@@ -2,10 +2,10 @@ package mcpserve
 
 import (
 	"fmt"
-	"path/filepath"
 	"sync"
 
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/boardio"
 	"github.com/OWNER/verdi/internal/index"
 )
 
@@ -50,24 +50,25 @@ func (b *Backend) buildIndex() (*index.Index, error) {
 }
 
 // annotationsDir is data/mutable/annotations/ under the store root
-// (01 §Directory layout).
+// (01 §Directory layout). Delegates to internal/boardio — see that
+// package's doc comment for why this moved out of mcpserve once
+// internal/workbench needed the identical annotation-stream I/O
+// (CLAUDE.md: shared code lives in a shared internal/ package).
 func (b *Backend) annotationsDir() string {
-	return filepath.Join(b.Root, ".verdi", "data", "mutable", "annotations")
+	return boardio.AnnotationsDir(b.Root)
 }
 
 // annotationFileForTarget names the JSONL file a targeted annotation
-// belongs in: <kind>--<name>.jsonl, keyed by the TARGET artifact's own
-// kind/name (02 §Record schemas' literal path shape), independent of the
-// pin's commit — every annotation pinned against any commit of the same
-// artifact lives in the same stream.
+// belongs in (boardio.AnnotationFileForTarget).
 func annotationFileForTarget(ref artifact.Ref) string {
-	return fmt.Sprintf("%s--%s.jsonl", ref.Kind, ref.Name)
+	return boardio.AnnotationFileForTarget(ref)
 }
 
 // annotationFileForBoard names the JSONL file a free-floating (board-only,
 // no target) sticky belongs in, keyed by its board's story slug via the
 // same store.RefSlug normative slugging every other story-keyed directory
-// in the store uses (01 §notes: "Ref slugging is normative").
+// in the store uses (01 §notes: "Ref slugging is normative";
+// boardio.AnnotationFileForBoard).
 //
 // Implementation note (not a ratified ledger entry — this phase's scope
 // excludes editing PLAN.md): 02 §Record schemas' one worked example is a
@@ -78,5 +79,5 @@ func annotationFileForTarget(ref artifact.Ref) string {
 // still exactly one deterministic function of the record's own fields,
 // and add_annotation/list_annotations/list_tasks all agree on it.
 func annotationFileForBoard(storySlug string) string {
-	return fmt.Sprintf("board--%s.jsonl", storySlug)
+	return boardio.AnnotationFileForBoard(storySlug)
 }

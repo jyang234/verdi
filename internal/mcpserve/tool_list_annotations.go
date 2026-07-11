@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/boardio"
 )
 
 // annotationItem is one list_annotations/list_tasks result row.
@@ -49,7 +50,7 @@ func (b *Backend) ListAnnotations(ctx context.Context, argsRaw json.RawMessage) 
 	unpinned := artifact.Ref{Kind: ref.Kind, Name: ref.Name}
 
 	file := filepath.Join(b.annotationsDir(), annotationFileForTarget(unpinned))
-	records, err := readAnnotationFile(file)
+	records, err := boardio.ReadAnnotationFile(file)
 	if err != nil {
 		return toolError("list_annotations: " + err.Error())
 	}

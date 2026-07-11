@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/OWNER/verdi/internal/boardio"
 )
 
 func TestSearchArtifacts_Happy(t *testing.T) {
@@ -248,7 +250,7 @@ func TestAddAnnotation_Happy(t *testing.T) {
 			t.Fatalf("file = %q, want adr--0001-outbox.jsonl", out.File)
 		}
 
-		annos, err := readAnnotationFile(b.annotationsDir() + "/" + out.File)
+		annos, err := boardio.ReadAnnotationFile(b.annotationsDir() + "/" + out.File)
 		if err != nil {
 			t.Fatalf("reading back appended annotation: %v", err)
 		}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/boardio"
 )
 
 // ListTasks implements the list_tasks tool: every OPEN agent-task
@@ -14,7 +15,7 @@ import (
 // reports it, since an agent picking up a task benefits from knowing
 // whether its anchor still holds.
 func (b *Backend) ListTasks(ctx context.Context, argsRaw json.RawMessage) map[string]any {
-	all, err := readAllAnnotations(b.annotationsDir())
+	all, err := boardio.ReadAllAnnotations(b.annotationsDir())
 	if err != nil {
 		return toolError("list_tasks: " + err.Error())
 	}
