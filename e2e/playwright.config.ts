@@ -25,7 +25,25 @@ export default defineConfig({
     command: "go run ./cmd/e2eharness",
     cwd: "..",
     url: "http://127.0.0.1:4173/healthz",
-    reuseExistingServer: !process.env.CI,
+    // reuseExistingServer MUST stay false. Playwright's readiness probe hits
+    // only ONE url (:4173/healthz), but a single harness process owns TWO
+    // ports: :4173 (workbench) and :4174 (dex static site). If reuse were
+    // enabled, any stale process answering :4173 — a leftover `verdi serve`
+    // from an interrupted run, or an unrelated demo server on that port —
+    // would satisfy the probe, so Playwright would adopt it and NEVER start
+    // the harness. Then :4174 stays down (every dex/presentation test fails
+    // with net::ERR_CONNECTION_REFUSED) and :4173 serves a foreign/empty
+    // store (workbench tests fail on missing fixtures) — the exact
+    // nondeterministic 12-15/23 flake this defect produced. false makes the
+    // harness authoritative every run and turns port contention into a loud,
+    // deterministic failure instead of silent corruption. This also matches
+    // CI, where !process.env.CI was already false (CLAUDE.md: trust CI parity).
+    reuseExistingServer: false,
+    // Send SIGTERM to the harness's process group on teardown (instead of the
+    // default hard SIGKILL) so main.go's signal handler runs its graceful
+    // subprocess stop, reaping `verdi serve` cleanly. Guarantees no orphaned
+    // listener is left on :4173 to break the next run.
+    gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
     timeout: 60_000,
   },
   projects: [
