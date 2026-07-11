@@ -14,7 +14,6 @@ func TestRun_KnownVerbs(t *testing.T) {
 		verb       string
 		wantSubstr string
 	}{
-		{"lint", "not implemented (phase 4)"},
 		{"design", "not implemented (phase 7)"},
 		{"accept", "not implemented (phase 7)"},
 		{"feature", "not implemented (phase 7)"},
@@ -51,15 +50,35 @@ func TestRun_KnownVerbs(t *testing.T) {
 }
 
 // TestRun_KnownVerbs_ExtraArgs asserts that trailing arguments after a known
-// verb do not change dispatch (verb-only parsing at phase 1).
+// verb do not change dispatch (verb-only parsing at phase 1). `lint` is now
+// implemented (phase 4 — see lint.go/lint_test.go), so this uses a
+// still-stubbed verb.
 func TestRun_KnownVerbs_ExtraArgs(t *testing.T) {
 	var stderr bytes.Buffer
-	got := run([]string{"lint", "--some-flag", "extra"}, &stderr)
+	got := run([]string{"design", "--some-flag", "extra"}, &stderr)
 	if got != 2 {
 		t.Fatalf("run with extra args exit = %d, want 2", got)
 	}
-	if !strings.Contains(stderr.String(), "not implemented (phase 4)") {
-		t.Fatalf("stderr = %q, want phase 4 message", stderr.String())
+	if !strings.Contains(stderr.String(), "not implemented (phase 7)") {
+		t.Fatalf("stderr = %q, want phase 7 message", stderr.String())
+	}
+}
+
+// TestRun_LintDispatchesToRealVerb proves `run` routes "lint" to the real
+// implementation (lint.go) rather than the generic phase-stub path: run
+// from a directory with no .verdi/ ancestor, it must fail operationally
+// with a store-root error, never the generic "usage" or "not implemented"
+// messages other stubbed verbs still produce.
+func TestRun_LintDispatchesToRealVerb(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stderr bytes.Buffer
+	got := run([]string{"lint"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([lint]) outside a store = %d, want 2 (operational)", got)
+	}
+	if strings.Contains(stderr.String(), "usage") || strings.Contains(stderr.String(), "not implemented") {
+		t.Fatalf("stderr = %q, want a real store-root error, not the generic stub message", stderr.String())
 	}
 }
 

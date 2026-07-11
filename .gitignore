@@ -1,0 +1,6 @@
+# Build artifacts (CLAUDE.md: "derived state is disposable"). Note this is
+# distinct from .verdi/.gitignore, which excludes only .verdi/data/ (the
+# store's own working area, D1/D3) — this file is ordinary Go-module
+# hygiene for the repo root.
+/.build/
+/verdi

@@ -16,7 +16,6 @@ import (
 // stubbed — absent") — dispatch still recognizes the name (so the error is
 // "not implemented", not "unknown verb"), but there is no phase to cite.
 var verbPhase = map[string]int{
-	"lint":            4,
 	"design":          7,
 	"accept":          7,
 	"feature":         7,
@@ -50,6 +49,10 @@ func run(args []string, stderr io.Writer) int {
 	}
 
 	verb := args[0]
+	if verb == "lint" {
+		return runLintVerb(args[1:], os.Stdout, stderr)
+	}
+
 	phase, known := verbPhase[verb]
 	if !known {
 		fmt.Fprintln(stderr, usage)

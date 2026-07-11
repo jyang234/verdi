@@ -1,9 +1,20 @@
-# Trust parity (CLAUDE.md): CI runs exactly `make verify`, nothing more,
-# nothing less, so a green local run is a green CI run. Grows only insofar
-# as `make verify` itself grows (PLAN.md §2) — this file should not need to.
+# Trust parity (CLAUDE.md): CI runs exactly `make verify` for everything
+# `make verify` itself gates — that part grows only insofar as `make
+# verify` grows (PLAN.md §2), this file should not need to change for it.
+#
+# Phase 4 adds one explicit step beyond `make verify`: `make verify`'s own
+# `lint-store` target already runs `verdi lint` against this repo locally
+# (no CI environment), which is enough to prove the binary and the store
+# both lint clean. Running it again here, in the real GitLab pipeline
+# environment, additionally exercises I-14's CI-context lint baselines
+# (VL-004's default-branch gate, VL-010's diff base) against real
+# CI_DEFAULT_BRANCH / CI_MERGE_REQUEST_TARGET_BRANCH_NAME values, which a
+# local run has no way to supply.
 
 verify:
   image: golang:1.25
   stage: test
   script:
     - make verify
+    - go build -o .build/verdi ./cmd/verdi
+    - ./.build/verdi lint
