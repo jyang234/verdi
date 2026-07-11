@@ -50,6 +50,7 @@ func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, st
 		Status:           p.Entry.Status,
 		Breadcrumb:       pageBreadcrumb(p.Entry.Kind, p.Entry.Title, isArchivedSpec(p.RelPath)),
 		Banner:           banner,
+		BannerClass:      bannerClass(class),
 		MetaRows:         artifactMetaRows(p),
 		BodyHTML:         template.HTML(bodyHTML),
 		DispositionsHTML: renderDispositionsTable(p.Meta.Dispositions),

@@ -178,7 +178,7 @@ func renderDependencyMap(svc string, edges []dependencyEdge, entryPoints []strin
 		return template.HTML(b.String())
 	}
 	if len(edges) == 0 {
-		return template.HTML(`<p>No declared boundaries reference this service yet.</p>`)
+		return template.HTML(`<p class="empty">No declared boundaries reference this service yet.</p>`)
 	}
 	b.WriteString("<table><thead><tr><th>From</th><th>Via</th><th>To</th></tr></thead><tbody>\n")
 	for _, e := range edges {
@@ -261,27 +261,31 @@ func renderServiceBody(svc store.Service, pages []*artifactPage) (template.HTML,
 
 	b.WriteString("<h2>Obligations registry</h2>\n")
 	if len(svc.Obligations) == 0 {
-		b.WriteString("<p>No obligations declared in .flowmap.yaml.</p>\n")
+		b.WriteString(`<p class="empty">No obligations declared in .flowmap.yaml.</p>` + "\n")
 	} else {
-		b.WriteString("<ul>\n")
+		// Promoted presentation: machine-checked guarantees published as
+		// documentation are this page's headline — a registry of green
+		// stamps, not a bullet list.
+		b.WriteString("<p>Machine-checked guarantees, enforced by the upstream toolchain and published here as documentation.</p>\n")
+		b.WriteString(`<ul class="obligations-registry">` + "\n")
 		for _, o := range svc.Obligations {
-			fmt.Fprintf(&b, "<li><a href=\"%s\">%s</a></li>\n", permalinkURL(fmt.Sprintf("svc/%s/obligations/%s", svc.Name, o)), template.HTMLEscapeString(o))
+			fmt.Fprintf(&b, "<li class=\"obligation\"><a href=\"%s\">%s</a></li>\n", permalinkURL(fmt.Sprintf("svc/%s/obligations/%s", svc.Name, o)), template.HTMLEscapeString(o))
 		}
 		b.WriteString("</ul>\n")
 	}
 
 	b.WriteString("<h2>Boundary contract</h2>\n")
 	if svc.BoundaryContractPath != "" {
-		fmt.Fprintf(&b, `<p><a href="%s">Permalink</a></p>`+"\n", permalinkURL(fmt.Sprintf("svc/%s/boundary-contract", svc.Name)))
+		fmt.Fprintf(&b, `<p><a href="%s">View the boundary contract</a></p>`+"\n", permalinkURL(fmt.Sprintf("svc/%s/boundary-contract", svc.Name)))
 	} else {
-		b.WriteString("<p>Not discovered for this service.</p>\n")
+		b.WriteString(`<p class="empty">Not discovered for this service.</p>` + "\n")
 	}
 
 	b.WriteString("<h2>API</h2>\n")
 	if svc.OpenAPIPath != "" {
-		fmt.Fprintf(&b, `<p><a href="%s">Permalink</a></p>`+"\n", permalinkURL(fmt.Sprintf("svc/%s/api", svc.Name)))
+		fmt.Fprintf(&b, `<p><a href="%s">View the API reference</a></p>`+"\n", permalinkURL(fmt.Sprintf("svc/%s/api", svc.Name)))
 	} else {
-		b.WriteString("<p>No OpenAPI document discovered for this service.</p>\n")
+		b.WriteString(`<p class="empty">No OpenAPI document discovered for this service.</p>` + "\n")
 	}
 
 	b.WriteString("<h2>Active specs</h2>\n")

@@ -46,6 +46,33 @@ func classify(kind string, frozen bool) temporalClass {
 	}
 }
 
+// bannerClass maps a temporal class to the temporal stamp's class-specific
+// CSS hook (style.css's .temporal--* rules) — presentation only: the banner
+// text itself (livingGatedBanner/frozenBanner/authoredLivingBanner below)
+// is the honest record and never varies with styling.
+func bannerClass(c temporalClass) string {
+	switch c {
+	case classFrozen:
+		return "temporal--frozen"
+	case classAuthoredLiving:
+		return "temporal--authored-living"
+	default:
+		return "temporal--living-gated"
+	}
+}
+
+// displayRef shortens a pinned ref's sha for display ("adr/0012@3e91ab2c…"
+// -> "adr/0012@3e91ab2"). The full form always remains what the copy
+// button actually copies (data-copy-ref) and announces (title/aria-label);
+// this only trims the visible label.
+func displayRef(ref string) string {
+	i := strings.LastIndexByte(ref, '@')
+	if i < 0 {
+		return ref
+	}
+	return ref[:i+1] + shortSHA(ref[i+1:])
+}
+
 // buildStamp is the dex build's own commit + date — resolved once per
 // Build call from the given commit (never time.Now(), per Phase 12's
 // determinism rule) — the "main @ <sha> · <date>" every living-gated page

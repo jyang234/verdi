@@ -30,15 +30,27 @@ type connection struct {
 // home — renders through, so there is exactly one HTML template to keep
 // consistent (breadcrumb, badge, banner, TOC, connections, copy-reference).
 type pageData struct {
-	Title       string
-	Status      string // "" suppresses the badge (listing/utility pages)
-	Breadcrumb  []breadcrumbEntry
-	Banner      string
+	Title      string
+	Status     string // "" suppresses the badge (listing/utility pages)
+	Breadcrumb []breadcrumbEntry
+	Banner     string
+	// BannerClass is the temporal stamp's class-specific styling hook
+	// ("temporal--frozen", "temporal--authored-living",
+	// "temporal--living-gated") — presentation only: the banner TEXT is the
+	// honest record and never varies with styling. renderPage defaults it
+	// to living-gated, the class of every dex-synthesized listing page;
+	// artifact pages set it explicitly from their classified temporal class.
+	BannerClass string
 	MetaRows    []metaRow
 	BodyHTML    template.HTML
 	Connections []connection
 	TOC         []TOCEntry
 	CopyRef     string // "" suppresses the copy-reference button
+	// CopyRefDisplay is CopyRef with its pin sha visually shortened for the
+	// button label. The full pinned form stays in data-copy-ref (what the
+	// clipboard receives) and in title/aria-label; only the visible text is
+	// truncated. Computed in renderPage.
+	CopyRefDisplay string
 	// DispositionsHTML is the I-5 dispositions table, pre-rendered to HTML
 	// (feature-spec pages only); empty elsewhere.
 	DispositionsHTML template.HTML
@@ -69,10 +81,14 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}} · verdi dex</title>
+<title>{{if eq .Title "verdi dex"}}verdi dex{{else}}{{.Title}} · verdi dex{{end}}</title>
 <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
+<header class="site-head">
+<a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">dex</span></a>
+<nav class="site-nav"><a href="/by-kind/">by kind</a> <a href="/by-service/">by service</a> <a href="/changelog/">what changed</a> <a href="/search/">search</a></nav>
+</header>
 <nav class="breadcrumb">
 {{range $i, $c := .Breadcrumb}}{{if $i}} <span class="sep">/</span> {{end}}{{if $c.URL}}<a href="{{$c.URL}}">{{$c.Label}}</a>{{else}}<span class="current">{{$c.Label}}</span>{{end}}{{end}}
 </nav>
@@ -80,8 +96,8 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <h1>{{.Title}}</h1>
 {{if .Status}}<span class="badge badge-{{.Status}}">{{.Status}}</span>{{end}}
 </header>
-<div class="temporal-banner">{{.Banner}}</div>
-{{if .CopyRef}}<button type="button" class="copy-ref" data-copy-ref="{{.CopyRef}}">Copy reference ({{.CopyRef}})</button>{{end}}
+<div class="temporal-banner {{.BannerClass}}"><span class="temporal-dot" aria-hidden="true"></span>{{.Banner}}</div>
+{{if .CopyRef}}<div><button type="button" class="copy-ref" data-copy-ref="{{.CopyRef}}" title="{{.CopyRef}}" aria-label="Copy full reference {{.CopyRef}}">Copy reference <code>{{.CopyRefDisplay}}</code></button></div>{{end}}
 <div class="page-body">
 <main class="content">
 {{if .MetaRows}}<aside class="metadata-card"><dl>
@@ -115,9 +131,18 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 `))
 
 // renderPage executes pageTemplate against data, gating the mermaid client
-// on whether the page body actually carries a mermaid block.
+// on whether the page body actually carries a mermaid block, defaulting the
+// temporal stamp's styling hook (living-gated — every dex-synthesized page's
+// class), and deriving the copy-reference button's sha-shortened display
+// text from the full pinned form.
 func renderPage(data pageData) ([]byte, error) {
 	data.HasMermaid = strings.Contains(string(data.BodyHTML), `<pre class="mermaid">`)
+	if data.BannerClass == "" {
+		data.BannerClass = bannerClass(classLivingGated)
+	}
+	if data.CopyRef != "" && data.CopyRefDisplay == "" {
+		data.CopyRefDisplay = displayRef(data.CopyRef)
+	}
 	var buf bytes.Buffer
 	if err := pageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("dex: rendering page %q: %w", data.Title, err)

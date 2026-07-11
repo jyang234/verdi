@@ -29,10 +29,12 @@
     var ref = el.getAttribute("data-copy-ref");
     if (!ref || !navigator.clipboard) return;
     navigator.clipboard.writeText(ref).then(function () {
-      var original = el.textContent;
-      el.textContent = "Copied " + ref;
+      // The clipboard got the FULL pinned form (ref); the button's visible
+      // label may be sha-shortened, so restore its markup, not just text.
+      var original = el.innerHTML;
+      el.textContent = "Copied full reference";
       setTimeout(function () {
-        el.textContent = original;
+        el.innerHTML = original;
       }, 1500);
     });
   });
