@@ -189,10 +189,23 @@ func TestBuild_Happy(t *testing.T) {
 		if strings.Contains(page, "<p>graph TD") {
 			t.Fatalf("diagram body must not be markdown-rendered into a <p>; got:\n%s", page)
 		}
-		// A page that carries a diagram must also load the mermaid client
-		// (the gating in the next commit keeps it off diagram-free pages).
+		// A page that carries a diagram must also load the mermaid client.
 		if !strings.Contains(page, "/assets/mermaid.min.js") {
 			t.Fatalf("diagram page missing the mermaid client script; got:\n%s", page)
+		}
+	})
+
+	t.Run("mermaid client is gated off a diagram-free page", func(t *testing.T) {
+		// store-layout-notes is a plain markdown component spec with no
+		// diagram; its page must not carry the mermaid script pair (the asset
+		// stays vendored — the JS-file-count test proves that — but the tags
+		// are dead weight on every diagram-free page).
+		page := readFile(t, outDir, "a/spec/store-layout-notes/index.html")
+		if strings.Contains(page, "/assets/mermaid.min.js") {
+			t.Fatalf("diagram-free page must not load the mermaid client; got:\n%s", page)
+		}
+		if strings.Contains(page, "mermaid.initialize") {
+			t.Fatalf("diagram-free page must not initialise mermaid; got:\n%s", page)
 		}
 	})
 

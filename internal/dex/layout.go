@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"strings"
 )
 
 // metaRow is one line of a page's metadata card (05 §Verdi-dex page
@@ -47,6 +48,14 @@ type pageData struct {
 	// data-openapi-json attribute (05 §Verdi-dex mechanics: "an OpenAPI
 	// renderer (script tag per API page ...)").
 	OpenAPIJSONPath string
+	// HasMermaid gates the mermaid client script + init on this page. It is
+	// computed in renderPage from whether BodyHTML actually carries a
+	// `<pre class="mermaid">` (a diagram-kind body or an inline fenced
+	// ```mermaid block), so the ~10-line script pair is emitted only where a
+	// diagram exists rather than on every page. The mermaid.min.js asset stays
+	// vendored once regardless — the three-JS-file budget counts served files,
+	// not `<script>` tags — so this trims dead tags without touching it.
+	HasMermaid bool
 }
 
 // pageTemplate is dex's single HTML shell. Asset and cross-page links use
@@ -98,15 +107,17 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 {{end}}</ul></section>{{end}}
 </aside>
 </div>
-<script src="/assets/mermaid.min.js"></script>
+{{if .HasMermaid}}<script src="/assets/mermaid.min.js"></script>
 <script>mermaid.initialize({startOnLoad:true,securityLevel:"strict",theme:window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"default"});</script>
-<script src="/assets/search.js" defer></script>
+{{end}}<script src="/assets/search.js" defer></script>
 </body>
 </html>
 `))
 
-// renderPage executes pageTemplate against data.
+// renderPage executes pageTemplate against data, gating the mermaid client
+// on whether the page body actually carries a mermaid block.
 func renderPage(data pageData) ([]byte, error) {
+	data.HasMermaid = strings.Contains(string(data.BodyHTML), `<pre class="mermaid">`)
 	var buf bytes.Buffer
 	if err := pageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("dex: rendering page %q: %w", data.Title, err)

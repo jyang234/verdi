@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"strings"
 )
 
 // metaRow is one line of a page's frontmatter card — deliberately the
@@ -36,6 +37,13 @@ type pageData struct {
 	// ExtraHTML is any page-specific content appended after the body
 	// (links/backlinks panel, verdict diff table, matrix table, ...).
 	ExtraHTML template.HTML
+	// HasMermaid gates the mermaid client script + init, computed in
+	// renderPage from whether BodyHTML carries a `<pre class="mermaid">` (a
+	// diagram-kind body or an inline fenced ```mermaid block). Same reasoning
+	// as internal/dex: the vendored asset is unaffected — this only drops the
+	// script pair from the pages (verdict viewer, matrix, most corpus pages)
+	// that never contain a diagram.
+	HasMermaid bool
 }
 
 var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
@@ -60,14 +68,16 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <main class="content">{{.BodyHTML}}</main>
 {{.ExtraHTML}}
 </div>
-<script src="/assets/mermaid.min.js"></script>
+{{if .HasMermaid}}<script src="/assets/mermaid.min.js"></script>
 <script>mermaid.initialize({startOnLoad:true,securityLevel:"strict",theme:window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"default"});</script>
-</body>
+{{end}}</body>
 </html>
 `))
 
-// renderPage executes pageTemplate against data.
+// renderPage executes pageTemplate against data, gating the mermaid client
+// on whether the page body actually carries a mermaid block.
 func renderPage(data pageData) ([]byte, error) {
+	data.HasMermaid = strings.Contains(string(data.BodyHTML), `<pre class="mermaid">`)
 	var buf bytes.Buffer
 	if err := pageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("workbench: rendering page %q: %w", data.Title, err)
