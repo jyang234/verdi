@@ -114,13 +114,32 @@ type Frontier struct {
 	Markers           []FrontierMarker `json:"markers,omitempty"`
 }
 
+// Annotation is one `graph.annotations[]` entry: human/AI context attached to
+// a blind spot, keyed by (Site, Kind) to the graph's blind-spot manifest.
+// Disclosure-only upstream — no verdict reads it — but it is a real,
+// omitempty field of upstream's Graph struct that a service's config
+// populates, so strict decode must model it (Site/Kind/Note are always
+// present; By/Claim are optional). Shape mirrors verdi-go graphio.Annotation,
+// verified read-only against the pinned toolchain.
+type Annotation struct {
+	Site  string `json:"site"`
+	Kind  string `json:"kind"`
+	Note  string `json:"note"`
+	By    string `json:"by,omitempty"`
+	Claim string `json:"claim,omitempty"`
+}
+
 // Graph is `flowmap graph`'s JSON output (PLAN.md §3: "graph JSON carries
 // no schema_version — versioning is the pinned binary plus strict
 // structural decode"). Every field is optional/omitempty per upstream's own
 // shape: an unscoped run omits Entrypoint (singular) and carries
 // Entrypoints (plural); a --entry-scoped run is the reverse; a graph with
 // no `.flowmap.yaml` obligations: block omits Obligations and Frontier
-// entirely.
+// entirely. OmittedPackages (types-only first-party imports the rollup
+// discloses) and Annotations (human/AI blind-spot context) are two further
+// omitempty disclosure fields — absent from svcfix's capture but declared by
+// upstream's Graph struct, so they must be modeled or strict decode fails
+// closed the moment a real service's config populates them.
 //
 // BlindSpots, and the boundary-contract-only nested arrays elsewhere in
 // this package, use []json.RawMessage where spike S1's captures never
@@ -139,9 +158,11 @@ type Graph struct {
 	Entrypoints      []GraphEntrypoint  `json:"entrypoints,omitempty"`
 	Entrypoint       *string            `json:"entrypoint,omitempty"`
 	CompositionRoots []string           `json:"composition_roots,omitempty"`
+	OmittedPackages  []string           `json:"omitted_packages,omitempty"`
 	EffectOrder      []EffectOrderEntry `json:"effect_order,omitempty"`
 	Obligations      []Obligation       `json:"obligations,omitempty"`
 	Frontier         *Frontier          `json:"frontier,omitempty"`
+	Annotations      []Annotation       `json:"annotations,omitempty"`
 }
 
 // DecodeGraph strict-decodes `flowmap graph`'s stdout JSON (DisallowUnknownFields

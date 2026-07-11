@@ -60,6 +60,52 @@ func TestDecodeGraph_UnknownField(t *testing.T) {
 	}
 }
 
+// TestDecodeGraph_OmittedPackagesAndAnnotations proves the decoder models the
+// two level-2 disclosure fields spike S1's svcfix capture never populated but
+// upstream's Graph struct declares (omitted_packages, annotations). Both are
+// omitempty, so they appear the moment a real service's config fills them —
+// and, before this fix, strict decode (DisallowUnknownFields) would then FAIL
+// closed on them, rejecting a well-formed graph. The shape mirrors upstream
+// graphio.Graph / graphio.Annotation exactly (verified read-only in verdi-go):
+// omitted_packages is a []string; each annotation carries the required
+// site/kind/note and the optional by/claim. The unknown-field twin must still
+// fail, proving the schema widened by exactly these two fields, not opened up.
+func TestDecodeGraph_OmittedPackagesAndAnnotations(t *testing.T) {
+	const j = `{
+	  "omitted_packages": ["example.com/svcfix/internal/types", "example.com/svcfix/internal/errs"],
+	  "annotations": [
+	    {"site": "(*example.com/svcfix/internal/app.Service).Dispatch", "kind": "unresolved-call", "note": "hand-audited: only ever the two registered handlers", "by": "jyang", "claim": "verify"},
+	    {"site": "example.com/svcfix/internal/bus.Publish", "kind": "dynamic-dispatch", "note": "topic is a build-time constant set"}
+	  ]
+	}`
+	g, err := DecodeGraph([]byte(j))
+	if err != nil {
+		t.Fatalf("DecodeGraph(both fields populated): %v", err)
+	}
+	if len(g.OmittedPackages) != 2 || g.OmittedPackages[0] != "example.com/svcfix/internal/types" {
+		t.Errorf("OmittedPackages = %v, want the two declared packages", g.OmittedPackages)
+	}
+	if len(g.Annotations) != 2 {
+		t.Fatalf("Annotations = %d entries, want 2", len(g.Annotations))
+	}
+	a := g.Annotations[0]
+	if a.Site == "" || a.Kind == "" || a.Note == "" {
+		t.Errorf("Annotations[0] missing a required field: %+v", a)
+	}
+	if a.By != "jyang" || a.Claim != "verify" {
+		t.Errorf("Annotations[0] optional fields = (by=%q, claim=%q), want (jyang, verify)", a.By, a.Claim)
+	}
+	if g.Annotations[1].By != "" || g.Annotations[1].Claim != "" {
+		t.Errorf("Annotations[1] optional fields should be empty, got %+v", g.Annotations[1])
+	}
+
+	// The unknown-field twin still fails: strict decode widened by exactly
+	// these two fields, it did not stop rejecting genuinely unknown ones.
+	if _, err := DecodeGraph(readCanned(t, "graph-unknown-field.json")); err == nil {
+		t.Fatal("DecodeGraph(unknown-field twin): want error after widening, got nil")
+	}
+}
+
 // TestDecodeGraph_Negative covers malformed and empty input, plus every
 // obligation status enum value (all four, per PLAN.md §3), including the
 // UNMATCHED case's hard requirement that verdi's join logic (internal/bundle)
