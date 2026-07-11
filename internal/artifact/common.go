@@ -40,6 +40,15 @@ func (t LinkType) Valid() bool { return validLinkTypes[t] }
 // "jira:LOAN-1482" (02 §Link taxonomy: "story ... scheme-prefixed ref").
 var storyRefRe = regexp.MustCompile(`^[a-z][a-z0-9]*:[A-Za-z0-9][A-Za-z0-9-]*$`)
 
+// externalRefRe matches a provisional index-minted external ref,
+// "svc/<service>/<artifact>[/<name>]" (02 §Identity: "External refs
+// (provisional)"). These are read-only, minted by the index from
+// discovery rather than authored under .verdi/, but 02 is explicit that
+// "they are valid link targets" — so this package's link validation
+// accepts them alongside ordinary kind/name refs, even though the index
+// that would resolve them (VL-003) doesn't exist until phase 3/4.
+var externalRefRe = regexp.MustCompile(`^svc/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)?$`)
+
 // Link is a typed edge in an artifact's frontmatter `links:` block
 // (02 §Common frontmatter). Refs inside links are unpinned — only context
 // manifests, evidence records, and board pins carry pinned refs.
@@ -51,7 +60,8 @@ type Link struct {
 
 // Validate checks the link type is known and Ref has the right shape for
 // that type: story links are scheme:key tracker refs; every other type is
-// an unpinned kind/name artifact ref.
+// either an unpinned kind/name artifact ref or a provisional svc/... external
+// ref (02 §Identity: "valid link targets").
 func (l Link) Validate() error {
 	if !l.Type.Valid() {
 		return fmt.Errorf("artifact: unknown link type %q", l.Type)
@@ -63,6 +73,9 @@ func (l Link) Validate() error {
 		if !storyRefRe.MatchString(l.Ref) {
 			return fmt.Errorf("artifact: story link ref %q must be scheme:key form (e.g. jira:LOAN-1482)", l.Ref)
 		}
+		return nil
+	}
+	if externalRefRe.MatchString(l.Ref) {
 		return nil
 	}
 	if _, err := ParseRef(l.Ref); err != nil {

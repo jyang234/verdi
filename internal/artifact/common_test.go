@@ -16,6 +16,8 @@ func TestLink_Validate_Happy(t *testing.T) {
 		{Type: LinkImpacts, Ref: "spec/foo"},
 		{Type: LinkChallenges, Ref: "adr/0001-old"},
 		{Type: LinkStory, Ref: "jira:LOAN-1482"},
+		{Type: LinkImpacts, Ref: "svc/loansvc/boundary-contract"},
+		{Type: LinkImpacts, Ref: "svc/loansvc/obligations/audit-before-publish"},
 	}
 	for _, l := range cases {
 		t.Run(string(l.Type), func(t *testing.T) {
