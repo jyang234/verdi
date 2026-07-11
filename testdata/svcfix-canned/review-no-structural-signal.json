@@ -1,0 +1,16 @@
+{
+  "service": "svcfix",
+  "verdict": "NO-STRUCTURAL-SIGNAL",
+  "shape": "body-only",
+  "standing_cautions": [
+    {
+      "rule": "io_budget",
+      "summary": "write budget is a lower bound on 1 route(s): the forward frontier is blind (dynamic dispatch, reflect/unsafe, or a <dynamic> effect) — writes reachable past it are uncounted, so a within-budget pass there is not a proof the write surface is bounded"
+    }
+  ],
+  "algo": "rta",
+  "caveats": [
+    "rta from 3 discovered root(s)"
+  ],
+  "digest": "6bde08bf40d7f8e267ba002535b3c6c7cccf1619460b7d5d4cd42ac42724d80d"
+}

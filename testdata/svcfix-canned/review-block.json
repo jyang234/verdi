@@ -1,0 +1,27 @@
+{
+  "service": "svcfix",
+  "verdict": "BLOCK",
+  "shape": "cross-package",
+  "new_violations": [
+    {
+      "rule": "layering",
+      "summary": "handler → audit skips 1 layer(s)",
+      "from": "example.com/svcfix/internal/handler.New",
+      "to": "example.com/svcfix/internal/audit.New"
+    }
+  ],
+  "reachable_from": [
+    "example.com/svcfix.main"
+  ],
+  "standing_cautions": [
+    {
+      "rule": "io_budget",
+      "summary": "write budget is a lower bound on 1 route(s): the forward frontier is blind (dynamic dispatch, reflect/unsafe, or a <dynamic> effect) — writes reachable past it are uncounted, so a within-budget pass there is not a proof the write surface is bounded"
+    }
+  ],
+  "algo": "rta",
+  "caveats": [
+    "rta from 3 discovered root(s)"
+  ],
+  "digest": "037b961f0050f4b2e9fc37807f9a542de14b3036d3d6636be6f839e90a362680"
+}

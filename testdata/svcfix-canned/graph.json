@@ -1,0 +1,223 @@
+{
+  "stamp": "deadbeef",
+  "tool": "v0.0.0-20260707202836-cd38b1a56bb7",
+  "algo": "rta",
+  "caveats": [
+    "rta from 3 discovered root(s)"
+  ],
+  "nodes": [
+    {
+      "fqn": "(*example.com/svcfix/internal/app.Service).GetRefund",
+      "sig": "func (*app.Service).GetRefund(ctx context.Context, id string) (string, error)",
+      "tier": 3,
+      "package": "example.com/svcfix/internal/app",
+      "fallible": true,
+      "file": "internal/app/app.go",
+      "line": 25,
+      "end_line": 27
+    },
+    {
+      "fqn": "(*example.com/svcfix/internal/app.Service).PublishRefund",
+      "sig": "func (*app.Service).PublishRefund(ctx context.Context, id string) error",
+      "tier": 1,
+      "package": "example.com/svcfix/internal/app",
+      "fallible": true,
+      "file": "internal/app/app.go",
+      "line": 32,
+      "end_line": 37
+    },
+    {
+      "fqn": "(*example.com/svcfix/internal/audit.Store).Write",
+      "sig": "func (*audit.Store).Write(ctx context.Context, id string) error",
+      "tier": 3,
+      "package": "example.com/svcfix/internal/audit",
+      "fallible": true,
+      "file": "internal/audit/audit.go",
+      "line": 15,
+      "end_line": 17
+    },
+    {
+      "fqn": "(*example.com/svcfix/internal/bus.Bus).Publish",
+      "sig": "func (*bus.Bus).Publish(ctx context.Context, id string) error",
+      "tier": 1,
+      "package": "example.com/svcfix/internal/bus",
+      "fallible": true,
+      "file": "internal/bus/bus.go",
+      "line": 15,
+      "end_line": 17
+    },
+    {
+      "fqn": "(*example.com/svcfix/internal/handler.Server).GetRefund",
+      "sig": "func (*handler.Server).GetRefund(w http.ResponseWriter, r *http.Request)",
+      "tier": 1,
+      "package": "example.com/svcfix/internal/handler",
+      "file": "internal/handler/handler.go",
+      "line": 25,
+      "end_line": 33
+    },
+    {
+      "fqn": "(*example.com/svcfix/internal/handler.Server).PublishRefund",
+      "sig": "func (*handler.Server).PublishRefund(w http.ResponseWriter, r *http.Request)",
+      "tier": 1,
+      "package": "example.com/svcfix/internal/handler",
+      "file": "internal/handler/handler.go",
+      "line": 36,
+      "end_line": 43
+    },
+    {
+      "fqn": "example.com/svcfix.main",
+      "sig": "func main.main()",
+      "tier": 1,
+      "package": "example.com/svcfix",
+      "file": "main.go",
+      "line": 15,
+      "end_line": 19
+    },
+    {
+      "fqn": "example.com/svcfix.run",
+      "sig": "func main.run() error",
+      "tier": 3,
+      "package": "example.com/svcfix",
+      "fallible": true,
+      "file": "main.go",
+      "line": 21,
+      "end_line": 30
+    },
+    {
+      "fqn": "example.com/svcfix/internal/app.New",
+      "sig": "func app.New(a *audit.Store, b *bus.Bus) *app.Service",
+      "tier": 3,
+      "package": "example.com/svcfix/internal/app",
+      "file": "internal/app/app.go",
+      "line": 19,
+      "end_line": 21
+    },
+    {
+      "fqn": "example.com/svcfix/internal/audit.New",
+      "sig": "func audit.New() *audit.Store",
+      "tier": 3,
+      "package": "example.com/svcfix/internal/audit",
+      "file": "internal/audit/audit.go",
+      "line": 12,
+      "end_line": 12
+    },
+    {
+      "fqn": "example.com/svcfix/internal/bus.New",
+      "sig": "func bus.New() *bus.Bus",
+      "tier": 3,
+      "package": "example.com/svcfix/internal/bus",
+      "file": "internal/bus/bus.go",
+      "line": 12,
+      "end_line": 12
+    },
+    {
+      "fqn": "example.com/svcfix/internal/handler.New",
+      "sig": "func handler.New(svc *app.Service) *handler.Server",
+      "tier": 3,
+      "package": "example.com/svcfix/internal/handler",
+      "file": "internal/handler/handler.go",
+      "line": 20,
+      "end_line": 22
+    },
+    {
+      "fqn": "example.com/svcfix/internal/handler.writeJSON",
+      "sig": "func handler.writeJSON(_ context.Context, w http.ResponseWriter, v any)",
+      "tier": 3,
+      "package": "example.com/svcfix/internal/handler",
+      "file": "internal/handler/handler.go",
+      "line": 45,
+      "end_line": 48
+    }
+  ],
+  "edges": [
+    {
+      "from": "(*example.com/svcfix/internal/app.Service).PublishRefund",
+      "to": "(*example.com/svcfix/internal/audit.Store).Write",
+      "tier": 2
+    },
+    {
+      "from": "(*example.com/svcfix/internal/app.Service).PublishRefund",
+      "to": "boundary:bus PUBLISH <dynamic>",
+      "tier": 1,
+      "boundary": "outbound-async"
+    },
+    {
+      "from": "(*example.com/svcfix/internal/handler.Server).GetRefund",
+      "to": "(*example.com/svcfix/internal/app.Service).GetRefund",
+      "tier": 2
+    },
+    {
+      "from": "(*example.com/svcfix/internal/handler.Server).GetRefund",
+      "to": "example.com/svcfix/internal/handler.writeJSON",
+      "tier": 3
+    },
+    {
+      "from": "(*example.com/svcfix/internal/handler.Server).PublishRefund",
+      "to": "(*example.com/svcfix/internal/app.Service).PublishRefund",
+      "tier": 2
+    },
+    {
+      "from": "example.com/svcfix.main",
+      "to": "example.com/svcfix.run",
+      "tier": 3
+    },
+    {
+      "from": "example.com/svcfix.run",
+      "to": "example.com/svcfix/internal/app.New",
+      "tier": 3
+    },
+    {
+      "from": "example.com/svcfix.run",
+      "to": "example.com/svcfix/internal/audit.New",
+      "tier": 3
+    },
+    {
+      "from": "example.com/svcfix.run",
+      "to": "example.com/svcfix/internal/bus.New",
+      "tier": 3
+    },
+    {
+      "from": "example.com/svcfix.run",
+      "to": "example.com/svcfix/internal/handler.New",
+      "tier": 3
+    }
+  ],
+  "blind_spots": [],
+  "obligations": [
+    {
+      "rule": "audit-before-publish",
+      "kind": "must-precede",
+      "fn": "(*example.com/svcfix/internal/app.Service).PublishRefund",
+      "site": "internal/app/app.go:36",
+      "status": "SATISFIED"
+    }
+  ],
+  "entrypoints": [
+    {
+      "kind": "http",
+      "name": "GET /refunds/{id}",
+      "fn": "(*example.com/svcfix/internal/handler.Server).GetRefund"
+    },
+    {
+      "kind": "http",
+      "name": "POST /refunds/{id}/publish",
+      "fn": "(*example.com/svcfix/internal/handler.Server).PublishRefund"
+    }
+  ],
+  "composition_roots": [
+    "example.com/svcfix"
+  ],
+  "frontier": {
+    "markers": [
+      {
+        "kind": "dynamic-bus",
+        "bin": "A",
+        "site": "bus PUBLISH <dynamic>",
+        "owner": "(*example.com/svcfix/internal/app.Service).PublishRefund",
+        "reclaimer_hint": "runtime-resolved target — disclose; resolvable only by observation, never statically"
+      }
+    ],
+    "unconfirmed_routes": 1,
+    "coverage": "starvation confirmed for the oapi strict-server shape only; unconfirmed routes reach no effect for an unverified reason (a no-op, or an unrecognized dispatch seam) — attribution_loss is a LOWER BOUND, not a proof of no severance"
+  }
+}

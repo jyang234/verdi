@@ -1,0 +1,6 @@
+{
+  "schema": "flowmap.trace/v1",
+  "flow": "refund-flow",
+  "entrypoint": "POST /refunds/{id}/publish",
+  "note": "Fixture placeholder (PLAN.md §4, phase 5): flowmap.trace/v1's real shape is upstream-owned and never strict-decoded by verdi (constitution: exec + strict-decode only the toolchain's own JSON, never invent a schema for a file verdi doesn't own). This file exists so testdata/svcfix has a golden flow named refund-flow for verdi.bindings.yaml's behavioral binding to name; verdi's own bundle assembly (internal/bundle) derives behavioral evidence from go test -json's coarse suite pass/fail (03 §Declarations: 'Unit tests deliberately stay coarse'), never by decoding this file's content."
+}

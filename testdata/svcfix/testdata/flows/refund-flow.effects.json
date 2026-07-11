@@ -1,0 +1,6 @@
+{
+  "schema": "flowmap.effects/v1",
+  "flow": "refund-flow",
+  "effects": ["boundary:bus PUBLISH refund"],
+  "note": "Fixture placeholder — see refund-flow.golden.json's note: this file's real shape is upstream-owned and opaque to verdi."
+}

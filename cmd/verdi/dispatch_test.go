@@ -18,7 +18,6 @@ func TestRun_KnownVerbs(t *testing.T) {
 		{"accept", "not implemented (phase 7)"},
 		{"feature", "not implemented (phase 7)"},
 		{"align", "not implemented (phase 8)"},
-		{"sync", "not implemented (phase 5)"},
 		{"serve", "not implemented (phase 9)"},
 		{"mcp", "not implemented (phase 9)"},
 		{"matrix", "not implemented (phase 6)"},

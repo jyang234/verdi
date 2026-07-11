@@ -1,0 +1,82 @@
+// Package forge is the I-22 forge port: the tiny, consumer-defined surface
+// v0 needs from a GitLab- or GitHub-hosted store (04 §port pattern applied
+// to forges) — evidence-bundle fetch for `sync` (I-8), CI-context
+// detection, and the generated-file attribute token VL-012 checks.
+// Adapters (gitlab/, github/) implement Forge; fake/ is the hermetic test
+// double; forgetest/ is the shared contract-test suite both adapters pass
+// (mirroring internal/provider/providertest's pattern).
+package forge
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// ErrNoBundle is returned, wrapped, by FetchEvidenceBundle when no
+// successful verdi-evidence run exists for the given (ref, commit) — the
+// trigger `verdi sync --or-regen` uses to fall back to local regeneration
+// (05 §CLI: "regenerates locally when no bundle exists").
+var ErrNoBundle = errors.New("forge: no evidence bundle available for this ref/commit")
+
+// EvidenceBundle is the CI evidence bundle FetchEvidenceBundle retrieves:
+// the raw bytes of each of the four derived-bundle files (I-8: verdi's own
+// CI job "verdi-evidence" uploads the derived/<ref-slug>/<commit>/ tree as
+// its artifact). Callers (cmd/verdi/sync.go) write these bytes straight to
+// disk under data/derived/<ref-slug>/<commit>/ — this package does not
+// decode them; that is internal/upstream's and internal/bundle's job.
+type EvidenceBundle struct {
+	Verdicts     []byte
+	Tests        []byte
+	Review       []byte
+	BoundaryDiff []byte
+}
+
+// CIInfo is what CIContext detects from the forge's own CI environment:
+// the default branch and, if the current run is building a merge/pull
+// request, its target branch (feeds I-14's lint baselines in a later
+// phase).
+type CIInfo struct {
+	DefaultBranch  string
+	IsMergeRequest bool
+	TargetBranch   string // "" if not in an MR/PR context
+}
+
+// Forge is the I-22 port.
+type Forge interface {
+	// FetchEvidenceBundle retrieves the latest successful verdi-evidence
+	// CI run's artifact for (ref, commit) through the forge's own API.
+	// Returns an error wrapping ErrNoBundle if no successful run exists
+	// for that (ref, commit).
+	FetchEvidenceBundle(ctx context.Context, ref, commit string) (*EvidenceBundle, error)
+	// GeneratedAttribute returns the forge-appropriate git-attribute
+	// token marking a path generated (02 §Repository plumbing, VL-012):
+	// "gitlab-generated" or "linguist-generated".
+	GeneratedAttribute() string
+	// CIContext detects the current CI environment from the forge's own
+	// CI-provided environment variables.
+	CIContext(ctx context.Context) (CIInfo, error)
+}
+
+// DetectKind decides which forge adapter kind applies: manifestForge (the
+// store manifest's `forge:` key) if set, else auto-detected from
+// remoteURL's host (I-22: "adapter selected via a verdi.yaml forge: key
+// with auto-detect from the remote URL"). It returns "gitlab" or "github";
+// constructing the concrete adapter for that kind is the caller's job
+// (cmd/verdi/sync.go) — this package cannot import the gitlab/github
+// subpackages without a dependency cycle, since they import this one.
+func DetectKind(manifestForge, remoteURL string) (string, error) {
+	if manifestForge != "" {
+		return manifestForge, nil
+	}
+	lower := strings.ToLower(remoteURL)
+	switch {
+	case strings.Contains(lower, "gitlab"):
+		return "gitlab", nil
+	case strings.Contains(lower, "github"):
+		return "github", nil
+	default:
+		return "", fmt.Errorf("forge: cannot auto-detect forge kind from remote URL %q and no forge: key set in verdi.yaml (I-22)", remoteURL)
+	}
+}

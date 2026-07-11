@@ -1,0 +1,61 @@
+{
+  "service": "svcfix",
+  "version": 1,
+  "substrate": "rta",
+  "layers": [
+    {
+      "name": "handler",
+      "packages": [
+        "example.com/svcfix/internal/handler"
+      ]
+    },
+    {
+      "name": "app",
+      "packages": [
+        "example.com/svcfix/internal/app"
+      ]
+    },
+    {
+      "name": "audit",
+      "packages": [
+        "example.com/svcfix/internal/audit"
+      ]
+    }
+  ],
+  "layering": {
+    "roots": [
+      "example.com/svcfix"
+    ]
+  },
+  "must_not_reach": [
+    {
+      "name": "read-routes-stay-read-only",
+      "from": [
+        "(*example.com/svcfix/internal/bus.Bus).Publish",
+        "(*example.com/svcfix/internal/handler.Server).GetRefund"
+      ],
+      "to": [
+        "boundary:db DELETE",
+        "boundary:db INSERT",
+        "boundary:db MERGE",
+        "boundary:db REPLACE",
+        "boundary:db UPDATE",
+        "boundary:db UPSERT",
+        "boundary:bus PUBLISH"
+      ]
+    }
+  ],
+  "io_budget": {
+    "max_writes_per_route": 1
+  },
+  "blind_spot_ratchet": {},
+  "effect_ratchet": {
+    "allow": [
+      {
+        "target": "bus PUBLISH <dynamic>",
+        "reason": "baseline at init — review"
+      }
+    ]
+  }
+}
+
