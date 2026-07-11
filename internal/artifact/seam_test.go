@@ -2,9 +2,30 @@ package artifact
 
 import (
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// moduleRoot resolves the directory containing this module's go.mod via
+// `go env GOMOD`. Both seam tests run `go list ./...` from HERE — a test
+// binary's cwd is its own package directory (internal/artifact), so an
+// unanchored `./...` would only ever inspect internal/artifact's subtree
+// and the module-wide guard would pass vacuously (the exact defect that
+// let internal/lint import yaml.v3 unnoticed). A guard that silently
+// passes is worse than no guard.
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("go", "env", "GOMOD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go env GOMOD: %v\n%s", err, out)
+	}
+	gomod := strings.TrimSpace(string(out))
+	if gomod == "" || gomod == "/dev/null" || gomod == "NUL" {
+		t.Fatalf("go env GOMOD = %q: not inside a module", gomod)
+	}
+	return filepath.Dir(gomod)
+}
 
 // TestYAMLImportSeam proves CLAUDE.md's "single import seam": across the
 // whole module, only internal/artifact (and its own test binary) imports
@@ -16,15 +37,11 @@ func TestYAMLImportSeam(t *testing.T) {
 		t.Skip("go tool not on PATH")
 	}
 
-	out, err := exec.Command("go", "list", "-deps", "./...").CombinedOutput()
-	if err != nil {
-		t.Fatalf("go list -deps ./...: %v\n%s", err, out)
-	}
-	_ = out // full dep list isn't per-package; use the importers form below.
-
-	// go list -deps lists a flattened set with no per-importer attribution,
-	// so ask directly: which packages in this module import yaml.v3?
-	out, err = exec.Command("go", "list", "-f", "{{.ImportPath}}: {{join .Imports \",\"}}", "./...").CombinedOutput()
+	// Which packages in this module import yaml.v3? Anchored at the module
+	// root so `./...` genuinely means module-wide (see moduleRoot).
+	cmd := exec.Command("go", "list", "-f", "{{.ImportPath}}: {{join .Imports \",\"}}", "./...")
+	cmd.Dir = moduleRoot(t)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list -f: %v\n%s", err, out)
 	}
@@ -51,7 +68,13 @@ func TestYAMLImportSeam(t *testing.T) {
 // -f {{.Imports}} covers only non-test files), since a stray import in a
 // test file would still violate the seam's intent.
 func TestYAMLImportSeam_TestFiles(t *testing.T) {
-	out, err := exec.Command("go", "list", "-f", "{{.ImportPath}} {{join .TestImports \",\"}} {{join .XTestImports \",\"}}", "./...").CombinedOutput()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go tool not on PATH")
+	}
+
+	cmd := exec.Command("go", "list", "-f", "{{.ImportPath}} {{join .TestImports \",\"}} {{join .XTestImports \",\"}}", "./...")
+	cmd.Dir = moduleRoot(t)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list -f: %v\n%s", err, out)
 	}

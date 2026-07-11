@@ -36,6 +36,71 @@ func TestSplitFrontmatter_Negative(t *testing.T) {
 	}
 }
 
+// TestProbeFrozen_Happy proves the tolerant historical-content probe reads
+// the `frozen:` key through frontmatter DecodeStrict would REJECT — an
+// unknown key (schema growth: base-side content may carry fields the
+// current schema does not know) and even a YAML anchor (the restricted
+// dialect is a current-content rule, not a bar to reading the past).
+func TestProbeFrozen_Happy(t *testing.T) {
+	cases := []struct {
+		name       string
+		doc        string
+		wantFrozen bool
+	}{
+		{
+			name:       "plain frozen adr",
+			doc:        "---\nid: adr/x\nkind: adr\nfrozen: { at: 2026-04-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }\n---\nbody\n",
+			wantFrozen: true,
+		},
+		{
+			name:       "frozen beside a key the current schema does not know",
+			doc:        "---\nid: adr/x\nsome_future_field: 42\nfrozen: { at: 2026-04-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }\n---\nbody\n",
+			wantFrozen: true,
+		},
+		{
+			name:       "frozen in frontmatter using a YAML anchor elsewhere",
+			doc:        "---\nowners: &o [platform-team]\nalso: *o\nfrozen: { at: 2026-04-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }\n---\nbody\n",
+			wantFrozen: true,
+		},
+		{
+			name:       "no frozen key",
+			doc:        "---\nid: adr/x\nkind: adr\n---\nbody\n",
+			wantFrozen: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			frozen, err := ProbeFrozen([]byte(tc.doc))
+			if err != nil {
+				t.Fatalf("ProbeFrozen: %v", err)
+			}
+			if (frozen != nil) != tc.wantFrozen {
+				t.Fatalf("frozen = %v, want present=%v", frozen, tc.wantFrozen)
+			}
+			if tc.wantFrozen && frozen.At != "2026-04-01" {
+				t.Fatalf("frozen.At = %q, want 2026-04-01", frozen.At)
+			}
+		})
+	}
+}
+
+// TestProbeFrozen_Negative: only genuinely unprobeable content errors — no
+// frontmatter delimiters, or frontmatter that is not YAML at all.
+func TestProbeFrozen_Negative(t *testing.T) {
+	cases := map[string]string{
+		"no frontmatter":       "just a plain file\n",
+		"unclosed frontmatter": "---\nid: adr/x\nnever closed\n",
+		"frontmatter not yaml": "---\n\t{not: yaml: at: all]]\n---\nbody\n",
+	}
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ProbeFrozen([]byte(doc)); err == nil {
+				t.Fatalf("ProbeFrozen(%q): want error, got nil", doc)
+			}
+		})
+	}
+}
+
 type decodeTarget struct {
 	ID    string   `yaml:"id"`
 	Title string   `yaml:"title"`

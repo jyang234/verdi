@@ -40,6 +40,8 @@ would independently reject the same file as defense in depth.
 | `VL-008/.../spec.md` | VL-008 | 1 | `provenance:` present, no `frozen:`, not `gated_generated`-allowlisted |
 | `VL-009/.../vl-009-bad-frozen.md` | VL-009 | 1 | `frozen.commit` well-formed but not real git history |
 | `VL-010/before/` + `VL-010/after/` | VL-010 | 2 | body text differs across commits at the same `frozen.commit` |
+| `VL-010/deletion/` | VL-010 | 1 | the frozen ADR is deleted in a follow-up commit — base-side frozen, gone from HEAD |
+| `VL-010/stamp-strip/before/` + `.../after/` | VL-010 | 2 | body edited AND `frozen:` stamp stripped (downgraded to `proposed`) — base still frozen |
 | `VL-011/.../ac-1.md` | VL-011 | 1 | path `story-9999/ac-1.md` disagrees with `id: ...story-1482--ac-3` |
 | `VL-012/.gitattributes` | VL-012 | 1 | missing `gitlab-generated`/`linguist-generated` attribute lines |
 | `VL-013/.verdi/data/...` | VL-013 | 1 | a file under `data/` present in the overlay (simulates `git add -f`) |
