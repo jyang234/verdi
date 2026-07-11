@@ -4,7 +4,10 @@ import { test, expect } from "@playwright/test";
 // table (05 §Workbench; PLAN.md Phase 10 exit criteria: "corpus page
 // renders title/frontmatter/dispositions table").
 test("corpus page renders title, frontmatter, and the dispositions table", async ({ page }) => {
-  await page.goto("/a/spec/stale-decline");
+  // Reach the spec page the way a user does: from the home index, not a
+  // hand-typed URL (DEFECT A made home a real, clickable index).
+  await page.goto("/");
+  await page.locator('a[href="/a/spec/stale-decline"]').click();
 
   await expect(page).toHaveTitle(/Stale decline handling \(fixture\)/);
   await expect(page.locator(".page-header h1")).toHaveText("Stale decline handling (fixture)");
