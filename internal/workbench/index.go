@@ -29,7 +29,8 @@ func indexHandler(root string) http.HandlerFunc {
 <h1>verdi serve</h1>
 <p>store root: <code>%s</code></p>
 <p><a href="/healthz">/healthz</a></p>
-<p>the full workbench (corpus pages, verdict viewer, board) lands in a later phase.</p>
+<p>Pages: <code>/a/&lt;kind&gt;/&lt;name&gt;</code> (corpus), <code>/verdict/&lt;story&gt;</code>
+(verdict viewer), <code>/matrix/&lt;story&gt;</code> (advisory preview), <code>/board/&lt;key&gt;</code> (board).</p>
 </body></html>
 `, html.EscapeString(root))
 	}

@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/boardio"
 	"github.com/OWNER/verdi/internal/store"
 )
 
@@ -123,28 +122,7 @@ func (b *Backend) AddAnnotation(ctx context.Context, argsRaw json.RawMessage) ma
 
 // appendAnnotation appends a's JSON encoding as one line to
 // data/mutable/annotations/fileName (creating the directory if needed).
-// Streams are append-only JSONL (D3) — no temp-then-rename here, unlike
-// every other write in this store: D3 names exactly this exception
-// ("Streams (annotations) are append-only JSONL").
+// Delegates to internal/boardio.AppendAnnotation.
 func (b *Backend) appendAnnotation(fileName string, a *artifact.Annotation) error {
-	dir := b.annotationsDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("creating %s: %w", dir, err)
-	}
-
-	line, err := json.Marshal(a)
-	if err != nil {
-		return fmt.Errorf("encoding annotation: %w", err)
-	}
-
-	f, err := os.OpenFile(filepath.Join(dir, fileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("opening %s: %w", fileName, err)
-	}
-	defer f.Close()
-
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		return fmt.Errorf("appending to %s: %w", fileName, err)
-	}
-	return nil
+	return boardio.AppendAnnotation(b.annotationsDir(), fileName, a)
 }
