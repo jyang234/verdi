@@ -336,5 +336,14 @@ func (erroringForge) ListOpenMRs(ctx context.Context, targetBranch string) ([]fo
 func (erroringForge) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error) {
 	return nil, errors.New("forge: simulated transport failure")
 }
+func (erroringForge) ListComments(ctx context.Context, mrID string) ([]forgepkg.Comment, error) {
+	return nil, nil
+}
+func (erroringForge) PostComment(ctx context.Context, mrID, body string, target *forgepkg.CommentTarget) (forgepkg.Comment, error) {
+	return forgepkg.Comment{}, errors.New("forge: simulated transport failure")
+}
+func (erroringForge) GetThreadResolution(ctx context.Context, mrID string) ([]forgepkg.ThreadResolution, error) {
+	return nil, nil
+}
 
 var _ forgepkg.Forge = erroringForge{}

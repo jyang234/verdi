@@ -86,7 +86,8 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 	// branch prefix, mirroring align.go's own runAlign→runDesignAlign split
 	// exactly (CLAUDE.md: don't invent a second design-branch detector).
 	if strings.HasPrefix(branch, "design/") {
-		return runSpecMRGate(ctx, root, branch, stdout, stderr)
+		f := buildForgeBestEffort(ctx, root)
+		return runSpecMRGate(ctx, root, branch, f, resolveDefaultBranch(ctx, root), stdout, stderr)
 	}
 
 	spec, err := storyresolve.ResolveBuildSpec(root, branch)

@@ -102,7 +102,7 @@ func TestSpecMRGate_DanglingExemptsFails(t *testing.T) {
 		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy is unresolved\" }\n")
 
 	var stdout, stderr bytes.Buffer
-	got := runSpecMRGate(context.Background(), repo.Dir, "design/stale-decline", &stdout, &stderr)
+	got := runSpecMRGate(context.Background(), repo.Dir, "design/stale-decline", nil, "main", &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runSpecMRGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -115,20 +115,25 @@ func TestSpecMRGate_DanglingExemptsFails(t *testing.T) {
 }
 
 // TestSpecMRGate_ResolvedPasses proves the same path passes (exit 0) once
-// every declared edge is resolved (its finding dispositioned) — the other
-// spec-MR conditions being vacuously satisfied this phase.
+// every declared edge is resolved (its finding dispositioned) — with a
+// nil forge, the review-thread condition (gate_threads.go) discloses
+// unproven (a printed [NOTICE], never a silent pass — constitution 2/10)
+// rather than either failing the gate or being silently skipped.
 func TestSpecMRGate_ResolvedPasses(t *testing.T) {
 	repo := buildDesignGateRepo(t)
 	writeDecisionConflictReport(t, repo.Dir, repo.Head,
 		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy\", disposition: exempt, note: \"excused, see witness\" }\n")
 
 	var stdout, stderr bytes.Buffer
-	got := runSpecMRGate(context.Background(), repo.Dir, "design/stale-decline", &stdout, &stderr)
+	got := runSpecMRGate(context.Background(), repo.Dir, "design/stale-decline", nil, "main", &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runSpecMRGate = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "gate: PASS") {
 		t.Fatalf("stdout = %q, want a final gate: PASS line", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "[NOTICE]") || !strings.Contains(stdout.String(), "review threads resolved") {
+		t.Fatalf("stdout = %q, want a [NOTICE] disclosing the review-thread condition unproven (nil forge)", stdout.String())
 	}
 }
 

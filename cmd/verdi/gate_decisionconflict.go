@@ -26,6 +26,7 @@ import (
 
 	"github.com/OWNER/verdi/internal/align"
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/forge"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/storyresolve"
 )
@@ -35,14 +36,24 @@ import (
 // resolved at merge). It mirrors gate.go's runGate but resolves the design
 // branch's OWN spec (storyresolve.ResolveDesignSpec — feature or story class,
 // the same resolver `verdi align`'s design-branch mode uses) and evaluates
-// the spec-MR condition set: for this phase, the single
-// declared-decision-conflict condition (checkDeclaredDecisionConflicts).
-// V1-P7's review-thread condition joins this same set later; the build-branch
-// merge conditions never run here, and this condition never runs on a build
-// branch (03 §Decision-conflict gate: "the design-branch analogue of the
-// build-branch merge gate's fresh-report requirement"). head is the design
-// branch head the report must cover.
-func runSpecMRGate(ctx context.Context, root, branch string, stdout, stderr io.Writer) int {
+// the spec-MR condition set: declared-decision-conflict
+// (checkDeclaredDecisionConflicts) and, as of V1-P7, review-thread
+// resolution (checkReviewThreadsCondition, gate_threads.go — "V1-P7's
+// review-thread condition joins this same set later," now resolved at this
+// phase). The build-branch merge conditions never run here, and neither of
+// these conditions ever runs on a build branch (03 §Decision-conflict
+// gate: "the design-branch analogue of the build-branch merge gate's
+// fresh-report requirement"). head is the design branch head the report
+// must cover. f is the forge to query for checkReviewThreadsCondition —
+// injected, mirroring sync.go's cmdSync/runSync split (CLAUDE.md: no
+// network in any test), so tests drive this core directly with nil or a
+// hermetic fake/httptest forge; only cmdGate (gate.go) ever builds a live
+// one (buildForgeBestEffort, gate_threads.go). defaultBranchRef is also
+// injected (mirroring runGate's own parameter, and closuregate.go's
+// runClosureGate) rather than resolved internally, so tests control it
+// directly instead of depending on a fixturegit repo's actual git
+// default-branch detection.
+func runSpecMRGate(ctx context.Context, root, branch string, f forge.Forge, defaultBranchRef string, stdout, stderr io.Writer) int {
 	spec, err := storyresolve.ResolveDesignSpec(root, branch)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate:", err)
@@ -58,12 +69,19 @@ func runSpecMRGate(ctx context.Context, root, branch string, stdout, stderr io.W
 		fmt.Fprintln(stderr, "gate:", err)
 		return 2
 	}
-	cond, err := checkDeclaredDecisionConflicts(root, specRef.Name, head)
+	cond1, err := checkDeclaredDecisionConflicts(root, specRef.Name, head)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate:", err)
 		return 2
 	}
-	conds := []gateCondition{cond}
+
+	cond2, err := checkReviewThreadsCondition(ctx, f, defaultBranchRef, branch)
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
+		return 2
+	}
+
+	conds := []gateCondition{cond1, cond2}
 	numberSpecMRConditions(conds)
 	return reportGateConditions(stdout, conds)
 }
