@@ -1,5 +1,5 @@
-// verdi gate (I-7, PLAN.md Phase 8): the merge-gate verb, 03 §Gates'
-// "merge gate" — three conditions, all fail-closed:
+// verdi gate (I-7, PLAN.md Phase 8; R4-I-8 extends it): the merge-gate
+// verb, 03 §Gates' "merge gate" — four conditions, all fail-closed:
 //
 //  1. the story's spec exists on the DEFAULT branch with status
 //     accepted-pending-build (read via git, never the working tree — a
@@ -10,12 +10,34 @@
 //     (`covers` == HEAD) with EVERY finding — computed and judged,
 //     including the synthetic absence finding — dispositioned (I-9's
 //     ratified reading of 03 §Gates, "every computed finding" corrected to
-//     "every finding").
+//     "every finding");
+//  4. (V1-P4, 03 §The amendment ladder rung 4) no unresolved rung-4
+//     cascade block: a story whose edges are CascadeInvalidated by a
+//     merged feature supersession, or CascadeStale without a matching
+//     re-affirmation record, is refused — "the merge gate and verdi build
+//     start refuse a story whose edges carry unresolved stale flags"
+//     (cascadecheck.go, shared with buildstart.go).
+//
+// This file also builds (V1-P4) the CLOSURE-gate condition set — spec-stale
+// and pending-supersession, 03 §Gates' "closure gate" — as a self-contained,
+// separately testable function (runClosureGate, closuregate.go) rather than
+// folding those two conditions into runGate above: 03 is explicit that
+// spec-stale and pending-supersession "block closure, not merge — builds
+// keep moving", so mixing them into the merge-gate conditions above would
+// be a spec violation, not just an organizational choice. `verdi close`
+// (the verb that would dispatch a closure-MR run of this condition set) is
+// out of this phase's scope (05 §CLI's close row), so runClosureGate is
+// unwired to any CLI verb yet — built cleanly extensible so a `verdi close`
+// phase can call it directly, and so V1-P5's declared-decision-conflict
+// condition and V1-P7's review-thread condition (05 §CLI's gate row,
+// SPEC-MR half — a THIRD, still-different condition set this phase
+// deliberately does not touch) have an established sibling pattern to
+// follow rather than needing to invent gate.go's next extension shape.
 //
 // gate takes no story/spec argument, like align — both infer the build's
 // spec from the feature/<name> branch convention (internal/storyresolve.
 // ResolveBuildSpec). Not named in 05 §CLI's table (I-7 notes this); exit
-// contract mirrors upstream's own convention: 0 all three hold, 1 any
+// contract mirrors upstream's own convention: 0 all conditions hold, 1 any
 // condition fails, 2 operational error.
 package main
 
@@ -117,8 +139,14 @@ func runGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, h
 		return 2
 	}
 
+	cond4, err := checkCascadeCondition(root, spec)
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
+		return 2
+	}
+
 	allOK := true
-	for _, c := range []gateCondition{cond1, cond2, cond3} {
+	for _, c := range []gateCondition{cond1, cond2, cond3, cond4} {
 		status := "PASS"
 		if !c.OK {
 			status = "FAIL"
@@ -201,6 +229,22 @@ func checkNoACViolated(ctx context.Context, root string, spec *artifact.SpecFron
 	}
 	sort.Strings(violated)
 	return gateCondition{Name: name, Reason: fmt.Sprintf("violated AC(s): %v", violated)}, nil
+}
+
+// checkCascadeCondition is condition 4: no unresolved rung-4 cascade block
+// (03 §The amendment ladder rung 4). Thin wrapper around
+// checkCascadeReaffirmation (cascadecheck.go, shared with build start)
+// rendering its (ok, reason) pair as a gateCondition.
+func checkCascadeCondition(root string, spec *artifact.SpecFrontmatter) (gateCondition, error) {
+	name := "4. no unresolved rung-4 cascade block (spec-stale re-affirmation / invalidated edges)"
+	ok, reason, err := checkCascadeReaffirmation(root, spec)
+	if err != nil {
+		return gateCondition{}, fmt.Errorf("checking rung-4 cascade: %w", err)
+	}
+	if !ok {
+		return gateCondition{Name: name, Reason: reason}, nil
+	}
+	return gateCondition{Name: name, OK: true}, nil
 }
 
 // checkFreshFullyDispositioned is condition 3: a deviation-report.md is
