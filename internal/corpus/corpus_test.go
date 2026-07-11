@@ -34,6 +34,20 @@ var goldenHeads = []string{
 	"93ddc5bbbb398cf747151e1c466afb83114398df", // layer 3
 }
 
+// goldenHeadsV2 are the v1-P1 rung-4 supersession pair's own, separate
+// fixturegit history (internal/artifact/v2fixture_test.go's
+// TestV2SupersessionRepo_MatchesGoldenSHAs builds and re-verifies this same
+// history) — a second, independent repo rather than a fourth layer on the
+// v0 corpus's history, since nothing about the v2 overlay needs to
+// interleave with v0's existing golden commits. testdata/corpus/'s v2
+// fixtures (loan-workflow, loan-workflow-v2, and the reaffirmation that
+// pins loan-workflow-v2's commit) cite these SHAs, so this walk test's
+// accepted-token set grows to include them.
+var goldenHeadsV2 = []string{
+	"b5117ecc69b6779ad75cde60d4aec206ece0950b", // v2 layer 1 (loan-workflow v1 draft)
+	"06a3f4cabb226fe9344e1645e27c344493b6b62b", // v2 layer 2 (loan-workflow v1 frozen + loan-workflow-v2 draft)
+}
+
 // parseLayers reads layers.txt and returns, for each layer number in
 // ascending order, the ordered list of corpus-relative file paths
 // belonging to it.
@@ -135,6 +149,9 @@ var hexTokenRe = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
 func TestFixtureCorpus_PinsNameGoldenCommits(t *testing.T) {
 	golden := map[string]bool{}
 	for _, h := range goldenHeads {
+		golden[h] = true
+	}
+	for _, h := range goldenHeadsV2 {
 		golden[h] = true
 	}
 

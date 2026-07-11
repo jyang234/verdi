@@ -1,0 +1,7 @@
+{
+  "schema": "verdi.boardlayout/v1",
+  "positions": {
+    "ac-1": { "x": 40, "y": 20 },
+    "ac-99": { "x": 220, "y": 20 }
+  }
+}

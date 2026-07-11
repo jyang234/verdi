@@ -1,0 +1,21 @@
+{
+  "_capture_status": "doc-derived, UNVERIFIED against live",
+  "_source": "https://docs.gitlab.com/ee/api/discussions.html (GitLab Discussions API, fetched 2026-07-11)",
+  "_endpoint": "PUT /projects/:id/merge_requests/:merge_request_iid/discussions/:discussion_id?resolved=true",
+  "example_response": {
+    "id": "6a9c1750b37d513a43987b574953fceb50b03ceX",
+    "individual_note": false,
+    "notes": [
+      {
+        "id": 99001,
+        "type": "DiffNote",
+        "body": "[vd:ac-2] outcome AC reads implementation-scoped — reword?",
+        "resolvable": true,
+        "resolved": true,
+        "resolved_by": { "id": 1, "username": "spike-s6" },
+        "resolved_at": "2026-07-11T18:05:00.000Z"
+      }
+    ]
+  },
+  "_finding": "Resolution state (resolved/resolved_by/resolved_at) is exposed directly on the REST discussions/notes resource -- no separate GraphQL-only path is documented as required, UNLIKE GitHub where isResolved is GraphQL-only. This asymmetry (GitLab: REST suffices; GitHub: GraphQL required) is itself a normalization finding for the port. NOT independently confirmed against a live GitLab instance in this spike -- see findings.md three-valued disclosure."
+}

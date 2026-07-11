@@ -1,0 +1,21 @@
+{
+  "_capture_status": "doc-derived, UNVERIFIED against live",
+  "_source": "https://docs.gitlab.com/ee/api/discussions.html (GitLab Discussions API, fetched 2026-07-11)",
+  "_note": "Representative REQUEST body for creating an inline diff comment, assembled from documented parameters. Not exercised against a live GitLab instance.",
+  "_endpoint": "POST /projects/:id/merge_requests/:merge_request_iid/discussions",
+  "example_request_body": {
+    "body": "[vd:ac-2] outcome AC reads implementation-scoped — reword?",
+    "position": {
+      "position_type": "text",
+      "base_sha": "b5d6e7b1613fca24d250fa8e5bc7bcc3dd6002ef",
+      "start_sha": "7c9c2ead8a320fb7ba0b4e234bd9529a2614e306",
+      "head_sha": "4803c71e6b1833ca72b8b26ef2ecd5adc8a38031",
+      "old_path": "sample.py",
+      "new_path": "sample.py",
+      "new_line": 9,
+      "old_line": null
+    }
+  },
+  "_required_params": ["body", "position.position_type", "position.base_sha", "position.head_sha", "position.start_sha", "position.new_path", "position.old_path"],
+  "_note_2": "All three shas (base_sha/start_sha/head_sha) come from the MR's diff_refs field (GET .../merge_requests/:iid) at the time of commenting -- the caller must fetch and pin these before posting, unlike GitHub's single commit_id + line + side."
+}

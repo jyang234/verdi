@@ -1,0 +1,9 @@
+{
+  "_capture_status": "doc-derived, UNVERIFIED against live -- and additionally INCONCLUSIVE from docs alone",
+  "_source": [
+    "https://docs.gitlab.com/ee/api/discussions.html",
+    "https://docs.gitlab.com/ee/user/discussions.html"
+  ],
+  "_finding": "GitLab's own docs do not expose an explicit boolean field (like GitHub's isOutdated/outdated) marking a diff note's position as stale relative to the current diff. The user-facing docs confirm diff comments PERSIST across force-push/rebase/amend ('these comments persist, even when you: Force-push after a rebase. Amend a commit.') but do not document how position/line_range is recomputed or nulled. The REST discussions.html page itself references GitLab issue #325161 about line-number-sync-across-file-changes with no resolution documented. Known GitLab UI behavior (external knowledge, not doc-verified here) is that outdated diff discussions render under a 'Compare with the previous version' / collapsed outdated-diff banner in the MR UI, computed by the app comparing the note's position.head_sha against the MR's current diff_refs.head_sha -- i.e. staleness is CLIENT-COMPUTED from the shas already present in the position object, not a server-supplied flag. This is DISCLOSED AS UNPROVEN: it was not exercised against a live instance in this spike.",
+  "_implication_for_port": "If this holds, the GitLab adapter cannot rely on a single boolean the way the GitHub adapter can (GraphQL isOutdated); it must instead diff position.head_sha against the MR's current diff_refs.head_sha itself. This needs live verification in V1-P7 before the port method's semantics are finalized -- flagged as an open item, not a settled answer."
+}

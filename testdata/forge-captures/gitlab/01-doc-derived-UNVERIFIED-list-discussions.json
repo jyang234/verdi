@@ -1,0 +1,101 @@
+{
+  "_capture_status": "doc-derived, UNVERIFIED against live",
+  "_source": "https://docs.gitlab.com/ee/api/discussions.html (GitLab Discussions API, fetched 2026-07-11)",
+  "_note": "glab CLI was not installed and no GitLab auth/token was available in this environment (see findings.md). This is a representative shape assembled from the official REST API docs, NOT a captured live response. Field names and nesting are as documented; example values (ids, shas) are illustrative, not real.",
+  "_endpoint": "GET /projects/:id/merge_requests/:merge_request_iid/discussions",
+  "example_response": [
+    {
+      "id": "6a9c1750b37d513a43987b574953fceb50b03ceX",
+      "individual_note": false,
+      "notes": [
+        {
+          "id": 99001,
+          "type": "DiffNote",
+          "body": "[vd:ac-2] outcome AC reads implementation-scoped — reword?",
+          "attachment": null,
+          "author": {
+            "id": 1,
+            "name": "Spike S6",
+            "username": "spike-s6",
+            "state": "active",
+            "avatar_url": "https://gitlab.example.com/avatar/deadbeef",
+            "web_url": "https://gitlab.example.com/spike-s6"
+          },
+          "created_at": "2026-07-11T18:00:00.000Z",
+          "updated_at": "2026-07-11T18:00:00.000Z",
+          "system": false,
+          "noteable_id": 42,
+          "noteable_type": "MergeRequest",
+          "project_id": 5,
+          "noteable_iid": 1,
+          "resolvable": true,
+          "resolved": false,
+          "resolved_by": null,
+          "resolved_at": null,
+          "position": {
+            "base_sha": "b5d6e7b1613fca24d250fa8e5bc7bcc3dd6002ef",
+            "start_sha": "7c9c2ead8a320fb7ba0b4e234bd9529a2614e306",
+            "head_sha": "4803c71e6b1833ca72b8b26ef2ecd5adc8a38031",
+            "old_path": "sample.py",
+            "new_path": "sample.py",
+            "position_type": "text",
+            "old_line": null,
+            "new_line": 9,
+            "line_range": {
+              "start": {
+                "line_code": "588440f66559714280628a4f9799f0c4eb880a4a_9_9",
+                "type": "new",
+                "old_line": null,
+                "new_line": 9
+              },
+              "end": {
+                "line_code": "588440f66559714280628a4f9799f0c4eb880a4a_9_9",
+                "type": "new",
+                "old_line": null,
+                "new_line": 9
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "7b0d2861c48e624b54098c685064gdfc61b14dfY",
+      "individual_note": true,
+      "notes": [
+        {
+          "id": 99002,
+          "type": "DiscussionNote",
+          "body": "nit: this comment has no vd token, should land in the inbox tray",
+          "attachment": null,
+          "author": {
+            "id": 1,
+            "name": "Spike S6",
+            "username": "spike-s6",
+            "state": "active",
+            "avatar_url": "https://gitlab.example.com/avatar/deadbeef",
+            "web_url": "https://gitlab.example.com/spike-s6"
+          },
+          "created_at": "2026-07-11T18:00:05.000Z",
+          "updated_at": "2026-07-11T18:00:05.000Z",
+          "system": false,
+          "noteable_id": 42,
+          "noteable_type": "MergeRequest",
+          "project_id": 5,
+          "noteable_iid": 1,
+          "resolvable": false,
+          "resolved": false,
+          "resolved_by": null,
+          "resolved_at": null
+        }
+      ]
+    }
+  ],
+  "_field_notes": {
+    "individual_note": "boolean; false when the note is part of a resolvable diff-anchored discussion thread, true for a bare non-diff comment",
+    "type": "one of DiscussionNote | DiffNote | null; only DiffNote carries a position object",
+    "resolvable": "boolean; whether this note participates in the resolve/unresolve mechanism at all (plain MR-level comments are resolvable:false)",
+    "resolved / resolved_by / resolved_at": "present only when resolvable:true; null/false until resolved",
+    "position.line_range": "GitLab's line-anchoring uses line_code (a hash of blob-sha_old-line_new-line) plus old_line/new_line -- NOT a bare integer offset like GitHub's diff 'position'"
+  }
+}

@@ -1,0 +1,1 @@
+{"id":"a-01J8Z0K9DDDDDDDDDDDDDDDDDD","ts":"2026-07-11T18:00:00Z","author":"jyang","target":{"ref":"spec/open-question-story@93ddc5bbbb398cf747151e1c466afb83114398df","selector":{"heading":"open-questions","quote":"should the retry window be configurable per tenant?","line":null}},"type":"question","body":"should the retry window be configurable per tenant?","status":"open"}
