@@ -85,15 +85,46 @@ Schema `verdi.evidence/v1`; materialized under
   "kind": "static",
   "verdict": "pass | fail | abstain",
   "witness": "retryWorker -> charge.Post",
-  "provenance": { "source": "ci | local", "pipeline": "913", "commit": "7f3c2a1" },
+  "producer": "audit-before-publish",
+  "provenance": { "source": "ci | local", "pipeline": "913", "job": "verdi-evidence", "commit": "7f3c2a1" },
   "digest": "sha256:..." }
 ```
+
+`producer` and `provenance.job` are optional. `producer` is the declared
+artifact id (obligation name, golden flow name, runtime check id) the
+fold's `(kind, producer)` grouping keys on directly; when a record predates
+this field or is hand-authored, the fold falls back to grouping by
+`(kind, witness)`. `provenance.job` refines the fold's `(pipeline id, job
+id)` ordering within a single pipeline; an absent `job` sorts before any
+present `job` in the same pipeline rather than being ambiguous.
+
+**Bundle assembly.** `verdicts.json` is verdi-assembled, never
+upstream-native: a graph's `obligations[]` joined against a service's
+`verdi.bindings.yaml` sidecar produces the static-kind records above; a
+`go test -json` suite run produces coarse behavioral records (suite
+pass/fail, no per-test AC mapping — see §Declarations). `tests.json` is a
+small, verdi-owned summary of that same `go test -json` run (pass/fail
+counts, not a per-AC join). `review.json` is the upstream `groundwork
+review --json` record(s), stored verbatim — every field preserved
+unchanged. `boundary-diff.json` is verdi-computed from two strict-decoded
+boundary contracts (upstream's `groundwork diff` has no JSON mode), with
+the breaking-change verdict cross-checked against `groundwork diff`'s own
+exit code. A regenerated graph's obligation status maps directly:
+SATISFIED → `pass`, VIOLATED → `fail`, CANT-PROVE → `abstain`, UNMATCHED →
+a hard error (never a silent abstain — an unmatched rule means its
+producer never fired at all).
 
 **Provenance classes.** `source: ci` is **authoritative**; `source: local` is
 **advisory** — the workbench renders advisory evidence as a preview matrix,
 and gates consume authoritative evidence only. This preserves verdi-go's
 load-bearing trust boundary: artifacts that gate come from trusted CI, never
 from the author under review.
+
+CI publishes this bundle under one fixed convention: the job (GitLab) or
+workflow (GitHub) named `verdi-evidence` uploads the
+`data/derived/<ref-slug>/<commit>/` tree as its artifact, identical on
+both forges; `verdi sync` (surfaces spec) pulls the latest successful
+`verdi-evidence` run for the current ref through the forge port.
 
 ## The fold
 
@@ -158,14 +189,17 @@ spec it is archiving.
 
 ## Attestations and waivers
 
-- **Attestation** (`attestations/<story>/<ac-id>.md`): who, what commit, what
+- **Attestation** (`attestations/<story-slug>/<ac-id>.md`, where
+  `<story-slug>` is `RefSlug` of the owning spec's scheme-prefixed `story:`
+  ref, e.g. `jira:LOAN-1482` → `jira-loan-1482`): who, what commit, what
   statement. CODEOWNERS routes the path to the designated oracle, so only the
   right human can merge one — the attestation is the oracle's answer made
   durable and commit-pinned. Frozen at commit.
-- **Waiver** (`waivers/<story>/<ac-id>.md`): owner, reason, optional expiry.
-  Waiving records descoping; it never deletes the AC. `verdi waivers` audits
-  the set — expired waivers and waivers whose AC or story no longer exists
-  are flagged, mirroring groundwork's audited exceptions.
+- **Waiver** (`waivers/<story-slug>/<ac-id>.md`, same story-slug rule):
+  owner, reason, optional expiry. Waiving records descoping; it never
+  deletes the AC. `verdi waivers` audits the set — expired waivers and
+  waivers whose AC or story no longer exists are flagged, mirroring
+  groundwork's audited exceptions.
 
 ## Closure ritual
 
@@ -203,15 +237,30 @@ sections with per-finding provenance:
 - **Computed** — regenerate graph and boundary contract at the build head;
   diff against the spec's `declares:` block (three-valued per declaration:
   declared-and-holds / declared-and-violated with witness / undeclared) and
-  against acceptance-time expectations. Digest-locked: recomputable from
-  pinned inputs.
+  against acceptance-time expectations. A declared boundary `{from, to,
+  via}` names a directed edge from service `from` to a resource named `to`
+  of surface kind `via`; it **holds** iff `from`'s regenerated boundary
+  contract carries a matching named resource — `{name: to, kind: via}` —
+  in any of `published`/`consumed`/`external_dependencies`, else it is
+  **violated** with the mismatch as witness. Any named resource present in
+  a regenerated contract with no matching declared boundary is
+  **undeclared** (extra, not asserted by the spec). A declared boundary
+  whose `from` service is not among the spec's impacted, regenerable
+  services is fail-closed **violated**, never silently skipped. The
+  acceptance-time baseline for the separate boundary-drift comparison is
+  the git-committed boundary contract at `spec.frozen.commit` — the
+  always-resolvable, git-native reference point, not an ephemeral local
+  derived bundle, which is not always resolvable. Digest-locked:
+  recomputable from pinned inputs.
 - **Judged** — the alignment-check subagent's semantic reading of spec vs
   implementation, for what no graph can see. Integrity-hashed only; it does
   not claim reproducibility (see the artifact contract's verifiability
   split).
 
 The judged section is produced by a configurable judge command
-(`align.judge_cmd` in `verdi.yaml`, default `claude -p`). When no judge is
+(`align.judge_cmd` in `verdi.yaml`, an argv **array** — never a shell
+string, so no quoting/escaping rules need inventing — default
+`["claude", "-p"]`). When no judge is
 available or it is skipped, `verdi align` emits a synthetic judged finding —
 *judged coverage absent* — which, like any finding, must be dispositioned
 (`accepted-deviation`, with a note) before the merge gate passes: skipping
@@ -221,7 +270,11 @@ fails outright without a judge.
 
 Every finding is tagged `computed` or `judged` and, pre-merge, carries a
 disposition: `fixed` or `accepted-deviation` with a note — the sanctioned
-record of how the build diverged from the accepted design. The archived
+record of how the build diverged from the accepted design. A finding's
+identity — the key a disposition survives regeneration under — is a
+content hash over `(kind, id, text)`, deliberately not `id` alone: a
+verdict flip under an otherwise-stable id must not silently inherit a
+stale disposition from before the flip. The archived
 quartet — spec, board.json, rollup.json, deviation-report.md — is the
 complete, self-contained story record.
 
