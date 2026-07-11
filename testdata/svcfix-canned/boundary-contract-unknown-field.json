@@ -25,5 +25,6 @@
       "site": "(*example.com/svcfix/internal/app.Service).PublishRefund",
       "detail": "publish event name is not a string constant; the published event cannot be named statically"
     }
-  ]
+  ],
+  "__unexpected_field__": "injected for strict-decode failure tests"
 }

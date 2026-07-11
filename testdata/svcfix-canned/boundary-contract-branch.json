@@ -5,6 +5,11 @@
     "http": [
       {
         "method": "GET",
+        "route": "/healthz",
+        "tier": 1
+      },
+      {
+        "method": "GET",
         "route": "/refunds/{id}",
         "tier": 1
       },

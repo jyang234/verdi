@@ -1,0 +1,29 @@
+{
+  "service": "svcfix",
+  "verdict": "STRUCTURALLY-CLEAR",
+  "shape": "localized",
+  "touches": [
+    {
+      "package": "example.com/svcfix/internal/handler",
+      "nodes_added": 1
+    }
+  ],
+  "contract_changes": [
+    {
+      "op": "+",
+      "surface": "entrypoint",
+      "name": "GET /healthz"
+    }
+  ],
+  "standing_cautions": [
+    {
+      "rule": "io_budget",
+      "summary": "write budget is a lower bound on 1 route(s): the forward frontier is blind (dynamic dispatch, reflect/unsafe, or a <dynamic> effect) — writes reachable past it are uncounted, so a within-budget pass there is not a proof the write surface is bounded"
+    }
+  ],
+  "algo": "rta",
+  "caveats": [
+    "rta from 4 discovered root(s)"
+  ],
+  "digest": "1d90cad62f8ea304ae30f45fc7719c9b05c139fdbf9a261f86874f248b63c485"
+}

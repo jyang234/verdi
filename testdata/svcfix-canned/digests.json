@@ -1,0 +1,14 @@
+{
+  "schema": "verdi.fixture-digests/v1",
+  "files": {
+    "boundary-contract-base.json": "sha256:f8c684d70806bf7ed11cfa759f28eb7acc8d23ef1675dff902d29b19c5484687",
+    "boundary-contract-branch.json": "sha256:ff6eb6acdbbf6fc73f49ce26854b46371f6ca73762877f269d075d0ae3827f69",
+    "boundary-contract-unknown-field.json": "sha256:5f329df228682bfeedb2a4777726de81939dfacda7153fe2331e66204a9631dc",
+    "graph-unknown-field.json": "sha256:58ac697873e8297ba108b1486bdf71a7745b4c018639c2b14386e85e022a6f40",
+    "graph.json": "sha256:d84d7c609fdf75b3dde95f47620ba20d160a61ebcdc716f5b113eb466ef21375",
+    "review-block.json": "sha256:6108e8d6e93302207edf5ed07677040df22484735d315f9ff2cef498a43a39c1",
+    "review-no-structural-signal.json": "sha256:450a30baf52a941eeee8a31bdf884dca81c60e030509ecd70023d1a69ea8621f",
+    "review-structurally-clear.json": "sha256:a5053fc7abd4b119a232f4a06888109cdb52cdafe1a5b09d533eb0b0a027059b",
+    "review-unknown-field.json": "sha256:6bddd788a840a52d46435ddc98b057a245fdb68dc02aff9d9dbf96cdbc4667bc"
+  }
+}
