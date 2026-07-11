@@ -1,13 +1,17 @@
-// tests-v1/fixtures.ts — the single constants module for every fixture ref
-// the v1 acceptance specs use.
+// fixtures.ts — the single constants module for every fixture ref the
+// v1 board/dex specs use (authored as tests-v1/fixtures.ts, moved here
+// with the V1-P6 flip-in).
 //
-// The specs in this directory import fixture refs from HERE ONLY. Every
-// value below is a placeholder chosen from the shapes PLAN-V1.md §4 (the
-// fixture-v2 overlay) and 02 §Object model prescribe; each constant's
-// FINAL value binds when V1-P1's fixture-v2 overlay merges and
-// cmd/e2eharness is extended to provision it (see tests-v1/README.md,
-// "Harness obligations"). When that happens, this is the one file to
-// update — no spec file in tests-v1/ names a fixture ref directly.
+// Spec files import fixture refs from HERE ONLY; no spec file names a
+// fixture ref directly.
+//
+// BINDING NOTE (V1-P6): the workbench constants below are FINAL — they
+// are provisioned verbatim by cmd/e2eharness/provisionv2.go (a draft
+// spec on a design branch cannot live in the committed testdata/corpus
+// tree, VL-004, so the harness authors the board fixtures onto a scratch
+// design branch at startup; see tests-v1/README.md "Harness
+// obligations"). The dex constants remain placeholders until V1-P8
+// extends the harness for :4174.
 
 // ---------------------------------------------------------------------------
 // Workbench (V1-P6 board v2) — authoring mode

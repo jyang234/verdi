@@ -7,7 +7,7 @@ import {
   ADR_NAME,
   dexSpecPath,
   dexAdrExemptionsPath,
-} from "./fixtures";
+} from "../tests/fixtures";
 
 // EXECUTABLE ACCEPTANCE CRITERIA — PLAN-V1.md §5 Phase V1-P8, exit
 // criteria: "the feature page renders the stub list paired with the

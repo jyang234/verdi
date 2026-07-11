@@ -109,6 +109,10 @@
 
 * { box-sizing: border-box; }
 
+/* The hidden attribute always wins: author display rules (flex menus,
+   fixed dialogs) must never resurrect an element the markup hid. */
+[hidden] { display: none !important; }
+
 body {
   font-family: var(--serif);
   font-size: 1.0625rem;
@@ -835,7 +839,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 /* object cards: one per frontmatter-declared object */
 .objcard {
   position: absolute;
-  width: 15rem;
+  width: 12.5rem;
   padding: 0.7rem 0.9rem 0.8rem;
   background: var(--card);
   border: 1px solid var(--rule);
@@ -883,7 +887,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 /* reference cards: targets outside this spec, filed frozen-blue */
 .refcard {
   position: absolute;
-  width: 13rem;
+  width: 12rem;
   padding: 0.55rem 0.8rem 0.65rem;
   background: var(--frozen-tint);
   border: 1px solid var(--frozen);

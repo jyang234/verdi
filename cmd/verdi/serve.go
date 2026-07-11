@@ -92,12 +92,28 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// Review mode's comment feed (05 §Review stickies): until V1-P7's
+	// forge port is adapted over workbench.CommentFeed at the wave close,
+	// the only wiring is the hermetic canned-file feed the e2e harness
+	// injects (VERDI_REVIEW_FEED — a strict-decoded local JSON file, no
+	// network). Unset, no spec is ever under review and the board keys
+	// purely off branch state.
+	deps := workbench.Deps{}
+	if feedPath := os.Getenv("VERDI_REVIEW_FEED"); feedPath != "" {
+		feed, ferr := workbench.LoadCannedCommentFeed(feedPath)
+		if ferr != nil {
+			fmt.Fprintln(stderr, "serve:", ferr)
+			return 2
+		}
+		deps.CommentFeed = feed
+	}
+
 	httpLn, err := net.Listen("tcp", httpAddr)
 	if err != nil {
 		fmt.Fprintln(stderr, "serve: binding workbench HTTP:", err)
 		return 2
 	}
-	httpSrv := &http.Server{Handler: workbench.NewHandler(root)}
+	httpSrv := &http.Server{Handler: workbench.NewHandlerWith(root, deps)}
 	go func() {
 		_ = httpSrv.Serve(httpLn)
 	}()

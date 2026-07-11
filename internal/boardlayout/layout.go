@@ -61,10 +61,13 @@ type Object struct {
 	DocOrder int
 }
 
-// Grid geometry (non-binding, see package comment): one column per zone.
+// Grid geometry (non-binding, see package comment): one column per
+// zone, compact enough that every zone — including the reference column
+// — sits inside one viewport, so drawing yarn from a decision to a
+// reference card never needs a scroll mid-gesture.
 const (
 	zoneOriginY = 40
-	zonePitchX  = 300
+	zonePitchX  = 220
 	zoneMarginX = 40
 	rowPitch    = 190
 )

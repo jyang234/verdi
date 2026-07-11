@@ -75,7 +75,12 @@ export default defineConfig({
     {
       name: "chromium",
       testDir: "./tests",
-      use: { ...devices["Desktop Chrome"] },
+      // Desktop-sized viewport (devices' default 1280x720 is too small):
+      // the v1 board's yarn gesture is a RAW pointer drag (helpers.ts
+      // drawYarn), and raw mouse events never auto-scroll the way
+      // locator actions do — both endpoints, including the reference
+      // column, must be co-visible on one screen.
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1600, height: 1000 } },
     },
     // Opt-in only (see v1AcceptanceRequested above). Shares the webServer
     // harness so the acceptance specs can run against it on demand; they
@@ -86,7 +91,8 @@ export default defineConfig({
           {
             name: "v1-acceptance",
             testDir: "./tests-v1",
-            use: { ...devices["Desktop Chrome"] },
+            // Same desktop viewport as the default project (see above).
+            use: { ...devices["Desktop Chrome"], viewport: { width: 1600, height: 1000 } },
           },
         ]
       : []),
