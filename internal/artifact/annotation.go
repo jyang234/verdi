@@ -14,6 +14,15 @@ const (
 	AnnotationQuestion       AnnotationType = "question"
 	AnnotationDecisionNeeded AnnotationType = "decision-needed"
 	AnnotationAgentTask      AnnotationType = "agent-task"
+	// AnnotationRelates is the annotation layer's untyped scratch thread
+	// between two elements (R4 concept §5, 02 §Record schemas): TargetB
+	// names the thread's second endpoint and is present only for this type.
+	AnnotationRelates AnnotationType = "relates"
+	// AnnotationReview records a review sticky (02 §Record schemas). Its
+	// canonical home is a forge MR inline comment, not this stream; a local
+	// mirror carries in Body the same "[vd:<object-id>]" token the forge
+	// comment carries.
+	AnnotationReview AnnotationType = "review"
 )
 
 var validAnnotationTypes = map[AnnotationType]bool{
@@ -21,6 +30,8 @@ var validAnnotationTypes = map[AnnotationType]bool{
 	AnnotationQuestion:       true,
 	AnnotationDecisionNeeded: true,
 	AnnotationAgentTask:      true,
+	AnnotationRelates:        true,
+	AnnotationReview:         true,
 }
 
 // AnnotationStatus is the `status` field of an annotation record.
@@ -65,14 +76,15 @@ type BoardAnchor struct {
 // `schema` field of its own — the literal example in 02 omits one, unlike
 // the other record schemas.
 type Annotation struct {
-	ID     string           `json:"id"`
-	TS     string           `json:"ts"`
-	Author string           `json:"author"`
-	Target *Target          `json:"target,omitempty"`
-	Board  *BoardAnchor     `json:"board,omitempty"`
-	Type   AnnotationType   `json:"type"`
-	Body   string           `json:"body"`
-	Status AnnotationStatus `json:"status"`
+	ID      string           `json:"id"`
+	TS      string           `json:"ts"`
+	Author  string           `json:"author"`
+	Target  *Target          `json:"target,omitempty"`
+	TargetB *Target          `json:"target_b,omitempty"`
+	Board   *BoardAnchor     `json:"board,omitempty"`
+	Type    AnnotationType   `json:"type"`
+	Body    string           `json:"body"`
+	Status  AnnotationStatus `json:"status"`
 }
 
 // DecodeAnnotation strict-decodes and validates a single annotation
@@ -115,6 +127,20 @@ func (a Annotation) Validate() error {
 	}
 	if !validAnnotationTypes[a.Type] {
 		return fmt.Errorf("artifact: annotation type %q is not a known type", a.Type)
+	}
+	// target_b is present only for type: relates — the untyped scratch
+	// thread's second endpoint (02 §Record schemas).
+	if a.Type == AnnotationRelates {
+		if a.TargetB == nil {
+			return fmt.Errorf("artifact: annotation type relates requires target_b")
+		}
+	} else if a.TargetB != nil {
+		return fmt.Errorf("artifact: annotation target_b is present only for type relates, not %q", a.Type)
+	}
+	if a.TargetB != nil {
+		if _, err := ParsePinnedRef(a.TargetB.Ref); err != nil {
+			return fmt.Errorf("artifact: annotation target_b.ref: %w", err)
+		}
 	}
 	if a.Body == "" {
 		return fmt.Errorf("artifact: annotation body is required")
