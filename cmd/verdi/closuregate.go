@@ -27,11 +27,13 @@ import (
 // runClosureGate evaluates 03 §Gates' closure gate for spec at head:
 // eligible (the story-level fold, authoritative evidence only), no
 // unresolved spec-stale flag, and no unresolved pending-supersession flag.
-// f may be nil (no forge configured / no network in tests) — the
-// pending-supersession condition then trivially passes (there is no way to
-// discover open MRs at all, and this function must never invent a network
-// call CLAUDE.md forbids in a test context; the caller is responsible for
-// disclosing when f is nil in a real, non-test invocation).
+// f may be nil (no forge configured / unreachable, or no network in tests).
+// When the story implements a feature whose open supersession MRs cannot be
+// enumerated because f is nil, the pending-supersession condition is
+// reported disclosed-unproven — a printed [NOTICE], never a silent pass
+// (constitution 2/10: silence is never a pass) — rather than being read as
+// "no pending MRs exist". Only a story that implements no feature at all
+// (nothing to prove) passes that condition outright with a nil forge.
 func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, head string, stdout io.Writer) (bool, error) {
 	cond1, err := checkClosureEligible(ctx, root, spec, head)
 	if err != nil {
@@ -48,13 +50,19 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 
 	allOK := true
 	for _, c := range []gateCondition{cond1, cond2, cond3} {
-		status := "PASS"
-		if !c.OK {
-			status = "FAIL"
+		switch {
+		case c.Disclosed:
+			// Three-valued honesty (constitution 2/10): the input was
+			// unavailable, so this is neither a pass nor a fail — a printed
+			// notice that leaves the gate verdict to the other conditions
+			// (mirrors VL-017's disclosure mechanism).
+			fmt.Fprintf(stdout, "[NOTICE] closure: %s\n", c.Name)
+			fmt.Fprintf(stdout, "       %s\n", c.Reason)
+		case c.OK:
+			fmt.Fprintf(stdout, "[PASS] closure: %s\n", c.Name)
+		default:
 			allOK = false
-		}
-		fmt.Fprintf(stdout, "[%s] closure: %s\n", status, c.Name)
-		if !c.OK {
+			fmt.Fprintf(stdout, "[FAIL] closure: %s\n", c.Name)
 			fmt.Fprintf(stdout, "       %s\n", c.Reason)
 		}
 	}
@@ -143,8 +151,21 @@ func checkPendingSupersessionCondition(ctx context.Context, f forge.Forge, defau
 	name := "3. no unresolved pending-supersession flag"
 
 	byFeature := implementsByFeature(spec)
-	if len(byFeature) == 0 || f == nil {
+	if len(byFeature) == 0 {
+		// The story implements no feature — there is no open-supersession
+		// input to fold at all, so the condition is genuinely satisfied.
 		return gateCondition{Name: name, OK: true}, nil
+	}
+	if f == nil {
+		// The story implements a feature, but no forge is configured or
+		// reachable, so open supersession MRs cannot be enumerated. Disclose
+		// the check unproven rather than reading the missing input as
+		// "no pending MRs" (constitution 2/10: silence is never a pass).
+		return gateCondition{
+			Name:      name,
+			Disclosed: true,
+			Reason:    "disclosed-unproven: no forge configured/reachable, so open supersession MRs cannot be enumerated (not read as 'no pending MRs' — constitution 2/10)",
+		}, nil
 	}
 
 	featureNames := make([]string, 0, len(byFeature))

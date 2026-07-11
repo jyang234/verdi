@@ -118,11 +118,18 @@ func resolveDefaultBranch(ctx context.Context, root string) string {
 	return ""
 }
 
-// gateCondition is one of the three merge-gate conditions' outcome.
+// gateCondition is one gate condition's outcome. Disclosed marks a
+// three-valued honesty case (constitution 2/10): the condition's input is
+// unavailable, so it can neither pass nor fail — it is reported as a printed
+// "disclosed-unproven" notice (mirroring VL-017's disclosure mechanism) that
+// is never a silent pass and never flips the gate verdict on its own. Only
+// the closure gate raises it today (a nil/unreachable forge for the
+// pending-supersession input, closuregate.go).
 type gateCondition struct {
-	Name   string
-	OK     bool
-	Reason string
+	Name      string
+	OK        bool
+	Reason    string
+	Disclosed bool
 }
 
 // runGate is the testable core: given an already-resolved root, the
@@ -171,13 +178,17 @@ func runGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, h
 func reportGateConditions(stdout io.Writer, conds []gateCondition) int {
 	allOK := true
 	for _, c := range conds {
-		status := "PASS"
-		if !c.OK {
-			status = "FAIL"
+		switch {
+		case c.Disclosed:
+			// Disclosed-unproven (constitution 2/10): a printed notice that
+			// neither passes nor fails the gate on its own (see gateCondition).
+			fmt.Fprintf(stdout, "[NOTICE] %s\n", c.Name)
+			fmt.Fprintf(stdout, "       %s\n", c.Reason)
+		case c.OK:
+			fmt.Fprintf(stdout, "[PASS] %s\n", c.Name)
+		default:
 			allOK = false
-		}
-		fmt.Fprintf(stdout, "[%s] %s\n", status, c.Name)
-		if !c.OK {
+			fmt.Fprintf(stdout, "[FAIL] %s\n", c.Name)
 			fmt.Fprintf(stdout, "       %s\n", c.Reason)
 		}
 	}

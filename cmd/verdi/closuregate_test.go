@@ -175,6 +175,61 @@ func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 	}
 }
 
+// TestRunClosureGate_PendingSupersessionDisclosedUnproven proves the
+// three-valued honesty fix (constitution 2/10): when the story implements a
+// feature but the open-MR input is unavailable (nil/unreachable forge), the
+// pending-supersession condition is reported disclosed-unproven — a printed
+// [NOTICE], never a silent pass — while a reachable forge that finds no open
+// supersession MR passes the condition outright.
+func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil forge: disclosed-unproven notice, not a silent pass", func(t *testing.T) {
+		repo := buildClosureGateRepo(t)
+		seedAttestation(t, repo.Dir)
+		spec, _ := readSpec(t, repo.Dir, "stale-decline")
+
+		var stdout bytes.Buffer
+		ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, repo.Head, &stdout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Disclosure is not failure: eligible + not spec-stale + disclosed
+		// pending-supersession still leaves the gate un-failed.
+		if !ok {
+			t.Fatalf("runClosureGate() = false, want true (disclosure is not failure); stdout=%s", stdout.String())
+		}
+		if !contains(stdout.String(), "[NOTICE] closure: 3.") {
+			t.Fatalf("stdout = %q, want condition 3 disclosed as a [NOTICE], never a silent pass", stdout.String())
+		}
+		if !contains(stdout.String(), "disclosed-unproven") {
+			t.Fatalf("stdout = %q, want the disclosed-unproven wording", stdout.String())
+		}
+		if contains(stdout.String(), "[PASS] closure: 3.") {
+			t.Fatalf("stdout = %q, condition 3 must NOT silently pass on a nil forge", stdout.String())
+		}
+	})
+
+	t.Run("reachable forge, no open MR: condition 3 passes", func(t *testing.T) {
+		repo := buildClosureGateRepo(t)
+		seedAttestation(t, repo.Dir)
+		spec, _ := readSpec(t, repo.Dir, "stale-decline")
+
+		fakeForge := forgefake.New() // no seeded open MRs
+		var stdout bytes.Buffer
+		ok, err := runClosureGate(ctx, repo.Dir, spec, fakeForge, "main", nil, repo.Head, &stdout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Fatalf("runClosureGate() = false, want true (no open supersession MR); stdout=%s", stdout.String())
+		}
+		if !contains(stdout.String(), "[PASS] closure: 3.") {
+			t.Fatalf("stdout = %q, want condition 3 to PASS with a reachable forge and no open MR", stdout.String())
+		}
+	})
+}
+
 // freshClosureGateRepoForBuildStart builds a repo whose story spec is
 // still status: draft-free accepted-pending-build with NO build branch cut
 // yet, isolated from buildClosureGateRepo's own repo (which already sits
