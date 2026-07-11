@@ -33,6 +33,12 @@ type Repo struct {
 	Dir string
 	// Head is the HEAD commit SHA after every layer was committed.
 	Head string
+	// Heads holds each layer's own commit SHA, in the order layers were
+	// built (Heads[len(Heads)-1] == Head). Callers that pin frontmatter
+	// refs or frozen stamps at a specific, earlier layer's commit (rather
+	// than always the final head) need these (PLAN.md §4: "Pins inside
+	// corpus files must be the literal deterministic SHAs").
+	Heads []string
 }
 
 // Fixed author/committer identity and commit timestamp so that a repo built
@@ -66,6 +72,7 @@ func Build(t testing.TB, layers []Layer) *Repo {
 	runGit(t, dir, nil, "config", "commit.gpgsign", "false")
 
 	commitEnv := commitEnvironment()
+	heads := make([]string, 0, len(layers))
 
 	for i, layer := range layers {
 		if len(layer.Files) == 0 {
@@ -81,10 +88,13 @@ func Build(t testing.TB, layers []Layer) *Repo {
 
 		runGit(t, dir, nil, "add", "-A")
 		runGit(t, dir, commitEnv, "commit", "--quiet", "--no-verify", "-m", layer.Message)
+
+		layerHead := strings.TrimSpace(runGitOutput(t, dir, nil, "rev-parse", "HEAD"))
+		heads = append(heads, layerHead)
 	}
 
-	head := strings.TrimSpace(runGitOutput(t, dir, nil, "rev-parse", "HEAD"))
-	return &Repo{Dir: dir, Head: head}
+	head := heads[len(heads)-1]
+	return &Repo{Dir: dir, Head: head, Heads: heads}
 }
 
 // commitEnvironment returns the fixed environment overrides applied to

@@ -61,6 +61,45 @@ func TestBuild_DifferentMessageDifferentSHA(t *testing.T) {
 	}
 }
 
+// TestBuild_HeadsPerLayer proves Repo.Heads records one SHA per layer, in
+// order, with the last entry equal to Head — corpus fixtures pin frontmatter
+// refs and frozen stamps at specific earlier layers' commits, not always the
+// final head.
+func TestBuild_HeadsPerLayer(t *testing.T) {
+	layers := []Layer{
+		{Files: map[string]string{"a.txt": "hello\n"}, Message: "add a"},
+		{Files: map[string]string{"b.txt": "world\n"}, Message: "add b"},
+		{Files: map[string]string{"c.txt": "!\n"}, Message: "add c"},
+	}
+	r := Build(t, layers)
+
+	if len(r.Heads) != len(layers) {
+		t.Fatalf("len(Heads) = %d, want %d", len(r.Heads), len(layers))
+	}
+	if r.Heads[len(r.Heads)-1] != r.Head {
+		t.Fatalf("Heads[last] = %s, want Head = %s", r.Heads[len(r.Heads)-1], r.Head)
+	}
+	seen := map[string]bool{}
+	for i, h := range r.Heads {
+		if h == "" {
+			t.Fatalf("Heads[%d] is empty", i)
+		}
+		if seen[h] {
+			t.Fatalf("Heads[%d] = %s duplicates an earlier layer's SHA", i, h)
+		}
+		seen[h] = true
+	}
+
+	// Determinism: building the same layers again reproduces every
+	// per-layer SHA exactly, not just the final head.
+	r2 := Build(t, layers)
+	for i := range r.Heads {
+		if r.Heads[i] != r2.Heads[i] {
+			t.Fatalf("Heads[%d] differs across builds: %s vs %s", i, r.Heads[i], r2.Heads[i])
+		}
+	}
+}
+
 // TestBuild_ProducesWorkingTree sanity-checks that Build leaves a real,
 // checked-out working tree behind (not just a bare object store) since
 // later phases read fixture files directly off disk.
