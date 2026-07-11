@@ -125,6 +125,10 @@ func seedRunner(t *testing.T, root string) upstream.Runner {
 	fr.Enqueue("flowmap", "graph", upstream.Result{Stdout: readCannedFile(t, cannedSrcDir, "graph.json"), ExitCode: 0})
 	fr.Enqueue("flowmap", "boundary", upstream.Result{ExitCode: 0})
 	fr.Enqueue("groundwork", "review", upstream.Result{Stdout: readCannedFile(t, cannedSrcDir, "review-structurally-clear.json"), ExitCode: 0})
+	// The healthz-route addition (boundary-contract-branch.json vs the
+	// base) is non-breaking, matching spike S1's captured `groundwork
+	// diff` text output (no BREAKING marker) — exit 0.
+	fr.Enqueue("groundwork", "diff", upstream.Result{ExitCode: 0})
 
 	return boundaryWriteRunner{
 		Runner:         fr,
@@ -242,6 +246,7 @@ func TestRunSync_BlockingReview_ExitsOne(t *testing.T) {
 	fr.Enqueue("flowmap", "graph", upstream.Result{Stdout: readCannedFile(t, cannedSrcDir, "graph.json"), ExitCode: 0})
 	fr.Enqueue("flowmap", "boundary", upstream.Result{ExitCode: 0})
 	fr.Enqueue("groundwork", "review", upstream.Result{Stdout: readCannedFile(t, cannedSrcDir, "review-block.json"), ExitCode: 1})
+	fr.Enqueue("groundwork", "diff", upstream.Result{ExitCode: 0}) // no boundary-contract change in this scenario
 
 	var stdout, stderr bytes.Buffer
 	deps := syncDeps{
@@ -255,6 +260,44 @@ func TestRunSync_BlockingReview_ExitsOne(t *testing.T) {
 	code := runSync(context.Background(), root, testRef, testCommit, true, deps)
 	if code != 1 {
 		t.Fatalf("runSync with a BLOCK review: exit = %d, want 1; stderr=%s", code, stderr.String())
+	}
+}
+
+// TestRunSync_Negative_BoundaryDiffCrossCheckDisagreement proves the I-3
+// cross-check between verdi's own computed boundary-diff breaking verdict
+// and `groundwork diff`'s exit code is actually wired into the regen path
+// (not just unit-tested in isolation): if the fake `groundwork diff` here
+// disagrees with the (non-breaking) route addition
+// boundaryWriteRunner simulates, regeneration fails loudly rather than
+// silently trusting its own computation.
+func TestRunSync_Negative_BoundaryDiffCrossCheckDisagreement(t *testing.T) {
+	root := buildTestStore(t)
+	fr := upstream.NewFakeRunner()
+	fr.Enqueue("flowmap", "graph", upstream.Result{Stdout: readCannedFile(t, cannedSrcDir, "graph.json"), ExitCode: 0})
+	fr.Enqueue("flowmap", "boundary", upstream.Result{ExitCode: 0})
+	fr.Enqueue("groundwork", "review", upstream.Result{Stdout: readCannedFile(t, cannedSrcDir, "review-structurally-clear.json"), ExitCode: 0})
+	// Disagreement: the route addition is non-breaking, but this fake
+	// `groundwork diff` claims exit 1 (breaking).
+	fr.Enqueue("groundwork", "diff", upstream.Result{ExitCode: 1})
+
+	runner := boundaryWriteRunner{
+		Runner:         fr,
+		svcDir:         filepath.Join(root, "svcfix"),
+		branchContract: readCannedFile(t, cannedSrcDir, "boundary-contract-branch.json"),
+	}
+
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{
+		Runner: runner,
+		Forge:  fake.New(),
+		GoTest: fakeGoTest{output: []byte(svcfixGoTestJSON)},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	code := runSync(context.Background(), root, testRef, testCommit, true, deps)
+	if code != 2 {
+		t.Fatalf("runSync with a boundary-diff cross-check disagreement: exit = %d, want 2; stderr=%s", code, stderr.String())
 	}
 }
 

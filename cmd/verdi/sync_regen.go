@@ -107,10 +107,25 @@ func regenerateService(ctx context.Context, root string, svc store.Service, comm
 	}
 
 	if svc.BoundaryContractPath != "" {
-		baseContract, err := readBoundaryContract(svc.BoundaryContractPath)
+		baseRaw, err := os.ReadFile(svc.BoundaryContractPath)
 		if err != nil {
-			return sb, nil, err
+			return sb, nil, fmt.Errorf("reading boundary contract %s: %w", svc.BoundaryContractPath, err)
 		}
+		baseContract, err := upstream.DecodeBoundaryContract(baseRaw)
+		if err != nil {
+			return sb, nil, fmt.Errorf("decoding boundary contract %s: %w", svc.BoundaryContractPath, err)
+		}
+		// Preserve the pre-regeneration bytes on disk under their own
+		// path: BoundaryGenerate overwrites svc.BoundaryContractPath in
+		// place (spike S1: flowmap boundary always writes there), and
+		// CrossCheckDiff needs both a base and a branch file path to hand
+		// to `groundwork diff`.
+		baseTmp, baseCleanup, err := writeTempFile(baseRaw, "verdi-sync-base-contract-*.json")
+		if err != nil {
+			return sb, nil, fmt.Errorf("writing scratch base contract: %w", err)
+		}
+		defer baseCleanup()
+
 		if err := upstream.BoundaryGenerate(ctx, deps.Runner, svc.Dir); err != nil {
 			return sb, nil, fmt.Errorf("flowmap boundary: %w", err)
 		}
@@ -119,6 +134,13 @@ func regenerateService(ctx context.Context, root string, svc store.Service, comm
 			return sb, nil, err
 		}
 		sb.BoundaryDiff = upstream.ComputeBoundaryDiff(baseContract, branchContract)
+
+		// I-3: cross-check verdi's own computed breaking verdict against
+		// `groundwork diff`'s exit code — a disagreement is a hard error,
+		// never silently ignored.
+		if err := upstream.CrossCheckDiff(ctx, deps.Runner, baseTmp, svc.BoundaryContractPath, upstream.HasBreaking(sb.BoundaryDiff)); err != nil {
+			return sb, nil, fmt.Errorf("cross-checking boundary diff: %w", err)
+		}
 	}
 
 	policyPath := filepath.Join(svc.Dir, "policy.json")
@@ -246,18 +268,26 @@ func listGoldenFlows(serviceDir string) (map[string]bool, error) {
 // encoding/json (determinism does not matter for a file that lives only
 // for the duration of one Review call).
 func writeTempGraph(g *upstream.Graph) (path string, cleanup func(), err error) {
-	f, err := os.CreateTemp("", "verdi-sync-graph-*.json")
+	data, err := json.Marshal(g)
+	if err != nil {
+		return "", nil, err
+	}
+	return writeTempFile(data, "verdi-sync-graph-*.json")
+}
+
+// writeTempFile writes data to a fresh scratch file matching pattern
+// (os.CreateTemp's glob-with-one-star convention) and returns its path
+// plus a cleanup func that removes it. Shared by writeTempGraph and the
+// boundary-diff cross-check's scratch base-contract file — both exist
+// only to hand a filesystem path to an upstream CLI that takes paths, not
+// stdin.
+func writeTempFile(data []byte, pattern string) (path string, cleanup func(), err error) {
+	f, err := os.CreateTemp("", pattern)
 	if err != nil {
 		return "", nil, err
 	}
 	cleanup = func() { os.Remove(f.Name()) }
 
-	data, err := json.Marshal(g)
-	if err != nil {
-		f.Close()
-		cleanup()
-		return "", nil, err
-	}
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		cleanup()
