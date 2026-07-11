@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"regexp"
 
 	"github.com/OWNER/verdi/internal/artifact"
 )
@@ -35,18 +34,17 @@ type CommentFeed interface {
 	ListMRComments(ctx context.Context, specName string) (comments []MRComment, ok bool, err error)
 }
 
-// vdTokenRe is 02 §Record schemas' comment-token grammar: a body
-// BEGINNING with "[vd:<object-id>]" anchors the comment to that object.
-var vdTokenRe = regexp.MustCompile(`^\[vd:([a-z][a-z0-9]*-[a-z0-9]+(?:-[a-z0-9]+)*)\]`)
-
 // commentToken extracts the leading [vd:<object-id>] token's object id,
-// or "" when the body carries none.
+// or "" when the body carries none. The grammar is single-sourced in
+// internal/artifact (02 §Record schemas' owner); the board resolves the
+// returned id against the spec's declared objects (a non-resolving token
+// routes to the inbox tray, never dropped — projection.go), so this
+// package parses the token grammar only, exactly as the forge/gate/mcp
+// side does (W4 M-3: the two copies are unified on
+// artifact.ParseCommentToken).
 func commentToken(body string) string {
-	m := vdTokenRe.FindStringSubmatch(body)
-	if m == nil {
-		return ""
-	}
-	return m[1]
+	id, _ := artifact.ParseCommentToken(body)
+	return id
 }
 
 // CannedCommentFeed is a CommentFeed backed by one strict-decoded JSON
