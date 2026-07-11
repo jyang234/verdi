@@ -63,7 +63,22 @@ func runSpecMRGate(ctx context.Context, root, branch string, stdout, stderr io.W
 		fmt.Fprintln(stderr, "gate:", err)
 		return 2
 	}
-	return reportGateConditions(stdout, []gateCondition{cond})
+	conds := []gateCondition{cond}
+	numberSpecMRConditions(conds)
+	return reportGateConditions(stdout, conds)
+}
+
+// numberSpecMRConditions prefixes each spec-MR condition's Name with its
+// 1-based position on this path, so the rendered ordinals start at "1."
+// rather than carrying a build-branch merge-condition number: the spec-MR
+// set is disjoint from runGate's build-branch conditions (03 §Decision-
+// conflict gate) and numbers independently. checkDeclaredDecisionConflicts
+// (and V1-P7's review-thread condition, when it joins this set) leaves its
+// Name unnumbered; the ordinal is derived here from actual position.
+func numberSpecMRConditions(conds []gateCondition) {
+	for i := range conds {
+		conds[i].Name = fmt.Sprintf("%d. %s", i+1, conds[i].Name)
+	}
 }
 
 // checkDeclaredDecisionConflicts is the spec-MR analogue of gate.go's
@@ -74,7 +89,7 @@ func runSpecMRGate(ctx context.Context, root, branch string, stdout, stderr io.W
 // condition by name rather than erroring, mirroring
 // checkFreshFullyDispositioned's own "no report at all" case exactly.
 func checkDeclaredDecisionConflicts(root, specName, head string) (gateCondition, error) {
-	name := "4. spec-MR: declared decision conflicts resolved and judged findings dispositioned"
+	name := "spec-MR: declared decision conflicts resolved and judged findings dispositioned"
 	path := filepath.Join(root, ".verdi", "specs", "active", specName, "decision-conflict-report.md")
 
 	data, err := os.ReadFile(path)
