@@ -1,7 +1,7 @@
 package workbench
 
 // The v1 board's write surface: POST /board/spec/{name}/api/{action}.
-// Every spec write goes through internal/specsplice (surgical splice +
+// Every spec write goes through internal/artifact/splice (surgical splice +
 // validate-before-write, S7) and lands in the working tree only;
 // annotation writes go to the mutable zone and never dirty the spec
 // tree; git acts are explicit rituals (05 §Workbench "Authoring").
@@ -18,11 +18,11 @@ import (
 	"time"
 
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/artifact/splice"
 	"github.com/OWNER/verdi/internal/boardio"
 	"github.com/OWNER/verdi/internal/boardlayout"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/mcpserve"
-	"github.com/OWNER/verdi/internal/specsplice"
 	"github.com/OWNER/verdi/internal/store"
 )
 
@@ -128,13 +128,13 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 // parse the pristine buffer, compute edits, apply tail-to-head, strict
 // re-decode (validate-before-write), then atomically replace the file.
 // An invalid result never touches the working tree (S7 §5).
-func (s *boardSpecServer) spliceSpec(name string, mutate func(d *specsplice.Doc) ([]specsplice.Edit, error)) error {
+func (s *boardSpecServer) spliceSpec(name string, mutate func(d *splice.Doc) ([]splice.Edit, error)) error {
 	path := filepath.Join(s.specDir(name), "spec.md")
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("workbench: reading spec %s: %w", name, err)
 	}
-	doc, err := specsplice.Parse(src)
+	doc, err := splice.Parse(src)
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func (s *boardSpecServer) spliceSpec(name string, mutate func(d *specsplice.Doc)
 	if err != nil {
 		return err
 	}
-	if err := specsplice.Validate(out); err != nil {
+	if err := splice.Validate(out); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(s.specDir(name), ".spec-*.md")
@@ -176,12 +176,12 @@ func (s *boardSpecServer) actionEditText(name string, req boardAPIRequest) error
 	if req.ID == "" || req.Text == "" {
 		return fmt.Errorf("edit-text requires id and text")
 	}
-	return s.spliceSpec(name, func(d *specsplice.Doc) ([]specsplice.Edit, error) {
+	return s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
 		e, err := d.SetObjectText(req.ID, req.Text)
 		if err != nil {
 			return nil, err
 		}
-		return []specsplice.Edit{e}, nil
+		return []splice.Edit{e}, nil
 	})
 }
 
@@ -232,19 +232,21 @@ func (s *boardSpecServer) actionEdge(name string, proj *boardProjection, req boa
 		return err
 	}
 	link := artifact.Link{Type: artifact.LinkType(req.Type), Ref: edgeRefFor(proj, name, req.To), Note: req.Note}
-	return s.spliceSpec(name, func(d *specsplice.Doc) ([]specsplice.Edit, error) {
+	return s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
 		e, err := d.AppendDecisionLink(req.From, link)
 		if err != nil {
 			return nil, err
 		}
-		return []specsplice.Edit{e}, nil
+		return []splice.Edit{e}, nil
 	})
 }
 
-// scratchZonePosition picks the next free slot in the scratch column for
+// scratchZonePosition picks the next free slot in the scratch area for
 // a new sticky — deterministic given the stickies already on the board.
+// The area sits below the reference column, inside the same screenful
+// as the zone columns (boardlayout's compact geometry).
 func scratchZonePosition(proj *boardProjection) (float64, float64) {
-	const scratchX, originY, pitch = 1540, 40, 190
+	const scratchX, originY, pitch = 920, 420, 190
 	occupied := map[[2]float64]bool{}
 	for _, st := range proj.Stickies {
 		occupied[[2]float64{st.X, st.Y}] = true
@@ -335,13 +337,13 @@ func (s *boardSpecServer) actionStickyGraduate(name string, proj *boardProjectio
 	for _, c := range proj.Cards {
 		existing = append(existing, c.ID)
 	}
-	objectID := specsplice.NextID(existing, prefix)
+	objectID := splice.NextID(existing, prefix)
 	var evidence []artifact.EvidenceKind
 	if prefix == "ac" {
 		evidence = []artifact.EvidenceKind{artifact.EvidenceAttestation}
 	}
 
-	if err := s.spliceSpec(name, func(d *specsplice.Doc) ([]specsplice.Edit, error) {
+	if err := s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
 		return d.AppendObject(objectID, sticky.Body, evidence)
 	}); err != nil {
 		return err
@@ -414,12 +416,12 @@ func (s *boardSpecServer) actionRelatesGraduate(name string, proj *boardProjecti
 		return err
 	}
 	link := artifact.Link{Type: artifact.LinkType(req.Type), Ref: edgeRefFor(proj, name, thread.To), Note: req.Note}
-	if err := s.spliceSpec(name, func(d *specsplice.Doc) ([]specsplice.Edit, error) {
+	if err := s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
 		e, err := d.AppendDecisionLink(thread.From, link)
 		if err != nil {
 			return nil, err
 		}
-		return []specsplice.Edit{e}, nil
+		return []splice.Edit{e}, nil
 	}); err != nil {
 		return err
 	}

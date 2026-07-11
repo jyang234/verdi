@@ -1,4 +1,4 @@
-package specsplice
+package splice
 
 // The board-facing edit operations: each returns Edits computed against
 // the pristine whole-file buffer (never a reassembled string — S7 §2's
@@ -41,7 +41,7 @@ func Parse(src []byte) (*Doc, error) {
 	offsets := lineOffsets(src)
 	lines := bytes.Split(src, []byte("\n"))
 	if len(lines) == 0 || string(bytes.TrimRight(lines[0], "\r")) != "---" {
-		return nil, fmt.Errorf("specsplice: document does not start with a %q frontmatter delimiter", "---")
+		return nil, fmt.Errorf("splice: document does not start with a %q frontmatter delimiter", "---")
 	}
 	closeLine := -1
 	for i := 1; i < len(lines); i++ {
@@ -51,7 +51,7 @@ func Parse(src []byte) (*Doc, error) {
 		}
 	}
 	if closeLine == -1 {
-		return nil, fmt.Errorf("specsplice: no closing %q frontmatter delimiter found", "---")
+		return nil, fmt.Errorf("splice: no closing %q frontmatter delimiter found", "---")
 	}
 
 	fmStart := offsets[2] // first byte of line 2
@@ -60,10 +60,10 @@ func Parse(src []byte) (*Doc, error) {
 
 	var root yaml.Node
 	if err := yaml.Unmarshal(fmText, &root); err != nil {
-		return nil, fmt.Errorf("specsplice: parsing frontmatter: %w", err)
+		return nil, fmt.Errorf("splice: parsing frontmatter: %w", err)
 	}
 	if root.Kind != yaml.DocumentNode || len(root.Content) != 1 || root.Content[0].Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("specsplice: frontmatter is not a single YAML mapping")
+		return nil, fmt.Errorf("splice: frontmatter is not a single YAML mapping")
 	}
 
 	return &Doc{
@@ -97,7 +97,7 @@ func blockForID(id string) (string, error) {
 	case strings.HasPrefix(id, "oq-"):
 		return "open_questions", nil
 	default:
-		return "", fmt.Errorf("specsplice: object id %q has no known block prefix (ac-/co-/dc-/oq-)", id)
+		return "", fmt.Errorf("splice: object id %q has no known block prefix (ac-/co-/dc-/oq-)", id)
 	}
 }
 
@@ -109,11 +109,11 @@ func (d *Doc) objectElem(id string) (*yaml.Node, error) {
 	}
 	seq := mapGet(d.fm, block)
 	if seq == nil {
-		return nil, fmt.Errorf("specsplice: spec has no %s block", block)
+		return nil, fmt.Errorf("splice: spec has no %s block", block)
 	}
 	elem := seqFindByID(seq, id)
 	if elem == nil {
-		return nil, fmt.Errorf("specsplice: no object %q in %s", id, block)
+		return nil, fmt.Errorf("splice: no object %q in %s", id, block)
 	}
 	return elem, nil
 }
@@ -127,7 +127,7 @@ func (d *Doc) SetObjectText(id, newText string) (Edit, error) {
 	}
 	textNode := mapGet(elem, "text")
 	if textNode == nil {
-		return Edit{}, fmt.Errorf("specsplice: object %q has no text field", id)
+		return Edit{}, fmt.Errorf("splice: object %q has no text field", id)
 	}
 	start, end, err := d.span(textNode)
 	if err != nil {
@@ -144,7 +144,7 @@ func (d *Doc) SetObjectText(id, newText string) (Edit, error) {
 // append-after-last-element).
 func (d *Doc) AppendDecisionLink(dcID string, l artifact.Link) (Edit, error) {
 	if !strings.HasPrefix(dcID, "dc-") {
-		return Edit{}, fmt.Errorf("specsplice: %q is not a decision id", dcID)
+		return Edit{}, fmt.Errorf("splice: %q is not a decision id", dcID)
 	}
 	elem, err := d.objectElem(dcID)
 	if err != nil {
@@ -158,7 +158,7 @@ func (d *Doc) AppendDecisionLink(dcID string, l artifact.Link) (Edit, error) {
 		// immediately after the map's last non-whitespace content byte,
 		// before its closing '}'.
 		if elem.Style&yaml.FlowStyle == 0 {
-			return Edit{}, fmt.Errorf("specsplice: decision %s is not a flow-style map (block style is unproven — S7); fail closed", dcID)
+			return Edit{}, fmt.Errorf("splice: decision %s is not a flow-style map (block style is unproven — S7); fail closed", dcID)
 		}
 		start, end, serr := d.span(elem)
 		if serr != nil {
@@ -177,10 +177,10 @@ func (d *Doc) AppendDecisionLink(dcID string, l artifact.Link) (Edit, error) {
 // sequence node.
 func (d *Doc) appendToFlowSeq(seq *yaml.Node, entry string) (Edit, error) {
 	if seq.Kind != yaml.SequenceNode {
-		return Edit{}, fmt.Errorf("specsplice: links is not a sequence")
+		return Edit{}, fmt.Errorf("splice: links is not a sequence")
 	}
 	if seq.Style&yaml.FlowStyle == 0 {
-		return Edit{}, fmt.Errorf("specsplice: sequence is not flow-style (block style append uses appendToBlockSeq)")
+		return Edit{}, fmt.Errorf("splice: sequence is not flow-style (block style append uses appendToBlockSeq)")
 	}
 	start, end, err := d.span(seq)
 	if err != nil {
@@ -210,7 +210,7 @@ func (d *Doc) AppendObject(id, text string, evidence []artifact.EvidenceKind) ([
 		return nil, err
 	}
 	if block == "acceptance_criteria" && len(evidence) == 0 {
-		return nil, fmt.Errorf("specsplice: a new acceptance criterion needs at least one evidence kind (VL-006)")
+		return nil, fmt.Errorf("splice: a new acceptance criterion needs at least one evidence kind (VL-006)")
 	}
 	entry := formatObjectEntry(block, id, text, evidence)
 
@@ -248,7 +248,7 @@ func (d *Doc) AppendObject(id, text string, evidence []artifact.EvidenceKind) ([
 // line prefix (indentation plus "- ") verbatim.
 func (d *Doc) appendToBlockSeq(seq *yaml.Node, entry string) (Edit, error) {
 	if len(seq.Content) == 0 {
-		return Edit{}, fmt.Errorf("specsplice: block-style sequence is empty (an empty block sequence cannot exist in YAML; fail closed)")
+		return Edit{}, fmt.Errorf("splice: block-style sequence is empty (an empty block sequence cannot exist in YAML; fail closed)")
 	}
 	last := seq.Content[len(seq.Content)-1]
 	lastStart, lastEnd, err := d.span(last)
@@ -263,7 +263,7 @@ func (d *Doc) appendToBlockSeq(seq *yaml.Node, entry string) (Edit, error) {
 	}
 	prefix := string(d.src[lineStart:lastStart])
 	if strings.TrimLeft(prefix, " \t") != "- " {
-		return Edit{}, fmt.Errorf("specsplice: block sequence element does not start its own line with a %q marker (got %q); fail closed", "- ", prefix)
+		return Edit{}, fmt.Errorf("splice: block sequence element does not start its own line with a %q marker (got %q); fail closed", "- ", prefix)
 	}
 	return Edit{Start: lastEnd, End: lastEnd, Replace: "\n" + prefix + entry}, nil
 }
@@ -281,14 +281,14 @@ func (d *Doc) Apply(edits []Edit) ([]byte, error) {
 func Validate(result []byte) error {
 	fm, body, err := artifact.SplitFrontmatter(result)
 	if err != nil {
-		return fmt.Errorf("specsplice: validate-before-write: %w", err)
+		return fmt.Errorf("splice: validate-before-write: %w", err)
 	}
 	spec, err := artifact.DecodeSpec(fm)
 	if err != nil {
-		return fmt.Errorf("specsplice: validate-before-write: %w", err)
+		return fmt.Errorf("splice: validate-before-write: %w", err)
 	}
 	if err := spec.ResolveObjectAnchors(body); err != nil {
-		return fmt.Errorf("specsplice: validate-before-write: %w", err)
+		return fmt.Errorf("splice: validate-before-write: %w", err)
 	}
 	return nil
 }

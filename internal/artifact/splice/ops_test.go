@@ -1,4 +1,4 @@
-package specsplice
+package splice
 
 import (
 	"bytes"

@@ -1,4 +1,4 @@
-package specsplice
+package splice
 
 // The low-level splice primitives, carried over from spike S7's proven
 // prototype (docs/spikes/v1/spike-s7-findings.md §2): byte spans located
@@ -32,7 +32,7 @@ func lineOffsets(src []byte) []int {
 // columns as unproven).
 func byteOffset(offsets []int, line, col int) (int, error) {
 	if line < 1 || line >= len(offsets) {
-		return -1, fmt.Errorf("specsplice: line %d out of range", line)
+		return -1, fmt.Errorf("splice: line %d out of range", line)
 	}
 	return offsets[line] + (col - 1), nil
 }
@@ -43,11 +43,11 @@ func byteOffset(offsets []int, line, col int) (int, error) {
 // backslash escapes and single-quote doubled-quote escapes.
 func scanQuotedSpan(src []byte, start int) (int, error) {
 	if start >= len(src) {
-		return -1, fmt.Errorf("specsplice: start %d out of range", start)
+		return -1, fmt.Errorf("splice: start %d out of range", start)
 	}
 	quote := src[start]
 	if quote != '"' && quote != '\'' {
-		return -1, fmt.Errorf("specsplice: byte at %d is %q, not a quote", start, quote)
+		return -1, fmt.Errorf("splice: byte at %d is %q, not a quote", start, quote)
 	}
 	i := start + 1
 	for i < len(src) {
@@ -65,7 +65,7 @@ func scanQuotedSpan(src []byte, start int) (int, error) {
 		}
 		i++
 	}
-	return -1, fmt.Errorf("specsplice: unterminated quoted scalar starting at %d", start)
+	return -1, fmt.Errorf("splice: unterminated quoted scalar starting at %d", start)
 }
 
 // findMatchingClose returns the exclusive end offset of a flow container
@@ -73,7 +73,7 @@ func scanQuotedSpan(src []byte, start int) (int, error) {
 // a brace inside a string never confuses the depth count.
 func findMatchingClose(src []byte, start int) (int, error) {
 	if start >= len(src) {
-		return -1, fmt.Errorf("specsplice: start %d out of range", start)
+		return -1, fmt.Errorf("splice: start %d out of range", start)
 	}
 	open := src[start]
 	var closeCh byte
@@ -83,7 +83,7 @@ func findMatchingClose(src []byte, start int) (int, error) {
 	case '[':
 		closeCh = ']'
 	default:
-		return -1, fmt.Errorf("specsplice: byte at %d is %q, not '{' or '['", start, open)
+		return -1, fmt.Errorf("splice: byte at %d is %q, not '{' or '['", start, open)
 	}
 	depth := 0
 	for i := start; i < len(src); {
@@ -105,7 +105,7 @@ func findMatchingClose(src []byte, start int) (int, error) {
 		}
 		i++
 	}
-	return -1, fmt.Errorf("specsplice: no matching close for %q starting at %d", open, start)
+	return -1, fmt.Errorf("splice: no matching close for %q starting at %d", open, start)
 }
 
 // scanPlainFlowScalar returns the exclusive end offset of a plain
@@ -116,7 +116,7 @@ func findMatchingClose(src []byte, start int) (int, error) {
 // ever needs to be READ (its span located), never emitted.
 func scanPlainFlowScalar(src []byte, start int) (int, error) {
 	if start >= len(src) {
-		return -1, fmt.Errorf("specsplice: start %d out of range", start)
+		return -1, fmt.Errorf("splice: start %d out of range", start)
 	}
 	i := start
 	for i < len(src) {
@@ -137,7 +137,7 @@ done:
 		end--
 	}
 	if end == start {
-		return -1, fmt.Errorf("specsplice: empty plain scalar at %d", start)
+		return -1, fmt.Errorf("splice: empty plain scalar at %d", start)
 	}
 	return end, nil
 }
@@ -152,7 +152,7 @@ func nodeSpan(src []byte, offsets []int, n *yaml.Node) (start, end int, err erro
 		return -1, -1, err
 	}
 	if start >= len(src) {
-		return -1, -1, fmt.Errorf("specsplice: node start offset %d out of range (line %d col %d)", start, n.Line, n.Column)
+		return -1, -1, fmt.Errorf("splice: node start offset %d out of range (line %d col %d)", start, n.Line, n.Column)
 	}
 	switch src[start] {
 	case '"', '\'':
@@ -164,11 +164,11 @@ func nodeSpan(src []byte, offsets []int, n *yaml.Node) (start, end int, err erro
 			// Plain flow scalar: verify the buffer agrees with the node
 			// before trusting the span.
 			if len(n.Value) == 0 || src[start] != n.Value[0] {
-				return -1, -1, fmt.Errorf("specsplice: buffer/node mismatch at offset %d (line %d col %d): fail closed", start, n.Line, n.Column)
+				return -1, -1, fmt.Errorf("splice: buffer/node mismatch at offset %d (line %d col %d): fail closed", start, n.Line, n.Column)
 			}
 			end, err = scanPlainFlowScalar(src, start)
 		} else {
-			return -1, -1, fmt.Errorf("specsplice: node at line %d col %d is not a quoted scalar, plain flow scalar, or flow container (block scalars are unproven — S7); fail closed", n.Line, n.Column)
+			return -1, -1, fmt.Errorf("splice: node at line %d col %d is not a quoted scalar, plain flow scalar, or flow container (block scalars are unproven — S7); fail closed", n.Line, n.Column)
 		}
 	}
 	if err != nil {
@@ -217,10 +217,10 @@ func applyEdits(src []byte, edits []Edit) ([]byte, error) {
 	out := append([]byte(nil), src...)
 	for k, e := range sorted {
 		if e.Start < 0 || e.End > len(out) || e.Start > e.End {
-			return nil, fmt.Errorf("specsplice: edit %d: invalid span [%d,%d) against %d-byte buffer", k, e.Start, e.End, len(out))
+			return nil, fmt.Errorf("splice: edit %d: invalid span [%d,%d) against %d-byte buffer", k, e.Start, e.End, len(out))
 		}
 		if k > 0 && e.End > sorted[k-1].Start {
-			return nil, fmt.Errorf("specsplice: edit %d: overlaps previous edit (end %d > prior start %d)", k, e.End, sorted[k-1].Start)
+			return nil, fmt.Errorf("splice: edit %d: overlaps previous edit (end %d > prior start %d)", k, e.End, sorted[k-1].Start)
 		}
 		var buf []byte
 		buf = append(buf, out[:e.Start]...)

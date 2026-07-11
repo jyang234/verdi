@@ -1,4 +1,4 @@
-// Package specsplice is the board's ONLY write path into a spec document
+// Package splice is the board's ONLY write path into a spec document
 // (05 §Workbench "Authoring" — board editing IS spec editing): surgical
 // byte-range splicing against the pristine whole-file buffer, per spike
 // S7's binding findings (docs/spikes/v1/spike-s7-findings.md):
@@ -18,4 +18,4 @@
 // board edit needs (a new list element on its own line; a new top-level
 // block before the closing delimiter). Block scalars (`|`, `>`) are out of
 // scope and fail closed.
-package specsplice
+package splice
