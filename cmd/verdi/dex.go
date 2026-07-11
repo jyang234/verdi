@@ -53,7 +53,15 @@ func runDexBuild(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	if err := dex.Build(context.Background(), dex.Options{Root: root, OutDir: *outDir, Commit: *commit}); err != nil {
+	// The story-page pending-supersession flag reads open MRs through the
+	// forge (V1-P8; 03 §The amendment ladder) — wired best-effort exactly
+	// like gate/serve/mcp (gate_threads.go): in the forge's own CI both
+	// halves are present and the flag is computed; hermetically (no
+	// credentials — every test) the forge is nil and the dex page
+	// discloses the flag unproven rather than silently unflagged.
+	ctx := context.Background()
+	f := buildForgeBestEffort(ctx, root)
+	if err := dex.Build(ctx, dex.Options{Root: root, OutDir: *outDir, Commit: *commit, Forge: f, DefaultBranch: resolveDefaultBranch(ctx, root)}); err != nil {
 		fmt.Fprintln(stderr, "dex build:", err)
 		return 2
 	}
