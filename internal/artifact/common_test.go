@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+func TestLinkType_Valid(t *testing.T) {
+	for _, lt := range []LinkType{
+		LinkImplements, LinkSupersedes, LinkVerifies, LinkDerivedFrom,
+		LinkAnnotates, LinkDependsOn, LinkStory, LinkImpacts, LinkChallenges,
+	} {
+		if !lt.Valid() {
+			t.Fatalf("LinkType(%q).Valid() = false, want true", lt)
+		}
+	}
+	if LinkType("bogus").Valid() {
+		t.Fatal(`LinkType("bogus").Valid() = true, want false`)
+	}
+}
+
 func TestLink_Validate_Happy(t *testing.T) {
 	cases := []Link{
 		{Type: LinkImplements, Ref: "spec/foo"},

@@ -114,6 +114,17 @@ func TestKind_Valid(t *testing.T) {
 	}
 }
 
+func TestRef_Pinned(t *testing.T) {
+	pinned := Ref{Kind: KindSpec, Name: "foo", Commit: "3e91ab2"}
+	if !pinned.Pinned() {
+		t.Fatal("Pinned() = false for a ref with a commit, want true")
+	}
+	unpinned := Ref{Kind: KindSpec, Name: "foo"}
+	if unpinned.Pinned() {
+		t.Fatal("Pinned() = true for a ref with no commit, want false")
+	}
+}
+
 func TestRef_String_Unpinned(t *testing.T) {
 	r := Ref{Kind: KindSpec, Name: "foo"}
 	if got, want := r.String(), "spec/foo"; got != want {
