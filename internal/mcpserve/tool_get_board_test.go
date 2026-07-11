@@ -92,6 +92,14 @@ func TestGetBoard_Negative(t *testing.T) {
 		}
 	})
 
+	t.Run("pinned ref rejected", func(t *testing.T) {
+		_, _, adrCommit := newTestBackend(t)
+		result := b.GetBoard(ctx, mustArgs(t, map[string]any{"ref": "spec/widget-retry@" + adrCommit}))
+		if !isToolError(result) {
+			t.Fatal("get_board(pinned ref): want isError (the board only ever projects the current working tree)")
+		}
+	})
+
 	t.Run("unknown spec", func(t *testing.T) {
 		result := b.GetBoard(ctx, mustArgs(t, map[string]any{"ref": "spec/does-not-exist"}))
 		if !isToolError(result) {

@@ -49,6 +49,9 @@ func (b *Backend) GetBoard(ctx context.Context, argsRaw json.RawMessage) map[str
 	if ref.Object != "" {
 		return toolError("get_board: ref must name a whole spec, not an object fragment")
 	}
+	if ref.Pinned() {
+		return toolError("get_board: ref must be unpinned — the board always projects the current working tree, never a pinned historical commit")
+	}
 
 	// Three I-1(b) states, exactly as list_annotations' review population
 	// distinguishes them (review.go's doc comment): no forge configured
