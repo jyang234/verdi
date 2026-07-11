@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -40,8 +41,11 @@ func buildBundleZip(t *testing.T, b forge.EvidenceBundle) []byte {
 }
 
 type fakeGitHubServer struct {
-	byCommit map[string][]byte
-	runIDs   map[string]int64
+	byCommit     map[string][]byte
+	runIDs       map[string]int64
+	prsByBase    map[string][]pullRequestJSON
+	filesByRef   map[string]map[string][]byte
+	nextPRNumber int64
 }
 
 type harness struct {
@@ -51,10 +55,34 @@ type harness struct {
 
 func newHarnessForTest(t *testing.T) *harness {
 	t.Helper()
-	srv := &fakeGitHubServer{byCommit: map[string][]byte{}, runIDs: map[string]int64{}}
+	srv := &fakeGitHubServer{
+		byCommit:     map[string][]byte{},
+		runIDs:       map[string]int64{},
+		prsByBase:    map[string][]pullRequestJSON{},
+		filesByRef:   map[string]map[string][]byte{},
+		nextPRNumber: 1,
+	}
 	nextRunID := int64(100)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/svcfix/pulls", func(w http.ResponseWriter, r *http.Request) {
+		base := r.URL.Query().Get("base")
+		_ = json.NewEncoder(w).Encode(srv.prsByBase[base])
+	})
+	mux.HandleFunc("/repos/acme/svcfix/contents/", func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/repos/acme/svcfix/contents/"
+		path := r.URL.Path[len(prefix):]
+		ref := r.URL.Query().Get("ref")
+		content, ok := srv.filesByRef[ref][path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(repoContentJSON{
+			Content:  base64.StdEncoding.EncodeToString(content),
+			Encoding: "base64",
+		})
+	})
 	mux.HandleFunc("/repos/acme/svcfix/actions/runs", func(w http.ResponseWriter, r *http.Request) {
 		sha := r.URL.Query().Get("head_sha")
 		if _, ok := srv.byCommit[sha]; !ok {
@@ -101,6 +129,26 @@ func (h *harness) SeedBundle(t *testing.T, ref, commit string, bundle forge.Evid
 }
 
 func (h *harness) WantGeneratedAttribute() string { return "linguist-generated" }
+
+func (h *harness) SeedOpenMR(t *testing.T, targetBranch, sourceBranch, title string) {
+	t.Helper()
+	h.srv.prsByBase[targetBranch] = append(h.srv.prsByBase[targetBranch], pullRequestJSON{
+		Number: h.srv.nextPRNumber,
+		Title:  title,
+		Head: struct {
+			Ref string `json:"ref"`
+		}{Ref: sourceBranch},
+	})
+	h.srv.nextPRNumber++
+}
+
+func (h *harness) SeedFile(t *testing.T, ref, path string, content []byte) {
+	t.Helper()
+	if h.srv.filesByRef[ref] == nil {
+		h.srv.filesByRef[ref] = map[string][]byte{}
+	}
+	h.srv.filesByRef[ref][path] = content
+}
 
 // TestGitHub_ContractSuite proves the GitHub adapter satisfies the forge
 // contract suite against an httptest double of GitHub's own API — no

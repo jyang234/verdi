@@ -57,7 +57,27 @@ type Forge interface {
 	// CIContext detects the current CI environment from the forge's own
 	// CI-provided environment variables.
 	CIContext(ctx context.Context) (CIInfo, error)
+	// ListOpenMRs lists open (unmerged) merge/pull requests targeting
+	// targetBranch (typically the store's default branch) through the
+	// forge's own API — the rung-4 cascade fold's pending-supersession
+	// input set (03 §The amendment ladder; openmr.go).
+	ListOpenMRs(ctx context.Context, targetBranch string) ([]OpenMR, error)
+	// FetchFileAtRef retrieves path's raw content as it stands at ref (a
+	// branch name) through the forge's own API — enough to read a pending
+	// supersession manifest's spec file from an OpenMR's SourceBranch
+	// without a local clone of that branch. Returns an error wrapping
+	// ErrFileNotFound when path does not exist at ref — the expected,
+	// non-error-in-spirit outcome for most open MRs, which don't touch the
+	// candidate spec path at all; callers distinguish that case from a
+	// real transport error via errors.Is(err, ErrFileNotFound).
+	FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error)
 }
+
+// ErrFileNotFound is returned, wrapped, by FetchFileAtRef when path does
+// not exist at ref — the expected, non-error outcome for most open MRs
+// when probed against one candidate supersession-manifest path (most open
+// MRs are not superseding the feature in question at all).
+var ErrFileNotFound = errors.New("forge: file not found at ref")
 
 // DetectKind decides which forge adapter kind applies: manifestForge (the
 // store manifest's `forge:` key) if set, else auto-detected from

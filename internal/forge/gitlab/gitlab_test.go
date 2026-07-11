@@ -4,10 +4,12 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/OWNER/verdi/internal/forge"
@@ -47,14 +49,49 @@ func buildBundleZip(t *testing.T, b forge.EvidenceBundle) []byte {
 type fakeGitLabServer struct {
 	mu      map[string][]byte // commit -> zip bytes
 	pipeIDs map[string]int64
+	// mrsByTarget holds open MRs keyed by target branch.
+	mrsByTarget map[string][]mergeRequestJSON
+	// filesByRef holds seeded file content keyed by ref then path.
+	filesByRef map[string]map[string][]byte
+	nextMRIID  int64
 }
 
 func newHarnessForTest(t *testing.T) *harness {
 	t.Helper()
-	srv := &fakeGitLabServer{mu: map[string][]byte{}, pipeIDs: map[string]int64{}}
+	srv := &fakeGitLabServer{
+		mu:          map[string][]byte{},
+		pipeIDs:     map[string]int64{},
+		mrsByTarget: map[string][]mergeRequestJSON{},
+		filesByRef:  map[string]map[string][]byte{},
+		nextMRIID:   1,
+	}
 	nextPipeID := int64(1)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/projects/42/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		target := r.URL.Query().Get("target_branch")
+		_ = json.NewEncoder(w).Encode(srv.mrsByTarget[target])
+	})
+	mux.HandleFunc("/projects/42/repository/files/", func(w http.ResponseWriter, r *http.Request) {
+		// Path form: /projects/42/repository/files/<url-escaped-path>
+		const prefix = "/projects/42/repository/files/"
+		escapedPath := r.URL.Path[len(prefix):]
+		path, err := url.PathUnescape(escapedPath)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		ref := r.URL.Query().Get("ref")
+		content, ok := srv.filesByRef[ref][path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(repositoryFileJSON{
+			Content:  base64.StdEncoding.EncodeToString(content),
+			Encoding: "base64",
+		})
+	})
 	mux.HandleFunc("/projects/42/pipelines", func(w http.ResponseWriter, r *http.Request) {
 		sha := r.URL.Query().Get("sha")
 		zipData, ok := srv.mu[sha]
@@ -107,6 +144,24 @@ func (h *harness) SeedBundle(t *testing.T, ref, commit string, bundle forge.Evid
 }
 
 func (h *harness) WantGeneratedAttribute() string { return "gitlab-generated" }
+
+func (h *harness) SeedOpenMR(t *testing.T, targetBranch, sourceBranch, title string) {
+	t.Helper()
+	h.srv.mrsByTarget[targetBranch] = append(h.srv.mrsByTarget[targetBranch], mergeRequestJSON{
+		IID:          h.srv.nextMRIID,
+		SourceBranch: sourceBranch,
+		Title:        title,
+	})
+	h.srv.nextMRIID++
+}
+
+func (h *harness) SeedFile(t *testing.T, ref, path string, content []byte) {
+	t.Helper()
+	if h.srv.filesByRef[ref] == nil {
+		h.srv.filesByRef[ref] = map[string][]byte{}
+	}
+	h.srv.filesByRef[ref][path] = content
+}
 
 // TestGitLab_ContractSuite proves the GitLab adapter satisfies the forge
 // contract suite against an httptest double of GitLab's own API — no

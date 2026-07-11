@@ -20,6 +20,16 @@ func (h harness) SeedBundle(t *testing.T, ref, commit string, bundle forge.Evide
 
 func (h harness) WantGeneratedAttribute() string { return "fake-generated" }
 
+func (h harness) SeedOpenMR(t *testing.T, targetBranch, sourceBranch, title string) {
+	t.Helper()
+	h.f.SeedOpenMR(targetBranch, forge.OpenMR{SourceBranch: sourceBranch, Title: title})
+}
+
+func (h harness) SeedFile(t *testing.T, ref, path string, content []byte) {
+	t.Helper()
+	h.f.SeedFile(ref, path, content)
+}
+
 // TestFake_ContractSuite proves the fake satisfies the same behavioral
 // contract the gitlab and github adapters must (04 §Testing's pattern).
 func TestFake_ContractSuite(t *testing.T) {
@@ -51,6 +61,23 @@ func TestForge_Negative_CancelledContext(t *testing.T) {
 	}
 	if _, err := f.CIContext(ctx); err == nil {
 		t.Fatal("CIContext with cancelled context: want error, got nil")
+	}
+	if _, err := f.ListOpenMRs(ctx, "main"); err == nil {
+		t.Fatal("ListOpenMRs with cancelled context: want error, got nil")
+	}
+	if _, err := f.FetchFileAtRef(ctx, "main", "path"); err == nil {
+		t.Fatal("FetchFileAtRef with cancelled context: want error, got nil")
+	}
+}
+
+func TestForge_ListOpenMRs_NoneSeeded(t *testing.T) {
+	f := New()
+	mrs, err := f.ListOpenMRs(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("ListOpenMRs: %v", err)
+	}
+	if len(mrs) != 0 {
+		t.Fatalf("ListOpenMRs with nothing seeded = %+v, want empty", mrs)
 	}
 }
 

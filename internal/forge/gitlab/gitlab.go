@@ -6,11 +6,15 @@ package gitlab
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/OWNER/verdi/internal/forge"
 )
@@ -174,6 +178,76 @@ func (a *Adapter) setAuth(req *http.Request) {
 	if a.cfg.Token != "" {
 		req.Header.Set("PRIVATE-TOKEN", a.cfg.Token)
 	}
+}
+
+// mergeRequestJSON is the subset of GitLab's merge request object
+// ListOpenMRs needs (GitLab API: "List merge requests").
+type mergeRequestJSON struct {
+	IID          int64  `json:"iid"`
+	SourceBranch string `json:"source_branch"`
+	Title        string `json:"title"`
+}
+
+// ListOpenMRs implements forge.Forge: GitLab's "list merge requests"
+// endpoint, filtered server-side to opened MRs targeting targetBranch.
+func (a *Adapter) ListOpenMRs(ctx context.Context, targetBranch string) ([]forge.OpenMR, error) {
+	reqURL := fmt.Sprintf("%s/projects/%s/merge_requests?state=opened&target_branch=%s",
+		a.cfg.BaseURL, a.cfg.ProjectID, url.QueryEscape(targetBranch))
+	var mrs []mergeRequestJSON
+	if err := a.getJSON(ctx, reqURL, &mrs); err != nil {
+		return nil, err
+	}
+	out := make([]forge.OpenMR, len(mrs))
+	for i, m := range mrs {
+		out[i] = forge.OpenMR{ID: strconv.FormatInt(m.IID, 10), SourceBranch: m.SourceBranch, Title: m.Title}
+	}
+	return out, nil
+}
+
+// repositoryFileJSON is the subset of GitLab's "Get file from repository"
+// response FetchFileAtRef needs: base64-encoded content plus its encoding
+// tag (GitLab always sets "base64" today, but the field is checked rather
+// than assumed).
+type repositoryFileJSON struct {
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"`
+}
+
+// FetchFileAtRef implements forge.Forge against GitLab's "Get file from
+// repository" endpoint (base64-encoded content).
+func (a *Adapter) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error) {
+	reqURL := fmt.Sprintf("%s/projects/%s/repository/files/%s?ref=%s",
+		a.cfg.BaseURL, a.cfg.ProjectID, url.PathEscape(path), url.QueryEscape(ref))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("gitlab: building file request: %w", err)
+	}
+	a.setAuth(req)
+
+	resp, err := a.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("gitlab: GET %s: %w", reqURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("gitlab: file %q not found at ref %q: %w", path, ref, forge.ErrFileNotFound)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("gitlab: GET %s: unexpected status %s", reqURL, resp.Status)
+	}
+
+	var rf repositoryFileJSON
+	if err := json.NewDecoder(resp.Body).Decode(&rf); err != nil {
+		return nil, fmt.Errorf("gitlab: decoding file response from %s: %w", reqURL, err)
+	}
+	if rf.Encoding != "" && rf.Encoding != "base64" {
+		return nil, fmt.Errorf("gitlab: file %q at ref %q: unsupported encoding %q", path, ref, rf.Encoding)
+	}
+	data, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(rf.Content, "\n", ""))
+	if err != nil {
+		return nil, fmt.Errorf("gitlab: decoding base64 content for %q at ref %q: %w", path, ref, err)
+	}
+	return data, nil
 }
 
 // GeneratedAttribute implements forge.Forge (02 §Repository plumbing,

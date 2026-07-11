@@ -330,5 +330,11 @@ func (erroringForge) GeneratedAttribute() string { return "x-generated" }
 func (erroringForge) CIContext(ctx context.Context) (forgepkg.CIInfo, error) {
 	return forgepkg.CIInfo{}, nil
 }
+func (erroringForge) ListOpenMRs(ctx context.Context, targetBranch string) ([]forgepkg.OpenMR, error) {
+	return nil, nil
+}
+func (erroringForge) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error) {
+	return nil, errors.New("forge: simulated transport failure")
+}
 
 var _ forgepkg.Forge = erroringForge{}

@@ -22,6 +22,18 @@ func Run(t *testing.T, newHarness func(t *testing.T) Harness) {
 	t.Run("generated attribute", func(t *testing.T) {
 		testGeneratedAttribute(t, newHarness(t))
 	})
+	t.Run("list open mrs happy path", func(t *testing.T) {
+		testListOpenMRsHappyPath(t, newHarness(t))
+	})
+	t.Run("list open mrs excludes other target branches", func(t *testing.T) {
+		testListOpenMRsExcludesOtherTargets(t, newHarness(t))
+	})
+	t.Run("fetch file at ref happy path", func(t *testing.T) {
+		testFetchFileAtRefHappyPath(t, newHarness(t))
+	})
+	t.Run("fetch file at ref not found", func(t *testing.T) {
+		testFetchFileAtRefNotFound(t, newHarness(t))
+	})
 }
 
 func testFetchHappyPath(t *testing.T, h Harness) {
@@ -68,5 +80,75 @@ func testGeneratedAttribute(t *testing.T, h Harness) {
 	got := h.Forge().GeneratedAttribute()
 	if got != h.WantGeneratedAttribute() {
 		t.Errorf("GeneratedAttribute() = %q, want %q", got, h.WantGeneratedAttribute())
+	}
+}
+
+// testListOpenMRsHappyPath proves a seeded open MR targeting "main" is
+// returned by ListOpenMRs(ctx, "main") with its source branch and title
+// intact. The MR/PR's forge-native ID is deliberately not asserted here —
+// GitLab (IID) and GitHub (PR number) assign it themselves and the two
+// numbering spaces are unrelated (openmr.go's OpenMR.ID doc comment).
+func testListOpenMRsHappyPath(t *testing.T, h Harness) {
+	t.Helper()
+	h.SeedOpenMR(t, "main", "design/loan-workflow-v2", "Supersede loan-workflow")
+
+	mrs, err := h.Forge().ListOpenMRs(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("ListOpenMRs: %v", err)
+	}
+	if len(mrs) != 1 {
+		t.Fatalf("ListOpenMRs returned %d MRs, want 1: %+v", len(mrs), mrs)
+	}
+	if mrs[0].SourceBranch != "design/loan-workflow-v2" {
+		t.Errorf("SourceBranch = %q, want %q", mrs[0].SourceBranch, "design/loan-workflow-v2")
+	}
+	if mrs[0].Title != "Supersede loan-workflow" {
+		t.Errorf("Title = %q, want %q", mrs[0].Title, "Supersede loan-workflow")
+	}
+}
+
+// testListOpenMRsExcludesOtherTargets proves an MR seeded against one
+// target branch does not appear when a different target branch is queried
+// — ListOpenMRs is scoped, not a blanket listing of every open MR.
+func testListOpenMRsExcludesOtherTargets(t *testing.T, h Harness) {
+	t.Helper()
+	h.SeedOpenMR(t, "main", "design/loan-workflow-v2", "Supersede loan-workflow")
+
+	mrs, err := h.Forge().ListOpenMRs(context.Background(), "release-1.0")
+	if err != nil {
+		t.Fatalf("ListOpenMRs: %v", err)
+	}
+	if len(mrs) != 0 {
+		t.Fatalf("ListOpenMRs(release-1.0) = %+v, want none (MR was seeded against main)", mrs)
+	}
+}
+
+// testFetchFileAtRefHappyPath proves a seeded file's exact bytes round-trip
+// through FetchFileAtRef.
+func testFetchFileAtRefHappyPath(t *testing.T, h Harness) {
+	t.Helper()
+	want := []byte("---\nid: spec/loan-workflow-v2\n---\nbody\n")
+	h.SeedFile(t, "design/loan-workflow-v2", ".verdi/specs/active/loan-workflow-v2/spec.md", want)
+
+	got, err := h.Forge().FetchFileAtRef(context.Background(), "design/loan-workflow-v2", ".verdi/specs/active/loan-workflow-v2/spec.md")
+	if err != nil {
+		t.Fatalf("FetchFileAtRef: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("FetchFileAtRef content = %q, want %q", got, want)
+	}
+}
+
+// testFetchFileAtRefNotFound proves fetching a path never seeded at a ref
+// wraps forge.ErrFileNotFound — the expected outcome for most open MRs,
+// which don't touch the candidate spec path at all.
+func testFetchFileAtRefNotFound(t *testing.T, h Harness) {
+	t.Helper()
+	_, err := h.Forge().FetchFileAtRef(context.Background(), "design/unrelated-branch", ".verdi/specs/active/never-seeded/spec.md")
+	if err == nil {
+		t.Fatal("FetchFileAtRef for a never-seeded path: want error, got nil")
+	}
+	if !errors.Is(err, forge.ErrFileNotFound) {
+		t.Fatalf("FetchFileAtRef error = %v, want errors.Is(err, forge.ErrFileNotFound)", err)
 	}
 }
