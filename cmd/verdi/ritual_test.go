@@ -321,25 +321,25 @@ x
 `
 	writeDraftSpec(t, ctx, repo.Dir, "stale-decline-story-v2", storyV2)
 
-	// --- 10. accept it: R4-I-12's stub-match is re-computed, disqualified
-	// only by the introduced supersedes edge — the implements-set/title-slug
-	// halves of the test still resolve to the SAME stub (the feature
-	// mapping is unchanged, 03's own words), proving the matching machinery
-	// itself is unaffected by the supersession; the supersedes edge alone
-	// is what routes v2 to full review, exactly as R4-I-12 specifies
-	// ("the story introduces no supersedes/exempts edges" is one of its
-	// four conjuncts, not waived for rung-3 revisions).
+	// --- 10. accept it: R4-I-12's stub-match is re-computed and HOLDS. The
+	// implements-set/title-slug halves resolve to the SAME stub (the feature
+	// mapping is unchanged, 03's own words), and v2's only supersedes edge is
+	// the rung-3 chain edge to its own predecessor STORY spec
+	// (spec/stale-decline-story, class story) — which, per the W3-adjudicated
+	// exception (03 §The amendment ladder rung 3: "the stub-matched fast path
+	// applies when the feature mapping is unchanged"), does NOT disqualify.
+	// So v2 stays on the fast path: this IS the rung-3 fast path in action.
 	stdout.Reset()
 	stderr.Reset()
 	if got := runAccept(ctx, repo.Dir, "spec/stale-decline-story-v2", &stdout, &stderr); got != 0 {
 		t.Fatalf("accept (story v2) = %d, want 0; stderr=%s", got, stderr.String())
 	}
-	if !contains(stdout.String(), "not stub-matched") || !contains(stdout.String(), "supersedes") {
-		t.Fatalf("accept (story v2) stdout = %q, want a not-stub-matched disclosure naming the supersedes edge", stdout.String())
+	if !contains(stdout.String(), "stub-matched") || contains(stdout.String(), "not stub-matched") {
+		t.Fatalf("accept (story v2) stdout = %q, want a stub-matched disclosure (rung-3 chain edge to a predecessor story is exempt)", stdout.String())
 	}
 	storyV2Spec, _ := readSpec(t, repo.Dir, "stale-decline-story-v2")
-	if storyV2Spec.Frozen == nil || storyV2Spec.Frozen.StubMatched {
-		t.Fatalf("story v2 Frozen = %+v, want stub_matched false (supersedes edge disqualifies it)", storyV2Spec.Frozen)
+	if storyV2Spec.Frozen == nil || !storyV2Spec.Frozen.StubMatched {
+		t.Fatalf("story v2 Frozen = %+v, want stub_matched true (its only supersedes edge is the exempt rung-3 chain edge)", storyV2Spec.Frozen)
 	}
 
 	// ================= Rung 4: feature supersession =================

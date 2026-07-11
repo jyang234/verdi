@@ -36,15 +36,42 @@ x
 y
 `
 
+// predecessorStorySpecMD is the frozen rung-3 predecessor (v1) a superseding
+// story-spec v2 points at with its `supersedes` chain edge — a class: story
+// spec, so it resolves under R4-I-12's chain-edge exception.
+const predecessorStorySpecMD = `---
+id: spec/stale-decline-story-v1
+kind: spec
+title: "Stale Decline"
+owners: [platform-team]
+class: story
+status: accepted-pending-build
+story: jira:LOAN-1482
+problem: { text: "x", anchor: problem }
+outcome: { text: "y", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static, attestation] }
+links:
+  - { type: implements, ref: "spec/loan-mgmt#ac-1" }
+frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }
+---
+# Stale Decline
+## Problem
+x
+## Outcome
+y
+`
+
 func buildStubMatchRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	return fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
-				".verdi/verdi.yaml":                     phase7ManifestYAML,
-				".verdi/specs/active/loan-mgmt/spec.md": stubMatchFeatureSpecMD,
+				".verdi/verdi.yaml":                                  phase7ManifestYAML,
+				".verdi/specs/active/loan-mgmt/spec.md":              stubMatchFeatureSpecMD,
+				".verdi/specs/active/stale-decline-story-v1/spec.md": predecessorStorySpecMD,
 			},
-			Message: "init store with a stubbed feature",
+			Message: "init store with a stubbed feature and a rung-3 predecessor story",
 		},
 	})
 }
@@ -106,19 +133,39 @@ func TestComputeStubMatch(t *testing.T) {
 			wantReason:  "RefSlug(title)",
 		},
 		{
-			name: "top-level supersedes edge disqualifies",
+			// (a) R4-I-12 chain-edge exception: a supersedes edge to the
+			// story's own predecessor (a class: story spec) is the rung-3
+			// fast path itself — it does NOT disqualify.
+			name: "supersedes edge to a predecessor story spec is exempt (rung-3 chain edge)",
 			story: draftStory("Stale Decline", append(implementsAC1(),
 				artifact.Link{Type: artifact.LinkSupersedes, Ref: "spec/stale-decline-story-v1"}), nil),
-			wantMatched: false,
-			wantReason:  "supersedes",
+			wantMatched: true,
 		},
 		{
-			name: "exempts edge on a decision disqualifies",
+			// (b) a supersedes edge to an ADR still disqualifies.
+			name: "top-level supersedes edge to an ADR disqualifies",
+			story: draftStory("Stale Decline", append(implementsAC1(),
+				artifact.Link{Type: artifact.LinkSupersedes, Ref: "adr/decline-policy"}), nil),
+			wantMatched: false,
+			wantReason:  "supersedes edge to a non-story target",
+		},
+		{
+			// (b') a supersedes edge into a FEATURE spec (a decision object)
+			// still disqualifies — only a story-class target is exempt.
+			name: "supersedes edge to a feature spec disqualifies",
+			story: draftStory("Stale Decline", append(implementsAC1(),
+				artifact.Link{Type: artifact.LinkSupersedes, Ref: "spec/loan-mgmt#dc-1"}), nil),
+			wantMatched: false,
+			wantReason:  "supersedes edge to a non-story target",
+		},
+		{
+			// (c) an exempts edge to a feature decision still disqualifies.
+			name: "exempts edge to a feature decision on a decision object disqualifies",
 			story: draftStory("Stale Decline", implementsAC1(), []artifact.Decision{
-				{ID: "dc-1", Text: "x", Anchor: "problem", Links: []artifact.Link{{Type: artifact.LinkExempts, Ref: "adr/some-decision"}}},
+				{ID: "dc-1", Text: "x", Anchor: "problem", Links: []artifact.Link{{Type: artifact.LinkExempts, Ref: "spec/loan-mgmt#dc-9"}}},
 			}),
 			wantMatched: false,
-			wantReason:  "supersedes/exempts",
+			wantReason:  "exempts edge",
 		},
 		{
 			name:        "no implements edges at all (spike-shaped)",

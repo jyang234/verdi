@@ -195,8 +195,10 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 // a story spec being accepted (03 §Lifecycle: the feature-first cascade,
 // "Stub-matched fast path"): the story's implements fragment set equals a
 // stub's declared AC set, RefSlug(title) equals that same stub's slug, the
-// story introduces no supersedes/exempts edges, and it carries no
-// undispositioned judged findings. It never fails runAccept outright —
+// story introduces no disqualifying supersedes/exempts edges (the rung-3
+// chain edge to a predecessor story spec is exempt — see
+// disqualifyingSupersedesOrExempts), and it carries no undispositioned
+// judged findings. It never fails runAccept outright —
 // a non-match just means "full review applies" (03: "Stories that deviate
 // from the plan ... get full review"), so every miss degrades to
 // (false, reason) rather than an error.
@@ -250,8 +252,8 @@ func computeStubMatch(root string, story *artifact.SpecFrontmatter) (matched boo
 		return false, fmt.Sprintf("RefSlug(title) %q does not equal the matched stub's slug %q", store.RefSlug(story.Title), matchedStub.Slug)
 	}
 
-	if hasSupersedesOrExempts(story) {
-		return false, "story carries a supersedes/exempts edge"
+	if disq, why := disqualifyingSupersedesOrExempts(root, story); disq {
+		return false, why
 	}
 
 	dispositioned, why := judgedFindingsClear(root, story)
@@ -286,23 +288,55 @@ func storyImplementsTarget(story *artifact.SpecFrontmatter) (featureName string,
 	return featureName, acIDs, nil
 }
 
-// hasSupersedesOrExempts reports whether story carries any supersedes/
-// exempts edge, at the top level or on any of its decisions (03: "the
-// story introduces no supersedes/exempts edges").
-func hasSupersedesOrExempts(story *artifact.SpecFrontmatter) bool {
-	for _, l := range story.Links {
-		if l.Type == artifact.LinkSupersedes || l.Type == artifact.LinkExempts {
-			return true
-		}
-	}
+// disqualifyingSupersedesOrExempts reports whether story carries a
+// supersedes/exempts edge that disqualifies it from the stub-matched fast
+// path, at the top level or on any of its decisions (03: "the story
+// introduces no supersedes/exempts edges").
+//
+// W3 adjudication of a spec contradiction (03's rung-3 story-supersession
+// chain vs R4-I-12's fourth conjunct; the spec text is being amended in
+// parallel to match this rule): a `supersedes` edge whose target resolves to
+// a spec of class STORY is the rung-3 chain edge to the story's OWN
+// predecessor — story-spec v2 supersedes v1 (03 §The amendment ladder rung
+// 3). That edge does NOT disqualify: it IS the fast path ("the stub-matched
+// fast path applies when the feature mapping is unchanged"). Every `exempts`
+// edge, and every `supersedes` edge targeting anything else — an ADR, a
+// feature spec, a decision object — still disqualifies.
+func disqualifyingSupersedesOrExempts(root string, story *artifact.SpecFrontmatter) (bool, string) {
+	links := append([]artifact.Link(nil), story.Links...)
 	for _, d := range story.Decisions {
-		for _, l := range d.Links {
-			if l.Type == artifact.LinkSupersedes || l.Type == artifact.LinkExempts {
-				return true
+		links = append(links, d.Links...)
+	}
+	for _, l := range links {
+		switch l.Type {
+		case artifact.LinkExempts:
+			return true, fmt.Sprintf("story carries an exempts edge (%s), disqualifying the stub-matched fast path", l.Ref)
+		case artifact.LinkSupersedes:
+			if supersedesTargetsStory(root, l.Ref) {
+				continue // rung-3 chain edge to the predecessor story — the fast path itself
 			}
+			return true, fmt.Sprintf("story carries a supersedes edge to a non-story target (%s); only the rung-3 chain edge to a predecessor story spec is exempt", l.Ref)
 		}
 	}
-	return false
+	return false, ""
+}
+
+// supersedesTargetsStory reports whether ref resolves to an active spec of
+// class story — the only supersedes target R4-I-12's chain-edge exception
+// admits. Anything unresolvable (a malformed ref, a non-spec kind such as an
+// ADR, a target not loadable as an active spec, or a fragment ref into a
+// feature spec) is NOT a story, so the edge disqualifies: fail closed toward
+// full review, never toward the fast path.
+func supersedesTargetsStory(root, ref string) bool {
+	r, err := artifact.ParseRef(ref)
+	if err != nil || r.Kind != artifact.KindSpec {
+		return false
+	}
+	target, err := storyresolve.LoadActiveSpec(root, r.Name)
+	if err != nil {
+		return false
+	}
+	return target.Class == artifact.ClassStory
 }
 
 // judgedFindingsClear checks the design-branch decision-conflict report
