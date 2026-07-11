@@ -212,3 +212,52 @@ func TestResolveBuildSpec_Negative(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveDesignSpec_Happy proves a design branch resolves either
+// class (feature or story) — unlike ResolveBuildSpec, which only accepts
+// feature class.
+func TestResolveDesignSpec_Happy(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "matrix-helper-test", testFeatureSpec)
+	writeActiveSpec(t, root, "matrix-helper-story", testStorySpec)
+
+	cases := map[string]struct {
+		branch string
+		wantID string
+	}{
+		"feature class": {"design/matrix-helper-test", "spec/matrix-helper-test"},
+		"story class":   {"design/matrix-helper-story", "spec/matrix-helper-story"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			spec, err := ResolveDesignSpec(root, tc.branch)
+			if err != nil {
+				t.Fatalf("ResolveDesignSpec: %v", err)
+			}
+			if spec.ID != tc.wantID {
+				t.Fatalf("ID = %q, want %q", spec.ID, tc.wantID)
+			}
+		})
+	}
+}
+
+func TestResolveDesignSpec_Negative(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "matrix-helper-test", testFeatureSpec)
+	writeActiveSpec(t, root, "matrix-helper-component", testComponentSpec)
+
+	cases := map[string]string{
+		"not a design branch at all": "main",
+		"build branch, not design":   "feature/matrix-helper-test",
+		"detached HEAD (empty)":      "",
+		"unknown spec name":          "design/does-not-exist",
+		"component spec":             "design/matrix-helper-component",
+	}
+	for name, branch := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ResolveDesignSpec(root, branch); err == nil {
+				t.Fatalf("ResolveDesignSpec(%q): want error, got nil", branch)
+			}
+		})
+	}
+}
