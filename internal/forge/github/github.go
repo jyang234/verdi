@@ -6,11 +6,15 @@ package github
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/OWNER/verdi/internal/forge"
 )
@@ -182,6 +186,77 @@ func (a *Adapter) setAuth(req *http.Request) {
 	if a.cfg.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+a.cfg.Token)
 	}
+}
+
+// pullRequestJSON is the subset of GitHub's pull request object
+// ListOpenMRs needs (GitHub API: "List pull requests").
+type pullRequestJSON struct {
+	Number int64  `json:"number"`
+	Title  string `json:"title"`
+	Head   struct {
+		Ref string `json:"ref"`
+	} `json:"head"`
+}
+
+// ListOpenMRs implements forge.Forge: GitHub's "list pull requests"
+// endpoint, filtered server-side to open PRs based on targetBranch.
+func (a *Adapter) ListOpenMRs(ctx context.Context, targetBranch string) ([]forge.OpenMR, error) {
+	reqURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&base=%s",
+		a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, url.QueryEscape(targetBranch))
+	var prs []pullRequestJSON
+	if err := a.getJSON(ctx, reqURL, &prs); err != nil {
+		return nil, err
+	}
+	out := make([]forge.OpenMR, len(prs))
+	for i, p := range prs {
+		out[i] = forge.OpenMR{ID: strconv.FormatInt(p.Number, 10), SourceBranch: p.Head.Ref, Title: p.Title}
+	}
+	return out, nil
+}
+
+// repoContentJSON is the subset of GitHub's "Get repository content"
+// response FetchFileAtRef needs: base64-encoded content plus its encoding
+// tag.
+type repoContentJSON struct {
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"`
+}
+
+// FetchFileAtRef implements forge.Forge against GitHub's "Get repository
+// content" endpoint (base64-encoded content for a file path).
+func (a *Adapter) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error) {
+	reqURL := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s",
+		a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, path, url.QueryEscape(ref))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("github: building file request: %w", err)
+	}
+	a.setAuth(req)
+
+	resp, err := a.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("github: GET %s: %w", reqURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("github: file %q not found at ref %q: %w", path, ref, forge.ErrFileNotFound)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github: GET %s: unexpected status %s", reqURL, resp.Status)
+	}
+
+	var rc repoContentJSON
+	if err := json.NewDecoder(resp.Body).Decode(&rc); err != nil {
+		return nil, fmt.Errorf("github: decoding content response from %s: %w", reqURL, err)
+	}
+	if rc.Encoding != "" && rc.Encoding != "base64" {
+		return nil, fmt.Errorf("github: file %q at ref %q: unsupported encoding %q", path, ref, rc.Encoding)
+	}
+	data, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(rc.Content, "\n", ""))
+	if err != nil {
+		return nil, fmt.Errorf("github: decoding base64 content for %q at ref %q: %w", path, ref, err)
+	}
+	return data, nil
 }
 
 // GeneratedAttribute implements forge.Forge (02 §Repository plumbing,

@@ -23,4 +23,11 @@ type Harness interface {
 	// WantGeneratedAttribute is the token Forge().GeneratedAttribute()
 	// must return for this forge kind.
 	WantGeneratedAttribute() string
+	// SeedOpenMR arranges for ListOpenMRs(ctx, targetBranch) to include an
+	// open MR/PR with the given source branch and title (V1-P3's open-MR
+	// port extension, openmr.go).
+	SeedOpenMR(t *testing.T, targetBranch, sourceBranch, title string)
+	// SeedFile arranges for FetchFileAtRef(ref, path) to succeed with
+	// content.
+	SeedFile(t *testing.T, ref, path string, content []byte)
 }
