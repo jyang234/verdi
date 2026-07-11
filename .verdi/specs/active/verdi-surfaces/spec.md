@@ -27,20 +27,28 @@ only durable write path.** Nothing is duplicated, so nothing can drift.
 | Verb                     | Runs      | Purpose                                                        |
 |--------------------------|-----------|----------------------------------------------------------------|
 | `verdi lint`             | local + CI| artifactlint (VL-001..014); CI gate                            |
-| `verdi design start <story>` | local | cut the **design branch**, scaffold `specs/active/<name>/` as `draft`, resolve story, open the board, and regenerate impacted-service graphs/contracts into `derived/` at the branch point (the design baseline, `provenance: local`) |
+| `verdi design start <story> --name <name>` | local | cut the **design branch**, scaffold `specs/active/<name>/` as `draft`, resolve story, open the board, and regenerate impacted-service graphs/contracts into `derived/` at the branch point (the design baseline, `provenance: local`); `--name` is required — no tracker-derived naming, no magic |
+| `verdi board commit <board-key> --name <name> [--story-ref <scheme:key>]` | local | the mechanical half of commit-to-design (below): scaffold the draft feature spec, freeze `board.json` with provenance, write the disposition block listing every board sticky; `--story-ref` sets the new spec's `story:` field, defaulting to the board key itself only when it is already `scheme:key`-shaped |
 | `verdi accept <spec>`    | local     | the acceptance flip, run as the design branch's final action: `draft → accepted-pending-build` + frozen stamp; merging the spec MR is acceptance |
 | `verdi feature start <story>` | local | cut the **build branch** after acceptance; fails unless the story's spec is `accepted-pending-build`; refreshes the baseline into `derived/` |
 | `verdi align [--freeze]` | local + CI| generate/refresh the alignment report (computed + judged) for the build head; `--freeze` produces the closure edition |
+| `verdi gate`             | local + CI| the merge gate: checks the build head's spec is accepted, no AC is violated, and a fresh alignment report has every finding — computed and judged — dispositioned; exit 0 pass / 1 fail / 2 operational error; takes no argument, inferring the build's spec from the branch the same way `align` does |
 | `verdi sync [--or-regen]`| local     | pull the MR/PR pipeline's evidence bundle for the current ref through the configured forge into `derived/<ref>/<commit>/`; `--or-regen` regenerates locally when no bundle exists (fresh clone, no pipeline yet) |
 | `verdi serve`            | local     | localhost workbench UI + lens pages (read/write to mutable zone) |
 | `verdi mcp`              | local     | MCP server over stdio (below)                                  |
-| `verdi matrix <story>`   | local + CI| compute and print the fold; `--preview` includes advisory evidence |
-| `verdi rollup --publish` | CI        | compute fold from authoritative evidence, publish to provider  |
+| `verdi matrix <story>`   | local + CI| compute and print the fold; `<story>` accepts exactly a scheme-prefixed story ref or a spec ref — a bare tracker key is an operational error naming the accepted forms; `--preview` includes advisory evidence |
+| `verdi rollup <story> --publish` | CI | compute fold from authoritative evidence for the given story or spec ref (the same strict two-form argument as `matrix`) and publish to provider; `--force-local` runs the verb outside CI for local testing, printing a disclosed, non-authoritative warning first |
 | `verdi close <story>`    | local→CI  | fetch runtime records, verify eligibility, run `align --freeze`, generate frozen rollup, open the closure MR |
 | `verdi waivers`          | local + CI| audit waivers: expired, orphaned                               |
 | `verdi verify-artifact <ref>` | any  | recompute a generated artifact's digest from pinned inputs     |
 | `verdi dex build -o <dir>` | CI      | emit the static site (below)                                   |
 | `verdi gc`               | local     | prune derived + cache per store-layout rules                   |
+
+In v0, `close`, `gc`, `waivers`, and `verify-artifact` are recognized by
+dispatch — never treated as unknown verbs — but each answers `not
+implemented (out of v0 scope)` and exits 2; the rows above state their
+intended full shape, which the v0 thin slice checklist (below) does not
+yet build.
 
 Baseline regeneration is affordable and honest by construction: producers are
 byte-deterministic pure functions of the tree, scoped to impacted services
@@ -75,7 +83,19 @@ sticky id in the committed `board.json` appears with a legal value
 or `open-question`), and every entry names a real board sticky — so the
 guarantee rests on a deterministic gate, not on an LLM's good behavior. The
 workbench and the dex render the block as a table on the spec page — a view,
-never authoritative. Yarn is promoted to typed
+never authoritative.
+
+The ritual splits cleanly at that mechanical boundary. Everything up to and
+including the disposition block — the spec skeleton, the frozen `board.json`
+snapshot with provenance, and the disposition block enumerating every
+sticky — is `verdi board commit`, the binary's own deterministic ritual: it
+takes an explicit `story_ref` for the new spec's `story:` field, defaulting
+to the board key itself only when the key is already `scheme:key`-shaped,
+since a board key is an opaque, free-form namespace distinct from a story
+ref (artifact-contract spec, §Record schemas). Everything past that
+skeleton — yarn promotion into typed links or prose, and the design
+write-up itself — belongs to a committed skill doc *outside* the binary,
+never to LLM logic inside it. Yarn is promoted to typed
 `links[]` / `declares:` entries or to prose. Stickies then graduate
 (`status: graduated`) or die with the branch. The branch then proceeds to
 `verdi accept` and the spec MR (see evidence model, two-MR lifecycle).
@@ -98,7 +118,10 @@ The writer process is `verdi serve` (D3): it hosts the workbench UI and the
 MCP endpoint on the checkout's unix socket. `verdi mcp` speaks stdio to the
 agent client and proxies to a running serve over that socket — or acquires
 the writer lock and serves standalone when the workbench isn't up. Agents
-and the board therefore never race on the mutable zone.
+and the board therefore never race on the mutable zone. The socket speaks
+the exact same wire framing as MCP's stdio transport — newline-delimited
+JSON-RPC 2.0 — so the shim never translates, only pipes bytes; `verdi mcp`
+degenerates to byte-forwarding once connected.
 
 The committed project-scope `.mcp.json` points at **committed shims**, not
 bare binaries, so the fresh-clone path actually works (approval prompt on
@@ -116,9 +139,14 @@ Shim contract (`.verdi/bin/`, POSIX, committed): acquire the verdi binary at
 a **pinned version** (default: `go run github.com/OWNER/verdi/cmd/verdi@<version>`
 with the version literal in the shim — zero-install, version-locked by the
 shim itself, no PATH assumption; OQ-5 resolved: verdi is a standalone
-module); run `verdi sync --or-regen` so the derived prerequisites
-exist (`graph.json`, `policy.json` for the groundwork shim); then exec the
-server. A fresh clone plus one approval prompt yields two working servers.
+module); run `verdi sync --or-regen` so the derived prerequisites exist —
+one `graph-<service>.json` per impacted service, `policy.json` at each
+service root. There is no upstream `groundwork-mcp` binary: the
+`groundwork` shim itself execs the pinned toolchain's `groundwork mcp`
+subcommand, one `--service <name>=<path to graph-<service>.json>` and
+`--policy <name>=<service-root>/policy.json` pair per discovered service
+with a materialized graph. A fresh clone plus one approval prompt yields
+two working servers.
 
 **Federation:** verdi serves knowledge artifacts; groundwork serves graph and
 policy lenses. Neither duplicates the other's tools.
