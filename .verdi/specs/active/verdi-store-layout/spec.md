@@ -21,6 +21,11 @@ is that the store is legible to three audiences with zero translation: humans
 (`ls`, `cat`), agents (`grep`, MCP tools over paths), and git (history, blame,
 CODEOWNERS).
 
+Store-root discovery is nearest-ancestor: every verdi command operates on the
+nearest ancestor directory (from cwd) containing `.verdi/verdi.yaml`. An
+explicit `--store` flag overrides the walk entirely, naming the root
+directly with no ancestor search.
+
 Principles inherited from verdi-go and binding here:
 
 1. **Derived state is disposable.** Anything not in git must be rebuildable from
@@ -49,21 +54,25 @@ Principles inherited from verdi-go and binding here:
       deviation-report.md          # frozen at closure
   adr/<name>.md
   diagrams/<name>.mermaid          # authored diagrams only; generated views are never committed
-  attestations/<story>/<ac-id>.md
-  waivers/<story>/<ac-id>.md
+  attestations/<story-slug>/<ac-id>.md   # <story-slug> = RefSlug(scheme-prefixed story ref)
+  waivers/<story-slug>/<ac-id>.md
   conflicts/<name>.md              # challenges to closed decisions (evidence-model spec)
   bin/                             # committed shims: verdi-mcp, groundwork-mcp (surfaces spec)
   data/                            # working area — gitignored, per-checkout
     writer.lock                    # single-writer enforcement (D3)
-    serve.sock                     # per-checkout MCP endpoint (D3)
+    serve.path                     # pointer file naming the real socket path (D3); the
+                                    #   socket itself binds off-tree at
+                                    #   $TMPDIR/verdi-<hash>/serve.sock
     derived/<ref-slug>/<commit>/   # materialized CI bundles + local regenerations
       verdicts.json
       boundary-diff.json
       tests.json
       review.json
+      graph-<service>.json         # one per impacted service (groundwork-mcp's input)
       views/                       # regenerated renderings (graphs, mermaid)
     mutable/
       annotations/<kind>--<name>.jsonl
+      annotations/board--<story-slug>.jsonl   # board-only (no target) annotations
       boards/<story>.json          # live board state (autosave)
     cache/
       index-<layout-version>-<tree-hash>
@@ -87,13 +96,29 @@ Notes:
   them in place** and never relocates them. The index unifies; the layout does
   not annex. The one verdi-owned file in a service root is the
   `verdi.bindings.yaml` AC-binding sidecar (evidence-model spec), discovered
-  and validated like the rest.
+  and validated like the rest. A service's boundary contract lives at the
+  fixed, upstream-written path `<service-root>/.flowmap/boundary-contract.json`
+  — `flowmap boundary` has no stdout mode or output flag; it always writes
+  there, so verdi reads that literal path rather than any configured location.
+- The `<story-slug>` segment under `attestations/` and `waivers/` (and the
+  matching half of the artifact contract's `<story>--<ac-id>` name grammar)
+  is `RefSlug` of the owning feature spec's scheme-prefixed `story:` ref —
+  e.g. `jira:LOAN-1482` → `jira-loan-1482` — never a bare tracker key, which
+  collides across schemes.
+- Service discovery skips `.git`, `.verdi/data`, `node_modules`, and
+  `testdata/` directories — the same noise class, so a fixture service root
+  under a module's own `testdata/` (needed to exercise discovery itself) is
+  never mistaken for a live corpus service, matching the Go toolchain's own
+  testdata invisibility convention.
 
 ## Store manifest: `verdi.yaml`
 
 ```yaml
 schema: verdi.layout/v1
 forge: gitlab                  # or github; auto-detected from the remote URL when omitted
+toolchain:                     # the pinned verdi-go dependency verdi execs, never links
+  module: github.com/OWNER/verdi-go
+  commit: 7a1c9e0b3f2d         # 12-hex pseudo-version commit; migrates to a tag form once upstream cuts one
 providers:                     # story-provider spec owns semantics
   jira:
     base_url: https://koalafi.atlassian.net
@@ -101,16 +126,26 @@ providers:                     # story-provider spec owns semantics
 lint:
   gated_generated: []          # committed generated artifacts that are currency-gated
 align:                         # evidence-model spec owns semantics
-  judge_cmd: claude -p         # the alignment judge; this is the default
+  judge_cmd: ["claude", "-p"]  # argv array, never a shell string — no quoting/injection ambiguity
   judge_required: false        # true: `verdi align` fails outright without a judge
 derived:
   retention_days: 14           # gc horizon for merged/deleted refs
 services:
   discovery: flowmap           # any directory containing .flowmap.yaml is a service root
+                                # (skips .git, .verdi/data, node_modules, testdata/)
 ```
 
 Decode is strict: unknown top-level keys fail `verdi lint`. Layout migrations
 bump `verdi.layout/vN` and regenerate affected paths in one coordinated change.
+
+`toolchain.module` and `toolchain.commit` pin the verdi-go dependency every
+flowmap/groundwork invocation execs (`go run <module>/cmd/<tool>@<commit>`):
+a 12-hex pseudo-version commit today, migrating to a human-legible tag in one
+manifest edit once upstream starts tagging releases. CI sets
+`GROUNDWORK_REQUIRE_STAMP=1` and passes `--expect` so a boundary check fails
+loudly on an unpinned or drifted toolchain; `GOPROXY` must stay reachable
+even with a warm module cache — module metadata lookups need it, so CI must
+never set `GOPROXY=off`.
 
 ## Zones
 
@@ -162,19 +197,38 @@ a byte-deterministic pure function of the tree.
   file, written temp-then-rename. Streams (annotations) are append-only
   JSONL. Evidence is keyed by commit and never edited in place: new evidence
   is a new record. Exactly one writer process per checkout, enforced by
-  `data/writer.lock`: `verdi serve` is that writer, and it additionally
-  exposes the MCP endpoint on the checkout's unix socket `data/serve.sock`.
-  `verdi mcp` is a stdio shim — it proxies to a running serve over the
-  socket, or acquires the lock and serves standalone when none is running.
-  Per-checkout sockets mean worktrees never collide. CI writes only
-  commit-scoped derived paths.
+  `data/writer.lock`: an atomically created (`O_CREATE|O_EXCL`) file whose
+  JSON body is `{pid, start}`. A holder is live iff its pid answers a
+  liveness probe *and* the OS's own process-start time for that pid
+  (`ps -o lstart=`) agrees with the recorded `start` within tolerance —
+  closing the PID-reuse gap a bare liveness probe would leave open. A dead
+  or reused-pid holder's lock is stale and eligible for takeover; the JSON
+  body stays legible with `cat`, per this document's legibility goal.
+  `verdi serve` is the writer, and it additionally exposes the MCP endpoint
+  on the checkout's unix socket. Realistic worktree checkout paths can
+  breach a unix socket's ~103-byte `sun_path` ceiling, so the socket does
+  not bind at a store-relative path: it binds at
+  `$TMPDIR/verdi-<hash>/serve.sock`, where `<hash>` is a short hash of the
+  checkout's absolute path, and the store records the real bound path in a
+  legible, cat-able pointer file, `data/serve.path`. `verdi mcp` is a stdio
+  shim — it reads the pointer file, then proxies to a running serve over
+  that socket, or acquires the lock and serves standalone when none is
+  running. Per-checkout sockets (and pointer files) mean worktrees never
+  collide; if even the short bound form overflows the ceiling, binding
+  fails loudly naming the path and the limit, rather than a cryptic `bind:
+  invalid argument`. CI writes only commit-scoped derived paths.
 - **D4 — Disposable caches.** Cache filenames embed layout version and tree
-  hash; staleness is detected, never guessed. The tree hash covers the whole
-  **corpus**, not just `.verdi/`: a hash over the sorted (path, blob-sha)
-  pairs of the committed zone (minus `data/`) plus every discovered
-  corpus-contributing file in service roots — so a boundary-contract or
-  obligation change invalidates the cache exactly like a spec change does.
-  `rm -rf .verdi/data/cache` is always safe.
+  hash; staleness is detected, never guessed. The tree hash algorithm is
+  sha256 over the sorted `(path, git-blob-sha)` pairs of the committed zone
+  (minus `data/`) plus every discovered corpus-contributing file in service
+  roots — so a boundary-contract or obligation change invalidates the cache
+  exactly like a spec change does. Every blob sha is computed the way git
+  would hash the file's *current on-disk content*, so a dirty (uncommitted)
+  edit changes the hash immediately: a new untracked file counts the moment
+  it exists, and a tracked file deleted from the working tree is omitted
+  from the pair set entirely (a deletion is a corpus change to detect, not
+  an error) rather than guessed at by mtime. `rm -rf .verdi/data/cache` is
+  always safe.
 
 ## Garbage collection
 
