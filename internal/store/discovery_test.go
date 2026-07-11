@@ -45,7 +45,7 @@ func TestDiscoverServices_Happy(t *testing.T) {
 	root := t.TempDir()
 
 	writeFileT(t, filepath.Join(root, "svcfix", flowmapFile), svcFlowmapYAML)
-	writeFileT(t, filepath.Join(root, "svcfix", boundaryContractRelPath), svcBoundaryContractJSON)
+	writeFileT(t, filepath.Join(root, "svcfix", BoundaryContractRelPath), svcBoundaryContractJSON)
 	writeFileT(t, filepath.Join(root, "svcfix", bindingsFile), svcBindingsYAML)
 	writeFileT(t, filepath.Join(root, "svcfix", "api", "openapi.yaml"), "openapi: 3.0.3\ninfo:\n  title: x\n  version: \"1\"\npaths: {}\n")
 

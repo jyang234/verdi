@@ -3,6 +3,7 @@ package upstream
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/OWNER/verdi/internal/artifact"
 )
@@ -63,6 +64,24 @@ func DecodeBoundaryContract(data []byte) (*BoundaryContract, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// ReadBoundaryContract reads and strict-decodes the boundary contract file
+// at path — the read-back half of BoundaryGenerate's write-only contract
+// (spike S1: "flowmap boundary always writes there; callers read the file
+// back themselves"), shared by cmd/verdi's sync/baseline regeneration and
+// internal/align's computed-section regeneration (CLAUDE.md: "anything
+// used by two or more packages lives in a shared internal/ package").
+func ReadBoundaryContract(path string) (*BoundaryContract, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("upstream: reading boundary contract %s: %w", path, err)
+	}
+	c, err := DecodeBoundaryContract(data)
+	if err != nil {
+		return nil, fmt.Errorf("upstream: decoding boundary contract %s: %w", path, err)
+	}
+	return c, nil
 }
 
 // Validate checks the schema literal and that Service is non-empty.
