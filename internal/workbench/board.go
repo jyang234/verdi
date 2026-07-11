@@ -128,12 +128,16 @@ var boardPageTemplate = template.Must(template.New("board").Parse(`<!doctype htm
 <title>Board: {{.Key}} · verdi workbench</title>
 <link rel="stylesheet" href="/assets/style.css">
 </head>
-<body>
-<nav class="workbench-nav"><a href="/">workbench</a></nav>
-<header class="page-header"><h1>Board: {{.Key}}</h1></header>
-<div class="page-body">
+<body class="board-page">
+<header class="site-head">
+<a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
+<nav class="site-nav workbench-nav"><a href="/">index</a></nav>
+</header>
+<header class="page-header board-head">
+<h1>Board: {{.Key}}</h1>
+<div id="autosave-status" role="status" aria-live="polite"></div>
+</header>
 {{.Body}}
-</div>
 <script>
 window.__BOARD_KEY__ = {{.KeyJSON}};
 window.__BOARD__ = {{.StateJSON}};
@@ -174,38 +178,76 @@ func renderBoardPage(state boardClientState) ([]byte, error) {
 
 func boardPageBody(state boardClientState) string {
 	var b bytes.Buffer
-	b.WriteString(`<div id="autosave-status"></div>`)
+	b.WriteString(`<div class="board-layout">`)
+
+	// The spatial canvas: index cards (pinned refs) and paper stickies at
+	// their stored coordinates; board.js overlays the yarn as SVG thread.
 	b.WriteString(`<div id="board-canvas" class="board-canvas">`)
 	for _, p := range state.Pins {
 		b.WriteString(`<div class="card" data-drag data-kind="pin" data-key="` + stdhtml.EscapeString(p.Ref) + `" style="left:` + floatStr(p.X) + `px;top:` + floatStr(p.Y) + `px">`)
-		b.WriteString(`<strong>pin</strong> ` + stdhtml.EscapeString(p.Ref))
+		b.WriteString(`<span class="card-kind">pinned ref</span>`)
+		// The full pinned form stays intact as the element's text (and in
+		// title); CSS (.card-ref) only truncates it visually.
+		b.WriteString(`<span class="card-ref" title="` + stdhtml.EscapeString(p.Ref) + `">` + stdhtml.EscapeString(p.Ref) + `</span>`)
 		b.WriteString(`</div>`)
 	}
 	for _, s := range state.Stickies {
-		b.WriteString(`<div class="sticky" data-drag data-kind="sticky" data-key="` + stdhtml.EscapeString(s.ID) + `" style="left:` + floatStr(s.X) + `px;top:` + floatStr(s.Y) + `px" data-status="` + stdhtml.EscapeString(s.Status) + `">`)
-		b.WriteString(`<strong>` + stdhtml.EscapeString(s.Type) + `</strong> ` + stdhtml.EscapeString(s.Body))
+		b.WriteString(`<div class="sticky sticky--` + stickyTypeClass(s.Type) + `" data-drag data-kind="sticky" data-key="` + stdhtml.EscapeString(s.ID) + `" data-type="` + stdhtml.EscapeString(s.Type) + `" data-status="` + stdhtml.EscapeString(s.Status) + `" style="left:` + floatStr(s.X) + `px;top:` + floatStr(s.Y) + `px">`)
+		b.WriteString(`<span class="sticky-type">` + stdhtml.EscapeString(s.Type) + `</span>`)
+		b.WriteString(`<p class="sticky-body">` + stdhtml.EscapeString(s.Body) + `</p>`)
+		meta := s.Status
+		if s.Author != "" {
+			meta = s.Author + " · " + s.Status
+		}
+		b.WriteString(`<span class="sticky-meta">` + stdhtml.EscapeString(meta) + `</span>`)
 		b.WriteString(`</div>`)
 	}
 	b.WriteString(`</div>`)
 
-	b.WriteString(`<section class="yarn"><h2>Yarn</h2><ul>`)
-	for _, y := range state.Yarn {
-		b.WriteString(`<li>` + stdhtml.EscapeString(y.From) + ` &rarr; ` + stdhtml.EscapeString(y.To) + ` (` + stdhtml.EscapeString(y.Label) + `)</li>`)
+	// The side column: the yarn ledger and the commit-to-design ritual.
+	b.WriteString(`<div class="board-side">`)
+
+	b.WriteString(`<section class="yarn"><h2>Yarn</h2>`)
+	if len(state.Yarn) == 0 {
+		b.WriteString(`<p class="empty">No yarn strung yet.</p>`)
+	} else {
+		b.WriteString(`<ul class="yarn-list">`)
+		for _, y := range state.Yarn {
+			b.WriteString(`<li>` + stdhtml.EscapeString(y.From) + ` &rarr; ` + stdhtml.EscapeString(y.To) + ` <span class="yarn-label">(` + stdhtml.EscapeString(y.Label) + `)</span></li>`)
+		}
+		b.WriteString(`</ul>`)
 	}
-	b.WriteString(`</ul></section>`)
+	b.WriteString(`</section>`)
 
 	b.WriteString(`<section class="commit-to-design"><h2>Commit to design</h2>` +
+		`<p class="ritual-note">Freezes this board into a draft feature spec: every sticky lands in the spec's dispositions block as an open question to incorporate or contradict.</p>` +
 		// No HTML5 `required` here: an empty name must exercise the
 		// SERVER's own validation (boardCommitHandler's "name is
 		// required" 400), the same negative path a non-browser API
 		// client would hit — browser-native validation would silently
 		// swallow that test case before any request is even sent.
-		`<form id="commit-form"><label>Spec name <input id="commit-name" name="name"></label> ` +
-		`<label>Story ref (optional) <input id="commit-story-ref" name="story_ref"></label> ` +
+		`<form id="commit-form">` +
+		`<div class="field"><label for="commit-name">Spec name</label><input id="commit-name" name="name" autocomplete="off"></div>` +
+		`<div class="field"><label for="commit-story-ref">Story ref <span class="optional">(optional)</span></label><input id="commit-story-ref" name="story_ref" autocomplete="off"></div>` +
 		`<button type="submit">Commit to design</button></form>` +
-		`<div id="commit-result"></div></section>`)
+		`<div id="commit-result" role="status"></div></section>`)
+
+	b.WriteString(`</div></div>`)
 
 	return b.String()
+}
+
+// stickyTypeClass maps an annotation type to its sticky-note CSS modifier.
+// Only the four legal annotation types (internal/artifact) get a paper
+// color of their own; anything else — including the "(annotation not
+// found)" placeholder's "unknown" — falls back to the neutral note.
+func stickyTypeClass(t string) string {
+	switch t {
+	case "comment", "question", "decision-needed", "agent-task":
+		return t
+	default:
+		return "unknown"
+	}
 }
 
 func floatStr(f float64) string {

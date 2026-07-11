@@ -55,9 +55,13 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
-<nav class="workbench-nav"><a href="/">workbench</a> {{.Nav}}</nav>
+<header class="site-head">
+<a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
+<nav class="site-nav workbench-nav">{{.Nav}}</nav>
+</header>
 <header class="page-header"><h1>{{.Title}}</h1></header>
 <div class="page-body">
+<main class="content">
 {{if .MetaRows}}<aside class="metadata-card"><dl>
 {{range .MetaRows}}<dt>{{.Label}}</dt><dd>{{.Value}}</dd>
 {{end}}</dl></aside>{{end}}
@@ -65,8 +69,9 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <h2>Dispositions</h2>
 {{.DispositionsHTML}}
 </section>{{end}}
-<main class="content">{{.BodyHTML}}</main>
+{{.BodyHTML}}
 {{.ExtraHTML}}
+</main>
 </div>
 {{if .HasMermaid}}<script src="/assets/mermaid.min.js"></script>
 <script>mermaid.initialize({startOnLoad:true,securityLevel:"strict",theme:window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"default"});</script>
