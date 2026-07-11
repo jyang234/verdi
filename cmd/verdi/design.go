@@ -10,11 +10,11 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/gitx"
@@ -31,6 +31,37 @@ func runDesignVerb(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return cmdDesignStart(args[1:], stdout, stderr)
+}
+
+// extractNameFlag pulls "--name"/"-name" (as a separate value token or
+// "=value") out of args in whatever position it appears, returning its
+// value and every remaining (positional) argument in order. An empty
+// return name means the flag was never given — the caller decides whether
+// that is an error (design start requires it, I-10). A flag given more
+// than once, or given with no value at all, is a parse error.
+func extractNameFlag(args []string) (name string, rest []string, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--name" || a == "-name":
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("%s requires a value", a)
+			}
+			if name != "" {
+				return "", nil, fmt.Errorf("--name given more than once")
+			}
+			name = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--name=") || strings.HasPrefix(a, "-name="):
+			if name != "" {
+				return "", nil, fmt.Errorf("--name given more than once")
+			}
+			_, name, _ = strings.Cut(a, "=")
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return name, rest, nil
 }
 
 // designDeps bundles design start's injectable dependencies (mirroring
@@ -52,17 +83,22 @@ type designDeps struct {
 // disclosed v0 behavior per 04 §Semantics's own failure table) and runner,
 // and delegates to runDesignStart.
 func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("design start", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	name := fs.String("name", "", "the spec directory name (required, I-10: no magic)")
-	if err := fs.Parse(args); err != nil {
+	// Parsed by hand rather than via the stdlib flag package: flag.FlagSet
+	// stops consuming flags at the first non-flag token, so it cannot
+	// parse "verdi design start <story-ref> --name <name>" — the exact
+	// ordering 05 §CLI and PLAN.md Phase 7's own exit criteria use, flag
+	// trailing the positional story-ref — without also accepting
+	// "--name <name> <story-ref>". This loop accepts --name (or -name),
+	// as "--name value" or "--name=value", in either position.
+	name, rest, err := extractNameFlag(args)
+	if err != nil {
+		fmt.Fprintln(stderr, "design start:", err)
 		return 2
 	}
-	if *name == "" {
+	if name == "" {
 		fmt.Fprintln(stderr, "design start: --name is required (I-10: no magic, no tracker-derived naming)")
 		return 2
 	}
-	rest := fs.Args()
 	if len(rest) != 1 {
 		fmt.Fprintln(stderr, "design start: usage: verdi design start <story-ref> --name <name>")
 		return 2
@@ -93,7 +129,7 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 	}
 	deps := designDeps{Provider: reg, Runner: runner, GoTest: realGoTestRunner{}}
 
-	return runDesignStart(ctx, root, storyRef, *name, manifest, deps, stdout, stderr)
+	return runDesignStart(ctx, root, storyRef, name, manifest, deps, stdout, stderr)
 }
 
 // runDesignStart is the testable core: given an already-resolved root and

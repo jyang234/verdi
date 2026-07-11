@@ -150,6 +150,36 @@ func TestRunDesignStart_Negative(t *testing.T) {
 	})
 }
 
+// TestCmdDesignStart_NameFlagOrdering proves --name parses correctly
+// whether it comes before or after the positional story-ref — in
+// particular the "<story-ref> --name <name>" ordering PLAN.md Phase 7's
+// own exit criteria and 05 §CLI's example both use, which the stdlib flag
+// package cannot parse (it stops consuming flags at the first non-flag
+// token), hence extractNameFlag's hand-rolled parse.
+func TestCmdDesignStart_NameFlagOrdering(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"flag after positional", []string{"jira:LOAN-1482", "--name", "stale-decline"}},
+		{"flag before positional", []string{"--name", "stale-decline", "jira:LOAN-1482"}},
+		{"flag=value after positional", []string{"jira:LOAN-1482", "--name=stale-decline"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildPhase7Repo(t)
+			t.Chdir(repo.Dir)
+
+			var stdout, stderr bytes.Buffer
+			got := cmdDesignStart(tc.args, &stdout, &stderr)
+			if got != 0 {
+				t.Fatalf("cmdDesignStart(%v) = %d, want 0; stderr=%s", tc.args, got, stderr.String())
+			}
+			readSpec(t, repo.Dir, "stale-decline") // fails the test if not found/decodable
+		})
+	}
+}
+
 // TestCmdDesignStart_NameFlagMissing proves --name is required at the
 // flag-parsing layer (I-10), exiting 2 before touching the store at all.
 func TestCmdDesignStart_NameFlagMissing(t *testing.T) {
