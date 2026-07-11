@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 
 	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/boardio"
@@ -57,6 +58,18 @@ type boardSpecServer struct {
 	// constitution 2/10). Empty means either no forge is configured (silent
 	// not-under-review is legitimate) or a live feed is wired.
 	reviewUnavailable string
+
+	// writeMu serializes board MUTATIONS within this process. D3's
+	// process-level writer lock (I-12) keeps other processes out, but the
+	// board's HTTP handlers run as concurrent goroutines against the same
+	// files; without this, two overlapping read-modify-write actions
+	// (spliceSpec on spec.md, actionPosition on layout.json, the boardio
+	// full-file JSONL rewrites) could lose an update (last writer wins).
+	// Atomic temp+rename already prevents a torn file, so this closes the
+	// remaining intra-process lost-update window (M-2). Reads (page/
+	// fragment) do not take it: atomic rename makes every read see one
+	// whole file, old or new.
+	writeMu sync.Mutex
 }
 
 var specNameRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/OWNER/verdi/internal/artifact"
@@ -643,5 +644,45 @@ func TestBoard_DefaultBranchAssumed_Disclosed(t *testing.T) {
 	body := getBoard(t, h, boardFixtureName).Body.String()
 	if !strings.Contains(body, `data-testid="board-notice"`) || !strings.Contains(body, "default branch could not be resolved") {
 		t.Errorf("assumed default branch not disclosed on the board:\n%s", body)
+	}
+}
+
+// TestBoard_ConcurrentMutations_BothLand proves M-2: two racing board
+// mutations against the same spec both land (no lost update). Without the
+// per-server writeMu the second read-modify-write of spec.md could
+// clobber the first (last writer wins).
+func TestBoard_ConcurrentMutations_BothLand(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+
+	var wg sync.WaitGroup
+	edits := []struct{ id, text string }{
+		{"ac-1", "a declined applicant sees the current reason [edit-A]"},
+		{"ac-2", "a decline reverses within one day [edit-B]"},
+	}
+	for _, e := range edits {
+		wg.Add(1)
+		go func(id, text string) {
+			defer wg.Done()
+			body := `{"id":"` + id + `","text":"` + text + `"}`
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/board/spec/"+boardFixtureName+"/api/edit-text", strings.NewReader(body))
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Errorf("edit-text %s = %d, want 200: %s", id, rec.Code, rec.Body.String())
+			}
+		}(e.id, e.text)
+	}
+	wg.Wait()
+
+	specData, err := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
+	if err != nil {
+		t.Fatalf("read spec: %v", err)
+	}
+	spec := string(specData)
+	for _, e := range edits {
+		if !strings.Contains(spec, e.text) {
+			t.Errorf("edit %q was lost (last-writer-wins) — both concurrent mutations must land:\n%s", e.text, spec)
+		}
 	}
 }

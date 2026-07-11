@@ -57,6 +57,15 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		name := r.PathValue("name")
 		action := r.PathValue("action")
 
+		// Serialize every mutation against this server's other in-flight
+		// mutations: each action is a read-modify-write of the working tree
+		// or the mutable zone, and two racing writers would otherwise lose
+		// an update (M-2). Held across loadBoard (the read half) through the
+		// action's write so the projection an action edits cannot go stale
+		// under a concurrent commit.
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+
 		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		if err != nil {
 			writeJSONError(w, http.StatusBadRequest, "reading request body: "+err.Error())
