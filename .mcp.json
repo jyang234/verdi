@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "verdi": {
+      "type": "stdio",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.verdi/bin/verdi-mcp"
+    },
+    "groundwork": {
+      "type": "stdio",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.verdi/bin/groundwork-mcp"
+    }
+  }
+}

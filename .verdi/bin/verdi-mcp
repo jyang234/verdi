@@ -1,0 +1,39 @@
+#!/bin/sh
+# .verdi/bin/verdi-mcp — committed MCP stdio shim for the "verdi" server
+# (05 §MCP server's shim contract, PLAN.md Phase 9). Committed, not a bare
+# binary, so a fresh clone's committed .mcp.json just works after one
+# approval prompt: zero-install, version-locked by this file itself, no
+# PATH assumption.
+#
+# VERDI_VERSION below pins the exact verdi module version this shim execs
+# (I-4's discipline, applied here to verdi's own module rather than
+# verdi-go's): `go run <module>@<version>` resolves publicly via the Go
+# module proxy once verdi has a real remote (spike S1's finding for
+# verdi-go's pin applies identically here). It is a PLACEHOLDER
+# pseudo-version today — OQ-5's residual: the literal OWNER in the module
+# path, and this pin, are both settled by whoever creates verdi's real
+# remote (PLAN.md §8 OQ-5). Replace both together in one edit; nothing
+# else in this script needs to change.
+set -eu
+
+VERDI_MODULE="github.com/OWNER/verdi"
+VERDI_VERSION="v0.0.0-00010101000000-000000000000"
+
+# Resolve the repo root from this script's own location (two directories
+# up from .verdi/bin/), so behavior does not depend on the caller's cwd —
+# Claude Code launches an MCP stdio server via its configured command
+# (${CLAUDE_PROJECT_DIR:-.}/.verdi/bin/verdi-mcp, see .mcp.json), not
+# necessarily with the project root as cwd.
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+cd "$repo_root"
+
+# Materialize the derived prerequisites first (05 §MCP server's shim
+# contract: "run verdi sync --or-regen so the derived prerequisites
+# exist").
+go run "${VERDI_MODULE}/cmd/verdi@${VERDI_VERSION}" sync --or-regen
+
+# exec (not a plain call): replace this shell so signals and stdio pass
+# straight through to the real server, with no shell left in the process
+# tree — the shim "degenerates to a pipe" (I-13) all the way down.
+exec go run "${VERDI_MODULE}/cmd/verdi@${VERDI_VERSION}" mcp

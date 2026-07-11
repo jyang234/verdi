@@ -1,0 +1,92 @@
+#!/bin/sh
+# .verdi/bin/groundwork-mcp — committed MCP stdio shim for the
+# "groundwork" server (05 §MCP server's shim contract; I-19: there is no
+# upstream "groundwork-mcp" binary — this shim itself execs
+# `groundwork mcp`, pinned to the SAME toolchain commit verdi.yaml's
+# `toolchain:` block names, I-4). Committed, not a bare binary, for the
+# same fresh-clone reasons as verdi-mcp.
+#
+# Two things must be true before groundwork can be usefully invoked:
+#   1. The per-service graph files it reads (derived/<ref-slug>/<commit>/
+#      graph-<service>.json, 01 §Directory layout, I-19) must exist —
+#      `verdi sync --or-regen`, run below, is what materializes them.
+#   2. groundwork itself must be invoked at the pinned toolchain commit —
+#      read directly from .verdi/verdi.yaml's toolchain: block below,
+#      rather than hardcoded here, so this shim never drifts out of sync
+#      with the manifest a `verdi.yaml` edit updates.
+set -eu
+
+VERDI_MODULE="github.com/OWNER/verdi"
+VERDI_VERSION="v0.0.0-00010101000000-000000000000"
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+cd "$repo_root"
+
+go run "${VERDI_MODULE}/cmd/verdi@${VERDI_VERSION}" sync --or-regen
+
+manifest="$repo_root/.verdi/verdi.yaml"
+if [ ! -f "$manifest" ]; then
+  echo "groundwork-mcp: $manifest not found" >&2
+  exit 2
+fi
+# Deliberately simple line-based extraction, not a general YAML parser —
+# valid ONLY for the exact "toolchain:\n  module: ...\n  commit: ...\n"
+# shape verdi.yaml always writes (01 §Store manifest); a hand-edited
+# manifest with different indentation or quoting will not parse here.
+gw_module=$(sed -n 's/^  module: *//p' "$manifest" | head -n1)
+gw_commit=$(sed -n 's/^  commit: *//p' "$manifest" | head -n1)
+if [ -z "$gw_module" ] || [ -z "$gw_commit" ]; then
+  echo "groundwork-mcp: could not read toolchain.module/toolchain.commit from $manifest (I-4)" >&2
+  exit 2
+fi
+
+# Resolve the same (ref-slug, commit) pair `verdi sync` just materialized
+# derived/ under (01 §notes: ref slugging is normative — lowercase, "/"
+# mapped to "--", every other byte outside [a-z0-9._-] mapped to "-").
+# Prefer CI's own ref env vars over `git symbolic-ref`, exactly like
+# `verdi sync` itself does (cmd/verdi/sync_regen.go's resolveRefCommit),
+# since CI checkouts are usually detached HEAD.
+ref="${CI_COMMIT_REF_NAME:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-}}}"
+if [ -z "$ref" ]; then
+  ref=$(git symbolic-ref --quiet --short HEAD || true)
+fi
+if [ -z "$ref" ]; then
+  echo "groundwork-mcp: cannot resolve the current ref (detached HEAD, no CI ref env var set)" >&2
+  exit 2
+fi
+commit=$(git rev-parse HEAD)
+slug=$(printf '%s' "$ref" | tr 'A-Z' 'a-z' | sed 's#/#--#g; s/[^a-z0-9._-]/-/g')
+
+# Discover service roots the same way verdi does (01 §Store manifest's
+# services.discovery: any directory containing .flowmap.yaml is a service
+# root; I-28 skips .git, .verdi/data, node_modules, and testdata/), and
+# build one --service/--policy pair per service whose derived graph
+# already exists (I-19: "graph filename graph-<service>.json").
+service_args=""
+found_any=0
+for flowmap in $(find "$repo_root" \
+    \( -name .git -o -path "$repo_root/.verdi/data" -o -name node_modules -o -name testdata \) -prune \
+    -o -name .flowmap.yaml -print); do
+  svc_root=$(dirname "$flowmap")
+  svc_name=$(basename "$svc_root")
+  graph="$repo_root/.verdi/data/derived/${slug}/${commit}/graph-${svc_name}.json"
+  policy="$svc_root/policy.json"
+  if [ -f "$graph" ]; then
+    found_any=1
+    service_args="$service_args --service ${svc_name}=${graph}"
+    if [ -f "$policy" ]; then
+      service_args="$service_args --policy ${svc_name}=${policy}"
+    fi
+  fi
+done
+
+if [ "$found_any" -eq 0 ]; then
+  echo "groundwork-mcp: no service graphs found under .verdi/data/derived/${slug}/${commit}/ — is there a service (a directory with .flowmap.yaml) with a materialized graph-<service>.json?" >&2
+  exit 2
+fi
+
+# shellcheck disable=SC2086  # service_args is intentionally word-split: a
+# sequence of separate --service/--policy arguments built above, not one
+# value.
+exec go run "${gw_module}/cmd/groundwork@${gw_commit}" mcp ${service_args}
