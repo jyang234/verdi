@@ -27,12 +27,18 @@ func testEvidence(kind artifact.EvidenceKind, verdict artifact.EvidenceVerdict, 
 	return e
 }
 
-func withProducer(p string) func(*artifact.Evidence) { return func(e *artifact.Evidence) { e.Producer = p } }
-func withWitness(w string) func(*artifact.Evidence)  { return func(e *artifact.Evidence) { e.Witness = w } }
+func withProducer(p string) func(*artifact.Evidence) {
+	return func(e *artifact.Evidence) { e.Producer = p }
+}
+func withWitness(w string) func(*artifact.Evidence) {
+	return func(e *artifact.Evidence) { e.Witness = w }
+}
 func withPipeline(p string) func(*artifact.Evidence) {
 	return func(e *artifact.Evidence) { e.Provenance.Pipeline = p }
 }
-func withJob(j string) func(*artifact.Evidence) { return func(e *artifact.Evidence) { e.Provenance.Job = j } }
+func withJob(j string) func(*artifact.Evidence) {
+	return func(e *artifact.Evidence) { e.Provenance.Job = j }
+}
 func withCommit(c string) func(*artifact.Evidence) {
 	return func(e *artifact.Evidence) { e.Provenance.Commit = c }
 }
