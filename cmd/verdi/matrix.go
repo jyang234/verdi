@@ -27,11 +27,14 @@
 //
 // The waivers/<slug>/ and attestations/<slug>/ directories the fold consults
 // are keyed by the story's own ref slug — store.RefSlug of the resolved
-// spec's `story:` field. A corpus that names them by some other free-standing
-// key (e.g. waivers/story-1482/ for story jira:LOAN-1482) is not bridged here;
-// bridging those two keys was exactly the rejected heuristic's job. The board
-// file (mutable/boards/STORY-1482.json) is board state owned by a different
-// subsystem and is never an input to matrix's resolution.
+// spec's `story:` field, e.g. store.RefSlug("jira:LOAN-1482") = "jira-loan-1482"
+// (I-31's canonical <story> path segment, which the corpus fixture now names
+// its waiver/attestation dirs by). A corpus that instead named them by some
+// other free-standing key (a bare tracker key like waivers/story-1482/) would
+// not be bridged here; bridging two unrelated keys was exactly the rejected
+// heuristic's job. The board file (mutable/boards/STORY-1482.json) is board
+// state owned by a different subsystem — keyed by the tracker's own board key,
+// not by RefSlug — and is never an input to matrix's resolution.
 package main
 
 import (

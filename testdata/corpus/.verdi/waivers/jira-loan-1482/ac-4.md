@@ -1,5 +1,5 @@
 ---
-id: waiver/story-1482--ac-4
+id: waiver/jira-loan-1482--ac-4
 kind: waiver
 title: "Runtime check deferred (fixture)"
 status: active

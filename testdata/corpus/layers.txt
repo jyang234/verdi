@@ -24,9 +24,9 @@
 # Layer 2: frozen content pinned at layer 1's commit (fixturegit Heads[0]).
 2 .verdi/adr/0001-outbox-events.md
 2 .verdi/adr/0002-outbox-events.md
-2 .verdi/attestations/story-1482/ac-2.md
-2 .verdi/waivers/story-1482/ac-4.md
-2 .verdi/waivers/story-1482/ac-3.md
+2 .verdi/attestations/jira-loan-1482/ac-2.md
+2 .verdi/waivers/jira-loan-1482/ac-4.md
+2 .verdi/waivers/jira-loan-1482/ac-3.md
 2 .verdi/conflicts/stale-decline-incident.md
 2 .verdi/conflicts/legacy-cache-dispute.md
 2 .verdi/conflicts/false-alarm.md

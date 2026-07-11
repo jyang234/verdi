@@ -1,5 +1,5 @@
 ---
-id: attestation/story-1482--ac-2
+id: attestation/jira-loan-1482--ac-2
 kind: attestation
 title: "AC-2 attested by QA lead (fixture)"
 owners: [qa-lead]
