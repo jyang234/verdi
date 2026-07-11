@@ -1,9 +1,9 @@
 .PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e
 
-# Pin for the lint target's version-drift warning. Not yet installed by the
-# CI skeleton (phase 1 has no network-dependent tool bootstrap); once CI
-# installs golangci-lint at this pin, lint stops degrading to a warning
-# there too. Kept in lockstep with verdi-go's own pin so results agree
+# Pin for the lint target. Both CI workflows install golangci-lint at this
+# exact version before `make verify` (see .github/workflows/), so in CI the
+# lint gate is mandatory — the `lint` target's CI=true branch refuses to pass
+# by skipping. Kept in lockstep with verdi-go's own pin so results agree
 # across the workspace if both are ever run side by side.
 GOLANGCI_LINT_VERSION ?= v2.5.0
 
@@ -34,12 +34,17 @@ fmt-check:
 	if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 	@echo "gofmt OK"
 
-# lint runs golangci-lint when it is installed and warns (without failing)
-# when it is not, mirroring verdi-go/Makefile's posture: a version drift
-# from the CI pin is a loud warning, never a silent pass. Phase 1's CI
-# skeleton does not yet install golangci-lint, so this is also what keeps
-# `make verify` green in CI today; a later phase adds the install step and
-# this same target starts gating for real, with no Makefile change needed.
+# lint gates on golangci-lint, with a deliberate local/CI split (matching
+# verdi-go's trust-parity posture):
+#   - CI (CI=true, which GitHub Actions sets): golangci-lint is MANDATORY.
+#     Both workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before
+#     `make verify`, so a missing binary here means the install step regressed
+#     — we exit 1 rather than pass by skipping (a silent skip would be exactly
+#     the undisclosed gap the constitution's three-valued honesty rules out).
+#   - Locally: warn-if-missing, so a fresh clone without the tool can still run
+#     the rest of `make verify`; install golangci-lint to gate lint locally.
+# When the tool IS present, a version drift from the CI pin is a loud warning
+# (never a silent pass) so local results can't quietly diverge from CI.
 lint:
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		have=$$(golangci-lint version 2>/dev/null | grep -oE 'version v?[0-9]+\.[0-9]+\.[0-9]+' | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
@@ -47,6 +52,9 @@ lint:
 			echo "warning: golangci-lint $$have differs from CI pin $(GOLANGCI_LINT_VERSION); results may diverge from CI" >&2; \
 		fi; \
 		golangci-lint run; \
+	elif [ "$$CI" = "true" ]; then \
+		echo "ERROR: golangci-lint not installed but CI=true — the lint gate is mandatory in CI. Both workflows install golangci-lint@$(GOLANGCI_LINT_VERSION) before 'make verify'; a missing binary means that step regressed. Refusing to pass by skipping." >&2; \
+		exit 1; \
 	else \
 		echo "WARNING: golangci-lint not installed locally; skipping lint (install it to gate this locally)" >&2; \
 	fi

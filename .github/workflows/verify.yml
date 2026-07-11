@@ -16,6 +16,13 @@
 # blocker, so this job installs Node + the Playwright browser (chromium
 # only, per e2e/playwright.config.ts) BEFORE `make verify` runs, keeping
 # local/CI parity real rather than nominal.
+#
+# This job also installs golangci-lint at the Makefile's pin BEFORE `make
+# verify`, so its `make lint` step gates for real (the lint target hard-
+# fails when CI=true and the binary is absent). This is the only workflow
+# that runs `make verify`; pages.yml only builds the dex site (no lint), so
+# it needs no linter. golangci-lint's version must stay in lockstep with
+# Makefile's GOLANGCI_LINT_VERSION.
 name: verify
 
 on:
@@ -45,6 +52,20 @@ jobs:
           # pass, not a CI-performance pass.
           cache: npm
           cache-dependency-path: e2e/package-lock.json
+      # golangci-lint gate: cache then install the pinned linter (must match
+      # Makefile's GOLANGCI_LINT_VERSION) so `make verify`'s lint step runs
+      # the real linter. The cache key pins the version, so a hit restores the
+      # exact binary and the install is a no-op; a miss builds it once.
+      - name: Cache golangci-lint
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: golangci-lint-${{ runner.os }}-v2.5.0
+      - name: Install golangci-lint (pinned)
+        run: |
+          test -x "$(go env GOPATH)/bin/golangci-lint" || \
+            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - run: make verify
       - run: go build -o .build/verdi ./cmd/verdi
       - run: ./.build/verdi lint
