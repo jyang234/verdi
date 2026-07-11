@@ -1,0 +1,12 @@
+---
+id: diagram/loansvc-topology
+kind: diagram
+title: "LoanSvc topology (fixture)"
+status: active
+owners: [platform-team]
+links:
+  - { type: derived-from, ref: spec/store-layout-notes }
+---
+graph TD
+  loansvc --> notification-svc
+  loansvc --> charge-svc

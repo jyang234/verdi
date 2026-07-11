@@ -1,0 +1,14 @@
+{
+  "schema": "verdi.board/v1",
+  "pins": [
+    { "ref": "spec/stale-decline@706a74e31c85917a62314e99c72d1ddd8a7ac261", "x": 50, "y": 50 }
+  ],
+  "stickies": [
+    { "id": "a-01J8Z0K3AAAAAAAAAAAAAAAAAA", "x": 200, "y": 60 },
+    { "id": "a-01J8Z0K4BBBBBBBBBBBBBBBBBB", "x": 120, "y": 80 },
+    { "id": "a-01J8Z0K5CCCCCCCCCCCCCCCCCC", "x": 220, "y": 160 }
+  ],
+  "yarn": [
+    { "from": "pin:spec/stale-decline", "to": "sticky:a-01J8Z0K3AAAAAAAAAAAAAAAAAA", "label": "relates" }
+  ]
+}
