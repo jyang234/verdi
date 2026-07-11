@@ -10,10 +10,38 @@
 # (VL-004's default-branch gate, VL-010's diff base) against real
 # CI_DEFAULT_BRANCH / CI_MERGE_REQUEST_TARGET_BRANCH_NAME values, which a
 # local run has no way to supply.
+#
+# Wave 7: `make verify` now ends with `make e2e` (Playwright), which is a
+# HARD FAILURE without Node — CLAUDE.md's testing regime made e2e a merge
+# blocker, so this job installs Node + the Playwright browser (chromium
+# only, per e2e/playwright.config.ts) BEFORE `make verify` runs, keeping
+# local/CI parity real rather than nominal. `golang:1.25` has no Node
+# preinstalled, hence the explicit NodeSource setup below rather than a
+# combined image.
+
+variables:
+  # GitLab's own npm-cache convention: cache keyed on the branch, paths
+  # under the job's working dir so `cache:` below can restore/save it.
+  # Does NOT cache ~/.cache/ms-playwright (the downloaded browser
+  # binary) — add that path to `cache:` too if `playwright install`
+  # becomes a measurable chunk of pipeline time; skipped here as this is
+  # the wave-7 wiring pass, not a CI-performance pass.
+  npm_config_cache: "$CI_PROJECT_DIR/.npm-cache"
 
 verify:
   image: golang:1.25
   stage: test
+  cache:
+    key:
+      files: [e2e/package-lock.json]
+    paths:
+      - .npm-cache/
+  before_script:
+    # golang:1.25 (Debian-based) has no Node; NodeSource's setup script is
+    # the standard non-interactive way to add an apt source for a current
+    # LTS and install it in one CI step.
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    - apt-get install -y nodejs
   script:
     - make verify
     - go build -o .build/verdi ./cmd/verdi

@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen e2e
+.PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e
 
 # Pin for the lint target's version-drift warning. Not yet installed by the
 # CI skeleton (phase 1 has no network-dependent tool bootstrap); once CI
@@ -80,29 +80,55 @@ lint-store:
 	go build -o $(LINT_STORE_BIN) ./cmd/verdi
 	$(LINT_STORE_BIN) lint
 
+# spec-align (wave 7, PLAN.md §2/§5: "make verify grows ... to include
+# ... spec-align by the end of the build") is internal/specalign's Go
+# test package: self-hosted spec fidelity against ../docs/design/specs/
+# (skips loudly, never fakes a pass, when the workspace layout isn't
+# present — e.g. a CI checkout of verdi alone), the 00-index v0 checklist
+# audit, the MCP tool inventory, and the CLI verb inventory. -race isn't
+# used here (unlike `test`/`fixture`): this package execs the built verdi
+# binary as a subprocess per PLAN.md's build-then-exec discipline, which
+# the race detector has nothing to instrument.
+spec-align:
+	go test ./internal/specalign/...
+
+# e2e-check-node is verify's Node/Playwright preflight: CLAUDE.md made
+# e2e a merge blocker ("every browser-facing behavioral path ... a
+# Playwright e2e test"), so a missing Node toolchain must FAIL verify
+# loudly, never silently skip e2e (a silent skip would be exactly the
+# kind of undisclosed gap the constitution's three-valued honesty rules
+# out). Checked separately from `e2e` itself so the failure message is
+# about the missing toolchain, not a confusing `npm: command not found`
+# buried in `cd e2e && npm install`'s output.
+e2e-check-node:
+	@if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then \
+		echo "ERROR: node/npm not found — e2e (verdi/e2e/, Playwright) is a merge blocker per CLAUDE.md's testing regime, not optional." >&2; \
+		echo "        Install Node.js (e.g. https://nodejs.org, nvm, or your OS package manager; e2e/package.json has no engines pin, any current LTS works) and re-run 'make verify'." >&2; \
+		exit 1; \
+	fi
+
 # e2e runs the Playwright suite under e2e/ (PLAN.md Phase 10 deliverable
-# 4): `npm ci` (falls back to `npm install` if no lockfile-clean install is
-# possible) then `npx playwright test`. e2e/playwright.config.ts's
-# webServer stanza does the rest — builds the real verdi binary, provisions
-# a scratch store, starts `verdi serve` plus a static server over a built
-# dex site, waits for readiness, and tears both down after the run.
+# 4): `npm install` then `npx playwright install --with-deps chromium`
+# then `npx playwright test`. e2e/playwright.config.ts's webServer stanza
+# does the rest — builds the real verdi binary, provisions a scratch
+# store, starts `verdi serve` plus a static server over a built dex site,
+# waits for readiness, and tears both down after the run.
 #
-# Deliberately NOT part of `verify` yet, unlike CLAUDE.md's eventual "grows
-# — never shrinks — to include ... e2e ... by the end of the build": this
-# phase's own instructions scope that wiring to a later integration wave,
-# once CI is proven to have Node available (`make verify` must stay green
-# in every CI environment; this target's own network/Node dependency is
-# exactly the kind of environment assumption CLAUDE.md's "trust parity"
-# between local and CI rules out until that's actually true). Run it
-# directly with `make e2e` in the meantime.
-e2e:
+# Wave 7: now wired into `verify` (see the `verify` target below) — both
+# CI configs install Node + Playwright browsers before `make verify` so
+# local/CI parity holds (CLAUDE.md: "CI runs exactly `make verify` —
+# trust parity"). Depends on e2e-check-node so a missing toolchain fails
+# with the install message above, not a raw shell error.
+e2e: e2e-check-node
 	cd e2e && npm install && npx playwright install --with-deps chromium && npx playwright test
 
-# verify is the per-phase gate: it must stay green at the end of every
-# phase (CLAUDE.md). It grows — never shrinks — to add integration, e2e,
-# and spec-align gates by the end of the build (PLAN.md §2). e2e is
-# deliberately excluded for now — see the `e2e` target's own comment.
-verify: build fmt-check vet lint test fixture lint-store
+# verify is the full gate (CLAUDE.md: "grows — never shrinks — to
+# include integration, e2e, and spec-align by the end of the build").
+# e2e runs LAST: it is by far the slowest step (browser install + a real
+# server round-trip) and every faster gate should fail first when
+# something's broken, so a run that fails early doesn't pay e2e's cost
+# for nothing.
+verify: build fmt-check vet lint test fixture lint-store spec-align e2e
 	@echo "verify OK"
 
 tidy:

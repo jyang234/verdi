@@ -10,6 +10,12 @@
 # (VL-004's default-branch gate, VL-010's diff base) against a real
 # GITHUB_BASE_REF value on pull_request events, which a local run has no
 # way to supply.
+#
+# Wave 7: `make verify` now ends with `make e2e` (Playwright), which is a
+# HARD FAILURE without Node — CLAUDE.md's testing regime made e2e a merge
+# blocker, so this job installs Node + the Playwright browser (chromium
+# only, per e2e/playwright.config.ts) BEFORE `make verify` runs, keeping
+# local/CI parity real rather than nominal.
 name: verify
 
 on:
@@ -26,6 +32,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # Caches ~/.npm keyed on e2e/package-lock.json — actions/setup-node's
+          # built-in npm cache, cheaper than hand-rolling actions/cache for
+          # the same thing. Does NOT cache the downloaded Playwright browser
+          # binaries themselves (~/.cache/ms-playwright); add an
+          # actions/cache step keyed on e2e/package-lock.json's hash over
+          # that path if `npx playwright install` becomes a measurable chunk
+          # of CI time — skipped for now since this is the wave-7 wiring
+          # pass, not a CI-performance pass.
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
       - run: make verify
       - run: go build -o .build/verdi ./cmd/verdi
       - run: ./.build/verdi lint
