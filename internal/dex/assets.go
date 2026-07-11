@@ -33,6 +33,16 @@ var staticAssets = []assetFile{
 	{EmbedPath: "assets/mermaid/mermaid.min.js", Name: "mermaid.min.js"},
 }
 
+// MermaidJS returns the vendored mermaid.min.js bytes this package embeds
+// (internal/dex/assets/mermaid/README.md has the vendoring provenance).
+// internal/workbench serves this exact same asset at its own
+// /assets/mermaid.min.js route rather than vendoring a second copy (05
+// §Workbench: "mermaid client-side reusing the dex's vendored asset") —
+// one vendored file in the binary, two surfaces reading it.
+func MermaidJS() ([]byte, error) {
+	return embeddedAssets.ReadFile("assets/mermaid/mermaid.min.js")
+}
+
 // writeStaticAssets writes every entry of staticAssets to
 // outDir/assets/<Name>.
 func writeStaticAssets(outDir string) error {
