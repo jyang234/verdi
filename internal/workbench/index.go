@@ -142,7 +142,12 @@ func writeSpecItem(buf *bytes.Buffer, e *index.Entry, withStory bool) {
 	buf.WriteString(stdhtml.EscapeString(e.Title))
 	buf.WriteString(`</a>`)
 	if e.Status != "" {
-		buf.WriteString(` <span class="badge">`)
+		// badge-<status> is the same per-status styling hook internal/dex's
+		// listing pages emit, so a draft reads ochre and an accepted spec
+		// green on both surfaces.
+		buf.WriteString(` <span class="badge badge-`)
+		buf.WriteString(stdhtml.EscapeString(e.Status))
+		buf.WriteString(`">`)
 		buf.WriteString(stdhtml.EscapeString(e.Status))
 		buf.WriteString(`</span>`)
 	}
@@ -244,9 +249,11 @@ func writeServicesSection(buf *bytes.Buffer, root string) {
 		buf.WriteString(`<li>`)
 		buf.WriteString(stdhtml.EscapeString(svc.Name))
 		if len(svc.Obligations) > 0 {
-			buf.WriteString(` <span class="count">(`)
+			// The obligations registry chip — machine-checked guarantees are a
+			// service's headline fact, styled like the fold's evidenced green.
+			buf.WriteString(` <span class="obligation-count">`)
 			buf.WriteString(strconv.Itoa(len(svc.Obligations)))
-			buf.WriteString(` obligations)</span>`)
+			buf.WriteString(` obligations</span>`)
 		}
 		buf.WriteString(`</li>`)
 	}

@@ -200,11 +200,18 @@ func writeSnapshotDiff(buf *bytes.Buffer, spec *artifact.SpecFrontmatter, a stri
 		}
 	}
 
-	buf.WriteString(`<table class="verdict-diff"><thead><tr><th>AC</th><th>`)
+	// The two snapshot commits head their columns visually truncated
+	// (.ulid ellipsis) with the full sha intact as text and title — same
+	// treatment as dispositions-table ULIDs.
+	buf.WriteString(`<table class="verdict-diff"><thead><tr><th>AC</th><th><code class="ulid" title="`)
 	buf.WriteString(stdhtml.EscapeString(a))
-	buf.WriteString(`</th><th>`)
+	buf.WriteString(`">`)
+	buf.WriteString(stdhtml.EscapeString(a))
+	buf.WriteString(`</code></th><th><code class="ulid" title="`)
 	buf.WriteString(stdhtml.EscapeString(b))
-	buf.WriteString(`</th><th>diff</th></tr></thead><tbody>`)
+	buf.WriteString(`">`)
+	buf.WriteString(stdhtml.EscapeString(b))
+	buf.WriteString(`</code></th><th>diff</th></tr></thead><tbody>`)
 	for _, ac := range acIDs {
 		setA := toSet(byACA[ac])
 		setB := toSet(byACB[ac])

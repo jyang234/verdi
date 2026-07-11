@@ -23,13 +23,18 @@ func DispositionsTable(ds []artifact.Disposition) template.HTML {
 	var buf bytes.Buffer
 	buf.WriteString("<table class=\"dispositions-table\"><thead><tr><th>Sticky</th><th>Disposition</th><th>Detail</th></tr></thead><tbody>\n")
 	for _, d := range ds {
-		buf.WriteString("<tr><td>")
+		// The sticky id (a ULID) is visually truncated by CSS (.ulid) while
+		// the full id stays intact as the cell's text — selecting/copying the
+		// cell yields the full form — and in title for hover/AT.
+		buf.WriteString("<tr><td><code class=\"ulid\" title=\"")
 		buf.WriteString(stdhtml.EscapeString(d.Sticky))
-		buf.WriteString("</td><td class=\"disposition-")
-		buf.WriteString(stdhtml.EscapeString(string(d.Disposition)))
 		buf.WriteString("\">")
+		buf.WriteString(stdhtml.EscapeString(d.Sticky))
+		buf.WriteString("</code></td><td class=\"disposition-")
 		buf.WriteString(stdhtml.EscapeString(string(d.Disposition)))
-		buf.WriteString("</td><td>")
+		buf.WriteString("\"><span class=\"status-badge\">")
+		buf.WriteString(stdhtml.EscapeString(string(d.Disposition)))
+		buf.WriteString("</span></td><td>")
 		buf.WriteString(dispositionDetail(d))
 		buf.WriteString("</td></tr>\n")
 	}
