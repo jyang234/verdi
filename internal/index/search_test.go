@@ -82,3 +82,53 @@ func TestIndex_Search_Negative(t *testing.T) {
 		t.Fatalf("Search(no tokenizable chars) = %+v, want nil", results)
 	}
 }
+
+func TestIndex_AllTokens_Happy(t *testing.T) {
+	ix, err := Build(buildSyntheticStore(t))
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	tokens := ix.AllTokens()
+	if len(tokens) == 0 {
+		t.Fatal("AllTokens: got none, want a non-empty vocabulary")
+	}
+	found := false
+	for i, tok := range tokens {
+		if tok == "zephyrtoken" {
+			found = true
+		}
+		if i > 0 && tokens[i-1] >= tokens[i] {
+			t.Fatalf("AllTokens not sorted: %q then %q", tokens[i-1], tok)
+		}
+	}
+	if !found {
+		t.Fatal(`AllTokens: "zephyrtoken" missing from vocabulary`)
+	}
+}
+
+func TestIndex_Postings_Happy(t *testing.T) {
+	ix, err := Build(buildSyntheticStore(t))
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	postings := ix.Postings("zephyrtoken")
+	if len(postings) != 1 || postings[0].Ref != "adr/0001-a" {
+		t.Fatalf("Postings(zephyrtoken) = %+v, want exactly [adr/0001-a]", postings)
+	}
+	if postings[0].Score < 1 {
+		t.Fatalf("Postings(zephyrtoken) score = %d, want >= 1", postings[0].Score)
+	}
+}
+
+func TestIndex_Postings_Negative(t *testing.T) {
+	ix, err := Build(buildSyntheticStore(t))
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if postings := ix.Postings("thistermdoesnotexistanywhereinthisfixture"); postings != nil {
+		t.Fatalf("Postings(bogus term) = %+v, want nil", postings)
+	}
+}
