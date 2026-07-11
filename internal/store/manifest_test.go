@@ -17,6 +17,10 @@ lint:
 align:
   judge_cmd: [claude, -p]
   judge_required: false
+audit:
+  exempts_conflict_threshold: 3
+  deviations_stale_threshold: 3
+spike_paths: [spikes/**, docs/spikes/**]
 derived:
   retention_days: 14
 services:
@@ -48,6 +52,54 @@ func TestDecodeManifest_Happy(t *testing.T) {
 	}
 	if m.Align == nil || len(m.Align.JudgeCmd) != 2 || m.Align.JudgeCmd[0] != "claude" || m.Align.JudgeCmd[1] != "-p" {
 		t.Fatalf("Align.JudgeCmd = %+v, want [claude -p]", m.Align)
+	}
+	if m.Audit == nil || m.Audit.ExemptsConflictThreshold != 3 || m.Audit.DeviationsStaleThreshold != 3 {
+		t.Fatalf("Audit = %+v, want both thresholds 3 (R4-I-10)", m.Audit)
+	}
+	if len(m.SpikePaths) != 2 || m.SpikePaths[0] != "spikes/**" || m.SpikePaths[1] != "docs/spikes/**" {
+		t.Fatalf("SpikePaths = %+v, unexpected", m.SpikePaths)
+	}
+}
+
+// TestDecodeManifest_AuditAndSpikePathsOptional proves both R4-I-10
+// additions are decode-optional: a manifest carrying neither still decodes,
+// with Audit nil and SpikePaths empty — "fails closed empty by default"
+// (01 §Store manifest) means an absent spike_paths: admits no spike diffs
+// at all, not that the key itself is required.
+func TestDecodeManifest_AuditAndSpikePathsOptional(t *testing.T) {
+	m, err := DecodeManifest([]byte("schema: verdi.layout/v1\n"))
+	if err != nil {
+		t.Fatalf("DecodeManifest: %v", err)
+	}
+	if m.Audit != nil {
+		t.Fatalf("Audit = %+v, want nil when absent", m.Audit)
+	}
+	if len(m.SpikePaths) != 0 {
+		t.Fatalf("SpikePaths = %+v, want empty when absent", m.SpikePaths)
+	}
+}
+
+// TestDecodeManifest_AuditNegativeThresholdRejected proves AuditConfig's
+// shape check: a negative threshold can never be reached, so it fails
+// closed rather than silently accepting a manifest typo.
+func TestDecodeManifest_AuditNegativeThresholdRejected(t *testing.T) {
+	cases := []string{
+		"schema: verdi.layout/v1\naudit:\n  exempts_conflict_threshold: -1\n  deviations_stale_threshold: 3\n",
+		"schema: verdi.layout/v1\naudit:\n  exempts_conflict_threshold: 3\n  deviations_stale_threshold: -1\n",
+	}
+	for _, data := range cases {
+		if _, err := DecodeManifest([]byte(data)); err == nil {
+			t.Fatalf("DecodeManifest(%q): want error for a negative threshold, got nil", data)
+		}
+	}
+}
+
+// TestDecodeManifest_AuditUnknownFieldRejected proves audit: decodes
+// strictly like every other manifest block.
+func TestDecodeManifest_AuditUnknownFieldRejected(t *testing.T) {
+	data := "schema: verdi.layout/v1\naudit:\n  exempts_conflict_threshold: 3\n  deviations_stale_threshold: 3\n  bogus: 1\n"
+	if _, err := DecodeManifest([]byte(data)); err == nil {
+		t.Fatal("DecodeManifest(audit unknown field): want error, got nil")
 	}
 }
 
