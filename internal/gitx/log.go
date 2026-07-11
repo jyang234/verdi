@@ -1,0 +1,106 @@
+package gitx
+
+import (
+	"context"
+	"fmt"
+	"strings"
+)
+
+// Commit is one entry from `git log`: enough to render dex's temporal
+// banners (living-gated build stamp, authored-living last-modified) and
+// "what changed" feed (05 §Verdi-dex mechanics) without dex needing to
+// shell out to git itself.
+type Commit struct {
+	// SHA is the full 40-character commit object id.
+	SHA string
+	// Date is the commit's committer date in strict ISO-8601
+	// (`git log --format=%cI`), the timezone-stable form fixturegit itself
+	// pins commits to — never wall-clock, per dex's determinism
+	// requirement (PLAN.md Phase 12: "no wall-clock or randomness in
+	// generated artifacts except declared stamps").
+	Date string
+	// Author is the commit's author name (`%an`).
+	Author string
+	// Subject is the commit's first message line (`%s`).
+	Subject string
+}
+
+// logRecordSep and logFieldSep delimit `git log --format` records/fields
+// with control characters that never legitimately appear in a commit's
+// author name or subject line, so a subject containing an ordinary
+// tab/newline cannot be mistaken for a field boundary.
+const (
+	logFieldSep  = "\x1f"
+	logRecordSep = "\x1e"
+)
+
+const logFormat = "%H" + logFieldSep + "%cI" + logFieldSep + "%an" + logFieldSep + "%s" + logRecordSep
+
+// Log returns the commit history reachable from rev that touched any of
+// paths (or the whole tree, if paths is empty), most-recent-first —
+// `git log --format=... rev -- paths...`. paths are repo-relative,
+// forward-slashed. A rev with no matching history (e.g. paths that were
+// never touched) is not an error: it returns a nil slice.
+func Log(ctx context.Context, dir, rev string, paths ...string) ([]Commit, error) {
+	args := []string{"log", "--format=" + logFormat, rev}
+	if len(paths) > 0 {
+		args = append(args, "--")
+		args = append(args, paths...)
+	}
+	out, err := run(ctx, dir, args...)
+	if err != nil {
+		return nil, fmt.Errorf("gitx: Log(%s): %w", rev, err)
+	}
+	return parseLog(string(out))
+}
+
+// LastCommit returns the single most recent commit that touched path as of
+// rev — `git log -1 rev -- path` — the mechanism behind dex's
+// authored-living "last-modified from git" banner (01 §Temporal classes).
+// ok is false, with a nil error, when path has no history at rev (an
+// operational impossibility for a real committed file, but LastCommit stays
+// total rather than panicking on a caller's mistake).
+func LastCommit(ctx context.Context, dir, rev, path string) (commit Commit, ok bool, err error) {
+	commits, err := Log(ctx, dir, rev, path)
+	if err != nil {
+		return Commit{}, false, err
+	}
+	if len(commits) == 0 {
+		return Commit{}, false, nil
+	}
+	return commits[0], true, nil
+}
+
+// CommitDate returns rev's own committer date in strict ISO-8601 form —
+// the "build stamp" date dex's living-gated banners and by-kind/by-service
+// index pages use (`main @ <sha> · <date>`), always the resolved commit's
+// own date, never time.Now().
+func CommitDate(ctx context.Context, dir, rev string) (string, error) {
+	out, err := run(ctx, dir, "log", "-1", "--format=%cI", rev)
+	if err != nil {
+		return "", fmt.Errorf("gitx: CommitDate(%s): %w", rev, err)
+	}
+	date := strings.TrimSpace(string(out))
+	if date == "" {
+		return "", fmt.Errorf("gitx: CommitDate(%s): no such commit", rev)
+	}
+	return date, nil
+}
+
+// parseLog splits raw `git log --format=logFormat` output into Commits.
+func parseLog(raw string) ([]Commit, error) {
+	records := strings.Split(raw, logRecordSep)
+	var commits []Commit
+	for _, rec := range records {
+		rec = strings.TrimPrefix(rec, "\n")
+		if strings.TrimSpace(rec) == "" {
+			continue
+		}
+		fields := strings.Split(rec, logFieldSep)
+		if len(fields) != 4 {
+			return nil, fmt.Errorf("gitx: parseLog: malformed record %q (want 4 fields, got %d)", rec, len(fields))
+		}
+		commits = append(commits, Commit{SHA: fields[0], Date: fields[1], Author: fields[2], Subject: fields[3]})
+	}
+	return commits, nil
+}
