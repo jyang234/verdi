@@ -48,9 +48,12 @@ lint:
 
 # fixture runs the fixturegit determinism test package (PLAN.md Phase 1 test
 # strategy: "fixturegit determinism test (build twice, assert identical
-# SHAs)"). It grows to build+verify the full testdata fixture in phase 2.
+# SHAs)") plus, as of phase 2, the corpus package: it builds the full
+# testdata/corpus fixture via fixturegit, asserts the resulting SHAs equal
+# the committed golden constants, and decodes every corpus file (committed
+# and mutable/derived) through internal/artifact.
 fixture:
-	go test -race ./internal/fixturegit/...
+	go test -race ./internal/fixturegit/... ./internal/corpus/...
 
 # verify is the per-phase gate: it must stay green at the end of every
 # phase (CLAUDE.md). It grows — never shrinks — to add integration, e2e,
