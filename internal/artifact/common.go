@@ -116,9 +116,23 @@ var (
 
 // Frozen is the point-in-time stamp carried by frozen artifacts
 // (01 §Temporal classes): `frozen: { at: date, commit: sha }`.
+//
+// StubMatched is V1-P4's addition (R4-I-12, disclosed as this phase's own
+// judgment call — no spec section names a field or location for the
+// "acceptance stamp" stub-match writes to beyond "writes stub_matched: true
+// into the acceptance stamp", 03 §Lifecycle: the feature-first cascade):
+// the acceptance stamp IS the `frozen:` block written at the same moment
+// (`verdi accept` flips status and writes `frozen: { at, commit }` in one
+// step, accept.go), so StubMatched lives here rather than inventing a
+// second frontmatter key. Always false/omitted for a feature spec and for
+// a non-stub-matched story; true only when `verdi accept` computed a full
+// R4-I-12 stub match. Never required — omitempty, so every pre-existing
+// Frozen literal across this module still decodes and round-trips
+// unchanged.
 type Frozen struct {
-	At     string `yaml:"at" json:"at"`
-	Commit string `yaml:"commit" json:"commit"`
+	At          string `yaml:"at" json:"at"`
+	Commit      string `yaml:"commit" json:"commit"`
+	StubMatched bool   `yaml:"stub_matched,omitempty" json:"stub_matched,omitempty"`
 }
 
 // Validate checks At is a YYYY-MM-DD date and Commit looks like a real sha.
