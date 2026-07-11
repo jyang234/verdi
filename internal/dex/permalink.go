@@ -47,15 +47,18 @@ type breadcrumbEntry struct {
 }
 
 // pageBreadcrumb builds an entry's breadcrumb from its kind (and, for
-// specs, its active/archive status), per 05 §Verdi-dex's by-kind IA
-// grouping ("specs active/archive, decisions, diagrams, contracts and
-// APIs").
-func pageBreadcrumb(kind, title, status string) []breadcrumbEntry {
+// specs, whether the source file lives under specs/active/ or
+// specs/archive/ — the directory truth, not a guess from status: 01
+// §Directory layout is what actually moves a spec at acceptance/closure,
+// and I-17's "never guess, drift toward honest" ethos extends here), per
+// 05 §Verdi-dex's by-kind IA grouping ("specs active/archive, decisions,
+// diagrams, contracts and APIs").
+func pageBreadcrumb(kind, title string, archived bool) []breadcrumbEntry {
 	crumbs := []breadcrumbEntry{{Label: "Home", URL: "/"}}
 	switch kind {
 	case "spec":
 		crumbs = append(crumbs, breadcrumbEntry{Label: "Specs", URL: "/by-kind/spec/"})
-		if status == "closed" || status == "superseded" {
+		if archived {
 			crumbs = append(crumbs, breadcrumbEntry{Label: "Archive", URL: "/by-kind/spec/archive/"})
 		} else {
 			crumbs = append(crumbs, breadcrumbEntry{Label: "Active", URL: "/by-kind/spec/active/"})

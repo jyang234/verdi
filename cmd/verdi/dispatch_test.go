@@ -25,7 +25,6 @@ func TestRun_KnownVerbs(t *testing.T) {
 		{"close", "not implemented (out of v0 scope)"},
 		{"waivers", "not implemented (out of v0 scope)"},
 		{"verify-artifact", "not implemented (out of v0 scope)"},
-		{"dex", "not implemented (phase 12)"},
 		{"gc", "not implemented (out of v0 scope)"},
 		{"gate", "not implemented (phase 8)"},
 	}
@@ -78,6 +77,25 @@ func TestRun_LintDispatchesToRealVerb(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "usage") || strings.Contains(stderr.String(), "not implemented") {
 		t.Fatalf("stderr = %q, want a real store-root error, not the generic stub message", stderr.String())
+	}
+}
+
+// TestRun_DexDispatchesToRealVerb proves `run` routes "dex" to the real
+// implementation (dex.go, PLAN.md Phase 12) rather than the generic
+// phase-stub path: a bare "dex" (no "build" subcommand) must produce dex's
+// own usage message, never the generic "not implemented (phase 12)" other
+// still-stubbed verbs produce.
+func TestRun_DexDispatchesToRealVerb(t *testing.T) {
+	var stderr bytes.Buffer
+	got := run([]string{"dex"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([dex]) = %d, want 2 (usage error, no subcommand given)", got)
+	}
+	if strings.Contains(stderr.String(), "not implemented") {
+		t.Fatalf("stderr = %q, want dex's own usage message, not the generic stub message", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "verdi dex build") {
+		t.Fatalf("stderr = %q, want it to mention 'verdi dex build'", stderr.String())
 	}
 }
 

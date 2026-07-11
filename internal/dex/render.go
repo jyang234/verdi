@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"html"
+	"html/template"
+	"io"
 	"regexp"
 	"strings"
 
@@ -111,8 +113,12 @@ func (r *chromaCodeRenderer) renderCodeBlock(w util.BufWriter, source []byte, n 
 // highlight tokenizes code with chroma's lexer for lang (falling back to
 // plaintext for an unknown or empty language) and writes chroma's
 // inline-styled HTML — no separate stylesheet dependency, so a page is
-// fully self-contained the moment its own bytes are served.
-func (r *chromaCodeRenderer) highlight(w util.BufWriter, code, lang string) error {
+// fully self-contained the moment its own bytes are served. w need only be
+// an io.Writer (util.BufWriter, goldmark's callback type, already
+// satisfies that); highlightCode below reuses this outside a goldmark
+// callback entirely, for dex pages that syntax-highlight a generated JSON
+// blob rather than a markdown-authored code fence.
+func (r *chromaCodeRenderer) highlight(w io.Writer, code, lang string) error {
 	lexer := lexers.Get(lang)
 	if lexer == nil {
 		lexer = lexers.Fallback
@@ -171,4 +177,19 @@ func extractTOC(renderedHTML string) []TOCEntry {
 		entries = append(entries, TOCEntry{Level: level, ID: m[2], Text: html.UnescapeString(text)})
 	}
 	return entries
+}
+
+// highlightCode renders code as a chroma-highlighted, inline-styled
+// <pre><code>...</code></pre> block outside of any markdown document — used
+// by dex pages that pretty-print a generated JSON blob (e.g. a service's
+// full boundary contract) rather than a markdown-authored code fence.
+func highlightCode(code, lang string) (template.HTML, error) {
+	r := &chromaCodeRenderer{style: chromaStyle}
+	var buf bytes.Buffer
+	buf.WriteString("<pre><code>")
+	if err := r.highlight(&buf, code, lang); err != nil {
+		return "", err
+	}
+	buf.WriteString("</code></pre>")
+	return template.HTML(buf.String()), nil
 }
