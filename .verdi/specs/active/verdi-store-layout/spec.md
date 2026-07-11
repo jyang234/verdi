@@ -46,9 +46,11 @@ Principles inherited from verdi-go and binding here:
   specs/
     active/<name>/                 # one directory per spec
       spec.md
+      layout.json                  # board coordinate sidecar, schema verdi.boardlayout/v1 (R4-I-5)
       board.json                   # frozen at commit-to-design (feature class only)
     archive/<name>/                # closed feature specs move here whole
       spec.md
+      layout.json
       board.json
       rollup.json                  # frozen at closure
       deviation-report.md          # frozen at closure
@@ -56,6 +58,7 @@ Principles inherited from verdi-go and binding here:
   diagrams/<name>.mermaid          # authored diagrams only; generated views are never committed
   attestations/<story-slug>/<ac-id>.md   # <story-slug> = RefSlug(scheme-prefixed story ref)
   waivers/<story-slug>/<ac-id>.md
+  reaffirmations/<story-slug>/<object-id>.md   # rung-4 re-affirmation records; one per (story, amended object)
   conflicts/<name>.md              # challenges to closed decisions (evidence-model spec)
   bin/                             # committed shims: verdi-mcp, groundwork-mcp (surfaces spec)
   data/                            # working area — gitignored, per-checkout
@@ -73,7 +76,9 @@ Principles inherited from verdi-go and binding here:
     mutable/
       annotations/<kind>--<name>.jsonl
       annotations/board--<story-slug>.jsonl   # board-only (no target) annotations
-      boards/<story>.json          # live board state (autosave)
+      boards/<story>.json          # live board state (autosave) — superseded for new work by
+                                    #   layout.json (see note below); existing files remain
+                                    #   valid until their branch dies
     cache/
       index-<layout-version>-<tree-hash>
 ```
@@ -102,9 +107,52 @@ Notes:
   there, so verdi reads that literal path rather than any configured location.
 - The `<story-slug>` segment under `attestations/` and `waivers/` (and the
   matching half of the artifact contract's `<story>--<ac-id>` name grammar)
-  is `RefSlug` of the owning feature spec's scheme-prefixed `story:` ref —
-  e.g. `jira:LOAN-1482` → `jira-loan-1482` — never a bare tracker key, which
-  collides across schemes.
+  has two forms, round four having split it by class: **story**
+  attestations/waivers use `RefSlug` of the owning **story** spec's
+  required, scheme-prefixed `story:` ref (R4-I-2) — e.g. `jira:LOAN-1482` →
+  `jira-loan-1482` — never a bare tracker key, which collides across
+  schemes. **Feature outcome-attestations** use the owning **feature**
+  spec's own ref slug instead (`RefSlug` of the feature spec's `id`, not
+  tracker-derived, since a feature's `story:` is only an optional
+  epic/objective ref) — see the artifact-contract spec's §Identity and
+  references and the evidence-model spec's §Attestations and waivers, which
+  define both forms in full.
+- `layout.json` is the board's coordinate sidecar (`verdi.boardlayout/v1`,
+  R4-I-5): `{schema, positions: {<object-id>: {x, y}}}`, positions only,
+  never content. It lives on the spec's design branch during authoring —
+  autosaved to the working tree, committed when the author commits, never
+  per-drag — merges to main with the spec's acceptance, and is locked from
+  then on with it (see Temporal classes, below). A superseding spec revision
+  seeds its own `layout.json` copy from its predecessor's; a rejected or
+  abandoned design branch's `layout.json` dies with the branch — no
+  coordinate litter on main. Fallback and strictness are distinct rules, not
+  one: an **absent** `layout.json` (or a present one with no stored position
+  for a given object) falls back to the zoned-incremental layout algorithm
+  for that object — this never gates. A **present** `layout.json` must
+  strict-decode against `verdi.boardlayout/v1`, and every key in its
+  `positions` map must resolve to a real object ID declared in that spec's
+  frontmatter (§Object model, artifact-contract spec) — a dangling key is a
+  VL-018 lint error, the same dangling-bindings posture as every other
+  reference in this system, never a silent fallback.
+- `mutable/boards/<story>.json` (live board state, autosave) is
+  **superseded for new work** by `layout.json`: under the spec-realignment
+  model (ratification round four), the board is a deterministic projection
+  of the spec document plus `layout.json`, so authoring no longer maintains
+  a separate live-board file — edits autosave straight into the spec's
+  working tree. This is a stop-writing, not a deletion: existing
+  `mutable/boards/<story>.json` files remain valid working state until the
+  branch that produced them dies (merges or is abandoned), per the mutable
+  zone's own lifecycle.
+- `reaffirmations/<story-slug>/<object-id>.md`: rung-4 re-affirmation
+  records (spec-realignment concept §3b) — one file per (story, amended
+  feature object) pair, filed when a feature supersession's object manifest
+  marks an object the story's edges touch as `amended`. `<story-slug>`
+  follows the same `RefSlug` rule as `attestations/` and `waivers/` (the
+  story's own scheme-prefixed ref); `<object-id>` is the amended object's
+  stable id (an AC, constraint, or design-decision id) from the feature
+  spec's object model. Attestation-shaped, CODEOWNERS-routed to the story
+  owner, and embeds the old→new content-hash pair; frozen at commit
+  (Temporal classes, below).
 - Service discovery skips `.git`, `.verdi/data`, `node_modules`, and
   `testdata/` directories — the same noise class, so a fixture service root
   under a module's own `testdata/` (needed to exercise discovery itself) is
@@ -128,6 +176,12 @@ lint:
 align:                         # evidence-model spec owns semantics
   judge_cmd: ["claude", "-p"]  # argv array, never a shell string — no quoting/injection ambiguity
   judge_required: false        # true: `verdi align` fails outright without a judge
+audit:                         # R4-I-10; exemption/deviation counterweights (spec-realignment concept §2, §3b)
+  exempts_conflict_threshold: 3      # active exemptions filed against one ADR before an auto-filed conflict record
+  deviations_stale_threshold: 3      # accepted-deviations on one story before a spec-stale closure flag
+spike_paths: []                # VL-016 fence: path globs a spike MR's diff may touch; empty by
+                                #   default (fails closed) until a repo declares its own spike
+                                #   workspace and doc paths
 derived:
   retention_days: 14           # gc horizon for merged/deleted refs
 services:
@@ -146,6 +200,23 @@ manifest edit once upstream starts tagging releases. CI sets
 loudly on an unpinned or drifted toolchain; `GOPROXY` must stay reachable
 even with a warm module cache — module metadata lookups need it, so CI must
 never set `GOPROXY=off`.
+
+`audit.exempts_conflict_threshold` and `audit.deviations_stale_threshold`
+(R4-I-10) are both tunable, both documented as spec-realignment concept
+OQ-iii watch items, and default to `3` and `3` — the smallest reversible
+starting point, not a value derived from data; retuning is a manifest edit,
+never a release. The exemption audit (concept §2) auto-files a conflict
+record against an ADR once its active-exemption count reaches the first
+threshold; the rung arbitrage counter-pressure (concept §3b) raises a
+story's `spec-stale` closure flag once its accepted-deviation count reaches
+the second.
+
+`spike_paths` (VL-016) is the path-glob fence a spike MR's diff must stay
+inside (concept §3b's spike evidence exemption); a spike diff touching a
+path outside this list fails closed. It defaults to the empty list —
+mirroring `lint.gated_generated`'s empty-by-default posture above — so a
+repo must explicitly declare its spike workspace and doc paths before any
+spike diff is accepted; an unconfigured store admits no spike diffs at all.
 
 ## Zones
 
@@ -168,7 +239,7 @@ the class honestly (see surfaces spec).
 |-----------------|------------------------------|--------------------------------------|-------------------------------------------|
 | living-gated    | current, machine-maintained  | CI currency gate (regenerate + fail on drift) | boundary contracts, goldens (in service dirs) |
 | authored-living | maintained by humans         | MR review; dex shows last-modified from git | component specs, ADR index pages, authored diagrams |
-| frozen          | none — point-in-time record  | immutability lint (VL-010)           | feature specs at acceptance, board.json, rollup.json, final alignment reports, attestations |
+| frozen          | none — point-in-time record  | immutability lint (VL-010)           | feature and story specs at acceptance, board.json, rollup.json, final alignment reports, attestations, re-affirmation records |
 
 Class transitions are part of the doctrine: a feature spec is
 authored-living while `draft` and becomes frozen at acceptance (the merge of
@@ -176,6 +247,17 @@ its spec MR); the alignment report is living-gated during the build (its
 currency gate is `covers` = MR head) and becomes frozen at closure. A
 transition is always a ritual (`verdi accept`, `verdi close`), never a hand
 edit.
+
+`layout.json` is not independently classed: it **inherits its spec's class**
+at every point — authored-living while the spec is `draft` (autosaved,
+committed alongside working-tree spec edits), frozen the instant the spec
+accepts, and re-seeded (as its own copy, same rule) on a superseding
+revision — because it is coordinate data for that one spec and nothing
+else; it has no currency claim of its own to keep honest. Re-affirmation
+records (concept §3b's rung-4 attestation) follow the incumbent attestation
+rule instead: **frozen at commit**, not at some later ritual — an
+attestation-shaped record is a point-in-time claim from the moment it
+exists, so there is no living interval to transition out of.
 
 Frozen artifacts carry a stamp in frontmatter: `frozen: { at: 2026-05-14, commit: 3e91ab2 }`.
 The normative rule (enforced as VL-008 in the artifact contract): any artifact
