@@ -153,8 +153,14 @@ func writeSpecItem(buf *bytes.Buffer, e *index.Entry, withStory bool) {
 	}
 
 	if withStory {
+		// Every active spec has a projection board (05 §Workbench, R4:
+		// the board is a view of the spec) — the four-concept minimum
+		// path starts from this link.
+		buf.WriteString(` &middot; <a href="/board/spec/`)
+		buf.WriteString(stdhtml.EscapeString(name))
+		buf.WriteString(`">board</a>`)
 		if class, story := specClassStory(e); class == artifact.ClassFeature && story != "" {
-			buf.WriteString(` &middot; <a href="/matrix/`)
+			buf.WriteString(` <a href="/matrix/`)
 			buf.WriteString(stdhtml.EscapeString(story))
 			buf.WriteString(`">matrix</a> <a href="/verdict/`)
 			buf.WriteString(stdhtml.EscapeString(story))

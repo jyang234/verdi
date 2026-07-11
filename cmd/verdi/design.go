@@ -297,7 +297,7 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 
 	fmt.Fprintf(stdout, "design start: created branch %s\n", branch)
 	fmt.Fprintf(stdout, "design start: scaffolded %s (kind: %s, status: draft)\n", specRef.String(), kind)
-	fmt.Fprintf(stdout, "design start: board: http://localhost:5173/design/%s (workbench UI lands in a later phase; verdi serve already ships)\n", name)
+	fmt.Fprintf(stdout, "design start: board: http://%s/board/spec/%s (run `verdi serve` from this checkout)\n", defaultWorkbenchAddr, name)
 	return 0
 }
 
