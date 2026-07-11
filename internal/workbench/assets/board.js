@@ -45,7 +45,19 @@
   }
 
   function doAutosave() {
-    var payload = { pins: state.pins, stickies: state.stickies, yarn: state.yarn };
+    // The server's autosave payload shape is verdi.board/v1's mutable
+    // subset — pins {ref,x,y}, stickies {id,x,y} ONLY, yarn {from,to,label}
+    // — strict-decoded (unknown fields rejected). state.stickies carries
+    // richer view fields (body/type/author/status, resolved server-side at
+    // page load for rendering) that must never round-trip back into a
+    // save: strip each sticky down to just what the schema accepts.
+    var payload = {
+      pins: state.pins,
+      stickies: state.stickies.map(function (s) {
+        return { id: s.id, x: s.x, y: s.y };
+      }),
+      yarn: state.yarn,
+    };
     fetch("/board/" + encodeURIComponent(boardKey) + "/autosave", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

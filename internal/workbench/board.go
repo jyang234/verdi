@@ -194,7 +194,12 @@ func boardPageBody(state boardClientState) string {
 	b.WriteString(`</ul></section>`)
 
 	b.WriteString(`<section class="commit-to-design"><h2>Commit to design</h2>` +
-		`<form id="commit-form"><label>Spec name <input id="commit-name" name="name" required></label> ` +
+		// No HTML5 `required` here: an empty name must exercise the
+		// SERVER's own validation (boardCommitHandler's "name is
+		// required" 400), the same negative path a non-browser API
+		// client would hit — browser-native validation would silently
+		// swallow that test case before any request is even sent.
+		`<form id="commit-form"><label>Spec name <input id="commit-name" name="name"></label> ` +
 		`<label>Story ref (optional) <input id="commit-story-ref" name="story_ref"></label> ` +
 		`<button type="submit">Commit to design</button></form>` +
 		`<div id="commit-result"></div></section>`)
