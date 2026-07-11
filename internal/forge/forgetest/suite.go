@@ -34,6 +34,140 @@ func Run(t *testing.T, newHarness func(t *testing.T) Harness) {
 	t.Run("fetch file at ref not found", func(t *testing.T) {
 		testFetchFileAtRefNotFound(t, newHarness(t))
 	})
+	t.Run("post comment round-trips byte-identical", func(t *testing.T) {
+		testPostCommentByteIdenticalRoundTrip(t, newHarness(t))
+	})
+	t.Run("list comments never drops anchored or unanchored", func(t *testing.T) {
+		testListCommentsAnchoredAndUnanchoredNeverDropped(t, newHarness(t))
+	})
+	t.Run("thread resolution matches native state", func(t *testing.T) {
+		testGetThreadResolutionMatchesNativeState(t, newHarness(t))
+	})
+	t.Run("thread resolution unresolved by default", func(t *testing.T) {
+		testGetThreadResolutionUnresolvedByDefault(t, newHarness(t))
+	})
+	t.Run("thread resolution excludes general comments", func(t *testing.T) {
+		testGetThreadResolutionExcludesGeneralComments(t, newHarness(t))
+	})
+}
+
+// testPostCommentByteIdenticalRoundTrip proves a posted token-bearing
+// diff comment's Body survives byte-identical when re-listed (S6 Q3,
+// live-verified on GitHub across post/resolve/push/force-push; exit
+// criteria: "a posted token-bearing comment round-trips byte-identical in
+// the comment body").
+func testPostCommentByteIdenticalRoundTrip(t *testing.T, h Harness) {
+	t.Helper()
+	body := "[vd:ac-2] outcome AC reads implementation-scoped — reword?"
+	created, err := h.Forge().PostComment(context.Background(), "1", body, &forge.CommentTarget{Path: "sample.py", Line: 9})
+	if err != nil {
+		t.Fatalf("PostComment: %v", err)
+	}
+	if created.Body != body {
+		t.Fatalf("PostComment returned Body = %q, want %q", created.Body, body)
+	}
+
+	comments, err := h.Forge().ListComments(context.Background(), "1")
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	var found *forge.Comment
+	for i := range comments {
+		if comments[i].ID == created.ID {
+			found = &comments[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("ListComments did not include the just-posted comment %q: %+v", created.ID, comments)
+	}
+	if found.Body != body {
+		t.Errorf("re-listed Body = %q, want byte-identical %q (S6 Q3)", found.Body, body)
+	}
+	id, ok := forge.ParseCommentToken(found.Body)
+	if !ok || id != "ac-2" {
+		t.Errorf(`ParseCommentToken(re-listed body) = (%q, %v), want ("ac-2", true)`, id, ok)
+	}
+}
+
+// testListCommentsAnchoredAndUnanchoredNeverDropped proves ListComments
+// returns both a token-bearing (anchored) and a token-free (unanchored)
+// comment in the same feed — the inbox tray's never-dropped guarantee
+// starts at the port (05 §Review stickies and forge round-trip).
+func testListCommentsAnchoredAndUnanchoredNeverDropped(t *testing.T, h Harness) {
+	t.Helper()
+	h.SeedComment(t, "2", forge.Comment{ID: "c1", ThreadID: "t1", Body: "[vd:ac-2] outcome AC reads implementation-scoped — reword?", Author: "reviewer"})
+	h.SeedComment(t, "2", forge.Comment{ID: "c2", Body: "nit: this comment has no vd token, should land in the inbox tray", Author: "reviewer"})
+
+	comments, err := h.Forge().ListComments(context.Background(), "2")
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("ListComments returned %d comments, want 2 (both anchored and unanchored, never dropped): %+v", len(comments), comments)
+	}
+	var sawAnchored, sawUnanchored bool
+	for _, c := range comments {
+		if _, ok := forge.ParseCommentToken(c.Body); ok {
+			sawAnchored = true
+		} else {
+			sawUnanchored = true
+		}
+	}
+	if !sawAnchored || !sawUnanchored {
+		t.Errorf("ListComments = %+v, want both a token-bearing and a token-free comment present", comments)
+	}
+}
+
+// testGetThreadResolutionMatchesNativeState proves a resolved thread's
+// state is reported accurately, including who resolved it.
+func testGetThreadResolutionMatchesNativeState(t *testing.T, h Harness) {
+	t.Helper()
+	h.SeedComment(t, "3", forge.Comment{ID: "c1", ThreadID: "t1", Body: "[vd:ac-2] reword?"})
+	h.SeedThreadResolution(t, "3", forge.ThreadResolution{ThreadID: "t1", Resolved: true, ResolvedBy: "reviewer"})
+
+	threads, err := h.Forge().GetThreadResolution(context.Background(), "3")
+	if err != nil {
+		t.Fatalf("GetThreadResolution: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("GetThreadResolution = %+v, want exactly 1 entry", threads)
+	}
+	if !threads[0].Resolved || threads[0].ResolvedBy != "reviewer" {
+		t.Errorf("GetThreadResolution[0] = %+v, want Resolved=true ResolvedBy=\"reviewer\"", threads[0])
+	}
+}
+
+// testGetThreadResolutionUnresolvedByDefault proves a freshly seeded
+// diff-anchored thread starts unresolved — matching both real forges,
+// where a new thread is never born resolved.
+func testGetThreadResolutionUnresolvedByDefault(t *testing.T, h Harness) {
+	t.Helper()
+	h.SeedComment(t, "4", forge.Comment{ID: "c1", ThreadID: "t1", Body: "[vd:ac-2] reword?"})
+
+	threads, err := h.Forge().GetThreadResolution(context.Background(), "4")
+	if err != nil {
+		t.Fatalf("GetThreadResolution: %v", err)
+	}
+	if len(threads) != 1 || threads[0].Resolved {
+		t.Fatalf("GetThreadResolution = %+v, want exactly 1 unresolved entry", threads)
+	}
+}
+
+// testGetThreadResolutionExcludesGeneralComments proves a general
+// (non-diff) comment — ThreadID "" — never appears in
+// GetThreadResolution: it belongs to no substantive/resolvable thread at
+// all (05's "substantive" — comments.go's ThreadResolution doc comment).
+func testGetThreadResolutionExcludesGeneralComments(t *testing.T, h Harness) {
+	t.Helper()
+	h.SeedComment(t, "5", forge.Comment{ID: "c1", Body: "General PR conversation comment, not tied to a diff line at all."})
+
+	threads, err := h.Forge().GetThreadResolution(context.Background(), "5")
+	if err != nil {
+		t.Fatalf("GetThreadResolution: %v", err)
+	}
+	if len(threads) != 0 {
+		t.Fatalf("GetThreadResolution = %+v, want none (a general/individual comment belongs to no resolvable thread)", threads)
+	}
 }
 
 func testFetchHappyPath(t *testing.T, h Harness) {

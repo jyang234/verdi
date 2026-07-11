@@ -30,4 +30,16 @@ type Harness interface {
 	// SeedFile arranges for FetchFileAtRef(ref, path) to succeed with
 	// content.
 	SeedFile(t *testing.T, ref, path string, content []byte)
+	// SeedComment arranges for ListComments(mrID) to include c already
+	// present (V1-P7's comment-round-trip extension, comments.go). If
+	// c.ThreadID is non-empty, an unresolved ThreadResolution for it must
+	// also become visible via GetThreadResolution unless
+	// SeedThreadResolution overrides it — mirroring both real forges,
+	// where a diff-anchored comment always belongs to a thread that
+	// exists (unresolved) from the moment it is created.
+	SeedComment(t *testing.T, mrID string, c forge.Comment)
+	// SeedThreadResolution arranges for GetThreadResolution(mrID) to
+	// report tr for tr.ThreadID, overriding any auto-created entry from
+	// SeedComment.
+	SeedThreadResolution(t *testing.T, mrID string, tr forge.ThreadResolution)
 }

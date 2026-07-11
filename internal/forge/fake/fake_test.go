@@ -30,6 +30,16 @@ func (h harness) SeedFile(t *testing.T, ref, path string, content []byte) {
 	h.f.SeedFile(ref, path, content)
 }
 
+func (h harness) SeedComment(t *testing.T, mrID string, c forge.Comment) {
+	t.Helper()
+	h.f.SeedComment(mrID, c)
+}
+
+func (h harness) SeedThreadResolution(t *testing.T, mrID string, tr forge.ThreadResolution) {
+	t.Helper()
+	h.f.SeedThreadResolution(mrID, tr)
+}
+
 // TestFake_ContractSuite proves the fake satisfies the same behavioral
 // contract the gitlab and github adapters must (04 §Testing's pattern).
 func TestFake_ContractSuite(t *testing.T) {
@@ -67,6 +77,15 @@ func TestForge_Negative_CancelledContext(t *testing.T) {
 	}
 	if _, err := f.FetchFileAtRef(ctx, "main", "path"); err == nil {
 		t.Fatal("FetchFileAtRef with cancelled context: want error, got nil")
+	}
+	if _, err := f.ListComments(ctx, "mr-1"); err == nil {
+		t.Fatal("ListComments with cancelled context: want error, got nil")
+	}
+	if _, err := f.PostComment(ctx, "mr-1", "body", nil); err == nil {
+		t.Fatal("PostComment with cancelled context: want error, got nil")
+	}
+	if _, err := f.GetThreadResolution(ctx, "mr-1"); err == nil {
+		t.Fatal("GetThreadResolution with cancelled context: want error, got nil")
 	}
 }
 

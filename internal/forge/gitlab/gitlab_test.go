@@ -7,9 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/OWNER/verdi/internal/forge"
@@ -54,6 +56,11 @@ type fakeGitLabServer struct {
 	// filesByRef holds seeded file content keyed by ref then path.
 	filesByRef map[string]map[string][]byte
 	nextMRIID  int64
+
+	// discussions is keyed by mrID (IID, string-rendered) — the V1-P7
+	// comment-round-trip extension.
+	discussions map[string][]discussionJSON
+	nextNoteID  int64
 }
 
 func newHarnessForTest(t *testing.T) *harness {
@@ -64,6 +71,8 @@ func newHarnessForTest(t *testing.T) *harness {
 		mrsByTarget: map[string][]mergeRequestJSON{},
 		filesByRef:  map[string]map[string][]byte{},
 		nextMRIID:   1,
+		discussions: map[string][]discussionJSON{},
+		nextNoteID:  1000,
 	}
 	nextPipeID := int64(1)
 
@@ -118,6 +127,51 @@ func newHarnessForTest(t *testing.T) *harness {
 		}
 		w.WriteHeader(http.StatusNotFound)
 	})
+	// /projects/42/merge_requests/{iid} (bare -> diff_refs) and
+	// /projects/42/merge_requests/{iid}/discussions (list/post) — V1-P7's
+	// comment-round-trip extension (DOC-DERIVED shapes — see gitlab.go's
+	// package doc note).
+	mux.HandleFunc("/projects/42/merge_requests/", func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/projects/42/merge_requests/"
+		rest := r.URL.Path[len(prefix):]
+		parts := strings.SplitN(rest, "/", 2)
+		mrID := parts[0]
+		if len(parts) == 2 && parts[1] == "discussions" {
+			switch r.Method {
+			case http.MethodGet:
+				_ = json.NewEncoder(w).Encode(srv.discussions[mrID])
+			case http.MethodPost:
+				var req createDiscussionRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				srv.nextNoteID++
+				id := srv.nextNoteID
+				n := noteJSON{ID: id, Body: req.Body, CreatedAt: "2026-07-11T18:00:00.000Z"}
+				n.Author.Username = "fake-poster"
+				d := discussionJSON{ID: fmt.Sprintf("disc-fake-%d", id)}
+				if req.Position != nil {
+					n.Resolvable = true
+					line := req.Position.NewLine
+					n.Position = &notePositionJSON{
+						NewPath: req.Position.NewPath, NewLine: &line,
+						BaseSHA: req.Position.BaseSHA, StartSHA: req.Position.StartSHA, HeadSHA: req.Position.HeadSHA,
+						PositionType: req.Position.PositionType,
+					}
+				} else {
+					d.IndividualNote = true
+				}
+				d.Notes = []noteJSON{n}
+				srv.discussions[mrID] = append(srv.discussions[mrID], d)
+				_ = json.NewEncoder(w).Encode(d)
+			}
+			return
+		}
+		// Bare "{iid}": PostComment's diff_refs pre-fetch.
+		_ = json.NewEncoder(w).Encode(mrDiffRefsJSON{DiffRefs: struct {
+			BaseSHA  string `json:"base_sha"`
+			StartSHA string `json:"start_sha"`
+			HeadSHA  string `json:"head_sha"`
+		}{BaseSHA: "fake-base-sha", StartSHA: "fake-start-sha", HeadSHA: "fake-head-sha"}})
+	})
 
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -161,6 +215,68 @@ func (h *harness) SeedFile(t *testing.T, ref, path string, content []byte) {
 		h.srv.filesByRef[ref] = map[string][]byte{}
 	}
 	h.srv.filesByRef[ref][path] = content
+}
+
+// SeedComment arranges for ListComments(mrID) to already include c: a
+// ThreadID-carrying comment becomes a resolvable DiffNote inside its own
+// (or an existing) discussion; a ThreadID-less comment becomes its own
+// individual_note:true discussion — mirroring how
+// ListComments/GetThreadResolution themselves classify GitLab's two note
+// kinds (gitlab.go's ListComments doc comment; DOC-DERIVED shapes).
+func (h *harness) SeedComment(t *testing.T, mrID string, c forge.Comment) {
+	t.Helper()
+	h.srv.nextNoteID++
+	id := h.srv.nextNoteID
+	n := noteJSON{ID: id, Body: c.Body, CreatedAt: c.CreatedAt, Resolvable: c.ThreadID != ""}
+	n.Author.Username = c.Author
+	if c.Path != "" {
+		line := c.Line
+		n.Position = &notePositionJSON{NewPath: c.Path, NewLine: &line}
+	}
+
+	if c.ThreadID == "" {
+		h.srv.discussions[mrID] = append(h.srv.discussions[mrID], discussionJSON{
+			ID: fmt.Sprintf("disc-individual-%d", id), IndividualNote: true, Notes: []noteJSON{n},
+		})
+		return
+	}
+	for i := range h.srv.discussions[mrID] {
+		if h.srv.discussions[mrID][i].ID == c.ThreadID {
+			h.srv.discussions[mrID][i].Notes = append(h.srv.discussions[mrID][i].Notes, n)
+			return
+		}
+	}
+	h.srv.discussions[mrID] = append(h.srv.discussions[mrID], discussionJSON{ID: c.ThreadID, Notes: []noteJSON{n}})
+}
+
+// SeedThreadResolution sets threadID's resolution state on every note in
+// its discussion (GitLab mirrors resolution across every note in a
+// discussion per docs), creating the discussion if SeedComment has not
+// already.
+func (h *harness) SeedThreadResolution(t *testing.T, mrID string, tr forge.ThreadResolution) {
+	t.Helper()
+	var resolvedBy *struct {
+		Username string `json:"username"`
+	}
+	if tr.ResolvedBy != "" {
+		resolvedBy = &struct {
+			Username string `json:"username"`
+		}{Username: tr.ResolvedBy}
+	}
+	for i := range h.srv.discussions[mrID] {
+		if h.srv.discussions[mrID][i].ID != tr.ThreadID {
+			continue
+		}
+		for j := range h.srv.discussions[mrID][i].Notes {
+			h.srv.discussions[mrID][i].Notes[j].Resolvable = true
+			h.srv.discussions[mrID][i].Notes[j].Resolved = tr.Resolved
+			h.srv.discussions[mrID][i].Notes[j].ResolvedBy = resolvedBy
+		}
+		return
+	}
+	h.srv.nextNoteID++
+	n := noteJSON{ID: h.srv.nextNoteID, Resolvable: true, Resolved: tr.Resolved, ResolvedBy: resolvedBy}
+	h.srv.discussions[mrID] = append(h.srv.discussions[mrID], discussionJSON{ID: tr.ThreadID, Notes: []noteJSON{n}})
 }
 
 // TestGitLab_ContractSuite proves the GitLab adapter satisfies the forge

@@ -21,16 +21,23 @@ type Forge struct {
 	ci        forge.CIInfo
 	openMRs   map[string][]forge.OpenMR    // targetBranch -> open MRs
 	files     map[string]map[string][]byte // branch -> path -> content
+
+	comments   map[string][]forge.Comment          // mrID -> comment feed
+	threads    map[string][]forge.ThreadResolution // mrID -> thread resolutions
+	nextCommID int
 }
 
 // New returns an empty Forge: no bundles seeded, GeneratedAttribute
 // returns "fake-generated", CIContext returns a zero CIInfo, no open MRs.
 func New() *Forge {
 	return &Forge{
-		bundles:   make(map[string]forge.EvidenceBundle),
-		attribute: "fake-generated",
-		openMRs:   make(map[string][]forge.OpenMR),
-		files:     make(map[string]map[string][]byte),
+		bundles:    make(map[string]forge.EvidenceBundle),
+		attribute:  "fake-generated",
+		openMRs:    make(map[string][]forge.OpenMR),
+		files:      make(map[string]map[string][]byte),
+		comments:   make(map[string][]forge.Comment),
+		threads:    make(map[string][]forge.ThreadResolution),
+		nextCommID: 1,
 	}
 }
 
@@ -137,6 +144,92 @@ func (f *Forge) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, e
 		return nil, fmt.Errorf("fake: no file %q seeded at ref %q: %w", path, ref, forge.ErrFileNotFound)
 	}
 	return content, nil
+}
+
+// SeedComment registers c as already present in mrID's comment feed
+// (ListComments). If c.ThreadID is non-empty and no ThreadResolution has
+// been seeded for it yet, an unresolved entry is created automatically —
+// mirroring both real forges, where a diff-anchored comment always
+// belongs to a thread that exists (unresolved) from the moment it is
+// created.
+func (f *Forge) SeedComment(mrID string, c forge.Comment) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.comments[mrID] = append(f.comments[mrID], c)
+	if c.ThreadID == "" {
+		return
+	}
+	for _, tr := range f.threads[mrID] {
+		if tr.ThreadID == c.ThreadID {
+			return
+		}
+	}
+	f.threads[mrID] = append(f.threads[mrID], forge.ThreadResolution{ThreadID: c.ThreadID})
+}
+
+// SeedThreadResolution sets threadID's resolution state on mrID directly
+// (overwriting any auto-created entry from SeedComment).
+func (f *Forge) SeedThreadResolution(mrID string, tr forge.ThreadResolution) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, existing := range f.threads[mrID] {
+		if existing.ThreadID == tr.ThreadID {
+			f.threads[mrID][i] = tr
+			return
+		}
+	}
+	f.threads[mrID] = append(f.threads[mrID], tr)
+}
+
+// ListComments implements forge.Forge: the full seeded feed for mrID,
+// unfiltered (never dropping an unanchored comment — 05 §Review stickies
+// and forge round-trip's inbox-tray guarantee starts at the port).
+func (f *Forge) ListComments(ctx context.Context, mrID string) ([]forge.Comment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	out := make([]forge.Comment, len(f.comments[mrID]))
+	copy(out, f.comments[mrID])
+	return out, nil
+}
+
+// PostComment implements forge.Forge: appends a new comment (general if
+// target is nil, diff-anchored — and belonging to a freshly minted,
+// unresolved thread — otherwise) and returns it.
+func (f *Forge) PostComment(ctx context.Context, mrID, body string, target *forge.CommentTarget) (forge.Comment, error) {
+	if err := ctx.Err(); err != nil {
+		return forge.Comment{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	id := fmt.Sprintf("fake-comment-%d", f.nextCommID)
+	f.nextCommID++
+	c := forge.Comment{ID: id, Body: body, Author: "fake-user"}
+	if target != nil {
+		c.Path = target.Path
+		c.Line = target.Line
+		c.ThreadID = "fake-thread-" + id
+		f.threads[mrID] = append(f.threads[mrID], forge.ThreadResolution{ThreadID: c.ThreadID})
+	}
+	f.comments[mrID] = append(f.comments[mrID], c)
+	return c, nil
+}
+
+// GetThreadResolution implements forge.Forge.
+func (f *Forge) GetThreadResolution(ctx context.Context, mrID string) ([]forge.ThreadResolution, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	out := make([]forge.ThreadResolution, len(f.threads[mrID]))
+	copy(out, f.threads[mrID])
+	return out, nil
 }
 
 var _ forge.Forge = (*Forge)(nil)

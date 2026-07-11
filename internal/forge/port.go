@@ -71,6 +71,26 @@ type Forge interface {
 	// candidate spec path at all; callers distinguish that case from a
 	// real transport error via errors.Is(err, ErrFileNotFound).
 	FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error)
+
+	// ListComments returns mrID's full comment feed — diff-anchored and
+	// general/thread comments merged into one list (comments.go's doc
+	// comment; 05 §Review stickies and forge round-trip: "the board pulls
+	// the MR's full comment feed on every render"). Unfiltered: every
+	// comment is returned regardless of whether its body carries a
+	// resolvable [vd:<object-id>] token — classification into
+	// anchored-vs-unanchored (the inbox tray split) is the caller's job
+	// (ParseCommentToken, token.go), never dropped here.
+	ListComments(ctx context.Context, mrID string) ([]Comment, error)
+	// PostComment posts body as a new comment on mrID, anchored to target
+	// if non-nil (a diff line) or as a general/thread comment if nil.
+	// Returns the created Comment as the forge reports it back.
+	PostComment(ctx context.Context, mrID, body string, target *CommentTarget) (Comment, error)
+	// GetThreadResolution returns one entry per SUBSTANTIVE thread on
+	// mrID — a thread the forge itself treats as resolvable (comments.go's
+	// doc comment operationalizes 05's "substantive"). Threads with no
+	// resolution concept at all (a general/individual comment) never
+	// appear here, only in ListComments.
+	GetThreadResolution(ctx context.Context, mrID string) ([]ThreadResolution, error)
 }
 
 // ErrFileNotFound is returned, wrapped, by FetchFileAtRef when path does

@@ -5,6 +5,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -188,6 +189,34 @@ func (a *Adapter) setAuth(req *http.Request) {
 	}
 }
 
+// postJSON mirrors getJSON for the write direction: encode body as the
+// JSON request payload, decode the response into out.
+func (a *Adapter) postJSON(ctx context.Context, url string, body, out interface{}) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("github: encoding request body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("github: building request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	a.setAuth(req)
+
+	resp, err := a.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("github: POST %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("github: POST %s: unexpected status %s", url, resp.Status)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("github: decoding response from %s: %w", url, err)
+	}
+	return nil
+}
+
 // pullRequestJSON is the subset of GitHub's pull request object
 // ListOpenMRs needs (GitHub API: "List pull requests").
 type pullRequestJSON struct {
@@ -257,6 +286,259 @@ func (a *Adapter) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte,
 		return nil, fmt.Errorf("github: decoding base64 content for %q at ref %q: %w", path, ref, err)
 	}
 	return data, nil
+}
+
+// reviewCommentJSON is the subset of GitHub's diff-anchored PR review
+// comment object (REST `pulls/comments`, S6 capture
+// `github/01-list-review-comments-REST.json`) ListComments/PostComment
+// need. Line is a pointer because GitHub nulls it once a force-push
+// breaks the original commit's ancestry (S6 Q4, capture
+// `09-...-after-force-push.json`).
+type reviewCommentJSON struct {
+	ID   int64  `json:"id"`
+	Body string `json:"body"`
+	Path string `json:"path"`
+	Line *int   `json:"line"`
+	User struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	CreatedAt string `json:"created_at"`
+}
+
+// issueCommentJSON is the subset of GitHub's general (non-diff) PR
+// conversation comment object (REST `issues/comments`, S6 capture
+// `github/02-list-issue-comments-REST.json`) ListComments/PostComment
+// need — no path/line at all, the "two comment universes" finding
+// (comments.go's package doc).
+type issueCommentJSON struct {
+	ID   int64  `json:"id"`
+	Body string `json:"body"`
+	User struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	CreatedAt string `json:"created_at"`
+}
+
+// reviewThreadsQuery is the GraphQL query resolution state requires (S6
+// Q2, live-verified: "isResolved... exist only via the GraphQL
+// reviewThreads query"; capture `github/03-review-threads-GraphQL-before-resolve.json`).
+// databaseId lets the REST-sourced diff comments above (ListComments) be
+// grouped into the same threads this query reports resolution for,
+// without ListComments itself depending on GraphQL for body/author/path —
+// only for the thread-id/resolution join.
+const reviewThreadsQuery = `query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          resolvedBy { login }
+          comments(first: 100) {
+            nodes { databaseId }
+          }
+        }
+      }
+    }
+  }
+}`
+
+type graphQLRequest struct {
+	Query     string         `json:"query"`
+	Variables map[string]any `json:"variables"`
+}
+
+type graphQLError struct {
+	Message string `json:"message"`
+}
+
+type reviewThreadNode struct {
+	ID         string `json:"id"`
+	IsResolved bool   `json:"isResolved"`
+	ResolvedBy *struct {
+		Login string `json:"login"`
+	} `json:"resolvedBy"`
+	Comments struct {
+		Nodes []struct {
+			DatabaseID int64 `json:"databaseId"`
+		} `json:"nodes"`
+	} `json:"comments"`
+}
+
+type reviewThreadsResponse struct {
+	Data struct {
+		Repository struct {
+			PullRequest struct {
+				ReviewThreads struct {
+					Nodes []reviewThreadNode `json:"nodes"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
+	Errors []graphQLError `json:"errors"`
+}
+
+// fetchReviewThreads runs reviewThreadsQuery against GitHub's GraphQL v4
+// endpoint (BaseURL + "/graphql" — the real API serves GraphQL on the same
+// host as REST, at a fixed sibling path, so no separate config knob is
+// needed; httptest doubles serve it from the same mux). Shared by
+// ListComments (thread-id grouping only) and GetThreadResolution (full
+// resolution state) — one query, two consumers, no duplicated transport
+// code (CLAUDE.md).
+func (a *Adapter) fetchReviewThreads(ctx context.Context, mrID string) ([]reviewThreadNode, error) {
+	number, err := strconv.Atoi(mrID)
+	if err != nil {
+		return nil, fmt.Errorf("github: mrID %q is not a PR number: %w", mrID, err)
+	}
+	reqBody := graphQLRequest{
+		Query:     reviewThreadsQuery,
+		Variables: map[string]any{"owner": a.cfg.Owner, "repo": a.cfg.Repo, "number": number},
+	}
+	var parsed reviewThreadsResponse
+	if err := a.postJSON(ctx, a.cfg.BaseURL+"/graphql", reqBody, &parsed); err != nil {
+		return nil, fmt.Errorf("github: GraphQL reviewThreads query: %w", err)
+	}
+	if len(parsed.Errors) > 0 {
+		return nil, fmt.Errorf("github: GraphQL reviewThreads query failed: %s", parsed.Errors[0].Message)
+	}
+	return parsed.Data.Repository.PullRequest.ReviewThreads.Nodes, nil
+}
+
+// ListComments implements forge.Forge: merges GitHub's two comment
+// universes (S6 finding) — diff-anchored REST `pulls/{mrID}/comments` and
+// general REST `issues/{mrID}/comments` — into one feed, joining each diff
+// comment to its GraphQL thread id (fetchReviewThreads) so
+// GetThreadResolution's entries can be matched back to it. General
+// comments carry no thread id at all (ThreadID stays "") — GitHub's model
+// has no resolution concept for them.
+func (a *Adapter) ListComments(ctx context.Context, mrID string) ([]forge.Comment, error) {
+	var diff []reviewCommentJSON
+	diffURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%s/comments", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, mrID)
+	if err := a.getJSON(ctx, diffURL, &diff); err != nil {
+		return nil, err
+	}
+	var general []issueCommentJSON
+	generalURL := fmt.Sprintf("%s/repos/%s/%s/issues/%s/comments", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, mrID)
+	if err := a.getJSON(ctx, generalURL, &general); err != nil {
+		return nil, err
+	}
+
+	threadByDBID := make(map[int64]string)
+	if len(diff) > 0 {
+		threads, err := a.fetchReviewThreads(ctx, mrID)
+		if err != nil {
+			return nil, err
+		}
+		for _, th := range threads {
+			for _, c := range th.Comments.Nodes {
+				threadByDBID[c.DatabaseID] = th.ID
+			}
+		}
+	}
+
+	out := make([]forge.Comment, 0, len(diff)+len(general))
+	for _, c := range diff {
+		line := 0
+		if c.Line != nil {
+			line = *c.Line
+		}
+		out = append(out, forge.Comment{
+			ID: strconv.FormatInt(c.ID, 10), ThreadID: threadByDBID[c.ID], Body: c.Body,
+			Author: c.User.Login, CreatedAt: c.CreatedAt, Path: c.Path, Line: line,
+		})
+	}
+	for _, c := range general {
+		out = append(out, forge.Comment{
+			ID: strconv.FormatInt(c.ID, 10), Body: c.Body, Author: c.User.Login, CreatedAt: c.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+// GetThreadResolution implements forge.Forge: GitHub's resolution state,
+// GraphQL-only (S6 Q2, live-verified) — REST carries no resolution field
+// whatsoever. Every reviewThreads node IS a substantive thread by
+// GitHub's own model (there is no unresolvable-diff-thread concept), so
+// every node fetchReviewThreads returns becomes one entry here.
+func (a *Adapter) GetThreadResolution(ctx context.Context, mrID string) ([]forge.ThreadResolution, error) {
+	threads, err := a.fetchReviewThreads(ctx, mrID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]forge.ThreadResolution, len(threads))
+	for i, th := range threads {
+		tr := forge.ThreadResolution{ThreadID: th.ID, Resolved: th.IsResolved}
+		if th.ResolvedBy != nil {
+			tr.ResolvedBy = th.ResolvedBy.Login
+		}
+		out[i] = tr
+	}
+	return out, nil
+}
+
+// createReviewCommentRequest is the POST body `pulls/{mrID}/comments`
+// requires: body plus the head commit sha, path, line, and side (S6 Q1:
+// "Posting requires body, commit_id (head sha), path, line").
+type createReviewCommentRequest struct {
+	Body     string `json:"body"`
+	CommitID string `json:"commit_id"`
+	Path     string `json:"path"`
+	Line     int    `json:"line"`
+	Side     string `json:"side"`
+}
+
+type createIssueCommentRequest struct {
+	Body string `json:"body"`
+}
+
+// pullHeadJSON is the subset of GitHub's pull request object PostComment
+// needs to learn the head sha `commit_id` requires.
+type pullHeadJSON struct {
+	Head struct {
+		SHA string `json:"sha"`
+	} `json:"head"`
+}
+
+// PostComment implements forge.Forge: a diff-anchored comment (target !=
+// nil) via `pulls/{mrID}/comments`, or a general comment (target == nil)
+// via `issues/{mrID}/comments`. KNOWN SIMPLIFICATION: a freshly posted
+// diff comment's ThreadID is left "" — GitHub's REST create response
+// carries no GraphQL thread id, and minting one would require a second
+// GraphQL round-trip whose result (a brand-new, always-unresolved thread)
+// no caller in this phase's scope needs immediately after posting; a
+// caller that needs the thread id re-lists via ListComments, which joins
+// it from fetchReviewThreads as usual.
+func (a *Adapter) PostComment(ctx context.Context, mrID, body string, target *forge.CommentTarget) (forge.Comment, error) {
+	if target == nil {
+		return a.postIssueComment(ctx, mrID, body)
+	}
+	return a.postReviewComment(ctx, mrID, body, *target)
+}
+
+func (a *Adapter) postReviewComment(ctx context.Context, mrID, body string, target forge.CommentTarget) (forge.Comment, error) {
+	var pr pullHeadJSON
+	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%s", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, mrID)
+	if err := a.getJSON(ctx, prURL, &pr); err != nil {
+		return forge.Comment{}, fmt.Errorf("github: resolving PR head sha to post a review comment: %w", err)
+	}
+
+	reqBody := createReviewCommentRequest{Body: body, CommitID: pr.Head.SHA, Path: target.Path, Line: target.Line, Side: "RIGHT"}
+	var created reviewCommentJSON
+	postURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%s/comments", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, mrID)
+	if err := a.postJSON(ctx, postURL, reqBody, &created); err != nil {
+		return forge.Comment{}, err
+	}
+	return forge.Comment{ID: strconv.FormatInt(created.ID, 10), Body: created.Body, Author: created.User.Login, CreatedAt: created.CreatedAt, Path: created.Path, Line: target.Line}, nil
+}
+
+func (a *Adapter) postIssueComment(ctx context.Context, mrID, body string) (forge.Comment, error) {
+	reqBody := createIssueCommentRequest{Body: body}
+	var created issueCommentJSON
+	postURL := fmt.Sprintf("%s/repos/%s/%s/issues/%s/comments", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, mrID)
+	if err := a.postJSON(ctx, postURL, reqBody, &created); err != nil {
+		return forge.Comment{}, err
+	}
+	return forge.Comment{ID: strconv.FormatInt(created.ID, 10), Body: created.Body, Author: created.User.Login, CreatedAt: created.CreatedAt}, nil
 }
 
 // GeneratedAttribute implements forge.Forge (02 §Repository plumbing,
