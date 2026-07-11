@@ -201,7 +201,74 @@ This table attributes the load-bearing ones to the component that embodies them.
 
 ---
 
-## 4. The story lifecycle, end to end
+## 4. The murder board, up close
+
+The board is where design happens *before there is a spec* — and its defining
+design decision is what it refuses to be: **a spatial lens over existing
+primitives, never a storage system**. Every element you manipulate on the board
+is a view of something that already has an identity and a home:
+
+| On the board | Is actually | Lives in |
+|---|---|---|
+| card | a pinned ref — a context-manifest entry in waiting; on commit it becomes the spec's `context:` | board state (position only) |
+| sticky | an annotation record (`a-<ULID>`): comment, question, decision-needed, or agent-task. A free-floating sticky with no target is the *normal early state* of a murder board (I-34 gives board-only stickies their own file) | `mutable/annotations/*.jsonl`, append-only |
+| yarn | a proto-link `{from, to, label}` — deliberately untyped; committing to a link *type* is design work that happens at commit-to-design, not while thinking | board state |
+| position | x/y coordinates — the only genuinely new datum the board introduces | `mutable/boards/<key>.json`, autosaved atomically, never committed per drag |
+
+Because nothing on the board is "board data," nothing can rot separately:
+abandon the board and the annotations remain queryable; commit it and they
+graduate. The mutable zone is one developer's working state — **sharing is
+committing**, and there is deliberately no sync mechanism. Agents participate
+as first-class board users through MCP: they leave stickies with the one write
+tool (`add_annotation`) and pull `agent-task` stickies off the board with
+`list_tasks` — and the single-writer discipline (one `serve` process, lock +
+socket) means the human dragging stickies and the agent appending them never
+race.
+
+Targeted stickies pin to a commit. As the tree moves underneath them, drift is
+computed three-valued — **fresh** (anchor resolves), **moved** (exact quote
+found elsewhere), **gone** — and displayed, never silently healed (I-17). A
+sticky that lost its anchor tells you so; it doesn't quietly reattach to the
+wrong paragraph.
+
+**The exit is the whole point.** Commit-to-design turns a wall of thinking into
+a draft spec under a three-layer guarantee, each layer covering the one above:
+
+1. **The mechanical half** (the binary, deterministic — I-20): the draft spec
+   skeleton, the frozen `board.json` snapshot (one frame, not a drag history;
+   digest over canonical JSON of {pins, stickies, yarn} — I-39), and a
+   `dispositions:` block listing *every* sticky as `open-question` — legal,
+   honest, and lint-passing before any judgment happens.
+2. **The skill** (LLM, out of the binary): promotes yarn to typed
+   `links[]`/`declares:` entries or prose, and upgrades each disposition to
+   `incorporated` (with a `where` anchor) or `contradicted` (with a reason).
+3. **VL-014** (lint, the deterministic backstop): bidirectional
+   sticky↔disposition completeness, per-value required fields, and resolving
+   anchors — the skill's promise is enforced by a gate, not by model behavior.
+
+Stickies then graduate (`status: graduated`); the board state dies with the
+design branch; the frozen `board.json` rides in the spec's directory forever,
+into the archived quartet.
+
+```mermaid
+flowchart LR
+    subgraph board ["The board (mutable zone)"]
+        CARD["cards = pinned refs"]
+        STICKY["stickies = a-ULID annotations<br/><i>incl. agent-task via MCP</i>"]
+        YARN["yarn = {from, to, label}"]
+        POS["positions — autosave only"]
+    end
+    MECH["1 · mechanical half<br/><i>binary, deterministic:<br/>spec skeleton · frozen board.json ·<br/>every sticky → open-question</i>"]
+    SKILL["2 · the skill<br/><i>LLM: yarn → typed links/declares ·<br/>dispositions upgraded</i>"]
+    GATE{"3 · VL-014<br/>bidirectional · where/note ·<br/>anchors resolve"}
+    OUT["design branch:<br/>spec.md (draft) ·<br/>board.json (frozen, digest) ·<br/>dispositions complete"]
+    ACCEPT["verdi accept → spec MR<br/><i>merge = acceptance</i>"]
+    board -- "board commit" --> MECH --> SKILL --> GATE -- pass --> OUT --> ACCEPT
+```
+
+---
+
+## 5. The story lifecycle, end to end
 
 Diamonds are gates that can refuse: `feature start` refuses non-accepted specs,
 the spec MR is guarded by lint, and `verdi gate` holds implementation MRs to all
