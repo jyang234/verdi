@@ -41,8 +41,10 @@ func RegisterRoutes(mux *http.ServeMux, root string) {
 	mux.HandleFunc("/board/{key}/autosave", boardAutosaveHandler(root))
 	mux.HandleFunc("/board/{key}/commit", boardCommitHandler(root))
 
-	// Static assets: the vendored mermaid.min.js (shared with internal/dex
-	// — one copy in the binary) and the board's one JS file.
+	// Static assets: the composed stylesheet and vendored mermaid.min.js
+	// (both shared with internal/dex — one copy in the binary) and the
+	// board's one JS file.
+	mux.HandleFunc("/assets/style.css", styleCSSHandler())
 	mux.HandleFunc("/assets/mermaid.min.js", mermaidHandler())
 	mux.HandleFunc("/assets/board.js", boardJSHandler())
 }

@@ -126,6 +126,7 @@ var boardPageTemplate = template.Must(template.New("board").Parse(`<!doctype htm
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Board: {{.Key}} · verdi workbench</title>
+<link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
 <nav class="workbench-nav"><a href="/">workbench</a></nav>

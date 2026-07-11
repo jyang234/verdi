@@ -44,6 +44,7 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · verdi workbench</title>
+<link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
 <nav class="workbench-nav"><a href="/">workbench</a> {{.Nav}}</nav>
@@ -60,7 +61,7 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 {{.ExtraHTML}}
 </div>
 <script src="/assets/mermaid.min.js"></script>
-<script>mermaid.initialize({startOnLoad:true,securityLevel:"strict"});</script>
+<script>mermaid.initialize({startOnLoad:true,securityLevel:"strict",theme:window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"default"});</script>
 </body>
 </html>
 `))

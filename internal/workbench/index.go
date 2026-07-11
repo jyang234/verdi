@@ -24,7 +24,7 @@ func indexHandler(root string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, `<!doctype html>
-<html><head><title>verdi</title></head>
+<html><head><title>verdi</title><link rel="stylesheet" href="/assets/style.css"></head>
 <body>
 <h1>verdi serve</h1>
 <p>store root: <code>%s</code></p>
