@@ -1,0 +1,96 @@
+package artifact
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestLink_Validate_Happy(t *testing.T) {
+	cases := []Link{
+		{Type: LinkImplements, Ref: "spec/foo"},
+		{Type: LinkSupersedes, Ref: "adr/0001-old"},
+		{Type: LinkVerifies, Ref: "spec/foo"},
+		{Type: LinkDerivedFrom, Ref: "spec/foo"},
+		{Type: LinkAnnotates, Ref: "spec/foo"},
+		{Type: LinkDependsOn, Ref: "spec/foo"},
+		{Type: LinkImpacts, Ref: "spec/foo"},
+		{Type: LinkChallenges, Ref: "adr/0001-old"},
+		{Type: LinkStory, Ref: "jira:LOAN-1482"},
+	}
+	for _, l := range cases {
+		t.Run(string(l.Type), func(t *testing.T) {
+			if err := l.Validate(); err != nil {
+				t.Fatalf("Validate(%+v): %v", l, err)
+			}
+		})
+	}
+}
+
+func TestLink_Validate_Negative(t *testing.T) {
+	cases := []Link{
+		{Type: "bogus", Ref: "spec/foo"},
+		{Type: LinkImplements, Ref: ""},
+		{Type: LinkImplements, Ref: "not-a-ref"},
+		{Type: LinkStory, Ref: "spec/foo"},  // story must be scheme:key, not kind/name
+		{Type: LinkStory, Ref: "LOAN-1482"}, // missing scheme
+	}
+	for _, l := range cases {
+		t.Run(string(l.Type)+"/"+l.Ref, func(t *testing.T) {
+			if err := l.Validate(); err == nil {
+				t.Fatalf("Validate(%+v): want error, got nil", l)
+			}
+		})
+	}
+}
+
+func TestFrozen_Validate_Happy(t *testing.T) {
+	f := Frozen{At: "2026-05-14", Commit: "3e91ab2"}
+	if err := f.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestFrozen_Validate_Negative(t *testing.T) {
+	cases := []Frozen{
+		{At: "May 14 2026", Commit: "3e91ab2"},
+		{At: "2026-05-14", Commit: "not-hex"},
+		{At: "", Commit: "3e91ab2"},
+		{At: "2026-05-14", Commit: ""},
+	}
+	for _, f := range cases {
+		if err := f.Validate(); err == nil {
+			t.Fatalf("Validate(%+v): want error, got nil", f)
+		}
+	}
+}
+
+func TestProvenance_Validate_Happy(t *testing.T) {
+	cases := []Provenance{
+		{Generator: "verdi-close", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64},
+		{Generator: "align-judge", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Integrity: "sha256:" + hex64},
+		{Generator: "align", Version: "v0", Inputs: []string{".verdi/specs/active/foo/spec.md@3e91ab2"}, Digest: "sha256:" + hex64, Integrity: "sha256:" + hex64},
+	}
+	for _, p := range cases {
+		if err := p.Validate(); err != nil {
+			t.Fatalf("Validate(%+v): %v", p, err)
+		}
+	}
+}
+
+func TestProvenance_Validate_Negative(t *testing.T) {
+	cases := []Provenance{
+		{Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64},            // missing generator
+		{Generator: "g", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64},           // missing version
+		{Generator: "g", Version: "v0", Digest: "sha256:" + hex64},                                  // missing inputs
+		{Generator: "g", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}},                       // neither digest nor integrity
+		{Generator: "g", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "not-sha256"}, // malformed digest
+		{Generator: "g", Version: "v0", Inputs: []string{"nonsense"}, Digest: "sha256:" + hex64},    // malformed input
+	}
+	for i, p := range cases {
+		if err := p.Validate(); err == nil {
+			t.Fatalf("case %d Validate(%+v): want error, got nil", i, p)
+		}
+	}
+}
+
+var hex64 = strings.Repeat("ab", 32)
