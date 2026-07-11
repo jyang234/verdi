@@ -170,6 +170,32 @@ func TestBuild_Happy(t *testing.T) {
 		}
 	})
 
+	t.Run("diagram-kind page renders a mermaid block, not markdown prose", func(t *testing.T) {
+		// The fixture's diagram/loansvc-topology body is `graph TD\n  loansvc
+		// --> notification-svc ...`. Rendered through the markdown path (the
+		// user-reported defect) it collapsed into <p>graph TD loansvc --&gt;
+		// notification-svc ...</p>; it must instead be the bare
+		// <pre class="mermaid"> the vendored mermaid.js turns into an SVG.
+		page := readFile(t, outDir, "a/diagram/loansvc-topology/index.html")
+		if !strings.Contains(page, `<pre class="mermaid">`) {
+			t.Fatalf("diagram page missing the <pre class=\"mermaid\"> block; got:\n%s", page)
+		}
+		// The arrow must survive HTML-escaped inside the block (mermaid reads
+		// textContent), proving the source is preserved verbatim, not prose.
+		if !strings.Contains(page, "loansvc --&gt; notification-svc") {
+			t.Fatalf("diagram source not preserved verbatim in the mermaid block; got:\n%s", page)
+		}
+		// And the defect's markdown-collapsed form must be gone.
+		if strings.Contains(page, "<p>graph TD") {
+			t.Fatalf("diagram body must not be markdown-rendered into a <p>; got:\n%s", page)
+		}
+		// A page that carries a diagram must also load the mermaid client
+		// (the gating in the next commit keeps it off diagram-free pages).
+		if !strings.Contains(page, "/assets/mermaid.min.js") {
+			t.Fatalf("diagram page missing the mermaid client script; got:\n%s", page)
+		}
+	})
+
 	t.Run("JS file count is exactly 3", func(t *testing.T) {
 		count := 0
 		var found []string
