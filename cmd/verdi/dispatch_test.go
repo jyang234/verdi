@@ -8,24 +8,23 @@ import (
 
 // TestRun_KnownVerbs is the happy path: every spec-named verb still
 // stubbed at this phase parses and exits 2 with a one-line "not
-// implemented" message on stderr (I-7 for `gate`; the rest per 05 §CLI).
-// design/accept/feature graduated to real implementations in Phase 7 — see
+// implemented" message on stderr. design/accept/feature graduated to real
+// implementations in Phase 7, align/gate in Phase 8 — see
 // TestRun_DesignDispatchesToRealVerb (design_test.go),
-// TestRun_AcceptDispatchesToRealVerb (accept_test.go), and
-// TestRun_FeatureDispatchesToRealVerb (feature_test.go) for their dispatch
-// coverage, matching the lint/dex pattern below. Table-driven per
-// CLAUDE.md's testing rules.
+// TestRun_AcceptDispatchesToRealVerb (accept_test.go),
+// TestRun_FeatureDispatchesToRealVerb (feature_test.go), and
+// TestRun_AlignDispatchesToRealVerb/TestRun_GateDispatchesToRealVerb below
+// for their dispatch coverage, matching the lint/dex pattern. Table-driven
+// per CLAUDE.md's testing rules.
 func TestRun_KnownVerbs(t *testing.T) {
 	cases := []struct {
 		verb       string
 		wantSubstr string
 	}{
-		{"align", "not implemented (phase 8)"},
 		{"close", "not implemented (out of v0 scope)"},
 		{"waivers", "not implemented (out of v0 scope)"},
 		{"verify-artifact", "not implemented (out of v0 scope)"},
 		{"gc", "not implemented (out of v0 scope)"},
-		{"gate", "not implemented (phase 8)"},
 	}
 
 	for _, tc := range cases {
@@ -47,17 +46,48 @@ func TestRun_KnownVerbs(t *testing.T) {
 }
 
 // TestRun_KnownVerbs_ExtraArgs asserts that trailing arguments after a known
-// verb do not change dispatch (verb-only parsing at phase 1). `lint` and
-// `design`/`accept`/`feature` are now implemented (phases 4 and 7), so this
-// uses a still-stubbed verb.
+// verb do not change dispatch (verb-only parsing at phase 1). `lint`,
+// `design`/`accept`/`feature`, and `align`/`gate` are now implemented
+// (phases 4, 7, and 8), so this uses a still-stubbed verb.
 func TestRun_KnownVerbs_ExtraArgs(t *testing.T) {
 	var stderr bytes.Buffer
-	got := run([]string{"align", "--some-flag", "extra"}, &stderr)
+	got := run([]string{"gc", "--some-flag", "extra"}, &stderr)
 	if got != 2 {
 		t.Fatalf("run with extra args exit = %d, want 2", got)
 	}
-	if !strings.Contains(stderr.String(), "not implemented (phase 8)") {
-		t.Fatalf("stderr = %q, want phase 8 message", stderr.String())
+	if !strings.Contains(stderr.String(), "not implemented (out of v0 scope)") {
+		t.Fatalf("stderr = %q, want the out-of-v0-scope message", stderr.String())
+	}
+}
+
+// TestRun_AlignDispatchesToRealVerb proves `run` routes "align" to the real
+// implementation (align.go, PLAN.md Phase 8) rather than the generic
+// phase-stub path: outside any store root it must fail with align's own
+// store-root error, never the generic "not implemented" message.
+func TestRun_AlignDispatchesToRealVerb(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stderr bytes.Buffer
+	got := run([]string{"align"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([align]) outside a store = %d, want 2 (operational)", got)
+	}
+	if strings.Contains(stderr.String(), "not implemented") {
+		t.Fatalf("stderr = %q, want a real store-root error, not the generic stub message", stderr.String())
+	}
+}
+
+// TestRun_GateDispatchesToRealVerb is align's own analogue for "gate" (I-7).
+func TestRun_GateDispatchesToRealVerb(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stderr bytes.Buffer
+	got := run([]string{"gate"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([gate]) outside a store = %d, want 2 (operational)", got)
+	}
+	if strings.Contains(stderr.String(), "not implemented") {
+		t.Fatalf("stderr = %q, want a real store-root error, not the generic stub message", stderr.String())
 	}
 }
 

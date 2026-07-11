@@ -52,19 +52,25 @@ func ComputeDigest(covers string, computedFindings []artifact.Finding, baselineD
 // string) and compares it to fm.Integrity — self-contained, no re-exec of
 // the judge, which 03 §Alignment report is explicit is never reproducible.
 // Tampering with either the persisted stdin/raw-result bytes or the stored
-// Integrity hash itself breaks verification. A report with no judged
-// exchange at all (Integrity == "" and JudgeIntegrity == nil — the
-// absence-finding-only case) verifies trivially true: there is nothing to
-// check.
+// Integrity hash itself breaks verification.
+//
+// A report with no judged exchange at all (Integrity == "" and
+// JudgeIntegrity == nil — the absence-finding-only case) verifies trivially
+// true: there is nothing to check. A report carrying Integrity but no
+// JudgeIntegrity (internal/artifact's DeviationFrontmatter.Validate allows
+// this one-directionally, for an older or hand-authored frozen report that
+// predates this self-verification record) is honestly UNVERIFIABLE, not
+// silently accepted: VerifyIntegrity returns an error saying so rather than
+// claiming a check it cannot perform.
 func VerifyIntegrity(fm *artifact.DeviationFrontmatter) error {
 	if fm.Integrity == "" && fm.JudgeIntegrity == nil {
 		return nil
 	}
-	// DecodeDeviation's own Validate already enforces these travel
-	// together; this guard keeps VerifyIntegrity safe to call on a value
-	// built by hand (e.g. in a test) rather than only via DecodeDeviation.
-	if fm.Integrity == "" || fm.JudgeIntegrity == nil {
-		return fmt.Errorf("align: VerifyIntegrity: integrity and judge_integrity must both be present or both absent")
+	if fm.Integrity != "" && fm.JudgeIntegrity == nil {
+		return fmt.Errorf("align: VerifyIntegrity: integrity is present but no judge_integrity record was persisted to recompute it from — unverifiable")
+	}
+	if fm.Integrity == "" && fm.JudgeIntegrity != nil {
+		return fmt.Errorf("align: VerifyIntegrity: judge_integrity is present but integrity is empty")
 	}
 
 	stdin, err := base64.StdEncoding.DecodeString(fm.JudgeIntegrity.StdinB64)

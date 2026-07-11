@@ -153,8 +153,14 @@ func (fm DeviationFrontmatter) Validate() error {
 	if fm.Integrity != "" && !sha256Re.MatchString(fm.Integrity) {
 		return fmt.Errorf("artifact: deviation integrity %q is not sha256:<64 hex> form", fm.Integrity)
 	}
-	if (fm.Integrity == "") != (fm.JudgeIntegrity == nil) {
-		return fmt.Errorf("artifact: deviation integrity and judge_integrity must be present or absent together (integrity=%q judge_integrity=%v)", fm.Integrity, fm.JudgeIntegrity)
+	// One-directional only: judge_integrity requires integrity (it exists to
+	// let integrity be recomputed), but integrity may legally stand alone —
+	// an older or hand-authored frozen report that predates this
+	// self-verification record is still a legally decodable artifact; it is
+	// simply unverifiable (VerifyIntegrity reports that explicitly rather
+	// than silently accepting or rejecting it).
+	if fm.JudgeIntegrity != nil && fm.Integrity == "" {
+		return fmt.Errorf("artifact: deviation judge_integrity is present but integrity is empty")
 	}
 	if fm.Frozen != nil {
 		if err := fm.Frozen.Validate(); err != nil {
