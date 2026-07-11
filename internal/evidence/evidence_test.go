@@ -5,7 +5,7 @@ import "github.com/OWNER/verdi/internal/artifact"
 // hex64 is a 64-hex-character placeholder used to satisfy Evidence's
 // sha256:<64 hex> digest shape check across this package's tests — the
 // digest's actual value is never load-bearing for fold logic.
-const hex64 = "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab1"
+const hex64 = "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12"
 
 // testEvidence builds a synthetic, already-decoded evidence record for
 // fold/current unit tests (bypassing DecodeEvidence's strict-decode path,
