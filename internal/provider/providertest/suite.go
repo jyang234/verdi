@@ -41,8 +41,20 @@ func testResolveHappyPath(t *testing.T, h Harness) {
 	if err != nil {
 		t.Fatalf("Resolve(%q) error = %v, want nil", story.Ref, err)
 	}
-	if got != story {
-		t.Fatalf("Resolve(%q) = %+v, want %+v", story.Ref, got, story)
+	if got.Ref != story.Ref {
+		t.Fatalf("Resolve(%q).Ref = %q, want %q", story.Ref, got.Ref, story.Ref)
+	}
+	if got.Title != story.Title {
+		t.Fatalf("Resolve(%q).Title = %q, want %q", story.Ref, got.Title, story.Title)
+	}
+	if got.Status != story.Status {
+		t.Fatalf("Resolve(%q).Status = %q, want %q", story.Ref, got.Status, story.Status)
+	}
+	// URL is compared against the harness's declaration rather than the
+	// seeded value (I-33): an adapter that constructs the URL from its own
+	// configuration cannot echo an arbitrary seeded URL back.
+	if want := h.ExpectResolvedURL(story); got.URL != want {
+		t.Fatalf("Resolve(%q).URL = %q, want %q", story.Ref, got.URL, want)
 	}
 }
 

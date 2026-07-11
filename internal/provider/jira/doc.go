@@ -3,8 +3,9 @@
 // the Jira Cloud REST API v3.
 //
 //   - Resolve: GET /rest/api/3/issue/{key} maps key/summary/status/URL onto
-//     provider.Story. URL is read from the response's own "self" link
-//     rather than constructed from the adapter's connection base URL — see
+//     provider.Story. URL is the human browse link, built as
+//     BaseURL+"/browse/"+key — not the response's machine-facing "self"
+//     REST URL, which is not a page a human should be sent to. See
 //     Resolve's doc comment for why.
 //   - PublishRollup writes two things: a machine field (the custom field
 //     named by Config.RollupField) holding a compact JSON payload

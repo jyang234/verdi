@@ -41,7 +41,25 @@ func (h *jiraHarness) SeedStory(t *testing.T, story provider.Story) {
 	if err != nil {
 		t.Fatalf("ParseStoryRef(%q): %v", story.Ref, err)
 	}
-	h.server.SeedIssue(key, story.Title, story.Status, story.URL)
+	// story.URL is intentionally not forwarded: the Jira adapter derives
+	// Story.URL as BaseURL+"/browse/"+key, never from any seeded/"self"
+	// value. The mock serves a realistic machine-facing REST self on its
+	// own.
+	h.server.SeedIssue(key, story.Title, story.Status)
+}
+
+// ExpectResolvedURL implements providertest.Harness (I-33): the Jira
+// adapter constructs Story.URL from its own configuration as the human
+// browse link, BaseURL+"/browse/"+key — here rooted at the harness's own
+// mock server base, which is what the adapter under test is configured
+// with. A malformed ref cannot occur here: the suite only calls this for
+// stories it seeded through SeedStory, which already parsed the ref.
+func (h *jiraHarness) ExpectResolvedURL(story provider.Story) string {
+	_, key, err := provider.ParseStoryRef(story.Ref)
+	if err != nil {
+		panic("jiraHarness.ExpectResolvedURL: unparseable ref " + string(story.Ref) + ": " + err.Error())
+	}
+	return h.server.URL + "/browse/" + key
 }
 
 func (h *jiraHarness) SeedNotFound(t *testing.T, ref provider.StoryRef) {

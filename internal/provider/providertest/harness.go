@@ -26,6 +26,13 @@ type Harness interface {
 	// SeedStory call for ref.
 	SeedNotFound(t *testing.T, ref provider.StoryRef)
 
+	// ExpectResolvedURL declares what URL the adapter under test must
+	// produce for a seeded story (PLAN.md ledger I-33): store-backed
+	// providers return the seeded story.URL unchanged; adapters that
+	// construct the URL from their own configuration (e.g. the Jira
+	// adapter's BaseURL+"/browse/"+key) return their constructed form.
+	ExpectResolvedURL(story provider.Story) string
+
 	// PublishedField returns the latest state Provider().PublishRollup
 	// has durably recorded for story — the adapter's own machine field,
 	// or an equivalent — and whether anything has been published yet.
