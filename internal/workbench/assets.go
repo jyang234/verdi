@@ -7,7 +7,7 @@ import (
 	"github.com/OWNER/verdi/internal/dex"
 )
 
-//go:embed assets/board.js
+//go:embed assets/board.js assets/boardspec.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -50,17 +50,27 @@ func styleCSSHandler() http.HandlerFunc {
 	}
 }
 
-// boardJSHandler serves the board page's one JS file (05 §Workbench:
+// boardJSHandler serves the v0 board page's one JS file (05 §Workbench:
 // "keep board JS minimal and in ONE file").
 func boardJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/board.js")
+}
+
+// boardSpecJSHandler serves the v1 board's one JS file — same minimal,
+// dependency-free posture as the v0 board's.
+func boardSpecJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/boardspec.js")
+}
+
+func embeddedJSHandler(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		data, err := embeddedAssets.ReadFile("assets/board.js")
+		data, err := embeddedAssets.ReadFile(name)
 		if err != nil {
-			http.Error(w, "board.js unavailable: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, name+" unavailable: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")

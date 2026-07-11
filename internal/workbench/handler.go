@@ -3,19 +3,28 @@ package workbench
 import "net/http"
 
 // NewHandler builds the workbench's full HTTP handler for the store
-// rooted at root. Phase 10 (PLAN.md Stubs: "workbench pages beyond a
-// health page land in phase 10") adds real corpus/board/verdict pages by
-// registering more routes in RegisterRoutes — this function itself never
-// needs to change shape.
+// rooted at root, with no injected collaborators (no forge wired: the
+// board renders authoring/read-only purely from branch state).
 func NewHandler(root string) http.Handler {
+	return NewHandlerWith(root, Deps{})
+}
+
+// NewHandlerWith builds the handler with injected collaborators (Deps).
+func NewHandlerWith(root string, deps Deps) http.Handler {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, root)
+	RegisterRoutesWith(mux, root, deps)
 	return mux
 }
 
-// RegisterRoutes wires every workbench route onto mux. The single place a
-// future phase adds a page.
+// RegisterRoutes wires every workbench route onto mux with empty Deps —
+// the pre-v1 signature, kept for existing callers and tests.
 func RegisterRoutes(mux *http.ServeMux, root string) {
+	RegisterRoutesWith(mux, root, Deps{})
+}
+
+// RegisterRoutesWith wires every workbench route onto mux. The single
+// place a phase adds a page.
+func RegisterRoutesWith(mux *http.ServeMux, root string, deps Deps) {
 	mux.HandleFunc("/healthz", healthHandler())
 	mux.HandleFunc("/", indexHandler(root))
 
@@ -36,15 +45,37 @@ func RegisterRoutes(mux *http.ServeMux, root string) {
 	// renders as preview").
 	mux.HandleFunc("/matrix/{story...}", matrixHandler(root))
 
-	// The board: cards, stickies, yarn, autosave, commit-to-design.
+	// The v1 board: the spec-as-source projection (05 §Workbench, R4).
+	// "/board/spec/{name}" is strictly more specific than the v0
+	// "/board/{key}/{action}" patterns below, so ServeMux routes every
+	// /board/spec/* request here without conflict.
+	bs := &boardSpecServer{root: root, feed: deps.CommentFeed}
+	mux.HandleFunc("/board/spec/{name}", bs.boardSpecPageHandler())
+	mux.HandleFunc("/board/spec/{name}/fragment", bs.boardSpecFragmentHandler())
+	mux.HandleFunc("/board/spec/{name}/api/{action}", bs.boardSpecAPIHandler())
+
+	// The v0 board — superseded by board-as-projection (R4-I-9) but kept
+	// reachable for grandfathered v0 board.json state. Its two POST
+	// routes share one {action} pattern so the v1 literal "spec" segment
+	// above can coexist (two sibling 3-segment patterns with different
+	// literal positions would be an unresolvable ServeMux conflict).
 	mux.HandleFunc("/board/{key}", boardHandler(root))
-	mux.HandleFunc("/board/{key}/autosave", boardAutosaveHandler(root))
-	mux.HandleFunc("/board/{key}/commit", boardCommitHandler(root))
+	mux.HandleFunc("/board/{key}/{action}", func(w http.ResponseWriter, r *http.Request) {
+		switch r.PathValue("action") {
+		case "autosave":
+			boardAutosaveHandler(root)(w, r)
+		case "commit":
+			boardCommitHandler(root)(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
 
 	// Static assets: the composed stylesheet and vendored mermaid.min.js
 	// (both shared with internal/dex — one copy in the binary) and the
-	// board's one JS file.
+	// two board scripts (v0 board.js, v1 boardspec.js).
 	mux.HandleFunc("/assets/style.css", styleCSSHandler())
 	mux.HandleFunc("/assets/mermaid.min.js", mermaidHandler())
 	mux.HandleFunc("/assets/board.js", boardJSHandler())
+	mux.HandleFunc("/assets/boardspec.js", boardSpecJSHandler())
 }
