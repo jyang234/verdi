@@ -77,8 +77,8 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			return
 		}
 
-		proj, _, err := s.loadBoard(r.Context(), name)
-		if err == errBoardNotFound {
+		proj, _, _, err := s.loadBoard(r.Context(), name)
+		if err == ErrBoardNotFound {
 			http.NotFound(w, r)
 			return
 		}
@@ -194,7 +194,7 @@ func (s *boardSpecServer) actionEditText(name string, req boardAPIRequest) error
 }
 
 // declaredKindsOf indexes a projection's cards by id → kind.
-func declaredKindsOf(proj *boardProjection) map[string]string {
+func declaredKindsOf(proj *BoardProjection) map[string]string {
 	kinds := make(map[string]string, len(proj.Cards))
 	for _, c := range proj.Cards {
 		kinds[c.ID] = c.Kind
@@ -205,7 +205,7 @@ func declaredKindsOf(proj *boardProjection) map[string]string {
 // checkEdgeLegal re-checks the picker's own table server-side: the menu
 // can only OFFER what this function permits, but the server never
 // trusts the menu.
-func checkEdgeLegal(proj *boardProjection, from, to, edgeType string) error {
+func checkEdgeLegal(proj *BoardProjection, from, to, edgeType string) error {
 	kinds := declaredKindsOf(proj)
 	sourceKind, ok := kinds[from]
 	if !ok {
@@ -223,7 +223,7 @@ func checkEdgeLegal(proj *boardProjection, from, to, edgeType string) error {
 // edgeRefFor renders a yarn target endpoint as the link ref the spec
 // document stores: an internal object becomes a same-spec fragment; an
 // external endpoint is stored as written.
-func edgeRefFor(proj *boardProjection, name, to string) string {
+func edgeRefFor(proj *BoardProjection, name, to string) string {
 	if _, ok := declaredKindsOf(proj)[to]; ok {
 		return "spec/" + name + "#" + to
 	}
@@ -232,7 +232,7 @@ func edgeRefFor(proj *boardProjection, name, to string) string {
 
 // actionEdge: the type picker's commit — a declared typed edge lands in
 // the decision's own links: via splice.
-func (s *boardSpecServer) actionEdge(name string, proj *boardProjection, req boardAPIRequest) error {
+func (s *boardSpecServer) actionEdge(name string, proj *BoardProjection, req boardAPIRequest) error {
 	if req.From == "" || req.To == "" || req.Type == "" {
 		return fmt.Errorf("edge requires from, to, and type")
 	}
@@ -253,7 +253,7 @@ func (s *boardSpecServer) actionEdge(name string, proj *boardProjection, req boa
 // a new sticky — deterministic given the stickies already on the board.
 // The area sits below the reference column, inside the same screenful
 // as the zone columns (boardlayout's compact geometry).
-func scratchZonePosition(proj *boardProjection) (float64, float64) {
+func scratchZonePosition(proj *BoardProjection) (float64, float64) {
 	const scratchX, originY, pitch = 920, 420, 190
 	occupied := map[[2]float64]bool{}
 	for _, st := range proj.Stickies {
@@ -298,7 +298,7 @@ func newAnnotation(typ artifact.AnnotationType, body string) (*artifact.Annotati
 // actionSticky: "Add sticky" — a free-floating open-question sticky in
 // the annotation layer; it never dirties the spec working tree (05
 // §Workbench "The scratch tier").
-func (s *boardSpecServer) actionSticky(name string, proj *boardProjection, req boardAPIRequest) error {
+func (s *boardSpecServer) actionSticky(name string, proj *BoardProjection, req boardAPIRequest) error {
 	if req.Text == "" {
 		return fmt.Errorf("sticky requires text")
 	}
@@ -325,7 +325,7 @@ var graduationBlocks = map[string]string{
 // A graduated acceptance criterion declares the outcome-evidence floor
 // (attestation) as its expected evidence; the author refines it in the
 // document like any other spec edit.
-func (s *boardSpecServer) actionStickyGraduate(name string, proj *boardProjection, req boardAPIRequest) error {
+func (s *boardSpecServer) actionStickyGraduate(name string, proj *BoardProjection, req boardAPIRequest) error {
 	prefix, ok := graduationBlocks[req.Kind]
 	if !ok {
 		return fmt.Errorf("unknown graduation kind %q", req.Kind)
@@ -361,7 +361,7 @@ func (s *boardSpecServer) actionStickyGraduate(name string, proj *boardProjectio
 }
 
 // relatesTarget builds a relates endpoint's pinned target record.
-func (s *boardSpecServer) relatesTarget(ctx context.Context, name string, proj *boardProjection, endpoint string) (*artifact.Target, error) {
+func (s *boardSpecServer) relatesTarget(ctx context.Context, name string, proj *BoardProjection, endpoint string) (*artifact.Target, error) {
 	head, err := gitx.RevParse(ctx, s.root, "HEAD")
 	if err != nil {
 		return nil, err
@@ -385,7 +385,7 @@ func (s *boardSpecServer) relatesTarget(ctx context.Context, name string, proj *
 
 // actionRelates: the scratch tier's untyped thread — annotation layer,
 // never the document (02 §Record schemas: type relates).
-func (s *boardSpecServer) actionRelates(ctx context.Context, name string, proj *boardProjection, req boardAPIRequest) error {
+func (s *boardSpecServer) actionRelates(ctx context.Context, name string, proj *BoardProjection, req boardAPIRequest) error {
 	if req.From == "" || req.To == "" {
 		return fmt.Errorf("relates requires from and to")
 	}
@@ -406,7 +406,7 @@ func (s *boardSpecServer) actionRelates(ctx context.Context, name string, proj *
 // picker — an ordinary spec edit replacing the annotation (05
 // §Workbench; 02 §Record schemas: "graduation to a real object edge ...
 // is an ordinary spec edit, not an automatic promotion").
-func (s *boardSpecServer) actionRelatesGraduate(name string, proj *boardProjection, req boardAPIRequest) error {
+func (s *boardSpecServer) actionRelatesGraduate(name string, proj *BoardProjection, req boardAPIRequest) error {
 	if req.ID == "" || req.Type == "" {
 		return fmt.Errorf("relates-graduate requires id and type")
 	}
@@ -441,7 +441,7 @@ func (s *boardSpecServer) actionRelatesGraduate(name string, proj *boardProjecti
 // layout.json (positions only, never content; autosaved, never
 // committed per-drag). The write prunes orphaned keys (VL-018, the
 // adjudicated policy).
-func (s *boardSpecServer) actionPosition(name string, proj *boardProjection, req boardAPIRequest) error {
+func (s *boardSpecServer) actionPosition(name string, proj *BoardProjection, req boardAPIRequest) error {
 	kinds := declaredKindsOf(proj)
 	if _, ok := kinds[req.ID]; !ok {
 		return fmt.Errorf("position target %q is not a declared object id (layout.json keys must resolve, VL-018)", req.ID)
@@ -460,7 +460,7 @@ func (s *boardSpecServer) actionPosition(name string, proj *boardProjection, req
 
 // actionStickyPosition: a sticky drag landed — the position lives inside
 // the annotation record (02 §Record schemas: board {story, x, y}).
-func (s *boardSpecServer) actionStickyPosition(proj *boardProjection, req boardAPIRequest) error {
+func (s *boardSpecServer) actionStickyPosition(proj *BoardProjection, req boardAPIRequest) error {
 	for _, st := range proj.Stickies {
 		if st.ID == req.ID {
 			return boardio.RepositionSticky(boardio.AnnotationsDir(s.root), req.ID, req.X, req.Y)

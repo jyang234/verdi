@@ -113,7 +113,7 @@ func TestServer_InitializeHandshake(t *testing.T) {
 	}
 }
 
-// TestServer_ToolsListAndCall proves tools/list enumerates all eight
+// TestServer_ToolsListAndCall proves tools/list enumerates all nine
 // tools (each carrying the data-never-instructions note) and tools/call
 // round-trips a real tool (per-tool business logic is exhaustively
 // covered in backend_test.go; this proves the JSON-RPC plumbing gets a
@@ -128,12 +128,12 @@ func TestServer_ToolsListAndCall(t *testing.T) {
 	listResp := c.call(t, "tools/list", nil)
 	result := listResp["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 8 {
-		t.Fatalf("tools/list returned %d tools, want 8: %#v", len(tools), tools)
+	if len(tools) != 9 {
+		t.Fatalf("tools/list returned %d tools, want 9: %#v", len(tools), tools)
 	}
 	wantNames := map[string]bool{
 		"search_artifacts": true, "get_artifact": true, "get_links": true, "get_matrix": true,
-		"get_context_bundle": true, "list_annotations": true, "list_tasks": true, "add_annotation": true,
+		"get_context_bundle": true, "list_annotations": true, "list_tasks": true, "get_board": true, "add_annotation": true,
 	}
 	for _, raw := range tools {
 		def := raw.(map[string]any)

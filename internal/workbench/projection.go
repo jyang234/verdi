@@ -26,19 +26,26 @@ const (
 )
 
 // cardView is one object card: a frontmatter-declared object at its
-// layout position, with any anchored review stickies riding on it.
+// layout position, with any anchored review stickies riding on it. JSON
+// tags are load-bearing beyond the board's own HTML template (which
+// accesses fields by name, tags irrelevant there): get_board
+// (internal/mcpserve) re-marshals this exact struct as its tool result, so
+// the tags ARE the wire contract for the machine read surface (05 §MCP
+// server's get_board row).
 type cardView struct {
-	ID       string
-	Kind     string // data-object-kind value (the boardlayout zone names)
-	Text     string
-	X, Y     float64
-	Anchored []reviewStickyView
+	ID       string             `json:"id"`
+	Kind     string             `json:"kind"` // data-object-kind value (the boardlayout zone names)
+	Text     string             `json:"text"`
+	X        float64            `json:"x"`
+	Y        float64            `json:"y"`
+	Anchored []reviewStickyView `json:"anchored,omitempty"`
 }
 
 // refCardView is a reference card — an edge target outside this spec.
 type refCardView struct {
-	Ref  string
-	X, Y float64
+	Ref string  `json:"ref"`
+	X   float64 `json:"x"`
+	Y   float64 `json:"y"`
 }
 
 // edgeView is one yarn element: a declared spec edge or an
@@ -53,47 +60,52 @@ type edgeView struct {
 
 // scratchStickyView is one free-floating annotation sticky.
 type scratchStickyView struct {
-	ID     string
-	Type   string
-	Body   string
-	Author string
-	X, Y   float64
+	ID     string  `json:"id"`
+	Type   string  `json:"type"`
+	Body   string  `json:"body"`
+	Author string  `json:"author"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
 }
 
 // reviewStickyView is one MR comment rendered as a review sticky —
 // anchored to its object's card, or in the inbox tray (never dropped).
 type reviewStickyView struct {
-	Anchor   string // resolved object id, or "" for the tray
-	Author   string
-	Body     string
-	Resolved bool
+	Anchor   string `json:"anchor,omitempty"` // resolved object id, or "" for the tray
+	Author   string `json:"author"`
+	Body     string `json:"body"`
+	Resolved bool   `json:"resolved"`
 }
 
-// boardProjection is the full render model for one spec's board.
-type boardProjection struct {
-	Spec     string
-	Title    string
-	Mode     boardModeKind
-	Problem  string
-	Outcome  string
-	Cards    []cardView
-	RefCards []refCardView
-	Edges    []edgeView
-	Stickies []scratchStickyView
-	Tray     []reviewStickyView
+// BoardProjection is the full render model for one spec's board — the
+// element taxonomy (05 §Workbench), computed once and consumed by both the
+// HTML board (boardspecrender.go, by field access) and get_board
+// (internal/mcpserve, by JSON marshaling this struct directly: one
+// computation, two presentations, never a reimplementation).
+type BoardProjection struct {
+	Spec     string              `json:"spec"`
+	Title    string              `json:"title"`
+	Mode     boardModeKind       `json:"mode"`
+	Problem  string              `json:"problem,omitempty"`
+	Outcome  string              `json:"outcome,omitempty"`
+	Cards    []cardView          `json:"cards"`
+	RefCards []refCardView       `json:"ref_cards"`
+	Edges    []edgeView          `json:"edges"`
+	Stickies []scratchStickyView `json:"stickies"`
+	Tray     []reviewStickyView  `json:"tray"`
 	// Notices are disclosed-unavailable banners rendered in the board
 	// chrome in EVERY mode (I-1(b)/I-2/M-4): a configured-but-unreachable
 	// review feed, or an assumed default branch. Not a projection of the
 	// four inputs — a render-time disclosure the loader attaches, so the
 	// board never renders as if a skipped input were simply absent
 	// (constitution 2/10: silence is never a pass).
-	Notices []string
+	Notices []string `json:"notices,omitempty"`
 }
 
 // buildProjection computes the deterministic projection of the four
 // inputs. comments is nil outside review mode.
-func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind) (*boardProjection, error) {
-	p := &boardProjection{Spec: specName, Title: fm.Title, Mode: mode}
+func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind) (*BoardProjection, error) {
+	p := &BoardProjection{Spec: specName, Title: fm.Title, Mode: mode}
 	if fm.Problem != nil {
 		p.Problem = fm.Problem.Text
 	}

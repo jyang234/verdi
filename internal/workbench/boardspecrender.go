@@ -81,7 +81,7 @@ window.__BOARDV2__ = {{.StateJSON}};
 `))
 
 // renderBoardSpecPage renders the full board page.
-func renderBoardSpecPage(p *boardProjection, git *boardGitState) ([]byte, error) {
+func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error) {
 	payload := boardClientPayload{
 		Spec:         p.Spec,
 		Mode:         string(p.Mode),
@@ -119,7 +119,7 @@ func renderBoardSpecPage(p *boardProjection, git *boardGitState) ([]byte, error)
 
 // renderBoardRegion renders the placards, canvas, and side rail — the
 // fragment swapped in after every mutation.
-func renderBoardRegion(p *boardProjection, git *boardGitState) string {
+func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	var b strings.Builder
 	esc := stdhtml.EscapeString
 	authoring := p.Mode == modeAuthoring

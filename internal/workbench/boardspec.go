@@ -90,34 +90,42 @@ type boardGitState struct {
 	Dirty         bool     `json:"dirty"`
 }
 
-// loadBoard assembles the projection's four inputs and the git state.
-func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*boardProjection, *boardGitState, error) {
+// loadBoard assembles the projection's four inputs and the git state. The
+// third return value is the review-feed disclosure ALONE (I-1(b)'s three
+// states — configured-and-live silent, configured-but-unavailable
+// disclosed, or not-configured silent), separated out from proj.Notices
+// (which also folds in unrelated chrome banners like an assumed default
+// branch) so a caller that wants ONLY the review state — get_board
+// (internal/mcpserve), via the exported LoadProjection below — can surface
+// it as its own field, matching list_annotations' review_unavailable
+// pattern (commit 1348e79) rather than parsing prose notices.
+func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardProjection, *boardGitState, string, error) {
 	if !specNameRe.MatchString(name) {
-		return nil, nil, errBoardNotFound
+		return nil, nil, "", ErrBoardNotFound
 	}
 	raw, err := os.ReadFile(filepath.Join(s.specDir(name), "spec.md"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil, errBoardNotFound
+			return nil, nil, "", ErrBoardNotFound
 		}
-		return nil, nil, fmt.Errorf("workbench: reading spec %s: %w", name, err)
+		return nil, nil, "", fmt.Errorf("workbench: reading spec %s: %w", name, err)
 	}
 	fmBytes, _, err := artifact.SplitFrontmatter(raw)
 	if err != nil {
-		return nil, nil, fmt.Errorf("workbench: spec %s: %w", name, err)
+		return nil, nil, "", fmt.Errorf("workbench: spec %s: %w", name, err)
 	}
 	fm, err := artifact.DecodeSpec(fmBytes)
 	if err != nil {
-		return nil, nil, fmt.Errorf("workbench: spec %s: %w", name, err)
+		return nil, nil, "", fmt.Errorf("workbench: spec %s: %w", name, err)
 	}
 
 	stored, err := boardlayout.ReadFile(s.specDir(name))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	annotations, err := boardio.ReadAllAnnotations(boardio.AnnotationsDir(s.root))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
 	// The review feed is NON-BLOCKING on every render (I-2, 04 §Semantics'
@@ -144,7 +152,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*boardPro
 
 	git, gitNotice, err := s.gitState(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
 	mode := modeReadOnly
@@ -162,7 +170,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*boardPro
 
 	proj, err := buildProjection(name, fm, stored, annotations, comments, mode)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	if reviewNotice != "" {
 		proj.Notices = append(proj.Notices, reviewNotice)
@@ -170,7 +178,27 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*boardPro
 	if gitNotice != "" {
 		proj.Notices = append(proj.Notices, gitNotice)
 	}
-	return proj, git, nil
+	return proj, git, reviewNotice, nil
+}
+
+// LoadProjection computes the deterministic board projection for a spec —
+// the SAME four-input computation (loadBoard, above) that renders the HTTP
+// board page — exposed for a non-HTTP caller (05 §MCP server's get_board
+// row: "the same element taxonomy, computed badges, and mode-appropriate
+// annotations a human sees in `verdi serve`, so agents work from what
+// humans see rather than a second-hand summary"). This is the ONLY
+// entrypoint mcpserve's get_board tool uses — it never reimplements the
+// projection. feed may be nil (no live review population, matching a nil
+// Deps.CommentFeed); reviewUnavailable carries the same configured-but-
+// unreachable disclosure Deps.ReviewUnavailable does. The returned
+// reviewNotice is the review-feed disclosure alone (see loadBoard's doc
+// comment) — get_board surfaces it as its own review_unavailable field,
+// never folded silently into the generic notices a human board's chrome
+// shows.
+func LoadProjection(ctx context.Context, root, name string, feed CommentFeed, reviewUnavailable string) (proj *BoardProjection, reviewNotice string, err error) {
+	s := &boardSpecServer{root: root, feed: feed, reviewUnavailable: reviewUnavailable}
+	proj, _, reviewNotice, err = s.loadBoard(ctx, name)
+	return proj, reviewNotice, err
 }
 
 // gitState queries the working tree's branch and dirtiness. When the
@@ -206,8 +234,8 @@ func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string,
 	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty}, notice, nil
 }
 
-// errBoardNotFound distinguishes 404 from operational failures.
-var errBoardNotFound = fmt.Errorf("workbench: no such spec board")
+// ErrBoardNotFound distinguishes 404 from operational failures.
+var ErrBoardNotFound = fmt.Errorf("workbench: no such spec board")
 
 // boardSpecPageHandler answers GET /board/spec/{name}: the full page.
 func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
@@ -216,8 +244,8 @@ func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		proj, git, err := s.loadBoard(r.Context(), r.PathValue("name"))
-		if err == errBoardNotFound {
+		proj, git, _, err := s.loadBoard(r.Context(), r.PathValue("name"))
+		if err == ErrBoardNotFound {
 			http.NotFound(w, r)
 			return
 		}
@@ -245,8 +273,8 @@ func (s *boardSpecServer) boardSpecFragmentHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		proj, git, err := s.loadBoard(r.Context(), r.PathValue("name"))
-		if err == errBoardNotFound {
+		proj, git, _, err := s.loadBoard(r.Context(), r.PathValue("name"))
+		if err == ErrBoardNotFound {
 			http.NotFound(w, r)
 			return
 		}
