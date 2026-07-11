@@ -85,6 +85,35 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 	}
 }
 
+// buildBranchPrefix is `verdi feature start`'s branch-naming convention
+// (cmd/verdi/feature.go: `branch := "feature/" + specRef.Name`) — the
+// convention ResolveBuildSpec inverts to infer, with no argument, which
+// spec a build branch belongs to.
+const buildBranchPrefix = "feature/"
+
+// ResolveBuildSpec infers the feature spec a build branch is for, given
+// only the currently checked-out branch's short name — the resolution
+// `verdi align` and `verdi gate` use (PLAN.md Phase 8, 05 §CLI: neither
+// verb takes a story/spec argument; both "generate ... for the build head"
+// / gate it). branch must have the "feature/<name>" shape `feature start`
+// cuts; anything else (a detached HEAD, main, a design/ branch, ...) is an
+// operational error naming the expected convention rather than silently
+// guessing which spec is in scope.
+func ResolveBuildSpec(root, branch string) (*artifact.SpecFrontmatter, error) {
+	name, ok := strings.CutPrefix(branch, buildBranchPrefix)
+	if !ok || name == "" {
+		return nil, fmt.Errorf("storyresolve: current branch %q is not a build branch (want feature/<name>, cut by `verdi feature start`)", branch)
+	}
+	spec, err := LoadActiveSpec(root, name)
+	if err != nil {
+		return nil, err
+	}
+	if spec.Class != artifact.ClassFeature {
+		return nil, fmt.Errorf("storyresolve: build branch %q resolves to %s, a component spec (no story, no acceptance criteria)", branch, spec.ID)
+	}
+	return spec, nil
+}
+
 // LoadActiveSpec reads and strict-decodes specs/active/<name>/spec.md.
 func LoadActiveSpec(root, name string) (*artifact.SpecFrontmatter, error) {
 	path := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")

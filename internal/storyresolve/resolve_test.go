@@ -139,3 +139,41 @@ acceptance_criteria:
 		}
 	})
 }
+
+// TestResolveBuildSpec_Happy proves the feature/<name> branch convention
+// `verdi feature start` cuts (cmd/verdi/feature.go) resolves back to the
+// same spec with no argument at all — the inference `verdi align`/`verdi
+// gate` rely on (PLAN.md Phase 8, 05 §CLI).
+func TestResolveBuildSpec_Happy(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "matrix-helper-test", testFeatureSpec)
+
+	spec, err := ResolveBuildSpec(root, "feature/matrix-helper-test")
+	if err != nil {
+		t.Fatalf("ResolveBuildSpec: %v", err)
+	}
+	if spec.ID != "spec/matrix-helper-test" {
+		t.Fatalf("ID = %q, want spec/matrix-helper-test", spec.ID)
+	}
+}
+
+func TestResolveBuildSpec_Negative(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "matrix-helper-test", testFeatureSpec)
+	writeActiveSpec(t, root, "matrix-helper-component", testComponentSpec)
+
+	cases := map[string]string{
+		"not a build branch at all": "main",
+		"design branch, not build":  "design/matrix-helper-test",
+		"detached HEAD (empty)":     "",
+		"unknown spec name":         "feature/does-not-exist",
+		"component spec":            "feature/matrix-helper-component",
+	}
+	for name, branch := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ResolveBuildSpec(root, branch); err == nil {
+				t.Fatalf("ResolveBuildSpec(%q): want error, got nil", branch)
+			}
+		})
+	}
+}
