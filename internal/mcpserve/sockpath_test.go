@@ -129,6 +129,33 @@ func TestPointerFile_RoundTrips(t *testing.T) {
 	}
 }
 
+// TestSocketPath_Negative covers I-29(b)'s loud-failure backstop: a
+// pathologically long $TMPDIR pushes even the short per-checkout form
+// over the sun_path ceiling, and SocketPath must fail loudly — naming the
+// path and the limit — rather than returning an unbindable path or
+// silently truncating it.
+func TestSocketPath_Negative(t *testing.T) {
+	t.Run("pathological TMPDIR overflows the sun_path ceiling", func(t *testing.T) {
+		orig, hadOrig := os.LookupEnv("TMPDIR")
+		defer func() {
+			if hadOrig {
+				os.Setenv("TMPDIR", orig)
+			} else {
+				os.Unsetenv("TMPDIR")
+			}
+		}()
+		os.Setenv("TMPDIR", "/"+strings.Repeat("a", maxSockPathLen))
+
+		_, err := SocketPath("/some/checkout")
+		if err == nil {
+			t.Fatal("SocketPath with a pathological TMPDIR: want error (I-29(b) loud-failure backstop), got nil")
+		}
+		if !strings.Contains(err.Error(), "sun_path") {
+			t.Fatalf("error %q should name the sun_path limit", err.Error())
+		}
+	})
+}
+
 // TestPointerFile_Negative covers reading a pointer file that was never
 // written and an empty pointer file (a degenerate case that must not be
 // silently treated as "no socket path known" turning into a crash

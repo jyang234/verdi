@@ -49,6 +49,35 @@ func TestAcquireLock_Happy(t *testing.T) {
 	ReleaseLock(f2, path)
 }
 
+// TestReleaseLock_Negative covers closing an already-closed file (a
+// double-release) and removing a lock file whose parent directory has
+// vanished out from under it.
+func TestReleaseLock_Negative(t *testing.T) {
+	t.Run("already-closed file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "writer.lock")
+		f, err := AcquireLock(path)
+		if err != nil {
+			t.Fatalf("AcquireLock: %v", err)
+		}
+		f.Close() // close it out from under ReleaseLock
+		if err := ReleaseLock(f, path); err == nil {
+			t.Fatal("ReleaseLock(already-closed file): want error, got nil")
+		}
+	})
+
+	t.Run("lock file already gone is not an error (idempotent release)", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "writer.lock")
+		f, err := AcquireLock(path)
+		if err != nil {
+			t.Fatalf("AcquireLock: %v", err)
+		}
+		os.Remove(path) // simulate the file already having been cleaned up
+		if err := ReleaseLock(f, path); err != nil {
+			t.Fatalf("ReleaseLock(already-removed lock file): want nil (os.ErrNotExist tolerated), got %v", err)
+		}
+	})
+}
+
 // TestAcquireLock_HeldByLiveProcess proves a lock recording OUR OWN pid
 // (definitely alive) with a start timestamp within tolerance of the real
 // process start is reported held, not stale — the D3/I-12 "one writer"
