@@ -42,6 +42,11 @@ verify:
     # LTS and install it in one CI step.
     - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
     - apt-get install -y nodejs
+    # golangci-lint at the Makefile's pin (keep in lockstep with
+    # GOLANGCI_LINT_VERSION there): the lint gate is mandatory in CI —
+    # the Makefile hard-fails when CI=true and the binary is absent, and
+    # GitLab always sets CI=true.
+    - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
   script:
     - make verify
     - go build -o .build/verdi ./cmd/verdi
