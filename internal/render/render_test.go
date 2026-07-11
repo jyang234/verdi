@@ -20,6 +20,55 @@ func TestRenderMarkdown_Happy(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdown_CodeBlockIsClassBased(t *testing.T) {
+	out, err := RenderMarkdown("```go\nfunc main() {}\n```\n")
+	if err != nil {
+		t.Fatalf("RenderMarkdown: %v", err)
+	}
+	// The whole point of the fix: highlighted code carries CSS classes, not
+	// inline colour. A `style="` attribute anywhere in the block would bake
+	// one theme's ink into the HTML and break dark mode.
+	if strings.Contains(out, `style="`) {
+		t.Fatalf("highlighted code must not carry inline style attributes, got: %s", out)
+	}
+	if !strings.Contains(out, `class="chroma-`) {
+		t.Fatalf("expected chroma-prefixed classes on highlighted tokens, got: %s", out)
+	}
+	if !strings.Contains(out, "func") {
+		t.Fatalf("expected code content preserved, got: %s", out)
+	}
+}
+
+func TestChromaPaletteCSS(t *testing.T) {
+	light := ChromaLightCSS()
+	dark := ChromaDarkCSS()
+	if light == "" || dark == "" {
+		t.Fatal("chroma palette CSS must be non-empty for both themes")
+	}
+	// Both palettes must colour the same prefixed classes the renderer
+	// emits, or the highlighted HTML would reference selectors nothing
+	// defines.
+	for _, css := range []string{light, dark} {
+		if !strings.Contains(css, ".chroma-chroma") {
+			t.Fatalf("palette CSS missing the .chroma-chroma wrapper rule: %s", css)
+		}
+	}
+	// github-dark sets a light foreground on the wrapper; github (light)
+	// does not — a cheap proof the two palettes are genuinely different
+	// styles, not the same one emitted twice.
+	if !strings.Contains(dark, "#e6edf3") {
+		t.Fatalf("dark palette missing github-dark's light foreground, got: %s", dark)
+	}
+	if light == dark {
+		t.Fatal("light and dark palettes are byte-identical — one style was pinned twice")
+	}
+	// Purity: regenerating yields the identical bytes (byte-identical
+	// rebuild depends on this).
+	if ChromaLightCSS() != light || ChromaDarkCSS() != dark {
+		t.Fatal("palette CSS is not stable across calls")
+	}
+}
+
 func TestRenderMarkdown_Negative(t *testing.T) {
 	// goldmark's Convert only errors on a writer failure, which never
 	// happens against a bytes.Buffer — so RenderMarkdown has no reachable

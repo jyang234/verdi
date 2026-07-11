@@ -21,12 +21,16 @@ import (
 	"github.com/yuin/goldmark/util"
 )
 
-// chromaStyle is the single, pinned chroma style every rendered code block
-// uses. Pinning one style (rather than reading a runtime choice) keeps
-// rendered HTML a pure function of the markdown source, per dex's
-// byte-identical-rebuild requirement — a property this package's shared
-// use by the workbench does not relax, since the workbench's own pages are
-// likewise a pure function of the store at request time.
+// chromaStyle is the single, pinned chroma style the renderer tokenises
+// with. The formatter emits CLASS-based HTML (see highlight), so this style
+// no longer bakes any colour into the rendered bytes — its colours are
+// instead emitted once, as a stylesheet, by chromacss.go (ChromaLightCSS).
+// That strengthens the dex's byte-identical-rebuild property rather than
+// merely preserving it: the rendered HTML is now a pure function of the
+// markdown source AND carries zero palette bytes, so a theme choice can
+// never perturb a single rendered byte (it lives entirely in CSS the page
+// selects at view time). The same guarantee holds for the workbench, whose
+// pages are likewise a pure function of the store at request time.
 var chromaStyle = mustStyle("github")
 
 func mustStyle(name string) *chroma.Style {
@@ -66,7 +70,8 @@ func RenderMarkdown(body string) (string, error) {
 
 // chromaCodeRenderer is a goldmark renderer.NodeRenderer that replaces
 // goldmark's default (unhighlighted, HTML-escaped-only) code block
-// rendering with chroma-tokenized, inline-styled HTML.
+// rendering with chroma-tokenized, class-based HTML (the colours come from
+// the generated stylesheet, chromacss.go — never inline).
 type chromaCodeRenderer struct {
 	style *chroma.Style
 }
@@ -109,7 +114,10 @@ func (r *chromaCodeRenderer) renderCodeBlock(w util.BufWriter, source []byte, n 
 
 // highlight tokenizes code with chroma's lexer for lang (falling back to
 // plaintext for an unknown or empty language) and writes chroma's
-// inline-styled HTML.
+// class-based HTML: token spans carry a `chroma-`-prefixed class, no inline
+// colour. The colours are supplied by the served stylesheet's generated
+// palettes (chromacss.go), so the same rendered markup is legible in both
+// light and dark themes.
 func (r *chromaCodeRenderer) highlight(w io.Writer, code, lang string) error {
 	lexer := lexers.Get(lang)
 	if lexer == nil {
@@ -121,7 +129,7 @@ func (r *chromaCodeRenderer) highlight(w io.Writer, code, lang string) error {
 	if err != nil {
 		return fmt.Errorf("render: chroma tokenise: %w", err)
 	}
-	formatter := chromahtml.New(chromahtml.WithClasses(false))
+	formatter := chromahtml.New(chromahtml.WithClasses(true), chromahtml.ClassPrefix(chromaClassPrefix))
 	if err := formatter.Format(w, r.style, iterator); err != nil {
 		return fmt.Errorf("render: chroma format: %w", err)
 	}
@@ -138,10 +146,11 @@ func linesText(lines *gmtext.Segments, source []byte) string {
 	return buf.String()
 }
 
-// HighlightCode renders code as a chroma-highlighted, inline-styled
+// HighlightCode renders code as a chroma-highlighted, class-based
 // <pre><code>...</code></pre> block outside of any markdown document — used
 // by pages that pretty-print a generated JSON blob rather than a
-// markdown-authored code fence.
+// markdown-authored code fence. Its colours, like the markdown path's, come
+// from the served stylesheet's generated palettes (chromacss.go).
 func HighlightCode(code, lang string) (template.HTML, error) {
 	r := &chromaCodeRenderer{style: chromaStyle}
 	var buf bytes.Buffer

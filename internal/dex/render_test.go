@@ -28,10 +28,15 @@ func TestRenderMarkdown_CodeBlockIsChromaHighlighted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderMarkdown: %v", err)
 	}
-	// chroma's inline-styled output wraps tokens in <span style="...">,
-	// distinct from goldmark's own unhighlighted <pre><code> passthrough.
-	if !strings.Contains(out, `style="`) {
-		t.Errorf("expected chroma inline-styled spans, got: %s", out)
+	// chroma's class-based output wraps tokens in <span class="chroma-...">,
+	// distinct from goldmark's own unhighlighted <pre><code> passthrough —
+	// and carries NO inline colour, so dark mode can restyle it via the
+	// served stylesheet's dark palette.
+	if !strings.Contains(out, `class="chroma-`) {
+		t.Errorf("expected chroma class-based spans, got: %s", out)
+	}
+	if strings.Contains(out, `style="`) {
+		t.Errorf("highlighted code must carry no inline style attributes, got: %s", out)
 	}
 	if !strings.Contains(out, "func") {
 		t.Errorf("expected code content preserved, got: %s", out)
