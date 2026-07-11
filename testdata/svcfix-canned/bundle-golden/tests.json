@@ -1,0 +1,1 @@
+{"packages":[{"failures":0,"package":"example.com/svcfix/internal/app","status":"pass","tests":2}],"schema":"verdi.tests/v1","suite":"pass"}

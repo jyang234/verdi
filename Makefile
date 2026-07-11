@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt fmt-check lint verify tidy fixture
+.PHONY: build test vet fmt fmt-check lint verify tidy fixture fixture-regen
 
 # Pin for the lint target's version-drift warning. Not yet installed by the
 # CI skeleton (phase 1 has no network-dependent tool bootstrap); once CI
@@ -51,9 +51,21 @@ lint:
 # SHAs)") plus, as of phase 2, the corpus package: it builds the full
 # testdata/corpus fixture via fixturegit, asserts the resulting SHAs equal
 # the committed golden constants, and decodes every corpus file (committed
-# and mutable/derived) through internal/artifact.
+# and mutable/derived) through internal/artifact. As of phase 5, also
+# internal/svcfixcanned: verifies testdata/svcfix-canned/digests.json's
+# sha256 ratchet against the committed canned upstream captures — hermetic
+# (no exec, no network); regenerating the captures for real is
+# `make fixture-regen`'s job, never this one's.
 fixture:
-	go test -race ./internal/fixturegit/... ./internal/corpus/...
+	go test -race ./internal/fixturegit/... ./internal/corpus/... ./internal/svcfixcanned/...
+
+# fixture-regen re-captures testdata/svcfix-canned/*.json from the real,
+# pinned toolchain (spike S1's bin/, or `go run …@pin` over the network —
+# see scripts/regen-svcfix-canned.sh) and recomputes the digest ratchet.
+# Opt-in and non-hermetic (PLAN.md §4): never part of `make verify`, `make
+# test`, or `make fixture`, and never run by CI.
+fixture-regen:
+	./scripts/regen-svcfix-canned.sh
 
 # verify is the per-phase gate: it must stay green at the end of every
 # phase (CLAUDE.md). It grows — never shrinks — to add integration, e2e,

@@ -71,7 +71,7 @@ func TestComputeBoundaryDiff_Dependency(t *testing.T) {
 	base := &BoundaryContract{Service: "svcfix", SchemaVersion: boundaryContractSchema}
 	branch := &BoundaryContract{
 		Service:              "svcfix",
-		SchemaVersion:         boundaryContractSchema,
+		SchemaVersion:        boundaryContractSchema,
 		ExternalDependencies: []NamedResource{{Name: "audit-svc", Kind: "http"}},
 	}
 
