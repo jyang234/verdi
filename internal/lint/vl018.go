@@ -1,6 +1,10 @@
 package lint
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/OWNER/verdi/internal/artifact"
+)
 
 // vl018 enforces "layout.json positions: every key in a spec directory's
 // positions map (verdi.boardlayout/v1, §Record schemas) resolves to a real
@@ -36,7 +40,7 @@ func (vl018) Check(in *RunInput) []Finding {
 			// spec.md, not this rule.
 			continue
 		}
-		declared := declaredObjectIDs(spec.Spec)
+		declared := artifact.DeclaredObjectIDs(spec.Spec)
 		for key := range l.Layout.Positions {
 			if !declared[key] {
 				findings = append(findings, Finding{Rule: "VL-018", Path: l.RelPath, Message: fmt.Sprintf("positions key %q does not resolve to a declared object id in %s", key, spec.RelPath)})

@@ -191,6 +191,33 @@ type SpecFrontmatter struct {
 	Dispositions       []Disposition         `yaml:"dispositions,omitempty"`
 }
 
+// DeclaredObjectIDs is the set of every frontmatter-declared object id a
+// spec carries — acceptance criteria, constraints, decisions, and open
+// questions (02 §Object model) — the resolution target for a fragment ref
+// (§Identity and references) and for a forge review comment's
+// `[vd:<object-id>]` token (02 §Record schemas' comment-token grammar).
+// Exported so both internal/lint's VL-003 fragment resolution and any
+// other consumer resolving an object id against a spec's declared objects
+// (cmd/verdi/gate_threads.go, internal/mcpserve) share one definition
+// rather than each re-deriving it (CLAUDE.md: shared code lives in a
+// shared internal/ package).
+func DeclaredObjectIDs(spec *SpecFrontmatter) map[string]bool {
+	ids := make(map[string]bool, len(spec.AcceptanceCriteria)+len(spec.Constraints)+len(spec.Decisions)+len(spec.OpenQuestions))
+	for _, ac := range spec.AcceptanceCriteria {
+		ids[ac.ID] = true
+	}
+	for _, c := range spec.Constraints {
+		ids[c.ID] = true
+	}
+	for _, dc := range spec.Decisions {
+		ids[dc.ID] = true
+	}
+	for _, q := range spec.OpenQuestions {
+		ids[q.ID] = true
+	}
+	return ids
+}
+
 // DecodeSpec strict-decodes and validates spec frontmatter (either class).
 func DecodeSpec(data []byte) (*SpecFrontmatter, error) {
 	var fm SpecFrontmatter

@@ -116,31 +116,10 @@ func (vl003) checkLink(l artifact.Link, path, field string, snap *Snapshot, exte
 		return nil
 	}
 	target := targets[0]
-	if target.Spec == nil || !declaredObjectIDs(target.Spec)[ref.Object] {
+	if target.Spec == nil || !artifact.DeclaredObjectIDs(target.Spec)[ref.Object] {
 		return []Finding{{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q fragment #%s does not resolve against %s's declared objects", field, l.Ref, ref.Object, unpinned)}}
 	}
 	return nil
-}
-
-// declaredObjectIDs is the set of every frontmatter-declared object id a
-// spec carries — acceptance criteria, constraints, decisions, and open
-// questions (02 §Object model) — the resolution target for a fragment ref
-// (§Identity and references).
-func declaredObjectIDs(spec *artifact.SpecFrontmatter) map[string]bool {
-	ids := make(map[string]bool, len(spec.AcceptanceCriteria)+len(spec.Constraints)+len(spec.Decisions)+len(spec.OpenQuestions))
-	for _, ac := range spec.AcceptanceCriteria {
-		ids[ac.ID] = true
-	}
-	for _, c := range spec.Constraints {
-		ids[c.ID] = true
-	}
-	for _, dc := range spec.Decisions {
-		ids[dc.ID] = true
-	}
-	for _, q := range spec.OpenQuestions {
-		ids[q.ID] = true
-	}
-	return ids
 }
 
 // checkPin validates a pinned ref (kind/name@commit): the unpinned kind/name
