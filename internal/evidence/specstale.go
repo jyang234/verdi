@@ -2,6 +2,16 @@ package evidence
 
 import "github.com/OWNER/verdi/internal/artifact"
 
+// DefaultDeviationsStaleThreshold is the spec-stale flag's threshold-count
+// trigger's default (03 §The amendment ladder: "more than a configured
+// count of accepted-deviation dispositions accumulated on one story
+// (verdi.yaml: audit.deviations_stale_threshold, default 3, tunable —
+// a watch item)"). internal/store decodes the raw manifest value and, per
+// its AuditConfig doc comment, leaves applying this default (and
+// disambiguating an absent field from an explicit 0) to this consuming
+// phase: SpecStale substitutes it whenever Threshold is zero or negative.
+const DefaultDeviationsStaleThreshold = 3
+
 // SpecStaleInput is SpecStale's input for one story.
 type SpecStaleInput struct {
 	// Findings are the story's frozen (or living) deviation report's
@@ -12,9 +22,10 @@ type SpecStaleInput struct {
 	// disclosed judgment call this join implements.
 	StoryACIDs map[string]bool
 	// Threshold is the configured accumulation count
-	// (audit.deviations_stale_threshold — DeviationsStaleThreshold reads
-	// it from verdi.yaml). A zero or negative Threshold is read as "use
-	// the default" (DefaultDeviationsStaleThreshold) rather than as a
+	// (audit.deviations_stale_threshold, decoded by internal/store into
+	// Manifest.Audit.DeviationsStaleThreshold — the caller reads it there
+	// and passes it in). A zero or negative Threshold is read as "use the
+	// default" (DefaultDeviationsStaleThreshold) rather than as a
 	// caller's deliberate zero, since a real zero would flag on the very
 	// first accepted-deviation, which 03's "tunable, default 3" framing
 	// never intends as the out-of-the-box behavior.
