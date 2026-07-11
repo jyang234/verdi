@@ -57,8 +57,9 @@ coordinated change everywhere, so the contract is versioned
   (evidence-model spec §Attestations and waivers) reuse the attestation kind
   with the same compound grammar — name `<feature-slug>--<ac-id>`, path
   `attestations/<feature-slug>/<ac-id>.md` — but in the `<story-slug>`
-  position they carry the **feature spec's own ref slug**: `<feature-slug>`
-  is `RefSlug` of the feature spec's own `id`, because features carry only an
+  position they carry the **feature spec's name** (the `name` half of its
+  ref; amended at V1-P3 phase review from the earlier `RefSlug(id)` form —
+  08 §Round 4 E2), because features carry only an
   OPTIONAL tracker ref, so the slug is never tracker-derived. The path stays
   the nested two-level form; VL-002 defers path/id agreement for these kinds
   to VL-011, which maps the compound name back onto the nested path.
@@ -535,7 +536,7 @@ run locally and as a CI gate. Rules:
 | VL-008  | generated provenance in committed zone ⇒ on `gated_generated` allowlist OR frozen-stamped |
 | VL-009  | frozen artifacts carry valid `frozen` stamp and provenance where generated    |
 | VL-010  | frozen artifacts are immutable: any diff touching a frozen file fails, except a pure rename within an active→archive move — the diff base is `merge-base(HEAD, default branch)`; uncommitted edits to a frozen file are errors too |
-| VL-011  | attestation/waiver/reaffirmation files live under the story/object they name; feature outcome-attestations (`attestations/<feature-slug>/<ac-id>.md`, name `<feature-slug>--<ac-id>`, §Identity and references) validate the same nested form with `<feature-slug>` = `RefSlug` of the feature spec's own id (not tracker-derived); waiver has owner + reason, expiry optional |
+| VL-011  | attestation/waiver/reaffirmation files live under the story/object they name; feature outcome-attestations (`attestations/<feature-slug>/<ac-id>.md`, name `<feature-slug>--<ac-id>`, §Identity and references) validate the same nested form with `<feature-slug>` = the feature spec's name (not tracker-derived; E2 as amended); waiver has owner + reason, expiry optional |
 | VL-012  | `.gitattributes` marks all committed-generated paths with the configured forge's generated attribute (`gitlab-generated` on GitLab, `linguist-generated` on GitHub) |
 | VL-013  | nothing under `.verdi/data/` is ever git-tracked (`git add -f` is intent; lint catches it) |
 | VL-014  | disposition completeness, bidirectional, **grandfathered** (R4-I-9(a)): fires only on specs carrying a `dispositions:` block (pre-R4 artifacts) — every sticky id in a committed `board.json` appears there as incorporated (with a resolving `where` anchor), contradicted (with `note`), or open-question, and every entry names a real board sticky. New specs use VL-017 instead |

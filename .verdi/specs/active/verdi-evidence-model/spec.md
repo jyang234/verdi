@@ -394,7 +394,10 @@ spec it is archiving.
   satisfying record, §The feature fold) reuses the same artifact kind
   unchanged: compound name `<feature-slug>--<ac-id>`, path
   `attestations/<feature-slug>/<ac-id>.md`, CODEOWNERS-routed.
-  `<feature-slug>` is the feature spec's own slug (`RefSlug` of its id) — a
+  `<feature-slug>` is the feature spec's **name** (the `name` half of its
+  ref — amended at V1-P3 phase review from round four's earlier
+  `RefSlug(id)` form, which would prefix every path with `spec--`;
+  08 §Round 4 E2 records the amendment) — a
   feature spec carries only an OPTIONAL `story:` (epic/objective) ref, so
   unlike story attestations this slug is not tracker-derived. The feature fold
   checks outcome-attestation file existence exactly as the story fold
