@@ -90,6 +90,7 @@ outcome: { text: string, anchor: string }   # required; feature/story only — �
 acceptance_criteria: [ {id, text, evidence, anchor}, ... ]  # optional; feature/story only — §Object model
 constraints: [ {id, text, anchor}, ... ]                    # optional; feature/story only — §Object model
 decisions: [ {id, text, anchor, links?}, ... ]              # optional; feature/story only — §Object model
+open_questions: [ {id, text, anchor}, ... ]                 # optional; feature/story only — §Object model
 frozen: { at: date, commit: sha }   # required iff temporal class is frozen
 provenance:                # required iff generated
   generator: string        # e.g. verdi-close, commit-to-design skill
@@ -125,9 +126,10 @@ renders on the board as the spec's attribute placards (surfaces spec
 neither.
 
 Feature and story specs (§Kind registry) declare their acceptance criteria,
-constraints, and design decisions as **frontmatter-declared objects** —
-typed array entries, each with a stable `id`, its `text`, and (except
-`constraints`, see below) evidence or edge fields:
+constraints, design decisions, and open questions as
+**frontmatter-declared objects** — typed array entries, each with a stable
+`id`, its `text`, and (except `constraints` and `open_questions`, see
+below) evidence or edge fields:
 
 ```yaml
 acceptance_criteria:
@@ -137,6 +139,8 @@ constraints:
 decisions:
   - { id: dc-1, text: "...", anchor: "#dc-1",
       links: [ { type: exempts, ref: adr/0012-outbox-loansvc-events, note: "..." } ] }
+open_questions:
+  - { id: oq-1, text: "...", anchor: "#oq-1" }
 ```
 
 Every object — and both attributes, above — carries an `anchor:` naming
@@ -157,10 +161,18 @@ no `links:` of their own — a feature constraint inherits downward to its
 stories, checked wherever relevant, never assigned to one. `decisions`
 objects may carry their own `links:` — the same shape as document-level
 `links:` (§Common frontmatter) — for `supersedes`/`exempts` edges against
-ADRs or other decisions (§Link taxonomy). A story's `implements`/`resolves`
-edges are declared at the document level (top-level `links:`), targeting a
-feature object fragment (§Identity and references), not inside an
-`acceptance_criteria` or `constraints` entry.
+ADRs or other decisions (§Link taxonomy). `open_questions` objects (added
+at ratification round four's phase review — the block VL-017's "declared
+open-question object" and the spike variant's `resolves` target had named
+without a home in this contract) carry no `links:` of their own: they are
+the *targets* of `resolves` edges (a spike's deliverable is answering
+them, §Kind registry) and the graduation destination of the board's
+carried open-question stickies (VL-017; surfaces spec §Workbench's
+scratch tier); a resolved open question graduates into a real object or
+prose by an ordinary edit, and the entry is removed in the same edit. A
+story's `implements`/`resolves` edges are declared at the document level
+(top-level `links:`), targeting a feature object fragment (§Identity and
+references), not inside an `acceptance_criteria` or `constraints` entry.
 
 Object **IDs are immutable once published** (first appearance in a spec
 that reaches `accepted-pending-build` or later). An object's cross-revision
