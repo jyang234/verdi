@@ -62,7 +62,7 @@ func matrixHandler(root string) http.HandlerFunc {
 
 		page := pageData{
 			Title:     "Advisory preview matrix: " + result.Story,
-			Nav:       `<a href="/">index</a>`,
+			Nav:       template.HTML(`<a href="/">index</a>`),
 			ExtraHTML: renderMatrixHTML(result),
 		}
 		out, err := renderPage(page)

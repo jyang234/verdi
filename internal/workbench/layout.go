@@ -27,7 +27,7 @@ type metaRow struct {
 // pageData is the shape every non-board workbench page renders through.
 type pageData struct {
 	Title    string
-	Nav      string // small top-of-page nav links, pre-rendered HTML
+	Nav      template.HTML // small top-of-page nav links, pre-rendered HTML
 	MetaRows []metaRow
 	BodyHTML template.HTML
 	// DispositionsHTML is the I-5 dispositions table (feature-spec corpus

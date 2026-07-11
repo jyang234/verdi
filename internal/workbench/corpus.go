@@ -71,7 +71,7 @@ func corpusHandler(root string) http.HandlerFunc {
 
 		page := pageData{
 			Title:            entry.Title,
-			Nav:              `<a href="/">index</a>`,
+			Nav:              template.HTML(`<a href="/">index</a>`),
 			MetaRows:         corpusMetaRows(entry, meta),
 			BodyHTML:         template.HTML(bodyHTML),
 			DispositionsHTML: render.DispositionsTable(meta.Dispositions),

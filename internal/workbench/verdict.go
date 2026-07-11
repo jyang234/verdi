@@ -72,7 +72,7 @@ func verdictHandler(root string) http.HandlerFunc {
 		specRef, _ := artifact.ParseRef(spec.ID)
 		page := pageData{
 			Title:     "Verdict viewer: " + spec.ID,
-			Nav:       `<a href="/">index</a> <a href="/a/spec/` + stdhtml.EscapeString(specRef.Name) + `">spec</a>`,
+			Nav:       template.HTML(`<a href="/">index</a> <a href="/a/spec/` + stdhtml.EscapeString(specRef.Name) + `">spec</a>`),
 			BodyHTML:  "",
 			ExtraHTML: template.HTML(extra.String()),
 		}
