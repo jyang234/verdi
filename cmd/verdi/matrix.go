@@ -38,15 +38,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
-	"strings"
 	"text/tabwriter"
 
-	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/evidence"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/store"
+	"github.com/OWNER/verdi/internal/storyresolve"
 )
 
 // cmdMatrix is `verdi matrix`'s real entry point, invoked by dispatch.go.
@@ -82,7 +80,7 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	spec, err := resolveSpec(root, storyArg)
+	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
 		fmt.Fprintln(stderr, "matrix:", err)
 		return 2
@@ -112,92 +110,6 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 
 	printMatrix(stdout, result, preview)
 	return 0
-}
-
-// resolveSpec resolves arg to a feature spec under specs/active/ — 03 §The
-// fold's "Scope: the fold is evaluated only for specs under specs/active/".
-// Per I-30, arg is EXACTLY one of two forms: a spec ref ("spec/<name>"),
-// loaded directly; or a scheme-prefixed story ref ("jira:LOAN-1482"),
-// matched against every active feature spec's `story:` field. Any other
-// argument is an operational error naming both accepted forms.
-func resolveSpec(root, arg string) (*artifact.SpecFrontmatter, error) {
-	// (b) A spec ref: load it directly.
-	if ref, err := artifact.ParseRef(arg); err == nil && ref.Kind == artifact.KindSpec {
-		spec, loadErr := loadActiveSpec(root, ref.Name)
-		if loadErr != nil {
-			return nil, loadErr
-		}
-		if spec.Class != artifact.ClassFeature {
-			return nil, fmt.Errorf("spec %q is a component spec (no story, no acceptance criteria); matrix only folds feature specs", arg)
-		}
-		return spec, nil
-	}
-
-	// (a) A scheme-prefixed story ref: match it against every active feature
-	// spec's story: field. The scheme (the part before ":") need not be a
-	// configured provider — an unmatched story ref simply names no spec.
-	if scheme, key, ok := strings.Cut(arg, ":"); ok && scheme != "" && key != "" {
-		return matchStoryRef(root, arg)
-	}
-
-	return nil, fmt.Errorf("%q is neither a scheme-prefixed story ref (e.g. jira:LOAN-1482) nor a spec ref (e.g. spec/stale-decline); matrix accepts exactly those two forms", arg)
-}
-
-// matchStoryRef returns the single active feature spec whose story: field
-// equals storyRef, erroring if none — or more than one — does.
-func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
-	dir := filepath.Join(root, ".verdi", "specs", "active")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("listing %s: %w", dir, err)
-	}
-
-	var matches []*artifact.SpecFrontmatter
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		spec, err := loadActiveSpec(root, e.Name())
-		if err != nil {
-			return nil, err
-		}
-		if spec.Class != artifact.ClassFeature {
-			continue
-		}
-		if spec.Story == storyRef {
-			matches = append(matches, spec)
-		}
-	}
-	switch len(matches) {
-	case 0:
-		return nil, fmt.Errorf("no active feature spec has story: %s", storyRef)
-	case 1:
-		return matches[0], nil
-	default:
-		names := make([]string, len(matches))
-		for i, m := range matches {
-			names[i] = m.ID
-		}
-		return nil, fmt.Errorf("story ref %q matches more than one active feature spec: %s", storyRef, strings.Join(names, ", "))
-	}
-}
-
-// loadActiveSpec reads and strict-decodes specs/active/<name>/spec.md.
-func loadActiveSpec(root, name string) (*artifact.SpecFrontmatter, error) {
-	path := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-	fm, _, err := artifact.SplitFrontmatter(data)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	spec, err := artifact.DecodeSpec(fm)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return spec, nil
 }
 
 // printMatrix renders result as a per-AC table plus the story eligibility

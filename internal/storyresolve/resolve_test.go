@@ -1,4 +1,4 @@
-package main
+package storyresolve
 
 import (
 	"os"
@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const matrixTestFeatureSpec = `---
+const testFeatureSpec = `---
 id: spec/matrix-helper-test
 kind: spec
 class: feature
@@ -22,7 +22,7 @@ frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
 # body
 `
 
-const matrixTestComponentSpec = `---
+const testComponentSpec = `---
 id: spec/matrix-helper-component
 kind: spec
 class: component
@@ -44,17 +44,17 @@ func writeActiveSpec(t *testing.T, root, name, content string) {
 	}
 }
 
-// TestResolveSpec_Happy covers the two accepted input shapes (I-30): a
-// spec ref, and a scheme-prefixed story ref matched against a feature
-// spec's story: field.
-func TestResolveSpec_Happy(t *testing.T) {
+// TestResolve_Happy covers the two accepted input shapes (I-30): a spec
+// ref, and a scheme-prefixed story ref matched against a feature spec's
+// story: field.
+func TestResolve_Happy(t *testing.T) {
 	root := t.TempDir()
-	writeActiveSpec(t, root, "matrix-helper-test", matrixTestFeatureSpec)
+	writeActiveSpec(t, root, "matrix-helper-test", testFeatureSpec)
 
 	t.Run("spec ref", func(t *testing.T) {
-		spec, err := resolveSpec(root, "spec/matrix-helper-test")
+		spec, err := Resolve(root, "spec/matrix-helper-test")
 		if err != nil {
-			t.Fatalf("resolveSpec: %v", err)
+			t.Fatalf("Resolve: %v", err)
 		}
 		if spec.ID != "spec/matrix-helper-test" {
 			t.Fatalf("ID = %q, want spec/matrix-helper-test", spec.ID)
@@ -62,9 +62,9 @@ func TestResolveSpec_Happy(t *testing.T) {
 	})
 
 	t.Run("scheme-prefixed story ref", func(t *testing.T) {
-		spec, err := resolveSpec(root, "jira:LOAN-1482")
+		spec, err := Resolve(root, "jira:LOAN-1482")
 		if err != nil {
-			t.Fatalf("resolveSpec: %v", err)
+			t.Fatalf("Resolve: %v", err)
 		}
 		if spec.ID != "spec/matrix-helper-test" {
 			t.Fatalf("ID = %q, want spec/matrix-helper-test", spec.ID)
@@ -72,18 +72,18 @@ func TestResolveSpec_Happy(t *testing.T) {
 	})
 }
 
-// TestResolveSpec_Negative covers, in I-30's strict regime: a bare tracker
+// TestResolve_Negative covers, in I-30's strict regime: a bare tracker
 // key (no scheme, not a spec ref) rejected with a message naming both
 // accepted forms; a well-formed but unknown story ref that no spec claims;
 // an ambiguous story ref two feature specs both claim; a spec ref naming a
 // component spec (no story, no ACs); and no specs/active directory at all.
-func TestResolveSpec_Negative(t *testing.T) {
+func TestResolve_Negative(t *testing.T) {
 	t.Run("bare tracker key is rejected naming both forms", func(t *testing.T) {
 		root := t.TempDir()
-		writeActiveSpec(t, root, "matrix-helper-test", matrixTestFeatureSpec)
-		_, err := resolveSpec(root, "STORY-1482")
+		writeActiveSpec(t, root, "matrix-helper-test", testFeatureSpec)
+		_, err := Resolve(root, "STORY-1482")
 		if err == nil {
-			t.Fatal("resolveSpec(bare key STORY-1482): want error, got nil")
+			t.Fatal("Resolve(bare key STORY-1482): want error, got nil")
 		}
 		msg := err.Error()
 		if !strings.Contains(msg, "jira:LOAN-1482") || !strings.Contains(msg, "spec/") {
@@ -93,10 +93,10 @@ func TestResolveSpec_Negative(t *testing.T) {
 
 	t.Run("unknown story ref", func(t *testing.T) {
 		root := t.TempDir()
-		writeActiveSpec(t, root, "matrix-helper-test", matrixTestFeatureSpec)
-		_, err := resolveSpec(root, "jira:NOPE-1")
+		writeActiveSpec(t, root, "matrix-helper-test", testFeatureSpec)
+		_, err := Resolve(root, "jira:NOPE-1")
 		if err == nil {
-			t.Fatal("resolveSpec(unknown story ref): want error, got nil")
+			t.Fatal("Resolve(unknown story ref): want error, got nil")
 		}
 		if !strings.Contains(err.Error(), "jira:NOPE-1") {
 			t.Fatalf("error %q should name the unmatched story ref", err.Error())
@@ -105,7 +105,7 @@ func TestResolveSpec_Negative(t *testing.T) {
 
 	t.Run("ambiguous story ref", func(t *testing.T) {
 		root := t.TempDir()
-		writeActiveSpec(t, root, "matrix-helper-test", matrixTestFeatureSpec)
+		writeActiveSpec(t, root, "matrix-helper-test", testFeatureSpec)
 		other := `---
 id: spec/matrix-helper-test-2
 kind: spec
@@ -120,22 +120,22 @@ acceptance_criteria:
 # body
 `
 		writeActiveSpec(t, root, "matrix-helper-test-2", other)
-		if _, err := resolveSpec(root, "jira:LOAN-1482"); err == nil {
-			t.Fatal("resolveSpec(ambiguous story ref): want error, got nil")
+		if _, err := Resolve(root, "jira:LOAN-1482"); err == nil {
+			t.Fatal("Resolve(ambiguous story ref): want error, got nil")
 		}
 	})
 
 	t.Run("component spec ref", func(t *testing.T) {
 		root := t.TempDir()
-		writeActiveSpec(t, root, "matrix-helper-component", matrixTestComponentSpec)
-		if _, err := resolveSpec(root, "spec/matrix-helper-component"); err == nil {
-			t.Fatal("resolveSpec(component spec ref): want error, got nil")
+		writeActiveSpec(t, root, "matrix-helper-component", testComponentSpec)
+		if _, err := Resolve(root, "spec/matrix-helper-component"); err == nil {
+			t.Fatal("Resolve(component spec ref): want error, got nil")
 		}
 	})
 
 	t.Run("no specs/active directory at all", func(t *testing.T) {
-		if _, err := resolveSpec(t.TempDir(), "jira:LOAN-1482"); err == nil {
-			t.Fatal("resolveSpec(no specs/active dir): want error, got nil")
+		if _, err := Resolve(t.TempDir(), "jira:LOAN-1482"); err == nil {
+			t.Fatal("Resolve(no specs/active dir): want error, got nil")
 		}
 	})
 }
