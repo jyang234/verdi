@@ -90,7 +90,7 @@ func boardHandler(root string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(out)
+		_, _ = w.Write(out) // response body write; post-header error is unactionable
 	}
 }
 
@@ -331,7 +331,7 @@ func boardCommitHandler(root string) http.HandlerFunc {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v) // response body write; post-header error is unactionable
 }
 
 func writeJSONError(w http.ResponseWriter, status int, msg string) {

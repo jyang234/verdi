@@ -107,16 +107,16 @@ func graduateFile(path string, want map[string]bool) (int, error) {
 	}
 	tmpName := tmp.Name()
 	if _, werr := tmp.Write(buf.Bytes()); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return 0, fmt.Errorf("boardio: writing temp file: %w", werr)
 	}
 	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return 0, fmt.Errorf("boardio: closing temp file: %w", cerr)
 	}
 	if rerr := os.Rename(tmpName, path); rerr != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return 0, fmt.Errorf("boardio: renaming into place: %w", rerr)
 	}
 	return changed, nil

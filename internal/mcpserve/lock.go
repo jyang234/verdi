@@ -139,8 +139,8 @@ func acquireLock(path string, retriesLeft int) (*os.File, error) {
 	if err == nil {
 		info := LockInfo{PID: os.Getpid(), Start: time.Now().Unix()}
 		if encErr := json.NewEncoder(f).Encode(info); encErr != nil {
-			f.Close()
-			os.Remove(path)
+			_ = f.Close()
+			_ = os.Remove(path)
 			return nil, fmt.Errorf("mcpserve: writing lock %s: %w", path, encErr)
 		}
 		return f, nil

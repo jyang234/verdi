@@ -65,7 +65,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 		}
 		return 2
 	}
-	defer mcpserve.ReleaseLock(lockFile, lockPath)
+	defer func() { _ = mcpserve.ReleaseLock(lockFile, lockPath) }()
 
 	sockPath, err := mcpserve.SocketPath(root)
 	if err != nil {
@@ -76,15 +76,15 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "serve:", err)
 		return 2
 	}
-	os.Remove(sockPath) // best-effort: a prior crash may have left a stale socket inode
+	_ = os.Remove(sockPath) // best-effort: a prior crash may have left a stale socket inode
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		fmt.Fprintln(stderr, "serve: binding MCP socket:", err)
 		return 2
 	}
 	defer func() {
-		ln.Close()
-		os.Remove(sockPath)
+		_ = ln.Close()
+		_ = os.Remove(sockPath)
 	}()
 
 	if err := mcpserve.WritePointerFile(root, sockPath); err != nil {

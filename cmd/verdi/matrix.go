@@ -122,7 +122,7 @@ func printMatrix(w io.Writer, result evidence.StoryResult, preview bool) {
 	for _, r := range result.ACs {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.ID, r.Status, r.Summary, r.Text)
 	}
-	tw.Flush()
+	_ = tw.Flush() // tabwriter over stdout; flush error is unactionable CLI output
 
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "story.violated: %t\n", result.Violated)

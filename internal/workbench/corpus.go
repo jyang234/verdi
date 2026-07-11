@@ -83,7 +83,7 @@ func corpusHandler(root string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(out)
+		_, _ = w.Write(out) // response body write; post-header error is unactionable
 	}
 }
 

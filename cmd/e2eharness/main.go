@@ -63,7 +63,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("creating scratch dir: %w", err)
 	}
-	defer os.RemoveAll(scratch)
+	defer func() { _ = os.RemoveAll(scratch) }()
 
 	binPath := filepath.Join(scratch, "verdi")
 	if err := buildBinary(moduleRoot, binPath); err != nil {
@@ -110,7 +110,7 @@ func run() error {
 
 	_ = serveCmd.Process.Signal(syscall.SIGTERM)
 	done := make(chan struct{})
-	go func() { serveCmd.Wait(); close(done) }()
+	go func() { _ = serveCmd.Wait(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):

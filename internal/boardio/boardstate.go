@@ -100,16 +100,16 @@ func SaveBoardState(path string, b *artifact.Board) error {
 	}
 	tmpName := tmp.Name()
 	if _, werr := tmp.Write(data); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("boardio: writing temp file: %w", werr)
 	}
 	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("boardio: closing temp file: %w", cerr)
 	}
 	if rerr := os.Rename(tmpName, path); rerr != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("boardio: renaming into place: %w", rerr)
 	}
 	return nil

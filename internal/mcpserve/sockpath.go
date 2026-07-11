@@ -30,10 +30,6 @@ const maxSockPathLen = 103
 // (48 bits of hash space).
 const hashPrefixLen = 12
 
-// PointerFileRelPath is data/serve.path's path relative to the store
-// root's .verdi/ directory (01 §Directory layout).
-const pointerFileRelPath = "data/serve.path"
-
 // SocketPath computes I-29(a)'s bind path for the checkout rooted at
 // root: `$TMPDIR/verdi-<hash>/serve.sock`, where hash is a short SHA-256
 // prefix of root's absolute path (so distinct checkouts — including
@@ -81,16 +77,16 @@ func WritePointerFile(root, sockPath string) error {
 	}
 	tmpName := tmp.Name()
 	if _, werr := tmp.WriteString(sockPath + "\n"); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("mcpserve: WritePointerFile: %w", werr)
 	}
 	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("mcpserve: WritePointerFile: %w", cerr)
 	}
 	if rerr := os.Rename(tmpName, target); rerr != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("mcpserve: WritePointerFile: %w", rerr)
 	}
 	return nil

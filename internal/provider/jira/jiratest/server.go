@@ -73,7 +73,7 @@ func (s *Server) SeedIssue(key, summary, status string) {
 // this server's own base. It is deliberately not the human browse link, so
 // a client that (wrongly) mapped Story.URL from "self" would visibly fail.
 func (s *Server) selfFor(key string) string {
-	return s.Server.URL + "/rest/api/3/issue/" + key
+	return s.URL + "/rest/api/3/issue/" + key
 }
 
 // SeedNotFound pins key so every request touching it 404s, without a prior

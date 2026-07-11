@@ -25,7 +25,7 @@ func mermaidHandler() http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		w.Write(data)
+		_, _ = w.Write(data) // response body write; post-header error is unactionable
 	}
 }
 
@@ -43,6 +43,6 @@ func boardJSHandler() http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		w.Write(data)
+		_, _ = w.Write(data) // response body write; post-header error is unactionable
 	}
 }

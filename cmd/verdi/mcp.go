@@ -73,14 +73,14 @@ func dialRunningServe(root string) (net.Conn, bool) {
 func proxyStdio(stdin io.Reader, stdout io.Writer, conn net.Conn) {
 	done := make(chan struct{}, 2)
 	go func() {
-		io.Copy(conn, stdin)
+		_, _ = io.Copy(conn, stdin)
 		if uc, ok := conn.(*net.UnixConn); ok {
-			uc.CloseWrite()
+			_ = uc.CloseWrite()
 		}
 		done <- struct{}{}
 	}()
 	go func() {
-		io.Copy(stdout, conn)
+		_, _ = io.Copy(stdout, conn)
 		done <- struct{}{}
 	}()
 	<-done // exit on the FIRST direction to end; do not wait on the other
@@ -112,7 +112,7 @@ func serveStandalone(root string, stdin io.Reader, stdout, stderr io.Writer) int
 		fmt.Fprintln(stderr, "mcp:", err)
 		return 2
 	}
-	defer mcpserve.ReleaseLock(lockFile, lockPath)
+	defer func() { _ = mcpserve.ReleaseLock(lockFile, lockPath) }()
 
 	srv := mcpserve.NewServer(root)
 	if err := mcpserve.ServeConn(context.Background(), stdin, stdout, srv); err != nil && !errors.Is(err, io.EOF) {
