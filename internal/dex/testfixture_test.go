@@ -100,6 +100,11 @@ func readTreeFiles(t *testing.T, dir, destPrefix string) map[string]string {
 	return out
 }
 
+// dexOverlayDir is testdata/dexoverlay — V1-P8's dex-only fixture overlay
+// (a spec-stale living report, a round-four archived quartet, and the
+// open-MR supersession candidate; see its README.md).
+const dexOverlayDir = "../../testdata/dexoverlay"
+
 // buildDexFixtureRepo builds a git repo whose first three commits are
 // byte-identical to testdata/corpus's own three layers (reproducing
 // corpusGoldenHeads exactly — every frozen stamp and pinned ref inside
@@ -107,11 +112,21 @@ func readTreeFiles(t *testing.T, dir, destPrefix string) map[string]string {
 // testdata/svcfix wholesale at repo path "svcfix/" — giving dex's by-service
 // axis and svc/... external refs something real to discover, without
 // touching the first three commits' tree contents (and so their SHAs).
+//
+// V1-P8 appends two more layers, still leaving layers 1-3's SHAs
+// untouched: the v2 fixture-overlay corpus files layers.txt never listed
+// (the accepted-pending-build cluster, the loan-workflow supersession
+// pair, the outcome attestation, the reaffirmation — everything on disk
+// under testdata/corpus/.verdi/ beyond the v0 layers), then
+// testdata/dexoverlay/'s dex-only files — so the built store matches what
+// cmd/e2eharness provisions and the feature-lens/ladder/by-story pages
+// have their fixtures.
 func buildDexFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	order, files := parseCorpusLayers(t)
 
 	var layers []fixturegit.Layer
+	inV0 := map[string]bool{}
 	for _, n := range order {
 		layerFiles := map[string]string{}
 		for _, rel := range files[n] {
@@ -120,12 +135,24 @@ func buildDexFixtureRepo(t *testing.T) *fixturegit.Repo {
 				t.Fatalf("reading corpus file %s (layer %d): %v", rel, n, err)
 			}
 			layerFiles[rel] = string(data)
+			inV0[rel] = true
 		}
 		layers = append(layers, fixturegit.Layer{Files: layerFiles, Message: fmt.Sprintf("layer %d", n)})
 	}
 
 	svcFiles := readTreeFiles(t, svcfixDir, "svcfix")
 	layers = append(layers, fixturegit.Layer{Files: svcFiles, Message: "add svcfix service"})
+
+	v2Files := map[string]string{}
+	for rel, content := range readTreeFiles(t, filepath.Join(corpusDir, ".verdi"), ".verdi") {
+		if !inV0[rel] {
+			v2Files[rel] = content
+		}
+	}
+	layers = append(layers, fixturegit.Layer{Files: v2Files, Message: "v2 fixture overlay"})
+
+	overlay := readTreeFiles(t, filepath.Join(dexOverlayDir, ".verdi"), ".verdi")
+	layers = append(layers, fixturegit.Layer{Files: overlay, Message: "dex overlay: spec-stale report + round-four quartet"})
 
 	repo := fixturegit.Build(t, layers)
 

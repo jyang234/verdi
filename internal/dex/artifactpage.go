@@ -13,7 +13,7 @@ import (
 
 // writeArtifactPage renders and writes one committed-zone permalink page
 // (05 §Verdi-dex mechanics: "/a/<kind>/<name>").
-func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, stamp buildStamp, ix *index.Index, known map[string]bool, p *artifactPage) error {
+func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, stamp buildStamp, ix *index.Index, known map[string]bool, lens *lensData, p *artifactPage) error {
 	bodyHTML, err := renderBody(p.Entry.Kind, p.Entry.Body)
 	if err != nil {
 		return fmt.Errorf("dex: rendering %s: %w", p.Entry.Ref, err)
@@ -45,16 +45,27 @@ func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, st
 		pinCommit = frozen.Commit
 	}
 
+	// The v2 lens surfaces (V1-P8): ladder badges + disclosure rows on
+	// story pages, the paired stub/live-mapping section on round-four
+	// feature pages, and the ADR page's link to its exemption page.
+	ladder := storyLadder(lens, p)
+	connections := allConnections(ix, p.Entry.Ref, p.Entry.Links, known)
+	if c := adrExemptionsConnection(p, lens.exemptions); c != nil {
+		connections = append(connections, *c)
+	}
+
 	data := pageData{
 		Title:            p.Entry.Title,
 		Status:           p.Entry.Status,
+		LadderBadges:     ladder.Badges,
 		Breadcrumb:       pageBreadcrumb(p.Entry.Kind, p.Entry.Title, isArchivedSpec(p.RelPath)),
 		Banner:           banner,
 		BannerClass:      bannerClass(class),
-		MetaRows:         artifactMetaRows(p),
+		MetaRows:         append(artifactMetaRows(p), ladder.Rows...),
 		BodyHTML:         template.HTML(bodyHTML),
 		DispositionsHTML: renderDispositionsTable(p.Meta.Dispositions),
-		Connections:      allConnections(ix, p.Entry.Ref, p.Entry.Links, known),
+		FeatureLensHTML:  featureLensHTML(ix, known, p),
+		Connections:      connections,
 		TOC:              extractTOC(bodyHTML),
 		CopyRef:          p.Entry.Ref + "@" + pinCommit,
 	}

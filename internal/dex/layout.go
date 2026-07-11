@@ -30,10 +30,17 @@ type connection struct {
 // home — renders through, so there is exactly one HTML template to keep
 // consistent (breadcrumb, badge, banner, TOC, connections, copy-reference).
 type pageData struct {
-	Title      string
-	Status     string // "" suppresses the badge (listing/utility pages)
-	Breadcrumb []breadcrumbEntry
-	Banner     string
+	Title  string
+	Status string // "" suppresses the badge (listing/utility pages)
+	// LadderBadges are a story page's computed ladder-state flags
+	// ("spec-stale", "pending-supersession" — 05 §Lenses story lens),
+	// rendered as badges beside the status badge; empty everywhere else.
+	// A badge renders iff the flag is COMPUTED to stand — an unprovable
+	// flag (no forge) is disclosed in the metadata card instead, never
+	// silently dropped and never rendered as if proven.
+	LadderBadges []string
+	Breadcrumb   []breadcrumbEntry
+	Banner       string
 	// BannerClass is the temporal stamp's class-specific styling hook
 	// ("temporal--frozen", "temporal--authored-living",
 	// "temporal--living-gated") — presentation only: the banner TEXT is the
@@ -54,6 +61,10 @@ type pageData struct {
 	// DispositionsHTML is the I-5 dispositions table, pre-rendered to HTML
 	// (feature-spec pages only); empty elsewhere.
 	DispositionsHTML template.HTML
+	// FeatureLensHTML is the feature lens' paired stub-plan/live-mapping
+	// section (V1-P8, 05 §Lenses), pre-rendered; empty on every page that
+	// is not a round-four feature spec.
+	FeatureLensHTML template.HTML
 	// OpenAPIJSONPath is set on the one API page per service that has a
 	// discovered OpenAPI doc: the site-relative path to the build-emitted
 	// openapi.json the openapi-renderer.js script tag reads via its
@@ -87,7 +98,7 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <body>
 <header class="site-head">
 <a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">dex</span></a>
-<nav class="site-nav"><a href="/by-kind/">by kind</a> <a href="/by-service/">by service</a> <a href="/changelog/">what changed</a> <a href="/search/">search</a></nav>
+<nav class="site-nav"><a href="/by-kind/">by kind</a> <a href="/by-service/">by service</a> <a href="/by-story/">by story</a> <a href="/changelog/">what changed</a> <a href="/search/">search</a></nav>
 </header>
 <nav class="breadcrumb">
 {{range $i, $c := .Breadcrumb}}{{if $i}} <span class="sep">/</span> {{end}}{{if $c.URL}}<a href="{{$c.URL}}">{{$c.Label}}</a>{{else}}<span class="current">{{$c.Label}}</span>{{end}}{{end}}
@@ -95,6 +106,7 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <header class="page-header">
 <h1>{{.Title}}</h1>
 {{if .Status}}<span class="badge badge-{{.Status}}">{{.Status}}</span>{{end}}
+{{range .LadderBadges}}<span class="badge badge-{{.}}" data-testid="badge-{{.}}">{{.}}</span>{{end}}
 </header>
 <div class="temporal-banner {{.BannerClass}}"><span class="temporal-dot" aria-hidden="true"></span>{{.Banner}}</div>
 {{if .CopyRef}}<div><button type="button" class="copy-ref" data-copy-ref="{{.CopyRef}}" title="{{.CopyRef}}" aria-label="Copy full reference {{.CopyRef}}">Copy reference <code>{{.CopyRefDisplay}}</code></button></div>{{end}}
@@ -107,6 +119,7 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <h2>Dispositions</h2>
 {{.DispositionsHTML}}
 </section>{{end}}
+{{.FeatureLensHTML}}
 {{.BodyHTML}}
 {{if .OpenAPIJSONPath}}<section class="openapi">
 <h2>API reference</h2>
