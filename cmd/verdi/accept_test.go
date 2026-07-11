@@ -5,6 +5,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/fixturegit"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/lint"
@@ -22,7 +23,7 @@ func scaffoldAndDesign(t *testing.T) (repo *fixturegit.Repo, preFlipHead string)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	if got := runDesignStart(ctx, repo.Dir, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr); got != 0 {
+	if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr); got != 0 {
 		t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
 	}
 	head, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
@@ -105,8 +106,21 @@ func TestRunAccept_PassesLintEngineInProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lint.Run: %v", err)
 	}
-	if len(findings) != 0 {
-		t.Fatalf("accepted spec has %d lint findings, want 0: %+v", len(findings), findings)
+	// Only verdict-failure findings flip a real lint run's exit code
+	// (lint/finding.go: SeverityDisclosure "is NOT a verdict failure ...
+	// a clean run carrying only disclosures still exits 0"). The
+	// round-four scaffold (design.go) is genuinely a new-class spec now
+	// (it carries problem/outcome/stubs), so VL-017's disclosed-unproven
+	// notice legitimately fires here (no data/mutable/ in this bare
+	// fixturegit repo) — a printed disclosure, not a violation.
+	var violations []lint.Finding
+	for _, f := range findings {
+		if f.Severity != lint.SeverityDisclosure {
+			violations = append(violations, f)
+		}
+	}
+	if len(violations) != 0 {
+		t.Fatalf("accepted spec has %d lint violations, want 0: %+v", len(violations), violations)
 	}
 }
 

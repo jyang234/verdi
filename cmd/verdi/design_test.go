@@ -5,6 +5,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/provider"
 	providerfake "github.com/OWNER/verdi/internal/provider/fake"
@@ -17,9 +18,10 @@ func seedFakeProvider(t *testing.T) *providerfake.Provider {
 	return p
 }
 
-// TestRunDesignStart_Happy proves the whole scaffold ritual: branch cut,
-// draft spec written with the provider-resolved title, scaffold committed,
-// board placeholder printed.
+// TestRunDesignStart_Happy proves the whole scaffold ritual for a
+// --kind feature spec: branch cut, draft spec written with the
+// provider-resolved title, scaffold committed (carrying attributes, ACs,
+// and stubs per 05 §CLI's own exit criterion), board placeholder printed.
 func TestRunDesignStart_Happy(t *testing.T) {
 	repo := buildPhase7Repo(t)
 	ctx := context.Background()
@@ -27,7 +29,7 @@ func TestRunDesignStart_Happy(t *testing.T) {
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStart(ctx, repo.Dir, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr)
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -53,6 +55,15 @@ func TestRunDesignStart_Happy(t *testing.T) {
 	if spec.Class != "feature" {
 		t.Fatalf("spec.Class = %q, want feature", spec.Class)
 	}
+	if spec.Problem == nil || spec.Outcome == nil {
+		t.Fatal("scaffolded feature spec must carry problem/outcome attributes (05 §CLI exit criterion)")
+	}
+	if len(spec.AcceptanceCriteria) == 0 {
+		t.Fatal("scaffolded feature spec must carry at least one acceptance criterion")
+	}
+	if len(spec.Stubs) == 0 {
+		t.Fatal("scaffolded feature spec must carry at least one stub (05 §CLI exit criterion)")
+	}
 
 	head, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
 	if err != nil {
@@ -64,6 +75,97 @@ func TestRunDesignStart_Happy(t *testing.T) {
 
 	if !contains(stdout.String(), "board:") {
 		t.Fatalf("stdout = %q, want a board URL placeholder line", stdout.String())
+	}
+}
+
+// TestRunDesignStart_FeatureWithNoRef proves a feature's tracker ref is
+// optional (05 §CLI, 02 §Kind registry's okr:LOAN-Q3 example): design start
+// --kind feature with no ref at all scaffolds a draft feature spec with an
+// empty story: field.
+func TestRunDesignStart_FeatureWithNoRef(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	ctx := context.Background()
+	manifest := phase7Manifest(t)
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "loan-mgmt", manifest, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runDesignStart(no ref) = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	spec, _ := readSpec(t, repo.Dir, "loan-mgmt")
+	if spec.Story != "" {
+		t.Fatalf("spec.Story = %q, want empty (a feature ref is optional)", spec.Story)
+	}
+	if spec.Class != artifact.ClassFeature {
+		t.Fatalf("spec.Class = %q, want feature", spec.Class)
+	}
+}
+
+// TestRunDesignStart_FeatureWithEpicRef proves a feature MAY carry an
+// epic/objective tracker ref (02 §Kind registry's own okr:LOAN-Q3 example)
+// when the store configures that scheme.
+func TestRunDesignStart_FeatureWithEpicRef(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	ctx := context.Background()
+	manifest := phase7Manifest(t)
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "loan-mgmt", manifest, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runDesignStart(epic ref) = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	spec, _ := readSpec(t, repo.Dir, "loan-mgmt")
+	if spec.Story != "jira:LOAN-1482" {
+		t.Fatalf("spec.Story = %q, want jira:LOAN-1482", spec.Story)
+	}
+}
+
+// TestRunDesignStart_Story proves --kind story scaffolds a class: story
+// spec, requires its ref, and carries the object-model fields validateStory
+// requires (problem/outcome/an implements edge).
+func TestRunDesignStart_Story(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	ctx := context.Background()
+	manifest := phase7Manifest(t)
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "jira:LOAN-1482", "stale-decline-story", manifest, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runDesignStart(story) = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	spec, _ := readSpec(t, repo.Dir, "stale-decline-story")
+	if spec.Class != artifact.ClassStory {
+		t.Fatalf("spec.Class = %q, want story", spec.Class)
+	}
+	if spec.Story != "jira:LOAN-1482" {
+		t.Fatalf("spec.Story = %q, want jira:LOAN-1482", spec.Story)
+	}
+	if spec.Problem == nil || spec.Outcome == nil {
+		t.Fatal("scaffolded story spec must carry problem/outcome attributes")
+	}
+}
+
+// TestRunDesignStart_StoryRequiresRef proves --kind story refuses (exit 2,
+// operational: a usage precondition, not a business verdict) with no ref at
+// all — the story class REQUIRES the scheme-prefixed story ref (05 §CLI).
+func TestRunDesignStart_StoryRequiresRef(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	ctx := context.Background()
+	manifest := phase7Manifest(t)
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "", "some-story", manifest, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runDesignStart(story, no ref) = %d, want 2", got)
+	}
+	if !contains(stderr.String(), "requires") {
+		t.Fatalf("stderr = %q, want it to name the required-ref refusal", stderr.String())
 	}
 }
 
@@ -81,7 +183,7 @@ func TestRunDesignStart_ProviderResolveFails_DegradesToRawRef(t *testing.T) {
 	deps := designDeps{Provider: p, Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStart(ctx, repo.Dir, "jira:LOAN-9999", "some-feature", manifest, deps, &stdout, &stderr)
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-9999", "some-feature", manifest, deps, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -105,7 +207,7 @@ func TestRunDesignStart_Negative(t *testing.T) {
 	t.Run("invalid name", func(t *testing.T) {
 		repo := buildPhase7Repo(t)
 		var stdout, stderr bytes.Buffer
-		got := runDesignStart(ctx, repo.Dir, "jira:LOAN-1482", "Not_A_Valid_Name", manifest, deps, &stdout, &stderr)
+		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "Not_A_Valid_Name", manifest, deps, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStart(invalid name) = %d, want 2", got)
 		}
@@ -117,7 +219,7 @@ func TestRunDesignStart_Negative(t *testing.T) {
 	t.Run("malformed story ref", func(t *testing.T) {
 		repo := buildPhase7Repo(t)
 		var stdout, stderr bytes.Buffer
-		got := runDesignStart(ctx, repo.Dir, "not-a-story-ref", "some-name", manifest, deps, &stdout, &stderr)
+		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "not-a-story-ref", "some-name", manifest, deps, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStart(malformed story ref) = %d, want 2", got)
 		}
@@ -126,7 +228,7 @@ func TestRunDesignStart_Negative(t *testing.T) {
 	t.Run("unconfigured scheme", func(t *testing.T) {
 		repo := buildPhase7Repo(t)
 		var stdout, stderr bytes.Buffer
-		got := runDesignStart(ctx, repo.Dir, "confluence:PAGE-1", "some-name", manifest, deps, &stdout, &stderr)
+		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "confluence:PAGE-1", "some-name", manifest, deps, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStart(unconfigured scheme) = %d, want 2", got)
 		}
@@ -138,32 +240,32 @@ func TestRunDesignStart_Negative(t *testing.T) {
 	t.Run("spec already exists", func(t *testing.T) {
 		repo := buildPhase7Repo(t)
 		var stdout, stderr bytes.Buffer
-		if got := runDesignStart(ctx, repo.Dir, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr); got != 0 {
+		if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr); got != 0 {
 			t.Fatalf("first runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
 		}
 		stdout.Reset()
 		stderr.Reset()
-		got := runDesignStart(ctx, repo.Dir, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr)
+		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("second runDesignStart(same name) = %d, want 2", got)
 		}
 	})
 }
 
-// TestCmdDesignStart_NameFlagOrdering proves --name parses correctly
-// whether it comes before or after the positional story-ref — in
-// particular the "<story-ref> --name <name>" ordering PLAN.md Phase 7's
-// own exit criteria and 05 §CLI's example both use, which the stdlib flag
-// package cannot parse (it stops consuming flags at the first non-flag
-// token), hence extractNameFlag's hand-rolled parse.
+// TestCmdDesignStart_NameFlagOrdering proves --name/--kind parse correctly
+// in every position relative to the positional story-ref — in particular
+// the "<story-ref> --kind feature --name <name>" ordering 05 §CLI's own
+// example uses, which the stdlib flag package cannot parse (it stops
+// consuming flags at the first non-flag token), hence extractFlags's
+// hand-rolled parse.
 func TestCmdDesignStart_NameFlagOrdering(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
 	}{
-		{"flag after positional", []string{"jira:LOAN-1482", "--name", "stale-decline"}},
-		{"flag before positional", []string{"--name", "stale-decline", "jira:LOAN-1482"}},
-		{"flag=value after positional", []string{"jira:LOAN-1482", "--name=stale-decline"}},
+		{"flags after positional", []string{"jira:LOAN-1482", "--kind", "feature", "--name", "stale-decline"}},
+		{"flags before positional", []string{"--kind", "feature", "--name", "stale-decline", "jira:LOAN-1482"}},
+		{"flag=value form", []string{"jira:LOAN-1482", "--kind=feature", "--name=stale-decline"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -187,13 +289,39 @@ func TestCmdDesignStart_NameFlagMissing(t *testing.T) {
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := cmdDesignStart([]string{"jira:LOAN-1482"}, &stdout, &stderr)
+	got := cmdDesignStart([]string{"jira:LOAN-1482", "--kind", "feature"}, &stdout, &stderr)
 	if got != 2 {
 		t.Fatalf("cmdDesignStart(no --name) = %d, want 2", got)
 	}
 	if !contains(stderr.String(), "--name") {
 		t.Fatalf("stderr = %q, want it to mention --name", stderr.String())
 	}
+}
+
+// TestCmdDesignStart_KindFlagMissingOrInvalid proves --kind is required and
+// closed to feature|story.
+func TestCmdDesignStart_KindFlagMissingOrInvalid(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	t.Chdir(repo.Dir)
+
+	t.Run("missing", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		got := cmdDesignStart([]string{"jira:LOAN-1482", "--name", "x"}, &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("cmdDesignStart(no --kind) = %d, want 2", got)
+		}
+		if !contains(stderr.String(), "--kind") {
+			t.Fatalf("stderr = %q, want it to mention --kind", stderr.String())
+		}
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		got := cmdDesignStart([]string{"jira:LOAN-1482", "--kind", "epic", "--name", "x"}, &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("cmdDesignStart(--kind epic) = %d, want 2", got)
+		}
+	})
 }
 
 // TestRunDesignVerb_UnknownSubcommand proves the design/start subcommand
@@ -214,11 +342,11 @@ func TestRunDesignVerb_UnknownSubcommand(t *testing.T) {
 }
 
 // TestRun_DesignDispatchesToRealVerb proves dispatch.go routes "design" to
-// the real implementation, matching the equivalent lint/sync/matrix tests.
+// the real implementation.
 func TestRun_DesignDispatchesToRealVerb(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var stderr bytes.Buffer
-	got := run([]string{"design", "start", "jira:LOAN-1", "--name", "x"}, &stderr)
+	got := run([]string{"design", "start", "jira:LOAN-1", "--kind", "feature", "--name", "x"}, &stderr)
 	if got != 2 {
 		t.Fatalf("run([design start ...]) outside a store = %d, want 2 (operational)", got)
 	}
