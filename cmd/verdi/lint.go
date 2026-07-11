@@ -17,10 +17,13 @@ import (
 
 // runLintVerb resolves the store root from the current working directory,
 // builds a lint.Context from git and CI environment signals, runs every
-// VL-001..VL-014 rule, and prints one "VL-xxx path: message" line per
-// finding to stdout. Exit contract (CLAUDE.md): 0 clean, 1 findings
-// present, 2 operational error (can't resolve the store root, can't build
-// the snapshot).
+// VL-001..VL-018 rule, and prints one line per finding to stdout. Exit
+// contract (CLAUDE.md): 0 clean, 1 findings present, 2 operational error
+// (can't resolve the store root, can't build the snapshot). A
+// SeverityDisclosure finding (VL-017's disclosed-unproven notice on a bare
+// CI clone) is printed but does NOT flip the exit to 1 — disclosure is not
+// failure (adjudicated at W2 wave close); a run whose only findings are
+// disclosures still exits 0.
 func runLintVerb(_ []string, stdout, stderr io.Writer) int {
 	ctx := context.Background()
 
@@ -43,13 +46,14 @@ func runLintVerb(_ []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	exit := 0
 	for _, f := range findings {
 		fmt.Fprintln(stdout, f.String())
+		if f.Severity != lint.SeverityDisclosure {
+			exit = 1
+		}
 	}
-	if len(findings) > 0 {
-		return 1
-	}
-	return 0
+	return exit
 }
 
 // buildLintContext derives lint.Context from git (CurrentBranch via

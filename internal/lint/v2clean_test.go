@@ -140,3 +140,32 @@ func TestV2FixtureCorpus_LintsClean(t *testing.T) {
 		t.Fatalf("v2 fixture corpus: got %d findings, want 0:\n%s", len(findings), findingsString(findings))
 	}
 }
+
+// TestV2FixtureCorpus_BareClone_OnlyVL017Disclosures models a CI clone of a
+// real repo carrying new-class specs: the mutable zone (data/mutable/) is
+// never committed (01 §Zones), so on a bare clone VL-017 cannot prove the
+// open-question check and reports it disclosed-unproven for each new-class
+// spec. Adjudicated at W2 wave close: those reports are SeverityDisclosure
+// notices — printed, never silent (constitution 2), but NOT verdict
+// failures. This test proves the run is neither a vacuous green (findings
+// are present) nor a red (every finding is a disclosure, so the CLI's
+// exit-code decision — see runLintVerb — stays 0).
+func TestV2FixtureCorpus_BareClone_OnlyVL017Disclosures(t *testing.T) {
+	repo := buildV2FixtureCorpusRepo(t)
+	if err := os.RemoveAll(filepath.Join(repo.Dir, ".verdi", "data", "mutable")); err != nil {
+		t.Fatalf("removing mutable zone: %v", err)
+	}
+
+	findings, err := NewEngine().Run(context.Background(), repo.Dir, Context{}, Options{})
+	if err != nil {
+		t.Fatalf("Engine.Run: %v", err)
+	}
+	if len(findings) == 0 {
+		t.Fatal("bare clone produced 0 findings — a vacuous green; want VL-017 disclosed-unproven notices")
+	}
+	for _, f := range findings {
+		if f.Rule != "VL-017" || f.Severity != SeverityDisclosure {
+			t.Fatalf("unexpected finding on a bare clone (want only VL-017 disclosures): %s (severity %v)", f.String(), f.Severity)
+		}
+	}
+}

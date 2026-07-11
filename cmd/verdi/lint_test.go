@@ -87,6 +87,59 @@ func TestRunLintVerb_FindingsExitOne(t *testing.T) {
 	}
 }
 
+// lintTestNewClassFeature is a minimal, otherwise-clean round-four
+// `class: feature` spec — a new-class spec (isNewClassSpec) that VL-017
+// scopes its disclosed-unproven report to. Draft status avoids the freeze/
+// predecessor rules; problem/outcome/one outcome-AC keep it valid.
+const lintTestNewClassFeature = `---
+id: spec/borrower-update
+kind: spec
+class: feature
+title: "Borrower update"
+status: draft
+owners: [platform-team]
+problem: { text: "the update API has no PUT route", anchor: "#problem" }
+outcome: { text: "a borrower can update their application", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a borrower can update their application", evidence: [behavioral], anchor: "#ac-1" }
+---
+# Borrower update
+
+## Problem
+
+The update API has no PUT route.
+
+## Outcome
+
+A borrower can update their application.
+
+## AC-1
+
+A borrower can update their application.
+`
+
+// TestRunLintVerb_VL017DisclosureOnly_ExitsZero is the M-1 adjudication: a
+// bare CI clone (no data/mutable/, per 01 §Zones — fixturegit never commits
+// it) of a repo carrying a new-class spec reports VL-017 disclosed-unproven.
+// That report is printed (never silent) but is NOT a verdict failure, so a
+// run whose only findings are disclosures exits 0 — CI stays green once a
+// new-class spec exists (adjudicated at W2 wave close).
+func TestRunLintVerb_VL017DisclosureOnly_ExitsZero(t *testing.T) {
+	repo := buildMinimalStore(t, map[string]string{
+		".verdi/specs/active/borrower-update/spec.md": lintTestNewClassFeature,
+	})
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runLintVerb(nil, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runLintVerb exit = %d, want 0 (VL-017 disclosure is not a verdict failure); stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "notice: VL-017") {
+		t.Fatalf("stdout = %q, want a printed \"notice: VL-017\" disclosure line (never silent)", stdout.String())
+	}
+}
+
 // TestRunLintVerb_NoStoreRoot_ExitTwo proves an operational failure (no
 // store root findable) exits 2 with a stderr message, not a Finding.
 func TestRunLintVerb_NoStoreRoot_ExitTwo(t *testing.T) {

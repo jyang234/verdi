@@ -61,7 +61,7 @@ func (vl017) Check(in *RunInput) []Finding {
 	if !mutableZonePresent(in.Root) {
 		var findings []Finding
 		for _, d := range applicable {
-			findings = append(findings, Finding{Rule: "VL-017", Path: d.RelPath, Message: "open-question resolved-or-carried check is disclosed-unproven: data/mutable/ is absent (bare clone; the mutable zone is never committed, 01 §Zones) — not a silent pass (constitution 2, three-valued honesty)"})
+			findings = append(findings, Finding{Rule: "VL-017", Path: d.RelPath, Severity: SeverityDisclosure, Message: "open-question resolved-or-carried check is disclosed-unproven: data/mutable/ is absent (bare clone; the mutable zone is never committed, 01 §Zones) — not a silent pass (constitution 2, three-valued honesty). This is a printed notice, not a verdict failure: a run with no other findings still exits 0 (adjudicated at W2 wave close)"})
 		}
 		return findings
 	}

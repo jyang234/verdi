@@ -96,7 +96,10 @@ func removeMutableZone(t *testing.T, root string) {
 // TestVL017_MutableZoneAbsent_DisclosedUnproven is the "mutable-zone-absent
 // case reports disclosed-unproven, never a silent pass" exit criterion
 // (E1): a bare clone with no data/mutable/ present never gets a vacuous
-// green for a new-class spec.
+// green for a new-class spec. Adjudicated at W2 wave close: the report is a
+// SeverityDisclosure notice — printed (never silent) but NOT a verdict
+// failure, so a run whose only finding is this disclosure exits 0 (CI stays
+// green once a new-class spec exists).
 func TestVL017_MutableZoneAbsent_DisclosedUnproven(t *testing.T) {
 	dir := adHocOverlayDir(t, ".verdi/specs/active/open-question-story/spec.md", vl017OpenQuestionStorySpec)
 	repo := buildLintRepo(t, dir) // provisions the mutable zone by default
@@ -109,6 +112,13 @@ func TestVL017_MutableZoneAbsent_DisclosedUnproven(t *testing.T) {
 	}
 	if got := findings[0].Message; !containsAll(got, "disclosed-unproven", "data/mutable") {
 		t.Fatalf("message = %q, want it to name disclosed-unproven and data/mutable", got)
+	}
+	if findings[0].Severity != SeverityDisclosure {
+		t.Fatalf("severity = %v, want SeverityDisclosure (a printed notice, not a verdict failure)", findings[0].Severity)
+	}
+	// The disclosure is printed (String prefixes "notice: ") — never silent.
+	if got := findings[0].String(); !strings.HasPrefix(got, "notice: VL-017 ") {
+		t.Fatalf("String() = %q, want a printed \"notice: VL-017 ...\" disclosure line", got)
 	}
 }
 
