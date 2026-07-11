@@ -1,0 +1,18 @@
+schema: verdi.layout/v1
+forge: gitlab                  # or github; auto-detected from the remote URL when omitted
+providers:                     # story-provider spec owns semantics
+  jira:
+    base_url: https://example.atlassian.net
+    rollup_field: customfield_00000     # ids only; secrets come from env/CI vars
+lint:
+  gated_generated: []          # committed generated artifacts that are currency-gated
+align:                         # evidence-model spec owns semantics
+  judge_cmd: claude -p         # the alignment judge; this is the default
+  judge_required: false        # true: `verdi align` fails outright without a judge
+derived:
+  retention_days: 14           # gc horizon for merged/deleted refs
+services:
+  discovery: flowmap           # any directory containing .flowmap.yaml is a service root
+toolchain:                     # verdi-go pin (I-4); no upstream tags yet, so pin by commit SHA
+  module: github.com/jyang234/golang-code-graph
+  commit: cd38b1a
