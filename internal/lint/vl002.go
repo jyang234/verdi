@@ -87,6 +87,15 @@ func otherPaths(docs []*Document, exclude *Document) string {
 // rule: feature specs move to archive/ once closed; component specs
 // always stay in active/, even superseded (02 §Kind registry).
 func checkSpecPath(d *Document, ref artifact.Ref) []Finding {
+	if d.Spec == nil {
+		// decodeDocument guarantees Spec != nil whenever Kind == "spec" and
+		// DecodeErr == nil (the only state Check's caller reaches this
+		// function from); guarded explicitly so a future refactor that
+		// breaks that invariant fails loudly here rather than panicking
+		// below on d.Spec.Class.
+		return []Finding{{Rule: "VL-002", Path: d.RelPath, Message: "internal: spec document has no decoded Spec despite no DecodeErr"}}
+	}
+
 	var findings []Finding
 
 	dir := specDirOf(d)

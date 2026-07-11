@@ -23,15 +23,21 @@ type Document struct {
 	Grandfathered bool
 
 	// DecodeErr is non-nil when artifact.SplitFrontmatter or
-	// artifact.DecodeStrict failed — VL-001's finding. Every field below is
-	// zero when DecodeErr != nil.
+	// artifact.DecodeStrict failed — VL-001's finding. Base, Status, and
+	// the kind-specific pointer below are all zero when DecodeErr != nil.
 	DecodeErr error
 
 	// Base is the common frontmatter, valid whenever DecodeErr == nil.
 	Base artifact.Base
 	// Status is the raw, kind-scoped status string.
 	Status string
-	// Body is the markdown body (post-frontmatter).
+	// Body is the markdown body (post-frontmatter). Set as soon as
+	// SplitFrontmatter succeeds, which is *before* the kind-specific
+	// DecodeStrict call — so a document whose frontmatter block splits
+	// cleanly but whose kind-specific decode then fails (unknown field,
+	// dialect violation) still has a populated Body alongside a non-nil
+	// DecodeErr. No rule reads Body without checking DecodeErr first, but
+	// callers should not assume Body is zero whenever DecodeErr is set.
 	Body string
 
 	// Exactly one of the following is non-nil, matching Kind, whenever
