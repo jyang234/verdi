@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/OWNER/verdi/internal/align"
 	"github.com/OWNER/verdi/internal/artifact"
@@ -84,6 +85,12 @@ func runAlign(ctx context.Context, root string, freeze bool, deps alignDeps, std
 	if err != nil {
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
+	}
+	// Design-branch mode (03 §Decision-conflict gate; 05 §CLI: "on a
+	// design branch, grows a decision-conflict-report mode") — the two
+	// modes share this one command; see align_design.go.
+	if strings.HasPrefix(branch, "design/") {
+		return runDesignAlign(ctx, root, freeze, deps, stdout, stderr)
 	}
 	spec, err := storyresolve.ResolveBuildSpec(root, branch)
 	if err != nil {
