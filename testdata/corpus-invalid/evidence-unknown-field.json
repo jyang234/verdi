@@ -1,0 +1,10 @@
+{
+  "schema": "verdi.evidence/v1",
+  "evidence_for": ["ac-1"],
+  "kind": "static",
+  "verdict": "pass",
+  "witness": "retryWorker -> charge.Post",
+  "provenance": { "source": "ci", "pipeline": "913", "commit": "706a74e31c85917a62314e99c72d1ddd8a7ac261" },
+  "digest": "sha256:f5fde00c3e76ff69ef4ac486c48778cd139e9463be595508459c69a4cb9a1d2d",
+  "confidence": 0.95
+}

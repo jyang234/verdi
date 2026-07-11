@@ -1,0 +1,9 @@
+{
+  "schema": "verdi.board/v1",
+  "pins": [
+    { "ref": "spec/stale-decline@c5e360a9ee5e9eb6089e54b772fa16959ada4662", "x": 50, "y": 50 }
+  ],
+  "stickies": [],
+  "yarn": [],
+  "extra_untracked_field": true
+}
