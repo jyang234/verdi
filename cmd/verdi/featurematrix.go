@@ -1,0 +1,278 @@
+// verdi matrix <feature-ref> — the feature-ref rendering mode (05 §CLI
+// matrix row's feature-ref rendering; 05 §Lenses' feature lens). Split out
+// of matrix.go per that file's own convention of keeping each rendering
+// mode in its own file.
+//
+// cmdMatrix (matrix.go) resolves the argument to a spec exactly as it
+// always has (storyresolve.Resolve — unchanged, still exactly the two
+// I-30 ref forms), then branches here when the resolved spec is a
+// round-four feature spec — Problem != nil is the discriminator (R4-I-15:
+// problem/outcome are decode-optional for backward compatibility with
+// grandfathered v0 "feature" class specs, which are actually story-grade;
+// a real round-four feature spec always carries both). A grandfathered
+// spec (Problem == nil) keeps going through the unchanged story-level
+// Fold path in matrix.go — it has implementation-scoped ACs exactly like
+// a round-four story spec, and Fold's own logic already never inspected
+// Class, so no behavior changes for it.
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"path/filepath"
+	"sort"
+	"text/tabwriter"
+
+	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/evidence"
+	"github.com/OWNER/verdi/internal/index"
+	"github.com/OWNER/verdi/internal/store"
+	"github.com/OWNER/verdi/internal/storyresolve"
+)
+
+// cmdMatrixFeature renders the feature fold (03 §The feature fold) for a
+// resolved round-four feature spec: per-AC status, frozen stubs paired
+// with the computed live `implements` mapping under the acceptance-time-
+// plan banner, and stub reconciliation state (05 §Lenses).
+func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, preview bool, stdout io.Writer) error {
+	ref, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		return fmt.Errorf("matrix: %w", err)
+	}
+	featureName := ref.Name
+
+	ix, err := index.Build(root)
+	if err != nil {
+		return fmt.Errorf("matrix: building index: %w", err)
+	}
+
+	stories, storiesByAC, err := discoverImplementingStories(ctx, root, commit, ix, featureName, spec)
+	if err != nil {
+		return err
+	}
+
+	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
+	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
+	if err != nil {
+		return fmt.Errorf("matrix: loading feature-level evidence: %w", err)
+	}
+
+	result, err := evidence.FoldFeature(evidence.FeatureInput{
+		Spec:        spec,
+		Stories:     storiesByAC,
+		Records:     records,
+		Preview:     preview,
+		StoreRoot:   root,
+		FeatureSlug: featureName,
+	})
+	if err != nil {
+		return fmt.Errorf("matrix: %w", err)
+	}
+
+	var stubStories []evidence.StubStory
+	for _, s := range stories {
+		stubStories = append(stubStories, evidence.StubStory{SpecRef: s.SpecRef, ACIDs: s.ACIDs, Closed: s.Closed})
+	}
+	reconciliation, err := evidence.ReconcileStubs(evidence.StubReconcileInput{
+		Spec:    spec,
+		Stories: stubStories,
+		// No withdrawal-declaration source exists yet at this phase (see
+		// evidence.StubWithdrawal's doc comment) — matrix reports the
+		// computed set honestly with whatever it has, never inventing one.
+	})
+	if err != nil {
+		return fmt.Errorf("matrix: %w", err)
+	}
+
+	printFeatureMatrix(stdout, spec, result, reconciliation, preview)
+	return nil
+}
+
+// implementingStoryEdges is one implementing story's already-folded
+// contribution, carried alongside its per-AC ImplementingStory views so
+// the stub-reconciliation section can reuse the same discovery pass.
+type implementingStoryEdges struct {
+	SpecRef string
+	ACIDs   []string // every feature AC this story implements, sorted
+	Closed  bool
+}
+
+// discoverImplementingStories finds every story spec with an `implements`
+// edge into featureName's ACs (via the index's computed backlink
+// inversion — 03 §The feature fold: "the authoritative AC->story mapping
+// is computed ... the set of story specs whose implements edges name the
+// feature AC"), story-folds each exactly once, and returns both a flat
+// per-story view (for stub reconciliation) and an AC-grouped view (for
+// the feature fold).
+func discoverImplementingStories(ctx context.Context, root, commit string, ix *index.Index, featureName string, spec *artifact.SpecFrontmatter) ([]implementingStoryEdges, map[string][]evidence.ImplementingStory, error) {
+	// acsByStory accumulates every feature AC id each story ref
+	// implements, deduped and in first-seen order per story.
+	order := make([]string, 0)
+	acsByStory := make(map[string][]string)
+	seen := make(map[string]map[string]bool)
+
+	for _, ac := range spec.AcceptanceCriteria {
+		key := fmt.Sprintf("spec/%s#%s", featureName, ac.ID)
+		for _, bl := range ix.Backlinks(key) {
+			if bl.Type != "implemented-by" {
+				continue
+			}
+			if seen[bl.From] == nil {
+				seen[bl.From] = make(map[string]bool)
+				order = append(order, bl.From)
+			}
+			if !seen[bl.From][ac.ID] {
+				seen[bl.From][ac.ID] = true
+				acsByStory[bl.From] = append(acsByStory[bl.From], ac.ID)
+			}
+		}
+	}
+	sort.Strings(order) // deterministic regardless of AC declaration order feeding discovery
+
+	var flat []implementingStoryEdges
+	byAC := make(map[string][]evidence.ImplementingStory)
+	for _, storyRef := range order {
+		storyName, err := artifact.ParseRef(storyRef)
+		if err != nil {
+			return nil, nil, fmt.Errorf("matrix: implementing story ref %q: %w", storyRef, err)
+		}
+		storySpec, err := storyresolve.LoadActiveSpec(root, storyName.Name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("matrix: loading implementing story %s: %w", storyRef, err)
+		}
+
+		closed := storySpec.Status == artifact.Status("closed")
+		folded, err := foldImplementingStory(ctx, root, commit, storySpec)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		acIDs := acsByStory[storyRef]
+		sort.Strings(acIDs)
+		flat = append(flat, implementingStoryEdges{SpecRef: storyRef, ACIDs: acIDs, Closed: closed})
+
+		for _, acID := range acIDs {
+			byAC[acID] = append(byAC[acID], evidence.ImplementingStory{
+				SpecRef:  storyRef,
+				ACIDs:    acIDs,
+				Closed:   closed,
+				Eligible: folded.Eligible,
+				Violated: folded.Violated,
+			})
+		}
+	}
+	return flat, byAC, nil
+}
+
+// foldImplementingStory runs the ordinary story-level fold (evidence.Fold)
+// for one implementing story, loading its own derived evidence and
+// consulting waivers/attestations keyed by its own story-slug — the exact
+// same mechanism cmdMatrix already uses for a directly-resolved story spec.
+func foldImplementingStory(ctx context.Context, root, commit string, storySpec *artifact.SpecFrontmatter) (evidence.StoryResult, error) {
+	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(storySpec.ID))
+	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
+	if err != nil {
+		return evidence.StoryResult{}, fmt.Errorf("matrix: loading evidence for implementing story %s: %w", storySpec.ID, err)
+	}
+	slug := store.RefSlug(storySpec.Story)
+	result, err := evidence.Fold(evidence.Input{
+		Spec:      storySpec,
+		Records:   records,
+		StoreRoot: root,
+		StorySlug: slug,
+	})
+	if err != nil {
+		return evidence.StoryResult{}, fmt.Errorf("matrix: folding implementing story %s: %w", storySpec.ID, err)
+	}
+	return result, nil
+}
+
+// printFeatureMatrix renders the feature fold, mirroring printMatrix's
+// shape (matrix.go) at the feature level, plus the stub × computed-live-
+// mapping section 05 §Lenses requires: "story stubs always rendered
+// paired with the computed live implements mapping under an explicit
+// 'acceptance-time plan; current mapping computed below' banner (never the
+// frozen stubs alone)".
+func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, preview bool) {
+	fmt.Fprintf(w, "feature: %s\n", result.SpecRef)
+	if preview {
+		fmt.Fprintln(w, "PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)")
+	}
+	fmt.Fprintln(w)
+
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "AC\tSTATUS\tEVIDENCE\tIMPLEMENTING STORIES\tTEXT")
+	for _, ac := range result.ACs {
+		stories := "-"
+		if len(ac.ImplementingStories) > 0 {
+			stories = joinComma(ac.ImplementingStories)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", ac.ID, ac.Status, ac.Summary, stories, ac.Text)
+	}
+	_ = tw.Flush()
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "stubs: acceptance-time plan; current mapping computed below")
+	if len(spec.Stubs) == 0 {
+		fmt.Fprintln(w, "(none declared)")
+	}
+	liveByAC := make(map[string][]string, len(result.ACs))
+	for _, ac := range result.ACs {
+		liveByAC[ac.ID] = ac.ImplementingStories
+	}
+	byStubSlug := make(map[string]evidence.StubResult, len(reconciliation.Stubs))
+	for _, r := range reconciliation.Stubs {
+		byStubSlug[r.Slug] = r
+	}
+	stw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(stw, "STUB\tDECLARED ACS\tLIVE STORIES\tRECONCILIATION")
+	for _, stub := range spec.Stubs {
+		live := unionStories(liveByAC, stub.AcceptanceCriteria)
+		liveStr := "-"
+		if len(live) > 0 {
+			liveStr = joinComma(live)
+		}
+		bucket := byStubSlug[stub.Slug].Bucket
+		fmt.Fprintf(stw, "%s\t%s\t%s\t%s\n", stub.Slug, joinComma(stub.AcceptanceCriteria), liveStr, bucket)
+	}
+	_ = stw.Flush()
+
+	if len(reconciliation.Unplanned) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "unplanned additions (closed stories tracing to no stub):")
+		for _, u := range reconciliation.Unplanned {
+			fmt.Fprintf(w, "  %s (%s)\n", u.SpecRef, joinComma(u.ACIDs))
+		}
+	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "feature.violated: %t\n", result.Violated)
+	fmt.Fprintf(w, "stub_reconciliation.blocked: %t\n", reconciliation.Blocked)
+}
+
+func unionStories(liveByAC map[string][]string, acIDs []string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, ac := range acIDs {
+		for _, s := range liveByAC[ac] {
+			if !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func joinComma(ss []string) string {
+	out := ""
+	for i, s := range ss {
+		if i > 0 {
+			out += ", "
+		}
+		out += s
+	}
+	return out
+}

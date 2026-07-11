@@ -80,6 +80,18 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// A round-four feature spec (Problem != nil — see featurematrix.go's
+	// doc comment for why this is the discriminator against a
+	// grandfathered v0 "feature" class spec, which is story-grade) renders
+	// through the feature fold instead of the story-level fold below.
+	if spec.Problem != nil {
+		if err := cmdMatrixFeature(ctx, root, commit, spec, preview, stdout); err != nil {
+			fmt.Fprintln(stderr, "matrix:", err)
+			return 2
+		}
+		return 0
+	}
+
 	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 	if err != nil {
