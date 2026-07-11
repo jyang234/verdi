@@ -124,10 +124,14 @@ func AppendAnnotation(dir, fileName string, a *artifact.Annotation) error {
 	if err != nil {
 		return fmt.Errorf("boardio: opening %s: %w", fileName, err)
 	}
-	defer f.Close()
-
 	if _, err := f.Write(append(line, '\n')); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("boardio: appending to %s: %w", fileName, err)
+	}
+	// Check the write-path Close: a swallowed close on this appended file
+	// could hide a lost flush (previously deferred and dropped).
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("boardio: closing %s: %w", fileName, err)
 	}
 	return nil
 }

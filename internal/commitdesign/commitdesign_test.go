@@ -101,8 +101,11 @@ func writeAnnotation(t *testing.T, root, fileName string, a map[string]any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
 	if _, err := f.Write(append(line, '\n')); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
