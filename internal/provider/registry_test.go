@@ -20,7 +20,7 @@ func TestRegistry_Provider(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Provider(%q) error = %v, want nil", "jira", err)
 		}
-		if p != provider.StoryProvider(jiraAdapter) {
+		if p != jiraAdapter {
 			t.Fatalf("Provider(%q) returned a different adapter than registered", "jira")
 		}
 	})
