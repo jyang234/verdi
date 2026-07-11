@@ -77,7 +77,7 @@ func parseCorpusLayers(t testing.TB) []fixturegit.Layer {
 	if err != nil {
 		t.Fatalf("opening layers.txt: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	filesByLayer := map[int][]string{}
 	var order []int

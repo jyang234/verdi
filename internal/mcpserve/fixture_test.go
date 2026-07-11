@@ -3,8 +3,6 @@ package mcpserve
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/OWNER/verdi/internal/fixturegit"
@@ -152,18 +150,4 @@ func toolResultJSON(t *testing.T, result map[string]any, out any) {
 func isToolError(result map[string]any) bool {
 	v, _ := result["isError"].(bool)
 	return v
-}
-
-// writeMutableFile writes content at root/.verdi/data/<relPath>, creating
-// parent directories — the mutable zone is never git-tracked (VL-013), so
-// these files are written directly, outside fixturegit.
-func writeMutableFile(t *testing.T, root, relPath, content string) {
-	t.Helper()
-	full := filepath.Join(root, ".verdi", "data", filepath.FromSlash(relPath))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatalf("mkdir for %s: %v", relPath, err)
-	}
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		t.Fatalf("writing %s: %v", relPath, err)
-	}
 }

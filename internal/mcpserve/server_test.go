@@ -72,7 +72,7 @@ func startTestServer(t *testing.T, root string) (sockPath string, stop func()) {
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(sockPath), err)
 	}
-	t.Cleanup(func() { os.RemoveAll(filepath.Dir(sockPath)) })
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(sockPath)) })
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {

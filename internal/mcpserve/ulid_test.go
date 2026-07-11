@@ -99,7 +99,7 @@ func TestNewULID_Happy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewULID: %v", err)
 		}
-		if !(early < later) {
+		if early >= later {
 			t.Fatalf("expected early ULID %q < later ULID %q", early, later)
 		}
 	})

@@ -46,7 +46,7 @@ func TestAcquireLock_Happy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcquireLock after release: %v", err)
 	}
-	ReleaseLock(f2, path)
+	_ = ReleaseLock(f2, path)
 }
 
 // TestReleaseLock_Negative covers closing an already-closed file (a
@@ -59,7 +59,7 @@ func TestReleaseLock_Negative(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AcquireLock: %v", err)
 		}
-		f.Close() // close it out from under ReleaseLock
+		_ = f.Close() // close it out from under ReleaseLock
 		if err := ReleaseLock(f, path); err == nil {
 			t.Fatal("ReleaseLock(already-closed file): want error, got nil")
 		}
@@ -71,7 +71,7 @@ func TestReleaseLock_Negative(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AcquireLock: %v", err)
 		}
-		os.Remove(path) // simulate the file already having been cleaned up
+		_ = os.Remove(path) // simulate the file already having been cleaned up
 		if err := ReleaseLock(f, path); err != nil {
 			t.Fatalf("ReleaseLock(already-removed lock file): want nil (os.ErrNotExist tolerated), got %v", err)
 		}
@@ -125,7 +125,7 @@ func TestAcquireLock_TakeoverAfterDeadPID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcquireLock(stale lock, dead pid %d): %v", deadPID, err)
 	}
-	defer ReleaseLock(f, path)
+	defer func() { _ = ReleaseLock(f, path) }()
 
 	got, err := os.ReadFile(path)
 	if err != nil {

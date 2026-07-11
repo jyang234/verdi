@@ -44,7 +44,7 @@ func TestSocketPath_Happy(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	ln, err := net.Listen("unix", a)
 	if err != nil {
 		t.Fatalf("net.Listen(unix, %q): %v", a, err)
@@ -69,7 +69,7 @@ func TestSocketPath_RelativeRootsAreAbsolutized(t *testing.T) {
 	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("Chdir: %v", err)
 	}
-	defer os.Chdir(wd)
+	defer func() { _ = os.Chdir(wd) }()
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -139,12 +139,12 @@ func TestSocketPath_Negative(t *testing.T) {
 		orig, hadOrig := os.LookupEnv("TMPDIR")
 		defer func() {
 			if hadOrig {
-				os.Setenv("TMPDIR", orig)
+				_ = os.Setenv("TMPDIR", orig)
 			} else {
-				os.Unsetenv("TMPDIR")
+				_ = os.Unsetenv("TMPDIR")
 			}
 		}()
-		os.Setenv("TMPDIR", "/"+strings.Repeat("a", maxSockPathLen))
+		_ = os.Setenv("TMPDIR", "/"+strings.Repeat("a", maxSockPathLen))
 
 		_, err := SocketPath("/some/checkout")
 		if err == nil {

@@ -70,7 +70,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "specalign: TestMain: mkdtemp:", err)
 		os.Exit(2)
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	verdiBinPath = filepath.Join(tmp, "verdi")
 	cmd := exec.Command("go", "build", "-o", verdiBinPath, "./cmd/verdi")

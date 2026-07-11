@@ -105,7 +105,7 @@ func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 	if err != nil {
 		t.Fatalf("opening layers.txt: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	files = map[int][]string{}
 	seen := map[int]bool{}

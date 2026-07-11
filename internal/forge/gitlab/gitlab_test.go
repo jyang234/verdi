@@ -59,7 +59,7 @@ func newHarnessForTest(t *testing.T) *harness {
 		sha := r.URL.Query().Get("sha")
 		zipData, ok := srv.mu[sha]
 		if !ok || zipData == nil {
-			json.NewEncoder(w).Encode([]pipeline{})
+			_ = json.NewEncoder(w).Encode([]pipeline{})
 			return
 		}
 		id, ok := srv.pipeIDs[sha]
@@ -68,15 +68,15 @@ func newHarnessForTest(t *testing.T) *harness {
 			nextPipeID++
 			srv.pipeIDs[sha] = id
 		}
-		json.NewEncoder(w).Encode([]pipeline{{ID: id, Status: "success"}})
+		_ = json.NewEncoder(w).Encode([]pipeline{{ID: id, Status: "success"}})
 	})
 	mux.HandleFunc("/projects/42/pipelines/", func(w http.ResponseWriter, r *http.Request) {
 		// /projects/42/pipelines/{id}/jobs
-		json.NewEncoder(w).Encode([]job{{ID: 999, Name: defaultJobName}})
+		_ = json.NewEncoder(w).Encode([]job{{ID: 999, Name: defaultJobName}})
 	})
 	mux.HandleFunc("/projects/42/jobs/999/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		for _, zipData := range srv.mu {
-			w.Write(zipData)
+			_, _ = w.Write(zipData)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)

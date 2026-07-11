@@ -58,7 +58,7 @@ func newHarnessForTest(t *testing.T) *harness {
 	mux.HandleFunc("/repos/acme/svcfix/actions/runs", func(w http.ResponseWriter, r *http.Request) {
 		sha := r.URL.Query().Get("head_sha")
 		if _, ok := srv.byCommit[sha]; !ok {
-			json.NewEncoder(w).Encode(runsResponse{})
+			_ = json.NewEncoder(w).Encode(runsResponse{})
 			return
 		}
 		id, ok := srv.runIDs[sha]
@@ -67,14 +67,14 @@ func newHarnessForTest(t *testing.T) *harness {
 			nextRunID++
 			srv.runIDs[sha] = id
 		}
-		json.NewEncoder(w).Encode(runsResponse{WorkflowRuns: []run{{ID: id, Status: "completed", Conclusion: "success"}}})
+		_ = json.NewEncoder(w).Encode(runsResponse{WorkflowRuns: []run{{ID: id, Status: "completed", Conclusion: "success"}}})
 	})
 	mux.HandleFunc("/repos/acme/svcfix/actions/runs/", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(artifactsResponse{Artifacts: []artifact{{ID: 7, Name: defaultArtifactName}}})
+		_ = json.NewEncoder(w).Encode(artifactsResponse{Artifacts: []artifact{{ID: 7, Name: defaultArtifactName}}})
 	})
 	mux.HandleFunc("/repos/acme/svcfix/actions/artifacts/7/zip", func(w http.ResponseWriter, r *http.Request) {
 		for _, zipData := range srv.byCommit {
-			w.Write(zipData)
+			_, _ = w.Write(zipData)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)

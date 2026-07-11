@@ -177,8 +177,8 @@ func TestD3_ConcurrentSecondProcessRoutesThroughSocket(t *testing.T) {
 		t.Fatalf("starting verdi serve: %v", err)
 	}
 	t.Cleanup(func() {
-		serveCmd.Process.Signal(syscall.SIGTERM)
-		serveCmd.Wait()
+		_ = serveCmd.Process.Signal(syscall.SIGTERM)
+		_ = serveCmd.Wait()
 	})
 	waitForPointerFile(t, root, 10*time.Second)
 
@@ -268,7 +268,7 @@ func TestLockTakeover_AfterSIGKILL(t *testing.T) {
 	if err := a.Process.Signal(syscall.SIGKILL); err != nil {
 		t.Fatalf("SIGKILL A: %v", err)
 	}
-	a.Wait() // reap; ignore the (expected) killed-signal error
+	_ = a.Wait() // reap; ignore the (expected) killed-signal error
 
 	b := exec.Command(bin, "serve", "--http", "127.0.0.1:0")
 	b.Dir = root
@@ -276,8 +276,8 @@ func TestLockTakeover_AfterSIGKILL(t *testing.T) {
 		t.Fatalf("starting verdi serve (B): %v", err)
 	}
 	t.Cleanup(func() {
-		b.Process.Signal(syscall.SIGTERM)
-		b.Wait()
+		_ = b.Process.Signal(syscall.SIGTERM)
+		_ = b.Wait()
 	})
 	infoB := waitForLockPID(t, root, b.Process.Pid, 10*time.Second)
 	waitForPointerFile(t, root, 10*time.Second) // B's own socket is up too
@@ -332,7 +332,7 @@ func TestShim_ExitsPromptlyWhenServeDies(t *testing.T) {
 	if err := serveCmd.Process.Signal(syscall.SIGKILL); err != nil {
 		t.Fatalf("SIGKILL serve: %v", err)
 	}
-	serveCmd.Wait()
+	_ = serveCmd.Wait()
 
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- mcpCmd.Wait() }()
@@ -343,7 +343,7 @@ func TestShim_ExitsPromptlyWhenServeDies(t *testing.T) {
 		// platforms a half-closed socket read surfaces as a nonzero-but-
 		// clean-shutdown exit; promptness is the property under test.)
 	case <-time.After(5 * time.Second):
-		mcpCmd.Process.Kill() // don't leak the hung process even though the test already failed
+		_ = mcpCmd.Process.Kill() // don't leak the hung process even though the test already failed
 		t.Fatal("verdi mcp did not exit within 5s of serve being killed — this is the S4 hang case: a naive wait-for-both-directions shutdown blocks forever on the still-open stdin Read")
 	}
 }
