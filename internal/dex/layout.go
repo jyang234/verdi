@@ -99,7 +99,7 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 </aside>
 </div>
 <script src="/assets/mermaid.min.js"></script>
-<script>mermaid.initialize({startOnLoad:true,securityLevel:"strict"});</script>
+<script>mermaid.initialize({startOnLoad:true,securityLevel:"strict",theme:window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"default"});</script>
 <script src="/assets/search.js" defer></script>
 </body>
 </html>

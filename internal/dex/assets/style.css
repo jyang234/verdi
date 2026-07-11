@@ -21,6 +21,10 @@
     --accent: #60a5fa;
     --card-bg: #1f2937;
   }
+  /* internal/render.ChromaDarkCSS() (github-dark) is composed in at the
+     marker below by internal/dex.StyleCSS — kept as a marker, not
+     hand-pasted, so chroma stays the one source of truth for token colours. */
+  /* CHROMA-DARK-PALETTE */
 }
 
 * { box-sizing: border-box; }
@@ -107,6 +111,15 @@ th { background: var(--card-bg); }
 pre { padding: 0.75rem; overflow-x: auto; border-radius: 0.4rem; border: 1px solid var(--border); }
 pre.mermaid { background: var(--card-bg); }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* Syntax-highlighting palette (light, default). internal/render's light
+   github palette is composed in at the marker below by
+   internal/dex.StyleCSS; the dark counterpart lives in the
+   prefers-color-scheme:dark block above. Chroma emits no inline colour, so
+   these two class-based palettes are the ONLY place code colour is defined
+   — which is what lets a dark-mode browser restyle highlighted code instead
+   of showing the light palette baked into the HTML. */
+/* CHROMA-LIGHT-PALETTE */
 
 .entry-list { list-style: none; padding: 0; }
 .entry-list li { padding: 0.35rem 0; border-bottom: 1px solid var(--border); }

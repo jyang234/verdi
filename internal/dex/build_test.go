@@ -209,6 +209,43 @@ func TestBuild_Happy(t *testing.T) {
 			t.Fatalf("copy-reference button missing the expected pinned form; got:\n%s", page)
 		}
 	})
+
+	t.Run("served stylesheet carries both chroma palettes", func(t *testing.T) {
+		css := readFile(t, outDir, "assets/style.css")
+		// The light palette is composed in at the default (top) level.
+		if !strings.Contains(css, ".chroma-chroma") {
+			t.Fatalf("style.css missing the composed chroma palette; got:\n%s", css)
+		}
+		// The dark palette must live inside the prefers-color-scheme:dark
+		// block, and must be github-dark's (its light foreground #e6edf3) —
+		// the whole fix for dark-mode-illegible code.
+		darkIdx := strings.Index(css, "@media (prefers-color-scheme: dark)")
+		if darkIdx < 0 {
+			t.Fatal("style.css has no prefers-color-scheme:dark block")
+		}
+		darkBlock := css[darkIdx:]
+		if !strings.Contains(darkBlock, "#e6edf3") {
+			t.Fatalf("dark palette (github-dark) not composed into the dark media block; got:\n%s", darkBlock)
+		}
+		// No unreplaced markers may survive into the served asset.
+		if strings.Contains(css, "CHROMA-LIGHT-PALETTE") || strings.Contains(css, "CHROMA-DARK-PALETTE") {
+			t.Fatalf("an unreplaced chroma palette marker leaked into style.css; got:\n%s", css)
+		}
+	})
+
+	t.Run("highlighted code on a built page carries no inline colour", func(t *testing.T) {
+		// The svcfix boundary-contract permalink pretty-prints its JSON via
+		// chroma (serviceaxis highlightCode) — a class-based block with the
+		// chroma- prefix and, critically, no inline style attribute that
+		// would bake one theme's ink into the page.
+		page := readFile(t, outDir, "a/svc/svcfix/boundary-contract/index.html")
+		if !strings.Contains(page, `class="chroma-chroma"`) {
+			t.Fatalf("boundary-contract page missing class-based highlighted code; got:\n%s", page)
+		}
+		if strings.Contains(page, `class="chroma-`) && strings.Contains(page, `<span style="`) {
+			t.Fatalf("highlighted code must not carry inline style attributes; got:\n%s", page)
+		}
+	})
 }
 
 func TestBuild_Negative_EmptyRoot(t *testing.T) {

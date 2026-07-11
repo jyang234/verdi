@@ -3,7 +3,50 @@ package dex
 import (
 	"embed"
 	"fmt"
+	"strings"
+
+	"github.com/OWNER/verdi/internal/render"
 )
+
+// The two placeholder markers in assets/style.css that StyleCSS replaces
+// with internal/render's generated syntax-highlighting palettes. Keeping
+// the palettes OUT of the committed asset (chroma is their one source of
+// truth) and composing them in at build/serve time is what keeps the served
+// stylesheet self-contained AND a pure function of the pinned styles.
+const (
+	chromaLightMarker = "/* CHROMA-LIGHT-PALETTE */"
+	chromaDarkMarker  = "/* CHROMA-DARK-PALETTE */"
+)
+
+// StyleCSS returns the served stylesheet: the committed assets/style.css
+// with the light palette (github) composed in at its default marker and the
+// dark palette (github-dark) composed in inside the existing
+// prefers-color-scheme:dark block. The result is deterministic (a pure
+// function of the embedded bytes and the two pinned chroma styles), so
+// writing it into a dex build stays byte-identical across rebuilds.
+//
+// internal/workbench serves this exact same composed stylesheet at its own
+// /assets/style.css route (as it already reuses this package's vendored
+// mermaid.min.js) rather than owning a second copy — one stylesheet in the
+// binary, two surfaces, so both surfaces' shared class-based code rendering
+// is coloured identically and is equally dark-mode-correct.
+func StyleCSS() ([]byte, error) {
+	raw, err := embeddedAssets.ReadFile("assets/style.css")
+	if err != nil {
+		return nil, fmt.Errorf("dex: reading embedded style.css: %w", err)
+	}
+	css := string(raw)
+	for marker, palette := range map[string]string{
+		chromaLightMarker: render.ChromaLightCSS(),
+		chromaDarkMarker:  render.ChromaDarkCSS(),
+	} {
+		if !strings.Contains(css, marker) {
+			return nil, fmt.Errorf("dex: style.css is missing the %q marker — the chroma palette cannot be composed in", marker)
+		}
+		css = strings.Replace(css, marker, palette, 1)
+	}
+	return []byte(css), nil
+}
 
 // embeddedAssets embeds dex's entire static client surface into the
 // verdi binary, so a build never depends on locating its own source tree
@@ -47,9 +90,17 @@ func MermaidJS() ([]byte, error) {
 // outDir/assets/<Name>.
 func writeStaticAssets(outDir string) error {
 	for _, a := range staticAssets {
-		data, err := embeddedAssets.ReadFile(a.EmbedPath)
+		var data []byte
+		var err error
+		if a.Name == "style.css" {
+			// The stylesheet is the one asset that is composed, not copied
+			// verbatim: its two chroma palettes are generated (StyleCSS).
+			data, err = StyleCSS()
+		} else {
+			data, err = embeddedAssets.ReadFile(a.EmbedPath)
+		}
 		if err != nil {
-			return fmt.Errorf("dex: reading embedded asset %s: %w", a.EmbedPath, err)
+			return fmt.Errorf("dex: reading asset %s: %w", a.Name, err)
 		}
 		if err := writeFile(outDir, "assets/"+a.Name, data); err != nil {
 			return err
