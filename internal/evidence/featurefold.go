@@ -64,12 +64,13 @@ type FeatureInput struct {
 	// attestation files on disk.
 	StoreRoot string
 	// FeatureSlug names the attestations/<FeatureSlug>/ directory to
-	// consult for the outcome floor's attestation form (R4-I-11: the
-	// feature spec's own slug — RefSlug of its bare name, not
-	// tracker-derived, unlike the story-level StorySlug). Resolving this
-	// from the feature spec is the caller's job (cmd/verdi/matrix.go) —
-	// FoldFeature takes it as given, the same "caller resolves, fold
-	// reduces" idiom Input.StorySlug already establishes.
+	// consult for the outcome floor's attestation form (R4-I-11 / R4-I-17,
+	// 08 §Round 4 E2 as amended: the feature spec's own NAME — the `name`
+	// half of its ref, passed verbatim by the caller — not tracker-derived,
+	// unlike the story-level StorySlug). Resolving this from the feature
+	// spec is the caller's job (cmd/verdi/matrix.go, which passes ref.Name
+	// directly) — FoldFeature takes it as given, the same "caller resolves,
+	// fold reduces" idiom Input.StorySlug already establishes.
 	FeatureSlug string
 }
 
