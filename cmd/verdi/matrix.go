@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
+	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/evidence"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/store"
@@ -80,11 +81,21 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// A round-four feature spec (Problem != nil — see featurematrix.go's
-	// doc comment for why this is the discriminator against a
-	// grandfathered v0 "feature" class spec, which is story-grade) renders
-	// through the feature fold instead of the story-level fold below.
-	if spec.Problem != nil {
+	// Only a round-four REAL feature spec renders through the feature fold;
+	// everything else folds at the story level below. A round-four real
+	// feature is exactly `class: feature` AND carrying problem/outcome
+	// (VL-006 requires them on new-class specs). Both conjuncts are load-
+	// bearing:
+	//   - Class alone is not enough: a grandfathered v0 `class: feature`
+	//     spec is story-grade (Problem == nil), and must fold at the story
+	//     level, not through FoldFeature.
+	//   - Problem alone is not enough: a round-four `class: story` spec
+	//     ALSO carries problem/outcome, so a Problem-only discriminator
+	//     misroutes it into FoldFeature, which fails closed ("not a feature
+	//     spec") — the I-1 defect. Its Class is story, so the Class conjunct
+	//     keeps it on the story path.
+	// See featurematrix.go's doc comment for the grandfathering preserved.
+	if spec.Class == artifact.ClassFeature && spec.Problem != nil {
 		if err := cmdMatrixFeature(ctx, root, commit, spec, preview, stdout); err != nil {
 			fmt.Fprintln(stderr, "matrix:", err)
 			return 2

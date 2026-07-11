@@ -15,13 +15,21 @@ import (
 	"github.com/OWNER/verdi/internal/artifact"
 )
 
-// Resolve resolves arg to a feature spec under specs/active/ — 03 §The
+// Resolve resolves arg to a foldable spec under specs/active/ — 03 §The
 // fold's "Scope: the fold is evaluated only for specs under
 // specs/active/". Per I-30, arg is EXACTLY one of two forms: a spec ref
 // ("spec/<name>"), loaded directly; or a scheme-prefixed story ref
 // ("jira:LOAN-1482"), matched against every active feature spec's
 // `story:` field. Any other argument is an operational error naming both
 // accepted forms.
+//
+// A resolved spec-ref may be either a `class: feature` spec (folded at the
+// feature level by the caller) or a story-grade spec — a round-four
+// `class: story` spec, or a grandfathered v0 `class: feature` spec, both
+// folded at the story level. Only a `class: component` spec (no story, no
+// acceptance criteria) is rejected: there is nothing to fold. Routing
+// between the feature and story folds is the caller's job, keyed on the
+// resolved spec's Class (cmd/verdi/matrix.go).
 func Resolve(root, arg string) (*artifact.SpecFrontmatter, error) {
 	// (b) A spec ref: load it directly.
 	if ref, err := artifact.ParseRef(arg); err == nil && ref.Kind == artifact.KindSpec {
@@ -29,8 +37,8 @@ func Resolve(root, arg string) (*artifact.SpecFrontmatter, error) {
 		if loadErr != nil {
 			return nil, loadErr
 		}
-		if spec.Class != artifact.ClassFeature {
-			return nil, fmt.Errorf("spec %q is a component spec (no story, no acceptance criteria); this verb only folds feature specs", arg)
+		if spec.Class == artifact.ClassComponent {
+			return nil, fmt.Errorf("spec %q is a component spec (no story, no acceptance criteria); matrix folds only feature and story specs", arg)
 		}
 		return spec, nil
 	}

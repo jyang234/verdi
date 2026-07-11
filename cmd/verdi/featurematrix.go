@@ -4,16 +4,17 @@
 // mode in its own file.
 //
 // cmdMatrix (matrix.go) resolves the argument to a spec exactly as it
-// always has (storyresolve.Resolve — unchanged, still exactly the two
-// I-30 ref forms), then branches here when the resolved spec is a
-// round-four feature spec — Problem != nil is the discriminator (R4-I-15:
-// problem/outcome are decode-optional for backward compatibility with
-// grandfathered v0 "feature" class specs, which are actually story-grade;
-// a real round-four feature spec always carries both). A grandfathered
-// spec (Problem == nil) keeps going through the unchanged story-level
-// Fold path in matrix.go — it has implementation-scoped ACs exactly like
-// a round-four story spec, and Fold's own logic already never inspected
-// Class, so no behavior changes for it.
+// always has (storyresolve.Resolve — still exactly the two I-30 ref forms,
+// now also admitting a story-grade spec ref), then branches here only when
+// the resolved spec is a round-four REAL feature: `class: feature` AND
+// carrying problem/outcome. Both conjuncts matter. A grandfathered v0
+// "feature" class spec is story-grade (Problem == nil) and keeps going
+// through the unchanged story-level Fold path in matrix.go; a round-four
+// `class: story` spec also carries problem/outcome, so its Class is what
+// keeps it on the story path (keying on Problem alone would misroute it
+// here — the I-1 defect). Every story-grade spec has implementation-scoped
+// ACs, and Fold's own logic already never inspected Class, so no behavior
+// changes for it.
 package main
 
 import (

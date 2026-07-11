@@ -22,6 +22,25 @@ frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
 # body
 `
 
+const testStorySpec = `---
+id: spec/matrix-helper-story
+kind: spec
+class: story
+title: "Matrix helper story spec"
+status: accepted-pending-build
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+story: jira:LOAN-1490
+links:
+  - { type: implements, ref: "spec/matrix-helper-test#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "t", evidence: [static] }
+frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+---
+# body
+`
+
 const testComponentSpec = `---
 id: spec/matrix-helper-component
 kind: spec
@@ -68,6 +87,22 @@ func TestResolve_Happy(t *testing.T) {
 		}
 		if spec.ID != "spec/matrix-helper-test" {
 			t.Fatalf("ID = %q, want spec/matrix-helper-test", spec.ID)
+		}
+	})
+
+	// A round-four `class: story` spec ref resolves too (I-1): it is
+	// story-grade and folds at the story level; only component specs are
+	// rejected. Regression against the old feature-only gate that made a
+	// round-four story unresolvable by matrix.
+	t.Run("round-four story spec ref", func(t *testing.T) {
+		storyRoot := t.TempDir()
+		writeActiveSpec(t, storyRoot, "matrix-helper-story", testStorySpec)
+		spec, err := Resolve(storyRoot, "spec/matrix-helper-story")
+		if err != nil {
+			t.Fatalf("Resolve(story spec ref): %v", err)
+		}
+		if spec.Class != "story" {
+			t.Fatalf("Class = %q, want story", spec.Class)
 		}
 	})
 }

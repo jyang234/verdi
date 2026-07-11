@@ -180,6 +180,44 @@ story.eligible: false
 	}
 }
 
+// TestCmdMatrix_RoundFourStory_RendersStoryFold is the I-1 regression: a
+// round-four `class: story` spec carries problem/outcome (VL-006 requires
+// them on new-class specs), so a Problem-based feature-vs-story
+// discriminator misrouted every such story into FoldFeature, which fails
+// closed ("not a feature spec") — exit 2 with empty stdout. Routing on
+// spec.Class == artifact.ClassFeature keeps the round-four story on the
+// story-level fold path. Fixture: testdata/corpus's borrower-update-api
+// (class: story, problem/outcome present, story jira:LOAN-1482, one AC).
+func TestCmdMatrix_RoundFourStory_RendersStoryFold(t *testing.T) {
+	repo := buildCorpusRepo(t)
+	copyV2FeatureFixture(t, repo.Dir, "specs/active/borrower-update-api")
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runMatrixForTest(t, []string{"spec/borrower-update-api"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdMatrix(spec/borrower-update-api) = %d, want 0 (round-four story renders the story fold); stderr=%q", got, stderr.String())
+	}
+
+	want := `story: jira:LOAN-1482
+spec:  spec/borrower-update-api
+
+AC    STATUS     EVIDENCE                      TEXT
+ac-1  no-signal  static:none; behavioral:none  PUT /applications/:id/update returns 200 with the new state
+
+story.violated: false
+story.eligible: false
+`
+	if stdout.String() != want {
+		t.Fatalf("round-four story matrix output mismatch:\n--- got ---\n%s\n--- want ---\n%s", stdout.String(), want)
+	}
+	// A misroute into the feature fold would print a feature header and stub
+	// section instead — guard against regression explicitly.
+	if strings.Contains(stdout.String(), "feature:") || strings.Contains(stdout.String(), "stub_reconciliation") {
+		t.Fatalf("output routed through the feature fold, not the story fold:\n%s", stdout.String())
+	}
+}
+
 // TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords proves --preview's
 // output differs from the authoritative run only in what the advisory
 // (source: local) ac-3 record changes: ac-3 goes from no-signal to
