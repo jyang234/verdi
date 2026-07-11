@@ -26,7 +26,19 @@ import (
 	"github.com/OWNER/verdi/internal/upstream"
 )
 
-// cmdAlign is `verdi align`'s entry point, invoked by dispatch.go.
+// alignDeps is cmdAlign's injectable dependency set — the same seam
+// feature.go's syncDeps establishes, so tests can supply an
+// upstream.FakeRunner and a fake judge command instead of the real,
+// network-needing toolchain/judge (CLAUDE.md: "no network in any test").
+type alignDeps struct {
+	Runner        upstream.Runner
+	JudgeCmd      []string
+	JudgeRequired bool
+}
+
+// cmdAlign is `verdi align`'s entry point, invoked by dispatch.go: resolves
+// the store root and manifest, wires the real upstream.Runner and
+// verdi.yaml's align: block, then delegates to runAlign.
 func cmdAlign(args []string, stdout, stderr io.Writer) int {
 	freeze := false
 	for _, a := range args {
@@ -50,6 +62,24 @@ func cmdAlign(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	var deps alignDeps
+	if manifest.Toolchain != nil {
+		deps.Runner = upstream.RealRunner{Module: manifest.Toolchain.Module, Commit: manifest.Toolchain.Commit, Dir: root}
+	}
+	if manifest.Align != nil {
+		deps.JudgeCmd = manifest.Align.JudgeCmd
+		deps.JudgeRequired = manifest.Align.JudgeRequired
+	}
+
+	return runAlign(ctx, root, freeze, deps, stdout, stderr)
+}
+
+// runAlign is the testable core: given an already-resolved root and
+// injected deps, resolve the build-head spec (from the current branch,
+// feature/<name> — align takes no story/spec argument), run
+// internal/align.Generate, and write deviation-report.md into the spec's
+// directory.
+func runAlign(ctx context.Context, root string, freeze bool, deps alignDeps, stdout, stderr io.Writer) int {
 	branch, err := gitx.CurrentBranch(ctx, root)
 	if err != nil {
 		fmt.Fprintln(stderr, "align:", err)
@@ -64,17 +94,6 @@ func cmdAlign(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
-	}
-
-	var runner upstream.Runner
-	if manifest.Toolchain != nil {
-		runner = upstream.RealRunner{Module: manifest.Toolchain.Module, Commit: manifest.Toolchain.Commit, Dir: root}
-	}
-	var judgeCmd []string
-	judgeRequired := false
-	if manifest.Align != nil {
-		judgeCmd = manifest.Align.JudgeCmd
-		judgeRequired = manifest.Align.JudgeRequired
 	}
 
 	specRef, err := artifact.ParseRef(spec.ID)
@@ -100,11 +119,11 @@ func cmdAlign(args []string, stdout, stderr io.Writer) int {
 
 	in := align.Input{
 		Root:             root,
-		Runner:           runner,
+		Runner:           deps.Runner,
 		Spec:             spec,
 		Covers:           covers,
-		JudgeCmd:         judgeCmd,
-		JudgeRequired:    judgeRequired,
+		JudgeCmd:         deps.JudgeCmd,
+		JudgeRequired:    deps.JudgeRequired,
 		ExistingFindings: existingFindings,
 	}
 	if freeze {
