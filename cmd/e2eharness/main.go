@@ -35,6 +35,8 @@ import (
 	"time"
 
 	"github.com/OWNER/verdi/internal/dex"
+	"github.com/OWNER/verdi/internal/forge"
+	"github.com/OWNER/verdi/internal/forge/fake"
 )
 
 const (
@@ -75,8 +77,17 @@ func run() error {
 		return fmt.Errorf("provisioning scratch store: %w", err)
 	}
 
+	// The pending-supersession fixture (e2e/tests/16-dex-v2.spec.ts): one
+	// open MR against main carrying testdata/dexoverlay's candidate v2
+	// spec for accepted-pending-build, served through internal/forge's
+	// hermetic fake — no network (CLAUDE.md), same seam the Go tests use.
+	supersessionForge, err := seedSupersessionForge(moduleRoot)
+	if err != nil {
+		return fmt.Errorf("seeding supersession forge: %w", err)
+	}
+
 	dexOut := filepath.Join(scratch, "dexsite")
-	if err := dex.Build(context.Background(), dex.Options{Root: storeRoot, OutDir: dexOut}); err != nil {
+	if err := dex.Build(context.Background(), dex.Options{Root: storeRoot, OutDir: dexOut, Forge: supersessionForge, DefaultBranch: "main"}); err != nil {
 		return fmt.Errorf("building dex site: %w", err)
 	}
 
@@ -131,6 +142,21 @@ func run() error {
 	}
 	_ = dexSrv.Close()
 	return nil
+}
+
+// seedSupersessionForge builds the in-memory forge double the dex build
+// reads open supersession MRs through: MR "mr-7" open against main, its
+// source branch carrying the dexoverlay candidate at the conventional
+// R4-I-14 path — the exact seeding internal/dex's own tests use.
+func seedSupersessionForge(moduleRoot string) (*fake.Forge, error) {
+	candidate, err := os.ReadFile(filepath.Join(moduleRoot, "testdata", "dexoverlay", "mr", "accepted-pending-build-v2.spec.md"))
+	if err != nil {
+		return nil, fmt.Errorf("reading MR candidate fixture: %w", err)
+	}
+	f := fake.New()
+	f.SeedOpenMR("main", forge.OpenMR{ID: "mr-7", SourceBranch: "design/accepted-pending-build-v2"})
+	f.SeedFile("design/accepted-pending-build-v2", ".verdi/specs/active/accepted-pending-build-v2/spec.md", candidate)
+	return f, nil
 }
 
 // buildBinary builds ./cmd/verdi from moduleRoot into out (build-then-exec,
