@@ -34,6 +34,12 @@ func (h *fakeHarness) SeedNotFound(t *testing.T, ref provider.StoryRef) {
 	// ref that was never seeded; nothing to arrange.
 }
 
+// ExpectResolvedURL implements providertest.Harness (I-33): the fake is
+// store-backed, so Resolve returns the seeded URL unchanged.
+func (h *fakeHarness) ExpectResolvedURL(story provider.Story) string {
+	return story.URL
+}
+
 func (h *fakeHarness) PublishedField(t *testing.T, story provider.StoryRef) (provider.Rollup, bool) {
 	t.Helper()
 	return h.p.PublishedField(story)
