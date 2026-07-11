@@ -1,0 +1,10 @@
+# VL-012 overlay: missing the forge-appropriate generated-attribute lines.
+# The valid form (02 §Repository plumbing) is:
+#
+#   .verdi/specs/*/*/board.json          gitlab-generated
+#   .verdi/specs/*/*/rollup.json         gitlab-generated
+#   .verdi/specs/*/*/deviation-report.md gitlab-generated
+#
+# (or linguist-generated on the GitHub adapter). This overlay's
+# .gitattributes is empty of any such rule, so the committed-generated
+# paths (board.json, rollup.json, deviation-report.md) are unmarked.

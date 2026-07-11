@@ -1,0 +1,6 @@
+VL-007 overlay: an unrecognized top-level entry directly under .verdi/
+(D1: "Unknown entries directly under .verdi/ fail lint"). Layering this
+file into a corpus checkout at .verdi/scratchpad.txt is the violation —
+scratchpad.txt is not one of the layout's known top-level names
+(verdi.yaml, .gitignore, specs/, adr/, diagrams/, attestations/, waivers/,
+conflicts/, bin/, data/).

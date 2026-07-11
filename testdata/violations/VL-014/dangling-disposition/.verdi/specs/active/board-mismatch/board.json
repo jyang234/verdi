@@ -1,0 +1,8 @@
+{
+  "schema": "verdi.board/v1",
+  "pins": [],
+  "stickies": [
+    { "id": "a-01J8Z0K3AAAAAAAAAAAAAAAAAA", "x": 10, "y": 10 }
+  ],
+  "yarn": []
+}
