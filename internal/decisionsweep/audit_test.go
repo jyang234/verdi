@@ -1,0 +1,146 @@
+package decisionsweep
+
+import (
+	"os"
+	"testing"
+
+	"github.com/OWNER/verdi/internal/artifact"
+)
+
+func storySpecMD(name string, acFragments ...string) string {
+	links := ""
+	for _, f := range acFragments {
+		links += "  - { type: implements, ref: spec/my-feature#" + f + " }\n"
+	}
+	linksBlock := ""
+	if links != "" {
+		linksBlock = "links:\n" + links
+	}
+	return "---\nid: spec/" + name + "\nkind: spec\ntitle: \"" + name + "\"\nclass: story\nstatus: draft\nowners: [platform-team]\n" +
+		"story: jira:LOAN-1\nproblem: { text: \"p\", anchor: \"#p\" }\noutcome: { text: \"o\", anchor: \"#o\" }\n" +
+		linksBlock + "---\nbody\n"
+}
+
+func deviationReportMD(covers string, findings string) string {
+	return "---\nschema: verdi.deviation/v1\ncovers: " + covers + "\nfindings:\n" + findings + "digest: sha256:" + decisionConflictTestHex + "\n---\nbody\n"
+}
+
+const decisionConflictTestHex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+// TestAudit_ExemptionThresholdEndToEnd is the exit criterion end to end:
+// seeding audit.exempts_conflict_threshold: 3 and three exempts edges
+// against one ADR, `Audit` auto-files a .verdi/conflicts/ record naming
+// that ADR via challenges:.
+func TestAudit_ExemptionThresholdEndToEnd(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, ".verdi/verdi.yaml", "schema: verdi.layout/v1\naudit:\n  exempts_conflict_threshold: 3\n  deviations_stale_threshold: 3\n")
+	writeFile(t, root, ".verdi/adr/retry-policy.md", adrMD("retry-policy", "accepted"))
+	writeFile(t, root, ".verdi/specs/active/spec-a/spec.md", componentSpecWithExempts("spec-a", "dc-1", "adr/retry-policy", "reason A"))
+	writeFile(t, root, ".verdi/specs/active/spec-b/spec.md", componentSpecWithExempts("spec-b", "dc-1", "adr/retry-policy", "reason B"))
+	writeFile(t, root, ".verdi/specs/active/spec-c/spec.md", componentSpecWithExempts("spec-c", "dc-1", "adr/retry-policy", "reason C"))
+
+	result, err := Audit(root, 3, 3)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(result.Exemptions) != 1 || result.Exemptions[0].Count() != 3 {
+		t.Fatalf("Exemptions = %+v, want one ADR with count 3", result.Exemptions)
+	}
+	if len(result.Filed) != 1 {
+		t.Fatalf("Filed = %v, want exactly one auto-filed conflict", result.Filed)
+	}
+
+	data, err := os.ReadFile(result.Filed[0])
+	if err != nil {
+		t.Fatalf("reading filed conflict: %v", err)
+	}
+	fm, _, err := artifact.SplitFrontmatter(data)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	decoded, err := artifact.DecodeConflict(fm)
+	if err != nil {
+		t.Fatalf("filed record does not decode as a valid conflict: %v", err)
+	}
+	hasChallenges := false
+	for _, l := range decoded.Links {
+		if l.Type == artifact.LinkChallenges && l.Ref == "adr/retry-policy" {
+			hasChallenges = true
+		}
+	}
+	if !hasChallenges {
+		t.Fatalf("Links = %+v, want a challenges link naming adr/retry-policy", decoded.Links)
+	}
+
+	// Re-running must not duplicate the filing (idempotent).
+	result2, err := Audit(root, 3, 3)
+	if err != nil {
+		t.Fatalf("Audit (second run): %v", err)
+	}
+	if len(result2.Filed) != 0 {
+		t.Fatalf("Filed (second run) = %v, want none (idempotent)", result2.Filed)
+	}
+}
+
+// TestAudit_SpecStaleSurfaced proves Audit also surfaces V1-P3's spec-stale
+// count against deviations_stale_threshold for a story with an
+// accepted-deviation-heavy deviation report.
+func TestAudit_SpecStaleSurfaced(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, ".verdi/verdi.yaml", "schema: verdi.layout/v1\n")
+	writeFile(t, root, ".verdi/specs/active/my-story/spec.md", storySpecMD("my-story", "ac-1"))
+	findings := "  - { id: f-1, kind: judged, text: t1, disposition: accepted-deviation, note: n1 }\n" +
+		"  - { id: f-2, kind: judged, text: t2, disposition: accepted-deviation, note: n2 }\n" +
+		"  - { id: f-3, kind: judged, text: t3, disposition: accepted-deviation, note: n3 }\n" +
+		"  - { id: f-4, kind: judged, text: t4, disposition: accepted-deviation, note: n4 }\n"
+	writeFile(t, root, ".verdi/specs/active/my-story/deviation-report.md", deviationReportMD("7f3c2a1", findings))
+
+	result, err := Audit(root, 3, 3)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(result.SpecStale) != 1 {
+		t.Fatalf("SpecStale = %+v, want exactly 1 entry", result.SpecStale)
+	}
+	entry := result.SpecStale[0]
+	if entry.StoryRef != "spec/my-story" {
+		t.Fatalf("StoryRef = %q", entry.StoryRef)
+	}
+	if !entry.Result.Flagged || !entry.Result.TriggeredByThreshold {
+		t.Fatalf("Result = %+v, want flagged via threshold (4 accepted-deviations > 3)", entry.Result)
+	}
+}
+
+// TestAudit_StoryWithNoDeviationReportSkipped proves a story that was
+// never `align`-ed (no deviation-report.md yet) is skipped, not flagged.
+func TestAudit_StoryWithNoDeviationReportSkipped(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, ".verdi/verdi.yaml", "schema: verdi.layout/v1\n")
+	writeFile(t, root, ".verdi/specs/active/my-story/spec.md", storySpecMD("my-story"))
+
+	result, err := Audit(root, 3, 3)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(result.SpecStale) != 0 {
+		t.Fatalf("SpecStale = %+v, want none (no deviation report yet)", result.SpecStale)
+	}
+}
+
+func TestAudit_Negative_NoVerdiDir(t *testing.T) {
+	if _, err := Audit(t.TempDir(), 3, 3); err == nil {
+		t.Fatal("Audit(no .verdi dir): want error, got nil")
+	}
+}
+
+func TestAudit_EmptyCorpusNoOp(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, ".verdi/verdi.yaml", "schema: verdi.layout/v1\n")
+	result, err := Audit(root, 3, 3)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(result.Exemptions) != 0 || len(result.Filed) != 0 || len(result.SpecStale) != 0 {
+		t.Fatalf("result = %+v, want all empty", result)
+	}
+}
