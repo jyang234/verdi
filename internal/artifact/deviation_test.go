@@ -46,6 +46,7 @@ func TestDecodeDeviation_Negative(t *testing.T) {
 		"accepted-deviation without note": "schema: verdi.deviation/v1\ncovers: 7f3c2a1\nfindings:\n  - { id: f-1, kind: judged, text: t, disposition: accepted-deviation }\n",
 		"duplicate finding id":            "schema: verdi.deviation/v1\ncovers: 7f3c2a1\nfindings:\n  - { id: f-1, kind: computed, text: t, disposition: fixed }\n  - { id: f-1, kind: judged, text: t2, disposition: fixed }\n",
 		"unknown field":                   "schema: verdi.deviation/v1\ncovers: 7f3c2a1\nfindings: []\nbogus: true\n",
+		"unknown disposition value":       "schema: verdi.deviation/v1\ncovers: 7f3c2a1\nfindings:\n  - { id: f-1, kind: computed, text: t, disposition: bogus }\n",
 	}
 	for name, y := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -53,5 +54,21 @@ func TestDecodeDeviation_Negative(t *testing.T) {
 				t.Fatalf("DecodeDeviation(%s): want error, got nil", name)
 			}
 		})
+	}
+}
+
+// TestDecodeDeviation_Undispositioned proves an empty disposition legally
+// decodes (a living report's normal pre-review state for a new or changed
+// finding, PLAN.md Phase 8) and that Finding.Dispositioned reports it
+// correctly — distinct from an unknown/garbage disposition value, which
+// still fails closed (see the negative table above).
+func TestDecodeDeviation_Undispositioned(t *testing.T) {
+	y := "schema: verdi.deviation/v1\ncovers: 7f3c2a1\nfindings:\n  - { id: f-1, kind: computed, text: t }\n"
+	fm, err := DecodeDeviation([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeDeviation: %v", err)
+	}
+	if len(fm.Findings) != 1 || fm.Findings[0].Dispositioned() {
+		t.Fatalf("Findings = %+v, want one undispositioned finding", fm.Findings)
 	}
 }
