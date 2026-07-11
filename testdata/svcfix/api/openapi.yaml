@@ -1,0 +1,21 @@
+openapi: 3.0.3
+info:
+  title: svcfix API
+  version: "0.1.0"
+  description: >
+    Fixture OpenAPI stub (PLAN.md §4): presence-only for phase 3's service
+    discovery; exercises 05 §dex OpenAPI discovery once dex exists.
+paths:
+  /refunds/{id}:
+    get:
+      summary: Get refund status
+      operationId: getRefund
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK

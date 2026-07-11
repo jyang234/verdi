@@ -1,0 +1,16 @@
+version: 1
+service: svcfix
+
+# svcfix is the fixture service root (PLAN.md §4): phase 3 needs it only as
+# a discovery target (service name + obligation names via
+# artifact.DecodeFlowmapLoose), so classify/obligation bodies are minimal —
+# shaped like verdi-go's own obligsvc fixture, not exercised by flowmap
+# itself until phase 5 makes this module compilable.
+classify:
+  busPublish:
+    - "example.com/svcfix/internal/bus#Publish"
+
+obligations:
+  - name: audit-before-publish
+    require: "example.com/svcfix/internal/audit#Write"
+    before: "example.com/svcfix/internal/bus#Publish"
