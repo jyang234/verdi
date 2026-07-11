@@ -20,7 +20,10 @@
 //     named subtest per checklist bullet, each an executable assertion
 //     that the bullet's shipped surface really exists on this repo.
 //   - TestMCPToolInventory (05 §MCP server): the live server's
-//     tools/list result is exactly the eight named tools.
+//     tools/list result is exactly the nine named tools (get_board
+//     grown at V1-P9); TestMCPToolInventory_ListAnnotationsDocumentsReviewPopulation
+//     additionally locks in that list_annotations' description documents
+//     its mirrored review-sticky population, not just its existence.
 //   - TestV0CLIVerbInventory (05 §CLI): every verb the spec (plus the
 //     I-7/I-20 invented verbs) names responds per its v0 status — real
 //     verbs never say "not implemented"; the four explicitly
