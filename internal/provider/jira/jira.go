@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/OWNER/verdi/internal/provider"
 )
@@ -40,8 +41,12 @@ type Config struct {
 // API v3 (04 §Jira adapter).
 type Adapter struct{ cfg Config }
 
-// New returns an Adapter with cfg's defaults filled in.
+// New returns an Adapter with cfg's defaults filled in. A trailing slash on
+// BaseURL is trimmed once here so both request paths and the constructed
+// browse URL concatenate cleanly (verdi.yaml may carry the site root with or
+// without a trailing "/").
 func New(cfg Config) *Adapter {
+	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
@@ -56,14 +61,13 @@ var _ provider.StoryProvider = (*Adapter)(nil)
 // issueResponse is the subset of a Jira issue GET response this adapter
 // reads. It is decoded with the standard (non-strict) json package,
 // deliberately: Jira's real payloads carry many fields this adapter does
-// not care about, unlike verdi's own internal schemas which go through the
-// strict-decode seam in internal/artifact.
+// not care about — including "self" — and this field-subset decode simply
+// ignores them, unlike verdi's own internal schemas which go through the
+// strict-decode seam in internal/artifact (CLAUDE.md: strict decode is for
+// verdi-owned artifacts; a tracker-owned foreign payload is decoded as a
+// tolerant subset).
 type issueResponse struct {
-	Key string `json:"key"`
-	// Self is Jira's own issue-identifying URL from the GET response. It is
-	// used as Story.URL unchanged (see Resolve's doc comment) rather than
-	// derived by string surgery from BaseURL.
-	Self   string `json:"self"`
+	Key    string `json:"key"`
 	Fields struct {
 		Summary string `json:"summary"`
 		Status  struct {
@@ -75,10 +79,14 @@ type issueResponse struct {
 // Resolve implements provider.StoryProvider (04 §Jira adapter: "GET
 // /rest/api/3/issue/{key} -> key, summary, status, URL").
 //
-// URL is mapped from the response's own "self" field rather than
-// constructed as BaseURL+"/browse/"+key: Jira's REST responses carry "self"
-// as the issue's own canonical URL, and reading it through unchanged means
-// this adapter never has to invent site-root parsing 04 doesn't specify.
+// URL is the human browse link, constructed as BaseURL+"/browse/"+key.
+// Story.URL is what lenses/dex/tracker surfaces put in front of a human, so
+// it must be the browse page, not the REST resource. The GET response's own
+// "self" field is deliberately *not* used: on real Jira Cloud "self" is the
+// machine-facing REST URL (…/rest/api/3/issue/<numeric-id>), which is not a
+// page a human should be sent to. Config.BaseURL already holds the site
+// root, so building the browse link is a bare concatenation — no site-root
+// parsing is invented.
 func (a *Adapter) Resolve(ctx context.Context, ref provider.StoryRef) (provider.Story, error) {
 	_, key, err := provider.ParseStoryRef(ref)
 	if err != nil {
@@ -95,7 +103,7 @@ func (a *Adapter) Resolve(ctx context.Context, ref provider.StoryRef) (provider.
 		Ref:    ref,
 		Title:  resp.Fields.Summary,
 		Status: resp.Fields.Status.Name,
-		URL:    resp.Self,
+		URL:    a.cfg.BaseURL + "/browse/" + key,
 	}, nil
 }
 
