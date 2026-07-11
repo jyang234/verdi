@@ -13,6 +13,10 @@ func TestDecodeEvidence_Happy(t *testing.T) {
 		"runtime abstain": `{"schema":"verdi.evidence/v1","evidence_for":["ac-4"],"kind":"runtime","verdict":"abstain",
 			"witness":"","provenance":{"source":"ci","pipeline":"914","commit":"7f3c2a1"},
 			"digest":"sha256:` + hex64 + `"}`,
+		"static pass ci with job and producer (I-25)": `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass",
+			"witness":"retryWorker -> charge.Post","producer":"retryWorker",
+			"provenance":{"source":"ci","pipeline":"913","job":"42","commit":"7f3c2a1"},
+			"digest":"sha256:` + hex64 + `"}`,
 	}
 	for name, y := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -34,6 +38,7 @@ func TestDecodeEvidence_Negative(t *testing.T) {
 		"bad commit":         `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","commit":"xyz"},"digest":"sha256:` + hex64 + `"}`,
 		"bad digest":         `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","commit":"7f3c2a1"},"digest":"not-sha256"}`,
 		"unknown field":      `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","commit":"7f3c2a1"},"digest":"sha256:` + hex64 + `","bogus":true}`,
+		"unknown field in provenance (I-25 job typo)": `{"schema":"verdi.evidence/v1","evidence_for":["ac-2"],"kind":"static","verdict":"pass","witness":"w","provenance":{"source":"ci","pipeline":"1","jobb":"1","commit":"7f3c2a1"},"digest":"sha256:` + hex64 + `"}`,
 	}
 	for name, y := range cases {
 		t.Run(name, func(t *testing.T) {
