@@ -185,6 +185,7 @@ type SpecFrontmatter struct {
 	AcceptanceCriteria []AcceptanceCriterion `yaml:"acceptance_criteria,omitempty"`
 	Constraints        []Constraint          `yaml:"constraints,omitempty"`
 	Decisions          []Decision            `yaml:"decisions,omitempty"`
+	OpenQuestions      []OpenQuestion        `yaml:"open_questions,omitempty"`
 	Stubs              []Stub                `yaml:"stubs,omitempty"`
 	Supersession       *Supersession         `yaml:"supersession,omitempty"`
 	Dispositions       []Disposition         `yaml:"dispositions,omitempty"`
@@ -270,7 +271,7 @@ func (fm SpecFrontmatter) validateFeature() error {
 			}
 		}
 	}
-	if err := validateObjectBlocks(fm.Problem, fm.Outcome, fm.Constraints, fm.Decisions); err != nil {
+	if err := validateObjectBlocks(fm.Problem, fm.Outcome, fm.Constraints, fm.Decisions, fm.OpenQuestions); err != nil {
 		return err
 	}
 	if err := validateDispositions(fm.Dispositions); err != nil {
@@ -339,7 +340,7 @@ func (fm SpecFrontmatter) validateStory() error {
 		}
 		seenAC[ac.ID] = true
 	}
-	if err := validateObjectBlocks(nil, nil, fm.Constraints, fm.Decisions); err != nil {
+	if err := validateObjectBlocks(nil, nil, fm.Constraints, fm.Decisions, fm.OpenQuestions); err != nil {
 		return err
 	}
 
@@ -400,6 +401,7 @@ func (fm SpecFrontmatter) validateComponent() error {
 	if fm.Spike || fm.Problem != nil || fm.Outcome != nil ||
 		len(fm.Impacts) != 0 || len(fm.Context) != 0 || fm.Declares != nil ||
 		len(fm.AcceptanceCriteria) != 0 || len(fm.Constraints) != 0 || len(fm.Decisions) != 0 ||
+		len(fm.OpenQuestions) != 0 ||
 		len(fm.Stubs) != 0 || fm.Supersession != nil || len(fm.Dispositions) != 0 {
 		return fmt.Errorf("artifact: component spec must not carry feature/story-only fields (02: 'no object model')")
 	}
@@ -413,7 +415,7 @@ func (fm SpecFrontmatter) validateComponent() error {
 // object-model blocks together: Problem/Outcome (if present, individually
 // valid — presence itself is enforced by the caller per class), and every
 // Constraint/Decision entry, with ids unique within their own block.
-func validateObjectBlocks(problem, outcome *Attribute, constraints []Constraint, decisions []Decision) error {
+func validateObjectBlocks(problem, outcome *Attribute, constraints []Constraint, decisions []Decision, openQuestions []OpenQuestion) error {
 	if problem != nil {
 		if err := problem.Validate(); err != nil {
 			return fmt.Errorf("artifact: problem: %w", err)
@@ -443,6 +445,16 @@ func validateObjectBlocks(problem, outcome *Attribute, constraints []Constraint,
 			return fmt.Errorf("artifact: decision id %q is duplicated", d.ID)
 		}
 		seenDc[d.ID] = true
+	}
+	seenOQ := make(map[string]bool, len(openQuestions))
+	for i, q := range openQuestions {
+		if err := q.Validate(); err != nil {
+			return fmt.Errorf("artifact: open_questions[%d]: %w", i, err)
+		}
+		if seenOQ[q.ID] {
+			return fmt.Errorf("artifact: open question id %q is duplicated", q.ID)
+		}
+		seenOQ[q.ID] = true
 	}
 	return nil
 }
