@@ -206,12 +206,13 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 // Condition (d), "no undispositioned judged findings": at accept time (a
 // design-branch action, before any build) the only judged-findings surface
 // this system defines is the design-branch decision-conflict report (03
-// §Decision-conflict gate) — a later phase's deliverable (internal/align's
-// design-branch mode, out of this phase's scope). Disclosed judgment call:
-// this function looks for that report at its one documented reuse point —
-// the same verdi.deviation/v1-shaped schema and Finding.Dispositioned()
-// rule the build-branch alignment report already uses (03: "structured
-// into the same computed/judged split") — at the conventional path
+// §Decision-conflict gate), the exact artifact `verdi align`'s design-branch
+// mode writes (align_design.go). This function reads that report with its
+// own contract — the verdi.decisionconflict/v1 schema and
+// ConflictFinding.Dispositioned() rule the reader in align_design.go already
+// uses (03: "structured into the same computed/judged split", but with the
+// decision-conflict report's own four-value disposition vocabulary) — at the
+// conventional path
 // .verdi/specs/active/<name>/decision-conflict-report.md. Its absence is
 // read as "no judged findings exist yet to disposition" (vacuously
 // satisfied), not as a failure: unlike the merge gate's condition 3 (which
@@ -321,19 +322,22 @@ func disqualifyingSupersedesOrExempts(root string, story *artifact.SpecFrontmatt
 	return false, ""
 }
 
-// supersedesTargetsStory reports whether ref resolves to an active spec of
-// class story — the only supersedes target R4-I-12's chain-edge exception
-// admits. Anything unresolvable (a malformed ref, a non-spec kind such as an
-// ADR, a target not loadable as an active spec, or a fragment ref into a
-// feature spec) is NOT a story, so the edge disqualifies: fail closed toward
-// full review, never toward the fast path.
+// supersedesTargetsStory reports whether ref resolves to a spec of class
+// story in either specs/active/ or specs/archive/ — the only supersedes
+// target R4-I-12's chain-edge exception admits. A predecessor story is
+// commonly archived (closed) by the time its successor is accepted, so both
+// zones must be consulted, matching internal/align's decision-edge
+// resolution (readSpecByName). Anything unresolvable (a malformed ref, a
+// non-spec kind such as an ADR, a target not loadable in either zone, or a
+// fragment ref into a feature spec) is NOT a story, so the edge disqualifies:
+// fail closed toward full review, never toward the fast path.
 func supersedesTargetsStory(root, ref string) bool {
 	r, err := artifact.ParseRef(ref)
 	if err != nil || r.Kind != artifact.KindSpec {
 		return false
 	}
-	target, err := storyresolve.LoadActiveSpec(root, r.Name)
-	if err != nil {
+	target, err := storyresolve.LoadSpec(root, r.Name)
+	if err != nil || target == nil {
 		return false
 	}
 	return target.Class == artifact.ClassStory
@@ -359,7 +363,7 @@ func judgedFindingsClear(root string, story *artifact.SpecFrontmatter) (bool, st
 	if err != nil {
 		return false, fmt.Sprintf("decision-conflict-report.md: %v", err)
 	}
-	decoded, err := artifact.DecodeDeviation(fm)
+	decoded, err := artifact.DecodeDecisionConflict(fm)
 	if err != nil {
 		return false, fmt.Sprintf("decision-conflict-report.md failed to decode: %v", err)
 	}

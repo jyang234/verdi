@@ -196,3 +196,32 @@ func LoadActiveSpec(root, name string) (*artifact.SpecFrontmatter, error) {
 	}
 	return spec, nil
 }
+
+// LoadSpec reads and strict-decodes <name>/spec.md from either
+// specs/active/ or specs/archive/ (active preferred), returning
+// (nil, nil) when neither exists. A supersedes target may legitimately
+// live in archive — an accepted/closed predecessor spec remains a valid
+// rung-3 chain-edge target — so callers resolving such edges must consult
+// both zones, mirroring internal/align's own readSpecByName.
+func LoadSpec(root, name string) (*artifact.SpecFrontmatter, error) {
+	for _, statusDir := range []string{"active", "archive"} {
+		path := filepath.Join(root, ".verdi", "specs", statusDir, name, "spec.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("reading %s: %w", path, err)
+		}
+		fm, _, err := artifact.SplitFrontmatter(data)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		spec, err := artifact.DecodeSpec(fm)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		return spec, nil
+	}
+	return nil, nil
+}

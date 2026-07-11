@@ -188,10 +188,13 @@ func TestComputeStubMatch(t *testing.T) {
 	}
 }
 
-// TestComputeStubMatch_UndispositionedJudgedFinding proves condition (d):
-// a decision-conflict-report.md with an undispositioned judged finding
-// disqualifies the match; a fully-dispositioned one (or its absence
-// entirely) does not.
+// TestComputeStubMatch_UndispositionedJudgedFinding proves condition (d)
+// against a REAL decision-conflict-report.md — the exact
+// verdi.decisionconflict/v1 artifact `verdi align`'s design-branch mode
+// writes (schema and four-value disposition vocabulary, decoded by
+// artifact.DecodeDecisionConflict), not a fabricated verdi.deviation/v1
+// stand-in. An undispositioned judged finding disqualifies the match; a
+// fully-dispositioned one (or its absence entirely) does not.
 func TestComputeStubMatch_UndispositionedJudgedFinding(t *testing.T) {
 	repo := buildStubMatchRepo(t)
 	story := draftStory("Stale Decline", implementsAC1(), nil)
@@ -211,7 +214,7 @@ func TestComputeStubMatch_UndispositionedJudgedFinding(t *testing.T) {
 
 	t.Run("undispositioned judged finding disqualifies", func(t *testing.T) {
 		content := fmt.Sprintf(`---
-schema: verdi.deviation/v1
+schema: verdi.decisionconflict/v1
 covers: %s
 findings:
   - { id: dc-conflict-1, kind: judged, text: "possible conflict with ADR-3" }
@@ -233,10 +236,10 @@ digest: sha256:%s
 
 	t.Run("dispositioned judged finding satisfies", func(t *testing.T) {
 		content := fmt.Sprintf(`---
-schema: verdi.deviation/v1
+schema: verdi.decisionconflict/v1
 covers: %s
 findings:
-  - { id: dc-conflict-1, kind: judged, text: "possible conflict with ADR-3", disposition: accepted-deviation, note: "reviewed, fine" }
+  - { id: dc-conflict-1, kind: judged, text: "possible conflict with ADR-3", disposition: no-conflict, note: "reviewed, fine" }
 digest: sha256:%s
 ---
 # Decision-conflict report
