@@ -19,7 +19,11 @@ test("board loads stickies, drag updates position, and autosave persists across 
   // Yarn.
   await expect(page.locator(".yarn")).toContainText("relates");
 
-  // Drag the first sticky to a new position.
+  // Drag the first sticky to a new position. Grab it near its top-left
+  // corner, not its center: real paper-sized stickies at the fixture's
+  // coordinates overlap, so a center-point grab lands on whichever LATER
+  // sticky is stacked on top — the same element a human clicking that
+  // pixel would drag.
   const sticky = stickies.first();
   const before = await sticky.boundingBox();
   expect(before).not.toBeNull();
@@ -27,7 +31,7 @@ test("board loads stickies, drag updates position, and autosave persists across 
   const targetX = (before!.x) + 260;
   const targetY = (before!.y) + 180;
 
-  await page.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2);
+  await page.mouse.move(before!.x + 8, before!.y + 8);
   await page.mouse.down();
   await page.mouse.move(targetX + 10, targetY + 10, { steps: 12 });
   await page.mouse.up();
