@@ -39,6 +39,42 @@ func TestRenderMarkdown_CodeBlockIsClassBased(t *testing.T) {
 	}
 }
 
+func TestRenderBody_DiagramKindIsMermaidNotMarkdown(t *testing.T) {
+	// The user-reported defect: a diagram-kind body ran through the markdown
+	// renderer, collapsing the diagram DSL into a <p>graph TD ...</p>. It must
+	// instead become the bare <pre class="mermaid"> the client-side engine
+	// turns into an SVG.
+	body := "graph TD\n  loansvc --> notification-svc\n  loansvc --> charge-svc\n"
+	out, err := RenderBody(string(artifact.KindDiagram), body)
+	if err != nil {
+		t.Fatalf("RenderBody: %v", err)
+	}
+	if !strings.Contains(out, `<pre class="mermaid">`) {
+		t.Fatalf("diagram body not wrapped for client-side rendering: %s", out)
+	}
+	// The arrow must survive as diagram syntax (HTML-escaped, textContent),
+	// never as goldmark prose.
+	if !strings.Contains(out, "loansvc --&gt; notification-svc") {
+		t.Fatalf("diagram source not HTML-escaped verbatim: %s", out)
+	}
+	if strings.Contains(out, "<p>") {
+		t.Fatalf("diagram body must not be markdown-rendered into a <p>: %s", out)
+	}
+}
+
+func TestRenderBody_NonDiagramKindIsMarkdown(t *testing.T) {
+	out, err := RenderBody(string(artifact.KindSpec), "# Title\n\nBody.\n")
+	if err != nil {
+		t.Fatalf("RenderBody: %v", err)
+	}
+	if !strings.Contains(out, `<h1 id="title">Title</h1>`) {
+		t.Fatalf("spec body not markdown-rendered: %s", out)
+	}
+	if strings.Contains(out, `class="mermaid"`) {
+		t.Fatalf("a non-diagram body must never become a mermaid block: %s", out)
+	}
+}
+
 func TestChromaPaletteCSS(t *testing.T) {
 	light := ChromaLightCSS()
 	dark := ChromaDarkCSS()

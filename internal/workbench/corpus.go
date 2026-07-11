@@ -63,7 +63,7 @@ func corpusHandler(root string) http.HandlerFunc {
 			return
 		}
 
-		bodyHTML, err := render.RenderMarkdown(entry.Body)
+		bodyHTML, err := render.RenderBody(entry.Kind, entry.Body)
 		if err != nil {
 			http.Error(w, "workbench: rendering "+ref+": "+err.Error(), http.StatusInternalServerError)
 			return

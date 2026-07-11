@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io"
 
+	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/alecthomas/chroma/v2"
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/alecthomas/chroma/v2/lexers"
@@ -68,6 +69,35 @@ func RenderMarkdown(body string) (string, error) {
 	return buf.String(), nil
 }
 
+// RenderBody renders an artifact body (the content after frontmatter) to a
+// self-contained HTML fragment, dispatching on the artifact's kind. A
+// "diagram" body is mermaid diagram source: it is emitted verbatim through
+// RenderMermaidBlock — never through goldmark, which would treat the diagram
+// DSL as prose and collapse it into a `<p>graph TD ...</p>` (the
+// user-reported defect). Every other kind renders as markdown. Both
+// HTML-producing surfaces (internal/dex's static pages and
+// internal/workbench's server-rendered pages) route their artifact bodies
+// through here, so the diagram special-case is defined once and cannot
+// drift between them.
+func RenderBody(kind, body string) (string, error) {
+	if kind == string(artifact.KindDiagram) {
+		return RenderMermaidBlock(body), nil
+	}
+	return RenderMarkdown(body)
+}
+
+// RenderMermaidBlock wraps mermaid diagram source in the bare
+// `<pre class="mermaid">` element the vendored client-side mermaid.js turns
+// into an SVG diagram. The source is HTML-escaped because mermaid reads the
+// element's textContent — escaping is the correct (and only) transform, so
+// `-->` survives as diagram syntax rather than becoming an HTML entity the
+// diagram engine never sees. These are byte-for-byte the same wrapper the
+// fenced ```mermaid special case (renderFencedCodeBlock) emits, so a
+// diagram-kind body and an inline fenced block render identically.
+func RenderMermaidBlock(source string) string {
+	return fmt.Sprintf("<pre class=\"mermaid\">%s</pre>\n", html.EscapeString(source))
+}
+
 // chromaCodeRenderer is a goldmark renderer.NodeRenderer that replaces
 // goldmark's default (unhighlighted, HTML-escaped-only) code block
 // rendering with chroma-tokenized, class-based HTML (the colours come from
@@ -90,7 +120,7 @@ func (r *chromaCodeRenderer) renderFencedCodeBlock(w util.BufWriter, source []by
 	code := linesText(node.Lines(), source)
 
 	if lang == "mermaid" {
-		if _, err := fmt.Fprintf(w, "<pre class=\"mermaid\">%s</pre>\n", html.EscapeString(code)); err != nil {
+		if _, err := io.WriteString(w, RenderMermaidBlock(code)); err != nil {
 			return ast.WalkStop, err
 		}
 		return ast.WalkSkipChildren, nil

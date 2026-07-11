@@ -20,6 +20,7 @@ import (
 // are untouched.
 var (
 	renderMarkdown = render.RenderMarkdown
+	renderBody     = render.RenderBody
 	highlightCode  = render.HighlightCode
 )
 
