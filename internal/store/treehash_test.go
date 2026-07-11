@@ -20,6 +20,7 @@ func buildTreeHashFixture(t *testing.T, flowmapContent string) *fixturegit.Repo 
 		{
 			Files: map[string]string{
 				".verdi/verdi.yaml":    "schema: verdi.layout/v1\n",
+				".verdi/.gitignore":    "data/\n",
 				".verdi/adr/0001-x.md": "---\nid: adr/0001-x\n---\nbody\n",
 				"README.md":            "not part of the committed zone\n",
 			},
@@ -59,74 +60,97 @@ func TestTreeHash_DeterministicAcrossIdenticalBuilds(t *testing.T) {
 	}
 }
 
-// TestTreeHash_ChangesWhenServiceRootFileChanges proves D4's whole-corpus
-// claim: a change to a discovered service-root file (here, adding an
-// obligation to .flowmap.yaml) invalidates the tree hash exactly like a
-// spec change would.
-func TestTreeHash_ChangesWhenServiceRootFileChanges(t *testing.T) {
-	before := buildTreeHashFixture(t, svcFlowmapYAML)
-	beforeHash := discoverAndHash(t, before.Dir)
-
-	changedFlowmap := svcFlowmapYAML + "  - name: second-obligation\n    require: \"x#Y\"\n    before: \"x#Z\"\n"
-	if err := os.WriteFile(filepath.Join(before.Dir, "svcfix", flowmapFile), []byte(changedFlowmap), 0o644); err != nil {
-		t.Fatalf("rewriting .flowmap.yaml: %v", err)
+// TestTreeHash_MutationMatrix drives D4's "staleness is detected, never
+// guessed" guarantee across the corpus mutations that must (or must not)
+// move the hash. Each case rebuilds the fixture, hashes, mutates the live
+// filesystem, and re-hashes. Note that discoverAndHash fails the test if
+// TreeHash ever errors, so every case here also proves TreeHash stays
+// error-free through the mutation — in particular the working-tree deletion,
+// which the old LsFiles+HashObject path turned into a hard failure.
+func TestTreeHash_MutationMatrix(t *testing.T) {
+	cases := []struct {
+		name        string
+		mutate      func(t *testing.T, dir string)
+		wantChanged bool
+	}{
+		{
+			// Defect 1: a brand-new untracked .verdi/ file the index walk
+			// would pick up must move the hash. Under the old LsFiles-only
+			// enumeration it was invisible — silent staleness.
+			name: "untracked .verdi file added",
+			mutate: func(t *testing.T, dir string) {
+				writeFileT(t, filepath.Join(dir, ".verdi", "adr", "0002-new.md"),
+					"---\nid: adr/0002-new\n---\nbrand new, never git-added\n")
+			},
+			wantChanged: true,
+		},
+		{
+			// Defect 2: a tracked file deleted from the working tree stays in
+			// ls-files but is gone on disk. It must be treated as deleted
+			// (hash changes) rather than erroring the whole computation.
+			name: "tracked .verdi file deleted from working tree",
+			mutate: func(t *testing.T, dir string) {
+				if err := os.Remove(filepath.Join(dir, ".verdi", "adr", "0001-x.md")); err != nil {
+					t.Fatalf("removing tracked file: %v", err)
+				}
+			},
+			wantChanged: true,
+		},
+		{
+			// .verdi/data/ is gitignored (committed .verdi/.gitignore), so
+			// --exclude-standard keeps this untracked file out; the
+			// verdiDataPrefix filter is the second line of defence.
+			name: "untracked file under .verdi/data/ (gitignored)",
+			mutate: func(t *testing.T, dir string) {
+				writeFileT(t, filepath.Join(dir, ".verdi", "data", "cache", "whatever"), "noise\n")
+			},
+			wantChanged: false,
+		},
+		{
+			// The committed (.verdi/) half of the hash is live: a dirty,
+			// uncommitted edit is picked up without a new commit (I-15).
+			name: "dirty edit to a committed .verdi file",
+			mutate: func(t *testing.T, dir string) {
+				writeFileT(t, filepath.Join(dir, ".verdi", "adr", "0001-x.md"),
+					"---\nid: adr/0001-x\n---\nedited body\n")
+			},
+			wantChanged: true,
+		},
+		{
+			// D4's whole-corpus claim: a discovered service-root file change
+			// invalidates the hash exactly like a spec change would.
+			name: "edit to a discovered service-root file",
+			mutate: func(t *testing.T, dir string) {
+				changed := svcFlowmapYAML + "  - name: second-obligation\n    require: \"x#Y\"\n    before: \"x#Z\"\n"
+				writeFileT(t, filepath.Join(dir, "svcfix", flowmapFile), changed)
+			},
+			wantChanged: true,
+		},
+		{
+			// Converse: touching a file outside .verdi/ and outside every
+			// service root must never move the hash.
+			name: "edit outside .verdi/ and every service root",
+			mutate: func(t *testing.T, dir string) {
+				writeFileT(t, filepath.Join(dir, "README.md"), "edited, but out of scope\n")
+			},
+			wantChanged: false,
+		},
 	}
-	afterHash := discoverAndHash(t, before.Dir)
 
-	if beforeHash == afterHash {
-		t.Fatal("TreeHash did not change after editing a discovered service-root file")
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildTreeHashFixture(t, svcFlowmapYAML)
+			beforeHash := discoverAndHash(t, repo.Dir)
+			tc.mutate(t, repo.Dir)
+			afterHash := discoverAndHash(t, repo.Dir)
 
-// TestTreeHash_ChangesWhenCommittedZoneFileChanges proves the committed
-// (.verdi/) half of the hash is live too, and that an uncommitted (dirty)
-// edit is picked up without needing a new commit (I-15).
-func TestTreeHash_ChangesWhenCommittedZoneFileChanges(t *testing.T) {
-	repo := buildTreeHashFixture(t, svcFlowmapYAML)
-	beforeHash := discoverAndHash(t, repo.Dir)
-
-	if err := os.WriteFile(filepath.Join(repo.Dir, ".verdi", "adr", "0001-x.md"), []byte("---\nid: adr/0001-x\n---\nedited body\n"), 0o644); err != nil {
-		t.Fatalf("editing committed file: %v", err)
-	}
-	afterHash := discoverAndHash(t, repo.Dir)
-
-	if beforeHash == afterHash {
-		t.Fatal("TreeHash did not change after a dirty (uncommitted) edit to a committed-zone file")
-	}
-}
-
-// TestTreeHash_UnchangedContentIdenticalHash is the direct converse of the
-// two change tests: touching an unrelated tracked file outside .verdi/ (and
-// outside any service root) must never move the hash.
-func TestTreeHash_UnchangedContentIdenticalHash(t *testing.T) {
-	repo := buildTreeHashFixture(t, svcFlowmapYAML)
-	beforeHash := discoverAndHash(t, repo.Dir)
-
-	if err := os.WriteFile(filepath.Join(repo.Dir, "README.md"), []byte("edited, but out of scope\n"), 0o644); err != nil {
-		t.Fatalf("editing README.md: %v", err)
-	}
-	afterHash := discoverAndHash(t, repo.Dir)
-
-	if beforeHash != afterHash {
-		t.Fatal("TreeHash changed after editing a file outside .verdi/ and outside every service root")
-	}
-}
-
-func TestTreeHash_ExcludesVerdiData(t *testing.T) {
-	repo := buildTreeHashFixture(t, svcFlowmapYAML)
-	beforeHash := discoverAndHash(t, repo.Dir)
-
-	// Defensive: even if something under .verdi/data/ were somehow
-	// git-tracked (VL-013 forbids this in the real store; this test proves
-	// TreeHash does not depend on that lint rule to stay correct), it must
-	// not affect the hash. TreeHash filters purely on path prefix, so an
-	// on-disk (untracked) file here is enough to prove the exclusion since
-	// LsFiles would never surface it anyway.
-	writeFileT(t, filepath.Join(repo.Dir, ".verdi", "data", "cache", "whatever"), "noise\n")
-	afterHash := discoverAndHash(t, repo.Dir)
-
-	if beforeHash != afterHash {
-		t.Fatal("TreeHash changed after adding a file under .verdi/data/")
+			switch {
+			case tc.wantChanged && beforeHash == afterHash:
+				t.Fatalf("TreeHash unchanged after mutation, want it to change (hash=%s)", beforeHash)
+			case !tc.wantChanged && beforeHash != afterHash:
+				t.Fatalf("TreeHash changed after mutation, want it unchanged: %s -> %s", beforeHash, afterHash)
+			}
+		})
 	}
 }
 

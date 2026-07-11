@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -31,19 +32,36 @@ const verdiDataPrefix = ".verdi/data/"
 // immediately — exactly the D4 guarantee ("a boundary-contract or
 // obligation change invalidates the cache exactly like a spec change
 // does"). Paths are relative to root with forward slashes.
+//
+// The committed-zone enumeration is LsFilesWithUntracked, not LsFiles, so a
+// brand-new untracked file under .verdi/ counts toward the hash the moment
+// the index walk would pick it up — otherwise the cache key would stay put
+// while the corpus changed (silent staleness, which D4 forbids).
+// `--exclude-standard` keeps .verdi/data/ out via the committed
+// .verdi/.gitignore; the verdiDataPrefix filter below is a belt-and-braces
+// second line. A tracked file deleted from the working tree is still listed
+// (it lives in the index) but has no on-disk content: it is treated as
+// deleted and omitted entirely, so its (path, blob) pair drops out of the
+// sorted set and the hash changes — a deletion is a corpus change D4 must
+// detect, not a hard error. Omitting (rather than emitting a tombstone) also
+// makes a working-tree deletion hash identically to a committed `git rm` of
+// the same file: both mean "this path is not in the corpus".
 func TreeHash(ctx context.Context, root string, services []Service) (string, error) {
-	tracked, err := gitx.LsFiles(ctx, root)
+	listed, err := gitx.LsFilesWithUntracked(ctx, root)
 	if err != nil {
 		return "", fmt.Errorf("store: TreeHash: %w", err)
 	}
 
 	paths := make(map[string]bool)
-	for _, p := range tracked {
+	for _, p := range listed {
 		if strings.HasPrefix(p, verdiDataPrefix) {
 			continue
 		}
 		if !strings.HasPrefix(p, ".verdi/") {
 			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(p))); err != nil {
+			continue // deleted from the working tree: omit, do not error
 		}
 		paths[p] = true
 	}
