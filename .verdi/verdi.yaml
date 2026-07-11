@@ -15,4 +15,4 @@ services:
   discovery: flowmap           # any directory containing .flowmap.yaml is a service root
 toolchain:                     # verdi-go pin (I-4); no upstream tags yet, so pin by commit SHA
   module: github.com/jyang234/golang-code-graph
-  commit: cd38b1a
+  commit: cd38b1a56bb782177a207d741a39807821cf2c1c
