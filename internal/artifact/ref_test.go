@@ -14,6 +14,7 @@ func TestParseRef_Happy(t *testing.T) {
 		{"conflict/stale-decline-incident", Ref{Kind: KindConflict, Name: "stale-decline-incident"}},
 		{"attestation/story-1482--ac-2", Ref{Kind: KindAttestation, Name: "story-1482--ac-2"}},
 		{"waiver/story-1482--ac-4", Ref{Kind: KindWaiver, Name: "story-1482--ac-4"}},
+		{"reaffirmation/jira-loan-1482--ac-2", Ref{Kind: KindReaffirmation, Name: "jira-loan-1482--ac-2"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
@@ -26,6 +27,52 @@ func TestParseRef_Happy(t *testing.T) {
 			}
 			if got.String() != tc.in {
 				t.Fatalf("round-trip: ParseRef(%q).String() = %q", tc.in, got.String())
+			}
+		})
+	}
+}
+
+func TestParseRef_FragmentHappy(t *testing.T) {
+	cases := []struct {
+		in   string
+		want Ref
+	}{
+		{"spec/loan-update#ac-2", Ref{Kind: KindSpec, Name: "loan-update", Object: "ac-2"}},
+		{"spec/loan-update@3e91ab2#ac-2", Ref{Kind: KindSpec, Name: "loan-update", Commit: "3e91ab2", Object: "ac-2"}},
+		{"spec/loan-update#oq-1", Ref{Kind: KindSpec, Name: "loan-update", Object: "oq-1"}},
+		{"spec/loan-update#co-1", Ref{Kind: KindSpec, Name: "loan-update", Object: "co-1"}},
+		{"spec/loan-update#dc-1", Ref{Kind: KindSpec, Name: "loan-update", Object: "dc-1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := ParseRef(tc.in)
+			if err != nil {
+				t.Fatalf("ParseRef(%q): %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Fatalf("ParseRef(%q) = %+v, want %+v", tc.in, got, tc.want)
+			}
+			if !got.Fragment() {
+				t.Fatalf("ParseRef(%q).Fragment() = false, want true", tc.in)
+			}
+			if got.String() != tc.in {
+				t.Fatalf("round-trip: ParseRef(%q).String() = %q", tc.in, got.String())
+			}
+		})
+	}
+}
+
+func TestParseRef_FragmentNegative(t *testing.T) {
+	cases := []string{
+		"spec/loan-update#",          // trailing '#' with no object id
+		"spec/loan-update#ac-2#dc-1", // more than one fragment separator
+		"spec/loan-update#Not-Kebab", // fragment not a valid object id shape
+		"spec/loan-update#nodash",    // no type-prefix dash
+	}
+	for _, in := range cases {
+		t.Run(in, func(t *testing.T) {
+			if _, err := ParseRef(in); err == nil {
+				t.Fatalf("ParseRef(%q): want error, got nil", in)
 			}
 		})
 	}
@@ -45,6 +92,7 @@ func TestParseRef_Negative(t *testing.T) {
 		"attestation/story-1482",     // attestation requires compound name
 		"waiver/ac-2",                // waiver requires compound name
 		"attestation/story-1482--",   // compound name missing second half
+		"reaffirmation/story-1482",   // reaffirmation requires compound name
 	}
 	for _, in := range cases {
 		t.Run(in, func(t *testing.T) {
@@ -104,7 +152,7 @@ func TestRef_Validate_Negative(t *testing.T) {
 }
 
 func TestKind_Valid(t *testing.T) {
-	for _, k := range []Kind{KindSpec, KindADR, KindDiagram, KindAttestation, KindWaiver, KindConflict} {
+	for _, k := range []Kind{KindSpec, KindADR, KindDiagram, KindAttestation, KindWaiver, KindConflict, KindReaffirmation} {
 		if !k.Valid() {
 			t.Fatalf("Kind(%q).Valid() = false, want true", k)
 		}
