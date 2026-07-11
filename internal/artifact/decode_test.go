@@ -396,3 +396,35 @@ func TestSpike_RealSpecFrontmatter_DialectViolationsRejected(t *testing.T) {
 		}
 	})
 }
+
+func TestDecodeYAMLLoose_Happy(t *testing.T) {
+	data := []byte("openapi: 3.0.3\ninfo:\n  title: x\npaths:\n  /y:\n    get:\n      summary: z\n")
+	generic, err := DecodeYAMLLoose(data)
+	if err != nil {
+		t.Fatalf("DecodeYAMLLoose: %v", err)
+	}
+	m, ok := generic.(map[string]interface{})
+	if !ok {
+		t.Fatalf("DecodeYAMLLoose: got %T, want map[string]interface{}", generic)
+	}
+	if m["openapi"] != "3.0.3" {
+		t.Fatalf("m[openapi] = %v, want 3.0.3", m["openapi"])
+	}
+	info, ok := m["info"].(map[string]interface{})
+	if !ok || info["title"] != "x" {
+		t.Fatalf("m[info] = %v, want a map with title=x", m["info"])
+	}
+}
+
+func TestDecodeYAMLLoose_Negative_DialectViolation(t *testing.T) {
+	data := []byte("defaults: &d foo\nsame: *d\n")
+	if _, err := DecodeYAMLLoose(data); err == nil {
+		t.Fatal("DecodeYAMLLoose: want dialect error for an alias, got nil")
+	}
+}
+
+func TestDecodeYAMLLoose_Negative_MalformedYAML(t *testing.T) {
+	if _, err := DecodeYAMLLoose([]byte("a: [1, 2\n")); err == nil {
+		t.Fatal("DecodeYAMLLoose: want a parse error for malformed YAML, got nil")
+	}
+}

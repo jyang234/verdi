@@ -134,6 +134,32 @@ func ProbeFrozen(doc []byte) (*Frozen, error) {
 	return probe.Frozen, nil
 }
 
+// DecodeYAMLLoose decodes arbitrary, foreign-schema YAML (data) into a
+// generic Go value (map[string]interface{} / []interface{} / scalars) —
+// the same "verdi doesn't own this schema, read it as a guest" posture
+// DecodeFlowmapLoose established for .flowmap.yaml, generalized for any
+// upstream-owned YAML document a caller needs to transcode rather than
+// strictly validate (dex build's OpenAPI-doc-to-JSON transcoding: 05
+// §Verdi-dex mechanics discovers `<service-root>/api/openapi.{yaml,yml,json}`
+// by convention, and the committed file — not a verdi schema — is the
+// source of truth). The restricted dialect (no anchors, aliases, or custom
+// tags) is still enforced, since dialect is a property of the parser, not
+// the schema, exactly as DecodeFlowmapLoose reasons.
+func DecodeYAMLLoose(data []byte) (interface{}, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, fmt.Errorf("artifact: yaml parse: %w", err)
+	}
+	if err := checkDialect(&root); err != nil {
+		return nil, err
+	}
+	var generic interface{}
+	if err := root.Decode(&generic); err != nil {
+		return nil, fmt.Errorf("artifact: decoding generic yaml: %w", err)
+	}
+	return generic, nil
+}
+
 // DecodeStrictJSON decodes JSON bytes into out with DisallowUnknownFields
 // and trailing-data rejection (CLAUDE.md: "JSON via DisallowUnknownFields +
 // trailing-data rejection"). It is used for the record schemas that live in
