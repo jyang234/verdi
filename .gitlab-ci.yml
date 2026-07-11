@@ -18,3 +18,32 @@ verify:
     - make verify
     - go build -o .build/verdi ./cmd/verdi
     - ./.build/verdi lint
+
+# pages (PLAN.md Phase 12, 05 §Verdi-dex): builds the static dex site from
+# main's tree on every push to the default branch and publishes it to
+# GitLab Pages. The job name "pages" and artifact path "public" are
+# GitLab's own fixed convention — this is the entire publish contract, no
+# further GitLab-specific configuration needed in-repo.
+#
+# I-21 / PLAN.md Phase 12 exit criteria: "member-restricted" readership is
+# forge configuration, not something this pipeline can express — GitLab
+# Pages has native access control for exactly this. REQUIRED PROJECT
+# SETTING (do this once, outside this file): in the project's
+# Settings > Deploy > Pages, set "Pages visibility" to "Only project
+# members" (Premium/Ultimate: "Enforce access control can also be scoped
+# further via group SSO). Without that setting, this job still runs and
+# still publishes correctly — the site simply defaults to the project's
+# general visibility instead of being member-restricted, which is a real
+# capability gap this comment discloses rather than hides (05 §Verdi-dex:
+# "readership restricted to project members ... via Pages access control").
+pages:
+  image: golang:1.25
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - go build -o .build/verdi ./cmd/verdi
+    - ./.build/verdi dex build -o public
+  artifacts:
+    paths:
+      - public

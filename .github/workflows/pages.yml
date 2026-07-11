@@ -1,0 +1,60 @@
+# pages (PLAN.md Phase 12, 05 §Verdi-dex): builds the static dex site from
+# main's tree on every push to the default branch and publishes it via
+# GitHub Pages' native actions/deploy-pages flow. Kept in its own workflow
+# file (rather than folded into verify.yml) so verify.yml's own comment —
+# "this file should not need to change" as `make verify` grows — stays
+# true; this workflow depends on nothing verify.yml gates.
+#
+# I-21 / PLAN.md Phase 12 exit criteria: "member-restricted" readership is
+# forge configuration, not something a workflow can express, and GitHub's
+# capability here is narrower than GitLab's. REQUIRED PROJECT SETTING
+# (do this once, outside this file, and read it before relying on this
+# job for anything sensitive): GitHub Pages on a **private** repository —
+# the only way to get member-restricted readership on GitHub — requires
+# **GitHub Enterprise Cloud**. On a plain private repo without Enterprise
+# Cloud, Pages cannot be enabled for that repo at all; on a public repo,
+# Pages is world-readable regardless of any setting here. This is a real
+# capability gap in the GitHub adapter, disclosed rather than hidden (05
+# §Verdi-dex: "on GitHub via private-repo Pages, which requires Enterprise
+# Cloud (a documented adapter gap, not a verdi behavior)"). Enable Pages
+# under Settings > Pages, source "GitHub Actions", once Enterprise Cloud
+# (if the repo is private) is confirmed.
+name: pages
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: go build -o .build/verdi ./cmd/verdi
+      - run: ./.build/verdi dex build -o _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
