@@ -109,6 +109,10 @@
 
 * { box-sizing: border-box; }
 
+/* The hidden attribute always wins: author display rules (flex menus,
+   fixed dialogs) must never resurrect an element the markup hid. */
+[hidden] { display: none !important; }
+
 body {
   font-family: var(--serif);
   font-size: 1.0625rem;
@@ -795,6 +799,270 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   border-radius: 4px;
   background: var(--panel);
   padding: 0.5rem 0.7rem;
+}
+
+/* ---------- the v1 board: spec-as-source projection ---------- */
+
+.board-mode-tag {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  margin-left: 0.9rem;
+}
+
+/* attribute placards: the two cards the wall starts from */
+.board-placards { display: flex; gap: 1rem; margin: 0 0 1rem; }
+.placard {
+  flex: 1 1 0;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 0.6rem 0.9rem;
+}
+.placard p { margin: 0.15rem 0 0; font-size: 0.92rem; line-height: 1.45; }
+.placard-tag {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+}
+
+.boardv2-canvas { overflow: auto; }
+
+/* object cards: one per frontmatter-declared object */
+.objcard {
+  position: absolute;
+  width: 12.5rem;
+  padding: 0.7rem 0.9rem 0.8rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--muted-solid);
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  cursor: grab;
+}
+.objcard:active { cursor: grabbing; }
+/* layered paper: a touched card rises above an overlapping neighbour
+   (e.g. an anchored review sticky riding the card above it) */
+.objcard:hover, .sticky:hover { z-index: 8; }
+.objcard--acceptance-criterion { border-top-color: var(--st-evidenced); }
+.objcard--constraint { border-top-color: var(--st-violated); }
+.objcard--decision { border-top-color: var(--authored); }
+.objcard--open-question { border-top-color: var(--st-waived); }
+.objcard .card-text { margin: 0.25rem 0 0; overflow-wrap: anywhere; }
+.card-editor, .sticky-editor {
+  width: 100%;
+  min-height: 4.5rem;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0.3rem 0.4rem;
+  resize: vertical;
+}
+
+/* the yarn handle: a spool pinned to the card's corner */
+.yarn-handle {
+  position: absolute;
+  top: -0.5rem;
+  right: -0.5rem;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: 2px solid var(--card);
+  border-radius: 50%;
+  background: var(--yarn);
+  cursor: crosshair;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.yarn-handle:hover { transform: scale(1.25); }
+
+/* reference cards: targets outside this spec, filed frozen-blue */
+.refcard {
+  position: absolute;
+  width: 12rem;
+  padding: 0.55rem 0.8rem 0.65rem;
+  background: var(--frozen-tint);
+  border: 1px solid var(--frozen);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+.refcard .card-ref { color: var(--frozen); display: block; overflow-wrap: anywhere; }
+
+/* yarn chips: the edge's label, riding its thread's midpoint */
+.yarn-chip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--yarn);
+  background: var(--card);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--yarn);
+  z-index: 6;
+}
+.yarn-chip--annotation { border-style: dashed; color: var(--muted-solid); border-color: var(--muted-solid); }
+.yarn-thread--annotation { stroke-dasharray: 5 4; opacity: 0.6; }
+.yarn-draft { stroke: var(--yarn); stroke-width: 2; opacity: 0.7; stroke-dasharray: 3 3; }
+
+.graduate-btn {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.sticky .graduate-btn { align-self: flex-end; }
+
+/* review stickies: the MR's voice, anchored or trayed — never dropped */
+.review-sticky {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--note-comment-bg);
+  color: var(--note-comment-ink);
+  border-radius: 2px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.review-sticky .sticky-body { margin: 0.2rem 0 0; overflow-wrap: anywhere; }
+
+.inbox-tray, .git-panel, .scratch-panel {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 1rem 1.1rem;
+}
+.inbox-tray h2, .git-panel h2, .scratch-panel h2 {
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  margin: 0 0 0.6rem;
+}
+.inbox-tray .review-sticky { margin-top: 0.6rem; }
+.inbox-tray .empty, .scratch-panel .ritual-note { font-size: 0.82rem; }
+
+/* the git affordance: quiet chrome, one calm indicator */
+.git-panel .uncommitted {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  color: var(--authored);
+  background: var(--authored-tint);
+  border: 1px solid var(--authored);
+  border-radius: 999px;
+  padding: 0.18rem 0.65rem;
+  margin-bottom: 0.7rem;
+}
+.git-panel button, .scratch-panel button, .board-dialog button { cursor: pointer; }
+#commit-push-btn, #add-sticky-btn {
+  display: block;
+  width: 100%;
+  margin: 0.2rem 0 0.7rem;
+}
+.branch-row { display: flex; align-items: center; gap: 0.5rem; }
+.branch-label {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-solid);
+}
+.branch-switcher {
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 0.25rem 0.6rem;
+  overflow-wrap: anywhere;
+}
+.branch-menu {
+  margin-top: 0.4rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.branch-menu [role="menuitem"] { text-align: left; font-family: var(--mono); font-size: 0.76rem; }
+
+/* dialogs: paper modals over a soft scrim */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  z-index: 20;
+}
+.board-dialog {
+  position: fixed;
+  top: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 22rem;
+  max-width: 32rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3);
+  padding: 1.1rem 1.3rem 1.2rem;
+  z-index: 21;
+}
+.board-dialog h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+.board-dialog .ritual-note { color: var(--muted-solid); font-size: 0.85rem; margin: 0 0 0.8rem; }
+.board-dialog .field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.8rem; }
+.board-dialog input { font: inherit; padding: 0.3rem 0.5rem; }
+.dialog-actions { display: flex; gap: 0.6rem; justify-content: flex-end; }
+.picker-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px dashed var(--rule);
+}
+.picker-item:last-child { border-bottom: 0; }
+.picker-item [role="menuitem"] {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.picker-item .consequence { font-size: 0.78rem; color: var(--muted-solid); }
+.graduate-menu {
+  transform: none;
+  min-width: 14rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem;
+}
+.graduate-menu [role="menuitem"] { text-align: left; }
+
+@media (max-width: 60rem) {
+  .board-placards { flex-direction: column; }
 }
 
 /* ---------- responsive + motion ---------- */

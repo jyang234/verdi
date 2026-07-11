@@ -80,6 +80,15 @@ func run() error {
 		return fmt.Errorf("building dex site: %w", err)
 	}
 
+	// The v1 board fixtures land on a design branch AFTER the dex build,
+	// so the static site keeps reflecting main while `verdi serve`'s
+	// working tree sits on the design branch (authoring mode's branch
+	// state — 05 §Workbench "Two modes").
+	feedPath, err := provisionBoardV2(scratch, storeRoot)
+	if err != nil {
+		return fmt.Errorf("provisioning v1 board fixtures: %w", err)
+	}
+
 	dexSrv := &http.Server{Addr: dexAddr, Handler: http.FileServer(http.Dir(dexOut))}
 	dexLn, err := net.Listen("tcp", dexAddr)
 	if err != nil {
@@ -90,6 +99,10 @@ func run() error {
 
 	serveCmd := exec.Command(binPath, "serve", "--http", workbenchAddr)
 	serveCmd.Dir = storeRoot
+	// The hermetic review-mode feed (workbench.CommentFeed's canned-file
+	// implementation): REVIEW_SPEC reads as under MR review, with the
+	// three fixtures.ts comments — no network (CLAUDE.md).
+	serveCmd.Env = append(os.Environ(), "VERDI_REVIEW_FEED="+feedPath)
 	serveCmd.Stdout = os.Stdout
 	serveCmd.Stderr = os.Stderr
 	if err := serveCmd.Start(); err != nil {

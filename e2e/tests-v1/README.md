@@ -1,5 +1,12 @@
 # tests-v1/ — executable acceptance criteria for V1-P6 and V1-P8
 
+> **Flip-in status (V1-P6, 2026-07-11):** the six board specs (10–15)
+> pass and moved into `tests/` per the protocol below, together with
+> `fixtures.ts`/`helpers.ts` (the default suite now needs them; they
+> remain the single constants/gesture modules — `16-dex-v2.spec.ts`
+> imports them from `../tests/`). Only V1-P8's `16-dex-v2.spec.ts`
+> remains here.
+
 The specs in this directory are the **binding behavioral contract** for UI
 that does not exist yet: the v1 board (PLAN-V1.md §5, Phase V1-P6, plus the
 board-side half of V1-P7's review stickies) and the v1 dex pages (Phase
