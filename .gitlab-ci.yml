@@ -1,0 +1,9 @@
+# Trust parity (CLAUDE.md): CI runs exactly `make verify`, nothing more,
+# nothing less, so a green local run is a green CI run. Grows only insofar
+# as `make verify` itself grows (PLAN.md §2) — this file should not need to.
+
+verify:
+  image: golang:1.25
+  stage: test
+  script:
+    - make verify
