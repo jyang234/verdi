@@ -7,7 +7,7 @@ providers:                     # story-provider spec owns semantics
 lint:
   gated_generated: []          # committed generated artifacts that are currency-gated
 align:                         # evidence-model spec owns semantics
-  judge_cmd: claude -p         # the alignment judge; this is the default
+  judge_cmd: [claude, -p, --output-format, json]  # argv array (Phase 8 S5, flagged: 01 shows a string)
   judge_required: false        # true: `verdi align` fails outright without a judge
 derived:
   retention_days: 14           # gc horizon for merged/deleted refs

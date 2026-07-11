@@ -27,9 +27,20 @@ type LintConfig struct {
 }
 
 // AlignConfig is verdi.yaml's `align:` block (I-9).
+//
+// JudgeCmd is an argv ARRAY, not a shell string — a deliberate, FLAGGED
+// deviation from 01 §Store manifest's example YAML (`judge_cmd: claude -p`),
+// made per PLAN.md Phase 8's binding spike S5 finding: "judge_cmd is an
+// argv ARRAY (no shell string) ... splitting a string on whitespace is
+// FORBIDDEN as silent invention" (quoting/escaping rules would have to be
+// invented, and S5 proved the real path takes an explicit argv, e.g.
+// ["claude", "-p", "--output-format", "json", "--model", "<pin>"]). This is
+// a manifest schema change candidate for ratification into 01 §Store
+// manifest; flagged here rather than silently reconciled, per CLAUDE.md
+// ("never resolve a spec ambiguity silently ... record it").
 type AlignConfig struct {
-	JudgeCmd      string `yaml:"judge_cmd"`
-	JudgeRequired bool   `yaml:"judge_required"`
+	JudgeCmd      []string `yaml:"judge_cmd,omitempty"`
+	JudgeRequired bool     `yaml:"judge_required"`
 }
 
 // DerivedConfig is verdi.yaml's `derived:` block.
