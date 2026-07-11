@@ -78,7 +78,7 @@ func (b *Backend) AddAnnotation(ctx context.Context, argsRaw json.RawMessage) ma
 		a.Board = &artifact.BoardAnchor{Story: args.BoardStory, X: args.BoardX, Y: args.BoardY}
 	}
 
-	id, err := NewAnnotationID()
+	id, err := artifact.NewAnnotationID()
 	if err != nil {
 		return toolError("add_annotation: generating id: " + err.Error())
 	}

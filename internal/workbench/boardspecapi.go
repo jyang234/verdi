@@ -22,7 +22,6 @@ import (
 	"github.com/OWNER/verdi/internal/boardio"
 	"github.com/OWNER/verdi/internal/boardlayout"
 	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/mcpserve"
 	"github.com/OWNER/verdi/internal/store"
 )
 
@@ -273,7 +272,7 @@ func annotationAuthor() string {
 // RFC3339 stamp). The id/timestamp are declared stamps on a mutable-zone
 // record, not generated-artifact content.
 func newAnnotation(typ artifact.AnnotationType, body string) (*artifact.Annotation, error) {
-	id, err := mcpserve.NewAnnotationID()
+	id, err := artifact.NewAnnotationID()
 	if err != nil {
 		return nil, fmt.Errorf("workbench: minting annotation id: %w", err)
 	}

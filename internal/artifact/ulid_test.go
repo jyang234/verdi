@@ -1,19 +1,12 @@
-package mcpserve
+package artifact
 
 import (
 	"bytes"
 	mathrand "math/rand"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
-
-// annotationIDShapeRe mirrors artifact's private annotationIDRe (I-11):
-// "a-" + 26-char Crockford base32. Duplicated here (a tiny, stable regex)
-// rather than exporting artifact's private var, so this package's tests
-// stay self-contained.
-var annotationIDShapeRe = regexp.MustCompile(`^a-[0-9A-HJKMNP-TV-Z]{26}$`)
 
 // TestNewULID_Happy checks: fixed (time, entropy) is fully deterministic;
 // the output is 26 Crockford-alphabet characters; and the well-known ULID
@@ -134,7 +127,7 @@ func TestNewAnnotationID_Happy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewAnnotationID: %v", err)
 		}
-		if !annotationIDShapeRe.MatchString(id) {
+		if !annotationIDRe.MatchString(id) {
 			t.Fatalf("NewAnnotationID: %q does not match a-<ULID> shape", id)
 		}
 		if seen[id] {

@@ -1,4 +1,4 @@
-package mcpserve
+package artifact
 
 import (
 	"crypto/rand"
@@ -23,17 +23,17 @@ const crockfordAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 func NewULID(t time.Time, entropy io.Reader) (string, error) {
 	ms := t.UnixMilli()
 	if ms < 0 {
-		return "", fmt.Errorf("mcpserve: NewULID: time %s is before the Unix epoch", t)
+		return "", fmt.Errorf("artifact: NewULID: time %s is before the Unix epoch", t)
 	}
 	// 48-bit timestamp ceiling: 2^48-1 ms after epoch, far beyond any
 	// real use, but explicit rather than silently truncating.
 	if ms > 0xFFFFFFFFFFFF {
-		return "", fmt.Errorf("mcpserve: NewULID: time %s overflows the ULID's 48-bit millisecond timestamp", t)
+		return "", fmt.Errorf("artifact: NewULID: time %s overflows the ULID's 48-bit millisecond timestamp", t)
 	}
 
 	var rnd [10]byte // 80 bits of entropy
 	if _, err := io.ReadFull(entropy, rnd[:]); err != nil {
-		return "", fmt.Errorf("mcpserve: NewULID: reading entropy: %w", err)
+		return "", fmt.Errorf("artifact: NewULID: reading entropy: %w", err)
 	}
 
 	var data [16]byte // 128 bits: 48-bit timestamp + 80-bit entropy

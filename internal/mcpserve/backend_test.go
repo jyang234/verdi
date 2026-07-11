@@ -2,11 +2,18 @@ package mcpserve
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/OWNER/verdi/internal/boardio"
 )
+
+// annotationIDShapeRe mirrors artifact's private annotationIDRe (I-11):
+// "a-" + 26-char Crockford base32. A tiny, stable regex kept local to
+// this package's tests rather than reaching into artifact's unexported var
+// (the ULID generator itself now lives in internal/artifact).
+var annotationIDShapeRe = regexp.MustCompile(`^a-[0-9A-HJKMNP-TV-Z]{26}$`)
 
 func TestSearchArtifacts_Happy(t *testing.T) {
 	b, _, _ := newTestBackend(t)
