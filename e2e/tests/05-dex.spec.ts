@@ -46,6 +46,29 @@ test("highlighted code is legible in dark mode (light-on-dark, not github light 
   expect(color).toBe("rgb(230, 237, 243)");
 });
 
+test("a diagram-kind page renders its mermaid source to an SVG", async ({ page }) => {
+  // The corpus provisions diagram/loansvc-topology.mermaid, whose body is
+  // `graph TD\n  loansvc --> notification-svc ...`. Before the fix that body
+  // ran through the markdown renderer and collapsed into <p> prose, so
+  // mermaid.js found no .mermaid element. Now the diagram KIND emits a bare
+  // <pre class="mermaid"> the client turns into an <svg>. Default scheme.
+  await page.goto(`${dexBase}/a/diagram/loansvc-topology/`);
+  const diagram = page.locator("pre.mermaid");
+  await expect(diagram).toBeVisible();
+  // mermaid replaces the element's text with an <svg> asynchronously — poll.
+  await expect(diagram.locator("svg")).toBeVisible({ timeout: 10_000 });
+});
+
+test("a fenced mermaid block inside a markdown body renders to an SVG", async ({ page }) => {
+  // spec/mermaid-demo (provisioned into the e2e store) carries a fenced
+  // ```mermaid block in an ordinary markdown body — the inline-fence surface,
+  // distinct from the diagram KIND above. It must also render client-side.
+  await page.goto(`${dexBase}/a/spec/mermaid-demo/`);
+  const diagram = page.locator("pre.mermaid");
+  await expect(diagram).toBeVisible();
+  await expect(diagram.locator("svg")).toBeVisible({ timeout: 10_000 });
+});
+
 test("dex search returns a known hit", async ({ page }) => {
   await page.goto(`${dexBase}/search/`);
   await page.fill("#search-box", "outbox");

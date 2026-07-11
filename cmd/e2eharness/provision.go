@@ -42,6 +42,21 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return fmt.Errorf("copying svcfix service: %w", err)
 	}
 
+	// A component spec whose markdown body carries a fenced ```mermaid block.
+	// testdata/corpus already provisions a diagram-KIND artifact
+	// (diagrams/loansvc-topology.mermaid, copied whole above), so the e2e
+	// store exercises both mermaid surfaces: the diagram kind and an inline
+	// fence inside ordinary markdown. This one lives only in the throwaway
+	// scratch store (not testdata/corpus) so it perturbs no golden-SHA fixture
+	// the Go tests pin.
+	mermaidDemoDir := filepath.Join(storeRoot, ".verdi", "specs", "active", "mermaid-demo")
+	if err := os.MkdirAll(mermaidDemoDir, 0o755); err != nil {
+		return fmt.Errorf("creating mermaid-demo spec dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(mermaidDemoDir, "spec.md"), []byte(mermaidDemoSpec), 0o644); err != nil {
+		return fmt.Errorf("writing mermaid-demo spec: %w", err)
+	}
+
 	manifest := "schema: verdi.layout/v1\nforge: gitlab\nproviders:\n  jira:\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\nservices:\n  discovery: flowmap\n"
 	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", "verdi.yaml"), []byte(manifest), 0o644); err != nil {
 		return err
@@ -67,6 +82,26 @@ func provisionStore(moduleRoot, storeRoot string) error {
 
 	return nil
 }
+
+// mermaidDemoSpec is a minimal component spec whose markdown body carries a
+// fenced ```mermaid block — the e2e fixture for "an inline mermaid fence in
+// ordinary markdown still renders client-side" (the diagram KIND is covered
+// by the corpus's own loansvc-topology.mermaid).
+const mermaidDemoSpec = "---\n" +
+	"id: spec/mermaid-demo\n" +
+	"kind: spec\n" +
+	"class: component\n" +
+	"title: \"Mermaid demo (e2e fixture)\"\n" +
+	"status: active\n" +
+	"owners: [platform-team]\n" +
+	"---\n" +
+	"# Mermaid demo\n\n" +
+	"A fenced mermaid block inside a markdown body must still render:\n\n" +
+	"```mermaid\n" +
+	"graph TD\n" +
+	"  a --> b\n" +
+	"  b --> c\n" +
+	"```\n"
 
 func gitInitAndCommit(dir string) error {
 	env := append(os.Environ(),
