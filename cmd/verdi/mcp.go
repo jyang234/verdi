@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 
 	"github.com/OWNER/verdi/internal/mcpserve"
@@ -90,7 +91,13 @@ func proxyStdio(stdin io.Reader, stdout io.Writer, conn net.Conn) {
 // file (I-13/05 §MCP server: "or acquires the writer lock and serves
 // standalone when the workbench isn't up").
 func serveStandalone(root string, stdin io.Reader, stdout, stderr io.Writer) int {
-	lockPath := filepath.Join(root, ".verdi", "data", "writer.lock")
+	dataDir := filepath.Join(root, ".verdi", "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		fmt.Fprintln(stderr, "mcp:", err)
+		return 2
+	}
+
+	lockPath := filepath.Join(dataDir, "writer.lock")
 	lockFile, err := mcpserve.AcquireLock(lockPath)
 	if err != nil {
 		var held *mcpserve.ErrLockHeld

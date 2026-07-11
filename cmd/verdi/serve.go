@@ -48,7 +48,13 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	lockPath := filepath.Join(root, ".verdi", "data", "writer.lock")
+	dataDir := filepath.Join(root, ".verdi", "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		fmt.Fprintln(stderr, "serve:", err)
+		return 2
+	}
+
+	lockPath := filepath.Join(dataDir, "writer.lock")
 	lockFile, err := mcpserve.AcquireLock(lockPath)
 	if err != nil {
 		var held *mcpserve.ErrLockHeld
