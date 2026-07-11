@@ -851,6 +851,9 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   cursor: grab;
 }
 .objcard:active { cursor: grabbing; }
+/* layered paper: a touched card rises above an overlapping neighbour
+   (e.g. an anchored review sticky riding the card above it) */
+.objcard:hover, .sticky:hover { z-index: 8; }
 .objcard--acceptance-criterion { border-top-color: var(--st-evidenced); }
 .objcard--constraint { border-top-color: var(--st-violated); }
 .objcard--decision { border-top-color: var(--authored); }
