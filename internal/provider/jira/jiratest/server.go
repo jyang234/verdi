@@ -27,10 +27,10 @@ import (
 type issueState struct {
 	exists bool // false only for a key SeedNotFound pinned as missing
 
-	summary, status, self string
-	field                 *string // current machine-field value; nil = unset
-	comments              []string
-	commitsWritten        map[string]bool // every distinct commit ever PUT, for PublishRecordCount-style observability
+	summary, status string
+	field           *string // current machine-field value; nil = unset
+	comments        []string
+	commitsWritten  map[string]bool // every distinct commit ever PUT, for PublishRecordCount-style observability
 }
 
 // Server is the mock. Embedding *httptest.Server exposes URL and Client()
@@ -57,14 +57,23 @@ func NewServer(rollupField string) *Server {
 	return s
 }
 
-// SeedIssue makes key resolve with the given summary/status/self. self is
-// echoed back verbatim as the issue's "self" link — see the jira package's
-// Resolve doc comment for why the adapter reads Story.URL from there
-// rather than deriving it.
-func (s *Server) SeedIssue(key, summary, status, self string) {
+// SeedIssue makes key resolve with the given summary/status. The issue's
+// "self" link is not a parameter: this mock always serves a realistic,
+// machine-facing REST self URL (see selfFor) that no test can shape, so
+// test convenience can never masquerade as the human Story.URL — the
+// adapter derives Story.URL from its own BaseURL, never from "self".
+func (s *Server) SeedIssue(key, summary, status string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.issues[key] = &issueState{exists: true, summary: summary, status: status, self: self, commitsWritten: make(map[string]bool)}
+	s.issues[key] = &issueState{exists: true, summary: summary, status: status, commitsWritten: make(map[string]bool)}
+}
+
+// selfFor returns the machine-facing REST resource URL Jira Cloud puts in
+// an issue's "self" field: the /rest/api/3/issue/... endpoint, rooted at
+// this server's own base. It is deliberately not the human browse link, so
+// a client that (wrongly) mapped Story.URL from "self" would visibly fail.
+func (s *Server) selfFor(key string) string {
+	return s.Server.URL + "/rest/api/3/issue/" + key
 }
 
 // SeedNotFound pins key so every request touching it 404s, without a prior
@@ -202,7 +211,7 @@ func (s *Server) handleGetIssue(w http.ResponseWriter, key string, st *issueStat
 	}
 	resp := map[string]interface{}{
 		"key":  key,
-		"self": st.self,
+		"self": s.selfFor(key),
 		"fields": map[string]interface{}{
 			"summary":     st.summary,
 			"status":      map[string]string{"name": st.status},

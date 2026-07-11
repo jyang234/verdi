@@ -41,7 +41,11 @@ func (h *jiraHarness) SeedStory(t *testing.T, story provider.Story) {
 	if err != nil {
 		t.Fatalf("ParseStoryRef(%q): %v", story.Ref, err)
 	}
-	h.server.SeedIssue(key, story.Title, story.Status, story.URL)
+	// story.URL is intentionally not forwarded: the Jira adapter derives
+	// Story.URL as BaseURL+"/browse/"+key, never from any seeded/"self"
+	// value. The mock serves a realistic machine-facing REST self on its
+	// own.
+	h.server.SeedIssue(key, story.Title, story.Status)
 }
 
 func (h *jiraHarness) SeedNotFound(t *testing.T, ref provider.StoryRef) {

@@ -25,11 +25,13 @@ func newAdapter(t *testing.T, server *jiratest.Server, getenv func(string) strin
 
 // TestResolve_Mapping proves Resolve maps key/summary/status/URL exactly
 // as 04 §Jira adapter describes: "GET /rest/api/3/issue/{key} -> key,
-// summary, status, URL".
+// summary, status, URL". URL is the human browse link built from BaseURL,
+// not the response's machine-facing "self" REST URL — the mock serves a
+// realistic REST self that must NOT leak into Story.URL.
 func TestResolve_Mapping(t *testing.T) {
 	server := jiratest.NewServer(testRollupField)
 	t.Cleanup(server.Close)
-	server.SeedIssue("LOAN-1482", "Stale decline handling", "In Progress", "https://example.atlassian.net/rest/api/3/issue/10002")
+	server.SeedIssue("LOAN-1482", "Stale decline handling", "In Progress")
 
 	a := newAdapter(t, server, nil)
 	got, err := a.Resolve(context.Background(), provider.StoryRef("jira:LOAN-1482"))
@@ -40,10 +42,53 @@ func TestResolve_Mapping(t *testing.T) {
 		Ref:    "jira:LOAN-1482",
 		Title:  "Stale decline handling",
 		Status: "In Progress",
-		URL:    "https://example.atlassian.net/rest/api/3/issue/10002",
+		URL:    server.URL + "/browse/LOAN-1482",
 	}
 	if got != want {
 		t.Fatalf("Resolve = %+v, want %+v", got, want)
+	}
+}
+
+// TestResolve_URLIsBrowseLinkNotSelf pins the defect fix: even when the
+// GET response carries a machine-facing "self" REST URL, Story.URL is the
+// human browse link derived from BaseURL, never the "self" value.
+func TestResolve_URLIsBrowseLinkNotSelf(t *testing.T) {
+	server := jiratest.NewServer(testRollupField)
+	t.Cleanup(server.Close)
+	server.SeedIssue("LOAN-1482", "Stale decline handling", "In Progress")
+
+	a := newAdapter(t, server, nil)
+	got, err := a.Resolve(context.Background(), provider.StoryRef("jira:LOAN-1482"))
+	if err != nil {
+		t.Fatalf("Resolve error = %v, want nil", err)
+	}
+	if strings.Contains(got.URL, "/rest/api/") {
+		t.Fatalf("Story.URL = %q, want the human /browse/ link, not the machine-facing REST self URL", got.URL)
+	}
+	if want := server.URL + "/browse/LOAN-1482"; got.URL != want {
+		t.Fatalf("Story.URL = %q, want %q", got.URL, want)
+	}
+}
+
+// TestResolve_TrailingSlashBaseURL proves a BaseURL with a trailing slash
+// does not double the slash in the constructed browse URL (New trims it).
+func TestResolve_TrailingSlashBaseURL(t *testing.T) {
+	server := jiratest.NewServer(testRollupField)
+	t.Cleanup(server.Close)
+	server.SeedIssue("LOAN-7", "Trailing slash", "Done")
+
+	a := jira.New(jira.Config{
+		BaseURL:     server.URL + "/",
+		RollupField: testRollupField,
+		Token:       "test-token",
+		HTTPClient:  server.Client(),
+	})
+	got, err := a.Resolve(context.Background(), provider.StoryRef("jira:LOAN-7"))
+	if err != nil {
+		t.Fatalf("Resolve error = %v, want nil", err)
+	}
+	if want := server.URL + "/browse/LOAN-7"; got.URL != want {
+		t.Fatalf("Story.URL = %q, want %q (no doubled slash)", got.URL, want)
 	}
 }
 
