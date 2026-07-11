@@ -5,7 +5,6 @@ class: feature
 title: "Accepted pending build (v2 fixture)"
 status: accepted-pending-build
 owners: [platform-team]
-story: okr:LOAN-Q3
 problem: { text: "borrowers cannot self-serve an update to a submitted application", anchor: "#problem" }
 outcome: { text: "a borrower can update their application and see the change reflected", anchor: "#outcome" }
 impacts: [loansvc, notification-svc]
@@ -24,6 +23,8 @@ decisions:
   - { id: dc-1, text: "excuse this feature from ADR-0001's synchronous-write rule", anchor: "#dc-1",
       links: [ { type: exempts, ref: adr/0001-outbox-events, note: "outbox pattern already async by design" } ] }
   - { id: dc-2, text: "use the outbox pattern for update events", anchor: "#dc-2" }
+open_questions:
+  - { id: oq-1, text: "should the mobile app use PUT or PATCH for the update route?", anchor: "#oq-1" }
 stubs:
   - { slug: borrower-update-api, acceptance_criteria: [ac-1] }
   - { slug: borrower-update-ui, acceptance_criteria: [ac-1, ac-2] }
@@ -77,3 +78,9 @@ pattern is already asynchronous by design, so the rule does not bind here.
 ## DC-2
 
 Use the outbox pattern for update events.
+
+## OQ-1
+
+Should the mobile app use PUT or PATCH for the update route? Spiked by
+`spec/borrower-update-mobile-spike`'s `resolves` edge (R4-I-16, 02 §Object
+model).
