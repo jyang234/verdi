@@ -33,12 +33,13 @@ var verbPhase = map[string]int{
 	"gc":              0,  // out of v0 (PLAN.md §5)
 	"gate":            8,  // I-7, not in 05 §CLI's table
 	"board":           10, // I-20, not in 05 §CLI's table (like "gate")
+	"audit":           13, // R4-I-10, V1-P5 — beyond v0's numbered phases; a real, implemented verb, never "out of scope" (phase 0)
 }
 
 const usage = `usage: verdi <verb> [args...]
 
 verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
-       rollup, close, waivers, verify-artifact, dex, gc, gate, board`
+       rollup, close, waivers, verify-artifact, dex, gc, gate, board, audit`
 
 // run parses args and returns the exit code per the CLAUDE.md contract:
 // 0 clean / 1 verdict failure / 2 operational error. Phase 1 has no verdicts
@@ -99,6 +100,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if verb == "board" {
 		return runBoardVerb(args[1:], os.Stdout, stderr)
+	}
+	if verb == "audit" {
+		return cmdAudit(args[1:], os.Stdout, stderr)
 	}
 
 	if phase == 0 {

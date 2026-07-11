@@ -28,12 +28,32 @@ import (
 // are excluded from the hash on purpose: they are exactly the state being
 // preserved, not part of what identifies the finding.
 func Identity(f artifact.Finding) string {
+	return identityOf(string(f.Kind), f.ID, f.Text)
+}
+
+// ConflictIdentity is Identity's decision-conflict-report analogue (03
+// §Decision-conflict gate: "the same finding-identity rule" as the
+// build-branch report — see Identity's own doc comment for why (kind, id,
+// text) rather than id alone): the stable content identity
+// PreserveConflictDispositions uses to decide whether a regenerated
+// artifact.ConflictFinding is "the same finding" as one in a prior report,
+// eligible to inherit its disposition (and, downstream, its computed
+// CODEOWNERS routing — decision_judge.go).
+func ConflictIdentity(f artifact.ConflictFinding) string {
+	return identityOf(string(f.Kind), f.ID, f.Text)
+}
+
+// identityOf is the shared content-hash formula both Identity and
+// ConflictIdentity apply over (kind, id, text) — the one hash rule this
+// package uses for every finding shape it produces (CLAUDE.md: don't
+// invent a second one).
+func identityOf(kind, id, text string) string {
 	h := sha256.New()
-	h.Write([]byte(f.Kind))
+	h.Write([]byte(kind))
 	h.Write([]byte{0})
-	h.Write([]byte(f.ID))
+	h.Write([]byte(id))
 	h.Write([]byte{0})
-	h.Write([]byte(f.Text))
+	h.Write([]byte(text))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -52,6 +72,27 @@ func PreserveDispositions(newFindings, existing []artifact.Finding) []artifact.F
 	out := make([]artifact.Finding, len(newFindings))
 	for i, f := range newFindings {
 		if prior, ok := byIdentity[Identity(f)]; ok {
+			f.Disposition = prior.Disposition
+			f.Note = prior.Note
+		}
+		out[i] = f
+	}
+	return out
+}
+
+// PreserveConflictDispositions is PreserveDispositions' decision-conflict-
+// report analogue, matching by ConflictIdentity instead of Identity —
+// otherwise byte-identical logic (03 §Decision-conflict gate: "the same
+// ... finding-identity rule" as the build-branch report).
+func PreserveConflictDispositions(newFindings, existing []artifact.ConflictFinding) []artifact.ConflictFinding {
+	byIdentity := make(map[string]artifact.ConflictFinding, len(existing))
+	for _, f := range existing {
+		byIdentity[ConflictIdentity(f)] = f
+	}
+
+	out := make([]artifact.ConflictFinding, len(newFindings))
+	for i, f := range newFindings {
+		if prior, ok := byIdentity[ConflictIdentity(f)]; ok {
 			f.Disposition = prior.Disposition
 			f.Note = prior.Note
 		}

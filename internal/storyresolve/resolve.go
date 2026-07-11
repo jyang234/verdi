@@ -149,6 +149,36 @@ func ResolveBuildSpec(root, branch string) (*artifact.SpecFrontmatter, error) {
 	return spec, nil
 }
 
+// designBranchPrefix is `verdi design start`'s branch-naming convention
+// (cmd/verdi/design.go: `branch := "design/" + name`) — the convention
+// ResolveDesignSpec inverts, mirroring ResolveBuildSpec's own pattern for
+// build branches.
+const designBranchPrefix = "design/"
+
+// ResolveDesignSpec infers the spec a design branch is for, given only the
+// currently checked-out branch's short name — the resolution `verdi
+// align`'s design-branch mode (03 §Decision-conflict gate) uses. branch
+// must have the "design/<name>" shape `design start` cuts. Unlike
+// ResolveBuildSpec (feature class only), a design branch legally carries
+// either class `verdi design start --kind` scaffolds (05 §CLI: "--kind
+// selects the two-scope spec class"): feature or story. Only a component
+// spec (no decisions block usage envisioned by 03's three-tier model, and
+// no story to build) is rejected.
+func ResolveDesignSpec(root, branch string) (*artifact.SpecFrontmatter, error) {
+	name, ok := strings.CutPrefix(branch, designBranchPrefix)
+	if !ok || name == "" {
+		return nil, fmt.Errorf("storyresolve: current branch %q is not a design branch (want design/<name>, cut by `verdi design start`)", branch)
+	}
+	spec, err := LoadActiveSpec(root, name)
+	if err != nil {
+		return nil, err
+	}
+	if spec.Class != artifact.ClassFeature && spec.Class != artifact.ClassStory {
+		return nil, fmt.Errorf("storyresolve: design branch %q resolves to %s, a component spec (03 §Decision-conflict gate applies to feature/story specs only)", branch, spec.ID)
+	}
+	return spec, nil
+}
+
 // LoadActiveSpec reads and strict-decodes specs/active/<name>/spec.md.
 func LoadActiveSpec(root, name string) (*artifact.SpecFrontmatter, error) {
 	path := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")

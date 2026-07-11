@@ -150,59 +150,17 @@ type JudgeSuccess struct {
 // failure mode here is disclosed content for the synthetic absence finding,
 // not an operational error align propagates.
 func runJudgeOnce(ctx context.Context, runner JudgeRunner, argv []string, timeout time.Duration, prompt []byte) (*JudgeSuccess, *JudgeFailure) {
-	if timeout <= 0 {
-		timeout = DefaultJudgeTimeout
-	}
-	cmdTemplate := strings.Join(argv, " ")
-
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	res, err := runner.RunJudge(runCtx, argv, prompt)
+	rawResult, err := execJudgeEnvelope(ctx, runner, argv, timeout, prompt)
 	if err != nil {
-		if errors.Is(err, ErrJudgeTimeout) {
-			return nil, &JudgeFailure{Stage: StageTimeout, CmdTemplate: cmdTemplate, Detail: fmt.Sprintf("no result within %s", timeout)}
-		}
-		return nil, &JudgeFailure{Stage: StageExec, CmdTemplate: cmdTemplate, Detail: err.Error()}
-	}
-	if res.ExitCode != 0 {
-		return nil, &JudgeFailure{
-			Stage:         StageExit,
-			ExitCode:      res.ExitCode,
-			StderrSnippet: snippet(res.Stderr),
-			CmdTemplate:   cmdTemplate,
-			Detail:        fmt.Sprintf("judge command exited %d", res.ExitCode),
-		}
+		return nil, err
 	}
 
-	var outer judgeOuterEnvelope
-	if err := json.Unmarshal(res.Stdout, &outer); err != nil {
+	inner, decErr := decodeInnerResult(rawResult)
+	if decErr != nil {
 		return nil, &JudgeFailure{
-			Stage:         StageOuterParse,
-			ExitCode:      res.ExitCode,
-			StderrSnippet: snippet(res.Stderr),
-			CmdTemplate:   cmdTemplate,
-			Detail:        fmt.Sprintf("decoding outer envelope: %v", err),
-		}
-	}
-	if outer.IsError {
-		return nil, &JudgeFailure{
-			Stage:         StageOuterParse,
-			ExitCode:      res.ExitCode,
-			StderrSnippet: snippet(res.Stderr),
-			CmdTemplate:   cmdTemplate,
-			Detail:        fmt.Sprintf("judge reported is_error=true (subtype %q)", outer.Subtype),
-		}
-	}
-
-	inner, err := decodeInnerResult(outer.Result)
-	if err != nil {
-		return nil, &JudgeFailure{
-			Stage:         StageInnerParse,
-			ExitCode:      res.ExitCode,
-			StderrSnippet: snippet(res.Stderr),
-			CmdTemplate:   cmdTemplate,
-			Detail:        fmt.Sprintf("decoding inner findings JSON: %v", err),
+			Stage:       StageInnerParse,
+			CmdTemplate: strings.Join(argv, " "),
+			Detail:      fmt.Sprintf("decoding inner findings JSON: %v", decErr),
 		}
 	}
 
@@ -214,7 +172,71 @@ func runJudgeOnce(ctx context.Context, runner JudgeRunner, argv []string, timeou
 			Text: fmt.Sprintf("%s (confidence %.2f)", jf.Text, jf.Confidence),
 		})
 	}
-	return &JudgeSuccess{Findings: findings, Stdin: prompt, RawResult: outer.Result}, nil
+	return &JudgeSuccess{Findings: findings, Stdin: prompt, RawResult: rawResult}, nil
+}
+
+// execJudgeEnvelope execs argv once with prompt on stdin and runs S5's
+// exec/timeout/exit/outer-envelope stages only (StageExec, StageTimeout,
+// StageExit, StageOuterParse) — the layer shared by every judge-consuming
+// mode this package has (build-branch deviation findings, decision_judge.go's
+// design-branch sweep): a foreign command is spawned, timed out, and its
+// `claude -p --output-format json`-shaped outer envelope decoded the same
+// way regardless of what the judge was ASKED to produce. S5's final stage,
+// inner-JSON parsing, is mode-specific (a different findings shape per
+// mode) and is deliberately left to each caller — see runJudgeOnce and
+// decision_judge.go's own inner-parse callers.
+//
+// A *JudgeFailure's ExitCode/StderrSnippet are populated whenever a
+// response (even a non-zero exit) was actually received; the CmdTemplate on
+// a StageOuterParse failure is filled in by the caller since this function
+// does not itself retain argv past the exec call — callers that need it in
+// the returned failure re-join argv themselves (both current callers do).
+func execJudgeEnvelope(ctx context.Context, runner JudgeRunner, argv []string, timeout time.Duration, prompt []byte) (string, *JudgeFailure) {
+	if timeout <= 0 {
+		timeout = DefaultJudgeTimeout
+	}
+	cmdTemplate := strings.Join(argv, " ")
+
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	res, err := runner.RunJudge(runCtx, argv, prompt)
+	if err != nil {
+		if errors.Is(err, ErrJudgeTimeout) {
+			return "", &JudgeFailure{Stage: StageTimeout, CmdTemplate: cmdTemplate, Detail: fmt.Sprintf("no result within %s", timeout)}
+		}
+		return "", &JudgeFailure{Stage: StageExec, CmdTemplate: cmdTemplate, Detail: err.Error()}
+	}
+	if res.ExitCode != 0 {
+		return "", &JudgeFailure{
+			Stage:         StageExit,
+			ExitCode:      res.ExitCode,
+			StderrSnippet: snippet(res.Stderr),
+			CmdTemplate:   cmdTemplate,
+			Detail:        fmt.Sprintf("judge command exited %d", res.ExitCode),
+		}
+	}
+
+	var outer judgeOuterEnvelope
+	if err := json.Unmarshal(res.Stdout, &outer); err != nil {
+		return "", &JudgeFailure{
+			Stage:         StageOuterParse,
+			ExitCode:      res.ExitCode,
+			StderrSnippet: snippet(res.Stderr),
+			CmdTemplate:   cmdTemplate,
+			Detail:        fmt.Sprintf("decoding outer envelope: %v", err),
+		}
+	}
+	if outer.IsError {
+		return "", &JudgeFailure{
+			Stage:         StageOuterParse,
+			ExitCode:      res.ExitCode,
+			StderrSnippet: snippet(res.Stderr),
+			CmdTemplate:   cmdTemplate,
+			Detail:        fmt.Sprintf("judge reported is_error=true (subtype %q)", outer.Subtype),
+		}
+	}
+	return outer.Result, nil
 }
 
 // decodeInnerResult trims whitespace and strips a defensive markdown code
