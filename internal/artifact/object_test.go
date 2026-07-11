@@ -73,6 +73,27 @@ func TestDecision_Validate_Negative(t *testing.T) {
 	}
 }
 
+func TestOpenQuestion_Validate_Happy(t *testing.T) {
+	q := OpenQuestion{ID: "oq-1", Text: "should this route be PUT or PATCH?", Anchor: "#oq-1"}
+	if err := q.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestOpenQuestion_Validate_Negative(t *testing.T) {
+	cases := []OpenQuestion{
+		{ID: "bad-id", Text: "t", Anchor: "#a"},
+		{ID: "oq-1", Text: "", Anchor: "#a"},
+		{ID: "oq-1", Text: "t", Anchor: ""},
+		{ID: "co-1", Text: "t", Anchor: "#a"}, // wrong prefix
+	}
+	for i, q := range cases {
+		if err := q.Validate(); err == nil {
+			t.Fatalf("case %d Validate(%+v): want error, got nil", i, q)
+		}
+	}
+}
+
 func TestStub_Validate_Happy(t *testing.T) {
 	s := Stub{Slug: "borrower-update-api", AcceptanceCriteria: []string{"ac-1"}}
 	if err := s.Validate(); err != nil {

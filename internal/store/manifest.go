@@ -60,6 +60,39 @@ type ToolchainConfig struct {
 	Commit string `yaml:"commit"`
 }
 
+// AuditConfig is verdi.yaml's `audit:` block (R4-I-10, 01 §Store manifest):
+// the exemption/deviation counterweight thresholds (spec-realignment
+// concept §2, §3b). Both fields are tunable, both documented as
+// spec-realignment concept OQ-iii watch items, and 01 documents both as
+// defaulting to 3 — "the smallest reversible starting point, not a value
+// derived from data." This package only decodes and shape-checks the raw
+// values; applying the documented default of 3 when the block (or a field
+// within it) is absent, and disambiguating an absent field from an
+// explicit 0, is left to the first consuming phase (V1-P3's spec-stale
+// computation for DeviationsStaleThreshold, V1-P5's exemption audit for
+// ExemptsConflictThreshold per R4-I-10's phase assignment) — this phase's
+// job is only to grow the manifest schema, not to invent the
+// zero-vs-absent-vs-configured default-application rule 01 does not spell
+// out mechanically. Flagged in the phase report as a candidate follow-up
+// for 01 §Store manifest to state explicitly.
+type AuditConfig struct {
+	ExemptsConflictThreshold int `yaml:"exempts_conflict_threshold"`
+	DeviationsStaleThreshold int `yaml:"deviations_stale_threshold"`
+}
+
+// Validate checks both thresholds are non-negative (a negative count can
+// never be reached, which would make the counterweight permanently inert —
+// silently accepting one would hide a manifest typo).
+func (a AuditConfig) Validate() error {
+	if a.ExemptsConflictThreshold < 0 {
+		return fmt.Errorf("store: verdi.yaml audit.exempts_conflict_threshold %d must not be negative", a.ExemptsConflictThreshold)
+	}
+	if a.DeviationsStaleThreshold < 0 {
+		return fmt.Errorf("store: verdi.yaml audit.deviations_stale_threshold %d must not be negative", a.DeviationsStaleThreshold)
+	}
+	return nil
+}
+
 // Manifest is the store manifest, `verdi.yaml`, schema verdi.layout/v1
 // (01 §Store manifest). Decode is strict: unknown top-level keys fail.
 type Manifest struct {
@@ -68,9 +101,17 @@ type Manifest struct {
 	Providers *ProvidersConfig `yaml:"providers,omitempty"`
 	Lint      *LintConfig      `yaml:"lint,omitempty"`
 	Align     *AlignConfig     `yaml:"align,omitempty"`
-	Derived   *DerivedConfig   `yaml:"derived,omitempty"`
-	Services  *ServicesConfig  `yaml:"services,omitempty"`
-	Toolchain *ToolchainConfig `yaml:"toolchain,omitempty"`
+	Audit     *AuditConfig     `yaml:"audit,omitempty"`
+	// SpikePaths is the VL-016 path-glob fence a spike build branch's diff
+	// must stay inside (01 §Store manifest, R4-I-10). Fails closed: an
+	// absent or empty list admits no spike diffs at all — a repo must
+	// explicitly declare its spike workspace and doc paths before any spike
+	// diff is accepted (01: "mirroring lint.gated_generated's empty-by-
+	// default posture").
+	SpikePaths []string         `yaml:"spike_paths,omitempty"`
+	Derived    *DerivedConfig   `yaml:"derived,omitempty"`
+	Services   *ServicesConfig  `yaml:"services,omitempty"`
+	Toolchain  *ToolchainConfig `yaml:"toolchain,omitempty"`
 }
 
 var validForges = map[string]bool{"": true, "gitlab": true, "github": true}
@@ -116,6 +157,11 @@ func (m Manifest) Validate() error {
 	}
 	if !validForges[m.Forge] {
 		return fmt.Errorf("store: verdi.yaml forge %q is not gitlab, github, or empty (auto-detect)", m.Forge)
+	}
+	if m.Audit != nil {
+		if err := m.Audit.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

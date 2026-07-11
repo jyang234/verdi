@@ -94,6 +94,38 @@ func (d Decision) Validate() error {
 	return nil
 }
 
+// OpenQuestion is one entry in a feature or story spec's `open_questions:`
+// block (02 §Object model; R4-I-16, added at ratification round four's
+// phase review). Open questions carry no `links:` of their own: they are
+// the *targets* of `resolves` edges (a spike's deliverable is answering
+// them) and the graduation destination of the board's carried
+// open-question stickies (VL-017) — a resolved open question graduates
+// into a real object or prose by an ordinary edit, and the entry is
+// removed in the same edit. Follows Constraint's exact pattern: a wholly
+// round-four block with no v0 usage, so, like Constraint and Decision (and
+// unlike AcceptanceCriterion), Anchor is required unconditionally rather
+// than left decode-optional.
+type OpenQuestion struct {
+	ID     string `yaml:"id"`
+	Text   string `yaml:"text"`
+	Anchor string `yaml:"anchor"`
+}
+
+// Validate checks ID looks like an open-question id (oq-<slug>), and Text
+// and Anchor are both present.
+func (q OpenQuestion) Validate() error {
+	if !strings.HasPrefix(q.ID, "oq-") || !objectIDRe.MatchString(q.ID) {
+		return fmt.Errorf("artifact: open question id %q must look like oq-<slug>", q.ID)
+	}
+	if q.Text == "" {
+		return fmt.Errorf("artifact: open question %s has no text", q.ID)
+	}
+	if q.Anchor == "" {
+		return fmt.Errorf("artifact: open question %s has no anchor (02 §Object model)", q.ID)
+	}
+	return nil
+}
+
 // Stub is one entry in a feature spec's acceptance-time `stubs:` scoping
 // record (02 §Kind registry: "the acceptance-time scoping record, one entry
 // per intended story"): `{ slug: <title-slug>, acceptance_criteria:
@@ -150,6 +182,7 @@ const (
 	ObjectKindAcceptanceCriterion ObjectKind = "acceptance_criteria"
 	ObjectKindConstraint          ObjectKind = "constraints"
 	ObjectKindDecision            ObjectKind = "decisions"
+	ObjectKindOpenQuestion        ObjectKind = "open_questions"
 )
 
 // HeadingAnchors extracts every ATX ("# ", "## ", ...) heading in body and
@@ -256,6 +289,11 @@ func (fm SpecFrontmatter) ResolveObjectAnchors(body []byte) error {
 	}
 	for _, d := range fm.Decisions {
 		if err := check(fmt.Sprintf("decision %s", d.ID), d.Anchor); err != nil {
+			return err
+		}
+	}
+	for _, q := range fm.OpenQuestions {
+		if err := check(fmt.Sprintf("open question %s", q.ID), q.Anchor); err != nil {
 			return err
 		}
 	}

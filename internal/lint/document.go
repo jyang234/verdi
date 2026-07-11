@@ -9,7 +9,8 @@ import "github.com/OWNER/verdi/internal/artifact"
 // regardless of whether it decodes.
 type Document struct {
 	// Kind is the artifact kind implied by the file's location: "spec",
-	// "adr", "diagram", "attestation", "waiver", or "conflict".
+	// "adr", "diagram", "attestation", "waiver", "conflict", or
+	// "reaffirmation" (R4-I-4).
 	Kind string
 	// Path is the file's absolute filesystem path.
 	Path string
@@ -43,10 +44,11 @@ type Document struct {
 	// Exactly one of the following is non-nil, matching Kind, whenever
 	// DecodeErr == nil — the raw decoded struct, for rules that need
 	// kind-specific fields (e.g. VL-005/006/014 need Spec).
-	Spec        *artifact.SpecFrontmatter
-	ADR         *artifact.ADRFrontmatter
-	Diagram     *artifact.DiagramFrontmatter
-	Attestation *artifact.AttestationFrontmatter
-	Waiver      *artifact.WaiverFrontmatter
-	Conflict    *artifact.ConflictFrontmatter
+	Spec          *artifact.SpecFrontmatter
+	ADR           *artifact.ADRFrontmatter
+	Diagram       *artifact.DiagramFrontmatter
+	Attestation   *artifact.AttestationFrontmatter
+	Waiver        *artifact.WaiverFrontmatter
+	Conflict      *artifact.ConflictFrontmatter
+	Reaffirmation *artifact.ReaffirmationFrontmatter
 }

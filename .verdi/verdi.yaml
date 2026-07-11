@@ -9,6 +9,10 @@ lint:
 align:                         # evidence-model spec owns semantics
   judge_cmd: [claude, -p, --output-format, json]  # argv array (Phase 8 S5, flagged: 01 shows a string)
   judge_required: false        # true: `verdi align` fails outright without a judge
+audit:                         # R4-I-10; exemption/deviation counterweights
+  exempts_conflict_threshold: 3
+  deviations_stale_threshold: 3
+spike_paths: []                # VL-016 fence; this repo declares no spike workspace yet (fails closed)
 derived:
   retention_days: 14           # gc horizon for merged/deleted refs
 services:

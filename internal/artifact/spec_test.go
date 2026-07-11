@@ -1,6 +1,9 @@
 package artifact
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const componentSpecActiveYAML = `
 id: spec/verdi-store-layout
@@ -118,6 +121,79 @@ func TestDecodeSpec_Negative(t *testing.T) {
 				t.Fatalf("DecodeSpec(%s): want error, got nil", name)
 			}
 		})
+	}
+}
+
+// --- open_questions (R4-I-16, 02 §Object model, §Common frontmatter) ---
+
+const featureSpecOpenQuestionsYAML = `
+id: spec/open-question-feature
+kind: spec
+class: feature
+title: "Feature with an open question"
+status: draft
+owners: [platform-team]
+story: jira:LOAN-9999
+acceptance_criteria:
+  - { id: ac-1, text: "does the thing", evidence: [static], anchor: "#ac-1" }
+open_questions:
+  - { id: oq-1, text: "should this route be PUT or PATCH?", anchor: "#oq-1" }
+`
+
+// TestDecodeSpec_OpenQuestions_Happy is the "open_questions decode support"
+// exit criterion's happy path: the block decodes, and its anchor resolves
+// against a real body heading like any other object (02 §Object model).
+func TestDecodeSpec_OpenQuestions_Happy(t *testing.T) {
+	fm, err := DecodeSpec([]byte(featureSpecOpenQuestionsYAML))
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v", err)
+	}
+	if len(fm.OpenQuestions) != 1 || fm.OpenQuestions[0].ID != "oq-1" {
+		t.Fatalf("OpenQuestions = %+v, want one entry oq-1", fm.OpenQuestions)
+	}
+	body := []byte("# Feature with an open question\n\n## AC-1\n\n## OQ-1\n")
+	if err := fm.ResolveObjectAnchors(body); err != nil {
+		t.Fatalf("ResolveObjectAnchors: %v", err)
+	}
+}
+
+// TestDecodeSpec_OpenQuestions_Negative covers: bad id prefix, missing
+// text, missing anchor, an unknown field inside an entry (strict decode),
+// and a duplicate id — mirroring Constraint/Decision's own negative table.
+func TestDecodeSpec_OpenQuestions_Negative(t *testing.T) {
+	base := "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: draft\nowners: [x]\nstory: jira:LOAN-1\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\n"
+	cases := map[string]string{
+		"bad id prefix":      base + "open_questions:\n  - { id: co-1, text: t, anchor: \"#a\" }\n",
+		"missing text":       base + "open_questions:\n  - { id: oq-1, text: \"\", anchor: \"#a\" }\n",
+		"missing anchor":     base + "open_questions:\n  - { id: oq-1, text: t, anchor: \"\" }\n",
+		"unknown field":      base + "open_questions:\n  - { id: oq-1, text: t, anchor: \"#a\", bogus_extra: 1 }\n",
+		"duplicate id":       base + "open_questions:\n  - { id: oq-1, text: t, anchor: \"#a\" }\n  - { id: oq-1, text: t2, anchor: \"#b\" }\n",
+		"links: not allowed": base + "open_questions:\n  - { id: oq-1, text: t, anchor: \"#a\", links: [ { type: exempts, ref: adr/0001-foo } ] }\n",
+	}
+	for name, y := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeSpec([]byte(y)); err == nil {
+				t.Fatalf("DecodeSpec(%s): want error, got nil", name)
+			}
+		})
+	}
+}
+
+// TestDecodeSpec_OpenQuestions_DanglingAnchorFails is the "dangling-anchor
+// negative" exit criterion: a well-formed open_questions entry whose anchor
+// names a heading that does not exist in the document body.
+func TestDecodeSpec_OpenQuestions_DanglingAnchorFails(t *testing.T) {
+	fm, err := DecodeSpec([]byte(featureSpecOpenQuestionsYAML))
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v", err)
+	}
+	body := []byte("# Feature with an open question\n\n## AC-1\n") // no "## OQ-1" heading
+	err = fm.ResolveObjectAnchors(body)
+	if err == nil {
+		t.Fatal("ResolveObjectAnchors: want error for dangling open-question anchor, got nil")
+	}
+	if !strings.Contains(err.Error(), "anchor") || !strings.Contains(err.Error(), "oq-1") {
+		t.Fatalf("ResolveObjectAnchors error = %q, want it to name the anchor rule and oq-1", err)
 	}
 }
 

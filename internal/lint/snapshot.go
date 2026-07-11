@@ -24,6 +24,21 @@ type Board struct {
 	DecodeErr error
 }
 
+// Layout is a committed layout.json sidecar found under a spec directory
+// (01 §Directory layout, 02 §Record schemas "Board layout"), alongside its
+// decode outcome — VL-018 needs both the successfully-decoded layout (to
+// resolve its positions keys against the sibling spec's declared objects)
+// and a clean signal when decode itself failed.
+type Layout struct {
+	// SpecDir is the RelPath of the spec directory this layout.json sits in
+	// (e.g. ".verdi/specs/active/accepted-pending-build").
+	SpecDir string
+	// RelPath is layout.json's own store-relative path.
+	RelPath   string
+	Layout    *artifact.BoardLayout
+	DecodeErr error
+}
+
 // Snapshot is everything the fourteen rules read: every committed-zone
 // document (decoded or not), every committed board.json, the repo-root
 // .gitattributes, the store manifest, and discovered services. Building a
@@ -37,6 +52,7 @@ type Snapshot struct {
 	Docs            []*Document
 	TopLevelEntries []string
 	Boards          []*Board
+	Layouts         []*Layout
 
 	// ByRef indexes decoded documents (DecodeErr == nil, id parses) by
 	// their frontmatter id — VL-002's global-uniqueness check.
@@ -65,6 +81,10 @@ func BuildSnapshot(root string, opts Options) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	layouts, err := walkLayouts(root)
+	if err != nil {
+		return nil, err
+	}
 	services, err := store.DiscoverServices(root)
 	if err != nil {
 		return nil, fmt.Errorf("lint: discovering services: %w", err)
@@ -75,6 +95,7 @@ func BuildSnapshot(root string, opts Options) (*Snapshot, error) {
 		Docs:            docs,
 		TopLevelEntries: tops,
 		Boards:          boards,
+		Layouts:         layouts,
 		ByRef:           make(map[string][]*Document),
 		Services:        services,
 	}
@@ -144,6 +165,44 @@ func walkBoards(root string) ([]*Board, error) {
 		}
 	}
 	return boards, nil
+}
+
+// walkLayouts finds every specs/*/*/layout.json (both active and archive)
+// and tolerantly decodes each.
+func walkLayouts(root string) ([]*Layout, error) {
+	var layouts []*Layout
+	for _, statusDir := range []string{"active", "archive"} {
+		base := filepath.Join(root, ".verdi", "specs", statusDir)
+		entries, err := os.ReadDir(base)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("lint: reading %s: %w", base, err)
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			layoutPath := filepath.Join(base, e.Name(), "layout.json")
+			data, err := os.ReadFile(layoutPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return nil, fmt.Errorf("lint: reading %s: %w", layoutPath, err)
+			}
+			specDir := fmt.Sprintf(".verdi/specs/%s/%s", statusDir, e.Name())
+			l := &Layout{SpecDir: specDir, RelPath: specDir + "/layout.json"}
+			if lv, err := artifact.DecodeBoardLayout(data); err != nil {
+				l.DecodeErr = err
+			} else {
+				l.Layout = lv
+			}
+			layouts = append(layouts, l)
+		}
+	}
+	return layouts, nil
 }
 
 // specDirOf returns a spec Document's containing directory, store-relative
