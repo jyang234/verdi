@@ -73,6 +73,17 @@ func RunJudged(ctx context.Context, runner JudgeRunner, in JudgedInput) (*Judged
 	}, nil
 }
 
+// ErrJudgeRequiredAbsent is RunJudged's (and Generate's) error when
+// align.judge_required is true and no judge produced a judged section.
+// cmd/verdi/align.go type-switches on it (errors.As) to choose exit 1
+// ("judge-required-and-absent", PLAN.md Phase 8's exit criteria) rather
+// than exit 2's generic operational failure.
+type ErrJudgeRequiredAbsent struct{ Failure *JudgeFailure }
+
+func (e *ErrJudgeRequiredAbsent) Error() string {
+	return fmt.Sprintf("align: align.judge_required is true but no judge produced a judged section (stage=%s: %s)", e.Failure.Stage, e.Failure.Detail)
+}
+
 // absentResult applies I-9's judge_required gate: required=true fails
 // align outright (a non-nil error); required=false (v0's default) degrades
 // to the synthetic absence finding, which — like any finding — must be
@@ -81,7 +92,7 @@ func RunJudged(ctx context.Context, runner JudgeRunner, in JudgedInput) (*Judged
 // countable in audit").
 func absentResult(required bool, failure *JudgeFailure) (*JudgedResult, error) {
 	if required {
-		return nil, fmt.Errorf("align: align.judge_required is true but no judge produced a judged section (stage=%s: %s)", failure.Stage, failure.Detail)
+		return nil, &ErrJudgeRequiredAbsent{Failure: failure}
 	}
 	return &JudgedResult{Findings: []artifact.Finding{absenceFinding(failure)}}, nil
 }
