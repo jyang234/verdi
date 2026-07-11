@@ -6,6 +6,31 @@ import { defineConfig, devices } from "@playwright/test";
 // the whole run), and several tests write real state to it (autosave,
 // commit-to-design) — parallel workers would race on the same board file
 // and git repository.
+
+// The v1-acceptance project holds EXECUTABLE ACCEPTANCE CRITERIA for UI
+// that does not exist yet (V1-P6 board v2, V1-P8 dex v2 — PLAN-V1.md §5;
+// contract: e2e/tests-v1/README.md). Those specs fail by design until
+// their phase lands, so the project materializes ONLY when explicitly
+// requested — `--project v1-acceptance` (or V1_ACCEPTANCE=1). A bare
+// `npx playwright test` / `make e2e` / CI run never defines it, so the
+// default suite's test count and green-ness are untouched. Flip-in
+// protocol (a spec moves tests-v1/ → tests/ in the same commit that makes
+// it pass): tests-v1/README.md.
+const v1AcceptanceRequested =
+  process.env.V1_ACCEPTANCE === "1" ||
+  process.argv.some(
+    (arg, i, argv) =>
+      arg === "--project=v1-acceptance" ||
+      (arg === "--project" && argv[i + 1] === "v1-acceptance"),
+  );
+// Worker processes re-evaluate this config without the runner's argv; pin
+// the detection into the env (inherited by workers) so the project exists
+// there too — otherwise every run dies with "Project not found in the
+// worker process".
+if (v1AcceptanceRequested) {
+  process.env.V1_ACCEPTANCE = "1";
+}
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
@@ -49,7 +74,21 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      testDir: "./tests",
       use: { ...devices["Desktop Chrome"] },
     },
+    // Opt-in only (see v1AcceptanceRequested above). Shares the webServer
+    // harness so the acceptance specs can run against it on demand; they
+    // are EXPECTED to fail until V1-P6/V1-P8 land and flip them into
+    // ./tests. Serial like the default project: they mutate one store.
+    ...(v1AcceptanceRequested
+      ? [
+          {
+            name: "v1-acceptance",
+            testDir: "./tests-v1",
+            use: { ...devices["Desktop Chrome"] },
+          },
+        ]
+      : []),
   ],
 });
