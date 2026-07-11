@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
@@ -90,7 +91,9 @@ func (r *chromaCodeRenderer) renderFencedCodeBlock(w util.BufWriter, source []by
 	code := linesText(node.Lines(), source)
 
 	if lang == "mermaid" {
-		fmt.Fprintf(w, "<pre class=\"mermaid\">%s</pre>\n", html.EscapeString(code))
+		if _, err := fmt.Fprintf(w, "<pre class=\"mermaid\">%s</pre>\n", html.EscapeString(code)); err != nil {
+			return ast.WalkStop, err
+		}
 		return ast.WalkSkipChildren, nil
 	}
 	if err := r.highlight(w, code, lang); err != nil {
@@ -171,8 +174,10 @@ func extractTOC(renderedHTML string) []TOCEntry {
 	matches := tocHeadingRe.FindAllStringSubmatch(renderedHTML, -1)
 	entries := make([]TOCEntry, 0, len(matches))
 	for _, m := range matches {
-		level := 2
-		fmt.Sscanf(m[1], "%d", &level)
+		level, err := strconv.Atoi(m[1])
+		if err != nil {
+			level = 2
+		}
 		text := strings.TrimSpace(innerTagRe.ReplaceAllString(m[3], ""))
 		entries = append(entries, TOCEntry{Level: level, ID: m[2], Text: html.UnescapeString(text)})
 	}

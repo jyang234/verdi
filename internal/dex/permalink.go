@@ -2,7 +2,6 @@ package dex
 
 import (
 	"path"
-	"strings"
 )
 
 // permalinkURL returns ref's permalink URL — "/a/<kind>/<name>" for a
@@ -38,9 +37,9 @@ func resolvableLinkURL(ref string, known map[string]bool) (string, bool) {
 	return permalinkURL(ref), true
 }
 
-// breadcrumb returns the ordered list of (label, url) crumbs leading to
-// ref's page. url is "" for the final (current-page) crumb, matching how
-// layout.go renders the last crumb as plain text rather than a self-link.
+// breadcrumbEntry is one crumb in a page's breadcrumb: URL is "" for the
+// final (current-page) crumb, matching how layout.go renders the last
+// crumb as plain text rather than a self-link.
 type breadcrumbEntry struct {
 	Label string
 	URL   string
@@ -87,13 +86,4 @@ func externalBreadcrumb(service, label string) []breadcrumbEntry {
 		{Label: service, URL: "/by-service/" + service + "/"},
 		{Label: label, URL: ""},
 	}
-}
-
-// refKind returns the leading "<kind>" segment of a ref
-// ("spec/foo" -> "spec", "svc/x/boundary-contract" -> "svc").
-func refKind(ref string) string {
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		return ref[:i]
-	}
-	return ref
 }

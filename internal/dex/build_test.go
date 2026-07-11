@@ -312,7 +312,7 @@ func hashTree(dir string) (digest string, fileCount int, err error) {
 
 	h := sha256.New()
 	for _, e := range entries {
-		fmt.Fprintf(h, "%s\x00", e.path)
+		_, _ = fmt.Fprintf(h, "%s\x00", e.path) // hash.Hash.Write never fails
 		h.Write(e.data)
 		h.Write([]byte{0})
 	}
