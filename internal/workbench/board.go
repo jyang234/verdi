@@ -42,18 +42,18 @@ func boardHandler(root string) http.HandlerFunc {
 
 		path, err := boardio.BoardStatePath(root, key)
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusBadRequest)
+			renderError(w, http.StatusBadRequest, err)
 			return
 		}
 		board, err := boardio.LoadBoardState(path)
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 
 		annotations, err := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 		byID := make(map[string]*artifact.Annotation, len(annotations))
@@ -86,7 +86,7 @@ func boardHandler(root string) http.HandlerFunc {
 
 		out, err := renderBoardPage(clientState)
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

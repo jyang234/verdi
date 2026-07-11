@@ -35,19 +35,19 @@ func matrixHandler(root string) http.HandlerFunc {
 		ctx := r.Context()
 		spec, err := storyresolve.Resolve(root, storyArg)
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusNotFound)
+			renderError(w, http.StatusNotFound, err)
 			return
 		}
 
 		commit, err := gitx.RevParse(ctx, root, "HEAD")
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 		derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
 		records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -56,7 +56,7 @@ func matrixHandler(root string) http.HandlerFunc {
 			StoreRoot: root, StorySlug: store.RefSlug(spec.Story),
 		})
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -67,7 +67,7 @@ func matrixHandler(root string) http.HandlerFunc {
 		}
 		out, err := renderPage(page)
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

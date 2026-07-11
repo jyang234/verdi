@@ -38,7 +38,7 @@ func corpusHandler(root string) http.HandlerFunc {
 
 		ix, err := index.Build(root)
 		if err != nil {
-			http.Error(w, "workbench: building index: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 		entry, ok := ix.Get(ref)
@@ -49,23 +49,23 @@ func corpusHandler(root string) http.HandlerFunc {
 
 		data, err := os.ReadFile(entry.Path)
 		if err != nil {
-			http.Error(w, "workbench: reading "+entry.Path+": "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 		fm, _, err := artifact.SplitFrontmatter(data)
 		if err != nil {
-			http.Error(w, "workbench: "+entry.Path+": "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 		meta, err := artifactview.DecodeMeta(entry.Kind, fm)
 		if err != nil {
-			http.Error(w, "workbench: "+entry.Path+": "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 
 		bodyHTML, err := render.RenderBody(entry.Kind, entry.Body)
 		if err != nil {
-			http.Error(w, "workbench: rendering "+ref+": "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -79,7 +79,7 @@ func corpusHandler(root string) http.HandlerFunc {
 		}
 		out, err := renderPage(page)
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

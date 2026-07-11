@@ -40,14 +40,14 @@ func verdictHandler(root string) http.HandlerFunc {
 		}
 		spec, err := storyresolve.Resolve(root, storyArg)
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusNotFound)
+			renderError(w, http.StatusNotFound, err)
 			return
 		}
 
 		derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
 		commits, err := listSnapshotCommits(derivedRoot)
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -62,7 +62,7 @@ func verdictHandler(root string) http.HandlerFunc {
 			recA, errA := loadSnapshot(derivedRoot, a)
 			recB, errB := loadSnapshot(derivedRoot, b)
 			if errA != nil || errB != nil {
-				http.Error(w, "workbench: loading snapshots: "+firstErr(errA, errB).Error(), http.StatusNotFound)
+				renderError(w, http.StatusNotFound, firstErr(errA, errB))
 				return
 			}
 			writeSnapshotDiff(&extra, spec, a, recA, b, recB)
@@ -78,7 +78,7 @@ func verdictHandler(root string) http.HandlerFunc {
 		}
 		out, err := renderPage(page)
 		if err != nil {
-			http.Error(w, "workbench: "+err.Error(), http.StatusInternalServerError)
+			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
