@@ -82,6 +82,29 @@ func supersedesRef(spec *artifact.SpecFrontmatter, featureRef string) bool {
 	return false
 }
 
+// ImplementsByFeature groups links' `implements`-edge fragment object ids
+// by target feature spec name — the caller-side input builder for
+// PendingSupersessionInput.ObjectIDs (and the cascade fold's per-story
+// edge sets). Links whose ref is not a fragment ref, or fails to parse,
+// contribute nothing: a document-level implements edge names no object a
+// supersession manifest could classify. Promoted here from cmd/verdi once
+// internal/dex became its second consumer (CLAUDE.md: shared code lives in
+// a shared internal/ package; never copy-paste across packages).
+func ImplementsByFeature(links []artifact.Link) map[string][]string {
+	out := make(map[string][]string)
+	for _, l := range links {
+		if l.Type != artifact.LinkImplements {
+			continue
+		}
+		ref, err := artifact.ParseRef(l.Ref)
+		if err != nil || !ref.Fragment() {
+			continue
+		}
+		out[ref.Name] = append(out[ref.Name], ref.Object)
+	}
+	return out
+}
+
 // PendingSupersessionInput is PendingSupersession's input for one story.
 type PendingSupersessionInput struct {
 	// ObjectIDs are the object ids (fragment targets) the story's edges

@@ -42,6 +42,16 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return fmt.Errorf("copying svcfix service: %w", err)
 	}
 
+	// The V1-P8 dex overlay (testdata/dexoverlay, committed — see its
+	// README): the spec-stale living report for borrower-update-mobile and
+	// the round-four archived quartet, so the dex site's story-page ladder
+	// badges and by-story axis have their fixtures on MAIN (the dex is
+	// main-only; the open-MR half of the ladder is seeded through the fake
+	// forge in main.go, never written into the store).
+	if err := copyTree(filepath.Join(moduleRoot, "testdata", "dexoverlay", ".verdi"), filepath.Join(storeRoot, ".verdi")); err != nil {
+		return fmt.Errorf("copying dex overlay: %w", err)
+	}
+
 	// A component spec whose markdown body carries a fenced ```mermaid block.
 	// testdata/corpus already provisions a diagram-KIND artifact
 	// (diagrams/loansvc-topology.mermaid, copied whole above), so the e2e

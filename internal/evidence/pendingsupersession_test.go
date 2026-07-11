@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/forge"
 	"github.com/OWNER/verdi/internal/forge/fake"
 )
@@ -212,5 +213,60 @@ func TestPendingSupersession_Negative_NoCandidates(t *testing.T) {
 	got := PendingSupersession(PendingSupersessionInput{ObjectIDs: []string{"ac-1"}})
 	if got.Flagged {
 		t.Fatal("Flagged = true, want false with no candidates at all")
+	}
+}
+
+func TestImplementsByFeature(t *testing.T) {
+	tests := []struct {
+		name  string
+		links []artifact.Link
+		want  map[string][]string
+	}{
+		{
+			name: "groups fragment implements edges by feature name",
+			links: []artifact.Link{
+				{Type: artifact.LinkImplements, Ref: "spec/accepted-pending-build#ac-1"},
+				{Type: artifact.LinkImplements, Ref: "spec/accepted-pending-build#ac-2"},
+				{Type: artifact.LinkImplements, Ref: "spec/loan-workflow#ac-1"},
+			},
+			want: map[string][]string{
+				"accepted-pending-build": {"ac-1", "ac-2"},
+				"loan-workflow":          {"ac-1"},
+			},
+		},
+		{
+			name: "non-implements and non-fragment links contribute nothing",
+			links: []artifact.Link{
+				{Type: artifact.LinkExempts, Ref: "spec/accepted-pending-build#dc-2"},
+				{Type: artifact.LinkImplements, Ref: "spec/loan-workflow"}, // document-level: no object id
+				{Type: artifact.LinkSupersedes, Ref: "spec/old-story"},
+				{Type: artifact.LinkImplements, Ref: "::not a ref::"},
+			},
+			want: map[string][]string{},
+		},
+		{
+			name:  "no links at all",
+			links: nil,
+			want:  map[string][]string{},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ImplementsByFeature(tc.links)
+			if len(got) != len(tc.want) {
+				t.Fatalf("ImplementsByFeature: got %d features %v, want %d %v", len(got), got, len(tc.want), tc.want)
+			}
+			for feature, ids := range tc.want {
+				gotIDs := got[feature]
+				if len(gotIDs) != len(ids) {
+					t.Fatalf("feature %s: got %v, want %v", feature, gotIDs, ids)
+				}
+				for i := range ids {
+					if gotIDs[i] != ids[i] {
+						t.Fatalf("feature %s: got %v, want %v", feature, gotIDs, ids)
+					}
+				}
+			}
+		})
 	}
 }

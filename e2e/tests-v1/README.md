@@ -3,9 +3,18 @@
 > **Flip-in status (V1-P6, 2026-07-11):** the six board specs (10–15)
 > pass and moved into `tests/` per the protocol below, together with
 > `fixtures.ts`/`helpers.ts` (the default suite now needs them; they
-> remain the single constants/gesture modules — `16-dex-v2.spec.ts`
-> imports them from `../tests/`). Only V1-P8's `16-dex-v2.spec.ts`
-> remains here.
+> remain the single constants/gesture modules).
+>
+> **Flip-in status (V1-P8, 2026-07-11):** `16-dex-v2.spec.ts` passes and
+> moved into `tests/` in the commit that made it pass. The dex fixture
+> constants in `fixtures.ts` were finalized to the v2 overlay's real refs
+> (FEATURE_SPEC `accepted-pending-build`, stories `borrower-update-*`;
+> ADR_NAME → `0001-outbox-events`, a ledgered deviation — the ADR the
+> fixture feature actually exempts, shared with the board's ref-card
+> tests via provisionv2.go). V1-P8's added dex behavior beyond the
+> contract (the by-story axis and the ADR page's exemptions link) is
+> covered by `tests/18-dex-by-story.spec.ts`. **This directory is now
+> empty of specs**, satisfying the V1-P9 audit precondition below.
 
 The specs in this directory are the **binding behavioral contract** for UI
 that does not exist yet: the v1 board (PLAN-V1.md §5, Phase V1-P6, plus the

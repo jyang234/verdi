@@ -5,13 +5,18 @@
 // Spec files import fixture refs from HERE ONLY; no spec file names a
 // fixture ref directly.
 //
-// BINDING NOTE (V1-P6): the workbench constants below are FINAL — they
-// are provisioned verbatim by cmd/e2eharness/provisionv2.go (a draft
-// spec on a design branch cannot live in the committed testdata/corpus
-// tree, VL-004, so the harness authors the board fixtures onto a scratch
-// design branch at startup; see tests-v1/README.md "Harness
-// obligations"). The dex constants remain placeholders until V1-P8
-// extends the harness for :4174.
+// BINDING NOTE (V1-P6, amended V1-P8): the workbench constants below are
+// FINAL — they are provisioned verbatim by cmd/e2eharness/provisionv2.go
+// (a draft spec on a design branch cannot live in the committed
+// testdata/corpus tree, VL-004, so the harness authors the board fixtures
+// onto a scratch design branch at startup; see tests-v1/README.md
+// "Harness obligations"). The dex constants were finalized by V1-P8 to
+// the v2 fixture overlay's real refs (testdata/corpus +
+// testdata/dexoverlay). One V1-P6 constant moved with them: ADR_NAME —
+// shared by the board's ref-card tests and the dex exemption-page test —
+// now names the ADR the v2 fixture feature's dc-1 actually exempts
+// (adr/0001-outbox-events, real on main), and provisionv2.go's design
+// spec exempts the same one; recorded as a V1-P8 ledger deviation.
 
 // ---------------------------------------------------------------------------
 // Workbench (V1-P6 board v2) — authoring mode
@@ -47,9 +52,11 @@ export const DECISION_PLAIN = "dc-2";
 export const PROBLEM_SNIPPET = "stale decline";
 export const OUTCOME_SNIPPET = "declined applicants";
 
-// The ADR that DECISION_WITH_EXEMPTS exempts (02 §Object model's own
-// example ref). Binds when V1-P1's fixture-v2 overlay merges.
-export const ADR_NAME = "0012-outbox-loansvc-events";
+// The ADR that DECISION_WITH_EXEMPTS exempts — and the ADR whose dex
+// exemption page 16-dex-v2 asserts (both the board fixture's dc-1 and
+// the v2 corpus feature's dc-1 exempt this one real corpus ADR). Bound
+// by V1-P8's fixture finalization.
+export const ADR_NAME = "0001-outbox-events";
 export const ADR_REF = `adr/${ADR_NAME}`;
 
 // ---------------------------------------------------------------------------
@@ -90,24 +97,34 @@ export const REVIEW_FEED_TOTAL = 3;
 
 export const DEX_BASE = "http://127.0.0.1:4174";
 
-// The v2 fixture feature spec (accepted-pending-build, three outcome ACs,
-// three stubs — PLAN-V1 §4). Binds when V1-P1's fixture-v2 overlay merges.
-export const FEATURE_SPEC = "loan-refinancing";
+// The v2 fixture feature spec (three outcome ACs, three stubs, dc-1
+// exempting ADR_NAME — PLAN-V1 §4's overlay, testdata/corpus). Finalized
+// by V1-P8.
+export const FEATURE_SPEC = "accepted-pending-build";
 
 // The v2 fixture's two story specs (PLAN-V1 §4: one stub-matched, one
 // deviating). STORY_STUB_MATCHED doubles as the realized stub's slug
-// (R4-I-12: RefSlug(title) equals the stub's slug). Bind when V1-P1's
-// fixture-v2 overlay merges.
-export const STORY_STUB_MATCHED = "refi-eligibility-check";
-export const STORY_DEVIATING = "refi-decline-notice";
+// (R4-I-12: RefSlug(title) equals the stub's slug). Finalized by V1-P8.
+export const STORY_STUB_MATCHED = "borrower-update-api";
+export const STORY_DEVIATING = "borrower-update-mobile";
 
-// Fixture stories carrying the rung-4 ladder flags V1-P8's badges render
-// (03 §The amendment ladder via the supersession pair, PLAN-V1 §4). The two
-// constants MAY resolve to the same story once the overlay lands — keep
-// them separate so the specs stay honest about which flag they assert.
-// Bind when V1-P1's fixture-v2 overlay merges.
-export const STORY_WITH_SPEC_STALE = "refi-eligibility-check";
-export const STORY_WITH_PENDING_SUPERSESSION = "refi-eligibility-check";
+// Fixture stories carrying the ladder flags V1-P8's badges render
+// (03 §The amendment ladder). Both resolve to the deviating story — the
+// constants stay separate so the specs stay honest about which flag they
+// assert: spec-stale comes from testdata/dexoverlay's living deviation
+// report (accepted-deviation on the story's own ac-1, R4-I-18);
+// pending-supersession from the fake forge's open MR whose candidate
+// manifest amends accepted-pending-build's ac-2 (which this story's
+// implements edges touch and STORY_STUB_MATCHED's do not).
+export const STORY_WITH_SPEC_STALE = "borrower-update-mobile";
+export const STORY_WITH_PENDING_SUPERSESSION = "borrower-update-mobile";
+
+// The by-story axis's two archived quartets (05 §Verdi-dex IA): the
+// round-four form archives layout.json in the board slot
+// (testdata/dexoverlay); the grandfathered v0 form keeps its frozen
+// board.json (testdata/corpus).
+export const ARCHIVED_STORY_ROUND4 = "refi-rate-check-2024";
+export const ARCHIVED_STORY_GRANDFATHERED = "loan-refi-2023";
 
 // ---------------------------------------------------------------------------
 // Route helpers (binding on the V1-P6/V1-P8 implementers — README.md)
@@ -129,6 +146,11 @@ export function dexSpecPath(name: string): string {
 // lists an ADR's active exemptions and the exempting specs").
 export function dexAdrExemptionsPath(adrName: string): string {
   return `${DEX_BASE}/a/adr/${adrName}/exemptions/`;
+}
+
+// A by-story quartet page (05 §Verdi-dex IA's by-story axis, V1-P8).
+export function dexByStoryPath(name: string): string {
+  return `${DEX_BASE}/by-story/${name}/`;
 }
 
 // data-testid for the reference card an external yarn target (e.g. an ADR)

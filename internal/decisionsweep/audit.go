@@ -52,7 +52,7 @@ func Audit(root string, exemptsThreshold, deviationsThreshold int) (*AuditResult
 		return nil, err
 	}
 
-	specStale, err := scanSpecStale(root, snap, deviationsThreshold)
+	specStale, err := ScanSpecStale(root, snap, deviationsThreshold)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func Audit(root string, exemptsThreshold, deviationsThreshold int) (*AuditResult
 	return &AuditResult{Exemptions: exemptions, Filed: filed, SpecStale: specStale}, nil
 }
 
-// scanSpecStale computes evidence.SpecStale for every story-class spec
+// ScanSpecStale computes evidence.SpecStale for every story-class spec
 // snap found, reading its sibling deviation-report.md (active or archive)
 // when one exists — a story with no report yet (never built, or built but
 // never `verdi align`-ed) is skipped, not flagged: there is no
@@ -76,7 +76,12 @@ func Audit(root string, exemptsThreshold, deviationsThreshold int) (*AuditResult
 // as the closure gate's spec-stale condition builds it (closuregate.go), so
 // `verdi audit` surfaces the same trigger (a) the gate enforces — never the
 // feature AC ids the story implements.
-func scanSpecStale(root string, snap *lint.Snapshot, threshold int) ([]SpecStaleEntry, error) {
+//
+// Exported (V1-P8): internal/dex's story-page ladder badges render THIS
+// computation's result — 05 §Lenses' anti-hairball law ("computed the same
+// way — no separate logic path"), so the dex's spec-stale badge and `verdi
+// audit`'s flag can never disagree.
+func ScanSpecStale(root string, snap *lint.Snapshot, threshold int) ([]SpecStaleEntry, error) {
 	var out []SpecStaleEntry
 	for _, doc := range snap.Docs {
 		if doc.DecodeErr != nil || doc.Spec == nil || doc.Spec.Class != artifact.ClassStory {

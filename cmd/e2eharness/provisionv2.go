@@ -42,7 +42,7 @@ constraints:
   - { id: co-1, text: "decline notices never expose internal model scores", anchor: "#co-1" }
 decisions:
   - { id: dc-1, text: "excuse decline events from the synchronous-write rule", anchor: "#dc-1",
-      links: [ { type: exempts, ref: adr/0012-outbox-loansvc-events, note: "decline events are already async via the outbox" } ] }
+      links: [ { type: exempts, ref: adr/0001-outbox-events, note: "decline events are already async via the outbox" } ] }
   - { id: dc-2, text: "reuse the existing notification channel for decline updates", anchor: "#dc-2" }
 ---
 # Refinancing decline flow
@@ -131,23 +131,6 @@ Channel completeness.
 Audit visibility.
 `
 
-// exemptedADR is ADR_REF's target so the reference the board renders
-// names a real artifact in the store.
-const exemptedADR = `---
-id: adr/0012-outbox-loansvc-events
-kind: adr
-title: "Synchronous writes for loansvc events"
-status: accepted
-owners: [platform-team]
-decided: 2026-07-01
-frozen: { at: 2026-07-01, commit: 1111111111111111111111111111111111111111 }
----
-# Synchronous writes for loansvc events
-
-The org-wide rule the refi-decline-flow fixture's dc-1 exempts itself
-from (e2e fixture).
-`
-
 // cannedReviewFeed is REVIEW_SPEC's MR comment feed — the three routing
 // cases of 02 §Record schemas' comment-token grammar (fixtures.ts:
 // anchored, token-free, unresolvable-token). Served to `verdi serve`
@@ -202,15 +185,17 @@ func provisionBoardV2(scratch, storeRoot string) (feedPath string, err error) {
 	}
 
 	// The design branch: both draft specs (draft never lands on main —
-	// VL-004) plus the ADR the design spec's dc-1 exempts.
+	// VL-004); the ADR dc-1 exempts is the corpus's own adr/0001-outbox-events.
 	if err := git("checkout", "--quiet", "-b", designBranch); err != nil {
 		return "", err
 	}
+	// ADR_REF's target (adr/0001-outbox-events, V1-P8's fixtures.ts
+	// finalization) is the corpus's own real ADR — already on main and so
+	// on this branch; nothing to author here.
 	files := map[string]string{
 		filepath.Join(".verdi", "specs", "active", designSpecName, "spec.md"):     designSpec,
 		filepath.Join(".verdi", "specs", "active", designSpecName, "layout.json"): designSpecLayout,
 		filepath.Join(".verdi", "specs", "active", reviewSpecName, "spec.md"):     reviewSpec,
-		filepath.Join(".verdi", "adr", "0012-outbox-loansvc-events.md"):           exemptedADR,
 	}
 	for rel, content := range files {
 		path := filepath.Join(storeRoot, rel)

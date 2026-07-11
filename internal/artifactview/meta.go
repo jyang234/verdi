@@ -20,6 +20,16 @@ type Meta struct {
 	Declares           *artifact.Declares
 	AcceptanceCriteria []artifact.AcceptanceCriterion
 	Dispositions       []artifact.Disposition
+	// Stubs is the feature spec's acceptance-time story plan (02 §Common
+	// frontmatter `stubs:`), carried through for the feature lens' dex
+	// edition (05 §Lenses: stubs always rendered paired with the computed
+	// live mapping, never alone).
+	Stubs []artifact.Stub
+	// Problem is the round-four spec attribute (02 §Object model) — its
+	// presence is the "real round-four feature vs grandfathered v0"
+	// discriminator cmd/verdi/featurematrix.go established, reused by the
+	// dex's feature lens.
+	Problem *artifact.Attribute
 
 	// ADR-only field.
 	Decided string
@@ -44,6 +54,7 @@ func DecodeMeta(kind string, fm []byte) (Meta, error) {
 			Base: s.Base, Status: string(s.Status),
 			Class: s.Class, Story: s.Story, Impacts: s.Impacts, Context: s.Context,
 			Declares: s.Declares, AcceptanceCriteria: s.AcceptanceCriteria, Dispositions: s.Dispositions,
+			Stubs: s.Stubs, Problem: s.Problem,
 		}, nil
 
 	case "adr":

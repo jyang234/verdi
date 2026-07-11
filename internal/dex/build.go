@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/OWNER/verdi/internal/forge"
 	"github.com/OWNER/verdi/internal/index"
 	"github.com/OWNER/verdi/internal/store"
 )
@@ -30,6 +31,22 @@ type Options struct {
 	// same commit twice, even on different days, produces byte-identical
 	// output (Phase 12's determinism requirement).
 	Commit string
+	// Forge is the optional forge port the story-page pending-supersession
+	// flag reads open MRs through (V1-P8; 03 §The amendment ladder: "the
+	// fold's input set includes open supersession MRs") — the ONE input to
+	// this site that is not a function of the tree, which is exactly the
+	// flag's point: the race window is an open-MR fact. nil (no forge
+	// configured/reachable — every hermetic `go test`) renders the flag
+	// disclosed-unproven on affected story pages rather than silently
+	// absent. For a fixed forge state, output stays byte-identical across
+	// rebuilds (constitution 1's determinism is over the build's full
+	// input set).
+	Forge forge.Forge
+	// DefaultBranch is the branch open supersession MRs are enumerated
+	// against (the MR target, resolved by the caller the same way the
+	// gates resolve it). Empty is treated like a nil Forge: candidates
+	// cannot be enumerated, so the flag is disclosed-unproven.
+	DefaultBranch string
 }
 
 // Build renders and writes the full dex site to opts.OutDir.
@@ -67,10 +84,21 @@ func Build(ctx context.Context, opts Options) error {
 
 	known := knownRefs(ix)
 
+	lens, err := computeLensData(ctx, opts.Root, opts.Forge, opts.DefaultBranch, pages)
+	if err != nil {
+		return err
+	}
+
 	for _, p := range pages {
-		if err := writeArtifactPage(ctx, opts.OutDir, opts.Root, stamp.SHA, stamp, ix, known, p); err != nil {
+		if err := writeArtifactPage(ctx, opts.OutDir, opts.Root, stamp.SHA, stamp, ix, known, lens, p); err != nil {
 			return err
 		}
+	}
+	if err := writeExemptionPages(opts.OutDir, stamp, pages, lens.exemptions, known); err != nil {
+		return err
+	}
+	if err := writeStoryAxis(opts.OutDir, stamp, pages); err != nil {
+		return err
 	}
 	if err := writeExternalPages(opts.OutDir, stamp, ix, known, services); err != nil {
 		return err

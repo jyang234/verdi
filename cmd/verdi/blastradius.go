@@ -84,7 +84,7 @@ func computeBlastRadius(root string, v2 *artifact.SpecFrontmatter) (BlastRadiusR
 		if spec.Class != artifact.ClassStory {
 			continue
 		}
-		byFeature := implementsByFeature(spec)
+		byFeature := evidence.ImplementsByFeature(spec.Links)
 		objectIDs, ok := byFeature[predRef.Name]
 		if !ok {
 			continue
