@@ -110,3 +110,51 @@ func TestProvenance_Validate_Negative(t *testing.T) {
 }
 
 var hex64 = strings.Repeat("ab", 32)
+
+// TestDecodeStrict_AcceptsOptionalSchemaField proves Base's optional
+// `schema:` key (phase 4 addition — see the field's doc comment) decodes
+// strictly rather than tripping KnownFields, both when present and when
+// absent, on every kind that embeds Base.
+func TestDecodeStrict_AcceptsOptionalSchemaField(t *testing.T) {
+	const withSchema = `---
+id: adr/schema-field-present
+kind: adr
+title: "has a schema key"
+status: proposed
+owners: [platform-team]
+schema: verdi.artifact/v1
+---
+`
+	fm, err := DecodeADR(mustFrontmatter(t, withSchema))
+	if err != nil {
+		t.Fatalf("DecodeADR with schema field: %v", err)
+	}
+	if fm.Schema != "verdi.artifact/v1" {
+		t.Fatalf("Schema = %q, want %q", fm.Schema, "verdi.artifact/v1")
+	}
+
+	const withoutSchema = `---
+id: adr/schema-field-absent
+kind: adr
+title: "has no schema key"
+status: proposed
+owners: [platform-team]
+---
+`
+	fm2, err := DecodeADR(mustFrontmatter(t, withoutSchema))
+	if err != nil {
+		t.Fatalf("DecodeADR without schema field: %v", err)
+	}
+	if fm2.Schema != "" {
+		t.Fatalf("Schema = %q, want empty", fm2.Schema)
+	}
+}
+
+func mustFrontmatter(t *testing.T, doc string) []byte {
+	t.Helper()
+	fm, _, err := SplitFrontmatter([]byte(doc))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	return fm
+}

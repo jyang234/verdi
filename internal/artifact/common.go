@@ -184,11 +184,22 @@ func cutLastAt(s string) (before, after string, ok bool) {
 // (02 §Common frontmatter), minus `status`, which each kind embeds with
 // its own enum type (attestation has none at all — "existence is the
 // record").
+//
+// Schema is *not* listed in 02 §Common frontmatter's table, but all five
+// of that spec's own sibling component-spec documents (01, 02, 03, 04, 05)
+// carry a top-level `schema: verdi.xxx/vN` key in their frontmatter (e.g.
+// 02 itself: `schema: verdi.artifact/v1`) — discovered self-hosting these
+// six specs in phase 4 (PLAN.md Phase 4's "eat the dog food" step).
+// Accepted here as an optional common field so strict decode does not
+// reject 02's own documents; flagged in the phase 4 report as an
+// invention-ledger candidate for 02 §Common frontmatter to document
+// formally. No format is enforced on the value beyond being a string.
 type Base struct {
 	ID         string      `yaml:"id"`
 	Kind       Kind        `yaml:"kind"`
 	Title      string      `yaml:"title"`
 	Owners     []string    `yaml:"owners"`
+	Schema     string      `yaml:"schema,omitempty"`
 	Links      []Link      `yaml:"links,omitempty"`
 	Frozen     *Frozen     `yaml:"frozen,omitempty"`
 	Provenance *Provenance `yaml:"provenance,omitempty"`
