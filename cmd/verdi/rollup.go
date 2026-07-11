@@ -7,7 +7,7 @@
 // handler change.
 //
 // Story/spec resolution reuses matrix.go's shared I-30 helper
-// (storyresolve.go): a positional argument accepting exactly a
+// (internal/storyresolve): a positional argument accepting exactly a
 // scheme-prefixed story ref or a spec ref. 05 §CLI's terse table entry
 // ("verdi rollup --publish") omits the argument the same way its "verdi
 // lint" row omits lint's path arguments; PLAN.md's own Phase 11 goal is
@@ -43,6 +43,7 @@ import (
 	"github.com/OWNER/verdi/internal/provider"
 	"github.com/OWNER/verdi/internal/provider/jira"
 	"github.com/OWNER/verdi/internal/store"
+	"github.com/OWNER/verdi/internal/storyresolve"
 )
 
 // rollupDeps bundles rollup's injectable dependencies so runRollup can be
@@ -119,7 +120,7 @@ func runRollup(ctx context.Context, root, storyArg string, deps rollupDeps) int 
 		return 2
 	}
 
-	spec, err := resolveSpec(root, storyArg)
+	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
 		fmt.Fprintln(deps.Stderr, "rollup:", err)
 		return 2

@@ -38,6 +38,7 @@ import (
 	"github.com/OWNER/verdi/internal/evidence"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/store"
+	"github.com/OWNER/verdi/internal/storyresolve"
 )
 
 // cmdMatrix is `verdi matrix`'s real entry point, invoked by dispatch.go.
@@ -73,7 +74,7 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	spec, err := resolveSpec(root, storyArg)
+	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
 		fmt.Fprintln(stderr, "matrix:", err)
 		return 2

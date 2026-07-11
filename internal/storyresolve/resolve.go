@@ -1,21 +1,10 @@
-// Story/spec resolution shared by every verb that takes a story argument
-// (05 §CLI, I-30): matrix.go (PLAN.md Phase 6) and rollup.go (PLAN.md
-// Phase 11) both resolve their positional argument the same way, so the
-// logic lives here once rather than being duplicated per verb.
-//
-// resolveSpec accepts EXACTLY two ref forms and nothing else —
-//
-//	(a) a scheme-prefixed story ref ("jira:LOAN-1482"), matched against
-//	    every active feature spec's `story:` field; and
-//	(b) a spec ref ("spec/stale-decline").
-//
-// Any other argument — including a bare tracker key like "STORY-1482" — is
-// an operational error (exit 2) whose message names both accepted forms.
-// I-30 rejected the earlier trailing-digit-run heuristic (a bare key matched
-// against a spec by comparing the numeric suffixes of the two sides' ref
-// slugs): it collided silently between stories that share a digit suffix and
-// cut against VL-005's scheme discipline.
-package main
+// Package storyresolve resolves a user- or tool-supplied story/spec
+// argument to a decoded active feature spec, per I-30's strict two-form
+// contract. Extracted from cmd/verdi/matrix.go (phase 6) so phase 9's
+// get_matrix MCP tool (internal/mcpserve) shares exactly the same
+// resolution policy instead of re-implementing it (CLAUDE.md: "anything
+// used by two or more packages lives in a shared internal/ package").
+package storyresolve
 
 import (
 	"fmt"
@@ -26,16 +15,17 @@ import (
 	"github.com/OWNER/verdi/internal/artifact"
 )
 
-// resolveSpec resolves arg to a feature spec under specs/active/ — 03 §The
-// fold's "Scope: the fold is evaluated only for specs under specs/active/".
-// Per I-30, arg is EXACTLY one of two forms: a spec ref ("spec/<name>"),
-// loaded directly; or a scheme-prefixed story ref ("jira:LOAN-1482"),
-// matched against every active feature spec's `story:` field. Any other
-// argument is an operational error naming both accepted forms.
-func resolveSpec(root, arg string) (*artifact.SpecFrontmatter, error) {
+// Resolve resolves arg to a feature spec under specs/active/ — 03 §The
+// fold's "Scope: the fold is evaluated only for specs under
+// specs/active/". Per I-30, arg is EXACTLY one of two forms: a spec ref
+// ("spec/<name>"), loaded directly; or a scheme-prefixed story ref
+// ("jira:LOAN-1482"), matched against every active feature spec's
+// `story:` field. Any other argument is an operational error naming both
+// accepted forms.
+func Resolve(root, arg string) (*artifact.SpecFrontmatter, error) {
 	// (b) A spec ref: load it directly.
 	if ref, err := artifact.ParseRef(arg); err == nil && ref.Kind == artifact.KindSpec {
-		spec, loadErr := loadActiveSpec(root, ref.Name)
+		spec, loadErr := LoadActiveSpec(root, ref.Name)
 		if loadErr != nil {
 			return nil, loadErr
 		}
@@ -45,9 +35,10 @@ func resolveSpec(root, arg string) (*artifact.SpecFrontmatter, error) {
 		return spec, nil
 	}
 
-	// (a) A scheme-prefixed story ref: match it against every active feature
-	// spec's story: field. The scheme (the part before ":") need not be a
-	// configured provider — an unmatched story ref simply names no spec.
+	// (a) A scheme-prefixed story ref: match it against every active
+	// feature spec's story: field. The scheme (the part before ":") need
+	// not be a configured provider — an unmatched story ref simply names
+	// no spec.
 	if scheme, key, ok := strings.Cut(arg, ":"); ok && scheme != "" && key != "" {
 		return matchStoryRef(root, arg)
 	}
@@ -69,7 +60,7 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 		if !e.IsDir() {
 			continue
 		}
-		spec, err := loadActiveSpec(root, e.Name())
+		spec, err := LoadActiveSpec(root, e.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -94,8 +85,8 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 	}
 }
 
-// loadActiveSpec reads and strict-decodes specs/active/<name>/spec.md.
-func loadActiveSpec(root, name string) (*artifact.SpecFrontmatter, error) {
+// LoadActiveSpec reads and strict-decodes specs/active/<name>/spec.md.
+func LoadActiveSpec(root, name string) (*artifact.SpecFrontmatter, error) {
 	path := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")
 	data, err := os.ReadFile(path)
 	if err != nil {

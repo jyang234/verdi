@@ -1,6 +1,6 @@
 // verdi feature start <story-ref | spec-ref> (05 §CLI, PLAN.md Phase 7):
 // the post-acceptance build ritual — locates the story's spec (I-30
-// strict forms, reusing matrix.go's resolveSpec), REFUSES (exit 1) unless
+// strict forms, reusing internal/storyresolve), REFUSES (exit 1) unless
 // its status is accepted-pending-build (03 §Gates condition 1's local
 // half), cuts the build branch feature/<name>, and best-effort refreshes
 // the baseline (baseline.go). Kept in its own file per the lint.go/sync.go/
@@ -15,6 +15,7 @@ import (
 	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/store"
+	"github.com/OWNER/verdi/internal/storyresolve"
 	"github.com/OWNER/verdi/internal/upstream"
 )
 
@@ -67,7 +68,7 @@ func cmdFeatureStart(args []string, stdout, stderr io.Writer) int {
 // accepted-pending-build, so a refused feature start leaves the repo
 // exactly as it found it.
 func runFeatureStart(ctx context.Context, root, storyArg string, deps syncDeps, stdout, stderr io.Writer) int {
-	spec, err := resolveSpec(root, storyArg)
+	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
 		fmt.Fprintln(stderr, "feature start:", err)
 		return 2

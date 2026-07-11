@@ -21,8 +21,6 @@ func TestRun_KnownVerbs(t *testing.T) {
 		wantSubstr string
 	}{
 		{"align", "not implemented (phase 8)"},
-		{"serve", "not implemented (phase 9)"},
-		{"mcp", "not implemented (phase 9)"},
 		{"close", "not implemented (out of v0 scope)"},
 		{"waivers", "not implemented (out of v0 scope)"},
 		{"verify-artifact", "not implemented (out of v0 scope)"},
@@ -97,6 +95,38 @@ func TestRun_DexDispatchesToRealVerb(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "verdi dex build") {
 		t.Fatalf("stderr = %q, want it to mention 'verdi dex build'", stderr.String())
+	}
+}
+
+// TestRun_ServeDispatchesToRealVerb proves `run` routes "serve" to the
+// real implementation (serve.go, PLAN.md Phase 9) rather than the generic
+// phase-stub path: outside any store root it must fail with serve's own
+// store-root error, never the generic "not implemented" message.
+func TestRun_ServeDispatchesToRealVerb(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stderr bytes.Buffer
+	got := run([]string{"serve"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([serve]) outside a store = %d, want 2 (operational)", got)
+	}
+	if strings.Contains(stderr.String(), "not implemented") {
+		t.Fatalf("stderr = %q, want a real store-root error, not the generic stub message", stderr.String())
+	}
+}
+
+// TestRun_McpDispatchesToRealVerb proves `run` routes "mcp" to the real
+// implementation (mcp.go, PLAN.md Phase 9) the same way.
+func TestRun_McpDispatchesToRealVerb(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stderr bytes.Buffer
+	got := run([]string{"mcp"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([mcp]) outside a store = %d, want 2 (operational)", got)
+	}
+	if strings.Contains(stderr.String(), "not implemented") {
+		t.Fatalf("stderr = %q, want a real store-root error, not the generic stub message", stderr.String())
 	}
 }
 
