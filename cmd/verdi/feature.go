@@ -1,10 +1,9 @@
-// verdi feature start <story-ref | spec-ref> (05 §CLI, PLAN.md Phase 7):
-// the post-acceptance build ritual — locates the story's spec (I-30
-// strict forms, reusing internal/storyresolve), REFUSES (exit 1) unless
-// its status is accepted-pending-build (03 §Gates condition 1's local
-// half), cuts the build branch feature/<name>, and best-effort refreshes
-// the baseline (baseline.go). Kept in its own file per the lint.go/sync.go/
-// matrix.go/dex.go convention.
+// verdi feature start <story-spec | story-ref> (R4-I-6): the deprecation
+// alias for `verdi build start`, kept one release per 03 §Lifecycle: the
+// feature-first cascade ("feature start is kept one release as a
+// deprecation alias: it prints the new form and proceeds"). Every bit of
+// real logic now lives in buildstart.go — this file is a thin,
+// notice-printing forward.
 package main
 
 import (
@@ -12,29 +11,26 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/storyresolve"
 	"github.com/OWNER/verdi/internal/upstream"
 )
 
-// runFeatureVerb dispatches `verdi feature <subcommand>`. v0 has exactly
-// one subcommand, `start` (05 §CLI); anything else is a usage error.
+// runFeatureVerb dispatches `verdi feature <subcommand>`. There is exactly
+// one subcommand, `start`; anything else is a usage error.
 func runFeatureVerb(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "start" {
-		fmt.Fprintln(stderr, "usage: verdi feature start <story-ref | spec-ref>")
+		fmt.Fprintln(stderr, "usage: verdi feature start <story-spec | story-ref>")
 		return 2
 	}
 	return cmdFeatureStart(args[1:], stdout, stderr)
 }
 
-// cmdFeatureStart is `verdi feature start`'s real entry point: it parses
-// the single positional argument, resolves the store root and manifest,
-// and wires the real runner before delegating to runFeatureStart.
+// cmdFeatureStart is `verdi feature start`'s real entry point: it prints
+// the deprecation notice, then delegates to the exact same wiring
+// cmdBuildStart uses.
 func cmdFeatureStart(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "feature start: usage: verdi feature start <story-ref | spec-ref>")
+		fmt.Fprintln(stderr, "feature start: usage: verdi feature start <story-spec | story-ref>")
 		return 2
 	}
 	storyArg := args[0]
@@ -60,43 +56,13 @@ func cmdFeatureStart(args []string, stdout, stderr io.Writer) int {
 	return runFeatureStart(ctx, root, storyArg, deps, stdout, stderr)
 }
 
-// runFeatureStart is the testable core: given an already-resolved root and
-// injected deps, run the whole feature-start ritual and return the exit
-// code. It refuses (exit 1, a verdict failure per CLAUDE.md's 0/1/2
-// contract — a business precondition, not an operational problem) before
-// touching git at all when the resolved spec is not
-// accepted-pending-build, so a refused feature start leaves the repo
-// exactly as it found it.
+// runFeatureStart is the testable core: prints R4-I-6's deprecation
+// notice ("prints the new form and proceeds rather than erroring") and
+// delegates to runBuildStart unchanged — the deprecation alias shares
+// every precondition (accepted-pending-build, the rung-4 cascade check)
+// and every side effect (branch cut, baseline regeneration) with `verdi
+// build start`; it differs only in the printed notice.
 func runFeatureStart(ctx context.Context, root, storyArg string, deps syncDeps, stdout, stderr io.Writer) int {
-	spec, err := storyresolve.Resolve(root, storyArg)
-	if err != nil {
-		fmt.Fprintln(stderr, "feature start:", err)
-		return 2
-	}
-	if spec.Status != "accepted-pending-build" {
-		fmt.Fprintf(stderr, "feature start: %s status is %q, not accepted-pending-build; a build may only reference an accepted spec (03 §Gates)\n", spec.ID, spec.Status)
-		return 1
-	}
-
-	specRef, err := artifact.ParseRef(spec.ID)
-	if err != nil {
-		fmt.Fprintln(stderr, "feature start: internal error: resolved spec has an invalid id:", err)
-		return 2
-	}
-	branch := "feature/" + specRef.Name
-
-	commit, err := gitx.RevParse(ctx, root, "HEAD")
-	if err != nil {
-		fmt.Fprintln(stderr, "feature start:", err)
-		return 2
-	}
-	if err := gitx.CheckoutNewBranch(ctx, root, branch); err != nil {
-		fmt.Fprintln(stderr, "feature start:", err)
-		return 2
-	}
-
-	regenerateBaseline(ctx, root, branch, commit, spec, deps, "feature start", stderr)
-
-	fmt.Fprintf(stdout, "feature start: created branch %s from %s (status: accepted-pending-build)\n", branch, spec.ID)
-	return 0
+	fmt.Fprintln(stderr, "feature start: deprecated (R4-I-6) — use `verdi build start <story-spec | story-ref>` instead; proceeding")
+	return runBuildStart(ctx, root, storyArg, deps, stdout, stderr)
 }

@@ -18,7 +18,8 @@ import (
 var verbPhase = map[string]int{
 	"design":          7,
 	"accept":          7,
-	"feature":         7,
+	"feature":         7, // R4-I-6: deprecation alias for "build"
+	"build":           7,
 	"align":           8,
 	"sync":            5,
 	"serve":           9,
@@ -36,7 +37,7 @@ var verbPhase = map[string]int{
 
 const usage = `usage: verdi <verb> [args...]
 
-verbs: lint, design, accept, feature, align, sync, serve, mcp, matrix,
+verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
        rollup, close, waivers, verify-artifact, dex, gc, gate, board`
 
 // run parses args and returns the exit code per the CLAUDE.md contract:
@@ -80,6 +81,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if verb == "feature" {
 		return runFeatureVerb(args[1:], os.Stdout, stderr)
+	}
+	if verb == "build" {
+		return runBuildVerb(args[1:], os.Stdout, stderr)
 	}
 	if verb == "serve" {
 		return cmdServe(args[1:], os.Stdout, stderr)

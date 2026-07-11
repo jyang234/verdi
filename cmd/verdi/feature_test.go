@@ -3,37 +3,71 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/OWNER/verdi/internal/fixturegit"
 	"github.com/OWNER/verdi/internal/gitx"
 )
 
-// acceptedRepo builds a Phase 7 repo, runs design start + accept, and
-// returns it sitting on the design branch with spec/stale-decline at
-// accepted-pending-build — the common starting point for feature start's
-// happy-path tests.
-func acceptedRepo(t *testing.T) *bytesRepo {
-	t.Helper()
-	repo, _ := scaffoldAndDesign(t)
-	ctx := context.Background()
+const featureAliasFrozenCommit = "0000000000000000000000000000000000000a"
 
-	var stdout, stderr bytes.Buffer
-	if got := runAccept(ctx, repo.Dir, "spec/stale-decline", &stdout, &stderr); got != 0 {
-		t.Fatalf("runAccept = %d, want 0; stderr=%s", got, stderr.String())
+// featureAliasStorySpecMD renders a class: story spec.md at the given
+// status — the story-grade unit `verdi build start`/`verdi feature start`
+// (the deprecation alias) actually operate on post-round-four (05 §CLI:
+// "build start ... fails unless the story's spec is accepted-pending-build").
+// It carries no implements-target feature on disk (the cascade check,
+// cascadecheck.go, tolerates a dangling implements target — findSupersedingSpec
+// simply finds nothing to fold against), keeping this fixture minimal and
+// focused on the deprecation-alias/status-precondition behavior under test.
+func featureAliasStorySpecMD(status string) string {
+	frozen := ""
+	if status == "accepted-pending-build" {
+		frozen = fmt.Sprintf("\nfrozen: { at: 2024-01-01, commit: %s }", featureAliasFrozenCommit)
 	}
-	return &bytesRepo{Dir: repo.Dir}
+	return fmt.Sprintf(`---
+id: spec/stale-decline
+kind: spec
+title: "Stale decline handling"
+owners: [platform-team]
+class: story
+status: %s
+story: jira:LOAN-1482
+problem: { text: "borrowers see stale decline data", anchor: problem }
+outcome: { text: "borrowers see current decline data", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+links:
+  - { type: implements, ref: "spec/loan-mgmt#ac-1" }%s
+---
+# Stale decline handling
+
+## Problem
+x
+
+## Outcome
+x
+`, status, frozen)
 }
 
-// bytesRepo is a minimal handle (just Dir) for tests that no longer need
-// fixturegit.Repo's Head/Heads fields once the repo has moved on from its
-// initial fixture state via real design/accept commits.
-type bytesRepo struct{ Dir string }
+func buildFeatureAliasRepo(t *testing.T, status string) *fixturegit.Repo {
+	t.Helper()
+	return fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                         phase7ManifestYAML,
+				".verdi/specs/active/stale-decline/spec.md": featureAliasStorySpecMD(status),
+			},
+			Message: "init store with story spec at " + status,
+		},
+	})
+}
 
 // TestRunFeatureStart_RefusesDraft proves feature start refuses (exit 1) a
 // spec still in draft, and never mutates the repo (no branch switch, no
 // commit) when it does.
 func TestRunFeatureStart_RefusesDraft(t *testing.T) {
-	repo, _ := scaffoldAndDesign(t) // draft only, no accept
+	repo := buildFeatureAliasRepo(t, "draft")
 	ctx := context.Background()
 
 	before, err := gitx.CurrentBranch(ctx, repo.Dir)
@@ -50,6 +84,9 @@ func TestRunFeatureStart_RefusesDraft(t *testing.T) {
 	if !contains(stderr.String(), "not accepted-pending-build") {
 		t.Fatalf("stderr = %q, want it to name the refusal", stderr.String())
 	}
+	if !contains(stderr.String(), "deprecated") {
+		t.Fatalf("stderr = %q, want the R4-I-6 deprecation notice", stderr.String())
+	}
 
 	after, err := gitx.CurrentBranch(ctx, repo.Dir)
 	if err != nil {
@@ -62,9 +99,10 @@ func TestRunFeatureStart_RefusesDraft(t *testing.T) {
 
 // TestRunFeatureStart_Succeeds proves feature start cuts feature/<name>
 // once the spec is accepted-pending-build, resolving via a story ref
-// (I-30's scheme-prefixed form, reusing matrix.go's resolveSpec).
+// (I-30's scheme-prefixed form) and prints the R4-I-6 deprecation notice
+// while still proceeding.
 func TestRunFeatureStart_Succeeds(t *testing.T) {
-	repo := acceptedRepo(t)
+	repo := buildFeatureAliasRepo(t, "accepted-pending-build")
 	ctx := context.Background()
 
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
@@ -72,6 +110,9 @@ func TestRunFeatureStart_Succeeds(t *testing.T) {
 	got := runFeatureStart(ctx, repo.Dir, "jira:LOAN-1482", deps, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runFeatureStart = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	if !contains(stderr.String(), "deprecated") {
+		t.Fatalf("stderr = %q, want the R4-I-6 deprecation notice", stderr.String())
 	}
 
 	branch, err := gitx.CurrentBranch(ctx, repo.Dir)
@@ -86,7 +127,7 @@ func TestRunFeatureStart_Succeeds(t *testing.T) {
 // TestRunFeatureStart_SpecRefForm proves feature start also accepts the
 // spec-ref form (I-30's second accepted form).
 func TestRunFeatureStart_SpecRefForm(t *testing.T) {
-	repo := acceptedRepo(t)
+	repo := buildFeatureAliasRepo(t, "accepted-pending-build")
 	ctx := context.Background()
 
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
@@ -100,7 +141,7 @@ func TestRunFeatureStart_SpecRefForm(t *testing.T) {
 // TestRunFeatureStart_Negative covers runFeatureStart's own
 // operational-error path: an unresolvable story/spec ref.
 func TestRunFeatureStart_Negative(t *testing.T) {
-	repo := acceptedRepo(t)
+	repo := buildFeatureAliasRepo(t, "accepted-pending-build")
 	ctx := context.Background()
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
 
