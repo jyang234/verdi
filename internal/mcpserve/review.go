@@ -6,6 +6,12 @@
 // posts, resolves, or mutates anything (the board, V1-P6, owns the write
 // side of the round-trip; add_annotation stays the only MCP write tool,
 // 05: "the write surface stays add_annotation and nothing else").
+//
+// The branch-scoped MR-discovery mechanism and the mirrored-item shape
+// below (annotationItem.ObjectID, review comments keyed to the CURRENT
+// design branch's open MR) are this phase's invention — neither 05 nor
+// 02 pins how list_annotations should locate "the" MR for a given ref;
+// ledgered at review as R4-I-29 (PLAN-V1.md §7).
 package mcpserve
 
 import (

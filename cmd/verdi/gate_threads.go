@@ -24,7 +24,7 @@ import (
 // readiness rule.
 //
 // JUDGMENT CALL / DISCLOSED GAP — recorded at this phase's review as
-// R4-I-27 (PLAN-V1.md §7), per this phase's brief ("if 05's text
+// R4-I-28 (PLAN-V1.md §7), per this phase's brief ("if 05's text
 // under-determines how a thread proves it 'points at a spec commit',
 // STOP -> NEEDS_CONTEXT rather than inventing"): 05 §Review stickies and
 // forge round-trip states the readiness rule at two different levels of

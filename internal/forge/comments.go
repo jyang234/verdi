@@ -7,7 +7,7 @@
 // spec-fixed... recorded as a phase-review invention ledger entry during
 // V1-P7") and V1-P0's spike S6
 // (docs/spikes/v1/spike-s6-findings.md, binding) prototyped both adapters'
-// real APIs first. Ledgered at this phase's review as R4-I-26
+// real APIs first. Ledgered at this phase's review as R4-I-27
 // (PLAN-V1.md §7).
 //
 // Two comment universes exist on both forges (S6 finding): diff-anchored
