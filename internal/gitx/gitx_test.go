@@ -146,6 +146,102 @@ func TestLsFiles_Negative(t *testing.T) {
 	}
 }
 
+func TestLsFilesWithUntracked_Happy(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	// A brand-new, never-git-added file: invisible to LsFiles, but the whole
+	// point of LsFilesWithUntracked is to surface it.
+	if err := os.WriteFile(filepath.Join(repo.Dir, "untracked.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatalf("writing untracked.txt: %v", err)
+	}
+
+	got, err := LsFilesWithUntracked(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("LsFilesWithUntracked: %v", err)
+	}
+	want := map[string]bool{"a.txt": true, "dir/b.txt": true, "untracked.txt": true}
+	if len(got) != len(want) {
+		t.Fatalf("LsFilesWithUntracked = %v, want exactly %v", got, want)
+	}
+	for _, p := range got {
+		if !want[p] {
+			t.Fatalf("LsFilesWithUntracked returned unexpected path %q", p)
+		}
+	}
+
+	// A tracked file deleted from the working tree (but not `git rm`'d) stays
+	// listed — it is still in the index. Callers hashing on-disk content rely
+	// on this to detect a deletion instead of erroring on a missing file.
+	if err := os.Remove(filepath.Join(repo.Dir, "dir/b.txt")); err != nil {
+		t.Fatalf("removing dir/b.txt: %v", err)
+	}
+	got, err = LsFilesWithUntracked(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("LsFilesWithUntracked after delete: %v", err)
+	}
+	stillListed := false
+	for _, p := range got {
+		if p == "dir/b.txt" {
+			stillListed = true
+		}
+	}
+	if !stillListed {
+		t.Fatal("LsFilesWithUntracked dropped a working-tree-deleted tracked file; want it still listed via the index")
+	}
+}
+
+// TestLsFilesWithUntracked_ExcludesGitignored proves `--exclude-standard`
+// keeps .gitignore'd paths out — the mechanism the store relies on so that
+// `.verdi/data/` (ignored by the committed `.verdi/.gitignore`) never enters
+// the corpus enumeration.
+func TestLsFilesWithUntracked_ExcludesGitignored(t *testing.T) {
+	ctx := context.Background()
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				"tracked.txt": "t\n",
+				".gitignore":  "data/\n",
+			},
+			Message: "layer 1",
+		},
+	})
+
+	// Untracked file under the ignored dir (must NOT appear) and an untracked
+	// file outside it (must appear).
+	if err := os.MkdirAll(filepath.Join(repo.Dir, "data", "cache"), 0o755); err != nil {
+		t.Fatalf("mkdir data/cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, "data", "cache", "blob"), []byte("noise\n"), 0o644); err != nil {
+		t.Fatalf("writing ignored blob: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, "visible.txt"), []byte("v\n"), 0o644); err != nil {
+		t.Fatalf("writing visible.txt: %v", err)
+	}
+
+	got, err := LsFilesWithUntracked(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("LsFilesWithUntracked: %v", err)
+	}
+	want := map[string]bool{"tracked.txt": true, ".gitignore": true, "visible.txt": true}
+	if len(got) != len(want) {
+		t.Fatalf("LsFilesWithUntracked = %v, want exactly %v (ignored data/ excluded)", got, want)
+	}
+	for _, p := range got {
+		if !want[p] {
+			t.Fatalf("LsFilesWithUntracked returned unexpected path %q (gitignored path leaked?)", p)
+		}
+	}
+}
+
+func TestLsFilesWithUntracked_Negative(t *testing.T) {
+	ctx := context.Background()
+	notARepo := t.TempDir()
+	if _, err := LsFilesWithUntracked(ctx, notARepo); err == nil {
+		t.Fatal("LsFilesWithUntracked outside a repo: want error, got nil")
+	}
+}
+
 func TestShow_Happy(t *testing.T) {
 	repo := buildRepo(t)
 	ctx := context.Background()
