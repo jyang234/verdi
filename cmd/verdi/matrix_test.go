@@ -144,16 +144,15 @@ func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 // (static+behavioral, only a behavioral ci pass record — no static record
 // at all) is pending; ac-3 (behavioral, only a source:local abstain
 // record, excluded from the authoritative fold) is no-signal; ac-4
-// (runtime, no reachable waiver) is pending.
+// (runtime) is waived by an active waiver.
 //
 // Note on ac-4: the fold consults waivers/<slug>/ keyed by the story's own
-// ref slug — store.RefSlug("jira:LOAN-1482") = "jira-loan-1482". The corpus
-// carries an active waiver at waivers/story-1482/ac-4.md, keyed by a
-// free-standing tracker key with no mechanical link to the story ref; the
-// digit-run heuristic that used to bridge those two keys was removed in
-// I-30 (silent collisions; cut against VL-005's scheme discipline), so that
-// waiver is no longer reachable from a scheme-prefixed ref and ac-4 folds to
-// its unwaived runtime status, pending. Story: not violated, not eligible.
+// ref slug — store.RefSlug("jira:LOAN-1482") = "jira-loan-1482" (I-31's
+// canonical <story> path segment). The corpus carries an active waiver at
+// waivers/jira-loan-1482/ac-4.md under exactly that segment, so the waiver
+// is reachable and ac-4 folds to waived. Story: not violated, but not
+// eligible either — ac-2 (pending) and ac-3 (no-signal) keep it short of
+// the all-evidenced-or-waived bar.
 func TestCmdMatrix_Golden(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	t.Chdir(repo.Dir)
@@ -171,7 +170,7 @@ AC    STATUS     EVIDENCE                      TEXT
 ac-1  evidenced  static:pass                   static obligation holds for the retry path
 ac-2  pending    static:none; behavioral:pass  static and behavioral: charge API retried on stale decline
 ac-3  no-signal  behavioral:none               behavioral: golden flow for partial refunds
-ac-4  pending    runtime:awaited               runtime: post-deploy decline-rate check
+ac-4  waived     runtime:awaited               runtime: post-deploy decline-rate check
 
 story.violated: false
 story.eligible: false
@@ -206,7 +205,7 @@ AC    STATUS     EVIDENCE                      TEXT
 ac-1  evidenced  static:pass                   static obligation holds for the retry path
 ac-2  pending    static:none; behavioral:pass  static and behavioral: charge API retried on stale decline
 ac-3  pending    behavioral:abstain            behavioral: golden flow for partial refunds
-ac-4  pending    runtime:awaited               runtime: post-deploy decline-rate check
+ac-4  waived     runtime:awaited               runtime: post-deploy decline-rate check
 
 story.violated: false
 story.eligible: false

@@ -1,5 +1,5 @@
 ---
-id: waiver/story-1482--ac-3
+id: waiver/jira-loan-1482--ac-3
 kind: waiver
 title: "Temporary golden gap (fixture, expired)"
 status: expired
