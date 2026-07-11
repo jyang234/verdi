@@ -14,11 +14,11 @@ import (
 // "any directory containing .flowmap.yaml is a service root").
 const flowmapFile = ".flowmap.yaml"
 
-// boundaryContractRelPath is upstream's own fixed path for a service's
+// BoundaryContractRelPath is upstream's own fixed path for a service's
 // boundary contract, corrected by spike S1 (PLAN.md §3 "Boundary
 // contracts" row): "flowmap boundary has no stdout mode or output flag —
 // it always writes there".
-const boundaryContractRelPath = ".flowmap/boundary-contract.json"
+const BoundaryContractRelPath = ".flowmap/boundary-contract.json"
 
 // bindingsFile is the one verdi-owned file allowed in a service root
 // (01 §notes; I-2).
@@ -141,7 +141,7 @@ func loadService(dir string) (*Service, error) {
 		Obligations: summary.Obligations,
 	}
 
-	if p := filepath.Join(dir, boundaryContractRelPath); fileExists(p) {
+	if p := filepath.Join(dir, BoundaryContractRelPath); fileExists(p) {
 		svc.BoundaryContractPath = p
 	}
 
@@ -167,6 +167,27 @@ func loadService(dir string) (*Service, error) {
 	}
 
 	return svc, nil
+}
+
+// FilterImpacted returns the subset of services whose Name is listed in
+// impacts, preserving services' original (Dir-sorted, deterministic) order.
+// Shared by cmd/verdi's baseline regeneration (`design start`/`feature
+// start`) and internal/align's computed-section regeneration — both scope a
+// discovered service set down to one spec's declared impacts: (CLAUDE.md:
+// "anything used by two or more packages lives in a shared internal/
+// package").
+func FilterImpacted(services []Service, impacts []string) []Service {
+	want := make(map[string]bool, len(impacts))
+	for _, i := range impacts {
+		want[i] = true
+	}
+	var out []Service
+	for _, svc := range services {
+		if want[svc.Name] {
+			out = append(out, svc)
+		}
+	}
+	return out
 }
 
 func fileExists(path string) bool {

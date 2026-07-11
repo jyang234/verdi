@@ -45,7 +45,7 @@ func TestDiscoverServices_Happy(t *testing.T) {
 	root := t.TempDir()
 
 	writeFileT(t, filepath.Join(root, "svcfix", flowmapFile), svcFlowmapYAML)
-	writeFileT(t, filepath.Join(root, "svcfix", boundaryContractRelPath), svcBoundaryContractJSON)
+	writeFileT(t, filepath.Join(root, "svcfix", BoundaryContractRelPath), svcBoundaryContractJSON)
 	writeFileT(t, filepath.Join(root, "svcfix", bindingsFile), svcBindingsYAML)
 	writeFileT(t, filepath.Join(root, "svcfix", "api", "openapi.yaml"), "openapi: 3.0.3\ninfo:\n  title: x\n  version: \"1\"\npaths: {}\n")
 
@@ -148,4 +148,20 @@ func TestDiscoverServices_Negative(t *testing.T) {
 			t.Fatal("DiscoverServices(nonexistent root): want error, got nil")
 		}
 	})
+}
+
+func TestFilterImpacted(t *testing.T) {
+	services := []Service{{Name: "loansvc"}, {Name: "notification-svc"}, {Name: "other"}}
+
+	got := FilterImpacted(services, []string{"loansvc", "notification-svc"})
+	if len(got) != 2 || got[0].Name != "loansvc" || got[1].Name != "notification-svc" {
+		t.Fatalf("FilterImpacted = %+v, want [loansvc notification-svc]", got)
+	}
+
+	if got := FilterImpacted(services, nil); len(got) != 0 {
+		t.Fatalf("FilterImpacted(nil impacts) = %+v, want empty", got)
+	}
+	if got := FilterImpacted(services, []string{"nope"}); len(got) != 0 {
+		t.Fatalf("FilterImpacted(unmatched impact) = %+v, want empty", got)
+	}
 }

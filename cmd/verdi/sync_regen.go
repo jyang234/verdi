@@ -144,7 +144,7 @@ func regenerateService(ctx context.Context, root string, svc store.Service, comm
 		if err := upstream.BoundaryGenerate(ctx, deps.Runner, svc.Dir); err != nil {
 			return sb, nil, fmt.Errorf("flowmap boundary: %w", err)
 		}
-		branchContract, err := readBoundaryContract(svc.BoundaryContractPath)
+		branchContract, err := upstream.ReadBoundaryContract(svc.BoundaryContractPath)
 		if err != nil {
 			return sb, nil, err
 		}
@@ -208,18 +208,6 @@ func regenerateService(ctx context.Context, root string, svc store.Service, comm
 	}
 
 	return sb, testSummary, nil
-}
-
-func readBoundaryContract(path string) (*upstream.BoundaryContract, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading boundary contract %s: %w", path, err)
-	}
-	c, err := upstream.DecodeBoundaryContract(data)
-	if err != nil {
-		return nil, fmt.Errorf("decoding boundary contract %s: %w", path, err)
-	}
-	return c, nil
 }
 
 // loadSpecACs resolves bindings.yaml's `spec:` ref to a spec.md under

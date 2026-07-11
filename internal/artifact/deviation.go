@@ -43,9 +43,17 @@ type Finding struct {
 	Note        string             `yaml:"note,omitempty"`
 }
 
-// Validate checks ID/Text are present, Kind and Disposition are known
-// enums, and accepted-deviation carries a note (03 §Alignment report: "the
+// Validate checks ID/Text are present, Kind is a known enum, Disposition is
+// either empty (**undispositioned** — a living report's normal state for a
+// new or changed finding before human review, PLAN.md Phase 8: "align ...
+// marks new/changed findings undispositioned") or a known disposition
+// value, and accepted-deviation carries a note (03 §Alignment report: "the
 // sanctioned record of how the build diverged from the accepted design").
+// An empty Disposition is legal at THIS decode seam deliberately: the merge
+// gate — not schema decode — is what enforces "every finding carries a
+// disposition" (03 §Gates condition 3), via Dispositioned/AllDispositioned
+// below, since a living, mid-build report is a legitimate, decodable
+// artifact even while findings remain open.
 func (f Finding) Validate() error {
 	if f.ID == "" {
 		return fmt.Errorf("artifact: finding has no id")
@@ -56,7 +64,7 @@ func (f Finding) Validate() error {
 	if !validFindingKinds[f.Kind] {
 		return fmt.Errorf("artifact: finding %s: kind %q is not computed or judged", f.ID, f.Kind)
 	}
-	if !validFindingDispositions[f.Disposition] {
+	if f.Disposition != "" && !validFindingDispositions[f.Disposition] {
 		return fmt.Errorf("artifact: finding %s: disposition %q is not a known value", f.ID, f.Disposition)
 	}
 	if f.Disposition == FindingAcceptedDeviation && f.Note == "" {
@@ -65,18 +73,45 @@ func (f Finding) Validate() error {
 	return nil
 }
 
+// Dispositioned reports whether f carries a disposition at all — false is
+// the "undispositioned" state Validate legally permits.
+func (f Finding) Dispositioned() bool { return f.Disposition != "" }
+
+// JudgeIntegrity is the persisted judge exchange a deviation report's
+// Integrity hash needs to be self-verifiable (PLAN.md Phase 8, spike S5:
+// "Integrity hash = hash of the exact stdin bytes + the raw result
+// string"): the exact stdin bytes (base64 — a YAML frontmatter value must
+// be a well-formed scalar; the real prompt can run to ~100KB per S5) and
+// the raw, untouched judge `result` string. A verifier recomputes the hash
+// straight from these two fields plus DeviationFrontmatter.Integrity —
+// tamper-evident (editing either field or the rendered judged text without
+// updating the hash breaks verification) without needing to re-run the
+// judge, which 03 §Alignment report is explicit is never reproducible.
+//
+// Present iff a genuine judge exchange succeeded — never for the synthetic
+// "judged coverage absent" finding, whose content is itself a
+// deterministic, computed fact (config presence, failure stage/exit/stderr)
+// rather than judge-authored text; see internal/align's doc comment on why
+// that finding is digest-, not integrity-, covered despite being tagged
+// kind: judged.
+type JudgeIntegrity struct {
+	StdinB64  string `yaml:"stdin_b64"`
+	RawResult string `yaml:"raw_result"`
+}
+
 // DeviationFrontmatter is the frontmatter schema for deviation-report.md,
 // schema verdi.deviation/v1 (03 §Alignment report). It is decoded via the
 // YAML frontmatter seam (the file is markdown, not plain JSON), unlike
 // board/evidence/rollup which live in plain JSON files.
 type DeviationFrontmatter struct {
-	Schema     string      `yaml:"schema"`
-	Covers     string      `yaml:"covers"`
-	Findings   []Finding   `yaml:"findings"`
-	Digest     string      `yaml:"digest,omitempty"`
-	Integrity  string      `yaml:"integrity,omitempty"`
-	Frozen     *Frozen     `yaml:"frozen,omitempty"`
-	Provenance *Provenance `yaml:"provenance,omitempty"`
+	Schema         string          `yaml:"schema"`
+	Covers         string          `yaml:"covers"`
+	Findings       []Finding       `yaml:"findings"`
+	Digest         string          `yaml:"digest,omitempty"`
+	Integrity      string          `yaml:"integrity,omitempty"`
+	JudgeIntegrity *JudgeIntegrity `yaml:"judge_integrity,omitempty"`
+	Frozen         *Frozen         `yaml:"frozen,omitempty"`
+	Provenance     *Provenance     `yaml:"provenance,omitempty"`
 }
 
 // DecodeDeviation strict-decodes and validates deviation-report.md
@@ -117,6 +152,15 @@ func (fm DeviationFrontmatter) Validate() error {
 	}
 	if fm.Integrity != "" && !sha256Re.MatchString(fm.Integrity) {
 		return fmt.Errorf("artifact: deviation integrity %q is not sha256:<64 hex> form", fm.Integrity)
+	}
+	// One-directional only: judge_integrity requires integrity (it exists to
+	// let integrity be recomputed), but integrity may legally stand alone —
+	// an older or hand-authored frozen report that predates this
+	// self-verification record is still a legally decodable artifact; it is
+	// simply unverifiable (VerifyIntegrity reports that explicitly rather
+	// than silently accepting or rejecting it).
+	if fm.JudgeIntegrity != nil && fm.Integrity == "" {
+		return fmt.Errorf("artifact: deviation judge_integrity is present but integrity is empty")
 	}
 	if fm.Frozen != nil {
 		if err := fm.Frozen.Validate(); err != nil {

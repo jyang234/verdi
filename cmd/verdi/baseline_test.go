@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/store"
 	"github.com/OWNER/verdi/internal/upstream"
 )
 
@@ -100,21 +99,9 @@ func TestRegenerateBaseline_ToolchainUnreachable(t *testing.T) {
 	assertNoDerivedDir(t, repo.Dir, "design--stale-decline", repo.Head)
 }
 
-func TestFilterImpacted(t *testing.T) {
-	services := []store.Service{{Name: "loansvc"}, {Name: "notification-svc"}, {Name: "other"}}
-
-	got := filterImpacted(services, []string{"loansvc", "notification-svc"})
-	if len(got) != 2 || got[0].Name != "loansvc" || got[1].Name != "notification-svc" {
-		t.Fatalf("filterImpacted = %+v, want [loansvc notification-svc]", got)
-	}
-
-	if got := filterImpacted(services, nil); len(got) != 0 {
-		t.Fatalf("filterImpacted(nil impacts) = %+v, want empty", got)
-	}
-	if got := filterImpacted(services, []string{"nope"}); len(got) != 0 {
-		t.Fatalf("filterImpacted(unmatched impact) = %+v, want empty", got)
-	}
-}
+// store.FilterImpacted itself (hoisted from this file's former private
+// filterImpacted so internal/align could share it too, PLAN.md Phase 8) is
+// covered directly by internal/store's own tests.
 
 func assertNoDerivedDir(t *testing.T, root, refSlug, commit string) {
 	t.Helper()

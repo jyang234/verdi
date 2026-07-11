@@ -15,7 +15,7 @@ providers:
 lint:
   gated_generated: []
 align:
-  judge_cmd: claude -p
+  judge_cmd: [claude, -p]
   judge_required: false
 derived:
   retention_days: 14
@@ -45,6 +45,21 @@ func TestDecodeManifest_Happy(t *testing.T) {
 	}
 	if m.Toolchain == nil || m.Toolchain.Commit != "cd38b1a56bb782177a207d741a39807821cf2c1c" {
 		t.Fatalf("Toolchain = %+v, unexpected", m.Toolchain)
+	}
+	if m.Align == nil || len(m.Align.JudgeCmd) != 2 || m.Align.JudgeCmd[0] != "claude" || m.Align.JudgeCmd[1] != "-p" {
+		t.Fatalf("Align.JudgeCmd = %+v, want [claude -p]", m.Align)
+	}
+}
+
+// TestDecodeManifest_JudgeCmdStringRejected proves align.judge_cmd is an
+// argv array, not a shell string (PLAN.md Phase 8 spike S5, binding):
+// splitting a scalar string on whitespace to recover an argv would be
+// silent invention (quoting/escaping semantics verdi does not own), so a
+// bare scalar must fail strict decode rather than be silently coerced.
+func TestDecodeManifest_JudgeCmdStringRejected(t *testing.T) {
+	data := "schema: verdi.layout/v1\nalign:\n  judge_cmd: claude -p\n"
+	if _, err := DecodeManifest([]byte(data)); err == nil {
+		t.Fatal("DecodeManifest(judge_cmd as bare string): want error, got nil")
 	}
 }
 

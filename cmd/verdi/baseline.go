@@ -47,7 +47,7 @@ func regenerateBaseline(ctx context.Context, root, branch, commit string, spec *
 		fmt.Fprintf(stderr, "%s: skipping baseline regeneration: discovering services: %v\n", verb, err)
 		return
 	}
-	impacted := filterImpacted(services, spec.Impacts)
+	impacted := store.FilterImpacted(services, spec.Impacts)
 	if len(impacted) == 0 {
 		fmt.Fprintf(stderr, "%s: spec %s declares no impacted service discoverable under this store; skipping baseline regeneration\n", verb, spec.ID)
 		return
@@ -69,22 +69,6 @@ func regenerateBaseline(ctx context.Context, root, branch, commit string, spec *
 		return
 	}
 	fmt.Fprintf(stderr, "%s: regenerated local baseline for %v at %s\n", verb, impactedNames(impacted), derivedDir)
-}
-
-// filterImpacted returns the subset of services whose Name is listed in
-// impacts, preserving services' original (Dir-sorted, deterministic) order.
-func filterImpacted(services []store.Service, impacts []string) []store.Service {
-	want := make(map[string]bool, len(impacts))
-	for _, i := range impacts {
-		want[i] = true
-	}
-	var out []store.Service
-	for _, svc := range services {
-		if want[svc.Name] {
-			out = append(out, svc)
-		}
-	}
-	return out
 }
 
 func impactedNames(services []store.Service) []string {
