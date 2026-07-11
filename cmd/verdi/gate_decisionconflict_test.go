@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/OWNER/verdi/internal/fixturegit"
 )
 
 // writeDecisionConflictReport writes decision-conflict-report.md directly
@@ -65,6 +70,82 @@ func TestCheckDeclaredDecisionConflicts_UndispositionedFails(t *testing.T) {
 	}
 	if cond.OK {
 		t.Fatal("OK = true, want false (undispositioned finding — unresolved declared edge)")
+	}
+}
+
+// buildDesignGateRepo builds a fixturegit repo whose spec (a draft feature
+// spec — a legitimate design-branch spec, ResolveDesignSpec accepts feature
+// and story class alike) lives at specs/active/stale-decline, then checks
+// out the design/stale-decline branch `verdi design start` would have cut.
+func buildDesignGateRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: gitlab\n",
+				".verdi/specs/active/stale-decline/spec.md": gateSpecMD("draft"),
+			},
+			Message: "scaffold + draft design spec",
+		},
+	})
+	checkoutBranch(t, repo.Dir, "design/stale-decline")
+	return repo
+}
+
+// TestSpecMRGate_DanglingExemptsFails proves the spec-MR path fails the gate
+// (exit 1, naming the declared-decision-conflict condition) when the
+// decision-conflict report carries a dangling declared edge — here an
+// undispositioned computed finding standing for an unresolved `exempts` edge.
+func TestSpecMRGate_DanglingExemptsFails(t *testing.T) {
+	repo := buildDesignGateRepo(t)
+	writeDecisionConflictReport(t, repo.Dir, repo.Head,
+		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy is unresolved\" }\n")
+
+	var stdout, stderr bytes.Buffer
+	got := runSpecMRGate(context.Background(), repo.Dir, "design/stale-decline", &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("runSpecMRGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "declared decision conflicts") {
+		t.Fatalf("stdout = %q, want it to name the declared-decision-conflict condition", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "gate: FAIL") {
+		t.Fatalf("stdout = %q, want a final gate: FAIL line", stdout.String())
+	}
+}
+
+// TestSpecMRGate_ResolvedPasses proves the same path passes (exit 0) once
+// every declared edge is resolved (its finding dispositioned) — the other
+// spec-MR conditions being vacuously satisfied this phase.
+func TestSpecMRGate_ResolvedPasses(t *testing.T) {
+	repo := buildDesignGateRepo(t)
+	writeDecisionConflictReport(t, repo.Dir, repo.Head,
+		"  - { id: f-1, kind: computed, text: \"exempts edge to adr/decline-policy\", disposition: exempt, note: \"excused, see witness\" }\n")
+
+	var stdout, stderr bytes.Buffer
+	got := runSpecMRGate(context.Background(), repo.Dir, "design/stale-decline", &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runSpecMRGate = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "gate: PASS") {
+		t.Fatalf("stdout = %q, want a final gate: PASS line", stdout.String())
+	}
+}
+
+// TestCmdGate_SpecMR_EntryPoint drives the real `verdi gate` entry point on a
+// design branch, proving cmdGate's branch-prefix dispatch into the spec-MR
+// path works end to end (not just runSpecMRGate's core): a resolved report
+// exits 0.
+func TestCmdGate_SpecMR_EntryPoint(t *testing.T) {
+	repo := buildDesignGateRepo(t)
+	writeDecisionConflictReport(t, repo.Dir, repo.Head,
+		"  - { id: f-1, kind: computed, text: t, disposition: exempt, note: n }\n")
+	t.Chdir(repo.Dir)
+
+	var stderr bytes.Buffer
+	got := run([]string{"gate"}, &stderr)
+	if got != 0 {
+		t.Fatalf("run([gate]) on a design branch = %d, want 0; stderr=%s", got, stderr.String())
 	}
 }
 

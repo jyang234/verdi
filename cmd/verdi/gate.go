@@ -48,6 +48,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/evidence"
@@ -75,6 +76,19 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gate:", err)
 		return 2
 	}
+
+	// Spec-MR (design-branch) path — 05 §CLI's gate row: "on spec MRs
+	// additionally blocks on unresolved declared decision conflicts". A
+	// design branch's gate evaluates the declared-decision-conflict
+	// condition set (03 §Decision-conflict gate), NOT the build-branch merge
+	// conditions below; the two condition sets are distinct (03: "the
+	// design-branch analogue of the build-branch merge gate"). Dispatch on
+	// branch prefix, mirroring align.go's own runAlign→runDesignAlign split
+	// exactly (CLAUDE.md: don't invent a second design-branch detector).
+	if strings.HasPrefix(branch, "design/") {
+		return runSpecMRGate(ctx, root, branch, stdout, stderr)
+	}
+
 	spec, err := storyresolve.ResolveBuildSpec(root, branch)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate:", err)
@@ -145,8 +159,18 @@ func runGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, h
 		return 2
 	}
 
+	return reportGateConditions(stdout, []gateCondition{cond1, cond2, cond3, cond4})
+}
+
+// reportGateConditions prints each condition's PASS/FAIL line (and its reason
+// on failure), then the final gate verdict, returning the exit code (0 all
+// hold, 1 any fails) — the one rendering both the build-branch merge gate
+// (runGate) and the spec-MR gate (runSpecMRGate, gate_decisionconflict.go)
+// share so their output stays byte-identical (CLAUDE.md: no copy-paste across
+// call sites).
+func reportGateConditions(stdout io.Writer, conds []gateCondition) int {
 	allOK := true
-	for _, c := range []gateCondition{cond1, cond2, cond3, cond4} {
+	for _, c := range conds {
 		status := "PASS"
 		if !c.OK {
 			status = "FAIL"

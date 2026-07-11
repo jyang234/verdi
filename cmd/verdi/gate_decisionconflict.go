@@ -4,34 +4,67 @@
 // §CLI's gate row: "on spec MRs additionally blocks on unresolved declared
 // decision conflicts").
 //
-// WIRING NOTE (read before deleting this comment): as of this phase
-// (V1-P5), cmd/verdi/gate.go's runGate ALWAYS resolves the build-branch
-// spec (storyresolve.ResolveBuildSpec, feature/<name> only) and evaluates
-// exactly three build-branch conditions — it has no spec-MR / design-
-// branch code path AT ALL yet for this condition to join. That branch-kind
-// dispatch is V1-P4's job (lifecycle verbs, run concurrently in a sibling
-// worktree this same wave) — V1-P4's own brief deliberately left this
-// condition unwired because the capability below (internal/align's
-// design-branch decision-conflict machinery) did not exist until this
-// phase. checkDeclaredDecisionConflicts is written to be a drop-in
-// addition to gate.go's existing gateCondition-returning check function
-// family (checkAcceptedOnDefaultBranch / checkNoACViolated /
-// checkFreshFullyDispositioned) the moment a spec-MR branch path exists to
-// call it from — ONE call site, no gate.go edits needed beyond that call.
-// If gate.go has already grown a spec-MR path by merge-prep, wire this
-// function in there directly instead of re-deriving the condition; if its
-// shape has moved in some other way, leave the wiring to the merge
-// reviewer per this phase's own instructions.
+// WIRING (W3 merge reconciliation): this condition is now wired. gate.go's
+// cmdGate dispatches on the "design/" branch prefix (mirroring align.go's
+// own runAlign→runDesignAlign split) into runSpecMRGate (below), which
+// resolves the design branch's spec via storyresolve.ResolveDesignSpec and
+// evaluates this condition — the spec-MR analogue of the build-branch merge
+// conditions, which never run on a design branch and are the only ones that
+// run on a build branch. checkDeclaredDecisionConflicts stays a drop-in
+// sibling of gate.go's build-branch check family
+// (checkAcceptedOnDefaultBranch / checkNoACViolated /
+// checkFreshFullyDispositioned): ONE call site, reached only on the spec-MR
+// path.
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/OWNER/verdi/internal/align"
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/OWNER/verdi/internal/storyresolve"
 )
+
+// runSpecMRGate is the spec-MR (design-branch) gate path, wired from
+// gate.go's cmdGate on the "design/" branch prefix (WIRING NOTE above, now
+// resolved at merge). It mirrors gate.go's runGate but resolves the design
+// branch's OWN spec (storyresolve.ResolveDesignSpec — feature or story class,
+// the same resolver `verdi align`'s design-branch mode uses) and evaluates
+// the spec-MR condition set: for this phase, the single
+// declared-decision-conflict condition (checkDeclaredDecisionConflicts).
+// V1-P7's review-thread condition joins this same set later; the build-branch
+// merge conditions never run here, and this condition never runs on a build
+// branch (03 §Decision-conflict gate: "the design-branch analogue of the
+// build-branch merge gate's fresh-report requirement"). head is the design
+// branch head the report must cover.
+func runSpecMRGate(ctx context.Context, root, branch string, stdout, stderr io.Writer) int {
+	spec, err := storyresolve.ResolveDesignSpec(root, branch)
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
+		return 2
+	}
+	specRef, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		fmt.Fprintln(stderr, "gate: internal error: resolved spec has an invalid id:", err)
+		return 2
+	}
+	head, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
+		return 2
+	}
+	cond, err := checkDeclaredDecisionConflicts(root, specRef.Name, head)
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
+		return 2
+	}
+	return reportGateConditions(stdout, []gateCondition{cond})
+}
 
 // checkDeclaredDecisionConflicts is the spec-MR analogue of gate.go's
 // checkFreshFullyDispositioned: present, `covers` == head, and every
