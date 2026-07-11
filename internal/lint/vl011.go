@@ -7,10 +7,17 @@ import (
 	"github.com/OWNER/verdi/internal/artifact"
 )
 
-// vl011 enforces "attestation/waiver files live under the story/AC they
-// name; waiver has owner + reason, expiry optional" (02 §Lint rules; I-6's
-// compound-name convention: id name is "<story>--<ac-id>", path is nested
-// "<kind-dir>/<story>/<ac-id>.md").
+// vl011 enforces "attestation/waiver/reaffirmation files live under the
+// story/object they name ... feature outcome-attestations validate the
+// same nested form" (02 §Lint rules, as amended for reaffirmation R4-I-4;
+// I-6's compound-name convention: id name is "<story>--<ac-id>" (or
+// "<feature-slug>--<ac-id>" for a feature outcome-attestation, or
+// "<story>--<object-id>" for a reaffirmation), path is nested
+// "<kind-dir>/<story-or-feature-slug>/<ac-or-object-id>.md"). The
+// outcome-attestation and reaffirmation forms need no special-casing here
+// (R4-I-11: "the mapping already generalizes") — both are still exactly
+// the generic "<kind-dir>s/<left>/<right>.md" shape this rule already
+// checks, driven only by Kind and the compound id split.
 type vl011 struct{}
 
 func (vl011) ID() string { return "VL-011" }
@@ -21,7 +28,7 @@ func (vl011) Check(in *RunInput) []Finding {
 		if d.Grandfathered || d.DecodeErr != nil {
 			continue
 		}
-		if d.Kind != "attestation" && d.Kind != "waiver" {
+		if d.Kind != "attestation" && d.Kind != "waiver" && d.Kind != "reaffirmation" {
 			continue
 		}
 

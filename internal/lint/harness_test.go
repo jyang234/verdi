@@ -178,6 +178,34 @@ func writeLoansvcFixture(t *testing.T, root string) {
 	writeTestFile(t, filepath.Join(root, "loansvc", ".flowmap", "boundary-contract.json"), loansvcBoundaryContractJSON)
 }
 
+// provisionMutableZone creates an empty (present, but recording nothing)
+// data/mutable/annotations/ directory in root's untracked working tree —
+// the default posture every buildLintRepo test repo gets, modeling an
+// ordinary local checkout rather than VL-017's "bare CI clone" edge case
+// (01 §Zones: the mutable zone is per-checkout, never committed). Tests
+// that specifically exercise VL-017's mutable-zone-absent path build their
+// own repo without calling this (or via a fresh t.TempDir()), rather than
+// every other rule's test incidentally tripping VL-017 noise merely
+// because buildLintRepo's corpus contains feature/story specs.
+func provisionMutableZone(t *testing.T, root string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "data", "mutable", "annotations")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("provisioning mutable zone %s: %v", dir, err)
+	}
+}
+
+// readTestdataFile reads path (relative to this package, e.g. under
+// testdata/violations/) and fails the test on error.
+func readTestdataFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading testdata file %s: %v", path, err)
+	}
+	return string(data)
+}
+
 func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -201,6 +229,7 @@ func buildLintRepo(t *testing.T, overlayDirs ...string) *fixturegit.Repo {
 	}
 	repo := fixturegit.Build(t, layers)
 	writeLoansvcFixture(t, repo.Dir)
+	provisionMutableZone(t, repo.Dir)
 	return repo
 }
 

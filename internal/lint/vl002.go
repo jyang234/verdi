@@ -45,9 +45,10 @@ func (vl002) Check(in *RunInput) []Finding {
 		switch d.Kind {
 		case "spec":
 			findings = append(findings, checkSpecPath(d, ref)...)
-		case "attestation", "waiver":
-			// Path/id agreement for the nested story/ac-id shape is VL-011's
-			// job; VL-002 has already checked id parses and kind agrees.
+		case "attestation", "waiver", "reaffirmation":
+			// Path/id agreement for the nested story/object-id shape is
+			// VL-011's job; VL-002 has already checked id parses and kind
+			// agrees.
 		default:
 			if want, ok := singleFileKindDir[d.Kind]; ok {
 				wantPath := fmt.Sprintf(".verdi/%s/%s%s", want.dir, ref.Name, want.ext)

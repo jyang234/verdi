@@ -1,22 +1,26 @@
 # testdata/violations/VL-015
 
-Skeleton overlays for VL-015 (supersession manifest completeness and
-fidelity — 02 §Lint rules), landed in V1-P1 alongside the round-four object
-model; VL-015 itself is not implemented until V1-P2, so no lint test
-consumes these yet (V1-P1's exit criteria only requires that the v2
-contract surface **decodes** — see `internal/artifact/v2fixture_test.go`).
-Each is a full copy of `spec/loan-workflow-v2`
-(`testdata/corpus/.verdi/specs/active/loan-workflow-v2/spec.md`) with
-exactly one injected VL-015 defect, matching the "one minimal overlay per
-rule that trips exactly that rule" discipline (`PLAN.md §4`).
+VL-015 (supersession manifest completeness and fidelity — 02 §Lint rules),
+implemented at V1-P2.
 
-- `carried-byte-drift/` — `supersession.carried` still lists `co-1`, but
-  this twin's `co-1` text differs from `spec/loan-workflow` v1's frozen
-  `co-1` text (`must not add new synchronous cross-service calls`) — VL-015's
-  "every carried object's content is byte-identical to its predecessor"
-  negative case.
-- `unclassified-object/` — `supersession.carried` is empty and `co-1`
-  appears in no other bucket (`amended`/`amended_advisory`/`removed`), so
-  a real predecessor object (`co-1`, present unchanged in v1) is left
-  entirely unclassified — VL-015's "every v1 object classified exactly
-  once" negative case.
+VL-015's fixtures live inline in `internal/lint/vl015_test.go`
+(`TestVL015_TableDriven`) rather than as overlay directories here: the
+rule needs the predecessor spec's own object manifest at its
+*frozen.commit*, read from real git history (`gitx.Show`) — the shared
+`testdata/corpus` fixturegit history (`layers.txt`) and
+`internal/artifact/v2fixture_test.go`'s own dedicated loan-workflow /
+loan-workflow-v2 history each bake in *their own* golden SHAs, neither of
+which is reproducible inside `internal/lint`'s separate fixturegit-built
+test repos. `vl015_test.go` builds its own small, dedicated two-layer
+history per test case (loan-workflow v1 draft, then v1 frozen at its own
+freshly-computed SHA plus loan-workflow-v2 with the supersession: block
+under test) — the same "one commit, no invented mechanism" pattern
+`v2fixture_test.go` established, just with a fresh SHA each run rather
+than a baked-in golden one, since nothing else in this package's corpus
+cites it.
+
+Table cases: happy path (every predecessor object classified exactly
+once, `carried` byte-identical); `carried-byte-drift` (a `carried` object
+whose text differs from its predecessor); `unclassified-object` (a real
+predecessor object named in no bucket); `double-classified` (a predecessor
+object named in more than one bucket).

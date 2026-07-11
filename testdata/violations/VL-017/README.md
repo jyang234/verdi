@@ -1,20 +1,17 @@
 # testdata/violations/VL-017
 
-Skeleton overlay for VL-017 (open-question stickies resolved-or-carried —
-02 §Lint rules), landed in V1-P1 alongside the annotation-type extensions;
-VL-017 itself is not implemented until a later phase, so no lint test
-consumes this yet. 02 §Lint rules requires an unresolved open-question
-annotation to be either `status: resolved` or "explicitly carried as a
-declared open-question object on the spec" — the artifact-contract spec
-(02) does not otherwise define an `open_questions:` frontmatter block
-alongside `acceptance_criteria:`/`constraints:`/`decisions:` (§Object
-model), so this fixture models the annotation half only; the "declared
-open-question object" carrying mechanism is left for whichever phase
-implements VL-017 to define (flagged in the V1-P1 phase report as a
-spec-gap candidate for that phase's invention ledger).
+VL-017 (open-question stickies resolved-or-carried — 02 §Lint rules),
+implemented at V1-P2 (which also fills the `open_questions:` frontmatter
+block gap this skeleton's V1-P1 README flagged — R4-I-16, 02 §Object
+model).
 
-- `.verdi/specs/active/open-question-story/spec.md` — a draft story spec
-  with no declared mechanism carrying the open question below.
-- `mutable/annotations/spec--open-question-story.jsonl` — a single
-  `type: question`, `status: open` annotation targeting that spec, neither
-  resolved nor (there being no such block) carried.
+VL-017's fixtures live inline in `internal/lint/vl017_test.go` rather than
+as overlay directories under this one: the rule's mutable-zone-present
+twin needs an annotation JSONL file written *untracked* directly to the
+built repo's working tree (`.verdi/data/mutable/annotations/`, 01 §Zones —
+the mutable zone is never git-tracked, VL-013), which the shared
+`overlayLayer`/`buildLintRepo` harness commits everything it's given
+through fixturegit — the wrong mechanism for content that must never be
+committed. The mutable-zone-absent twin removes the directory
+`buildLintRepo` provisions by default (see harness_test.go's
+`provisionMutableZone`) rather than needing its own overlay at all.
