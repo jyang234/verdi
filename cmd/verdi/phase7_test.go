@@ -38,6 +38,16 @@ const loansvcFlowmapYAML = `version: 1
 service: loansvc
 `
 
+// phase7GitAttributes satisfies VL-012 (02 §Repository plumbing: every
+// committed-generated path pattern needs a `gitlab-generated` attribute
+// line, since phase7ManifestYAML's forge: is gitlab) so that a spec
+// scaffolded and accepted against this fixture is lint-clean on that rule
+// too, not just the ones design/accept/feature directly touch.
+const phase7GitAttributes = `.verdi/specs/*/*/board.json gitlab-generated
+.verdi/specs/*/*/rollup.json gitlab-generated
+.verdi/specs/*/*/deviation-report.md gitlab-generated
+`
+
 // buildPhase7Repo builds a one-layer fixturegit repo carrying just
 // verdi.yaml and the loansvc service fixture — the common starting point
 // for design/accept/feature start tests.
@@ -48,6 +58,7 @@ func buildPhase7Repo(t *testing.T) *fixturegit.Repo {
 			Files: map[string]string{
 				".verdi/verdi.yaml":     phase7ManifestYAML,
 				"loansvc/.flowmap.yaml": loansvcFlowmapYAML,
+				".gitattributes":        phase7GitAttributes,
 			},
 			Message: "init store",
 		},
