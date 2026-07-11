@@ -131,6 +131,7 @@ func staticRecords(in JoinInput, b artifact.Binding) ([]artifact.Evidence, error
 			Kind:        artifact.EvidenceStatic,
 			Verdict:     verdict,
 			Witness:     staticWitness(o),
+			Producer:    b.Producer,
 			Provenance:  in.Provenance,
 			Digest:      digest,
 		})
@@ -204,6 +205,7 @@ func behavioralRecord(in JoinInput, b artifact.Binding) (artifact.Evidence, erro
 		Kind:        artifact.EvidenceBehavioral,
 		Verdict:     verdict,
 		Witness:     fmt.Sprintf("golden flow %q via go test suite (%s)", b.Producer, in.ServiceName),
+		Producer:    b.Producer,
 		Provenance:  in.Provenance,
 		Digest:      digest,
 	}, nil

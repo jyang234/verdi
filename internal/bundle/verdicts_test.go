@@ -83,6 +83,9 @@ func TestBuildVerdicts_Happy(t *testing.T) {
 	if len(static.EvidenceFor) != 2 || static.EvidenceFor[0] != "ac-1" || static.EvidenceFor[1] != "ac-2" {
 		t.Errorf("static record EvidenceFor = %v, want [ac-1 ac-2]", static.EvidenceFor)
 	}
+	if static.Producer != "audit-before-publish" {
+		t.Errorf("static record Producer = %q, want the binding's producer id %q", static.Producer, "audit-before-publish")
+	}
 	if err := static.Validate(); err != nil {
 		t.Errorf("static record fails artifact.Evidence.Validate: %v", err)
 	}
@@ -93,6 +96,9 @@ func TestBuildVerdicts_Happy(t *testing.T) {
 	}
 	if len(behavioral.EvidenceFor) != 1 || behavioral.EvidenceFor[0] != "ac-3" {
 		t.Errorf("behavioral record EvidenceFor = %v, want [ac-3]", behavioral.EvidenceFor)
+	}
+	if behavioral.Producer != "refund-flow" {
+		t.Errorf("behavioral record Producer = %q, want the binding's producer id %q", behavioral.Producer, "refund-flow")
 	}
 	if err := behavioral.Validate(); err != nil {
 		t.Errorf("behavioral record fails artifact.Evidence.Validate: %v", err)

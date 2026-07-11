@@ -38,20 +38,49 @@ var validProvenanceSources = map[ProvenanceSource]bool{
 // EvidenceProvenance is an evidence record's provenance block, distinct
 // from the frontmatter Provenance type (different fields: source/pipeline/
 // commit, not generator/version/inputs/digest/integrity).
+//
+// Job is an I-25 addition (PLAN.md invention ledger): 03 §The fold orders
+// "current" record selection by "(pipeline id, job id), monotonic", but the
+// verdi.evidence/v1 example in 03 §Evidence records carries only
+// `pipeline` — the spec's own example omits `job`. I-25 resolves this by
+// adding an optional `job` field here; the fold (internal/evidence) treats
+// an absent Job as sorting before any present Job within the same
+// Pipeline, so same-pipeline retry ordering degrades gracefully rather
+// than becoming ambiguous.
 type EvidenceProvenance struct {
 	Source   ProvenanceSource `json:"source"`
 	Pipeline string           `json:"pipeline"`
+	Job      string           `json:"job,omitempty"`
 	Commit   string           `json:"commit"`
 }
 
 // Evidence is schema verdi.evidence/v1 (03 §Evidence records), materialized
 // under data/derived/<ref>/<commit>/ from CI bundles or local regeneration.
+//
+// Producer is a second, phase-6 addition, in the same spirit as I-25's Job
+// field and flagged as its own invention-ledger candidate: 03 §The fold
+// defines "producer" as "the declared artifact id (obligation name, golden
+// flow name, runtime check id)" and requires selecting the latest record
+// per (kind, producer), but the verdi.evidence/v1 schema as specified in 03
+// §Evidence records carries no producer field at all — only `witness`,
+// which internal/bundle populates inconsistently (a static record's
+// witness is usually "fn @ site", not the binding's producer id, once the
+// matched graph obligation has a call site) and therefore cannot reliably
+// recover producer identity by parsing. Rather than silently invent a
+// parsing convention over free-text witness, this field makes producer
+// identity explicit and optional; internal/bundle now stamps it from the
+// binding that produced the record (JoinInput.Bindings), and
+// internal/evidence falls back to grouping by (kind, witness) only when
+// Producer is genuinely absent (e.g. hand-authored or pre-I-25 fixture
+// records), which is the best-effort join the fold's "join through the
+// bindings/witness" reading allows.
 type Evidence struct {
 	Schema      string             `json:"schema"`
 	EvidenceFor []string           `json:"evidence_for"`
 	Kind        EvidenceKind       `json:"kind"`
 	Verdict     EvidenceVerdict    `json:"verdict"`
 	Witness     string             `json:"witness"`
+	Producer    string             `json:"producer,omitempty"`
 	Provenance  EvidenceProvenance `json:"provenance"`
 	Digest      string             `json:"digest"`
 }
