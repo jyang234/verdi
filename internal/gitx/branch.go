@@ -2,6 +2,7 @@ package gitx
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
 
@@ -53,4 +54,17 @@ func MergeBase(ctx context.Context, dir, a, b string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// CheckoutNewBranch creates a new branch named name at dir's current HEAD
+// and checks it out — `git checkout -b <name>` (PLAN.md Phase 7's branch-
+// cutting ritual for `design start`'s design/<name> and `feature start`'s
+// feature/<name>; 01 §Temporal classes: "a transition is always a
+// ritual"). It fails — rather than silently reusing the existing branch —
+// if name already exists, matching D3's one-writer, no-clobber posture.
+func CheckoutNewBranch(ctx context.Context, dir, name string) error {
+	if _, err := run(ctx, dir, "checkout", "-b", name); err != nil {
+		return fmt.Errorf("gitx: CheckoutNewBranch(%q): %w", name, err)
+	}
+	return nil
 }
