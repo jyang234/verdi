@@ -69,13 +69,13 @@ func Audit(root string, exemptsThreshold, deviationsThreshold int) (*AuditResult
 // snap found, reading its sibling deviation-report.md (active or archive)
 // when one exists — a story with no report yet (never built, or built but
 // never `verdi align`-ed) is skipped, not flagged: there is no
-// accepted-deviation to have accumulated. StoryACIDs (SpecStale's join
-// key, "the set of AC ids the story's own spec declares" — specstale.go's
-// own doc comment) is read from the story's `implements` link fragments:
-// the AC ids the story declares itself as implementing (02 §Link
-// taxonomy) — a story spec carries no acceptance_criteria block of its
-// own, so this is the one place a story's "own" AC ids are recorded.
-// Disclosed judgment call, cited in the phase report.
+// accepted-deviation to have accumulated. StoryACIDs (SpecStale's join key,
+// "the set of AC ids the story's OWN spec declares" — specstale.go's own
+// doc comment) is built from the story's own `acceptance_criteria:` block
+// (02 §Kind registry: round-four story specs carry their own ACs), exactly
+// as the closure gate's spec-stale condition builds it (closuregate.go), so
+// `verdi audit` surfaces the same trigger (a) the gate enforces — never the
+// feature AC ids the story implements.
 func scanSpecStale(root string, snap *lint.Snapshot, threshold int) ([]SpecStaleEntry, error) {
 	var out []SpecStaleEntry
 	for _, doc := range snap.Docs {
@@ -103,19 +103,13 @@ func scanSpecStale(root string, snap *lint.Snapshot, threshold int) ([]SpecStale
 	return out, nil
 }
 
-// storyOwnACIDs is the set of AC ids story declares via its own
-// `implements` link fragments.
+// storyOwnACIDs is the set of AC ids the story's OWN spec declares in its
+// `acceptance_criteria:` block — SpecStale's trigger-(a) join key,
+// identical to the closure gate's own construction (closuregate.go).
 func storyOwnACIDs(story *artifact.SpecFrontmatter) map[string]bool {
-	ids := make(map[string]bool)
-	for _, l := range story.Links {
-		if l.Type != artifact.LinkImplements {
-			continue
-		}
-		ref, err := artifact.ParseRef(l.Ref)
-		if err != nil || !ref.Fragment() {
-			continue
-		}
-		ids[ref.Object] = true
+	ids := make(map[string]bool, len(story.AcceptanceCriteria))
+	for _, ac := range story.AcceptanceCriteria {
+		ids[ac.ID] = true
 	}
 	return ids
 }

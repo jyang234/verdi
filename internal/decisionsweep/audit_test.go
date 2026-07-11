@@ -21,6 +21,19 @@ func storySpecMD(name string, acFragments ...string) string {
 		linksBlock + "---\nbody\n"
 }
 
+// storySpecMDWithOwnAC builds a story spec that declares its OWN
+// acceptance_criteria block (ownACID) while implementing a DIFFERENT feature
+// AC fragment (implementsFrag) — the general case where a story's own AC ids
+// and the feature AC ids it implements do not coincide. Trigger (a) must key
+// off the own AC id, never the implemented feature fragment.
+func storySpecMDWithOwnAC(name, ownACID, implementsFrag string) string {
+	return "---\nid: spec/" + name + "\nkind: spec\ntitle: \"" + name + "\"\nclass: story\nstatus: draft\nowners: [platform-team]\n" +
+		"story: jira:LOAN-1\nproblem: { text: \"p\", anchor: \"#p\" }\noutcome: { text: \"o\", anchor: \"#o\" }\n" +
+		"acceptance_criteria:\n  - { id: " + ownACID + ", text: \"own text\", evidence: [behavioral] }\n" +
+		"links:\n  - { type: implements, ref: spec/my-feature#" + implementsFrag + " }\n" +
+		"---\nbody\n"
+}
+
 func deviationReportMD(covers string, findings string) string {
 	return "---\nschema: verdi.deviation/v1\ncovers: " + covers + "\nfindings:\n" + findings + "digest: sha256:" + decisionConflictTestHex + "\n---\nbody\n"
 }
@@ -108,6 +121,42 @@ func TestAudit_SpecStaleSurfaced(t *testing.T) {
 	}
 	if !entry.Result.Flagged || !entry.Result.TriggeredByThreshold {
 		t.Fatalf("Result = %+v, want flagged via threshold (4 accepted-deviations > 3)", entry.Result)
+	}
+}
+
+// TestAudit_SpecStaleOwnTextTrigger proves trigger (a): an
+// accepted-deviation finding whose id equals one of the story's OWN declared
+// AC ids flags the story spec-stale, keyed off the story's own
+// acceptance_criteria block (matching the closure gate) — NOT off the feature
+// AC fragment the story implements. The report also carries an
+// accepted-deviation finding whose id equals the implemented FEATURE AC
+// fragment; that one must NOT trigger (a), proving audit no longer joins on
+// implements-fragment ids.
+func TestAudit_SpecStaleOwnTextTrigger(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, ".verdi/verdi.yaml", "schema: verdi.layout/v1\n")
+	writeFile(t, root, ".verdi/specs/active/own-story/spec.md",
+		storySpecMDWithOwnAC("own-story", "ac-own", "ac-feat"))
+	// Two accepted-deviations (count 2 < threshold 3, so trigger (b) is
+	// silent): one keyed on the story's own AC id (must fire trigger (a)),
+	// one keyed on the implemented feature AC fragment (must NOT).
+	findings := "  - { id: ac-own, kind: judged, text: t1, disposition: accepted-deviation, note: n1 }\n" +
+		"  - { id: ac-feat, kind: judged, text: t2, disposition: accepted-deviation, note: n2 }\n"
+	writeFile(t, root, ".verdi/specs/active/own-story/deviation-report.md", deviationReportMD("7f3c2a1", findings))
+
+	result, err := Audit(root, 3, 3)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(result.SpecStale) != 1 {
+		t.Fatalf("SpecStale = %+v, want exactly 1 entry", result.SpecStale)
+	}
+	r := result.SpecStale[0].Result
+	if !r.Flagged || r.TriggeredByThreshold {
+		t.Fatalf("Result = %+v, want flagged via own-text trigger (a), not threshold", r)
+	}
+	if len(r.OwnTextFindingIDs) != 1 || r.OwnTextFindingIDs[0] != "ac-own" {
+		t.Fatalf("OwnTextFindingIDs = %v, want exactly [ac-own] (own AC id, not the implemented feature fragment ac-feat)", r.OwnTextFindingIDs)
 	}
 }
 
