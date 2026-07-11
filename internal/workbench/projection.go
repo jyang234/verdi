@@ -81,6 +81,13 @@ type boardProjection struct {
 	Edges    []edgeView
 	Stickies []scratchStickyView
 	Tray     []reviewStickyView
+	// Notices are disclosed-unavailable banners rendered in the board
+	// chrome in EVERY mode (I-1(b)/I-2/M-4): a configured-but-unreachable
+	// review feed, or an assumed default branch. Not a projection of the
+	// four inputs — a render-time disclosure the loader attaches, so the
+	// board never renders as if a skipped input were simply absent
+	// (constitution 2/10: silence is never a pass).
+	Notices []string
 }
 
 // buildProjection computes the deterministic projection of the four

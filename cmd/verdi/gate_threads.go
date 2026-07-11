@@ -108,57 +108,86 @@ func checkReviewThreadsCondition(ctx context.Context, f forge.Forge, defaultBran
 	return gateCondition{Name: name, OK: true}, nil
 }
 
-// buildForgeBestEffort constructs the real forge adapter for root's
+// forgeBestEffort constructs the real forge adapter for root's
 // configured/detected kind (sync.go's buildForge/loadManifest/
-// forge.DetectKind, reused verbatim — no second construction path), or
-// returns nil on ANY failure or absence of real connection details (no
-// verdi.yaml, no forge: key and no auto-detectable remote, unknown kind,
-// or — forgeCredentialsPresent — no CI-provided project/repo identifier
-// in the environment). gate must never hard-fail merely because forge
-// configuration is incomplete or absent — an accepted, disclosed
-// limitation of a local/offline gate run; checkReviewThreadsCondition
-// discloses-unproven on a nil forge instead (mirrors closuregate.go's own
-// nil-forge tolerance for checkPendingSupersessionCondition).
+// forge.DetectKind, reused verbatim — no second construction path). It
+// returns two facts the read surfaces both need (I-1):
 //
-// The forgeCredentialsPresent guard also keeps this function itself
-// network-silent under `go test` (CLAUDE.md: no network in any test):
-// every fixture repo in this codebase's test suite sets `forge: gitlab`
-// (never github) precisely so that, running inside this project's own
-// GitHub Actions CI, GITHUB_REPOSITORY is real but CI_PROJECT_ID is not —
-// this guard makes that convention load-bearing rather than incidental,
-// so a test that happens to drive the real `gate` entry point
-// (TestCmdGate_SpecMR_EntryPoint) never reaches a live HTTP call.
-func buildForgeBestEffort(ctx context.Context, root string) forge.Forge {
+//   - f: the live forge, or nil when one cannot be built.
+//   - configuredKind: the forge kind NAMED in verdi.yaml or auto-detected
+//     from the remote ("" when none is — DetectKind failed). This is the
+//     "is a forge configured at all" signal, resolved WITHOUT network (a
+//     local git remote read only), so a caller can tell a
+//     configured-but-unreachable forge (disclose) apart from a genuinely
+//     unconfigured checkout (stay silent) — I-1(b).
+//
+// Construction is best-effort: gate/serve/mcp must never hard-fail merely
+// because forge config is incomplete or absent. When configuredKind is set
+// but credentials are absent, f is nil AND configuredKind is non-empty —
+// the disclosed-unavailable state. checkReviewThreadsCondition
+// discloses-unproven on a nil forge (mirrors closuregate.go's own
+// nil-forge tolerance).
+//
+// forgeCredentialsPresent keeps this network-silent under `go test`
+// (CLAUDE.md: no network in any test): a bare fixture repo, even one with
+// `forge: gitlab` in verdi.yaml, exports no forge credentials, so f is nil
+// and no adapter method is ever reachable. Local reachability is the flip
+// side of the same gate: a developer who exports the same credentials the
+// adapters read gets a live forge from `verdi serve`, no CI required.
+func forgeBestEffort(ctx context.Context, root string) (f forge.Forge, configuredKind string) {
 	manifest, err := loadManifest(root)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 	remoteURL, _ := gitx.RemoteURL(ctx, root, "origin") // best-effort: only used for auto-detect
 	kind, err := forge.DetectKind(manifest.Forge, remoteURL)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
+	// A forge IS configured from here on (kind names it). Whether it is
+	// REACHABLE depends on credentials being present in the environment.
 	if !forgeCredentialsPresent(kind) {
-		return nil
+		return nil, kind
 	}
-	f, err := buildForge(kind)
+	built, err := buildForge(kind)
 	if err != nil {
-		return nil
+		return nil, kind
 	}
+	return built, kind
+}
+
+// buildForgeBestEffort returns just the live forge (or nil) for callers
+// that do not need the configured-but-unavailable distinction (gate, mcp
+// standalone). serve.go/mcp.go read configuredKind through forgeBestEffort
+// directly to drive their disclosure.
+func buildForgeBestEffort(ctx context.Context, root string) forge.Forge {
+	f, _ := forgeBestEffort(ctx, root)
 	return f
 }
 
-// forgeCredentialsPresent reports whether the CI-provided environment
-// variables buildForge (sync.go) reads actually name a real project/repo
-// — the signal that this run is genuinely inside the forge's own CI,
-// never present in a local dev shell or a test process.
+// forgeCredentialsPresent reports whether the environment carries the
+// connection credentials the buildForge (sync.go) adapters actually read —
+// both the project/repo identifier AND the auth token. Present, the forge
+// can authenticate (in the forge's own CI or a local shell that exported
+// them); absent, no live adapter is built. Requiring the token as well as
+// the identifier means we never build a forge doomed to 401, and it keeps
+// the check hermetic under `go test`: a fixture repo exports neither, so
+// this is false regardless of which forge kind its verdi.yaml names.
 func forgeCredentialsPresent(kind string) bool {
 	switch kind {
 	case "gitlab":
-		return os.Getenv("CI_PROJECT_ID") != ""
+		return os.Getenv("CI_PROJECT_ID") != "" && os.Getenv("CI_JOB_TOKEN") != ""
 	case "github":
-		return os.Getenv("GITHUB_REPOSITORY") != ""
+		return os.Getenv("GITHUB_REPOSITORY") != "" && os.Getenv("GITHUB_TOKEN") != ""
 	default:
 		return false
 	}
+}
+
+// reviewUnavailableReason renders the disclosed-unavailable notice for a
+// configured-but-unreachable forge (I-1(b)) — one message shared by the
+// board chrome and the mcp list_annotations disclosure field so both read
+// surfaces say the same thing.
+func reviewUnavailableReason(kind string) string {
+	return fmt.Sprintf("forge %q is configured (verdi.yaml) but no credentials are available to reach it; review state cannot be shown", kind)
 }

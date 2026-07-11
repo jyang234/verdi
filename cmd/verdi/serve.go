@@ -102,20 +102,23 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 	// Real forge config takes precedence when both are present; with
 	// neither, no spec is ever under review and the board keys purely off
 	// branch state.
-	forgePort := buildForgeBestEffort(context.Background(), root)
+	forgePort, configuredKind := forgeBestEffort(context.Background(), root)
 	deps := workbench.Deps{}
 	switch {
 	case forgePort != nil:
 		deps.CommentFeed = newForgeCommentFeed(forgePort, root)
-	default:
-		if feedPath := os.Getenv("VERDI_REVIEW_FEED"); feedPath != "" {
-			feed, ferr := workbench.LoadCannedCommentFeed(feedPath)
-			if ferr != nil {
-				fmt.Fprintln(stderr, "serve:", ferr)
-				return 2
-			}
-			deps.CommentFeed = feed
+	case os.Getenv("VERDI_REVIEW_FEED") != "":
+		feed, ferr := workbench.LoadCannedCommentFeed(os.Getenv("VERDI_REVIEW_FEED"))
+		if ferr != nil {
+			fmt.Fprintln(stderr, "serve:", ferr)
+			return 2
 		}
+		deps.CommentFeed = feed
+	case configuredKind != "":
+		// A forge is named in verdi.yaml but no live adapter could be built
+		// (no credentials): disclose on the board rather than render as
+		// silently not-under-review (I-1(b)).
+		deps.ReviewUnavailable = reviewUnavailableReason(configuredKind)
 	}
 
 	httpLn, err := net.Listen("tcp", httpAddr)
@@ -149,6 +152,12 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 	// is a fully valid zero value). Same instance the workbench comment
 	// feed above uses — one construction per serve.
 	srv.Backend.Forge = forgePort
+	if forgePort == nil && configuredKind != "" {
+		// Same disclosed-unavailable state on the machine read surface:
+		// list_annotations returns a disclosure field rather than silently
+		// omitting review population (I-1(b)).
+		srv.Backend.ReviewUnavailable = reviewUnavailableReason(configuredKind)
+	}
 	// Serve blocks until ln errors — the expected path is ln.Close() from
 	// the signal handler above, a clean shutdown rather than a failure.
 	_ = srv.Serve(context.Background(), ln)

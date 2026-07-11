@@ -834,6 +834,39 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   color: var(--muted-solid);
 }
 
+/* Disclosed-unavailable board notices (I-1(b)/I-2/M-4): an advisory
+   banner — attention-drawing but not alarming — that discloses a skipped
+   input (unreachable review feed, assumed default branch) rather than
+   rendering as if it were simply absent. */
+.board-notices { display: flex; flex-direction: column; gap: 0.5rem; margin: 0 0 1rem; }
+.board-notice {
+  border: 1px solid #d9a441;
+  border-left: 3px solid #c8791b;
+  border-radius: 6px;
+  background: #fdf6e6;
+  color: #5c4410;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+.board-notice::before {
+  content: "disclosed \00b7 ";
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #8a6414;
+}
+@media (prefers-color-scheme: dark) {
+  .board-notice {
+    border-color: #6b5116;
+    border-left-color: #d9a441;
+    background: #2a2312;
+    color: #e6cf97;
+  }
+  .board-notice::before { color: #d9a441; }
+}
+
 .boardv2-canvas { overflow: auto; }
 
 /* object cards: one per frontmatter-declared object */

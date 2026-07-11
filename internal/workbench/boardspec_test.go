@@ -3,6 +3,7 @@ package workbench
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -559,5 +560,88 @@ func TestLegalEdgeTypes(t *testing.T) {
 		if got := len(legalEdgeTypes(tc.source, tc.target)); got != tc.want {
 			t.Errorf("legalEdgeTypes(%s, %s) = %d types, want %d", tc.source, tc.target, got, tc.want)
 		}
+	}
+}
+
+// erroringFeed is a CommentFeed whose call always fails — the
+// configured-but-unreachable forge from the failure side (I-2).
+type erroringFeed struct{}
+
+func (erroringFeed) ListMRComments(context.Context, string) ([]MRComment, bool, error) {
+	return nil, false, errors.New("forge unreachable: dial tcp 10.0.0.1:443: connect: connection refused")
+}
+
+// TestBoard_FeedError_DegradesNotBlocks proves I-2: a feed error on an
+// authoring board renders 200 with the board content intact PLUS a
+// disclosed notice — never a 500, never a blocked page. The feed is a
+// review-mode-only input; authoring must always render (04 §Semantics'
+// degradation posture).
+func TestBoard_FeedError_DegradesNotBlocks(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandlerWith(root, Deps{CommentFeed: erroringFeed{}})
+
+	rec := getBoard(t, h, boardFixtureName)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET board with a failing feed = %d, want 200 (never block on the feed)\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	// Board content is intact — authoring mode rendered fully.
+	if !strings.Contains(body, `data-board-mode="authoring"`) {
+		t.Error("authoring board did not render authoring mode on a feed error")
+	}
+	if !strings.Contains(body, `data-testid="card-ac-1"`) {
+		t.Error("authoring board content missing on a feed error (should be fully rendered)")
+	}
+	// The failure is disclosed, never silent.
+	if !strings.Contains(body, `data-testid="board-notice"`) || !strings.Contains(body, "review feed unavailable") {
+		t.Errorf("feed error not disclosed as a board notice:\n%s", body)
+	}
+	// The fragment surface degrades identically (post-mutation re-render).
+	frag := httptest.NewRecorder()
+	h.ServeHTTP(frag, httptest.NewRequest(http.MethodGet, "/board/spec/"+boardFixtureName+"/fragment", nil))
+	if frag.Code != http.StatusOK || !strings.Contains(frag.Body.String(), "review feed unavailable") {
+		t.Errorf("fragment on feed error = %d, want 200 with the disclosure notice", frag.Code)
+	}
+}
+
+// TestBoard_ConfiguredButUnavailable_Disclosed proves I-1(b) state 3: a
+// forge configured but with no live feed (Deps.ReviewUnavailable set)
+// discloses on the board chrome rather than rendering as silently
+// not-under-review.
+func TestBoard_ConfiguredButUnavailable_Disclosed(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandlerWith(root, Deps{ReviewUnavailable: `forge "gitlab" is configured but no credentials are available to reach it; review state cannot be shown`})
+
+	body := getBoard(t, h, boardFixtureName).Body.String()
+	if !strings.Contains(body, `data-testid="board-notice"`) || !strings.Contains(body, "review state cannot be shown") {
+		t.Errorf("configured-but-unavailable forge not disclosed on the board:\n%s", body)
+	}
+}
+
+// TestBoard_NoForge_Silent proves I-1(b) state 1: with no feed and no
+// ReviewUnavailable, the board says nothing about review — an unconfigured
+// integration legitimately stays silent (no review-specific disclosure).
+func TestBoard_NoForge_Silent(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandlerWith(root, Deps{})
+
+	body := getBoard(t, h, boardFixtureName).Body.String()
+	for _, absent := range []string{"review feed unavailable", "review state cannot be shown"} {
+		if strings.Contains(body, absent) {
+			t.Errorf("unconfigured forge should be silent, but board contains %q", absent)
+		}
+	}
+}
+
+// TestBoard_DefaultBranchAssumed_Disclosed proves M-4: a repo with no
+// origin/HEAD configured (the fixture's state) discloses the assumed "main"
+// default rather than keying authoring mode off it silently.
+func TestBoard_DefaultBranchAssumed_Disclosed(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+
+	body := getBoard(t, h, boardFixtureName).Body.String()
+	if !strings.Contains(body, `data-testid="board-notice"`) || !strings.Contains(body, "default branch could not be resolved") {
+		t.Errorf("assumed default branch not disclosed on the board:\n%s", body)
 	}
 }

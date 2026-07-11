@@ -37,6 +37,16 @@ type Backend struct {
 	// than erroring.
 	Forge forge.Forge
 
+	// ReviewUnavailable, when non-empty, is the disclosed reason a
+	// CONFIGURED forge (named in verdi.yaml) could not be reached to build
+	// a live Forge (I-1(b)). Set by cmd/verdi's serve.go/mcp.go when
+	// forgeBestEffort finds a configured kind but no credentials. It lets
+	// list_annotations distinguish "no forge configured" (Forge nil,
+	// ReviewUnavailable "" — silent, legitimate) from "configured but
+	// unavailable" (Forge nil, ReviewUnavailable set — a disclosure field
+	// in the response, never silence: constitution 2/10).
+	ReviewUnavailable string
+
 	// writeMu serializes add_annotation, the one write path: two
 	// concurrent connections calling it are ordinary (Server.Serve
 	// spawns a goroutine per connection), and while a single O_APPEND

@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -146,21 +148,59 @@ func TestBuildForgeBestEffort_NoManifest_ReturnsNil(t *testing.T) {
 	}
 }
 
+// TestForgeBestEffort_BareFixtureRepo_YieldsNil is the R4-I-28 hermeticity
+// fence (I-1(a)): a fixture repo that NAMES a forge in verdi.yaml but
+// exports no credentials must still yield a nil live forge — so `go test`
+// never dials out — while reporting the configured kind so the read
+// surfaces can disclose (I-1(b)). Credentials are explicitly cleared so
+// the assertion holds even inside this project's own CI.
+func TestForgeBestEffort_BareFixtureRepo_YieldsNil(t *testing.T) {
+	t.Setenv("CI_PROJECT_ID", "")
+	t.Setenv("CI_JOB_TOKEN", "")
+	t.Setenv("GITHUB_REPOSITORY", "")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".verdi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".verdi", "verdi.yaml"), []byte("schema: verdi.layout/v1\nforge: gitlab\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f, kind := forgeBestEffort(context.Background(), root)
+	if f != nil {
+		t.Fatalf("forgeBestEffort on a bare fixture repo = %v, want nil live forge (no credentials — go test must never dial out)", f)
+	}
+	if kind != "gitlab" {
+		t.Fatalf("configuredKind = %q, want gitlab (a forge IS named in verdi.yaml, for I-1(b) disclosure)", kind)
+	}
+}
+
 func TestForgeCredentialsPresent(t *testing.T) {
 	t.Setenv("CI_PROJECT_ID", "")
+	t.Setenv("CI_JOB_TOKEN", "")
 	t.Setenv("GITHUB_REPOSITORY", "")
+	t.Setenv("GITHUB_TOKEN", "")
 	if forgeCredentialsPresent("gitlab") {
-		t.Error(`forgeCredentialsPresent("gitlab") = true with CI_PROJECT_ID unset, want false`)
+		t.Error(`forgeCredentialsPresent("gitlab") = true with no gitlab credentials, want false`)
 	}
 	if forgeCredentialsPresent("github") {
-		t.Error(`forgeCredentialsPresent("github") = true with GITHUB_REPOSITORY unset, want false`)
+		t.Error(`forgeCredentialsPresent("github") = true with no github credentials, want false`)
 	}
 	if forgeCredentialsPresent("unknown") {
 		t.Error(`forgeCredentialsPresent("unknown") = true, want false`)
 	}
 
+	// The identifier alone is not enough — the auth token is required too,
+	// so we never build a forge doomed to 401 (and a fixture that leaks an
+	// identifier still yields nil).
 	t.Setenv("CI_PROJECT_ID", "42")
+	if forgeCredentialsPresent("gitlab") {
+		t.Error(`forgeCredentialsPresent("gitlab") = true with CI_PROJECT_ID but no CI_JOB_TOKEN, want false`)
+	}
+	t.Setenv("CI_JOB_TOKEN", "secret")
 	if !forgeCredentialsPresent("gitlab") {
-		t.Error(`forgeCredentialsPresent("gitlab") = false with CI_PROJECT_ID set, want true`)
+		t.Error(`forgeCredentialsPresent("gitlab") = false with both CI_PROJECT_ID and CI_JOB_TOKEN set, want true`)
 	}
 }

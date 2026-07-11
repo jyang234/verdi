@@ -24,16 +24,39 @@ import (
 // Deps carries the workbench's injected collaborators (04 §port
 // pattern: interfaces defined at the consumer, wired by the caller).
 type Deps struct {
-	// CommentFeed is review mode's comment source. nil means no forge is
-	// wired: no spec is ever under review and the board renders
-	// authoring/read-only purely from branch state.
+	// CommentFeed is review mode's comment source. nil means no LIVE feed
+	// is wired: either no forge is configured (the board renders
+	// authoring/read-only purely from branch state, silently — legitimate)
+	// or a forge IS configured but unreachable, in which case the caller
+	// sets ReviewUnavailable below so the board discloses rather than
+	// silently omits the review input (I-1(b)).
 	CommentFeed CommentFeed
+
+	// ReviewUnavailable, when non-empty, is the disclosed reason a
+	// configured forge could not be reached to build a live CommentFeed
+	// (e.g. named in verdi.yaml but no credentials). The board renders a
+	// visible notice in its chrome — review or authoring mode alike —
+	// distinguishing "configured but unavailable" (disclosed) from "no
+	// forge configured" (silent). Only the caller that knows the manifest
+	// (cmd/verdi's serve.go/mcp.go) can set it; unit tests wiring a feed
+	// directly leave it empty.
+	ReviewUnavailable string
 }
 
 // boardSpecServer holds the board's dependencies for one store root.
 type boardSpecServer struct {
 	root string
 	feed CommentFeed
+
+	// reviewUnavailable, when non-empty, is a disclosed reason the review
+	// feed is CONFIGURED (a forge is named in verdi.yaml) but cannot be
+	// consulted — no credentials to build a live adapter at startup. The
+	// board renders a visible notice in its chrome rather than silently
+	// reading the missing input as "not under review" (I-1(b): a
+	// configured-but-unavailable forge is disclosed, never silent;
+	// constitution 2/10). Empty means either no forge is configured (silent
+	// not-under-review is legitimate) or a live feed is wired.
+	reviewUnavailable string
 }
 
 var specNameRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -84,16 +107,29 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*boardPro
 		return nil, nil, err
 	}
 
+	// The review feed is NON-BLOCKING on every render (I-2, 04 §Semantics'
+	// degradation posture: never block rendering). A configured-but-erroring
+	// feed degrades to a disclosed notice and underReview=false — authoring
+	// and read-only boards render fully without a feed; a review board
+	// renders the projection plus the disclosure. The startup-time
+	// disclosure (forge configured but no credentials, s.reviewUnavailable)
+	// seeds the notice; a render-time transport error overrides it with the
+	// live reason.
 	var comments []MRComment
 	underReview := false
+	reviewNotice := s.reviewUnavailable
 	if s.feed != nil {
-		comments, underReview, err = s.feed.ListMRComments(ctx, name)
-		if err != nil {
-			return nil, nil, fmt.Errorf("workbench: comment feed for %s: %w", name, err)
+		c, ur, ferr := s.feed.ListMRComments(ctx, name)
+		if ferr != nil {
+			// Configured AND reachable enough to attempt, but the call
+			// failed: disclose, never silence, never a 500 (I-1(b)/I-2).
+			reviewNotice = "review feed unavailable: " + ferr.Error()
+		} else {
+			comments, underReview = c, ur
 		}
 	}
 
-	git, err := s.gitState(ctx)
+	git, gitNotice, err := s.gitState(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -115,33 +151,46 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*boardPro
 	if err != nil {
 		return nil, nil, err
 	}
+	if reviewNotice != "" {
+		proj.Notices = append(proj.Notices, reviewNotice)
+	}
+	if gitNotice != "" {
+		proj.Notices = append(proj.Notices, gitNotice)
+	}
 	return proj, git, nil
 }
 
-// gitState queries the working tree's branch and dirtiness. An unknown
-// default branch (no origin HEAD configured) falls back to "main" — the
-// board only needs a best-effort "are we on a design branch" signal.
-func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, error) {
+// gitState queries the working tree's branch and dirtiness. When the
+// default branch cannot be resolved (no origin/HEAD configured) it falls
+// back to "main" — the board needs a non-empty "are we on a design branch"
+// signal to key authoring-vs-read-only mode — but the assumption is
+// DISCLOSED, never silent (M-4): the returned notice names it, since a
+// repo whose real default is e.g. "master" would otherwise misread a
+// checkout literally on "main" as the default branch and deny authoring
+// mode. The notice feeds the board's rendered chrome at the call site.
+func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string, error) {
 	branch, err := gitx.CurrentBranch(ctx, s.root)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	def, err := gitx.DefaultBranch(ctx, s.root)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
+	notice := ""
 	if def == "" {
 		def = "main"
+		notice = `default branch could not be resolved (no origin/HEAD configured); assuming "main" — authoring-mode detection may be wrong if this repo's real default differs`
 	}
 	dirty, err := gitx.StatusDirty(ctx, s.root)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	branches, err := gitx.LocalBranches(ctx, s.root)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty}, nil
+	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty}, notice, nil
 }
 
 // errBoardNotFound distinguishes 404 from operational failures.

@@ -93,15 +93,19 @@ func (b *Backend) ListAnnotations(ctx context.Context, argsRaw json.RawMessage) 
 	// declared objects — merged into the same result set the local
 	// mutable-zone streams populate above, per 05 §MCP server's
 	// list_annotations row ("covers the R4 annotation types... and
-	// (mirrored) review stickies"). A forge error here IS surfaced (never
-	// silently swallowed — constitution 2/10); every "nothing to mirror"
-	// case (no forge, not a design branch, no open MR, non-spec target)
-	// returns (nil, nil) from reviewMirroredAnnotations itself.
-	reviewItems, err := b.reviewMirroredAnnotations(ctx, unpinned)
+	// (mirrored) review stickies"). A configured-but-unreachable forge
+	// yields a disclosure field rather than silence or a hard tool error
+	// (I-1(b)/I-2): the local annotations still return, and the agent sees
+	// review_unavailable naming why the review layer is missing.
+	reviewItems, disclosure, err := b.reviewMirroredAnnotations(ctx, unpinned)
 	if err != nil {
 		return toolError("list_annotations: " + err.Error())
 	}
 	items = append(items, reviewItems...)
 
-	return toolJSON(map[string]any{"ref": unpinned.String(), "annotations": items})
+	result := map[string]any{"ref": unpinned.String(), "annotations": items}
+	if disclosure != "" {
+		result["review_unavailable"] = disclosure
+	}
+	return toolJSON(result)
 }

@@ -124,6 +124,19 @@ func renderBoardRegion(p *boardProjection, git *boardGitState) string {
 	esc := stdhtml.EscapeString
 	authoring := p.Mode == modeAuthoring
 
+	// Disclosed-unavailable notices (I-1(b)/I-2/M-4): a configured-but-
+	// unreachable review feed, or an assumed default branch. Rendered
+	// FIRST, in every mode, and included in the post-mutation fragment
+	// (renderBoardRegion feeds both page and fragment) so the board never
+	// renders as if a skipped input were simply absent (constitution 2/10).
+	if len(p.Notices) > 0 {
+		b.WriteString(`<div class="board-notices">`)
+		for _, n := range p.Notices {
+			b.WriteString(`<div class="board-notice" data-testid="board-notice" role="status">` + esc(n) + `</div>`)
+		}
+		b.WriteString(`</div>`)
+	}
+
 	// Attribute placards (element taxonomy row 1): the spec's problem
 	// and outcome, pinned across the top like the two index cards a
 	// murder board starts from.

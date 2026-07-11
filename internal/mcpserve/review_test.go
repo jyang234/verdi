@@ -43,15 +43,40 @@ func buildReviewFixture(t *testing.T) *fixturegit.Repo {
 	return repo
 }
 
-func TestReviewMirroredAnnotations_NilForge(t *testing.T) {
+// TestReviewMirroredAnnotations_NilForge_NotConfigured proves the first of
+// the three I-1(b) states: no forge configured (Forge nil AND
+// ReviewUnavailable "") is silent — nil items, NO disclosure.
+func TestReviewMirroredAnnotations_NilForge_NotConfigured(t *testing.T) {
 	repo := buildReviewFixture(t)
 	b := &Backend{Root: repo.Dir}
-	items, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
+	items, disclosure, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
 	if err != nil {
 		t.Fatalf("reviewMirroredAnnotations: %v", err)
 	}
 	if items != nil {
 		t.Fatalf("items = %+v, want nil (no forge configured)", items)
+	}
+	if disclosure != "" {
+		t.Fatalf("disclosure = %q, want empty (unconfigured forge is silent, not disclosed)", disclosure)
+	}
+}
+
+// TestReviewMirroredAnnotations_NilForge_ConfiguredButUnavailable proves
+// the third I-1(b) state: a forge is configured but no live adapter could
+// be built (ReviewUnavailable set) — nil items but a DISCLOSURE, never
+// silence (constitution 2/10).
+func TestReviewMirroredAnnotations_NilForge_ConfiguredButUnavailable(t *testing.T) {
+	repo := buildReviewFixture(t)
+	b := &Backend{Root: repo.Dir, ReviewUnavailable: "forge \"gitlab\" is configured but no credentials are available"}
+	items, disclosure, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
+	if err != nil {
+		t.Fatalf("reviewMirroredAnnotations: %v", err)
+	}
+	if items != nil {
+		t.Fatalf("items = %+v, want nil (no live forge)", items)
+	}
+	if disclosure == "" {
+		t.Fatal("disclosure = empty, want the configured-but-unavailable reason (never silent)")
 	}
 }
 
@@ -65,7 +90,7 @@ func TestReviewMirroredAnnotations_NotDesignBranch(t *testing.T) {
 	f := forgefake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "1", SourceBranch: "main", Title: "irrelevant"})
 	b := &Backend{Root: repo.Dir, Forge: f}
-	items, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
+	items, _, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
 	if err != nil {
 		t.Fatalf("reviewMirroredAnnotations: %v", err)
 	}
@@ -79,7 +104,7 @@ func TestReviewMirroredAnnotations_NoOpenMR(t *testing.T) {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	f := forgefake.New() // nothing seeded
 	b := &Backend{Root: repo.Dir, Forge: f}
-	items, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
+	items, _, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
 	if err != nil {
 		t.Fatalf("reviewMirroredAnnotations: %v", err)
 	}
@@ -105,7 +130,7 @@ func TestReviewMirroredAnnotations_TokenResolvesAndResolutionState(t *testing.T)
 	f.SeedThreadResolution("5", forge.ThreadResolution{ThreadID: "t1", Resolved: true, ResolvedBy: "reviewer"})
 
 	b := &Backend{Root: repo.Dir, Forge: f}
-	items, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
+	items, _, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
 	if err != nil {
 		t.Fatalf("reviewMirroredAnnotations: %v", err)
 	}
@@ -138,7 +163,7 @@ func TestReviewMirroredAnnotations_UnresolvedThreadStaysOpen(t *testing.T) {
 	f.SeedComment("5", forge.Comment{ID: "c1", ThreadID: "t1", Body: "[vd:ac-2] reword?"})
 
 	b := &Backend{Root: repo.Dir, Forge: f}
-	items, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
+	items, _, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
 	if err != nil {
 		t.Fatalf("reviewMirroredAnnotations: %v", err)
 	}
@@ -148,21 +173,28 @@ func TestReviewMirroredAnnotations_UnresolvedThreadStaysOpen(t *testing.T) {
 }
 
 // erroringOpenMRForge wraps the fake forge but fails ListOpenMRs, proving
-// a genuine forge transport failure surfaces as a real error rather than
-// being swallowed alongside the legitimate "nothing to mirror" cases.
+// a live-forge transport failure DEGRADES to a disclosure (I-1(b)/I-2:
+// non-blocking, never silence, never a hard tool error) rather than
+// failing the whole read — the local annotations still return.
 type erroringOpenMRForge struct{ *forgefake.Forge }
 
 func (erroringOpenMRForge) ListOpenMRs(ctx context.Context, targetBranch string) ([]forge.OpenMR, error) {
 	return nil, errors.New("forge: simulated transport failure")
 }
 
-func TestReviewMirroredAnnotations_ForgeErrorSurfaces(t *testing.T) {
+func TestReviewMirroredAnnotations_ForgeErrorDegradesToDisclosure(t *testing.T) {
 	repo := buildReviewFixture(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	b := &Backend{Root: repo.Dir, Forge: erroringOpenMRForge{forgefake.New()}}
-	_, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
-	if err == nil {
-		t.Fatal("reviewMirroredAnnotations with a failing ListOpenMRs: want error, got nil")
+	items, disclosure, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
+	if err != nil {
+		t.Fatalf("reviewMirroredAnnotations: want nil error (degrades to disclosure), got %v", err)
+	}
+	if items != nil {
+		t.Fatalf("items = %+v, want nil on a failing feed", items)
+	}
+	if disclosure == "" {
+		t.Fatal("disclosure = empty, want a review-population-unavailable notice (never silence)")
 	}
 }
 
@@ -210,5 +242,43 @@ func TestListAnnotations_MergesLocalAndReviewItems(t *testing.T) {
 	}
 	if !sawLocal || !sawReview {
 		t.Fatalf("Annotations = %+v, want both a local comment and a mirrored review item", decoded.Annotations)
+	}
+}
+
+// TestListAnnotations_ConfiguredButUnavailable_Disclosed proves I-1(b) on
+// the machine read surface: a forge configured but with no live adapter
+// (Backend.ReviewUnavailable set, Forge nil) makes list_annotations return
+// a review_unavailable disclosure field rather than silently omitting the
+// review layer — while still returning whatever local annotations exist.
+func TestListAnnotations_ConfiguredButUnavailable_Disclosed(t *testing.T) {
+	repo := buildReviewFixture(t)
+	b := &Backend{Root: repo.Dir, ReviewUnavailable: `forge "gitlab" is configured but no credentials are available`}
+
+	result := b.ListAnnotations(context.Background(), mustArgs(t, map[string]string{"ref": "spec/loan-update"}))
+	if isToolError(result) {
+		t.Fatalf("ListAnnotations returned an error result: %s", toolResultText(t, result))
+	}
+	var decoded struct {
+		ReviewUnavailable string           `json:"review_unavailable"`
+		Annotations       []annotationItem `json:"annotations"`
+	}
+	toolResultJSON(t, result, &decoded)
+	if decoded.ReviewUnavailable == "" {
+		t.Fatal("review_unavailable field absent — a configured-but-unavailable forge must disclose, never stay silent")
+	}
+}
+
+// TestListAnnotations_NoForge_NoDisclosure proves the silent state on the
+// machine surface: no forge configured at all yields NO review_unavailable
+// field (an unconfigured integration is legitimately silent).
+func TestListAnnotations_NoForge_NoDisclosure(t *testing.T) {
+	repo := buildReviewFixture(t)
+	b := &Backend{Root: repo.Dir}
+
+	result := b.ListAnnotations(context.Background(), mustArgs(t, map[string]string{"ref": "spec/loan-update"}))
+	var raw map[string]any
+	toolResultJSON(t, result, &raw)
+	if _, present := raw["review_unavailable"]; present {
+		t.Fatalf("review_unavailable present with no forge configured, want absent (silent): %#v", raw)
 	}
 }

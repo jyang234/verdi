@@ -30,57 +30,69 @@ import (
 // whose [vd:<object-id>] token resolves against unpinned's OWN declared
 // objects (02 §Record schemas' comment-token grammar; 05 §Review stickies
 // and forge round-trip), mirrored into annotationItem shape (type:
-// "review"). Returns (nil, nil) — never an error — for every case where
-// there is honestly nothing to mirror rather than a failure:
+// "review"). It returns three things: the mirrored items, a DISCLOSURE
+// string (non-empty when a configured forge could not be consulted — the
+// caller surfaces it as a response field, never silence, I-1(b)), and an
+// error reserved for truly unexpected operational failures.
 //
-//   - b.Forge is nil (no forge configured/reachable for this checkout);
-//   - the current checkout is not on a design branch at all (05 §Review
-//     stickies and forge round-trip: "accepted specs on main" have no
-//     open MR to host review stickies against — "there is no open MR to
-//     host them");
+// Three states (I-1(b)):
+//
+//   - No forge configured (b.Forge nil AND b.ReviewUnavailable "") →
+//     (nil, "", nil): silent not-under-review, legitimate.
+//   - Forge configured but unreachable (b.Forge nil AND b.ReviewUnavailable
+//     set, OR a live forge whose call fails) → (nil, disclosure, nil):
+//     disclosed-unavailable, never silence.
+//   - Forge reachable → (items, "", nil).
+//
+// The remaining "nothing to mirror" cases below are genuine silent states,
+// not failures, and return (nil, "", nil):
+//
+//   - the current checkout is not on a design branch at all (accepted
+//     specs on main have no open MR to host review stickies against);
 //   - the default branch cannot be resolved;
 //   - no open MR is found whose source branch is the current design
 //     branch (nothing pushed/opened yet);
 //   - unpinned does not resolve to a spec at all (only spec objects are
 //     ever [vd:<object-id>] token targets, §Object model).
 //
-// A genuine forge transport failure (the forge WAS reachable enough to
-// attempt the call) is still returned as an error — this function does
-// not swallow real operational failures, only "nothing to mirror" states.
-func (b *Backend) reviewMirroredAnnotations(ctx context.Context, unpinned artifact.Ref) ([]annotationItem, error) {
+// A forge transport failure (the forge WAS reachable enough to attempt the
+// call) DEGRADES to a disclosure rather than a hard tool error, matching
+// the board's non-blocking posture (I-2) and gate_threads.go's
+// disclosed-unproven stance — the local annotations still return.
+func (b *Backend) reviewMirroredAnnotations(ctx context.Context, unpinned artifact.Ref) ([]annotationItem, string, error) {
 	if b.Forge == nil {
-		return nil, nil
+		return nil, b.ReviewUnavailable, nil
 	}
 
 	branch, err := gitx.CurrentBranch(ctx, b.Root)
 	if err != nil || !strings.HasPrefix(branch, "design/") {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	spec, ok := b.readSpecFrontmatter(unpinned)
 	if !ok {
-		return nil, nil
+		return nil, "", nil
 	}
 	declared := artifact.DeclaredObjectIDs(spec)
 	if len(declared) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	defaultBranch := lint.ResolveDefaultBranch(ctx, b.Root)
 	if defaultBranch == "" {
-		return nil, nil
+		return nil, "", nil
 	}
 	mrID, err := forge.FindOpenMR(ctx, b.Forge, defaultBranch, branch)
 	if err != nil {
-		return nil, fmt.Errorf("mcpserve: listing open MRs for review population: %w", err)
+		return nil, fmt.Sprintf("review population unavailable: %v", err), nil
 	}
 	if mrID == "" {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	comments, err := b.Forge.ListComments(ctx, mrID)
 	if err != nil {
-		return nil, fmt.Errorf("mcpserve: listing review comments for MR %s: %w", mrID, err)
+		return nil, fmt.Sprintf("review population unavailable: %v", err), nil
 	}
 
 	// Resolution state is best-effort: a query failure here still leaves
@@ -120,7 +132,7 @@ func (b *Backend) reviewMirroredAnnotations(ctx context.Context, unpinned artifa
 			ObjectID: objID,
 		})
 	}
-	return items, nil
+	return items, "", nil
 }
 
 // readSpecFrontmatter reads unpinned's backing file from the current

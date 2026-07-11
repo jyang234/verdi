@@ -120,8 +120,14 @@ func serveStandalone(root string, stdin io.Reader, stdout, stderr io.Writer) int
 	// valid Backend.Forge zero value (review.go degrades to "no review
 	// population" — every other tool is unaffected), so a missing/
 	// unreachable forge is never an operational error for `verdi mcp`
-	// itself. Mirrors gate_threads.go's identical tolerance.
-	srv.Backend.Forge = buildForgeBestEffort(context.Background(), root)
+	// itself. Mirrors gate_threads.go's identical tolerance. When a forge
+	// is CONFIGURED but unreachable, list_annotations discloses rather than
+	// silently omitting review population (I-1(b)).
+	forgePort, configuredKind := forgeBestEffort(context.Background(), root)
+	srv.Backend.Forge = forgePort
+	if forgePort == nil && configuredKind != "" {
+		srv.Backend.ReviewUnavailable = reviewUnavailableReason(configuredKind)
+	}
 	if err := mcpserve.ServeConn(context.Background(), stdin, stdout, srv); err != nil && !errors.Is(err, io.EOF) {
 		fmt.Fprintln(stderr, "mcp:", err)
 		return 2
