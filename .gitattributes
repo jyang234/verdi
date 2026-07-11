@@ -1,0 +1,6 @@
+# Repository plumbing (02 §Repository plumbing; VL-012). forge: gitlab in
+# .verdi/verdi.yaml, so these use gitlab-generated; a github: store would
+# use linguist-generated instead.
+.verdi/specs/*/*/board.json          gitlab-generated
+.verdi/specs/*/*/rollup.json         gitlab-generated
+.verdi/specs/*/*/deviation-report.md gitlab-generated

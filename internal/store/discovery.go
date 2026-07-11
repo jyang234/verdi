@@ -32,10 +32,18 @@ var openAPICandidates = []string{"openapi.yaml", "openapi.yml", "openapi.json"}
 // skipDirNames are directory names DiscoverServices never descends into,
 // beyond the .verdi/data special case handled separately (01 §Store
 // manifest service-discovery row: "skip .git, .verdi/data, node_modules-ish
-// noise").
+// noise"). "testdata" joined this set in phase 4: this module's own
+// testdata/svcfix and testdata/corpus fixtures are real, flowmap-shaped
+// service roots (needed to exercise discovery itself), and without this
+// exclusion self-hosting verdi's own store (PLAN.md Phase 4) discovers
+// them as if they were live services of this repo — PLAN.md §2 already
+// designates testdata/ as "the hermetic fixture" directory store-wide, so
+// this is the same noise class .git/node_modules already are, not a new
+// policy.
 var skipDirNames = map[string]bool{
 	".git":         true,
 	"node_modules": true,
+	"testdata":     true,
 }
 
 // Service is one discovered service root: a directory containing

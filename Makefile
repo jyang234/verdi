@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt fmt-check lint verify tidy fixture
+.PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store
 
 # Pin for the lint target's version-drift warning. Not yet installed by the
 # CI skeleton (phase 1 has no network-dependent tool bootstrap); once CI
@@ -6,6 +6,11 @@
 # there too. Kept in lockstep with verdi-go's own pin so results agree
 # across the workspace if both are ever run side by side.
 GOLANGCI_LINT_VERSION ?= v2.5.0
+
+# Where lint-store builds the real verdi binary (gitignored — see root
+# .gitignore). Distinct from `build`, which compiles every package but
+# writes no binary anywhere useful to exec.
+LINT_STORE_BIN := .build/verdi
 
 build:
 	go build ./...
@@ -55,10 +60,18 @@ lint:
 fixture:
 	go test -race ./internal/fixturegit/... ./internal/corpus/...
 
+# lint-store builds the real verdi binary and runs `verdi lint` against
+# this repo's own self-hosted store (PLAN.md Phase 4: "eat the dog food" —
+# .verdi/specs/active/ holds the six component specs). Build-then-exec, not
+# `go run`, so the gate exercises the exact binary CI would ship.
+lint-store:
+	go build -o $(LINT_STORE_BIN) ./cmd/verdi
+	$(LINT_STORE_BIN) lint
+
 # verify is the per-phase gate: it must stay green at the end of every
 # phase (CLAUDE.md). It grows — never shrinks — to add integration, e2e,
 # and spec-align gates by the end of the build (PLAN.md §2).
-verify: build fmt-check vet lint test fixture
+verify: build fmt-check vet lint test fixture lint-store
 	@echo "verify OK"
 
 tidy:
