@@ -169,6 +169,27 @@ func loadService(dir string) (*Service, error) {
 	return svc, nil
 }
 
+// FilterImpacted returns the subset of services whose Name is listed in
+// impacts, preserving services' original (Dir-sorted, deterministic) order.
+// Shared by cmd/verdi's baseline regeneration (`design start`/`feature
+// start`) and internal/align's computed-section regeneration — both scope a
+// discovered service set down to one spec's declared impacts: (CLAUDE.md:
+// "anything used by two or more packages lives in a shared internal/
+// package").
+func FilterImpacted(services []Service, impacts []string) []Service {
+	want := make(map[string]bool, len(impacts))
+	for _, i := range impacts {
+		want[i] = true
+	}
+	var out []Service
+	for _, svc := range services {
+		if want[svc.Name] {
+			out = append(out, svc)
+		}
+	}
+	return out
+}
+
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
