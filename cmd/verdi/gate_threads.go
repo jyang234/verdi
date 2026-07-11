@@ -82,7 +82,7 @@ func checkReviewThreadsCondition(ctx context.Context, f forge.Forge, defaultBran
 		}, nil
 	}
 
-	mrID, err := findOpenMRSourceBranch(ctx, f, defaultBranchRef, branch)
+	mrID, err := forge.FindOpenMR(ctx, f, defaultBranchRef, branch)
 	if err != nil {
 		return gateCondition{}, fmt.Errorf("listing open MRs to find this design branch's spec MR: %w", err)
 	}
@@ -106,22 +106,6 @@ func checkReviewThreadsCondition(ctx context.Context, f forge.Forge, defaultBran
 		return gateCondition{Name: name, Reason: fmt.Sprintf("unresolved review thread(s): %v", unresolved)}, nil
 	}
 	return gateCondition{Name: name, OK: true}, nil
-}
-
-// findOpenMRSourceBranch returns the forge-native id of the open MR
-// targeting defaultBranchRef whose source branch is branch, or "" if none
-// is open yet.
-func findOpenMRSourceBranch(ctx context.Context, f forge.Forge, defaultBranchRef, branch string) (string, error) {
-	mrs, err := f.ListOpenMRs(ctx, defaultBranchRef)
-	if err != nil {
-		return "", err
-	}
-	for _, mr := range mrs {
-		if mr.SourceBranch == branch {
-			return mr.ID, nil
-		}
-	}
-	return "", nil
 }
 
 // buildForgeBestEffort constructs the real forge adapter for root's

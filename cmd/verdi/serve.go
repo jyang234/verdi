@@ -92,20 +92,30 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// Review mode's comment feed (05 §Review stickies): until V1-P7's
-	// forge port is adapted over workbench.CommentFeed at the wave close,
-	// the only wiring is the hermetic canned-file feed the e2e harness
-	// injects (VERDI_REVIEW_FEED — a strict-decoded local JSON file, no
-	// network). Unset, no spec is ever under review and the board keys
-	// purely off branch state.
+	// Review mode's comment feed (05 §Review stickies). The real source is
+	// the forge adapter over workbench.CommentFeed (reviewfeed.go), built
+	// from the same best-effort forge that feeds mcpserve's review-sticky
+	// mirror below — a single forge construction, reused. When no real
+	// forge is configured/reachable (the hermetic e2e harness, any offline
+	// checkout) it falls back to the canned-file feed the harness injects
+	// (VERDI_REVIEW_FEED — a strict-decoded local JSON file, no network).
+	// Real forge config takes precedence when both are present; with
+	// neither, no spec is ever under review and the board keys purely off
+	// branch state.
+	forgePort := buildForgeBestEffort(context.Background(), root)
 	deps := workbench.Deps{}
-	if feedPath := os.Getenv("VERDI_REVIEW_FEED"); feedPath != "" {
-		feed, ferr := workbench.LoadCannedCommentFeed(feedPath)
-		if ferr != nil {
-			fmt.Fprintln(stderr, "serve:", ferr)
-			return 2
+	switch {
+	case forgePort != nil:
+		deps.CommentFeed = newForgeCommentFeed(forgePort, root)
+	default:
+		if feedPath := os.Getenv("VERDI_REVIEW_FEED"); feedPath != "" {
+			feed, ferr := workbench.LoadCannedCommentFeed(feedPath)
+			if ferr != nil {
+				fmt.Fprintln(stderr, "serve:", ferr)
+				return 2
+			}
+			deps.CommentFeed = feed
 		}
-		deps.CommentFeed = feed
 	}
 
 	httpLn, err := net.Listen("tcp", httpAddr)
@@ -136,8 +146,9 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 	// missing/unreachable forge never blocks `verdi serve` from starting;
 	// list_annotations' review-sticky mirrored population (05 §MCP
 	// server) just degrades to "no review population" (Backend.Forge nil
-	// is a fully valid zero value).
-	srv.Backend.Forge = buildForgeBestEffort(context.Background(), root)
+	// is a fully valid zero value). Same instance the workbench comment
+	// feed above uses — one construction per serve.
+	srv.Backend.Forge = forgePort
 	// Serve blocks until ln errors — the expected path is ln.Close() from
 	// the signal handler above, a clean shutdown rather than a failure.
 	_ = srv.Serve(context.Background(), ln)

@@ -70,16 +70,9 @@ func (b *Backend) reviewMirroredAnnotations(ctx context.Context, unpinned artifa
 	if defaultBranch == "" {
 		return nil, nil
 	}
-	mrs, err := b.Forge.ListOpenMRs(ctx, defaultBranch)
+	mrID, err := forge.FindOpenMR(ctx, b.Forge, defaultBranch, branch)
 	if err != nil {
 		return nil, fmt.Errorf("mcpserve: listing open MRs for review population: %w", err)
-	}
-	var mrID string
-	for _, mr := range mrs {
-		if mr.SourceBranch == branch {
-			mrID = mr.ID
-			break
-		}
 	}
 	if mrID == "" {
 		return nil, nil

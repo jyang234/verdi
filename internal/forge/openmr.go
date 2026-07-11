@@ -20,6 +20,33 @@
 // round-trip) and creates no dependency on that later wave.
 package forge
 
+import "context"
+
+// FindOpenMR discovers the open MR targeting targetBranch whose source
+// (head) branch is sourceBranch, returning its forge-native id or "" when
+// no such MR is open yet. This is the ONE branch-scoped MR-discovery
+// mechanism three callers share (CLAUDE.md: anything used by two or more
+// packages lives in a shared internal/ package, no third copy):
+// cmd/verdi/gate_threads.go's spec-MR review-thread gate condition,
+// internal/mcpserve/review.go's mirrored review-sticky population
+// (R4-I-29), and the workbench comment-feed adapter — each maps its own
+// notion of "this spec's design branch" to sourceBranch, then asks the
+// same question of the same port. A "" result is the honest "nothing is
+// open yet" state (a local run before the design branch is pushed), never
+// an error.
+func FindOpenMR(ctx context.Context, f Forge, targetBranch, sourceBranch string) (mrID string, err error) {
+	mrs, err := f.ListOpenMRs(ctx, targetBranch)
+	if err != nil {
+		return "", err
+	}
+	for _, mr := range mrs {
+		if mr.SourceBranch == sourceBranch {
+			return mr.ID, nil
+		}
+	}
+	return "", nil
+}
+
 // OpenMR is one open (unmerged) merge/pull request targeting a branch,
 // through whichever forge hosts the store.
 type OpenMR struct {
