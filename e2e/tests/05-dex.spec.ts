@@ -21,6 +21,31 @@ test("an authored-living dex page renders its last-modified banner", async ({ pa
   await expect(banner).not.toContainText("point-in-time record");
 });
 
+test("highlighted code is legible in dark mode (light-on-dark, not github light ink)", async ({ page }) => {
+  // The svcfix boundary-contract permalink pretty-prints its JSON through
+  // chroma. In a dark-mode browser the page background goes dark; the
+  // defect was that chroma's pinned github (light) palette was baked inline
+  // into the HTML, leaving near-black code on the dark page. With
+  // class-based output plus the composed github-dark palette, the same
+  // markup must restyle to light-on-dark.
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto(`${dexBase}/a/svc/svcfix/boundary-contract/`);
+
+  const code = page.locator("pre.chroma-chroma").first();
+  await expect(code).toBeVisible();
+
+  const { color, background } = await code.evaluate((el) => {
+    const cs = getComputedStyle(el as HTMLElement);
+    return { color: cs.color, background: cs.backgroundColor };
+  });
+
+  // github-dark: foreground #e6edf3, background #0d1117 — i.e. light text on
+  // a dark block, the opposite of the github light ink that would have
+  // shown through before the fix.
+  expect(background).toBe("rgb(13, 17, 23)");
+  expect(color).toBe("rgb(230, 237, 243)");
+});
+
 test("dex search returns a known hit", async ({ page }) => {
   await page.goto(`${dexBase}/search/`);
   await page.fill("#search-box", "outbox");

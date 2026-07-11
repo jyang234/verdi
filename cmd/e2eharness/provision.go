@@ -32,6 +32,16 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return fmt.Errorf("copying committed zone: %w", err)
 	}
 
+	// Fold in testdata/svcfix as a real service root (it carries a
+	// .flowmap.yaml plus a .flowmap/boundary-contract.json), so the built
+	// dex site gains a by-service axis and a boundary-contract permalink
+	// whose JSON is pretty-printed through chroma — the one e2e page with a
+	// highlighted code block, which the dark-mode syntax-highlighting check
+	// (05-dex.spec) needs something real to assert against.
+	if err := copyTree(filepath.Join(moduleRoot, "testdata", "svcfix"), filepath.Join(storeRoot, "svcfix")); err != nil {
+		return fmt.Errorf("copying svcfix service: %w", err)
+	}
+
 	manifest := "schema: verdi.layout/v1\nforge: gitlab\nproviders:\n  jira:\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\nservices:\n  discovery: flowmap\n"
 	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", "verdi.yaml"), []byte(manifest), 0o644); err != nil {
 		return err

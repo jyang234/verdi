@@ -21,10 +21,6 @@
     --accent: #60a5fa;
     --card-bg: #1f2937;
   }
-  /* internal/render.ChromaDarkCSS() (github-dark) is composed in at the
-     marker below by internal/dex.StyleCSS — kept as a marker, not
-     hand-pasted, so chroma stays the one source of truth for token colours. */
-  /* CHROMA-DARK-PALETTE */
 }
 
 * { box-sizing: border-box; }
@@ -112,14 +108,24 @@ pre { padding: 0.75rem; overflow-x: auto; border-radius: 0.4rem; border: 1px sol
 pre.mermaid { background: var(--card-bg); }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
-/* Syntax-highlighting palette (light, default). internal/render's light
-   github palette is composed in at the marker below by
-   internal/dex.StyleCSS; the dark counterpart lives in the
-   prefers-color-scheme:dark block above. Chroma emits no inline colour, so
-   these two class-based palettes are the ONLY place code colour is defined
-   — which is what lets a dark-mode browser restyle highlighted code instead
-   of showing the light palette baked into the HTML. */
+/* Syntax-highlighting palettes. Chroma emits no inline colour, so these two
+   class-based palettes are the ONLY place code colour is defined — which is
+   what lets a dark-mode browser restyle highlighted code instead of showing
+   one theme's ink baked into the HTML. internal/render's github (light) and
+   github-dark palettes are composed in at the two markers below by
+   internal/dex.StyleCSS.
+
+   Unlike this file's --fg/--bg tokens — resolved at their use site, so their
+   dark override can sit up top — chroma palettes carry CONCRETE colours, so
+   source order decides the cascade. The dark palette therefore gets its OWN
+   prefers-color-scheme:dark block placed AFTER the light default here (not
+   folded into the token override block above): both rules match in dark
+   mode, and the later one must be the dark one, or the light ink wins and
+   the code is unreadable — exactly the defect this fixes. */
 /* CHROMA-LIGHT-PALETTE */
+@media (prefers-color-scheme: dark) {
+/* CHROMA-DARK-PALETTE */
+}
 
 .entry-list { list-style: none; padding: 0; }
 .entry-list li { padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
