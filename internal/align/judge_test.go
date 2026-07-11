@@ -58,9 +58,48 @@ const fakeJudgeTimeoutScript = `sleep 5
 echo "should never get here"
 `
 
+// judgeTestBudget bounds every runJudgeOnce call in this file that is NOT
+// itself testing the timeout stage (TestRunJudgeOnce_Timeout, below, keeps
+// its own short, deliberately tight timeout — that IS the behavior under
+// test there).
+//
+// This is a fix for a proven flake, not a guess: a flat 1-second injected
+// timeout on these calls was observed failing StageTimeout under
+// full-module `go test -race` load three times across this build (always
+// passing standalone). Reproduced on demand by running this package's
+// tests concurrently with the rest of the module under -race (see the
+// phase report for the captured run) — every failure showed
+// Stage:timeout, Detail:"no result within 1s", never a wrong finding or a
+// wrong OTHER stage. The fake judge scripts here do near-zero real work
+// (a `cat <<EOF` heredoc or an `echo`); the time that blows through 1s
+// under load is the OS scheduling this test's own os/exec fork+exec of
+// /bin/sh, competing with the rest of the module's `-race`-instrumented
+// goroutines for CPU — not the judge logic being slow. Sizing the budget
+// as a `context.WithTimeout` deadline handed to runJudgeOnce as ctx (with
+// the `timeout` parameter itself left at its zero-value default, so
+// runJudgeOnce's OWN timeout-selection logic — "timeout<=0 uses
+// DefaultJudgeTimeout" — stays exercised exactly as production calls it)
+// is deadline-from-context, not a blind widening of the injected
+// duration: the deadline these tests actually race against is expressed
+// once, here, reasoned about explicitly, and stays two orders of
+// magnitude below DefaultJudgeTimeout's 120s ceiling — a genuine
+// timeout-logic regression (e.g. the real timeout silently not firing at
+// all) still fails this test suite within judgeTestBudget, not by hanging
+// for the full 120s or forever.
+const judgeTestBudget = 10 * time.Second
+
+// judgeTestContext returns a context bounded by judgeTestBudget, cleaned
+// up automatically at the end of the calling test.
+func judgeTestContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), judgeTestBudget)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 func TestRunJudgeOnce_Success(t *testing.T) {
 	script := writeFakeJudge(t, fakeJudgeOKScript)
-	success, failure := runJudgeOnce(context.Background(), ExecJudgeRunner{}, []string{script}, time.Second, []byte("prompt bytes"))
+	success, failure := runJudgeOnce(judgeTestContext(t), ExecJudgeRunner{}, []string{script}, 0, []byte("prompt bytes"))
 	if failure != nil {
 		t.Fatalf("runJudgeOnce: unexpected failure %+v", failure)
 	}
@@ -84,7 +123,7 @@ func TestRunJudgeOnce_Success(t *testing.T) {
 
 func TestRunJudgeOnce_FencedResult(t *testing.T) {
 	script := writeFakeJudge(t, fakeJudgeFencedScript)
-	success, failure := runJudgeOnce(context.Background(), ExecJudgeRunner{}, []string{script}, time.Second, []byte("p"))
+	success, failure := runJudgeOnce(judgeTestContext(t), ExecJudgeRunner{}, []string{script}, 0, []byte("p"))
 	if failure != nil {
 		t.Fatalf("runJudgeOnce: unexpected failure %+v", failure)
 	}
@@ -113,7 +152,7 @@ func TestRunJudgeOnce_FailureModes(t *testing.T) {
 			} else {
 				argv = []string{writeFakeJudge(t, tc.script)}
 			}
-			success, failure := runJudgeOnce(context.Background(), ExecJudgeRunner{}, argv, time.Second, []byte("p"))
+			success, failure := runJudgeOnce(judgeTestContext(t), ExecJudgeRunner{}, argv, 0, []byte("p"))
 			if success != nil {
 				t.Fatalf("runJudgeOnce(%s): unexpected success %+v", tc.name, success)
 			}
@@ -131,7 +170,7 @@ func TestRunJudgeOnce_FailureModes(t *testing.T) {
 
 	t.Run("non-zero exit records exit code and stderr", func(t *testing.T) {
 		script := writeFakeJudge(t, fakeJudgeNonZeroExitScript)
-		_, failure := runJudgeOnce(context.Background(), ExecJudgeRunner{}, []string{script}, time.Second, []byte("p"))
+		_, failure := runJudgeOnce(judgeTestContext(t), ExecJudgeRunner{}, []string{script}, 0, []byte("p"))
 		if failure.ExitCode != 3 {
 			t.Fatalf("ExitCode = %d, want 3", failure.ExitCode)
 		}
@@ -142,7 +181,14 @@ func TestRunJudgeOnce_FailureModes(t *testing.T) {
 }
 
 // TestRunJudgeOnce_Timeout exercises the timeout stage with a short
-// injected Timeout, never S5's real ~120s ceiling.
+// injected Timeout, never S5's real ~120s ceiling. Unlike every other test
+// in this file, this one is DELIBERATELY tight (100ms) — it is the
+// regression detector for the timeout mechanism itself, so it must stay
+// sensitive rather than getting the judgeTestBudget treatment above. It is
+// not part of the proven flake (judgeTestBudget's doc comment) and does
+// not need to be: fakeJudgeTimeoutScript always sleeps 5s regardless of
+// scheduling load, an interval no plausible fork/exec scheduling jitter
+// approaches, so a 100ms timeout fires deterministically either way.
 func TestRunJudgeOnce_Timeout(t *testing.T) {
 	script := writeFakeJudge(t, fakeJudgeTimeoutScript)
 	start := time.Now()
