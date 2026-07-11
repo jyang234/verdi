@@ -34,6 +34,15 @@ coordinated change everywhere, so the contract is versioned
 - **Never duplicate git.** Frontmatter carries no created/updated dates —
   git owns time. The exceptions are load-bearing stamps: `frozen:` and
   `decided:` (ADRs), which record doctrine-relevant moments, not file history.
+- **Attestation/waiver names.** These two kinds nest their path by story and
+  AC (`attestations/<story-slug>/<ac-id>.md`), which the `kind/name` grammar
+  does not otherwise express. Their canonical `name` is the compound slug
+  `<story-slug>--<ac-id>` (e.g. `attestation/jira-loan-1482--ac-2`), where
+  `<story-slug>` is `RefSlug` (store-layout spec) of the owning feature
+  spec's scheme-prefixed `story:` ref — never a bare tracker key, which
+  collides across schemes. The path stays the nested two-level form;
+  VL-002 defers path/id agreement for these two kinds to VL-011, which maps
+  the compound name back onto the nested path.
 - **External refs (provisional).** In-place service artifacts — boundary
   contracts, obligations, goldens, OpenAPI files — get read-only identity
   minted by the index from discovery: `svc/<service>/<artifact>[/<name>]`,
@@ -52,6 +61,7 @@ coordinated change everywhere, so the contract is versioned
 id: <kind>/<name>          # required, must agree with path
 kind: spec | adr | diagram | attestation | waiver
 title: string              # required
+schema: string             # optional; this document's own schema, e.g. verdi.artifact/v1
 status: <per-kind enum>    # required
 owners: [string]           # required; team or CODEOWNERS-resolvable handles
 links:                     # optional, typed edges (see taxonomy)
@@ -71,6 +81,12 @@ fail (VL-001), and YAML anchors, aliases, and custom tags are rejected outright
 implementations converge on identical decodes. One vendored parser, behind a
 single import seam, decodes every schema in this contract.
 
+`schema:` is optional and unconstrained in form — a free string identifying
+a document's own schema version. Every component spec in this system's
+own reading order carries one (e.g. this document's `verdi.artifact/v1`);
+strict decode accepts the field on every kind so a self-hosted schema
+document is never rejected for describing itself.
+
 ## Kind registry
 
 | Kind        | Dir              | Form | Statuses                          | Temporal class            |
@@ -83,12 +99,21 @@ single import seam, decodes every schema in this contract.
 | waiver      | waivers/         | file | active → expired                  | frozen at commit          |
 | conflict    | conflicts/       | file | open → superseded \| dismissed    | frozen at resolution      |
 
+Attestation and waiver paths nest by story and AC —
+`attestations/<story-slug>/<ac-id>.md`, `waivers/<story-slug>/<ac-id>.md` —
+per §Identity and references' compound-name rule; VL-011 enforces the
+mapping.
+
 Spec classes:
 
-- **feature** — story-linked. Requires exactly one `story:` link
-  (`jira:KEY` form), an `acceptance_criteria:` block (evidence-model spec),
-  and optionally `context:` (pinned manifest), `impacts: [service...]`, and
-  `declares:` (intended boundaries). Lifecycle is two-MR: the spec gets its
+- **feature** — story-linked. Requires exactly one `story:` **scalar**
+  field (`jira:KEY` form) as the canonical reference; an optional mirroring
+  `links[]` entry of type `story` is allowed but must agree with the
+  scalar — VL-005 validates the scalar's scheme and configuredness and
+  rejects a `links[]` mirror that disagrees with it. Also requires an
+  `acceptance_criteria:` block (evidence-model spec), and optionally
+  `context:` (pinned manifest), `impacts: [service...]`, and `declares:`
+  (intended boundaries). Lifecycle is two-MR: the spec gets its
   **own MR** from a design branch, and *merging that MR is acceptance*.
   `verdi accept <spec>` performs the mechanical flip as the final action on
   the design branch — sets `status: accepted-pending-build` and writes the
@@ -172,10 +197,22 @@ rendered form labels each section `computed` or `judged`.
 `verdi verify-artifact <ref>` recomputes digests and checks integrity
 hashes, reporting each separately.
 
+Every `digest` and `integrity` value in this contract is computed over a
+**canonical JSON byte form**, mirroring upstream verdi-go's own `canonjson`:
+object keys sorted, no HTML escaping, one trailing newline. Two
+semantically equal values always serialize identically regardless of map
+iteration or struct field order — the property digests depend on;
+`encoding/json`'s unordered default is digest-unstable and MUST NOT be used
+directly for hashed content.
+
 ## Record schemas (working area)
 
-**Annotation** (`data/mutable/annotations/<kind>--<name>.jsonl`, append-only;
-schema `verdi.annotation/v1`):
+**Annotation** (`data/mutable/annotations/<kind>--<name>.jsonl` for targeted
+annotations, append-only; schema `verdi.annotation/v1`). Board-only
+annotations (no `target`) have no ref to derive a filename from, so they
+get their own stream: `annotations/board--<story-slug>.jsonl`, where
+`<story-slug>` is `RefSlug` of the board key (see the board-state entry
+below for the board-key namespace this slug is drawn from).
 
 ```json
 { "id": "a-01J...", "ts": "2026-07-10T14:02:11Z", "author": "john",
@@ -186,16 +223,37 @@ schema `verdi.annotation/v1`):
   "body": "string", "status": "open | resolved | graduated" }
 ```
 
-`target` is optional: a free-floating sticky — the normal early state of a
-murder board — is a record with `board` and no `target`. At least one of
-`target` or `board` MUST be present. Anchors pin to a commit; drift against
-the working tree is computed three-valued (fresh / moved / gone) and
-displayed, never silently healed.
+`id` is `a-<ULID>`: a sortable, monotonic identifier matching the shape
+above. `target` is optional: a free-floating sticky — the normal early
+state of a murder board — is a record with `board` and no `target`. At
+least one of `target` or `board` MUST be present.
+
+Anchor drift is computed three-valued against the *current* working tree
+(never re-resolved against the pinned commit — drift measures change since
+the pin): **fresh** — the selector's quote is still found within the
+section under its pinned heading; **moved** — the quote is not under its
+pinned heading but is found verbatim elsewhere in the current document;
+**gone** — the quote is not found anywhere (including the target artifact
+no longer resolving at all). Matching is exact, never fuzzy: a near-miss
+is `moved` or `gone`, honestly, not silently healed to `fresh`.
 
 **Board state** (`data/mutable/boards/<story>.json`, autosaved; schema
 `verdi.board/v1`): `pins` (pinned refs + x/y), `stickies` (annotation ids +
-x/y), `yarn` (proto-links). The frozen `board.json` committed at
-commit-to-design is this schema plus a `frozen` stamp and provenance.
+x/y), `yarn` (proto-links). The `<story>` key here is an **opaque, verbatim
+filename stem** — a separate namespace from the scheme-prefixed `story:`
+ref feature specs carry, and not required to parse as one (a board can
+exist before a story ref is even chosen). Commit-to-design takes an
+explicit `story_ref` parameter for the new spec's `story:` field,
+defaulting to the board key itself only when the board key is already
+shaped like a scheme-prefixed ref (`scheme:key`) — no invented bridge
+between the two namespaces otherwise.
+
+The frozen `board.json` committed at commit-to-design is this schema plus
+a `frozen` stamp and provenance: `digest` is sha256 of the canonical JSON
+(§Generated artifacts and digests) of `{pins, stickies, yarn}` only — never
+the raw file bytes, which would couple the digest to formatting — and
+`inputs` is the mutable board file named as `path@commit` plus every
+distinct pinned ref among `pins`.
 
 ## Lint rules
 
@@ -208,13 +266,13 @@ run locally and as a CI gate. Rules:
 | VL-001  | frontmatter present, decodes strictly against kind schema; the restricted dialect is enforced here (anchors, aliases, custom tags fail) |
 | VL-002  | id/path agreement; global ref uniqueness. Status-in-path applies to the feature class only: superseded component specs remain in `specs/active/` |
 | VL-003  | all link refs resolve — verdi refs against the committed zone, `svc/...` external refs against discovery, and `evidence-for` bindings in discovered `verdi.bindings.yaml` sidecars (evidence-model spec) against the named spec's ACs; pins name real commits |
-| VL-004  | status transitions legal per kind; `status: draft` MUST NOT exist on the default branch |
+| VL-004  | status transitions legal per kind; `status: draft` MUST NOT exist on the default branch — enforced when linting the default branch itself or a change targeting it (CI vars, or a local merge-base against the default branch); elsewhere a bare warning, since always-enforcing would break ordinary design branches |
 | VL-005  | feature spec has exactly one `story:` link with a configured scheme           |
 | VL-006  | every AC declares ≥1 expected evidence kind (activation lint)                 |
 | VL-007  | unknown entries directly under `.verdi/` fail (D1)                            |
 | VL-008  | generated provenance in committed zone ⇒ on `gated_generated` allowlist OR frozen-stamped |
 | VL-009  | frozen artifacts carry valid `frozen` stamp and provenance where generated    |
-| VL-010  | frozen artifacts are immutable: any diff touching a frozen file fails, except a pure rename within an active→archive move |
+| VL-010  | frozen artifacts are immutable: any diff touching a frozen file fails, except a pure rename within an active→archive move — the diff base is `merge-base(HEAD, default branch)`; uncommitted edits to a frozen file are errors too |
 | VL-011  | attestation/waiver files live under the story/AC they name; waiver has owner + reason, expiry optional |
 | VL-012  | `.gitattributes` marks all committed-generated paths with the configured forge's generated attribute (`gitlab-generated` on GitLab, `linguist-generated` on GitHub) |
 | VL-013  | nothing under `.verdi/data/` is ever git-tracked (`git add -f` is intent; lint catches it) |
