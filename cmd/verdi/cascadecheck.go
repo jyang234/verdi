@@ -50,7 +50,7 @@ import (
 // consistent-with-its-siblings option and discloses the choice rather than
 // silently picking one.
 func checkCascadeReaffirmation(root string, spec *artifact.SpecFrontmatter) (ok bool, reason string, err error) {
-	byFeature := implementsByFeature(spec)
+	byFeature := evidence.ImplementsByFeature(spec.Links)
 	if len(byFeature) == 0 {
 		return true, "", nil
 	}
@@ -103,23 +103,6 @@ func checkCascadeReaffirmation(root string, spec *artifact.SpecFrontmatter) (ok 
 		}
 	}
 	return true, "", nil
-}
-
-// implementsByFeature groups spec's implements-edge object ids by target
-// feature spec name.
-func implementsByFeature(spec *artifact.SpecFrontmatter) map[string][]string {
-	out := make(map[string][]string)
-	for _, l := range spec.Links {
-		if l.Type != artifact.LinkImplements {
-			continue
-		}
-		ref, err := artifact.ParseRef(l.Ref)
-		if err != nil || !ref.Fragment() {
-			continue
-		}
-		out[ref.Name] = append(out[ref.Name], ref.Object)
-	}
-	return out
 }
 
 // findSupersedingSpec scans specs/active/ for a spec carrying a

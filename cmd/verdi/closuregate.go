@@ -150,7 +150,7 @@ func checkSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manife
 func checkPendingSupersessionCondition(ctx context.Context, f forge.Forge, defaultBranchRef string, spec *artifact.SpecFrontmatter) (gateCondition, error) {
 	name := "3. no unresolved pending-supersession flag"
 
-	byFeature := implementsByFeature(spec)
+	byFeature := evidence.ImplementsByFeature(spec.Links)
 	if len(byFeature) == 0 {
 		// The story implements no feature — there is no open-supersession
 		// input to fold at all, so the condition is genuinely satisfied.
