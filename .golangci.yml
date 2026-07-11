@@ -1,0 +1,50 @@
+# golangci-lint v2 configuration for the verdi module.
+#
+# Posture: the v2 "standard" linter set (errcheck, govet, ineffassign,
+# staticcheck, unused) — the same set verdi-go gates on, kept in lockstep so
+# results agree across the workspace (../CLAUDE.md: "golangci-lint-clean" is
+# a ground rule; verdi-go/.golangci.yml is the parity reference). staticcheck
+# and unused are NEVER disabled: unused code is deleted, not silenced.
+#
+# The only errcheck exclusions are two genuinely-unactionable patterns, each
+# justified below. They are deliberately narrow: no blanket test-file carve-
+# out, no whole-linter disables.
+version: "2"
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      exclude-functions:
+        # CLI/HTTP/hash output writes: every fmt.Fprint* finding in this tree
+        # targets an output sink — os.Stdout/os.Stderr (and their injected
+        # deps.Stdout/deps.Stderr test doubles), an http.ResponseWriter, a
+        # tabwriter over stdout, or a hash.Hash — where a write error is
+        # unactionable (headers are already sent / the process is mid-render)
+        # and never signals data loss to a persisted file. Audited: no
+        # fmt.Fprint* in this module writes to a file opened for writing.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # Read-only-body Close: HTTP response bodies and zip entries, whose
+        # static type is io.ReadCloser (Close declared via embedded
+        # io.Closer). Reading is finished; the close error is unactionable
+        # and cannot indicate lost written bytes.
+        - (io.Closer).Close
+        # Network/server teardown Close: dialed/accepted conns, listeners,
+        # and http.Server shutdown. These are shutdown-phase closes whose
+        # error cannot signal a persisted-file write loss — the class the
+        # task sanctions under "(io.Closer).Close in defers", listed by
+        # concrete type because errcheck maps a method to the interface that
+        # DECLARES it (net.Conn/net.Listener declare Close directly, so
+        # (io.Closer).Close above does not match them).
+        - (net.Conn).Close
+        - (net.Listener).Close
+        - (*net/http.Server).Close
+        # NOTE: (*os.File).Close is deliberately NOT excluded. An os.File may
+        # be a written file, where a swallowed Close hides truncation — the
+        # real-bug class. Every os.File close in this tree is instead handled
+        # at the call site: write-path closes are checked and propagated
+        # (atomic writers' `cerr := tmp.Close()`, copyFile's returned
+        # out.Close()); read-only and error-cleanup closes are explicitly
+        # `_ =`-discarded.
