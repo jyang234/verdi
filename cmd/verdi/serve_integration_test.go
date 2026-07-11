@@ -231,8 +231,8 @@ func TestD3_ConcurrentSecondProcessRoutesThroughSocket(t *testing.T) {
 		t.Fatalf("verdi mcp tools/list: no result: %#v", toolsResp)
 	}
 	tools, _ := toolsResult["tools"].([]any)
-	if len(tools) != 8 {
-		t.Fatalf("verdi mcp tools/list returned %d tools through the socket, want 8", len(tools))
+	if len(tools) != 9 {
+		t.Fatalf("verdi mcp tools/list returned %d tools through the socket, want 9", len(tools))
 	}
 
 	// Clean up process B: closing stdin signals EOF on the stdin->socket
