@@ -178,8 +178,10 @@ reopened per story:
    - **Stub-matched fast path.** `verdi accept` computes stub-match: the
      story's `implements` fragment set equals a stub's declared AC set,
      `RefSlug(title)` equals the stub's slug, the story introduces no
-     `supersedes`/`exempts` edges, and carries no undispositioned judged
-     findings. A stub-matched story is eligible for **single-approver
+     `supersedes`/`exempts` edges — with one exception, adjudicated at W3
+     review: a `supersedes` of its own predecessor **story** spec (the
+     rung-3 chain edge) does not disqualify; decision- or ADR-targeting
+     edges do — and carries no undispositioned judged findings. A stub-matched story is eligible for **single-approver
      acceptance**, and verdi writes `stub_matched: true` into the
      acceptance stamp — a disclosed marker, never a silent relaxation. The
      scoping review already happened at the feature MR; stub-match is
