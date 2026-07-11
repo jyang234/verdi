@@ -44,9 +44,12 @@ func Resolve(root, arg string) (*artifact.SpecFrontmatter, error) {
 	}
 
 	// (a) A scheme-prefixed story ref: match it against every active
-	// feature spec's story: field. The scheme (the part before ":") need
-	// not be a configured provider — an unmatched story ref simply names
-	// no spec.
+	// feature spec's story: field — UNCHANGED from pre-round-four (see
+	// matchStoryRef's own doc comment for why this function deliberately
+	// stays feature-class-only rather than also matching class: story
+	// specs, even though round four gives stories their own story: field
+	// too). The scheme (the part before ":") need not be a configured
+	// provider — an unmatched story ref simply names no spec.
 	if scheme, key, ok := strings.Cut(arg, ":"); ok && scheme != "" && key != "" {
 		return matchStoryRef(root, arg)
 	}
@@ -54,8 +57,24 @@ func Resolve(root, arg string) (*artifact.SpecFrontmatter, error) {
 	return nil, fmt.Errorf("%q is neither a scheme-prefixed story ref (e.g. jira:LOAN-1482) nor a spec ref (e.g. spec/stale-decline); this verb accepts exactly those two forms", arg)
 }
 
-// matchStoryRef returns the single active feature spec whose story: field
-// equals storyRef, erroring if none — or more than one — does.
+// matchStoryRef returns the single active class: feature spec whose
+// story: field equals storyRef, erroring if none — or more than one —
+// does. Deliberately UNCHANGED from pre-round-four (V1-P4 tried, then
+// reverted, widening this to also match class: story specs — see the
+// phase report's disclosed judgment call): this function is Resolve's
+// shared seam, consumed by every ref/story-argument-taking verb
+// (matrix, rollup, the verdict viewer, MCP tools, and more), all of which
+// already depend on its feature-only resolution semantics against the
+// real corpus (testdata/corpus/'s stale-decline, class: feature, and
+// borrower-update-api, class: story, both legitimately carry
+// story: jira:LOAN-1482 — a feature's OPTIONAL epic/objective story: field
+// and a story's REQUIRED own story: field are different tracker refs that
+// can coincide with no reserved-uniqueness rule against each other, so
+// widening this shared function silently changes which spec several
+// unrelated, already-shipped call sites resolve to). `verdi build start`'s
+// own need to resolve a bare story ref against a class: story spec is
+// solved locally, in cmd/verdi/buildstart.go's resolveBuildTarget, which
+// layers on top of this function rather than changing its behavior.
 func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 	dir := filepath.Join(root, ".verdi", "specs", "active")
 	entries, err := os.ReadDir(dir)
@@ -99,24 +118,32 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 // spec a build branch belongs to.
 const buildBranchPrefix = "feature/"
 
-// ResolveBuildSpec infers the feature spec a build branch is for, given
+// ResolveBuildSpec infers the build-head spec a build branch is for, given
 // only the currently checked-out branch's short name — the resolution
 // `verdi align` and `verdi gate` use (PLAN.md Phase 8, 05 §CLI: neither
 // verb takes a story/spec argument; both "generate ... for the build head"
-// / gate it). branch must have the "feature/<name>" shape `feature start`
-// cuts; anything else (a detached HEAD, main, a design/ branch, ...) is an
-// operational error naming the expected convention rather than silently
-// guessing which spec is in scope.
+// / gate it). branch must have the "feature/<name>" shape `verdi build
+// start` (and its deprecation alias, `feature start`) cuts; anything else
+// (a detached HEAD, main, a design/ branch, ...) is an operational error
+// naming the expected convention rather than silently guessing which spec
+// is in scope. V1-P4: the resolved spec may be a round-four class: story
+// spec (the actual buildable unit, 03 §Lifecycle: the feature-first
+// cascade) or a grandfathered v0 class: feature spec (A8, pre-round-four's
+// single-level model) — build start cuts the SAME "feature/<name>" branch
+// shape for both, so this inference must accept both classes exactly as
+// storyresolve.Resolve's own doc comment already does; only a class:
+// component spec (no story, no acceptance criteria — nothing to gate or
+// align) is rejected.
 func ResolveBuildSpec(root, branch string) (*artifact.SpecFrontmatter, error) {
 	name, ok := strings.CutPrefix(branch, buildBranchPrefix)
 	if !ok || name == "" {
-		return nil, fmt.Errorf("storyresolve: current branch %q is not a build branch (want feature/<name>, cut by `verdi feature start`)", branch)
+		return nil, fmt.Errorf("storyresolve: current branch %q is not a build branch (want feature/<name>, cut by `verdi build start`)", branch)
 	}
 	spec, err := LoadActiveSpec(root, name)
 	if err != nil {
 		return nil, err
 	}
-	if spec.Class != artifact.ClassFeature {
+	if spec.Class == artifact.ClassComponent {
 		return nil, fmt.Errorf("storyresolve: build branch %q resolves to %s, a component spec (no story, no acceptance criteria)", branch, spec.ID)
 	}
 	return spec, nil
