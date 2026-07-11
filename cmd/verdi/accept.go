@@ -1,9 +1,13 @@
-// verdi accept <spec-ref> (05 §CLI, PLAN.md Phase 7): the design branch's
-// final action — mechanically flips a draft feature spec's
+// verdi accept <spec-ref> (05 §CLI, R4-I-12): the design branch's final
+// action — mechanically flips a draft spec's
 // `status: draft -> accepted-pending-build` and writes the frozen stamp
 // (`commit` = the content-final sha it supersedes, `at` = that commit's
 // own committer date — never wall clock), then commits the flip. Merging
 // the resulting spec MR to main *is* acceptance (03 §Lifecycle: two MRs).
+// Round four widens accept from feature-only to both spec classes
+// (feature and story share one lifecycle, 02 §Kind registry): a story
+// spec's acceptance additionally computes R4-I-12's stub-match (below) and
+// stamps `stub_matched: true` into the same frozen block when it holds.
 // Kept in its own file per the lint.go/sync.go/matrix.go/dex.go
 // convention.
 package main
@@ -15,14 +19,16 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 
 	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/store"
+	"github.com/OWNER/verdi/internal/storyresolve"
 )
 
 // draftStatusLineRe matches the scaffold's own `status: draft` frontmatter
-// line (design.go's scaffoldDraftSpec always writes exactly this form),
+// line (design.go's scaffold functions always write exactly this form),
 // tolerating an optional surrounding quote so a human's re-quoting edit
 // during the design branch does not break the flip.
 var draftStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?draft"?\s*$`)
@@ -70,13 +76,14 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		fmt.Fprintf(stderr, "accept: %s: %v\n", specPath, err)
 		return 2
 	}
+	_ = body
 
-	if spec.Class != artifact.ClassFeature {
-		fmt.Fprintf(stderr, "accept: %s is a %s spec (no story, no acceptance criteria); only a feature spec can be accepted\n", ref.String(), spec.Class)
+	if spec.Class != artifact.ClassFeature && spec.Class != artifact.ClassStory {
+		fmt.Fprintf(stderr, "accept: %s is a %s spec (no story, no acceptance criteria); only a feature or story spec can be accepted\n", ref.String(), spec.Class)
 		return 1
 	}
 	if spec.Status != "draft" {
-		fmt.Fprintf(stderr, "accept: %s status is %q, not draft; only a draft feature spec can be accepted\n", ref.String(), spec.Status)
+		fmt.Fprintf(stderr, "accept: %s status is %q, not draft; only a draft spec can be accepted\n", ref.String(), spec.Status)
 		return 1
 	}
 
@@ -105,8 +112,48 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	}
 	at := commitDate[:10]
 
+	stubMatched := false
+	if spec.Class == artifact.ClassStory {
+		var reason string
+		stubMatched, reason = computeStubMatch(root, spec)
+		if stubMatched {
+			fmt.Fprintf(stdout, "accept: %s: stub-matched (R4-I-12): eligible for single-approver acceptance (forge/CODEOWNERS configuration, never verdi-enforced)\n", ref.String())
+		} else {
+			fmt.Fprintf(stdout, "accept: %s: not stub-matched (%s): full review applies\n", ref.String(), reason)
+		}
+	}
+
+	// Rung-4 blast-radius-priced quorum disclosure (03 §The amendment
+	// ladder rung 4, blastradius.go): fires only when the feature being
+	// accepted itself carries a supersession: block — i.e. this accept IS
+	// a rung-4 supersession's acceptance MR, never an ordinary first
+	// acceptance. verdi computes and discloses the label; it never
+	// enforces an approval count (03: "the mechanics of counting
+	// approvals stay repo/CODEOWNERS configuration either way").
+	if spec.Class == artifact.ClassFeature && spec.Supersession != nil {
+		radius, berr := computeBlastRadius(root, spec)
+		if berr != nil {
+			fmt.Fprintln(stderr, "accept:", berr)
+			return 2
+		}
+		if radius.PredecessorRef != "" {
+			affectedRefs := make([]string, len(radius.Affected))
+			for i, a := range radius.Affected {
+				affectedRefs[i] = a.SpecRef
+			}
+			fmt.Fprintf(stdout, "accept: %s: rung-4 feature supersession of %s — %d affected in-flight/closed stor(y/ies) %v -> computed quorum: %s (disclosed fact; approval-count enforcement stays forge/CODEOWNERS configuration, never verdi behavior, 03 §The amendment ladder)\n",
+				ref.String(), radius.PredecessorRef, len(radius.Affected), affectedRefs, radius.Quorum)
+		}
+	}
+
+	frozenLine := fmt.Sprintf("frozen: { at: %s, commit: %s", at, preFlipHead)
+	if stubMatched {
+		frozenLine += ", stub_matched: true"
+	}
+	frozenLine += " }"
+
 	newFm := draftStatusLineRe.ReplaceAll(fm, []byte("status: accepted-pending-build"))
-	newFm = append(newFm, []byte(fmt.Sprintf("\nfrozen: { at: %s, commit: %s }", at, preFlipHead))...)
+	newFm = append(newFm, []byte("\n"+frozenLine)...)
 
 	// Self-validate the flipped content before writing anything to disk
 	// (CLAUDE.md: "never fake success").
@@ -117,6 +164,10 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	}
 	if flipped.Status != "accepted-pending-build" || flipped.Frozen == nil || flipped.Frozen.Commit != preFlipHead {
 		fmt.Fprintln(stderr, "accept: internal error: flipped frontmatter does not carry the expected status/frozen stamp")
+		return 2
+	}
+	if flipped.Frozen.StubMatched != stubMatched {
+		fmt.Fprintln(stderr, "accept: internal error: flipped frontmatter's stub_matched does not match the computed value")
 		return 2
 	}
 
@@ -136,6 +187,184 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	}
 
 	fmt.Fprintf(stdout, "accept: %s status: draft -> accepted-pending-build\n", ref.String())
-	fmt.Fprintf(stdout, "accept: frozen: { at: %s, commit: %s }\n", at, preFlipHead)
+	fmt.Fprintf(stdout, "accept: frozen: { at: %s, commit: %s, stub_matched: %t }\n", at, preFlipHead, stubMatched)
 	return 0
+}
+
+// computeStubMatch implements R4-I-12's four-condition stub-match test for
+// a story spec being accepted (03 §Lifecycle: the feature-first cascade,
+// "Stub-matched fast path"): the story's implements fragment set equals a
+// stub's declared AC set, RefSlug(title) equals that same stub's slug, the
+// story introduces no supersedes/exempts edges, and it carries no
+// undispositioned judged findings. It never fails runAccept outright —
+// a non-match just means "full review applies" (03: "Stories that deviate
+// from the plan ... get full review"), so every miss degrades to
+// (false, reason) rather than an error.
+//
+// Condition (d), "no undispositioned judged findings": at accept time (a
+// design-branch action, before any build) the only judged-findings surface
+// this system defines is the design-branch decision-conflict report (03
+// §Decision-conflict gate) — a later phase's deliverable (internal/align's
+// design-branch mode, out of this phase's scope). Disclosed judgment call:
+// this function looks for that report at its one documented reuse point —
+// the same verdi.deviation/v1-shaped schema and Finding.Dispositioned()
+// rule the build-branch alignment report already uses (03: "structured
+// into the same computed/judged split") — at the conventional path
+// .verdi/specs/active/<name>/decision-conflict-report.md. Its absence is
+// read as "no judged findings exist yet to disposition" (vacuously
+// satisfied), not as a failure: unlike the merge gate's condition 3 (which
+// requires a FRESH report to exist because build-branch alignment is
+// mandatory machinery), the design-branch sweep is optional exploratory
+// tooling this phase does not build, so a store without one yet must not
+// have every story spec permanently stub-match-ineligible.
+func computeStubMatch(root string, story *artifact.SpecFrontmatter) (matched bool, reason string) {
+	featureName, acIDs, err := storyImplementsTarget(story)
+	if err != nil {
+		return false, err.Error()
+	}
+	if featureName == "" {
+		return false, "no implements edges (spike or malformed story)"
+	}
+
+	feature, err := storyresolve.LoadActiveSpec(root, featureName)
+	if err != nil {
+		return false, fmt.Sprintf("implements-target feature %q could not be loaded: %v", featureName, err)
+	}
+	if feature.Class != artifact.ClassFeature {
+		return false, fmt.Sprintf("implements-target %q is a %s spec, not a feature spec", featureName, feature.Class)
+	}
+
+	implSet := sortedSet(acIDs)
+	var matchedStub *artifact.Stub
+	for i := range feature.Stubs {
+		if equalSortedSets(implSet, sortedSet(feature.Stubs[i].AcceptanceCriteria)) {
+			matchedStub = &feature.Stubs[i]
+			break
+		}
+	}
+	if matchedStub == nil {
+		return false, "implements-set does not equal any of the feature's declared stub AC sets"
+	}
+
+	if store.RefSlug(story.Title) != matchedStub.Slug {
+		return false, fmt.Sprintf("RefSlug(title) %q does not equal the matched stub's slug %q", store.RefSlug(story.Title), matchedStub.Slug)
+	}
+
+	if hasSupersedesOrExempts(story) {
+		return false, "story carries a supersedes/exempts edge"
+	}
+
+	dispositioned, why := judgedFindingsClear(root, story)
+	if !dispositioned {
+		return false, why
+	}
+
+	return true, ""
+}
+
+// storyImplementsTarget gathers the single feature spec name every
+// implements edge on story targets, plus the union of AC ids those edges
+// name. An error is returned only when implements edges name more than one
+// distinct feature — everything else (no edges at all) is reported via the
+// zero-value featureName, left for the caller to read as "not matched".
+func storyImplementsTarget(story *artifact.SpecFrontmatter) (featureName string, acIDs []string, err error) {
+	for _, l := range story.Links {
+		if l.Type != artifact.LinkImplements {
+			continue
+		}
+		ref, perr := artifact.ParseRef(l.Ref)
+		if perr != nil || !ref.Fragment() {
+			continue // already lint-checked elsewhere; ignore malformed edges here
+		}
+		if featureName == "" {
+			featureName = ref.Name
+		} else if featureName != ref.Name {
+			return "", nil, fmt.Errorf("implements edges span more than one feature (%s, %s)", featureName, ref.Name)
+		}
+		acIDs = append(acIDs, ref.Object)
+	}
+	return featureName, acIDs, nil
+}
+
+// hasSupersedesOrExempts reports whether story carries any supersedes/
+// exempts edge, at the top level or on any of its decisions (03: "the
+// story introduces no supersedes/exempts edges").
+func hasSupersedesOrExempts(story *artifact.SpecFrontmatter) bool {
+	for _, l := range story.Links {
+		if l.Type == artifact.LinkSupersedes || l.Type == artifact.LinkExempts {
+			return true
+		}
+	}
+	for _, d := range story.Decisions {
+		for _, l := range d.Links {
+			if l.Type == artifact.LinkSupersedes || l.Type == artifact.LinkExempts {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// judgedFindingsClear checks the design-branch decision-conflict report
+// (see computeStubMatch's doc comment for the disclosed judgment call on
+// where/whether this artifact exists at accept time).
+func judgedFindingsClear(root string, story *artifact.SpecFrontmatter) (bool, string) {
+	specRef, err := artifact.ParseRef(story.ID)
+	if err != nil {
+		return true, "" // unreachable: story.ID already decoded successfully
+	}
+	path := filepath.Join(root, ".verdi", "specs", "active", specRef.Name, "decision-conflict-report.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, ""
+		}
+		return false, fmt.Sprintf("reading decision-conflict-report.md: %v", err)
+	}
+	fm, _, err := artifact.SplitFrontmatter(raw)
+	if err != nil {
+		return false, fmt.Sprintf("decision-conflict-report.md: %v", err)
+	}
+	decoded, err := artifact.DecodeDeviation(fm)
+	if err != nil {
+		return false, fmt.Sprintf("decision-conflict-report.md failed to decode: %v", err)
+	}
+	var undispositioned []string
+	for _, f := range decoded.Findings {
+		if !f.Dispositioned() {
+			undispositioned = append(undispositioned, f.ID)
+		}
+	}
+	if len(undispositioned) > 0 {
+		sort.Strings(undispositioned)
+		return false, fmt.Sprintf("undispositioned judged finding(s): %v", undispositioned)
+	}
+	return true, ""
+}
+
+func sortedSet(ids []string) []string {
+	out := append([]string(nil), ids...)
+	sort.Strings(out)
+	// dedup
+	uniq := out[:0]
+	var last string
+	for i, id := range out {
+		if i == 0 || id != last {
+			uniq = append(uniq, id)
+		}
+		last = id
+	}
+	return uniq
+}
+
+func equalSortedSets(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
