@@ -95,8 +95,11 @@ type StoryProvider interface {
     `verdi.yaml`) set to a compact JSON payload
     `{ commit, eligible, criteria: [{id, status}] }` — this is what the
     workflow validator reads (OQ-1);
-  - a **human comment**, posted only when any AC status changed since the
-    last publish: the criteria table plus a link to the MR/pipeline.
+  - a **human comment**, posted when any AC status changed since the last
+    publish — including the very first publish for a story, which always
+    counts as changed (there is no prior baseline to diff against, so the
+    PM learns the initial state): the criteria table plus a link to the
+    MR/pipeline.
 - **Secrets**: token via `VERDI_JIRA_TOKEN` (CI variable / local env). Only
   ids and URLs live in `verdi.yaml`; credentials are never committed.
 
@@ -104,5 +107,11 @@ type StoryProvider interface {
 
 The port ships with a fake provider and a contract-test suite that every
 adapter must pass (resolve happy path, not-found, publish idempotency,
-comment-only-on-change). Fixtures are hermetic and committed, in the
-verdi-go style, so the whole story pipeline tests without network.
+comment-only-on-change). The resolve happy-path assertion is
+harness-declared, not echo-based: the suite checks `Resolve`'s returned
+URL against a per-adapter expectation the harness itself supplies, rather
+than requiring every adapter to echo back an arbitrary seeded `Story.URL`
+— a construct-from-config adapter (e.g. Jira, which builds a browse URL
+from `base_url` plus the issue key) can never echo an arbitrary seeded
+host. Fixtures are hermetic and committed, in the verdi-go style, so the
+whole story pipeline tests without network.
