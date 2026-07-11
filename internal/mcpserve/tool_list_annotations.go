@@ -19,6 +19,13 @@ type annotationItem struct {
 	Status string                `json:"status"`
 	Target *targetItem           `json:"target,omitempty"`
 	Board  *artifact.BoardAnchor `json:"board,omitempty"`
+	// ObjectID is set only on a mirrored review-sticky item (Type
+	// "review", review.go, V1-P7): the spec object id its
+	// [vd:<object-id>] token resolved to (02 §Record schemas'
+	// comment-token grammar) — "tokens resolved to object ids", 05 §MCP
+	// server's list_annotations row. Omitted for every other annotation
+	// type, which anchor via Target's selector instead.
+	ObjectID string `json:"object_id,omitempty"`
 }
 
 // targetItem mirrors artifact.Target but adds the computed Drift field
@@ -80,5 +87,21 @@ func (b *Backend) ListAnnotations(ctx context.Context, argsRaw json.RawMessage) 
 			Board:  a.Board,
 		})
 	}
+
+	// Review population (V1-P7, review.go): mirrored, read-only, live
+	// forge review comments whose token resolves to one of unpinned's OWN
+	// declared objects — merged into the same result set the local
+	// mutable-zone streams populate above, per 05 §MCP server's
+	// list_annotations row ("covers the R4 annotation types... and
+	// (mirrored) review stickies"). A forge error here IS surfaced (never
+	// silently swallowed — constitution 2/10); every "nothing to mirror"
+	// case (no forge, not a design branch, no open MR, non-spec target)
+	// returns (nil, nil) from reviewMirroredAnnotations itself.
+	reviewItems, err := b.reviewMirroredAnnotations(ctx, unpinned)
+	if err != nil {
+		return toolError("list_annotations: " + err.Error())
+	}
+	items = append(items, reviewItems...)
+
 	return toolJSON(map[string]any{"ref": unpinned.String(), "annotations": items})
 }

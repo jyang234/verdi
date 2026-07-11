@@ -116,6 +116,12 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "serve: workbench at http://%s\n", httpLn.Addr())
 
 	srv := mcpserve.NewServer(root)
+	// Best-effort (V1-P7): see mcp.go's identical comment — a
+	// missing/unreachable forge never blocks `verdi serve` from starting;
+	// list_annotations' review-sticky mirrored population (05 §MCP
+	// server) just degrades to "no review population" (Backend.Forge nil
+	// is a fully valid zero value).
+	srv.Backend.Forge = buildForgeBestEffort(context.Background(), root)
 	// Serve blocks until ln errors — the expected path is ln.Close() from
 	// the signal handler above, a clean shutdown rather than a failure.
 	_ = srv.Serve(context.Background(), ln)

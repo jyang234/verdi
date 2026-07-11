@@ -1,6 +1,11 @@
 package lint
 
-import "os"
+import (
+	"context"
+	"os"
+
+	"github.com/OWNER/verdi/internal/gitx"
+)
 
 // CIEnv is the generic CI environment signal this package reads directly:
 // GitLab's CI_DEFAULT_BRANCH/CI_MERGE_REQUEST_TARGET_BRANCH_NAME and
@@ -31,4 +36,25 @@ func ReadCIEnv() CIEnv {
 	}
 	e.InCI = os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != ""
 	return e
+}
+
+// ResolveDefaultBranch is the "which branch is the default" resolution
+// this package's own buildLintContext caller and cmd/verdi/gate.go's
+// resolveDefaultBranch both already implemented independently (small,
+// same-package duplication each of those doc comments calls out as
+// deliberate): CI_DEFAULT_BRANCH env var first, else the configured
+// remote's HEAD symbolic ref, else "" (unknown, never guessed). Exported
+// (V1-P7) so a THIRD, cross-package copy — internal/mcpserve's review
+// population, which needs the same resolution to find a design branch's
+// open MR — shares this one definition instead of duplicating it again
+// (CLAUDE.md: anything used by two or more packages lives in a shared
+// internal/ package).
+func ResolveDefaultBranch(ctx context.Context, root string) string {
+	if env := ReadCIEnv(); env.DefaultBranch != "" {
+		return env.DefaultBranch
+	}
+	if branch, err := gitx.DefaultBranch(ctx, root); err == nil {
+		return branch
+	}
+	return ""
 }

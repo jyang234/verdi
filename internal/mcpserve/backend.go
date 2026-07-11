@@ -6,6 +6,7 @@ import (
 
 	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/boardio"
+	"github.com/OWNER/verdi/internal/forge"
 	"github.com/OWNER/verdi/internal/index"
 )
 
@@ -13,16 +14,28 @@ import (
 // root plus the read (internal/index, internal/evidence,
 // internal/storyresolve) and write (append-only JSONL) operations 05
 // §MCP server's table names. It is a concrete struct, not an interface —
-// there is exactly one implementation, it does no network I/O, and its
-// filesystem/git dependencies are exercised directly (against a real,
-// hermetic fixturegit-built repo) in tests, so no port/fake seam earns
-// its keep here (04 §port pattern applies where a real dependency is
-// unsafe or slow to exercise in tests; local git and the local
-// filesystem are neither).
+// there is exactly one implementation, its filesystem/git dependencies
+// are exercised directly (against a real, hermetic fixturegit-built repo)
+// in tests, so no port/fake seam earns its keep here for THOSE (04 §port
+// pattern applies where a real dependency is unsafe or slow to exercise
+// in tests; local git and the local filesystem are neither) — Forge is
+// the one exception (V1-P7): a genuine network dependency, so it stays
+// the I-22 port interface, nil by default (no live review population;
+// every other tool is unaffected), set by cmd/verdi's serve.go/mcp.go
+// when a real forge is configured/reachable, and driven by a hermetic
+// fake/httptest double in tests (review_test.go).
 type Backend struct {
 	// Root is the store root directory (internal/store.FindRoot's
 	// result) — the directory whose child is .verdi/.
 	Root string
+
+	// Forge is used only by list_annotations' review-sticky mirrored
+	// population (review.go) — read-only (ListOpenMRs/ListComments/
+	// GetThreadResolution only; never PostComment, which stays exclusively
+	// the board's authoring-side concern, V1-P6). nil is a fully valid
+	// zero value: every tool degrades to "no review population" rather
+	// than erroring.
+	Forge forge.Forge
 
 	// writeMu serializes add_annotation, the one write path: two
 	// concurrent connections calling it are ordinary (Server.Serve

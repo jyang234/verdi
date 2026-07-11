@@ -115,6 +115,13 @@ func serveStandalone(root string, stdin io.Reader, stdout, stderr io.Writer) int
 	defer func() { _ = mcpserve.ReleaseLock(lockFile, lockPath) }()
 
 	srv := mcpserve.NewServer(root)
+	// Best-effort (V1-P7): list_annotations' review-sticky mirrored
+	// population (05 §MCP server) needs a live forge; nil is a fully
+	// valid Backend.Forge zero value (review.go degrades to "no review
+	// population" — every other tool is unaffected), so a missing/
+	// unreachable forge is never an operational error for `verdi mcp`
+	// itself. Mirrors gate_threads.go's identical tolerance.
+	srv.Backend.Forge = buildForgeBestEffort(context.Background(), root)
 	if err := mcpserve.ServeConn(context.Background(), stdin, stdout, srv); err != nil && !errors.Is(err, io.EOF) {
 		fmt.Fprintln(stderr, "mcp:", err)
 		return 2

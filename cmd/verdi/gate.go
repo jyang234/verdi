@@ -104,19 +104,14 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 	return runGate(ctx, root, spec, head, resolveDefaultBranch(ctx, root), stdout, stderr)
 }
 
-// resolveDefaultBranch mirrors cmd/verdi/lint.go's buildLintContext exactly
-// (CI_DEFAULT_BRANCH, else the configured remote's HEAD symbolic ref, else
-// "" — unknown, never guessed): the same "which branch is the default"
-// resolution the rest of this module already uses (CLAUDE.md: don't invent
-// a second one).
+// resolveDefaultBranch delegates to internal/lint.ResolveDefaultBranch
+// (V1-P7: promoted there so internal/mcpserve's review population can
+// share the exact same "which branch is the default" resolution —
+// CI_DEFAULT_BRANCH, else the configured remote's HEAD symbolic ref, else
+// "" — unknown, never guessed — instead of a third copy in a different
+// package; CLAUDE.md: don't invent a second one).
 func resolveDefaultBranch(ctx context.Context, root string) string {
-	if env := lint.ReadCIEnv(); env.DefaultBranch != "" {
-		return env.DefaultBranch
-	}
-	if branch, err := gitx.DefaultBranch(ctx, root); err == nil {
-		return branch
-	}
-	return ""
+	return lint.ResolveDefaultBranch(ctx, root)
 }
 
 // gateCondition is one gate condition's outcome. Disclosed marks a
