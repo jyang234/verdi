@@ -65,6 +65,9 @@ func run(args []string, stderr io.Writer) int {
 	if verb == "matrix" {
 		return cmdMatrix(args[1:], os.Stdout, stderr)
 	}
+	if verb == "rollup" {
+		return cmdRollup(args[1:], os.Stdout, stderr)
+	}
 	if verb == "dex" {
 		return runDexVerb(args[1:], os.Stdout, stderr)
 	}

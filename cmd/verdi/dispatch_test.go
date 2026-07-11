@@ -20,7 +20,6 @@ func TestRun_KnownVerbs(t *testing.T) {
 		{"align", "not implemented (phase 8)"},
 		{"serve", "not implemented (phase 9)"},
 		{"mcp", "not implemented (phase 9)"},
-		{"rollup", "not implemented (phase 11)"},
 		{"close", "not implemented (out of v0 scope)"},
 		{"waivers", "not implemented (out of v0 scope)"},
 		{"verify-artifact", "not implemented (out of v0 scope)"},
