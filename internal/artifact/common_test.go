@@ -7,7 +7,7 @@ import (
 
 func TestLinkType_Valid(t *testing.T) {
 	for _, lt := range []LinkType{
-		LinkImplements, LinkSupersedes, LinkVerifies, LinkDerivedFrom,
+		LinkImplements, LinkResolves, LinkSupersedes, LinkExempts, LinkVerifies, LinkDerivedFrom,
 		LinkAnnotates, LinkDependsOn, LinkStory, LinkImpacts, LinkChallenges,
 	} {
 		if !lt.Valid() {
@@ -32,9 +32,16 @@ func TestLink_Validate_Happy(t *testing.T) {
 		{Type: LinkStory, Ref: "jira:LOAN-1482"},
 		{Type: LinkImpacts, Ref: "svc/loansvc/boundary-contract"},
 		{Type: LinkImpacts, Ref: "svc/loansvc/obligations/audit-before-publish"},
+		{Type: LinkExempts, Ref: "adr/0012-outbox-loansvc-events"},
+		// closed-vocabulary edges targeting an object fragment (02 §Link taxonomy).
+		{Type: LinkImplements, Ref: "spec/loan-update#ac-1"},
+		{Type: LinkResolves, Ref: "spec/loan-update#oq-1"},
+		{Type: LinkExempts, Ref: "spec/loan-update#dc-1"},
+		{Type: LinkSupersedes, Ref: "spec/loan-update#ac-1"},
+		{Type: LinkDependsOn, Ref: "spec/loan-update#ac-1"},
 	}
 	for _, l := range cases {
-		t.Run(string(l.Type), func(t *testing.T) {
+		t.Run(string(l.Type)+"/"+l.Ref, func(t *testing.T) {
 			if err := l.Validate(); err != nil {
 				t.Fatalf("Validate(%+v): %v", l, err)
 			}
@@ -49,6 +56,12 @@ func TestLink_Validate_Negative(t *testing.T) {
 		{Type: LinkImplements, Ref: "not-a-ref"},
 		{Type: LinkStory, Ref: "spec/foo"},  // story must be scheme:key, not kind/name
 		{Type: LinkStory, Ref: "LOAN-1482"}, // missing scheme
+		// fragment-targeting edges outside the closed five-value vocabulary.
+		{Type: LinkVerifies, Ref: "spec/loan-update#ac-1"},
+		{Type: LinkAnnotates, Ref: "spec/loan-update#ac-1"},
+		{Type: LinkImpacts, Ref: "spec/loan-update#ac-1"},
+		{Type: LinkChallenges, Ref: "spec/loan-update#ac-1"},
+		{Type: LinkDerivedFrom, Ref: "spec/loan-update#ac-1"},
 	}
 	for _, l := range cases {
 		t.Run(string(l.Type)+"/"+l.Ref, func(t *testing.T) {

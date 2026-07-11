@@ -11,7 +11,9 @@ type LinkType string
 
 const (
 	LinkImplements  LinkType = "implements"
+	LinkResolves    LinkType = "resolves" // R4: spike story -> open-question fragment
 	LinkSupersedes  LinkType = "supersedes"
+	LinkExempts     LinkType = "exempts" // R4: spec-scoped decision excused from an ADR/decision above it
 	LinkVerifies    LinkType = "verifies"
 	LinkDerivedFrom LinkType = "derived-from"
 	LinkAnnotates   LinkType = "annotates"
@@ -23,7 +25,9 @@ const (
 
 var validLinkTypes = map[LinkType]bool{
 	LinkImplements:  true,
+	LinkResolves:    true,
 	LinkSupersedes:  true,
+	LinkExempts:     true,
 	LinkVerifies:    true,
 	LinkDerivedFrom: true,
 	LinkAnnotates:   true,
@@ -33,8 +37,21 @@ var validLinkTypes = map[LinkType]bool{
 	LinkChallenges:  true,
 }
 
-// Valid reports whether t is one of the nine known link types.
+// Valid reports whether t is one of the eleven known link types.
 func (t LinkType) Valid() bool { return validLinkTypes[t] }
+
+// closedEdgeVocab is the "closed spec-object edge vocabulary" (02 §Link
+// taxonomy, R4 concept §1): the only five link types a decision object's own
+// `links:`, or a story/spike's top-level `links:`, may use when the target
+// is an object fragment (§Identity and references). A fragment-targeting
+// link of any other type fails closed.
+var closedEdgeVocab = map[LinkType]bool{
+	LinkImplements: true,
+	LinkResolves:   true,
+	LinkSupersedes: true,
+	LinkExempts:    true,
+	LinkDependsOn:  true,
+}
 
 // storyRefRe matches a scheme-prefixed tracker reference, e.g.
 // "jira:LOAN-1482" (02 §Link taxonomy: "story ... scheme-prefixed ref").
@@ -61,7 +78,11 @@ type Link struct {
 // Validate checks the link type is known and Ref has the right shape for
 // that type: story links are scheme:key tracker refs; every other type is
 // either an unpinned kind/name artifact ref or a provisional svc/... external
-// ref (02 §Identity: "valid link targets").
+// ref (02 §Identity: "valid link targets"). A ref carrying an object
+// fragment (§Identity and references) is additionally checked against the
+// closed five-value spec-object edge vocabulary (02 §Link taxonomy):
+// implements/resolves/supersedes/exempts/depends-on are the only types
+// allowed to target a fragment — every other type fails closed.
 func (l Link) Validate() error {
 	if !l.Type.Valid() {
 		return fmt.Errorf("artifact: unknown link type %q", l.Type)
@@ -78,8 +99,12 @@ func (l Link) Validate() error {
 	if externalRefRe.MatchString(l.Ref) {
 		return nil
 	}
-	if _, err := ParseRef(l.Ref); err != nil {
+	ref, err := ParseRef(l.Ref)
+	if err != nil {
 		return fmt.Errorf("artifact: link of type %q: %w", l.Type, err)
+	}
+	if ref.Fragment() && !closedEdgeVocab[l.Type] {
+		return fmt.Errorf("artifact: link of type %q targets object fragment %q, but only implements/resolves/supersedes/exempts/depends-on may target a fragment (02 §Link taxonomy: closed spec-object edge vocabulary)", l.Type, l.Ref)
 	}
 	return nil
 }
