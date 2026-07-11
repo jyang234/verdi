@@ -65,6 +65,25 @@ func regenerate(ctx context.Context, root, commit, derivedDir string, deps syncD
 		return fmt.Errorf("no services discovered under %s (nothing to regenerate)", root)
 	}
 
+	serviceBundles, merged, err := regenerateServices(ctx, root, commit, services, deps)
+	if err != nil {
+		return err
+	}
+	if err := bundle.Assemble(derivedDir, serviceBundles, merged); err != nil {
+		return fmt.Errorf("assembling bundle: %w", err)
+	}
+	return nil
+}
+
+// regenerateServices execs the pinned toolchain against exactly services
+// (sync's regenerate scopes to every discovered service; PLAN.md Phase 7's
+// design/feature-start baseline scopes to a spec's impacted services only
+// — baseline.go's regenerateBaseline) and returns each service's
+// ServiceBundle contribution plus one merged TestSummary for the whole
+// regeneration, both ready for bundle.Assemble. Every record carries
+// provenance source: local (03 §Provenance classes: "source: local is
+// advisory").
+func regenerateServices(ctx context.Context, root, commit string, services []store.Service, deps syncDeps) ([]bundle.ServiceBundle, *bundle.TestSummary, error) {
 	prov := artifact.EvidenceProvenance{Source: artifact.SourceLocal, Commit: commit}
 
 	var serviceBundles []bundle.ServiceBundle
@@ -72,7 +91,7 @@ func regenerate(ctx context.Context, root, commit, derivedDir string, deps syncD
 	for _, svc := range services {
 		sb, ts, err := regenerateService(ctx, root, svc, commit, prov, deps)
 		if err != nil {
-			return fmt.Errorf("service %s: %w", svc.Name, err)
+			return nil, nil, fmt.Errorf("service %s: %w", svc.Name, err)
 		}
 		serviceBundles = append(serviceBundles, sb)
 		if ts != nil {
@@ -80,11 +99,7 @@ func regenerate(ctx context.Context, root, commit, derivedDir string, deps syncD
 		}
 	}
 
-	merged := bundle.MergeTestSummaries(testSummaries)
-	if err := bundle.Assemble(derivedDir, serviceBundles, merged); err != nil {
-		return fmt.Errorf("assembling bundle: %w", err)
-	}
-	return nil
+	return serviceBundles, bundle.MergeTestSummaries(testSummaries), nil
 }
 
 // regenerateService runs the toolchain against one service and returns

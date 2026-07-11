@@ -71,6 +71,15 @@ func run(args []string, stderr io.Writer) int {
 	if verb == "dex" {
 		return runDexVerb(args[1:], os.Stdout, stderr)
 	}
+	if verb == "design" {
+		return runDesignVerb(args[1:], os.Stdout, stderr)
+	}
+	if verb == "accept" {
+		return cmdAccept(args[1:], os.Stdout, stderr)
+	}
+	if verb == "feature" {
+		return runFeatureVerb(args[1:], os.Stdout, stderr)
+	}
 
 	if phase == 0 {
 		fmt.Fprintln(stderr, "not implemented (out of v0 scope)")

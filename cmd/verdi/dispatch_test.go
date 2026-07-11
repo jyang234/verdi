@@ -6,17 +6,20 @@ import (
 	"testing"
 )
 
-// TestRun_KnownVerbs is the happy path: every spec-named verb parses and
-// exits 2 with a one-line "not implemented" message on stderr (I-7 for
-// `gate`; the rest per 05 §CLI). Table-driven per CLAUDE.md's testing rules.
+// TestRun_KnownVerbs is the happy path: every spec-named verb still
+// stubbed at this phase parses and exits 2 with a one-line "not
+// implemented" message on stderr (I-7 for `gate`; the rest per 05 §CLI).
+// design/accept/feature graduated to real implementations in Phase 7 — see
+// TestRun_DesignDispatchesToRealVerb (design_test.go),
+// TestRun_AcceptDispatchesToRealVerb (accept_test.go), and
+// TestRun_FeatureDispatchesToRealVerb (feature_test.go) for their dispatch
+// coverage, matching the lint/dex pattern below. Table-driven per
+// CLAUDE.md's testing rules.
 func TestRun_KnownVerbs(t *testing.T) {
 	cases := []struct {
 		verb       string
 		wantSubstr string
 	}{
-		{"design", "not implemented (phase 7)"},
-		{"accept", "not implemented (phase 7)"},
-		{"feature", "not implemented (phase 7)"},
 		{"align", "not implemented (phase 8)"},
 		{"serve", "not implemented (phase 9)"},
 		{"mcp", "not implemented (phase 9)"},
@@ -46,17 +49,17 @@ func TestRun_KnownVerbs(t *testing.T) {
 }
 
 // TestRun_KnownVerbs_ExtraArgs asserts that trailing arguments after a known
-// verb do not change dispatch (verb-only parsing at phase 1). `lint` is now
-// implemented (phase 4 — see lint.go/lint_test.go), so this uses a
-// still-stubbed verb.
+// verb do not change dispatch (verb-only parsing at phase 1). `lint` and
+// `design`/`accept`/`feature` are now implemented (phases 4 and 7), so this
+// uses a still-stubbed verb.
 func TestRun_KnownVerbs_ExtraArgs(t *testing.T) {
 	var stderr bytes.Buffer
-	got := run([]string{"design", "--some-flag", "extra"}, &stderr)
+	got := run([]string{"align", "--some-flag", "extra"}, &stderr)
 	if got != 2 {
 		t.Fatalf("run with extra args exit = %d, want 2", got)
 	}
-	if !strings.Contains(stderr.String(), "not implemented (phase 7)") {
-		t.Fatalf("stderr = %q, want phase 7 message", stderr.String())
+	if !strings.Contains(stderr.String(), "not implemented (phase 8)") {
+		t.Fatalf("stderr = %q, want phase 8 message", stderr.String())
 	}
 }
 
