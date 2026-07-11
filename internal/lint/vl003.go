@@ -12,7 +12,18 @@ import (
 // vl003 enforces "all link refs resolve — verdi refs against the committed
 // zone, svc/... external refs against discovery, and evidence-for bindings
 // in discovered verdi.bindings.yaml sidecars against the named spec's ACs;
-// pins name real commits" (02 §Lint rules).
+// pins name real commits; object-id fragments (#<object-id>) resolve
+// against the target's parsed frontmatter objects, and their edge types are
+// the closed five-value enum — unknown types fail closed" (02 §Lint rules,
+// as amended, R4-I-3). internal/lint's walk deliberately decodes every
+// document via artifact.DecodeStrict only, never the kind's own semantic
+// Validate() (doc.go's design note: every semantic check is re-implemented
+// by its own VL-xxx rule rather than centralized) — so this rule is the
+// sole place that both an unknown link type at all, and a known type
+// outside the closed five-value vocabulary targeting a fragment, are
+// caught, by calling artifact.Link.Validate() itself per link. This rule's
+// other new work (R4-I-3) is resolving a fragment's object id against the
+// target spec's declared objects.
 type vl003 struct{}
 
 func (vl003) ID() string { return "VL-003" }
@@ -28,17 +39,17 @@ func (r vl003) Check(in *RunInput) []Finding {
 			continue
 		}
 		for _, l := range d.Base.Links {
-			if l.Type == artifact.LinkStory {
-				continue // tracker ref, not a corpus ref (02 §External refs scope)
-			}
-			if !r.refResolves(l.Ref, in.Snapshot, externalRefs) {
-				findings = append(findings, Finding{Rule: "VL-003", Path: d.RelPath, Message: fmt.Sprintf("links[].ref %q does not resolve", l.Ref)})
-			}
+			findings = append(findings, r.checkLink(l, d.RelPath, "links[].ref", in.Snapshot, externalRefs)...)
 		}
 
 		if d.Spec != nil {
 			for _, ctxRef := range d.Spec.Context {
 				findings = append(findings, r.checkPin(in, d.RelPath, "context[]", ctxRef)...)
+			}
+			for _, dc := range d.Spec.Decisions {
+				for _, l := range dc.Links {
+					findings = append(findings, r.checkLink(l, d.RelPath, fmt.Sprintf("decisions[%s].links[].ref", dc.ID), in.Snapshot, externalRefs)...)
+				}
 			}
 		}
 	}
@@ -57,14 +68,79 @@ func (r vl003) Check(in *RunInput) []Finding {
 	return findings
 }
 
-// refResolves reports whether ref (an unpinned link target) resolves
-// against either the committed zone or a discovered external ref.
-func (vl003) refResolves(ref string, snap *Snapshot, externalRefs map[string]bool) bool {
-	if externalRefShapeRe.MatchString(ref) {
-		return externalRefs[ref]
+// checkLink resolves a single link's ref: first, l.Validate() itself —
+// covering both an unknown link type outright and, per R4-I-3, a known
+// type outside the closed five-value spec-object edge vocabulary
+// (implements/resolves/supersedes/exempts/depends-on) targeting a
+// fragment (02 §Link taxonomy) — since internal/lint's walk deliberately
+// decodes via artifact.DecodeStrict only, never the kind's own Validate()
+// (see doc.go's design note: every semantic check is re-implemented by its
+// own VL-xxx rule rather than centralized), nothing else in this engine
+// would ever catch either case. Then: a story link is a tracker ref, not a
+// corpus ref (02 §External refs scope), and is skipped; an svc/... external
+// ref is checked against discovery only (fragments are not modeled for the
+// provisional external-ref form, 02 §Identity: "External refs
+// (provisional)"); every other ref is checked against the committed zone
+// by its unpinned kind/name half, and, when it carries an object-id
+// fragment (§Identity and references), the fragment is additionally
+// resolved against the target's parsed frontmatter objects (§Object
+// model).
+func (vl003) checkLink(l artifact.Link, path, field string, snap *Snapshot, externalRefs map[string]bool) []Finding {
+	if err := l.Validate(); err != nil {
+		return []Finding{{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q: %v", field, l.Ref, err)}}
 	}
-	_, ok := snap.ByRef[ref]
-	return ok
+	if l.Type == artifact.LinkStory {
+		return nil
+	}
+	if externalRefShapeRe.MatchString(l.Ref) {
+		if !externalRefs[l.Ref] {
+			return []Finding{{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q does not resolve", field, l.Ref)}}
+		}
+		return nil
+	}
+
+	ref, err := artifact.ParseRef(l.Ref)
+	if err != nil {
+		// Decode already validated every link's ref shape (VL-001's scope);
+		// this is unreachable in practice, but fail closed rather than
+		// panicking if it ever isn't.
+		return []Finding{{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q: %v", field, l.Ref, err)}}
+	}
+	unpinned := artifact.Ref{Kind: ref.Kind, Name: ref.Name}.String()
+	targets, ok := snap.ByRef[unpinned]
+	if !ok || len(targets) == 0 {
+		return []Finding{{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q does not resolve", field, l.Ref)}}
+	}
+
+	if !ref.Fragment() {
+		return nil
+	}
+	target := targets[0]
+	if target.Spec == nil || !declaredObjectIDs(target.Spec)[ref.Object] {
+		return []Finding{{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q fragment #%s does not resolve against %s's declared objects", field, l.Ref, ref.Object, unpinned)}}
+	}
+	return nil
+}
+
+// declaredObjectIDs is the set of every frontmatter-declared object id a
+// spec carries — acceptance criteria, constraints, decisions, and open
+// questions (02 §Object model) — the resolution target for a fragment ref
+// (§Identity and references).
+func declaredObjectIDs(spec *artifact.SpecFrontmatter) map[string]bool {
+	ids := make(map[string]bool, len(spec.AcceptanceCriteria)+len(spec.Constraints)+len(spec.Decisions)+len(spec.OpenQuestions))
+	for _, ac := range spec.AcceptanceCriteria {
+		ids[ac.ID] = true
+	}
+	for _, c := range spec.Constraints {
+		ids[c.ID] = true
+	}
+	for _, dc := range spec.Decisions {
+		ids[dc.ID] = true
+	}
+	for _, q := range spec.OpenQuestions {
+		ids[q.ID] = true
+	}
+	return ids
 }
 
 // checkPin validates a pinned ref (kind/name@commit): the unpinned kind/name
