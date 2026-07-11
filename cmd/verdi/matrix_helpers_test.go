@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,8 +44,9 @@ func writeActiveSpec(t *testing.T, root, name, content string) {
 	}
 }
 
-// TestResolveSpec_Happy covers both accepted input shapes: a direct spec
-// ref, and a story key matched via storyKeyMatches.
+// TestResolveSpec_Happy covers the two accepted input shapes (I-30): a
+// spec ref, and a scheme-prefixed story ref matched against a feature
+// spec's story: field.
 func TestResolveSpec_Happy(t *testing.T) {
 	root := t.TempDir()
 	writeActiveSpec(t, root, "matrix-helper-test", matrixTestFeatureSpec)
@@ -59,8 +61,8 @@ func TestResolveSpec_Happy(t *testing.T) {
 		}
 	})
 
-	t.Run("story key", func(t *testing.T) {
-		spec, err := resolveSpec(root, "STORY-1482")
+	t.Run("scheme-prefixed story ref", func(t *testing.T) {
+		spec, err := resolveSpec(root, "jira:LOAN-1482")
 		if err != nil {
 			t.Fatalf("resolveSpec: %v", err)
 		}
@@ -70,26 +72,45 @@ func TestResolveSpec_Happy(t *testing.T) {
 	})
 }
 
-// TestResolveSpec_Negative covers: no match, an ambiguous match (two
-// specs whose story keys both match), and a spec ref naming a component
-// spec (no story, no ACs — matrix cannot fold it).
+// TestResolveSpec_Negative covers, in I-30's strict regime: a bare tracker
+// key (no scheme, not a spec ref) rejected with a message naming both
+// accepted forms; a well-formed but unknown story ref that no spec claims;
+// an ambiguous story ref two feature specs both claim; a spec ref naming a
+// component spec (no story, no ACs); and no specs/active directory at all.
 func TestResolveSpec_Negative(t *testing.T) {
-	t.Run("no match", func(t *testing.T) {
+	t.Run("bare tracker key is rejected naming both forms", func(t *testing.T) {
 		root := t.TempDir()
 		writeActiveSpec(t, root, "matrix-helper-test", matrixTestFeatureSpec)
-		if _, err := resolveSpec(root, "STORY-9999"); err == nil {
-			t.Fatal("resolveSpec(no matching story): want error, got nil")
+		_, err := resolveSpec(root, "STORY-1482")
+		if err == nil {
+			t.Fatal("resolveSpec(bare key STORY-1482): want error, got nil")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "jira:LOAN-1482") || !strings.Contains(msg, "spec/") {
+			t.Fatalf("error %q must name both accepted forms (a scheme-prefixed story ref and a spec ref)", msg)
 		}
 	})
 
-	t.Run("ambiguous match", func(t *testing.T) {
+	t.Run("unknown story ref", func(t *testing.T) {
+		root := t.TempDir()
+		writeActiveSpec(t, root, "matrix-helper-test", matrixTestFeatureSpec)
+		_, err := resolveSpec(root, "jira:NOPE-1")
+		if err == nil {
+			t.Fatal("resolveSpec(unknown story ref): want error, got nil")
+		}
+		if !strings.Contains(err.Error(), "jira:NOPE-1") {
+			t.Fatalf("error %q should name the unmatched story ref", err.Error())
+		}
+	})
+
+	t.Run("ambiguous story ref", func(t *testing.T) {
 		root := t.TempDir()
 		writeActiveSpec(t, root, "matrix-helper-test", matrixTestFeatureSpec)
 		other := `---
 id: spec/matrix-helper-test-2
 kind: spec
 class: feature
-title: "Second spec, same story key by construction"
+title: "Second spec, same story ref by construction"
 status: draft
 owners: [platform-team]
 story: jira:LOAN-1482
@@ -99,8 +120,8 @@ acceptance_criteria:
 # body
 `
 		writeActiveSpec(t, root, "matrix-helper-test-2", other)
-		if _, err := resolveSpec(root, "STORY-1482"); err == nil {
-			t.Fatal("resolveSpec(ambiguous story match): want error, got nil")
+		if _, err := resolveSpec(root, "jira:LOAN-1482"); err == nil {
+			t.Fatal("resolveSpec(ambiguous story ref): want error, got nil")
 		}
 	})
 
@@ -113,69 +134,8 @@ acceptance_criteria:
 	})
 
 	t.Run("no specs/active directory at all", func(t *testing.T) {
-		if _, err := resolveSpec(t.TempDir(), "STORY-1482"); err == nil {
+		if _, err := resolveSpec(t.TempDir(), "jira:LOAN-1482"); err == nil {
 			t.Fatal("resolveSpec(no specs/active dir): want error, got nil")
 		}
 	})
-}
-
-// TestStoryKeyMatches_Happy proves the trailing-digit-run comparison
-// bridges a generic story key and a scheme-prefixed tracker ref that
-// share a numeric suffix.
-func TestStoryKeyMatches_Happy(t *testing.T) {
-	if !storyKeyMatches("STORY-1482", "jira:LOAN-1482") {
-		t.Fatal("storyKeyMatches(STORY-1482, jira:LOAN-1482) = false, want true (both end in 1482)")
-	}
-	if !storyKeyMatches("story-1482", "jira:LOAN-1482") {
-		t.Fatal("storyKeyMatches is not case-sensitive-broken: lowercase arg must still match")
-	}
-}
-
-// TestStoryKeyMatches_Negative covers a numeric mismatch and the
-// digit-less case (neither side should match on an empty suffix).
-func TestStoryKeyMatches_Negative(t *testing.T) {
-	if storyKeyMatches("STORY-9999", "jira:LOAN-1482") {
-		t.Fatal("storyKeyMatches(STORY-9999, jira:LOAN-1482) = true, want false (different numbers)")
-	}
-	if storyKeyMatches("spec/no-digits", "adr/also-no-digits") {
-		t.Fatal("storyKeyMatches with no digits on either side = true, want false (empty suffixes must never match)")
-	}
-}
-
-// TestResolveStorySlug_Happy proves it prefers the argument's own slug
-// when a waivers/ or attestations/ directory exists there, and falls back
-// to the spec's story-field slug when only that one exists.
-func TestResolveStorySlug_Happy(t *testing.T) {
-	t.Run("argument's own slug exists on disk", func(t *testing.T) {
-		root := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(root, ".verdi", "waivers", "story-1482"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		got := resolveStorySlug(root, "STORY-1482", "jira:LOAN-1482")
-		if got != "story-1482" {
-			t.Fatalf("resolveStorySlug = %q, want story-1482", got)
-		}
-	})
-
-	t.Run("falls back to the spec's story-field slug", func(t *testing.T) {
-		root := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(root, ".verdi", "attestations", "jira-loan-1482"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		got := resolveStorySlug(root, "STORY-1482", "jira:LOAN-1482")
-		if got != "jira-loan-1482" {
-			t.Fatalf("resolveStorySlug = %q, want jira-loan-1482 (fallback)", got)
-		}
-	})
-}
-
-// TestResolveStorySlug_Negative proves that when neither candidate
-// directory exists, resolveStorySlug still returns a deterministic slug
-// (the argument's own) rather than an error — a story with no
-// waivers/attestations at all is the ordinary case.
-func TestResolveStorySlug_Negative(t *testing.T) {
-	got := resolveStorySlug(t.TempDir(), "STORY-1482", "jira:LOAN-1482")
-	if got != "story-1482" {
-		t.Fatalf("resolveStorySlug (neither exists) = %q, want the argument's own slug story-1482", got)
-	}
 }

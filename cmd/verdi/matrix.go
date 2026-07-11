@@ -11,17 +11,27 @@
 // This is deliberate, not an oversight: a report that refused to print
 // because the news was bad would be worse than useless in CI logs.
 //
-// Story resolution (v0 convention, disclosed — no spec pins this down):
-// the argument may be a spec ref ("spec/<name>") or a story key. A story
-// key is matched against every feature spec under specs/active/ by
-// comparing the trailing digit run of each side's RefSlug — e.g.
-// "STORY-1482" matches a spec whose `story:` field is "jira:LOAN-1482"
-// because both end in "1482". This is necessarily a heuristic: nothing in
-// 02/03/04 defines a mechanical relationship between a spec's tracker-
-// scoped `story:` field (jira:LOAN-1482) and the free-standing key used to
-// name its waivers/attestations/board files elsewhere in the corpus
-// (waivers/story-1482/, mutable/boards/STORY-1482.json) — see this
-// package's matrix_test.go and the phase-6 report for the full trail.
+// Story/spec resolution (05 §CLI, I-30): matrix accepts EXACTLY two ref
+// forms and nothing else —
+//
+//	(a) a scheme-prefixed story ref ("jira:LOAN-1482"), matched against
+//	    every active feature spec's `story:` field; and
+//	(b) a spec ref ("spec/stale-decline").
+//
+// Any other argument — including a bare tracker key like "STORY-1482" — is
+// an operational error (exit 2) whose message names both accepted forms.
+// I-30 rejected the earlier trailing-digit-run heuristic (a bare key matched
+// against a spec by comparing the numeric suffixes of the two sides' ref
+// slugs): it collided silently between stories that share a digit suffix and
+// cut against VL-005's scheme discipline.
+//
+// The waivers/<slug>/ and attestations/<slug>/ directories the fold consults
+// are keyed by the story's own ref slug — store.RefSlug of the resolved
+// spec's `story:` field. A corpus that names them by some other free-standing
+// key (e.g. waivers/story-1482/ for story jira:LOAN-1482) is not bridged here;
+// bridging those two keys was exactly the rejected heuristic's job. The board
+// file (mutable/boards/STORY-1482.json) is board state owned by a different
+// subsystem and is never an input to matrix's resolution.
 package main
 
 import (
@@ -30,7 +40,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"text/tabwriter"
 
@@ -58,7 +67,7 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		storyArg = a
 	}
 	if storyArg == "" {
-		fmt.Fprintln(stderr, "matrix: usage: verdi matrix <story-or-spec-ref> [--preview]")
+		fmt.Fprintln(stderr, "matrix: usage: verdi matrix <jira:STORY-KEY | spec/name> [--preview]")
 		return 2
 	}
 
@@ -86,7 +95,9 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	slug := resolveStorySlug(root, storyArg, spec.Story)
+	// The fold's waiver/attestation directories are keyed by the story's
+	// own ref slug (I-30): store.RefSlug of the resolved spec's story: field.
+	slug := store.RefSlug(spec.Story)
 	result, err := evidence.Fold(evidence.Input{
 		Spec:      spec,
 		Records:   records,
@@ -103,23 +114,38 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// resolveSpec resolves storyArg to a feature spec under specs/active/ —
-// 03 §The fold's "Scope: the fold is evaluated only for specs under
-// specs/active/". storyArg is either a spec ref ("spec/<name>") or a
-// story key matched against every feature spec's `story:` field via
-// storyKeyMatches.
-func resolveSpec(root, storyArg string) (*artifact.SpecFrontmatter, error) {
-	if ref, err := artifact.ParseRef(storyArg); err == nil && ref.Kind == artifact.KindSpec {
+// resolveSpec resolves arg to a feature spec under specs/active/ — 03 §The
+// fold's "Scope: the fold is evaluated only for specs under specs/active/".
+// Per I-30, arg is EXACTLY one of two forms: a spec ref ("spec/<name>"),
+// loaded directly; or a scheme-prefixed story ref ("jira:LOAN-1482"),
+// matched against every active feature spec's `story:` field. Any other
+// argument is an operational error naming both accepted forms.
+func resolveSpec(root, arg string) (*artifact.SpecFrontmatter, error) {
+	// (b) A spec ref: load it directly.
+	if ref, err := artifact.ParseRef(arg); err == nil && ref.Kind == artifact.KindSpec {
 		spec, loadErr := loadActiveSpec(root, ref.Name)
 		if loadErr != nil {
 			return nil, loadErr
 		}
 		if spec.Class != artifact.ClassFeature {
-			return nil, fmt.Errorf("spec %q is a component spec (no story, no acceptance criteria); matrix only folds feature specs", storyArg)
+			return nil, fmt.Errorf("spec %q is a component spec (no story, no acceptance criteria); matrix only folds feature specs", arg)
 		}
 		return spec, nil
 	}
 
+	// (a) A scheme-prefixed story ref: match it against every active feature
+	// spec's story: field. The scheme (the part before ":") need not be a
+	// configured provider — an unmatched story ref simply names no spec.
+	if scheme, key, ok := strings.Cut(arg, ":"); ok && scheme != "" && key != "" {
+		return matchStoryRef(root, arg)
+	}
+
+	return nil, fmt.Errorf("%q is neither a scheme-prefixed story ref (e.g. jira:LOAN-1482) nor a spec ref (e.g. spec/stale-decline); matrix accepts exactly those two forms", arg)
+}
+
+// matchStoryRef returns the single active feature spec whose story: field
+// equals storyRef, erroring if none — or more than one — does.
+func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 	dir := filepath.Join(root, ".verdi", "specs", "active")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -138,13 +164,13 @@ func resolveSpec(root, storyArg string) (*artifact.SpecFrontmatter, error) {
 		if spec.Class != artifact.ClassFeature {
 			continue
 		}
-		if spec.Story == storyArg || storyKeyMatches(storyArg, spec.Story) {
+		if spec.Story == storyRef {
 			matches = append(matches, spec)
 		}
 	}
 	switch len(matches) {
 	case 0:
-		return nil, fmt.Errorf("no feature spec under specs/active matches story/spec ref %q", storyArg)
+		return nil, fmt.Errorf("no active feature spec has story: %s", storyRef)
 	case 1:
 		return matches[0], nil
 	default:
@@ -152,7 +178,7 @@ func resolveSpec(root, storyArg string) (*artifact.SpecFrontmatter, error) {
 		for i, m := range matches {
 			names[i] = m.ID
 		}
-		return nil, fmt.Errorf("story/spec ref %q matches more than one spec under specs/active: %s", storyArg, strings.Join(names, ", "))
+		return nil, fmt.Errorf("story ref %q matches more than one active feature spec: %s", storyRef, strings.Join(names, ", "))
 	}
 }
 
@@ -172,45 +198,6 @@ func loadActiveSpec(root, name string) (*artifact.SpecFrontmatter, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return spec, nil
-}
-
-var trailingDigitsRe = regexp.MustCompile(`[0-9]+$`)
-
-// storyKeyMatches reports whether arg and specStory name the same story
-// key, comparing the trailing run of digits in each side's store.RefSlug
-// form — e.g. RefSlug("STORY-1482") = "story-1482" and
-// RefSlug("jira:LOAN-1482") = "jira-loan-1482" both end in "1482". Two
-// empty (digit-less) suffixes never match — that would make every
-// digit-less argument match every digit-less story, which is worse than
-// refusing the match.
-func storyKeyMatches(arg, specStory string) bool {
-	a := trailingDigitsRe.FindString(store.RefSlug(arg))
-	b := trailingDigitsRe.FindString(store.RefSlug(specStory))
-	return a != "" && a == b
-}
-
-// resolveStorySlug picks the waivers/<slug>/ and attestations/<slug>/
-// directory name to consult: whichever of the raw argument's own slug or
-// the resolved spec's story-field slug actually has a waivers/ or
-// attestations/ directory on disk wins; the argument's own slug is the
-// default when neither exists yet (a story with no waivers/attestations
-// at all is the common case, not an error).
-func resolveStorySlug(root, storyArg, specStory string) string {
-	candidates := []string{store.RefSlug(storyArg)}
-	if slug := store.RefSlug(specStory); slug != candidates[0] {
-		candidates = append(candidates, slug)
-	}
-	for _, c := range candidates {
-		if dirExists(filepath.Join(root, ".verdi", "waivers", c)) || dirExists(filepath.Join(root, ".verdi", "attestations", c)) {
-			return c
-		}
-	}
-	return candidates[0]
-}
-
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
 }
 
 // printMatrix renders result as a per-AC table plus the story eligibility

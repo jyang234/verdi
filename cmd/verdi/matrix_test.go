@@ -137,19 +137,29 @@ func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 	return order, files
 }
 
-// TestCmdMatrix_Golden runs `verdi matrix STORY-1482` against the real
-// fixturegit-built corpus and checks the result byte-for-byte: ac-1
-// (static, one ci pass record) is evidenced; ac-2 (static+behavioral, only
-// a behavioral ci pass record — no static record at all) is pending; ac-3
-// (behavioral, only a source:local abstain record, excluded from the
-// authoritative fold) is no-signal; ac-4 (runtime, an active waiver) is
-// waived. Story: not violated, not eligible (ac-2 is pending).
+// TestCmdMatrix_Golden runs `verdi matrix jira:LOAN-1482` (I-30: a
+// scheme-prefixed story ref, matched against the feature spec's story:
+// field) against the real fixturegit-built corpus and checks the result
+// byte-for-byte: ac-1 (static, one ci pass record) is evidenced; ac-2
+// (static+behavioral, only a behavioral ci pass record — no static record
+// at all) is pending; ac-3 (behavioral, only a source:local abstain
+// record, excluded from the authoritative fold) is no-signal; ac-4
+// (runtime, no reachable waiver) is pending.
+//
+// Note on ac-4: the fold consults waivers/<slug>/ keyed by the story's own
+// ref slug — store.RefSlug("jira:LOAN-1482") = "jira-loan-1482". The corpus
+// carries an active waiver at waivers/story-1482/ac-4.md, keyed by a
+// free-standing tracker key with no mechanical link to the story ref; the
+// digit-run heuristic that used to bridge those two keys was removed in
+// I-30 (silent collisions; cut against VL-005's scheme discipline), so that
+// waiver is no longer reachable from a scheme-prefixed ref and ac-4 folds to
+// its unwaived runtime status, pending. Story: not violated, not eligible.
 func TestCmdMatrix_Golden(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runMatrixForTest(t, []string{"STORY-1482"}, &stdout, &stderr)
+	got := runMatrixForTest(t, []string{"jira:LOAN-1482"}, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("cmdMatrix exit = %d, want 0 (matrix reports, never gates); stderr=%q", got, stderr.String())
 	}
@@ -161,7 +171,7 @@ AC    STATUS     EVIDENCE                      TEXT
 ac-1  evidenced  static:pass                   static obligation holds for the retry path
 ac-2  pending    static:none; behavioral:pass  static and behavioral: charge API retried on stale decline
 ac-3  no-signal  behavioral:none               behavioral: golden flow for partial refunds
-ac-4  waived     runtime:awaited               runtime: post-deploy decline-rate check
+ac-4  pending    runtime:awaited               runtime: post-deploy decline-rate check
 
 story.violated: false
 story.eligible: false
@@ -181,10 +191,10 @@ func TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords(t *testing.T) {
 	t.Chdir(repo.Dir)
 
 	var authoritative, preview bytes.Buffer
-	if got := runMatrixForTest(t, []string{"STORY-1482"}, &authoritative, &bytes.Buffer{}); got != 0 {
+	if got := runMatrixForTest(t, []string{"jira:LOAN-1482"}, &authoritative, &bytes.Buffer{}); got != 0 {
 		t.Fatalf("authoritative run exit = %d, want 0", got)
 	}
-	if got := runMatrixForTest(t, []string{"STORY-1482", "--preview"}, &preview, &bytes.Buffer{}); got != 0 {
+	if got := runMatrixForTest(t, []string{"jira:LOAN-1482", "--preview"}, &preview, &bytes.Buffer{}); got != 0 {
 		t.Fatalf("preview run exit = %d, want 0", got)
 	}
 
@@ -196,7 +206,7 @@ AC    STATUS     EVIDENCE                      TEXT
 ac-1  evidenced  static:pass                   static obligation holds for the retry path
 ac-2  pending    static:none; behavioral:pass  static and behavioral: charge API retried on stale decline
 ac-3  pending    behavioral:abstain            behavioral: golden flow for partial refunds
-ac-4  waived     runtime:awaited               runtime: post-deploy decline-rate check
+ac-4  pending    runtime:awaited               runtime: post-deploy decline-rate check
 
 story.violated: false
 story.eligible: false
@@ -282,12 +292,59 @@ func TestCmdMatrix_Negative(t *testing.T) {
 	t.Run("no store root", func(t *testing.T) {
 		t.Chdir(t.TempDir())
 		var stdout, stderr bytes.Buffer
-		got := cmdMatrix([]string{"STORY-1482"}, &stdout, &stderr)
+		got := cmdMatrix([]string{"jira:LOAN-1482"}, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("cmdMatrix(no store root) = %d, want 2", got)
 		}
 		if stdout.Len() != 0 {
 			t.Fatalf("stdout = %q, want empty on an operational error", stdout.String())
+		}
+	})
+}
+
+// TestCmdMatrix_RefForms drives cmdMatrix end-to-end against the real
+// corpus to pin I-30's strict ref contract: a bare tracker key is an
+// operational error naming both accepted forms; a well-formed but unknown
+// scheme-prefixed story ref is an operational error naming no matching
+// spec; and the spec-ref path still folds and prints the same story.
+func TestCmdMatrix_RefForms(t *testing.T) {
+	repo := buildCorpusRepo(t)
+	t.Chdir(repo.Dir)
+
+	t.Run("bare tracker key exits 2 naming both accepted forms", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		got := cmdMatrix([]string{"STORY-1482"}, &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("cmdMatrix(STORY-1482) = %d, want 2 (operational error); stderr=%q", got, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("stdout = %q, want empty on an operational error", stdout.String())
+		}
+		msg := stderr.String()
+		if !strings.Contains(msg, "jira:LOAN-1482") || !strings.Contains(msg, "spec/") {
+			t.Fatalf("stderr %q must name both accepted forms (a scheme-prefixed story ref and a spec ref)", msg)
+		}
+	})
+
+	t.Run("unknown scheme-prefixed story ref exits 2 naming no matching spec", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		got := cmdMatrix([]string{"jira:NOPE-1"}, &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("cmdMatrix(jira:NOPE-1) = %d, want 2 (operational error); stderr=%q", got, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "jira:NOPE-1") {
+			t.Fatalf("stderr %q should name the unmatched story ref", stderr.String())
+		}
+	})
+
+	t.Run("spec ref path still folds", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		got := cmdMatrix([]string{"spec/stale-decline"}, &stdout, &stderr)
+		if got != 0 {
+			t.Fatalf("cmdMatrix(spec/stale-decline) = %d, want 0; stderr=%q", got, stderr.String())
+		}
+		if !strings.HasPrefix(stdout.String(), "story: jira:LOAN-1482\nspec:  spec/stale-decline\n") {
+			t.Fatalf("spec-ref output header mismatch:\n%s", stdout.String())
 		}
 	})
 }
