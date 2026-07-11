@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/gitx"
 )
@@ -87,31 +85,22 @@ func (vl010) Check(in *RunInput) []Finding {
 // baseFrozen reports whether the file at basePath carried a `frozen:` stamp
 // as it existed at diffBase — the base side of the diff. It reads the
 // historical content via `git show` and probes only the frontmatter's
-// `frozen:` key.
-//
-// The probe is deliberately TOLERANT, not a full strict decode: base-side
-// content may predate schema growth (a key the current strict schema does
-// not yet know, or no longer accepts), and rejecting it would make VL-010
-// miss a genuinely frozen file. So it splits the frontmatter and unmarshals
-// only the one key that matters into a minimal struct. Anything that is not
-// a frozen-stamped markdown artifact — a non-markdown file, absent or
-// unparseable frontmatter, an absent `frozen:` key — reads as "not frozen".
+// `frozen:` key through artifact.ProbeFrozen, the deliberately-tolerant
+// historical-content probe (see its doc for why strict decode would be
+// wrong here). Anything ProbeFrozen cannot probe at all — a non-markdown
+// file, absent or unparseable frontmatter — reads as "not frozen": a
+// non-artifact file cannot carry a stamp. Only the `git show` failure is an
+// error: the diff itself named this path as existing on the base side.
 func baseFrozen(ctx context.Context, root, diffBase, basePath string) (bool, error) {
 	content, err := gitx.Show(ctx, root, diffBase, basePath)
 	if err != nil {
 		return false, err
 	}
-	fm, _, err := artifact.SplitFrontmatter(content)
+	frozen, err := artifact.ProbeFrozen(content)
 	if err != nil {
-		return false, nil // no frontmatter delimiters ⇒ not a frozen artifact
+		return false, nil // not a probeable markdown artifact ⇒ not frozen
 	}
-	var probe struct {
-		Frozen *artifact.Frozen `yaml:"frozen"`
-	}
-	if err := yaml.Unmarshal(fm, &probe); err != nil {
-		return false, nil // unparseable frontmatter ⇒ not provably frozen
-	}
-	return probe.Frozen != nil, nil
+	return frozen != nil, nil
 }
 
 // isActiveArchiveMove reports whether oldPath -> newPath is a spec

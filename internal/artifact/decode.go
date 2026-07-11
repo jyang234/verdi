@@ -104,6 +104,36 @@ func checkDialect(n *yaml.Node) error {
 	return nil
 }
 
+// ProbeFrozen reports whether a markdown document's frontmatter carries a
+// `frozen:` stamp, reading ONLY that key. Unlike DecodeStrict it is
+// deliberately TOLERANT — no KnownFields, no dialect check, no kind schema
+// — because it exists to read HISTORICAL content (e.g. a file as it stood
+// at VL-010's diff base, via `git show`), which may predate schema growth:
+// a key the current strict schema does not yet know, or no longer accepts,
+// must not stop the probe from seeing a genuinely frozen file. It is a
+// read-only probe of the past, never a validation seam for current
+// content — current-tree decoding stays on DecodeStrict.
+//
+// The returned error is non-nil only when the document cannot be probed at
+// all (no frontmatter delimiters, or frontmatter that is not YAML); a
+// parseable frontmatter with no `frozen:` key returns (nil, nil). Callers
+// probing arbitrary historical files decide their own posture toward
+// unprobeable content (VL-010 treats it as not-frozen: a non-artifact file
+// cannot carry a stamp).
+func ProbeFrozen(doc []byte) (*Frozen, error) {
+	fm, _, err := SplitFrontmatter(doc)
+	if err != nil {
+		return nil, err
+	}
+	var probe struct {
+		Frozen *Frozen `yaml:"frozen"`
+	}
+	if err := yaml.Unmarshal(fm, &probe); err != nil {
+		return nil, fmt.Errorf("artifact: probing frozen stamp: %w", err)
+	}
+	return probe.Frozen, nil
+}
+
 // DecodeStrictJSON decodes JSON bytes into out with DisallowUnknownFields
 // and trailing-data rejection (CLAUDE.md: "JSON via DisallowUnknownFields +
 // trailing-data rejection"). It is used for the record schemas that live in
