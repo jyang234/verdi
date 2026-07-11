@@ -178,7 +178,9 @@ align:                         # evidence-model spec owns semantics
   judge_required: false        # true: `verdi align` fails outright without a judge
 audit:                         # R4-I-10; exemption/deviation counterweights (spec-realignment concept §2, §3b)
   exempts_conflict_threshold: 3      # active exemptions filed against one ADR before an auto-filed conflict record
-  deviations_stale_threshold: 3      # accepted-deviations on one story before a spec-stale closure flag
+  deviations_stale_threshold: 3      # accepted-deviations on one story before a spec-stale closure flag;
+                                      #   0 (or absent) means the default (3), so a store cannot configure a
+                                      #   zero threshold — the loosest configurable value is 1
 spike_paths: []                # VL-016 fence: path globs a spike MR's diff may touch; empty by
                                 #   default (fails closed) until a repo declares its own spike
                                 #   workspace and doc paths

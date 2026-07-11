@@ -69,6 +69,16 @@ type SpecStaleResult struct {
 // drift breaks the match silently) and CLAUDE.md forbids exactly that
 // class of invented parsing convention.
 func SpecStale(in SpecStaleInput) SpecStaleResult {
+	// Documented rule (adjudicated, not silent): a threshold of 0 (or
+	// absent — Go's zero value collapses the two, matching this codebase's
+	// config idiom) means the default (DefaultDeviationsStaleThreshold, 3),
+	// NOT "flag on the first accepted-deviation". A store therefore cannot
+	// configure a zero threshold; the loosest configurable-and-honored value
+	// is 1. 03's "tunable, default 3" framing never intends a zero
+	// out-of-the-box, and disambiguating an explicit 0 from an absent field
+	// would need a decode-boundary pointer that internal/store deliberately
+	// does not carry. Negative values are rejected upstream by
+	// AuditConfig.Validate.
 	threshold := in.Threshold
 	if threshold <= 0 {
 		threshold = DefaultDeviationsStaleThreshold
