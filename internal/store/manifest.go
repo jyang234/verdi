@@ -79,6 +79,24 @@ func DecodeManifest(data []byte) (*Manifest, error) {
 	return &m, nil
 }
 
+// ConfiguredStorySchemes returns the set of story-ref schemes verdi.yaml's
+// providers: block configures (VL-005's "a configured scheme"; `verdi
+// design start`'s I-10 scheme-configured check, 04 §Reference scheme).
+// Only "jira" is modeled today (JiraConfig); a nil Manifest or an absent
+// providers: block configures no scheme at all. A pointer receiver so a
+// nil *Manifest (a legitimately absent manifest, e.g. lint's
+// Snapshot.Manifest before a store has one) is safe to call directly.
+func (m *Manifest) ConfiguredStorySchemes() map[string]bool {
+	schemes := map[string]bool{}
+	if m == nil || m.Providers == nil {
+		return schemes
+	}
+	if m.Providers.Jira != nil {
+		schemes["jira"] = true
+	}
+	return schemes
+}
+
 // Validate checks the schema literal and the forge enum ("" auto-detects
 // per 01 §Store manifest).
 func (m Manifest) Validate() error {

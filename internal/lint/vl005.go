@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/store"
 )
 
 // vl005 enforces "feature spec has exactly one story: link with a
@@ -18,7 +17,7 @@ func (vl005) ID() string { return "VL-005" }
 
 func (vl005) Check(in *RunInput) []Finding {
 	var findings []Finding
-	schemes := configuredStorySchemes(in.Snapshot.Manifest)
+	schemes := in.Snapshot.Manifest.ConfiguredStorySchemes()
 
 	for _, d := range in.Snapshot.Docs {
 		if d.Grandfathered || d.DecodeErr != nil || d.Spec == nil || d.Spec.Class != artifact.ClassFeature {
@@ -47,19 +46,4 @@ func (vl005) Check(in *RunInput) []Finding {
 		}
 	}
 	return findings
-}
-
-// configuredStorySchemes returns the set of story-ref schemes verdi.yaml's
-// providers: block configures. Only "jira" is modeled today
-// (internal/store.ProvidersConfig); an absent manifest or providers block
-// configures no scheme at all.
-func configuredStorySchemes(m *store.Manifest) map[string]bool {
-	schemes := map[string]bool{}
-	if m == nil || m.Providers == nil {
-		return schemes
-	}
-	if m.Providers.Jira != nil {
-		schemes["jira"] = true
-	}
-	return schemes
 }
