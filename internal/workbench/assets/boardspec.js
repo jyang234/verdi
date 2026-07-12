@@ -297,9 +297,29 @@
     return el.getAttribute("data-id") || el.getAttribute("data-ref");
   }
 
+  // The picker speaks human: kind names as a PM reads them — an article
+  // form and a plural form, for the no-typed-edge explanation.
+  var kindNames = {
+    "acceptance-criterion": ["an acceptance criterion", "acceptance criteria"],
+    constraint: ["a constraint", "constraints"],
+    decision: ["a decision", "decisions"],
+    "open-question": ["an open question", "open questions"],
+    adr: ["an ADR", "ADRs"],
+    spec: ["a spec", "specs"],
+    "spec-fragment": ["a spec fragment", "spec fragments"],
+    diagram: ["a diagram", "diagrams"],
+  };
+  function pairPhrase(a, b) {
+    var an = kindNames[a] || ["a " + a, a + "s"];
+    var bn = kindNames[b] || ["a " + b, b + "s"];
+    return a === b ? "two " + an[1] : an[0] + " and " + bn[0];
+  }
+
   // openPicker fills the context-sensitive menu: ONLY the pair's legal
   // types (each with its one-line consequence), plus the scratch tier's
-  // untyped thread — always available (05 §Workbench).
+  // untyped thread. When NO typed edge is legal for the pair, the picker
+  // says so in plain language instead of presenting a menu of nothing
+  // (owner UAT round 6, item 1).
   function openPicker(p) {
     pending = p;
     var items = document.getElementById("edge-picker-items");
@@ -308,7 +328,20 @@
     items.innerHTML = "";
     if (pair) pair.textContent = p.from + " → " + p.to;
 
-    var types = (state.legal[p.fromKind + "|" + p.toKind] || []).slice();
+    var legal = state.legal[p.fromKind + "|" + p.toKind] || [];
+    if (legal.length === 0) {
+      var note = document.createElement("p");
+      note.className = "ritual-note picker-empty-note";
+      note.setAttribute("data-testid", "picker-no-typed-edge");
+      note.textContent =
+        "No typed edge exists between " + pairPhrase(p.fromKind, p.toKind) +
+        (p.annotationId
+          ? " — this stays a scratch thread. To type a connection, draw it from a decision card."
+          : " — this can only be a scratch thread.");
+      items.appendChild(note);
+    }
+
+    var types = legal.slice();
     if (!p.annotationId) types.push("relates");
     types.forEach(function (t) {
       var row = document.createElement("div");
@@ -662,8 +695,14 @@
       case "edge-confirm-ok":
         commitEdge(pending.type, document.getElementById("edge-confirm-reason").value.trim());
         return;
+      // Every dialog closes from a visible affordance, the backdrop, or
+      // Escape (owner UAT round 6: never a modal you can't get out of).
+      case "modal-backdrop":
       case "edge-confirm-cancel":
+      case "edge-picker-cancel":
+      case "graduate-menu-cancel":
         pending = null;
+        pendingSticky = null;
         hideAllDialogs();
         return;
       case "commit-push-btn":

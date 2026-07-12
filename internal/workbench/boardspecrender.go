@@ -297,6 +297,7 @@ func renderBoardDialogs(mode boardModeKind) string {
 <h2>Edge type</h2>
 <p class="ritual-note" id="edge-picker-pair"></p>
 <div id="edge-picker-items"></div>
+<div class="dialog-actions"><button type="button" id="edge-picker-cancel">Cancel</button></div>
 </div>
 <div role="alertdialog" aria-label="" class="board-dialog confirm" id="edge-confirm" hidden aria-describedby="edge-confirm-consequence">
 <h2 id="edge-confirm-title"></h2>
@@ -322,6 +323,7 @@ func renderBoardDialogs(mode boardModeKind) string {
 <button type="button" role="menuitem" data-object-kind="constraint">Constraint</button>
 <button type="button" role="menuitem" data-object-kind="decision">Decision</button>
 <button type="button" role="menuitem" data-object-kind="open-question">Open question</button>
+<button type="button" id="graduate-menu-cancel">Cancel</button>
 </div>`
 }
 
