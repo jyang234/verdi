@@ -1197,6 +1197,83 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   white-space: nowrap;
 }
 
+/* the reference peek: a filed card pulled from the drawer — fixed to the
+   right edge above the board, frozen-blue like the refcards it serves,
+   dismissible from ×, Escape, or any outside click. Read-only in every
+   mode. */
+.refcard { cursor: pointer; }
+.ref-peek {
+  position: fixed;
+  top: 4.5rem;
+  right: 1rem;
+  bottom: 1rem;
+  width: 24rem;
+  max-width: calc(100vw - 2rem);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--frozen);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3);
+  z-index: 15;
+  overflow: hidden;
+}
+.ref-peek-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.8rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--frozen-tint);
+}
+.ref-peek-ref {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--frozen);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#ref-peek-close {
+  border: 0;
+  background: transparent;
+  color: var(--frozen);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+.ref-peek-content { padding: 0.8rem 1rem 1rem; overflow-y: auto; font-size: 0.88rem; }
+.ref-peek-content .peek-title { font-size: 1.05rem; margin: 0.35rem 0 0.5rem; }
+.peek-kind, .peek-status {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-solid);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  margin-right: 0.3rem;
+}
+.peek-body { line-height: 1.55; }
+.peek-body h1, .peek-body h2, .peek-body h3 { font-size: 0.95rem; margin: 0.8rem 0 0.3rem; }
+.peek-open { display: inline-block; margin-top: 0.8rem; font-size: 0.85rem; }
+.peek-error { color: var(--muted-solid); font-size: 0.88rem; }
+.peek-error::before {
+  content: "disclosed";
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--authored);
+  margin-right: 0.6rem;
+}
+
 /* yarn chips: the edge's label, riding its thread at the first point
    clear of every card's interior (layoutYarn slides it along the curve),
    so the chip sits on the yarn without lying over anyone's text — and

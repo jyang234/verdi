@@ -59,6 +59,7 @@ func RegisterRoutesWith(mux *http.ServeMux, root string, deps Deps) {
 	mux.HandleFunc("/board/spec/{name}", bs.boardSpecPageHandler())
 	mux.HandleFunc("/board/spec/{name}/fragment", bs.boardSpecFragmentHandler())
 	mux.HandleFunc("/board/spec/{name}/api/{action}", bs.boardSpecAPIHandler())
+	mux.HandleFunc("/board/spec/{name}/peek", bs.boardPeekHandler())
 
 	// The v0 board — superseded by board-as-projection (R4-I-9) but kept
 	// reachable for grandfathered v0 board.json state. Its two POST

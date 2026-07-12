@@ -80,6 +80,24 @@ const boardFixtureLayout = `{
 
 const boardFixtureName = "refi-test"
 
+// boardFixtureADR is the ADR dc-1's exempts edge targets — a real,
+// peekable corpus artifact (the ref-peek tests resolve it).
+const boardFixtureADR = `---
+id: adr/0001-outbox-events
+kind: adr
+title: "Outbox pattern for domain events (board fixture)"
+status: accepted
+owners: [platform-team]
+decided: 2026-03-01
+frozen: { at: 2026-03-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+---
+# Outbox pattern for domain events
+
+## Decision
+
+Domain events leave through the transactional outbox.
+`
+
 // newBoardFixture builds a fixture repo with the draft spec, checked out
 // on a design branch (authoring mode's branch state).
 func newBoardFixture(t *testing.T) string {
@@ -88,6 +106,7 @@ func newBoardFixture(t *testing.T) string {
 		Files: map[string]string{
 			".verdi/specs/active/" + boardFixtureName + "/spec.md":     boardFixtureSpec,
 			".verdi/specs/active/" + boardFixtureName + "/layout.json": boardFixtureLayout,
+			".verdi/adr/0001-outbox-events.md":                         boardFixtureADR,
 			".verdi/.gitignore": "data/\n",
 		},
 		Message: "seed board fixture",
@@ -426,6 +445,90 @@ func TestBoardSpec_StickyGraduate_Negative(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("graduating to an unknown kind = %d, want 400", rec.Code)
 	}
+}
+
+// Owner UAT round 6, item 4: clicking a reference card peeks the
+// referenced artifact without leaving the board. The fragment carries
+// title, kind, status, rendered body, and the full-page link; an
+// unresolvable ref gets a DISCLOSED explanation, never a dead click and
+// never a silent nothing.
+func TestBoardSpec_RefPeek(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+	get := func(query string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/board/spec/"+boardFixtureName+"/peek"+query, nil))
+		return rec
+	}
+
+	t.Run("resolvable ref renders the artifact", func(t *testing.T) {
+		rec := get("?ref=adr/0001-outbox-events")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("peek = %d\n%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		for _, want := range []string{
+			"Outbox pattern for domain events (board fixture)", // title
+			`class="peek-kind"`, ">adr<", // kind
+			`class="peek-status"`, ">accepted<", // status
+			"Domain events leave through the transactional outbox", // rendered body
+			`href="/a/adr/0001-outbox-events"`,                     // the full-page link
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("peek fragment missing %q\n%s", want, body)
+			}
+		}
+	})
+
+	t.Run("pinned and fragment refs resolve to the same artifact", func(t *testing.T) {
+		for _, ref := range []string{
+			"adr/0001-outbox-events@c5e360a9ee5e9eb6089e54b772fa16959ada4662",
+			"spec/" + boardFixtureName + "%23ac-1",
+		} {
+			rec := get("?ref=" + ref)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("peek %s = %d", ref, rec.Code)
+			}
+			if strings.Contains(rec.Body.String(), "ref-peek-error") {
+				t.Errorf("peek %s disclosed an error for a resolvable target\n%s", ref, rec.Body.String())
+			}
+		}
+	})
+
+	t.Run("unresolvable refs are disclosed, never silent", func(t *testing.T) {
+		for name, ref := range map[string]string{
+			"missing artifact": "adr/no-such-adr",
+			"non-artifact ref": "jira:LOAN-1482",
+		} {
+			rec := get("?ref=" + ref)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s: peek = %d, want 200 with a disclosed fragment", name, rec.Code)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, `data-testid="ref-peek-error"`) {
+				t.Errorf("%s: no disclosed error state\n%s", name, body)
+			}
+		}
+	})
+
+	t.Run("negative: no ref, wrong method", func(t *testing.T) {
+		if rec := get(""); rec.Code != http.StatusBadRequest {
+			t.Errorf("peek without ref = %d, want 400", rec.Code)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/board/spec/"+boardFixtureName+"/peek?ref=adr/0001-outbox-events", nil))
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("POST peek = %d, want 405", rec.Code)
+		}
+	})
+
+	t.Run("deterministic fragment", func(t *testing.T) {
+		a := get("?ref=adr/0001-outbox-events").Body.String()
+		b := get("?ref=adr/0001-outbox-events").Body.String()
+		if a != b {
+			t.Error("two peeks of the same ref differ")
+		}
+	})
 }
 
 func TestBoardSpec_RelatesLifecycle(t *testing.T) {

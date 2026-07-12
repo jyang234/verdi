@@ -723,6 +723,65 @@
     });
   }
 
+  // -- reference peek ---------------------------------------------------------
+  //
+  // Clicking a reference card opens an in-board peek of the referenced
+  // artifact (owner UAT round 6, item 4): the server fragment carries
+  // title, kind, status, rendered body, and the full-page link. Read-only
+  // information, so it works in EVERY board mode; an unresolvable ref
+  // renders the fragment's disclosed explanation — never a dead click.
+  // Closes via ×, Escape, or clicking anywhere outside it.
+
+  function closeRefPeek() {
+    var p = document.getElementById("ref-peek");
+    if (p) p.remove();
+  }
+
+  function openRefPeek(ref) {
+    closeRefPeek();
+    var panel = document.createElement("aside");
+    panel.id = "ref-peek";
+    panel.className = "ref-peek";
+    panel.setAttribute("data-testid", "ref-peek");
+    panel.setAttribute("role", "complementary");
+    panel.setAttribute("aria-label", "Reference peek");
+
+    var bar = document.createElement("div");
+    bar.className = "ref-peek-bar";
+    var label = document.createElement("span");
+    label.className = "ref-peek-ref";
+    label.textContent = ref;
+    label.title = ref;
+    var close = document.createElement("button");
+    close.type = "button";
+    close.id = "ref-peek-close";
+    close.setAttribute("aria-label", "Close peek");
+    close.textContent = "×";
+    bar.appendChild(label);
+    bar.appendChild(close);
+    panel.appendChild(bar);
+
+    var content = document.createElement("div");
+    content.className = "ref-peek-content";
+    content.textContent = "loading…";
+    panel.appendChild(content);
+    document.body.appendChild(panel);
+
+    fetch(
+      "/board/spec/" + encodeURIComponent(state.spec) + "/peek?ref=" + encodeURIComponent(ref)
+    )
+      .then(function (resp) {
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        return resp.text();
+      })
+      .then(function (html) {
+        content.innerHTML = html;
+      })
+      .catch(function (err) {
+        content.textContent = "peek failed: " + err.message;
+      });
+  }
+
   // -- graduate menus ---------------------------------------------------------
 
   var pendingSticky = null;
@@ -752,6 +811,23 @@
 
   function onClick(e) {
     var t = e.target;
+
+    // The peek dismisses on any click outside it (a reference card click
+    // replaces it with the new ref's peek instead).
+    var peekEl = document.getElementById("ref-peek");
+    if (peekEl && !peekEl.contains(t) && !t.closest(".refcard")) {
+      closeRefPeek();
+    }
+    if (t.id === "ref-peek-close") {
+      closeRefPeek();
+      return;
+    }
+
+    var refcard = t.closest(".refcard");
+    if (refcard) {
+      openRefPeek(refcard.getAttribute("data-ref"));
+      return;
+    }
 
     var choice = t.closest("[data-edge-choice]");
     if (choice) {
@@ -858,6 +934,7 @@
     if (e.key === "Escape") {
       pending = null;
       hideAllDialogs();
+      closeRefPeek();
     }
   }
 
