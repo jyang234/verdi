@@ -1,8 +1,18 @@
 package artifact
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+)
 
 const boardLayoutSchema = "verdi.boardlayout/v1"
+
+// stubPositionKeyRe matches a layout.json positions key naming a declared
+// stub rather than an object id — "stub:<slug>" (02 §Record schemas,
+// round 5.5 dc-6 amendment: "a `positions` key names a declared object by
+// id, or ... a declared stub as `stub:<slug>`"). The slug half is the
+// same kebab-case shape Stub.Validate enforces.
+var stubPositionKeyRe = regexp.MustCompile(`^stub:` + nameSegment + `$`)
 
 // Position is one object's board coordinates in a layout.json sidecar
 // (02 §Record schemas: "Board layout").
@@ -36,15 +46,19 @@ func DecodeBoardLayout(data []byte) (*BoardLayout, error) {
 }
 
 // Validate checks the schema literal and that every positions key looks
-// like a real object id.
+// like a real object id or a "stub:<slug>" stub key (shape only — that it
+// resolves to a real object or a real declared stub is VL-018's job, not
+// checked here, same division of labor the package comment already
+// documents for object ids).
 func (bl BoardLayout) Validate() error {
 	if bl.Schema != boardLayoutSchema {
 		return fmt.Errorf("artifact: boardlayout schema %q, want %q", bl.Schema, boardLayoutSchema)
 	}
 	for k := range bl.Positions {
-		if !objectIDRe.MatchString(k) {
-			return fmt.Errorf("artifact: boardlayout positions key %q is not a valid object id", k)
+		if objectIDRe.MatchString(k) || stubPositionKeyRe.MatchString(k) {
+			continue
 		}
+		return fmt.Errorf("artifact: boardlayout positions key %q is not a valid object id or stub:<slug> key", k)
 	}
 	return nil
 }
