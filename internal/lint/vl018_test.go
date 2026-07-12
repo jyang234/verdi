@@ -2,6 +2,7 @@ package lint
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -83,5 +84,92 @@ func TestVL018_NoLayoutJSON_NeverFires(t *testing.T) {
 		if f.Rule == "VL-018" {
 			t.Fatalf("VL-018 fired with no layout.json present anywhere: %s", f.String())
 		}
+	}
+}
+
+// vl018StubSpec is a feature spec declaring one stub — the round 5.5 dc-6
+// amendment's resolution target: a `positions` key may be `stub:<slug>`
+// naming a declared stub of the same spec, exactly like an object id.
+const vl018StubSpec = `---
+id: spec/vl-018-stub
+kind: spec
+class: feature
+title: "VL-018: stub:<slug> position keys"
+status: draft
+owners: [platform-team]
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+stubs:
+  - { slug: borrower-update-api, acceptance_criteria: [ac-1] }
+---
+# VL-018: stub:<slug> position keys
+
+## Problem
+
+Placeholder problem.
+
+## Outcome
+
+Placeholder outcome.
+
+## AC-1
+
+Placeholder.
+`
+
+// TestVL018_StubPositionKey_Clean proves a `stub:<slug>` key resolving to a
+// declared stub is legal, exactly like an object id key (02 §Record
+// schemas, round 5.5: "Same verbatim-pass-through, prune, and
+// display-resolution semantics either way").
+func TestVL018_StubPositionKey_Clean(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi/specs/active/vl-018-stub/spec.md"), vl018StubSpec)
+	writeTestFile(t, filepath.Join(dir, ".verdi/specs/active/vl-018-stub/layout.json"), `{
+  "schema": "verdi.boardlayout/v1",
+  "positions": {
+    "ac-1": { "x": 40, "y": 20 },
+    "stub:borrower-update-api": { "x": 990, "y": 40 }
+  }
+}
+`)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-018" {
+			t.Fatalf("VL-018 fired on a stub:<slug> key resolving to a declared stub: %s", f.String())
+		}
+	}
+}
+
+// TestVL018_DanglingStubPositionKey is the negative complement: a
+// `stub:<slug>` key naming a stub NOT declared on the sibling spec is a
+// dangling key, exactly like a dangling object id (VL-018's one rule
+// covers both namespaces).
+func TestVL018_DanglingStubPositionKey(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi/specs/active/vl-018-stub/spec.md"), vl018StubSpec)
+	writeTestFile(t, filepath.Join(dir, ".verdi/specs/active/vl-018-stub/layout.json"), `{
+  "schema": "verdi.boardlayout/v1",
+  "positions": {
+    "ac-1": { "x": 40, "y": 20 },
+    "stub:no-such-stub": { "x": 990, "y": 40 }
+  }
+}
+`)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	var got []Finding
+	for _, f := range findings {
+		if f.Rule == "VL-018" {
+			got = append(got, f)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d VL-018 findings, want 1:\n%s", len(got), findingsString(got))
+	}
+	if !strings.Contains(got[0].Message, `"stub:no-such-stub"`) {
+		t.Errorf("finding does not name the dangling stub key: %s", got[0].Message)
 	}
 }
