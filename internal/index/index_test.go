@@ -2,6 +2,8 @@ package index
 
 import (
 	"testing"
+
+	"github.com/OWNER/verdi/internal/artifact"
 )
 
 func TestBuild_Happy(t *testing.T) {
@@ -112,6 +114,29 @@ func TestIndex_Backlinks(t *testing.T) {
 	// A ref with no incoming links returns an empty (nil) slice, not an error.
 	if bl := ix.Backlinks("adr/0002-b"); len(bl) != 0 {
 		t.Fatalf("Backlinks(adr/0002-b) = %+v, want none", bl)
+	}
+}
+
+// TestBuildBacklinks_ResolvesAndExempts is D-7's regression guard: 02 §Link
+// taxonomy's inverse-of column lists resolved-by and exempted-by, which were
+// missing from inverseOf. A spike's `resolves` edge and a decision's
+// `exempts` edge must now invert into computed backlinks on their targets.
+func TestBuildBacklinks_ResolvesAndExempts(t *testing.T) {
+	entries := []*Entry{
+		{Ref: "spec/spike", Kind: "spec", Links: []artifact.Link{
+			{Type: artifact.LinkResolves, Ref: "spec/feature#oq-1"},
+		}},
+		{Ref: "spec/scoped", Kind: "spec", Links: []artifact.Link{
+			{Type: artifact.LinkExempts, Ref: "adr/0007-policy"},
+		}},
+	}
+	bl := buildBacklinks(entries)
+
+	if got := bl["spec/feature#oq-1"]; len(got) != 1 || got[0].From != "spec/spike" || got[0].Type != "resolved-by" {
+		t.Fatalf("backlinks[spec/feature#oq-1] = %+v, want one resolved-by from spec/spike", got)
+	}
+	if got := bl["adr/0007-policy"]; len(got) != 1 || got[0].From != "spec/scoped" || got[0].Type != "exempted-by" {
+		t.Fatalf("backlinks[adr/0007-policy] = %+v, want one exempted-by from spec/scoped", got)
 	}
 }
 

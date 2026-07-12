@@ -26,6 +26,8 @@ var inverseOf = map[artifact.LinkType]string{
 	artifact.LinkDependsOn:   "depended-on-by",
 	artifact.LinkImpacts:     "impacted-by",
 	artifact.LinkChallenges:  "challenged-by",
+	artifact.LinkResolves:    "resolved-by",
+	artifact.LinkExempts:     "exempted-by",
 }
 
 // buildBacklinks inverts every entry's outgoing links into a target-ref ->
