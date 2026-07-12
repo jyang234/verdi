@@ -168,3 +168,12 @@ export function refCardTestId(ref: string): string {
 // modes, keyed by branch state") — the fixture for the drag-refusal
 // contract (a read-only board is never silently inert).
 export const READONLY_SPEC = "stale-decline";
+
+// READONLY_SPEC's one closed-vocabulary DOCUMENT-LEVEL edge (02 §Object
+// model: frontmatter `links:` declared on the spec document itself, so
+// the projection emits it with From:"spec"). The document is not a card —
+// it hangs above the canvas as the placards header — so this edge's yarn
+// must tie to its one on-board endpoint (the target's reference card)
+// with a thread pointing off the board's top edge.
+export const DOC_EDGE_TYPE = "implements";
+export const DOC_EDGE_TARGET = "adr/0002-outbox-events";

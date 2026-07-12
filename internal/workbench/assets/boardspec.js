@@ -90,7 +90,9 @@
   function endpointElement(key) {
     var c = canvas();
     if (!c) return null;
-    if (key === "spec") return null; // document-level edges: chip only
+    // "spec" is the document itself — not a card; it lives above the
+    // canvas (the placards header), so its edges hang off-board.
+    if (key === "spec") return null;
     return (
       c.querySelector('.objcard[data-id="' + esc(key) + '"]') ||
       c.querySelector('.refcard[data-ref="' + esc(key) + '"]')
@@ -143,8 +145,14 @@
   // layoutYarn draws every chip's thread — anchored edge-to-edge, sagging
   // like real yarn, layered UNDER the papers so an in-between card is
   // passed behind, never struck through — and sits the chip on the sag's
-  // midpoint (open canvas between the cards). Chips with an unresolvable
-  // endpoint stack in the canvas corner — visible, never dropped.
+  // midpoint (open canvas between the cards). An edge with an off-board
+  // endpoint (From:"spec": the document itself, hanging above the canvas
+  // as the placards header) gets an off-board thread instead — entering
+  // past the canvas's top edge, where the SVG clips it, so the yarn reads
+  // as running up to the document — tied to its one on-board endpoint.
+  // Every edge stays visible, never dropped, and never a bare chip.
+  var OFFBOARD_Y = -24; // thread origin above the canvas (clipped at 0)
+
   function layoutYarn() {
     var c = canvas();
     if (!c) return;
@@ -152,41 +160,69 @@
     while (svg.firstChild) svg.removeChild(svg.firstChild);
 
     var chips = c.querySelectorAll(".yarn-chip");
-    var orphanRow = 0;
+    var papers = c.querySelectorAll(".objcard, .refcard");
+    var offboardCount = 0; // bow alternation + margin slots
+    var offboardTies = {}; // fan-out of several document edges on one card
     for (var i = 0; i < chips.length; i++) {
       var chip = chips[i];
       var fromEl = endpointElement(chip.getAttribute("data-from"));
       var toEl = endpointElement(chip.getAttribute("data-to"));
-      if (!fromEl || !toEl) {
-        chip.style.left = "16px";
-        chip.style.top = 16 + orphanRow * 34 + "px";
-        orphanRow++;
-        continue;
+      var offboard = !fromEl || !toEl;
+      var a, b, cx, cy, knots;
+      if (!offboard) {
+        a = edgeAnchor(fromEl, centerOf(toEl));
+        b = edgeAnchor(toEl, centerOf(fromEl));
+        var dx = b.x - a.x;
+        var dy = b.y - a.y;
+        var sag = 8 + Math.sqrt(dx * dx + dy * dy) * 0.06;
+        cx = (a.x + b.x) / 2;
+        cy = (a.y + b.y) / 2 + sag;
+        knots = [a, b];
+      } else {
+        var anchorEl = fromEl || toEl;
+        if (anchorEl) {
+          // One on-board endpoint: the thread hangs from above it and
+          // ties to its top edge. Several document edges on one card fan
+          // out along that edge instead of overlapping.
+          var tieKey = keyOfElement(anchorEl);
+          var tie = offboardTies[tieKey] || 0;
+          offboardTies[tieKey] = tie + 1;
+          a = { x: centerOf(anchorEl).x + tie * 26, y: OFFBOARD_Y };
+          b = edgeAnchor(anchorEl, a);
+          knots = [b];
+        } else {
+          // No on-board endpoint at all — impossible by construction (the
+          // projection renders a reference card for every non-document
+          // endpoint), but the visible-never-dropped guarantee survives
+          // as the same designed state: a short thread hung from the top
+          // margin, the chip riding its end.
+          a = { x: 40 + offboardCount * 180, y: OFFBOARD_Y };
+          b = { x: a.x, y: 56 };
+          knots = [];
+        }
+        // A gentle lateral bow — hung yarn, not a plumb line.
+        var bow = (offboardCount % 2 === 0 ? 1 : -1) * Math.min(24, 6 + (b.y - a.y) * 0.05);
+        cx = (a.x + b.x) / 2 + bow;
+        cy = (a.y + b.y) / 2;
+        offboardCount++;
       }
-      var a = edgeAnchor(fromEl, centerOf(toEl));
-      var b = edgeAnchor(toEl, centerOf(fromEl));
-      var dx = b.x - a.x;
-      var dy = b.y - a.y;
-      var sag = 8 + Math.sqrt(dx * dx + dy * dy) * 0.06;
-      var cx = (a.x + b.x) / 2;
-      var cy = (a.y + b.y) / 2 + sag;
 
       var path = document.createElementNS(svgNS, "path");
       path.setAttribute(
         "class",
-        "yarn-thread yarn-thread--" + chip.getAttribute("data-layer")
+        "yarn-thread yarn-thread--" + chip.getAttribute("data-layer") +
+          (offboard ? " yarn-thread--offboard" : "")
       );
       path.setAttribute(
         "d",
         "M " + a.x + " " + a.y + " Q " + cx + " " + cy + " " + b.x + " " + b.y
       );
       svg.appendChild(path);
-      var ends = [a, b];
-      for (var j = 0; j < 2; j++) {
+      for (var j = 0; j < knots.length; j++) {
         var knot = document.createElementNS(svgNS, "circle");
         knot.setAttribute("class", "yarn-knot");
-        knot.setAttribute("cx", ends[j].x);
-        knot.setAttribute("cy", ends[j].y);
+        knot.setAttribute("cx", knots[j].x);
+        knot.setAttribute("cy", knots[j].y);
         knot.setAttribute("r", 3.2);
         svg.appendChild(knot);
       }
@@ -195,7 +231,6 @@
       // canvas, otherwise slid along the thread to the first spot clear
       // of every card's interior (the chip sits ON the yarn, never over
       // anyone's text).
-      var papers = c.querySelectorAll(".objcard, .refcard");
       var w = chip.offsetWidth;
       var h = chip.offsetHeight;
       var clearOfCards = function (x, y) {
@@ -223,8 +258,12 @@
           break;
         }
       }
+      var top = spot.y - h / 2;
+      // A short off-board thread's midpoint can sit above the canvas;
+      // the chip stays fully on the board (the thread is what exits).
+      if (offboard && top < 4) top = 4;
       chip.style.left = spot.x - w / 2 + "px";
-      chip.style.top = spot.y - h / 2 + "px";
+      chip.style.top = top + "px";
     }
   }
 
