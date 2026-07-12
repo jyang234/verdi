@@ -41,7 +41,7 @@ func TestV0CLIVerbInventory(t *testing.T) {
 		t.Run("real_"+verb, func(t *testing.T) {
 			var stderr string
 			switch verb {
-			case "serve", "mcp", "audit":
+			case "serve", "mcp", "audit", "align":
 				// serve/mcp resolve the store root before doing anything
 				// else (socket bind, lock acquire, ...); audit (bare, no
 				// args) resolves the store root and then actually RUNS the
@@ -49,9 +49,19 @@ func TestV0CLIVerbInventory(t *testing.T) {
 				// auto-file a conflict record into the working tree at
 				// threshold (03 §Exemption audit) — a real mutation this
 				// inventory check must never risk against the shared
-				// self-hosted checkout. All three fail fast and honestly
-				// from a rootless tempdir instead, while still proving the
-				// verb is dispatched as real.
+				// self-hosted checkout. align takes no argument at all —
+				// it infers its spec from the CURRENT BRANCH, so against
+				// the live checkout it is branch-state-dependent: on main
+				// it fails fast, but on a real design/build branch (the
+				// round-5 self-hosted arena's normal state) it runs the
+				// REAL alignment — execing verdi.yaml's live judge_cmd
+				// (`claude -p`, a network call with a 2m timeout;
+				// CLAUDE.md: no network in any test) and writing a real
+				// deviation-report.md into the shared working tree
+				// (round5-divergences.md D-14, the same hermeticity class
+				// as D-11's checklist-probe fix). All four fail fast and
+				// honestly from a rootless tempdir instead, while still
+				// proving the verb is dispatched as real.
 				_, stderr, _ = runBinary(t, t.TempDir(), verb)
 			case "dex":
 				_, stderr, _ = runBinary(t, root, "dex", "build", "-o", t.TempDir())
