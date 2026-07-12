@@ -169,6 +169,12 @@ export function refCardTestId(ref: string): string {
 // contract (a read-only board is never silently inert).
 export const READONLY_SPEC = "stale-decline";
 
+// A draft spec on the design branch with the two required attributes and
+// NO declared objects — the newcomer's first board. Its board opens in
+// authoring mode and must render the teaching empty-wall state, never a
+// void (provisioned by cmd/e2eharness/provisionv2.go).
+export const EMPTY_SPEC = "income-verification";
+
 // READONLY_SPEC's one closed-vocabulary DOCUMENT-LEVEL edge (02 §Object
 // model: frontmatter `links:` declared on the spec document itself, so
 // the projection emits it with From:"spec"). The document is not a card —

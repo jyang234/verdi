@@ -39,6 +39,11 @@ test.describe("board: reference cards peek their artifact", () => {
     await expect(peek(page).locator(".peek-body")).not.toContainText("##");
     const open = peek(page).getByRole("link", { name: /open full page/i });
     await expect(open).toHaveAttribute("href", `/a/${DOC_EDGE_TARGET}`);
+    // Owner directive: the full-page link spawns a NEW tab — the peek
+    // exists so the board is never lost, so the link must never navigate
+    // the board's own tab away.
+    await expect(open).toHaveAttribute("target", "_blank");
+    await expect(open).toHaveAttribute("rel", "noopener");
 
     // Three ways out, same as every board surface.
     await peek(page).getByRole("button", { name: "Close peek" }).click();

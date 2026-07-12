@@ -82,7 +82,10 @@ func peekFragment(root, ref string) string {
 	b.WriteString(`</div>`)
 	b.WriteString(`<h2 class="peek-title">` + esc(entry.Title) + `</h2>`)
 	b.WriteString(`<div class="peek-body">` + bodyHTML + `</div>`)
-	b.WriteString(`<a class="peek-open" data-testid="ref-peek-open" href="/a/` + esc(simple) + `">open full page</a>`)
+	// target=_blank + rel=noopener (owner directive): the full-page link
+	// spawns a NEW tab — the whole point of the peek is never losing the
+	// board, and a same-tab navigation would lose it.
+	b.WriteString(`<a class="peek-open" data-testid="ref-peek-open" href="/a/` + esc(simple) + `" target="_blank" rel="noopener">open full page</a>`)
 	return b.String()
 }
 

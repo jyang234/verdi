@@ -472,7 +472,9 @@ func TestBoardSpec_RefPeek(t *testing.T) {
 			`class="peek-kind"`, ">adr<", // kind
 			`class="peek-status"`, ">accepted<", // status
 			"Domain events leave through the transactional outbox", // rendered body
-			`href="/a/adr/0001-outbox-events"`,                     // the full-page link
+			// The full-page link opens a NEW tab (owner directive: the
+			// whole point of the peek is never losing the board).
+			`href="/a/adr/0001-outbox-events" target="_blank" rel="noopener"`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("peek fragment missing %q\n%s", want, body)

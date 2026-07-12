@@ -207,10 +207,15 @@
         offboardCount++;
       }
 
+      // The thread carries its TYPE as well as its layer: yarn color is
+      // the relationship's meaning (the rail's yarn key teaches it), so
+      // the thread and its knots must be paintable per edge type.
+      var edgeType = chip.getAttribute("data-edge-type");
       var path = document.createElementNS(svgNS, "path");
       path.setAttribute(
         "class",
         "yarn-thread yarn-thread--" + chip.getAttribute("data-layer") +
+          " yarn-thread--type-" + edgeType +
           (offboard ? " yarn-thread--offboard" : "")
       );
       path.setAttribute(
@@ -220,7 +225,7 @@
       svg.appendChild(path);
       for (var j = 0; j < knots.length; j++) {
         var knot = document.createElementNS(svgNS, "circle");
-        knot.setAttribute("class", "yarn-knot");
+        knot.setAttribute("class", "yarn-knot yarn-knot--type-" + edgeType);
         knot.setAttribute("cx", knots[j].x);
         knot.setAttribute("cy", knots[j].y);
         knot.setAttribute("r", 3.2);
