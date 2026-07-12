@@ -37,3 +37,71 @@ func TestVL002_DuplicateRef(t *testing.T) {
 		t.Fatalf("got %d duplicate-ref findings, want 2 (one per file):\n%s", dupCount, findingsString(findings))
 	}
 }
+
+// closedStorySpec is a clean, closed round-four story spec (problem/outcome
+// present and resolving, AC anchored, implements edge resolving) whose only
+// possible lint concern is its status-in-path placement. 02 §Lint rules'
+// VL-002 row binds status-in-path to "the feature and story classes", so a
+// closed story spec belongs under specs/archive/ — the same rule as a closed
+// feature spec (FR-I-1). No frozen: block, so the frozen-scoped rules
+// (VL-008/009/015) never engage; the placement is the sole variable.
+const closedStorySpec = `---
+id: spec/vl-002-closed-story
+kind: spec
+class: story
+title: "VL-002: closed story spec, status-in-path"
+status: closed
+owners: [platform-team]
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+story: jira:LOAN-0087
+links:
+  - { type: implements, ref: "spec/stale-decline#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+---
+# VL-002: closed story spec, status-in-path
+
+## Problem
+
+Placeholder problem.
+
+## Outcome
+
+Placeholder outcome.
+
+## AC-1
+
+Placeholder.
+`
+
+// TestVL002_ClosedStoryUnderActive_Fires proves the FR-I-1 fix: a class:
+// story spec with status: closed left under specs/active/ fires VL-002
+// (before the fix it never did, because the status-in-path guard covered
+// only class: feature). Status-in-path is the sole enforcement site for the
+// active→archive invariant (no close verb performs the move), so this is the
+// only place the invariant is caught.
+func TestVL002_ClosedStoryUnderActive_Fires(t *testing.T) {
+	dir := adHocOverlayDir(t, ".verdi/specs/active/vl-002-closed-story/spec.md", closedStorySpec)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-002")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1 (closed story belongs under specs/archive/):\n%s", len(findings), findingsString(findings))
+	}
+}
+
+// TestVL002_ClosedStoryUnderArchive_Clean is the positive complement: the
+// same closed story spec correctly sitting under specs/archive/ is clean —
+// VL-002 does not fire, so the fix introduces no false positive on the
+// well-placed case.
+func TestVL002_ClosedStoryUnderArchive_Clean(t *testing.T) {
+	dir := adHocOverlayDir(t, ".verdi/specs/archive/vl-002-closed-story/spec.md", closedStorySpec)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-002" {
+			t.Fatalf("VL-002 fired on a correctly-archived closed story spec: %s", f.String())
+		}
+	}
+}

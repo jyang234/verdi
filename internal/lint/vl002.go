@@ -9,8 +9,8 @@ import (
 )
 
 // vl002 enforces "id/path agreement; global ref uniqueness. Status-in-path
-// applies to the feature class only: superseded component specs remain in
-// specs/active/" (02 §Lint rules).
+// applies to the feature and story classes only: superseded component specs
+// remain in specs/active/" (02 §Lint rules).
 type vl002 struct{}
 
 func (vl002) ID() string { return "VL-002" }
@@ -85,8 +85,8 @@ func otherPaths(docs []*Document, exclude *Document) string {
 
 // checkSpecPath checks a spec document's directory name against its id's
 // name, and its status-dir (active/archive) against 02's class-scoped
-// rule: feature specs move to archive/ once closed; component specs
-// always stay in active/, even superseded (02 §Kind registry).
+// rule: feature and story specs move to archive/ once closed; component
+// specs always stay in active/, even superseded (02 §Kind registry).
 func checkSpecPath(d *Document, ref artifact.Ref) []Finding {
 	if d.Spec == nil {
 		// decodeDocument guarantees Spec != nil whenever Kind == "spec" and
@@ -111,7 +111,9 @@ func checkSpecPath(d *Document, ref artifact.Ref) []Finding {
 	}
 
 	wantStatusDir := "active"
-	if d.Spec != nil && d.Spec.Class == artifact.ClassFeature && d.Status == "closed" {
+	if d.Spec != nil &&
+		(d.Spec.Class == artifact.ClassFeature || d.Spec.Class == artifact.ClassStory) &&
+		d.Status == "closed" {
 		wantStatusDir = "archive"
 	}
 	if statusDir != wantStatusDir {
