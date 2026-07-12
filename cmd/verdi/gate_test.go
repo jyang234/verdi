@@ -284,6 +284,87 @@ func TestCmdGate_EntryPoint(t *testing.T) {
 	}
 }
 
+// gateSpikeSpecMD renders a spike story spec (class story, spike: true, no
+// acceptance criteria, one resolves edge) at accepted-pending-build.
+func gateSpikeSpecMD() string {
+	return fmt.Sprintf(`---
+id: spec/enum-spike
+kind: spec
+class: story
+title: "Enumeration spike"
+status: accepted-pending-build
+owners: [platform-team]
+story: jira:LOAN-1490
+spike: true
+problem: { text: "which enumeration approach is right", anchor: "#problem" }
+outcome: { text: "a recommendation recorded", anchor: "#outcome" }
+links:
+  - { type: resolves, ref: "spec/some-feature#oq-1" }
+frozen: { at: 2024-01-01, commit: %s }
+---
+# body
+`, gateFakeFrozenCommit)
+}
+
+// TestGate_SpikeBranch_EvidenceExempt is D-6's regression: a spike build
+// branch has zero acceptance criteria, which used to hard-error the
+// condition-2 fold (exit 2, the gate inoperable). It must now DISCLOSE the
+// evidence exemption (03 §Ceremony pricing) — never a silent pass — while
+// conditions 1/3/4 still decide the verdict. With all three of those
+// holding, gate exits 0.
+func TestGate_SpikeBranch_EvidenceExempt(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                      "schema: verdi.layout/v1\nforge: gitlab\n",
+				".verdi/specs/active/enum-spike/spec.md": gateSpikeSpecMD(),
+			},
+			Message: "scaffold + spike spec",
+		},
+	})
+	checkoutBranch(t, repo.Dir, "feature/enum-spike")
+
+	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/enum-spike")
+	if err != nil {
+		t.Fatalf("ResolveBuildSpec: %v", err)
+	}
+
+	// A fresh, fully-dispositioned alignment report for condition 3.
+	dir := filepath.Join(repo.Dir, ".verdi", "specs", "active", "enum-spike")
+	report := fmt.Sprintf(`---
+schema: verdi.deviation/v1
+covers: %s
+findings:
+%s
+digest: sha256:%s
+---
+# Alignment report
+`, repo.Head, dispositionedFindingYAML, strings.Repeat("0", 64))
+	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(report), 0o644); err != nil {
+		t.Fatalf("writing deviation-report.md: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runGate(spike) = %d, want 0 (evidence-exempt, not inoperable); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	// Condition 2 is disclosed, not passed or failed.
+	if strings.Contains(out, "[PASS] 2.") || strings.Contains(out, "[FAIL] 2.") {
+		t.Fatalf("condition 2 must be disclosed for a spike, not pass/fail:\n%s", out)
+	}
+	if !strings.Contains(out, "disclosed-unproven [gate:spike-evidence-exempt]") {
+		t.Fatalf("stdout missing the spike evidence-exempt disclosure line:\n%s", out)
+	}
+	assertConditionPasses(t, out, 1)
+	assertConditionPasses(t, out, 3)
+	assertConditionPasses(t, out, 4)
+	if !strings.Contains(out, "gate: PASS") {
+		t.Fatalf("stdout = %q, want gate: PASS", out)
+	}
+}
+
 func assertConditionFails(t *testing.T, stdout string, n int) {
 	t.Helper()
 	if !strings.Contains(stdout, fmt.Sprintf("[FAIL] %d.", n)) {

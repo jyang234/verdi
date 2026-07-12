@@ -246,6 +246,22 @@ func checkAcceptedOnDefaultBranch(ctx context.Context, root, specName, defaultBr
 func checkNoACViolated(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string) (gateCondition, error) {
 	name := "2. no AC violated at head (authoritative evidence)"
 
+	// A spike build branch is exempt from the evidence model (03 §Ceremony
+	// pricing; D-6): a spike declares no acceptance criteria, so there is
+	// nothing to fold. Rather than hard-error on the zero-AC fold (exit 2,
+	// inoperable), disclose the exemption through the shared disclosure seam
+	// — never a silent pass — and let conditions 1/3/4 still decide the
+	// verdict. Disclosed conditions neither pass nor fail the gate on their
+	// own (reportGateConditions).
+	if spec.Spike {
+		return gateCondition{
+			Name:      name,
+			Disclosed: true,
+			Source:    "gate:spike-evidence-exempt",
+			Reason:    "spike build branch is exempt from the evidence model (03 §Ceremony pricing): no acceptance criteria to fold, so condition 2 is skipped; conditions 1/3/4 still apply",
+		}, nil
+	}
+
 	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, head)
 	if err != nil {
