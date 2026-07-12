@@ -55,8 +55,9 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 			// Three-valued honesty (constitution 2/10): the input was
 			// unavailable, so this is neither a pass nor a fail — a printed
 			// notice that leaves the gate verdict to the other conditions
-			// (mirrors VL-017's disclosure mechanism).
-			fmt.Fprintf(stdout, "[NOTICE] closure: %s\n", c.Name)
+			// (mirrors VL-017's disclosure mechanism). Tag renamed to match
+			// gate.go's reportGateConditions (disclosure-seam story, R5-2).
+			fmt.Fprintf(stdout, "[DISCLOSED-UNPROVEN] closure: %s\n", c.Name)
 			fmt.Fprintf(stdout, "       %s\n", c.Reason)
 		case c.OK:
 			fmt.Fprintf(stdout, "[PASS] closure: %s\n", c.Name)

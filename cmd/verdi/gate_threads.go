@@ -187,7 +187,10 @@ func forgeCredentialsPresent(kind string) bool {
 // reviewUnavailableReason renders the disclosed-unavailable notice for a
 // configured-but-unreachable forge (I-1(b)) — one message shared by the
 // board chrome and the mcp list_annotations disclosure field so both read
-// surfaces say the same thing.
+// surfaces say the same thing. Prefixed "disclosed-unproven: "
+// (disclosure-seam story, R5-2 rename-in-place attempt) to share lint's
+// Finding.String() / gate's [DISCLOSED-UNPROVEN] tag's leading vocabulary
+// token.
 func reviewUnavailableReason(kind string) string {
-	return fmt.Sprintf("forge %q is configured (verdi.yaml) but no credentials are available to reach it; review state cannot be shown", kind)
+	return fmt.Sprintf("disclosed-unproven: forge %q is configured (verdi.yaml) but no credentials are available to reach it; review state cannot be shown", kind)
 }

@@ -199,8 +199,8 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 		if !ok {
 			t.Fatalf("runClosureGate() = false, want true (disclosure is not failure); stdout=%s", stdout.String())
 		}
-		if !contains(stdout.String(), "[NOTICE] closure: 3.") {
-			t.Fatalf("stdout = %q, want condition 3 disclosed as a [NOTICE], never a silent pass", stdout.String())
+		if !contains(stdout.String(), "[DISCLOSED-UNPROVEN] closure: 3.") {
+			t.Fatalf("stdout = %q, want condition 3 disclosed as a [DISCLOSED-UNPROVEN] tag, never a silent pass", stdout.String())
 		}
 		if !contains(stdout.String(), "disclosed-unproven") {
 			t.Fatalf("stdout = %q, want the disclosed-unproven wording", stdout.String())

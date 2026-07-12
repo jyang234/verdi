@@ -178,7 +178,10 @@ func reportGateConditions(stdout io.Writer, conds []gateCondition) int {
 		case c.Disclosed:
 			// Disclosed-unproven (constitution 2/10): a printed notice that
 			// neither passes nor fails the gate on its own (see gateCondition).
-			fmt.Fprintf(stdout, "[NOTICE] %s\n", c.Name)
+			// Tag renamed to match lint's Finding.String() and
+			// review_unavailable's shared leading vocabulary token
+			// (disclosure-seam story, R5-2 rename-in-place attempt).
+			fmt.Fprintf(stdout, "[DISCLOSED-UNPROVEN] %s\n", c.Name)
 			fmt.Fprintf(stdout, "       %s\n", c.Reason)
 		case c.OK:
 			fmt.Fprintf(stdout, "[PASS] %s\n", c.Name)

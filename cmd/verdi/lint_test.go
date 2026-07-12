@@ -135,8 +135,8 @@ func TestRunLintVerb_VL017DisclosureOnly_ExitsZero(t *testing.T) {
 	if got != 0 {
 		t.Fatalf("runLintVerb exit = %d, want 0 (VL-017 disclosure is not a verdict failure); stdout=%q stderr=%q", got, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "notice: VL-017") {
-		t.Fatalf("stdout = %q, want a printed \"notice: VL-017\" disclosure line (never silent)", stdout.String())
+	if !strings.Contains(stdout.String(), "disclosed-unproven: VL-017") {
+		t.Fatalf("stdout = %q, want a printed \"disclosed-unproven: VL-017\" disclosure line (never silent)", stdout.String())
 	}
 }
 

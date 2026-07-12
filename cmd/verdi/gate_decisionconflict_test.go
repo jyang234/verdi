@@ -132,8 +132,8 @@ func TestSpecMRGate_ResolvedPasses(t *testing.T) {
 	if !strings.Contains(stdout.String(), "gate: PASS") {
 		t.Fatalf("stdout = %q, want a final gate: PASS line", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "[NOTICE]") || !strings.Contains(stdout.String(), "review threads resolved") {
-		t.Fatalf("stdout = %q, want a [NOTICE] disclosing the review-thread condition unproven (nil forge)", stdout.String())
+	if !strings.Contains(stdout.String(), "[DISCLOSED-UNPROVEN]") || !strings.Contains(stdout.String(), "review threads resolved") {
+		t.Fatalf("stdout = %q, want a [DISCLOSED-UNPROVEN] tag disclosing the review-thread condition unproven (nil forge)", stdout.String())
 	}
 }
 

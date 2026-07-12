@@ -40,11 +40,14 @@ type Finding struct {
 }
 
 // String formats f as "VL-xxx path: message" — the CLI's one-line-per-
-// finding output format. A disclosure is prefixed "notice: " so a reader
-// (and CI logs) can tell a printed disclosure apart from a real violation.
+// finding output format. A disclosure is prefixed "disclosed-unproven: "
+// (disclosure-seam story, R5-2: rename-in-place attempt at ac-1's shared
+// disclosure vocabulary — see the gate and review_unavailable call sites
+// for the same token) so a reader (and CI logs) can tell a printed
+// disclosure apart from a real violation.
 func (f Finding) String() string {
 	if f.Severity == SeverityDisclosure {
-		return fmt.Sprintf("notice: %s %s: %s", f.Rule, f.Path, f.Message)
+		return fmt.Sprintf("disclosed-unproven: %s %s: %s", f.Rule, f.Path, f.Message)
 	}
 	return fmt.Sprintf("%s %s: %s", f.Rule, f.Path, f.Message)
 }
