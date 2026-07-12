@@ -257,33 +257,26 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// Stub cards (spec/scoping-canvas ac-3, dc-6): a declared stub is a
 	// typeset claim about a future story — kraft file-tab stock in the
 	// stubs band, spec register (no hand voice, no lean), its slug on the
-	// tab and its AC/OQ attributions as chips. On a sealed accepted-
-	// pending-build feature wall each card carries the one live
-	// affordance a sealed record permits: Instantiate (ac-6).
+	// tab. Its AC/OQ attributions hang on the wall as scoping yarn (the
+	// owner directive: the yarn IS the representation — no chip list on
+	// the card). On a sealed accepted-pending-build feature wall each
+	// card carries the one live affordance a sealed record permits:
+	// Instantiate (ac-6).
 	instantiable := feature && p.Status == "accepted-pending-build"
 	for _, sv := range p.StubViews {
 		cls := "stubcard"
 		spikeAttr := ""
 		kindLabel := "story stub"
-		verb, chipCls, attrs := "covers", "stub-link-chip--ac", sv.AcceptanceCriteria
 		if sv.Spike {
 			cls += " stubcard--spike"
 			spikeAttr = ` data-spike="true"`
 			kindLabel = "spike stub"
-			verb, chipCls, attrs = "resolves", "stub-link-chip--oq", sv.Resolves
 		}
 		title := designscaffold.HumanizeName(sv.Slug)
 		b.WriteString(`<div class="` + cls + `" data-testid="stub-card-` + esc(sv.Slug) + `" data-stub="` + esc(sv.Slug) + `"` + spikeAttr + ` style="left:` + px(sv.X) + `;top:` + px(sv.Y) + `">`)
 		b.WriteString(`<span class="stub-tab">` + esc(sv.Slug) + `</span>`)
 		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + kindLabel + `</span><span class="card-kind-id">declared</span></span>`)
 		b.WriteString(`<p class="stub-title" title="` + esc(title) + `">` + esc(title) + `</p>`)
-		if len(attrs) > 0 {
-			b.WriteString(`<span class="stub-links" data-testid="stub-links-` + esc(sv.Slug) + `"><span class="stub-links-verb">` + verb + `</span>`)
-			for _, id := range attrs {
-				b.WriteString(`<span class="stub-link-chip ` + chipCls + `">` + esc(id) + `</span>`)
-			}
-			b.WriteString(`</span>`)
-		}
 		if instantiable {
 			verbLabel := "Instantiate story"
 			if sv.Spike {
@@ -526,38 +519,50 @@ func writeZoneLabels(b *strings.Builder, p *BoardProjection) {
 	b.WriteString(`</div>`)
 }
 
-// yarnKeyOrder is the legend's canonical order: the minimum path's edge
-// first, the gate-bearing amendments late, scratch last.
-var yarnKeyOrder = []string{"implements", "resolves", "depends-on", "supersedes", "exempts", "relates"}
-
-// yarnKeyMeanings is one clause per type — what the thread claims, in a
-// PM's words (the consequence labels stay the picker's fuller voice).
-var yarnKeyMeanings = map[string]string{
-	"implements": "this spec delivers it",
-	"resolves":   "this spec answers it",
-	"depends-on": "needed background",
-	"supersedes": "amends it for everyone",
-	"exempts":    "this spec is excused from it",
-	"relates":    "scratch thread — not in the spec",
+// yarnKeyEntry is one legend row: a (layer, type) pair — the pair, not
+// the type alone, because the scoping layer's "resolves" (a planned
+// spike's claim) and the spec layer's "resolves" (this spec's own
+// answer) can share a wall and must never collapse into one row.
+type yarnKeyEntry struct {
+	Layer, Type, Meaning string
 }
 
-// writeYarnKey renders the wall's legend: exactly the edge types
-// present, in canonical order — a key to this board, never the closed
-// enum's vocabulary lesson.
+// yarnKeyEntries is the legend's canonical order: the committed record's
+// threads first (the minimum path's edge leading, the gate-bearing
+// amendments late), the scoping layer's planning threads next, scratch
+// last. Meanings are one clause each, in a PM's words (the consequence
+// labels stay the picker's fuller voice); the scoping pair speaks in the
+// planning tense — a claim about a future story, not the record.
+var yarnKeyEntries = []yarnKeyEntry{
+	{"spec", "implements", "this spec delivers it"},
+	{"spec", "resolves", "this spec answers it"},
+	{"spec", "depends-on", "needed background"},
+	{"spec", "supersedes", "amends it for everyone"},
+	{"spec", "exempts", "this spec is excused from it"},
+	{"scoping", "covers", "a planned story will deliver it"},
+	{"scoping", "resolves", "a planned spike will answer it"},
+	{"annotation", "relates", "scratch thread — not in the spec"},
+}
+
+// writeYarnKey renders the wall's legend: exactly the (layer, type)
+// pairs present, in canonical order — a key to this board, never the
+// closed enum's vocabulary lesson. data-layer precedes data-edge-type in
+// the markup so selectors written against data-edge-type alone keep
+// matching (the selector contract extends, never breaks).
 func writeYarnKey(b *strings.Builder, p *BoardProjection) {
-	present := map[string]bool{}
+	present := map[yarnKeyEntry]bool{}
 	for _, e := range p.Edges {
-		present[e.Type] = true
+		present[yarnKeyEntry{Layer: e.Layer, Type: e.Type}] = true
 	}
 	if len(present) == 0 {
 		return
 	}
 	b.WriteString(`<section class="yarn-key" data-testid="yarn-key"><h2>Yarn on this wall</h2><ul>`)
-	for _, t := range yarnKeyOrder {
-		if !present[t] {
+	for _, entry := range yarnKeyEntries {
+		if !present[yarnKeyEntry{Layer: entry.Layer, Type: entry.Type}] {
 			continue
 		}
-		b.WriteString(`<li data-edge-type="` + t + `"><span class="yarn-key-swatch" aria-hidden="true"></span><span class="yarn-key-type">` + t + `</span><span class="yarn-key-what">` + yarnKeyMeanings[t] + `</span></li>`)
+		b.WriteString(`<li data-layer="` + entry.Layer + `" data-edge-type="` + entry.Type + `"><span class="yarn-key-swatch" aria-hidden="true"></span><span class="yarn-key-type">` + entry.Type + `</span><span class="yarn-key-what">` + entry.Meaning + `</span></li>`)
 	}
 	b.WriteString(`</ul></section>`)
 }

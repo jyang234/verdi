@@ -41,6 +41,8 @@ func TestDecodeBoardLayout_Negative(t *testing.T) {
 		"bad position key":     `{"schema": "verdi.boardlayout/v1", "positions": {"Not-An-Id": {"x": 1, "y": 2}}}`,
 		"unknown field":        `{"schema": "verdi.boardlayout/v1", "positions": {}, "bogus": true}`,
 		"positions wrong type": `{"schema": "verdi.boardlayout/v1", "positions": []}`,
+		"empty stub slug":      `{"schema": "verdi.boardlayout/v1", "positions": {"stub:": {"x": 1, "y": 2}}}`,
+		"uppercase stub slug":  `{"schema": "verdi.boardlayout/v1", "positions": {"stub:Not-Kebab": {"x": 1, "y": 2}}}`,
 	}
 	for name, y := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -48,5 +50,23 @@ func TestDecodeBoardLayout_Negative(t *testing.T) {
 				t.Fatalf("DecodeBoardLayout(%s): want error, got nil", name)
 			}
 		})
+	}
+}
+
+// TestDecodeBoardLayout_StubKey proves a "stub:<slug>" positions key
+// decodes (round 5.5 dc-6 amendment: a stub is now a legal position-key
+// namespace alongside object ids) — shape only; VL-018 resolves it against
+// the sibling spec's declared stubs.
+func TestDecodeBoardLayout_StubKey(t *testing.T) {
+	const y = `{"schema": "verdi.boardlayout/v1", "positions": {"ac-1": {"x": 40, "y": 20}, "stub:borrower-update-api": {"x": 990, "y": 40}}}`
+	bl, err := DecodeBoardLayout([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeBoardLayout: %v", err)
+	}
+	if len(bl.Positions) != 2 {
+		t.Fatalf("Positions = %+v, want 2 entries", bl.Positions)
+	}
+	if p := bl.Positions["stub:borrower-update-api"]; p.X != 990 || p.Y != 40 {
+		t.Fatalf("Positions[stub:borrower-update-api] = %+v, want {990 40}", p)
 	}
 }

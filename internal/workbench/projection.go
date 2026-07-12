@@ -88,9 +88,11 @@ type reviewStickyView struct {
 // render on the wall as first-class scoping cards"). A pure copy of
 // artifact.Stub's fields under the projection's own JSON contract (the
 // wire shape get_board and the board's own client share, mirroring
-// cardView's convention), plus the card's computed board position —
-// computed-only, like reference cards (dc-6; VL-018: layout.json keys
-// must resolve to object ids, which a stub is not).
+// cardView's convention), plus the card's board position — the zone's
+// computed lane slot absent a stored one, or the stored `stub:<slug>`
+// position verbatim when layout.json holds one (round 5.5 dc-6 amendment:
+// a stub is draggable now, exactly like an object card, just keyed in its
+// own `stub:` namespace since a stub is not an object, VL-018).
 type StubView struct {
 	Slug               string   `json:"slug"`
 	Spike              bool     `json:"spike,omitempty"`
@@ -235,6 +237,31 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 		p.Edges = append(p.Edges, edgeView{Type: string(l.Type), From: "spec", To: edgeEndpoint(specName, declared, l.Ref), Layer: "spec"})
 	}
 
+	// (1c) Scoping-layer edges (owner directive, the ac-3 "coverage yarn
+	// projected" fix): each stub's declared attributions hang as yarn —
+	// story stub → covered AC as "covers", spike stub → resolved OQ as
+	// "resolves" — under layer "scoping". These are PROJECTIONS of the
+	// stubs block, not document links: presentation-owned, no graduate/
+	// delete/retype affordances, not gate material, and the closed
+	// five-type spec-edge vocabulary is untouched. Both endpoints are
+	// papers on this wall (the stub card via its "stub:<slug>" key, the
+	// declared AC/OQ card); an attribution naming an undeclared id
+	// projects nothing — a dangling attribution is the linter's finding,
+	// never a phantom endpoint or a minted reference card.
+	for _, st := range fm.Stubs {
+		stubKey := "stub:" + st.Slug
+		attrType, attrs := "covers", st.AcceptanceCriteria
+		if st.Spike {
+			attrType, attrs = "resolves", st.Resolves
+		}
+		for _, id := range attrs {
+			if !declared[id] {
+				continue
+			}
+			p.Edges = append(p.Edges, edgeView{Type: attrType, From: stubKey, To: id, Layer: "scoping"})
+		}
+	}
+
 	// (3) Annotation streams: this board's free-floating stickies, its
 	// untyped relates threads, and its pinned references. Graduated
 	// records have already become spec content — they no longer render
@@ -331,6 +358,12 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	// Reference cards are every external edge endpoint, ordered by ref.
 	refSet := map[string]bool{}
 	for _, e := range p.Edges {
+		// A scoping edge's endpoints are both on-wall papers by
+		// construction (the stub card and a declared AC/OQ card) — its
+		// "stub:<slug>" key must never mint a reference card.
+		if e.Layer == "scoping" {
+			continue
+		}
 		for _, end := range []string{e.From, e.To} {
 			// An annotation-id endpoint (round 5.4: an attribution
 			// thread tied to a live sticky) is the sticky's own paper —
@@ -371,10 +404,14 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	for i, r := range refs {
 		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneReference, ID: r, DocOrder: i})
 	}
-	// Stub cards slot into the kind-locked stubs band in declaration
-	// order (dc-6), keyed "stub:<slug>" — a namespace no object id or
-	// artifact ref can produce, so a stub can never collide with a stored
-	// position (none is ever stored for it, VL-018) or another card's key.
+	// Stub cards slot into the kind-locked stubs band in declaration order
+	// (dc-6), keyed "stub:<slug>" — a namespace no object id or artifact
+	// ref can produce, so a stub's key can never collide with another
+	// card's. `stored` may hold a "stub:<slug>" entry (round 5.5: the
+	// position action writes one when a stub is dragged) — Generate and
+	// ResolveDisplayOverlaps below treat it exactly like a stored object
+	// position, verbatim pass-through and all, since both operate
+	// generically over Object.ID.
 	for i, sv := range p.StubViews {
 		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneStub, ID: "stub:" + sv.Slug, DocOrder: i})
 	}

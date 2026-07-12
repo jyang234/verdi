@@ -32,9 +32,13 @@ func scopingRenderProjection(t *testing.T, mode boardModeKind) *BoardProjection 
 	return p
 }
 
-// Stub views take computed-only positions in the stubs band, exactly
-// like reference cards (dc-6; VL-018: stubs are not objects, so nothing
-// is ever stored for them).
+// Stub views fall back to a computed lane position in the stubs band
+// absent any stored one — this fixture's projection carries no stored
+// positions at all, so every stub takes its lane default (round 5.5 dc-6
+// amendment: a stub CAN carry a stored `stub:<slug>` position and win
+// verbatim, covered separately in projection_test.go and boardspecapi's
+// position-action tests; this test only exercises the no-stored-position
+// path).
 func TestScopingCanvas_StubViewPositions(t *testing.T) {
 	p := scopingRenderProjection(t, modeReadOnly)
 	if len(p.StubViews) != 3 {
@@ -70,8 +74,12 @@ func TestScopingCanvas_StubViewPositions(t *testing.T) {
 }
 
 // Declared stubs render as first-class scoping cards (ac-3): typeset
-// spec register in the stubs band — slug tab, story/spike marking, and
-// legible AC/OQ attributions — visually distinct from object cards.
+// spec register in the stubs band — slug tab, story/spike marking —
+// visually distinct from object cards. AMENDED (scoping yarn, owner
+// directive): the card's AC/OQ chip list retired — the scoping yarn is
+// the attribution's representation now (asserted below in
+// TestScopingCanvas_ScopingYarnChips), so this test now proves the chips
+// are GONE where it used to prove they rendered.
 func TestScopingCanvas_StubCardsRender(t *testing.T) {
 	p := scopingRenderProjection(t, modeReadOnly)
 	body := renderBoardRegion(p, &boardGitState{})
@@ -89,15 +97,16 @@ func TestScopingCanvas_StubCardsRender(t *testing.T) {
 		">spike stub<",
 		// The typeset title: the slug set in the record's serif.
 		`>Plain One</`,
-		// Attributions: chips naming the covered ACs / resolved OQs.
-		`data-testid="stub-links-plain-one"`,
-		`stub-link-chip--ac">ac-1<`,
-		`stub-link-chip--oq">oq-1<`,
-		">covers<",
-		">resolves<",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("stub cards missing %q", want)
+		}
+	}
+	// The chip list is retired: the attribution lives on the wall as
+	// scoping yarn, not on the card as text.
+	for _, gone := range []string{"stub-links", "stub-link-chip"} {
+		if strings.Contains(body, gone) {
+			t.Errorf("retired stub chip markup %q still renders", gone)
 		}
 	}
 	// Positions are inline like every card's.
@@ -107,6 +116,134 @@ func TestScopingCanvas_StubCardsRender(t *testing.T) {
 	// The stubs band wears its tape label (occupied, so in every mode).
 	if !strings.Contains(body, `data-testid="zone-label-stub"`) || !strings.Contains(body, ">stubs<") {
 		t.Error("stubs band label missing")
+	}
+}
+
+// scopingChipsOf slices every scoping-layer yarn chip's full element out
+// of a rendered board region (the chip div opens with its class and
+// closes before any nested div — chips contain only spans/buttons).
+func scopingChipsOf(t *testing.T, body string) []string {
+	t.Helper()
+	var chips []string
+	rest := body
+	for {
+		start := strings.Index(rest, `<div class="yarn-chip yarn-chip--scoping"`)
+		if start < 0 {
+			break
+		}
+		rest = rest[start:]
+		end := strings.Index(rest, `</div>`)
+		if end < 0 {
+			t.Fatal("unterminated yarn chip markup")
+		}
+		chips = append(chips, rest[:end])
+		rest = rest[end:]
+	}
+	return chips
+}
+
+// The scoping yarn (owner directive, verbatim: "the yarn should be used
+// to consistently represent the UI element. Story stubs are associated
+// with acceptance criteria and spikes are associated with open
+// questions."): each scoping edge renders one yarn chip under
+// data-layer="scoping" — the projection of the stubs block, in the yarn
+// system's own contract (data-edge-type / data-from / data-to), with the
+// stub's "stub:<slug>" key as its From so the thread ties to the stub
+// card's paper.
+func TestScopingCanvas_ScopingYarnChips(t *testing.T) {
+	for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
+		p := scopingRenderProjection(t, mode)
+		body := renderBoardRegion(p, &boardGitState{})
+		for _, want := range []string{
+			`<div class="yarn-chip yarn-chip--scoping" data-edge-type="covers" data-from="stub:plain-one" data-to="ac-1" data-layer="scoping">`,
+			`<div class="yarn-chip yarn-chip--scoping" data-edge-type="resolves" data-from="stub:spike-one" data-to="oq-1" data-layer="scoping">`,
+			`<div class="yarn-chip yarn-chip--scoping" data-edge-type="resolves" data-from="stub:spike-two" data-to="oq-1" data-layer="scoping">`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: scoping yarn chip missing: %q", mode, want)
+			}
+		}
+	}
+}
+
+// A scoping edge is a PROJECTION of the stubs block, not a document
+// link: it carries no graduate/delete/retype affordance in ANY mode —
+// there is no spec edge behind it to edit, and the closed five-type
+// vocabulary is untouched. This is the merge-blocking assertion the
+// owner directive names: no scoping edge ever renders an edit
+// affordance.
+func TestScopingCanvas_ScopingEdgesCarryNoAffordances(t *testing.T) {
+	for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
+		p := scopingRenderProjection(t, mode)
+		body := renderBoardRegion(p, &boardGitState{})
+		chips := scopingChipsOf(t, body)
+		if len(chips) != 3 {
+			t.Fatalf("%s: found %d scoping chips, want 3", mode, len(chips))
+		}
+		for _, chip := range chips {
+			if strings.Contains(chip, "<button") {
+				t.Errorf("%s: a scoping chip renders an affordance:\n%s", mode, chip)
+			}
+			for _, forbidden := range []string{"data-retype", "data-graduate", "data-delete"} {
+				if strings.Contains(chip, forbidden) {
+					t.Errorf("%s: a scoping chip carries %s:\n%s", mode, forbidden, chip)
+				}
+			}
+		}
+	}
+}
+
+// The yarn key gains the scoping entries — listed only when present,
+// each with its one-line planning-tense meaning, distinguishable from
+// the spec layer's committed types by data-layer (a wall can carry a
+// spec-layer resolves AND a scoping resolves at once; the key must name
+// both without collapsing them).
+func TestScopingCanvas_YarnKeyScopingEntries(t *testing.T) {
+	p := scopingRenderProjection(t, modeReadOnly)
+	body := renderBoardRegion(p, &boardGitState{})
+	for _, want := range []string{
+		`<li data-layer="scoping" data-edge-type="covers">`,
+		`<li data-layer="scoping" data-edge-type="resolves">`,
+		"a planned story will deliver it",
+		"a planned spike will answer it",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("yarn key missing scoping entry %q", want)
+		}
+	}
+	// Only when present: a wall with covers-only lists no scoping
+	// resolves entry.
+	coversOnly := &BoardProjection{
+		Spec: "s", Mode: modeReadOnly,
+		Edges: []edgeView{{Type: "covers", From: "stub:x", To: "ac-1", Layer: "scoping"}},
+	}
+	coversBody := renderBoardRegion(coversOnly, &boardGitState{})
+	if !strings.Contains(coversBody, `<li data-layer="scoping" data-edge-type="covers">`) {
+		t.Error("covers-only wall lost its covers key entry")
+	}
+	if strings.Contains(coversBody, `<li data-layer="scoping" data-edge-type="resolves">`) {
+		t.Error("covers-only wall lists a scoping resolves entry it does not carry")
+	}
+
+	// Coexistence: spec resolves and scoping resolves are two entries.
+	both := &BoardProjection{
+		Spec: "s", Mode: modeReadOnly,
+		Edges: []edgeView{
+			{Type: "resolves", From: "spec", To: "spec/other", Layer: "spec"},
+			{Type: "resolves", From: "stub:x", To: "oq-1", Layer: "scoping"},
+		},
+	}
+	bothBody := renderBoardRegion(both, &boardGitState{})
+	if !strings.Contains(bothBody, `<li data-layer="spec" data-edge-type="resolves">`) ||
+		!strings.Contains(bothBody, `<li data-layer="scoping" data-edge-type="resolves">`) {
+		t.Error("spec resolves and scoping resolves collapsed into one key entry")
+	}
+	// Canonical order: the committed types precede the planning types,
+	// scratch stays last.
+	specIdx := strings.Index(bothBody, `<li data-layer="spec" data-edge-type="resolves">`)
+	scopingIdx := strings.Index(bothBody, `<li data-layer="scoping" data-edge-type="resolves">`)
+	if specIdx > scopingIdx {
+		t.Error("yarn key lists planning threads before the committed record's")
 	}
 }
 

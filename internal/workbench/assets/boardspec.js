@@ -93,6 +93,12 @@
     // "spec" is the document itself — not a card; it lives above the
     // canvas (the placards header), so its edges hang off-board.
     if (key === "spec") return null;
+    // A scoping edge's From is the stub card's own "stub:<slug>" key
+    // (the same key its stored position lives under): the coverage/
+    // resolution thread ties to the stub's kraft paper.
+    if (key.indexOf("stub:") === 0) {
+      return c.querySelector('.stubcard[data-stub="' + esc(key.slice(5)) + '"]');
+    }
     // A relates endpoint may name a live sticky by annotation id (round
     // 5.4): the attribution thread ties to the proto-sticky's paper.
     return (
@@ -166,6 +172,7 @@
     var papers = c.querySelectorAll(".objcard, .refcard, .stubcard");
     var offboardCount = 0; // bow alternation + margin slots
     var offboardTies = {}; // fan-out of several document edges on one card
+    var placedChips = []; // chips seated earlier this pass: labels never bury labels
     for (var i = 0; i < chips.length; i++) {
       var chip = chips[i];
       var fromEl = endpointElement(chip.getAttribute("data-from"));
@@ -228,7 +235,13 @@
       svg.appendChild(path);
       for (var j = 0; j < knots.length; j++) {
         var knot = document.createElementNS(svgNS, "circle");
-        knot.setAttribute("class", "yarn-knot yarn-knot--type-" + edgeType);
+        // The knot carries the layer too: a scoping "resolves" pin must
+        // never wear the spec layer's committed resolves ink.
+        knot.setAttribute(
+          "class",
+          "yarn-knot yarn-knot--" + chip.getAttribute("data-layer") +
+            " yarn-knot--type-" + edgeType
+        );
         knot.setAttribute("cx", knots[j].x);
         knot.setAttribute("cy", knots[j].y);
         knot.setAttribute("r", 3.2);
@@ -244,7 +257,10 @@
       // Blocked space for the chip: every card's interior AND its
       // pushpin (the yarn handle protrudes above the card's top edge,
       // and chips paint over cards — a chip parked on a pin makes yarn
-      // undrawable from that card).
+      // undrawable from that card) AND every chip already seated this
+      // pass (two threads sharing a corridor — e.g. a scoping resolves
+      // beside a decision's exempts — must not stack their labels;
+      // DOM order seats them, so the layout stays deterministic).
       var clearOfCards = function (x, y) {
         for (var k = 0; k < papers.length; k++) {
           var r = rectOf(papers[k]);
@@ -254,6 +270,12 @@
           var pinX = r.x + r.w / 2 - 14;
           var pinY = r.y - 18;
           if (x < pinX + 28 && pinX < x + w && y < pinY + 22 && pinY < y + h) {
+            return false;
+          }
+        }
+        for (var q = 0; q < placedChips.length; q++) {
+          var pc = placedChips[q];
+          if (x < pc.x + pc.w && pc.x < x + w && y < pc.y + pc.h && pc.y < y + h) {
             return false;
           }
         }
@@ -268,11 +290,31 @@
       };
       var ts = [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82];
       var spot = pointAt(0.5);
+      var seated = false;
       for (var m = 0; m < ts.length; m++) {
         var p = pointAt(ts[m]);
         if (clearOfCards(p.x - w / 2, p.y - h / 2)) {
           spot = p;
+          seated = true;
           break;
+        }
+      }
+      // A corridor narrower than the chip — adjacent columns, e.g. a
+      // spike stub filed right beside the open question it claims — has
+      // no clear on-thread seat. Rather than lie over a card's text (or
+      // another chip's label), the chip slides DOWN the sag, hanging
+      // beneath the papers like a tag on the yarn. Fixed candidate
+      // order: the layout stays deterministic.
+      if (!seated) {
+        for (var dy = 18; dy <= 126 && !seated; dy += 18) {
+          for (var m2 = 0; m2 < ts.length; m2++) {
+            var p2 = pointAt(ts[m2]);
+            if (clearOfCards(p2.x - w / 2, p2.y + dy - h / 2)) {
+              spot = { x: p2.x, y: p2.y + dy };
+              seated = true;
+              break;
+            }
+          }
         }
       }
       var top = spot.y - h / 2;
@@ -281,6 +323,7 @@
       if (offboard && top < 4) top = 4;
       chip.style.left = spot.x - w / 2 + "px";
       chip.style.top = top + "px";
+      placedChips.push({ x: spot.x - w / 2, y: top, w: w, h: h });
     }
   }
 
@@ -520,7 +563,7 @@
 
   var DRAG_SLOP = 4; // px of pointer travel before a press is a drag
 
-  var gesture = null; // {kind: "card"|"sticky"|"refcard"|"chip"|"yarn", pointerId, ...}
+  var gesture = null; // {kind: "card"|"sticky"|"refcard"|"stub"|"chip"|"yarn", pointerId, ...}
 
   // A completed drag still fires a click on its element (press and
   // release land on the captured element); the reference card's click
@@ -646,12 +689,19 @@
 
     if (e.target.closest("button, textarea, input, .review-sticky")) return;
 
-    var el = e.target.closest(".objcard, .sticky, .refcard, .yarn-chip--annotation");
+    var el = e.target.closest(".objcard, .sticky, .refcard, .stubcard, .yarn-chip--annotation");
     if (!el || !c.contains(el)) return;
     if (!authoring) {
       // A reference card outside authoring is a peek affordance, not a
-      // frozen drag — no refusal theater on it. Chips likewise.
-      if (el.classList.contains("objcard") || el.classList.contains("sticky")) {
+      // frozen drag — no refusal theater on it. Chips likewise. A stub
+      // card is a positioned paper like an object card: its refusal
+      // speaks (round 5.5 dc-6 — stubs are movable, so a frozen wall
+      // must say why this one is not).
+      if (
+        el.classList.contains("objcard") ||
+        el.classList.contains("sticky") ||
+        el.classList.contains("stubcard")
+      ) {
         refuseDrag();
       }
       return;
@@ -659,6 +709,7 @@
     var kind = "card";
     if (el.classList.contains("sticky")) kind = "sticky";
     else if (el.classList.contains("refcard")) kind = "refcard";
+    else if (el.classList.contains("stubcard")) kind = "stub";
     else if (el.classList.contains("yarn-chip")) kind = "chip";
     var rect = el.getBoundingClientRect();
     gesture = {
@@ -796,6 +847,22 @@
   // ceremony; anything that would edit the spec document confirms first,
   // in plain language, naming what goes.
   function trashDrop(g) {
+    if (g.kind === "stub") {
+      // A declared stub is spec content — the stubs block in the
+      // document's own frontmatter — and removing a stub from the wall
+      // is not built yet. A designed refusal in plain language (the
+      // paper already snapped home; nothing is written).
+      var slug = g.el.getAttribute("data-stub");
+      pending = null;
+      openConfirm(
+        "This stub stays",
+        slug + " is a declared stub — spec content, in the document's own stubs block. " +
+          "Removing a stub from the wall is not built yet; to retire it, edit the spec document itself.",
+        false
+      );
+      document.getElementById("edge-confirm-ok").hidden = true;
+      return;
+    }
     if (g.kind === "sticky") {
       mutate("annotation-delete", { id: g.el.getAttribute("data-id") });
       return;
@@ -926,6 +993,15 @@
       var x = parseFloat(g.el.style.left) || 0;
       var y = parseFloat(g.el.style.top) || 0;
       mutate("position", { id: g.el.getAttribute("data-id"), x: x, y: y });
+    } else if (g.kind === "stub") {
+      // A stub drags exactly like an object card — same position action,
+      // same collision-free drop resolution server-side — keyed in its
+      // own "stub:<slug>" namespace (round 5.5 dc-6).
+      mutate("position", {
+        id: "stub:" + g.el.getAttribute("data-stub"),
+        x: parseFloat(g.el.style.left) || 0,
+        y: parseFloat(g.el.style.top) || 0,
+      });
     } else if (g.kind === "sticky") {
       mutate("sticky-position", { id: g.el.getAttribute("data-id"), x: parseFloat(g.el.style.left) || 0, y: parseFloat(g.el.style.top) || 0 });
     } else if (g.kind === "refcard" && g.el.hasAttribute("data-pin-id")) {

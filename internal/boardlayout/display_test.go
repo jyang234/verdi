@@ -185,6 +185,36 @@ func TestResolveDisplayOverlaps_AddOneNeverMovesOthers(t *testing.T) {
 	assertPairwiseDisjoint(t, rectsOf(t, added, after))
 }
 
+// TestResolveDisplayOverlaps_StubParticipates proves round 5.5's dc-6
+// amendment holds at display time too (owner directive R4-I-35): a stored
+// stub position colliding with a stored object's footprint is resolved
+// with the SAME machinery and canonical order as an object-object
+// collision — the stub zone sorts after open-question in zoneIndex, so
+// when a stub's stored spot collides with an earlier-zone object, the
+// object (the earlier claimant) keeps its stored position and the stub is
+// the one nudged.
+func TestResolveDisplayOverlaps_StubParticipates(t *testing.T) {
+	objects := []Object{
+		{Kind: ZoneAC, ID: "ac-1", DocOrder: 0},
+		{Kind: ZoneStub, ID: "stub:alpha", DocOrder: 0},
+	}
+	stored := map[string]artifact.Position{
+		"ac-1":       {X: 100, Y: 100},
+		"stub:alpha": {X: 100, Y: 100}, // squarely on ac-1's footprint
+	}
+	got, err := ResolveDisplayOverlaps(objects, stored)
+	if err != nil {
+		t.Fatalf("ResolveDisplayOverlaps: %v", err)
+	}
+	if want := (artifact.Position{X: 100, Y: 100}); got["ac-1"] != want {
+		t.Errorf("ac-1 (earlier zone, first claimant) = %v, want stored verbatim %v", got["ac-1"], want)
+	}
+	if got["stub:alpha"] == (artifact.Position{X: 100, Y: 100}) {
+		t.Error("stub:alpha still renders stacked on ac-1's stored position")
+	}
+	assertPairwiseDisjoint(t, rectsOf(t, objects, got))
+}
+
 // Negative paths: unknown kinds fail closed (CLAUDE.md), and orphaned
 // stored entries (keys naming no live object) neither render nor claim
 // a footprint — the same adjudicated policy Generate follows.

@@ -43,11 +43,14 @@ const (
 	ZoneOpenQuestion ZoneKind = "open-question"
 	// ZoneStub holds a feature wall's declared-stub cards — the scoping
 	// canvas's kind-locked band between open questions and references
-	// (spec/scoping-canvas dc-6). Stub positions are always computed,
-	// never stored, exactly like reference cards: layout.json keys must
-	// resolve to declared object ids (VL-018), and a stub is not an
-	// object; stored stub positions are deferred until dragging stubs
-	// proves needed (dc-6, the smallest reversible option).
+	// (spec/scoping-canvas dc-6). A stub card's position falls back to
+	// this zone's computed lane slot absent a stored one, exactly like an
+	// object card — but round 5.5's dc-6 amendment lets a stub's position
+	// be STORED too, keyed `stub:<slug>` rather than an object id (a stub
+	// is not an object, so it needs its own key namespace; VL-018
+	// resolves `stub:<slug>` against the sibling spec's declared stubs
+	// instead of its declared objects). Same verbatim-pass-through,
+	// display-resolution, and prune semantics as a stored object position.
 	ZoneStub ZoneKind = "stub"
 	// ZoneReference holds reference cards — external edge targets
 	// (05 §Workbench: an edge target outside the spec still renders).

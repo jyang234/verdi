@@ -545,8 +545,14 @@ R4-I-5):
 
 ```json
 { "schema": "verdi.boardlayout/v1",
-  "positions": { "ac-1": { "x": 40, "y": 20 }, "dc-1": { "x": 40, "y": 180 } } }
+  "positions": { "ac-1": { "x": 40, "y": 20 }, "dc-1": { "x": 40, "y": 180 },
+                 "stub:borrower-update-api": { "x": 990, "y": 40 } } }
 ```
+
+A `positions` key names a declared object by id, or — round 5.5, the
+scoping canvas's stubs made draggable on demand — a declared stub as
+`stub:<slug>`. Same verbatim-pass-through, prune, and display-resolution
+semantics either way; positions only, never content, as ever.
 
 Positions only, keyed by object ID (§Object model) — never content. It is
 committed with the spec, frozen with it at acceptance (VL-018 checks its
@@ -608,7 +614,7 @@ run locally and as a CI gate. Rules:
 | VL-015  | supersession manifest completeness and fidelity: every object in the predecessor spec (at its `frozen.commit`) is classified exactly once across the superseding revision's `supersession:` block (`carried`/`amended`/`amended_advisory`/`removed`, plus `added`); every `carried` object's `(kind, id, text)` content is byte-identical to its predecessor (§Object model) — fail closed on drift |
 | VL-016  | spike path fence: a build branch built from a `spike: true` story touches only paths matched by `verdi.yaml`'s `spike_paths:` allowlist; any other path in the diff fails closed |
 | VL-017  | open-question stickies resolved-or-carried: on a design branch targeting the default branch, every open-question annotation (§Record schemas) is either `status: resolved` or explicitly carried as a declared open-question object on the spec — the VL-014 successor for new specs. Scoped by mutable-zone presence: open-question annotations live in the per-checkout mutable zone (`data/mutable/annotations/*.jsonl`), which is never committed. The rule enforces **where the mutable zone is present** — author-local lint and the workbench's review-ready indicator. **Where the mutable zone is absent (CI clone), lint reports the check disclosed-unproven for that spec** — never a silent pass — honoring three-valued honesty (constitution 2); a vacuous green is never emitted. The disclosure is a printed notice, not a verdict failure — a CI run with no other findings exits 0 with the disclosure on the record (adjudicated at W2 wave close) |
-| VL-018  | `layout.json` positions: every key in a spec directory's `positions` map (`verdi.boardlayout/v1`, §Record schemas) resolves to a real object ID declared in that spec's frontmatter |
+| VL-018  | `layout.json` positions: every key in a spec directory's `positions` map (`verdi.boardlayout/v1`, §Record schemas) resolves to a real object ID declared in that spec's frontmatter, or — as `stub:<slug>` — to a declared stub of that spec |
 
 ## Repository plumbing
 
