@@ -4,13 +4,14 @@ kind: spec
 title: "Disclosure enumeration spike"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 spike: true
 story: jira:VERDI-R5-1
 problem: { text: "spec/disclosure-legibility's oq-1 is open: whether disclosures should be machine-enumerable (MCP/audit surface) and what an enumeration item should carry is unanswered, and story-2 (disclosures-panel) cannot be specced responsibly without a concrete recommendation", anchor: "#problem" }
 outcome: { text: "a concrete, timeboxed recommendation on MCP-enumerability of disclosures and a specified enumeration item shape, precise enough for story-2's spec to consume directly", anchor: "#outcome" }
 links:
   - { type: resolves, ref: "spec/disclosure-legibility#oq-1" }
+frozen: { at: 2026-07-11, commit: 3077bdeffbe8e33c1559b96dffd98b485ccd9ab4 }
 ---
 # Disclosure enumeration spike
 
