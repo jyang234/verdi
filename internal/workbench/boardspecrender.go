@@ -357,7 +357,13 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			b.WriteString(`<span class="yarn-chip-type">` + esc(e.Type) + `</span>`)
 		}
 		if authoring && e.Layer == "annotation" {
-			b.WriteString(`<button type="button" class="graduate-btn" data-graduate="thread">Graduate</button>`)
+			// An attribution thread (either endpoint a live sticky, round
+			// 5.4) never graduates through the type picker: its meaning IS
+			// the endpoint pair (dc-5), and stub-graduate on the sticky is
+			// what consumes it. It still dies from its own ×.
+			if !artifact.IsAnnotationID(e.From) && !artifact.IsAnnotationID(e.To) {
+				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="thread">Graduate</button>`)
+			}
 			b.WriteString(`<button type="button" class="delete-btn" data-delete="thread" aria-label="Delete thread" title="the thread dies; the spec is untouched">×</button>`)
 		}
 		if editableSpecEdge {

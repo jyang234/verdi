@@ -561,6 +561,12 @@ func TestBoardSpec_StubInstantiate_Negative(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("stub-instantiate(branch exists) = %d, want 400\n%s", rec.Code, rec.Body.String())
 		}
+		// The refusal speaks plainly (the wall surfaces it verbatim): it
+		// names the branch and says it already exists, rather than
+		// leaking git plumbing.
+		if !strings.Contains(rec.Body.String(), "design/borrower-update-api already exists") {
+			t.Errorf("branch-exists refusal not in plain language:\n%s", rec.Body.String())
+		}
 	})
 
 	// The generic authoring-mode gate must still apply to every OTHER

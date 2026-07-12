@@ -637,6 +637,14 @@ func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string
 		}
 	}
 
+	// A plain-language pre-check on the branch (the wall surfaces this
+	// message verbatim): UpdateRef below stays the atomic create-only
+	// guard — this only makes the common refusal legible, it does not
+	// replace the fail-closed write.
+	if _, err := gitx.RevParse(ctx, s.root, "refs/heads/design/"+slug); err == nil {
+		return fmt.Errorf("branch design/%s already exists — this stub was already instantiated (or the name is taken); check that branch out instead", slug)
+	}
+
 	content := designscaffold.Story("spec/"+slug, stubInstantiatePlaceholderStoryRef, designscaffold.HumanizeName(slug), stub.Spike, links)
 
 	// Self-validate before ever touching the object database (CLAUDE.md:

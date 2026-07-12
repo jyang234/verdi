@@ -221,6 +221,48 @@ func TestScopingCanvas_ProtoStickyAffordances(t *testing.T) {
 	}
 }
 
+// An attribution thread (a relates whose endpoint is a live sticky)
+// carries no picker-graduate affordance: its meaning is the endpoint
+// pair (dc-5), and stub-graduate on the sticky consumes it. It keeps
+// its × (threads still die).
+func TestScopingCanvas_AttributionThreadHasNoPickerGraduate(t *testing.T) {
+	const stickyID = "a-01J8Z0K3AAAAAAAAAAAAAAAAAA"
+	const threadID = "a-01J8Z0K4BBBBBBBBBBBBBBBBBB"
+	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec)
+	annotations := []*artifact.Annotation{
+		{
+			ID: stickyID, TS: "2026-07-10T14:02:11Z", Author: "j",
+			Type: artifact.AnnotationStory, Body: "bulk update", Status: artifact.AnnotationOpen,
+			Board: &artifact.BoardAnchor{Story: "scoping-fixture", X: 960, Y: 600},
+		},
+		{
+			ID: threadID, TS: "2026-07-10T14:03:00Z", Author: "j",
+			Type: artifact.AnnotationRelates, Body: "relates: sticky ~ ac-1", Status: artifact.AnnotationOpen,
+			Target:  &artifact.Target{Ref: stickyID},
+			TargetB: &artifact.Target{Ref: "spec/scoping-fixture@7f3c2a1", Selector: artifact.Selector{Heading: "ac-1"}},
+		},
+	}
+	p, err := buildProjection("scoping-fixture", fm, nil, annotations, nil, modeAuthoring)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	body := renderBoardRegion(p, &boardGitState{})
+	chipStart := strings.Index(body, `data-annotation-id="`+threadID+`"`)
+	if chipStart < 0 {
+		t.Fatal("attribution thread chip not rendered")
+	}
+	chip := body[chipStart:]
+	if end := strings.Index(chip, "</div>"); end >= 0 {
+		chip = chip[:end]
+	}
+	if strings.Contains(chip, `data-graduate="thread"`) {
+		t.Error("attribution thread offers the picker graduate")
+	}
+	if !strings.Contains(chip, `data-delete="thread"`) {
+		t.Error("attribution thread lost its delete affordance")
+	}
+}
+
 // The embedded client payload carries the wall's class, so the sticky
 // draft's type control can offer story/spike ONLY where the server would
 // accept them (feature-class walls) — the client mirrors the server's
