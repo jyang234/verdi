@@ -197,6 +197,47 @@ func TestRunDesignStart_ProviderResolveFails_DegradesToRawRef(t *testing.T) {
 	}
 }
 
+// TestCmdDesignStart_WiresConfiguredProvider proves D-3's fix: design start
+// builds its provider registry from verdi.yaml's providers: map (the same
+// buildProviderRegistry construction rollup/sync use), so a configured
+// scheme (jira) resolves through a real adapter instead of always degrading
+// with ErrUnknownScheme, while an unconfigured scheme still honestly misses.
+func TestCmdDesignStart_WiresConfiguredProvider(t *testing.T) {
+	reg := buildProviderRegistry(phase7Manifest(t))
+	if _, err := reg.Provider("jira"); err != nil {
+		t.Fatalf("Provider(jira) = %v, want a real adapter (design start must attempt real resolution for a configured scheme, not ErrUnknownScheme)", err)
+	}
+	if _, err := reg.Provider("confluence"); err == nil {
+		t.Fatal("Provider(confluence) = nil error, want a miss for an unconfigured scheme")
+	}
+}
+
+// TestRunDesignStart_ConfiguredProviderUnreachable_DegradesForTrueReason
+// proves that once the real registry is wired, a configured-but-unreachable
+// ref degrades for the TRUE reason (Unavailable/NotFound), never the generic
+// ErrUnknownScheme that reads as "this scheme isn't configured" (D-3).
+func TestRunDesignStart_ConfiguredProviderUnreachable_DegradesForTrueReason(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	ctx := context.Background()
+	manifest := phase7Manifest(t)
+
+	p := providerfake.New()
+	p.FailResolve("jira:LOAN-9999", provider.ErrUnavailable)
+	deps := designDeps{Provider: p, Runner: nil, GoTest: fakeGoTest{}}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-9999", "some-feature", manifest, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	if !contains(stderr.String(), "degraded") || !contains(stderr.String(), "unavailable") {
+		t.Fatalf("stderr = %q, want the true resolution-failure reason (unavailable)", stderr.String())
+	}
+	if contains(stderr.String(), "unknown scheme") {
+		t.Fatalf("stderr = %q, must NOT degrade with ErrUnknownScheme for a configured, resolvable-scheme ref", stderr.String())
+	}
+}
+
 // TestRunDesignStart_Negative covers runDesignStart's own operational
 // error paths.
 func TestRunDesignStart_Negative(t *testing.T) {

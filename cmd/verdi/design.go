@@ -119,11 +119,10 @@ type designDeps struct {
 
 // cmdDesignStart is `verdi design start`'s real entry point: it parses
 // --kind/--name and the optional positional ref, resolves the store root
-// and manifest, wires the real provider registry (empty in v1 — the Jira
-// adapter is a later phase's deliverable, so every scheme currently
-// degrades to the raw ref, which is the honest, disclosed behavior per 04
-// §Semantics's own failure table) and runner, and delegates to
-// runDesignStart.
+// and manifest, wires the real provider registry from verdi.yaml's
+// providers: map (buildProviderRegistry — the same construction rollup/sync
+// use, so a configured jira ref resolves or degrades for the true reason per
+// 04 §Semantics) and runner, and delegates to runDesignStart.
 func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 	kindArg, name, rest, err := extractFlags(args)
 	if err != nil {
@@ -176,11 +175,17 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// No real story-provider adapter ships yet (the Jira adapter is a
-	// later phase); an empty registry makes every Resolve call fail with
-	// ErrUnknownScheme, which runDesignStart's degrade path already
-	// handles honestly per 04 §Semantics.
-	reg := provider.NewRegistry(map[string]provider.StoryProvider{})
+	// Wire the real story-provider registry from verdi.yaml's providers:
+	// map — the same construction rollup/sync use (buildProviderRegistry,
+	// rollup.go) — so a CONFIGURED scheme (jira) actually attempts
+	// resolution and degrades for the true reason (NotFound/Unavailable) per
+	// 04 §Semantics, rather than always degrading with ErrUnknownScheme (the
+	// D-3 defect: the old empty registry made a well-formed, configured ref
+	// and a truly-unconfigured one indistinguishable from design start's
+	// point of view). An unconfigured scheme is still rejected earlier, in
+	// runDesignStart, via manifest.ConfiguredStorySchemes (the VL-005-shaped
+	// error) — it never reaches this registry.
+	reg := buildProviderRegistry(manifest)
 
 	var runner upstream.Runner
 	if manifest.Toolchain != nil {
