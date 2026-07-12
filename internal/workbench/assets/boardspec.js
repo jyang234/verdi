@@ -290,11 +290,31 @@
       };
       var ts = [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82];
       var spot = pointAt(0.5);
+      var seated = false;
       for (var m = 0; m < ts.length; m++) {
         var p = pointAt(ts[m]);
         if (clearOfCards(p.x - w / 2, p.y - h / 2)) {
           spot = p;
+          seated = true;
           break;
+        }
+      }
+      // A corridor narrower than the chip — adjacent columns, e.g. a
+      // spike stub filed right beside the open question it claims — has
+      // no clear on-thread seat. Rather than lie over a card's text (or
+      // another chip's label), the chip slides DOWN the sag, hanging
+      // beneath the papers like a tag on the yarn. Fixed candidate
+      // order: the layout stays deterministic.
+      if (!seated) {
+        for (var dy = 18; dy <= 126 && !seated; dy += 18) {
+          for (var m2 = 0; m2 < ts.length; m2++) {
+            var p2 = pointAt(ts[m2]);
+            if (clearOfCards(p2.x - w / 2, p2.y + dy - h / 2)) {
+              spot = { x: p2.x, y: p2.y + dy };
+              seated = true;
+              break;
+            }
+          }
         }
       }
       var top = spot.y - h / 2;
