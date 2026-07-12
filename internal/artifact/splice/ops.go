@@ -257,6 +257,84 @@ func (d *Doc) RemoveDecisionLink(dcID, linkType string, refMatches func(ref stri
 	return Edit{Start: elemStart, End: nextStart}, nil
 }
 
+// RemoveDecisionLinksMatching removes EVERY link in one decision's
+// links: that the caller's predicate matches, in a single edit (the
+// trash gesture's batch removal: taking a card off the wall removes all
+// the edges holding it there atomically). All links matching → the whole
+// links: key goes, exactly like RemoveDecisionLink's sole-link path; a
+// subset → one edit rewrites the flow sequence with the kept elements'
+// source text verbatim, in order, in the house style. Returns how many
+// links were removed; zero matches is an error (fail closed — the caller
+// believed an edge existed).
+func (d *Doc) RemoveDecisionLinksMatching(dcID string, match func(linkType, ref string) bool) (Edit, int, error) {
+	if !strings.HasPrefix(dcID, "dc-") {
+		return Edit{}, 0, fmt.Errorf("splice: %q is not a decision id", dcID)
+	}
+	elem, err := d.objectElem(dcID)
+	if err != nil {
+		return Edit{}, 0, err
+	}
+	key, seq := mapKeyValue(elem, "links")
+	if seq == nil {
+		return Edit{}, 0, fmt.Errorf("splice: decision %s has no links", dcID)
+	}
+	if seq.Kind != yaml.SequenceNode || seq.Style&yaml.FlowStyle == 0 {
+		return Edit{}, 0, fmt.Errorf("splice: decision %s links is not a flow-style sequence (only the house style is proven); fail closed", dcID)
+	}
+	matched := make(map[int]bool)
+	for i, li := range seq.Content {
+		t := mapGet(li, "type")
+		r := mapGet(li, "ref")
+		if t != nil && r != nil && match(t.Value, r.Value) {
+			matched[i] = true
+		}
+	}
+	if len(matched) == 0 {
+		return Edit{}, 0, fmt.Errorf("splice: decision %s has no link matching the target", dcID)
+	}
+
+	if len(matched) == len(seq.Content) {
+		// Every link goes: remove ", links: [ ... ]" whole — the inverse
+		// of the first-yarn insertion (same span logic as
+		// RemoveDecisionLink's sole-link path).
+		keyStart, _, kerr := d.span(key)
+		if kerr != nil {
+			return Edit{}, 0, kerr
+		}
+		_, valEnd, verr := d.span(seq)
+		if verr != nil {
+			return Edit{}, 0, verr
+		}
+		at := keyStart
+		for at > 0 && isYAMLSpace(d.src[at-1]) {
+			at--
+		}
+		if at == 0 || d.src[at-1] != ',' {
+			return Edit{}, 0, fmt.Errorf("splice: links key for %s is not comma-separated from a preceding field; fail closed", dcID)
+		}
+		return Edit{Start: at - 1, End: valEnd}, len(matched), nil
+	}
+
+	// A subset: rewrite the sequence with the kept elements' own source
+	// text, verbatim and in order.
+	kept := make([]string, 0, len(seq.Content)-len(matched))
+	for i, li := range seq.Content {
+		if matched[i] {
+			continue
+		}
+		s, e, serr := d.span(li)
+		if serr != nil {
+			return Edit{}, 0, serr
+		}
+		kept = append(kept, string(d.src[s:e]))
+	}
+	start, end, err := d.span(seq)
+	if err != nil {
+		return Edit{}, 0, err
+	}
+	return Edit{Start: start, End: end, Replace: "[ " + strings.Join(kept, ", ") + " ]"}, len(matched), nil
+}
+
 // RetypeDecisionLink changes one link's type IN PLACE (owner directive,
 // round 6 UAT follow-up: the relationship's type is updatable without
 // delete-and-redraw): a single edit replacing only the type scalar, so
@@ -353,6 +431,119 @@ func (d *Doc) AppendObject(id, text string, evidence []artifact.EvidenceKind) ([
 	bodyEdit := Edit{Start: len(d.src), End: len(d.src), Replace: body}
 
 	return []Edit{fmEdit, bodyEdit}, nil
+}
+
+// RemoveObjectEntry removes one declared object's frontmatter entry —
+// the trash gesture's spec half (its body prose and anchor heading are
+// NEVER touched: prose is not silently destroyed; the entry is what
+// declares the object). A sole element takes its whole block key with it,
+// so add-then-remove round-trips the frontmatter; both house shapes are
+// handled (block-style sequence of flow maps — a multi-line element goes
+// whole — and a flow-style sequence). Anything else fails closed.
+func (d *Doc) RemoveObjectEntry(id string) (Edit, error) {
+	block, err := blockForID(id)
+	if err != nil {
+		return Edit{}, err
+	}
+	key, seq := mapKeyValue(d.fm, block)
+	if seq == nil {
+		return Edit{}, fmt.Errorf("splice: spec has no %s block", block)
+	}
+	if seq.Kind != yaml.SequenceNode {
+		return Edit{}, fmt.Errorf("splice: %s is not a sequence; fail closed", block)
+	}
+	idx := -1
+	for i, li := range seq.Content {
+		if n := mapGet(li, "id"); n != nil && n.Value == id {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return Edit{}, fmt.Errorf("splice: no object %q in %s", id, block)
+	}
+	elem := seq.Content[idx]
+	elemStart, elemEnd, err := d.span(elem)
+	if err != nil {
+		return Edit{}, err
+	}
+
+	if seq.Style&yaml.FlowStyle != 0 {
+		if len(seq.Content) == 1 {
+			return d.removeWholeLineSpan(key, seq, block)
+		}
+		if idx > 0 {
+			_, prevEnd, perr := d.span(seq.Content[idx-1])
+			if perr != nil {
+				return Edit{}, perr
+			}
+			return Edit{Start: prevEnd, End: elemEnd}, nil
+		}
+		nextStart, _, nerr := d.span(seq.Content[idx+1])
+		if nerr != nil {
+			return Edit{}, nerr
+		}
+		return Edit{Start: elemStart, End: nextStart}, nil
+	}
+
+	// Block style: the element owns its line(s) — "- { ... }", possibly
+	// wrapped. Remove from its line start through its trailing newline.
+	if len(seq.Content) == 1 {
+		return d.removeWholeLineSpan(key, elem, block)
+	}
+	lineStart, err := byteOffset(d.offsets, elem.Line+d.lineDelta, 1)
+	if err != nil {
+		return Edit{}, err
+	}
+	prefix := string(d.src[lineStart:elemStart])
+	if strings.TrimLeft(prefix, " \t") != "- " {
+		return Edit{}, fmt.Errorf("splice: block sequence element does not start its own line with a %q marker (got %q); fail closed", "- ", prefix)
+	}
+	end, err := extendThroughNewline(d.src, elemEnd)
+	if err != nil {
+		return Edit{}, err
+	}
+	return Edit{Start: lineStart, End: end}, nil
+}
+
+// removeWholeLineSpan removes a top-level "key: ..." span as whole lines:
+// from the key's line start through the value node's trailing newline —
+// the sole-element case, where the emptied block key must go with its
+// last entry (an empty block sequence cannot exist in YAML).
+func (d *Doc) removeWholeLineSpan(key, lastValue *yaml.Node, block string) (Edit, error) {
+	keyStart, _, err := d.span(key)
+	if err != nil {
+		return Edit{}, err
+	}
+	lineStart, err := byteOffset(d.offsets, key.Line+d.lineDelta, 1)
+	if err != nil {
+		return Edit{}, err
+	}
+	if strings.TrimLeft(string(d.src[lineStart:keyStart]), " \t") != "" {
+		return Edit{}, fmt.Errorf("splice: %s key does not start its own line; fail closed", block)
+	}
+	_, valEnd, err := d.span(lastValue)
+	if err != nil {
+		return Edit{}, err
+	}
+	end, err := extendThroughNewline(d.src, valEnd)
+	if err != nil {
+		return Edit{}, err
+	}
+	return Edit{Start: lineStart, End: end}, nil
+}
+
+// extendThroughNewline advances end past trailing inline whitespace and
+// the one newline that closes the line, failing closed if anything else
+// intervenes (the span would not be a whole-line removal).
+func extendThroughNewline(src []byte, end int) (int, error) {
+	for end < len(src) && (src[end] == ' ' || src[end] == '\t' || src[end] == '\r') {
+		end++
+	}
+	if end >= len(src) || src[end] != '\n' {
+		return 0, fmt.Errorf("splice: element is not followed by a line end; fail closed")
+	}
+	return end + 1, nil
 }
 
 // appendToBlockSeq inserts entry as a new "- { ... }" line after the last
