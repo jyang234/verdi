@@ -114,6 +114,15 @@ func TestDecodeSpec_Negative(t *testing.T) {
 		"disposition duplicate sticky":           "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: draft\nowners: [x]\nstory: jira:LOAN-1\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\ndispositions:\n  - { sticky: a-01J8Z0K3AAAAAAAAAAAAAAAAAA, disposition: open-question }\n  - { sticky: a-01J8Z0K3AAAAAAAAAAAAAAAAAA, disposition: open-question }\n",
 		"disposition bad sticky shape":           "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: draft\nowners: [x]\nstory: jira:LOAN-1\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\ndispositions:\n  - { sticky: not-a-ulid, disposition: open-question }\n",
 		"unknown top-level field":                "id: spec/foo\nkind: spec\nclass: component\ntitle: Foo\nstatus: active\nowners: [x]\nbogus: 1\n",
+		// Round-5.4 spike-stub grammar (02 §Kind registry, DC-4): each
+		// malformed shape must surface as an actual decode/validation
+		// failure here, at the artifact package's own decode/validate
+		// seam — never silently accepted (CLAUDE.md: "unknown enum values
+		// fail closed"; constitution: "silence is never a pass").
+		"spike stub resolves without spike: true": "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: draft\nowners: [x]\nstory: jira:LOAN-1\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\nstubs:\n  - { slug: x, resolves: [oq-1] }\n",
+		"spike stub with no resolves":             "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: draft\nowners: [x]\nstory: jira:LOAN-1\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\nstubs:\n  - { slug: x, spike: true }\n",
+		"spike stub with acceptance_criteria":     "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: draft\nowners: [x]\nstory: jira:LOAN-1\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\nstubs:\n  - { slug: x, spike: true, resolves: [oq-1], acceptance_criteria: [ac-1] }\n",
+		"spike stub resolves entry not oq-shaped": "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: draft\nowners: [x]\nstory: jira:LOAN-1\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\nstubs:\n  - { slug: x, spike: true, resolves: [bad-id] }\n",
 	}
 	for name, y := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -121,6 +130,42 @@ func TestDecodeSpec_Negative(t *testing.T) {
 				t.Fatalf("DecodeSpec(%s): want error, got nil", name)
 			}
 		})
+	}
+}
+
+// TestDecodeSpec_SpikeStub_Happy proves the round-5.4 spike-stub shape
+// decodes and re-round-trips through a feature spec's stubs: block
+// alongside a plain stub — one list, flag-discriminated (DC-4).
+func TestDecodeSpec_SpikeStub_Happy(t *testing.T) {
+	const y = `
+id: spec/scoping-canvas-fixture
+kind: spec
+class: feature
+title: "Scoping canvas fixture"
+status: draft
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "does the thing", evidence: [static] }
+stubs:
+  - { slug: plain-stub, acceptance_criteria: [ac-1] }
+  - { slug: retry-strategy-spike, spike: true, resolves: [oq-1, oq-2] }
+`
+	fm, err := DecodeSpec([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v", err)
+	}
+	if len(fm.Stubs) != 2 {
+		t.Fatalf("len(Stubs) = %d, want 2", len(fm.Stubs))
+	}
+	spike := fm.Stubs[1]
+	if !spike.Spike {
+		t.Fatal("Stubs[1].Spike = false, want true")
+	}
+	if len(spike.Resolves) != 2 || spike.Resolves[0] != "oq-1" || spike.Resolves[1] != "oq-2" {
+		t.Fatalf("Stubs[1].Resolves = %v, want [oq-1 oq-2]", spike.Resolves)
+	}
+	if len(spike.AcceptanceCriteria) != 0 {
+		t.Fatalf("Stubs[1].AcceptanceCriteria = %v, want empty", spike.AcceptanceCriteria)
 	}
 }
 

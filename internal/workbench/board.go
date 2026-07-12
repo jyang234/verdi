@@ -238,12 +238,14 @@ func boardPageBody(state boardClientState) string {
 }
 
 // stickyTypeClass maps an annotation type to its sticky-note CSS modifier.
-// Only the four legal annotation types (internal/artifact) get a paper
-// color of their own; anything else — including the "(annotation not
-// found)" placeholder's "unknown" — falls back to the neutral note.
+// Only the sticky-creatable annotation types (internal/artifact) — the
+// four generic ones plus the scoping canvas's story/spike proto-stickies
+// (round 5.4) — get a paper color of their own; anything else, including
+// the "(annotation not found)" placeholder's "unknown", falls back to
+// the neutral note.
 func stickyTypeClass(t string) string {
 	switch t {
-	case "comment", "question", "decision-needed", "agent-task":
+	case "comment", "question", "decision-needed", "agent-task", "story", "spike":
 		return t
 	default:
 		return "unknown"

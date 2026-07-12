@@ -114,6 +114,36 @@ func TestStub_Validate_Negative(t *testing.T) {
 	}
 }
 
+// TestSpikeStub_Validate_Happy proves the round-5.4 spike-stub shape (02
+// §Kind registry amendment, DC-4): spike: true plus a non-empty resolves
+// list of oq-<slug> ids, and no acceptance_criteria.
+func TestSpikeStub_Validate_Happy(t *testing.T) {
+	s := Stub{Slug: "retry-strategy-spike", Spike: true, Resolves: []string{"oq-1", "oq-2"}}
+	if err := s.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+// TestSpikeStub_Validate_Negative proves the DC-4 grammar fails closed:
+// resolves requires spike: true; a spike stub declares resolves and no
+// acceptance_criteria; a plain stub the reverse.
+func TestSpikeStub_Validate_Negative(t *testing.T) {
+	cases := map[string]Stub{
+		"resolves without spike: true":       {Slug: "retry-strategy-spike", Resolves: []string{"oq-1"}},
+		"spike with no resolves":             {Slug: "retry-strategy-spike", Spike: true},
+		"spike with acceptance_criteria":     {Slug: "retry-strategy-spike", Spike: true, Resolves: []string{"oq-1"}, AcceptanceCriteria: []string{"ac-1"}},
+		"spike resolves entry not oq-shaped": {Slug: "retry-strategy-spike", Spike: true, Resolves: []string{"bad-id"}},
+		"spike resolves entry is an ac id":   {Slug: "retry-strategy-spike", Spike: true, Resolves: []string{"ac-1"}},
+	}
+	for name, s := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := s.Validate(); err == nil {
+				t.Fatalf("Validate(%+v): want error, got nil", s)
+			}
+		})
+	}
+}
+
 func TestObjectContentHash_Deterministic(t *testing.T) {
 	h1, err := ObjectContentHash(ObjectKindAcceptanceCriterion, "ac-2", "the update API has no PUT route")
 	if err != nil {

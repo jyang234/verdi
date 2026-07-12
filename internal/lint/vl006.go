@@ -47,6 +47,7 @@ func (r vl006) Check(in *RunInput) []Finding {
 			findings = append(findings, r.checkRequiredness(d)...)
 		}
 		findings = append(findings, r.checkStubACs(d)...)
+		findings = append(findings, r.checkStubResolves(d)...)
 	}
 	return findings
 }
@@ -74,6 +75,32 @@ func (vl006) checkStubACs(d *Document) []Finding {
 		for _, acID := range st.AcceptanceCriteria {
 			if !declaredAC[acID] {
 				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("stub %q names acceptance_criteria %s, which is not a declared acceptance criterion of this spec", st.Slug, acID)})
+			}
+		}
+	}
+	return findings
+}
+
+// checkStubResolves is checkStubACs' round-5.4 sibling (02 §Kind
+// registry's DC-4: "VL-006 grows its sibling check (`resolves` must name
+// declared open questions of the same spec) inside the rule that already
+// validates stub `acceptance_criteria`"): every spike stub's `resolves`
+// entry must name a declared open question of the same spec.
+// Stub.Validate only checks each entry is a syntactically well-formed
+// oq-<slug> id (object.go) — a spike stub naming a nonexistent oq-99
+// decodes and validates clean, leaving a dangling attribution reference.
+// Same guard as checkStubACs: runs for every non-grandfathered, cleanly-
+// decoded spec.
+func (vl006) checkStubResolves(d *Document) []Finding {
+	var findings []Finding
+	declaredOQ := make(map[string]bool, len(d.Spec.OpenQuestions))
+	for _, q := range d.Spec.OpenQuestions {
+		declaredOQ[q.ID] = true
+	}
+	for _, st := range d.Spec.Stubs {
+		for _, oqID := range st.Resolves {
+			if !declaredOQ[oqID] {
+				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("spike stub %q names resolves %s, which is not a declared open question of this spec", st.Slug, oqID)})
 			}
 		}
 	}

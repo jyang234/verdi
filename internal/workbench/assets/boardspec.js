@@ -93,9 +93,12 @@
     // "spec" is the document itself — not a card; it lives above the
     // canvas (the placards header), so its edges hang off-board.
     if (key === "spec") return null;
+    // A relates endpoint may name a live sticky by annotation id (round
+    // 5.4): the attribution thread ties to the proto-sticky's paper.
     return (
       c.querySelector('.objcard[data-id="' + esc(key) + '"]') ||
-      c.querySelector('.refcard[data-ref="' + esc(key) + '"]')
+      c.querySelector('.refcard[data-ref="' + esc(key) + '"]') ||
+      c.querySelector('.sticky[data-id="' + esc(key) + '"]')
     );
   }
 
@@ -160,7 +163,7 @@
     while (svg.firstChild) svg.removeChild(svg.firstChild);
 
     var chips = c.querySelectorAll(".yarn-chip");
-    var papers = c.querySelectorAll(".objcard, .refcard");
+    var papers = c.querySelectorAll(".objcard, .refcard, .stubcard");
     var offboardCount = 0; // bow alternation + margin slots
     var offboardTies = {}; // fan-out of several document edges on one card
     for (var i = 0; i < chips.length; i++) {
@@ -427,6 +430,76 @@
     }
   }
 
+  // -- proto-sticky attribution yarn (the scoping canvas, dc-5) --------------
+  //
+  // A story sticky's thread to an acceptance criterion is the coverage
+  // claim; a spike sticky's thread to an open question is the resolution
+  // attribution. Each pair has exactly ONE reading, so there is no picker
+  // ceremony: a legal drop confirms what the thread means and mints the
+  // untyped relates record directly; an illegal pair gets the picker's
+  // plain-language refusal (the endpoint pair IS the claim).
+
+  function protoRefusal(fromLabel, toLabel, message) {
+    pending = null;
+    var items = document.getElementById("edge-picker-items");
+    var pair = document.getElementById("edge-picker-pair");
+    if (!items) return;
+    items.innerHTML = "";
+    if (pair) pair.textContent = fromLabel + " → " + toLabel;
+    var note = document.createElement("p");
+    note.className = "ritual-note picker-empty-note";
+    note.setAttribute("data-testid", "proto-yarn-refusal");
+    note.textContent = message;
+    items.appendChild(note);
+    show("edge-picker");
+  }
+
+  function routeProtoYarn(g, target) {
+    var toKind = kindOfElement(target);
+    var to = keyOfElement(target);
+    var story = g.proto === "story";
+    var wantKind = story ? "acceptance-criterion" : "open-question";
+
+    if (toKind !== wantKind) {
+      var refusal;
+      if (story && toKind === "open-question") {
+        refusal =
+          "A story sticky's thread claims coverage — it ties only to acceptance criteria. " +
+          "If this thought answers open questions, it wants to be a spike sticky instead.";
+      } else if (!story && toKind === "acceptance-criterion") {
+        refusal =
+          "A spike sticky's thread claims an answer — it ties only to open questions. " +
+          "If this thought delivers an acceptance criterion, it wants to be a story sticky instead.";
+      } else {
+        refusal =
+          "A " + g.proto + " sticky's thread has one meaning: " +
+          (story
+            ? "coverage of an acceptance criterion."
+            : "resolution of an open question.") +
+          " It has nothing to say to " + pairPhrase(toKind, toKind).replace(/^two /, "") + ".";
+      }
+      protoRefusal(g.proto + " sticky", to, refusal);
+      return;
+    }
+
+    pending = { protoRelate: { from: g.from, to: to } };
+    if (story) {
+      openConfirm(
+        "Claim coverage of " + to,
+        "Ties this story sticky to " + to + ". The thread is the coverage claim: " +
+          "when the sticky graduates into a stub, " + to + " joins its declared acceptance criteria.",
+        false
+      );
+    } else {
+      openConfirm(
+        "Claim resolution of " + to,
+        "Ties this spike sticky to " + to + ". The thread is the attribution: " +
+          "when the sticky graduates into a spike stub, " + to + " joins the questions it resolves.",
+        false
+      );
+    }
+  }
+
   // -- pointer gestures: drag, yarn draw ------------------------------------
   //
   // Pointer Events, not mouse events: the e2e suite's synthetic mouse
@@ -503,6 +576,22 @@
     var handle = e.target.closest(".yarn-handle");
     if (handle && c.contains(handle)) {
       if (!authoring) return;
+      // The pin on a story/spike proto-sticky draws the ATTRIBUTION
+      // thread (dc-5): same gesture, but the drop resolves against the
+      // endpoint-pair table instead of the type picker.
+      var protoSticky = handle.closest(".sticky");
+      if (protoSticky) {
+        gesture = {
+          kind: "yarn",
+          proto: protoSticky.getAttribute("data-annotation-type"),
+          pointerId: e.pointerId,
+          fromEl: protoSticky,
+          from: protoSticky.getAttribute("data-id"),
+          fromKind: "sticky",
+        };
+        capturePointer(handle, e);
+        return;
+      }
       var card = handle.closest(".objcard");
       gesture = {
         kind: "yarn",
@@ -529,13 +618,18 @@
       var canvasRect0 = c.getBoundingClientRect();
       var gx = e.clientX - canvasRect0.left + c.scrollLeft;
       var gy = e.clientY - canvasRect0.top + c.scrollTop;
-      var cards0 = c.querySelectorAll(".objcard");
+      // Pin owners: object cards AND proto-stickies (their pins draw
+      // attribution yarn) — any paper whose pushpin a chip may bury.
+      var cards0 = c.querySelectorAll(".objcard, .sticky");
       for (var ci = 0; ci < cards0.length; ci++) {
+        if (!cards0[ci].querySelector(".yarn-handle")) continue;
         var cr = rectOf(cards0[ci]);
         var pinCX = cr.x + cr.w / 2;
         if (gx >= pinCX - 8 && gx <= pinCX + 8 && gy >= cr.y - 8 && gy <= cr.y + 8) {
+          var isSticky0 = cards0[ci].classList.contains("sticky");
           gesture = {
             kind: "yarn",
+            proto: isSticky0 ? cards0[ci].getAttribute("data-annotation-type") : undefined,
             viaCover: true,
             moved: false,
             downX: e.clientX,
@@ -543,7 +637,7 @@
             pointerId: e.pointerId,
             fromEl: cards0[ci],
             from: cards0[ci].getAttribute("data-id"),
-            fromKind: cards0[ci].getAttribute("data-object-kind"),
+            fromKind: isSticky0 ? "sticky" : cards0[ci].getAttribute("data-object-kind"),
           };
           return;
         }
@@ -797,6 +891,10 @@
         }
       }
       if (!target || target === g.fromEl) return;
+      if (g.proto) {
+        routeProtoYarn(g, target);
+        return;
+      }
       openPicker({
         from: g.from,
         fromKind: g.fromKind,
@@ -912,6 +1010,12 @@
     ["decision-needed", "Decision needed"],
     ["agent-task", "Agent task"],
   ];
+  // Story/spike proto-stickies are the feature wall's scoping surface
+  // (dc-5): the server refuses them anywhere else, so the control only
+  // offers them there — the menu never offers what the server refuses.
+  if (state.class === "feature") {
+    STICKY_TYPES.push(["story", "Story"], ["spike", "Spike"]);
+  }
 
   function startStickyEditor() {
     var c = canvas();
@@ -1200,6 +1304,66 @@
 
     switch (t.id) {
       case "edge-confirm-ok": {
+        // The proto-sticky attribution thread: confirmed meaning, minted
+        // directly as an untyped relates record (dc-5 — the endpoint
+        // pair carries the semantics, no picker ceremony).
+        if (pending && pending.protoRelate) {
+          var rel = pending.protoRelate;
+          pending = null;
+          hideAllDialogs();
+          mutate("relates", { from: rel.from, to: rel.to });
+          return;
+        }
+        // Stub graduation (dc-6's register ceremony). The server's
+        // refusals — zero yarn, slug collision — come back in plain
+        // language; surface them in the same dialog, never a raw toast.
+        if (pending && pending.stubGraduate) {
+          var gradID = pending.stubGraduate;
+          pending = null;
+          hideAllDialogs();
+          setStatus("saving…");
+          api("stub-graduate", { id: gradID })
+            .then(function (data) {
+              if (typeof data.dirty === "boolean") state.git.dirty = data.dirty;
+              return refreshFragment().then(function () {
+                setStatus("saved");
+              });
+            })
+            .catch(function (err) {
+              setStatus("");
+              openConfirm("Not yet a stub", err.message, false);
+              document.getElementById("edge-confirm-ok").hidden = true;
+            });
+          return;
+        }
+        // Instantiate (ac-6): the sealed wall's one live affordance.
+        // Success is a receipt — the branch name and the tracker-ref
+        // placeholder the operator must fill; failure surfaces plain.
+        if (pending && pending.instantiate) {
+          var slug = pending.instantiate;
+          pending = null;
+          hideAllDialogs();
+          setStatus("cutting branch…");
+          api("stub-instantiate", { id: slug })
+            .then(function () {
+              setStatus("");
+              openConfirm(
+                "Story instantiated",
+                "Branch design/" + slug + " now carries spec/" + slug +
+                  ", scaffolded from this stub. Its story: tracker ref is the placeholder " +
+                  "todo:REPLACE-ME — fill it in on the branch before the story is real. " +
+                  "This wall (the serving checkout) has not moved.",
+                false
+              );
+              document.getElementById("edge-confirm-ok").hidden = true;
+            })
+            .catch(function (err) {
+              setStatus("");
+              openConfirm("Could not instantiate", err.message, false);
+              document.getElementById("edge-confirm-ok").hidden = true;
+            });
+          return;
+        }
         if (pending && pending.remove) {
           var removal = pending;
           pending = null;
@@ -1305,9 +1469,39 @@
       return;
     }
 
+    // Instantiate (sealed accepted feature wall): consequence-labeled
+    // before it fires — a branch cut is not a hover-and-hope click.
+    var inst = t.closest("[data-instantiate]");
+    if (inst) {
+      var instSlug = inst.getAttribute("data-instantiate");
+      var isSpike = !!inst.closest(".stubcard--spike");
+      pending = { instantiate: instSlug };
+      openConfirm(
+        "Instantiate " + (isSpike ? "spike" : "story") + " “" + instSlug + "”",
+        "Cuts branch design/" + instSlug + " carrying a scaffolded " +
+          (isSpike ? "spike" : "story") + " spec bound to this stub by slug. " +
+          "The serving checkout never moves — nothing on this wall changes until that branch merges.",
+        false
+      );
+      return;
+    }
+
     var grad = t.closest(".graduate-btn");
     if (grad) {
-      if (grad.getAttribute("data-graduate") === "sticky") {
+      if (grad.getAttribute("data-graduate") === "stub") {
+        // The proto-sticky's graduation: the kind is already the
+        // sticky's type, so there is no menu — one confirmation naming
+        // the ceremony (dc-6: the band stays, the voice changes).
+        var protoEl = grad.closest(".sticky");
+        pending = { stubGraduate: protoEl.getAttribute("data-id") };
+        openConfirm(
+          "Graduate into a stub",
+          "Typesets this sticky in place: its text becomes the stub's slug, its yarn " +
+            "the coverage it claims — an ordinary spec edit into the stubs registry. " +
+            "The handwriting becomes the record.",
+          false
+        );
+      } else if (grad.getAttribute("data-graduate") === "sticky") {
         openGraduateMenu(grad, grad.closest(".sticky").getAttribute("data-id"));
       } else {
         var chip = grad.closest(".yarn-chip");
