@@ -5,7 +5,7 @@ title: "Workbench Directory"
 owners: [platform-team]
 class: feature
 status: draft
-problem: { text: "the workbench serves one checkout, so one branch: drafts on design branches are invisible at the main address, every parallel draft demands its own port, and the home page under-reports the store — work in progress is exactly what a directory must show", anchor: problem }
+problem: { text: "the workbench serves one checkout, so one branch: every draft in progress demands its own ad-hoc port while the main address under-reports the store — the distinction the operator needs is status (draft, accepted, active, terminal), and the tool is expressing it as network addresses", anchor: problem }
 outcome: { text: "one workbench address is the whole directory: accepted and active specs beside every draft in progress, each with class and status, each board one click away — drafts authorable, accepted specs sealed, no second port ever", anchor: outcome }
 acceptance_criteria:
   - { id: ac-2, text: "the home directory lists every spec on the default branch and every draft on a design branch, grouped and status-chipped, computed deterministically from git refs", evidence: [behavioral], anchor: "#ac-2" }
