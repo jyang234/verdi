@@ -79,8 +79,12 @@ export default defineConfig({
       // the v1 board's yarn gesture is a RAW pointer drag (helpers.ts
       // drawYarn), and raw mouse events never auto-scroll the way
       // locator actions do — both endpoints, including the reference
-      // column, must be co-visible on one screen.
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1600, height: 1000 } },
+      // column, must be co-visible on one screen. AMENDED 1600 -> 1880
+      // with the scoping canvas: the stubs band (spec/scoping-canvas
+      // dc-6) added a sixth column, pushing the references lane to
+      // x 1180–1380; the wider viewport keeps every yarn endpoint
+      // co-visible — the same contract, one more column.
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1880, height: 1000 } },
     },
     // Opt-in only (see v1AcceptanceRequested above). Shares the webServer
     // harness so the acceptance specs can run against it on demand; they
@@ -92,7 +96,7 @@ export default defineConfig({
             name: "v1-acceptance",
             testDir: "./tests-v1",
             // Same desktop viewport as the default project (see above).
-            use: { ...devices["Desktop Chrome"], viewport: { width: 1600, height: 1000 } },
+            use: { ...devices["Desktop Chrome"], viewport: { width: 1880, height: 1000 } },
           },
         ]
       : []),

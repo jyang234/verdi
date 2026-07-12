@@ -20,11 +20,16 @@ import { addSticky } from "./helpers";
 // front-loaded), the yarn key that names only the threads present, and
 // mode identity readable from the page chrome.
 
+// AMENDED with the scoping canvas: the stubs band (spec/scoping-canvas
+// dc-6) sits between open questions and references. It is CLASS-GATED:
+// a feature wall wears it (DESIGN_SPEC below); a story wall never files
+// stubs and never shows the band — asserted separately for EMPTY_SPEC.
 const ZONE_KINDS = [
   "acceptance-criterion",
   "constraint",
   "decision",
   "open-question",
+  "stub",
   "reference",
   "scratch",
 ] as const;
@@ -237,6 +242,13 @@ test.describe("board legibility: the wall reads at a glance", () => {
     await expect(page.locator(".yarn-chip--doc")).toHaveCount(1);
     for (const kind of ZONE_KINDS) {
       const label = page.getByTestId(`zone-label-${kind}`);
+      if (kind === "stub") {
+        // EMPTY_SPEC is class: story — a story wall never files stubs,
+        // so it never wears the band's label, not even the invitation
+        // (the same class gate the server puts on proto-stickies).
+        await expect(label).toHaveCount(0);
+        continue;
+      }
       await expect(label).toBeVisible();
       if (kind !== "reference") {
         await expect(label).toHaveClass(/zone-label--empty/);

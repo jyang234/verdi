@@ -618,13 +618,18 @@
       var canvasRect0 = c.getBoundingClientRect();
       var gx = e.clientX - canvasRect0.left + c.scrollLeft;
       var gy = e.clientY - canvasRect0.top + c.scrollTop;
-      var cards0 = c.querySelectorAll(".objcard");
+      // Pin owners: object cards AND proto-stickies (their pins draw
+      // attribution yarn) — any paper whose pushpin a chip may bury.
+      var cards0 = c.querySelectorAll(".objcard, .sticky");
       for (var ci = 0; ci < cards0.length; ci++) {
+        if (!cards0[ci].querySelector(".yarn-handle")) continue;
         var cr = rectOf(cards0[ci]);
         var pinCX = cr.x + cr.w / 2;
         if (gx >= pinCX - 8 && gx <= pinCX + 8 && gy >= cr.y - 8 && gy <= cr.y + 8) {
+          var isSticky0 = cards0[ci].classList.contains("sticky");
           gesture = {
             kind: "yarn",
+            proto: isSticky0 ? cards0[ci].getAttribute("data-annotation-type") : undefined,
             viaCover: true,
             moved: false,
             downX: e.clientX,
@@ -632,7 +637,7 @@
             pointerId: e.pointerId,
             fromEl: cards0[ci],
             from: cards0[ci].getAttribute("data-id"),
-            fromKind: cards0[ci].getAttribute("data-object-kind"),
+            fromKind: isSticky0 ? "sticky" : cards0[ci].getAttribute("data-object-kind"),
           };
           return;
         }

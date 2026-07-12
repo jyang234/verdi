@@ -12,12 +12,16 @@ import { FEATURE_SPEC, boardPath } from "./fixtures";
 // free spot and NEVER writes layout.json (deliberately kept colliding as
 // the permanent fixture — do not "clean it up").
 
+// AMENDED (strengthened) with the scoping canvas: stub cards take
+// computed footprints in the layout like reference cards, so the
+// never-stacked property must hold across them too.
 const allCardRects = (page: Page) =>
-  page.locator(".objcard, .refcard").evaluateAll((els) =>
+  page.locator(".objcard, .refcard, .stubcard").evaluateAll((els) =>
     els.map((el) => ({
       id:
         el.getAttribute("data-id") ||
         el.getAttribute("data-ref") ||
+        el.getAttribute("data-stub") ||
         el.getAttribute("data-testid"),
       x: (el as HTMLElement).offsetLeft,
       y: (el as HTMLElement).offsetTop,
