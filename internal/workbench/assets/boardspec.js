@@ -62,6 +62,7 @@
       return resp.text().then(function (html) {
         region.innerHTML = html;
         layoutYarn();
+        markClamped();
       });
     });
   }
@@ -324,6 +325,159 @@
       chip.style.left = spot.x - w / 2 + "px";
       chip.style.top = top + "px";
       placedChips.push({ x: spot.x - w / 2, y: top, w: w, h: h });
+    }
+  }
+
+  // -- click-to-expand: truncation made visible (owner directive) -----------
+  //
+  // The wall clamps text to keep every paper a bounded footprint (a
+  // case-file placard to three lines, an object card and a stub to their
+  // index-card size). When a clamp actually cuts text, that must be
+  // visible, not silent: the element gets `.is-clamped` (a fade on its
+  // last line + a zoom-in cursor) and a quiet "⋯" mark in its corner, and
+  // a click opens the read-only expand dialog. The affordance appears
+  // ONLY when the text measurably overflows — a short placard stays crisp
+  // and inert. Measured on the SERVER-RENDERED text (the DOM always holds
+  // the full string; the clamp only hides it), so it re-runs after every
+  // fragment swap, on load (web fonts change wrapping), and on resize.
+  // The mark lives in the element's parent (never inside the clamped box,
+  // where it would perturb -webkit-line-clamp or leak into the full text
+  // the dialog reads back).
+
+  var EXPANDABLE_SELECTOR =
+    ".placard > p, .objcard .card-text, .stubcard .stub-title, .sticky:not(.sticky-draft) .sticky-body";
+
+  function setClampMark(el, on) {
+    var parent = el.parentNode;
+    if (!parent) return;
+    var mark = null;
+    for (var i = 0; i < parent.children.length; i++) {
+      if (parent.children[i].classList.contains("clamp-more")) {
+        mark = parent.children[i];
+        break;
+      }
+    }
+    if (on && !mark) {
+      mark = document.createElement("span");
+      mark.className = "clamp-more";
+      mark.setAttribute("aria-hidden", "true");
+      parent.appendChild(mark);
+    } else if (!on && mark) {
+      mark.remove();
+    }
+  }
+
+  function markClamped() {
+    if (!region) return;
+    var els = region.querySelectorAll(EXPANDABLE_SELECTOR);
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      // A vertical clamp overflows in height; the ref/nowrap cases carry
+      // their own ellipsis and (for a reference card) the peek, so only
+      // the multi-line papers are measured here.
+      var truncated = el.scrollHeight - el.clientHeight > 1;
+      el.classList.toggle("is-clamped", truncated);
+      if (truncated) el.setAttribute("data-expandable", "");
+      else el.removeAttribute("data-expandable");
+      setClampMark(el, truncated);
+    }
+  }
+
+  // expandHeaderFor names the element in its own eyebrow voice — the
+  // dialog's header (owner directive: "the element's kind + id"). A
+  // placard is its tag; an object card its id; a stub its slug.
+  function expandHeaderFor(el) {
+    var placard = el.closest(".placard");
+    if (placard) {
+      return placard.classList.contains("placard--outcome") ? "OUTCOME" : "PROBLEM";
+    }
+    var card = el.closest(".objcard");
+    if (card) {
+      var kind = (card.getAttribute("data-object-kind") || "").replace(/-/g, " ");
+      var id = card.getAttribute("data-id") || "";
+      return kind ? kind + " · " + id : id;
+    }
+    var stub = el.closest(".stubcard");
+    if (stub) return stub.getAttribute("data-stub") || "stub";
+    var sticky = el.closest(".sticky");
+    if (sticky) return sticky.getAttribute("data-annotation-type") || "sticky";
+    return "";
+  }
+
+  // A scratch element (a sticky) reads back in the hand it was written in;
+  // everything else is the spec register's serif.
+  function expandIsHand(el) {
+    return !!el.closest(".sticky");
+  }
+
+  function closeExpandDialog() {
+    var d = document.getElementById("expand-dialog");
+    var b = document.getElementById("expand-backdrop");
+    if (d) d.remove();
+    if (b) b.remove();
+  }
+
+  function openExpandDialog(el) {
+    closeExpandDialog();
+    var header = expandHeaderFor(el);
+    var backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop expand-backdrop";
+    backdrop.id = "expand-backdrop";
+
+    var dlg = document.createElement("div");
+    dlg.id = "expand-dialog";
+    dlg.className = "board-dialog expand-dialog" + (expandIsHand(el) ? " expand-dialog--hand" : "");
+    dlg.setAttribute("data-testid", "expand-dialog");
+    dlg.setAttribute("role", "dialog");
+    dlg.setAttribute("aria-modal", "true");
+    dlg.setAttribute("aria-label", header);
+    dlg.setAttribute("aria-labelledby", "expand-dialog-kind");
+
+    var close = document.createElement("button");
+    close.type = "button";
+    close.id = "expand-close";
+    close.className = "expand-close";
+    close.setAttribute("aria-label", "Close");
+    close.textContent = "×"; // ×
+
+    var kind = document.createElement("h2");
+    kind.id = "expand-dialog-kind";
+    kind.className = "expand-kind";
+    kind.textContent = header;
+
+    var body = document.createElement("div");
+    body.className = "expand-text";
+    body.setAttribute("data-testid", "expand-text");
+    // The DOM holds the full string; the clamp only hid it. Reading
+    // textContent (not innerHTML) keeps this strictly read-only text.
+    body.textContent = el.textContent;
+
+    dlg.appendChild(close);
+    dlg.appendChild(kind);
+    dlg.appendChild(body);
+    document.body.appendChild(backdrop);
+    document.body.appendChild(dlg);
+    close.focus();
+  }
+
+  // A single click opens the dialog, but a card is also double-click-to-
+  // edit in authoring: the open is deferred a beat and CANCELLED by the
+  // dblclick handler, so the second click never lands on an expand dialog
+  // and editing wins. A drag (past the slop) is a drag — its click tail is
+  // guarded out below.
+  var EXPAND_DELAY = 250;
+  var expandTimer = null;
+  function scheduleExpand(el) {
+    if (expandTimer) clearTimeout(expandTimer);
+    expandTimer = setTimeout(function () {
+      expandTimer = null;
+      openExpandDialog(el);
+    }, EXPAND_DELAY);
+  }
+  function cancelExpand() {
+    if (expandTimer) {
+      clearTimeout(expandTimer);
+      expandTimer = null;
     }
   }
 
@@ -1051,6 +1205,7 @@
     if (!card) return;
     var textEl = card.querySelector(".card-text");
     if (!textEl) return;
+    cancelExpand(); // editing a card wins over the click-to-expand it shares
     editing = true;
     var original = textEl.textContent;
     var editor = document.createElement("textarea");
@@ -1346,6 +1501,13 @@
       return;
     }
 
+    // The expand dialog closes from its ×, the backdrop, or Escape — the
+    // same three exits every board dialog offers.
+    if (t.id === "expand-close" || t.id === "expand-backdrop") {
+      closeExpandDialog();
+      return;
+    }
+
     // The supply toolbox: the tab toggles the tray; a result row pins;
     // any click outside closes the tray without residue.
     if (t.closest("#pin-toolbox-tab")) {
@@ -1369,6 +1531,27 @@
     if (refcard) {
       if (refcard === dragGhost) return; // a drag's tail, not a peek click
       openRefPeek(refcard.getAttribute("data-ref"));
+      return;
+    }
+
+    // Click-to-expand: a clamped placard / card text / stub title opens
+    // its read-only dialog. Only truncated text carries `.is-clamped`, so
+    // a short one is inert. A reference card is excluded above (its own
+    // click is the peek, which already shows the whole artifact).
+    var clampEl = t.closest(".is-clamped[data-expandable]");
+    if (!clampEl && !t.closest("button, textarea, input, .review-sticky")) {
+      // A draggable paper captures the pointer on press, so the click's
+      // target is the paper itself, not the clamped text child underneath
+      // it (a placard, uncaptured, resolves directly above). Recover the
+      // paper's own clamped text so a click anywhere on a truncated card
+      // or stub still expands it.
+      var paper = t.closest(".objcard, .stubcard, .sticky");
+      if (paper) clampEl = paper.querySelector(".is-clamped[data-expandable]");
+    }
+    // The drag-tail guard: a completed drag's click fires on the dragged
+    // paper (dragGhost) — its clamped child must not be read as an expand.
+    if (clampEl && !(dragGhost && dragGhost.contains(clampEl))) {
+      scheduleExpand(clampEl);
       return;
     }
 
@@ -1635,8 +1818,10 @@
   function onKeyDown(e) {
     if (e.key === "Escape") {
       pending = null;
+      cancelExpand();
       hideAllDialogs();
       closeRefPeek();
+      closeExpandDialog();
       closePinTray();
     }
   }
@@ -1650,5 +1835,16 @@
   document.addEventListener("keydown", onKeyDown);
   document.addEventListener("input", onInput);
 
+  // Re-measure clamps when wrapping can change: after web fonts load and
+  // on resize (the placards are fluid). requestAnimationFrame coalesces a
+  // resize storm into one measure.
+  var clampRAF = null;
+  window.addEventListener("resize", function () {
+    if (clampRAF) cancelAnimationFrame(clampRAF);
+    clampRAF = requestAnimationFrame(markClamped);
+  });
+  window.addEventListener("load", markClamped);
+
   layoutYarn();
+  markClamped();
 })();
