@@ -233,6 +233,35 @@ func declaredKindsOf(proj *BoardProjection) map[string]string {
 	return kinds
 }
 
+// stubKeyFor returns the declared stub's own "stub:<slug>" layout key when
+// slug names one of proj.StubViews, else "" — the board id ↔ layout.json
+// key mapping the position action and liveKeys share (round 5.5 dc-6).
+func stubKeyFor(proj *BoardProjection, slug string) (string, bool) {
+	for _, sv := range proj.StubViews {
+		if sv.Slug == slug {
+			return "stub:" + sv.Slug, true
+		}
+	}
+	return "", false
+}
+
+// liveKeys is the full set of layout.json keys currently backed by
+// something real on this board: every declared object id (declaredKindsOf)
+// plus every declared stub's "stub:<slug>" key (round 5.5 dc-6 amendment:
+// stubs are draggable now, mirroring how a stored object position works).
+// It is the writer's live set for Prune (VL-018: a dangling key, object or
+// stub, is a lint error the writer never persists).
+func liveKeys(proj *BoardProjection) map[string]bool {
+	live := make(map[string]bool, len(proj.Cards)+len(proj.StubViews))
+	for id := range declaredKindsOf(proj) {
+		live[id] = true
+	}
+	for _, sv := range proj.StubViews {
+		live["stub:"+sv.Slug] = true
+	}
+	return live
+}
+
 // checkEdgeLegal re-checks the picker's own table server-side: the menu
 // can only OFFER what this function permits, but the server never
 // trusts the menu.
@@ -875,17 +904,35 @@ func (s *boardSpecServer) actionEdgeRetype(name string, proj *BoardProjection, r
 // collision-free by construction) and store ONLY the dragged card's
 // coordinate in layout.json (positions only, never content; autosaved,
 // never committed per-drag; no other stored position is ever touched).
-// The write prunes orphaned keys (VL-018, the adjudicated policy).
+// The write prunes orphaned keys (VL-018, the adjudicated policy). The id
+// is either a declared object id, or — round 5.5 dc-6 — "stub:<slug>"
+// naming a declared stub; either way the layout key and the zone kind
+// (hence the footprint) are resolved the same way and fed to the same
+// drop-resolution machinery.
 func (s *boardSpecServer) actionPosition(name string, proj *BoardProjection, req boardAPIRequest) error {
 	kinds := declaredKindsOf(proj)
-	if _, ok := kinds[req.ID]; !ok {
-		return fmt.Errorf("position target %q is not a declared object id (layout.json keys must resolve, VL-018)", req.ID)
+	layoutKey := req.ID
+	var kind boardlayout.ZoneKind
+	switch {
+	case kinds[req.ID] != "":
+		kind = boardlayout.ZoneKind(kinds[req.ID])
+	default:
+		slug, isStub := strings.CutPrefix(req.ID, "stub:")
+		if !isStub {
+			return fmt.Errorf("position target %q is not a declared object id or a declared stub (layout.json keys must resolve, VL-018)", req.ID)
+		}
+		key, ok := stubKeyFor(proj, slug)
+		if !ok {
+			return fmt.Errorf("position target %q is not a declared object id or a declared stub (layout.json keys must resolve, VL-018)", req.ID)
+		}
+		layoutKey = key
+		kind = boardlayout.ZoneStub
 	}
 	stored, err := boardlayout.ReadFile(s.specDir(name))
 	if err != nil {
 		return err
 	}
-	obstacles := make([]boardlayout.Rect, 0, len(proj.Cards)+len(proj.RefCards))
+	obstacles := make([]boardlayout.Rect, 0, len(proj.Cards)+len(proj.RefCards)+len(proj.StubViews))
 	for _, c := range proj.Cards {
 		if c.ID == req.ID {
 			continue
@@ -897,13 +944,16 @@ func (s *boardSpecServer) actionPosition(name string, proj *BoardProjection, req
 		w, h := boardlayout.FootprintFor(boardlayout.ZoneReference)
 		obstacles = append(obstacles, boardlayout.Rect{X: rc.X, Y: rc.Y, W: w, H: h})
 	}
-	w, h := boardlayout.FootprintFor(boardlayout.ZoneKind(kinds[req.ID]))
-	stored[req.ID] = boardlayout.ResolveDrop(artifact.Position{X: req.X, Y: req.Y}, w, h, obstacles)
-	live := make(map[string]bool, len(kinds))
-	for id := range kinds {
-		live[id] = true
+	for _, sv := range proj.StubViews {
+		if "stub:"+sv.Slug == layoutKey {
+			continue
+		}
+		w, h := boardlayout.FootprintFor(boardlayout.ZoneStub)
+		obstacles = append(obstacles, boardlayout.Rect{X: sv.X, Y: sv.Y, W: w, H: h})
 	}
-	return boardlayout.WriteFile(s.specDir(name), stored, live)
+	w, h := boardlayout.FootprintFor(kind)
+	stored[layoutKey] = boardlayout.ResolveDrop(artifact.Position{X: req.X, Y: req.Y}, w, h, obstacles)
+	return boardlayout.WriteFile(s.specDir(name), stored, liveKeys(proj))
 }
 
 // actionStickyPosition: a sticky (or pinned-reference) drag landed — the

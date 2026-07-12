@@ -574,6 +574,42 @@ func TestBoardSpec_ObjectTrash_StubClaimsAC(t *testing.T) {
 	}
 }
 
+// TestBoardSpec_ObjectTrash_PrunesLayout_KeepsStubKey proves round 5.5's
+// live-key fix: trashing a declared object prunes only ITS OWN layout.json
+// key. A stored "stub:<slug>" position for a stub that still exists is
+// NOT an orphan of this trash — it must survive the same Prune call that
+// removes the trashed object's key (the live-key set the writer checks
+// against must include declared stub keys, not just declared object ids).
+func TestBoardSpec_ObjectTrash_PrunesLayout_KeepsStubKey(t *testing.T) {
+	root := newTrashStubFixture(t) // ac-1 unclaimed, ac-2 claimed by stub badge-computes
+	layoutPath := filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "layout.json")
+	const seedLayout = `{
+  "schema": "verdi.boardlayout/v1",
+  "positions": { "ac-1": { "x": 40, "y": 20 }, "stub:badge-computes": { "x": 900, "y": 40 } }
+}
+`
+	if err := os.WriteFile(layoutPath, []byte(seedLayout), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(root)
+
+	rec := postBoardAPI(t, h, boardFixtureName, "object-trash", `{"id":"ac-1"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("object-trash = %d\n%s", rec.Code, rec.Body.String())
+	}
+	layout, err := os.ReadFile(layoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(layout)
+	if strings.Contains(got, `"ac-1"`) {
+		t.Errorf("layout.json still holds the trashed object's own key: %s", got)
+	}
+	if !strings.Contains(got, `"stub:badge-computes":{"x":900,"y":40}`) {
+		t.Errorf("layout.json lost the still-live stub's stored position: %s", got)
+	}
+}
+
 func TestBoardSpec_PinActionsAreAuthoringOnly(t *testing.T) {
 	root := newBoardFixture(t)
 	// On the default branch the same draft renders read-only (05

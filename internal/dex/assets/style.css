@@ -2164,40 +2164,49 @@ button.yarn-chip-type {
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
-/* attributions: the stub's declared coverage/resolution, as chips in
-   the target kind's ink — legible without opening the document */
-.stub-links {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.25rem;
-  overflow: hidden;
+/* attributions retired from the card (owner directive): the stub's
+   declared coverage/resolution hangs on the wall as scoping yarn — see
+   "the scoping yarn" below — so the card carries only its own identity */
+
+/* stub cards drag on the live wall (round 5.5 dc-6): the same pick-up
+   cues every positioned paper speaks, only where moving means something */
+.mode-authoring .stubcard { cursor: grab; touch-action: none; }
+.mode-authoring .stubcard:active { cursor: grabbing; }
+.mode-authoring .stubcard:hover { box-shadow: var(--shadow-lift); }
+
+/* the scoping yarn: BASTING STITCHES — a run of round tacking dots, the
+   temporary stitch that lays the work out before any permanent seam.
+   Committed spec yarn is solid thread (supersedes long-dashed) and the
+   scratch layer a flat gray dash; the basting run is the third voice:
+   planning. Each type wears the ink of the surface it serves — covers
+   in the evidenced green of the AC's own coverage receipt, resolves in
+   the spike's waived violet — so thread, receipt, and card agree at a
+   glance in both themes. */
+.yarn-thread--scoping {
+  stroke-dasharray: 2 8;
+  stroke-linecap: round;
+  stroke-width: 2.2;
+  opacity: 0.8;
 }
-.stub-links-verb {
-  font-family: var(--mono);
-  font-size: 0.56rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted-solid);
+.yarn-thread--scoping.yarn-thread--type-covers { stroke: var(--st-evidenced); }
+.yarn-knot--scoping.yarn-knot--type-covers { fill: var(--st-evidenced); }
+.yarn-thread--scoping.yarn-thread--type-resolves { stroke: var(--st-waived); }
+.yarn-knot--scoping.yarn-knot--type-resolves { fill: var(--st-waived); }
+
+/* the scoping chip is cut from the stub's own kraft stock: dotted edge,
+   type ink — a label pinned to the basting run, never an affordance
+   (a scoping edge is a projection of the stubs block; nothing to edit) */
+.yarn-chip--scoping {
+  border-style: dotted;
+  background: var(--stub-paper);
 }
-.stub-link-chip {
-  font-family: var(--mono);
-  font-size: 0.6rem;
-  font-weight: 600;
-  padding: 0.02rem 0.4rem;
-  border-radius: 999px;
-  border: 1px solid;
-}
-.stub-link-chip--ac {
-  color: var(--st-evidenced);
-  border-color: color-mix(in srgb, var(--st-evidenced) 55%, transparent);
-  background: color-mix(in srgb, var(--st-evidenced-tint) 70%, transparent);
-}
-.stub-link-chip--oq {
-  color: var(--st-waived);
-  border-color: color-mix(in srgb, var(--st-waived) 55%, transparent);
-  background: color-mix(in srgb, var(--st-waived-tint) 70%, transparent);
-}
+.yarn-chip--scoping[data-edge-type="covers"] { color: var(--st-evidenced); border-color: var(--st-evidenced); }
+.yarn-chip--scoping[data-edge-type="resolves"] { color: var(--st-waived); border-color: var(--st-waived); }
+
+/* the key rows for the planning threads: dotted swatch, same inks */
+.yarn-key li[data-layer="scoping"] .yarn-key-swatch { border-top-style: dotted; }
+.yarn-key li[data-layer="scoping"][data-edge-type="covers"] { color: var(--st-evidenced); }
+.yarn-key li[data-layer="scoping"][data-edge-type="resolves"] { color: var(--st-waived); }
 
 /* instantiate (ac-6): the one live affordance a sealed record permits —
    the paved road's green on frozen paper, unmistakably the only thing
@@ -2287,7 +2296,7 @@ button.yarn-chip-type {
   .copy-ref, button, a, .sticky, .card { transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease, box-shadow 120ms ease; }
   /* the wall's approach cues: lifts, halos, and the peek whisper —
      all withheld when the reader prefers reduced motion */
-  .objcard, .yarn-handle { transition: box-shadow 120ms ease, transform 120ms ease; }
+  .objcard, .stubcard, .yarn-handle { transition: box-shadow 120ms ease, transform 120ms ease; }
   .refcard::after { transition: opacity 120ms ease; }
   /* the trash's rise and heat are motion; without it the states still
      switch, instantly and honestly */

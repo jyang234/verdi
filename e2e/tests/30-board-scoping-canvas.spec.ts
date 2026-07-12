@@ -136,7 +136,16 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     await expect(stub).toBeVisible();
     await expect(stub.locator(".stub-tab")).toHaveText("audit-decline-notice-log");
     await expect(stub.locator(".card-kind-label")).toHaveText("story stub");
-    await expect(stub.locator(".stub-link-chip--ac")).toHaveText(AC_IDS[2]);
+    // AMENDED (scoping yarn): the coverage attribution is no longer a
+    // chip ON the card — it hangs as scoping yarn tying the stub card
+    // to the AC it covers (owner directive; 32-board-scoping-yarn
+    // proves the full thread contract).
+    await expect(
+      page.locator(
+        `.yarn-chip--scoping[data-edge-type="covers"]` +
+          `[data-from="stub:audit-decline-notice-log"][data-to="${AC_IDS[2]}"]`,
+      ),
+    ).toHaveCount(1);
     // The handwriting is gone — the record took its place — and so is
     // the consumed attribution thread.
     await expect(page.getByTestId(`sticky-${stickyId}`)).toHaveCount(0);
@@ -200,7 +209,14 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     await expect(firstStub).toBeVisible();
     await expect(firstStub).toHaveClass(/stubcard--spike/);
     await expect(firstStub.locator(".card-kind-label")).toHaveText("spike stub");
-    await expect(firstStub.locator(".stub-link-chip--oq")).toHaveText(OQ_ID);
+    // AMENDED (scoping yarn): the resolution attribution hangs as
+    // scoping yarn to the open question, not as a chip on the card.
+    await expect(
+      page.locator(
+        `.yarn-chip--scoping[data-edge-type="resolves"]` +
+          `[data-from="stub:probe-legal-wording"][data-to="${OQ_ID}"]`,
+      ),
+    ).toHaveCount(1);
     await expect(page.getByTestId(`oq-claims-${OQ_ID}`)).toHaveCount(0);
 
     // Second spike claiming the SAME question: the multi-claim smell
