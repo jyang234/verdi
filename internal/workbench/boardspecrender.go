@@ -53,6 +53,15 @@ func legalPairTable() map[string][]string {
 	return table
 }
 
+// modeStampLabels is the mode stamp's copy — the room's state in words,
+// not just an enum value: authoring is the live wall, review is a
+// mirror of someone else's MR, read-only is the sealed record.
+var modeStampLabels = map[boardModeKind]string{
+	modeAuthoring: "authoring · live wall",
+	modeReview:    "review · mirror of the MR",
+	modeReadOnly:  "read-only · sealed record",
+}
+
 var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doctype html>
 <html lang="en">
 <head>
@@ -61,14 +70,14 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doc
 <title>Board: {{.Name}} · verdi workbench</title>
 <link rel="stylesheet" href="/assets/style.css">
 </head>
-<body class="board-page boardv2-page">
+<body class="board-page boardv2-page mode-{{.Mode}}">
 <header class="site-head">
 <a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
 <nav class="site-nav workbench-nav"><a href="/">index</a></nav>
 </header>
 <header class="page-header board-head">
 <h1>{{.Title}}</h1>
-<span class="board-mode-tag">{{.Mode}}</span>
+<span class="board-mode-tag board-mode-tag--{{.Mode}}">{{.ModeLabel}}</span>
 <div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>
 </header>
 <div id="boardv2-region">
@@ -103,6 +112,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 		Name      string
 		Title     string
 		Mode      string
+		ModeLabel string
 		Region    template.HTML
 		Dialogs   template.HTML
 		StateJSON template.JS
@@ -110,6 +120,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 		Name:      p.Spec,
 		Title:     p.Title,
 		Mode:      string(p.Mode),
+		ModeLabel: modeStampLabels[p.Mode],
 		Region:    template.HTML(renderBoardRegion(p, git)),
 		Dialogs:   template.HTML(renderBoardDialogs(p.Mode)),
 		StateJSON: template.JS(stateJSON),
@@ -141,15 +152,21 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		b.WriteString(`</div>`)
 	}
 
-	// Attribute placards (element taxonomy row 1): the spec's problem
-	// and outcome, pinned across the top like the two index cards a
-	// murder board starts from.
-	b.WriteString(`<header class="board-placards">`)
+	// The case file (element taxonomy row 1): the spec's problem and
+	// outcome as ONE header lockup — the folder a murder board opens
+	// with. Problem wears the violated accent, outcome the evidenced
+	// one, and the arrow between them is the whole story's arc: the
+	// wall below exists to get from the left card to the right one.
+	b.WriteString(`<header class="board-placards case-file">`)
+	b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
 	if p.Problem != "" {
-		b.WriteString(`<div class="placard" data-testid="placard-problem"><span class="placard-tag">problem</span><p>` + esc(p.Problem) + `</p></div>`)
+		b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p>` + esc(p.Problem) + `</p></div>`)
+	}
+	if p.Problem != "" && p.Outcome != "" {
+		b.WriteString(`<div class="case-arrow" aria-hidden="true">&#8594;</div>`)
 	}
 	if p.Outcome != "" {
-		b.WriteString(`<div class="placard" data-testid="placard-outcome"><span class="placard-tag">outcome</span><p>` + esc(p.Outcome) + `</p></div>`)
+		b.WriteString(`<div class="placard placard--outcome" data-testid="placard-outcome"><span class="placard-tag">outcome</span><p>` + esc(p.Outcome) + `</p></div>`)
 	}
 	b.WriteString(`</header>`)
 
@@ -158,6 +175,26 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// function of the projection's positions (deterministic), so a sparse
 	// board is a shallow board, not a fixed void.
 	b.WriteString(`<div id="board-canvas" class="board-canvas boardv2-canvas" data-testid="board" data-board-mode="` + esc(string(p.Mode)) + `" data-spec="` + esc(p.Spec) + `" style="min-height:` + px(canvasMinHeight(p)) + `">`)
+
+	// Zone labels: the filing scheme the zoned layout already uses, made
+	// visible — tape strips over each kind's column band. Authoring
+	// labels every band (an empty band is an invitation: this is where
+	// decisions land); review and read-only label only what the record
+	// holds. Pure function of the projection + boardlayout constants.
+	writeZoneLabels(&b, p)
+
+	// The empty wall: a board with nothing on it teaches instead of
+	// voiding (authoring) or states its emptiness plainly (elsewhere).
+	if len(p.Cards) == 0 && len(p.RefCards) == 0 && len(p.Stickies) == 0 {
+		b.WriteString(`<div class="board-empty" data-testid="board-empty">`)
+		if authoring {
+			b.WriteString(`<p class="board-empty-lead">An empty wall.</p>`)
+			b.WriteString(`<p class="board-empty-how">Pin your first fact: <strong>Add sticky</strong> (in the rail), write what you know, and graduate it into the spec when it firms up &#8212; or declare an acceptance criterion in the spec file and it lands here as a card.</p>`)
+		} else {
+			b.WriteString(`<p class="board-empty-lead">Nothing is declared on this spec yet.</p>`)
+		}
+		b.WriteString(`</div>`)
+	}
 
 	// Object cards. The header is a one-line lockup — kind label left,
 	// id right — and the clamped text carries its full form in title
@@ -210,11 +247,20 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// the frontmatter links: block the board cannot edit.
 	for _, e := range p.Edges {
 		editableSpecEdge := authoring && e.Layer == "spec" && e.From != "spec"
-		b.WriteString(`<div class="yarn-chip yarn-chip--` + esc(e.Layer) + `" data-edge-type="` + esc(e.Type) + `" data-from="` + esc(e.From) + `" data-to="` + esc(e.To) + `" data-layer="` + esc(e.Layer) + `"`)
+		chipClass := "yarn-chip yarn-chip--" + esc(e.Layer)
+		if e.From == "spec" {
+			chipClass += " yarn-chip--doc"
+		}
+		b.WriteString(`<div class="` + chipClass + `" data-edge-type="` + esc(e.Type) + `" data-from="` + esc(e.From) + `" data-to="` + esc(e.To) + `" data-layer="` + esc(e.Layer) + `"`)
 		if e.AnnotationID != "" {
 			b.WriteString(` data-annotation-id="` + esc(e.AnnotationID) + `"`)
 		}
 		b.WriteString(`>`)
+		if e.From == "spec" {
+			// The document is not a card — its thread runs off the top of
+			// the wall — so its chip says whose edge this is.
+			b.WriteString(`<span class="yarn-chip-doc">this spec</span>`)
+		}
 		if editableSpecEdge {
 			b.WriteString(`<button type="button" class="yarn-chip-type" data-retype aria-label="Change ` + esc(e.Type) + ` edge type" title="change this relationship's type">` + esc(e.Type) + `</button>`)
 		} else {
@@ -232,23 +278,121 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 
 	b.WriteString(`</div>`) // board-canvas
 
-	// The side rail.
+	// The side rail, top-down by consequence: the commit affordance (the
+	// page's one write to the record), then the scratch tools, then the
+	// reading aids (yarn key), then the learning aid (the four-move
+	// guide) — quiet last, discoverable, never front-loaded.
 	b.WriteString(`<aside class="board-side">`)
 	switch p.Mode {
 	case modeAuthoring:
 		writeGitPanel(&b, git)
 		b.WriteString(`<section class="scratch-panel"><h2>Scratch</h2>` +
-			`<p class="ritual-note">Stickies and untyped threads stay in the annotation layer — they never enter the spec until graduated.</p>` +
+			`<p class="ritual-note scratch-note">Think here first. Stickies and untyped threads stay in the annotation layer &#8212; they never enter the spec until graduated.</p>` +
 			`<button type="button" id="add-sticky-btn">Add sticky</button></section>`)
+		writeYarnKey(&b, p)
+		writeGuide(&b)
 	case modeReview:
+		b.WriteString(`<section class="mirror-note"><h2>Review mirror</h2>` +
+			`<p class="ritual-note">This board mirrors the merge request. Comments that name a card ride on it; everything else lands in the tray below &#8212; nothing is dropped.</p></section>`)
 		writeInboxTray(&b, p.Tray)
+		writeYarnKey(&b, p)
 	default:
-		b.WriteString(`<section class="scratch-panel"><h2>Read-only</h2><p class="ritual-note">This spec is not on a design branch. Change means supersession (the amendment ladder).</p></section>`)
+		b.WriteString(`<section class="scratch-panel sealed-panel"><h2>Sealed record</h2><p class="ritual-note">This spec is accepted; the wall is its photograph. Change means supersession (the amendment ladder).</p></section>`)
+		writeYarnKey(&b, p)
 	}
 	b.WriteString(`</aside>`)
 	b.WriteString(`</div>`) // board-layout
 
 	return b.String()
+}
+
+// zoneLabelText names each zone band as a newcomer reads it.
+var zoneLabelText = map[boardlayout.ZoneKind]string{
+	boardlayout.ZoneAC:           "acceptance criteria",
+	boardlayout.ZoneConstraint:   "constraints",
+	boardlayout.ZoneDecision:     "decisions",
+	boardlayout.ZoneOpenQuestion: "open questions",
+	boardlayout.ZoneReference:    "references",
+}
+
+// writeZoneLabels renders the tape strips over the zoned columns.
+// Decorative teaching (aria-hidden, pointer-events off in CSS): every
+// card already names its own kind for assistive tech.
+func writeZoneLabels(b *strings.Builder, p *BoardProjection) {
+	occupied := map[boardlayout.ZoneKind]bool{}
+	for _, c := range p.Cards {
+		occupied[boardlayout.ZoneKind(c.Kind)] = true
+	}
+	if len(p.RefCards) > 0 {
+		occupied[boardlayout.ZoneReference] = true
+	}
+	authoring := p.Mode == modeAuthoring
+
+	b.WriteString(`<div class="zone-labels" aria-hidden="true">`)
+	for _, col := range boardlayout.ZoneColumns() {
+		if !occupied[col.Kind] && !authoring {
+			continue // the record shows what it has; it does not invite
+		}
+		cls := "zone-label zone-label--" + string(col.Kind)
+		if !occupied[col.Kind] {
+			cls += " zone-label--empty"
+		}
+		b.WriteString(`<span class="` + cls + `" data-testid="zone-label-` + string(col.Kind) + `" style="left:` +
+			strconv.Itoa(col.X) + `px;width:` + strconv.Itoa(col.Width) + `px">` + zoneLabelText[col.Kind] + `</span>`)
+	}
+	b.WriteString(`</div>`)
+}
+
+// yarnKeyOrder is the legend's canonical order: the minimum path's edge
+// first, the gate-bearing amendments late, scratch last.
+var yarnKeyOrder = []string{"implements", "resolves", "depends-on", "supersedes", "exempts", "relates"}
+
+// yarnKeyMeanings is one clause per type — what the thread claims, in a
+// PM's words (the consequence labels stay the picker's fuller voice).
+var yarnKeyMeanings = map[string]string{
+	"implements": "this spec delivers it",
+	"resolves":   "this spec answers it",
+	"depends-on": "needed background",
+	"supersedes": "amends it for everyone",
+	"exempts":    "this spec is excused from it",
+	"relates":    "scratch thread — not in the spec",
+}
+
+// writeYarnKey renders the wall's legend: exactly the edge types
+// present, in canonical order — a key to this board, never the closed
+// enum's vocabulary lesson.
+func writeYarnKey(b *strings.Builder, p *BoardProjection) {
+	present := map[string]bool{}
+	for _, e := range p.Edges {
+		present[e.Type] = true
+	}
+	if len(present) == 0 {
+		return
+	}
+	b.WriteString(`<section class="yarn-key" data-testid="yarn-key"><h2>Yarn on this wall</h2><ul>`)
+	for _, t := range yarnKeyOrder {
+		if !present[t] {
+			continue
+		}
+		b.WriteString(`<li data-edge-type="` + t + `"><span class="yarn-key-swatch" aria-hidden="true"></span><span class="yarn-key-type">` + t + `</span><span class="yarn-key-what">` + yarnKeyMeanings[t] + `</span></li>`)
+	}
+	b.WriteString(`</ul></section>`)
+}
+
+// writeGuide renders the four-move guide (05 §Workbench "The
+// four-concept minimum path": story spec + ACs + implements + commit),
+// collapsed by default — the newcomer's whole path in one quiet
+// disclosure, everything further learned from the wall itself.
+func writeGuide(b *strings.Builder) {
+	b.WriteString(`<details class="board-guide" data-testid="board-guide"><summary>New to the wall? Four moves.</summary>` +
+		`<ol class="guide-moves">` +
+		`<li><strong>Read the case file</strong> &#8212; the problem and outcome placards above the wall are the spec&#8217;s own header.</li>` +
+		`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true. Drag cards anywhere; double-click one to edit its text.</li>` +
+		`<li><strong>String yarn</strong> &#8212; drag the pin on a decision card to another card to type a relationship. A thread running off the top edge belongs to the spec document itself (its implements/resolves edges).</li>` +
+		`<li><strong>Commit &amp; push</strong> &#8212; the wall autosaves as you work; committing files it on the design branch.</li>` +
+		`</ol>` +
+		`<p class="guide-more">Everything else &#8212; stickies, graduation, exemptions &#8212; is on the wall when you need it.</p>` +
+		`</details>`)
 }
 
 func writeReviewSticky(b *strings.Builder, rs reviewStickyView) {
