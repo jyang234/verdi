@@ -236,6 +236,23 @@ func DeclaredObjectIDs(spec *SpecFrontmatter) map[string]bool {
 	return ids
 }
 
+// DeclaredStubSlugs is the set of every frontmatter-declared stub slug a
+// feature spec carries (02 §Kind registry "stubs:") — the resolution
+// target for a `layout.json` `stub:<slug>` positions key (VL-018, round
+// 5.5's dc-6 amendment: "a `positions` key names a declared object by id,
+// or ... a declared stub as `stub:<slug>`") and for the workbench
+// position-write path's own id check. A stub is not an object (it never
+// appears in DeclaredObjectIDs), so this is a separate resolution set,
+// keyed by bare slug — callers prefix with "stub:" themselves to match a
+// layout key or a board id.
+func DeclaredStubSlugs(spec *SpecFrontmatter) map[string]bool {
+	slugs := make(map[string]bool, len(spec.Stubs))
+	for _, s := range spec.Stubs {
+		slugs[s.Slug] = true
+	}
+	return slugs
+}
+
 // DecodeSpec strict-decodes and validates spec frontmatter (either class).
 func DecodeSpec(data []byte) (*SpecFrontmatter, error) {
 	var fm SpecFrontmatter
