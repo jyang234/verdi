@@ -308,7 +308,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			`<p class="ritual-note">Think here first. Stickies and untyped threads stay in the annotation layer &#8212; they never enter the spec until graduated.</p>` +
 			`<button type="button" id="add-sticky-btn">Add sticky</button></section>`)
 		writeYarnKey(&b, p)
-		writeGuide(&b)
+		writeGuide(&b, p)
 	case modeReview:
 		b.WriteString(`<section class="mirror-note"><h2>Review mirror</h2>` +
 			`<p class="ritual-note">This board mirrors the merge request. Comments that name a card ride on it; everything else lands in the tray below &#8212; nothing is dropped.</p></section>`)
@@ -437,13 +437,31 @@ func writeYarnKey(b *strings.Builder, p *BoardProjection) {
 // four-concept minimum path": story spec + ACs + implements + commit),
 // collapsed by default — the newcomer's whole path in one quiet
 // disclosure, everything further learned from the wall itself.
-func writeGuide(b *strings.Builder) {
-	b.WriteString(`<details class="board-guide" data-testid="board-guide"><summary>New to the wall? Four moves.</summary>` +
-		`<ol class="guide-moves">` +
-		`<li><strong>Read the case file</strong> &#8212; the problem and outcome placards above the wall are the spec&#8217;s own header.</li>` +
-		`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true. Drag cards anywhere; double-click one to edit its text.</li>` +
-		`<li><strong>String yarn</strong> &#8212; drag the pin on a decision card to another card to type a relationship. A thread running off the top edge belongs to the spec document itself (its implements/resolves edges).</li>` +
-		`<li><strong>Commit &amp; push</strong> &#8212; the wall autosaves as you work; committing files it on the design branch.</li>` +
+//
+// The guide is CLASS-AWARE (owner directive: a wall must teach whether
+// it is a feature or a story). A feature wall opens with the split in
+// one breath — outcome ACs and stubs live here; each story is its own
+// spec pointing up at these ACs with implements yarn, and a feature
+// never lists its stories — and its AC move says outcome-shaped. A
+// story wall (or a class-less projection) keeps the four-move copy
+// unadorned: its spec IS the minimum path's story.
+func writeGuide(b *strings.Builder, p *BoardProjection) {
+	feature := p.Class == "feature"
+	b.WriteString(`<details class="board-guide" data-testid="board-guide"><summary>New to the wall? Four moves.</summary>`)
+	if feature {
+		b.WriteString(`<p class="guide-class-note" data-testid="guide-class-note">This is a <strong>feature</strong> wall: outcome ACs and story stubs. ` +
+			`Each story is its own spec that points up at these ACs with <strong>implements</strong> yarn &#8212; a feature never lists its stories.</p>`)
+	}
+	b.WriteString(`<ol class="guide-moves">` +
+		`<li><strong>Read the case file</strong> &#8212; the problem and outcome placards above the wall are the spec&#8217;s own header.</li>`)
+	if feature {
+		b.WriteString(`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true when the feature lands (outcomes, never story-sized tasks). Drag cards anywhere; double-click one to edit its text.</li>` +
+			`<li><strong>String yarn</strong> &#8212; drag the pin on a decision card to another card to type a relationship. A thread running off the top edge belongs to the spec document itself.</li>`)
+	} else {
+		b.WriteString(`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true. Drag cards anywhere; double-click one to edit its text.</li>` +
+			`<li><strong>String yarn</strong> &#8212; drag the pin on a decision card to another card to type a relationship. A thread running off the top edge belongs to the spec document itself (its implements/resolves edges).</li>`)
+	}
+	b.WriteString(`<li><strong>Commit &amp; push</strong> &#8212; the wall autosaves as you work; committing files it on the design branch.</li>` +
 		`</ol>` +
 		`<p class="guide-more">Everything else &#8212; stickies, graduation, exemptions &#8212; is on the wall when you need it.</p>` +
 		`</details>`)

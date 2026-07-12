@@ -229,7 +229,11 @@ func TestBoardLegibility_YarnKey(t *testing.T) {
 
 // The four-move guide is authoring's quiet teacher: present (collapsed
 // by markup — no open attribute) in authoring, absent from the mirror
-// and the sealed record.
+// and the sealed record — and CLASS-AWARE (owner directive): a feature
+// wall's guide opens by teaching the feature/story split (outcome ACs +
+// stubs here; stories are their own specs pointing up with implements
+// yarn — a feature never lists its stories); a story wall keeps the
+// four-move copy unadorned.
 func TestBoardLegibility_Guide(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
@@ -244,6 +248,32 @@ func TestBoardLegibility_Guide(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("guide missing the four-move vocabulary %q", want)
 		}
+	}
+	// The fixture is a feature spec: its guide teaches the split.
+	for _, want := range []string{
+		`data-testid="guide-class-note"`,
+		"a feature never lists its stories",
+		"implements",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("feature wall's guide missing the split lesson %q", want)
+		}
+	}
+
+	// A story wall keeps the four-move copy, with no class note.
+	story := &BoardProjection{Spec: "s", Mode: modeAuthoring, Class: "story", StoryRef: "jira:LOAN-7"}
+	storyBody := renderBoardRegion(story, &boardGitState{Branch: "design/s"})
+	for _, want := range []string{
+		`data-testid="board-guide"`,
+		"case file", "acceptance criteria", "yarn", "Commit",
+		"implements/resolves edges",
+	} {
+		if !strings.Contains(storyBody, want) {
+			t.Errorf("story wall's guide missing %q", want)
+		}
+	}
+	if strings.Contains(storyBody, "guide-class-note") {
+		t.Error("story wall's guide carries the feature-wall class note")
 	}
 
 	proj := &BoardProjection{Spec: "s", Mode: modeReadOnly, Cards: []cardView{{ID: "ac-1", Kind: "acceptance-criterion", Text: "x"}}}

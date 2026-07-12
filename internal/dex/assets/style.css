@@ -1761,6 +1761,17 @@ button.yarn-chip-type {
   color: var(--accent);
 }
 .board-guide[open] summary { margin-bottom: 0.6rem; }
+/* the class lesson (feature walls only): what THIS wall is — outcome
+   ACs + stubs here, stories point up from their own specs. One breath,
+   set off in the feature ink before the four moves. */
+.guide-class-note {
+  margin: 0 0 0.6rem;
+  padding: 0.45rem 0.65rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  background: var(--panel);
+  line-height: 1.5;
+}
 .guide-moves {
   margin: 0;
   padding-left: 1.15rem;
