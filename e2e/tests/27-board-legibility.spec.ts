@@ -190,20 +190,35 @@ test.describe("board legibility: the wall reads at a glance", () => {
     // canonical order and present-types-only rule are pinned
     // deterministically in the Go render tests). Checked on both a
     // sealed record and the live wall.
+    // AMENDED (strengthened) with the scoping yarn: the key row is a
+    // (layer, type) pair, not a type — a wall can carry the spec layer's
+    // resolves AND the scoping layer's resolves at once, and the key
+    // must list both without collapsing them. Chips and key rows are
+    // compared as layer|type pairs.
     const keyMatchesChips = async () => {
-      const chipTypes = await page
+      const chipPairs = await page
         .locator(".yarn-chip")
         .evaluateAll((els) =>
           Array.from(
-            new Set(els.map((el) => el.getAttribute("data-edge-type"))),
+            new Set(
+              els.map(
+                (el) =>
+                  `${el.getAttribute("data-layer")}|${el.getAttribute("data-edge-type")}`,
+              ),
+            ),
           ).sort(),
         );
-      const keyTypes = await page
+      const keyPairs = await page
         .locator('[data-testid="yarn-key"] li')
         .evaluateAll((els) =>
-          els.map((el) => el.getAttribute("data-edge-type")).sort(),
+          els
+            .map(
+              (el) =>
+                `${el.getAttribute("data-layer")}|${el.getAttribute("data-edge-type")}`,
+            )
+            .sort(),
         );
-      expect(keyTypes).toEqual(chipTypes);
+      expect(keyPairs).toEqual(chipPairs);
     };
 
     await page.goto(boardPath(READONLY_SPEC));

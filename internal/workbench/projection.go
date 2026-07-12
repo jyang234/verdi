@@ -237,6 +237,31 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 		p.Edges = append(p.Edges, edgeView{Type: string(l.Type), From: "spec", To: edgeEndpoint(specName, declared, l.Ref), Layer: "spec"})
 	}
 
+	// (1c) Scoping-layer edges (owner directive, the ac-3 "coverage yarn
+	// projected" fix): each stub's declared attributions hang as yarn —
+	// story stub → covered AC as "covers", spike stub → resolved OQ as
+	// "resolves" — under layer "scoping". These are PROJECTIONS of the
+	// stubs block, not document links: presentation-owned, no graduate/
+	// delete/retype affordances, not gate material, and the closed
+	// five-type spec-edge vocabulary is untouched. Both endpoints are
+	// papers on this wall (the stub card via its "stub:<slug>" key, the
+	// declared AC/OQ card); an attribution naming an undeclared id
+	// projects nothing — a dangling attribution is the linter's finding,
+	// never a phantom endpoint or a minted reference card.
+	for _, st := range fm.Stubs {
+		stubKey := "stub:" + st.Slug
+		attrType, attrs := "covers", st.AcceptanceCriteria
+		if st.Spike {
+			attrType, attrs = "resolves", st.Resolves
+		}
+		for _, id := range attrs {
+			if !declared[id] {
+				continue
+			}
+			p.Edges = append(p.Edges, edgeView{Type: attrType, From: stubKey, To: id, Layer: "scoping"})
+		}
+	}
+
 	// (3) Annotation streams: this board's free-floating stickies, its
 	// untyped relates threads, and its pinned references. Graduated
 	// records have already become spec content — they no longer render
@@ -333,6 +358,12 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	// Reference cards are every external edge endpoint, ordered by ref.
 	refSet := map[string]bool{}
 	for _, e := range p.Edges {
+		// A scoping edge's endpoints are both on-wall papers by
+		// construction (the stub card and a declared AC/OQ card) — its
+		// "stub:<slug>" key must never mint a reference card.
+		if e.Layer == "scoping" {
+			continue
+		}
 		for _, end := range []string{e.From, e.To} {
 			// An annotation-id endpoint (round 5.4: an attribution
 			// thread tied to a live sticky) is the sticky's own paper —
