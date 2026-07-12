@@ -1311,6 +1311,43 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 }
 .sticky .graduate-btn { align-self: flex-end; }
 
+/* deletion affordances (owner UAT round 6, item 3): a quiet × — the
+   scratch tier's records graduate or die, and a spec edge is removable
+   as the inverse of drawing it. Authoring mode only (server-gated). */
+.delete-btn {
+  font-size: 0.78rem;
+  line-height: 1;
+  padding: 0 0.28rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.65;
+}
+.delete-btn:hover { opacity: 1; }
+.sticky .delete-btn {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.4rem;
+  border: 0;
+  font-size: 0.95rem;
+}
+
+/* the chip's type label doubles as the in-place retype affordance on
+   editable spec edges (owner directive): same lockup, dotted underline
+   as the "this opens the picker" cue */
+button.yarn-chip-type {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
 /* review stickies: the MR's voice, anchored or trayed — never dropped */
 .review-sticky {
   margin-top: 0.5rem;

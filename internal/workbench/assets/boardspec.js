@@ -328,21 +328,29 @@
     items.innerHTML = "";
     if (pair) pair.textContent = p.from + " → " + p.to;
 
-    var legal = state.legal[p.fromKind + "|" + p.toKind] || [];
+    var legal = (state.legal[p.fromKind + "|" + p.toKind] || []).slice();
+    if (p.retype) {
+      // In-place retype (owner directive): offer the OTHER legal types.
+      legal = legal.filter(function (t) {
+        return t !== p.retype;
+      });
+      if (pair) pair.textContent += " · currently " + p.retype;
+    }
     if (legal.length === 0) {
       var note = document.createElement("p");
       note.className = "ritual-note picker-empty-note";
       note.setAttribute("data-testid", "picker-no-typed-edge");
-      note.textContent =
-        "No typed edge exists between " + pairPhrase(p.fromKind, p.toKind) +
-        (p.annotationId
-          ? " — this stays a scratch thread. To type a connection, draw it from a decision card."
-          : " — this can only be a scratch thread.");
+      note.textContent = p.retype
+        ? "No other typed edge is legal between " + pairPhrase(p.fromKind, p.toKind) + " — remove the edge (×) and draw a new connection instead."
+        : "No typed edge exists between " + pairPhrase(p.fromKind, p.toKind) +
+          (p.annotationId
+            ? " — this stays a scratch thread. To type a connection, draw it from a decision card."
+            : " — this can only be a scratch thread.");
       items.appendChild(note);
     }
 
-    var types = legal.slice();
-    if (!p.annotationId) types.push("relates");
+    var types = legal;
+    if (!p.annotationId && !p.retype) types.push("relates");
     types.forEach(function (t) {
       var row = document.createElement("div");
       row.className = "picker-item";
@@ -362,6 +370,20 @@
     show("edge-picker");
   }
 
+  // openConfirm arms the gate-bearing confirmation dialog — the same
+  // ritual for creating, retyping, and removing (a menu misclick must
+  // not summon an org-wide supersession flow, 05 §Workbench).
+  function openConfirm(title, consequence, withReason) {
+    var confirmEl = document.getElementById("edge-confirm");
+    confirmEl.setAttribute("aria-label", title);
+    document.getElementById("edge-confirm-title").textContent = title;
+    document.getElementById("edge-confirm-consequence").textContent = consequence;
+    var reasonField = document.getElementById("edge-confirm-reason-field");
+    document.getElementById("edge-confirm-reason").value = "";
+    reasonField.hidden = !withReason;
+    show("edge-confirm");
+  }
+
   function pickEdgeType(t) {
     hide("edge-picker");
     if (t === "relates") {
@@ -371,16 +393,9 @@
     }
     if (state.gate.indexOf(t) >= 0) {
       pending.type = t;
-      var confirmEl = document.getElementById("edge-confirm");
-      confirmEl.setAttribute("aria-label", "Confirm " + t);
-      document.getElementById("edge-confirm-title").textContent = "Confirm " + t;
-      document.getElementById("edge-confirm-consequence").textContent =
-        state.consequences[t] || "";
-      var reasonField = document.getElementById("edge-confirm-reason-field");
-      var reason = document.getElementById("edge-confirm-reason");
-      reason.value = "";
-      reasonField.hidden = t !== "exempts";
-      show("edge-confirm");
+      // The reason field feeds a NEW exempts edge's note; a retype keeps
+      // the existing note verbatim.
+      openConfirm("Confirm " + t, state.consequences[t] || "", t === "exempts" && !pending.retype);
       return;
     }
     commitEdge(t, "");
@@ -388,7 +403,9 @@
 
   function commitEdge(t, note) {
     hideAllDialogs();
-    if (pending.annotationId) {
+    if (pending.retype) {
+      mutate("edge-retype", { from: pending.from, to: pending.to, type: pending.retype, newType: t });
+    } else if (pending.annotationId) {
       mutate("relates-graduate", { id: pending.annotationId, type: t, note: note });
     } else {
       mutate("edge", { from: pending.from, to: pending.to, type: t, note: note });
@@ -836,9 +853,17 @@
     }
 
     switch (t.id) {
-      case "edge-confirm-ok":
+      case "edge-confirm-ok": {
+        if (pending && pending.remove) {
+          var removal = pending;
+          pending = null;
+          hideAllDialogs();
+          mutate("edge-delete", { from: removal.from, to: removal.to, type: removal.type });
+          return;
+        }
         commitEdge(pending.type, document.getElementById("edge-confirm-reason").value.trim());
         return;
+      }
       // Every dialog closes from a visible affordance, the backdrop, or
       // Escape (owner UAT round 6: never a modal you can't get out of).
       case "modal-backdrop":
@@ -871,6 +896,51 @@
       case "add-sticky-btn":
         startStickyEditor();
         return;
+    }
+
+    // Deletion affordances (owner UAT round 6, item 3): scratch records
+    // die immediately (mutable stream only); a spec-layer edge mirrors
+    // creation — gate-bearing types restate their removal consequence
+    // and confirm first, others remove on the spot.
+    var del = t.closest(".delete-btn");
+    if (del) {
+      var what = del.getAttribute("data-delete");
+      if (what === "sticky") {
+        mutate("annotation-delete", { id: del.closest(".sticky").getAttribute("data-id") });
+      } else if (what === "thread") {
+        mutate("annotation-delete", { id: del.closest(".yarn-chip").getAttribute("data-annotation-id") });
+      } else {
+        var edgeChip = del.closest(".yarn-chip");
+        var edge = {
+          from: edgeChip.getAttribute("data-from"),
+          to: edgeChip.getAttribute("data-to"),
+          type: edgeChip.getAttribute("data-edge-type"),
+        };
+        if (state.gate.indexOf(edge.type) >= 0) {
+          pending = { remove: true, from: edge.from, to: edge.to, type: edge.type };
+          openConfirm("Remove " + edge.type, state.removals[edge.type] || "", false);
+        } else {
+          mutate("edge-delete", edge);
+        }
+      }
+      return;
+    }
+
+    // In-place retype (owner directive): the chip's type label reopens
+    // the context-sensitive picker over the same pair.
+    var retypeBtn = t.closest("[data-retype]");
+    if (retypeBtn) {
+      var retypeChip = retypeBtn.closest(".yarn-chip");
+      var rFrom = endpointElement(retypeChip.getAttribute("data-from"));
+      var rTo = endpointElement(retypeChip.getAttribute("data-to"));
+      openPicker({
+        from: retypeChip.getAttribute("data-from"),
+        fromKind: rFrom ? kindOfElement(rFrom) : "unknown",
+        to: retypeChip.getAttribute("data-to"),
+        toKind: rTo ? kindOfElement(rTo) : "unknown",
+        retype: retypeChip.getAttribute("data-edge-type"),
+      });
+      return;
     }
 
     var grad = t.closest(".graduate-btn");

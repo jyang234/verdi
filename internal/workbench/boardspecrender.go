@@ -28,7 +28,10 @@ type boardClientPayload struct {
 	Git          *boardGitState      `json:"git"`
 	Legal        map[string][]string `json:"legal"`
 	Consequences map[string]string   `json:"consequences"`
-	Gate         []string            `json:"gate"`
+	// Removals are the gate-bearing types' removal consequences — the
+	// confirmation ritual mirrors creation (owner UAT round 6, item 3).
+	Removals map[string]string `json:"removals"`
+	Gate     []string          `json:"gate"`
 }
 
 // legalPairTable flattens legalEdgeTypes over every source/target kind
@@ -88,6 +91,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 		Git:          git,
 		Legal:        legalPairTable(),
 		Consequences: consequenceLabels,
+		Removals:     removalConsequenceLabels,
 		Gate:         []string{"supersedes", "exempts"},
 	}
 	stateJSON, err := json.Marshal(payload)
@@ -190,6 +194,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		}
 		if authoring {
 			b.WriteString(`<button type="button" class="graduate-btn" data-graduate="sticky">Graduate</button>`)
+			b.WriteString(`<button type="button" class="delete-btn" data-delete="sticky" aria-label="Delete sticky" title="the sticky dies; the spec is untouched">×</button>`)
 		}
 		b.WriteString(`</div>`)
 	}
@@ -197,15 +202,30 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// Yarn chips: one HTML element per edge carrying the contract's data
 	// attributes; boardspec.js lays them on the thread's midpoint and
 	// draws the SVG thread itself (pure decoration, no data attributes).
+	// Authoring affordances (owner UAT round 6, item 3 + the retype
+	// directive): annotation chips graduate or die; a spec-layer chip
+	// drawn from a decision retypes in place (its type label is the
+	// affordance) or is removed — the inverse of drawing it. A
+	// document-level chip (From "spec") gets neither: its edge lives in
+	// the frontmatter links: block the board cannot edit.
 	for _, e := range p.Edges {
+		editableSpecEdge := authoring && e.Layer == "spec" && e.From != "spec"
 		b.WriteString(`<div class="yarn-chip yarn-chip--` + esc(e.Layer) + `" data-edge-type="` + esc(e.Type) + `" data-from="` + esc(e.From) + `" data-to="` + esc(e.To) + `" data-layer="` + esc(e.Layer) + `"`)
 		if e.AnnotationID != "" {
 			b.WriteString(` data-annotation-id="` + esc(e.AnnotationID) + `"`)
 		}
 		b.WriteString(`>`)
-		b.WriteString(`<span class="yarn-chip-type">` + esc(e.Type) + `</span>`)
+		if editableSpecEdge {
+			b.WriteString(`<button type="button" class="yarn-chip-type" data-retype aria-label="Change ` + esc(e.Type) + ` edge type" title="change this relationship's type">` + esc(e.Type) + `</button>`)
+		} else {
+			b.WriteString(`<span class="yarn-chip-type">` + esc(e.Type) + `</span>`)
+		}
 		if authoring && e.Layer == "annotation" {
 			b.WriteString(`<button type="button" class="graduate-btn" data-graduate="thread">Graduate</button>`)
+			b.WriteString(`<button type="button" class="delete-btn" data-delete="thread" aria-label="Delete thread" title="the thread dies; the spec is untouched">×</button>`)
+		}
+		if editableSpecEdge {
+			b.WriteString(`<button type="button" class="delete-btn" data-delete="edge" aria-label="Remove ` + esc(e.Type) + ` edge" title="remove this relationship from the spec">×</button>`)
 		}
 		b.WriteString(`</div>`)
 	}

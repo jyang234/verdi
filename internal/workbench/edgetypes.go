@@ -73,3 +73,11 @@ var consequenceLabels = map[string]string{
 	string(artifact.LinkDependsOn):  "notes the target as required background reading; gates nothing",
 	"relates":                       "a scratch thread for your own thinking — never written into the spec document",
 }
+
+// removalConsequenceLabels is the same voice for taking a gate-bearing
+// edge OUT of the spec document — removal mirrors creation, including
+// the confirmation ritual (owner UAT round 6, item 3).
+var removalConsequenceLabels = map[string]string{
+	string(artifact.LinkSupersedes): "withdraws this spec's amendment claim on the target; the target stands as it was",
+	string(artifact.LinkExempts):    "ends this spec's exemption — the target's rule applies to this spec again",
+}
