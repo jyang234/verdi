@@ -172,6 +172,7 @@
     var papers = c.querySelectorAll(".objcard, .refcard, .stubcard");
     var offboardCount = 0; // bow alternation + margin slots
     var offboardTies = {}; // fan-out of several document edges on one card
+    var placedChips = []; // chips seated earlier this pass: labels never bury labels
     for (var i = 0; i < chips.length; i++) {
       var chip = chips[i];
       var fromEl = endpointElement(chip.getAttribute("data-from"));
@@ -256,7 +257,10 @@
       // Blocked space for the chip: every card's interior AND its
       // pushpin (the yarn handle protrudes above the card's top edge,
       // and chips paint over cards — a chip parked on a pin makes yarn
-      // undrawable from that card).
+      // undrawable from that card) AND every chip already seated this
+      // pass (two threads sharing a corridor — e.g. a scoping resolves
+      // beside a decision's exempts — must not stack their labels;
+      // DOM order seats them, so the layout stays deterministic).
       var clearOfCards = function (x, y) {
         for (var k = 0; k < papers.length; k++) {
           var r = rectOf(papers[k]);
@@ -266,6 +270,12 @@
           var pinX = r.x + r.w / 2 - 14;
           var pinY = r.y - 18;
           if (x < pinX + 28 && pinX < x + w && y < pinY + 22 && pinY < y + h) {
+            return false;
+          }
+        }
+        for (var q = 0; q < placedChips.length; q++) {
+          var pc = placedChips[q];
+          if (x < pc.x + pc.w && pc.x < x + w && y < pc.y + pc.h && pc.y < y + h) {
             return false;
           }
         }
@@ -293,6 +303,7 @@
       if (offboard && top < 4) top = 4;
       chip.style.left = spot.x - w / 2 + "px";
       chip.style.top = top + "px";
+      placedChips.push({ x: spot.x - w / 2, y: top, w: w, h: h });
     }
   }
 
