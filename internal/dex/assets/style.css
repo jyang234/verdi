@@ -1143,6 +1143,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   padding: 0.14rem 0.7rem;
 }
 .placard {
+  position: relative;
   flex: 1 1 0;
   border: 1px solid var(--rule);
   border-left: 3px solid var(--accent);
@@ -1153,7 +1154,20 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 }
 .placard--problem { border-left-color: var(--st-violated); }
 .placard--outcome { border-left-color: var(--st-evidenced); }
-.placard p { margin: 0.15rem 0 0; font-size: 0.92rem; line-height: 1.45; }
+/* the placard keeps a bounded footprint like every card on the wall: a
+   long problem or outcome clamps to three lines and carries its full form
+   in the click-to-expand dialog (owner directive: a truncated placard is
+   never silently cut — it fades, marks itself, and opens on click) */
+.placard p {
+  margin: 0.15rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
 .placard-tag {
   font-family: var(--mono);
   font-size: 0.62rem;
@@ -2275,6 +2289,77 @@ button.yarn-chip-type {
    the chip never sits on the prose */
 .objcard:has(.coverage-chip) .card-text,
 .objcard:has(.oq-claims) .card-text { -webkit-line-clamp: 3; }
+
+/* ---------- click-to-expand: truncation is visible, never silent ----------
+
+   Any wall text the layout clamps (a case-file placard, an object card's
+   text, a stub's title) says so when it actually overflows: its last line
+   fades into the paper and a quiet pencilled "⋯" sits in the corner. The
+   affordance is added by boardspec.js ONLY when the text is measurably
+   truncated — a short placard stays crisp, keeps its cursor, and does
+   nothing on click. Clicking a clamped text opens the read-only expand
+   dialog (below). The hint is a static gradient and a mark — no motion,
+   so nothing here needs the reduced-motion guard. */
+.is-clamped {
+  cursor: zoom-in;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.15em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.15em), transparent);
+}
+.clamp-more {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--muted-solid);
+  opacity: 0.8;
+  pointer-events: none;
+}
+.clamp-more::before { content: "\22EF"; } /* ⋯ */
+/* while a card's inline editor is open its text is hidden — so is its mark */
+.objcard:has(.card-editor) .clamp-more { display: none; }
+
+/* the expand dialog: the same paper modal + scrim as every board dialog
+   (matched, not reinvented), closing on ×, the backdrop, or Escape. It is
+   read-only information, so it opens in every mode. The header is the
+   element's identity in its own eyebrow voice; the body is the full text
+   as readable prose — serif for the spec register, the hand for scratch. */
+.expand-dialog { padding-top: 1.4rem; }
+.expand-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.7rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted-solid);
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  cursor: pointer;
+}
+.expand-close:hover, .expand-close:focus-visible { color: var(--ink); }
+.expand-kind {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  margin: 0 0 0.6rem;
+}
+.expand-text {
+  font-family: var(--serif);
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.expand-dialog--hand .expand-text { font-family: var(--hand); font-size: 1.05rem; }
 
 @media (max-width: 60rem) {
   .board-placards { flex-direction: column; }
