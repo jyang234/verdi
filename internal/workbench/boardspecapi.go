@@ -294,8 +294,11 @@ const (
 
 // stickyLaneColumn maps a sticky's type to the wall band it files
 // into: a question queues beneath the open-questions column it may
-// graduate into, a decision-needed beneath the decisions; comments and
-// agent tasks take the scratch lane past the references.
+// graduate into, a decision-needed beneath the decisions, a story or
+// spike proto-sticky parks in the stubs band it will typeset into
+// (spec/scoping-canvas dc-6: "its parking spot a claim about where the
+// stub will land"); comments and agent tasks take the scratch lane past
+// the references.
 func stickyLaneColumn(typ artifact.AnnotationType) boardlayout.ZoneColumn {
 	var want boardlayout.ZoneKind
 	switch typ {
@@ -303,6 +306,8 @@ func stickyLaneColumn(typ artifact.AnnotationType) boardlayout.ZoneColumn {
 		want = boardlayout.ZoneOpenQuestion
 	case artifact.AnnotationDecisionNeeded:
 		want = boardlayout.ZoneDecision
+	case artifact.AnnotationStory, artifact.AnnotationSpike:
+		want = boardlayout.ZoneStub
 	default:
 		return boardlayout.ScratchColumn()
 	}
@@ -311,7 +316,7 @@ func stickyLaneColumn(typ artifact.AnnotationType) boardlayout.ZoneColumn {
 			return c
 		}
 	}
-	return boardlayout.ScratchColumn() // unreachable: zoneOrder covers both
+	return boardlayout.ScratchColumn() // unreachable: zoneOrder covers all three
 }
 
 // stickyLanePosition appends a new sticky to the BOTTOM of its type's
@@ -333,6 +338,11 @@ func stickyLanePosition(proj *BoardProjection, typ artifact.AnnotationType) (flo
 	for _, rc := range proj.RefCards {
 		if inLane(rc.X, boardlayout.CardWidth) && rc.Y+boardlayout.RefCardHeight > bottom {
 			bottom = rc.Y + boardlayout.RefCardHeight
+		}
+	}
+	for _, sv := range proj.StubViews {
+		if inLane(sv.X, boardlayout.CardWidth) && sv.Y+boardlayout.StubCardHeight > bottom {
+			bottom = sv.Y + boardlayout.StubCardHeight
 		}
 	}
 	for _, st := range proj.Stickies {

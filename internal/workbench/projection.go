@@ -88,12 +88,16 @@ type reviewStickyView struct {
 // render on the wall as first-class scoping cards"). A pure copy of
 // artifact.Stub's fields under the projection's own JSON contract (the
 // wire shape get_board and the board's own client share, mirroring
-// cardView's convention).
+// cardView's convention), plus the card's computed board position —
+// computed-only, like reference cards (dc-6; VL-018: layout.json keys
+// must resolve to object ids, which a stub is not).
 type StubView struct {
 	Slug               string   `json:"slug"`
 	Spike              bool     `json:"spike,omitempty"`
 	Resolves           []string `json:"resolves,omitempty"`
 	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
+	X                  float64  `json:"x"`
+	Y                  float64  `json:"y"`
 }
 
 // BoardProjection is the full render model for one spec's board — the
@@ -356,12 +360,19 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	}
 	sort.Strings(refs)
 
-	layoutObjs := make([]boardlayout.Object, 0, len(objects)+len(refs))
+	layoutObjs := make([]boardlayout.Object, 0, len(objects)+len(refs)+len(p.StubViews))
 	for _, o := range objects {
 		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneKind(o.kind), ID: o.id, DocOrder: o.order})
 	}
 	for i, r := range refs {
 		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneReference, ID: r, DocOrder: i})
+	}
+	// Stub cards slot into the kind-locked stubs band in declaration
+	// order (dc-6), keyed "stub:<slug>" — a namespace no object id or
+	// artifact ref can produce, so a stub can never collide with a stored
+	// position (none is ever stored for it, VL-018) or another card's key.
+	for i, sv := range p.StubViews {
+		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneStub, ID: "stub:" + sv.Slug, DocOrder: i})
 	}
 	positions, err := boardlayout.ResolveDisplayOverlaps(layoutObjs, stored)
 	if err != nil {
@@ -380,6 +391,11 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 			rc.PinID = pv.id
 		}
 		p.RefCards = append(p.RefCards, rc)
+	}
+	for i := range p.StubViews {
+		pos := positions["stub:"+p.StubViews[i].Slug]
+		p.StubViews[i].X = pos.X
+		p.StubViews[i].Y = pos.Y
 	}
 
 	return p, nil
