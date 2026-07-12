@@ -109,7 +109,10 @@ diagram, or spec put on the wall as planning material before any edge
 exists), **quick-capture notes** (`type: note` — the zero-ceremony fast
 lane; the lane is the classification until graduation), **named frames**
 (`type: frame` — declared clustering: a labeled region, never a semantic
-container), and an **untyped "relates" annotation** between any two elements —
+container), **story and spike proto-stickies** on feature walls (`type:
+story` / `type: spike`, 02 §Record schemas — the scoping canvas's claim
+that a story or spike will exist, graduating into stubs), and an
+**untyped "relates" annotation** between any two elements —
 mutable-zone,
 never entering the spec document, exactly the category review stickies
 already occupy. Graduation is an ordinary edit: a sticky becomes a real

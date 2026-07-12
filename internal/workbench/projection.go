@@ -83,6 +83,19 @@ type reviewStickyView struct {
 	Resolved bool   `json:"resolved"`
 }
 
+// StubView is one declared stub entry, projected verbatim from a feature
+// spec's `stubs:` frontmatter (spec/scoping-canvas ac-3: "declared stubs
+// render on the wall as first-class scoping cards"). A pure copy of
+// artifact.Stub's fields under the projection's own JSON contract (the
+// wire shape get_board and the board's own client share, mirroring
+// cardView's convention).
+type StubView struct {
+	Slug               string   `json:"slug"`
+	Spike              bool     `json:"spike,omitempty"`
+	Resolves           []string `json:"resolves,omitempty"`
+	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
+}
+
 // BoardProjection is the full render model for one spec's board — the
 // element taxonomy (05 §Workbench), computed once and consumed by both the
 // HTML board (boardspecrender.go, by field access) and get_board
@@ -92,6 +105,14 @@ type BoardProjection struct {
 	Spec  string        `json:"spec"`
 	Title string        `json:"title"`
 	Mode  boardModeKind `json:"mode"`
+	// Status is the spec's own frontmatter status (02 §Kind registry) —
+	// additive (R4 board polish, spec/scoping-canvas): stub-instantiate
+	// gates on a feature wall's status being accepted-pending-build, which
+	// Mode alone cannot distinguish from any other read-only reason (an
+	// authoring board's status is always "draft", by Mode's own
+	// construction, so Status only adds information off the authoring
+	// path).
+	Status string `json:"status,omitempty"`
 	// Class identity (02 §Kind registry): which kind of wall this is —
 	// a feature (outcome ACs + stubs, downward-blind) or a story (the
 	// unit of build, pointing up at its feature's AC fragments), with
@@ -107,6 +128,18 @@ type BoardProjection struct {
 	Edges    []edgeView          `json:"edges"`
 	Stickies []scratchStickyView `json:"stickies"`
 	Tray     []reviewStickyView  `json:"tray"`
+	// StubViews, ACCoverage, and OQClaims are the scoping canvas's
+	// additive projection (spec/scoping-canvas ac-3/ac-4/ac-5): declared
+	// stubs verbatim, each AC's covering-stub count ("covered by N
+	// stubs", 0 meaning "no stub"), and each open question's resolving-
+	// spike-stub count (0 = unclaimed, >1 = the multi-claim smell — a
+	// soft observation, never a rule, ac-5). Pure functions of the
+	// frontmatter alone (co-2: "no LLM, no position, no inference from
+	// proximity"); keyed maps are populated for every declared AC/OQ, so
+	// an absent key never has to be told apart from a real zero.
+	StubViews  []StubView     `json:"stub_views,omitempty"`
+	ACCoverage map[string]int `json:"ac_coverage,omitempty"`
+	OQClaims   map[string]int `json:"oq_claims,omitempty"`
 	// Notices are disclosed-unavailable banners rendered in the board
 	// chrome in EVERY mode (I-1(b)/I-2/M-4): a configured-but-unreachable
 	// review feed, or an assumed default branch. Not a projection of the
@@ -120,7 +153,7 @@ type BoardProjection struct {
 // inputs. comments is nil outside review mode.
 func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind) (*BoardProjection, error) {
 	p := &BoardProjection{
-		Spec: specName, Title: fm.Title, Mode: mode,
+		Spec: specName, Title: fm.Title, Mode: mode, Status: string(fm.Status),
 		Class: string(fm.Class), StoryRef: fm.Story, Spike: fm.Spike,
 	}
 	if fm.Problem != nil {
@@ -128,6 +161,32 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	}
 	if fm.Outcome != nil {
 		p.Outcome = fm.Outcome.Text
+	}
+
+	// StubViews/ACCoverage/OQClaims: the scoping canvas's pure-frontmatter
+	// projection (co-2). Keyed for every declared AC/OQ up front so "no
+	// stub"/"unclaimed" is an explicit 0, not a missing key.
+	p.ACCoverage = make(map[string]int, len(fm.AcceptanceCriteria))
+	for _, ac := range fm.AcceptanceCriteria {
+		p.ACCoverage[ac.ID] = 0
+	}
+	p.OQClaims = make(map[string]int, len(fm.OpenQuestions))
+	for _, q := range fm.OpenQuestions {
+		p.OQClaims[q.ID] = 0
+	}
+	for _, st := range fm.Stubs {
+		p.StubViews = append(p.StubViews, StubView{
+			Slug: st.Slug, Spike: st.Spike, Resolves: st.Resolves, AcceptanceCriteria: st.AcceptanceCriteria,
+		})
+		if st.Spike {
+			for _, oqID := range st.Resolves {
+				p.OQClaims[oqID]++
+			}
+			continue
+		}
+		for _, acID := range st.AcceptanceCriteria {
+			p.ACCoverage[acID]++
+		}
 	}
 
 	// (1) The object model, in document order per block.
@@ -183,6 +242,27 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 		x, y float64
 	}
 	pins := map[string]pinView{}
+
+	// liveByID is every non-graduated, non-pin, non-relates, non-review
+	// annotation on THIS board, keyed by id — the set a relates thread's
+	// endpoint may name directly (02 §Record schemas, round 5.4: "a
+	// relates endpoint may name a board annotation by id ... as well as
+	// an artifact ref"). Computed in its own pass since a relates thread
+	// may appear before the sticky it names, in append order.
+	liveByID := map[string]bool{}
+	for _, a := range annotations {
+		if a.Status == artifact.AnnotationGraduated {
+			continue
+		}
+		switch a.Type {
+		case artifact.AnnotationPin, artifact.AnnotationRelates, artifact.AnnotationReview:
+			continue
+		}
+		if a.Board != nil && a.Board.Story == specName {
+			liveByID[a.ID] = true
+		}
+	}
+
 	for _, a := range annotations {
 		if a.Status == artifact.AnnotationGraduated {
 			continue
@@ -202,8 +282,8 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 			}
 			pins[ref] = pinView{id: a.ID, x: a.Board.X, y: a.Board.Y}
 		case artifact.AnnotationRelates:
-			from, okA := relatesEndpoint(specName, declared, a.Target)
-			to, okB := relatesEndpoint(specName, declared, a.TargetB)
+			from, okA := relatesEndpoint(specName, declared, liveByID, a.Target)
+			to, okB := relatesEndpoint(specName, declared, liveByID, a.TargetB)
 			if !okA || !okB {
 				continue // a thread of some other board/spec
 			}
@@ -336,12 +416,21 @@ func edgeEndpoint(specName string, declared map[string]bool, ref string) string 
 }
 
 // relatesEndpoint maps a relates annotation's target to a yarn endpoint:
-// a target naming this spec with a heading selector is that object's
-// card; any other artifact target is a reference card. ok=false when the
-// target belongs to some other spec's board entirely.
-func relatesEndpoint(specName string, declared map[string]bool, t *artifact.Target) (string, bool) {
+// an annotation id (a-<ULID>) naming a live sticky on THIS board (per
+// liveByID) is that sticky's own id — the round-5.4 attribution-thread
+// case (02 §Record schemas: "a relates endpoint may name a board
+// annotation by id"), e.g. a story sticky's coverage yarn to an AC, or a
+// spike sticky's resolution yarn to an open question; a target naming
+// this spec with a heading selector is that object's card; any other
+// artifact target is a reference card. ok=false when the target names a
+// sticky that is not live on this board, or belongs to some other spec's
+// board entirely.
+func relatesEndpoint(specName string, declared, liveByID map[string]bool, t *artifact.Target) (string, bool) {
 	if t == nil {
 		return "", false
+	}
+	if artifact.IsAnnotationID(t.Ref) {
+		return t.Ref, liveByID[t.Ref]
 	}
 	r, err := artifact.ParseRef(t.Ref)
 	if err != nil {

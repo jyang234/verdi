@@ -39,6 +39,80 @@ func TestDecodeAnnotation_Happy(t *testing.T) {
 	}
 }
 
+// TestDecodeAnnotation_StoryAndSpike proves the round-5.4 scoping-canvas
+// proto-sticky types (02 §Record schemas): a board position and a
+// non-empty body are required, mirroring the other free-sticky types.
+func TestDecodeAnnotation_StoryAndSpike(t *testing.T) {
+	cases := map[string]string{
+		"story": `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","board":{"story":"S","x":0,"y":0},"type":"story","body":"borrower self-serve update","status":"open"}`,
+		"spike": `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","board":{"story":"S","x":0,"y":0},"type":"spike","body":"can we cap retries at 3?","status":"open"}`,
+	}
+	for name, y := range cases {
+		t.Run(name, func(t *testing.T) {
+			a, err := DecodeAnnotation([]byte(y))
+			if err != nil {
+				t.Fatalf("DecodeAnnotation: %v", err)
+			}
+			if a.ID == "" {
+				t.Fatal("empty id")
+			}
+		})
+	}
+}
+
+// TestDecodeAnnotation_StoryAndSpike_Negative proves story/spike proto-
+// stickies fail closed without a board position or with an empty body,
+// exactly like the other free-sticky types.
+func TestDecodeAnnotation_StoryAndSpike_Negative(t *testing.T) {
+	cases := map[string]string{
+		"story without board":   `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","target":{"ref":"adr/0001-x@7f3c2a1","selector":{"heading":"h","quote":"q","line":null}},"type":"story","body":"x","status":"open"}`,
+		"spike without board":   `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","target":{"ref":"adr/0001-x@7f3c2a1","selector":{"heading":"h","quote":"q","line":null}},"type":"spike","body":"x","status":"open"}`,
+		"story with empty body": `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","board":{"story":"S","x":0,"y":0},"type":"story","body":"","status":"open"}`,
+		"spike with empty body": `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","board":{"story":"S","x":0,"y":0},"type":"spike","body":"","status":"open"}`,
+		"story with a target_b": `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","board":{"story":"S","x":0,"y":0},"target_b":{"ref":"adr/0001-x@7f3c2a1","selector":{"heading":"","quote":"","line":null}},"type":"story","body":"x","status":"open"}`,
+	}
+	for name, y := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeAnnotation([]byte(y)); err == nil {
+				t.Fatalf("DecodeAnnotation(%s): want error, got nil", name)
+			}
+		})
+	}
+}
+
+// TestDecodeAnnotation_RelatesEndpointNamesAnnotation proves round 5.4's
+// relates-endpoint amendment: a relates thread's target/target_b may name
+// a board annotation by id (a-<ULID>) as well as an artifact ref (02
+// §Record schemas: "a relates endpoint may name a board annotation by id
+// ... as well as an artifact ref").
+func TestDecodeAnnotation_RelatesEndpointNamesAnnotation(t *testing.T) {
+	y := `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j",
+		"target":{"ref":"a-01J8Z0K4BBBBBBBBBBBBBBBBBB","selector":{"heading":"","quote":"","line":null}},
+		"target_b":{"ref":"spec/scoping-canvas@7f3c2a1#ac-2","selector":{"heading":"","quote":"","line":null}},
+		"type":"relates","body":"relates: story-sticky ~ ac-2","status":"open"}`
+	a, err := DecodeAnnotation([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeAnnotation: %v", err)
+	}
+	if a.Target.Ref != "a-01J8Z0K4BBBBBBBBBBBBBBBBBB" {
+		t.Fatalf("Target.Ref = %q, want the annotation id verbatim", a.Target.Ref)
+	}
+}
+
+// TestDecodeAnnotation_RelatesEndpointAnnotationID_OnlyForRelates proves
+// the annotation-id endpoint form is legal ONLY for type relates — a pin's
+// target, for instance, still requires a real pinned artifact ref (02
+// §Record schemas: the pin's own closed shape is unamended).
+func TestDecodeAnnotation_RelatesEndpointAnnotationID_OnlyForRelates(t *testing.T) {
+	y := `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j",
+		"target":{"ref":"a-01J8Z0K4BBBBBBBBBBBBBBBBBB","selector":{"heading":"","quote":"","line":null}},
+		"board":{"story":"S","x":0,"y":0},
+		"type":"pin","body":"","status":"open"}`
+	if _, err := DecodeAnnotation([]byte(y)); err == nil {
+		t.Fatal("DecodeAnnotation(pin naming an annotation id target): want error, got nil")
+	}
+}
+
 func TestDecodeAnnotation_Negative(t *testing.T) {
 	cases := map[string]string{
 		"bad id":                   `{"id":"not-a-ulid","ts":"2026-07-10T14:02:11Z","author":"j","board":{"story":"S","x":0,"y":0},"type":"comment","body":"x","status":"open"}`,
