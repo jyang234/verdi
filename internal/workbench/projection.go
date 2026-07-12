@@ -200,8 +200,8 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	}
 
 	// (2) Positions: stored coordinates, everything else zoned — with
-	// stored collisions resolved AT DISPLAY TIME (owner directive, round
-	// 6: cards never render stacked in any mode; a store can hold
+	// stored collisions resolved AT DISPLAY TIME (owner directive, ledgered
+	// R4-I-35: cards never render stacked in any mode; a store can hold
 	// positions saved before the uniform-footprint enlargement whose
 	// footprints now collide, and a read-only board could never repair
 	// them by drag). layout.json is never rewritten by rendering — the

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { FEATURE_SPEC, boardPath } from "./fixtures";
 
-// Owner directive (round 6): cards must never render stacked, in any
+// Owner directive (R4-I-35): cards must never render stacked, in any
 // mode. The regression fixture is testdata/corpus's accepted-pending-build
 // layout.json — ac-1 stored at (40,20) and ac-2 at (220,20), a 20px
 // footprint overlap under the uniform CardWidth=200 (positions saved

@@ -1,6 +1,6 @@
 package boardlayout
 
-// Display-time collision resolution (owner directive, round 6: cards
+// Display-time collision resolution (owner directive, ledgered R4-I-35: cards
 // must never RENDER stacked, in any mode). Stored positions still pass
 // through Generate verbatim and layout.json is never rewritten by
 // rendering — this is a separate projection step applied to what gets

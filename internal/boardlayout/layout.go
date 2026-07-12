@@ -17,8 +17,8 @@
 // item 5) — this package lays each kind out as its own vertical column,
 // a kind-per-column wall that keeps the projection compact and legible.
 //
-// Rendering is a separate, documented step: the owner directive (round
-// 6) is that cards never RENDER stacked in any mode, so the projection
+// Rendering is a separate, documented step: the owner directive
+// (R4-I-35) is that cards never RENDER stacked in any mode, so the projection
 // applies ResolveDisplayOverlaps (display.go) to Generate's output —
 // display-time nudging of colliding stored positions that never touches
 // layout.json (only a real drag writes, and it writes only the dragged

@@ -146,7 +146,7 @@ func TestBoardSpecPage_Authoring(t *testing.T) {
 	}
 }
 
-// Owner directive (round 6): cards never RENDER stacked, in any mode. A
+// Owner directive (R4-I-35): cards never RENDER stacked, in any mode. A
 // layout.json holding footprint-colliding positions (saved before the
 // uniform-footprint enlargement — the accepted-pending-build regression
 // fixture's exact geometry) renders resolved: the canonical-order first
