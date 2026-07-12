@@ -10,6 +10,7 @@ package workbench
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -395,6 +396,53 @@ func TestScopingCanvas_ProtoStickyLandsInStubBand(t *testing.T) {
 	if found.Board.X != float64(stubCol.X) || found.Board.Y != boardlayout.ZoneOriginY {
 		t.Errorf("story sticky landed at (%v,%v), want the empty stubs band's first slot (%d,%d)",
 			found.Board.X, found.Board.Y, stubCol.X, boardlayout.ZoneOriginY)
+	}
+}
+
+// The two committed fixtures that already declare stubs — the corpus's
+// accepted-pending-build (also driven end-to-end by e2e/tests/31) and
+// this repo's own live-store disclosure-legibility — render their stub
+// cards for free; assert them verbatim so the committed record and the
+// wall never drift apart silently.
+func TestScopingCanvas_CommittedFixturesRenderStubCards(t *testing.T) {
+	cases := []struct {
+		name, path string
+		slugs      []string
+	}{
+		{
+			name: "accepted-pending-build (testdata/corpus)",
+			path: "../../testdata/corpus/.verdi/specs/active/accepted-pending-build/spec.md",
+			slugs: []string{
+				"borrower-update-api", "borrower-update-ui", "borrower-update-audit-log",
+			},
+		},
+		{
+			name:  "disclosure-legibility (the live store)",
+			path:  "../../.verdi/specs/active/disclosure-legibility/spec.md",
+			slugs: []string{"disclosure-seam", "disclosures-panel"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := os.ReadFile(tc.path)
+			if err != nil {
+				t.Fatalf("reading fixture: %v", err)
+			}
+			fm := mustDecodeSpecForTest(t, string(raw))
+			p, err := buildProjection("x", fm, nil, nil, nil, modeReadOnly)
+			if err != nil {
+				t.Fatalf("buildProjection: %v", err)
+			}
+			body := renderBoardRegion(p, &boardGitState{})
+			for _, slug := range tc.slugs {
+				if !strings.Contains(body, `data-testid="stub-card-`+slug+`"`) {
+					t.Errorf("declared stub %q has no card on the wall", slug)
+				}
+			}
+			if !strings.Contains(body, `data-testid="zone-label-stub"`) {
+				t.Error("stubs band not labeled on a wall that files stubs")
+			}
+		})
 	}
 }
 
