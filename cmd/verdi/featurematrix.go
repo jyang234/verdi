@@ -86,7 +86,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 		return fmt.Errorf("matrix: %w", err)
 	}
 
-	printFeatureMatrix(stdout, spec, result, reconciliation, preview)
+	printFeatureMatrix(stdout, spec, result, reconciliation, stories, preview)
 	return nil
 }
 
@@ -97,6 +97,11 @@ type implementingStoryEdges struct {
 	SpecRef string
 	ACIDs   []string // every feature AC this story implements, sorted
 	Closed  bool
+	// Slug is store.RefSlug(story.Title) — the same title-slug half of
+	// R4-I-12's stub-match that binds a story to a stub (accept.go). Used by
+	// the stub table's per-stub LIVE STORIES realization-candidate computation
+	// (D-17).
+	Slug string
 }
 
 // discoverImplementingStories finds every story spec with an `implements`
@@ -161,7 +166,7 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 
 		acIDs := acsByStory[storyRef]
 		sort.Strings(acIDs)
-		flat = append(flat, implementingStoryEdges{SpecRef: storyRef, ACIDs: acIDs, Closed: closed})
+		flat = append(flat, implementingStoryEdges{SpecRef: storyRef, ACIDs: acIDs, Closed: closed, Slug: store.RefSlug(storySpec.Title)})
 
 		for _, acID := range acIDs {
 			byAC[acID] = append(byAC[acID], evidence.ImplementingStory{
@@ -205,7 +210,7 @@ func foldImplementingStory(ctx context.Context, root, commit string, storySpec *
 // paired with the computed live implements mapping under an explicit
 // 'acceptance-time plan; current mapping computed below' banner (never the
 // frozen stubs alone)".
-func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, preview bool) {
+func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, preview bool) {
 	fmt.Fprintf(w, "feature: %s\n", result.SpecRef)
 	if preview {
 		fmt.Fprintln(w, "PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)")
@@ -228,10 +233,6 @@ func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evid
 	if len(spec.Stubs) == 0 {
 		fmt.Fprintln(w, "(none declared)")
 	}
-	liveByAC := make(map[string][]string, len(result.ACs))
-	for _, ac := range result.ACs {
-		liveByAC[ac.ID] = ac.ImplementingStories
-	}
 	byStubSlug := make(map[string]evidence.StubResult, len(reconciliation.Stubs))
 	for _, r := range reconciliation.Stubs {
 		byStubSlug[r.Slug] = r
@@ -239,7 +240,7 @@ func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evid
 	stw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(stw, "STUB\tDECLARED ACS\tLIVE STORIES\tRECONCILIATION")
 	for _, stub := range spec.Stubs {
-		live := unionStories(liveByAC, stub.AcceptanceCriteria)
+		live := realizationCandidates(stories, stub)
 		liveStr := "-"
 		if len(live) > 0 {
 			liveStr = joinComma(live)
@@ -262,15 +263,21 @@ func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evid
 	fmt.Fprintf(w, "stub_reconciliation.blocked: %t\n", reconciliation.Blocked)
 }
 
-func unionStories(liveByAC map[string][]string, acIDs []string) []string {
-	seen := make(map[string]bool)
+// realizationCandidates returns the per-stub LIVE STORIES a stub's row shows
+// (D-17): the stories that plausibly REALIZE this specific stub, so an
+// operator can read which story maps to which stub — not every story merely
+// touching one of the stub's ACs (the old union, which listed the same story
+// under every stub sharing an AC and made the column illegible). A story is a
+// candidate iff it matches either half of R4-I-12's stub-match binding: its
+// title slug equals the stub's slug, OR its implements-AC set equals the
+// stub's declared AC set. "Unreconciled" reconciliation semantics are
+// unchanged — this only sharpens the projection of them.
+func realizationCandidates(stories []implementingStoryEdges, stub artifact.Stub) []string {
+	want := sortedSet(stub.AcceptanceCriteria)
 	var out []string
-	for _, ac := range acIDs {
-		for _, s := range liveByAC[ac] {
-			if !seen[s] {
-				seen[s] = true
-				out = append(out, s)
-			}
+	for _, s := range stories {
+		if s.Slug == stub.Slug || equalSortedSets(sortedSet(s.ACIDs), want) {
+			out = append(out, s.SpecRef)
 		}
 	}
 	sort.Strings(out)

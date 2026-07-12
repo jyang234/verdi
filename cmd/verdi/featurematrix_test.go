@@ -100,10 +100,10 @@ ac-2  pending    attestation:absent   spec/borrower-update-mobile               
 ac-3  no-signal  attestation:absent   -                                                      support can audit every update
 
 stubs: acceptance-time plan; current mapping computed below
-STUB                       DECLARED ACS  LIVE STORIES                                           RECONCILIATION
-borrower-update-api        ac-1          spec/borrower-update-api, spec/borrower-update-mobile  unreconciled
-borrower-update-ui         ac-1, ac-2    spec/borrower-update-api, spec/borrower-update-mobile  unreconciled
-borrower-update-audit-log  ac-3          -                                                      unreconciled
+STUB                       DECLARED ACS  LIVE STORIES                 RECONCILIATION
+borrower-update-api        ac-1          spec/borrower-update-api     unreconciled
+borrower-update-ui         ac-1, ac-2    spec/borrower-update-mobile  unreconciled
+borrower-update-audit-log  ac-3          -                            unreconciled
 
 feature.violated: false
 stub_reconciliation.blocked: true
