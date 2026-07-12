@@ -25,7 +25,7 @@ import (
 func scopingRenderProjection(t *testing.T, mode boardModeKind) *BoardProjection {
 	t.Helper()
 	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec)
-	p, err := buildProjection("scoping-fixture", fm, nil, nil, nil, mode)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, nil, nil, mode)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestScopingCanvas_CoverageChipsAndSmell(t *testing.T) {
 		AcceptanceCriteria: []artifact.AcceptanceCriterion{
 			{ID: "ac-1", Text: "story ac"},
 		},
-	}, nil, nil, nil, modeAuthoring)
+	}, nil, nil, nil, nil, modeAuthoring)
 	if err != nil {
 		t.Fatalf("buildProjection(story): %v", err)
 	}
@@ -296,7 +296,7 @@ func TestScopingCanvas_CoverageChipsAndSmell(t *testing.T) {
 // gets the empty invitation; a story wall never files stubs and gets no
 // band label at all (dc-6's band is the feature's scoping surface).
 func TestScopingCanvas_StubZoneLabelClassAware(t *testing.T) {
-	feature, err := buildProjection("f", &artifact.SpecFrontmatter{Class: artifact.ClassFeature}, nil, nil, nil, modeAuthoring)
+	feature, err := buildProjection("f", &artifact.SpecFrontmatter{Class: artifact.ClassFeature}, nil, nil, nil, nil, modeAuthoring)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestScopingCanvas_StubZoneLabelClassAware(t *testing.T) {
 		t.Error("feature authoring wall missing the empty stubs-band invitation")
 	}
 
-	story, err := buildProjection("s", &artifact.SpecFrontmatter{Class: artifact.ClassStory}, nil, nil, nil, modeAuthoring)
+	story, err := buildProjection("s", &artifact.SpecFrontmatter{Class: artifact.ClassStory}, nil, nil, nil, nil, modeAuthoring)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestScopingCanvas_ProtoStickyAffordances(t *testing.T) {
 			Board: &artifact.BoardAnchor{Story: "scoping-fixture", X: 10, Y: 20},
 		},
 	}
-	p, err := buildProjection("scoping-fixture", fm, nil, annotations, nil, modeAuthoring)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, annotations, nil, modeAuthoring)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestScopingCanvas_AttributionThreadHasNoPickerGraduate(t *testing.T) {
 			TargetB: &artifact.Target{Ref: "spec/scoping-fixture@7f3c2a1", Selector: artifact.Selector{Heading: "ac-1"}},
 		},
 	}
-	p, err := buildProjection("scoping-fixture", fm, nil, annotations, nil, modeAuthoring)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, annotations, nil, modeAuthoring)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestScopingCanvas_StickyEndpointMintsNoRefCard(t *testing.T) {
 			TargetB: &artifact.Target{Ref: "spec/scoping-fixture@7f3c2a1", Selector: artifact.Selector{Heading: "oq-1"}},
 		},
 	}
-	p, err := buildProjection("scoping-fixture", fm, nil, annotations, nil, modeAuthoring)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, annotations, nil, modeAuthoring)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestScopingCanvas_CommittedFixturesRenderStubCards(t *testing.T) {
 				t.Fatalf("reading fixture: %v", err)
 			}
 			fm := mustDecodeSpecForTest(t, string(raw))
-			p, err := buildProjection("x", fm, nil, nil, nil, modeReadOnly)
+			p, err := buildProjection("x", fm, nil, nil, nil, nil, modeReadOnly)
 			if err != nil {
 				t.Fatalf("buildProjection: %v", err)
 			}

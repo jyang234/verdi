@@ -172,13 +172,17 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
 		writeCaseClassTag(&b, p)
 		if p.Problem != "" {
-			b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p>` + esc(p.Problem) + `</p></div>`)
+			b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p>` + esc(p.Problem) + `</p>`)
+			writePlacardFull(&b, "problem", p.ProblemBodyHTML)
+			b.WriteString(`</div>`)
 		}
 		if p.Problem != "" && p.Outcome != "" {
 			b.WriteString(`<div class="case-arrow" aria-hidden="true">&#8594;</div>`)
 		}
 		if p.Outcome != "" {
-			b.WriteString(`<div class="placard placard--outcome" data-testid="placard-outcome"><span class="placard-tag">outcome</span><p>` + esc(p.Outcome) + `</p></div>`)
+			b.WriteString(`<div class="placard placard--outcome" data-testid="placard-outcome"><span class="placard-tag">outcome</span><p>` + esc(p.Outcome) + `</p>`)
+			writePlacardFull(&b, "outcome", p.OutcomeBodyHTML)
+			b.WriteString(`</div>`)
 		}
 		b.WriteString(`</header>`)
 	}
@@ -417,6 +421,26 @@ func writeCaseClassTag(b *strings.Builder, p *BoardProjection) {
 		b.WriteString(` · <span class="case-class-ref">` + esc(p.StoryRef) + `</span>`)
 	}
 	b.WriteString(`</span>`)
+}
+
+// writePlacardFull writes a placard's hidden full-body-prose element — the
+// click-to-read-full-prose seam (R4 board polish): the body section the
+// problem/outcome attribute's anchor resolves to, already rendered to
+// HTML (attributebody.go, through the SAME render path the corpus page
+// uses — never raw-injected markdown). Emitted ONLY when bodyHTML is
+// non-empty: a placard whose attribute has no matching body section (no
+// anchor, an unresolved anchor, or a blank section) writes nothing, and
+// the follow-on Fable pass falls back to the attribute's own headline
+// text. `hidden` keeps it out of the rendered flow — and out of any
+// layout/clamp measurement of the placard's own <p>, since this element
+// is that <p>'s sibling, never its descendant — until a later client pass
+// wires the expand affordance to it; data-testid is that pass's stable
+// contract (`placard-full-problem` / `placard-full-outcome`).
+func writePlacardFull(b *strings.Builder, which string, bodyHTML template.HTML) {
+	if bodyHTML == "" {
+		return
+	}
+	b.WriteString(`<div class="placard-full" data-testid="placard-full-` + which + `" hidden>` + string(bodyHTML) + `</div>`)
 }
 
 // writeScopingReceipts writes a feature-wall object card's scoping
