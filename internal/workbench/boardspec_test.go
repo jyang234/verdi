@@ -107,7 +107,7 @@ func newBoardFixture(t *testing.T) string {
 			".verdi/specs/active/" + boardFixtureName + "/spec.md":     boardFixtureSpec,
 			".verdi/specs/active/" + boardFixtureName + "/layout.json": boardFixtureLayout,
 			".verdi/adr/0001-outbox-events.md":                         boardFixtureADR,
-			".verdi/.gitignore": "data/\n",
+			".verdi/.gitignore":                                        "data/\n",
 		},
 		Message: "seed board fixture",
 	}})
@@ -635,7 +635,7 @@ func TestBoardSpec_EdgeRetype(t *testing.T) {
 
 	// Negatives: an illegal new type, and a type the edge does not carry.
 	for name, req := range map[string]string{
-		"illegal new type":  `{"from":"dc-1","to":"adr/0001-outbox-events","type":"supersedes","newType":"implements"}`,
+		"illegal new type":   `{"from":"dc-1","to":"adr/0001-outbox-events","type":"supersedes","newType":"implements"}`,
 		"wrong current type": `{"from":"dc-1","to":"adr/0001-outbox-events","type":"exempts","newType":"supersedes"}`,
 	} {
 		rec := postBoardAPI(t, h, boardFixtureName, "edge-retype", req)
@@ -661,8 +661,8 @@ func TestBoardSpec_AffordancesAreAuthoringOnly(t *testing.T) {
 
 	proj := &BoardProjection{
 		Spec: boardFixtureName, Mode: modeReadOnly,
-		Cards: []cardView{{ID: "dc-1", Kind: "decision", Text: "x"}},
-		Edges: []edgeView{{Type: "exempts", From: "dc-1", To: "adr/0001-outbox-events", Layer: "spec"}},
+		Cards:    []cardView{{ID: "dc-1", Kind: "decision", Text: "x"}},
+		Edges:    []edgeView{{Type: "exempts", From: "dc-1", To: "adr/0001-outbox-events", Layer: "spec"}},
 		Stickies: []scratchStickyView{{ID: "a-01J8Z0K3AAAAAAAAAAAAAAAAAA", Type: "comment", Body: "b"}},
 	}
 	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
