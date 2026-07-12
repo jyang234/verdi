@@ -4,6 +4,9 @@ import {
   READONLY_SPEC,
   REVIEW_SPEC,
   EMPTY_SPEC,
+  EMPTY_SPEC_STORY_REF,
+  FEATURE_SPEC,
+  STORY_STUB_MATCHED,
   boardPath,
 } from "./fixtures";
 import { addSticky } from "./helpers";
@@ -106,11 +109,71 @@ test.describe("board legibility: the wall reads at a glance", () => {
     await expect(guide).toContainText("acceptance criteria");
     await expect(guide).toContainText("yarn");
     await expect(guide).toContainText("Commit & push");
+    // DESIGN_SPEC is class: feature — its guide teaches the split (owner
+    // directive: a PM must see, on first read, that a feature wall holds
+    // outcome ACs + stubs while stories are their own specs pointing up).
+    const note = guide.getByTestId("guide-class-note");
+    await expect(note).toBeVisible();
+    await expect(note).toContainText("feature");
+    await expect(note).toContainText("implements");
+    await expect(note).toContainText("a feature never lists its stories");
+
+    // EMPTY_SPEC is class: story — the four-move copy stands unadorned
+    // (story spec + ACs + implements + commit IS the minimum path).
+    await page.goto(boardPath(EMPTY_SPEC));
+    const storyGuide = page.getByTestId("board-guide");
+    await expect(storyGuide).toBeVisible();
+    await expect(storyGuide).not.toHaveAttribute("open", "");
+    await storyGuide.locator("summary").click();
+    await expect(storyGuide).toContainText("case file");
+    await expect(storyGuide).toContainText("acceptance criteria");
+    await expect(storyGuide).toContainText("implements/resolves edges");
+    await expect(storyGuide).toContainText("Commit & push");
+    await expect(storyGuide.getByTestId("guide-class-note")).toHaveCount(0);
 
     for (const spec of [REVIEW_SPEC, READONLY_SPEC]) {
       await page.goto(boardPath(spec));
       await expect(page.getByTestId("board-guide")).toHaveCount(0);
     }
+  });
+
+  test("the case file wears its class in every room", async ({ page }) => {
+    // Authoring, feature wall: the stamp says so.
+    await page.goto(boardPath(DESIGN_SPEC));
+    const tag = page.getByTestId("case-class-tag");
+    await expect(tag).toHaveText("feature");
+    await expect(tag).toHaveClass(/case-class-tag--feature/);
+
+    // Authoring, story wall: the stamp carries the tracker ref from the
+    // spec's story: field.
+    await page.goto(boardPath(EMPTY_SPEC));
+    const storyTag = page.getByTestId("case-class-tag");
+    await expect(storyTag).toHaveText(`story · ${EMPTY_SPEC_STORY_REF}`);
+    await expect(storyTag).toHaveClass(/case-class-tag--story/);
+
+    // The review mirror and the sealed record wear it too — the class
+    // question does not expire with the draft. FEATURE_SPEC and
+    // STORY_STUB_MATCHED live on main (accepted-pending-build), so their
+    // walls are sealed records.
+    await page.goto(boardPath(REVIEW_SPEC));
+    await expect(page.getByTestId("case-class-tag")).toHaveText("feature");
+    await page.goto(boardPath(FEATURE_SPEC));
+    await expect(page.getByTestId("board")).toHaveAttribute(
+      "data-board-mode",
+      "readonly",
+    );
+    await expect(page.getByTestId("case-class-tag")).toHaveText("feature");
+    await page.goto(boardPath(STORY_STUB_MATCHED));
+    await expect(page.getByTestId("case-class-tag")).toContainText("story ·");
+
+    // A grandfathered v0 spec (no problem/outcome) has no case-file
+    // lockup to wear the stamp — and never wears an orphaned one.
+    await page.goto(boardPath(READONLY_SPEC));
+    await expect(page.getByTestId("board")).toHaveAttribute(
+      "data-board-mode",
+      "readonly",
+    );
+    await expect(page.getByTestId("case-class-tag")).toHaveCount(0);
   });
 
   test("the yarn key names exactly the threads on the wall", async ({
