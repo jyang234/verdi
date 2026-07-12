@@ -4,7 +4,7 @@ kind: spec
 title: "Disclosures Panel"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-R5-3
 problem: { text: "the shared disclosure seam exists (spec/disclosure-seam-v2), so every migrated call site now speaks one vocabulary — but there is still no single place to stand: an operator who wants to know \"what is verdi currently not proving for this checkout, in total?\" must still run each verb and read each surface, because nothing enumerates the checkout's current disclosures in one view", anchor: "#problem" }
 outcome: { text: "the workbench serves a disclosures view — and the dex ships its read-only edition through the same compute path — enumerating every current disclosure for the checkout through the internal/disclosure seam, so the operator's \"what is verdi not proving right now\" question has one answer surface", anchor: "#outcome" }
@@ -17,6 +17,7 @@ open_questions:
 links:
   - { type: implements, ref: "spec/disclosure-legibility#ac-1" }
   - { type: implements, ref: "spec/disclosure-legibility#ac-2" }
+frozen: { at: 2026-07-11, commit: db31d48d0828cc8a8d243faed7ec72e73d62657c, stub_matched: true }
 ---
 # Disclosures Panel
 
