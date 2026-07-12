@@ -381,6 +381,50 @@
       else el.removeAttribute("data-expandable");
       setClampMark(el, truncated);
     }
+    markPlacards();
+  }
+
+  // markPlacards gives the case-file placards their ALWAYS-PRESENT expand
+  // affordance — the quiet dog-ear (setPlacardMore) that says "there is a
+  // fuller file to open" — independent of whether the headline currently
+  // clamps. That is the whole point of the board-polish pass: a placard is
+  // expandable when there is anything more to read than the three lines on
+  // its face, i.e. it carries a server-rendered body section OR its headline
+  // is actually clamped. The one degenerate case — no body section AND a
+  // headline that fits — has nothing more to show, so it gets no affordance
+  // and stays inert (the object-card/stub clamp affordance, by contrast, is
+  // untouched: still purely clamp-triggered, above). Runs inside the same
+  // measure pass, after the headline's own is-clamped state is set.
+  function markPlacards() {
+    var placards = region.querySelectorAll(".placard");
+    for (var i = 0; i < placards.length; i++) {
+      var pl = placards[i];
+      var headline = pl.querySelector(".placard-text");
+      var hasBody = !!pl.querySelector(".placard-full");
+      var clamps = !!(headline && headline.classList.contains("is-clamped"));
+      var expandable = hasBody || clamps;
+      pl.classList.toggle("placard--expandable", expandable);
+      setPlacardMore(pl, expandable);
+    }
+  }
+
+  // setPlacardMore adds or removes a placard's dog-ear button. It is a real
+  // button (keyboard-focusable, screen-reader labelled with what it opens),
+  // its fold drawn in CSS; the whole placard is also click-to-open, so the
+  // dog-ear is the visible promise, not the only way in.
+  function setPlacardMore(pl, on) {
+    var btn = pl.querySelector(".placard-more");
+    if (on && !btn) {
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "placard-more";
+      var which = pl.classList.contains("placard--outcome") ? "outcome" : "problem";
+      btn.setAttribute("aria-label", "Read the full " + which);
+      btn.setAttribute("aria-haspopup", "dialog");
+      pl.appendChild(btn);
+    } else if (!on && btn) {
+      btn.remove();
+    }
   }
 
   // expandHeaderFor names the element in its own eyebrow voice — the
@@ -417,16 +461,25 @@
     if (b) b.remove();
   }
 
-  function openExpandDialog(el) {
+  // buildExpandDialog frames the read-only dialog (the shared board-dialog
+  // chrome: × / scrim / Escape) and returns its empty body container for
+  // the caller to fill — with plain text (a card/stub/sticky, or a placard
+  // with no body section) or with rendered prose (a placard's server-side
+  // HTML body). `rich` swaps the plain pre-wrap body for prose that lays
+  // out paragraphs and lists; `hand` keeps a scratch element in its own
+  // handwriting.
+  function buildExpandDialog(header, rich, hand) {
     closeExpandDialog();
-    var header = expandHeaderFor(el);
     var backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop expand-backdrop";
     backdrop.id = "expand-backdrop";
 
     var dlg = document.createElement("div");
     dlg.id = "expand-dialog";
-    dlg.className = "board-dialog expand-dialog" + (expandIsHand(el) ? " expand-dialog--hand" : "");
+    dlg.className =
+      "board-dialog expand-dialog" +
+      (hand ? " expand-dialog--hand" : "") +
+      (rich ? " expand-dialog--rich" : "");
     dlg.setAttribute("data-testid", "expand-dialog");
     dlg.setAttribute("role", "dialog");
     dlg.setAttribute("aria-modal", "true");
@@ -446,11 +499,8 @@
     kind.textContent = header;
 
     var body = document.createElement("div");
-    body.className = "expand-text";
+    body.className = "expand-text" + (rich ? " expand-text--rich" : "");
     body.setAttribute("data-testid", "expand-text");
-    // The DOM holds the full string; the clamp only hid it. Reading
-    // textContent (not innerHTML) keeps this strictly read-only text.
-    body.textContent = el.textContent;
 
     dlg.appendChild(close);
     dlg.appendChild(kind);
@@ -458,6 +508,37 @@
     document.body.appendChild(backdrop);
     document.body.appendChild(dlg);
     close.focus();
+    return body;
+  }
+
+  function openExpandDialog(el) {
+    var body = buildExpandDialog(expandHeaderFor(el), false, expandIsHand(el));
+    // The DOM holds the full string; the clamp only hid it. Reading
+    // textContent (not innerHTML) keeps this strictly read-only text.
+    body.textContent = el.textContent;
+  }
+
+  // openPlacardExpand reads a case-file placard's FULL prose. When the spec
+  // carried a "## Problem"/"## Outcome" body section, the server rendered it
+  // (already escaped, through the same markdown path the corpus page uses)
+  // into a hidden `.placard-full` sibling of the headline — the dialog shows
+  // that body as laid-out prose. When there is no body section, there is
+  // nothing fuller to reveal than the headline itself (which the wall may
+  // have clamped), so the dialog falls back to the headline text.
+  function openPlacardExpand(placard) {
+    var header = expandHeaderFor(placard);
+    var full = placard.querySelector(".placard-full");
+    if (full) {
+      var richBody = buildExpandDialog(header, true, false);
+      // The body is trusted, server-rendered HTML (goldmark output from the
+      // committed spec, never user input) — the same bytes the corpus page
+      // injects. Surfacing it as markup is the point of the seam.
+      richBody.innerHTML = full.innerHTML;
+      return;
+    }
+    var headline = placard.querySelector(".placard-text");
+    var body = buildExpandDialog(header, false, false);
+    body.textContent = headline ? headline.textContent : "";
   }
 
   // A single click opens the dialog, but a card is also double-click-to-
@@ -1531,6 +1612,18 @@
     if (refcard) {
       if (refcard === dragGhost) return; // a drag's tail, not a peek click
       openRefPeek(refcard.getAttribute("data-ref"));
+      return;
+    }
+
+    // Case-file placards are ALWAYS expandable — a click anywhere on one
+    // (its face, its clamped headline, or its dog-ear button) reads the full
+    // case file: the rendered body prose when the spec carried one, else the
+    // headline. This is independent of clamping (the width-dependence fix),
+    // so it is handled before the generic clamp path below. A degenerate
+    // placard never wears `.placard--expandable`, so a click on it is inert.
+    var expandablePlacard = t.closest(".placard--expandable");
+    if (expandablePlacard) {
+      openPlacardExpand(expandablePlacard);
       return;
     }
 
