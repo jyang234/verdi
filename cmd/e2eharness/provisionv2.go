@@ -28,6 +28,13 @@ const (
 // draws its resolution yarn to), with problem/outcome texts containing
 // PROBLEM_SNIPPET ("stale decline") and OUTCOME_SNIPPET ("declined
 // applicants").
+//
+// The problem text is deliberately long (several sentences): at the e2e
+// viewport its case-file placard overflows the 3-line clamp, so it is the
+// fixture for the board's click-to-expand affordance (33-board-expand) —
+// a truncated placard shows the hint and opens the read-only expand
+// dialog. EMPTY_SPEC (income-verification) keeps a short one-line problem,
+// the negative case (a short placard gets no affordance).
 const designSpec = `---
 id: spec/refi-decline-flow
 kind: spec
@@ -35,7 +42,7 @@ class: feature
 title: "Refinancing decline flow"
 status: draft
 owners: [platform-team]
-problem: { text: "applicants keep acting on stale decline reasons after the underlying data changes", anchor: "#problem" }
+problem: { text: "applicants keep acting on stale decline reasons after the underlying data changes, and the cost of that gap compounds at every touchpoint: they re-apply against a rule that no longer holds, they call support to contest a decision that has already been reversed, and some abandon the product entirely in the belief that a hard block still stands. Each of those paths generates avoidable rework for the servicing team, and every repetition erodes the applicant's trust that the decline they were shown is the decline that is actually real.", anchor: "#problem" }
 outcome: { text: "declined applicants see the current decline state and a concrete next step", anchor: "#outcome" }
 acceptance_criteria:
   - { id: ac-1, text: "a declined applicant sees the current decline reason within a minute of a data change", evidence: [behavioral, attestation], anchor: "#ac-1" }
@@ -142,7 +149,7 @@ class: feature
 title: "Stale decline notices"
 status: draft
 owners: [platform-team]
-problem: { text: "decline notices linger after the decline is stale", anchor: "#problem" }
+problem: { text: "decline notices linger long after the decline that produced them has gone stale, and because the mirror board that reviews this work is a non-authoring room, its placards must clamp and expand exactly like the live wall does: a reviewer who opens this spec sees the same three-line case file, the same fade-and-mark on an overflowing problem, and the same read-only expand dialog on a click — nothing about legibility depends on which room you are standing in.", anchor: "#problem" }
 outcome: { text: "notices retract themselves when a decline goes stale", anchor: "#outcome" }
 acceptance_criteria:
   - { id: ac-1, text: "a stale decline retracts its notice", evidence: [behavioral, attestation], anchor: "#ac-1" }
