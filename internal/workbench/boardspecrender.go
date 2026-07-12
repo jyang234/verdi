@@ -150,13 +150,18 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	b.WriteString(`</header>`)
 
 	b.WriteString(`<div class="board-layout">`)
-	b.WriteString(`<div id="board-canvas" class="board-canvas boardv2-canvas" data-testid="board" data-board-mode="` + esc(string(p.Mode)) + `" data-spec="` + esc(p.Spec) + `">`)
+	// The canvas is sized to its content plus a working margin — a pure
+	// function of the projection's positions (deterministic), so a sparse
+	// board is a shallow board, not a fixed void.
+	b.WriteString(`<div id="board-canvas" class="board-canvas boardv2-canvas" data-testid="board" data-board-mode="` + esc(string(p.Mode)) + `" data-spec="` + esc(p.Spec) + `" style="min-height:` + px(canvasMinHeight(p)) + `">`)
 
-	// Object cards.
+	// Object cards. The header is a one-line lockup — kind label left,
+	// id right — and the clamped text carries its full form in title
+	// (the uniform-footprint card never grows past its index-card size).
 	for _, c := range p.Cards {
 		b.WriteString(`<div class="objcard objcard--` + esc(c.Kind) + `" data-testid="card-` + esc(c.ID) + `" data-id="` + esc(c.ID) + `" data-object-kind="` + esc(c.Kind) + `" style="left:` + px(c.X) + `;top:` + px(c.Y) + `">`)
-		b.WriteString(`<span class="card-kind">` + esc(strings.ReplaceAll(c.Kind, "-", " ")) + ` · ` + esc(c.ID) + `</span>`)
-		b.WriteString(`<p class="card-text">` + esc(c.Text) + `</p>`)
+		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + esc(strings.ReplaceAll(c.Kind, "-", " ")) + `</span><span class="card-kind-id">` + esc(c.ID) + `</span></span>`)
+		b.WriteString(`<p class="card-text" title="` + esc(c.Text) + `">` + esc(c.Text) + `</p>`)
 		if authoring {
 			b.WriteString(`<button type="button" class="yarn-handle" data-testid="yarn-handle-` + esc(c.ID) + `" aria-label="Draw yarn from ` + esc(c.ID) + `" title="drag to another card to string yarn"></button>`)
 		}
@@ -170,7 +175,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// a visible endpoint.
 	for _, rc := range p.RefCards {
 		b.WriteString(`<div class="refcard" data-testid="` + esc(refCardTestID(rc.Ref)) + `" data-ref="` + esc(rc.Ref) + `" data-ref-kind="` + esc(refKindOf(rc.Ref)) + `" style="left:` + px(rc.X) + `;top:` + px(rc.Y) + `">`)
-		b.WriteString(`<span class="card-kind">reference</span>`)
+		b.WriteString(`<span class="card-kind"><span class="card-kind-label">reference</span><span class="card-kind-id">` + esc(refKindOf(rc.Ref)) + `</span></span>`)
 		b.WriteString(`<span class="card-ref" title="` + esc(rc.Ref) + `">` + esc(rc.Ref) + `</span>`)
 		b.WriteString(`</div>`)
 	}
@@ -269,7 +274,8 @@ func writeGitPanel(b *strings.Builder, git *boardGitState) {
 		b.WriteString(` hidden`)
 	}
 	b.WriteString(`>uncommitted changes</span>`)
-	b.WriteString(`<button type="button" id="commit-push-btn">Commit &amp; push</button>`)
+	// The page's most consequential action wears primary weight.
+	b.WriteString(`<button type="button" id="commit-push-btn" class="btn-primary">Commit &amp; push</button>`)
 	b.WriteString(`<div class="branch-row"><span class="branch-label">branch</span>`)
 	b.WriteString(`<button type="button" class="branch-switcher" data-testid="branch-switcher" aria-haspopup="menu">` + esc(git.Branch) + `</button></div>`)
 	b.WriteString(`<div role="menu" class="branch-menu" id="branch-menu" hidden aria-label="Switch branch">`)
@@ -323,6 +329,35 @@ func renderBoardDialogs(mode boardModeKind) string {
 // legality lookup (data-ref-kind).
 func refKindOf(ref string) string {
 	return targetKindOf(nil, ref)
+}
+
+// canvasMinHeight sizes the canvas to its content plus one empty row of
+// working margin (floor: enough for two rows of empty board). A pure
+// function of the projection's positions — no viewport, clock, or
+// randomness — so the page stays a deterministic render.
+func canvasMinHeight(p *BoardProjection) float64 {
+	const (
+		floor        = 416 // two card rows + margins: an empty board is still a board
+		margin       = 176 // one card row of working room below the content
+		stickyHeight = 150 // sticky min footprint (est.: stickies grow with text)
+	)
+	bottom := float64(floor)
+	for _, c := range p.Cards {
+		if y := c.Y + boardlayout.CardHeight; y > bottom {
+			bottom = y
+		}
+	}
+	for _, rc := range p.RefCards {
+		if y := rc.Y + boardlayout.RefCardHeight; y > bottom {
+			bottom = y
+		}
+	}
+	for _, s := range p.Stickies {
+		if y := s.Y + stickyHeight; y > bottom {
+			bottom = y
+		}
+	}
+	return bottom + margin
 }
 
 func px(f float64) string {

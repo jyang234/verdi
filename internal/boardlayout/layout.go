@@ -65,11 +65,24 @@ type Object struct {
 // zone, compact enough that every zone — including the reference column
 // — sits inside one viewport, so drawing yarn from a decision to a
 // reference card never needs a scroll mid-gesture.
+//
+// The card footprint is UNIFORM (owner directive: fixed index-card
+// dimensions, clamped text) and mirrored by style.css's .objcard/.refcard
+// rules; the pitches derive from it (footprint + gutter), which is what
+// makes default placement collision-free by construction.
 const (
+	// CardWidth and CardHeight are the object card's fixed rendered
+	// footprint in px (style.css .objcard: 12.5rem × 8.75rem).
+	CardWidth  = 200
+	CardHeight = 140
+	// RefCardHeight is the squat reference-card footprint
+	// (style.css .refcard: 12.5rem × 4.5rem).
+	RefCardHeight = 72
+
 	zoneOriginY = 40
-	zonePitchX  = 220
 	zoneMarginX = 40
-	rowPitch    = 190
+	zonePitchX  = CardWidth + 28  // column rhythm: footprint + gutter
+	rowPitch    = CardHeight + 36 // row rhythm: footprint + gap
 )
 
 // Generate computes every object's position: stored positions verbatim,
@@ -107,12 +120,33 @@ func Generate(objects []Object, stored map[string]artifact.Position) (map[string
 
 	out := make(map[string]artifact.Position, len(objects))
 
-	// occupied tracks every pixel spoken for by a LIVE stored position
-	// (orphans ignored per the adjudication) or an already-placed object.
-	occupied := make(map[artifact.Position]bool, len(stored))
+	// occupied tracks every FOOTPRINT spoken for by a LIVE stored
+	// position (orphans ignored per the adjudication) or an already-
+	// placed object. Overlap is tested rect-against-rect — with the
+	// uniform footprint, a fresh slot can never land under a stored
+	// card, even one dragged off the grid. Membership testing is
+	// order-independent, so map iteration order cannot leak into the
+	// layout (S8 property 1).
+	kindOf := make(map[string]ZoneKind, len(objects))
+	for _, o := range objects {
+		kindOf[o.ID] = o.Kind
+	}
+	occupied := make([]Rect, 0, len(objects))
+	claim := func(id string, p artifact.Position) {
+		w, h := FootprintFor(kindOf[id])
+		occupied = append(occupied, Rect{X: p.X, Y: p.Y, W: w, H: h})
+	}
+	overlaps := func(r Rect) bool {
+		for _, o := range occupied {
+			if r.intersects(o) {
+				return true
+			}
+		}
+		return false
+	}
 	for id, p := range stored {
 		if live[id] {
-			occupied[p] = true
+			claim(id, p)
 		}
 	}
 
@@ -124,11 +158,12 @@ func Generate(objects []Object, stored map[string]artifact.Position) (map[string
 				out[o.ID] = p // verbatim, never inspected or "fixed"
 				continue
 			}
+			w, h := FootprintFor(o.Kind)
 			for {
 				p := positionForSlot(next, zoneX)
-				if !occupied[p] {
+				if !overlaps(Rect{X: p.X, Y: p.Y, W: w, H: h}) {
 					out[o.ID] = p
-					occupied[p] = true
+					claim(o.ID, p)
 					next++
 					break
 				}

@@ -53,6 +53,9 @@
 
   /* board */
   --yarn: #b0402d;
+  --grid-dot: rgba(35, 41, 32, 0.08);
+  --shadow-card: 0 1px 2px rgba(20, 26, 18, 0.10), 0 2px 6px rgba(20, 26, 18, 0.07);
+  --shadow-lift: 0 10px 22px rgba(20, 26, 18, 0.28);
   --note-comment-bg: #f6e8a6;      --note-comment-ink: #4d3f10;
   --note-question-bg: #e6d9f2;     --note-question-ink: #453064;
   --note-decision-bg: #f7d4ba;     --note-decision-ink: #6d3410;
@@ -97,6 +100,9 @@
     --st-waived-tint: #261f33;
 
     --yarn: #d9705a;
+    --grid-dot: rgba(215, 221, 209, 0.07);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.30);
+    --shadow-lift: 0 10px 22px rgba(0, 0, 0, 0.55);
     --note-comment-bg: #453d1b;      --note-comment-ink: #ecdf9e;
     --note-question-bg: #37294b;     --note-question-ink: #dccdf2;
     --note-decision-bg: #48291a;     --note-decision-ink: #f0c9a8;
@@ -788,7 +794,8 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 
 .board-layout { display: flex; gap: 1.5rem; align-items: flex-start; }
 
-/* drafting-paper canvas: dot grid, inset frame */
+/* drafting-paper canvas: a calm, wide-pitched dot grid — texture you
+   notice only when you look for it — inside an inset frame */
 .board-canvas {
   position: relative;
   flex: 1 1 auto;
@@ -797,12 +804,13 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   border: 1px solid var(--rule);
   border-radius: 8px;
   background-color: var(--panel);
-  background-image: radial-gradient(var(--rule) 1px, transparent 1.5px);
-  background-size: 22px 22px;
+  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1.4px);
+  background-size: 36px 36px;
   overflow: hidden;
 }
 
-/* the thread lies OVER the papers, like real yarn on an evidence wall;
+/* the thread lies UNDER the papers, tied to their edges: a thread that
+   crosses a card passes behind it (never through its text), and
    pointer-events: none keeps it from ever intercepting a drag */
 .yarn-svg {
   position: absolute;
@@ -810,7 +818,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 5;
+  z-index: 1;
 }
 .yarn-thread { fill: none; stroke: var(--yarn); stroke-width: 2; opacity: 0.85; }
 .yarn-knot { fill: var(--yarn); }
@@ -826,17 +834,18 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 /* pinned-ref index cards */
 .card {
   position: absolute;
+  z-index: 2;
   width: 15rem;
   padding: 1rem 0.9rem 0.7rem;
   background: var(--card);
   border: 1px solid var(--rule);
-  border-radius: 4px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
   cursor: grab;
   font-size: 0.82rem;
   line-height: 1.4;
 }
-.card::before { /* the pin */
+.card::before { /* a physical pushpin: highlit head, seated shadow */
   content: "";
   position: absolute;
   top: -0.42rem;
@@ -845,22 +854,42 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   height: 0.84rem;
   margin-left: -0.42rem;
   border-radius: 50%;
-  background: var(--yarn);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  background: radial-gradient(circle at 33% 28%,
+    color-mix(in srgb, var(--yarn), white 45%),
+    var(--yarn) 55%,
+    color-mix(in srgb, var(--yarn), black 35%) 100%);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 .card-kind {
-  display: block;
-  font-size: 0.62rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.58rem;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
   color: var(--muted-solid);
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.3rem;
+}
+/* the header lockup: kind label left (truncates before it ever wraps),
+   id right as the stable anchor the eye scans for */
+.card-kind-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.card-kind-id {
+  flex: none;
+  font-weight: 700;
+  color: var(--ink);
 }
 .card-ref { font-family: var(--mono); font-size: 0.78rem; color: var(--accent); max-width: 100%; }
 
 /* stickies: paper notes, one color per annotation type */
 .sticky {
   position: absolute;
+  z-index: 3;
   width: 12.5rem;
   min-height: 7rem;
   padding: 0.65rem 0.75rem 0.9rem;
@@ -874,6 +903,15 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* editors inside a drag surface still select normally */
+.sticky textarea, .objcard textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: auto;
 }
 /* deterministic, subtle lean — pinned paper, not a grid of divs */
 .sticky:nth-of-type(odd) { transform: rotate(-0.7deg); }
@@ -904,15 +942,24 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .sticky--agent-task { background: var(--note-agent-bg); color: var(--note-agent-ink); }
 
 .card:active, .sticky:active { cursor: grabbing; }
-/* a lifted paper rises above the thread while it moves */
+/* a lifted paper rises above everything while it moves */
 .dragging {
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-lift);
   z-index: 10;
 }
 .sticky.dragging { transform: rotate(0deg) scale(1.02); }
 
-/* the board's side column: yarn legend + the commit ritual */
-.board-side { flex: 0 0 20rem; display: flex; flex-direction: column; gap: 1.25rem; }
+/* the board's side column: yarn legend + the commit ritual. Sticky, so
+   the rail rides with the reader instead of floating detached at the top
+   of a tall canvas. */
+.board-side {
+  flex: 0 0 20rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  position: sticky;
+  top: 1.25rem;
+}
 
 .yarn, .commit-to-design {
   border: 1px solid var(--rule);
@@ -974,6 +1021,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   border-left: 3px solid var(--accent);
   border-radius: 6px;
   background: var(--card);
+  box-shadow: var(--shadow-card);
   padding: 0.6rem 0.9rem;
 }
 .placard p { margin: 0.15rem 0 0; font-size: 0.92rem; line-height: 1.45; }
@@ -986,29 +1034,29 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 }
 
 /* Disclosed-unavailable board notices (I-1(b)/I-2/M-4): an advisory
-   banner — attention-drawing but not alarming — that discloses a skipped
+   line — honest and visible, never dominant — that discloses a skipped
    input (unreachable review feed, assumed default branch) rather than
-   rendering as if it were simply absent. Speaks the registry's
-   authored-living ochre (the "hand-off, unverified input" color) through
-   the shared theme tokens, so both themes stay legible with no bespoke
-   palette: the mono "disclosed" stamp and left accent carry the color,
-   the prose stays calm page ink. */
-.board-notices { display: flex; flex-direction: column; gap: 0.5rem; margin: 0 0 1rem; }
+   rendering as if it were simply absent. The mono "disclosed" stamp and
+   the ochre left accent carry the authored-living color (the "hand-off,
+   unverified input" voice) through the shared theme tokens; the prose
+   stays quiet page ink at footnote size — an advisory note in the
+   margin, not a second headline. */
+.board-notices { display: flex; flex-direction: column; gap: 0.4rem; margin: 0 0 0.9rem; }
 .board-notice {
   border: 1px solid var(--rule);
   border-left: 3px solid var(--authored);
   border-radius: 6px;
-  background: var(--authored-tint);
-  color: var(--ink);
-  padding: 0.55rem 0.9rem;
-  font-size: 0.88rem;
+  background: var(--card);
+  color: var(--muted-solid);
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
   line-height: 1.5;
 }
 .board-notice::before {
   content: "disclosed";
   display: inline-block;
   font-family: var(--mono);
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.14em;
@@ -1016,22 +1064,35 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   margin-right: 0.6rem;
   transform: translateY(-0.08em);
 }
+/* the drag-refusal notice (a read-only board is never silently inert)
+   speaks the same channel, stamped as the refusal it is */
+.board-notice--refusal::before { content: "read-only"; }
 
-.boardv2-canvas { overflow: auto; }
+/* the v2 canvas scrolls and is sized server-side to its content (an
+   inline min-height: content + working margin, never a fixed void) */
+.boardv2-canvas { overflow: auto; min-height: 26rem; }
 
-/* object cards: one per frontmatter-declared object */
+/* object cards: one per frontmatter-declared object — a UNIFORM
+   index-card footprint (12.5rem × 8.75rem, mirrored by boardlayout's
+   CardWidth/CardHeight), so slots and drops can be collision-free by
+   construction; the text clamps and carries its full form in title */
 .objcard {
   position: absolute;
+  z-index: 2;
   width: 12.5rem;
+  height: 8.75rem;
   padding: 0.7rem 0.9rem 0.8rem;
   background: var(--card);
   border: 1px solid var(--rule);
   border-top: 3px solid var(--muted-solid);
-  border-radius: 4px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
   font-size: 0.85rem;
   line-height: 1.45;
   cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .objcard:active { cursor: grabbing; }
 /* layered paper: a touched card rises above an overlapping neighbour
@@ -1041,7 +1102,14 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .objcard--constraint { border-top-color: var(--st-violated); }
 .objcard--decision { border-top-color: var(--authored); }
 .objcard--open-question { border-top-color: var(--st-waived); }
-.objcard .card-text { margin: 0.25rem 0 0; overflow-wrap: anywhere; }
+.objcard .card-text {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
 .card-editor, .sticky-editor {
   width: 100%;
   min-height: 4.5rem;
@@ -1054,36 +1122,60 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   resize: vertical;
 }
 
-/* the yarn handle: a spool pinned to the card's corner */
+/* the yarn handle IS the card's pushpin: a physical pin head seated at
+   the top edge — the affordance yarn is drawn from, present only where
+   drawing yarn means something (authoring mode) */
 .yarn-handle {
   position: absolute;
   top: -0.5rem;
-  right: -0.5rem;
+  left: 50%;
+  margin-left: -0.5rem;
   width: 1rem;
   height: 1rem;
   padding: 0;
-  border: 2px solid var(--card);
+  border: 0;
   border-radius: 50%;
-  background: var(--yarn);
+  background: radial-gradient(circle at 33% 28%,
+    color-mix(in srgb, var(--yarn), white 45%),
+    var(--yarn) 55%,
+    color-mix(in srgb, var(--yarn), black 35%) 100%);
   cursor: crosshair;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  touch-action: none;
 }
-.yarn-handle:hover { transform: scale(1.25); }
+.yarn-handle:hover { transform: scale(1.2); }
 
-/* reference cards: targets outside this spec, filed frozen-blue */
+/* reference cards: targets outside this spec, filed frozen-blue — the
+   one deliberately different paper on the wall (squat, tinted, pinned
+   ref) sharing the cards' radius, shadow, and header lockup */
 .refcard {
   position: absolute;
-  width: 12rem;
+  z-index: 2;
+  width: 12.5rem;
+  height: 4.5rem;
   padding: 0.55rem 0.8rem 0.65rem;
   background: var(--frozen-tint);
   border: 1px solid var(--frozen);
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 0.78rem;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-card);
+  -webkit-user-select: none;
+  user-select: none;
 }
-.refcard .card-ref { color: var(--frozen); display: block; overflow-wrap: anywhere; }
+.refcard .card-kind, .refcard .card-kind-id { color: var(--frozen); }
+.refcard .card-ref {
+  color: var(--frozen);
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-/* yarn chips: the edge's label, riding its thread's midpoint */
+/* yarn chips: the edge's label, riding its thread at the first point
+   clear of every card's interior (layoutYarn slides it along the curve),
+   so the chip sits on the yarn without lying over anyone's text — and
+   stays clickable (its Graduate affordance is part of the contract) */
 .yarn-chip {
   position: absolute;
   display: inline-flex;
@@ -1093,10 +1185,11 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   border-radius: 999px;
   border: 1px solid var(--yarn);
   background: var(--card);
+  box-shadow: var(--shadow-card);
   font-family: var(--mono);
   font-size: 0.68rem;
   color: var(--yarn);
-  z-index: 6;
+  z-index: 4;
 }
 .yarn-chip--annotation { border-style: dashed; color: var(--muted-solid); border-color: var(--muted-solid); }
 .yarn-thread--annotation { stroke-dasharray: 5 4; opacity: 0.6; }
@@ -1129,11 +1222,22 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 }
 .review-sticky .sticky-body { margin: 0.2rem 0 0; overflow-wrap: anywhere; }
 
+/* the rail's hierarchy: the git panel (Commit & push — the page's most
+   consequential act) leads with the accent and the primary button; the
+   scratch/read-only panels recede into the paper as secondary chrome */
 .inbox-tray, .git-panel, .scratch-panel {
   border: 1px solid var(--rule);
   border-radius: 6px;
   background: var(--card);
   padding: 1rem 1.1rem;
+}
+.git-panel {
+  border-top: 3px solid var(--accent);
+  box-shadow: var(--shadow-card);
+}
+.scratch-panel {
+  background: transparent;
+  border-style: dashed;
 }
 .inbox-tray h2, .git-panel h2, .scratch-panel h2 {
   font-size: 0.7rem;
@@ -1142,7 +1246,10 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   letter-spacing: 0.14em;
   color: var(--muted-solid);
   margin: 0 0 0.6rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--rule);
 }
+.git-panel h2 { color: var(--accent); border-bottom-color: var(--rule); }
 .inbox-tray .review-sticky { margin-top: 0.6rem; }
 .inbox-tray .empty, .scratch-panel .ritual-note { font-size: 0.82rem; }
 
@@ -1255,7 +1362,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   .page-body { flex-direction: column; }
   .side-rail { position: static; flex: none; width: 100%; }
   .board-layout { flex-direction: column; }
-  .board-side { flex: none; width: 100%; }
+  .board-side { flex: none; width: 100%; position: static; }
   .board-canvas { min-height: 30rem; }
 }
 

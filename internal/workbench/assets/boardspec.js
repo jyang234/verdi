@@ -90,18 +90,43 @@
   function endpointElement(key) {
     var c = canvas();
     if (!c) return null;
-    if (key === "spec") return null; // document-level edges: chip only
+    // "spec" is the document itself — not a card; it lives above the
+    // canvas (the placards header), so its edges hang off-board.
+    if (key === "spec") return null;
     return (
       c.querySelector('.objcard[data-id="' + esc(key) + '"]') ||
       c.querySelector('.refcard[data-ref="' + esc(key) + '"]')
     );
   }
 
-  function centerOf(el) {
+  function rectOf(el) {
     return {
-      x: el.offsetLeft + el.offsetWidth / 2,
-      y: el.offsetTop + el.offsetHeight / 2,
+      x: el.offsetLeft,
+      y: el.offsetTop,
+      w: el.offsetWidth,
+      h: el.offsetHeight,
     };
+  }
+
+  function centerOf(el) {
+    var r = rectOf(el);
+    return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
+  }
+
+  // edgeAnchor: the point where the ray from a card's center toward
+  // `toward` crosses the card's border — threads tie to card EDGES, so
+  // yarn never runs through a card's text (it reads as strikethrough).
+  function edgeAnchor(el, toward) {
+    var r = rectOf(el);
+    var cx = r.x + r.w / 2;
+    var cy = r.y + r.h / 2;
+    var dx = toward.x - cx;
+    var dy = toward.y - cy;
+    if (dx === 0 && dy === 0) return { x: cx, y: cy };
+    var sx = dx !== 0 ? r.w / 2 / Math.abs(dx) : Infinity;
+    var sy = dy !== 0 ? r.h / 2 / Math.abs(dy) : Infinity;
+    var t = Math.min(sx, sy);
+    return { x: cx + dx * t, y: cy + dy * t };
   }
 
   function ensureYarnSvg() {
@@ -117,9 +142,17 @@
     return svg;
   }
 
-  // layoutYarn draws every chip's thread and sits the chip on the
-  // thread's midpoint. Chips with an unresolvable endpoint stack in the
-  // canvas corner — visible, never dropped.
+  // layoutYarn draws every chip's thread — anchored edge-to-edge, sagging
+  // like real yarn, layered UNDER the papers so an in-between card is
+  // passed behind, never struck through — and sits the chip on the sag's
+  // midpoint (open canvas between the cards). An edge with an off-board
+  // endpoint (From:"spec": the document itself, hanging above the canvas
+  // as the placards header) gets an off-board thread instead — entering
+  // past the canvas's top edge, where the SVG clips it, so the yarn reads
+  // as running up to the document — tied to its one on-board endpoint.
+  // Every edge stays visible, never dropped, and never a bare chip.
+  var OFFBOARD_Y = -24; // thread origin above the canvas (clipped at 0)
+
   function layoutYarn() {
     var c = canvas();
     if (!c) return;
@@ -127,50 +160,110 @@
     while (svg.firstChild) svg.removeChild(svg.firstChild);
 
     var chips = c.querySelectorAll(".yarn-chip");
-    var orphanRow = 0;
+    var papers = c.querySelectorAll(".objcard, .refcard");
+    var offboardCount = 0; // bow alternation + margin slots
+    var offboardTies = {}; // fan-out of several document edges on one card
     for (var i = 0; i < chips.length; i++) {
       var chip = chips[i];
       var fromEl = endpointElement(chip.getAttribute("data-from"));
       var toEl = endpointElement(chip.getAttribute("data-to"));
-      if (!fromEl || !toEl) {
-        chip.style.left = "16px";
-        chip.style.top = 16 + orphanRow * 34 + "px";
-        orphanRow++;
-        continue;
+      var offboard = !fromEl || !toEl;
+      var a, b, cx, cy, knots;
+      if (!offboard) {
+        a = edgeAnchor(fromEl, centerOf(toEl));
+        b = edgeAnchor(toEl, centerOf(fromEl));
+        var dx = b.x - a.x;
+        var dy = b.y - a.y;
+        var sag = 8 + Math.sqrt(dx * dx + dy * dy) * 0.06;
+        cx = (a.x + b.x) / 2;
+        cy = (a.y + b.y) / 2 + sag;
+        knots = [a, b];
+      } else {
+        var anchorEl = fromEl || toEl;
+        if (anchorEl) {
+          // One on-board endpoint: the thread hangs from above it and
+          // ties to its top edge. Several document edges on one card fan
+          // out along that edge instead of overlapping.
+          var tieKey = keyOfElement(anchorEl);
+          var tie = offboardTies[tieKey] || 0;
+          offboardTies[tieKey] = tie + 1;
+          a = { x: centerOf(anchorEl).x + tie * 26, y: OFFBOARD_Y };
+          b = edgeAnchor(anchorEl, a);
+          knots = [b];
+        } else {
+          // No on-board endpoint at all — impossible by construction (the
+          // projection renders a reference card for every non-document
+          // endpoint), but the visible-never-dropped guarantee survives
+          // as the same designed state: a short thread hung from the top
+          // margin, the chip riding its end.
+          a = { x: 40 + offboardCount * 180, y: OFFBOARD_Y };
+          b = { x: a.x, y: 56 };
+          knots = [];
+        }
+        // A gentle lateral bow — hung yarn, not a plumb line.
+        var bow = (offboardCount % 2 === 0 ? 1 : -1) * Math.min(24, 6 + (b.y - a.y) * 0.05);
+        cx = (a.x + b.x) / 2 + bow;
+        cy = (a.y + b.y) / 2;
+        offboardCount++;
       }
-      var a = centerOf(fromEl);
-      var b = centerOf(toEl);
-      var dx = b.x - a.x;
-      var dy = b.y - a.y;
-      var sag = 14 + Math.sqrt(dx * dx + dy * dy) * 0.1;
-      var cx = (a.x + b.x) / 2;
-      var cy = (a.y + b.y) / 2 + sag;
 
       var path = document.createElementNS(svgNS, "path");
       path.setAttribute(
         "class",
-        "yarn-thread yarn-thread--" + chip.getAttribute("data-layer")
+        "yarn-thread yarn-thread--" + chip.getAttribute("data-layer") +
+          (offboard ? " yarn-thread--offboard" : "")
       );
       path.setAttribute(
         "d",
         "M " + a.x + " " + a.y + " Q " + cx + " " + cy + " " + b.x + " " + b.y
       );
       svg.appendChild(path);
-      var ends = [a, b];
-      for (var j = 0; j < 2; j++) {
+      for (var j = 0; j < knots.length; j++) {
         var knot = document.createElementNS(svgNS, "circle");
         knot.setAttribute("class", "yarn-knot");
-        knot.setAttribute("cx", ends[j].x);
-        knot.setAttribute("cy", ends[j].y);
-        knot.setAttribute("r", 3);
+        knot.setAttribute("cx", knots[j].x);
+        knot.setAttribute("cy", knots[j].y);
+        knot.setAttribute("r", 3.2);
         svg.appendChild(knot);
       }
 
-      // The chip rides the curve's own midpoint (t=0.5).
-      var mx = 0.25 * a.x + 0.5 * cx + 0.25 * b.x;
-      var my = 0.25 * a.y + 0.5 * cy + 0.25 * b.y;
-      chip.style.left = mx - chip.offsetWidth / 2 + "px";
-      chip.style.top = my - chip.offsetHeight / 2 + "px";
+      // The chip rides the curve — at the midpoint when that's open
+      // canvas, otherwise slid along the thread to the first spot clear
+      // of every card's interior (the chip sits ON the yarn, never over
+      // anyone's text).
+      var w = chip.offsetWidth;
+      var h = chip.offsetHeight;
+      var clearOfCards = function (x, y) {
+        for (var k = 0; k < papers.length; k++) {
+          var r = rectOf(papers[k]);
+          if (x < r.x + r.w && r.x < x + w && y < r.y + r.h && r.y < y + h) {
+            return false;
+          }
+        }
+        return true;
+      };
+      var pointAt = function (t) {
+        var u = 1 - t;
+        return {
+          x: u * u * a.x + 2 * u * t * cx + t * t * b.x,
+          y: u * u * a.y + 2 * u * t * cy + t * t * b.y,
+        };
+      };
+      var ts = [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82];
+      var spot = pointAt(0.5);
+      for (var m = 0; m < ts.length; m++) {
+        var p = pointAt(ts[m]);
+        if (clearOfCards(p.x - w / 2, p.y - h / 2)) {
+          spot = p;
+          break;
+        }
+      }
+      var top = spot.y - h / 2;
+      // A short off-board thread's midpoint can sit above the canvas;
+      // the chip stays fully on the board (the thread is what exits).
+      if (offboard && top < 4) top = 4;
+      chip.style.left = spot.x - w / 2 + "px";
+      chip.style.top = top + "px";
     }
   }
 
@@ -270,24 +363,85 @@
   }
 
   // -- pointer gestures: drag, yarn draw ------------------------------------
+  //
+  // Pointer Events, not mouse events: the e2e suite's synthetic mouse
+  // stream masked three real-input gaps — (a) touch/pen drags never fire
+  // mouse events, so the board was undraggable on any touch device;
+  // (b) without pointer capture a release outside the window (or on a
+  // native scrollbar) is lost, leaving a stuck gesture chasing a
+  // button-up cursor and then committing a phantom position; (c) real
+  // hands jitter a pixel or two inside a double-click, which the old
+  // zero-threshold code turned into a drag-write that re-rendered the
+  // fragment between the two clicks. Hence: setPointerCapture on the
+  // dragged element, an e.buttons===0 guard that lands the drop where
+  // the drag actually was, pointercancel reverting the gesture, and a
+  // small slop threshold before a press becomes a drag. Selection and
+  // scroll hijack are handled declaratively (style.css: user-select and
+  // touch-action on the drag surfaces), so pointerdown is never
+  // preventDefault-ed and click/dblclick semantics stay native.
 
-  var gesture = null; // {kind: "card"|"sticky"|"yarn", ...}
+  var DRAG_SLOP = 4; // px of pointer travel before a press is a drag
 
-  function onMouseDown(e) {
-    if (!authoring) return;
+  var gesture = null; // {kind: "card"|"sticky"|"yarn", pointerId, ...}
+
+  // A calm, visible refusal for a drag attempt on a board that will not
+  // move (05 §Workbench: read-only is a document, review is a mirror) —
+  // never a dead-silent immovable element. Spoken through the board's
+  // existing notice channel, and transient: it names why, then leaves.
+  var refusalTimer = null;
+  function refuseDrag() {
+    var container = region.querySelector(".board-notices");
+    if (!container) {
+      container = document.createElement("div");
+      container.className = "board-notices";
+      region.insertBefore(container, region.firstChild);
+    }
+    var note = container.querySelector(".board-notice--refusal");
+    if (!note) {
+      note = document.createElement("div");
+      note.className = "board-notice board-notice--refusal";
+      note.setAttribute("data-testid", "drag-refusal");
+      note.setAttribute("role", "status");
+      container.appendChild(note);
+    }
+    note.textContent =
+      state.mode === "review"
+        ? "this board mirrors the merge request under review — nothing moves here; reply on the MR or wait for the branch"
+        : "positions are frozen with the accepted spec — change means supersession (the amendment ladder)";
+    if (refusalTimer) clearTimeout(refusalTimer);
+    refusalTimer = setTimeout(function () {
+      note.remove();
+    }, 6000);
+  }
+
+  function capturePointer(el, e) {
+    if (el.setPointerCapture) {
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* a vanished pointer: the move/up guards cover it */
+      }
+    }
+  }
+
+  function onPointerDown(e) {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (gesture) return; // one gesture at a time
     var c = canvas();
     if (!c) return;
 
     var handle = e.target.closest(".yarn-handle");
     if (handle && c.contains(handle)) {
+      if (!authoring) return;
       var card = handle.closest(".objcard");
       gesture = {
         kind: "yarn",
+        pointerId: e.pointerId,
         fromEl: card,
         from: card.getAttribute("data-id"),
         fromKind: card.getAttribute("data-object-kind"),
       };
-      e.preventDefault();
+      capturePointer(handle, e);
       return;
     }
 
@@ -295,30 +449,46 @@
 
     var el = e.target.closest(".objcard, .sticky");
     if (!el || !c.contains(el)) return;
+    if (!authoring) {
+      refuseDrag();
+      return;
+    }
     var rect = el.getBoundingClientRect();
     gesture = {
       kind: el.classList.contains("objcard") ? "card" : "sticky",
+      pointerId: e.pointerId,
       el: el,
       dx: e.clientX - rect.left,
       dy: e.clientY - rect.top,
+      downX: e.clientX,
+      downY: e.clientY,
+      startLeft: el.style.left,
+      startTop: el.style.top,
       moved: false,
     };
-    el.classList.add("dragging");
-    e.preventDefault();
+    capturePointer(el, e);
   }
 
-  function onMouseMove(e) {
-    if (!gesture) return;
+  function onPointerMove(e) {
+    if (!gesture || e.pointerId !== gesture.pointerId) return;
+    // A mouse with no button down mid-gesture means the release happened
+    // where the page could not see it: land the drop at the last dragged
+    // position instead of chasing a button-up cursor.
+    if (e.pointerType === "mouse" && e.buttons === 0) {
+      finishGesture(e);
+      return;
+    }
     var c = canvas();
+    if (!c) return;
     var canvasRect = c.getBoundingClientRect();
 
     if (gesture.kind === "yarn") {
       var svg = ensureYarnSvg();
       var old = svg.querySelector(".yarn-draft");
       if (old) svg.removeChild(old);
-      var a = centerOf(gesture.fromEl);
       var bx = e.clientX - canvasRect.left + c.scrollLeft;
       var by = e.clientY - canvasRect.top + c.scrollTop;
+      var a = edgeAnchor(gesture.fromEl, { x: bx, y: by });
       var line = document.createElementNS(svgNS, "line");
       line.setAttribute("class", "yarn-thread yarn-draft");
       line.setAttribute("x1", a.x);
@@ -329,18 +499,23 @@
       return;
     }
 
+    if (!gesture.moved) {
+      var tx = e.clientX - gesture.downX;
+      var ty = e.clientY - gesture.downY;
+      if (tx * tx + ty * ty < DRAG_SLOP * DRAG_SLOP) return; // jitter, not a drag
+      gesture.moved = true;
+      gesture.el.classList.add("dragging");
+    }
     var x = e.clientX - canvasRect.left - gesture.dx + c.scrollLeft;
     var y = e.clientY - canvasRect.top - gesture.dy + c.scrollTop;
     if (x < 0) x = 0;
     if (y < 0) y = 0;
     gesture.el.style.left = x + "px";
     gesture.el.style.top = y + "px";
-    gesture.moved = true;
     layoutYarn();
   }
 
-  function onMouseUp(e) {
-    if (!gesture) return;
+  function finishGesture(e) {
     var g = gesture;
     gesture = null;
 
@@ -369,6 +544,30 @@
     } else {
       mutate("sticky-position", { id: g.el.getAttribute("data-id"), x: x, y: y });
     }
+  }
+
+  function onPointerUp(e) {
+    if (!gesture || e.pointerId !== gesture.pointerId) return;
+    finishGesture(e);
+  }
+
+  // The platform took the pointer away (system gesture, palm rejection,
+  // window switch): revert — the card goes back where it was, nothing is
+  // written.
+  function onPointerCancel(e) {
+    if (!gesture || e.pointerId !== gesture.pointerId) return;
+    var g = gesture;
+    gesture = null;
+    if (g.kind === "yarn") {
+      var svg = ensureYarnSvg();
+      var draft = svg.querySelector(".yarn-draft");
+      if (draft) svg.removeChild(draft);
+      return;
+    }
+    g.el.classList.remove("dragging");
+    g.el.style.left = g.startLeft;
+    g.el.style.top = g.startTop;
+    layoutYarn();
   }
 
   // -- inline card editor (authoring is bidirectional) ----------------------
@@ -432,9 +631,20 @@
     var menu = document.getElementById("graduate-menu");
     if (!menu) return;
     var rect = anchorEl.getBoundingClientRect();
-    menu.style.left = rect.left + "px";
-    menu.style.top = rect.bottom + 4 + "px";
-    show("graduate-menu");
+    show("graduate-menu"); // visible first: a hidden menu measures 0×0
+    // Clamped to the viewport: the menu is position:fixed, so a cut-off
+    // menu can never be scrolled to — a sticky near the bottom edge
+    // opens its menu upward instead.
+    var left = rect.left;
+    var top = rect.bottom + 4;
+    if (top + menu.offsetHeight > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - menu.offsetHeight - 4);
+    }
+    if (left + menu.offsetWidth > window.innerWidth - 8) {
+      left = Math.max(8, window.innerWidth - menu.offsetWidth - 8);
+    }
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
   }
 
   // -- click routing -----------------------------------------------------------
@@ -544,9 +754,10 @@
     }
   }
 
-  document.addEventListener("mousedown", onMouseDown);
-  document.addEventListener("mousemove", onMouseMove);
-  document.addEventListener("mouseup", onMouseUp);
+  document.addEventListener("pointerdown", onPointerDown);
+  document.addEventListener("pointermove", onPointerMove);
+  document.addEventListener("pointerup", onPointerUp);
+  document.addEventListener("pointercancel", onPointerCancel);
   document.addEventListener("dblclick", onDblClick);
   document.addEventListener("click", onClick);
   document.addEventListener("keydown", onKeyDown);

@@ -437,10 +437,12 @@ func (s *boardSpecServer) actionRelatesGraduate(name string, proj *BoardProjecti
 	return err
 }
 
-// actionPosition: a card drag landed — store the coordinate in
-// layout.json (positions only, never content; autosaved, never
-// committed per-drag). The write prunes orphaned keys (VL-018, the
-// adjudicated policy).
+// actionPosition: a card drag landed — resolve the drop against every
+// other card's footprint (nearest non-overlapping position; the board is
+// collision-free by construction) and store ONLY the dragged card's
+// coordinate in layout.json (positions only, never content; autosaved,
+// never committed per-drag; no other stored position is ever touched).
+// The write prunes orphaned keys (VL-018, the adjudicated policy).
 func (s *boardSpecServer) actionPosition(name string, proj *BoardProjection, req boardAPIRequest) error {
 	kinds := declaredKindsOf(proj)
 	if _, ok := kinds[req.ID]; !ok {
@@ -450,7 +452,20 @@ func (s *boardSpecServer) actionPosition(name string, proj *BoardProjection, req
 	if err != nil {
 		return err
 	}
-	stored[req.ID] = artifact.Position{X: req.X, Y: req.Y}
+	obstacles := make([]boardlayout.Rect, 0, len(proj.Cards)+len(proj.RefCards))
+	for _, c := range proj.Cards {
+		if c.ID == req.ID {
+			continue
+		}
+		w, h := boardlayout.FootprintFor(boardlayout.ZoneKind(c.Kind))
+		obstacles = append(obstacles, boardlayout.Rect{X: c.X, Y: c.Y, W: w, H: h})
+	}
+	for _, rc := range proj.RefCards {
+		w, h := boardlayout.FootprintFor(boardlayout.ZoneReference)
+		obstacles = append(obstacles, boardlayout.Rect{X: rc.X, Y: rc.Y, W: w, H: h})
+	}
+	w, h := boardlayout.FootprintFor(boardlayout.ZoneKind(kinds[req.ID]))
+	stored[req.ID] = boardlayout.ResolveDrop(artifact.Position{X: req.X, Y: req.Y}, w, h, obstacles)
 	live := make(map[string]bool, len(kinds))
 	for id := range kinds {
 		live[id] = true

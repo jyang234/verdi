@@ -391,7 +391,8 @@ func TestBoardSpec_Position(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
 
-	rec := postBoardAPI(t, h, boardFixtureName, "position", `{"id":"ac-2","x":613,"y":218}`)
+	// A drop on open canvas is stored verbatim.
+	rec := postBoardAPI(t, h, boardFixtureName, "position", `{"id":"ac-2","x":613,"y":500}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("position = %d\n%s", rec.Code, rec.Body.String())
 	}
@@ -400,14 +401,35 @@ func TestBoardSpec_Position(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(data)
-	if !strings.Contains(got, `"ac-2":{"x":613,"y":218}`) {
+	if !strings.Contains(got, `"ac-2":{"x":613,"y":500}`) {
 		t.Errorf("layout.json missing the stored position: %s", got)
 	}
 	if !strings.Contains(got, `"ac-1":{"x":40,"y":60}`) {
 		t.Errorf("layout.json lost the pre-existing stored position: %s", got)
 	}
-	if !strings.Contains(getBoard(t, h, boardFixtureName).Body.String(), `style="left:613px;top:218px"`) {
+	if !strings.Contains(getBoard(t, h, boardFixtureName).Body.String(), `style="left:613px;top:500px"`) {
 		t.Error("stored position does not render")
+	}
+
+	// A drop overlapping another card's footprint resolves to the nearest
+	// non-overlapping position (collision-free by construction): (613,218)
+	// lands on dc-2's generated slot (496,216), so the drop slides out to
+	// the right of dc-2's footprint — and ONLY the dragged card's stored
+	// position changes.
+	rec = postBoardAPI(t, h, boardFixtureName, "position", `{"id":"ac-2","x":613,"y":218}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("position (colliding) = %d\n%s", rec.Code, rec.Body.String())
+	}
+	data, err = os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "layout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = string(data)
+	if !strings.Contains(got, `"ac-2":{"x":708,"y":218}`) {
+		t.Errorf("colliding drop not resolved to the free position right of dc-2: %s", got)
+	}
+	if !strings.Contains(got, `"ac-1":{"x":40,"y":60}`) {
+		t.Errorf("drop resolution touched another card's stored position: %s", got)
 	}
 
 	// A non-object key is refused (VL-018: keys must resolve).

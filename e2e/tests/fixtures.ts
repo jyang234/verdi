@@ -158,3 +158,22 @@ export function dexByStoryPath(name: string): string {
 export function refCardTestId(ref: string): string {
   return `ref-card-${ref.replace(/\//g, "-")}`;
 }
+
+// ---------------------------------------------------------------------------
+// Workbench (board polish) — read-only mode
+// ---------------------------------------------------------------------------
+
+// A spec that is NOT a draft on a design branch (it lives on main in the
+// committed corpus), so its board renders READ-ONLY (05 §Workbench, "Two
+// modes, keyed by branch state") — the fixture for the drag-refusal
+// contract (a read-only board is never silently inert).
+export const READONLY_SPEC = "stale-decline";
+
+// READONLY_SPEC's one closed-vocabulary DOCUMENT-LEVEL edge (02 §Object
+// model: frontmatter `links:` declared on the spec document itself, so
+// the projection emits it with From:"spec"). The document is not a card —
+// it hangs above the canvas as the placards header — so this edge's yarn
+// must tie to its one on-board endpoint (the target's reference card)
+// with a thread pointing off the board's top edge.
+export const DOC_EDGE_TYPE = "implements";
+export const DOC_EDGE_TARGET = "adr/0002-outbox-events";
