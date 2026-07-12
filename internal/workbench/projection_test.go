@@ -80,7 +80,7 @@ func mustDecodeSpecForTest(t *testing.T, y string) *artifact.SpecFrontmatter {
 // counts every spike stub resolving an OQ (the multi-claim smell number).
 func TestBuildProjection_StubViewsAndCoverage(t *testing.T) {
 	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec)
-	p, err := buildProjection("scoping-fixture", fm, nil, nil, nil, modeReadOnly)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestBuildProjection_StubStoredPositionWinsOverComputed(t *testing.T) {
 	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec)
 
 	// The computed baseline: no stored positions at all.
-	baseline, err := buildProjection("scoping-fixture", fm, nil, nil, nil, modeReadOnly)
+	baseline, err := buildProjection("scoping-fixture", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection (baseline): %v", err)
 	}
@@ -140,7 +140,7 @@ func TestBuildProjection_StubStoredPositionWinsOverComputed(t *testing.T) {
 	}
 
 	stored := map[string]artifact.Position{"stub:plain-one": {X: 990, Y: 444}}
-	p, err := buildProjection("scoping-fixture", fm, stored, nil, nil, modeReadOnly)
+	p, err := buildProjection("scoping-fixture", fm, nil, stored, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestBuildProjection_StubStoredPositionWinsOverComputed(t *testing.T) {
 
 	// Reload-determinism: rebuilding the projection from the same four
 	// inputs reproduces the identical stored position.
-	again, err := buildProjection("scoping-fixture", fm, stored, nil, nil, modeReadOnly)
+	again, err := buildProjection("scoping-fixture", fm, nil, stored, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection (again): %v", err)
 	}
@@ -184,7 +184,7 @@ func TestBuildProjection_StubStoredPositionCollidesWithObject(t *testing.T) {
 		"ac-1":           {X: 40, Y: 20},
 		"stub:plain-one": {X: 40, Y: 20}, // squarely on ac-1's stored spot
 	}
-	p, err := buildProjection("scoping-fixture", fm, stored, nil, nil, modeReadOnly)
+	p, err := buildProjection("scoping-fixture", fm, nil, stored, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestBuildProjection_RelatesEndpointNamesLiveSticky(t *testing.T) {
 			TargetB: &artifact.Target{Ref: "spec/scoping-fixture@7f3c2a1", Selector: artifact.Selector{Heading: "ac-1"}},
 		},
 	}
-	p, err := buildProjection("scoping-fixture", fm, nil, annotations, nil, modeReadOnly)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, annotations, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestBuildProjection_RelatesEndpointNamesLiveSticky(t *testing.T) {
 // and the closed five-type edge vocabulary is untouched.
 func TestBuildProjection_ScopingEdges(t *testing.T) {
 	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec)
-	p, err := buildProjection("scoping-fixture", fm, nil, nil, nil, modeReadOnly)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestBuildProjection_ScopingEdges(t *testing.T) {
 	}
 
 	// Deterministic: same inputs, same edges in the same order.
-	again, err := buildProjection("scoping-fixture", fm, nil, nil, nil, modeReadOnly)
+	again, err := buildProjection("scoping-fixture", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection (again): %v", err)
 	}
@@ -317,7 +317,7 @@ func TestBuildProjection_ScopingEdgeUndeclaredTargetDropped(t *testing.T) {
 		artifact.Stub{Slug: "dangling-story", AcceptanceCriteria: []string{"ac-99"}},
 		artifact.Stub{Slug: "dangling-spike", Spike: true, Resolves: []string{"oq-99"}},
 	)
-	p, err := buildProjection("scoping-fixture", fm, nil, nil, nil, modeReadOnly)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestBuildProjection_RelatesEndpointNamesDeadSticky_Dropped(t *testing.T) {
 			TargetB: &artifact.Target{Ref: "spec/scoping-fixture@7f3c2a1", Selector: artifact.Selector{Heading: "ac-1"}},
 		},
 	}
-	p, err := buildProjection("scoping-fixture", fm, nil, annotations, nil, modeReadOnly)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, annotations, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
