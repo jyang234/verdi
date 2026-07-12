@@ -26,11 +26,14 @@ func (r Rect) intersects(o Rect) bool {
 
 // FootprintFor is the rendered footprint (px) of a card of the given
 // kind. The values mirror style.css's fixed card dimensions (.objcard,
-// .refcard) — the uniform footprint is what makes slot placement and
-// drop resolution collision-free by construction.
+// .refcard, .stubcard) — the uniform footprint is what makes slot
+// placement and drop resolution collision-free by construction.
 func FootprintFor(kind ZoneKind) (w, h float64) {
-	if kind == ZoneReference {
+	switch kind {
+	case ZoneReference:
 		return CardWidth, RefCardHeight
+	case ZoneStub:
+		return CardWidth, StubCardHeight
 	}
 	return CardWidth, CardHeight
 }

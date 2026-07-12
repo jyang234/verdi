@@ -31,6 +31,17 @@ const (
 	// mirror carries in Body the same "[vd:<object-id>]" token the forge
 	// comment carries.
 	AnnotationReview AnnotationType = "review"
+	// AnnotationStory and AnnotationSpike (round 5.4) are the scoping
+	// canvas's typed proto-stickies (02 §Record schemas): a feature wall's
+	// claim that a story (or spike) will exist. Board carries the parking
+	// spot, Body the working title; their untyped relates-threads to
+	// acceptance criteria (story) or open questions (spike) carry the
+	// coverage/resolution attribution. Graduation mints the frontmatter
+	// stub (a spike stub carrying resolves); legal only on feature-class
+	// walls (fail closed elsewhere — enforced by internal/workbench, which
+	// alone knows the wall's class).
+	AnnotationStory AnnotationType = "story"
+	AnnotationSpike AnnotationType = "spike"
 )
 
 var validAnnotationTypes = map[AnnotationType]bool{
@@ -41,6 +52,8 @@ var validAnnotationTypes = map[AnnotationType]bool{
 	AnnotationPin:            true,
 	AnnotationRelates:        true,
 	AnnotationReview:         true,
+	AnnotationStory:          true,
+	AnnotationSpike:          true,
 }
 
 // AnnotationStatus is the `status` field of an annotation record.
@@ -96,6 +109,24 @@ type Annotation struct {
 	Status  AnnotationStatus `json:"status"`
 }
 
+// validateEndpointRef checks an annotation target/target_b ref resolves
+// either as a pinned artifact ref (the general case, every annotation
+// type) or, when allowAnnotationID is true (type relates only), as an
+// "a-<ULID>" board-annotation id (02 §Record schemas, round 5.4: "a
+// relates endpoint may name a board annotation by id ... as well as an
+// artifact ref"). The annotation-id form is checked first since
+// ParsePinnedRef would otherwise reject it outright (it is not artifact
+// ref shaped at all).
+func validateEndpointRef(ref string, allowAnnotationID bool) error {
+	if allowAnnotationID && IsAnnotationID(ref) {
+		return nil
+	}
+	if _, err := ParsePinnedRef(ref); err != nil {
+		return err
+	}
+	return nil
+}
+
 // DecodeAnnotation strict-decodes and validates a single annotation
 // record (one line of a JSONL file).
 func DecodeAnnotation(data []byte) (*Annotation, error) {
@@ -127,7 +158,7 @@ func (a Annotation) Validate() error {
 		return fmt.Errorf("artifact: annotation must carry target, board, or both (02 §Record schemas)")
 	}
 	if a.Target != nil {
-		if _, err := ParsePinnedRef(a.Target.Ref); err != nil {
+		if err := validateEndpointRef(a.Target.Ref, a.Type == AnnotationRelates); err != nil {
 			return fmt.Errorf("artifact: annotation target.ref: %w", err)
 		}
 	}
@@ -147,8 +178,21 @@ func (a Annotation) Validate() error {
 		return fmt.Errorf("artifact: annotation target_b is present only for type relates, not %q", a.Type)
 	}
 	if a.TargetB != nil {
-		if _, err := ParsePinnedRef(a.TargetB.Ref); err != nil {
+		// TargetB exists only for type relates (checked just above), so
+		// the annotation-id endpoint form is always allowed here.
+		if err := validateEndpointRef(a.TargetB.Ref, true); err != nil {
 			return fmt.Errorf("artifact: annotation target_b.ref: %w", err)
+		}
+	}
+	// Round 5.4's proto-stickies (story/spike): a board parking spot and a
+	// non-empty body are required (body is enforced by the general rule
+	// below, same as every non-pin type); no target/selector or target_b
+	// of their own — they are pure board claims, closed the same way a
+	// free-floating sticky of any other type is (fail closed, not
+	// silently permitted).
+	if a.Type == AnnotationStory || a.Type == AnnotationSpike {
+		if a.Board == nil {
+			return fmt.Errorf("artifact: annotation type %s requires a board position (02 §Record schemas)", a.Type)
 		}
 	}
 	// A pin's closed shape (02 §Record schemas, round-5.2): the pinned

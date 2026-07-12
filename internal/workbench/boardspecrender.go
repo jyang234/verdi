@@ -14,7 +14,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/boardlayout"
+	"github.com/OWNER/verdi/internal/designscaffold"
 )
 
 // boardClientPayload is the JSON state embedded for boardspec.js: the
@@ -23,8 +25,13 @@ import (
 // git state the dialogs need. Board content itself is NOT duplicated
 // here: the DOM is the state.
 type boardClientPayload struct {
-	Spec         string              `json:"spec"`
-	Mode         string              `json:"mode"`
+	Spec string `json:"spec"`
+	Mode string `json:"mode"`
+	// Class mirrors the projection's class so the sticky draft's type
+	// control offers story/spike proto-stickies ONLY on feature-class
+	// walls — the same gate the server enforces (spec/scoping-canvas
+	// dc-5; the menu never offers what the server would refuse).
+	Class        string              `json:"class"`
 	Git          *boardGitState      `json:"git"`
 	Legal        map[string][]string `json:"legal"`
 	Consequences map[string]string   `json:"consequences"`
@@ -97,6 +104,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 	payload := boardClientPayload{
 		Spec:         p.Spec,
 		Mode:         string(p.Mode),
+		Class:        p.Class,
 		Git:          git,
 		Legal:        legalPairTable(),
 		Consequences: consequenceLabels,
@@ -122,7 +130,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 		Mode:      string(p.Mode),
 		ModeLabel: modeStampLabels[p.Mode],
 		Region:    template.HTML(renderBoardRegion(p, git)),
-		Dialogs:   template.HTML(renderBoardDialogs(p.Mode)),
+		Dialogs:   template.HTML(renderBoardDialogs(p)),
 		StateJSON: template.JS(stateJSON),
 	}
 	var buf bytes.Buffer
@@ -162,6 +170,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	if p.Problem != "" || p.Outcome != "" {
 		b.WriteString(`<header class="board-placards case-file">`)
 		b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
+		writeCaseClassTag(&b, p)
 		if p.Problem != "" {
 			b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p>` + esc(p.Problem) + `</p></div>`)
 		}
@@ -206,10 +215,17 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// Object cards. The header is a one-line lockup — kind label left,
 	// id right — and the clamped text carries its full form in title
 	// (the uniform-footprint card never grows past its index-card size).
+	// On a feature wall, AC cards additionally wear their computed
+	// coverage chip and OQ cards their multi-claim observation
+	// (spec/scoping-canvas ac-4/ac-5) — writeScopingReceipts.
+	feature := p.Class == string(artifact.ClassFeature)
 	for _, c := range p.Cards {
 		b.WriteString(`<div class="objcard objcard--` + esc(c.Kind) + `" data-testid="card-` + esc(c.ID) + `" data-id="` + esc(c.ID) + `" data-object-kind="` + esc(c.Kind) + `" style="left:` + px(c.X) + `;top:` + px(c.Y) + `">`)
 		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + esc(strings.ReplaceAll(c.Kind, "-", " ")) + `</span><span class="card-kind-id">` + esc(c.ID) + `</span></span>`)
 		b.WriteString(`<p class="card-text" title="` + esc(c.Text) + `">` + esc(c.Text) + `</p>`)
+		if feature {
+			writeScopingReceipts(&b, p, c)
+		}
 		if authoring {
 			b.WriteString(`<button type="button" class="yarn-handle" data-testid="yarn-handle-` + esc(c.ID) + `" aria-label="Draw yarn from ` + esc(c.ID) + `" title="drag to another card to string yarn"></button>`)
 		}
@@ -238,16 +254,73 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		b.WriteString(`</div>`)
 	}
 
-	// Scratch stickies (the scratch tier, 05 §Workbench).
+	// Stub cards (spec/scoping-canvas ac-3, dc-6): a declared stub is a
+	// typeset claim about a future story — kraft file-tab stock in the
+	// stubs band, spec register (no hand voice, no lean), its slug on the
+	// tab and its AC/OQ attributions as chips. On a sealed accepted-
+	// pending-build feature wall each card carries the one live
+	// affordance a sealed record permits: Instantiate (ac-6).
+	instantiable := feature && p.Status == "accepted-pending-build"
+	for _, sv := range p.StubViews {
+		cls := "stubcard"
+		spikeAttr := ""
+		kindLabel := "story stub"
+		verb, chipCls, attrs := "covers", "stub-link-chip--ac", sv.AcceptanceCriteria
+		if sv.Spike {
+			cls += " stubcard--spike"
+			spikeAttr = ` data-spike="true"`
+			kindLabel = "spike stub"
+			verb, chipCls, attrs = "resolves", "stub-link-chip--oq", sv.Resolves
+		}
+		title := designscaffold.HumanizeName(sv.Slug)
+		b.WriteString(`<div class="` + cls + `" data-testid="stub-card-` + esc(sv.Slug) + `" data-stub="` + esc(sv.Slug) + `"` + spikeAttr + ` style="left:` + px(sv.X) + `;top:` + px(sv.Y) + `">`)
+		b.WriteString(`<span class="stub-tab">` + esc(sv.Slug) + `</span>`)
+		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + kindLabel + `</span><span class="card-kind-id">declared</span></span>`)
+		b.WriteString(`<p class="stub-title" title="` + esc(title) + `">` + esc(title) + `</p>`)
+		if len(attrs) > 0 {
+			b.WriteString(`<span class="stub-links" data-testid="stub-links-` + esc(sv.Slug) + `"><span class="stub-links-verb">` + verb + `</span>`)
+			for _, id := range attrs {
+				b.WriteString(`<span class="stub-link-chip ` + chipCls + `">` + esc(id) + `</span>`)
+			}
+			b.WriteString(`</span>`)
+		}
+		if instantiable {
+			verbLabel := "Instantiate story"
+			if sv.Spike {
+				verbLabel = "Instantiate spike"
+			}
+			b.WriteString(`<button type="button" class="stub-instantiate" data-instantiate="` + esc(sv.Slug) + `" data-testid="instantiate-` + esc(sv.Slug) + `" title="cuts a design branch with a scaffolded spec; the serving checkout never moves">` + verbLabel + `</button>`)
+		}
+		b.WriteString(`</div>`)
+	}
+
+	// Scratch stickies (the scratch tier, 05 §Workbench). Story/spike
+	// proto-stickies (dc-5, feature walls only — the server refuses them
+	// elsewhere) carry two extra affordances in authoring: the yarn
+	// handle that draws their attribution thread, and a Graduate that
+	// routes to stub-graduate instead of the object menu (the sticky's
+	// type already names what it becomes).
 	for _, s := range p.Stickies {
+		proto := s.Type == string(artifact.AnnotationStory) || s.Type == string(artifact.AnnotationSpike)
 		b.WriteString(`<div class="sticky sticky--` + stickyTypeClass(s.Type) + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
 		b.WriteString(`<span class="sticky-type">` + esc(s.Type) + `</span>`)
 		b.WriteString(`<p class="sticky-body">` + esc(s.Body) + `</p>`)
 		if s.Author != "" {
 			b.WriteString(`<span class="sticky-meta">` + esc(s.Author) + `</span>`)
 		}
+		if authoring && proto {
+			target := "an acceptance criterion"
+			if s.Type == string(artifact.AnnotationSpike) {
+				target = "an open question"
+			}
+			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw attribution yarn from this ` + esc(s.Type) + ` sticky" title="drag to ` + target + ` to claim it"></button>`)
+		}
 		if authoring {
-			b.WriteString(`<button type="button" class="graduate-btn" data-graduate="sticky">Graduate</button>`)
+			if proto {
+				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="stub">Graduate</button>`)
+			} else {
+				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="sticky">Graduate</button>`)
+			}
 			b.WriteString(`<button type="button" class="delete-btn" data-delete="sticky" aria-label="Delete sticky" title="the sticky dies; the spec is untouched">×</button>`)
 		}
 		b.WriteString(`</div>`)
@@ -284,7 +357,13 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			b.WriteString(`<span class="yarn-chip-type">` + esc(e.Type) + `</span>`)
 		}
 		if authoring && e.Layer == "annotation" {
-			b.WriteString(`<button type="button" class="graduate-btn" data-graduate="thread">Graduate</button>`)
+			// An attribution thread (either endpoint a live sticky, round
+			// 5.4) never graduates through the type picker: its meaning IS
+			// the endpoint pair (dc-5), and stub-graduate on the sticky is
+			// what consumes it. It still dies from its own ×.
+			if !artifact.IsAnnotationID(e.From) && !artifact.IsAnnotationID(e.To) {
+				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="thread">Graduate</button>`)
+			}
 			b.WriteString(`<button type="button" class="delete-btn" data-delete="thread" aria-label="Delete thread" title="the thread dies; the spec is untouched">×</button>`)
 		}
 		if editableSpecEdge {
@@ -307,7 +386,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			`<p class="ritual-note">Think here first. Stickies and untyped threads stay in the annotation layer &#8212; they never enter the spec until graduated.</p>` +
 			`<button type="button" id="add-sticky-btn">Add sticky</button></section>`)
 		writeYarnKey(&b, p)
-		writeGuide(&b)
+		writeGuide(&b, p)
 	case modeReview:
 		b.WriteString(`<section class="mirror-note"><h2>Review mirror</h2>` +
 			`<p class="ritual-note">This board mirrors the merge request. Comments that name a card ride on it; everything else lands in the tray below &#8212; nothing is dropped.</p></section>`)
@@ -323,12 +402,64 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	return b.String()
 }
 
+// writeCaseClassTag stamps the spec's class on the case-file lockup
+// (owner directive: a wall must say whether it is a feature or a story —
+// 02 §Kind registry's split is invisible without it). "feature" for the
+// outcome-shaped plan; "story · <tracker-ref>" for the unit of build
+// (ref omitted when the spec carries none); "spike · <tracker-ref>" for
+// a story with spike: true. Rendered in every mode — the sealed record
+// wears it like the live wall — and skipped entirely for a projection
+// with no class (never an empty stamp).
+func writeCaseClassTag(b *strings.Builder, p *BoardProjection) {
+	if p.Class == "" {
+		return
+	}
+	esc := stdhtml.EscapeString
+	name := p.Class
+	if p.Spike {
+		name = "spike"
+	}
+	b.WriteString(`<span class="case-class-tag case-class-tag--` + esc(name) + `" data-testid="case-class-tag">` + esc(name))
+	if p.Class == "story" && p.StoryRef != "" {
+		b.WriteString(` · <span class="case-class-ref">` + esc(p.StoryRef) + `</span>`)
+	}
+	b.WriteString(`</span>`)
+}
+
+// writeScopingReceipts writes a feature-wall object card's scoping
+// receipts (spec/scoping-canvas ac-4/ac-5). An AC card ALWAYS wears its
+// coverage chip — "covered by N stubs" calm, "no stub" quietly insistent
+// (the receipts spirit: never an error, but never silent either), pure
+// counts from ACCoverage (co-2: computed from declared frontmatter only).
+// An open-question card wears the multi-claim observation ONLY when more
+// than one spike stub claims it — a norm-shaped smell, never a rule.
+func writeScopingReceipts(b *strings.Builder, p *BoardProjection, c cardView) {
+	esc := stdhtml.EscapeString
+	switch boardlayout.ZoneKind(c.Kind) {
+	case boardlayout.ZoneAC:
+		n := p.ACCoverage[c.ID]
+		switch {
+		case n == 0:
+			b.WriteString(`<span class="coverage-chip coverage-chip--none" data-testid="coverage-` + esc(c.ID) + `" data-coverage="0">no stub</span>`)
+		case n == 1:
+			b.WriteString(`<span class="coverage-chip coverage-chip--covered" data-testid="coverage-` + esc(c.ID) + `" data-coverage="1">covered by 1 stub</span>`)
+		default:
+			b.WriteString(`<span class="coverage-chip coverage-chip--covered" data-testid="coverage-` + esc(c.ID) + `" data-coverage="` + strconv.Itoa(n) + `">covered by ` + strconv.Itoa(n) + ` stubs</span>`)
+		}
+	case boardlayout.ZoneOpenQuestion:
+		if n := p.OQClaims[c.ID]; n > 1 {
+			b.WriteString(`<span class="oq-claims" data-testid="oq-claims-` + esc(c.ID) + `" data-claims="` + strconv.Itoa(n) + `" title="one spike answering many questions is normal; many spikes on one question is worth a look">claimed by ` + strconv.Itoa(n) + ` spikes</span>`)
+		}
+	}
+}
+
 // zoneLabelText names each zone band as a newcomer reads it.
 var zoneLabelText = map[boardlayout.ZoneKind]string{
 	boardlayout.ZoneAC:           "acceptance criteria",
 	boardlayout.ZoneConstraint:   "constraints",
 	boardlayout.ZoneDecision:     "decisions",
 	boardlayout.ZoneOpenQuestion: "open questions",
+	boardlayout.ZoneStub:         "stubs",
 	boardlayout.ZoneReference:    "references",
 	boardlayout.ZoneScratch:      "scratch",
 }
@@ -345,20 +476,43 @@ func writeZoneLabels(b *strings.Builder, p *BoardProjection) {
 	if len(p.RefCards) > 0 {
 		occupied[boardlayout.ZoneReference] = true
 	}
-	// The scratch lane is occupied by geometry: any sticky whose
-	// footprint currently sits in the band (a dragged-away sticky stops
-	// counting — the label follows the paper, not the paper's history).
+	if len(p.StubViews) > 0 {
+		occupied[boardlayout.ZoneStub] = true
+	}
+	// The scratch lane — and the stubs band, whose scratch tier is the
+	// parked proto-sticky (dc-6: "a story or spike sticky parks
+	// handwritten in the band") — is occupied by geometry: any sticky
+	// whose footprint currently sits in the band (a dragged-away sticky
+	// stops counting — the label follows the paper, not its history).
 	sc := boardlayout.ScratchColumn()
+	inBand := func(col boardlayout.ZoneColumn, x float64) bool {
+		return x < float64(col.X+col.Width) && float64(col.X) < x+boardlayout.CardWidth
+	}
+	var stubCol boardlayout.ZoneColumn
+	for _, col := range boardlayout.ZoneColumns() {
+		if col.Kind == boardlayout.ZoneStub {
+			stubCol = col
+		}
+	}
 	for _, st := range p.Stickies {
-		if st.X < float64(sc.X+sc.Width) && float64(sc.X) < st.X+boardlayout.CardWidth {
+		if inBand(sc, st.X) {
 			occupied[boardlayout.ZoneScratch] = true
-			break
+		}
+		if inBand(stubCol, st.X) {
+			occupied[boardlayout.ZoneStub] = true
 		}
 	}
 	authoring := p.Mode == modeAuthoring
 
 	b.WriteString(`<div class="zone-labels" aria-hidden="true">`)
 	for _, col := range append(boardlayout.ZoneColumns(), sc) {
+		// The stubs band is the feature's scoping surface: a story wall
+		// never files stubs, so it never wears the band's label — not
+		// even the authoring invitation (dc-6; class gates the whole
+		// surface, exactly like the server's proto-sticky refusal).
+		if col.Kind == boardlayout.ZoneStub && p.Class != string(artifact.ClassFeature) && !occupied[col.Kind] {
+			continue
+		}
 		if !occupied[col.Kind] && !authoring {
 			continue // the record shows what it has; it does not invite
 		}
@@ -412,13 +566,31 @@ func writeYarnKey(b *strings.Builder, p *BoardProjection) {
 // four-concept minimum path": story spec + ACs + implements + commit),
 // collapsed by default — the newcomer's whole path in one quiet
 // disclosure, everything further learned from the wall itself.
-func writeGuide(b *strings.Builder) {
-	b.WriteString(`<details class="board-guide" data-testid="board-guide"><summary>New to the wall? Four moves.</summary>` +
-		`<ol class="guide-moves">` +
-		`<li><strong>Read the case file</strong> &#8212; the problem and outcome placards above the wall are the spec&#8217;s own header.</li>` +
-		`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true. Drag cards anywhere; double-click one to edit its text.</li>` +
-		`<li><strong>String yarn</strong> &#8212; drag the pin on a decision card to another card to type a relationship. A thread running off the top edge belongs to the spec document itself (its implements/resolves edges).</li>` +
-		`<li><strong>Commit &amp; push</strong> &#8212; the wall autosaves as you work; committing files it on the design branch.</li>` +
+//
+// The guide is CLASS-AWARE (owner directive: a wall must teach whether
+// it is a feature or a story). A feature wall opens with the split in
+// one breath — outcome ACs and stubs live here; each story is its own
+// spec pointing up at these ACs with implements yarn, and a feature
+// never lists its stories — and its AC move says outcome-shaped. A
+// story wall (or a class-less projection) keeps the four-move copy
+// unadorned: its spec IS the minimum path's story.
+func writeGuide(b *strings.Builder, p *BoardProjection) {
+	feature := p.Class == "feature"
+	b.WriteString(`<details class="board-guide" data-testid="board-guide"><summary>New to the wall? Four moves.</summary>`)
+	if feature {
+		b.WriteString(`<p class="guide-class-note" data-testid="guide-class-note">This is a <strong>feature</strong> wall: outcome ACs and story stubs. ` +
+			`Each story is its own spec that points up at these ACs with <strong>implements</strong> yarn &#8212; a feature never lists its stories.</p>`)
+	}
+	b.WriteString(`<ol class="guide-moves">` +
+		`<li><strong>Read the case file</strong> &#8212; the problem and outcome placards above the wall are the spec&#8217;s own header.</li>`)
+	if feature {
+		b.WriteString(`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true when the feature lands (outcomes, never story-sized tasks). Drag cards anywhere; double-click one to edit its text.</li>` +
+			`<li><strong>String yarn</strong> &#8212; drag the pin on a decision card to another card to type a relationship. A thread running off the top edge belongs to the spec document itself.</li>`)
+	} else {
+		b.WriteString(`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true. Drag cards anywhere; double-click one to edit its text.</li>` +
+			`<li><strong>String yarn</strong> &#8212; drag the pin on a decision card to another card to type a relationship. A thread running off the top edge belongs to the spec document itself (its implements/resolves edges).</li>`)
+	}
+	b.WriteString(`<li><strong>Commit &amp; push</strong> &#8212; the wall autosaves as you work; committing files it on the design branch.</li>` +
 		`</ol>` +
 		`<p class="guide-more">Everything else &#8212; stickies, graduation, exemptions &#8212; is on the wall when you need it.</p>` +
 		`</details>`)
@@ -479,9 +651,24 @@ func writeGitPanel(b *strings.Builder, git *boardGitState) {
 }
 
 // renderBoardDialogs renders the page-level dialogs. Only authoring mode
-// gets any: review is a mirror, read-only a document (05 §Workbench).
-func renderBoardDialogs(mode boardModeKind) string {
-	if mode != modeAuthoring {
+// gets the full set: review is a mirror, read-only a document (05
+// §Workbench) — EXCEPT the sealed accepted-pending-build feature wall,
+// whose one live affordance (Instantiate story, spec/scoping-canvas
+// ac-6) needs the confirmation chrome: its consequence is spoken before
+// it fires, and its receipt/refusal after, all through the same dialog.
+func renderBoardDialogs(p *BoardProjection) string {
+	if p.Mode != modeAuthoring {
+		if p.Class == string(artifact.ClassFeature) && p.Status == "accepted-pending-build" && len(p.StubViews) > 0 {
+			return `
+<div class="modal-backdrop" id="modal-backdrop" hidden></div>
+<div role="alertdialog" aria-label="" class="board-dialog confirm" id="edge-confirm" hidden aria-describedby="edge-confirm-consequence">
+<h2 id="edge-confirm-title"></h2>
+<p id="edge-confirm-consequence" class="ritual-note"></p>
+<div class="field" id="edge-confirm-reason-field" hidden><label for="edge-confirm-reason">Reason</label><input id="edge-confirm-reason" autocomplete="off"></div>
+<div class="dialog-actions"><button type="button" id="edge-confirm-ok">Confirm</button>
+<button type="button" id="edge-confirm-cancel">Cancel</button></div>
+</div>`
+		}
 		return ""
 	}
 	return `
@@ -563,6 +750,11 @@ func canvasMinHeight(p *BoardProjection) float64 {
 	}
 	for _, rc := range p.RefCards {
 		if y := rc.Y + boardlayout.RefCardHeight; y > bottom {
+			bottom = y
+		}
+	}
+	for _, sv := range p.StubViews {
+		if y := sv.Y + boardlayout.StubCardHeight; y > bottom {
 			bottom = y
 		}
 	}

@@ -129,17 +129,45 @@ func (q OpenQuestion) Validate() error {
 // Stub is one entry in a feature spec's acceptance-time `stubs:` scoping
 // record (02 §Kind registry: "the acceptance-time scoping record, one entry
 // per intended story"): `{ slug: <title-slug>, acceptance_criteria:
-// [<ac-id>...] }`.
+// [<ac-id>...] }`. A stub may instead be a **spike stub** (round 5.4,
+// mirroring the story level's own spike discriminator): `{ slug, spike:
+// true, resolves: [<oq-id>...] }` — one list, flag-discriminated (DC-4),
+// rather than a parallel `spike_stubs:` block.
 type Stub struct {
 	Slug               string   `yaml:"slug"`
-	AcceptanceCriteria []string `yaml:"acceptance_criteria"`
+	Spike              bool     `yaml:"spike,omitempty"`
+	AcceptanceCriteria []string `yaml:"acceptance_criteria,omitempty"`
+	Resolves           []string `yaml:"resolves,omitempty"`
 }
 
-// Validate checks Slug is a non-empty kebab-case title slug and
-// AcceptanceCriteria names at least one well-formed AC id.
+// Validate checks Slug is a non-empty kebab-case title slug and enforces
+// the DC-4 grammar, fail closed: `resolves` requires `spike: true`; a spike
+// stub declares `resolves` (non-empty) and no `acceptance_criteria`; a
+// plain stub declares `acceptance_criteria` (non-empty) and no `resolves`
+// (the two blocks are mutually exclusive by construction of the switch
+// below, but Resolves is checked unconditionally first so a non-spike stub
+// carrying a stray `resolves:` fails closed rather than being silently
+// ignored).
 func (s Stub) Validate() error {
 	if !simpleNameRe.MatchString(s.Slug) {
 		return fmt.Errorf("artifact: stub slug %q must be kebab-case", s.Slug)
+	}
+	if len(s.Resolves) > 0 && !s.Spike {
+		return fmt.Errorf("artifact: stub %s: resolves requires spike: true (02 §Kind registry, DC-4)", s.Slug)
+	}
+	if s.Spike {
+		if len(s.Resolves) == 0 {
+			return fmt.Errorf("artifact: spike stub %s declares no resolves (the open questions it will answer)", s.Slug)
+		}
+		if len(s.AcceptanceCriteria) != 0 {
+			return fmt.Errorf("artifact: spike stub %s must not declare acceptance_criteria (02 §Kind registry, DC-4)", s.Slug)
+		}
+		for _, id := range s.Resolves {
+			if !oqIDRe.MatchString(id) {
+				return fmt.Errorf("artifact: spike stub %s: resolves entry %q is not a valid oq-<slug> id", s.Slug, id)
+			}
+		}
+		return nil
 	}
 	if len(s.AcceptanceCriteria) == 0 {
 		return fmt.Errorf("artifact: stub %s declares no acceptance criteria", s.Slug)

@@ -9,12 +9,74 @@ package workbench
 // everything beyond the minimum is discoverable, never front-loaded.
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/boardio"
 )
+
+// The projection carries the spec's class identity (02 §Kind registry:
+// class + story tracker ref + spike flag) so both presentations — the
+// HTML case file and get_board's JSON — can say which kind of wall this
+// is. Additive fields only; the JSON keys are wire contract (get_board
+// re-marshals this struct).
+func TestBoardProjection_CarriesSpecClass(t *testing.T) {
+	cases := []struct {
+		name     string
+		fm       artifact.SpecFrontmatter
+		class    string
+		storyRef string
+		spike    bool
+	}{
+		{"feature", artifact.SpecFrontmatter{Class: artifact.ClassFeature}, "feature", "", false},
+		{"story", artifact.SpecFrontmatter{Class: artifact.ClassStory, Story: "jira:LOAN-7"}, "story", "jira:LOAN-7", false},
+		{"spike", artifact.SpecFrontmatter{Class: artifact.ClassStory, Story: "jira:LOAN-9", Spike: true}, "story", "jira:LOAN-9", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := buildProjection("s", &tc.fm, nil, nil, nil, modeAuthoring)
+			if err != nil {
+				t.Fatalf("buildProjection: %v", err)
+			}
+			if p.Class != tc.class || p.StoryRef != tc.storyRef || p.Spike != tc.spike {
+				t.Fatalf("projection = (%q, %q, %v), want (%q, %q, %v)",
+					p.Class, p.StoryRef, p.Spike, tc.class, tc.storyRef, tc.spike)
+			}
+		})
+	}
+
+	// The wire keys (get_board marshals the projection verbatim): class
+	// always present; story_ref and spike omitted when zero.
+	spike, err := buildProjection("s", &artifact.SpecFrontmatter{Class: artifact.ClassStory, Story: "jira:LOAN-9", Spike: true}, nil, nil, nil, modeAuthoring)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	raw, err := json.Marshal(spike)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"class":"story"`, `"story_ref":"jira:LOAN-9"`, `"spike":true`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("projection JSON missing %s\n%s", want, raw)
+		}
+	}
+	feature, err := buildProjection("s", &artifact.SpecFrontmatter{Class: artifact.ClassFeature}, nil, nil, nil, modeAuthoring)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	raw, err = json.Marshal(feature)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, banned := range []string{`"story_ref"`, `"spike"`} {
+		if strings.Contains(string(raw), banned) {
+			t.Errorf("feature projection JSON carries zero-valued %s\n%s", banned, raw)
+		}
+	}
+}
 
 // Authoring labels every zone — empty bands included, as invitations
 // ("decisions land here") — while review/read-only label only what the
@@ -29,9 +91,12 @@ func TestBoardLegibility_ZoneLabels(t *testing.T) {
 		`data-testid="zone-label-constraint"`,
 		`data-testid="zone-label-decision"`,
 		`data-testid="zone-label-open-question"`,
+		// The stubs band (spec/scoping-canvas dc-6) — the fixture is a
+		// feature-class wall, so the band is labeled even when empty.
+		`data-testid="zone-label-stub"`,
 		`data-testid="zone-label-reference"`,
 		">acceptance criteria<", ">constraints<", ">decisions<",
-		">open questions<", ">references<",
+		">open questions<", ">stubs<", ">references<",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("authoring board missing zone label %q", want)
@@ -167,7 +232,11 @@ func TestBoardLegibility_YarnKey(t *testing.T) {
 
 // The four-move guide is authoring's quiet teacher: present (collapsed
 // by markup — no open attribute) in authoring, absent from the mirror
-// and the sealed record.
+// and the sealed record — and CLASS-AWARE (owner directive): a feature
+// wall's guide opens by teaching the feature/story split (outcome ACs +
+// stubs here; stories are their own specs pointing up with implements
+// yarn — a feature never lists its stories); a story wall keeps the
+// four-move copy unadorned.
 func TestBoardLegibility_Guide(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
@@ -182,6 +251,32 @@ func TestBoardLegibility_Guide(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("guide missing the four-move vocabulary %q", want)
 		}
+	}
+	// The fixture is a feature spec: its guide teaches the split.
+	for _, want := range []string{
+		`data-testid="guide-class-note"`,
+		"a feature never lists its stories",
+		"implements",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("feature wall's guide missing the split lesson %q", want)
+		}
+	}
+
+	// A story wall keeps the four-move copy, with no class note.
+	story := &BoardProjection{Spec: "s", Mode: modeAuthoring, Class: "story", StoryRef: "jira:LOAN-7"}
+	storyBody := renderBoardRegion(story, &boardGitState{Branch: "design/s"})
+	for _, want := range []string{
+		`data-testid="board-guide"`,
+		"case file", "acceptance criteria", "yarn", "Commit",
+		"implements/resolves edges",
+	} {
+		if !strings.Contains(storyBody, want) {
+			t.Errorf("story wall's guide missing %q", want)
+		}
+	}
+	if strings.Contains(storyBody, "guide-class-note") {
+		t.Error("story wall's guide carries the feature-wall class note")
 	}
 
 	proj := &BoardProjection{Spec: "s", Mode: modeReadOnly, Cards: []cardView{{ID: "ac-1", Kind: "acceptance-criterion", Text: "x"}}}
@@ -265,6 +360,54 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 	}
 }
 
+// The case file wears its class (owner directive): a small stamp in the
+// case-file lockup — "feature" on feature walls, "story · <tracker-ref>"
+// on story walls (ref omitted when absent), "spike · <tracker-ref>" on
+// spikes — in every mode; the sealed record needs it just as much. A
+// projection with no class (grandfathered callers) gets no stamp, and a
+// spec with no case-file header (no problem/outcome) has nowhere to
+// wear one.
+func TestBoardLegibility_CaseClassTag(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+	body := getBoard(t, h, boardFixtureName).Body.String()
+	if !strings.Contains(body, `<span class="case-class-tag case-class-tag--feature" data-testid="case-class-tag">feature</span>`) {
+		t.Error("feature wall's case file wears no feature stamp")
+	}
+
+	cases := []struct {
+		name string
+		proj BoardProjection
+		want string
+	}{
+		{"story with tracker ref", BoardProjection{Class: "story", StoryRef: "jira:LOAN-7"},
+			`<span class="case-class-tag case-class-tag--story" data-testid="case-class-tag">story · <span class="case-class-ref">jira:LOAN-7</span></span>`},
+		{"story without tracker ref", BoardProjection{Class: "story"},
+			`<span class="case-class-tag case-class-tag--story" data-testid="case-class-tag">story</span>`},
+		{"spike", BoardProjection{Class: "story", StoryRef: "jira:LOAN-9", Spike: true},
+			`<span class="case-class-tag case-class-tag--spike" data-testid="case-class-tag">spike · <span class="case-class-ref">jira:LOAN-9</span></span>`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Every mode: the mirror and the sealed record wear the stamp too.
+			for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
+				proj := tc.proj
+				proj.Spec, proj.Mode = "s", mode
+				proj.Problem, proj.Outcome = "p", "o"
+				if got := renderBoardRegion(&proj, &boardGitState{}); !strings.Contains(got, tc.want) {
+					t.Errorf("%s board missing class stamp %s", mode, tc.want)
+				}
+			}
+		})
+	}
+
+	// No class → no stamp (never an empty tag).
+	bare := &BoardProjection{Spec: "s", Mode: modeReadOnly, Problem: "p", Outcome: "o"}
+	if strings.Contains(renderBoardRegion(bare, &boardGitState{}), "case-class-tag") {
+		t.Error("a projection with no class still renders a class stamp")
+	}
+}
+
 // A new sticky lands at the BOTTOM of its type's lane (owner directive):
 // questions queue beneath the open-questions column they may graduate
 // into, decisions-needed beneath decisions, comments and agent tasks in
@@ -309,14 +452,17 @@ func TestBoardLegibility_StickyLanding(t *testing.T) {
 	}
 
 	// Comments file into the scratch lane; a second one appends below
-	// the first (sticky footprint estimate + gap).
+	// the first (sticky footprint estimate + gap). AMENDED with the
+	// scoping canvas: the stubs band (spec/scoping-canvas dc-6) now sits
+	// between open questions and references, so the scratch lane moved
+	// one column right (1180 -> 1408) — the landing POLICY is unchanged.
 	post(`{"type":"comment","text":"c-one"}`)
-	if x, y := stickyAt("c-one"); x != 1180 || y != 40 {
-		t.Errorf("comment landed at (%v,%v), want empty scratch lane slot (1180,40)", x, y)
+	if x, y := stickyAt("c-one"); x != 1408 || y != 40 {
+		t.Errorf("comment landed at (%v,%v), want empty scratch lane slot (1408,40)", x, y)
 	}
 	post(`{"type":"agent-task","text":"c-two"}`)
-	if x, y := stickyAt("c-two"); x != 1180 || y != 214 {
-		t.Errorf("agent-task landed at (%v,%v), want appended below c-one (1180,214)", x, y)
+	if x, y := stickyAt("c-two"); x != 1408 || y != 214 {
+		t.Errorf("agent-task landed at (%v,%v), want appended below c-one (1408,214)", x, y)
 	}
 
 	// The scratch lane's zone label materializes with its occupant.
