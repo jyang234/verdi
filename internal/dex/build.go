@@ -115,6 +115,9 @@ func Build(ctx context.Context, opts Options) error {
 	if err := writeChangelog(ctx, opts.Root, opts.OutDir, stamp, stamp.SHA); err != nil {
 		return err
 	}
+	if err := writeDisclosuresPage(ctx, opts.Root, opts.OutDir, stamp); err != nil {
+		return err
+	}
 	if err := writeSearchIndex(opts.OutDir, stamp, ix); err != nil {
 		return err
 	}

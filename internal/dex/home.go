@@ -16,6 +16,7 @@ reader can never mistake an acceptance-time spec for current architecture.</p>
 <li><a href="/by-kind/">By kind</a> — specs (active/archive), decisions, diagrams, contracts and APIs</li>
 <li><a href="/by-service/">By service</a> — description, boundary contract, obligations, active specs, dependency mini-map</li>
 <li><a href="/by-story/">By story</a> — the archived quartet: spec, board, rollup, deviation report</li>
+<li><a href="/disclosures/">Disclosures</a> — every claim this checkout is currently not proving, in one view</li>
 <li><a href="/changelog/">What changed</a> — the git log of .verdi/</li>
 <li><a href="/search/">Search</a></li>
 </ul>`

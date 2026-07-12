@@ -427,6 +427,92 @@ th {
 }
 .notice { border-style: solid; border-left: 3px solid var(--st-pending); font-style: normal; }
 
+/* ---------- the disclosures view (spec/disclosures-panel) ----------
+   One markup, two editions (workbench live page, dex read-only edition —
+   both render internal/disclosureview's output through this same sheet).
+   Severity is legible without being alarming: disclosed-unproven wears
+   the pending amber (attention, not violation — violated is a verdict
+   failure and never appears here). The empty state is the view's quiet
+   signature: "no current disclosures" is a positive, computed verdict,
+   so it wears the evidenced green rather than a gray absence. Two
+   aliases keep that tuning in one place; both resolve per-theme. */
+:root {
+  --disclosed: var(--st-pending);
+  --disclosed-tint: var(--st-pending-tint);
+}
+
+.disclosures-count { font-size: 0.95rem; color: var(--muted-solid); margin: 0.4rem 0 1rem; }
+.disclosures-count strong { color: var(--ink); }
+
+.disclosure-list { list-style: none; padding: 0; margin: 0.75rem 0; }
+.disclosure-item {
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--disclosed);
+  border-radius: 6px;
+  background: var(--card);
+  padding: 0.7rem 1rem 0.8rem;
+  margin: 0 0 0.75rem;
+}
+.disclosure-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+.disclosure-severity {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  white-space: nowrap;
+  color: var(--disclosed);
+  border: 1px solid var(--disclosed);
+  background: var(--disclosed-tint);
+  padding: 0.18rem 0.55rem;
+  border-radius: 3px;
+}
+.disclosure-source {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.08rem 0.4rem;
+  overflow-wrap: anywhere;
+}
+.disclosure-scope {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.disclosure-text { margin: 0; font-size: 0.92rem; line-height: 1.55; overflow-wrap: anywhere; }
+
+.disclosures-empty {
+  border: 1px solid var(--st-evidenced);
+  border-left: 3px solid var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+  border-radius: 6px;
+  padding: 1rem 1.2rem;
+  margin: 1rem 0;
+}
+.disclosures-empty-claim { margin: 0 0 0.25rem; font-weight: 600; color: var(--st-evidenced); font-size: 1.05rem; }
+.disclosures-empty-detail { margin: 0; font-size: 0.9rem; color: var(--muted-solid); }
+
+.disclosures-note {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted-solid);
+  margin-top: 1.4rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 0.6rem;
+}
+
+.home-disclosures { font-size: 0.95rem; }
+
 #search-box {
   font: inherit;
   font-family: var(--mono);
