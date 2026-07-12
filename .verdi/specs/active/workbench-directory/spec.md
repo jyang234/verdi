@@ -24,9 +24,9 @@ decisions:
   - { id: dc-1, text: "serve-managed lazy worktrees over guarded checkout-switching: opening a directory entry must never mutate the state under another tab — shared-state surprise is the silent-loss family", anchor: "#dc-1" }
   - { id: dc-2, text: "the directory groups by status — drafts in progress, accepted-pending-build, active components, terminal — the status is the distinction, never the address", anchor: "#dc-2" }
   - { id: dc-3, text: "one address: the per-draft port pattern is retired the day this lands", anchor: "#dc-3" }
+  - { id: dc-4, text: "managed worktrees are reclaimed by verdi gc on the ratified gc signals — a branch merged (tip is an ancestor of the default-branch tip) or deleted (absent) is reclaimable; directory reads never delete and there is no background daemon; a worktree with uncommitted changes is never reclaimed but disclosed and kept", anchor: "#dc-4" }
 open_questions:
-  - { id: oq-1, text: "worktree lifecycle: when a design branch merges or is deleted, who garbage-collects its managed worktree, and when?", anchor: "#oq-1" }
-  - { id: oq-2, text: "once the PR flow lands a remote: do remote design branches join the directory enumeration, and how are they told apart from local drafts?", anchor: "#oq-2" }
+  - { id: oq-2, text: "once the PR flow lands a remote (round-6 work): do remote design branches join the directory enumeration, and how are they told apart from local drafts? Carried with a recommended shape (see body) pending the remote", anchor: "#oq-2" }
 ---
 # Workbench Directory
 
@@ -83,10 +83,29 @@ the directory groups by status — drafts in progress, accepted-pending-build, a
 
 one address: the per-draft port pattern is retired the day this lands
 
-## oq-1
+## dc-4
 
-worktree lifecycle: when a design branch merges or is deleted, who garbage-collects its managed worktree, and when?
+A managed worktree is derived state under the data zone, created lazily by
+the serve process, so the serve process owns its reclamation — but reads
+never delete (a worktree vanishing under an open tab is the surprise
+mutation dc-1 forbids), and there is no background daemon. Reclamation
+reuses verdi's ratified gc signals: a managed worktree whose branch is
+merged (its tip is an ancestor of the default-branch tip) or deleted
+(absent) is reclaimable, and `verdi gc` reaps it — the same explicit
+reaper that already prunes the corpus cache. A worktree carrying
+uncommitted changes is never reclaimed: it is disclosed in the directory
+and kept until the human resolves it — three-valued honesty applied to
+cleanup; clean-and-merged is safe to drop, dirty is disclosed and held.
 
 ## oq-2
 
-once the PR flow lands a remote: do remote design branches join the directory enumeration, and how are they told apart from local drafts?
+Carried, not resolved: this binds only once the PR flow lands a remote,
+which does not exist yet (round-6 work), and deciding against an unbuilt
+mechanism is what the invention discipline forbids. Recommended shape to
+inherit when the remote lands: remote design branches DO join the
+directory, keyed by status per dc-2 — a local design branch with no MR is
+a local-authoring draft; a remote branch with an open MR is "in review"
+and renders as the review mirror (the mode law: an open MR wins as review
+mode). Enumeration sources differ and are disclosed — local drafts from
+local refs, remote ones from the forge port's ListOpenMRs — and a forge
+that cannot be reached is disclosed, never silently dropped.
