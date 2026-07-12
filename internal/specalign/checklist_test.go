@@ -44,20 +44,35 @@ func TestV0ThinSliceChecklist(t *testing.T) {
 	})
 
 	// Checklist: "`artifactlint` VL-001..014, wired as a CI gate"
-	t.Run("02_artifactlint_wired_zero_findings", func(t *testing.T) {
+	//
+	// The assertion is "no ERROR-severity (verdict) findings", not "zero
+	// findings of any kind": a live self-hosted store legitimately carries
+	// disclosure notices (SeverityDisclosure — e.g. VL-017's mutable-zone-
+	// absent notice on any new-class spec authored in a checkout with no
+	// data/mutable/ zone, by-design per its W2 adjudication). Those are the
+	// three-valued-honesty channel, not lint failures (`verdi lint` still
+	// exits 0), and they multiply as the store grows real work. A verdict
+	// finding, by contrast, must still be zero.
+	t.Run("02_artifactlint_no_error_severity_findings", func(t *testing.T) {
 		ctx := context.Background()
 		lctx := buildLintContext(ctx, root)
 		findings, err := lint.NewEngine().Run(ctx, root, lctx, lint.Options{})
 		if err != nil {
 			t.Fatalf("lint.Engine.Run: %v", err)
 		}
-		if len(findings) > 0 {
+		var violations []lint.Finding
+		for _, f := range findings {
+			if f.Severity == lint.SeverityViolation {
+				violations = append(violations, f)
+			}
+		}
+		if len(violations) > 0 {
 			var b strings.Builder
-			for _, f := range findings {
+			for _, f := range violations {
 				b.WriteString(f.String())
 				b.WriteString("\n")
 			}
-			t.Fatalf("artifactlint found %d finding(s) running in-process against this repo's own store — want zero:\n%s", len(findings), b.String())
+			t.Fatalf("artifactlint found %d error-severity finding(s) running in-process against this repo's own store — want zero (disclosure notices are tolerated):\n%s", len(violations), b.String())
 		}
 	})
 

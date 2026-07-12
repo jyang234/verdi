@@ -10,16 +10,36 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 )
 
-// TestSelfHostedSpecFidelity asserts every spec under
+// componentSpecs are the six self-hosted copies of the system's own
+// component specs (00-index.md §How these documents are maintained). Each
+// MUST be present under .verdi/specs/active/ and byte-faithful to its
+// docs/design/specs/ origin. This is the closed set this fidelity gate
+// audits — deliberately NOT "every directory under specs/active/": the
+// store is a live workbench that GROWS as the system authors real
+// feature/story/spike specs of itself (the self-hosting thesis), and those
+// additional specs are legal and out of this check's scope. Adding one must
+// never break the gate; dropping or drifting a component spec must.
+var componentSpecs = []string{
+	"verdi-index",
+	"verdi-store-layout",
+	"verdi-artifact-contract",
+	"verdi-evidence-model",
+	"verdi-story-provider",
+	"verdi-surfaces",
+}
+
+// TestSelfHostedSpecFidelity asserts each of the six component specs under
 // .verdi/specs/active/<name>/spec.md is byte-identical to its
 // ../docs/design/specs/ origin except the single
 // "status: draft" -> "status: active" line. Any other drift — including
 // no drift at all (an un-activated copy) — fails with a diff summary.
+// Additional specs in the store (round-N features/stories/spikes) are legal
+// and ignored here: the fidelity check is over the six component copies,
+// not the store's total population.
 //
 // The docs live OUTSIDE this repo, workspace-relative
 // (verdi/../docs/design/specs/): a CI checkout of verdi alone (no
@@ -34,29 +54,13 @@ func TestSelfHostedSpecFidelity(t *testing.T) {
 	}
 
 	activeDir := filepath.Join(verdiRepoRoot, ".verdi", "specs", "active")
-	entries, err := os.ReadDir(activeDir)
-	if err != nil {
-		t.Fatalf("reading %s: %v", activeDir, err)
-	}
 
-	var specDirs []string
-	for _, e := range entries {
-		if e.IsDir() {
-			specDirs = append(specDirs, e.Name())
-		}
-	}
-	sort.Strings(specDirs)
-
-	if len(specDirs) != 6 {
-		t.Fatalf("expected exactly 6 self-hosted specs under %s, found %d: %v", activeDir, len(specDirs), specDirs)
-	}
-
-	for _, name := range specDirs {
+	for _, name := range componentSpecs {
 		t.Run(name, func(t *testing.T) {
 			hostedPath := filepath.Join(activeDir, name, "spec.md")
 			hosted, err := os.ReadFile(hostedPath)
 			if err != nil {
-				t.Fatalf("reading %s: %v", hostedPath, err)
+				t.Fatalf("component spec %q must be PRESENT under %s (byte-faithful to its docs/design/specs origin): %v", name, activeDir, err)
 			}
 
 			// Origin filename discovery is convention-based, not
