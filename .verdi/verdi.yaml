@@ -12,7 +12,7 @@ align:                         # evidence-model spec owns semantics
 audit:                         # R4-I-10; exemption/deviation counterweights
   exempts_conflict_threshold: 3
   deviations_stale_threshold: 3
-spike_paths: []                # VL-016 fence; this repo declares no spike workspace yet (fails closed)
+spike_paths: ["docs/spikes/**"]  # VL-016 fence; this repo's spike workspace and doc paths
 derived:
   retention_days: 14           # gc horizon for merged/deleted refs
 services:
