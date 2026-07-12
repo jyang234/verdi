@@ -471,8 +471,10 @@ container with semantics.
 typed proto-stickies — a feature wall's claim that a story (or spike)
 will exist: `board` carries the parking spot, `body` the working title.
 Their untyped relates-threads to acceptance criteria (story) or open
-questions (spike) carry the coverage and resolution attribution; the
-endpoint pair is the meaning, so the edge vocabulary is untouched.
+questions (spike) carry the coverage and resolution attribution — and for
+exactly this, a relates endpoint may name a board annotation by id
+(`a-<ULID>`) as well as an artifact ref; the endpoint pair is the
+meaning, so the edge vocabulary is untouched.
 Graduation mints the frontmatter stub (spike stubs carrying `resolves`);
 like every sticky, they graduate or they die, and they are legal only on
 feature-class walls (fail closed elsewhere).
