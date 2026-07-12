@@ -256,7 +256,7 @@ func TestRenderBoardRegion_PlacardFullHiddenElements(t *testing.T) {
 	}
 	// The placard's own concise headline (the attribute TEXT) still
 	// renders — the hidden element is additive, never a replacement.
-	if !strings.Contains(rendered, `data-testid="placard-problem"><span class="placard-tag">problem</span><p>short problem headline</p>`) {
+	if !strings.Contains(rendered, `data-testid="placard-problem"><span class="placard-tag">problem</span><p class="placard-text">short problem headline</p>`) {
 		t.Error("problem placard's own headline text got displaced by the full-body element")
 	}
 

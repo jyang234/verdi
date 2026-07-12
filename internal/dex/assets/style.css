@@ -2321,6 +2321,59 @@ button.yarn-chip-type {
 /* while a card's inline editor is open its text is hidden — so is its mark */
 .objcard:has(.card-editor) .clamp-more { display: none; }
 
+/* ---------- the case file's always-present "read the full file" mark ----
+
+   A case-file placard is ALWAYS expandable (the board-polish pass), not only
+   when its headline happens to clamp: the fuller authored problem/outcome
+   prose lives a click away, so the placard wears a persistent, quiet
+   affordance saying so. That mark is a dog-ear — a page corner folded up to
+   show there is more file behind this one — drawn in the placard's own
+   accent (the violated red on the problem, the evidenced green on the
+   outcome). It is distinct from the truncation fade+⋯, which still appears
+   ONLY when the headline is genuinely cut and layers on top. The one
+   placard that gets neither is the degenerate one — a short headline with no
+   body section, where the face already IS the whole file. */
+.placard--problem { --placard-accent: var(--st-violated); --placard-accent-tint: var(--st-violated-tint); }
+.placard--outcome { --placard-accent: var(--st-evidenced); --placard-accent-tint: var(--st-evidenced-tint); }
+.placard--expandable { cursor: zoom-in; }
+/* the clamp ⋯, when a placard's headline also clamps, steps left of the
+   dog-ear so the two marks never sit on top of one another */
+.placard .clamp-more { right: 1.25rem; }
+.placard-more {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+/* the fold itself: the bottom-right triangle turned up to reveal the
+   accent-tinted back of the page, its crease a hairline in the full accent */
+.placard-more::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-bottom-right-radius: 6px;
+  opacity: 0.5;
+  background: linear-gradient(
+    135deg,
+    transparent calc(50% - 0.6px),
+    var(--placard-accent) calc(50% - 0.6px) calc(50% + 0.6px),
+    var(--placard-accent-tint) calc(50% + 0.6px)
+  );
+}
+.placard-more:hover::after,
+.placard-more:focus-visible::after { opacity: 1; }
+.placard-more:focus-visible {
+  outline: 2px solid var(--placard-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* the expand dialog: the same paper modal + scrim as every board dialog
    (matched, not reinvented), closing on ×, the backdrop, or Escape. It is
    read-only information, so it opens in every mode. The header is the
@@ -2360,6 +2413,16 @@ button.yarn-chip-type {
   overflow-y: auto;
 }
 .expand-dialog--hand .expand-text { font-family: var(--hand); font-size: 1.05rem; }
+/* a placard's body prose reads as laid-out prose — real paragraphs, lists,
+   and emphasis, rendered from the server's escaped HTML — not the plain
+   pre-wrapped single string the text expand shows. */
+.expand-text--rich { white-space: normal; }
+.expand-text--rich > :first-child { margin-top: 0; }
+.expand-text--rich > :last-child { margin-bottom: 0; }
+.expand-text--rich p { margin: 0 0 0.7rem; }
+.expand-text--rich ul, .expand-text--rich ol { margin: 0 0 0.7rem; padding-left: 1.25rem; }
+.expand-text--rich li { margin: 0.25rem 0; }
+.expand-text--rich li::marker { color: var(--muted-solid); }
 
 @media (max-width: 60rem) {
   .board-placards { flex-direction: column; }
@@ -2388,6 +2451,9 @@ button.yarn-chip-type {
   .board-trash { transition: opacity 160ms ease, transform 160ms ease, box-shadow 120ms ease, border-color 120ms ease, background-color 120ms ease; }
   /* the sealed wall's one live affordance answers the hand */
   .stub-instantiate { transition: box-shadow 120ms ease, color 120ms ease, border-color 120ms ease; }
+  /* the case-file dog-ear brightens under the pointer/focus; without motion
+     it still switches, just instantly */
+  .placard-more::after { transition: opacity 120ms ease; }
 }
 
 /* Syntax-highlighting palettes. Chroma emits no inline colour, so these two

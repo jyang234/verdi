@@ -172,7 +172,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
 		writeCaseClassTag(&b, p)
 		if p.Problem != "" {
-			b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p>` + esc(p.Problem) + `</p>`)
+			b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p class="placard-text">` + esc(p.Problem) + `</p>`)
 			writePlacardFull(&b, "problem", p.ProblemBodyHTML)
 			b.WriteString(`</div>`)
 		}
@@ -180,7 +180,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			b.WriteString(`<div class="case-arrow" aria-hidden="true">&#8594;</div>`)
 		}
 		if p.Outcome != "" {
-			b.WriteString(`<div class="placard placard--outcome" data-testid="placard-outcome"><span class="placard-tag">outcome</span><p>` + esc(p.Outcome) + `</p>`)
+			b.WriteString(`<div class="placard placard--outcome" data-testid="placard-outcome"><span class="placard-tag">outcome</span><p class="placard-text">` + esc(p.Outcome) + `</p>`)
 			writePlacardFull(&b, "outcome", p.OutcomeBodyHTML)
 			b.WriteString(`</div>`)
 		}
