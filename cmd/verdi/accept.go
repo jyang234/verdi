@@ -328,7 +328,16 @@ func computeStubMatch(root string, story *artifact.SpecFrontmatter) (matched boo
 		return false, err.Error()
 	}
 	if featureName == "" {
-		return false, "no implements edges (spike or malformed story)"
+		// Split the two materially different zero-implements cases (D-4): a
+		// spike carries no implements edges BY DESIGN (02 §Kind registry:
+		// stub-matching is not applicable to it), whereas a non-spike story
+		// with zero implements is a malformed story. Conflating them into one
+		// "spike or malformed" message is exactly the kind of ambiguous
+		// disclosure this feature exists to end.
+		if story.Spike {
+			return false, "spike: stub-matching is not applicable (a spike carries no implements edges, 02 §Kind registry)"
+		}
+		return false, "no implements edges (malformed story)"
 	}
 
 	feature, err := storyresolve.LoadActiveSpec(root, featureName)

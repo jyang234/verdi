@@ -168,10 +168,22 @@ func TestComputeStubMatch(t *testing.T) {
 			wantReason:  "exempts edge",
 		},
 		{
-			name:        "no implements edges at all (spike-shaped)",
+			name:        "no implements edges at all (malformed story)",
 			story:       draftStory("Stale Decline", nil, nil),
 			wantMatched: false,
-			wantReason:  "no implements edges",
+			wantReason:  "no implements edges (malformed story)",
+		},
+		{
+			// D-4: a spike's zero-implements case says the spike-expected
+			// thing, not the ambiguous "spike or malformed story".
+			name: "spike: stub-matching not applicable, distinct message",
+			story: func() *artifact.SpecFrontmatter {
+				s := draftStory("Stale Decline", nil, nil)
+				s.Spike = true
+				return s
+			}(),
+			wantMatched: false,
+			wantReason:  "spike: stub-matching is not applicable",
 		},
 	}
 
