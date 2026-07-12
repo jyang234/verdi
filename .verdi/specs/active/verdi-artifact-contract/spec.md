@@ -238,16 +238,19 @@ Spec classes:
   mapping is only ever the computed inverse of stories' `implements` edges
   (§Link taxonomy), never a field on the feature itself. **Superseded is a
   terminal status (round 5, D-12/D-16):** accepting a spec that carries a
-  `supersedes` edge to a predecessor feature or story spec flips that
-  predecessor's `status:` to `superseded` in the same `verdi accept`
-  ritual — a sanctioned, status-only edit (VL-004 gains the
+  `supersedes` edge to a predecessor **story** spec (the rung-3 chain)
+  flips that predecessor's `status:` to `superseded` in the same
+  `verdi accept` ritual — a sanctioned, status-only edit (VL-004 gains the
   accepted-pending-build → superseded transition, performed only by the
   ritual; VL-010 gains the matching narrow exception alongside the
   active→archive rename: the diff may touch only the status line). A
   superseded spec stays in `specs/active/` (its supersession chain is live
   reading during the build), is excluded from the feature fold's computed
   AC→story mapping, and is refused by `verdi build start`, which names the
-  successor.
+  successor. A superseded **feature** predecessor's status remains
+  governed by the rung-4 cascade machinery for now — its terminal-state
+  question is carried to round 6 (round 5's D-12 fix pass, deliberately
+  scoped).
 - **story** (NEW) — the unit of work, and the unit of review. Same status
   lifecycle as feature, frozen at acceptance. Requires the two spec
   attributes `problem:` and `outcome:` (§Object model), exactly one `story:`
