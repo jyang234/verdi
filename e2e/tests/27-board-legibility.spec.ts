@@ -39,11 +39,27 @@ test.describe("board legibility: the wall reads at a glance", () => {
     for (const kind of ZONE_KINDS) {
       await expect(page.getByTestId(`zone-label-${kind}`)).toBeVisible();
     }
-    // The fixture declares no open questions: that band still renders in
-    // authoring, marked as the empty invitation it is.
-    await expect(page.getByTestId("zone-label-open-question")).toHaveClass(
-      /zone-label--empty/,
-    );
+    // Empty bands render as dimmed invitations, occupied bands as plain
+    // tape — self-consistent with whatever earlier suite writes left on
+    // the shared wall (graduations mint cards; the exact empty-band rule
+    // is pinned deterministically in the Go render tests).
+    for (const kind of [
+      "acceptance-criterion",
+      "constraint",
+      "decision",
+      "open-question",
+    ]) {
+      const occupied = await page
+        .locator(`.objcard[data-object-kind="${kind}"]`)
+        .count();
+      const cls = await page
+        .getByTestId(`zone-label-${kind}`)
+        .getAttribute("class");
+      expect(
+        cls!.includes("zone-label--empty"),
+        `${kind}: ${occupied} cards, class ${cls}`,
+      ).toBe(occupied === 0);
+    }
 
     // The labels are teaching chrome, never an interaction layer: a
     // pointer aimed at a card or the canvas must pass straight through.
@@ -100,34 +116,44 @@ test.describe("board legibility: the wall reads at a glance", () => {
   test("the yarn key names exactly the threads on the wall", async ({
     page,
   }) => {
-    // The sealed fixture is static: one document-level implements edge.
+    // The key lists each distinct thread type on the wall exactly once,
+    // and nothing more — self-consistent with whatever annotation
+    // threads earlier suite writes left in the shared store (the
+    // canonical order and present-types-only rule are pinned
+    // deterministically in the Go render tests). Checked on both a
+    // sealed record and the live wall.
+    const keyMatchesChips = async () => {
+      const chipTypes = await page
+        .locator(".yarn-chip")
+        .evaluateAll((els) =>
+          Array.from(
+            new Set(els.map((el) => el.getAttribute("data-edge-type"))),
+          ).sort(),
+        );
+      const keyTypes = await page
+        .locator('[data-testid="yarn-key"] li')
+        .evaluateAll((els) =>
+          els.map((el) => el.getAttribute("data-edge-type")).sort(),
+        );
+      expect(keyTypes).toEqual(chipTypes);
+    };
+
     await page.goto(boardPath(READONLY_SPEC));
     const key = page.getByTestId("yarn-key");
     await expect(key).toBeVisible();
+    // The sealed fixture's own document-level implements edge is always
+    // on this wall, whatever else leaked in.
     await expect(key.locator('li[data-edge-type="implements"]')).toBeVisible();
-    await expect(key.locator("li")).toHaveCount(1);
+    await keyMatchesChips();
 
     // The document's own chip says whose edge it is — the document is
     // not a card, so its thread runs off the top of the wall.
-    await expect(page.locator(".yarn-chip--doc")).toContainText("this spec");
+    await expect(
+      page.locator('.yarn-chip--doc[data-edge-type="implements"]'),
+    ).toContainText("this spec");
 
-    // The authoring wall's key stays self-consistent with whatever
-    // threads earlier suite writes left on the shared board: the key
-    // lists each distinct chip type exactly once, and nothing more.
     await page.goto(boardPath(DESIGN_SPEC));
-    const chipTypes = await page
-      .locator(".yarn-chip")
-      .evaluateAll((els) =>
-        Array.from(
-          new Set(els.map((el) => el.getAttribute("data-edge-type"))),
-        ).sort(),
-      );
-    const keyTypes = await page
-      .locator('[data-testid="yarn-key"] li')
-      .evaluateAll((els) =>
-        els.map((el) => el.getAttribute("data-edge-type")).sort(),
-      );
-    expect(keyTypes).toEqual(chipTypes);
+    await keyMatchesChips();
   });
 
   test("an empty wall invites instead of voiding", async ({ page }) => {
