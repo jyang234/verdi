@@ -320,7 +320,7 @@ func (fm SpecFrontmatter) validateFeature() error {
 		}
 	}
 
-	frozenRequired := fm.Status == "accepted-pending-build" || fm.Status == "closed"
+	frozenRequired := fm.Status == "accepted-pending-build" || fm.Status == "closed" || fm.Status == "superseded"
 	return requireFrozen(fm.Frozen, frozenRequired, "feature spec", string(fm.Status))
 }
 
@@ -399,7 +399,7 @@ func (fm SpecFrontmatter) validateStory() error {
 		}
 	}
 
-	frozenRequired := fm.Status == "accepted-pending-build" || fm.Status == "closed"
+	frozenRequired := fm.Status == "accepted-pending-build" || fm.Status == "closed" || fm.Status == "superseded"
 	return requireFrozen(fm.Frozen, frozenRequired, "story spec", string(fm.Status))
 }
 

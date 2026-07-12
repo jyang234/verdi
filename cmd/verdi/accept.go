@@ -22,6 +22,7 @@ import (
 	"sort"
 
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/disclosure"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/store"
 	"github.com/OWNER/verdi/internal/storyresolve"
@@ -32,6 +33,13 @@ import (
 // tolerating an optional surrounding quote so a human's re-quoting edit
 // during the design branch does not break the flip.
 var draftStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?draft"?\s*$`)
+
+// acceptedStatusLineRe matches an `accepted-pending-build` status
+// frontmatter line, tolerating an optional surrounding quote (mirroring
+// draftStatusLineRe). It is the only status a predecessor spec can legally
+// be flipped FROM when its successor is accepted (VL-004's sole
+// accepted-pending-build→superseded transition, D-12).
+var acceptedStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?accepted-pending-build"?\s*$`)
 
 // cmdAccept is `verdi accept`'s entry point, invoked by dispatch.go.
 func cmdAccept(args []string, stdout, stderr io.Writer) int {
@@ -177,6 +185,17 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		return 2
 	}
 
+	// Round-5 amendment (D-12): accepting a spec that carries a `supersedes`
+	// edge to a predecessor STORY spec also flips that predecessor's status
+	// to `superseded` in the same ritual — the sole legal writer of VL-004's
+	// accepted-pending-build→superseded transition, a status-only edit VL-010
+	// admits on an otherwise-frozen spec. The predecessor keeps its frozen
+	// stamp and stays in specs/active/. Written to disk here so the caller's
+	// own AddAll/CreateCommit lands it in the same commit as the accept flip.
+	if rc := supersedePredecessors(root, spec, stdout, stderr); rc != 0 {
+		return rc
+	}
+
 	if err := gitx.AddAll(ctx, root); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
@@ -188,6 +207,89 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 
 	fmt.Fprintf(stdout, "accept: %s status: draft -> accepted-pending-build\n", ref.String())
 	fmt.Fprintf(stdout, "accept: frozen: { at: %s, commit: %s, stub_matched: %t }\n", at, preFlipHead, stubMatched)
+	return 0
+}
+
+// supersedePredecessors flips every active `accepted-pending-build`
+// STORY spec that `spec` supersedes to `status: superseded` (D-12). Scope
+// is deliberately the rung-3 story-to-story chain edge (03 §The amendment
+// ladder rung 3) — the same target class disqualifyingSupersedesOrExempts
+// already special-cases via supersedesTargetsStory — never the rung-4
+// feature supersession, whose predecessor lifecycle is governed by the
+// blast-radius/cascade machinery (blastradius.go, cascadecheck.go) this
+// patch does not disturb (invention ledger: smallest reversible option).
+//
+// Each flip is a raw, status-line-only ReplaceAll so the written file
+// differs from its frozen base by exactly that one line — VL-010's
+// status-only-to-superseded exception is then cleanly satisfiable and the
+// frozen stamp is preserved untouched. A predecessor not in specs/active/
+// (archived/closed), already superseded (idempotent), or in any status
+// other than accepted-pending-build is left alone (the last case disclosed,
+// never forced). Returns 0 on success, 2 on an operational failure.
+func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, stdout, stderr io.Writer) int {
+	for _, l := range spec.Links {
+		if l.Type != artifact.LinkSupersedes || !supersedesTargetsStory(root, l.Ref) {
+			continue
+		}
+		ref, err := artifact.ParseRef(l.Ref)
+		if err != nil {
+			continue // malformed edges are lint's concern, not accept's
+		}
+		predPath := filepath.Join(root, ".verdi", "specs", "active", ref.Name, "spec.md")
+		raw, err := os.ReadFile(predPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // not in active/ (archived/closed) — nothing to flip here
+			}
+			fmt.Fprintf(stderr, "accept: reading predecessor %s: %v\n", predPath, err)
+			return 2
+		}
+		predFm, _, err := artifact.SplitFrontmatter(raw)
+		if err != nil {
+			fmt.Fprintf(stderr, "accept: %s: %v\n", predPath, err)
+			return 2
+		}
+		predSpec, err := artifact.DecodeSpec(predFm)
+		if err != nil {
+			fmt.Fprintf(stderr, "accept: %s: %v\n", predPath, err)
+			return 2
+		}
+		if predSpec.Status == "superseded" {
+			continue // already superseded — idempotent
+		}
+		if predSpec.Status != "accepted-pending-build" {
+			fmt.Fprintln(stdout, disclosure.Render(disclosure.New("accept:supersede-predecessor", l.Ref,
+				fmt.Sprintf("predecessor status is %q, not accepted-pending-build; left unflipped (only accepted-pending-build->superseded is a legal ritual transition, VL-004)", predSpec.Status))))
+			continue
+		}
+		if n := len(acceptedStatusLineRe.FindAll(raw, -1)); n != 1 {
+			fmt.Fprintf(stderr, "accept: %s: expected exactly one status: accepted-pending-build line to flip, found %d\n", predPath, n)
+			return 2
+		}
+		newRaw := acceptedStatusLineRe.ReplaceAll(raw, []byte("status: superseded"))
+		// Self-validate the flipped predecessor before writing (CLAUDE.md:
+		// "never fake success"): it must still decode and keep its frozen
+		// stamp — a superseded story is a post-acceptance, frozen artifact.
+		flippedFm, _, err := artifact.SplitFrontmatter(newRaw)
+		if err != nil {
+			fmt.Fprintf(stderr, "accept: internal error: flipped predecessor %s failed self-validation: %v\n", ref.String(), err)
+			return 2
+		}
+		flipped, err := artifact.DecodeSpec(flippedFm)
+		if err != nil {
+			fmt.Fprintf(stderr, "accept: internal error: flipped predecessor %s failed self-validation: %v\n", ref.String(), err)
+			return 2
+		}
+		if flipped.Status != "superseded" || flipped.Frozen == nil {
+			fmt.Fprintf(stderr, "accept: internal error: flipped predecessor %s does not carry status: superseded with its frozen stamp\n", ref.String())
+			return 2
+		}
+		if err := os.WriteFile(predPath, newRaw, 0o644); err != nil {
+			fmt.Fprintln(stderr, "accept:", err)
+			return 2
+		}
+		fmt.Fprintf(stdout, "accept: %s: superseded by %s (status: accepted-pending-build -> superseded; status-only edit, frozen stamp preserved, stays in specs/active/)\n", ref.String(), spec.ID)
+	}
 	return 0
 }
 

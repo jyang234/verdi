@@ -342,6 +342,30 @@ x
 		t.Fatalf("story v2 Frozen = %+v, want stub_matched true (its only supersedes edge is the exempt rung-3 chain edge)", storyV2Spec.Frozen)
 	}
 
+	// --- D-12: accepting v2 also flipped its predecessor v1's status to
+	// `superseded` in the SAME ritual (status-only edit, frozen stamp
+	// preserved, still in specs/active/), and the accept stdout disclosed it.
+	predV1, _ := readSpec(t, repo.Dir, "stale-decline-story")
+	if predV1.Status != "superseded" {
+		t.Fatalf("predecessor v1 status = %q, want superseded (accept of its successor must flip it, D-12)", predV1.Status)
+	}
+	if predV1.Frozen == nil {
+		t.Fatal("predecessor v1 must keep its frozen stamp across the superseded flip (status-only edit)")
+	}
+	if !contains(stdout.String(), "superseded by spec/stale-decline-story-v2") {
+		t.Fatalf("accept (story v2) stdout = %q, want a disclosed predecessor-superseded line", stdout.String())
+	}
+	// The superseded predecessor is now refused as a build target, naming
+	// its successor via the supersedes chain (D-12).
+	stdout.Reset()
+	stderr.Reset()
+	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", buildDeps, &stdout, &stderr); got != 1 {
+		t.Fatalf("build start (superseded v1) = %d, want 1 (refused); stderr=%s", got, stderr.String())
+	}
+	if !contains(stderr.String(), "superseded by spec/stale-decline-story-v2") {
+		t.Fatalf("build start (superseded v1) stderr = %q, want it to name the successor via the supersedes chain", stderr.String())
+	}
+
 	// ================= Rung 4: feature supersession =================
 
 	// --- 11. file a conflict: a feature AC itself was wrong for everyone ---

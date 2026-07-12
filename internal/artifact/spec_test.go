@@ -311,6 +311,32 @@ func TestDecodeSpec_Story_Happy(t *testing.T) {
 	}
 }
 
+// TestDecodeSpec_SupersededStatus proves round-5's terminal `superseded`
+// status (02 §Kind registry, as amended): valid on both the story and
+// feature classes, and — being a post-acceptance status — requiring the
+// frozen stamp just like accepted-pending-build/closed.
+func TestDecodeSpec_SupersededStatus(t *testing.T) {
+	supersededStory := strings.Replace(storySpecYAML, "status: accepted-pending-build", "status: superseded", 1)
+	if fm, err := DecodeSpec([]byte(supersededStory)); err != nil {
+		t.Fatalf("DecodeSpec(superseded story): %v", err)
+	} else if fm.Status != "superseded" {
+		t.Fatalf("Status = %q, want superseded", fm.Status)
+	}
+
+	// A feature spec may also be superseded (owner's round-5 choice: the
+	// terminal status is shared by both classes).
+	supersededFeature := strings.Replace(featureSpecAcceptedYAML, "status: accepted-pending-build", "status: superseded", 1)
+	if _, err := DecodeSpec([]byte(supersededFeature)); err != nil {
+		t.Fatalf("DecodeSpec(superseded feature): %v", err)
+	}
+
+	// superseded requires the frozen stamp — dropping it must fail closed.
+	noFrozen := strings.Replace(supersededStory, "\nfrozen: { at: 2026-07-14, commit: 3e91ab2 }", "", 1)
+	if _, err := DecodeSpec([]byte(noFrozen)); err == nil {
+		t.Fatal("DecodeSpec(superseded story without frozen): want error, got nil")
+	}
+}
+
 func TestDecodeSpec_Story_Negative(t *testing.T) {
 	base := `
 id: spec/loan-update-api

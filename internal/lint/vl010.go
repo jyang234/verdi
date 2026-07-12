@@ -3,10 +3,23 @@ package lint
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/gitx"
+)
+
+// anyStatusLineRe / supersededStatusLineRe recognize a frontmatter status
+// line and, specifically, a `status: superseded` one — the base and head
+// sides of VL-010's round-5 status-only supersession exception (D-12): a
+// diff that touches an otherwise-frozen spec on ONLY its status line,
+// flipping it to `superseded`, is legal (the accept ritual's predecessor
+// flip, cmd/verdi/accept.go), alongside the pre-existing active→archive
+// rename exception.
+var (
+	anyStatusLineRe        = regexp.MustCompile(`^status:\s*"?[a-z][a-z-]*"?\s*$`)
+	supersededStatusLineRe = regexp.MustCompile(`^status:\s*"?superseded"?\s*$`)
 )
 
 // vl010 enforces "frozen artifacts are immutable: any diff touching a
@@ -69,6 +82,14 @@ func (vl010) Check(in *RunInput) []Finding {
 
 		switch e.Status {
 		case "M":
+			// Round-5 exception (D-12): a status-only edit flipping the spec
+			// to `superseded` is legal on an otherwise-frozen spec (the accept
+			// ritual's predecessor flip). Verified by diffing the base/head
+			// content and requiring exactly one changed line — the status line
+			// — now reading `superseded`.
+			if ok, cerr := isStatusOnlySupersededFlip(in.Ctx, in.Root, in.LintCtx.DiffBase, e.Path); cerr == nil && ok {
+				continue
+			}
 			findings = append(findings, Finding{Rule: "VL-010", Path: e.Path, Message: fmt.Sprintf("frozen file modified between %s and HEAD", in.LintCtx.DiffBase)})
 		case "D":
 			findings = append(findings, Finding{Rule: "VL-010", Path: e.Path, Message: fmt.Sprintf("frozen file deleted between %s and HEAD", in.LintCtx.DiffBase)})
@@ -101,6 +122,44 @@ func baseFrozen(ctx context.Context, root, diffBase, basePath string) (bool, err
 		return false, nil // not a probeable markdown artifact ⇒ not frozen
 	}
 	return frozen != nil, nil
+}
+
+// isStatusOnlySupersededFlip reports whether the change to path between
+// diffBase and HEAD is exactly a status-line flip to `superseded` and
+// nothing else (D-12). It reads both historical sides via `git show`,
+// compares them line by line, and returns true only when precisely one line
+// differs, that line is a frontmatter status line on the base, and its HEAD
+// counterpart reads `status: superseded`. Any read failure is surfaced as an
+// error so the caller can fall through to the ordinary frozen-modification
+// finding rather than silently admitting the diff.
+func isStatusOnlySupersededFlip(ctx context.Context, root, diffBase, path string) (bool, error) {
+	baseContent, err := gitx.Show(ctx, root, diffBase, path)
+	if err != nil {
+		return false, err
+	}
+	headContent, err := gitx.Show(ctx, root, "HEAD", path)
+	if err != nil {
+		return false, err
+	}
+	baseLines := strings.Split(string(baseContent), "\n")
+	headLines := strings.Split(string(headContent), "\n")
+	if len(baseLines) != len(headLines) {
+		return false, nil
+	}
+	diffIdx := -1
+	for i := range baseLines {
+		if baseLines[i] == headLines[i] {
+			continue
+		}
+		if diffIdx != -1 {
+			return false, nil // more than one line changed — not status-only
+		}
+		diffIdx = i
+	}
+	if diffIdx == -1 {
+		return false, nil
+	}
+	return anyStatusLineRe.MatchString(baseLines[diffIdx]) && supersededStatusLineRe.MatchString(headLines[diffIdx]), nil
 }
 
 // isActiveArchiveMove reports whether oldPath -> newPath is a spec

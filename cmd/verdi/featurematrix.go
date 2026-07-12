@@ -143,6 +143,16 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 			return nil, nil, fmt.Errorf("matrix: loading implementing story %s: %w", storyRef, err)
 		}
 
+		// Round-5 amendment (D-16): a superseded story is excluded from the
+		// feature fold's AC→story mapping entirely. It can never close, so
+		// leaving it in the mapping makes "every implementing story closed or
+		// eligible" permanently unreachable for any feature that ever had a
+		// rung-3 event; its successor (the story that supersedes it) carries
+		// the same implements edges and remains in the mapping in its place.
+		if storySpec.Status == artifact.Status("superseded") {
+			continue
+		}
+
 		closed := storySpec.Status == artifact.Status("closed")
 		folded, err := foldImplementingStory(ctx, root, commit, storySpec)
 		if err != nil {

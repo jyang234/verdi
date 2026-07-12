@@ -155,3 +155,52 @@ func TestCmdMatrix_FeatureRef_Negative_DanglingBinding(t *testing.T) {
 func bytesContains(b []byte, s string) bool {
 	return bytes.Contains(b, []byte(s))
 }
+
+// TestCmdMatrix_FeatureRef_ExcludesSupersededStory proves D-16: a superseded
+// implementing story is dropped from the feature fold's AC→story mapping
+// entirely. Starting from the golden fixture, flipping borrower-update-mobile
+// (which implements ac-1 and ac-2) to `superseded` on disk must remove it from
+// every AC's implementing set — ac-2, which it was the sole implementer of,
+// falls back to no-signal — so a rung-3 predecessor can never permanently
+// hold a feature AC below `evidenced`.
+func TestCmdMatrix_FeatureRef_ExcludesSupersededStory(t *testing.T) {
+	repo := buildCorpusRepo(t)
+	copyV2FeatureFixture(t, repo.Dir,
+		"specs/active/accepted-pending-build",
+		"specs/active/borrower-update-api",
+		"specs/active/borrower-update-mobile",
+		"specs/active/borrower-update-mobile-spike",
+		"attestations/accepted-pending-build",
+	)
+
+	// Flip the on-disk (disposable) copy of borrower-update-mobile to
+	// superseded — a status-only edit, frozen stamp preserved.
+	mobilePath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "borrower-update-mobile", "spec.md")
+	raw, err := os.ReadFile(mobilePath)
+	if err != nil {
+		t.Fatalf("reading mobile spec: %v", err)
+	}
+	flipped := bytes.Replace(raw, []byte("status: accepted-pending-build"), []byte("status: superseded"), 1)
+	if bytes.Equal(flipped, raw) {
+		t.Fatal("test setup: mobile spec did not carry the expected status line to flip")
+	}
+	if err := os.WriteFile(mobilePath, flipped, 0o644); err != nil {
+		t.Fatalf("writing flipped mobile spec: %v", err)
+	}
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runMatrixForTest(t, []string{"spec/accepted-pending-build"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdMatrix exit = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	out := stdout.String()
+	if bytes.Contains([]byte(out), []byte("borrower-update-mobile")) {
+		t.Fatalf("superseded story borrower-update-mobile must not appear in the feature mapping:\n%s", out)
+	}
+	// ac-2's only implementer was the now-superseded mobile story, so it must
+	// fall back to no-signal with an empty implementing set.
+	if !bytes.Contains([]byte(out), []byte("ac-2  no-signal")) {
+		t.Fatalf("ac-2 should read no-signal once its sole (superseded) implementer is excluded:\n%s", out)
+	}
+}

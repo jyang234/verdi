@@ -91,6 +91,18 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 		fmt.Fprintf(stderr, "build start: %s is a feature spec (birds-eye, outcome-level); build start operates on a story spec that implements it, not the feature itself\n", spec.ID)
 		return 2
 	}
+	// A superseded spec is never re-buildable (D-12): report the successor
+	// found via the incoming supersedes chain so the operator is pointed at
+	// the spec they should build instead, rather than the generic
+	// wrong-status message below.
+	if spec.Status == "superseded" {
+		if s, ferr := findSupersedingSpec(root, spec.ID); ferr == nil && s != nil {
+			fmt.Fprintf(stderr, "build start: refused: %s is superseded by %s; build the successor, not the superseded predecessor (03 §The amendment ladder)\n", spec.ID, s.ID)
+		} else {
+			fmt.Fprintf(stderr, "build start: refused: %s is superseded; a superseded spec is never re-buildable (03 §The amendment ladder)\n", spec.ID)
+		}
+		return 1
+	}
 	if spec.Status != "accepted-pending-build" {
 		fmt.Fprintf(stderr, "build start: %s status is %q, not accepted-pending-build; a build may only reference an accepted spec (03 §Gates)\n", spec.ID, spec.Status)
 		return 1
