@@ -276,3 +276,26 @@ func TestZoneColumns(t *testing.T) {
 		}
 	}
 }
+
+// The scratch lane sits one band past the object zones and stays
+// OUTSIDE the object layout: Generate must keep failing closed on
+// ZoneScratch (no spec object ever files there).
+func TestScratchColumn(t *testing.T) {
+	cols := ZoneColumns()
+	sc := ScratchColumn()
+	if sc.Kind != ZoneScratch {
+		t.Errorf("ScratchColumn().Kind = %s, want %s", sc.Kind, ZoneScratch)
+	}
+	last := cols[len(cols)-1]
+	if sc.X <= last.X {
+		t.Errorf("scratch lane X %d not past the last object zone (%d)", sc.X, last.X)
+	}
+	for _, c := range cols {
+		if c.Kind == ZoneScratch {
+			t.Error("ZoneScratch leaked into ZoneColumns — objects could be slotted there")
+		}
+	}
+	if _, err := Generate([]Object{{Kind: ZoneScratch, ID: "x-1"}}, nil); err == nil {
+		t.Error("Generate accepted a ZoneScratch object; must fail closed")
+	}
+}

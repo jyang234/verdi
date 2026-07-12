@@ -46,6 +46,12 @@ const (
 	// Their positions are always computed, never stored: layout.json keys
 	// must resolve to declared object ids (VL-018), which a ref is not.
 	ZoneReference ZoneKind = "reference"
+	// ZoneScratch is the scratch lane — the landing band for
+	// comment/agent-task stickies (annotation-layer paper with no
+	// graduation column of its own). Deliberately NOT in zoneOrder:
+	// no spec OBJECT files there, so Generate keeps failing closed on
+	// it; only the sticky landing policy and the zone labels use it.
+	ZoneScratch ZoneKind = "scratch"
 )
 
 // zoneOrder is the fixed left-to-right column order.
@@ -86,7 +92,12 @@ const (
 	// (style.css .refcard: 12.5rem × 4.5rem).
 	RefCardHeight = 72
 
-	zoneOriginY = 40
+	// ZoneOriginY is the first row's y origin — exported alongside the
+	// column bands so the sticky landing policy can start an empty lane
+	// at the same first slot the zoned algorithm uses.
+	ZoneOriginY = 40
+
+	zoneOriginY = ZoneOriginY
 	zoneMarginX = 40
 	zonePitchX  = CardWidth + 28  // column rhythm: footprint + gutter
 	rowPitch    = CardHeight + 36 // row rhythm: footprint + gap
@@ -203,6 +214,14 @@ func ZoneColumns() []ZoneColumn {
 		cols[i] = ZoneColumn{Kind: k, X: zoneMarginX + i*zonePitchX, Width: CardWidth}
 	}
 	return cols
+}
+
+// ScratchColumn is the scratch lane's band: one column past the last
+// object zone. Not part of ZoneColumns — no spec object is ever slotted
+// there (ZoneScratch stays outside zoneOrder, so Generate fails closed
+// on it); it exists for the sticky landing policy and its zone label.
+func ScratchColumn() ZoneColumn {
+	return ZoneColumn{Kind: ZoneScratch, X: zoneMarginX + len(zoneOrder)*zonePitchX, Width: CardWidth}
 }
 
 // Prune returns stored restricted to keys naming a live object id — the
