@@ -88,10 +88,14 @@ links:                     # optional, typed edges (see taxonomy)
   - { type: <link-type>, ref: <kind>/<name or name#object-id>, note: string? }
 problem: { text: string, anchor: string }   # required; feature/story only — §Object model
 outcome: { text: string, anchor: string }   # required; feature/story only — §Object model
-acceptance_criteria: [ {id, text, evidence, anchor}, ... ]  # optional; feature/story only — §Object model
-constraints: [ {id, text, anchor}, ... ]                    # optional; feature/story only — §Object model
-decisions: [ {id, text, anchor, links?}, ... ]              # optional; feature/story only — §Object model
-open_questions: [ {id, text, anchor}, ... ]                 # optional; feature/story only — §Object model
+acceptance_criteria: [ {id, text, evidence, anchor, synopsis?}, ... ]  # optional; feature/story only — §Object model
+constraints: [ {id, text, anchor, synopsis?}, ... ]                    # optional; feature/story only — §Object model
+decisions: [ {id, text, anchor, links?, synopsis?}, ... ]              # optional; feature/story only — §Object model
+open_questions: [ {id, text, anchor, synopsis?}, ... ]                 # optional; feature/story only — §Object model
+
+`synopsis` (round 5.3) is an optional authored headline on any object —
+the card face renders it in place of body truncation when present; absent
+means truncate. Presentation-only: no gate, fold, or edge ever reads it.
 frozen: { at: date, commit: sha }   # required iff temporal class is frozen
 provenance:                # required iff generated
   generator: string        # e.g. verdi-close, commit-to-design skill
@@ -427,7 +431,7 @@ below for the board-key namespace this slug is drawn from).
               "selector": { "heading": "ac-2", "quote": "charge API", "line": null } },
   "target_b": { "ref": "...", "selector": { "heading": "...", "quote": "...", "line": null } },
   "board": { "story": "STORY-1482", "x": 262, "y": 132 },
-  "type": "comment | question | decision-needed | agent-task | pin | relates | review",
+  "type": "comment | question | decision-needed | agent-task | frame | note | pin | relates | review",
   "body": "string", "status": "open | resolved | graduated" }
 ```
 
@@ -442,6 +446,19 @@ only for this type and names the thread's second endpoint. It never enters
 the spec document; graduation to a real object edge (`implements`,
 `resolves`, `exempts`, `supersedes`, `depends-on`, §Link taxonomy) is an
 ordinary spec edit, not an automatic promotion.
+
+`type: note` is the fast lane's explicitly unclassified thought — minted
+by quick capture with `board` and no required classification. Choosing the
+fast lane is itself the choice (R4-I-36's no-silent-default ruling is
+satisfied by the lane, not a form); a note classifies at graduation like
+any sticky — or it dies.
+
+`type: frame` is a named annotation-layer region — declared clustering,
+carrying the label so proximity alone never has to: `body` is the frame's
+name, and its `board` record alone may carry the optional `w`/`h` extent
+fields (fail closed on every other type). A frame never enters the spec
+document and never constrains layout; it is a label over space, not a
+container with semantics.
 
 `type: pin` pins an existing artifact to a board as planning material — the
 murder-board move of putting a fact on the wall before any claim is made
