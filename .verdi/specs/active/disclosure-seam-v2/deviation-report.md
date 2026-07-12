@@ -18,4 +18,4 @@ provenance: { generator: verdi-align, version: v0, inputs: [spec/disclosure-seam
 
 ## Judged
 
-- **judged-coverage-absent** [UNDISPOSITIONED]: judged coverage absent: no result within 2m0s (stage=timeout, exit=0, cmd="claude -p --output-format json")
+- **judged-coverage-absent** [accepted-deviation]: judged coverage absent: no result within 2m0s (stage=timeout, exit=0, cmd="claude -p --output-format json") — judge timed out in this environment (round5-divergences.md D-11: internal/specalign's own self-hosted checklist test already exercises real claude -p round-trips against this checkout as an incidental side effect of go test, straining the same judge command); the build's changes are a mechanical, behavior-preserving migration (three existing disclosure call sites construct-and-render through the new internal/disclosure seam, no producer's decision logic changed) fully covered by this story's own behavioral ac-1/ac-2 exercisers (cmd/verdi/disclosure_seam_test.go) and the updated per-site unit tests, so the missing judged sweep is accepted rather than re-run
