@@ -157,18 +157,22 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// with. Problem wears the violated accent, outcome the evidenced
 	// one, and the arrow between them is the whole story's arc: the
 	// wall below exists to get from the left card to the right one.
-	b.WriteString(`<header class="board-placards case-file">`)
-	b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
-	if p.Problem != "" {
-		b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p>` + esc(p.Problem) + `</p></div>`)
+	// A spec carrying neither attribute (grandfathered v0 artifacts)
+	// gets no header at all — never an empty folder tab.
+	if p.Problem != "" || p.Outcome != "" {
+		b.WriteString(`<header class="board-placards case-file">`)
+		b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
+		if p.Problem != "" {
+			b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p>` + esc(p.Problem) + `</p></div>`)
+		}
+		if p.Problem != "" && p.Outcome != "" {
+			b.WriteString(`<div class="case-arrow" aria-hidden="true">&#8594;</div>`)
+		}
+		if p.Outcome != "" {
+			b.WriteString(`<div class="placard placard--outcome" data-testid="placard-outcome"><span class="placard-tag">outcome</span><p>` + esc(p.Outcome) + `</p></div>`)
+		}
+		b.WriteString(`</header>`)
 	}
-	if p.Problem != "" && p.Outcome != "" {
-		b.WriteString(`<div class="case-arrow" aria-hidden="true">&#8594;</div>`)
-	}
-	if p.Outcome != "" {
-		b.WriteString(`<div class="placard placard--outcome" data-testid="placard-outcome"><span class="placard-tag">outcome</span><p>` + esc(p.Outcome) + `</p></div>`)
-	}
-	b.WriteString(`</header>`)
 
 	b.WriteString(`<div class="board-layout">`)
 	// The canvas is sized to its content plus a working margin — a pure
@@ -183,12 +187,15 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// holds. Pure function of the projection + boardlayout constants.
 	writeZoneLabels(&b, p)
 
-	// The empty wall: a board with nothing on it teaches instead of
+	// The empty wall: a board with no pinned facts teaches instead of
 	// voiding (authoring) or states its emptiness plainly (elsewhere).
-	if len(p.Cards) == 0 && len(p.RefCards) == 0 && len(p.Stickies) == 0 {
+	// Reference cards don't count as facts — the leanest valid story
+	// spec already hangs its implements thread, and its wall must still
+	// read as the invitation it is.
+	if len(p.Cards) == 0 && len(p.Stickies) == 0 {
 		b.WriteString(`<div class="board-empty" data-testid="board-empty">`)
 		if authoring {
-			b.WriteString(`<p class="board-empty-lead">An empty wall.</p>`)
+			b.WriteString(`<p class="board-empty-lead">Nothing pinned yet.</p>`)
 			b.WriteString(`<p class="board-empty-how">Pin your first fact: <strong>Add sticky</strong> (in the rail), write what you know, and graduate it into the spec when it firms up &#8212; or declare an acceptance criterion in the spec file and it lands here as a card.</p>`)
 		} else {
 			b.WriteString(`<p class="board-empty-lead">Nothing is declared on this spec yet.</p>`)
@@ -287,7 +294,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	case modeAuthoring:
 		writeGitPanel(&b, git)
 		b.WriteString(`<section class="scratch-panel"><h2>Scratch</h2>` +
-			`<p class="ritual-note scratch-note">Think here first. Stickies and untyped threads stay in the annotation layer &#8212; they never enter the spec until graduated.</p>` +
+			`<p class="ritual-note">Think here first. Stickies and untyped threads stay in the annotation layer &#8212; they never enter the spec until graduated.</p>` +
 			`<button type="button" id="add-sticky-btn">Add sticky</button></section>`)
 		writeYarnKey(&b, p)
 		writeGuide(&b)
@@ -313,9 +320,11 @@ var zoneLabelText = map[boardlayout.ZoneKind]string{
 	boardlayout.ZoneDecision:     "decisions",
 	boardlayout.ZoneOpenQuestion: "open questions",
 	boardlayout.ZoneReference:    "references",
+	boardlayout.ZoneScratch:      "scratch",
 }
 
-// writeZoneLabels renders the tape strips over the zoned columns.
+// writeZoneLabels renders the tape strips over the zoned columns, plus
+// the scratch lane (where comment/agent-task stickies land).
 // Decorative teaching (aria-hidden, pointer-events off in CSS): every
 // card already names its own kind for assistive tech.
 func writeZoneLabels(b *strings.Builder, p *BoardProjection) {
@@ -326,10 +335,20 @@ func writeZoneLabels(b *strings.Builder, p *BoardProjection) {
 	if len(p.RefCards) > 0 {
 		occupied[boardlayout.ZoneReference] = true
 	}
+	// The scratch lane is occupied by geometry: any sticky whose
+	// footprint currently sits in the band (a dragged-away sticky stops
+	// counting — the label follows the paper, not the paper's history).
+	sc := boardlayout.ScratchColumn()
+	for _, st := range p.Stickies {
+		if st.X < float64(sc.X+sc.Width) && float64(sc.X) < st.X+boardlayout.CardWidth {
+			occupied[boardlayout.ZoneScratch] = true
+			break
+		}
+	}
 	authoring := p.Mode == modeAuthoring
 
 	b.WriteString(`<div class="zone-labels" aria-hidden="true">`)
-	for _, col := range boardlayout.ZoneColumns() {
+	for _, col := range append(boardlayout.ZoneColumns(), sc) {
 		if !occupied[col.Kind] && !authoring {
 			continue // the record shows what it has; it does not invite
 		}

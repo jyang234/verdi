@@ -256,22 +256,65 @@ func (s *boardSpecServer) actionEdge(name string, proj *BoardProjection, req boa
 	})
 }
 
-// scratchZonePosition picks the next free slot in the scratch area for
-// a new sticky — deterministic given the stickies already on the board.
-// The area sits below the reference column, inside the same screenful
-// as the zone columns (boardlayout's compact geometry).
-func scratchZonePosition(proj *BoardProjection) (float64, float64) {
-	const scratchX, originY, pitch = 920, 420, 190
-	occupied := map[[2]float64]bool{}
-	for _, st := range proj.Stickies {
-		occupied[[2]float64{st.X, st.Y}] = true
+// Sticky landing geometry: the rendered sticky footprint estimate
+// (mirrors canvasMinHeight's) and the append gap.
+const (
+	stickyEstHeight = 150
+	stickyLaneGap   = 24
+)
+
+// stickyLaneColumn maps a sticky's type to the wall band it files
+// into: a question queues beneath the open-questions column it may
+// graduate into, a decision-needed beneath the decisions; comments and
+// agent tasks take the scratch lane past the references.
+func stickyLaneColumn(typ artifact.AnnotationType) boardlayout.ZoneColumn {
+	var want boardlayout.ZoneKind
+	switch typ {
+	case artifact.AnnotationQuestion:
+		want = boardlayout.ZoneOpenQuestion
+	case artifact.AnnotationDecisionNeeded:
+		want = boardlayout.ZoneDecision
+	default:
+		return boardlayout.ScratchColumn()
 	}
-	for slot := 0; ; slot++ {
-		x, y := float64(scratchX), float64(originY+slot*pitch)
-		if !occupied[[2]float64{x, y}] {
-			return x, y
+	for _, c := range boardlayout.ZoneColumns() {
+		if c.Kind == want {
+			return c
 		}
 	}
+	return boardlayout.ScratchColumn() // unreachable: zoneOrder covers both
+}
+
+// stickyLanePosition appends a new sticky to the BOTTOM of its type's
+// lane (owner directive): below every element whose footprint
+// intersects the lane's band, or the lane's first slot when it is
+// empty. Deterministic given the projection; the lane is only the
+// landing spot — stickies drag anywhere afterwards.
+func stickyLanePosition(proj *BoardProjection, typ artifact.AnnotationType) (float64, float64) {
+	lane := stickyLaneColumn(typ)
+	left := float64(lane.X)
+	right := float64(lane.X + lane.Width)
+	inLane := func(x, w float64) bool { return x < right && left < x+w }
+	bottom := -1.0
+	for _, c := range proj.Cards {
+		if inLane(c.X, boardlayout.CardWidth) && c.Y+boardlayout.CardHeight > bottom {
+			bottom = c.Y + boardlayout.CardHeight
+		}
+	}
+	for _, rc := range proj.RefCards {
+		if inLane(rc.X, boardlayout.CardWidth) && rc.Y+boardlayout.RefCardHeight > bottom {
+			bottom = rc.Y + boardlayout.RefCardHeight
+		}
+	}
+	for _, st := range proj.Stickies {
+		if inLane(st.X, boardlayout.CardWidth) && st.Y+stickyEstHeight > bottom {
+			bottom = st.Y + stickyEstHeight
+		}
+	}
+	if bottom < 0 {
+		return left, boardlayout.ZoneOriginY
+	}
+	return left, bottom + stickyLaneGap
 }
 
 // annotationAuthor names the local author for board-created annotation
@@ -332,7 +375,7 @@ func (s *boardSpecServer) actionSticky(name string, proj *BoardProjection, req b
 	if err != nil {
 		return err
 	}
-	x, y := scratchZonePosition(proj)
+	x, y := stickyLanePosition(proj, typ)
 	a.Board = &artifact.BoardAnchor{Story: name, X: x, Y: y}
 	return boardio.AppendAnnotation(boardio.AnnotationsDir(s.root), boardio.AnnotationFileForBoard(store.RefSlug(name)), a)
 }

@@ -51,8 +51,22 @@
   --st-waived: #6b4fa1;
   --st-waived-tint: #ebe5f4;
 
-  /* board */
+  /* board — the case wall. Three mode casts (the room's state): the
+     live wall is warm cork, the review mirror is cool glass, the sealed
+     record is frozen. Yarn color IS the relationship's meaning (the
+     rail's yarn key names the mapping); the hand voice is the scratch
+     tier's — unfiled human thought, typeset only on graduation. */
   --yarn: #b0402d;
+  --wall: #ece4d2;
+  --wall-review: #e7e9ec;
+  --wall-sealed: #e3ebf3;
+  --yarn-implements: #b0402d;
+  --yarn-resolves: #2e6b45;
+  --yarn-depends-on: #8a6414;
+  --yarn-exempts: #6b4fa1;
+  --yarn-supersedes: #43483f;
+  --yarn-relates: #666f66;
+  --hand: "Bradley Hand", "Marker Felt", "Segoe Print", "Ink Free", "Comic Sans MS", cursive;
   --grid-dot: rgba(35, 41, 32, 0.08);
   --shadow-card: 0 1px 2px rgba(20, 26, 18, 0.10), 0 2px 6px rgba(20, 26, 18, 0.07);
   --shadow-lift: 0 10px 22px rgba(20, 26, 18, 0.28);
@@ -100,6 +114,15 @@
     --st-waived-tint: #261f33;
 
     --yarn: #d9705a;
+    --wall: #242017;
+    --wall-review: #1d2024;
+    --wall-sealed: #1b2633;
+    --yarn-implements: #d9705a;
+    --yarn-resolves: #82c49a;
+    --yarn-depends-on: #d1aa4f;
+    --yarn-exempts: #b39fdd;
+    --yarn-supersedes: #c8ccc1;
+    --yarn-relates: #96a094;
     --grid-dot: rgba(215, 221, 209, 0.07);
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.30);
     --shadow-lift: 0 10px 22px rgba(0, 0, 0, 0.55);
@@ -820,8 +843,27 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   pointer-events: none;
   z-index: 1;
 }
-.yarn-thread { fill: none; stroke: var(--yarn); stroke-width: 2; opacity: 0.85; }
+.yarn-thread { fill: none; stroke: var(--yarn); stroke-width: 2.4; opacity: 0.85; }
 .yarn-knot { fill: var(--yarn); }
+
+/* yarn color IS the relationship (the rail's yarn key names the
+   mapping): implements red — the classic thread and the minimum path's
+   edge; resolves green (answered); depends-on ochre (contingent);
+   exempts violet (a waiver); supersedes charcoal, long-dashed — the
+   stroke that amends the record. Scratch relates stays the gray dashed
+   thread it always was. */
+.yarn-thread--type-implements { stroke: var(--yarn-implements); }
+.yarn-knot--type-implements { fill: var(--yarn-implements); }
+.yarn-thread--type-resolves { stroke: var(--yarn-resolves); }
+.yarn-knot--type-resolves { fill: var(--yarn-resolves); }
+.yarn-thread--type-depends-on { stroke: var(--yarn-depends-on); }
+.yarn-knot--type-depends-on { fill: var(--yarn-depends-on); }
+.yarn-thread--type-exempts { stroke: var(--yarn-exempts); }
+.yarn-knot--type-exempts { fill: var(--yarn-exempts); }
+.yarn-thread--type-supersedes { stroke: var(--yarn-supersedes); stroke-dasharray: 13 5; }
+.yarn-knot--type-supersedes { fill: var(--yarn-supersedes); }
+.yarn-thread--type-relates { stroke: var(--yarn-relates); }
+.yarn-knot--type-relates { fill: var(--yarn-relates); }
 .yarn-thread-label {
   font-family: var(--mono);
   font-size: 11px;
@@ -933,7 +975,17 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   letter-spacing: 0.14em;
   opacity: 0.75;
 }
-.sticky-body { margin: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
+/* the scratch tier is HANDWRITTEN: a sticky is unfiled human thought,
+   and graduation literally typesets it into the record's serif. The
+   editor writes in the same hand it will read in. */
+.sticky-body {
+  margin: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  font-family: var(--hand);
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
 .sticky-meta { font-size: 0.62rem; letter-spacing: 0.05em; opacity: 0.65; }
 
 .sticky--comment { background: var(--note-comment-bg); color: var(--note-comment-ink); }
@@ -1026,20 +1078,49 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- the v1 board: spec-as-source projection ---------- */
 
+/* the mode stamp: three rooms, three inks — a rubber stamp on the page
+   header, not a neutral pill (authoring = the live wall you may pin
+   into; review = a mirror of someone else's MR; read-only = the sealed
+   record) */
 .board-mode-tag {
   font-family: var(--mono);
   font-size: 0.62rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--muted-solid);
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  padding: 0.2rem 0.7rem;
+  border: 2px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.18rem 0.6rem;
   margin-left: 0.9rem;
+  transform: rotate(-1.2deg);
 }
+.board-mode-tag--authoring { color: var(--accent); border-color: var(--accent); }
+.board-mode-tag--review { color: var(--authored); border-color: var(--authored); }
+.board-mode-tag--readonly { color: var(--frozen); border-color: var(--frozen); }
 
-/* attribute placards: the two cards the wall starts from */
-.board-placards { display: flex; gap: 1rem; margin: 0 0 1rem; }
+/* the case file: problem → outcome as ONE header lockup — the folder
+   the wall opens with. Problem wears the violated ink, outcome the
+   evidenced one; the arrow between them is the arc the wall below
+   exists to close. */
+.board-placards { display: flex; gap: 0.9rem; margin: 0 0 1rem; }
+.case-file { position: relative; margin-top: 1.1rem; }
+.case-tab {
+  position: absolute;
+  top: -1.05rem;
+  left: 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--authored);
+  background: var(--authored-tint);
+  border: 1px solid var(--authored);
+  border-bottom: 0;
+  border-radius: 5px 5px 0 0;
+  padding: 0.14rem 0.7rem;
+}
 .placard {
   flex: 1 1 0;
   border: 1px solid var(--rule);
@@ -1049,6 +1130,8 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   box-shadow: var(--shadow-card);
   padding: 0.6rem 0.9rem;
 }
+.placard--problem { border-left-color: var(--st-violated); }
+.placard--outcome { border-left-color: var(--st-evidenced); }
 .placard p { margin: 0.15rem 0 0; font-size: 0.92rem; line-height: 1.45; }
 .placard-tag {
   font-family: var(--mono);
@@ -1056,6 +1139,15 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--muted-solid);
+}
+.placard--problem .placard-tag { color: var(--st-violated); }
+.placard--outcome .placard-tag { color: var(--st-evidenced); }
+.case-arrow {
+  align-self: center;
+  color: var(--muted-solid);
+  font-size: 1.3rem;
+  line-height: 1;
+  flex: none;
 }
 
 /* Disclosed-unavailable board notices (I-1(b)/I-2/M-4): an advisory
@@ -1066,15 +1158,14 @@ button:hover { border-color: var(--accent); color: var(--accent); }
    unverified input" voice) through the shared theme tokens; the prose
    stays quiet page ink at footnote size — an advisory note in the
    margin, not a second headline. */
-.board-notices { display: flex; flex-direction: column; gap: 0.4rem; margin: 0 0 0.9rem; }
+.board-notices { display: flex; flex-direction: column; gap: 0.3rem; margin: 0 0 0.7rem; }
 .board-notice {
-  border: 1px solid var(--rule);
   border-left: 3px solid var(--authored);
-  border-radius: 6px;
-  background: var(--card);
+  border-radius: 0 4px 4px 0;
+  background: transparent;
   color: var(--muted-solid);
-  padding: 0.4rem 0.8rem;
-  font-size: 0.8rem;
+  padding: 0.1rem 0.8rem;
+  font-size: 0.76rem;
   line-height: 1.5;
 }
 .board-notice::before {
@@ -1094,8 +1185,106 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .board-notice--refusal::before { content: "read-only"; }
 
 /* the v2 canvas scrolls and is sized server-side to its content (an
-   inline min-height: content + working margin, never a fixed void) */
+   inline min-height: content + working margin, never a fixed void).
+   Its surface is the MODE: warm cork for the live wall, cool glass for
+   the review mirror, frozen paper (grid faded, sealed stamp) for the
+   accepted record — the room's state, readable before a single card. */
 .boardv2-canvas { overflow: auto; min-height: 26rem; }
+.mode-authoring .boardv2-canvas { background-color: var(--wall); }
+.mode-review .boardv2-canvas { background-color: var(--wall-review); }
+.mode-readonly .boardv2-canvas {
+  background-color: var(--wall-sealed);
+  border-color: var(--frozen);
+  background-image: none;
+}
+.mode-readonly .boardv2-canvas::after {
+  content: "sealed";
+  position: absolute;
+  bottom: 14px;
+  right: 16px;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--frozen);
+  border: 2px solid var(--frozen);
+  border-radius: 4px;
+  padding: 0.16rem 0.55rem;
+  transform: rotate(2deg);
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+/* zone labels: the zoned layout's filing scheme, made visible — tape
+   strips over each kind's column band. Teaching chrome only: never an
+   interaction layer (pointer-events: none), under the papers. An empty
+   band in authoring is an invitation ("decisions land here"), dimmed
+   and dotted. */
+.zone-labels { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.zone-label {
+  position: absolute;
+  top: 9px;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  text-align: center;
+  padding: 0.2rem 0.3rem;
+  border: 1px dashed color-mix(in srgb, currentColor 40%, transparent);
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.07);
+  transform: rotate(-0.5deg);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.zone-label--acceptance-criterion { color: var(--st-evidenced); background: color-mix(in srgb, var(--st-evidenced-tint) 80%, transparent); }
+.zone-label--constraint { color: var(--st-violated); background: color-mix(in srgb, var(--st-violated-tint) 80%, transparent); }
+.zone-label--decision { color: var(--authored); background: color-mix(in srgb, var(--authored-tint) 80%, transparent); }
+.zone-label--open-question { color: var(--st-waived); background: color-mix(in srgb, var(--st-waived-tint) 80%, transparent); }
+.zone-label--reference { color: var(--frozen); background: color-mix(in srgb, var(--frozen-tint) 80%, transparent); }
+.zone-label--scratch { color: var(--st-nosignal); background: color-mix(in srgb, var(--st-nosignal-tint) 80%, transparent); }
+.zone-label--empty {
+  opacity: 0.55;
+  background: transparent;
+  border-style: dotted;
+  box-shadow: none;
+}
+
+/* the empty wall: an invitation in authoring (handwritten — nothing is
+   filed yet), a plain statement of record everywhere else. Inert to the
+   pointer so the canvas stays clickable through it. */
+.board-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-align: center;
+  padding: 2.5rem;
+  pointer-events: none;
+  z-index: 0;
+}
+.board-empty-lead { margin: 0; font-size: 1.05rem; color: var(--muted-solid); }
+.mode-authoring .board-empty-lead {
+  font-family: var(--hand);
+  font-size: 1.55rem;
+  color: var(--ink);
+  opacity: 0.8;
+  transform: rotate(-1.2deg);
+}
+.board-empty-how {
+  margin: 0;
+  max-width: 34rem;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--muted-solid);
+}
 
 /* object cards: one per frontmatter-declared object — a UNIFORM
    index-card footprint (12.5rem × 8.75rem, mirrored by boardlayout's
@@ -1123,10 +1312,59 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 /* layered paper: a touched card rises above an overlapping neighbour
    (e.g. an anchored review sticky riding the card above it) */
 .objcard:hover, .sticky:hover { z-index: 8; }
-.objcard--acceptance-criterion { border-top-color: var(--st-evidenced); }
-.objcard--constraint { border-top-color: var(--st-violated); }
-.objcard--decision { border-top-color: var(--authored); }
-.objcard--open-question { border-top-color: var(--st-waived); }
+/* a live wall's papers lift when the hand approaches — the "you can
+   pick this up" cue, spoken only where picking up means something */
+.mode-authoring .objcard:hover { box-shadow: var(--shadow-lift); transform: translateY(-2px); }
+.mode-authoring .sticky:hover { box-shadow: var(--shadow-lift); }
+
+/* four kinds, four papers — what a card IS is readable across the room:
+   ACs are ruled index cards (things that must be checked off),
+   constraints wear a hazard edge (hard limits), decisions sit on ochre
+   slips (the authored voice), open questions carry their own watermark */
+.objcard .card-kind-label { font-weight: 700; }
+.objcard--acceptance-criterion {
+  border-top-color: var(--st-evidenced);
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent 0 21px,
+    color-mix(in srgb, var(--st-evidenced) 14%, transparent) 21px 22px
+  );
+}
+.objcard--acceptance-criterion .card-kind-label { color: var(--st-evidenced); }
+.objcard--constraint {
+  border-top-color: var(--st-violated);
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--st-violated) 45%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+  background-size: 7px 100%;
+  background-repeat: no-repeat;
+}
+.objcard--constraint .card-kind-label { color: var(--st-violated); }
+.objcard--decision {
+  border-top-color: var(--authored);
+  background-color: color-mix(in srgb, var(--card) 90%, var(--authored) 10%);
+}
+.objcard--decision .card-kind-label { color: var(--authored); }
+.objcard--open-question {
+  border-top-color: var(--st-waived);
+  background-color: color-mix(in srgb, var(--card) 93%, var(--st-waived) 7%);
+}
+.objcard--open-question .card-kind-label { color: var(--st-waived); }
+.objcard--open-question::after {
+  content: "?";
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0;
+  font-family: var(--serif);
+  font-size: 3.1rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--st-waived);
+  opacity: 0.13;
+  pointer-events: none;
+}
 .objcard .card-text {
   margin: 0.25rem 0 0;
   overflow-wrap: anywhere;
@@ -1146,6 +1384,9 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   padding: 0.3rem 0.4rem;
   resize: vertical;
 }
+/* the sticky's editor writes in the hand it will read in (the card's
+   stays the record's serif — editing a card IS editing the spec) */
+.sticky-editor { font-family: var(--hand); font-size: 0.98rem; }
 
 /* the yarn handle IS the card's pushpin: a physical pin head seated at
    the top edge — the affordance yarn is drawn from, present only where
@@ -1168,7 +1409,13 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.06);
   touch-action: none;
 }
-.yarn-handle:hover { transform: scale(1.2); }
+/* the pin says "I'm a handle" on approach: a halo ring, not just a
+   bigger head */
+.yarn-handle:hover, .yarn-handle:focus-visible {
+  transform: scale(1.22);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 0 0 5px color-mix(in srgb, var(--yarn) 28%, transparent);
+}
 
 /* reference cards: targets outside this spec, filed frozen-blue — the
    one deliberately different paper on the wall (squat, tinted, pinned
@@ -1200,8 +1447,23 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 /* the reference peek: a filed card pulled from the drawer — fixed to the
    right edge above the board, frozen-blue like the refcards it serves,
    dismissible from ×, Escape, or any outside click. Read-only in every
-   mode. */
-.refcard { cursor: pointer; }
+   mode. The card advertises the affordance itself: a magnifier cursor,
+   and a corner "peek" cue on approach. */
+.refcard { cursor: zoom-in; }
+.refcard::after {
+  content: "peek";
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--frozen);
+  opacity: 0;
+}
+.refcard:hover::after, .refcard:focus-visible::after { opacity: 0.9; }
 .ref-peek {
   position: fixed;
   top: 4.5rem;
@@ -1283,17 +1545,34 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.12rem 0.55rem;
+  padding: 0.14rem 0.6rem;
   border-radius: 999px;
   border: 1px solid var(--yarn);
   background: var(--card);
   box-shadow: var(--shadow-card);
   font-family: var(--mono);
-  font-size: 0.68rem;
+  font-size: 0.7rem;
+  font-weight: 600;
   color: var(--yarn);
   z-index: 4;
 }
-.yarn-chip--annotation { border-style: dashed; color: var(--muted-solid); border-color: var(--muted-solid); }
+/* the chip wears its thread's ink: label and yarn agree at a glance */
+.yarn-chip[data-edge-type="implements"] { color: var(--yarn-implements); border-color: var(--yarn-implements); }
+.yarn-chip[data-edge-type="resolves"] { color: var(--yarn-resolves); border-color: var(--yarn-resolves); }
+.yarn-chip[data-edge-type="depends-on"] { color: var(--yarn-depends-on); border-color: var(--yarn-depends-on); }
+.yarn-chip[data-edge-type="exempts"] { color: var(--yarn-exempts); border-color: var(--yarn-exempts); }
+.yarn-chip[data-edge-type="supersedes"] { color: var(--yarn-supersedes); border-color: var(--yarn-supersedes); }
+.yarn-chip--annotation { border-style: dashed; color: var(--yarn-relates); border-color: var(--yarn-relates); font-weight: 400; }
+/* the document's own edge: the chip names its off-board endpoint */
+.yarn-chip-doc {
+  font-size: 0.56rem;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted-solid);
+  border-right: 1px solid var(--rule);
+  padding-right: 0.4rem;
+}
 .yarn-thread--annotation { stroke-dasharray: 5 4; opacity: 0.6; }
 .yarn-draft { stroke: var(--yarn); stroke-width: 2; opacity: 0.7; stroke-dasharray: 3 3; }
 
@@ -1359,12 +1638,14 @@ button.yarn-chip-type {
   font-size: 0.78rem;
   line-height: 1.4;
 }
-.review-sticky .sticky-body { margin: 0.2rem 0 0; overflow-wrap: anywhere; }
+.review-sticky .sticky-body { margin: 0.2rem 0 0; overflow-wrap: anywhere; font-size: 0.92rem; }
 
-/* the rail's hierarchy: the git panel (Commit & push — the page's most
-   consequential act) leads with the accent and the primary button; the
-   scratch/read-only panels recede into the paper as secondary chrome */
-.inbox-tray, .git-panel, .scratch-panel {
+/* the rail's hierarchy, top-down by consequence: the git panel
+   (Commit & push — the page's one write to the record) leads with the
+   accent and the primary button; the scratch panel recedes into dashed
+   paper; the yarn key and the four-move guide are reading aids that
+   wait quietly at the bottom */
+.inbox-tray, .git-panel, .scratch-panel, .yarn-key, .mirror-note {
   border: 1px solid var(--rule);
   border-radius: 6px;
   background: var(--card);
@@ -1378,7 +1659,7 @@ button.yarn-chip-type {
   background: transparent;
   border-style: dashed;
 }
-.inbox-tray h2, .git-panel h2, .scratch-panel h2 {
+.inbox-tray h2, .git-panel h2, .scratch-panel h2, .yarn-key h2, .mirror-note h2 {
   font-size: 0.7rem;
   font-family: var(--mono);
   text-transform: uppercase;
@@ -1391,6 +1672,78 @@ button.yarn-chip-type {
 .git-panel h2 { color: var(--accent); border-bottom-color: var(--rule); }
 .inbox-tray .review-sticky { margin-top: 0.6rem; }
 .inbox-tray .empty, .scratch-panel .ritual-note { font-size: 0.82rem; }
+
+/* the review mirror explains itself in its own (authored-ochre) voice */
+.mirror-note { border-left: 3px solid var(--authored); }
+.mirror-note h2 { color: var(--authored); }
+.mirror-note .ritual-note { margin: 0; font-size: 0.82rem; }
+
+/* the sealed record's panel: frozen, filed, not editable */
+.sealed-panel {
+  background: var(--frozen-tint);
+  border: 1px solid var(--frozen);
+  border-left-width: 3px;
+}
+.sealed-panel h2 { color: var(--frozen); border-bottom-color: color-mix(in srgb, var(--frozen) 40%, transparent); }
+
+/* the yarn key: a legend of THIS wall — only the types present render */
+.yarn-key ul { list-style: none; margin: 0; padding: 0; }
+.yarn-key li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.32rem 0;
+  border-bottom: 1px dashed var(--rule);
+  font-size: 0.78rem;
+}
+.yarn-key li:last-child { border-bottom: 0; }
+.yarn-key li[data-edge-type="implements"] { color: var(--yarn-implements); }
+.yarn-key li[data-edge-type="resolves"] { color: var(--yarn-resolves); }
+.yarn-key li[data-edge-type="depends-on"] { color: var(--yarn-depends-on); }
+.yarn-key li[data-edge-type="supersedes"] { color: var(--yarn-supersedes); }
+.yarn-key li[data-edge-type="exempts"] { color: var(--yarn-exempts); }
+.yarn-key li[data-edge-type="relates"] { color: var(--yarn-relates); }
+.yarn-key-swatch {
+  flex: none;
+  width: 1.5rem;
+  border-top: 3px solid currentColor;
+  border-radius: 2px;
+  transform: translateY(-0.2em);
+}
+.yarn-key li[data-edge-type="supersedes"] .yarn-key-swatch,
+.yarn-key li[data-edge-type="relates"] .yarn-key-swatch { border-top-style: dashed; }
+.yarn-key-type { font-family: var(--mono); font-size: 0.72rem; font-weight: 600; }
+.yarn-key-what { color: var(--muted-solid); font-size: 0.74rem; }
+
+/* the four-move guide (05 §Workbench: the four-concept minimum path) —
+   present, collapsed, never front-loaded */
+.board-guide {
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  padding: 0.7rem 0.95rem;
+  font-size: 0.84rem;
+  color: var(--muted-solid);
+}
+.board-guide summary {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+.board-guide[open] summary { margin-bottom: 0.6rem; }
+.guide-moves {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.guide-moves li { line-height: 1.5; }
+.guide-moves strong { color: var(--ink); font-weight: 600; }
+.guide-more { margin: 0.6rem 0 0; font-style: italic; }
 
 /* the git affordance: quiet chrome, one calm indicator */
 .git-panel .uncommitted {
@@ -1492,6 +1845,7 @@ button.yarn-chip-type {
 
 @media (max-width: 60rem) {
   .board-placards { flex-direction: column; }
+  .case-arrow { display: none; }
 }
 
 /* ---------- responsive + motion ---------- */
@@ -1507,6 +1861,10 @@ button.yarn-chip-type {
 
 @media (prefers-reduced-motion: no-preference) {
   .copy-ref, button, a, .sticky, .card { transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease, box-shadow 120ms ease; }
+  /* the wall's approach cues: lifts, halos, and the peek whisper —
+     all withheld when the reader prefers reduced motion */
+  .objcard, .yarn-handle { transition: box-shadow 120ms ease, transform 120ms ease; }
+  .refcard::after { transition: opacity 120ms ease; }
 }
 
 /* Syntax-highlighting palettes. Chroma emits no inline colour, so these two

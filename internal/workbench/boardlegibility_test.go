@@ -9,8 +9,11 @@ package workbench
 // everything beyond the minimum is discoverable, never front-loaded.
 
 import (
+	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/OWNER/verdi/internal/boardio"
 )
 
 // Authoring labels every zone — empty bands included, as invitations
@@ -72,17 +75,30 @@ func TestBoardLegibility_ZoneLabels(t *testing.T) {
 }
 
 // An empty or sparse board is an invitation in authoring, a plain
-// statement of record everywhere else — never a bare void.
+// statement of record everywhere else — never a bare void. Reference
+// cards don't count as pinned facts: the leanest valid story spec
+// already hangs its implements thread, and its wall still invites.
 func TestBoardLegibility_EmptyWall(t *testing.T) {
 	empty := &BoardProjection{Spec: "fresh", Mode: modeAuthoring}
 	body := renderBoardRegion(empty, &boardGitState{Branch: "design/fresh"})
 	if !strings.Contains(body, `data-testid="board-empty"`) {
 		t.Fatal("empty authoring board renders no empty-wall state")
 	}
-	for _, want := range []string{"An empty wall", "Add sticky", "graduate"} {
+	for _, want := range []string{"Nothing pinned yet", "Add sticky", "graduate"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("empty-wall invitation missing %q", want)
 		}
+	}
+
+	// A refcard-only wall (story spec + implements thread, no facts)
+	// still invites.
+	refOnly := &BoardProjection{
+		Spec: "fresh", Mode: modeAuthoring,
+		RefCards: []refCardView{{Ref: "spec/f#ac-1", X: 40, Y: 40}},
+		Edges:    []edgeView{{Type: "implements", From: "spec", To: "spec/f#ac-1", Layer: "spec"}},
+	}
+	if !strings.Contains(renderBoardRegion(refOnly, &boardGitState{}), `data-testid="board-empty"`) {
+		t.Error("a wall holding only reference cards lost its invitation")
 	}
 
 	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
@@ -222,6 +238,13 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 		}
 	}
 
+	// A spec carrying neither attribute (grandfathered v0 artifacts) gets
+	// no folder header at all — never an empty tab.
+	bare := &BoardProjection{Spec: "s", Mode: modeReadOnly, Cards: []cardView{{ID: "ac-1", Kind: "acceptance-criterion", Text: "x"}}}
+	if strings.Contains(renderBoardRegion(bare, &boardGitState{}), "case-tab") {
+		t.Error("a spec with no problem/outcome still renders the case-file tab")
+	}
+
 	proj := &BoardProjection{
 		Spec: "s", Mode: modeReadOnly,
 		Edges:    []edgeView{{Type: "implements", From: "spec", To: "adr/a", Layer: "spec"}},
@@ -239,5 +262,66 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 	proj.Cards = []cardView{{ID: "dc-1", Kind: "decision", Text: "x"}}
 	if strings.Contains(renderBoardRegion(proj, &boardGitState{}), "yarn-chip--doc") {
 		t.Error("card-sourced chip wrongly marked as the document's")
+	}
+}
+
+// A new sticky lands at the BOTTOM of its type's lane (owner directive):
+// questions queue beneath the open-questions column they may graduate
+// into, decisions-needed beneath decisions, comments and agent tasks in
+// the scratch lane past the references. Deterministic given the board.
+func TestBoardLegibility_StickyLanding(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+
+	post := func(body string) {
+		t.Helper()
+		rec := postBoardAPI(t, h, boardFixtureName, "sticky", body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("sticky = %d\n%s", rec.Code, rec.Body.String())
+		}
+	}
+	stickyAt := func(text string) (x, y float64) {
+		t.Helper()
+		annotations, err := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+		if err != nil {
+			t.Fatalf("reading annotations: %v", err)
+		}
+		for _, a := range annotations {
+			if a.Body == text && a.Board != nil {
+				return a.Board.X, a.Board.Y
+			}
+		}
+		t.Fatalf("no positioned annotation with body %q", text)
+		return 0, 0
+	}
+
+	// The fixture's open-question lane (x=724) is empty: first slot.
+	post(`{"type":"question","text":"q-lane"}`)
+	if x, y := stickyAt("q-lane"); x != 724 || y != 40 {
+		t.Errorf("question landed at (%v,%v), want empty open-question lane slot (724,40)", x, y)
+	}
+
+	// The decisions lane holds dc-1 (zoned 496,40) and dc-2 (496,216):
+	// a decision-needed sticky appends below dc-2's footprint.
+	post(`{"type":"decision-needed","text":"d-lane"}`)
+	if x, y := stickyAt("d-lane"); x != 496 || y != 380 {
+		t.Errorf("decision-needed landed at (%v,%v), want below dc-2 (496,380)", x, y)
+	}
+
+	// Comments file into the scratch lane; a second one appends below
+	// the first (sticky footprint estimate + gap).
+	post(`{"type":"comment","text":"c-one"}`)
+	if x, y := stickyAt("c-one"); x != 1180 || y != 40 {
+		t.Errorf("comment landed at (%v,%v), want empty scratch lane slot (1180,40)", x, y)
+	}
+	post(`{"type":"agent-task","text":"c-two"}`)
+	if x, y := stickyAt("c-two"); x != 1180 || y != 214 {
+		t.Errorf("agent-task landed at (%v,%v), want appended below c-one (1180,214)", x, y)
+	}
+
+	// The scratch lane's zone label materializes with its occupant.
+	body := getBoard(t, h, boardFixtureName).Body.String()
+	if !strings.Contains(body, `data-testid="zone-label-scratch"`) {
+		t.Error("occupied scratch lane has no zone label")
 	}
 }

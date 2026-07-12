@@ -19,6 +19,7 @@ const (
 	designSpecName = "refi-decline-flow"
 	designBranch   = "design/" + designSpecName
 	reviewSpecName = "stale-decline-notices"
+	emptySpecName  = "income-verification"
 )
 
 // designSpec is DESIGN_SPEC: the object model fixtures.ts binds (3 ACs,
@@ -89,6 +90,38 @@ const designSpecLayout = `{
   "schema": "verdi.boardlayout/v1",
   "positions": { "ac-1": { "x": 40, "y": 40 }, "dc-1": { "x": 480, "y": 40 } }
 }
+`
+
+// emptySpec is EMPTY_SPEC (fixtures.ts): the leanest VALID draft on the
+// design branch — a story spec (class story requires problem, outcome,
+// a tracker ref, and >=1 implements edge; no class permits zero of
+// everything) with NOT ONE declared object. The newcomer's first board:
+// its wall holds only the implements thread and must render the
+// teaching empty-wall state rather than a void (the board-legibility
+// contract). The implements target is the v2 corpus feature's ac-1,
+// real on main.
+const emptySpec = `---
+id: spec/income-verification
+kind: spec
+class: story
+title: "Income verification"
+status: draft
+owners: [platform-team]
+story: jira:LOAN-2201
+problem: { text: "income documents are verified by hand and applicants wait days", anchor: "#problem" }
+outcome: { text: "verification completes the day the documents arrive", anchor: "#outcome" }
+links:
+  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+---
+# Income verification
+
+## Problem
+
+Manual verification queues.
+
+## Outcome
+
+Same-day verification.
 `
 
 // reviewSpec is REVIEW_SPEC: the board opens it in review mode (its
@@ -196,6 +229,7 @@ func provisionBoardV2(scratch, storeRoot string) (feedPath string, err error) {
 		filepath.Join(".verdi", "specs", "active", designSpecName, "spec.md"):     designSpec,
 		filepath.Join(".verdi", "specs", "active", designSpecName, "layout.json"): designSpecLayout,
 		filepath.Join(".verdi", "specs", "active", reviewSpecName, "spec.md"):     reviewSpec,
+		filepath.Join(".verdi", "specs", "active", emptySpecName, "spec.md"):      emptySpec,
 	}
 	for rel, content := range files {
 		path := filepath.Join(storeRoot, rel)
