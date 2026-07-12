@@ -16,10 +16,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/dex"
+	"github.com/OWNER/verdi/internal/fixturegit"
 	"github.com/OWNER/verdi/internal/index"
 	"github.com/OWNER/verdi/internal/lint"
 	"github.com/OWNER/verdi/internal/workbench"
@@ -138,8 +141,33 @@ func TestV0ThinSliceChecklist(t *testing.T) {
 			t.Errorf("matrix: --preview was rejected as an unrecognized extra argument (flag not accepted): %q", matrixStderr)
 		}
 
-		_, alignStderr, _ := runBinary(t, root, "align")
+		// align runs against a HERMETIC fixture (a fake judge on a
+		// feature/<name> build branch), NEVER the live checkout: a plain
+		// `go test ./...` must make no network call and leave no stray
+		// deviation-report.md in this working tree (CLAUDE.md: "no network
+		// in any test"; the judge is verdi.yaml's align.judge_cmd, which on
+		// this repo is the live `claude -p` — off-limits to a test). The
+		// fixture's own report lands inside its t.TempDir(), so this proves
+		// align (computed + judged, report shape consumable) is really wired
+		// end to end, hermetically.
+		alignRoot := buildAlignFixtureRepo(t)
+		alignStdout, alignStderr, alignCode := runBinary(t, alignRoot, "align")
 		assertNotOutOfV0(t, "align", alignStderr)
+		if alignCode != 0 {
+			t.Fatalf("verdi align (hermetic fixture): exit = %d, want 0\nstdout: %q\nstderr: %q", alignCode, alignStdout, alignStderr)
+		}
+		reportPath := filepath.Join(alignRoot, ".verdi", "specs", "active", "align-smoke", "deviation-report.md")
+		reportData, err := os.ReadFile(reportPath)
+		if err != nil {
+			t.Fatalf("verdi align: expected a deviation-report.md at %s: %v", reportPath, err)
+		}
+		fmBytes, _, err := artifact.SplitFrontmatter(reportData)
+		if err != nil {
+			t.Fatalf("verdi align: report at %s has no decodable frontmatter: %v", reportPath, err)
+		}
+		if _, err := artifact.DecodeDeviation(fmBytes); err != nil {
+			t.Fatalf("verdi align: report shape is not consumable (DecodeDeviation): %v\n%s", err, reportData)
+		}
 	})
 
 	// Checklist: "workbench: rendered corpus, verdict viewer with
@@ -261,4 +289,85 @@ func TestV0ThinSliceChecklist(t *testing.T) {
 			}
 		}
 	})
+}
+
+// alignFakeJudgeScript is a tiny hermetic stand-in for the real `claude -p`
+// judge, honoring spike S5's envelope shape (a JSON object whose `result`
+// is itself the judge's `{"findings":[...]}` payload as a string). It reads
+// nothing from the network and ignores its stdin prompt, returning an empty
+// findings set deterministically — the established fake-judge pattern from
+// internal/align's own tests, so `verdi align` runs its full judged section
+// with no live LLM call (CLAUDE.md: "no network in any test").
+const alignFakeJudgeScript = "#!/bin/sh\ncat <<'EOF'\n{\"is_error\":false,\"subtype\":\"success\",\"result\":\"{\\\"findings\\\":[]}\"}\nEOF\n"
+
+// alignSmokeSpecMD is a minimal accepted feature spec with NO impacted
+// services (so align's computed section is vacuously "(none)" and its
+// RealRunner is constructed but never exec'd — no toolchain call, no
+// network), letting `verdi align` reach and exercise the judged section
+// against the fake judge and write a decodable deviation-report.md.
+const alignSmokeSpecMD = `---
+id: spec/align-smoke
+kind: spec
+class: feature
+title: "Align Smoke"
+status: accepted-pending-build
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }
+---
+# body
+`
+
+// buildAlignFixtureRepo stands up a hermetic fixturegit store carrying one
+// accepted feature spec and a fake judge (wired through verdi.yaml's
+// align.judge_cmd), on the feature/<name> build branch `verdi build start`
+// cuts (storyresolve.ResolveBuildSpec's inference target). Running `verdi
+// align` here exercises the verb's full pipeline against a deterministic
+// fake — never the live checkout, never the network — and its report lands
+// inside this temp dir, so a plain `go test ./...` leaves no stray artifact
+// in the developer's working tree. Returns the fixture's store root.
+func buildAlignFixtureRepo(t *testing.T) string {
+	t.Helper()
+
+	judgeDir := t.TempDir()
+	judgePath := filepath.Join(judgeDir, "fakejudge.sh")
+	if err := os.WriteFile(judgePath, []byte(alignFakeJudgeScript), 0o755); err != nil {
+		t.Fatalf("writing fake judge: %v", err)
+	}
+
+	// toolchain: is present so cmdAlign constructs a (real, but never
+	// exec'd — the spec impacts no service) upstream.Runner; align.Compute
+	// requires a non-nil Runner even when no service is impacted.
+	verdiYAML := "schema: verdi.layout/v1\n" +
+		"align:\n" +
+		"  judge_cmd: [" + strconv.Quote(judgePath) + "]\n" +
+		"  judge_required: false\n" +
+		"toolchain:\n" +
+		"  module: example.com/fake-toolchain\n" +
+		"  commit: 0000000000000000000000000000000000000000\n"
+
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                       verdiYAML,
+			".verdi/specs/active/align-smoke/spec.md": alignSmokeSpecMD,
+		},
+		Message: "scaffold + accepted spec",
+	}})
+
+	gitCheckoutBranch(t, repo.Dir, "feature/align-smoke")
+	return repo.Dir
+}
+
+// gitCheckoutBranch cuts and switches to a new branch at HEAD in dir — the
+// build-branch shape `verdi align` infers its spec from. A test
+// infrastructure failure (not a verb-behavior result), so it fails the
+// calling test outright.
+func gitCheckoutBranch(t *testing.T, dir, branch string) {
+	t.Helper()
+	cmd := exec.Command("git", "checkout", "-q", "-b", branch)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b %s in %s: %v\n%s", branch, dir, err, out)
+	}
 }
