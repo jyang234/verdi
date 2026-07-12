@@ -167,22 +167,25 @@ History, not work — the v0 thin slice, complete and frozen. See
 
 ## v1 checklist
 
-The live list, per ratification round four (the Verdesign spec
+Delivered 2026-07-11 (the v1 build, PLAN-V1.md; every item's exit
+criteria proven, final whole-branch review READY-AFTER-FIXES with the one
+fix applied — see the round-4 execution ledger). Originally: the live
+list, per ratification round four (the Verdesign spec
 realignment). Build contract: `PLAN-V1.md`.
 
-- [ ] contract v2: object model, story class, edges, object manifest
-- [ ] lint v2: VL-015..018 + rescopes of the v0 rules
-- [ ] feature fold + outcome floor + stub reconciliation
-- [ ] ladder machinery: spec-stale / pending-supersession flags, cascade
+- [x] contract v2: object model, story class, edges, object manifest
+- [x] lint v2: VL-015..018 + rescopes of the v0 rules
+- [x] feature fold + outcome floor + stub reconciliation
+- [x] ladder machinery: spec-stale / pending-supersession flags, cascade
       verdicts, re-affirmations
-- [ ] conflict gate (declared + judged) + sweep + exemption audit
-- [ ] lifecycle verbs v2 (`design start --kind`, `build start`, deprecation
+- [x] conflict gate (declared + judged) + sweep + exemption audit
+- [x] lifecycle verbs v2 (`design start --kind`, `build start`, deprecation
       alias for `feature start`)
-- [ ] board v2: spec-is-source projection, scratch tier, board-owned git
+- [x] board v2: spec-is-source projection, scratch tier, board-owned git
       affordance
-- [ ] review-sticky forge round-trip (`[vd:<object-id>]` tokens, inbox tray)
-- [ ] dex/lens updates for the two-level model
-- [ ] v0 grandfathering (frozen v0 artifacts remain valid under their own
+- [x] review-sticky forge round-trip (`[vd:<object-id>]` tokens, inbox tray)
+- [x] dex/lens updates for the two-level model
+- [x] v0 grandfathering (frozen v0 artifacts remain valid under their own
       schemas)
 
 ## Open questions (carried, owned, not hidden)
