@@ -327,6 +327,54 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 	}
 }
 
+// The case file wears its class (owner directive): a small stamp in the
+// case-file lockup — "feature" on feature walls, "story · <tracker-ref>"
+// on story walls (ref omitted when absent), "spike · <tracker-ref>" on
+// spikes — in every mode; the sealed record needs it just as much. A
+// projection with no class (grandfathered callers) gets no stamp, and a
+// spec with no case-file header (no problem/outcome) has nowhere to
+// wear one.
+func TestBoardLegibility_CaseClassTag(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+	body := getBoard(t, h, boardFixtureName).Body.String()
+	if !strings.Contains(body, `<span class="case-class-tag case-class-tag--feature" data-testid="case-class-tag">feature</span>`) {
+		t.Error("feature wall's case file wears no feature stamp")
+	}
+
+	cases := []struct {
+		name string
+		proj BoardProjection
+		want string
+	}{
+		{"story with tracker ref", BoardProjection{Class: "story", StoryRef: "jira:LOAN-7"},
+			`<span class="case-class-tag case-class-tag--story" data-testid="case-class-tag">story · <span class="case-class-ref">jira:LOAN-7</span></span>`},
+		{"story without tracker ref", BoardProjection{Class: "story"},
+			`<span class="case-class-tag case-class-tag--story" data-testid="case-class-tag">story</span>`},
+		{"spike", BoardProjection{Class: "story", StoryRef: "jira:LOAN-9", Spike: true},
+			`<span class="case-class-tag case-class-tag--spike" data-testid="case-class-tag">spike · <span class="case-class-ref">jira:LOAN-9</span></span>`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Every mode: the mirror and the sealed record wear the stamp too.
+			for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
+				proj := tc.proj
+				proj.Spec, proj.Mode = "s", mode
+				proj.Problem, proj.Outcome = "p", "o"
+				if got := renderBoardRegion(&proj, &boardGitState{}); !strings.Contains(got, tc.want) {
+					t.Errorf("%s board missing class stamp %s", mode, tc.want)
+				}
+			}
+		})
+	}
+
+	// No class → no stamp (never an empty tag).
+	bare := &BoardProjection{Spec: "s", Mode: modeReadOnly, Problem: "p", Outcome: "o"}
+	if strings.Contains(renderBoardRegion(bare, &boardGitState{}), "case-class-tag") {
+		t.Error("a projection with no class still renders a class stamp")
+	}
+}
+
 // A new sticky lands at the BOTTOM of its type's lane (owner directive):
 // questions queue beneath the open-questions column they may graduate
 // into, decisions-needed beneath decisions, comments and agent tasks in

@@ -162,6 +162,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	if p.Problem != "" || p.Outcome != "" {
 		b.WriteString(`<header class="board-placards case-file">`)
 		b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
+		writeCaseClassTag(&b, p)
 		if p.Problem != "" {
 			b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p>` + esc(p.Problem) + `</p></div>`)
 		}
@@ -321,6 +322,30 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	b.WriteString(`</div>`) // board-layout
 
 	return b.String()
+}
+
+// writeCaseClassTag stamps the spec's class on the case-file lockup
+// (owner directive: a wall must say whether it is a feature or a story —
+// 02 §Kind registry's split is invisible without it). "feature" for the
+// outcome-shaped plan; "story · <tracker-ref>" for the unit of build
+// (ref omitted when the spec carries none); "spike · <tracker-ref>" for
+// a story with spike: true. Rendered in every mode — the sealed record
+// wears it like the live wall — and skipped entirely for a projection
+// with no class (never an empty stamp).
+func writeCaseClassTag(b *strings.Builder, p *BoardProjection) {
+	if p.Class == "" {
+		return
+	}
+	esc := stdhtml.EscapeString
+	name := p.Class
+	if p.Spike {
+		name = "spike"
+	}
+	b.WriteString(`<span class="case-class-tag case-class-tag--` + esc(name) + `" data-testid="case-class-tag">` + esc(name))
+	if p.Class == "story" && p.StoryRef != "" {
+		b.WriteString(` · <span class="case-class-ref">` + esc(p.StoryRef) + `</span>`)
+	}
+	b.WriteString(`</span>`)
 }
 
 // zoneLabelText names each zone band as a newcomer reads it.
