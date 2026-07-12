@@ -29,6 +29,7 @@ import (
 // reads its fields from; unknown fields fail closed.
 type boardAPIRequest struct {
 	ID      string  `json:"id,omitempty"`
+	Ref     string  `json:"ref,omitempty"`
 	Text    string  `json:"text,omitempty"`
 	From    string  `json:"from,omitempty"`
 	To      string  `json:"to,omitempty"`
@@ -106,6 +107,12 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			err = s.actionRelates(ctx, name, proj, req)
 		case "relates-graduate":
 			err = s.actionRelatesGraduate(name, proj, req)
+		case "pin":
+			err = s.actionPin(ctx, name, proj, req)
+		case "ref-trash":
+			err = s.actionRefTrash(name, proj, req)
+		case "object-trash":
+			err = s.actionObjectTrash(name, proj, req)
 		case "annotation-delete":
 			err = s.actionAnnotationDelete(proj, req)
 		case "edge-delete":
@@ -247,13 +254,18 @@ func (s *boardSpecServer) actionEdge(name string, proj *BoardProjection, req boa
 		return err
 	}
 	link := artifact.Link{Type: artifact.LinkType(req.Type), Ref: edgeRefFor(proj, name, req.To), Note: req.Note}
-	return s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
+	if err := s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
 		e, err := d.AppendDecisionLink(req.From, link)
 		if err != nil {
 			return nil, err
 		}
 		return []splice.Edit{e}, nil
-	})
+	}); err != nil {
+		return err
+	}
+	// Drawing a typed edge to a pinned target IS the pin's graduation
+	// (02 §Record schemas): the record flips, the card stays.
+	return s.graduatePinsFor(proj, req.To)
 }
 
 // Sticky landing geometry: the rendered sticky footprint estimate
@@ -502,8 +514,12 @@ func (s *boardSpecServer) actionRelatesGraduate(name string, proj *BoardProjecti
 	}); err != nil {
 		return err
 	}
-	_, err := boardio.GraduateStickies(boardio.AnnotationsDir(s.root), []string{req.ID})
-	return err
+	if _, err := boardio.GraduateStickies(boardio.AnnotationsDir(s.root), []string{req.ID}); err != nil {
+		return err
+	}
+	// The graduated thread's typed edge also graduates any pin holding
+	// its target (02 §Record schemas).
+	return s.graduatePinsFor(proj, thread.To)
 }
 
 // actionAnnotationDelete: a scratch sticky or an untyped relates thread
@@ -642,11 +658,17 @@ func (s *boardSpecServer) actionPosition(name string, proj *BoardProjection, req
 	return boardlayout.WriteFile(s.specDir(name), stored, live)
 }
 
-// actionStickyPosition: a sticky drag landed — the position lives inside
-// the annotation record (02 §Record schemas: board {story, x, y}).
+// actionStickyPosition: a sticky (or pinned-reference) drag landed — the
+// position lives inside the annotation record (02 §Record schemas:
+// board {story, x, y}); pins drag like stickies.
 func (s *boardSpecServer) actionStickyPosition(proj *BoardProjection, req boardAPIRequest) error {
 	for _, st := range proj.Stickies {
 		if st.ID == req.ID {
+			return boardio.RepositionSticky(boardio.AnnotationsDir(s.root), req.ID, req.X, req.Y)
+		}
+	}
+	for _, rc := range proj.RefCards {
+		if rc.Pinned && rc.PinID == req.ID {
 			return boardio.RepositionSticky(boardio.AnnotationsDir(s.root), req.ID, req.X, req.Y)
 		}
 	}

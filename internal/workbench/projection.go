@@ -41,11 +41,17 @@ type cardView struct {
 	Anchored []reviewStickyView `json:"anchored,omitempty"`
 }
 
-// refCardView is a reference card — an edge target outside this spec.
+// refCardView is a reference card — an edge target outside this spec,
+// or a pinned reference (type pin, 02 §Record schemas: planning
+// material on the wall before any edge exists). One card per ref, ever:
+// a ref both pinned and edge-derived renders once, and while the pin
+// record lives its stored board position wins.
 type refCardView struct {
-	Ref string  `json:"ref"`
-	X   float64 `json:"x"`
-	Y   float64 `json:"y"`
+	Ref    string  `json:"ref"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Pinned bool    `json:"pinned,omitempty"`
+	PinID  string  `json:"pinId,omitempty"`
 }
 
 // edgeView is one yarn element: a declared spec edge or an
@@ -155,15 +161,35 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 		p.Edges = append(p.Edges, edgeView{Type: string(l.Type), From: "spec", To: edgeEndpoint(specName, declared, l.Ref), Layer: "spec"})
 	}
 
-	// (3) Annotation streams: this board's free-floating stickies and its
-	// untyped relates threads. Graduated records have already become spec
-	// content — they no longer render (05 §Workbench: graduation is an
-	// ordinary edit; the sticky dies into the document).
+	// (3) Annotation streams: this board's free-floating stickies, its
+	// untyped relates threads, and its pinned references. Graduated
+	// records have already become spec content — they no longer render
+	// (05 §Workbench: graduation is an ordinary edit; the sticky dies
+	// into the document, and a graduated pin's card files into the
+	// references lane, held by its typed edge instead).
+	type pinView struct {
+		id   string
+		x, y float64
+	}
+	pins := map[string]pinView{}
 	for _, a := range annotations {
 		if a.Status == artifact.AnnotationGraduated {
 			continue
 		}
 		switch a.Type {
+		case artifact.AnnotationPin:
+			if a.Board == nil || a.Board.Story != specName || a.Target == nil {
+				continue
+			}
+			r, err := artifact.ParseRef(a.Target.Ref)
+			if err != nil {
+				continue // unreachable: DecodeAnnotation validated the ref
+			}
+			ref := string(r.Kind) + "/" + r.Name
+			if _, dup := pins[ref]; dup {
+				continue // one card per ref, ever: the first record wins
+			}
+			pins[ref] = pinView{id: a.ID, x: a.Board.X, y: a.Board.Y}
 		case artifact.AnnotationRelates:
 			from, okA := relatesEndpoint(specName, declared, a.Target)
 			to, okB := relatesEndpoint(specName, declared, a.TargetB)
@@ -216,6 +242,23 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 			}
 		}
 	}
+	// Pinned refs are reference cards too — DEDUPED against the
+	// edge-derived set (one card per ref, ever), and while the pin record
+	// lives its stored board position wins, injected as a stored position
+	// the display resolver treats like any other.
+	for ref := range pins {
+		refSet[ref] = true
+	}
+	if len(pins) > 0 {
+		merged := make(map[string]artifact.Position, len(stored)+len(pins))
+		for k, v := range stored {
+			merged[k] = v
+		}
+		for ref, pv := range pins {
+			merged[ref] = artifact.Position{X: pv.x, Y: pv.y}
+		}
+		stored = merged
+	}
 	refs := make([]string, 0, len(refSet))
 	for r := range refSet {
 		refs = append(refs, r)
@@ -240,7 +283,12 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	}
 	for _, r := range refs {
 		pos := positions[r]
-		p.RefCards = append(p.RefCards, refCardView{Ref: r, X: pos.X, Y: pos.Y})
+		rc := refCardView{Ref: r, X: pos.X, Y: pos.Y}
+		if pv, ok := pins[r]; ok {
+			rc.Pinned = true
+			rc.PinID = pv.id
+		}
+		p.RefCards = append(p.RefCards, rc)
 	}
 
 	return p, nil

@@ -219,11 +219,21 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		b.WriteString(`</div>`)
 	}
 
-	// Reference cards: external edge targets, so every declared edge has
-	// a visible endpoint.
+	// Reference cards: external edge targets (every declared edge has a
+	// visible endpoint) and pinned references (the scratch tier's planning
+	// material, 05) — the SAME paper, one card per ref; a live pin adds
+	// the pushpin marking, the scratch lean, and the drag affordance.
 	for _, rc := range p.RefCards {
-		b.WriteString(`<div class="refcard" data-testid="` + esc(refCardTestID(rc.Ref)) + `" data-ref="` + esc(rc.Ref) + `" data-ref-kind="` + esc(refKindOf(rc.Ref)) + `" style="left:` + px(rc.X) + `;top:` + px(rc.Y) + `">`)
-		b.WriteString(`<span class="card-kind"><span class="card-kind-label">reference</span><span class="card-kind-id">` + esc(refKindOf(rc.Ref)) + `</span></span>`)
+		cls := "refcard"
+		pinAttrs := ""
+		label := "reference"
+		if rc.Pinned {
+			cls += " refcard--pinned"
+			pinAttrs = ` data-pin-id="` + esc(rc.PinID) + `"`
+			label = "pinned reference"
+		}
+		b.WriteString(`<div class="` + cls + `" data-testid="` + esc(refCardTestID(rc.Ref)) + `" data-ref="` + esc(rc.Ref) + `" data-ref-kind="` + esc(refKindOf(rc.Ref)) + `"` + pinAttrs + ` style="left:` + px(rc.X) + `;top:` + px(rc.Y) + `">`)
+		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + label + `</span><span class="card-kind-id">` + esc(refKindOf(rc.Ref)) + `</span></span>`)
 		b.WriteString(`<span class="card-ref" title="` + esc(rc.Ref) + `">` + esc(rc.Ref) + `</span>`)
 		b.WriteString(`</div>`)
 	}
