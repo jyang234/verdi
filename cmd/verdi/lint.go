@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/lint"
 	"github.com/OWNER/verdi/internal/store"
 )
@@ -38,7 +37,10 @@ func runLintVerb(_ []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	lctx := buildLintContext(ctx, root)
+	// lint.BuildContext (lifted there from this file, verbatim behavior)
+	// derives the git/CI context per I-14 — shared with the disclosures
+	// view's enumeration so both run the same context-construction path.
+	lctx := lint.BuildContext(ctx, root)
 
 	findings, err := lint.NewEngine().Run(ctx, root, lctx, lint.Options{})
 	if err != nil {
@@ -54,41 +56,4 @@ func runLintVerb(_ []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return exit
-}
-
-// buildLintContext derives lint.Context from git (CurrentBranch via
-// symbolic-ref; DefaultBranch via the configured remote's HEAD symbolic
-// ref, or a CI-declared default branch when running in CI; DiffBase via
-// merge-base(HEAD, DefaultBranch) when DefaultBranch is known) per I-14.
-// Every git/CI lookup failure degrades to "unknown" rather than aborting
-// the lint run — the git-aware rules (VL-004, VL-010) already treat an
-// unknown Context field as "can't prove it, don't enforce" (three-valued
-// honesty, constitution 2), which is the correct behavior for a checkout
-// this function cannot fully introspect (shallow clone, detached HEAD, no
-// configured remote).
-func buildLintContext(ctx context.Context, root string) lint.Context {
-	env := lint.ReadCIEnv()
-
-	var lctx lint.Context
-	lctx.InCI = env.InCI
-	lctx.TargetBranch = env.TargetBranch
-
-	if branch, err := gitx.CurrentBranch(ctx, root); err == nil {
-		lctx.CurrentBranch = branch
-	}
-
-	lctx.DefaultBranch = env.DefaultBranch
-	if lctx.DefaultBranch == "" {
-		if branch, err := gitx.DefaultBranch(ctx, root); err == nil {
-			lctx.DefaultBranch = branch
-		}
-	}
-
-	if lctx.DefaultBranch != "" {
-		if base, err := gitx.MergeBase(ctx, root, "HEAD", lctx.DefaultBranch); err == nil {
-			lctx.DiffBase = base
-		}
-	}
-
-	return lctx
 }

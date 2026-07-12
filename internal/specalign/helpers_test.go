@@ -42,7 +42,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/lint"
 )
 
@@ -147,34 +146,11 @@ func assertNotOutOfV0(t *testing.T, verb, stderr string) {
 	}
 }
 
-// buildLintContext duplicates cmd/verdi/lint.go's own buildLintContext
-// exactly (that function is unexported in package main and this test
-// package cannot import a main package) so that "lint wired" is proven by
-// running the SAME context-construction path the real `verdi lint`
-// verb runs, not a simplified stand-in.
+// buildLintContext is lint.BuildContext — the duplicate this helper used
+// to carry (cmd/verdi's then-unexported buildLintContext) was lifted into
+// internal/lint itself for the disclosures-view enumeration
+// (spec/disclosures-panel), so "lint wired" is now proven by literally
+// the one shared context-construction path, not a maintained copy.
 func buildLintContext(ctx context.Context, root string) lint.Context {
-	env := lint.ReadCIEnv()
-
-	var lctx lint.Context
-	lctx.InCI = env.InCI
-	lctx.TargetBranch = env.TargetBranch
-
-	if branch, err := gitx.CurrentBranch(ctx, root); err == nil {
-		lctx.CurrentBranch = branch
-	}
-
-	lctx.DefaultBranch = env.DefaultBranch
-	if lctx.DefaultBranch == "" {
-		if branch, err := gitx.DefaultBranch(ctx, root); err == nil {
-			lctx.DefaultBranch = branch
-		}
-	}
-
-	if lctx.DefaultBranch != "" {
-		if base, err := gitx.MergeBase(ctx, root, "HEAD", lctx.DefaultBranch); err == nil {
-			lctx.DiffBase = base
-		}
-	}
-
-	return lctx
+	return lint.BuildContext(ctx, root)
 }

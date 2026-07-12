@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/OWNER/verdi/internal/fixturegit"
+	"github.com/OWNER/verdi/internal/lint"
 )
 
 const lintTestManifest = `schema: verdi.layout/v1
@@ -168,7 +169,7 @@ func TestBuildLintContext_NoRemote_UnknownDefaultBranch(t *testing.T) {
 		t.Setenv(k, "")
 	}
 
-	lctx := buildLintContext(t.Context(), repo.Dir)
+	lctx := lint.BuildContext(t.Context(), repo.Dir)
 	if lctx.DefaultBranch != "" {
 		t.Fatalf("DefaultBranch = %q, want empty (no origin remote configured)", lctx.DefaultBranch)
 	}
@@ -188,7 +189,7 @@ func TestBuildLintContext_CIEnv(t *testing.T) {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	t.Setenv("CI_MERGE_REQUEST_TARGET_BRANCH_NAME", "main")
 
-	lctx := buildLintContext(t.Context(), repo.Dir)
+	lctx := lint.BuildContext(t.Context(), repo.Dir)
 	if !lctx.InCI {
 		t.Fatal("InCI = false, want true")
 	}

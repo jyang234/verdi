@@ -1,5 +1,11 @@
 package lint
 
+import (
+	"context"
+
+	"github.com/OWNER/verdi/internal/gitx"
+)
+
 // Context carries the git- and CI-derived facts the git-aware rules need
 // (I-14). The CLI fills this from git (symbolic-ref/merge-base — see
 // internal/gitx's CurrentBranch/DefaultBranch/MergeBase) and, when
@@ -43,4 +49,39 @@ func (c Context) EnforceDraftGate() bool {
 		return true
 	}
 	return false
+}
+
+// BuildContext derives Context from git and CI environment signals per
+// I-14: CurrentBranch via symbolic-ref; DefaultBranch via a CI-declared
+// default branch or the configured remote's HEAD (ResolveDefaultBranch);
+// DiffBase via merge-base(HEAD, DefaultBranch) when DefaultBranch is
+// known. Every git/CI lookup failure degrades to "unknown" rather than
+// aborting — the git-aware rules already treat an unknown field as
+// "can't prove it, don't enforce" (three-valued honesty, constitution 2).
+//
+// Lifted from cmd/verdi/lint.go's buildLintContext (verbatim behavior) so
+// the disclosures-view enumeration (internal/disclosureview,
+// spec/disclosures-panel ac-1) runs the SAME context-construction path
+// `verdi lint` runs — and so internal/specalign's test no longer needs
+// its own documented duplicate of it.
+func BuildContext(ctx context.Context, root string) Context {
+	env := ReadCIEnv()
+
+	var lctx Context
+	lctx.InCI = env.InCI
+	lctx.TargetBranch = env.TargetBranch
+
+	if branch, err := gitx.CurrentBranch(ctx, root); err == nil {
+		lctx.CurrentBranch = branch
+	}
+
+	lctx.DefaultBranch = ResolveDefaultBranch(ctx, root)
+
+	if lctx.DefaultBranch != "" {
+		if base, err := gitx.MergeBase(ctx, root, "HEAD", lctx.DefaultBranch); err == nil {
+			lctx.DiffBase = base
+		}
+	}
+
+	return lctx
 }
