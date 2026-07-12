@@ -195,6 +195,16 @@ func forgeCredentialsPresent(kind string) bool {
 // use, so equivalent disclosed-unproven states read in one vocabulary
 // wherever they appear (spec/disclosure-legibility#ac-1).
 func reviewUnavailableReason(kind string) string {
+	return disclosure.Render(reviewUnavailableDisclosure(kind))
+}
+
+// reviewUnavailableDisclosure is the structured seam value behind
+// reviewUnavailableReason — the ONE decision point for the
+// configured-but-unreachable review-feed disclosure. serve.go hands it to
+// the workbench's /disclosures page (workbench.Deps.Disclosures,
+// spec/disclosures-panel ac-1) so the panel enumerates the same value the
+// board chrome and list_annotations render, never a re-derived copy.
+func reviewUnavailableDisclosure(kind string) disclosure.Disclosure {
 	text := fmt.Sprintf("forge %q is configured (verdi.yaml) but no credentials are available to reach it; review state cannot be shown", kind)
-	return disclosure.Render(disclosure.New("mcp:review-feed", "", text))
+	return disclosure.New("mcp:review-feed", "", text)
 }

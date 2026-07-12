@@ -19,6 +19,7 @@ import (
 	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/boardio"
 	"github.com/OWNER/verdi/internal/boardlayout"
+	"github.com/OWNER/verdi/internal/disclosure"
 	"github.com/OWNER/verdi/internal/gitx"
 )
 
@@ -42,6 +43,16 @@ type Deps struct {
 	// (cmd/verdi's serve.go/mcp.go) can set it; unit tests wiring a feed
 	// directly leave it empty.
 	ReviewUnavailable string
+
+	// Disclosures carries the serving process's own disclosed context as
+	// structured seam values (e.g. the review-feed-unavailable state
+	// behind ReviewUnavailable, as its Disclosure rather than its rendered
+	// line) for the /disclosures page (spec/disclosures-panel ac-1): the
+	// page appends these to its fresh per-render enumeration, so
+	// process-context disclosures and store-derived ones read in the one
+	// view. Only the caller that computes that context (cmd/verdi's
+	// serve.go) can supply them.
+	Disclosures []disclosure.Disclosure
 }
 
 // boardSpecServer holds the board's dependencies for one store root.

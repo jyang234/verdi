@@ -37,6 +37,12 @@ func RegisterRoutesWith(mux *http.ServeMux, root string, deps Deps) {
 	// turn a wrong-method request on a real route into a confusing 404.
 	mux.HandleFunc("/a/{kind}/{name}", corpusHandler(root))
 
+	// The disclosures page (spec/disclosures-panel): the checkout's
+	// current disclosures, enumerated fresh per render through the shared
+	// internal/disclosureview compute path (the dex ships the read-only
+	// edition of the same view).
+	mux.HandleFunc("/disclosures", disclosuresHandler(root, deps.Disclosures))
+
 	// The verdict viewer: cross-commit per-AC diff of a story's derived
 	// verdicts.json snapshots.
 	mux.HandleFunc("/verdict/{story...}", verdictHandler(root))

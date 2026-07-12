@@ -65,6 +65,11 @@ func renderHome(root string) ([]byte, error) {
 	body.WriteString(stdhtml.EscapeString(root))
 	body.WriteString(`</code></p>`)
 
+	// The disclosures view (spec/disclosures-panel): one landing-page
+	// pointer so the checkout's "what is verdi not proving right now"
+	// surface is discoverable, not tribal knowledge.
+	body.WriteString(`<p class="home-disclosures"><a href="/disclosures">Disclosures</a> — every claim this checkout is currently not proving, in one view.</p>`)
+
 	if ix, err := index.Build(root); err != nil {
 		body.WriteString(`<p class="notice">Could not read the corpus for this store: `)
 		body.WriteString(stdhtml.EscapeString(err.Error()))

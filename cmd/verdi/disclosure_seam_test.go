@@ -55,6 +55,17 @@ func TestDisclosureSeam_AC1_RenderThroughTheSharedSeam(t *testing.T) {
 			t.Fatalf("reviewUnavailableReason() = %q, want the shared seam's rendering %q", got, want)
 		}
 	})
+
+	t.Run("review_unavailable structured value is the rendered line's own input", func(t *testing.T) {
+		// spec/disclosures-panel ac-1: the /disclosures page enumerates
+		// reviewUnavailableDisclosure (via workbench.Deps.Disclosures);
+		// the board/mcp line renders reviewUnavailableReason. One decision
+		// point: the line IS the structured value rendered, so the panel
+		// item and the chrome notice can never drift.
+		if got, want := reviewUnavailableReason("gitlab"), disclosure.Render(reviewUnavailableDisclosure("gitlab")); got != want {
+			t.Fatalf("reviewUnavailableReason() = %q, want Render(reviewUnavailableDisclosure()) = %q", got, want)
+		}
+	})
 }
 
 // TestDisclosureSeam_AC2_EquivalentStatesProduceIdenticalText is

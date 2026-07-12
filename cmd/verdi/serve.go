@@ -120,6 +120,17 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 		// silently not-under-review (I-1(b)).
 		deps.ReviewUnavailable = reviewUnavailableReason(configuredKind)
 	}
+	if forgePort == nil && configuredKind != "" {
+		// The /disclosures page's process-context input
+		// (spec/disclosures-panel ac-1): the same structured seam value
+		// behind reviewUnavailableReason, under the same condition
+		// mcpserve's ReviewUnavailable uses below — deliberately NOT the
+		// board switch's narrower case, because a canned harness feed
+		// (VERDI_REVIEW_FEED) substituting for review comments does not
+		// make the live forge any more reachable; the checkout's
+		// disclosed context holds either way.
+		deps.Disclosures = append(deps.Disclosures, reviewUnavailableDisclosure(configuredKind))
+	}
 
 	httpLn, err := net.Listen("tcp", httpAddr)
 	if err != nil {
