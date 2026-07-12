@@ -15,12 +15,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/artifact/splice"
 	"github.com/OWNER/verdi/internal/boardio"
 	"github.com/OWNER/verdi/internal/boardlayout"
+	"github.com/OWNER/verdi/internal/designscaffold"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/store"
 )
@@ -88,7 +91,17 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if proj.Mode != modeAuthoring {
+		// stub-instantiate is deliberately EXEMPT from the authoring-only
+		// gate (spec/scoping-canvas ac-6, flagged judgment call): it never
+		// edits the SERVED spec at all — it scaffolds an unrelated new
+		// story spec on a fresh, un-checked-out branch via git plumbing —
+		// so an accepted-pending-build wall (permanently sealed, never
+		// authoring) must still be able to run it. Its own guard (class
+		// feature, status accepted-pending-build) is enforced inside the
+		// action itself, against the wall's own state rather than the
+		// generic writes-need-authoring-mode posture every other action
+		// shares.
+		if action != "stub-instantiate" && proj.Mode != modeAuthoring {
 			writeJSONError(w, http.StatusForbidden, fmt.Sprintf("board for %s is in %s mode; only an authoring board (draft spec on a design branch) accepts writes", name, proj.Mode))
 			return
 		}
@@ -103,6 +116,10 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			err = s.actionSticky(name, proj, req)
 		case "sticky-graduate":
 			err = s.actionStickyGraduate(name, proj, req)
+		case "stub-graduate":
+			err = s.actionStubGraduate(name, proj, req)
+		case "stub-instantiate":
+			err = s.actionStubInstantiate(ctx, name, proj, req)
 		case "relates":
 			err = s.actionRelates(ctx, name, proj, req)
 		case "relates-graduate":
@@ -360,6 +377,9 @@ func newAnnotation(typ artifact.AnnotationType, body string) (*artifact.Annotati
 // stickyCreatableTypes is the closed set of annotation types an author
 // can pin as a free-floating sticky (02 §Record schemas; relates is a
 // thread and review is the MR's voice — neither is sticky-creatable).
+// story/spike (round 5.4) are NOT in this generic set — they are
+// feature-class-only proto-stickies (protoStickyTypes below), gated
+// separately since this set alone cannot see the wall's class.
 var stickyCreatableTypes = map[artifact.AnnotationType]bool{
 	artifact.AnnotationComment:        true,
 	artifact.AnnotationQuestion:       true,
@@ -367,21 +387,36 @@ var stickyCreatableTypes = map[artifact.AnnotationType]bool{
 	artifact.AnnotationAgentTask:      true,
 }
 
+// protoStickyTypes is the scoping canvas's typed proto-sticky set (02
+// §Record schemas, round 5.4, DC-5): legal ONLY on a feature-class wall
+// (spec/scoping-canvas item 5a) — a story sticky's yarn reads as AC
+// coverage, a spike sticky's as open-question resolution, neither of
+// which means anything on a story wall.
+var protoStickyTypes = map[artifact.AnnotationType]bool{
+	artifact.AnnotationStory: true,
+	artifact.AnnotationSpike: true,
+}
+
 // actionSticky: "Add sticky" — a free-floating sticky of the author's
 // explicitly chosen type (owner UAT round 6, item 2: choosing is part
 // of creating; nothing defaults silently, unknown types fail closed) in
 // the annotation layer; it never dirties the spec working tree (05
-// §Workbench "The scratch tier").
+// §Workbench "The scratch tier"). story/spike additionally require a
+// feature-class wall (proj.Class, already carried by the projection) —
+// a plain-language refusal everywhere else.
 func (s *boardSpecServer) actionSticky(name string, proj *BoardProjection, req boardAPIRequest) error {
 	if req.Text == "" {
 		return fmt.Errorf("sticky requires text")
 	}
 	typ := artifact.AnnotationType(req.Type)
 	if req.Type == "" {
-		return fmt.Errorf("sticky requires a type (one of comment, question, decision-needed, agent-task)")
+		return fmt.Errorf("sticky requires a type (one of comment, question, decision-needed, agent-task, story, spike)")
 	}
-	if !stickyCreatableTypes[typ] {
-		return fmt.Errorf("sticky type %q is not creatable (one of comment, question, decision-needed, agent-task); fail closed", req.Type)
+	if !stickyCreatableTypes[typ] && !protoStickyTypes[typ] {
+		return fmt.Errorf("sticky type %q is not creatable (one of comment, question, decision-needed, agent-task, story, spike); fail closed", req.Type)
+	}
+	if protoStickyTypes[typ] && proj.Class != string(artifact.ClassFeature) {
+		return fmt.Errorf("sticky type %q is only creatable on a feature-class wall (the scoping canvas, 02 §Record schemas); this wall is class %s", req.Type, proj.Class)
 	}
 	a, err := newAnnotation(typ, req.Text)
 	if err != nil {
@@ -441,8 +476,203 @@ func (s *boardSpecServer) actionStickyGraduate(name string, proj *BoardProjectio
 	return err
 }
 
+// actionStubGraduate: a story (or spike) proto-sticky plus its coverage
+// (or resolution) yarn graduates into a declared stub (spec/scoping-
+// canvas ac-2/ac-5, DC-1/DC-2) — a story sticky's relates-threads to
+// acceptance criteria become the stub's acceptance_criteria list; a spike
+// sticky's threads to open questions become its resolves list. The slug
+// is RefSlug of the sticky's own body (its working title): a body that
+// does not produce a usable kebab-case slug is refused by the splice
+// write's own validate-before-write step, honestly, rather than silently
+// repaired here. Refuses with a plain-language error when the sticky has
+// no attribution yarn at all, or a slug collision with an already-
+// declared stub. On success, the sticky and every thread that fed the
+// stub flip to graduated — the same GraduateStickies machinery
+// sticky-graduate uses.
+func (s *boardSpecServer) actionStubGraduate(name string, proj *BoardProjection, req boardAPIRequest) error {
+	if req.ID == "" {
+		return fmt.Errorf("stub-graduate requires id")
+	}
+	var sticky *scratchStickyView
+	for i := range proj.Stickies {
+		if proj.Stickies[i].ID == req.ID {
+			sticky = &proj.Stickies[i]
+			break
+		}
+	}
+	if sticky == nil {
+		return fmt.Errorf("no sticky %q on this board", req.ID)
+	}
+
+	var spike bool
+	switch artifact.AnnotationType(sticky.Type) {
+	case artifact.AnnotationStory:
+		spike = false
+	case artifact.AnnotationSpike:
+		spike = true
+	default:
+		return fmt.Errorf("sticky %q is a %s, not a story or spike proto-sticky; stub-graduate does not apply", req.ID, sticky.Type)
+	}
+
+	wantPrefix, noun := "ac-", "acceptance criteria"
+	if spike {
+		wantPrefix, noun = "oq-", "open questions"
+	}
+	seen := map[string]bool{}
+	var ids []string
+	var threadIDs []string
+	for _, e := range proj.Edges {
+		if e.Layer != "annotation" {
+			continue
+		}
+		var other string
+		switch {
+		case e.From == req.ID:
+			other = e.To
+		case e.To == req.ID:
+			other = e.From
+		default:
+			continue
+		}
+		if !strings.HasPrefix(other, wantPrefix) {
+			continue
+		}
+		threadIDs = append(threadIDs, e.AnnotationID)
+		if !seen[other] {
+			seen[other] = true
+			ids = append(ids, other)
+		}
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("sticky %q has no attribution yarn to %s yet; draw coverage yarn first", req.ID, noun)
+	}
+	sort.Strings(ids)
+
+	slug := store.RefSlug(sticky.Body)
+	for _, sv := range proj.StubViews {
+		if sv.Slug == slug {
+			return fmt.Errorf("a stub named %q already exists on this spec (slug collision)", slug)
+		}
+	}
+
+	if err := s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
+		var e splice.Edit
+		var err error
+		if spike {
+			e, err = d.AppendSpikeStub(slug, ids)
+		} else {
+			e, err = d.AppendStub(slug, ids)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return []splice.Edit{e}, nil
+	}); err != nil {
+		return err
+	}
+
+	graduate := append([]string{req.ID}, threadIDs...)
+	_, err := boardio.GraduateStickies(boardio.AnnotationsDir(s.root), graduate)
+	return err
+}
+
+// stubInstantiatePlaceholderStoryRef is the `story:` tracker scalar a
+// stub-instantiated story spec carries: the story class requires one
+// unconditionally (validateStory), but stub-instantiate has no real
+// tracker ref of its own to give it (ac-6: bound to its stub by slug,
+// "with no new provenance record") — an explicit, scheme-shaped
+// placeholder rather than an empty field that would fail self-validation.
+const stubInstantiatePlaceholderStoryRef = "todo:REPLACE-ME"
+
+// actionStubInstantiate scaffolds a declared stub's story (or spike) spec
+// on a fresh design/<slug> branch, built entirely via git plumbing so the
+// SERVING checkout's HEAD, working tree, and real index are never touched
+// (spec/scoping-canvas ac-6) — the operator checks the new branch out
+// themselves. Guarded by the wall's own class and status (class feature,
+// status accepted-pending-build: "the owner's rule: implementations
+// build accepted specs only") rather than the generic authoring-mode
+// gate — see the handler's own comment on why this action is exempted
+// from it. Fails closed if the branch already exists (gitx.UpdateRef's
+// own atomicity).
+func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string, proj *BoardProjection, req boardAPIRequest) error {
+	slug := req.ID
+	if slug == "" {
+		return fmt.Errorf("stub-instantiate requires a stub slug (id)")
+	}
+	if proj.Class != string(artifact.ClassFeature) {
+		return fmt.Errorf("stub-instantiate is only available on a feature-class wall; this wall is class %s", proj.Class)
+	}
+	if proj.Status != "accepted-pending-build" {
+		return fmt.Errorf("stub-instantiate is only available on an accepted-pending-build spec (implementations build accepted specs only); this wall's status is %s", proj.Status)
+	}
+	var stub *StubView
+	for i := range proj.StubViews {
+		if proj.StubViews[i].Slug == slug {
+			stub = &proj.StubViews[i]
+			break
+		}
+	}
+	if stub == nil {
+		return fmt.Errorf("no stub %q declared on this spec", slug)
+	}
+
+	var links []designscaffold.StoryLink
+	if stub.Spike {
+		for _, oq := range stub.Resolves {
+			links = append(links, designscaffold.StoryLink{Type: artifact.LinkResolves, Ref: "spec/" + name + "#" + oq})
+		}
+	} else {
+		for _, ac := range stub.AcceptanceCriteria {
+			links = append(links, designscaffold.StoryLink{Type: artifact.LinkImplements, Ref: "spec/" + name + "#" + ac})
+		}
+	}
+
+	content := designscaffold.Story("spec/"+slug, stubInstantiatePlaceholderStoryRef, designscaffold.HumanizeName(slug), stub.Spike, links)
+
+	// Self-validate before ever touching the object database (CLAUDE.md:
+	// "never fake success" — mirrors design start's own pre-write check).
+	fm, _, err := artifact.SplitFrontmatter([]byte(content))
+	if err != nil {
+		return fmt.Errorf("workbench: internal error: stub-instantiate scaffold failed self-validation: %w", err)
+	}
+	if _, err := artifact.DecodeSpec(fm); err != nil {
+		return fmt.Errorf("workbench: internal error: stub-instantiate scaffold failed self-validation: %w", err)
+	}
+
+	baseCommit, err := gitx.RevParse(ctx, s.root, "HEAD")
+	if err != nil {
+		return err
+	}
+	blobSHA, err := gitx.WriteBlob(ctx, s.root, []byte(content))
+	if err != nil {
+		return err
+	}
+	path := ".verdi/specs/active/" + slug + "/spec.md"
+	tree, err := gitx.BuildTreeWithFile(ctx, s.root, baseCommit+"^{tree}", path, blobSHA)
+	if err != nil {
+		return err
+	}
+	msg := fmt.Sprintf("stub-instantiate: scaffold spec/%s from stub %q of spec/%s", slug, slug, name)
+	commit, err := gitx.CommitTree(ctx, s.root, tree, baseCommit, msg)
+	if err != nil {
+		return err
+	}
+	return gitx.UpdateRef(ctx, s.root, "refs/heads/design/"+slug, commit)
+}
+
 // relatesTarget builds a relates endpoint's pinned target record.
 func (s *boardSpecServer) relatesTarget(ctx context.Context, name string, proj *BoardProjection, endpoint string) (*artifact.Target, error) {
+	// A live sticky on this board (round 5.4, 02 §Record schemas: "a
+	// relates endpoint may name a board annotation by id") — most
+	// relevantly a story/spike proto-sticky's attribution yarn, but
+	// legal for any sticky, matching the amendment's own general wording.
+	// Stored as the bare annotation id, no selector: this is exactly what
+	// relatesEndpoint (projection.go) recognizes on the read side.
+	for _, st := range proj.Stickies {
+		if st.ID == endpoint {
+			return &artifact.Target{Ref: endpoint}, nil
+		}
+	}
 	head, err := gitx.RevParse(ctx, s.root, "HEAD")
 	if err != nil {
 		return nil, err
