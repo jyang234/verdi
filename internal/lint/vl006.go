@@ -46,6 +46,36 @@ func (r vl006) Check(in *RunInput) []Finding {
 		if isNewClassSpec(d.Spec) {
 			findings = append(findings, r.checkRequiredness(d)...)
 		}
+		findings = append(findings, r.checkStubACs(d)...)
+	}
+	return findings
+}
+
+// checkStubACs enforces that every entry in a stub's acceptance_criteria
+// names a declared acceptance criterion of the SAME spec. Stub.Validate
+// only checks each entry is a syntactically well-formed ac-<slug> id
+// (object.go) — a stub naming a nonexistent ac-99 decodes and validates
+// clean, leaving a dangling scoping reference. This is the syntactic
+// stub-surface check the house steer (vl006.go's doc comment) keeps under
+// VL-006 rather than minting a new VL number: same "is this spec's own
+// declared surface internally consistent?" shape as the requiredness and
+// anchor-resolution checks already folded here, not a decode-strictness
+// concern (VL-001's narrow scope). Runs for every non-grandfathered,
+// cleanly-decoded spec (grandfathered v0 specs never carried stubs; a
+// decode-failed doc has no Spec) — the same guard the Check loop already
+// applies.
+func (vl006) checkStubACs(d *Document) []Finding {
+	var findings []Finding
+	declaredAC := make(map[string]bool, len(d.Spec.AcceptanceCriteria))
+	for _, ac := range d.Spec.AcceptanceCriteria {
+		declaredAC[ac.ID] = true
+	}
+	for _, st := range d.Spec.Stubs {
+		for _, acID := range st.AcceptanceCriteria {
+			if !declaredAC[acID] {
+				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("stub %q names acceptance_criteria %s, which is not a declared acceptance criterion of this spec", st.Slug, acID)})
+			}
+		}
 	}
 	return findings
 }

@@ -474,6 +474,103 @@ func TestBoardSpec_ObjectTrash_Negative(t *testing.T) {
 	_ = before
 }
 
+// trashStubFixtureSpec is a feature spec whose stubs: scoping record
+// claims a subset of its ACs: ac-2 is claimed by the "badge-computes"
+// stub, ac-1 is claimed by nothing. Trashing a claimed AC must refuse
+// (stubs are not board-editable yet); trashing an unclaimed one still
+// works.
+const trashStubFixtureSpec = `---
+id: spec/refi-test
+kind: spec
+class: feature
+title: "Refi test flow"
+status: draft
+owners: [platform-team]
+problem: { text: "declined applicants act on stale decline reasons", anchor: "#problem" }
+outcome: { text: "declined applicants see a current decline flow", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a declined applicant sees the current reason", evidence: [attestation], anchor: "#ac-1" }
+  - { id: ac-2, text: "a decline reverses within one day", evidence: [behavioral, attestation], anchor: "#ac-2" }
+stubs:
+  - { slug: badge-computes, acceptance_criteria: [ac-2] }
+---
+# Refi test flow
+
+## Problem
+
+Prose.
+
+## Outcome
+
+Prose.
+
+## ac-1
+
+Prose.
+
+## ac-2
+
+Prose.
+`
+
+func newTrashStubFixture(t *testing.T) string {
+	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/active/" + boardFixtureName + "/spec.md": trashStubFixtureSpec,
+			".verdi/.gitignore": "data/\n",
+		},
+		Message: "seed stub trash fixture",
+	}})
+	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/"+boardFixtureName); err != nil {
+		t.Fatalf("checkout design branch: %v", err)
+	}
+	return repo.Dir
+}
+
+// TestBoardSpec_ObjectTrash_StubClaimsAC proves object-trash refuses to
+// remove an AC a stub's acceptance_criteria still claims (a stub with an
+// emptied AC list has no defined meaning — fail closed, name the stub),
+// while an unclaimed AC still trashes.
+func TestBoardSpec_ObjectTrash_StubClaimsAC(t *testing.T) {
+	specPath := func(root string) string {
+		return filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md")
+	}
+
+	// Happy: an AC no stub claims still trashes.
+	root := newTrashStubFixture(t)
+	h := NewHandler(root)
+	if rec := postBoardAPI(t, h, boardFixtureName, "object-trash", `{"id":"ac-1"}`); rec.Code != http.StatusOK {
+		t.Fatalf("trashing an unclaimed AC = %d, want 200\n%s", rec.Code, rec.Body.String())
+	}
+	if data, _ := os.ReadFile(specPath(root)); strings.Contains(string(data), "{ id: ac-1,") {
+		t.Errorf("ac-1's frontmatter entry survived a successful trash:\n%s", data)
+	}
+
+	// Negative: an AC a stub claims refuses, names the stub, and leaves the
+	// spec file byte-for-byte unchanged.
+	root2 := newTrashStubFixture(t)
+	h2 := NewHandler(root2)
+	before, err := os.ReadFile(specPath(root2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := postBoardAPI(t, h2, boardFixtureName, "object-trash", `{"id":"ac-2"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("trashing a stub-claimed AC = %d, want 400\n%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "badge-computes") {
+		t.Errorf("the refusal does not name the claiming stub: %s", rec.Body.String())
+	}
+	after, err := os.ReadFile(specPath(root2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("the refused trash changed the spec file:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
 func TestBoardSpec_PinActionsAreAuthoringOnly(t *testing.T) {
 	root := newBoardFixture(t)
 	// On the default branch the same draft renders read-only (05
