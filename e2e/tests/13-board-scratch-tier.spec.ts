@@ -27,7 +27,11 @@ test.describe("V1-P6: scratch tier", () => {
     );
   });
 
-  const stickyText = "open question: what about partial refunds?";
+  // Each test creates its own sticky (11-board-git-affordance's
+  // establish-your-own-state discipline), so every test here stays
+  // meaningful run in isolation. Texts are unique per test: the harness
+  // re-provisions the scratch store at startup, but within one run the
+  // hasText filters must never collide.
 
   // Free-floating sticky: annotation layer only. The sharpest observable
   // of "never entering the spec document" is the git affordance itself —
@@ -36,6 +40,7 @@ test.describe("V1-P6: scratch tier", () => {
   test("a free-floating open-question sticky is annotation-layer and survives reload", async ({
     page,
   }) => {
+    const stickyText = "open question: what about partial refunds?";
     await expect(uncommittedIndicator(page)).toBeHidden();
 
     const sticky = await addSticky(page, stickyText);
@@ -57,11 +62,12 @@ test.describe("V1-P6: scratch tier", () => {
   test("a sticky graduates to a declared open-question object", async ({
     page,
   }) => {
-    const sticky = page
-      .locator('[data-testid^="sticky-"]')
-      .filter({ hasText: stickyText })
-      .first();
-    await expect(sticky).toBeVisible();
+    const stickyText = "open question: do declined co-borrowers get notices?";
+    const sticky = await addSticky(page, stickyText);
+
+    // The working-tree-honesty pair, first half: the sticky alone is
+    // mutable-zone — creating it left the spec's working tree clean.
+    await expect(uncommittedIndicator(page)).toBeHidden();
 
     await sticky.getByRole("button", { name: "Graduate" }).click();
     await page.getByRole("menuitem", { name: "Open question" }).click();
@@ -73,11 +79,12 @@ test.describe("V1-P6: scratch tier", () => {
     ).toHaveCount(0);
     const graduated = page
       .locator('[data-testid^="card-"][data-object-kind="open-question"]')
-      .filter({ hasText: "partial refunds" });
+      .filter({ hasText: "co-borrowers" });
     await expect(graduated).toHaveCount(1);
 
-    // Becoming a declared object edited the spec document — the working
-    // tree is dirty where the sticky alone left it clean.
+    // The honesty pair, second half: becoming a declared object edited
+    // the spec document — the working tree is dirty where the sticky
+    // alone left it clean.
     await expect(uncommittedIndicator(page)).toBeVisible();
 
     // Declared means durable: the object re-projects from the document.
@@ -85,7 +92,7 @@ test.describe("V1-P6: scratch tier", () => {
     await expect(
       page
         .locator('[data-testid^="card-"][data-object-kind="open-question"]')
-        .filter({ hasText: "partial refunds" }),
+        .filter({ hasText: "co-borrowers" }),
     ).toHaveCount(1);
   });
 
