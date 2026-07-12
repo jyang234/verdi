@@ -631,9 +631,20 @@
     var menu = document.getElementById("graduate-menu");
     if (!menu) return;
     var rect = anchorEl.getBoundingClientRect();
-    menu.style.left = rect.left + "px";
-    menu.style.top = rect.bottom + 4 + "px";
-    show("graduate-menu");
+    show("graduate-menu"); // visible first: a hidden menu measures 0×0
+    // Clamped to the viewport: the menu is position:fixed, so a cut-off
+    // menu can never be scrolled to — a sticky near the bottom edge
+    // opens its menu upward instead.
+    var left = rect.left;
+    var top = rect.bottom + 4;
+    if (top + menu.offsetHeight > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - menu.offsetHeight - 4);
+    }
+    if (left + menu.offsetWidth > window.innerWidth - 8) {
+      left = Math.max(8, window.innerWidth - menu.offsetWidth - 8);
+    }
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
   }
 
   // -- click routing -----------------------------------------------------------
