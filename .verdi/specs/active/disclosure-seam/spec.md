@@ -4,7 +4,7 @@ kind: spec
 title: "Disclosure Seam"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-R5-2
 problem: { text: "the three disclosure call sites verdi already ships — internal/lint's VL-017 notice, cmd/verdi gate's [NOTICE] rendering, and internal/mcpserve/internal/workbench's review_unavailable field — each invented their own wording for the same disclosed-unproven judgment, so an operator reading two of the three cannot tell by phrasing alone that they are looking at the same kind of claim", anchor: "#problem" }
 outcome: { text: "the three existing disclosure call sites emit textually identical phrasing for equivalent disclosed-unproven states", anchor: "#outcome" }
@@ -12,6 +12,7 @@ acceptance_criteria:
   - { id: ac-1, text: "the three existing disclosure call sites (lint notice, gate [NOTICE], mcp/workbench review_unavailable) emit textually identical phrasing for equivalent states", evidence: [behavioral], anchor: "#ac-1" }
 links:
   - { type: implements, ref: "spec/disclosure-legibility#ac-1" }
+frozen: { at: 2026-07-11, commit: 69d348f6b6dc237189619eccdd56791eca4997ee, stub_matched: true }
 ---
 # Disclosure Seam
 
