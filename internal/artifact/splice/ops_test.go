@@ -414,3 +414,130 @@ func TestNextID(t *testing.T) {
 		})
 	}
 }
+
+// refIs is the exact-match ref predicate the removal/retype tests use
+// (the workbench passes a normalizing matcher; splice never guesses).
+func refIs(want string) func(string) bool {
+	return func(ref string) bool { return ref == want }
+}
+
+// Owner UAT round 6, item 3: removing a typed edge is the exact inverse
+// of drawing it (05 §Workbench: authoring is bidirectional).
+func TestRemoveDecisionLink(t *testing.T) {
+	t.Run("sole link removes the whole links key", func(t *testing.T) {
+		d := mustParse(t, sampleSpec)
+		edit, err := d.RemoveDecisionLink("dc-1", "exempts", refIs("adr/0001-outbox-events"))
+		if err != nil {
+			t.Fatalf("RemoveDecisionLink: %v", err)
+		}
+		out := applyAndValidate(t, d, edit)
+		if strings.Contains(string(out), "exempts") {
+			t.Errorf("removed edge still present:\n%s", out)
+		}
+		if !strings.Contains(string(out), `- { id: dc-1, text: "excuse this flow from the outbox rule", anchor: "#dc-1" }`) {
+			t.Errorf("dc-1 did not collapse to its linkless house-style form:\n%s", out)
+		}
+	})
+
+	t.Run("append then remove restores the original buffer byte-for-byte", func(t *testing.T) {
+		d := mustParse(t, sampleSpec)
+		link := artifact.Link{Type: artifact.LinkSupersedes, Ref: "adr/0002-outbox-events"}
+		edit, err := d.AppendDecisionLink("dc-2", link)
+		if err != nil {
+			t.Fatalf("AppendDecisionLink: %v", err)
+		}
+		appended := applyAndValidate(t, d, edit)
+
+		d2 := mustParse(t, string(appended))
+		rm, err := d2.RemoveDecisionLink("dc-2", "supersedes", refIs("adr/0002-outbox-events"))
+		if err != nil {
+			t.Fatalf("RemoveDecisionLink: %v", err)
+		}
+		restored := applyAndValidate(t, d2, rm)
+		if !bytes.Equal(restored, []byte(sampleSpec)) {
+			t.Fatalf("append+remove is not the identity:\n%s", restored)
+		}
+	})
+
+	t.Run("one of several links removed keeps the rest", func(t *testing.T) {
+		d := mustParse(t, sampleSpec)
+		edit, err := d.AppendDecisionLink("dc-1", artifact.Link{Type: artifact.LinkSupersedes, Ref: "adr/0009-x"})
+		if err != nil {
+			t.Fatalf("AppendDecisionLink: %v", err)
+		}
+		twoLinks := applyAndValidate(t, d, edit)
+
+		for _, tc := range []struct{ removeType, removeRef, keep string }{
+			{"exempts", "adr/0001-outbox-events", "supersedes"}, // first of two
+			{"supersedes", "adr/0009-x", "exempts"},             // last of two
+		} {
+			d2 := mustParse(t, string(twoLinks))
+			rm, err := d2.RemoveDecisionLink("dc-1", tc.removeType, refIs(tc.removeRef))
+			if err != nil {
+				t.Fatalf("RemoveDecisionLink(%s): %v", tc.removeType, err)
+			}
+			out := applyAndValidate(t, d2, rm)
+			if strings.Contains(string(out), tc.removeType) {
+				t.Errorf("removed %s link still present:\n%s", tc.removeType, out)
+			}
+			if !strings.Contains(string(out), tc.keep) {
+				t.Errorf("removing %s also lost the %s link:\n%s", tc.removeType, tc.keep, out)
+			}
+		}
+	})
+
+	t.Run("negative paths fail closed", func(t *testing.T) {
+		d := mustParse(t, sampleSpec)
+		for name, try := range map[string]func() (Edit, error){
+			"not a decision id":      func() (Edit, error) { return d.RemoveDecisionLink("ac-1", "exempts", refIs("x")) },
+			"missing decision":       func() (Edit, error) { return d.RemoveDecisionLink("dc-99", "exempts", refIs("x")) },
+			"decision without links": func() (Edit, error) { return d.RemoveDecisionLink("dc-2", "exempts", refIs("x")) },
+			"empty links list":       func() (Edit, error) { return d.RemoveDecisionLink("dc-3", "exempts", refIs("x")) },
+			"type mismatch": func() (Edit, error) {
+				return d.RemoveDecisionLink("dc-1", "supersedes", refIs("adr/0001-outbox-events"))
+			},
+			"ref matcher matches nothing": func() (Edit, error) {
+				return d.RemoveDecisionLink("dc-1", "exempts", refIs("adr/none"))
+			},
+		} {
+			if _, err := try(); err == nil {
+				t.Errorf("%s: succeeded, want error", name)
+			}
+		}
+	})
+}
+
+// Owner directive (round 6 UAT follow-up): the relationship's type is
+// updatable in place — ONE edit replacing only the type scalar, so ref
+// and note survive verbatim and the document never passes through a
+// linkless state.
+func TestRetypeDecisionLink(t *testing.T) {
+	t.Run("retype replaces only the type scalar", func(t *testing.T) {
+		d := mustParse(t, sampleSpec)
+		edit, err := d.RetypeDecisionLink("dc-1", "exempts", refIs("adr/0001-outbox-events"), "supersedes")
+		if err != nil {
+			t.Fatalf("RetypeDecisionLink: %v", err)
+		}
+		out := applyAndValidate(t, d, edit)
+		want := `links: [ { type: supersedes, ref: adr/0001-outbox-events, note: "async by design" } ]`
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("output missing %q (ref and note must survive verbatim):\n%s", want, out)
+		}
+		if strings.Contains(string(out), "exempts") {
+			t.Errorf("old type still present:\n%s", out)
+		}
+	})
+
+	t.Run("negative: missing link and non-decisions fail closed", func(t *testing.T) {
+		d := mustParse(t, sampleSpec)
+		if _, err := d.RetypeDecisionLink("dc-2", "exempts", refIs("x"), "supersedes"); err == nil {
+			t.Error("retype on a linkless decision succeeded, want error")
+		}
+		if _, err := d.RetypeDecisionLink("ac-1", "exempts", refIs("x"), "supersedes"); err == nil {
+			t.Error("retype on an AC succeeded, want error")
+		}
+		if _, err := d.RetypeDecisionLink("dc-1", "resolves", refIs("adr/0001-outbox-events"), "supersedes"); err == nil {
+			t.Error("retype of a type the decision does not carry succeeded, want error")
+		}
+	})
+}
