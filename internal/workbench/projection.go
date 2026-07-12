@@ -88,9 +88,11 @@ type reviewStickyView struct {
 // render on the wall as first-class scoping cards"). A pure copy of
 // artifact.Stub's fields under the projection's own JSON contract (the
 // wire shape get_board and the board's own client share, mirroring
-// cardView's convention), plus the card's computed board position —
-// computed-only, like reference cards (dc-6; VL-018: layout.json keys
-// must resolve to object ids, which a stub is not).
+// cardView's convention), plus the card's board position — the zone's
+// computed lane slot absent a stored one, or the stored `stub:<slug>`
+// position verbatim when layout.json holds one (round 5.5 dc-6 amendment:
+// a stub is draggable now, exactly like an object card, just keyed in its
+// own `stub:` namespace since a stub is not an object, VL-018).
 type StubView struct {
 	Slug               string   `json:"slug"`
 	Spike              bool     `json:"spike,omitempty"`
@@ -371,10 +373,14 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	for i, r := range refs {
 		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneReference, ID: r, DocOrder: i})
 	}
-	// Stub cards slot into the kind-locked stubs band in declaration
-	// order (dc-6), keyed "stub:<slug>" — a namespace no object id or
-	// artifact ref can produce, so a stub can never collide with a stored
-	// position (none is ever stored for it, VL-018) or another card's key.
+	// Stub cards slot into the kind-locked stubs band in declaration order
+	// (dc-6), keyed "stub:<slug>" — a namespace no object id or artifact
+	// ref can produce, so a stub's key can never collide with another
+	// card's. `stored` may hold a "stub:<slug>" entry (round 5.5: the
+	// position action writes one when a stub is dragged) — Generate and
+	// ResolveDisplayOverlaps below treat it exactly like a stored object
+	// position, verbatim pass-through and all, since both operate
+	// generically over Object.ID.
 	for i, sv := range p.StubViews {
 		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneStub, ID: "stub:" + sv.Slug, DocOrder: i})
 	}

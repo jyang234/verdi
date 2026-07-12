@@ -312,16 +312,16 @@ func (s *boardSpecServer) actionObjectTrash(name string, proj *BoardProjection, 
 	}
 
 	// Prune the layout key (a dangling layout.json key is a VL-018 lint
-	// error; the writer never persists one).
+	// error; the writer never persists one) — the live set includes every
+	// declared stub's "stub:<slug>" key too (round 5.5 dc-6), so a stored
+	// stub position is never mistaken for this trashed object's own
+	// orphan and pruned alongside it.
 	stored, err := boardlayout.ReadFile(s.specDir(name))
 	if err != nil {
 		return err
 	}
 	if _, had := stored[req.ID]; had {
-		live := make(map[string]bool, len(kinds))
-		for id := range kinds {
-			live[id] = true
-		}
+		live := liveKeys(proj)
 		delete(live, req.ID)
 		if err := boardlayout.WriteFile(s.specDir(name), stored, live); err != nil {
 			return err

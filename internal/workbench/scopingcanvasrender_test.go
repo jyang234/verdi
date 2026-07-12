@@ -32,9 +32,13 @@ func scopingRenderProjection(t *testing.T, mode boardModeKind) *BoardProjection 
 	return p
 }
 
-// Stub views take computed-only positions in the stubs band, exactly
-// like reference cards (dc-6; VL-018: stubs are not objects, so nothing
-// is ever stored for them).
+// Stub views fall back to a computed lane position in the stubs band
+// absent any stored one — this fixture's projection carries no stored
+// positions at all, so every stub takes its lane default (round 5.5 dc-6
+// amendment: a stub CAN carry a stored `stub:<slug>` position and win
+// verbatim, covered separately in projection_test.go and boardspecapi's
+// position-action tests; this test only exercises the no-stored-position
+// path).
 func TestScopingCanvas_StubViewPositions(t *testing.T) {
 	p := scopingRenderProjection(t, modeReadOnly)
 	if len(p.StubViews) != 3 {

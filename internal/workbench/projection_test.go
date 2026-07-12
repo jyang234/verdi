@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/boardlayout"
 )
 
 // scopingProjectionFixtureSpec is a feature-class spec with two ACs, two
@@ -115,6 +116,98 @@ func TestBuildProjection_StubViewsAndCoverage(t *testing.T) {
 	}
 	if got := p.OQClaims["oq-2"]; got != 0 {
 		t.Errorf("OQClaims[oq-2] = %d, want 0", got)
+	}
+}
+
+// TestBuildProjection_StubStoredPositionWinsOverComputed proves round
+// 5.5's dc-6 amendment at the projection layer: a layout.json "stub:<slug>"
+// entry passes through to the stub card's rendered X/Y verbatim, winning
+// over the zone's computed lane default the same stub would otherwise
+// take (mirroring how a stored object position already wins).
+func TestBuildProjection_StubStoredPositionWinsOverComputed(t *testing.T) {
+	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec)
+
+	// The computed baseline: no stored positions at all.
+	baseline, err := buildProjection("scoping-fixture", fm, nil, nil, nil, modeReadOnly)
+	if err != nil {
+		t.Fatalf("buildProjection (baseline): %v", err)
+	}
+	var baseX, baseY float64
+	for _, sv := range baseline.StubViews {
+		if sv.Slug == "plain-one" {
+			baseX, baseY = sv.X, sv.Y
+		}
+	}
+
+	stored := map[string]artifact.Position{"stub:plain-one": {X: 990, Y: 444}}
+	p, err := buildProjection("scoping-fixture", fm, stored, nil, nil, modeReadOnly)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	var found bool
+	for _, sv := range p.StubViews {
+		if sv.Slug != "plain-one" {
+			continue
+		}
+		found = true
+		if sv.X != 990 || sv.Y != 444 {
+			t.Errorf("StubViews[plain-one] = (%v,%v), want stored verbatim (990,444)", sv.X, sv.Y)
+		}
+	}
+	if !found {
+		t.Fatal("stub plain-one missing from StubViews")
+	}
+	if baseX == 990 && baseY == 444 {
+		t.Fatal("test fixture's computed default coincidentally matches the stored spot; pick a different probe position")
+	}
+
+	// Reload-determinism: rebuilding the projection from the same four
+	// inputs reproduces the identical stored position.
+	again, err := buildProjection("scoping-fixture", fm, stored, nil, nil, modeReadOnly)
+	if err != nil {
+		t.Fatalf("buildProjection (again): %v", err)
+	}
+	for _, sv := range again.StubViews {
+		if sv.Slug == "plain-one" && (sv.X != 990 || sv.Y != 444) {
+			t.Errorf("reload produced (%v,%v), want the same stored (990,444)", sv.X, sv.Y)
+		}
+	}
+}
+
+// TestBuildProjection_StubStoredPositionCollidesWithObject proves a
+// stored stub position participates in R4-I-35 display-time collision
+// resolution against an object card's stored position, using the stub's
+// own footprint (StubCardHeight) — never rendering stacked.
+func TestBuildProjection_StubStoredPositionCollidesWithObject(t *testing.T) {
+	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec)
+	stored := map[string]artifact.Position{
+		"ac-1":           {X: 40, Y: 20},
+		"stub:plain-one": {X: 40, Y: 20}, // squarely on ac-1's stored spot
+	}
+	p, err := buildProjection("scoping-fixture", fm, stored, nil, nil, modeReadOnly)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	var ac1X, ac1Y float64
+	for _, c := range p.Cards {
+		if c.ID == "ac-1" {
+			ac1X, ac1Y = c.X, c.Y
+		}
+	}
+	if ac1X != 40 || ac1Y != 20 {
+		t.Fatalf("ac-1 (earlier zone, first claimant) = (%v,%v), want stored verbatim (40,20)", ac1X, ac1Y)
+	}
+	acRect := boardlayout.Rect{X: ac1X, Y: ac1Y, W: boardlayout.CardWidth, H: boardlayout.CardHeight}
+	for _, sv := range p.StubViews {
+		if sv.Slug != "plain-one" {
+			continue
+		}
+		w, h := boardlayout.FootprintFor(boardlayout.ZoneStub)
+		stubRect := boardlayout.Rect{X: sv.X, Y: sv.Y, W: w, H: h}
+		if stubRect.X < acRect.X+acRect.W && acRect.X < stubRect.X+stubRect.W &&
+			stubRect.Y < acRect.Y+acRect.H && acRect.Y < stubRect.Y+stubRect.H {
+			t.Errorf("stub plain-one at (%v,%v) still renders overlapping ac-1's footprint", sv.X, sv.Y)
+		}
 	}
 }
 

@@ -169,6 +169,64 @@ stubs:
 	}
 }
 
+// TestDeclaredStubSlugs proves the resolution set VL-018 and the workbench
+// position write path both use: every declared stub's bare slug, and
+// nothing else (round 5.5 dc-6 amendment: "a `positions` key names ... a
+// declared stub as `stub:<slug>`").
+func TestDeclaredStubSlugs(t *testing.T) {
+	const y = `
+id: spec/scoping-canvas-fixture
+kind: spec
+class: feature
+title: "Scoping canvas fixture"
+status: draft
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "does the thing", evidence: [static] }
+stubs:
+  - { slug: plain-stub, acceptance_criteria: [ac-1] }
+  - { slug: retry-strategy-spike, spike: true, resolves: [oq-1, oq-2] }
+`
+	fm, err := DecodeSpec([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v", err)
+	}
+	got := DeclaredStubSlugs(fm)
+	if len(got) != 2 || !got["plain-stub"] || !got["retry-strategy-spike"] {
+		t.Fatalf("DeclaredStubSlugs = %v, want {plain-stub, retry-strategy-spike}", got)
+	}
+	if got["ac-1"] {
+		t.Error("DeclaredStubSlugs must not include object ids")
+	}
+	if got["no-such-stub"] {
+		t.Error("DeclaredStubSlugs must not include an undeclared slug")
+	}
+}
+
+// TestDeclaredStubSlugs_Empty is the negative complement: a spec with no
+// stubs: block returns an empty (non-nil) set, never panicking a caller
+// that ranges over it.
+func TestDeclaredStubSlugs_Empty(t *testing.T) {
+	const y = `
+id: spec/no-stubs
+kind: spec
+class: feature
+title: "No stubs"
+status: draft
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "does the thing", evidence: [static] }
+`
+	fm, err := DecodeSpec([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v", err)
+	}
+	got := DeclaredStubSlugs(fm)
+	if len(got) != 0 {
+		t.Fatalf("DeclaredStubSlugs = %v, want empty", got)
+	}
+}
+
 // --- open_questions (R4-I-16, 02 §Object model, §Common frontmatter) ---
 
 const featureSpecOpenQuestionsYAML = `

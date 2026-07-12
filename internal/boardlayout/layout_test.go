@@ -353,3 +353,70 @@ func TestStubZone(t *testing.T) {
 		t.Error("two stubs share one slot")
 	}
 }
+
+// TestGenerate_StubStoredVerbatimWinsOverComputed proves round 5.5's dc-6
+// amendment at the Generate layer: a stored "stub:<slug>" position passes
+// through verbatim — including a colliding one, mirroring
+// TestGenerate_StoredVerbatimEvenColliding's object-level property — and
+// wins over the zone's computed lane default a stub would otherwise take.
+func TestGenerate_StubStoredVerbatimWinsOverComputed(t *testing.T) {
+	objs := []Object{
+		{Kind: ZoneStub, ID: "stub:alpha", DocOrder: 0},
+		{Kind: ZoneStub, ID: "stub:beta", DocOrder: 1},
+	}
+	// Without a stored position, alpha would land at the zone's first slot.
+	computed, err := Generate(objs, nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	stored := map[string]artifact.Position{
+		"stub:alpha": {X: 990, Y: 40}, // an arbitrary dragged-to spot
+	}
+	got, err := Generate(objs, stored)
+	if err != nil {
+		t.Fatalf("Generate (stored): %v", err)
+	}
+	if want := (artifact.Position{X: 990, Y: 40}); got["stub:alpha"] != want {
+		t.Errorf("stub:alpha = %v, want stored verbatim %v", got["stub:alpha"], want)
+	}
+	if got["stub:alpha"] == computed["stub:alpha"] {
+		t.Error("stored stub position did not win over the computed lane default")
+	}
+	// beta is unaffected: it still slots at its own free position.
+	if _, ok := got["stub:beta"]; !ok {
+		t.Fatal("stub:beta was not placed")
+	}
+}
+
+// TestGenerate_AddOneNeverMovesStub is the S8 add-never-reflows property
+// (property 3), asserted specifically for a STORED stub position (task
+// round 5.5): appending a new object — of any kind, not just another
+// stub — never moves a stub whose position is stored.
+func TestGenerate_AddOneNeverMovesStub(t *testing.T) {
+	objs := []Object{
+		{Kind: ZoneAC, ID: "ac-1", DocOrder: 0},
+		{Kind: ZoneStub, ID: "stub:alpha", DocOrder: 0},
+	}
+	stored := map[string]artifact.Position{
+		"stub:alpha": {X: 990, Y: 40},
+	}
+	before, err := Generate(objs, stored)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	added := append(objs,
+		Object{Kind: ZoneAC, ID: "ac-2", DocOrder: 1},
+		Object{Kind: ZoneStub, ID: "stub:beta", DocOrder: 1},
+	)
+	after, err := Generate(added, stored)
+	if err != nil {
+		t.Fatalf("Generate (added): %v", err)
+	}
+	if after["stub:alpha"] != before["stub:alpha"] {
+		t.Errorf("adding content moved the stored stub: %v -> %v", before["stub:alpha"], after["stub:alpha"])
+	}
+	if after["ac-1"] != before["ac-1"] {
+		t.Errorf("adding content moved ac-1: %v -> %v", before["ac-1"], after["ac-1"])
+	}
+}
