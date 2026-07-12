@@ -55,10 +55,10 @@ func TestDecodeAnnotation_Negative(t *testing.T) {
 		// amendment): a pin REQUIRES a target (the pinned artifact) AND a
 		// board position; a selector-bearing target, a target_b, or a
 		// fragment target all fail closed.
-		"pin without target":        `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","board":{"story":"S","x":0,"y":0},"type":"pin","body":"","status":"open"}`,
-		"pin without board":         `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","target":{"ref":"adr/0001-x@7f3c2a1","selector":{"heading":"","quote":"","line":null}},"type":"pin","body":"","status":"open"}`,
-		"pin with a selector":       `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","target":{"ref":"adr/0001-x@7f3c2a1","selector":{"heading":"h","quote":"","line":null}},"board":{"story":"S","x":0,"y":0},"type":"pin","body":"","status":"open"}`,
-		"pin with a target_b":       `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","target":{"ref":"adr/0001-x@7f3c2a1","selector":{"heading":"","quote":"","line":null}},"target_b":{"ref":"adr/0002-x@7f3c2a1","selector":{"heading":"","quote":"","line":null}},"board":{"story":"S","x":0,"y":0},"type":"pin","body":"","status":"open"}`,
+		"pin without target":         `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","board":{"story":"S","x":0,"y":0},"type":"pin","body":"","status":"open"}`,
+		"pin without board":          `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","target":{"ref":"adr/0001-x@7f3c2a1","selector":{"heading":"","quote":"","line":null}},"type":"pin","body":"","status":"open"}`,
+		"pin with a selector":        `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","target":{"ref":"adr/0001-x@7f3c2a1","selector":{"heading":"h","quote":"","line":null}},"board":{"story":"S","x":0,"y":0},"type":"pin","body":"","status":"open"}`,
+		"pin with a target_b":        `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","target":{"ref":"adr/0001-x@7f3c2a1","selector":{"heading":"","quote":"","line":null}},"target_b":{"ref":"adr/0002-x@7f3c2a1","selector":{"heading":"","quote":"","line":null}},"board":{"story":"S","x":0,"y":0},"type":"pin","body":"","status":"open"}`,
 		"pin with a fragment target": `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","ts":"2026-07-10T14:02:11Z","author":"j","target":{"ref":"spec/foo@7f3c2a1#ac-1","selector":{"heading":"","quote":"","line":null}},"board":{"story":"S","x":0,"y":0},"type":"pin","body":"","status":"open"}`,
 	}
 	for name, y := range cases {
