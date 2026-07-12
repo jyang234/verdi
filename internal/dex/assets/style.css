@@ -1150,6 +1150,33 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   flex: none;
 }
 
+/* the class stamp: the case file wears its spec class (02 §Kind
+   registry) — FEATURE (the outcome-shaped plan), STORY · <tracker-ref>
+   (the unit of build), SPIKE (a story-class probe). Same rubber-stamp
+   voice and weight as the mode tag, tilted the other way — two stamps
+   on one folder never sit square. The tracker ref keeps its machine
+   case: it is a quoted ref, not stamp lettering. */
+.case-class-tag {
+  position: absolute;
+  top: -1.05rem;
+  right: 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  background: var(--paper);
+  border: 2px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.14rem 0.55rem;
+  transform: rotate(1.1deg);
+}
+.case-class-tag--feature { color: var(--accent); border-color: var(--accent); }
+.case-class-tag--story { color: var(--authored); border-color: var(--authored); }
+.case-class-tag--spike { color: var(--st-waived); border-color: var(--st-waived); }
+.case-class-ref { text-transform: none; }
+
 /* Disclosed-unavailable board notices (I-1(b)/I-2/M-4): an advisory
    line — honest and visible, never dominant — that discloses a skipped
    input (unreachable review feed, assumed default branch) rather than
@@ -1734,6 +1761,17 @@ button.yarn-chip-type {
   color: var(--accent);
 }
 .board-guide[open] summary { margin-bottom: 0.6rem; }
+/* the class lesson (feature walls only): what THIS wall is — outcome
+   ACs + stubs here, stories point up from their own specs. One breath,
+   set off in the feature ink before the four moves. */
+.guide-class-note {
+  margin: 0 0 0.6rem;
+  padding: 0.45rem 0.65rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  background: var(--panel);
+  line-height: 1.5;
+}
 .guide-moves {
   margin: 0;
   padding-left: 1.15rem;

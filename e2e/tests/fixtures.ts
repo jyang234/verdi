@@ -175,6 +175,12 @@ export const READONLY_SPEC = "stale-decline";
 // void (provisioned by cmd/e2eharness/provisionv2.go).
 export const EMPTY_SPEC = "income-verification";
 
+// EMPTY_SPEC is class: story — the harness's one story-class board
+// fixture (every other board fixture is a feature) — and this is its
+// `story:` tracker ref, which the case-file class tag wears as
+// "story · <tracker-ref>" (provisioned by cmd/e2eharness/provisionv2.go).
+export const EMPTY_SPEC_STORY_REF = "jira:LOAN-2201";
+
 // Corpus artifacts nothing on DESIGN_SPEC's wall names (real on main,
 // so real on the design branch) — the pin toolbox's import fixtures.
 export const PIN_ADR = "adr/0002-outbox-events";
