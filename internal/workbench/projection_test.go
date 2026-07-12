@@ -251,6 +251,96 @@ func TestBuildProjection_RelatesEndpointNamesLiveSticky(t *testing.T) {
 	}
 }
 
+// TestBuildProjection_ScopingEdges proves the scoping layer's projection
+// (owner directive, fixing the flagged ac-3 deviation — "with their
+// coverage yarn projected"): every declared story stub hangs one edge per
+// AC it covers (displayed type "covers") and every spike stub one edge
+// per open question it resolves (displayed type "resolves"), all under
+// layer "scoping" with the stub's own "stub:<slug>" key as the From
+// endpoint. Presentation-owned derivation of the stubs block — NOT
+// document links: no reference card is ever minted for a stub endpoint,
+// and the closed five-type edge vocabulary is untouched.
+func TestBuildProjection_ScopingEdges(t *testing.T) {
+	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, nil, modeReadOnly)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+
+	var scoping []edgeView
+	for _, e := range p.Edges {
+		if e.Layer == "scoping" {
+			scoping = append(scoping, e)
+		}
+	}
+	want := []edgeView{
+		{Type: "covers", From: "stub:plain-one", To: "ac-1", Layer: "scoping"},
+		{Type: "resolves", From: "stub:spike-one", To: "oq-1", Layer: "scoping"},
+		{Type: "resolves", From: "stub:spike-two", To: "oq-1", Layer: "scoping"},
+	}
+	if len(scoping) != len(want) {
+		t.Fatalf("scoping edges = %+v, want %+v", scoping, want)
+	}
+	for i, e := range scoping {
+		if e != want[i] {
+			t.Errorf("scoping edge[%d] = %+v, want %+v (declaration order)", i, e, want[i])
+		}
+	}
+
+	// A stub endpoint is the stub card's own paper — never a reference
+	// card (this fixture declares no external refs at all).
+	if len(p.RefCards) != 0 {
+		t.Errorf("scoping edges minted reference cards: %+v", p.RefCards)
+	}
+
+	// Deterministic: same inputs, same edges in the same order.
+	again, err := buildProjection("scoping-fixture", fm, nil, nil, nil, modeReadOnly)
+	if err != nil {
+		t.Fatalf("buildProjection (again): %v", err)
+	}
+	for i, e := range again.Edges {
+		if e != p.Edges[i] {
+			t.Fatalf("edge order not deterministic at %d: %+v vs %+v", i, e, p.Edges[i])
+		}
+	}
+}
+
+// TestBuildProjection_ScopingEdgeUndeclaredTargetDropped proves a stub
+// attribution naming an AC/OQ id the spec does not declare projects no
+// scoping edge (and mints nothing): the yarn ties two papers on THIS
+// wall, and a dangling attribution is the linter's finding (VL-006
+// family), not a phantom endpoint. The coverage receipts stay the honest
+// counters they were.
+func TestBuildProjection_ScopingEdgeUndeclaredTargetDropped(t *testing.T) {
+	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec)
+	fm.Stubs = append(fm.Stubs,
+		artifact.Stub{Slug: "dangling-story", AcceptanceCriteria: []string{"ac-99"}},
+		artifact.Stub{Slug: "dangling-spike", Spike: true, Resolves: []string{"oq-99"}},
+	)
+	p, err := buildProjection("scoping-fixture", fm, nil, nil, nil, modeReadOnly)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	for _, e := range p.Edges {
+		if e.Layer != "scoping" {
+			continue
+		}
+		if e.To == "ac-99" || e.To == "oq-99" {
+			t.Errorf("undeclared attribution target projected an edge: %+v", e)
+		}
+	}
+	for _, rc := range p.RefCards {
+		if rc.Ref == "ac-99" || rc.Ref == "oq-99" {
+			t.Errorf("undeclared attribution target minted a reference card: %+v", rc)
+		}
+	}
+	// The dangling stubs still render as cards — the band shows the
+	// declared record; only the unresolvable yarn is withheld.
+	if len(p.StubViews) != 5 {
+		t.Errorf("len(StubViews) = %d, want 5", len(p.StubViews))
+	}
+}
+
 // TestBuildProjection_RelatesEndpointNamesDeadSticky_Dropped proves a
 // relates thread naming a sticky id that is NOT live on this board (never
 // existed, or already graduated) is dropped rather than projected — the
