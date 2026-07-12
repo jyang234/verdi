@@ -88,7 +88,10 @@ test.describe("board dialogs: always escapable, always legible", () => {
   test("a pair with no legal typed edge gets plain language, not an empty menu", async ({
     page,
   }) => {
-    // Fresh yarn AC → AC: explanation + the scratch option.
+    // Fresh yarn AC → AC: explanation + the scratch option. (This draw
+    // doubles as the buried-pin regression proof: in the full suite a
+    // wide chip legitimately parks over ac-2's pushpin, and the grab
+    // must resolve geometrically through it.)
     await drawYarn(page, AC_IDS[1], page.getByTestId(`card-${AC_IDS[2]}`));
     const picker = edgeTypePicker(page);
     await expect(picker).toBeVisible();

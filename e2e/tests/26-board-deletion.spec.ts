@@ -35,15 +35,19 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
   }) => {
     const text = "doomed: does the decline email localize?";
     const sticky = await addSticky(page, text, "question");
-    await expect(uncommittedIndicator(page)).toBeHidden();
+    // Order-independent working-tree honesty: earlier suite files may
+    // have left the tree dirty (drags write positions), so assert the
+    // deletion CHANGES nothing — the mutable stream is not the spec.
+    const dirtyBefore = await uncommittedIndicator(page).isVisible();
 
     await sticky.getByRole("button", { name: "Delete sticky" }).click();
     await expectAutosaved(page);
     await expect(
       page.locator('[data-testid^="sticky-"]').filter({ hasText: text }),
     ).toHaveCount(0);
-    // The mutable stream died; the spec document was never touched.
-    await expect(uncommittedIndicator(page)).toBeHidden();
+    // The record died from the mutable stream; the spec tree's state is
+    // exactly what it was.
+    expect(await uncommittedIndicator(page).isVisible()).toBe(dirtyBefore);
 
     await page.reload();
     await expect(

@@ -11,6 +11,7 @@ package workbench
 // deterministic; no clock, no randomness).
 
 import (
+	"fmt"
 	stdhtml "html"
 	"net/http"
 	"strings"
@@ -37,8 +38,21 @@ func (s *boardSpecServer) boardPeekHandler() http.HandlerFunc {
 }
 
 // renderPeekFragment renders the peek for one ref: the artifact when the
-// ref resolves in this corpus, a disclosed explanation otherwise.
-func renderPeekFragment(root, ref string) string {
+// ref resolves in this corpus, a disclosed explanation otherwise. A
+// panic anywhere in the render (a hostile artifact in a live store)
+// degrades to the disclosed state instead of killing the connection —
+// the owner's click must never see a dead socket (live-UAT finding:
+// Safari reports a mid-response connection loss as "Load failed").
+func renderPeekFragment(root, ref string) (out string) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = peekErrorFragment(ref, fmt.Sprintf("resolved, but rendering it failed unexpectedly (%v)", r))
+		}
+	}()
+	return peekFragment(root, ref)
+}
+
+func peekFragment(root, ref string) string {
 	parsed, err := artifact.ParseRef(ref)
 	if err != nil {
 		return peekErrorFragment(ref, "is not an artifact reference this corpus can resolve (an external tracker key or service ref has no page here)")

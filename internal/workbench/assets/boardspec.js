@@ -233,10 +233,19 @@
       // anyone's text).
       var w = chip.offsetWidth;
       var h = chip.offsetHeight;
+      // Blocked space for the chip: every card's interior AND its
+      // pushpin (the yarn handle protrudes above the card's top edge,
+      // and chips paint over cards — a chip parked on a pin makes yarn
+      // undrawable from that card).
       var clearOfCards = function (x, y) {
         for (var k = 0; k < papers.length; k++) {
           var r = rectOf(papers[k]);
           if (x < r.x + r.w && r.x < x + w && y < r.y + r.h && r.y < y + h) {
+            return false;
+          }
+          var pinX = r.x + r.w / 2 - 14;
+          var pinY = r.y - 18;
+          if (x < pinX + 28 && pinX < x + w && y < pinY + 22 && pinY < y + h) {
             return false;
           }
         }
@@ -495,6 +504,41 @@
       return;
     }
 
+    // A pin buried under a floating chip stays grabbable: between two
+    // close cards a chip can be wider than the thread's whole span, so
+    // it may legitimately park over a card's pushpin — and the grab,
+    // like the drop, must resolve GEOMETRICALLY so a decoration never
+    // deadens the affordance beneath it. The gesture is PROVISIONAL
+    // (viaCover): no pointer capture and nothing happens until the
+    // press travels past the drag slop, so an unmoved press stays the
+    // chip's own click (its buttons keep working), while a real drag
+    // from the buried pin becomes the yarn draw.
+    var overChip = e.target.closest(".yarn-chip");
+    if (authoring && overChip) {
+      var canvasRect0 = c.getBoundingClientRect();
+      var gx = e.clientX - canvasRect0.left + c.scrollLeft;
+      var gy = e.clientY - canvasRect0.top + c.scrollTop;
+      var cards0 = c.querySelectorAll(".objcard");
+      for (var ci = 0; ci < cards0.length; ci++) {
+        var cr = rectOf(cards0[ci]);
+        var pinCX = cr.x + cr.w / 2;
+        if (gx >= pinCX - 8 && gx <= pinCX + 8 && gy >= cr.y - 8 && gy <= cr.y + 8) {
+          gesture = {
+            kind: "yarn",
+            viaCover: true,
+            moved: false,
+            downX: e.clientX,
+            downY: e.clientY,
+            pointerId: e.pointerId,
+            fromEl: cards0[ci],
+            from: cards0[ci].getAttribute("data-id"),
+            fromKind: cards0[ci].getAttribute("data-object-kind"),
+          };
+          return;
+        }
+      }
+    }
+
     if (e.target.closest("button, textarea, input, .review-sticky")) return;
 
     var el = e.target.closest(".objcard, .sticky");
@@ -573,8 +617,26 @@
       var svg = ensureYarnSvg();
       var draft = svg.querySelector(".yarn-draft");
       if (draft) svg.removeChild(draft);
-      var hit = document.elementFromPoint(e.clientX, e.clientY);
-      var target = hit && hit.closest(".objcard, .refcard");
+      // The drop target is resolved GEOMETRICALLY against the card
+      // rects, not via elementFromPoint: yarn chips and stickies float
+      // above the papers, and a drop must never die because a floating
+      // element happens to cover the aimed-at card. Cards are
+      // collision-free by construction (R4-I-35), so at most one
+      // contains the point.
+      var c2 = canvas();
+      if (!c2) return;
+      var canvasRect2 = c2.getBoundingClientRect();
+      var px2 = e.clientX - canvasRect2.left + c2.scrollLeft;
+      var py2 = e.clientY - canvasRect2.top + c2.scrollTop;
+      var target = null;
+      var papers2 = c2.querySelectorAll(".objcard, .refcard");
+      for (var pi = 0; pi < papers2.length; pi++) {
+        var pr = rectOf(papers2[pi]);
+        if (px2 >= pr.x && px2 <= pr.x + pr.w && py2 >= pr.y && py2 <= pr.y + pr.h) {
+          target = papers2[pi];
+          break;
+        }
+      }
       if (!target || target === g.fromEl) return;
       openPicker({
         from: g.from,
@@ -686,6 +748,16 @@
       btn.setAttribute("data-sticky-type", t[0]);
       btn.setAttribute("aria-pressed", "false");
       btn.textContent = t[1];
+      // Choosing a type must never steal focus from the editor: Safari
+      // blurs the focused element to body on a button's mousedown
+      // (relatedTarget null), which read as "leaving the draft" and
+      // closed it before the author typed a word (live-UAT finding).
+      btn.addEventListener("pointerdown", function (ev) {
+        ev.preventDefault();
+      });
+      btn.addEventListener("mousedown", function (ev) {
+        ev.preventDefault();
+      });
       btn.addEventListener("click", function () {
         chosen = t[0];
         draft.className = "sticky sticky--" + t[0] + " sticky-draft";
@@ -716,21 +788,27 @@
       draft.appendChild(hint);
     }
 
-    // Commit when focus truly leaves the draft (a type-button click moves
-    // focus WITHIN it and must not count as leaving).
-    draft.addEventListener("focusout", function (e) {
-      if (e.relatedTarget && draft.contains(e.relatedTarget)) return;
-      var text = editor.value.trim();
-      if (!text) {
+    // Commit when focus truly leaves the draft. Decided one tick later
+    // against document.activeElement, not focusout's relatedTarget —
+    // Safari reports null relatedTarget on blurs it routes to body, and
+    // the type buttons refuse focus anyway (their pointerdown is
+    // prevented), so activeElement is the only honest signal.
+    draft.addEventListener("focusout", function () {
+      setTimeout(function () {
+        if (!draft.isConnected) return;
+        if (draft.contains(document.activeElement)) return;
+        var text = editor.value.trim();
+        if (!text) {
+          draft.remove();
+          return;
+        }
+        if (!chosen) {
+          needType();
+          return;
+        }
         draft.remove();
-        return;
-      }
-      if (!chosen) {
-        needType();
-        return;
-      }
-      draft.remove();
-      mutate("sticky", { text: text, type: chosen });
+        mutate("sticky", { text: text, type: chosen });
+      }, 0);
     });
     draft.addEventListener("keydown", function (e) {
       if (e.key === "Escape") {
