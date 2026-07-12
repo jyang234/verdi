@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { DESIGN_SPEC, boardPath } from "./fixtures";
 
 // Presentation-meaningful assertions for the visual system ("the registry"):
 // the board is a real spatial canvas (absolute positioning, SVG yarn that
@@ -119,7 +120,10 @@ test("dark theme renders dark pages with light ink on workbench and dex", async 
     return (m[0] + m[1] + m[2]) / 3;
   };
 
-  for (const url of ["/", `${dexBase}/a/spec/stale-decline/`]) {
+  // Home, a dex artifact page, and the v2 board page — the board's whole
+  // visual system (canvas, cards, yarn, chips) must go dark with the
+  // theme, not just the site chrome.
+  for (const url of ["/", `${dexBase}/a/spec/stale-decline/`, boardPath(DESIGN_SPEC)]) {
     await page.goto(url);
     const { bg, fg } = await page.evaluate(() => {
       const cs = getComputedStyle(document.body);

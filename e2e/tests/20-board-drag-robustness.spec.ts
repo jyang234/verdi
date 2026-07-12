@@ -1,5 +1,12 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { DESIGN_SPEC, READONLY_SPEC, AC_IDS, DECISION_PLAIN, boardPath } from "./fixtures";
+import {
+  DESIGN_SPEC,
+  READONLY_SPEC,
+  REVIEW_SPEC,
+  AC_IDS,
+  DECISION_PLAIN,
+  boardPath,
+} from "./fixtures";
 import { expectAutosaved } from "./helpers";
 
 // Drag robustness under REAL input conditions — the regression suite for
@@ -146,6 +153,38 @@ test.describe("board drag robustness (real-input regression)", () => {
     await expect(refusal).toBeVisible();
     await expect(refusal).toHaveText(/frozen with the accepted spec/);
     await expect(refusal).toHaveText(/supersession/);
+
+    // And nothing moved.
+    expect(await position(card)).toEqual(before);
+  });
+
+  // The other frozen mode: a review board is a mirror of the MR, and its
+  // refusal must say so — mirror-specific wording, not the read-only
+  // supersession line (05 §Workbench: review is a mirror, read-only a
+  // document; boardspec.js speaks a distinct refusal for each).
+  test("a review-mode board refuses a drag with the mirror-specific wording", async ({
+    page,
+  }) => {
+    await page.goto(boardPath(REVIEW_SPEC));
+    await expect(page.getByTestId("board")).toHaveAttribute(
+      "data-board-mode",
+      "review",
+    );
+
+    const card = page.locator('[data-testid^="card-"]').first();
+    const before = await position(card);
+    const box = await card.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + 220, box!.y + 180, { steps: 6 });
+    await page.mouse.up();
+
+    // Visible, and names the review mirror — not the read-only refusal.
+    const refusal = page.getByTestId("drag-refusal");
+    await expect(refusal).toBeVisible();
+    await expect(refusal).toHaveText(/mirrors the merge request/);
+    await expect(refusal).toHaveText(/reply on the MR or wait for the branch/);
 
     // And nothing moved.
     expect(await position(card)).toEqual(before);
