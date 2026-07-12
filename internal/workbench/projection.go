@@ -332,7 +332,11 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	refSet := map[string]bool{}
 	for _, e := range p.Edges {
 		for _, end := range []string{e.From, e.To} {
-			if end != "spec" && !declared[end] {
+			// An annotation-id endpoint (round 5.4: an attribution
+			// thread tied to a live sticky) is the sticky's own paper —
+			// never a reference card (a second card would split the
+			// endpoint and steal the thread's tie).
+			if end != "spec" && !declared[end] && !artifact.IsAnnotationID(end) {
 				refSet[end] = true
 			}
 		}

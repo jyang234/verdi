@@ -2128,14 +2128,14 @@ button.yarn-chip-type {
    bound to at instantiation (dc-3: slug equality, no new provenance) */
 .stub-tab {
   position: absolute;
-  top: -1.05rem;
+  top: -0.95rem;
   left: -1px;
   max-width: 82%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.56rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--stub-ink);

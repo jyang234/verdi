@@ -263,6 +263,47 @@ func TestScopingCanvas_AttributionThreadHasNoPickerGraduate(t *testing.T) {
 	}
 }
 
+// An attribution thread's sticky endpoint is the STICKY's paper — it
+// must never mint a reference card for the annotation id (a live sticky
+// is on this board already; a second card would split the endpoint and
+// steal the thread's tie).
+func TestScopingCanvas_StickyEndpointMintsNoRefCard(t *testing.T) {
+	const stickyID = "a-01J8Z0K3AAAAAAAAAAAAAAAAAA"
+	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec)
+	annotations := []*artifact.Annotation{
+		{
+			ID: stickyID, TS: "2026-07-10T14:02:11Z", Author: "j",
+			Type: artifact.AnnotationSpike, Body: "probe", Status: artifact.AnnotationOpen,
+			Board: &artifact.BoardAnchor{Story: "scoping-fixture", X: 960, Y: 600},
+		},
+		{
+			ID: "a-01J8Z0K4BBBBBBBBBBBBBBBBBB", TS: "2026-07-10T14:03:00Z", Author: "j",
+			Type: artifact.AnnotationRelates, Body: "relates: sticky ~ oq-1", Status: artifact.AnnotationOpen,
+			Target:  &artifact.Target{Ref: stickyID},
+			TargetB: &artifact.Target{Ref: "spec/scoping-fixture@7f3c2a1", Selector: artifact.Selector{Heading: "oq-1"}},
+		},
+	}
+	p, err := buildProjection("scoping-fixture", fm, nil, annotations, nil, modeAuthoring)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	for _, rc := range p.RefCards {
+		if artifact.IsAnnotationID(rc.Ref) {
+			t.Errorf("annotation id %s minted a reference card", rc.Ref)
+		}
+	}
+	// The thread itself still projects, sticky id as its endpoint.
+	found := false
+	for _, e := range p.Edges {
+		if e.Type == "relates" && (e.From == stickyID || e.To == stickyID) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("attribution thread lost from the projection")
+	}
+}
+
 // The embedded client payload carries the wall's class, so the sticky
 // draft's type control can offer story/spike ONLY where the server would
 // accept them (feature-class walls) — the client mirrors the server's

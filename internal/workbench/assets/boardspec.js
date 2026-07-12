@@ -163,7 +163,7 @@
     while (svg.firstChild) svg.removeChild(svg.firstChild);
 
     var chips = c.querySelectorAll(".yarn-chip");
-    var papers = c.querySelectorAll(".objcard, .refcard");
+    var papers = c.querySelectorAll(".objcard, .refcard, .stubcard");
     var offboardCount = 0; // bow alternation + margin slots
     var offboardTies = {}; // fan-out of several document edges on one card
     for (var i = 0; i < chips.length; i++) {
