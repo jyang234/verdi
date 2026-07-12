@@ -158,3 +158,13 @@ export function dexByStoryPath(name: string): string {
 export function refCardTestId(ref: string): string {
   return `ref-card-${ref.replace(/\//g, "-")}`;
 }
+
+// ---------------------------------------------------------------------------
+// Workbench (board polish) — read-only mode
+// ---------------------------------------------------------------------------
+
+// A spec that is NOT a draft on a design branch (it lives on main in the
+// committed corpus), so its board renders READ-ONLY (05 §Workbench, "Two
+// modes, keyed by branch state") — the fixture for the drag-refusal
+// contract (a read-only board is never silently inert).
+export const READONLY_SPEC = "stale-decline";
