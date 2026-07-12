@@ -9,12 +9,74 @@ package workbench
 // everything beyond the minimum is discoverable, never front-loaded.
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/OWNER/verdi/internal/boardio"
 )
+
+// The projection carries the spec's class identity (02 §Kind registry:
+// class + story tracker ref + spike flag) so both presentations — the
+// HTML case file and get_board's JSON — can say which kind of wall this
+// is. Additive fields only; the JSON keys are wire contract (get_board
+// re-marshals this struct).
+func TestBoardProjection_CarriesSpecClass(t *testing.T) {
+	cases := []struct {
+		name     string
+		fm       artifact.SpecFrontmatter
+		class    string
+		storyRef string
+		spike    bool
+	}{
+		{"feature", artifact.SpecFrontmatter{Class: artifact.ClassFeature}, "feature", "", false},
+		{"story", artifact.SpecFrontmatter{Class: artifact.ClassStory, Story: "jira:LOAN-7"}, "story", "jira:LOAN-7", false},
+		{"spike", artifact.SpecFrontmatter{Class: artifact.ClassStory, Story: "jira:LOAN-9", Spike: true}, "story", "jira:LOAN-9", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := buildProjection("s", &tc.fm, nil, nil, nil, modeAuthoring)
+			if err != nil {
+				t.Fatalf("buildProjection: %v", err)
+			}
+			if p.Class != tc.class || p.StoryRef != tc.storyRef || p.Spike != tc.spike {
+				t.Fatalf("projection = (%q, %q, %v), want (%q, %q, %v)",
+					p.Class, p.StoryRef, p.Spike, tc.class, tc.storyRef, tc.spike)
+			}
+		})
+	}
+
+	// The wire keys (get_board marshals the projection verbatim): class
+	// always present; story_ref and spike omitted when zero.
+	spike, err := buildProjection("s", &artifact.SpecFrontmatter{Class: artifact.ClassStory, Story: "jira:LOAN-9", Spike: true}, nil, nil, nil, modeAuthoring)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	raw, err := json.Marshal(spike)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"class":"story"`, `"story_ref":"jira:LOAN-9"`, `"spike":true`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("projection JSON missing %s\n%s", want, raw)
+		}
+	}
+	feature, err := buildProjection("s", &artifact.SpecFrontmatter{Class: artifact.ClassFeature}, nil, nil, nil, modeAuthoring)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	raw, err = json.Marshal(feature)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, banned := range []string{`"story_ref"`, `"spike"`} {
+		if strings.Contains(string(raw), banned) {
+			t.Errorf("feature projection JSON carries zero-valued %s\n%s", banned, raw)
+		}
+	}
+}
 
 // Authoring labels every zone — empty bands included, as invitations
 // ("decisions land here") — while review/read-only label only what the

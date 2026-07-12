@@ -89,9 +89,17 @@ type reviewStickyView struct {
 // (internal/mcpserve, by JSON marshaling this struct directly: one
 // computation, two presentations, never a reimplementation).
 type BoardProjection struct {
-	Spec     string              `json:"spec"`
-	Title    string              `json:"title"`
-	Mode     boardModeKind       `json:"mode"`
+	Spec  string        `json:"spec"`
+	Title string        `json:"title"`
+	Mode  boardModeKind `json:"mode"`
+	// Class identity (02 §Kind registry): which kind of wall this is —
+	// a feature (outcome ACs + stubs, downward-blind) or a story (the
+	// unit of build, pointing up at its feature's AC fragments), with
+	// the story's tracker ref and spike flag carried alongside so both
+	// presentations can stamp it (additive fields, R4 board polish).
+	Class    string              `json:"class"`
+	StoryRef string              `json:"story_ref,omitempty"`
+	Spike    bool                `json:"spike,omitempty"`
 	Problem  string              `json:"problem,omitempty"`
 	Outcome  string              `json:"outcome,omitempty"`
 	Cards    []cardView          `json:"cards"`
@@ -111,7 +119,10 @@ type BoardProjection struct {
 // buildProjection computes the deterministic projection of the four
 // inputs. comments is nil outside review mode.
 func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind) (*BoardProjection, error) {
-	p := &BoardProjection{Spec: specName, Title: fm.Title, Mode: mode}
+	p := &BoardProjection{
+		Spec: specName, Title: fm.Title, Mode: mode,
+		Class: string(fm.Class), StoryRef: fm.Story, Spike: fm.Spike,
+	}
 	if fm.Problem != nil {
 		p.Problem = fm.Problem.Text
 	}
