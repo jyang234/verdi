@@ -181,6 +181,30 @@ func positionForSlot(slot, zoneX int) artifact.Position {
 	return artifact.Position{X: float64(zoneX), Y: float64(zoneOriginY + slot*rowPitch)}
 }
 
+// ZoneColumn is one zone's rendered column band: the kind, its column's
+// x origin, and the band width (one card footprint). Exposed so the
+// board can LABEL the regions the zoned algorithm already files cards
+// into (05 §Workbench "grouped by object kind" — the wall's filing
+// scheme, made legible). Geometry stays non-binding (package comment);
+// the labels describe where unstored cards land, never where a dragged
+// card must stay.
+type ZoneColumn struct {
+	Kind  ZoneKind
+	X     int
+	Width int
+}
+
+// ZoneColumns returns every zone's column band in the fixed
+// left-to-right zone order — a pure function of the package constants
+// (no inputs, same output every call).
+func ZoneColumns() []ZoneColumn {
+	cols := make([]ZoneColumn, len(zoneOrder))
+	for i, k := range zoneOrder {
+		cols[i] = ZoneColumn{Kind: k, X: zoneMarginX + i*zonePitchX, Width: CardWidth}
+	}
+	return cols
+}
+
 // Prune returns stored restricted to keys naming a live object id — the
 // adjudicated writer policy (a dangling layout.json key is a VL-018 lint
 // error, so the writer never persists one).

@@ -238,3 +238,41 @@ func TestReadFile_Negative(t *testing.T) {
 		t.Fatal("ReadFile accepted a wrong schema")
 	}
 }
+
+// ZoneColumns is the board's zone-label geometry: fixed order, one band
+// per zone, bands aligned with where Generate actually slots unstored
+// cards (the label must sit over its own column).
+func TestZoneColumns(t *testing.T) {
+	cols := ZoneColumns()
+	wantOrder := []ZoneKind{ZoneAC, ZoneConstraint, ZoneDecision, ZoneOpenQuestion, ZoneReference}
+	if len(cols) != len(wantOrder) {
+		t.Fatalf("ZoneColumns() has %d entries, want %d", len(cols), len(wantOrder))
+	}
+	for i, c := range cols {
+		if c.Kind != wantOrder[i] {
+			t.Errorf("cols[%d].Kind = %s, want %s", i, c.Kind, wantOrder[i])
+		}
+		if c.Width != CardWidth {
+			t.Errorf("cols[%d].Width = %d, want CardWidth", i, c.Width)
+		}
+	}
+	// The band origin agrees with Generate's slotting: an unstored card
+	// of each kind lands at its column's X.
+	for i, c := range cols {
+		objs := []Object{{Kind: c.Kind, ID: "z-1", DocOrder: 0}}
+		got, err := Generate(objs, nil)
+		if err != nil {
+			t.Fatalf("Generate(%s): %v", c.Kind, err)
+		}
+		if got["z-1"].X != float64(c.X) {
+			t.Errorf("zone %d (%s): label X %d but cards land at %v", i, c.Kind, c.X, got["z-1"].X)
+		}
+	}
+	// Pure function of constants: two calls agree.
+	again := ZoneColumns()
+	for i := range cols {
+		if cols[i] != again[i] {
+			t.Errorf("ZoneColumns() not stable at %d: %+v vs %+v", i, cols[i], again[i])
+		}
+	}
+}
