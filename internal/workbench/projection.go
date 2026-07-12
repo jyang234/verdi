@@ -199,7 +199,14 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 		p.Tray = append(p.Tray, rs)
 	}
 
-	// (2) Positions: stored coordinates verbatim, everything else zoned.
+	// (2) Positions: stored coordinates, everything else zoned — with
+	// stored collisions resolved AT DISPLAY TIME (owner directive, round
+	// 6: cards never render stacked in any mode; a store can hold
+	// positions saved before the uniform-footprint enlargement whose
+	// footprints now collide, and a read-only board could never repair
+	// them by drag). layout.json is never rewritten by rendering — the
+	// nudge exists only in this projection, so a nudged card snaps back
+	// to its stored spot once the contested footprint frees up.
 	// Reference cards are every external edge endpoint, ordered by ref.
 	refSet := map[string]bool{}
 	for _, e := range p.Edges {
@@ -222,7 +229,7 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	for i, r := range refs {
 		layoutObjs = append(layoutObjs, boardlayout.Object{Kind: boardlayout.ZoneReference, ID: r, DocOrder: i})
 	}
-	positions, err := boardlayout.Generate(layoutObjs, stored)
+	positions, err := boardlayout.ResolveDisplayOverlaps(layoutObjs, stored)
 	if err != nil {
 		return nil, fmt.Errorf("workbench: board layout for %s: %w", specName, err)
 	}

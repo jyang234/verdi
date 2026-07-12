@@ -146,6 +146,48 @@ func TestBoardSpecPage_Authoring(t *testing.T) {
 	}
 }
 
+// Owner directive (round 6): cards never RENDER stacked, in any mode. A
+// layout.json holding footprint-colliding positions (saved before the
+// uniform-footprint enlargement — the accepted-pending-build regression
+// fixture's exact geometry) renders resolved: the canonical-order first
+// claimant keeps its stored spot, the collider is nudged — and rendering
+// never writes layout.json (only a real drag writes).
+func TestBoardSpecPage_CollidingStoredPositionsRenderResolved(t *testing.T) {
+	root := newBoardFixture(t)
+	layoutPath := filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "layout.json")
+	colliding := `{
+  "schema": "verdi.boardlayout/v1",
+  "positions": { "ac-1": { "x": 40, "y": 20 }, "ac-2": { "x": 220, "y": 20 } }
+}
+`
+	if err := os.WriteFile(layoutPath, []byte(colliding), 0o644); err != nil {
+		t.Fatalf("seeding colliding layout: %v", err)
+	}
+	h := NewHandler(root)
+
+	rec := getBoard(t, h, boardFixtureName)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET board = %d, want 200\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	// First claimant: stored verbatim.
+	if !strings.Contains(body, `data-testid="card-ac-1" data-id="ac-1" data-object-kind="acceptance-criterion" style="left:40px;top:20px"`) {
+		t.Error("ac-1 (first claimant) not rendered at its stored position")
+	}
+	// The collider does NOT render at its stored, overlapping position.
+	if strings.Contains(body, `data-id="ac-2" data-object-kind="acceptance-criterion" style="left:220px;top:20px"`) {
+		t.Error("ac-2 still renders stacked at its stored colliding position")
+	}
+	// Rendering never wrote the store: the colliding record is intact.
+	after, err := os.ReadFile(layoutPath)
+	if err != nil {
+		t.Fatalf("reading layout.json back: %v", err)
+	}
+	if string(after) != colliding {
+		t.Errorf("rendering rewrote layout.json:\n got %s\nwant %s", after, colliding)
+	}
+}
+
 func TestBoardSpecPage_Deterministic(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
