@@ -25,11 +25,10 @@ decisions:
   - { id: dc-2, text: "interactive editing is structural-operations-only — add node, connect, rename, delete — and spatial positioning is refused by design", anchor: dc-2 }
   - { id: dc-3, text: "verification coverage is itself three-valued and disclosed per artifact: full (flowchart within the generator's vocabulary), partial (flowchart beyond it), illustrative (no generator)", anchor: dc-3 }
   - { id: dc-4, text: "realization is detected by regeneration diff against current truth, and divergence feeds the alignment verdict rather than any authoring-time block", anchor: dc-4 }
-open_questions:
-  - { id: oq-1, text: "rename semantics in the structural diff: an explicit rename operation, or declared remove+add — which yields honest witnesses?", anchor: oq-1 }
-  - { id: oq-2, text: "large graphs: is the proposal unit a --root-scoped subgraph, and how is the scope declared and pinned?", anchor: oq-2 }
-  - { id: oq-3, text: "which 02 amendments ratify the surface — diagram status vocabulary, derived_from + base-digest fields, the illustrative marker — and do they land as one batch?", anchor: oq-3 }
-  - { id: oq-4, text: "where do illustrative diagrams attach: a spec link, or a body-figure convention?", anchor: oq-4 }
+  - { id: dc-5, text: "the structural diff represents a rename as remove+add — no rename inference (that would reimplement flowmap's graph semantics, co-2, and invite the judgment co-1 forbids); honest witnesses (kept-but-gone plus proposed-new) over concise inference; an author-declared rename is a possible later refinement, out of v1", anchor: dc-5 }
+  - { id: dc-6, text: "a proposal declares its scope as a pinned field — the flowmap --root selector it was generated under — and verification regenerates truth at the same scope; an unscoped proposal is verified against the whole graph with the hairball cap disclosed; scope is its own field, orthogonal to derived_from which names the base", anchor: dc-6 }
+  - { id: dc-7, text: "the schema surface ratifies as one 02 amendment batch before implementation (the scoping-canvas round-5.4 pattern; co-2 needs a stable artifact contract before the extractor is built): diagram status vocabulary, derived_from plus base-digest, the scope field, and the illustrative marker", anchor: dc-7 }
+  - { id: dc-8, text: "illustrative diagrams attach as a body-figure convention — a fenced mermaid block or diagram/ reference in the spec body, prose register, already rendered by the dex — never a new edge type; the closed edge vocabulary stays closed; illustrative is a body figure, a proposal is a first-class artifact", anchor: dc-8 }
 stubs:
   - { slug: proposal-artifact, acceptance_criteria: [ac-2, ac-6] }
   - { slug: verification-extractor, acceptance_criteria: [ac-1] }
@@ -211,29 +210,53 @@ section at pre-review; the only hard failures are strict-decode failures
 of the artifact itself. Gates visible early, enforced late — and the
 enforcement is disclosure, not refusal.
 
-## OQ-1
+## DC-5
 
-A rename in a diagram diff is ambiguous: remove+add is honest but noisy,
-an explicit rename operation yields better witnesses but needs grammar.
-The answer shapes contradiction quality and must land before the
-extractor's schema freezes.
+A rename in a diagram diff is ambiguous only if the tool tries to guess
+it. flowmap's `--diff` is set-difference over node/edge identity; calling
+two differently-named nodes "the same node renamed" is a semantic
+judgment flowmap does not make, co-2 forbids verification from
+reimplementing, and co-1 keeps the LLM out of. So a rename is two honest
+facts: the old node is kept-but-gone (contradicted, witnessed by the
+removing commit) and the new node is proposed-new. Noisier than a single
+"renamed" chip, but honest noise beats concise inference, and the two
+facts render adjacent. An author-DECLARED rename (the human writes the
+intent — an authorship act, not an inference) would give better witnesses
+without guessing, but is out of v1 scope.
 
-## OQ-2
+## DC-6
 
-flowmap caps hairballs (--max-nodes) and scopes with --root. A proposal
-over a large graph probably needs to be a declared, pinned subgraph
-scope; whether scope is part of derived_from or its own field is open.
+flowmap already scopes with `--root` and caps hairballs with
+`--max-nodes` (above the cap it renders an index of entry points, not a
+tangle). A proposal therefore carries its scope explicitly — the `--root`
+selector it was generated under — pinned, so verification regenerates
+truth at the same scope and the diff is comparable. An unscoped proposal
+is verified against the whole graph, the cap disclosed. Scope is its own
+field, orthogonal to `derived_from`: `derived_from` names the base a
+DERIVED proposal forked from, while scope applies to from-scratch
+proposals too (they can also be about a subgraph). The selector grammar
+joins DC-7's amendment batch.
 
-## OQ-3
+## DC-7
 
-The ratification surface: diagram status vocabulary
-(proposed/accepted/realized/stale semantics), derived_from plus
-base-digest fields, and the illustrative marker are 02 amendments in the
-round-5.2 pattern. Whether they land as one batch before implementation
-or ride the first implementing story is open.
+The schema surface — diagram status vocabulary (proposed / accepted /
+realized / stale), `derived_from` plus its base digest, the scope field
+(DC-6), and the illustrative marker (DC-8) — ratifies as one 02
+amendment batch BEFORE any implementation, the scoping-canvas round-5.4
+pattern. co-2's determinism needs a stable artifact contract before the
+extractor is built; freezing the schema first and then building against
+it is the only honest order.
 
-## OQ-4
+## DC-8
 
-Illustrative diagrams are "tied to the spec" by ruling; the binding
-mechanism — a link type on the spec, or a body-figure convention — is
-open, and interacts with oq-3's amendment batch.
+Illustrative diagrams — the coverage tier with no truth generator
+(DC-3) — attach as a body-figure convention: a fenced mermaid block or a
+`diagram/` reference in the spec's own body, prose register, which the
+dex already renders today. This is deliberately NOT a new edge type: an
+"illustrates" edge would extend the closed five-value edge vocabulary
+(implements / resolves / exempts / supersedes / depends-on) that VL-003,
+the board yarn, and the whole edge grammar depend on staying closed. The
+clean line: an illustrative diagram is a body figure (prose), a verified
+proposal is a first-class artifact (spec register with status and
+`derived_from`) — dc-3's two tiers become two document locations, no new
+vocabulary.
