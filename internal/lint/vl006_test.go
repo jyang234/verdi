@@ -2,6 +2,7 @@ package lint
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -119,6 +120,146 @@ Placeholder outcome.
 	onlyRule(t, findings, "VL-006")
 	if len(findings) != 1 {
 		t.Fatalf("got %d findings, want 1 (missing AC anchor):\n%s", len(findings), findingsString(findings))
+	}
+}
+
+// --- Stub acceptance_criteria integrity (this phase: folded into
+// VL-006, same syntactic-stub-surface home the house steer names) ---
+
+// vl006StubSpecTmpl is a feature spec declaring ac-1 and ac-2 with one
+// stub whose acceptance_criteria list is the %s insertion point.
+const vl006StubSpecTmpl = `---
+id: spec/vl-006-stub
+kind: spec
+class: feature
+title: "VL-006: feature with a stub"
+status: draft
+owners: [platform-team]
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+  - { id: ac-2, text: "placeholder", evidence: [static], anchor: "#ac-2" }
+stubs:
+  - { slug: badge-computes, acceptance_criteria: [%s] }
+---
+# VL-006: feature with a stub
+
+## Problem
+
+Placeholder problem.
+
+## Outcome
+
+Placeholder outcome.
+
+## AC-1
+
+Placeholder.
+
+## AC-2
+
+Placeholder.
+`
+
+// TestVL006_StubACRefs is table-driven over a stub's acceptance_criteria:
+// entries naming declared ACs lint clean; a dangling ref fires VL-006
+// naming the stub slug and the missing id.
+func TestVL006_StubACRefs(t *testing.T) {
+	cases := []struct {
+		name     string
+		acList   string
+		wantFire bool
+		wantIn   []string // substrings the finding message must carry
+	}{
+		{name: "all declared", acList: "ac-1, ac-2", wantFire: false},
+		{name: "dangling ref", acList: "ac-1, ac-99", wantFire: true, wantIn: []string{"badge-computes", "ac-99"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := strings.Replace(vl006StubSpecTmpl, "%s", tc.acList, 1)
+			dir := adHocOverlayDir(t, ".verdi/specs/active/vl-006-stub/spec.md", spec)
+			repo := buildLintRepo(t, dir)
+			findings := runLint(t, repo.Dir, Context{}, Options{})
+			var got []Finding
+			for _, f := range findings {
+				if f.Rule == "VL-006" {
+					got = append(got, f)
+				}
+			}
+			if !tc.wantFire {
+				if len(got) != 0 {
+					t.Fatalf("VL-006 fired on a valid stub: %s", findingsString(got))
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("got %d VL-006 findings, want 1:\n%s", len(got), findingsString(got))
+			}
+			for _, want := range tc.wantIn {
+				if !strings.Contains(got[0].Message, want) {
+					t.Errorf("finding %q does not name %q", got[0].Message, want)
+				}
+			}
+		})
+	}
+}
+
+// TestVL006_StubACRefs_GrandfatheredAndDecodeErrSkipped mirrors VL-006's
+// existing guards: a grandfathered doc and a decode-error doc are never
+// subject to the stub-AC check (grandfathered v0 specs never carried
+// stubs, and a decode-failed doc has no Spec to read).
+func TestVL006_StubACRefs_GrandfatheredAndDecodeErrSkipped(t *testing.T) {
+	// A decode-error doc: an unknown frontmatter field fails DecodeStrict,
+	// so d.Spec is nil and the stub check must not panic or fire VL-006.
+	const decodeErr = `---
+id: spec/vl-006-stub-decode-err
+kind: spec
+class: feature
+title: "VL-006: stub spec that fails decode"
+status: draft
+owners: [platform-team]
+bogus_field: nope
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+stubs:
+  - { slug: badge-computes, acceptance_criteria: [ac-99] }
+---
+# VL-006: stub spec that fails decode
+`
+	dir := adHocOverlayDir(t, ".verdi/specs/active/vl-006-stub-decode-err/spec.md", decodeErr)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-006" {
+			t.Fatalf("VL-006 fired on a decode-error doc: %s", f.String())
+		}
+	}
+
+	// A grandfathered (archived, GrandfatherArchive on) doc with a dangling
+	// stub ref is skipped too — the same guard line VL-006's other checks
+	// already sit behind.
+	const grandfatheredDangling = `---
+id: spec/vl-006-stub-grandfathered
+kind: spec
+class: feature
+title: "VL-006: archived stub spec, dangling ref"
+status: draft
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+stubs:
+  - { slug: badge-computes, acceptance_criteria: [ac-99] }
+---
+# VL-006: archived stub spec, dangling ref
+`
+	gdir := adHocOverlayDir(t, ".verdi/specs/archive/vl-006-stub-grandfathered/spec.md", grandfatheredDangling)
+	grepo := buildLintRepo(t, gdir)
+	gfindings := runLint(t, grepo.Dir, Context{}, Options{GrandfatherArchive: true})
+	for _, f := range gfindings {
+		if f.Rule == "VL-006" {
+			t.Fatalf("VL-006 fired on a grandfathered archived doc: %s", f.String())
+		}
 	}
 }
 
