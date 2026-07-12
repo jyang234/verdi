@@ -205,6 +205,95 @@ func TestVL006_StubACRefs(t *testing.T) {
 	}
 }
 
+// vl006SpikeStubSpecTmpl is a feature spec declaring oq-1 and oq-2 with
+// one spike stub whose resolves list is the %s insertion point — the
+// DC-4 sibling check to checkStubACs, folded into the same VL-006 rule
+// (vl006.go's doc comment: "the rule that already validates stub
+// acceptance_criteria").
+const vl006SpikeStubSpecTmpl = `---
+id: spec/vl-006-spike-stub
+kind: spec
+class: feature
+title: "VL-006: feature with a spike stub"
+status: draft
+owners: [platform-team]
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+open_questions:
+  - { id: oq-1, text: "placeholder", anchor: "#oq-1" }
+  - { id: oq-2, text: "placeholder", anchor: "#oq-2" }
+stubs:
+  - { slug: retry-strategy-spike, spike: true, resolves: [%s] }
+---
+# VL-006: feature with a spike stub
+
+## Problem
+
+Placeholder problem.
+
+## Outcome
+
+Placeholder outcome.
+
+## AC-1
+
+Placeholder.
+
+## OQ-1
+
+Placeholder.
+
+## OQ-2
+
+Placeholder.
+`
+
+// TestVL006_SpikeStubResolvesRefs is the resolves-side analogue of
+// TestVL006_StubACRefs: a spike stub's resolves entries naming declared
+// open questions lint clean; a dangling ref fires VL-006 naming the stub
+// slug and the missing id.
+func TestVL006_SpikeStubResolvesRefs(t *testing.T) {
+	cases := []struct {
+		name     string
+		oqList   string
+		wantFire bool
+		wantIn   []string
+	}{
+		{name: "all declared", oqList: "oq-1, oq-2", wantFire: false},
+		{name: "dangling ref", oqList: "oq-1, oq-99", wantFire: true, wantIn: []string{"retry-strategy-spike", "oq-99"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := strings.Replace(vl006SpikeStubSpecTmpl, "%s", tc.oqList, 1)
+			dir := adHocOverlayDir(t, ".verdi/specs/active/vl-006-spike-stub/spec.md", spec)
+			repo := buildLintRepo(t, dir)
+			findings := runLint(t, repo.Dir, Context{}, Options{})
+			var got []Finding
+			for _, f := range findings {
+				if f.Rule == "VL-006" {
+					got = append(got, f)
+				}
+			}
+			if !tc.wantFire {
+				if len(got) != 0 {
+					t.Fatalf("VL-006 fired on a valid spike stub: %s", findingsString(got))
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("got %d VL-006 findings, want 1:\n%s", len(got), findingsString(got))
+			}
+			for _, want := range tc.wantIn {
+				if !strings.Contains(got[0].Message, want) {
+					t.Errorf("finding %q does not name %q", got[0].Message, want)
+				}
+			}
+		})
+	}
+}
+
 // TestVL006_StubACRefs_GrandfatheredAndDecodeErrSkipped mirrors VL-006's
 // existing guards: a grandfathered doc and a decode-error doc are never
 // subject to the stub-AC check (grandfathered v0 specs never carried
