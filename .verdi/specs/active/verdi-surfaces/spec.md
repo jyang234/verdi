@@ -103,12 +103,16 @@ or a computed badge; nothing is board-native except position:
 
 **The scratch tier (authoring mode).** A murder board is a thinking tool
 before it is a schema; the messy phase is relocated, not deleted. In
-authoring mode the annotation layer allows **free-floating stickies** and an
-**untyped "relates" annotation** between any two elements — mutable-zone,
+authoring mode the annotation layer allows **free-floating stickies**,
+**pinned references** (`type: pin`, 02 §Record schemas — an existing ADR,
+diagram, or spec put on the wall as planning material before any edge
+exists), and an **untyped "relates" annotation** between any two elements —
+mutable-zone,
 never entering the spec document, exactly the category review stickies
 already occupy. Graduation is an ordinary edit: a sticky becomes a real
-object (decision, constraint, AC, declared open question) or a
-relates-thread becomes a typed edge — or they die. **Readiness rule**
+object (decision, constraint, AC, declared open question), a
+relates-thread becomes a typed edge, or a pinned reference earns a typed
+edge drawn to its target — or they die. **Readiness rule**
 (authoring population, the VL-014 successor's first half): every
 open-question sticky is resolved or explicitly carried as a declared open
 question on the spec before the spec MR is review-ready.
