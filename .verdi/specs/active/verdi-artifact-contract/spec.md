@@ -226,7 +226,14 @@ Spec classes:
   (§Object model), `context:` (pinned manifest), `impacts: [service...]`,
   and `declares:` (intended boundaries). It also carries `stubs:` — the
   acceptance-time scoping record, one entry per intended story:
-  `{ slug: <title-slug>, acceptance_criteria: [<ac-id>...] }`. On a
+  `{ slug: <title-slug>, acceptance_criteria: [<ac-id>...] }`. A stub may
+  instead be a **spike stub** (round 5.4, mirroring the story level's own
+  discriminator): `{ slug, spike: true, resolves: [<oq-id>...] }` — the
+  intended spike named with the open questions it will answer. The grammar
+  fails closed: `resolves` requires `spike: true`; a spike stub declares
+  `resolves` and no `acceptance_criteria`; a plain stub the reverse. One
+  spike may resolve many questions; a question claimed by multiple spike
+  stubs is a norm-level smell, never an error. On a
   superseding revision, a `supersession:` block is required (R4-I-4):
   `{ carried: [ids], amended: [{id, note}], amended_advisory: [{id, note}],
   removed: [{id, note}], added: [ids] }`, classifying every predecessor
@@ -431,7 +438,7 @@ below for the board-key namespace this slug is drawn from).
               "selector": { "heading": "ac-2", "quote": "charge API", "line": null } },
   "target_b": { "ref": "...", "selector": { "heading": "...", "quote": "...", "line": null } },
   "board": { "story": "STORY-1482", "x": 262, "y": 132 },
-  "type": "comment | question | decision-needed | agent-task | frame | note | pin | relates | review",
+  "type": "comment | question | decision-needed | agent-task | frame | note | pin | relates | review | spike | story",
   "body": "string", "status": "open | resolved | graduated" }
 ```
 
@@ -459,6 +466,16 @@ name, and its `board` record alone may carry the optional `w`/`h` extent
 fields (fail closed on every other type). A frame never enters the spec
 document and never constrains layout; it is a label over space, not a
 container with semantics.
+
+`type: story` and `type: spike` (round 5.4) are the scoping canvas's
+typed proto-stickies — a feature wall's claim that a story (or spike)
+will exist: `board` carries the parking spot, `body` the working title.
+Their untyped relates-threads to acceptance criteria (story) or open
+questions (spike) carry the coverage and resolution attribution; the
+endpoint pair is the meaning, so the edge vocabulary is untouched.
+Graduation mints the frontmatter stub (spike stubs carrying `resolves`);
+like every sticky, they graduate or they die, and they are legal only on
+feature-class walls (fail closed elsewhere).
 
 `type: pin` pins an existing artifact to a board as planning material — the
 murder-board move of putting a fact on the wall before any claim is made
