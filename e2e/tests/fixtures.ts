@@ -175,6 +175,12 @@ export const READONLY_SPEC = "stale-decline";
 // void (provisioned by cmd/e2eharness/provisionv2.go).
 export const EMPTY_SPEC = "income-verification";
 
+// EMPTY_SPEC is class: story — the harness's one story-class board
+// fixture (every other board fixture is a feature) — and this is its
+// `story:` tracker ref, which the case-file class tag wears as
+// "story · <tracker-ref>" (provisioned by cmd/e2eharness/provisionv2.go).
+export const EMPTY_SPEC_STORY_REF = "jira:LOAN-2201";
+
 // Corpus artifacts nothing on DESIGN_SPEC's wall names (real on main,
 // so real on the design branch) — the pin toolbox's import fixtures.
 export const PIN_ADR = "adr/0002-outbox-events";
@@ -189,3 +195,39 @@ export const PIN_TRASH_ADR = "adr/0003-retry-policy";
 // with a thread pointing off the board's top edge.
 export const DOC_EDGE_TYPE = "implements";
 export const DOC_EDGE_TARGET = "adr/0002-outbox-events";
+
+// ---------------------------------------------------------------------------
+// Workbench (scoping canvas, spec/scoping-canvas) — the stubs band
+// ---------------------------------------------------------------------------
+
+// DESIGN_SPEC's one open question (provisioned by provisionv2.go): the
+// spike proto-sticky's resolution-yarn target.
+export const OQ_ID = "oq-1";
+
+// FEATURE_SPEC (accepted-pending-build, on main → sealed wall) declares
+// three stubs; its wall renders them as stub cards with Instantiate.
+// STUB_SLUGS mirrors the fixture's stubs: frontmatter verbatim.
+export const STUB_SLUGS = [
+  "borrower-update-api",
+  "borrower-update-ui",
+  "borrower-update-audit-log",
+] as const;
+
+// The stub the instantiate journey cuts a branch for: it must have NO
+// realized story spec in the corpus (borrower-update-api is realized;
+// the audit log story does not exist yet), so design/<slug> carries a
+// genuinely new scaffold.
+export const INSTANTIATE_SLUG = "borrower-update-audit-log";
+
+// The live corpus's other committed stub fixture: disclosure-legibility
+// (in this repo's own .verdi store) — asserted only through the Go
+// render tests; the e2e store's stub fixture is FEATURE_SPEC above.
+
+// data-testid helpers for the scoping surface (binding selector
+// contract, like refCardTestId above).
+export function stubCardTestId(slug: string): string {
+  return `stub-card-${slug}`;
+}
+export function coverageChipTestId(acId: string): string {
+  return `coverage-${acId}`;
+}

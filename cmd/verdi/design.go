@@ -24,9 +24,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"unicode"
 
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/designscaffold"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/provider"
 	"github.com/OWNER/verdi/internal/store"
@@ -250,14 +250,21 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	if storyRef != "" {
 		title = resolveStoryTitle(ctx, deps.Provider, storyRef, stderr)
 	} else {
-		title = humanizeName(name)
+		title = designscaffold.HumanizeName(name)
 	}
 
 	var content string
 	if kind == artifact.ClassFeature {
-		content = scaffoldDraftFeatureSpec(specRef.String(), storyRef, title)
+		content = designscaffold.Feature(specRef.String(), storyRef, title)
 	} else {
-		content = scaffoldDraftStorySpec(specRef.String(), storyRef, title)
+		// design start's own placeholder edge: an implements edge to a
+		// not-yet-real feature/AC pair, since 05 §CLI names no --feature
+		// flag (nothing about which feature a story belongs to is knowable
+		// at scaffold time) — the design-branch edit is where a human or
+		// agent replaces it with a real edge into the accepted feature this
+		// story implements.
+		links := []designscaffold.StoryLink{{Type: artifact.LinkImplements, Ref: "spec/todo-replace-feature-name#ac-1"}}
+		content = designscaffold.Story(specRef.String(), storyRef, title, false, links)
 	}
 
 	// Self-validate before writing anything to disk (CLAUDE.md: "never
@@ -326,111 +333,7 @@ func resolveStoryTitle(ctx context.Context, prov provider.StoryProvider, storyRe
 	return story.Title
 }
 
-// humanizeName renders a kebab-case spec name as a Title Case placeholder
-// title for the ref-less feature-scaffold path (--kind feature with no
-// tracker ref: there is no story title to resolve, and 05 §CLI's own I-10
-// "no magic, no tracker-derived naming" posture rules out inventing one
-// from anything but --name itself). Cosmetic only — the design branch's
-// own edit is where a human replaces this placeholder with a real title,
-// exactly like every other TODO the scaffold carries.
-func humanizeName(name string) string {
-	parts := strings.Split(name, "-")
-	for i, p := range parts {
-		if p == "" {
-			continue
-		}
-		r := []rune(p)
-		r[0] = unicode.ToUpper(r[0])
-		parts[i] = string(r)
-	}
-	return strings.Join(parts, " ")
-}
-
-// scaffoldDraftFeatureSpec renders a draft feature spec's markdown content:
-// frontmatter plus a minimal body. 05 §CLI's own exit criterion requires
-// the scaffold itself — before any design-branch edit — to already carry
-// attributes, ACs, and stubs (not just a bare shell), so this placeholder
-// includes one of each, all self-consistently anchored against the body
-// below (02 §Object model: exact-match anchor resolution) so the scaffold
-// round-trips through ResolveObjectAnchors unmodified. storyRef is ""
-// when the feature carries no tracker ref at all (05 §CLI: optional for
-// the feature class). Owners is a disclosed placeholder ("unassigned"): 02
-// documents owners as "team or CODEOWNERS-resolvable handles" and nothing
-// in this system names a default owning team — inventing one silently
-// would be exactly the "no magic" I-10 rejects for naming.
-func scaffoldDraftFeatureSpec(specRef, storyRef, title string) string {
-	storyLine := ""
-	if storyRef != "" {
-		storyLine = fmt.Sprintf("\nstory: %s", storyRef)
-	}
-	return fmt.Sprintf(`---
-id: %s
-kind: spec
-title: %q
-owners: [unassigned]
-class: feature%s
-status: draft
-problem: { text: "TODO: replace with the real problem statement before accept", anchor: problem }
-outcome: { text: "TODO: replace with the real outcome statement before accept", anchor: outcome }
-acceptance_criteria:
-  - { id: ac-1, text: "TODO: replace with real acceptance criteria before accept", evidence: [static, attestation], anchor: ac-1 }
-stubs:
-  - { slug: todo-replace-stub-slug, acceptance_criteria: [ac-1] }
----
-# %s
-
-## Problem
-
-TODO: design notes.
-
-## Outcome
-
-TODO: design notes.
-
-## Ac 1
-
-TODO: design notes.
-`, specRef, title, storyLine, title)
-}
-
-// scaffoldDraftStorySpec renders a draft story spec's markdown content
-// (02 §Kind registry: story (NEW)). storyRef is always non-empty — the
-// story class REQUIRES the scheme-prefixed ref (05 §CLI). The placeholder
-// `implements` edge targets a not-yet-real feature/AC pair
-// ("spec/todo-replace-feature-name#ac-1"); the story's own design-branch
-// edit (the same ordinary content editing accept.go's stub-match
-// computation expects to have already happened) is where a human or agent
-// replaces it with a real edge into the accepted feature this story
-// implements — 05 §CLI names no --feature flag, so nothing about which
-// feature a story belongs to is knowable at scaffold time.
-func scaffoldDraftStorySpec(specRef, storyRef, title string) string {
-	return fmt.Sprintf(`---
-id: %s
-kind: spec
-title: %q
-owners: [unassigned]
-class: story
-status: draft
-story: %s
-problem: { text: "TODO: replace with the real problem statement before accept", anchor: problem }
-outcome: { text: "TODO: replace with the real outcome statement before accept", anchor: outcome }
-acceptance_criteria:
-  - { id: ac-1, text: "TODO: replace with real acceptance criteria before accept", evidence: [static], anchor: ac-1 }
-links:
-  - { type: implements, ref: "spec/todo-replace-feature-name#ac-1" }
----
-# %s
-
-## Problem
-
-TODO: design notes.
-
-## Outcome
-
-TODO: design notes.
-
-## Ac 1
-
-TODO: design notes.
-`, specRef, title, storyRef, title)
-}
+// The scaffold-rendering core (feature/story markdown content,
+// HumanizeName) has moved to internal/designscaffold (CLAUDE.md: two
+// consumers — this verb and the workbench's stub-instantiate board
+// action — share one internal/ home; cmd stays thin).

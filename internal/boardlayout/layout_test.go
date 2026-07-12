@@ -244,7 +244,12 @@ func TestReadFile_Negative(t *testing.T) {
 // cards (the label must sit over its own column).
 func TestZoneColumns(t *testing.T) {
 	cols := ZoneColumns()
-	wantOrder := []ZoneKind{ZoneAC, ZoneConstraint, ZoneDecision, ZoneOpenQuestion, ZoneReference}
+	// The stubs band sits between open questions and references
+	// (spec/scoping-canvas dc-6: "a dedicated kind-locked stubs zone ...
+	// between open questions and references"). AMENDED with the scoping
+	// canvas: the previous order had no ZoneStub; references stay
+	// outermost (dc-6's non-binding house style, kept deliberately).
+	wantOrder := []ZoneKind{ZoneAC, ZoneConstraint, ZoneDecision, ZoneOpenQuestion, ZoneStub, ZoneReference}
 	if len(cols) != len(wantOrder) {
 		t.Fatalf("ZoneColumns() has %d entries, want %d", len(cols), len(wantOrder))
 	}
@@ -297,5 +302,54 @@ func TestScratchColumn(t *testing.T) {
 	}
 	if _, err := Generate([]Object{{Kind: ZoneScratch, ID: "x-1"}}, nil); err == nil {
 		t.Error("Generate accepted a ZoneScratch object; must fail closed")
+	}
+}
+
+// The stubs zone (spec/scoping-canvas dc-6): a real layout zone —
+// Generate slots stub cards there like any kind — with its own squat
+// footprint (stub cards are typeset claims, not full object cards), and
+// the S8 properties hold across it: determinism and add-never-reflows.
+func TestStubZone(t *testing.T) {
+	w, h := FootprintFor(ZoneStub)
+	if w != CardWidth {
+		t.Errorf("stub footprint width = %v, want CardWidth", w)
+	}
+	if h != StubCardHeight {
+		t.Errorf("stub footprint height = %v, want StubCardHeight", h)
+	}
+	if h >= CardHeight {
+		t.Errorf("StubCardHeight %v not squatter than an object card (%v) — the stub card must read as its own paper", h, CardHeight)
+	}
+
+	// Two stubs slot deterministically down their own column; adding a
+	// third never moves the first two (S8 property 3).
+	objs := []Object{
+		{Kind: ZoneStub, ID: "stub:alpha", DocOrder: 0},
+		{Kind: ZoneStub, ID: "stub:beta", DocOrder: 1},
+	}
+	first, err := Generate(objs, nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	again, err := Generate(objs, nil)
+	if err != nil {
+		t.Fatalf("Generate (again): %v", err)
+	}
+	for id := range first {
+		if first[id] != again[id] {
+			t.Errorf("stub layout not deterministic for %s: %v vs %v", id, first[id], again[id])
+		}
+	}
+	grown, err := Generate(append(objs, Object{Kind: ZoneStub, ID: "stub:gamma", DocOrder: 2}), nil)
+	if err != nil {
+		t.Fatalf("Generate (grown): %v", err)
+	}
+	for _, id := range []string{"stub:alpha", "stub:beta"} {
+		if grown[id] != first[id] {
+			t.Errorf("adding a stub moved %s: %v -> %v", id, first[id], grown[id])
+		}
+	}
+	if first["stub:alpha"] == first["stub:beta"] {
+		t.Error("two stubs share one slot")
 	}
 }

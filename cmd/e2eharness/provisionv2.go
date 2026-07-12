@@ -24,8 +24,10 @@ const (
 
 // designSpec is DESIGN_SPEC: the object model fixtures.ts binds (3 ACs,
 // 1 constraint, dc-1 carrying the declared exempts edge to ADR_REF, dc-2
-// plain), with problem/outcome texts containing PROBLEM_SNIPPET
-// ("stale decline") and OUTCOME_SNIPPET ("declined applicants").
+// plain, and oq-1 — the open question the scoping-canvas spike journey
+// draws its resolution yarn to), with problem/outcome texts containing
+// PROBLEM_SNIPPET ("stale decline") and OUTCOME_SNIPPET ("declined
+// applicants").
 const designSpec = `---
 id: spec/refi-decline-flow
 kind: spec
@@ -45,6 +47,8 @@ decisions:
   - { id: dc-1, text: "excuse decline events from the synchronous-write rule", anchor: "#dc-1",
       links: [ { type: exempts, ref: adr/0001-outbox-events, note: "decline events are already async via the outbox" } ] }
   - { id: dc-2, text: "reuse the existing notification channel for decline updates", anchor: "#dc-2" }
+open_questions:
+  - { id: oq-1, text: "which decline reasons can legally be shown verbatim?", anchor: "#oq-1" }
 ---
 # Refinancing decline flow
 
@@ -79,6 +83,10 @@ The outbox already decouples decline events.
 ## dc-2
 
 No second channel.
+
+## oq-1
+
+Legal review pending.
 `
 
 // designSpecLayout stores positions for a SUBSET of the objects (ac-1,

@@ -75,6 +75,16 @@
   --note-decision-bg: #f7d4ba;     --note-decision-ink: #6d3410;
   --note-agent-bg: #cde7da;        --note-agent-ink: #1c4c34;
   --note-unknown-bg: #e7e7e2;      --note-unknown-ink: #44483f;
+  /* the scoping canvas (spec/scoping-canvas): a story proto-sticky is
+     manila — the folder it will become; a spike proto-sticky is
+     blueprint periwinkle — the probe. Stub cards are kraft file-tab
+     stock: the future case file's tab, filed on the wall before the
+     case exists (dc-6's typeset register). */
+  --note-story-bg: #efdfb3;        --note-story-ink: #57430e;
+  --note-spike-bg: #d9def4;       --note-spike-ink: #363e6e;
+  --stub-paper: #eee3c2;
+  --stub-edge: #c4ad6d;
+  --stub-ink: #5a4716;
 
   /* type voices */
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
@@ -131,6 +141,11 @@
     --note-decision-bg: #48291a;     --note-decision-ink: #f0c9a8;
     --note-agent-bg: #1c3a2b;        --note-agent-ink: #c2e5d1;
     --note-unknown-bg: #2a2e27;      --note-unknown-ink: #c8ccc1;
+    --note-story-bg: #443917;        --note-story-ink: #ecd9a4;
+    --note-spike-bg: #2b3050;       --note-spike-ink: #ccd3f2;
+    --stub-paper: #322b18;
+    --stub-edge: #6e5f33;
+    --stub-ink: #e0d3a6;
   }
 }
 
@@ -992,6 +1007,12 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .sticky--question { background: var(--note-question-bg); color: var(--note-question-ink); }
 .sticky--decision-needed { background: var(--note-decision-bg); color: var(--note-decision-ink); }
 .sticky--agent-task { background: var(--note-agent-bg); color: var(--note-agent-ink); }
+/* proto-stickies (the scoping canvas, feature walls only): manila for
+   the story — the folder it graduates into — periwinkle blueprint for
+   the spike. Handwritten like every sticky; the register changes only
+   at graduation. */
+.sticky--story { background: var(--note-story-bg); color: var(--note-story-ink); }
+.sticky--spike { background: var(--note-spike-bg); color: var(--note-spike-ink); }
 
 /* the sticky draft's inline type control: choosing the paper's color IS
    part of pinning it (owner UAT round 6, item 2: the draft starts
@@ -1150,6 +1171,33 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   flex: none;
 }
 
+/* the class stamp: the case file wears its spec class (02 §Kind
+   registry) — FEATURE (the outcome-shaped plan), STORY · <tracker-ref>
+   (the unit of build), SPIKE (a story-class probe). Same rubber-stamp
+   voice and weight as the mode tag, tilted the other way — two stamps
+   on one folder never sit square. The tracker ref keeps its machine
+   case: it is a quoted ref, not stamp lettering. */
+.case-class-tag {
+  position: absolute;
+  top: -1.05rem;
+  right: 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  background: var(--paper);
+  border: 2px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.14rem 0.55rem;
+  transform: rotate(1.1deg);
+}
+.case-class-tag--feature { color: var(--accent); border-color: var(--accent); }
+.case-class-tag--story { color: var(--authored); border-color: var(--authored); }
+.case-class-tag--spike { color: var(--st-waived); border-color: var(--st-waived); }
+.case-class-ref { text-transform: none; }
+
 /* Disclosed-unavailable board notices (I-1(b)/I-2/M-4): an advisory
    line — honest and visible, never dominant — that discloses a skipped
    input (unreachable review feed, assumed default branch) rather than
@@ -1245,6 +1293,8 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .zone-label--constraint { color: var(--st-violated); background: color-mix(in srgb, var(--st-violated-tint) 80%, transparent); }
 .zone-label--decision { color: var(--authored); background: color-mix(in srgb, var(--authored-tint) 80%, transparent); }
 .zone-label--open-question { color: var(--st-waived); background: color-mix(in srgb, var(--st-waived-tint) 80%, transparent); }
+/* the stubs band wears the kraft voice of the cards that file there */
+.zone-label--stub { color: var(--stub-ink); background: color-mix(in srgb, var(--stub-paper) 80%, transparent); }
 .zone-label--reference { color: var(--frozen); background: color-mix(in srgb, var(--frozen-tint) 80%, transparent); }
 .zone-label--scratch { color: var(--st-nosignal); background: color-mix(in srgb, var(--st-nosignal-tint) 80%, transparent); }
 .zone-label--empty {
@@ -1734,6 +1784,17 @@ button.yarn-chip-type {
   color: var(--accent);
 }
 .board-guide[open] summary { margin-bottom: 0.6rem; }
+/* the class lesson (feature walls only): what THIS wall is — outcome
+   ACs + stubs here, stories point up from their own specs. One breath,
+   set off in the feature ink before the four moves. */
+.guide-class-note {
+  margin: 0 0 0.6rem;
+  padding: 0.45rem 0.65rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  background: var(--panel);
+  line-height: 1.5;
+}
 .guide-moves {
   margin: 0;
   padding-left: 1.15rem;
@@ -2037,6 +2098,175 @@ button.yarn-chip-type {
 .board-trash-label::after { content: "remove"; }
 .board-trash.is-hot .board-trash-label::after { content: "release"; }
 
+/* ---------- the scoping canvas (spec/scoping-canvas) ---------- */
+
+/* the stub card: a declared stub is the future case file's TAB, filed
+   in the stubs band before the case exists — kraft file-divider stock,
+   set straight in the record's register (no hand voice, no lean; dc-6:
+   graduation typesets the handwritten sticky into this paper in place).
+   Uniform footprint 12.5rem × 7.5rem, mirrored by boardlayout's
+   StubCardHeight. */
+.stubcard {
+  position: absolute;
+  z-index: 2;
+  width: 12.5rem;
+  height: 7.5rem;
+  padding: 0.55rem 0.8rem 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+  background: var(--stub-paper);
+  border: 1px solid var(--stub-edge);
+  border-radius: 2px 6px 6px 6px;
+  box-shadow: var(--shadow-card);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* the tab: the slug in the machine's mono — the identity the story is
+   bound to at instantiation (dc-3: slug equality, no new provenance) */
+.stub-tab {
+  position: absolute;
+  top: -0.95rem;
+  left: -1px;
+  max-width: 82%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--stub-ink);
+  background: var(--stub-paper);
+  border: 1px solid var(--stub-edge);
+  border-bottom: 0;
+  border-radius: 5px 5px 0 0;
+  padding: 0.12rem 0.55rem;
+}
+.stubcard .card-kind { margin-bottom: 0; }
+.stubcard .card-kind-label { font-weight: 700; color: var(--authored); }
+.stubcard .card-kind-id { color: var(--muted-solid); font-weight: 400; }
+/* the spike stub wears the spike's waived-violet ink (the same ink the
+   case-class stamp uses for a spike) */
+.stubcard--spike .card-kind-label,
+.stubcard--spike .stub-tab { color: var(--st-waived); }
+.stub-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+/* attributions: the stub's declared coverage/resolution, as chips in
+   the target kind's ink — legible without opening the document */
+.stub-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem;
+  overflow: hidden;
+}
+.stub-links-verb {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted-solid);
+}
+.stub-link-chip {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.02rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.stub-link-chip--ac {
+  color: var(--st-evidenced);
+  border-color: color-mix(in srgb, var(--st-evidenced) 55%, transparent);
+  background: color-mix(in srgb, var(--st-evidenced-tint) 70%, transparent);
+}
+.stub-link-chip--oq {
+  color: var(--st-waived);
+  border-color: color-mix(in srgb, var(--st-waived) 55%, transparent);
+  background: color-mix(in srgb, var(--st-waived-tint) 70%, transparent);
+}
+
+/* instantiate (ac-6): the one live affordance a sealed record permits —
+   the paved road's green on frozen paper, unmistakably the only thing
+   here that still acts */
+.stub-instantiate {
+  align-self: flex-start;
+  margin-top: auto;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.14rem 0.55rem;
+  cursor: pointer;
+}
+.stub-instantiate:hover, .stub-instantiate:focus-visible {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* coverage receipts (ac-4): every AC card on a feature wall says, in
+   the receipts voice, whether a stub claims it — calm evidenced green
+   when covered, quietly insistent pending ochre (dashed, never red)
+   when not. The OQ multi-claim smell (ac-5) is a norm-shaped
+   observation in the no-signal ink: worth a look, never a rule. */
+.coverage-chip, .oq-claims {
+  position: absolute;
+  left: 0.9rem;
+  bottom: 0.5rem;
+  max-width: calc(100% - 1.8rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.06rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.coverage-chip--covered {
+  color: var(--st-evidenced);
+  border-color: color-mix(in srgb, var(--st-evidenced) 55%, transparent);
+  background: color-mix(in srgb, var(--st-evidenced-tint) 75%, transparent);
+}
+.coverage-chip--none {
+  color: var(--st-pending);
+  border-style: dashed;
+  border-color: var(--st-pending);
+  background: transparent;
+}
+.oq-claims {
+  color: var(--st-nosignal);
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--st-nosignal) 60%, transparent);
+  background: color-mix(in srgb, var(--st-nosignal-tint) 70%, transparent);
+}
+/* a card wearing a receipt gives its text one clamped line back, so
+   the chip never sits on the prose */
+.objcard:has(.coverage-chip) .card-text,
+.objcard:has(.oq-claims) .card-text { -webkit-line-clamp: 3; }
+
 @media (max-width: 60rem) {
   .board-placards { flex-direction: column; }
   .case-arrow { display: none; }
@@ -2062,6 +2292,8 @@ button.yarn-chip-type {
   /* the trash's rise and heat are motion; without it the states still
      switch, instantly and honestly */
   .board-trash { transition: opacity 160ms ease, transform 160ms ease, box-shadow 120ms ease, border-color 120ms ease, background-color 120ms ease; }
+  /* the sealed wall's one live affordance answers the hand */
+  .stub-instantiate { transition: box-shadow 120ms ease, color 120ms ease, border-color 120ms ease; }
 }
 
 /* Syntax-highlighting palettes. Chroma emits no inline colour, so these two

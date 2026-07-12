@@ -39,6 +39,13 @@ var validEvidenceKinds = map[EvidenceKind]bool{
 
 var acIDRe = regexp.MustCompile(`^ac-[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
+// oqIDRe matches an open-question id's shape (oq-<slug>) — the same
+// per-prefix shape check acIDRe gives acceptance criteria, needed by
+// Stub.Validate's spike variant (`resolves` entries, 02 §Kind registry
+// round 5.4) since OpenQuestion.Validate itself checks the prefix and
+// objectIDRe separately rather than exposing one combined regex.
+var oqIDRe = regexp.MustCompile(`^oq-[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
 // AcceptanceCriterion is one entry in a feature or story spec's
 // `acceptance_criteria:` block (02 §feature-spec frontmatter additions,
 // §Object model). Anchor is a round-four addition (02 §Object model: "every
@@ -122,6 +129,17 @@ var validDispositionValues = map[DispositionValue]bool{
 // "a-" prefix followed by a 26-character Crockford base32 ULID (uppercase
 // alphanumerics, excluding I, L, O, U).
 var annotationIDRe = regexp.MustCompile(`^a-[0-9A-HJKMNP-TV-Z]{26}$`)
+
+// IsAnnotationID reports whether s has the "a-<ULID>" shape (I-11) — an
+// annotation id, as opposed to an artifact/object ref. Exported so a
+// resolver outside this package (internal/workbench's board projection)
+// can distinguish a relates endpoint naming a board annotation from one
+// naming an artifact ref (02 §Record schemas, round 5.4: "a relates
+// endpoint may name a board annotation by id ... as well as an artifact
+// ref").
+func IsAnnotationID(s string) bool {
+	return annotationIDRe.MatchString(s)
+}
 
 // Disposition is one entry in a feature spec's `dispositions:` block, the
 // commit-to-design ritual's durable output (I-5, hardened per plan

@@ -255,6 +255,30 @@ func (s *boardSpecServer) actionObjectTrash(name string, proj *BoardProjection, 
 			return fmt.Errorf("%s is named by the spec document's own links: block, which the board cannot edit — the card stays", req.ID)
 		}
 	}
+
+	// A stub's acceptance_criteria naming this AC blocks the trash: a
+	// scoping plan whose stub lists an AC has no defined meaning if that
+	// AC vanishes (a stub with an emptied AC list is undefined), and stubs
+	// are not board-editable yet — so refuse rather than silently rewrite
+	// the plan, the same fail-closed posture that governs document-held
+	// refcards above.
+	var claimingStubs []string
+	for _, st := range fm.Stubs {
+		for _, acID := range st.AcceptanceCriteria {
+			if acID == req.ID {
+				claimingStubs = append(claimingStubs, st.Slug)
+				break
+			}
+		}
+	}
+	if len(claimingStubs) > 0 {
+		sort.Strings(claimingStubs)
+		quoted := make([]string, len(claimingStubs))
+		for i, s := range claimingStubs {
+			quoted[i] = fmt.Sprintf("%q", s)
+		}
+		return fmt.Errorf("%s is claimed by stub %s — repoint the stub first; stubs are not board-editable yet", req.ID, strings.Join(quoted, ", "))
+	}
 	var linked []string
 	for _, dcObj := range fm.Decisions {
 		if dcObj.ID == req.ID {
