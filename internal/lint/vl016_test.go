@@ -5,6 +5,52 @@ import (
 	"testing"
 )
 
+// TestVL016_SpikeBuildBranch_FencesWithoutTouchingSpikeDir is D-5's
+// regression: it reproduces Phase B's real spike-build-branch shape, where
+// the spike's own spec directory is committed and frozen during the design
+// phase — BEFORE the build branch is cut — so the build branch's diff
+// (DiffBase..HEAD) never touches it. The old touchesSpike heuristic keyed the
+// fence off exactly that (now-absent) signal, so it could never fire on a
+// real spike build. The fence must now activate on the current branch being
+// feature/<spike-name>, fire on the out-of-fence touch, and stay quiet on the
+// in-fence one.
+func TestVL016_SpikeBuildBranch_FencesWithoutTouchingSpikeDir(t *testing.T) {
+	overlay := t.TempDir()
+	writeTestFile(t, filepath.Join(overlay, ".verdi/verdi.yaml"), vl016ManifestWithSpikePaths)
+	spikeSpec := readTestdataFile(t, filepath.Join(violationsDir, "VL-016", "only-spike-dir", ".verdi", "specs", "active", "borrower-update-mobile-spike", "spec.md"))
+	writeTestFile(t, filepath.Join(overlay, ".verdi/specs/active/borrower-update-mobile-spike/spec.md"), spikeSpec)
+
+	repo := buildLintRepo(t, overlay)
+	// The spike-spec commit is the build branch's diff base — the build
+	// branch's own diff starts AFTER the spike directory was already frozen.
+	branchPoint := repo.Heads[len(repo.Heads)-1]
+
+	gitCheckoutNewBranch(t, repo.Dir, "feature/borrower-update-mobile-spike")
+	// The build branch's real diff: one in-fence file (matches spike_paths:
+	// spikes/**) and one out-of-fence production touch — NEVER the spike's
+	// own spec directory.
+	writeTestFile(t, filepath.Join(repo.Dir, "spikes/borrower-update-mobile-spike/findings.md"), "# spike findings\n")
+	writeTestFile(t, filepath.Join(repo.Dir, "internal/production/leaked.go"), "package production\n")
+	commitPaths(t, repo.Dir, "spike build: in-fence findings + out-of-fence touch",
+		"spikes/borrower-update-mobile-spike/findings.md", "internal/production/leaked.go")
+
+	lctx := Context{DiffBase: branchPoint, CurrentBranch: "feature/borrower-update-mobile-spike"}
+	findings := runLint(t, repo.Dir, lctx, Options{})
+
+	var vl016 []Finding
+	for _, f := range findings {
+		if f.Rule == "VL-016" {
+			vl016 = append(vl016, f)
+		}
+	}
+	if len(vl016) != 1 {
+		t.Fatalf("VL-016 findings = %d, want exactly 1 (the out-of-fence touch), got:\n%s", len(vl016), findingsString(vl016))
+	}
+	if vl016[0].Path != "internal/production/leaked.go" {
+		t.Fatalf("VL-016 finding path = %q, want internal/production/leaked.go (in-fence findings.md must stay quiet)", vl016[0].Path)
+	}
+}
+
 // TestVL016_TouchesOutsideFence_Fails is the primary negative case: a
 // spike build branch's diff (the spike's own spec directory plus a path
 // outside both that directory and any spike_paths: allowlist entry) fails

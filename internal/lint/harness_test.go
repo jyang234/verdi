@@ -286,6 +286,38 @@ func commitAll(t *testing.T, dir, message string) {
 	run("commit", "--quiet", "--no-verify", "-m", message)
 }
 
+// commitPaths stages exactly the named paths and commits them under the
+// fixed fixturegit identity — unlike commitAll's `git add -A`, it never
+// sweeps in the untracked discovery/mutable-zone fixtures buildLintRepo
+// leaves in the working tree (which would otherwise pollute a branch's diff).
+func commitPaths(t *testing.T, dir, message string, paths ...string) {
+	t.Helper()
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Verdi Fixture", "GIT_AUTHOR_EMAIL=fixture@verdi.invalid", "GIT_AUTHOR_DATE=1704067200 +0000",
+			"GIT_COMMITTER_NAME=Verdi Fixture", "GIT_COMMITTER_EMAIL=fixture@verdi.invalid", "GIT_COMMITTER_DATE=1704067200 +0000",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run(append([]string{"add"}, paths...)...)
+	run("commit", "--quiet", "--no-verify", "-m", message)
+}
+
+// gitCheckoutNewBranch cuts and switches to a new branch at the current
+// HEAD under the same fixed identity fixturegit uses.
+func gitCheckoutNewBranch(t *testing.T, dir, name string) {
+	t.Helper()
+	cmd := exec.Command("git", "checkout", "-b", name)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b %s: %v\n%s", name, err, out)
+	}
+}
+
 // onlyRule asserts every finding in got has Rule == want and that there is
 // at least one — "assert THE EXACT RULE fires (rule-id equality, and no
 // unrelated rule storm)" (PLAN.md §4): multiple findings from the tested

@@ -48,14 +48,26 @@ func (vl016) Check(in *RunInput) []Finding {
 		return []Finding{{Rule: "VL-016", Path: "", Message: fmt.Sprintf("computing diff %s..HEAD: %v", in.LintCtx.DiffBase, err)}}
 	}
 
-	touchesSpike := false
+	activated := false
 	for _, e := range entries {
 		if withinAnyDir(spikeDirs, e.Path) || (e.OldPath != "" && withinAnyDir(spikeDirs, e.OldPath)) {
-			touchesSpike = true
+			activated = true
 			break
 		}
 	}
-	if !touchesSpike {
+	// D-5: on the canonical spike BUILD branch, the spike's own spec directory
+	// is committed and frozen during the design phase — before build start
+	// even cuts the build branch — so the branch's own diff (DiffBase..HEAD)
+	// never touches it, and the touchesSpike signal above can never fire. Also
+	// activate when the current branch is that spike's build branch
+	// (feature/<spike-name>), keying off the originating spec the way build
+	// start's own story resolution does, rather than re-deriving the branch's
+	// identity from the diff's contents — the one signal the frozen-directory
+	// workflow makes absent from the diff.
+	if !activated && isSpikeBuildBranch(in.Snapshot.Docs, in.LintCtx.CurrentBranch) {
+		activated = true
+	}
+	if !activated {
 		return nil
 	}
 
@@ -101,6 +113,30 @@ func spikeStoryDirs(docs []*Document) []string {
 		dirs = append(dirs, specDirOf(d))
 	}
 	return dirs
+}
+
+// isSpikeBuildBranch reports whether branch is the build branch of a spike
+// story spec — feature/<name>, where <name> is a spike spec's own directory
+// name (buildstart.go names the build branch feature/<specRef.Name>, and a
+// spec's directory is specs/active/<specRef.Name>/). This is the "which
+// branch is a spike branch" signal that survives the spike spec directory
+// being frozen before the build branch exists (D-5), unlike the diff-content
+// heuristic.
+func isSpikeBuildBranch(docs []*Document, branch string) bool {
+	const prefix = "feature/"
+	if !strings.HasPrefix(branch, prefix) {
+		return false
+	}
+	name := strings.TrimPrefix(branch, prefix)
+	for _, d := range docs {
+		if d.Grandfathered || d.DecodeErr != nil || d.Spec == nil || !d.Spec.Spike {
+			continue
+		}
+		if path.Base(specDirOf(d)) == name {
+			return true
+		}
+	}
+	return false
 }
 
 // withinAnyDir reports whether p is dir itself or lies under it, for any
