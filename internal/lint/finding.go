@@ -53,7 +53,18 @@ type Finding struct {
 // rename-only attempt was insufficient).
 func (f Finding) String() string {
 	if f.Severity == SeverityDisclosure {
-		return disclosure.Render(disclosure.New("lint:"+f.Rule, f.Path, f.Message))
+		return disclosure.Render(f.Disclosure())
 	}
 	return fmt.Sprintf("%s %s: %s", f.Rule, f.Path, f.Message)
+}
+
+// Disclosure maps f onto the shared seam value: rule id as source
+// ("lint:VL-xxx"), path as scope, message as text. This is the ONE
+// Finding->Disclosure mapping in the codebase — String()'s disclosure
+// branch renders it, and the disclosures-view enumeration
+// (spec/disclosures-panel ac-1) collects it — so the CLI's printed line
+// and an enumerated panel item are the same value by construction, never
+// two hand-aligned copies.
+func (f Finding) Disclosure() disclosure.Disclosure {
+	return disclosure.New("lint:"+f.Rule, f.Path, f.Message)
 }
