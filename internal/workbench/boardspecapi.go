@@ -33,6 +33,7 @@ type boardAPIRequest struct {
 	From    string  `json:"from,omitempty"`
 	To      string  `json:"to,omitempty"`
 	Type    string  `json:"type,omitempty"`
+	NewType string  `json:"newType,omitempty"`
 	Note    string  `json:"note,omitempty"`
 	Kind    string  `json:"kind,omitempty"`
 	X       float64 `json:"x,omitempty"`
@@ -105,6 +106,12 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			err = s.actionRelates(ctx, name, proj, req)
 		case "relates-graduate":
 			err = s.actionRelatesGraduate(name, proj, req)
+		case "annotation-delete":
+			err = s.actionAnnotationDelete(proj, req)
+		case "edge-delete":
+			err = s.actionEdgeDelete(name, proj, req)
+		case "edge-retype":
+			err = s.actionEdgeRetype(name, proj, req)
 		case "position":
 			err = s.actionPosition(name, proj, req)
 		case "sticky-position":
@@ -295,14 +302,33 @@ func newAnnotation(typ artifact.AnnotationType, body string) (*artifact.Annotati
 	}, nil
 }
 
-// actionSticky: "Add sticky" — a free-floating open-question sticky in
+// stickyCreatableTypes is the closed set of annotation types an author
+// can pin as a free-floating sticky (02 §Record schemas; relates is a
+// thread and review is the MR's voice — neither is sticky-creatable).
+var stickyCreatableTypes = map[artifact.AnnotationType]bool{
+	artifact.AnnotationComment:        true,
+	artifact.AnnotationQuestion:       true,
+	artifact.AnnotationDecisionNeeded: true,
+	artifact.AnnotationAgentTask:      true,
+}
+
+// actionSticky: "Add sticky" — a free-floating sticky of the author's
+// explicitly chosen type (owner UAT round 6, item 2: choosing is part
+// of creating; nothing defaults silently, unknown types fail closed) in
 // the annotation layer; it never dirties the spec working tree (05
 // §Workbench "The scratch tier").
 func (s *boardSpecServer) actionSticky(name string, proj *BoardProjection, req boardAPIRequest) error {
 	if req.Text == "" {
 		return fmt.Errorf("sticky requires text")
 	}
-	a, err := newAnnotation(artifact.AnnotationQuestion, req.Text)
+	typ := artifact.AnnotationType(req.Type)
+	if req.Type == "" {
+		return fmt.Errorf("sticky requires a type (one of comment, question, decision-needed, agent-task)")
+	}
+	if !stickyCreatableTypes[typ] {
+		return fmt.Errorf("sticky type %q is not creatable (one of comment, question, decision-needed, agent-task); fail closed", req.Type)
+	}
+	a, err := newAnnotation(typ, req.Text)
 	if err != nil {
 		return err
 	}
@@ -435,6 +461,106 @@ func (s *boardSpecServer) actionRelatesGraduate(name string, proj *BoardProjecti
 	}
 	_, err := boardio.GraduateStickies(boardio.AnnotationsDir(s.root), []string{req.ID})
 	return err
+}
+
+// actionAnnotationDelete: a scratch sticky or an untyped relates thread
+// dies from the mutable stream (05 §Workbench: they graduate or they
+// die; owner UAT round 6, item 3). Only records this board actually
+// presents are deletable, and the spec document is never touched.
+func (s *boardSpecServer) actionAnnotationDelete(proj *BoardProjection, req boardAPIRequest) error {
+	if req.ID == "" {
+		return fmt.Errorf("annotation-delete requires id")
+	}
+	onBoard := false
+	for _, st := range proj.Stickies {
+		if st.ID == req.ID {
+			onBoard = true
+			break
+		}
+	}
+	if !onBoard {
+		for _, e := range proj.Edges {
+			if e.AnnotationID == req.ID {
+				onBoard = true
+				break
+			}
+		}
+	}
+	if !onBoard {
+		return fmt.Errorf("no annotation %q on this board", req.ID)
+	}
+	n, err := boardio.DeleteAnnotations(boardio.AnnotationsDir(s.root), []string{req.ID})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("annotation %q was not found in the mutable stream", req.ID)
+	}
+	return nil
+}
+
+// edgeRefMatcher matches a stored link ref against a board endpoint the
+// way the projection derives endpoints (edgeEndpoint): verbatim, the
+// same-spec fragment form, or the pin-dropped kind/name#object form —
+// so a pinned stored ref still matches the chip's unpinned data-to.
+func edgeRefMatcher(name, to string) func(string) bool {
+	internal := "spec/" + name + "#" + to
+	return func(ref string) bool {
+		if ref == to || ref == internal {
+			return true
+		}
+		r, err := artifact.ParseRef(ref)
+		if err != nil {
+			return false
+		}
+		normalized := string(r.Kind) + "/" + r.Name
+		if r.Object != "" {
+			normalized += "#" + r.Object
+		}
+		return normalized == to || normalized == internal
+	}
+}
+
+// actionEdgeDelete: removing a spec-layer typed edge is the exact
+// inverse of drawing it — an ordinary spec edit through the splice
+// write path (owner UAT round 6, item 3; the gate-bearing confirmation
+// is the client's ritual, mirroring creation).
+func (s *boardSpecServer) actionEdgeDelete(name string, proj *BoardProjection, req boardAPIRequest) error {
+	if req.From == "" || req.To == "" || req.Type == "" {
+		return fmt.Errorf("edge-delete requires from, to, and type")
+	}
+	if _, ok := declaredKindsOf(proj)[req.From]; !ok {
+		return fmt.Errorf("edge source %q is not a declared object (a document-level edge lives in the frontmatter links: block, which the board cannot edit)", req.From)
+	}
+	return s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
+		e, err := d.RemoveDecisionLink(req.From, req.Type, edgeRefMatcher(name, req.To))
+		if err != nil {
+			return nil, err
+		}
+		return []splice.Edit{e}, nil
+	})
+}
+
+// actionEdgeRetype: the relationship's type is updatable in place
+// (owner directive, round 6 UAT follow-up) — one splice edit replacing
+// only the type scalar, so the stored ref (pins included) and note
+// survive verbatim and the document never passes through a linkless
+// state. The new type must be legal for the pair, same table as
+// creation.
+func (s *boardSpecServer) actionEdgeRetype(name string, proj *BoardProjection, req boardAPIRequest) error {
+	if req.From == "" || req.To == "" || req.Type == "" || req.NewType == "" {
+		return fmt.Errorf("edge-retype requires from, to, type, and newType")
+	}
+	if err := checkEdgeLegal(proj, req.From, req.To, req.NewType); err != nil {
+		return err
+	}
+	return s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
+		e, err := d.RetypeDecisionLink(req.From, req.Type, edgeRefMatcher(name, req.To), req.NewType)
+		if err != nil {
+			return nil, err
+		}
+		return []splice.Edit{e}, nil
+	})
 }
 
 // actionPosition: a card drag landed — resolve the drop against every

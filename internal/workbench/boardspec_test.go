@@ -80,6 +80,24 @@ const boardFixtureLayout = `{
 
 const boardFixtureName = "refi-test"
 
+// boardFixtureADR is the ADR dc-1's exempts edge targets — a real,
+// peekable corpus artifact (the ref-peek tests resolve it).
+const boardFixtureADR = `---
+id: adr/0001-outbox-events
+kind: adr
+title: "Outbox pattern for domain events (board fixture)"
+status: accepted
+owners: [platform-team]
+decided: 2026-03-01
+frozen: { at: 2026-03-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+---
+# Outbox pattern for domain events
+
+## Decision
+
+Domain events leave through the transactional outbox.
+`
+
 // newBoardFixture builds a fixture repo with the draft spec, checked out
 // on a design branch (authoring mode's branch state).
 func newBoardFixture(t *testing.T) string {
@@ -88,7 +106,8 @@ func newBoardFixture(t *testing.T) string {
 		Files: map[string]string{
 			".verdi/specs/active/" + boardFixtureName + "/spec.md":     boardFixtureSpec,
 			".verdi/specs/active/" + boardFixtureName + "/layout.json": boardFixtureLayout,
-			".verdi/.gitignore": "data/\n",
+			".verdi/adr/0001-outbox-events.md":                         boardFixtureADR,
+			".verdi/.gitignore":                                        "data/\n",
 		},
 		Message: "seed board fixture",
 	}})
@@ -308,7 +327,9 @@ func TestBoardSpec_StickyLifecycle(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
 
-	rec := postBoardAPI(t, h, boardFixtureName, "sticky", `{"text":"open question: partial refunds?"}`)
+	// The type is the author's explicit choice at creation (owner UAT
+	// round 6, item 2 — amends R4-I-31's question-by-default).
+	rec := postBoardAPI(t, h, boardFixtureName, "sticky", `{"text":"open question: partial refunds?","type":"question"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sticky = %d\n%s", rec.Code, rec.Body.String())
 	}
@@ -360,6 +381,59 @@ func TestBoardSpec_StickyLifecycle(t *testing.T) {
 	}
 }
 
+// Owner UAT round 6, item 2: the sticky's type is chosen at creation
+// from the closed sticky-creatable enum; nothing defaults silently and
+// unknown types fail closed (CLAUDE.md).
+func TestBoardSpec_StickyTypes(t *testing.T) {
+	creatable := []artifact.AnnotationType{
+		artifact.AnnotationComment,
+		artifact.AnnotationQuestion,
+		artifact.AnnotationDecisionNeeded,
+		artifact.AnnotationAgentTask,
+	}
+	for _, typ := range creatable {
+		t.Run("creatable/"+string(typ), func(t *testing.T) {
+			root := newBoardFixture(t)
+			h := NewHandler(root)
+			rec := postBoardAPI(t, h, boardFixtureName, "sticky", `{"text":"note for `+string(typ)+`","type":"`+string(typ)+`"}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("sticky type %s = %d\n%s", typ, rec.Code, rec.Body.String())
+			}
+			annotations, err := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(annotations) != 1 || annotations[0].Type != typ {
+				t.Fatalf("annotations = %+v, want one %s", annotations, typ)
+			}
+			body := getBoard(t, h, boardFixtureName).Body.String()
+			if !strings.Contains(body, `data-annotation-type="`+string(typ)+`"`) {
+				t.Errorf("sticky does not render with its chosen type %s", typ)
+			}
+		})
+	}
+
+	for name, req := range map[string]string{
+		"missing type":              `{"text":"typeless"}`,
+		"unknown type fails closed": `{"text":"x","type":"todo"}`,
+		"relates is not a sticky":   `{"text":"x","type":"relates"}`,
+		"review is not creatable":   `{"text":"x","type":"review"}`,
+	} {
+		t.Run("negative/"+name, func(t *testing.T) {
+			root := newBoardFixture(t)
+			h := NewHandler(root)
+			rec := postBoardAPI(t, h, boardFixtureName, "sticky", req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("%s = %d, want 400\n%s", name, rec.Code, rec.Body.String())
+			}
+			annotations, _ := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+			if len(annotations) != 0 {
+				t.Errorf("a refused sticky still wrote a record: %+v", annotations)
+			}
+		})
+	}
+}
+
 func TestBoardSpec_StickyGraduate_Negative(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
@@ -370,6 +444,235 @@ func TestBoardSpec_StickyGraduate_Negative(t *testing.T) {
 	rec = postBoardAPI(t, h, boardFixtureName, "sticky-graduate", `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA","kind":"story"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("graduating to an unknown kind = %d, want 400", rec.Code)
+	}
+}
+
+// Owner UAT round 6, item 4: clicking a reference card peeks the
+// referenced artifact without leaving the board. The fragment carries
+// title, kind, status, rendered body, and the full-page link; an
+// unresolvable ref gets a DISCLOSED explanation, never a dead click and
+// never a silent nothing.
+func TestBoardSpec_RefPeek(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+	get := func(query string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/board/spec/"+boardFixtureName+"/peek"+query, nil))
+		return rec
+	}
+
+	t.Run("resolvable ref renders the artifact", func(t *testing.T) {
+		rec := get("?ref=adr/0001-outbox-events")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("peek = %d\n%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		for _, want := range []string{
+			"Outbox pattern for domain events (board fixture)", // title
+			`class="peek-kind"`, ">adr<", // kind
+			`class="peek-status"`, ">accepted<", // status
+			"Domain events leave through the transactional outbox", // rendered body
+			`href="/a/adr/0001-outbox-events"`,                     // the full-page link
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("peek fragment missing %q\n%s", want, body)
+			}
+		}
+	})
+
+	t.Run("pinned and fragment refs resolve to the same artifact", func(t *testing.T) {
+		for _, ref := range []string{
+			"adr/0001-outbox-events@c5e360a9ee5e9eb6089e54b772fa16959ada4662",
+			"spec/" + boardFixtureName + "%23ac-1",
+		} {
+			rec := get("?ref=" + ref)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("peek %s = %d", ref, rec.Code)
+			}
+			if strings.Contains(rec.Body.String(), "ref-peek-error") {
+				t.Errorf("peek %s disclosed an error for a resolvable target\n%s", ref, rec.Body.String())
+			}
+		}
+	})
+
+	t.Run("unresolvable refs are disclosed, never silent", func(t *testing.T) {
+		for name, ref := range map[string]string{
+			"missing artifact": "adr/no-such-adr",
+			"non-artifact ref": "jira:LOAN-1482",
+		} {
+			rec := get("?ref=" + ref)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s: peek = %d, want 200 with a disclosed fragment", name, rec.Code)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, `data-testid="ref-peek-error"`) {
+				t.Errorf("%s: no disclosed error state\n%s", name, body)
+			}
+		}
+	})
+
+	t.Run("negative: no ref, wrong method", func(t *testing.T) {
+		if rec := get(""); rec.Code != http.StatusBadRequest {
+			t.Errorf("peek without ref = %d, want 400", rec.Code)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/board/spec/"+boardFixtureName+"/peek?ref=adr/0001-outbox-events", nil))
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("POST peek = %d, want 405", rec.Code)
+		}
+	})
+
+	t.Run("deterministic fragment", func(t *testing.T) {
+		a := get("?ref=adr/0001-outbox-events").Body.String()
+		b := get("?ref=adr/0001-outbox-events").Body.String()
+		if a != b {
+			t.Error("two peeks of the same ref differ")
+		}
+	})
+}
+
+// Owner UAT round 6, item 3(a)/(b): a scratch sticky or an untyped
+// relates thread dies from the mutable stream — never touching the spec
+// document — through the board's own affordance.
+func TestBoardSpec_AnnotationDelete(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+
+	rec := postBoardAPI(t, h, boardFixtureName, "sticky", `{"text":"a doomed note","type":"comment"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sticky = %d\n%s", rec.Code, rec.Body.String())
+	}
+	annotations, err := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+	if err != nil || len(annotations) != 1 {
+		t.Fatalf("annotations = %+v, err %v", annotations, err)
+	}
+	id := annotations[0].ID
+
+	rec = postBoardAPI(t, h, boardFixtureName, "annotation-delete", `{"id":"`+id+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("annotation-delete = %d\n%s", rec.Code, rec.Body.String())
+	}
+	var resp boardAPIResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.Dirty {
+		t.Error("deleting a sticky dirtied the spec working tree (mutable zone only)")
+	}
+	annotations, _ = boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+	if len(annotations) != 0 {
+		t.Fatalf("record still present after delete: %+v", annotations)
+	}
+	if strings.Contains(getBoard(t, h, boardFixtureName).Body.String(), `data-testid="sticky-`+id+`"`) {
+		t.Error("deleted sticky still renders")
+	}
+
+	// Negative: an id this board does not present is refused.
+	rec = postBoardAPI(t, h, boardFixtureName, "annotation-delete", `{"id":"a-01J8Z0K9ZZZZZZZZZZZZZZZZZZ"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("deleting a foreign annotation = %d, want 400", rec.Code)
+	}
+}
+
+// Owner UAT round 6, item 3(c): removing a spec-layer typed edge is the
+// exact inverse of drawing it — an ordinary spec edit through the
+// splice write path.
+func TestBoardSpec_EdgeDelete(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+
+	// The fixture's dc-1 carries the declared exempts edge.
+	rec := postBoardAPI(t, h, boardFixtureName, "edge-delete", `{"from":"dc-1","to":"adr/0001-outbox-events","type":"exempts"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edge-delete = %d\n%s", rec.Code, rec.Body.String())
+	}
+	var resp boardAPIResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !resp.Dirty {
+		t.Error("removing a declared edge did not dirty the working tree (it IS a spec edit)")
+	}
+	specData, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
+	if strings.Contains(string(specData), "exempts") {
+		t.Errorf("spec still carries the removed edge:\n%s", specData)
+	}
+	if strings.Contains(getBoard(t, h, boardFixtureName).Body.String(), `data-edge-type="exempts" data-from="dc-1"`) {
+		t.Error("removed edge still projects as yarn")
+	}
+
+	// Negatives: unknown edge, undeclared source, document-level source.
+	for name, body := range map[string]string{
+		"already removed":       `{"from":"dc-1","to":"adr/0001-outbox-events","type":"exempts"}`,
+		"undeclared source":     `{"from":"zz-9","to":"adr/0001-outbox-events","type":"exempts"}`,
+		"document-level source": `{"from":"spec","to":"adr/0001-outbox-events","type":"implements"}`,
+	} {
+		rec := postBoardAPI(t, h, boardFixtureName, "edge-delete", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400\n%s", name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// Owner directive (round 6 UAT follow-up): the relationship's type is
+// updatable in place — one atomic splice transaction, ref and note
+// surviving verbatim.
+func TestBoardSpec_EdgeRetype(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+
+	rec := postBoardAPI(t, h, boardFixtureName, "edge-retype", `{"from":"dc-1","to":"adr/0001-outbox-events","type":"exempts","newType":"supersedes"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edge-retype = %d\n%s", rec.Code, rec.Body.String())
+	}
+	specData, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
+	if !strings.Contains(string(specData), `links: [ { type: supersedes, ref: adr/0001-outbox-events, note: "async by design" } ]`) {
+		t.Errorf("spec does not carry the retyped edge with ref and note verbatim:\n%s", specData)
+	}
+	body := getBoard(t, h, boardFixtureName).Body.String()
+	if !strings.Contains(body, `data-edge-type="supersedes" data-from="dc-1"`) {
+		t.Error("retyped edge does not project")
+	}
+	if strings.Contains(body, `data-edge-type="exempts" data-from="dc-1"`) {
+		t.Error("old edge type still projects")
+	}
+
+	// Negatives: an illegal new type, and a type the edge does not carry.
+	for name, req := range map[string]string{
+		"illegal new type":   `{"from":"dc-1","to":"adr/0001-outbox-events","type":"supersedes","newType":"implements"}`,
+		"wrong current type": `{"from":"dc-1","to":"adr/0001-outbox-events","type":"exempts","newType":"supersedes"}`,
+	} {
+		rec := postBoardAPI(t, h, boardFixtureName, "edge-retype", req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400\n%s", name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// Deletion and retype affordances exist ONLY in authoring mode: review
+// is a mirror, read-only a document (05 §Workbench). The renderer is
+// mode-gated, provable directly on the projection render; the e2e suite
+// additionally proves the absence on a live read-only board.
+func TestBoardSpec_AffordancesAreAuthoringOnly(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+	authoringBody := getBoard(t, h, boardFixtureName).Body.String()
+	for _, want := range []string{`class="delete-btn"`, `data-retype`} {
+		if !strings.Contains(authoringBody, want) {
+			t.Errorf("authoring board missing %s", want)
+		}
+	}
+
+	proj := &BoardProjection{
+		Spec: boardFixtureName, Mode: modeReadOnly,
+		Cards:    []cardView{{ID: "dc-1", Kind: "decision", Text: "x"}},
+		Edges:    []edgeView{{Type: "exempts", From: "dc-1", To: "adr/0001-outbox-events", Layer: "spec"}},
+		Stickies: []scratchStickyView{{ID: "a-01J8Z0K3AAAAAAAAAAAAAAAAAA", Type: "comment", Body: "b"}},
+	}
+	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
+		proj.Mode = mode
+		frozen := renderBoardRegion(proj, &boardGitState{})
+		for _, banned := range []string{`class="delete-btn"`, `data-retype`, `class="graduate-btn"`} {
+			if strings.Contains(frozen, banned) {
+				t.Errorf("%s board renders %s", mode, banned)
+			}
+		}
 	}
 }
 

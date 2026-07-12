@@ -63,12 +63,21 @@ func gateBearing(edgeType string) bool {
 
 // consequenceLabels is the one-line consequence per pickable edge type —
 // calm warnings, not modal nagging (05 §Workbench's own example wording
-// for supersedes).
+// for supersedes), phrased as what the choice DOES to the spec document
+// in words a PM reads without a glossary (owner UAT round 6, item 1).
 var consequenceLabels = map[string]string{
-	string(artifact.LinkSupersedes): "amends the target for everyone; requires quorum",
-	string(artifact.LinkExempts):    "the target stays valid org-wide; this spec is excused from it — routes to the target's owners",
-	string(artifact.LinkImplements): "claims this story realizes that outcome AC; routes to the AC's owners",
-	string(artifact.LinkResolves):   "claims this spike answers that open question",
-	string(artifact.LinkDependsOn):  "records a reading-order dependency; never gates",
-	"relates":                       "an untyped scratch thread; stays in the annotation layer, never enters the spec",
+	string(artifact.LinkSupersedes): "amends the target for everyone once accepted; requires quorum from its owners",
+	string(artifact.LinkExempts):    "the target's rule keeps applying to everyone else — this spec alone is excused; its owners are notified",
+	string(artifact.LinkImplements): "records that this story delivers that acceptance criterion; its owners see the claim",
+	string(artifact.LinkResolves):   "records that this spike answers that open question",
+	string(artifact.LinkDependsOn):  "notes the target as required background reading; gates nothing",
+	"relates":                       "a scratch thread for your own thinking — never written into the spec document",
+}
+
+// removalConsequenceLabels is the same voice for taking a gate-bearing
+// edge OUT of the spec document — removal mirrors creation, including
+// the confirmation ritual (owner UAT round 6, item 3).
+var removalConsequenceLabels = map[string]string{
+	string(artifact.LinkSupersedes): "withdraws this spec's amendment claim on the target; the target stands as it was",
+	string(artifact.LinkExempts):    "ends this spec's exemption — the target's rule applies to this spec again",
 }

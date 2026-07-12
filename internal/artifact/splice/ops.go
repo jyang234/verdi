@@ -173,6 +173,119 @@ func (d *Doc) AppendDecisionLink(dcID string, l artifact.Link) (Edit, error) {
 	return d.appendToFlowSeq(linksNode, entry)
 }
 
+// findDecisionLink locates one link element in a decision's links: by
+// its type plus a caller-supplied ref predicate (the caller owns ref
+// normalization — a stored ref may carry a pin a board endpoint drops;
+// splice never guesses). Returns the flow-style sequence node, the key
+// node, and the matched element's index. Only the flow-style house
+// shape AppendDecisionLink writes is proven; anything else fails closed.
+func (d *Doc) findDecisionLink(dcID, linkType string, refMatches func(ref string) bool) (key, seq *yaml.Node, idx int, err error) {
+	if !strings.HasPrefix(dcID, "dc-") {
+		return nil, nil, 0, fmt.Errorf("splice: %q is not a decision id", dcID)
+	}
+	elem, err := d.objectElem(dcID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	key, seq = mapKeyValue(elem, "links")
+	if seq == nil {
+		return nil, nil, 0, fmt.Errorf("splice: decision %s has no links", dcID)
+	}
+	if seq.Kind != yaml.SequenceNode || seq.Style&yaml.FlowStyle == 0 {
+		return nil, nil, 0, fmt.Errorf("splice: decision %s links is not a flow-style sequence (only the house style is proven); fail closed", dcID)
+	}
+	for i, li := range seq.Content {
+		t := mapGet(li, "type")
+		r := mapGet(li, "ref")
+		if t != nil && r != nil && t.Value == linkType && refMatches(r.Value) {
+			return key, seq, i, nil
+		}
+	}
+	return nil, nil, 0, fmt.Errorf("splice: decision %s has no %s link matching the target", dcID, linkType)
+}
+
+// RemoveDecisionLink removes one typed edge from a decision's links: —
+// the exact inverse of AppendDecisionLink (05 §Workbench: authoring is
+// bidirectional; owner UAT round 6, item 3). Removing the sole link
+// removes the whole links: key, so append-then-remove restores the
+// original buffer byte-for-byte.
+func (d *Doc) RemoveDecisionLink(dcID, linkType string, refMatches func(ref string) bool) (Edit, error) {
+	key, seq, idx, err := d.findDecisionLink(dcID, linkType, refMatches)
+	if err != nil {
+		return Edit{}, err
+	}
+
+	if len(seq.Content) == 1 {
+		// Sole link: remove ", links: [ ... ]" whole — the inverse of the
+		// first-yarn insertion.
+		keyStart, _, kerr := d.span(key)
+		if kerr != nil {
+			return Edit{}, kerr
+		}
+		_, valEnd, verr := d.span(seq)
+		if verr != nil {
+			return Edit{}, verr
+		}
+		at := keyStart
+		for at > 0 && isYAMLSpace(d.src[at-1]) {
+			at--
+		}
+		if at == 0 || d.src[at-1] != ',' {
+			return Edit{}, fmt.Errorf("splice: links key for %s is not comma-separated from a preceding field; fail closed", dcID)
+		}
+		return Edit{Start: at - 1, End: valEnd}, nil
+	}
+
+	elemStart, elemEnd, err := d.span(seq.Content[idx])
+	if err != nil {
+		return Edit{}, err
+	}
+	if idx > 0 {
+		// Not the first element: remove ", <elem>" back through the
+		// previous element's end.
+		_, prevEnd, perr := d.span(seq.Content[idx-1])
+		if perr != nil {
+			return Edit{}, perr
+		}
+		return Edit{Start: prevEnd, End: elemEnd}, nil
+	}
+	// First of several: remove "<elem>, " forward to the next element.
+	nextStart, _, nerr := d.span(seq.Content[idx+1])
+	if nerr != nil {
+		return Edit{}, nerr
+	}
+	return Edit{Start: elemStart, End: nextStart}, nil
+}
+
+// RetypeDecisionLink changes one link's type IN PLACE (owner directive,
+// round 6 UAT follow-up: the relationship's type is updatable without
+// delete-and-redraw): a single edit replacing only the type scalar, so
+// the stored ref (pins included) and note survive verbatim and the
+// document never passes through a linkless state.
+func (d *Doc) RetypeDecisionLink(dcID, oldType string, refMatches func(ref string) bool, newType string) (Edit, error) {
+	_, seq, idx, err := d.findDecisionLink(dcID, oldType, refMatches)
+	if err != nil {
+		return Edit{}, err
+	}
+	typeNode := mapGet(seq.Content[idx], "type")
+	start, end, err := d.span(typeNode)
+	if err != nil {
+		return Edit{}, err
+	}
+	return Edit{Start: start, End: end, Replace: newType}, nil
+}
+
+// mapKeyValue returns the key and value nodes for key in a mapping node
+// (Content alternates key, value), or nil, nil.
+func mapKeyValue(mapNode *yaml.Node, key string) (*yaml.Node, *yaml.Node) {
+	for i := 0; i+1 < len(mapNode.Content); i += 2 {
+		if mapNode.Content[i].Value == key {
+			return mapNode.Content[i], mapNode.Content[i+1]
+		}
+	}
+	return nil, nil
+}
+
 // appendToFlowSeq inserts entry as the last element of a flow-style
 // sequence node.
 func (d *Doc) appendToFlowSeq(seq *yaml.Node, entry string) (Edit, error) {

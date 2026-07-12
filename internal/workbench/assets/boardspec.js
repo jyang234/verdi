@@ -233,10 +233,19 @@
       // anyone's text).
       var w = chip.offsetWidth;
       var h = chip.offsetHeight;
+      // Blocked space for the chip: every card's interior AND its
+      // pushpin (the yarn handle protrudes above the card's top edge,
+      // and chips paint over cards — a chip parked on a pin makes yarn
+      // undrawable from that card).
       var clearOfCards = function (x, y) {
         for (var k = 0; k < papers.length; k++) {
           var r = rectOf(papers[k]);
           if (x < r.x + r.w && r.x < x + w && y < r.y + r.h && r.y < y + h) {
+            return false;
+          }
+          var pinX = r.x + r.w / 2 - 14;
+          var pinY = r.y - 18;
+          if (x < pinX + 28 && pinX < x + w && y < pinY + 22 && pinY < y + h) {
             return false;
           }
         }
@@ -297,9 +306,29 @@
     return el.getAttribute("data-id") || el.getAttribute("data-ref");
   }
 
+  // The picker speaks human: kind names as a PM reads them — an article
+  // form and a plural form, for the no-typed-edge explanation.
+  var kindNames = {
+    "acceptance-criterion": ["an acceptance criterion", "acceptance criteria"],
+    constraint: ["a constraint", "constraints"],
+    decision: ["a decision", "decisions"],
+    "open-question": ["an open question", "open questions"],
+    adr: ["an ADR", "ADRs"],
+    spec: ["a spec", "specs"],
+    "spec-fragment": ["a spec fragment", "spec fragments"],
+    diagram: ["a diagram", "diagrams"],
+  };
+  function pairPhrase(a, b) {
+    var an = kindNames[a] || ["a " + a, a + "s"];
+    var bn = kindNames[b] || ["a " + b, b + "s"];
+    return a === b ? "two " + an[1] : an[0] + " and " + bn[0];
+  }
+
   // openPicker fills the context-sensitive menu: ONLY the pair's legal
   // types (each with its one-line consequence), plus the scratch tier's
-  // untyped thread — always available (05 §Workbench).
+  // untyped thread. When NO typed edge is legal for the pair, the picker
+  // says so in plain language instead of presenting a menu of nothing
+  // (owner UAT round 6, item 1).
   function openPicker(p) {
     pending = p;
     var items = document.getElementById("edge-picker-items");
@@ -308,8 +337,29 @@
     items.innerHTML = "";
     if (pair) pair.textContent = p.from + " → " + p.to;
 
-    var types = (state.legal[p.fromKind + "|" + p.toKind] || []).slice();
-    if (!p.annotationId) types.push("relates");
+    var legal = (state.legal[p.fromKind + "|" + p.toKind] || []).slice();
+    if (p.retype) {
+      // In-place retype (owner directive): offer the OTHER legal types.
+      legal = legal.filter(function (t) {
+        return t !== p.retype;
+      });
+      if (pair) pair.textContent += " · currently " + p.retype;
+    }
+    if (legal.length === 0) {
+      var note = document.createElement("p");
+      note.className = "ritual-note picker-empty-note";
+      note.setAttribute("data-testid", "picker-no-typed-edge");
+      note.textContent = p.retype
+        ? "No other typed edge is legal between " + pairPhrase(p.fromKind, p.toKind) + " — remove the edge (×) and draw a new connection instead."
+        : "No typed edge exists between " + pairPhrase(p.fromKind, p.toKind) +
+          (p.annotationId
+            ? " — this stays a scratch thread. To type a connection, draw it from a decision card."
+            : " — this can only be a scratch thread.");
+      items.appendChild(note);
+    }
+
+    var types = legal;
+    if (!p.annotationId && !p.retype) types.push("relates");
     types.forEach(function (t) {
       var row = document.createElement("div");
       row.className = "picker-item";
@@ -329,6 +379,20 @@
     show("edge-picker");
   }
 
+  // openConfirm arms the gate-bearing confirmation dialog — the same
+  // ritual for creating, retyping, and removing (a menu misclick must
+  // not summon an org-wide supersession flow, 05 §Workbench).
+  function openConfirm(title, consequence, withReason) {
+    var confirmEl = document.getElementById("edge-confirm");
+    confirmEl.setAttribute("aria-label", title);
+    document.getElementById("edge-confirm-title").textContent = title;
+    document.getElementById("edge-confirm-consequence").textContent = consequence;
+    var reasonField = document.getElementById("edge-confirm-reason-field");
+    document.getElementById("edge-confirm-reason").value = "";
+    reasonField.hidden = !withReason;
+    show("edge-confirm");
+  }
+
   function pickEdgeType(t) {
     hide("edge-picker");
     if (t === "relates") {
@@ -338,16 +402,9 @@
     }
     if (state.gate.indexOf(t) >= 0) {
       pending.type = t;
-      var confirmEl = document.getElementById("edge-confirm");
-      confirmEl.setAttribute("aria-label", "Confirm " + t);
-      document.getElementById("edge-confirm-title").textContent = "Confirm " + t;
-      document.getElementById("edge-confirm-consequence").textContent =
-        state.consequences[t] || "";
-      var reasonField = document.getElementById("edge-confirm-reason-field");
-      var reason = document.getElementById("edge-confirm-reason");
-      reason.value = "";
-      reasonField.hidden = t !== "exempts";
-      show("edge-confirm");
+      // The reason field feeds a NEW exempts edge's note; a retype keeps
+      // the existing note verbatim.
+      openConfirm("Confirm " + t, state.consequences[t] || "", t === "exempts" && !pending.retype);
       return;
     }
     commitEdge(t, "");
@@ -355,7 +412,9 @@
 
   function commitEdge(t, note) {
     hideAllDialogs();
-    if (pending.annotationId) {
+    if (pending.retype) {
+      mutate("edge-retype", { from: pending.from, to: pending.to, type: pending.retype, newType: t });
+    } else if (pending.annotationId) {
       mutate("relates-graduate", { id: pending.annotationId, type: t, note: note });
     } else {
       mutate("edge", { from: pending.from, to: pending.to, type: t, note: note });
@@ -445,6 +504,41 @@
       return;
     }
 
+    // A pin buried under a floating chip stays grabbable: between two
+    // close cards a chip can be wider than the thread's whole span, so
+    // it may legitimately park over a card's pushpin — and the grab,
+    // like the drop, must resolve GEOMETRICALLY so a decoration never
+    // deadens the affordance beneath it. The gesture is PROVISIONAL
+    // (viaCover): no pointer capture and nothing happens until the
+    // press travels past the drag slop, so an unmoved press stays the
+    // chip's own click (its buttons keep working), while a real drag
+    // from the buried pin becomes the yarn draw.
+    var overChip = e.target.closest(".yarn-chip");
+    if (authoring && overChip) {
+      var canvasRect0 = c.getBoundingClientRect();
+      var gx = e.clientX - canvasRect0.left + c.scrollLeft;
+      var gy = e.clientY - canvasRect0.top + c.scrollTop;
+      var cards0 = c.querySelectorAll(".objcard");
+      for (var ci = 0; ci < cards0.length; ci++) {
+        var cr = rectOf(cards0[ci]);
+        var pinCX = cr.x + cr.w / 2;
+        if (gx >= pinCX - 8 && gx <= pinCX + 8 && gy >= cr.y - 8 && gy <= cr.y + 8) {
+          gesture = {
+            kind: "yarn",
+            viaCover: true,
+            moved: false,
+            downX: e.clientX,
+            downY: e.clientY,
+            pointerId: e.pointerId,
+            fromEl: cards0[ci],
+            from: cards0[ci].getAttribute("data-id"),
+            fromKind: cards0[ci].getAttribute("data-object-kind"),
+          };
+          return;
+        }
+      }
+    }
+
     if (e.target.closest("button, textarea, input, .review-sticky")) return;
 
     var el = e.target.closest(".objcard, .sticky");
@@ -523,8 +617,26 @@
       var svg = ensureYarnSvg();
       var draft = svg.querySelector(".yarn-draft");
       if (draft) svg.removeChild(draft);
-      var hit = document.elementFromPoint(e.clientX, e.clientY);
-      var target = hit && hit.closest(".objcard, .refcard");
+      // The drop target is resolved GEOMETRICALLY against the card
+      // rects, not via elementFromPoint: yarn chips and stickies float
+      // above the papers, and a drop must never die because a floating
+      // element happens to cover the aimed-at card. Cards are
+      // collision-free by construction (R4-I-35), so at most one
+      // contains the point.
+      var c2 = canvas();
+      if (!c2) return;
+      var canvasRect2 = c2.getBoundingClientRect();
+      var px2 = e.clientX - canvasRect2.left + c2.scrollLeft;
+      var py2 = e.clientY - canvasRect2.top + c2.scrollTop;
+      var target = null;
+      var papers2 = c2.querySelectorAll(".objcard, .refcard");
+      for (var pi = 0; pi < papers2.length; pi++) {
+        var pr = rectOf(papers2[pi]);
+        if (px2 >= pr.x && px2 <= pr.x + pr.w && py2 >= pr.y && py2 <= pr.y + pr.h) {
+          target = papers2[pi];
+          break;
+        }
+      }
       if (!target || target === g.fromEl) return;
       openPicker({
         from: g.from,
@@ -601,25 +713,168 @@
   }
 
   // -- sticky creation -------------------------------------------------------
+  //
+  // The draft starts NEUTRAL: the author picks the sticky's type from an
+  // inline segmented control as part of creating it (owner UAT round 6,
+  // item 2 — no silent question-by-default, no second modal). Leaving
+  // the draft commits it once text AND type exist; with text but no type
+  // it stays, showing a hint (never a silent default, never silent
+  // loss); Escape discards it.
+
+  var STICKY_TYPES = [
+    ["comment", "Comment"],
+    ["question", "Question"],
+    ["decision-needed", "Decision needed"],
+    ["agent-task", "Agent task"],
+  ];
 
   function startStickyEditor() {
     var c = canvas();
     if (!c || c.querySelector(".sticky-draft")) return;
     var draft = document.createElement("div");
-    draft.className = "sticky sticky--question sticky-draft";
+    draft.className = "sticky sticky-draft";
     draft.style.left = "16px";
     draft.style.top = "16px";
+
+    var chosen = "";
+    var picker = document.createElement("div");
+    picker.className = "sticky-type-picker";
+    picker.setAttribute("role", "group");
+    picker.setAttribute("aria-label", "Sticky type");
+    STICKY_TYPES.forEach(function (t) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "sticky-type-choice";
+      btn.setAttribute("data-sticky-type", t[0]);
+      btn.setAttribute("aria-pressed", "false");
+      btn.textContent = t[1];
+      // Choosing a type must never steal focus from the editor: Safari
+      // blurs the focused element to body on a button's mousedown
+      // (relatedTarget null), which read as "leaving the draft" and
+      // closed it before the author typed a word (live-UAT finding).
+      btn.addEventListener("pointerdown", function (ev) {
+        ev.preventDefault();
+      });
+      btn.addEventListener("mousedown", function (ev) {
+        ev.preventDefault();
+      });
+      btn.addEventListener("click", function () {
+        chosen = t[0];
+        draft.className = "sticky sticky--" + t[0] + " sticky-draft";
+        var all = picker.querySelectorAll(".sticky-type-choice");
+        for (var i = 0; i < all.length; i++) {
+          all[i].setAttribute("aria-pressed", all[i] === btn ? "true" : "false");
+        }
+        var hint = draft.querySelector(".sticky-type-hint");
+        if (hint) hint.remove();
+      });
+      picker.appendChild(btn);
+    });
+    draft.appendChild(picker);
+
     var editor = document.createElement("textarea");
     editor.setAttribute("aria-label", "Sticky text");
     editor.className = "sticky-editor";
     draft.appendChild(editor);
     c.appendChild(draft);
     editor.focus();
-    editor.addEventListener("blur", function () {
-      var text = editor.value.trim();
-      draft.remove();
-      if (text) mutate("sticky", { text: text });
+
+    function needType() {
+      if (draft.querySelector(".sticky-type-hint")) return;
+      var hint = document.createElement("p");
+      hint.className = "sticky-type-hint";
+      hint.setAttribute("data-testid", "sticky-type-hint");
+      hint.textContent = "Pick a type to pin this sticky — or press Escape to discard it.";
+      draft.appendChild(hint);
+    }
+
+    // Commit when focus truly leaves the draft. Decided one tick later
+    // against document.activeElement, not focusout's relatedTarget —
+    // Safari reports null relatedTarget on blurs it routes to body, and
+    // the type buttons refuse focus anyway (their pointerdown is
+    // prevented), so activeElement is the only honest signal.
+    draft.addEventListener("focusout", function () {
+      setTimeout(function () {
+        if (!draft.isConnected) return;
+        if (draft.contains(document.activeElement)) return;
+        var text = editor.value.trim();
+        if (!text) {
+          draft.remove();
+          return;
+        }
+        if (!chosen) {
+          needType();
+          return;
+        }
+        draft.remove();
+        mutate("sticky", { text: text, type: chosen });
+      }, 0);
     });
+    draft.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.stopPropagation(); // the draft dies; open dialogs are not its business
+        draft.remove();
+      }
+    });
+  }
+
+  // -- reference peek ---------------------------------------------------------
+  //
+  // Clicking a reference card opens an in-board peek of the referenced
+  // artifact (owner UAT round 6, item 4): the server fragment carries
+  // title, kind, status, rendered body, and the full-page link. Read-only
+  // information, so it works in EVERY board mode; an unresolvable ref
+  // renders the fragment's disclosed explanation — never a dead click.
+  // Closes via ×, Escape, or clicking anywhere outside it.
+
+  function closeRefPeek() {
+    var p = document.getElementById("ref-peek");
+    if (p) p.remove();
+  }
+
+  function openRefPeek(ref) {
+    closeRefPeek();
+    var panel = document.createElement("aside");
+    panel.id = "ref-peek";
+    panel.className = "ref-peek";
+    panel.setAttribute("data-testid", "ref-peek");
+    panel.setAttribute("role", "complementary");
+    panel.setAttribute("aria-label", "Reference peek");
+
+    var bar = document.createElement("div");
+    bar.className = "ref-peek-bar";
+    var label = document.createElement("span");
+    label.className = "ref-peek-ref";
+    label.textContent = ref;
+    label.title = ref;
+    var close = document.createElement("button");
+    close.type = "button";
+    close.id = "ref-peek-close";
+    close.setAttribute("aria-label", "Close peek");
+    close.textContent = "×";
+    bar.appendChild(label);
+    bar.appendChild(close);
+    panel.appendChild(bar);
+
+    var content = document.createElement("div");
+    content.className = "ref-peek-content";
+    content.textContent = "loading…";
+    panel.appendChild(content);
+    document.body.appendChild(panel);
+
+    fetch(
+      "/board/spec/" + encodeURIComponent(state.spec) + "/peek?ref=" + encodeURIComponent(ref)
+    )
+      .then(function (resp) {
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        return resp.text();
+      })
+      .then(function (html) {
+        content.innerHTML = html;
+      })
+      .catch(function (err) {
+        content.textContent = "peek failed: " + err.message;
+      });
   }
 
   // -- graduate menus ---------------------------------------------------------
@@ -652,6 +907,23 @@
   function onClick(e) {
     var t = e.target;
 
+    // The peek dismisses on any click outside it (a reference card click
+    // replaces it with the new ref's peek instead).
+    var peekEl = document.getElementById("ref-peek");
+    if (peekEl && !peekEl.contains(t) && !t.closest(".refcard")) {
+      closeRefPeek();
+    }
+    if (t.id === "ref-peek-close") {
+      closeRefPeek();
+      return;
+    }
+
+    var refcard = t.closest(".refcard");
+    if (refcard) {
+      openRefPeek(refcard.getAttribute("data-ref"));
+      return;
+    }
+
     var choice = t.closest("[data-edge-choice]");
     if (choice) {
       pickEdgeType(choice.getAttribute("data-edge-choice"));
@@ -659,11 +931,25 @@
     }
 
     switch (t.id) {
-      case "edge-confirm-ok":
+      case "edge-confirm-ok": {
+        if (pending && pending.remove) {
+          var removal = pending;
+          pending = null;
+          hideAllDialogs();
+          mutate("edge-delete", { from: removal.from, to: removal.to, type: removal.type });
+          return;
+        }
         commitEdge(pending.type, document.getElementById("edge-confirm-reason").value.trim());
         return;
+      }
+      // Every dialog closes from a visible affordance, the backdrop, or
+      // Escape (owner UAT round 6: never a modal you can't get out of).
+      case "modal-backdrop":
       case "edge-confirm-cancel":
+      case "edge-picker-cancel":
+      case "graduate-menu-cancel":
         pending = null;
+        pendingSticky = null;
         hideAllDialogs();
         return;
       case "commit-push-btn":
@@ -688,6 +974,51 @@
       case "add-sticky-btn":
         startStickyEditor();
         return;
+    }
+
+    // Deletion affordances (owner UAT round 6, item 3): scratch records
+    // die immediately (mutable stream only); a spec-layer edge mirrors
+    // creation — gate-bearing types restate their removal consequence
+    // and confirm first, others remove on the spot.
+    var del = t.closest(".delete-btn");
+    if (del) {
+      var what = del.getAttribute("data-delete");
+      if (what === "sticky") {
+        mutate("annotation-delete", { id: del.closest(".sticky").getAttribute("data-id") });
+      } else if (what === "thread") {
+        mutate("annotation-delete", { id: del.closest(".yarn-chip").getAttribute("data-annotation-id") });
+      } else {
+        var edgeChip = del.closest(".yarn-chip");
+        var edge = {
+          from: edgeChip.getAttribute("data-from"),
+          to: edgeChip.getAttribute("data-to"),
+          type: edgeChip.getAttribute("data-edge-type"),
+        };
+        if (state.gate.indexOf(edge.type) >= 0) {
+          pending = { remove: true, from: edge.from, to: edge.to, type: edge.type };
+          openConfirm("Remove " + edge.type, state.removals[edge.type] || "", false);
+        } else {
+          mutate("edge-delete", edge);
+        }
+      }
+      return;
+    }
+
+    // In-place retype (owner directive): the chip's type label reopens
+    // the context-sensitive picker over the same pair.
+    var retypeBtn = t.closest("[data-retype]");
+    if (retypeBtn) {
+      var retypeChip = retypeBtn.closest(".yarn-chip");
+      var rFrom = endpointElement(retypeChip.getAttribute("data-from"));
+      var rTo = endpointElement(retypeChip.getAttribute("data-to"));
+      openPicker({
+        from: retypeChip.getAttribute("data-from"),
+        fromKind: rFrom ? kindOfElement(rFrom) : "unknown",
+        to: retypeChip.getAttribute("data-to"),
+        toKind: rTo ? kindOfElement(rTo) : "unknown",
+        retype: retypeChip.getAttribute("data-edge-type"),
+      });
+      return;
     }
 
     var grad = t.closest(".graduate-btn");
@@ -751,6 +1082,7 @@
     if (e.key === "Escape") {
       pending = null;
       hideAllDialogs();
+      closeRefPeek();
     }
   }
 
