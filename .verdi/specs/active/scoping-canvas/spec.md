@@ -4,7 +4,7 @@ kind: spec
 title: "Scoping Canvas"
 owners: [platform-team]
 class: feature
-status: draft
+status: accepted-pending-build
 problem: { text: "scoping is decided once, at the feature, but the wall gives scoping no surface: stubs are frontmatter-only — invisible on the board and not board-authorable — AC coverage is uncomputed on the wall, spike-to-question attribution has no home anywhere, and instantiating a story from a stub is manual copying", anchor: problem }
 outcome: { text: "the feature wall is a scoping canvas: story and spike stickies graduate into stubs, yarn attributes coverage and question-resolution, every AC wears its computed coverage, and a stub instantiates its story on the paved road", anchor: outcome }
 acceptance_criteria:
@@ -30,6 +30,7 @@ decisions:
   - { id: dc-4, text: "the stub registry stays one list, flag-discriminated like the story level it mirrors: an entry gains optional spike: true and resolves: [oq-ids]; resolves requires the flag, a spike stub declares resolves and no acceptance_criteria, a plain stub the reverse — all fail-closed", anchor: "#dc-4" }
   - { id: dc-5, text: "story and spike stickies are minted annotation types (a 02 enum amendment on the pin/note path); the attribution yarn stays untyped relates-threads — the endpoint pair carries the meaning, so the closed edge vocabulary is untouched", anchor: "#dc-5" }
   - { id: dc-6, text: "scoping cards live in a dedicated kind-locked stubs zone between open questions and references; a story or spike sticky parks handwritten in the band and graduation typesets it in place; stub cards take computed-only positions like reference cards", anchor: "#dc-6" }
+frozen: { at: 2026-07-12, commit: 6400db382876f416ed943f6b6e22954f9666fde3 }
 ---
 # Scoping Canvas
 
