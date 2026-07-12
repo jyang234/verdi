@@ -10,12 +10,19 @@
 //
 // Only the S8 properties bind: same inputs → same layout (no wall clock,
 // no randomness, no map-iteration-order dependence); stored positions
-// pass through verbatim (never "fixed", even when they collide); adding
-// a new object (which the board always appends in document order) never
-// moves any previously placed object. Zone geometry is explicitly NOT
-// binding (S8 findings §"Binding constraints" item 5) — this package
-// lays each kind out as its own vertical column, a kind-per-column wall
-// that keeps the projection compact and legible.
+// pass through GENERATE verbatim — never rewritten, even when they
+// collide; adding a new object (which the board always appends in
+// document order) never moves any previously placed object. Zone
+// geometry is explicitly NOT binding (S8 findings §"Binding constraints"
+// item 5) — this package lays each kind out as its own vertical column,
+// a kind-per-column wall that keeps the projection compact and legible.
+//
+// Rendering is a separate, documented step: the owner directive (round
+// 6) is that cards never RENDER stacked in any mode, so the projection
+// applies ResolveDisplayOverlaps (display.go) to Generate's output —
+// display-time nudging of colliding stored positions that never touches
+// layout.json (only a real drag writes, and it writes only the dragged
+// card).
 package boardlayout
 
 import (
@@ -110,12 +117,7 @@ func Generate(objects []Object, stored map[string]artifact.Position) (map[string
 	}
 	for zi := range buckets {
 		b := buckets[zi]
-		sort.Slice(b, func(i, j int) bool {
-			if b[i].DocOrder != b[j].DocOrder {
-				return b[i].DocOrder < b[j].DocOrder
-			}
-			return b[i].ID < b[j].ID // byte-wise ordinal tiebreak, locale-independent
-		})
+		sort.Slice(b, func(i, j int) bool { return canonicalLess(b[i], b[j]) })
 	}
 
 	out := make(map[string]artifact.Position, len(objects))
