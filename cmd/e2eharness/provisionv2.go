@@ -33,8 +33,17 @@ const (
 // viewport its case-file placard overflows the 3-line clamp, so it is the
 // fixture for the board's click-to-expand affordance (33-board-expand) —
 // a truncated placard shows the hint and opens the read-only expand
-// dialog. EMPTY_SPEC (income-verification) keeps a short one-line problem,
-// the negative case (a short placard gets no affordance).
+// dialog. Its "## Problem" body section is intentionally EMPTY, so the
+// problem placard carries no hidden placard-full and its dialog falls back
+// to the (long) headline text — the no-body path. Its "## Outcome" body,
+// by contrast, is a RICHER-THAN-THE-HEADLINE section (a paragraph, a
+// bulleted list, emphasis): the outcome placard's headline is short (it
+// does NOT clamp at the wide e2e viewport), yet the placard is still
+// expandable and its dialog renders that body HTML — the board-polish
+// pass's always-expandable + show-body behavior, and the width-independence
+// proof. EMPTY_SPEC (income-verification) keeps a short one-line problem
+// headline AND an empty body section: no body, no clamp — the degenerate
+// case (a short placard gets no affordance).
 const designSpec = `---
 id: spec/refi-decline-flow
 kind: spec
@@ -61,11 +70,20 @@ open_questions:
 
 ## Problem
 
-Declined applicants act on stale reasons.
-
 ## Outcome
 
-The decline state a borrower sees is always current.
+The fix is a single source of decline truth: a borrower, a support agent, and
+the audit log all read the *same* current decline state, sourced from the
+servicing system of record rather than any cached copy. Concretely:
+
+- a **reversal** propagates to every surface that showed the original
+  decline, inside one refresh window;
+- a **stale** decline retracts itself instead of standing until a human
+  happens to notice;
+- every notice ever shown stays **audit-visible**, so support can
+  reconstruct exactly what the borrower saw, and when.
+
+The wall below exists to close that gap.
 
 ## ac-1
 
@@ -132,11 +150,7 @@ links:
 
 ## Problem
 
-Manual verification queues.
-
 ## Outcome
-
-Same-day verification.
 `
 
 // reviewSpec is REVIEW_SPEC: the board opens it in review mode (its
@@ -160,11 +174,7 @@ acceptance_criteria:
 
 ## Problem
 
-Notices outlive their declines.
-
 ## Outcome
-
-Self-retracting notices.
 
 ## ac-1
 

@@ -37,7 +37,7 @@ func TestBoardProjection_CarriesSpecClass(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p, err := buildProjection("s", &tc.fm, nil, nil, nil, modeAuthoring)
+			p, err := buildProjection("s", &tc.fm, nil, nil, nil, nil, modeAuthoring)
 			if err != nil {
 				t.Fatalf("buildProjection: %v", err)
 			}
@@ -50,7 +50,7 @@ func TestBoardProjection_CarriesSpecClass(t *testing.T) {
 
 	// The wire keys (get_board marshals the projection verbatim): class
 	// always present; story_ref and spike omitted when zero.
-	spike, err := buildProjection("s", &artifact.SpecFrontmatter{Class: artifact.ClassStory, Story: "jira:LOAN-9", Spike: true}, nil, nil, nil, modeAuthoring)
+	spike, err := buildProjection("s", &artifact.SpecFrontmatter{Class: artifact.ClassStory, Story: "jira:LOAN-9", Spike: true}, nil, nil, nil, nil, modeAuthoring)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestBoardProjection_CarriesSpecClass(t *testing.T) {
 			t.Errorf("projection JSON missing %s\n%s", want, raw)
 		}
 	}
-	feature, err := buildProjection("s", &artifact.SpecFrontmatter{Class: artifact.ClassFeature}, nil, nil, nil, modeAuthoring)
+	feature, err := buildProjection("s", &artifact.SpecFrontmatter{Class: artifact.ClassFeature}, nil, nil, nil, nil, modeAuthoring)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}

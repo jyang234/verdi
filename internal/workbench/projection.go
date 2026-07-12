@@ -1,6 +1,8 @@
 // The board projection (05 §Workbench "Board as projection", R4):
 // generation is a PURE FUNCTION of four inputs — (1) the spec revision's
-// parsed object model, (2) layout.json positions, (3) the mutable-zone
+// parsed object model AND, for the problem/outcome attributes, the body
+// prose their anchor resolves to (R4 board polish's placard body seam,
+// attributebody.go), (2) layout.json positions, (3) the mutable-zone
 // annotation streams, and (4), in review mode, the live MR comment feed.
 // Same four inputs, same board: no LLM, no randomness, no wall clock
 // anywhere in this file. Nothing here is board-native except position.
@@ -8,6 +10,7 @@ package workbench
 
 import (
 	"fmt"
+	"html/template"
 	"sort"
 	"strings"
 
@@ -124,16 +127,29 @@ type BoardProjection struct {
 	// unit of build, pointing up at its feature's AC fragments), with
 	// the story's tracker ref and spike flag carried alongside so both
 	// presentations can stamp it (additive fields, R4 board polish).
-	Class    string              `json:"class"`
-	StoryRef string              `json:"story_ref,omitempty"`
-	Spike    bool                `json:"spike,omitempty"`
-	Problem  string              `json:"problem,omitempty"`
-	Outcome  string              `json:"outcome,omitempty"`
-	Cards    []cardView          `json:"cards"`
-	RefCards []refCardView       `json:"ref_cards"`
-	Edges    []edgeView          `json:"edges"`
-	Stickies []scratchStickyView `json:"stickies"`
-	Tray     []reviewStickyView  `json:"tray"`
+	Class    string `json:"class"`
+	StoryRef string `json:"story_ref,omitempty"`
+	Spike    bool   `json:"spike,omitempty"`
+	Problem  string `json:"problem,omitempty"`
+	Outcome  string `json:"outcome,omitempty"`
+	// ProblemBodyHTML and OutcomeBodyHTML are the fuller authored argument
+	// under the spec body's "## Problem"/"## Outcome" heading the
+	// attribute's own anchor resolves to (02 §Object model) — the body
+	// prose behind Problem/Outcome's concise headline above, rendered
+	// through the SAME render.RenderMarkdown path the corpus artifact page
+	// uses (attributebody.go): never a second markdown implementation.
+	// Empty when the attribute is nil, carries no anchor, the anchor
+	// resolves to no heading, or the section is blank — fail-soft, never
+	// an error: this is read-only reference content a follow-on
+	// click-to-read-full-prose pass renders, falling back to the headline
+	// text above when absent.
+	ProblemBodyHTML template.HTML       `json:"problem_body_html,omitempty"`
+	OutcomeBodyHTML template.HTML       `json:"outcome_body_html,omitempty"`
+	Cards           []cardView          `json:"cards"`
+	RefCards        []refCardView       `json:"ref_cards"`
+	Edges           []edgeView          `json:"edges"`
+	Stickies        []scratchStickyView `json:"stickies"`
+	Tray            []reviewStickyView  `json:"tray"`
 	// StubViews, ACCoverage, and OQClaims are the scoping canvas's
 	// additive projection (spec/scoping-canvas ac-3/ac-4/ac-5): declared
 	// stubs verbatim, each AC's covering-stub count ("covered by N
@@ -156,8 +172,15 @@ type BoardProjection struct {
 }
 
 // buildProjection computes the deterministic projection of the four
-// inputs. comments is nil outside review mode.
-func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind) (*BoardProjection, error) {
+// inputs. comments is nil outside review mode. body is the spec
+// document's markdown body (post-frontmatter) — used ONLY to resolve the
+// problem/outcome attributes' anchors to their fuller body-section prose
+// (attributebody.go); every other field is computed from fm alone,
+// exactly as before. nil is a legitimate body (no anchor ever resolves,
+// so ProblemBodyHTML/OutcomeBodyHTML both stay empty) — every caller that
+// builds a projection from a bare in-memory SpecFrontmatter literal
+// (rather than a parsed document) passes nil.
+func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind) (*BoardProjection, error) {
 	p := &BoardProjection{
 		Spec: specName, Title: fm.Title, Mode: mode, Status: string(fm.Status),
 		Class: string(fm.Class), StoryRef: fm.Story, Spike: fm.Spike,
@@ -168,6 +191,8 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, stored map[s
 	if fm.Outcome != nil {
 		p.Outcome = fm.Outcome.Text
 	}
+	p.ProblemBodyHTML = attributeBodyHTML(body, fm.Problem)
+	p.OutcomeBodyHTML = attributeBodyHTML(body, fm.Outcome)
 
 	// StubViews/ACCoverage/OQClaims: the scoping canvas's pure-frontmatter
 	// projection (co-2). Keyed for every declared AC/OQ up front so "no

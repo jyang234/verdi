@@ -121,7 +121,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 		}
 		return nil, nil, "", fmt.Errorf("workbench: reading spec %s: %w", name, err)
 	}
-	fmBytes, _, err := artifact.SplitFrontmatter(raw)
+	fmBytes, bodyBytes, err := artifact.SplitFrontmatter(raw)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("workbench: spec %s: %w", name, err)
 	}
@@ -179,7 +179,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 		comments = nil // the feed is a review-mode input only
 	}
 
-	proj, err := buildProjection(name, fm, stored, annotations, comments, mode)
+	proj, err := buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode)
 	if err != nil {
 		return nil, nil, "", err
 	}
