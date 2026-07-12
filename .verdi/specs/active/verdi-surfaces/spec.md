@@ -305,7 +305,10 @@ project members — on GitLab via Pages access control (SSO included); on
 GitHub via private-repo Pages, which requires Enterprise Cloud (a documented
 adapter gap, not a verdi behavior). Readership equals repo membership,
 authenticated through the forge itself, zero new auth infrastructure. The
-site is a pure function of main's tree: rebuildable, diffable, and
+site is a pure function of main's tree — with one disclosed second input
+(round 5, D-15): the disclosures view enumerates checkout state
+(mutable-zone presence among its sources), deterministic in CI's bare
+clone and labeled on the page itself. Otherwise: rebuildable, diffable, and
 time-travelable (check out any commit and rebuild).
 
 **Thesis: a wiki that structurally cannot lie about time.** Every page renders

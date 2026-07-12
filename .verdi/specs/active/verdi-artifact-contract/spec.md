@@ -170,7 +170,13 @@ the *targets* of `resolves` edges (a spike's deliverable is answering
 them, §Kind registry) and the graduation destination of the board's
 carried open-question stickies (VL-017; surfaces spec §Workbench's
 scratch tier); a resolved open question graduates into a real object or
-prose by an ordinary edit, and the entry is removed in the same edit. A
+prose by an ordinary edit, and the entry is removed in the same edit. For a
+FROZEN declarer (an accepted feature whose open question a spike later
+answers), resolution surfaces mechanically as the computed `resolved-by`
+backlink (round 5, D-8): the spike's `resolves` edge inverts through §Link
+taxonomy's table and renders in the declarer's connections panel (dex) and
+on its board's open-question card — the frozen document is never edited;
+the backlink is the record. A
 story's `implements`/`resolves` edges are declared at the document level
 (top-level `links:`), targeting a feature object fragment (§Identity and
 references), not inside an `acceptance_criteria` or `constraints` entry.
@@ -187,8 +193,8 @@ registry, R4-I-4): the same `id` with an unchanged hash across revisions is
 
 | Kind        | Dir              | Form | Statuses                          | Temporal class            |
 |-------------|------------------|------|-----------------------------------|---------------------------|
-| spec (feature)   | specs/{active,archive}/ | dir  | draft → accepted-pending-build → closed(archive) | frozen at acceptance (merge of the spec MR) |
-| spec (story)     | specs/{active,archive}/ | dir  | draft → accepted-pending-build → closed(archive) | frozen at acceptance (merge of the spec MR) |
+| spec (feature)   | specs/{active,archive}/ | dir  | draft → accepted-pending-build → closed(archive) \| superseded | frozen at acceptance (merge of the spec MR) |
+| spec (story)     | specs/{active,archive}/ | dir  | draft → accepted-pending-build → closed(archive) \| superseded | frozen at acceptance (merge of the spec MR) |
 | spec (component) | specs/active/           | dir  | draft → active → superseded       | authored-living           |
 | adr         | adr/             | file | proposed → accepted → superseded  | frozen at acceptance      |
 | diagram     | diagrams/        | file | active → superseded               | authored-living           |
@@ -230,7 +236,18 @@ Spec classes:
   (R4 concept §3b). The feature is **downward-blind**: it is never amended
   when stories are added, split, or superseded; the authoritative AC→story
   mapping is only ever the computed inverse of stories' `implements` edges
-  (§Link taxonomy), never a field on the feature itself.
+  (§Link taxonomy), never a field on the feature itself. **Superseded is a
+  terminal status (round 5, D-12/D-16):** accepting a spec that carries a
+  `supersedes` edge to a predecessor feature or story spec flips that
+  predecessor's `status:` to `superseded` in the same `verdi accept`
+  ritual — a sanctioned, status-only edit (VL-004 gains the
+  accepted-pending-build → superseded transition, performed only by the
+  ritual; VL-010 gains the matching narrow exception alongside the
+  active→archive rename: the diff may touch only the status line). A
+  superseded spec stays in `specs/active/` (its supersession chain is live
+  reading during the build), is excluded from the feature fold's computed
+  AC→story mapping, and is refused by `verdi build start`, which names the
+  successor.
 - **story** (NEW) — the unit of work, and the unit of review. Same status
   lifecycle as feature, frozen at acceptance. Requires the two spec
   attributes `problem:` and `outcome:` (§Object model), exactly one `story:`

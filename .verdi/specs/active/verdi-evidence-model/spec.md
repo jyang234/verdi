@@ -73,7 +73,10 @@ object model — feature vs. story specs); they do not bind evidence to a
 producer directly, they **fold over implementing stories, plus an outcome
 floor**. The authoritative AC→story mapping is computed, never authored on
 the feature: it is the set of story specs whose `implements` edges name the
-feature AC, resolved through the edge-fragment grammar. The feature spec is
+feature AC, resolved through the edge-fragment grammar. **Superseded
+stories are excluded from the mapping** (round 5, D-16): a superseded
+story can never close, so counting it would make `evidenced` unreachable
+for any feature that ever had a rung-3 event. The feature spec is
 **never amended** when stories are added, split, or superseded — the fold is
 live; the feature document is frozen at acceptance like any other.
 
@@ -366,7 +369,12 @@ spec it is archiving.
   2. no AC is **violated** at the MR head — a red cell is a known defect and
      never ships;
   3. a fresh alignment report is present in the spec's directory:
-     `covers` equals the MR head sha, and every finding — computed and
+     `covers` equals the MR head sha — evaluated against the on-disk report
+     before it is committed: committing the report necessarily moves HEAD,
+     so the sanctioned order is gate-then-commit, and the committed
+     record's `covers` names the content-final head it audited, one-behind
+     by construction exactly like `accept`'s `frozen.commit` (round 5,
+     D-13) — and every finding — computed and
      judged — carries a disposition (`fixed` or `accepted-deviation` with a
      note). An MR without it is not eligible for review, mechanically.
 
@@ -639,7 +647,10 @@ invalidated, but the feature ACs it implements still stand.
   story-spec v2 (`supersedes` v1) on a design branch; accept it — the
   stub-matched fast path applies when the feature mapping is unchanged
   (§Lifecycle: the feature-first cascade); re-point the build branch. The
-  frozen v1 is preserved, never edited.
+  frozen v1 is preserved, never content-edited — accepting v2 flips v1's
+  `status:` to `superseded` (the sanctioned status-only ritual edit, 02
+  §Kind registry), making its state legible everywhere without consulting
+  backlinks.
 - **Decomposition** is the special case: supersede with two or more smaller
   story specs whose `implements` edges re-cover the same feature ACs. The
   feature is untouched — the payoff of downward-blindness.
