@@ -295,14 +295,33 @@ func newAnnotation(typ artifact.AnnotationType, body string) (*artifact.Annotati
 	}, nil
 }
 
-// actionSticky: "Add sticky" — a free-floating open-question sticky in
+// stickyCreatableTypes is the closed set of annotation types an author
+// can pin as a free-floating sticky (02 §Record schemas; relates is a
+// thread and review is the MR's voice — neither is sticky-creatable).
+var stickyCreatableTypes = map[artifact.AnnotationType]bool{
+	artifact.AnnotationComment:        true,
+	artifact.AnnotationQuestion:       true,
+	artifact.AnnotationDecisionNeeded: true,
+	artifact.AnnotationAgentTask:      true,
+}
+
+// actionSticky: "Add sticky" — a free-floating sticky of the author's
+// explicitly chosen type (owner UAT round 6, item 2: choosing is part
+// of creating; nothing defaults silently, unknown types fail closed) in
 // the annotation layer; it never dirties the spec working tree (05
 // §Workbench "The scratch tier").
 func (s *boardSpecServer) actionSticky(name string, proj *BoardProjection, req boardAPIRequest) error {
 	if req.Text == "" {
 		return fmt.Errorf("sticky requires text")
 	}
-	a, err := newAnnotation(artifact.AnnotationQuestion, req.Text)
+	typ := artifact.AnnotationType(req.Type)
+	if req.Type == "" {
+		return fmt.Errorf("sticky requires a type (one of comment, question, decision-needed, agent-task)")
+	}
+	if !stickyCreatableTypes[typ] {
+		return fmt.Errorf("sticky type %q is not creatable (one of comment, question, decision-needed, agent-task); fail closed", req.Type)
+	}
+	a, err := newAnnotation(typ, req.Text)
 	if err != nil {
 		return err
 	}

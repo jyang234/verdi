@@ -73,14 +73,36 @@ export function uncommittedIndicator(page: Page): Locator {
 
 // Create a free-floating scratch sticky (05 §Workbench, "The scratch
 // tier": "free-floating stickies ... mutable-zone, never entering the spec
-// document"). Contract: an "Add sticky" button, a "Sticky text" textbox,
-// commit on blur.
-export async function addSticky(page: Page, text: string): Promise<Locator> {
+// document"). Contract (AMENDED, owner UAT round 6 item 2 — choosing the
+// type is part of creating the sticky): "Add sticky" opens a draft with
+// an inline type control (one button per creatable annotation type) and
+// a "Sticky text" textbox; the author picks a type, writes the text, and
+// the sticky commits when focus leaves the draft.
+export type StickyType =
+  | "comment"
+  | "question"
+  | "decision-needed"
+  | "agent-task";
+
+const stickyTypeLabels: Record<StickyType, string> = {
+  comment: "Comment",
+  question: "Question",
+  "decision-needed": "Decision needed",
+  "agent-task": "Agent task",
+};
+
+export async function addSticky(
+  page: Page,
+  text: string,
+  type: StickyType = "question",
+): Promise<Locator> {
   await page.getByRole("button", { name: "Add sticky" }).click();
-  const editor = page.getByRole("textbox", { name: "Sticky text" });
-  await expect(editor).toBeVisible();
-  await editor.fill(text);
-  await editor.blur();
+  const draft = page.locator(".sticky-draft");
+  await expect(draft).toBeVisible();
+  await draft.getByRole("button", { name: stickyTypeLabels[type] }).click();
+  const editor = draft.getByRole("textbox", { name: "Sticky text" });
+  await editor.fill(text); // fill focuses the editor…
+  await editor.blur(); // …so this blur leaves the draft and commits
   await expectAutosaved(page);
   const sticky = page
     .locator('[data-testid^="sticky-"]')

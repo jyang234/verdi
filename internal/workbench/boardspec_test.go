@@ -308,7 +308,9 @@ func TestBoardSpec_StickyLifecycle(t *testing.T) {
 	root := newBoardFixture(t)
 	h := NewHandler(root)
 
-	rec := postBoardAPI(t, h, boardFixtureName, "sticky", `{"text":"open question: partial refunds?"}`)
+	// The type is the author's explicit choice at creation (owner UAT
+	// round 6, item 2 — amends R4-I-31's question-by-default).
+	rec := postBoardAPI(t, h, boardFixtureName, "sticky", `{"text":"open question: partial refunds?","type":"question"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sticky = %d\n%s", rec.Code, rec.Body.String())
 	}
@@ -357,6 +359,59 @@ func TestBoardSpec_StickyLifecycle(t *testing.T) {
 	}
 	if strings.Contains(body, `data-testid="sticky-`+stickyID+`"`) {
 		t.Error("graduated sticky still renders")
+	}
+}
+
+// Owner UAT round 6, item 2: the sticky's type is chosen at creation
+// from the closed sticky-creatable enum; nothing defaults silently and
+// unknown types fail closed (CLAUDE.md).
+func TestBoardSpec_StickyTypes(t *testing.T) {
+	creatable := []artifact.AnnotationType{
+		artifact.AnnotationComment,
+		artifact.AnnotationQuestion,
+		artifact.AnnotationDecisionNeeded,
+		artifact.AnnotationAgentTask,
+	}
+	for _, typ := range creatable {
+		t.Run("creatable/"+string(typ), func(t *testing.T) {
+			root := newBoardFixture(t)
+			h := NewHandler(root)
+			rec := postBoardAPI(t, h, boardFixtureName, "sticky", `{"text":"note for `+string(typ)+`","type":"`+string(typ)+`"}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("sticky type %s = %d\n%s", typ, rec.Code, rec.Body.String())
+			}
+			annotations, err := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(annotations) != 1 || annotations[0].Type != typ {
+				t.Fatalf("annotations = %+v, want one %s", annotations, typ)
+			}
+			body := getBoard(t, h, boardFixtureName).Body.String()
+			if !strings.Contains(body, `data-annotation-type="`+string(typ)+`"`) {
+				t.Errorf("sticky does not render with its chosen type %s", typ)
+			}
+		})
+	}
+
+	for name, req := range map[string]string{
+		"missing type":              `{"text":"typeless"}`,
+		"unknown type fails closed": `{"text":"x","type":"todo"}`,
+		"relates is not a sticky":   `{"text":"x","type":"relates"}`,
+		"review is not creatable":   `{"text":"x","type":"review"}`,
+	} {
+		t.Run("negative/"+name, func(t *testing.T) {
+			root := newBoardFixture(t)
+			h := NewHandler(root)
+			rec := postBoardAPI(t, h, boardFixtureName, "sticky", req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("%s = %d, want 400\n%s", name, rec.Code, rec.Body.String())
+			}
+			annotations, _ := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+			if len(annotations) != 0 {
+				t.Errorf("a refused sticky still wrote a record: %+v", annotations)
+			}
+		})
 	}
 }
 

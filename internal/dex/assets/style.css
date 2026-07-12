@@ -941,6 +941,31 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .sticky--decision-needed { background: var(--note-decision-bg); color: var(--note-decision-ink); }
 .sticky--agent-task { background: var(--note-agent-bg); color: var(--note-agent-ink); }
 
+/* the sticky draft's inline type control: choosing the paper's color IS
+   part of pinning it (owner UAT round 6, item 2: the draft starts
+   neutral — no silent question-default, no second modal) */
+.sticky-type-picker { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.sticky-type-choice {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.14rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.sticky-type-choice:hover { opacity: 1; }
+.sticky-type-choice[aria-pressed="true"] {
+  opacity: 1;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.12);
+}
+.sticky-type-hint { margin: 0; font-size: 0.68rem; font-style: italic; opacity: 0.85; }
+
 .card:active, .sticky:active { cursor: grabbing; }
 /* a lifted paper rises above everything while it moves */
 .dragging {

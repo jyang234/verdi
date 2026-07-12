@@ -634,24 +634,92 @@
   }
 
   // -- sticky creation -------------------------------------------------------
+  //
+  // The draft starts NEUTRAL: the author picks the sticky's type from an
+  // inline segmented control as part of creating it (owner UAT round 6,
+  // item 2 — no silent question-by-default, no second modal). Leaving
+  // the draft commits it once text AND type exist; with text but no type
+  // it stays, showing a hint (never a silent default, never silent
+  // loss); Escape discards it.
+
+  var STICKY_TYPES = [
+    ["comment", "Comment"],
+    ["question", "Question"],
+    ["decision-needed", "Decision needed"],
+    ["agent-task", "Agent task"],
+  ];
 
   function startStickyEditor() {
     var c = canvas();
     if (!c || c.querySelector(".sticky-draft")) return;
     var draft = document.createElement("div");
-    draft.className = "sticky sticky--question sticky-draft";
+    draft.className = "sticky sticky-draft";
     draft.style.left = "16px";
     draft.style.top = "16px";
+
+    var chosen = "";
+    var picker = document.createElement("div");
+    picker.className = "sticky-type-picker";
+    picker.setAttribute("role", "group");
+    picker.setAttribute("aria-label", "Sticky type");
+    STICKY_TYPES.forEach(function (t) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "sticky-type-choice";
+      btn.setAttribute("data-sticky-type", t[0]);
+      btn.setAttribute("aria-pressed", "false");
+      btn.textContent = t[1];
+      btn.addEventListener("click", function () {
+        chosen = t[0];
+        draft.className = "sticky sticky--" + t[0] + " sticky-draft";
+        var all = picker.querySelectorAll(".sticky-type-choice");
+        for (var i = 0; i < all.length; i++) {
+          all[i].setAttribute("aria-pressed", all[i] === btn ? "true" : "false");
+        }
+        var hint = draft.querySelector(".sticky-type-hint");
+        if (hint) hint.remove();
+      });
+      picker.appendChild(btn);
+    });
+    draft.appendChild(picker);
+
     var editor = document.createElement("textarea");
     editor.setAttribute("aria-label", "Sticky text");
     editor.className = "sticky-editor";
     draft.appendChild(editor);
     c.appendChild(draft);
     editor.focus();
-    editor.addEventListener("blur", function () {
+
+    function needType() {
+      if (draft.querySelector(".sticky-type-hint")) return;
+      var hint = document.createElement("p");
+      hint.className = "sticky-type-hint";
+      hint.setAttribute("data-testid", "sticky-type-hint");
+      hint.textContent = "Pick a type to pin this sticky — or press Escape to discard it.";
+      draft.appendChild(hint);
+    }
+
+    // Commit when focus truly leaves the draft (a type-button click moves
+    // focus WITHIN it and must not count as leaving).
+    draft.addEventListener("focusout", function (e) {
+      if (e.relatedTarget && draft.contains(e.relatedTarget)) return;
       var text = editor.value.trim();
+      if (!text) {
+        draft.remove();
+        return;
+      }
+      if (!chosen) {
+        needType();
+        return;
+      }
       draft.remove();
-      if (text) mutate("sticky", { text: text });
+      mutate("sticky", { text: text, type: chosen });
+    });
+    draft.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.stopPropagation(); // the draft dies; open dialogs are not its business
+        draft.remove();
+      }
     });
   }
 
