@@ -14,6 +14,14 @@ const (
 	AnnotationQuestion       AnnotationType = "question"
 	AnnotationDecisionNeeded AnnotationType = "decision-needed"
 	AnnotationAgentTask      AnnotationType = "agent-task"
+	// AnnotationPin pins an existing artifact to a board as planning
+	// material (02 §Record schemas, round-5.2 amendment; ledgered
+	// R4-I-41): Target names the pinned artifact (a whole-artifact ref —
+	// no selector, no fragment), Board carries its wall position, and
+	// Body optionally says why. It never enters the spec document; its
+	// graduation is drawing a typed edge to the pinned target — or it
+	// dies, taking its untyped relates threads with it.
+	AnnotationPin AnnotationType = "pin"
 	// AnnotationRelates is the annotation layer's untyped scratch thread
 	// between two elements (R4 concept §5, 02 §Record schemas): TargetB
 	// names the thread's second endpoint and is present only for this type.
@@ -30,6 +38,7 @@ var validAnnotationTypes = map[AnnotationType]bool{
 	AnnotationQuestion:       true,
 	AnnotationDecisionNeeded: true,
 	AnnotationAgentTask:      true,
+	AnnotationPin:            true,
 	AnnotationRelates:        true,
 	AnnotationReview:         true,
 }
@@ -142,7 +151,29 @@ func (a Annotation) Validate() error {
 			return fmt.Errorf("artifact: annotation target_b.ref: %w", err)
 		}
 	}
-	if a.Body == "" {
+	// A pin's closed shape (02 §Record schemas, round-5.2): the pinned
+	// artifact AND a wall position are both required; the target is a
+	// whole artifact (no selector, no fragment); body stays optional —
+	// it only says why. Anything else fails closed.
+	if a.Type == AnnotationPin {
+		if a.Target == nil {
+			return fmt.Errorf("artifact: annotation type pin requires a target (the pinned artifact)")
+		}
+		if a.Board == nil {
+			return fmt.Errorf("artifact: annotation type pin requires a board position")
+		}
+		if a.Target.Selector != (Selector{}) {
+			return fmt.Errorf("artifact: a pin's target takes no selector (it pins the whole artifact)")
+		}
+		r, err := ParsePinnedRef(a.Target.Ref)
+		if err != nil {
+			return fmt.Errorf("artifact: annotation target.ref: %w", err)
+		}
+		if r.Fragment() {
+			return fmt.Errorf("artifact: a pin's target %q must name a whole artifact, not a fragment", a.Target.Ref)
+		}
+	}
+	if a.Body == "" && a.Type != AnnotationPin {
 		return fmt.Errorf("artifact: annotation body is required")
 	}
 	if !validAnnotationStatuses[a.Status] {

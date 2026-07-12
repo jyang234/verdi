@@ -98,6 +98,24 @@ frozen: { at: 2026-03-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
 Domain events leave through the transactional outbox.
 `
 
+// boardFixtureADR2 is a second, unreferenced corpus ADR — nothing on the
+// wall names it, so it is the pin lifecycle's import candidate.
+const boardFixtureADR2 = `---
+id: adr/0007-retry-budget
+kind: adr
+title: "Retry budget for downstream calls (board fixture)"
+status: accepted
+owners: [platform-team]
+decided: 2026-03-02
+frozen: { at: 2026-03-02, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+---
+# Retry budget for downstream calls
+
+## Decision
+
+Every downstream call spends from a shared retry budget.
+`
+
 // newBoardFixture builds a fixture repo with the draft spec, checked out
 // on a design branch (authoring mode's branch state).
 func newBoardFixture(t *testing.T) string {
@@ -107,6 +125,7 @@ func newBoardFixture(t *testing.T) string {
 			".verdi/specs/active/" + boardFixtureName + "/spec.md":     boardFixtureSpec,
 			".verdi/specs/active/" + boardFixtureName + "/layout.json": boardFixtureLayout,
 			".verdi/adr/0001-outbox-events.md":                         boardFixtureADR,
+			".verdi/adr/0007-retry-budget.md":                          boardFixtureADR2,
 			".verdi/.gitignore":                                        "data/\n",
 		},
 		Message: "seed board fixture",

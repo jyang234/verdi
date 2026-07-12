@@ -91,6 +91,98 @@ const stickyTypeLabels: Record<StickyType, string> = {
   "agent-task": "Agent task",
 };
 
+// Open the supply toolbox (board-polish, owner directive): the "Pin an
+// artifact" tab at the screen's lower-left opens the corpus picker tray
+// in one click. Returns the tray.
+export async function openPinToolbox(page: Page): Promise<Locator> {
+  await page.getByRole("button", { name: "Pin an artifact" }).click();
+  const tray = page.getByRole("dialog", { name: "Pin an artifact" });
+  await expect(tray).toBeVisible();
+  return tray;
+}
+
+// Pin an artifact to the wall through the toolbox picker (02 §Record
+// schemas: type pin; 05 §The scratch tier: pinned references). Contract:
+// each picker row is a .pin-result button carrying data-ref; choosing
+// one pins the artifact and the same-paper reference card appears with
+// data-pin-id. Returns the pinned card.
+export async function pinArtifact(
+  page: Page,
+  ref: string,
+  searchTerm?: string,
+): Promise<Locator> {
+  const tray = await openPinToolbox(page);
+  if (searchTerm) {
+    await tray.getByRole("searchbox", { name: "Search artifacts" }).fill(searchTerm);
+  }
+  const result = tray.locator(`.pin-result[data-ref="${ref}"]`);
+  await expect(result).toBeVisible();
+  await result.click();
+  await expectAutosaved(page);
+  const card = page.locator(`.refcard[data-ref="${ref}"]`);
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("data-pin-id", /a-/);
+  return card;
+}
+
+// Find a grip on a wall element that a real hand could take: a point
+// that elementFromPoint resolves INSIDE the element and not on any
+// button (a yarn chip can park over a sticky's center — chips avoid
+// cards, not stickies — and a chip's own center is its Graduate button).
+export async function grabPoint(
+  page: Page,
+  el: Locator,
+): Promise<{ x: number; y: number }> {
+  // The element can sit past the canvas's visible edge (the canvas
+  // scrolls); the grip must land on the element itself.
+  await el.scrollIntoViewIfNeeded();
+  const p = await el.evaluate((node) => {
+    const r = node.getBoundingClientRect();
+    const cands: Array<[number, number]> = [
+      [0.5, 0.5], [0.25, 0.2], [0.75, 0.8], [0.2, 0.8],
+      [0.8, 0.2], [0.5, 0.15], [0.15, 0.5], [0.85, 0.5],
+    ];
+    for (const [fx, fy] of cands) {
+      const x = r.left + r.width * fx;
+      const y = r.top + r.height * fy;
+      const hit = document.elementFromPoint(x, y);
+      if (hit && node.contains(hit) && !hit.closest("button, textarea, input")) {
+        return { x, y };
+      }
+    }
+    return null;
+  });
+  expect(p, "no clear grip on the element (fully covered?)").not.toBeNull();
+  return p!;
+}
+
+// Drag a wall element onto the trash target (owner directive): nearing
+// the viewport's lower-right raises the trash (is-armed), hovering it
+// goes hot (is-hot), releasing drops the element on it. The mouse is
+// released with the pointer over the trash; what happens next is the
+// caller's tier to assert.
+export async function dragToTrash(page: Page, el: Locator): Promise<void> {
+  const grip = await grabPoint(page, el);
+  await page.mouse.move(grip.x, grip.y);
+  await page.mouse.down();
+
+  const vp = page.viewportSize();
+  expect(vp).not.toBeNull();
+  // Approach the corner: the trash rises when the pointer nears it.
+  await page.mouse.move(vp!.width - 180, vp!.height - 180, { steps: 12 });
+  const trash = page.getByTestId("board-trash");
+  await expect(trash).toHaveClass(/is-armed/);
+
+  // Over the bin it goes unmistakably hot; release drops there.
+  const tbox = await trash.boundingBox();
+  expect(tbox, "trash target has no layout box").not.toBeNull();
+  await page.mouse.move(tbox!.x + tbox!.width / 2, tbox!.y + tbox!.height / 2, {
+    steps: 6,
+  });
+  await expect(trash).toHaveClass(/is-hot/);
+  await page.mouse.up();
+}
+
 export async function addSticky(
   page: Page,
   text: string,

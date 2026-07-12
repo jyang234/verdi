@@ -219,11 +219,21 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		b.WriteString(`</div>`)
 	}
 
-	// Reference cards: external edge targets, so every declared edge has
-	// a visible endpoint.
+	// Reference cards: external edge targets (every declared edge has a
+	// visible endpoint) and pinned references (the scratch tier's planning
+	// material, 05) — the SAME paper, one card per ref; a live pin adds
+	// the pushpin marking, the scratch lean, and the drag affordance.
 	for _, rc := range p.RefCards {
-		b.WriteString(`<div class="refcard" data-testid="` + esc(refCardTestID(rc.Ref)) + `" data-ref="` + esc(rc.Ref) + `" data-ref-kind="` + esc(refKindOf(rc.Ref)) + `" style="left:` + px(rc.X) + `;top:` + px(rc.Y) + `">`)
-		b.WriteString(`<span class="card-kind"><span class="card-kind-label">reference</span><span class="card-kind-id">` + esc(refKindOf(rc.Ref)) + `</span></span>`)
+		cls := "refcard"
+		pinAttrs := ""
+		label := "reference"
+		if rc.Pinned {
+			cls += " refcard--pinned"
+			pinAttrs = ` data-pin-id="` + esc(rc.PinID) + `"`
+			label = "pinned reference"
+		}
+		b.WriteString(`<div class="` + cls + `" data-testid="` + esc(refCardTestID(rc.Ref)) + `" data-ref="` + esc(rc.Ref) + `" data-ref-kind="` + esc(refKindOf(rc.Ref)) + `"` + pinAttrs + ` style="left:` + px(rc.X) + `;top:` + px(rc.Y) + `">`)
+		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + label + `</span><span class="card-kind-id">` + esc(refKindOf(rc.Ref)) + `</span></span>`)
 		b.WriteString(`<span class="card-ref" title="` + esc(rc.Ref) + `">` + esc(rc.Ref) + `</span>`)
 		b.WriteString(`</div>`)
 	}
@@ -507,6 +517,25 @@ func renderBoardDialogs(mode boardModeKind) string {
 <button type="button" role="menuitem" data-object-kind="decision">Decision</button>
 <button type="button" role="menuitem" data-object-kind="open-question">Open question</button>
 <button type="button" id="graduate-menu-cancel">Cancel</button>
+</div>
+<!-- The supply toolbox (owner directive): the wall's box of pins — one
+     quiet tab at the screen's lower-left, one click to the picker, no
+     residue when it closes. Authoring only, like every write affordance. -->
+<div class="pin-toolbox" id="pin-toolbox" data-testid="pin-toolbox">
+<div class="pin-tray" id="pin-tray" role="dialog" aria-label="Pin an artifact" hidden>
+<h2>Pin an artifact</h2>
+<p class="ritual-note">Put an existing record on the wall as planning material. It stays scratch &#8212; graduate it by drawing a typed edge, or it dies.</p>
+<input id="pin-search" type="search" aria-label="Search artifacts" placeholder="search the corpus&#8230;" autocomplete="off">
+<div id="pin-results" data-testid="pin-results"></div>
+</div>
+<button type="button" id="pin-toolbox-tab" class="pin-toolbox-tab" aria-expanded="false" aria-controls="pin-tray"><span class="pin-head" aria-hidden="true"></span>Pin an artifact</button>
+</div>
+<!-- The trash target (owner directive): fades in near the lower-right
+     while a wall element is dragged; dropping removes per tier. A pure
+     drop zone — pointer-events stay off; the gesture code measures it. -->
+<div id="board-trash" class="board-trash" data-testid="board-trash" aria-hidden="true">
+<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M4 7h16M9 7V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2V7M6.5 7l1 13h9l1-13M10 10.5v6M14 10.5v6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<span class="board-trash-label" aria-hidden="true"></span>
 </div>`
 }
 

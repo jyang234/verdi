@@ -1843,6 +1843,200 @@ button.yarn-chip-type {
 }
 .graduate-menu [role="menuitem"] { text-align: left; }
 
+/* ---------- pinned references, the supply toolbox, the trash ---------- */
+
+/* a pinned reference: the SAME frozen-blue paper, seated by a real
+   pushpin and leaning the scratch tier's half-degree — planning
+   material, not yet the record's straight filing */
+.refcard--pinned { transform: rotate(-0.65deg); }
+.refcard--pinned::before {
+  content: "";
+  position: absolute;
+  top: -0.42rem;
+  left: 50%;
+  width: 0.84rem;
+  height: 0.84rem;
+  margin-left: -0.42rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 28%,
+    color-mix(in srgb, var(--yarn), white 45%),
+    var(--yarn) 55%,
+    color-mix(in srgb, var(--yarn), black 35%) 100%);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+/* on the live wall reference cards drag (pins re-place, the rest ride
+   to the trash and snap home) — never at the cost of the peek click */
+.mode-authoring .refcard { touch-action: none; }
+.mode-authoring .refcard--pinned { cursor: grab; }
+.mode-authoring .refcard--pinned:active { cursor: grabbing; }
+.mode-authoring .refcard:hover { box-shadow: var(--shadow-lift); }
+.mode-authoring .yarn-chip--annotation { touch-action: none; cursor: grab; }
+
+/* the supply toolbox: the wall's box of pins — one quiet tab at the
+   screen's lower-left (zero clutter at rest), one click to the picker */
+.pin-toolbox { position: fixed; left: 1.1rem; bottom: 1.1rem; z-index: 18; }
+.pin-toolbox-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-solid);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
+  padding: 0.42rem 0.75rem;
+  cursor: pointer;
+  transform: rotate(-0.8deg);
+}
+.pin-toolbox-tab:hover,
+.pin-toolbox-tab:focus-visible,
+.pin-toolbox-tab[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-lift);
+}
+.pin-head {
+  flex: none;
+  width: 0.78rem;
+  height: 0.78rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 33% 28%,
+    color-mix(in srgb, var(--yarn), white 45%),
+    var(--yarn) 55%,
+    color-mix(in srgb, var(--yarn), black 35%) 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* the tray the tab opens: the picker over the corpus drawer */
+.pin-tray {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.6rem);
+  width: 26rem;
+  max-width: calc(100vw - 2.5rem);
+  max-height: min(30rem, 70vh);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3);
+  padding: 1rem 1.1rem;
+}
+.pin-tray h2 {
+  font-size: 0.7rem;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  margin: 0 0 0.4rem;
+}
+.pin-tray .ritual-note { font-size: 0.78rem; margin: 0 0 0.6rem; }
+#pin-search {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  padding: 0.35rem 0.55rem;
+  margin: 0 0 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+}
+#pin-search:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+#pin-results { overflow-y: auto; min-height: 3rem; }
+.pin-result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.55rem;
+  row-gap: 0.05rem;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--rule);
+  border-radius: 0;
+  padding: 0.45rem 0.15rem;
+  cursor: pointer;
+}
+.pin-result:last-child { border-bottom: 0; }
+.pin-result:hover, .pin-result:focus-visible { background: var(--panel); }
+.pin-result-kind {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--frozen);
+  background: var(--frozen-tint);
+  border: 1px solid var(--frozen);
+  border-radius: 999px;
+  padding: 0.06rem 0.45rem;
+}
+.pin-result-title { font-size: 0.84rem; line-height: 1.35; }
+.pin-result-ref {
+  grid-column: 2;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.pin-results-empty, .pin-results-more {
+  font-size: 0.78rem;
+  color: var(--muted-solid);
+  margin: 0.4rem 0 0;
+}
+
+/* the trash target (owner directive): sleeps invisible at the screen's
+   lower-right; a drag nearing the corner raises it; hovering it is
+   unmistakable — the bin goes hot in the violated ink and asks for the
+   release. Never a pointer target (the gesture code measures its box). */
+.board-trash {
+  position: fixed;
+  right: 1.4rem;
+  bottom: 1.4rem;
+  z-index: 19;
+  width: 4.4rem;
+  height: 4.4rem;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.18rem;
+  border: 2px dashed var(--muted-solid);
+  background: var(--panel);
+  color: var(--muted-solid);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px);
+}
+.board-trash.is-armed { opacity: 0.95; transform: translateY(0); }
+.board-trash.is-hot {
+  border-style: solid;
+  border-color: var(--st-violated);
+  background: var(--st-violated-tint);
+  color: var(--st-violated);
+  transform: scale(1.14);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--st-violated) 22%, transparent);
+}
+.board-trash-label {
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.board-trash-label::after { content: "remove"; }
+.board-trash.is-hot .board-trash-label::after { content: "release"; }
+
 @media (max-width: 60rem) {
   .board-placards { flex-direction: column; }
   .case-arrow { display: none; }
@@ -1865,6 +2059,9 @@ button.yarn-chip-type {
      all withheld when the reader prefers reduced motion */
   .objcard, .yarn-handle { transition: box-shadow 120ms ease, transform 120ms ease; }
   .refcard::after { transition: opacity 120ms ease; }
+  /* the trash's rise and heat are motion; without it the states still
+     switch, instantly and honestly */
+  .board-trash { transition: opacity 160ms ease, transform 160ms ease, box-shadow 120ms ease, border-color 120ms ease, background-color 120ms ease; }
 }
 
 /* Syntax-highlighting palettes. Chroma emits no inline colour, so these two

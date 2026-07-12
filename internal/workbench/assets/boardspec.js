@@ -392,6 +392,7 @@
     confirmEl.setAttribute("aria-label", title);
     document.getElementById("edge-confirm-title").textContent = title;
     document.getElementById("edge-confirm-consequence").textContent = consequence;
+    document.getElementById("edge-confirm-ok").hidden = false; // a refusal may have hidden it
     var reasonField = document.getElementById("edge-confirm-reason-field");
     document.getElementById("edge-confirm-reason").value = "";
     reasonField.hidden = !withReason;
@@ -446,7 +447,12 @@
 
   var DRAG_SLOP = 4; // px of pointer travel before a press is a drag
 
-  var gesture = null; // {kind: "card"|"sticky"|"yarn", pointerId, ...}
+  var gesture = null; // {kind: "card"|"sticky"|"refcard"|"chip"|"yarn", pointerId, ...}
+
+  // A completed drag still fires a click on its element (press and
+  // release land on the captured element); the reference card's click
+  // affordance (the peek) must not fire off the tail of a drag.
+  var justDragged = null;
 
   // A calm, visible refusal for a drag attempt on a board that will not
   // move (05 §Workbench: read-only is a document, review is a mirror) —
@@ -546,15 +552,23 @@
 
     if (e.target.closest("button, textarea, input, .review-sticky")) return;
 
-    var el = e.target.closest(".objcard, .sticky");
+    var el = e.target.closest(".objcard, .sticky, .refcard, .yarn-chip--annotation");
     if (!el || !c.contains(el)) return;
     if (!authoring) {
-      refuseDrag();
+      // A reference card outside authoring is a peek affordance, not a
+      // frozen drag — no refusal theater on it. Chips likewise.
+      if (el.classList.contains("objcard") || el.classList.contains("sticky")) {
+        refuseDrag();
+      }
       return;
     }
+    var kind = "card";
+    if (el.classList.contains("sticky")) kind = "sticky";
+    else if (el.classList.contains("refcard")) kind = "refcard";
+    else if (el.classList.contains("yarn-chip")) kind = "chip";
     var rect = el.getBoundingClientRect();
     gesture = {
-      kind: el.classList.contains("objcard") ? "card" : "sticky",
+      kind: kind,
       pointerId: e.pointerId,
       el: el,
       dx: e.clientX - rect.left,
@@ -611,7 +625,147 @@
     if (y < 0) y = 0;
     gesture.el.style.left = x + "px";
     gesture.el.style.top = y + "px";
-    layoutYarn();
+    // A dragged chip rides the hand alone (layoutYarn would seat every
+    // chip back on its thread, the dragged one included).
+    if (gesture.kind !== "chip") layoutYarn();
+    updateTrashState(e);
+  }
+
+  // -- the trash target (owner directive) ------------------------------------
+  //
+  // During any wall-element drag, nearing the screen's lower-right
+  // raises the trash target; hovering it makes it unmistakably hot;
+  // releasing there removes the element per tier (scratch dies without
+  // ceremony; record removals confirm first, naming their edges). The
+  // target never takes pointer events — the gesture code measures its
+  // box — so it can never eat a drop meant for the wall.
+
+  var TRASH_NEAR = 300; // px from the lower-right corner where it rises
+
+  function trashEl() {
+    return document.getElementById("board-trash");
+  }
+  function overTrash(e) {
+    var tr = trashEl();
+    if (!tr) return false;
+    var r = tr.getBoundingClientRect();
+    var pad = 14; // a forgiving halo: near-misses on a 4rem disc count
+    return (
+      e.clientX >= r.left - pad && e.clientX <= r.right + pad &&
+      e.clientY >= r.top - pad && e.clientY <= r.bottom + pad
+    );
+  }
+  function updateTrashState(e) {
+    var tr = trashEl();
+    if (!tr) return;
+    var dx = window.innerWidth - e.clientX;
+    var dy = window.innerHeight - e.clientY;
+    var near = dx * dx + dy * dy < TRASH_NEAR * TRASH_NEAR;
+    tr.classList.toggle("is-armed", near);
+    tr.classList.toggle("is-hot", near && overTrash(e));
+  }
+  function hideTrash() {
+    var tr = trashEl();
+    if (tr) tr.classList.remove("is-armed", "is-hot");
+  }
+
+  // specEdgeChipsFor collects the spec-layer chips touching a ref — the
+  // edges a trash confirmation must name.
+  function specEdgeChipsFor(key) {
+    var out = [];
+    var chips = region.querySelectorAll('.yarn-chip[data-layer="spec"]');
+    for (var i = 0; i < chips.length; i++) {
+      var from = chips[i].getAttribute("data-from");
+      var to = chips[i].getAttribute("data-to");
+      if (from === key || to === key) out.push({ from: from, to: to, type: chips[i].getAttribute("data-edge-type") });
+    }
+    return out;
+  }
+
+  // gateRitualCopy appends the removal consequence for every gate-bearing
+  // type among the named edges — the same ritual voice removal wears at
+  // the chip's own × (a trash drop must not be a quieter path).
+  function gateRitualCopy(edges) {
+    var seen = {};
+    var copy = "";
+    for (var i = 0; i < edges.length; i++) {
+      var t = edges[i].type;
+      if (state.gate.indexOf(t) >= 0 && !seen[t]) {
+        seen[t] = true;
+        copy += " Removing " + t + ": " + (state.removals[t] || "") + ".";
+      }
+    }
+    return copy;
+  }
+
+  // trashDrop routes a trash release per tier. Scratch dies without
+  // ceremony; anything that would edit the spec document confirms first,
+  // in plain language, naming what goes.
+  function trashDrop(g) {
+    if (g.kind === "sticky") {
+      mutate("annotation-delete", { id: g.el.getAttribute("data-id") });
+      return;
+    }
+    if (g.kind === "chip") {
+      mutate("annotation-delete", { id: g.el.getAttribute("data-annotation-id") });
+      return;
+    }
+    if (g.kind === "refcard") {
+      var ref = g.el.getAttribute("data-ref");
+      var edges = specEdgeChipsFor(ref);
+      var docHeld = edges.some(function (c) {
+        return c.from === "spec";
+      });
+      if (docHeld) {
+        // The card is held by the document's own links: block, which the
+        // board cannot edit — a designed refusal, not a doomed confirm.
+        openConfirm(
+          "This card stays",
+          ref + " is held by the spec document's own links: block (its implements/resolves edges), which the board cannot edit.",
+          false
+        );
+        document.getElementById("edge-confirm-ok").hidden = true;
+        return;
+      }
+      if (edges.length === 0) {
+        // A pure pin (or a card held only by scratch threads): the
+        // scratch tier's "or they die" — no ceremony.
+        mutate("ref-trash", { ref: ref });
+        return;
+      }
+      var names = edges
+        .map(function (c) {
+          return c.from + " " + c.type;
+        })
+        .join(", ");
+      var msg =
+        "Removes the " +
+        (edges.length === 1 ? "typed relationship" : edges.length + " typed relationships") +
+        " holding it here (" + names + ") from the spec document." +
+        gateRitualCopy(edges);
+      if (g.el.hasAttribute("data-pin-id")) {
+        msg += " Its pin and scratch threads go with it.";
+      }
+      pending = { trashRef: ref };
+      openConfirm("Take " + ref + " off the wall", msg, false);
+      return;
+    }
+    // A declared object card: removing it removes its declaration from
+    // the spec document plus every edge touching it — prose stays.
+    var id = g.el.getAttribute("data-id");
+    var edges2 = specEdgeChipsFor(id);
+    var msg2 = "Removes " + id + " from the spec document";
+    if (edges2.length > 0) {
+      var names2 = edges2
+        .map(function (c) {
+          return (c.from === id ? "its " + c.type + " to " + c.to : c.from + " " + c.type);
+        })
+        .join(", ");
+      msg2 += ", and the " + (edges2.length === 1 ? "edge" : edges2.length + " edges") + " touching it (" + names2 + ")";
+    }
+    msg2 += ". Its body prose stays in the document — the board never deletes prose." + gateRitualCopy(edges2);
+    pending = { trashObject: id };
+    openConfirm("Remove " + id + " from the spec", msg2, false);
   }
 
   function finishGesture(e) {
@@ -653,13 +807,38 @@
     }
 
     g.el.classList.remove("dragging");
+    var onTrash = g.moved && overTrash(e);
+    hideTrash();
     if (!g.moved) return; // a plain click (or half a dblclick), not a drag
-    var x = parseFloat(g.el.style.left) || 0;
-    var y = parseFloat(g.el.style.top) || 0;
+    justDragged = g.el;
+
+    if (onTrash) {
+      // The paper snaps back first (nothing is written by the drop
+      // itself); removal then happens per tier — immediately for
+      // scratch, behind the confirmation for record edits, so a
+      // cancelled confirm leaves the wall exactly as it was.
+      g.el.style.left = g.startLeft;
+      g.el.style.top = g.startTop;
+      layoutYarn();
+      trashDrop(g);
+      return;
+    }
+
     if (g.kind === "card") {
+      var x = parseFloat(g.el.style.left) || 0;
+      var y = parseFloat(g.el.style.top) || 0;
       mutate("position", { id: g.el.getAttribute("data-id"), x: x, y: y });
+    } else if (g.kind === "sticky") {
+      mutate("sticky-position", { id: g.el.getAttribute("data-id"), x: parseFloat(g.el.style.left) || 0, y: parseFloat(g.el.style.top) || 0 });
+    } else if (g.kind === "refcard" && g.el.hasAttribute("data-pin-id")) {
+      // Pins drag like stickies: the position lives in the pin record.
+      mutate("sticky-position", { id: g.el.getAttribute("data-pin-id"), x: parseFloat(g.el.style.left) || 0, y: parseFloat(g.el.style.top) || 0 });
     } else {
-      mutate("sticky-position", { id: g.el.getAttribute("data-id"), x: x, y: y });
+      // An edge-derived reference card (or a chip) has no stored
+      // position: away from the trash it snaps home, exactly as today.
+      g.el.style.left = g.startLeft;
+      g.el.style.top = g.startTop;
+      layoutYarn();
     }
   }
 
@@ -675,6 +854,7 @@
     if (!gesture || e.pointerId !== gesture.pointerId) return;
     var g = gesture;
     gesture = null;
+    hideTrash();
     if (g.kind === "yarn") {
       var svg = ensureYarnSvg();
       var draft = svg.querySelector(".yarn-draft");
@@ -882,6 +1062,67 @@
       });
   }
 
+  // -- the supply toolbox (import/pin) ----------------------------------------
+  //
+  // The wall's box of pins (owner directive): a quiet tab at the
+  // screen's lower-left; one click opens the tray — a search picker over
+  // the corpus index, server-rendered rows — and choosing a row pins the
+  // artifact to the wall. Escape, the tab, or any outside click closes
+  // it without residue.
+
+  var pinFetchSeq = 0;
+
+  function pinTray() {
+    return document.getElementById("pin-tray");
+  }
+
+  function fetchPinResults(q) {
+    var results = document.getElementById("pin-results");
+    if (!results) return;
+    var seq = ++pinFetchSeq;
+    fetch(
+      "/board/spec/" + encodeURIComponent(state.spec) + "/pinsearch?q=" + encodeURIComponent(q)
+    )
+      .then(function (resp) {
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        return resp.text();
+      })
+      .then(function (html) {
+        if (seq !== pinFetchSeq) return; // a newer query already answered
+        results.innerHTML = html;
+      })
+      .catch(function (err) {
+        if (seq !== pinFetchSeq) return;
+        results.textContent = "search failed: " + err.message;
+      });
+  }
+
+  function openPinTray() {
+    var tray = pinTray();
+    var tab = document.getElementById("pin-toolbox-tab");
+    if (!tray || !tray.hidden) return;
+    tray.hidden = false;
+    if (tab) tab.setAttribute("aria-expanded", "true");
+    var input = document.getElementById("pin-search");
+    if (input) {
+      input.value = "";
+      input.focus();
+    }
+    fetchPinResults("");
+  }
+
+  function closePinTray() {
+    var tray = pinTray();
+    var tab = document.getElementById("pin-toolbox-tab");
+    if (!tray || tray.hidden) return;
+    tray.hidden = true;
+    if (tab) tab.setAttribute("aria-expanded", "false");
+  }
+
+  function onInput(e) {
+    if (e.target && e.target.id === "pin-search") fetchPinResults(e.target.value);
+  }
+
   // -- graduate menus ---------------------------------------------------------
 
   var pendingSticky = null;
@@ -911,6 +1152,8 @@
 
   function onClick(e) {
     var t = e.target;
+    var dragGhost = justDragged;
+    justDragged = null;
 
     // The peek dismisses on any click outside it (a reference card click
     // replaces it with the new ref's peek instead).
@@ -923,8 +1166,28 @@
       return;
     }
 
+    // The supply toolbox: the tab toggles the tray; a result row pins;
+    // any click outside closes the tray without residue.
+    if (t.closest("#pin-toolbox-tab")) {
+      var trayEl = pinTray();
+      if (trayEl && trayEl.hidden) openPinTray();
+      else closePinTray();
+      return;
+    }
+    var pinResult = t.closest(".pin-result");
+    if (pinResult) {
+      closePinTray();
+      mutate("pin", { ref: pinResult.getAttribute("data-ref") });
+      return;
+    }
+    var openTray = pinTray();
+    if (openTray && !openTray.hidden && !t.closest("#pin-toolbox")) {
+      closePinTray();
+    }
+
     var refcard = t.closest(".refcard");
     if (refcard) {
+      if (refcard === dragGhost) return; // a drag's tail, not a peek click
       openRefPeek(refcard.getAttribute("data-ref"));
       return;
     }
@@ -942,6 +1205,22 @@
           pending = null;
           hideAllDialogs();
           mutate("edge-delete", { from: removal.from, to: removal.to, type: removal.type });
+          return;
+        }
+        // The trash confirmations (owner directive): removal happens
+        // ONLY here — cancel or Escape leaves everything standing.
+        if (pending && pending.trashRef) {
+          var deadRef = pending.trashRef;
+          pending = null;
+          hideAllDialogs();
+          mutate("ref-trash", { ref: deadRef });
+          return;
+        }
+        if (pending && pending.trashObject) {
+          var deadObject = pending.trashObject;
+          pending = null;
+          hideAllDialogs();
+          mutate("object-trash", { id: deadObject });
           return;
         }
         commitEdge(pending.type, document.getElementById("edge-confirm-reason").value.trim());
@@ -1088,6 +1367,7 @@
       pending = null;
       hideAllDialogs();
       closeRefPeek();
+      closePinTray();
     }
   }
 
@@ -1098,6 +1378,7 @@
   document.addEventListener("dblclick", onDblClick);
   document.addEventListener("click", onClick);
   document.addEventListener("keydown", onKeyDown);
+  document.addEventListener("input", onInput);
 
   layoutYarn();
 })();

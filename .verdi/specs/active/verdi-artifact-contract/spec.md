@@ -427,7 +427,7 @@ below for the board-key namespace this slug is drawn from).
               "selector": { "heading": "ac-2", "quote": "charge API", "line": null } },
   "target_b": { "ref": "...", "selector": { "heading": "...", "quote": "...", "line": null } },
   "board": { "story": "STORY-1482", "x": 262, "y": 132 },
-  "type": "comment | question | decision-needed | agent-task | relates | review",
+  "type": "comment | question | decision-needed | agent-task | pin | relates | review",
   "body": "string", "status": "open | resolved | graduated" }
 ```
 
@@ -442,6 +442,15 @@ only for this type and names the thread's second endpoint. It never enters
 the spec document; graduation to a real object edge (`implements`,
 `resolves`, `exempts`, `supersedes`, `depends-on`, §Link taxonomy) is an
 ordinary spec edit, not an automatic promotion.
+
+`type: pin` pins an existing artifact to a board as planning material — the
+murder-board move of putting a fact on the wall before any claim is made
+about it: `target` names the pinned artifact (a ref; no selector required),
+`board` carries its wall position, and `body` optionally says why it is
+pinned. A pin never enters the spec document. Its graduation is drawing a
+typed edge to the pinned target (an ordinary spec edit, §Link taxonomy) —
+or it dies (the record is deleted), taking its untyped `relates` threads
+with it.
 
 `type: review` records a review sticky. It never enters the document
 either, and its canonical home is a forge MR inline comment, not this

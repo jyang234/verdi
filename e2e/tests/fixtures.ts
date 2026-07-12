@@ -175,6 +175,12 @@ export const READONLY_SPEC = "stale-decline";
 // void (provisioned by cmd/e2eharness/provisionv2.go).
 export const EMPTY_SPEC = "income-verification";
 
+// Corpus artifacts nothing on DESIGN_SPEC's wall names (real on main,
+// so real on the design branch) — the pin toolbox's import fixtures.
+export const PIN_ADR = "adr/0002-outbox-events";
+export const PIN_DIAGRAM = "diagram/loansvc-topology";
+export const PIN_TRASH_ADR = "adr/0003-retry-policy";
+
 // READONLY_SPEC's one closed-vocabulary DOCUMENT-LEVEL edge (02 §Object
 // model: frontmatter `links:` declared on the spec document itself, so
 // the projection emits it with From:"spec"). The document is not a card —
