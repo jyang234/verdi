@@ -1,6 +1,10 @@
 package lint
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/OWNER/verdi/internal/disclosure"
+)
 
 // Severity distinguishes a verdict failure from a printed disclosure.
 type Severity int
@@ -40,14 +44,16 @@ type Finding struct {
 }
 
 // String formats f as "VL-xxx path: message" — the CLI's one-line-per-
-// finding output format. A disclosure is prefixed "disclosed-unproven: "
-// (disclosure-seam story, R5-2: rename-in-place attempt at ac-1's shared
-// disclosure vocabulary — see the gate and review_unavailable call sites
-// for the same token) so a reader (and CI logs) can tell a printed
-// disclosure apart from a real violation.
+// finding output format. A disclosure renders through the shared
+// internal/disclosure seam (spec/disclosure-seam-v2, ac-1) instead of a
+// locally-authored prefix, so it shares its exact phrasing with the gate's
+// disclosed conditions and the mcp/workbench review_unavailable field —
+// never coincidentally-matching hand-aligned strings (see
+// conflict/disclosure-seam-rename-insufficient for why the earlier
+// rename-only attempt was insufficient).
 func (f Finding) String() string {
 	if f.Severity == SeverityDisclosure {
-		return fmt.Sprintf("disclosed-unproven: %s %s: %s", f.Rule, f.Path, f.Message)
+		return disclosure.Render(disclosure.New("lint:"+f.Rule, f.Path, f.Message))
 	}
 	return fmt.Sprintf("%s %s: %s", f.Rule, f.Path, f.Message)
 }

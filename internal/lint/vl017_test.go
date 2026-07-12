@@ -116,10 +116,10 @@ func TestVL017_MutableZoneAbsent_DisclosedUnproven(t *testing.T) {
 	if findings[0].Severity != SeverityDisclosure {
 		t.Fatalf("severity = %v, want SeverityDisclosure (a printed notice, not a verdict failure)", findings[0].Severity)
 	}
-	// The disclosure is printed (String prefixes "disclosed-unproven: ") —
-	// never silent (disclosure-seam story, R5-2 rename).
-	if got := findings[0].String(); !strings.HasPrefix(got, "disclosed-unproven: VL-017 ") {
-		t.Fatalf("String() = %q, want a printed \"disclosed-unproven: VL-017 ...\" disclosure line", got)
+	// The disclosure is printed through the shared internal/disclosure seam
+	// (spec/disclosure-seam-v2, ac-1) — never silent.
+	if got := findings[0].String(); !strings.HasPrefix(got, "disclosed-unproven [lint:VL-017] ") {
+		t.Fatalf("String() = %q, want a printed \"disclosed-unproven [lint:VL-017] ...\" disclosure line", got)
 	}
 }
 

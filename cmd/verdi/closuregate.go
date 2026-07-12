@@ -19,6 +19,7 @@ import (
 	"sort"
 
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/disclosure"
 	"github.com/OWNER/verdi/internal/evidence"
 	"github.com/OWNER/verdi/internal/forge"
 	"github.com/OWNER/verdi/internal/store"
@@ -30,9 +31,10 @@ import (
 // f may be nil (no forge configured / unreachable, or no network in tests).
 // When the story implements a feature whose open supersession MRs cannot be
 // enumerated because f is nil, the pending-supersession condition is
-// reported disclosed-unproven — a printed [NOTICE], never a silent pass
-// (constitution 2/10: silence is never a pass) — rather than being read as
-// "no pending MRs exist". Only a story that implements no feature at all
+// reported disclosed-unproven — rendered through the shared
+// internal/disclosure seam (spec/disclosure-seam-v2, ac-1), never a silent
+// pass (constitution 2/10: silence is never a pass) — rather than being
+// read as "no pending MRs exist". Only a story that implements no feature at all
 // (nothing to prove) passes that condition outright with a nil forge.
 func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, head string, stdout io.Writer) (bool, error) {
 	cond1, err := checkClosureEligible(ctx, root, spec, head)
@@ -53,12 +55,12 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 		switch {
 		case c.Disclosed:
 			// Three-valued honesty (constitution 2/10): the input was
-			// unavailable, so this is neither a pass nor a fail — a printed
-			// notice that leaves the gate verdict to the other conditions
-			// (mirrors VL-017's disclosure mechanism). Tag renamed to match
-			// gate.go's reportGateConditions (disclosure-seam story, R5-2).
-			fmt.Fprintf(stdout, "[DISCLOSED-UNPROVEN] closure: %s\n", c.Name)
-			fmt.Fprintf(stdout, "       %s\n", c.Reason)
+			// unavailable, so this is neither a pass nor a fail — rendered
+			// through the shared internal/disclosure seam
+			// (spec/disclosure-seam-v2, ac-1), the same Render function
+			// gate.go's reportGateConditions and lint's Finding.String() use.
+			fmt.Fprint(stdout, "closure: ")
+			fmt.Fprintln(stdout, disclosure.Render(disclosure.New(c.Source, "", c.Reason)))
 		case c.OK:
 			fmt.Fprintf(stdout, "[PASS] closure: %s\n", c.Name)
 		default:
@@ -165,7 +167,8 @@ func checkPendingSupersessionCondition(ctx context.Context, f forge.Forge, defau
 		return gateCondition{
 			Name:      name,
 			Disclosed: true,
-			Reason:    "disclosed-unproven: no forge configured/reachable, so open supersession MRs cannot be enumerated (not read as 'no pending MRs' — constitution 2/10)",
+			Source:    "gate:pending-supersession",
+			Reason:    "no forge configured/reachable, so open supersession MRs cannot be enumerated (not read as 'no pending MRs' — constitution 2/10)",
 		}, nil
 	}
 

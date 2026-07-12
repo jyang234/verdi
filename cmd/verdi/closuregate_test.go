@@ -178,8 +178,9 @@ func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 // TestRunClosureGate_PendingSupersessionDisclosedUnproven proves the
 // three-valued honesty fix (constitution 2/10): when the story implements a
 // feature but the open-MR input is unavailable (nil/unreachable forge), the
-// pending-supersession condition is reported disclosed-unproven — a printed
-// [NOTICE], never a silent pass — while a reachable forge that finds no open
+// pending-supersession condition is reported disclosed-unproven — rendered
+// through the shared internal/disclosure seam (spec/disclosure-seam-v2,
+// ac-1), never a silent pass — while a reachable forge that finds no open
 // supersession MR passes the condition outright.
 func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 	ctx := context.Background()
@@ -199,11 +200,8 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 		if !ok {
 			t.Fatalf("runClosureGate() = false, want true (disclosure is not failure); stdout=%s", stdout.String())
 		}
-		if !contains(stdout.String(), "[DISCLOSED-UNPROVEN] closure: 3.") {
-			t.Fatalf("stdout = %q, want condition 3 disclosed as a [DISCLOSED-UNPROVEN] tag, never a silent pass", stdout.String())
-		}
-		if !contains(stdout.String(), "disclosed-unproven") {
-			t.Fatalf("stdout = %q, want the disclosed-unproven wording", stdout.String())
+		if !contains(stdout.String(), "closure: disclosed-unproven [gate:pending-supersession]:") {
+			t.Fatalf("stdout = %q, want condition 3 disclosed through the shared internal/disclosure rendering, never a silent pass", stdout.String())
 		}
 		if contains(stdout.String(), "[PASS] closure: 3.") {
 			t.Fatalf("stdout = %q, condition 3 must NOT silently pass on a nil forge", stdout.String())

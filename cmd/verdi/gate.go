@@ -51,6 +51,7 @@ import (
 	"strings"
 
 	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/OWNER/verdi/internal/disclosure"
 	"github.com/OWNER/verdi/internal/evidence"
 	"github.com/OWNER/verdi/internal/gitx"
 	"github.com/OWNER/verdi/internal/lint"
@@ -116,16 +117,21 @@ func resolveDefaultBranch(ctx context.Context, root string) string {
 
 // gateCondition is one gate condition's outcome. Disclosed marks a
 // three-valued honesty case (constitution 2/10): the condition's input is
-// unavailable, so it can neither pass nor fail — it is reported as a printed
-// "disclosed-unproven" notice (mirroring VL-017's disclosure mechanism) that
-// is never a silent pass and never flips the gate verdict on its own. Only
-// the closure gate raises it today (a nil/unreachable forge for the
-// pending-supersession input, closuregate.go).
+// unavailable, so it can neither pass nor fail — it is reported through the
+// shared internal/disclosure seam (spec/disclosure-seam-v2, ac-1) that is
+// never a silent pass and never flips the gate verdict on its own. Only the
+// closure gate and the spec-MR review-thread condition raise it today (a
+// nil/unreachable forge, closuregate.go / gate_threads.go).
 type gateCondition struct {
 	Name      string
 	OK        bool
 	Reason    string
 	Disclosed bool
+	// Source names this condition's disclosure producer id (e.g.
+	// "gate:pending-supersession") — required when Disclosed is true; the
+	// internal/disclosure.Disclosure this condition renders through
+	// (reportGateConditions). Unused otherwise.
+	Source string
 }
 
 // runGate is the testable core: given an already-resolved root, the
@@ -176,13 +182,12 @@ func reportGateConditions(stdout io.Writer, conds []gateCondition) int {
 	for _, c := range conds {
 		switch {
 		case c.Disclosed:
-			// Disclosed-unproven (constitution 2/10): a printed notice that
-			// neither passes nor fails the gate on its own (see gateCondition).
-			// Tag renamed to match lint's Finding.String() and
-			// review_unavailable's shared leading vocabulary token
-			// (disclosure-seam story, R5-2 rename-in-place attempt).
-			fmt.Fprintf(stdout, "[DISCLOSED-UNPROVEN] %s\n", c.Name)
-			fmt.Fprintf(stdout, "       %s\n", c.Reason)
+			// Disclosed-unproven (constitution 2/10): rendered through the
+			// shared internal/disclosure seam (spec/disclosure-seam-v2, ac-1)
+			// — the same Render function lint's Finding.String() and
+			// review_unavailable use, so equivalent states produce identical
+			// text (ac-2) rather than an independently-formatted bracket tag.
+			fmt.Fprintln(stdout, disclosure.Render(disclosure.New(c.Source, "", c.Reason)))
 		case c.OK:
 			fmt.Fprintf(stdout, "[PASS] %s\n", c.Name)
 		default:

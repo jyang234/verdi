@@ -117,7 +117,8 @@ func TestSpecMRGate_DanglingExemptsFails(t *testing.T) {
 // TestSpecMRGate_ResolvedPasses proves the same path passes (exit 0) once
 // every declared edge is resolved (its finding dispositioned) — with a
 // nil forge, the review-thread condition (gate_threads.go) discloses
-// unproven (a printed [NOTICE], never a silent pass — constitution 2/10)
+// unproven (rendered through the shared internal/disclosure seam,
+// spec/disclosure-seam-v2 ac-1 — never a silent pass, constitution 2/10)
 // rather than either failing the gate or being silently skipped.
 func TestSpecMRGate_ResolvedPasses(t *testing.T) {
 	repo := buildDesignGateRepo(t)
@@ -132,8 +133,8 @@ func TestSpecMRGate_ResolvedPasses(t *testing.T) {
 	if !strings.Contains(stdout.String(), "gate: PASS") {
 		t.Fatalf("stdout = %q, want a final gate: PASS line", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "[DISCLOSED-UNPROVEN]") || !strings.Contains(stdout.String(), "review threads resolved") {
-		t.Fatalf("stdout = %q, want a [DISCLOSED-UNPROVEN] tag disclosing the review-thread condition unproven (nil forge)", stdout.String())
+	if !strings.Contains(stdout.String(), "disclosed-unproven [gate:review-threads-resolved]") {
+		t.Fatalf("stdout = %q, want the shared internal/disclosure rendering disclosing the review-thread condition unproven (nil forge)", stdout.String())
 	}
 }
 

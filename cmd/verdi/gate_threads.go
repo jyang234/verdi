@@ -16,6 +16,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/OWNER/verdi/internal/disclosure"
 	"github.com/OWNER/verdi/internal/forge"
 	"github.com/OWNER/verdi/internal/gitx"
 )
@@ -78,7 +79,8 @@ func checkReviewThreadsCondition(ctx context.Context, f forge.Forge, defaultBran
 		return gateCondition{
 			Name:      name,
 			Disclosed: true,
-			Reason:    `disclosed-unproven: no forge configured/reachable, so review-thread resolution state cannot be queried (not read as "no threads" — constitution 2/10)`,
+			Source:    "gate:review-threads-resolved",
+			Reason:    `no forge configured/reachable, so review-thread resolution state cannot be queried (not read as "no threads" — constitution 2/10)`,
 		}, nil
 	}
 
@@ -187,10 +189,12 @@ func forgeCredentialsPresent(kind string) bool {
 // reviewUnavailableReason renders the disclosed-unavailable notice for a
 // configured-but-unreachable forge (I-1(b)) — one message shared by the
 // board chrome and the mcp list_annotations disclosure field so both read
-// surfaces say the same thing. Prefixed "disclosed-unproven: "
-// (disclosure-seam story, R5-2 rename-in-place attempt) to share lint's
-// Finding.String() / gate's [DISCLOSED-UNPROVEN] tag's leading vocabulary
-// token.
+// surfaces say the same thing. Rendered through the shared
+// internal/disclosure seam (spec/disclosure-seam-v2, ac-1) — the same
+// Render function lint's Finding.String() and gate's disclosed conditions
+// use, so equivalent disclosed-unproven states read in one vocabulary
+// wherever they appear (spec/disclosure-legibility#ac-1).
 func reviewUnavailableReason(kind string) string {
-	return fmt.Sprintf("disclosed-unproven: forge %q is configured (verdi.yaml) but no credentials are available to reach it; review state cannot be shown", kind)
+	text := fmt.Sprintf("forge %q is configured (verdi.yaml) but no credentials are available to reach it; review state cannot be shown", kind)
+	return disclosure.Render(disclosure.New("mcp:review-feed", "", text))
 }
