@@ -18,6 +18,22 @@ export async function drawYarn(
   await expect(handle).toBeVisible();
   await expect(target).toBeVisible();
 
+  // Raw mouse events never auto-scroll, and scrolling each endpoint
+  // into view separately can push the other back out (a proto-sticky
+  // parked at the bottom of a tall stubs band vs. an AC card at the
+  // wall's top). Center the PAIR's midpoint instead: both endpoints are
+  // in the viewport at once whenever they fit one screen — the
+  // co-visibility contract the desktop viewport guarantees.
+  await handle.scrollIntoViewIfNeeded();
+  const hb = await handle.boundingBox();
+  const tb = await target.boundingBox();
+  expect(hb, `yarn handle for ${fromObjectId} has no layout box`).not.toBeNull();
+  expect(tb, "yarn target has no layout box").not.toBeNull();
+  const vh = page.viewportSize()!.height;
+  const midY =
+    (Math.min(hb!.y, tb!.y) + Math.max(hb!.y + hb!.height, tb!.y + tb!.height)) / 2;
+  await page.evaluate((dy) => window.scrollBy(0, dy), midY - vh / 2);
+
   const from = await handle.boundingBox();
   const to = await target.boundingBox();
   expect(from, `yarn handle for ${fromObjectId} has no layout box`).not.toBeNull();
@@ -82,13 +98,19 @@ export type StickyType =
   | "comment"
   | "question"
   | "decision-needed"
-  | "agent-task";
+  | "agent-task"
+  // Proto-stickies (spec/scoping-canvas dc-5): offered by the same
+  // inline type control, on feature-class walls only.
+  | "story"
+  | "spike";
 
 const stickyTypeLabels: Record<StickyType, string> = {
   comment: "Comment",
   question: "Question",
   "decision-needed": "Decision needed",
   "agent-task": "Agent task",
+  story: "Story",
+  spike: "Spike",
 };
 
 // Open the supply toolbox (board-polish, owner directive): the "Pin an

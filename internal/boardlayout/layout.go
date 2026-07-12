@@ -41,6 +41,14 @@ const (
 	ZoneConstraint   ZoneKind = "constraint"
 	ZoneDecision     ZoneKind = "decision"
 	ZoneOpenQuestion ZoneKind = "open-question"
+	// ZoneStub holds a feature wall's declared-stub cards — the scoping
+	// canvas's kind-locked band between open questions and references
+	// (spec/scoping-canvas dc-6). Stub positions are always computed,
+	// never stored, exactly like reference cards: layout.json keys must
+	// resolve to declared object ids (VL-018), and a stub is not an
+	// object; stored stub positions are deferred until dragging stubs
+	// proves needed (dc-6, the smallest reversible option).
+	ZoneStub ZoneKind = "stub"
 	// ZoneReference holds reference cards — external edge targets
 	// (05 §Workbench: an edge target outside the spec still renders).
 	// Their positions are always computed, never stored: layout.json keys
@@ -54,8 +62,11 @@ const (
 	ZoneScratch ZoneKind = "scratch"
 )
 
-// zoneOrder is the fixed left-to-right column order.
-var zoneOrder = []ZoneKind{ZoneAC, ZoneConstraint, ZoneDecision, ZoneOpenQuestion, ZoneReference}
+// zoneOrder is the fixed left-to-right column order. The stubs band
+// sits between open questions and references (spec/scoping-canvas dc-6:
+// spike stubs beside the questions they resolve; references stay
+// outermost, non-binding house style).
+var zoneOrder = []ZoneKind{ZoneAC, ZoneConstraint, ZoneDecision, ZoneOpenQuestion, ZoneStub, ZoneReference}
 
 var zoneIndex = func() map[ZoneKind]int {
 	m := make(map[ZoneKind]int, len(zoneOrder))
@@ -91,6 +102,11 @@ const (
 	// RefCardHeight is the squat reference-card footprint
 	// (style.css .refcard: 12.5rem × 4.5rem).
 	RefCardHeight = 72
+	// StubCardHeight is the stub card's footprint (style.css .stubcard:
+	// 12.5rem × 7.5rem) — squatter than an object card (a stub is a
+	// typeset claim about a future story, not this spec's own object),
+	// taller than a reference (it carries its attribution chips).
+	StubCardHeight = 120
 
 	// ZoneOriginY is the first row's y origin — exported alongside the
 	// column bands so the sticky landing policy can start an empty lane

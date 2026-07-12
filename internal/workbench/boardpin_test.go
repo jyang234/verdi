@@ -67,9 +67,12 @@ func TestBoardSpec_PinLifecycle(t *testing.T) {
 	}
 	// Deterministic landing: the bottom of the references lane — below
 	// the edge-derived adr/0001 card at the lane's first slot (y 40,
-	// RefCardHeight 72, gap 24).
-	if pin.Board.X != 952 || pin.Board.Y != 136 {
-		t.Errorf("pin landed at (%v, %v), want the references lane bottom (952, 136)", pin.Board.X, pin.Board.Y)
+	// RefCardHeight 72, gap 24). AMENDED with the scoping canvas: the
+	// stubs band (spec/scoping-canvas dc-6) sits before the references,
+	// so the lane moved one column right (952 -> 1180) — the landing
+	// POLICY is unchanged.
+	if pin.Board.X != 1180 || pin.Board.Y != 136 {
+		t.Errorf("pin landed at (%v, %v), want the references lane bottom (1180, 136)", pin.Board.X, pin.Board.Y)
 	}
 
 	// The pinned ref wears the same reference-card paper, deduped: one
@@ -81,7 +84,7 @@ func TestBoardSpec_PinLifecycle(t *testing.T) {
 	if !strings.Contains(body, `data-pin-id="`+pin.ID+`"`) {
 		t.Error("pinned card does not carry its pin id")
 	}
-	if !strings.Contains(body, `style="left:952px;top:136px"`) {
+	if !strings.Contains(body, `style="left:1180px;top:136px"`) {
 		t.Error("pinned card does not render at the pin record's stored position")
 	}
 

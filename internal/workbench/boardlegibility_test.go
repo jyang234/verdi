@@ -91,9 +91,12 @@ func TestBoardLegibility_ZoneLabels(t *testing.T) {
 		`data-testid="zone-label-constraint"`,
 		`data-testid="zone-label-decision"`,
 		`data-testid="zone-label-open-question"`,
+		// The stubs band (spec/scoping-canvas dc-6) — the fixture is a
+		// feature-class wall, so the band is labeled even when empty.
+		`data-testid="zone-label-stub"`,
 		`data-testid="zone-label-reference"`,
 		">acceptance criteria<", ">constraints<", ">decisions<",
-		">open questions<", ">references<",
+		">open questions<", ">stubs<", ">references<",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("authoring board missing zone label %q", want)
@@ -449,14 +452,17 @@ func TestBoardLegibility_StickyLanding(t *testing.T) {
 	}
 
 	// Comments file into the scratch lane; a second one appends below
-	// the first (sticky footprint estimate + gap).
+	// the first (sticky footprint estimate + gap). AMENDED with the
+	// scoping canvas: the stubs band (spec/scoping-canvas dc-6) now sits
+	// between open questions and references, so the scratch lane moved
+	// one column right (1180 -> 1408) — the landing POLICY is unchanged.
 	post(`{"type":"comment","text":"c-one"}`)
-	if x, y := stickyAt("c-one"); x != 1180 || y != 40 {
-		t.Errorf("comment landed at (%v,%v), want empty scratch lane slot (1180,40)", x, y)
+	if x, y := stickyAt("c-one"); x != 1408 || y != 40 {
+		t.Errorf("comment landed at (%v,%v), want empty scratch lane slot (1408,40)", x, y)
 	}
 	post(`{"type":"agent-task","text":"c-two"}`)
-	if x, y := stickyAt("c-two"); x != 1180 || y != 214 {
-		t.Errorf("agent-task landed at (%v,%v), want appended below c-one (1180,214)", x, y)
+	if x, y := stickyAt("c-two"); x != 1408 || y != 214 {
+		t.Errorf("agent-task landed at (%v,%v), want appended below c-one (1408,214)", x, y)
 	}
 
 	// The scratch lane's zone label materializes with its occupant.

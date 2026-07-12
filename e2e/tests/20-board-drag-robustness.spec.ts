@@ -95,10 +95,57 @@ test.describe("board drag robustness (real-input regression)", () => {
     const sx = box!.x + box!.width / 2;
     const sy = box!.y + box!.height / 2;
 
-    // Drag a little...
+    // Drag a little, to a mid-spot chosen KNOWINGLY free of every other
+    // card's footprint. AMENDED with the scoping canvas: DESIGN_SPEC
+    // gained oq-1, so the cards the scratch suite graduates each file
+    // one row lower and the old fixed (+40,+40) offset now clips a
+    // graduated card's footprint; the drop resolver would legitimately
+    // nudge such a drop, which is not what this test proves. The proof
+    // is unchanged — an unseen release must land the drop at the FREE
+    // spot where the drag actually was — so the offset is computed
+    // against the wall's current obstacle map instead of hardcoded.
+    const offset = await page
+      .locator("#board-canvas")
+      .evaluate((canvas, draggedId) => {
+        const pad = 14; // dropClearance (12) + margin
+        const rects = Array.from(
+          canvas.querySelectorAll<HTMLElement>(".objcard, .refcard, .stubcard"),
+        )
+          .filter((el) => el.getAttribute("data-id") !== draggedId)
+          .map((el) => ({
+            x: el.offsetLeft,
+            y: el.offsetTop,
+            w: el.offsetWidth,
+            h: el.offsetHeight,
+          }));
+        const dragged = canvas.querySelector<HTMLElement>(
+          `.objcard[data-id="${draggedId}"]`,
+        )!;
+        const start = { x: dragged.offsetLeft, y: dragged.offsetTop };
+        const w = dragged.offsetWidth;
+        const h = dragged.offsetHeight;
+        for (const [dx, dy] of [
+          [-60, 20], [40, 40], [-60, 180], [60, 180], [-60, 340], [60, 340],
+          [-160, 180], [160, 340], [-60, 500], [60, 500],
+        ]) {
+          const x = start.x + dx;
+          const y = start.y + dy;
+          if (x < 0 || y < 0) continue;
+          const hit = rects.some(
+            (r) =>
+              x < r.x + r.w + pad &&
+              r.x < x + w + pad &&
+              y < r.y + r.h + pad &&
+              r.y < y + h + pad,
+          );
+          if (!hit) return { dx, dy };
+        }
+        return null;
+      }, DECISION_PLAIN);
+    expect(offset, "no free mid-spot near the card").not.toBeNull();
     await page.mouse.move(sx, sy);
     await page.mouse.down();
-    await page.mouse.move(sx + 40, sy + 40, { steps: 4 });
+    await page.mouse.move(sx + offset!.dx, sy + offset!.dy, { steps: 4 });
     const mid = await position(card);
 
     // ...then the release happens where the page cannot see it (outside
