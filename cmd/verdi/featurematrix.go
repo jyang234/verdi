@@ -129,6 +129,29 @@ type implementingStoryEdges struct {
 // render it with a terminal marker instead of it vanishing — the fold and
 // reconciliation inputs above are computed exactly as D-16 shipped them,
 // unaffected by this third value's existence.
+//
+// Defect fix (disclosed, found while building feature closure, spec/close-
+// verb's deferred half): this function used to resolve every implementing
+// story via storyresolve.LoadActiveSpec, which reads specs/active/ only.
+// The index (internal/index/walk.go) walks BOTH specs/active/ and
+// specs/archive/, so a story's `implements` backlink is discovered
+// regardless of which zone it lives in — but a story that has already
+// CLOSED has moved to specs/archive/ (02 §Kind registry's
+// "...→closed(archive)" transition), and LoadActiveSpec then errors
+// "no such file or directory", surfaced as an operational failure of the
+// whole matrix/close call. This is exactly the scenario feature closure
+// most needs to handle (03 §The feature fold: "every implementing story is
+// closed or eligible") and it was never exercised before: proven with a
+// witness against this very repo — `verdi matrix spec/true-closure` (whose
+// four implementing stories are already archived) fails today with
+// "loading implementing story spec/close-verb: ... no such file or
+// directory". Fixed by resolving through storyresolve.LoadSpec, which
+// already checks active then archive (used elsewhere for exactly this
+// "a supersedes target may legitimately live in archive" reason) —
+// unchanged behavior for every existing test (none of which has a closed
+// implementing story, by their own admission — see
+// TestCmdMatrix_FeatureRef_Golden's doc comment), since LoadSpec checks
+// active first.
 func discoverImplementingStories(ctx context.Context, root, commit string, ix *index.Index, featureName string, spec *artifact.SpecFrontmatter) ([]implementingStoryEdges, map[string][]evidence.ImplementingStory, map[string][]string, error) {
 	// acsByStory accumulates every feature AC id each story ref
 	// implements, deduped and in first-seen order per story.
@@ -162,9 +185,16 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("matrix: implementing story ref %q: %w", storyRef, err)
 		}
-		storySpec, err := storyresolve.LoadActiveSpec(root, storyName.Name)
+		// storyresolve.LoadSpec (not LoadActiveSpec): an implementing story
+		// discovered via the index's backlink inversion may already have
+		// closed and moved to specs/archive/ — see this function's doc
+		// comment's "Defect fix" note.
+		storySpec, err := storyresolve.LoadSpec(root, storyName.Name)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("matrix: loading implementing story %s: %w", storyRef, err)
+		}
+		if storySpec == nil {
+			return nil, nil, nil, fmt.Errorf("matrix: implementing story %s not found in specs/active/ or specs/archive/", storyRef)
 		}
 
 		acIDs := acsByStory[storyRef]

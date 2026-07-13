@@ -18,6 +18,31 @@ func TestDecodeRollup_Happy(t *testing.T) {
 	}
 }
 
+// TestDecodeRollup_Happy_FeatureNoStory proves a feature rollup with no
+// story: tracker ref at all (empty string) is a valid rollup.json — R4-I-2:
+// a feature spec's story: field is OPTIONAL (spec/true-closure is a real
+// example carrying none), so the closure ritual must still be able to
+// write and validate its rollup.json quartet member even though there is
+// nowhere honest to publish it (cmd/verdi/closefeature.go skips the
+// tracker publish step in exactly this case, never fabricating a ref).
+func TestDecodeRollup_Happy_FeatureNoStory(t *testing.T) {
+	y := `{"schema":"verdi.rollup/v1","story":"","ref":"spec/close-feature-fixture","commit":"7f3c2a1",
+		"criteria":[
+			{"id":"ac-1","text":"outcome check","status":"evidenced","summary":"attestation:present"}
+		],
+		"eligible":true,"digest":"sha256:` + hex64 + `"}`
+	r, err := DecodeRollup([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeRollup: %v", err)
+	}
+	if r.Story != "" {
+		t.Fatalf("Story = %q, want empty", r.Story)
+	}
+	if !r.Eligible {
+		t.Fatal("Eligible = false")
+	}
+}
+
 func TestDecodeRollup_Negative(t *testing.T) {
 	base := `{"schema":"verdi.rollup/v1","story":"jira:LOAN-1482","ref":"spec/stale-decline","commit":"7f3c2a1","criteria":[{"id":"ac-1","text":"t","status":"pending","summary":"s"}],"eligible":true,"digest":"sha256:` + hex64 + `"}`
 	cases := map[string]string{

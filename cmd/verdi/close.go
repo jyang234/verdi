@@ -1,16 +1,20 @@
-// verdi close <jira:STORY-KEY | spec/name> (05 §CLI; 03 §Closure ritual;
-// spec/close-verb ac-1, ac-2, ac-3, dc-3): drives a merged verdi STORY to a
-// true, archived closure on authoritative (source: ci) evidence alone, then
-// publishes its rollup to the configured tracker. Flips `close` from I-23's
-// phase-0 stub ("not implemented (out of v0 scope)", exit 2) to a real
-// handler (dispatch.go).
+// verdi close <jira:STORY-KEY | spec/name | feature spec/name> (05 §CLI;
+// 03 §Closure ritual; spec/close-verb ac-1, ac-2, ac-3, dc-3): drives a
+// merged verdi STORY to a true, archived closure on authoritative
+// (source: ci) evidence alone, then publishes its rollup to the configured
+// tracker. Flips `close` from I-23's phase-0 stub ("not implemented (out
+// of v0 scope)", exit 2) to a real handler (dispatch.go).
 //
 // Feature closure (03's other half: every feature AC evidenced including
-// the outcome floor, plus stub reconciliation) is OUT OF THIS STORY'S
-// SCOPE — a clear, honest "not yet" for a feature-class target, never a
-// silent no-op or a lie about the verb surface (I-23's own precedent).
+// the outcome floor, plus stub reconciliation passed, plus every
+// implementing story closed) was OUT OF spec/close-verb's SCOPE — a clear,
+// honest "not yet" for a feature-class target rather than a silent no-op
+// or a lie about the verb surface (I-23's own precedent) — and is now
+// completed in closefeature.go/closuregatefeature.go (runClose below
+// delegates to runCloseFeature the moment the resolved spec is
+// class: feature).
 //
-// The ritual, in order:
+// The story ritual, in order:
 //  1. Resolve the story (internal/storyresolve.Resolve — a scheme-prefixed
 //     story ref or a spec/<name> ref, I-30's strict two-form contract).
 //  2. Evaluate the closure gate (runClosureGate, closuregate.go, CONSUMED
@@ -156,8 +160,7 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		return 2
 	}
 	if spec.Class == artifact.ClassFeature {
-		fmt.Fprintf(stderr, "close: %s is a feature spec; feature closure is not yet implemented (spec/close-verb scopes story closure only) — pass a story spec or its story ref instead\n", spec.ID)
-		return 2
+		return runCloseFeature(ctx, root, spec, manifest, deps, stdout, stderr)
 	}
 
 	head, err := gitx.RevParse(ctx, root, "HEAD")

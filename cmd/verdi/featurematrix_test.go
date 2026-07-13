@@ -9,6 +9,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // v2FixtureRoot is testdata/corpus's own directory, relative to this
@@ -159,6 +160,72 @@ func TestCmdMatrix_FeatureRef_Negative_DanglingBinding(t *testing.T) {
 
 func bytesContains(b []byte, s string) bool {
 	return bytes.Contains(b, []byte(s))
+}
+
+// TestDiscoverImplementingStories_ClosedStoryInArchive is the regression
+// proof for discoverImplementingStories' "Defect fix" doc comment (found
+// while building feature closure, spec/close-verb's deferred half): an
+// implementing story that has already closed and moved to
+// specs/archive/ must still be discoverable, not an operational error.
+// Reproduces, in miniature, a real failure this repo's own store hit
+// before the fix — `verdi matrix spec/true-closure` errored "loading
+// implementing story spec/close-verb: ... no such file or directory"
+// because all four of its implementing stories are already archived;
+// after the storyresolve.LoadActiveSpec -> LoadSpec fix, the same command
+// against the real repo succeeds and lists all four. This test pins that
+// behavior with a minimal, hermetic fixture so it cannot silently regress.
+func TestDiscoverImplementingStories_ClosedStoryInArchive(t *testing.T) {
+	const featureSpecMD = `---
+id: spec/matrix-closed-fixture
+kind: spec
+class: feature
+title: "Matrix closed-story fixture"
+owners: [platform-team]
+status: accepted-pending-build
+problem: { text: "x", anchor: problem }
+outcome: { text: "y", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "the fixture outcome holds", evidence: [attestation] }
+frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
+---
+# body
+`
+	const closedStorySpecMD = `---
+id: spec/matrix-closed-story
+kind: spec
+class: story
+title: "Matrix closed story"
+owners: [platform-team]
+status: closed
+story: jira:MATRIX-CLOSED-1
+problem: { text: "x", anchor: problem }
+outcome: { text: "y", anchor: outcome }
+links:
+  - { type: implements, ref: "spec/matrix-closed-fixture#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "the story's own obligation holds", evidence: [attestation] }
+frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
+---
+# body
+`
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/matrix-closed-fixture/spec.md": featureSpecMD,
+			".verdi/specs/archive/matrix-closed-story/spec.md":  closedStorySpecMD,
+		},
+		Message: "feature + already-closed implementing story in archive",
+	}})
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runMatrixForTest(t, []string{"spec/matrix-closed-fixture"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdMatrix exit = %d, want 0 (a closed implementing story must be discoverable, not an operational error); stderr=%q", got, stderr.String())
+	}
+	if !bytesContains(stdout.Bytes(), "spec/matrix-closed-story") {
+		t.Fatalf("stdout = %q, want it to list the closed implementing story spec/matrix-closed-story", stdout.String())
+	}
 }
 
 // TestCmdMatrix_FeatureRef_SupersededStoryRendersTerminalMarker proves D-16's
