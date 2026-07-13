@@ -1,5 +1,5 @@
 ---
-id: attestation/remote-and-ci--ac-3
+id: attestation/jira-verdi-1--ac-3
 kind: attestation
 title: "AC-3 attested: verdi sync fetches the authoritative bundle by (ref, commit); the fold consumes only source:ci"
 owners: [platform-team]

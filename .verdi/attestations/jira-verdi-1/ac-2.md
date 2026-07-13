@@ -1,5 +1,5 @@
 ---
-id: attestation/remote-and-ci--ac-2
+id: attestation/jira-verdi-1--ac-2
 kind: attestation
 title: "AC-2 attested: verdi-evidence CI assembles + uploads the source:ci derived tree; make verify is the gate"
 owners: [platform-team]
