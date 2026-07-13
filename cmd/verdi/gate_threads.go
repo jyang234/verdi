@@ -18,6 +18,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/forge"
+	forgegithub "github.com/jyang234/verdi/internal/forge/github"
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
@@ -148,10 +149,10 @@ func forgeBestEffort(ctx context.Context, root string) (f forge.Forge, configure
 	}
 	// A forge IS configured from here on (kind names it). Whether it is
 	// REACHABLE depends on credentials being present in the environment.
-	if !forgeCredentialsPresent(kind) {
+	if !forgeCredentialsPresent(kind, remoteURL) {
 		return nil, kind
 	}
-	built, err := buildForge(kind)
+	built, err := buildForge(kind, remoteURL)
 	if err != nil {
 		return nil, kind
 	}
@@ -167,20 +168,34 @@ func buildForgeBestEffort(ctx context.Context, root string) forge.Forge {
 	return f
 }
 
-// forgeCredentialsPresent reports whether the environment carries the
-// connection credentials the buildForge (sync.go) adapters actually read —
-// both the project/repo identifier AND the auth token. Present, the forge
-// can authenticate (in the forge's own CI or a local shell that exported
-// them); absent, no live adapter is built. Requiring the token as well as
-// the identifier means we never build a forge doomed to 401, and it keeps
-// the check hermetic under `go test`: a fixture repo exports neither, so
-// this is false regardless of which forge kind its verdi.yaml names.
-func forgeCredentialsPresent(kind string) bool {
+// forgeCredentialsPresent reports whether a live adapter can be built for
+// kind — the auth TOKEN the buildForge (sync.go) adapters read must be
+// present, and the repo IDENTIFIER must be resolvable. Present, the forge
+// can authenticate (in the forge's own CI or a local shell that exported the
+// token); absent, no live adapter is built, so we never build a forge doomed
+// to a 401/404. It keeps the check hermetic under `go test`: a fixture repo
+// exports no token, so this is false regardless of which forge kind its
+// verdi.yaml names. remoteURL is the origin remote (best-effort; "" when
+// none) — for github the identifier falls back to it (D6-14), so it is
+// consulted only after the token is confirmed present.
+func forgeCredentialsPresent(kind, remoteURL string) bool {
 	switch kind {
 	case "gitlab":
 		return os.Getenv("CI_PROJECT_ID") != "" && os.Getenv("CI_JOB_TOKEN") != ""
 	case "github":
-		return os.Getenv("GITHUB_REPOSITORY") != "" && os.Getenv("GITHUB_TOKEN") != ""
+		// GITHUB_TOKEN is the auth verdi cannot synthesize; without it there
+		// is nothing to build (and a bare fixture repo exports none, so this
+		// stays false under `go test`). The identifier may come from GitHub
+		// Actions' env OR (D6-14) the origin URL, so a local shell that
+		// exported only GITHUB_TOKEN still yields a live forge.
+		if os.Getenv("GITHUB_TOKEN") == "" {
+			return false
+		}
+		if os.Getenv("GITHUB_REPOSITORY") != "" {
+			return true
+		}
+		_, _, ok := forgegithub.OwnerRepoFromURL(remoteURL)
+		return ok
 	default:
 		return false
 	}
