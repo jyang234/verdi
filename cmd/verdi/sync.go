@@ -140,7 +140,7 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "sync:", err)
 		return 2
 	}
-	fg, err := buildForge(forgeKind)
+	fg, err := buildForge(forgeKind, remoteURL)
 	if err != nil {
 		fmt.Fprintln(stderr, "sync:", err)
 		return 2
@@ -479,10 +479,14 @@ func resolveRefCommit(ctx context.Context, root string) (ref, commit string, err
 }
 
 // buildForge constructs the real adapter for kind ("gitlab" or "github"),
-// reading connection details from CI-provided environment variables
-// (never verdi.yaml — 01 §Store manifest: "secrets come from env/CI
-// vars").
-func buildForge(kind string) (forge.Forge, error) {
+// reading connection secrets from CI-provided environment variables (never
+// verdi.yaml — 01 §Store manifest: "secrets come from env/CI vars"). The
+// github REPO IDENTIFIER (owner/repo), unlike the token, is not a secret and
+// falls back to the origin remote URL when GitHub Actions' env vars are
+// absent (D6-14; githubOwnerRepo) — so a local `verdi sync`/`close`/`gate`
+// no longer needs GITHUB_REPOSITORY[_OWNER] exported by hand. remoteURL is
+// the `origin` remote (best-effort; "" when none) both callers already read.
+func buildForge(kind, remoteURL string) (forge.Forge, error) {
 	switch kind {
 	case "gitlab":
 		return forgegitlab.New(forgegitlab.Config{
@@ -491,9 +495,10 @@ func buildForge(kind string) (forge.Forge, error) {
 			Token:     os.Getenv("CI_JOB_TOKEN"),
 		}), nil
 	case "github":
+		owner, repo := githubOwnerRepo(remoteURL)
 		return forgegithub.New(forgegithub.Config{
-			Owner: os.Getenv("GITHUB_REPOSITORY_OWNER"),
-			Repo:  githubRepoName(),
+			Owner: owner,
+			Repo:  repo,
 			Token: os.Getenv("GITHUB_TOKEN"),
 		}), nil
 	default:
@@ -501,8 +506,32 @@ func buildForge(kind string) (forge.Forge, error) {
 	}
 }
 
+// githubOwnerRepo resolves the GitHub (owner, repo) the adapter needs,
+// preferring GitHub Actions' own GITHUB_REPOSITORY_OWNER / GITHUB_REPOSITORY
+// env vars (authoritative inside CI) and falling back per-field to parsing
+// the origin remote URL (D6-14) for a local run where those vars are unset.
+// The env wins where it is set, so a partial CI environment is never
+// overridden.
+func githubOwnerRepo(remoteURL string) (owner, repo string) {
+	owner = os.Getenv("GITHUB_REPOSITORY_OWNER")
+	repo = githubRepoName()
+	if owner != "" && repo != "" {
+		return owner, repo
+	}
+	if o, r, ok := forgegithub.OwnerRepoFromURL(remoteURL); ok {
+		if owner == "" {
+			owner = o
+		}
+		if repo == "" {
+			repo = r
+		}
+	}
+	return owner, repo
+}
+
 // githubRepoName extracts the repo name from GITHUB_REPOSITORY
-// ("owner/repo"), GitHub Actions' own combined env var.
+// ("owner/repo"), GitHub Actions' own combined env var. "" when unset — the
+// local case githubOwnerRepo then resolves from the origin URL.
 func githubRepoName() string {
 	full := os.Getenv("GITHUB_REPOSITORY")
 	for i := len(full) - 1; i >= 0; i-- {

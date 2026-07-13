@@ -182,13 +182,13 @@ func TestForgeCredentialsPresent(t *testing.T) {
 	t.Setenv("CI_JOB_TOKEN", "")
 	t.Setenv("GITHUB_REPOSITORY", "")
 	t.Setenv("GITHUB_TOKEN", "")
-	if forgeCredentialsPresent("gitlab") {
-		t.Error(`forgeCredentialsPresent("gitlab") = true with no gitlab credentials, want false`)
+	if forgeCredentialsPresent("gitlab", "") {
+		t.Error(`forgeCredentialsPresent("gitlab", "") = true with no gitlab credentials, want false`)
 	}
-	if forgeCredentialsPresent("github") {
+	if forgeCredentialsPresent("github", "") {
 		t.Error(`forgeCredentialsPresent("github") = true with no github credentials, want false`)
 	}
-	if forgeCredentialsPresent("unknown") {
+	if forgeCredentialsPresent("unknown", "") {
 		t.Error(`forgeCredentialsPresent("unknown") = true, want false`)
 	}
 
@@ -196,11 +196,32 @@ func TestForgeCredentialsPresent(t *testing.T) {
 	// so we never build a forge doomed to 401 (and a fixture that leaks an
 	// identifier still yields nil).
 	t.Setenv("CI_PROJECT_ID", "42")
-	if forgeCredentialsPresent("gitlab") {
-		t.Error(`forgeCredentialsPresent("gitlab") = true with CI_PROJECT_ID but no CI_JOB_TOKEN, want false`)
+	if forgeCredentialsPresent("gitlab", "") {
+		t.Error(`forgeCredentialsPresent("gitlab", "") = true with CI_PROJECT_ID but no CI_JOB_TOKEN, want false`)
 	}
 	t.Setenv("CI_JOB_TOKEN", "secret")
-	if !forgeCredentialsPresent("gitlab") {
-		t.Error(`forgeCredentialsPresent("gitlab") = false with both CI_PROJECT_ID and CI_JOB_TOKEN set, want true`)
+	if !forgeCredentialsPresent("gitlab", "") {
+		t.Error(`forgeCredentialsPresent("gitlab", "") = false with both CI_PROJECT_ID and CI_JOB_TOKEN set, want true`)
+	}
+
+	// github (D6-14): the token is the gate; the repo identifier may come
+	// from GITHUB_REPOSITORY OR, for a local run, the origin remote URL.
+	t.Setenv("GITHUB_TOKEN", "")
+	if forgeCredentialsPresent("github", "https://github.com/jyang234/verdi.git") {
+		t.Error("github with an origin URL but no GITHUB_TOKEN must be false (the token is required)")
+	}
+	t.Setenv("GITHUB_TOKEN", "ghp_x")
+	if forgeCredentialsPresent("github", "") {
+		t.Error("github with a token but no identifier at all (no env, no URL) must be false — a forge doomed to 404")
+	}
+	if forgeCredentialsPresent("github", "https://gitlab.com/jyang234/verdi.git") {
+		t.Error("github with a token but a NON-github origin URL must be false (identifier unresolvable)")
+	}
+	if !forgeCredentialsPresent("github", "git@github.com:jyang234/verdi.git") {
+		t.Error("github with a token and a github origin URL must be true (D6-14 origin fallback)")
+	}
+	t.Setenv("GITHUB_REPOSITORY", "jyang234/verdi")
+	if !forgeCredentialsPresent("github", "") {
+		t.Error("github with a token and GITHUB_REPOSITORY must be true even with no origin URL")
 	}
 }
