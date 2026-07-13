@@ -4,7 +4,7 @@ kind: spec
 title: "Runtime Evidence"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-3
 problem: { text: "runtime is the one evidence kind with only a decoder and a fixture (I-? / OQ-2): `verdi.evidence/v1` parses `kind: runtime` and the fold renders it `pending`, but nothing emits or queries one, so a story declaring `evidence: [runtime]` can never fold to evidenced and `verdi close` cannot honestly claim to handle it. true-closure#ac-3 requires every declared kind — runtime included — to have a producing mechanism queryable by (story, AC) at close time (03 §Runtime evidence residence).", anchor: "#problem" }
 outcome: { text: "a scheduled-probe runtime mechanism emits `kind: runtime` evidence records keyed by (story, AC), `source: ci`, carried in the derived tree and queryable at close time — so a story that declares runtime evidence folds to evidenced from a real record, exactly as static/behavioral do.", anchor: "#outcome" }
@@ -21,6 +21,7 @@ decisions:
 constraints:
   - { id: co-1, text: "no network in any test: the probe emit, the (story, AC) query, and the fold-to-evidenced are exercised hermetically over a fixture runtime record and a fixture story declaring runtime, via the httptest forge double", anchor: "#co-1" }
   - { id: co-2, text: "queryable-by-(story, AC)-at-close is the ratified hard constraint carried verbatim from 03 §Runtime evidence residence and true-closure oq-1; the mechanism satisfies it or the story is not done", anchor: "#co-2" }
+frozen: { at: 2026-07-13, commit: f9b1597affa00a6570a1f1e28763372d462fe5b6, stub_matched: true }
 ---
 # Runtime Evidence
 
