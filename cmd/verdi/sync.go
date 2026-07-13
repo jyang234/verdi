@@ -57,26 +57,64 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 
 	orRegen := false
 	produce := false
+	produceRuntime := false
 	forceLocal := false
-	for _, a := range args {
+	var storyArg, acID, witnessArg string
+	var verdictArg artifact.EvidenceVerdict
+
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		switch a {
 		case "--or-regen":
 			orRegen = true
 		case "--produce":
 			produce = true
+		case "--produce-runtime":
+			produceRuntime = true
 		case "--force-local":
 			forceLocal = true
+		case "--story", "--ac", "--verdict", "--witness":
+			i++
+			if i >= len(args) {
+				fmt.Fprintf(stderr, "sync: %s requires a value\n", a)
+				return 2
+			}
+			switch a {
+			case "--story":
+				storyArg = args[i]
+			case "--ac":
+				acID = args[i]
+			case "--verdict":
+				verdictArg = artifact.EvidenceVerdict(args[i])
+			case "--witness":
+				witnessArg = args[i]
+			}
 		default:
 			fmt.Fprintf(stderr, "sync: unknown argument %q\n", a)
 			return 2
 		}
 	}
-	if orRegen && produce {
-		fmt.Fprintln(stderr, "sync: --or-regen and --produce are mutually exclusive (--or-regen falls back to source: local; --produce always stamps source: ci for the verdi-evidence workflow, spec/remote-and-ci dc-1)")
+
+	modes := 0
+	for _, m := range []bool{orRegen, produce, produceRuntime} {
+		if m {
+			modes++
+		}
+	}
+	if modes > 1 {
+		fmt.Fprintln(stderr, "sync: --or-regen, --produce, and --produce-runtime are mutually exclusive (--or-regen falls back to source: local; --produce always stamps source: ci for the verdi-evidence workflow, spec/remote-and-ci dc-1; --produce-runtime emits one kind: runtime record, spec/runtime-evidence dc-1)")
 		return 2
 	}
-	if forceLocal && !produce {
-		fmt.Fprintln(stderr, "sync: --force-local only applies to --produce")
+	if forceLocal && modes == 0 {
+		fmt.Fprintln(stderr, "sync: --force-local only applies to --produce or --produce-runtime")
+		return 2
+	}
+	if !produceRuntime && (storyArg != "" || acID != "" || witnessArg != "" || verdictArg != "") {
+		fmt.Fprintln(stderr, "sync: --story/--ac/--verdict/--witness only apply to --produce-runtime")
+		return 2
+	}
+	if produceRuntime && verdictArg != "" && verdictArg != artifact.VerdictPass && verdictArg != artifact.VerdictFail && verdictArg != artifact.VerdictAbstain {
+		fmt.Fprintf(stderr, "sync: --verdict %q is not pass, fail, or abstain\n", verdictArg)
 		return 2
 	}
 
@@ -106,6 +144,11 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "sync:", err)
 		return 2
+	}
+
+	if produceRuntime {
+		deps := syncDeps{Forge: fg, Stdout: stdout, Stderr: stderr}
+		return runProduceRuntime(ctx, root, commit, storyArg, acID, witnessArg, verdictArg, forceLocal, deps)
 	}
 
 	if manifest.Toolchain == nil {

@@ -108,6 +108,28 @@ func TestExtractTreeFromZip_NoPrefix(t *testing.T) {
 	}
 }
 
+// TestExtractTreeFromZip_RecognizesRuntimeJSON proves runtime.json
+// (spec/runtime-evidence dc-2 — a sibling of verdicts.json carrying a real
+// service's probe output) round-trips through the extractor exactly like
+// the four pre-existing bundle files, so a CI-fetched artifact's runtime
+// records reach the derived tree `verdi sync` writes to disk.
+func TestExtractTreeFromZip_RecognizesRuntimeJSON(t *testing.T) {
+	commit := "deadbeef"
+	data := buildZip(t, map[string][]byte{
+		"derived/spec--x/" + commit + "/verdicts.json": []byte(`[]`),
+		"derived/spec--x/" + commit + "/runtime.json":  []byte(`[{"kind":"runtime"}]`),
+	})
+
+	tree, err := ExtractTreeFromZip(data)
+	if err != nil {
+		t.Fatalf("ExtractTreeFromZip: %v", err)
+	}
+	key := "spec--x/" + commit + "/runtime.json"
+	if string(tree[key]) != `[{"kind":"runtime"}]` {
+		t.Errorf("tree[%q] = %q, want the seeded runtime.json content", key, tree[key])
+	}
+}
+
 func TestExtractTreeFromZip_IgnoresExtraFiles(t *testing.T) {
 	data := buildZip(t, map[string][]byte{
 		"derived/spec--x/deadbeef/verdicts.json":   []byte(`[]`),

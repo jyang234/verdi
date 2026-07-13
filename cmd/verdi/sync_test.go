@@ -401,6 +401,65 @@ func TestRunSync_Produce_Negative_ForceLocalWithoutProduce(t *testing.T) {
 	}
 }
 
+// TestCmdSync_ProduceRuntime_Negative_MutuallyExclusive proves
+// --produce-runtime is mutually exclusive with both --or-regen and
+// --produce — three distinct provenance intents, never combinable
+// (spec/runtime-evidence dc-1).
+func TestCmdSync_ProduceRuntime_Negative_MutuallyExclusive(t *testing.T) {
+	cases := [][]string{
+		{"--produce-runtime", "--produce"},
+		{"--produce-runtime", "--or-regen"},
+	}
+	for _, args := range cases {
+		var stdout, stderr bytes.Buffer
+		code := cmdSync(args, &stdout, &stderr)
+		if code != 2 {
+			t.Fatalf("cmdSync(%v) exit = %d, want 2", args, code)
+		}
+	}
+}
+
+// TestCmdSync_ProduceRuntime_Negative_ValueFlagsRequireMode proves
+// --story/--ac/--verdict/--witness are rejected without --produce-runtime —
+// they have no meaning for --produce/--or-regen.
+func TestCmdSync_ProduceRuntime_Negative_ValueFlagsRequireMode(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := cmdSync([]string{"--produce", "--story", "spec/x"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("cmdSync(--produce --story spec/x) exit = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "--produce-runtime") {
+		t.Errorf("stderr = %q, want a mention of --produce-runtime", stderr.String())
+	}
+}
+
+// TestCmdSync_ProduceRuntime_Negative_InvalidVerdict proves an unrecognized
+// --verdict value is a usage error, never silently coerced or ignored.
+func TestCmdSync_ProduceRuntime_Negative_InvalidVerdict(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := cmdSync([]string{"--produce-runtime", "--story", "spec/x", "--ac", "ac-1", "--verdict", "maybe", "--witness", "w"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("cmdSync(--verdict maybe) exit = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "pass, fail, or abstain") {
+		t.Errorf("stderr = %q, want a message naming the valid verdicts", stderr.String())
+	}
+}
+
+// TestCmdSync_ProduceRuntime_Negative_MissingFlagValue proves a value flag
+// given with no following value is a usage error rather than an index panic
+// or a silently absorbed empty string.
+func TestCmdSync_ProduceRuntime_Negative_MissingFlagValue(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := cmdSync([]string{"--produce-runtime", "--story"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("cmdSync(--story with no value) exit = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "requires a value") {
+		t.Errorf("stderr = %q, want a 'requires a value' message", stderr.String())
+	}
+}
+
 // TestRunSync_Produce_Negative_UnknownForgeCIContextError proves a forge
 // CIContext error surfaces as an operational failure (exit 2), not a
 // silently-empty pipeline/job stamp.
