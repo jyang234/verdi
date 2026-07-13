@@ -3,7 +3,7 @@ package artifactview
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // Meta is the render-fidelity metadata a page needs beyond index.Entry's

@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // vl002 enforces "id/path agreement; global ref uniqueness. Status-in-path

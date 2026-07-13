@@ -7,6 +7,11 @@
 // "regenerates locally when no bundle exists (fresh clone, no pipeline
 // yet)"). Kept in its own file per PLAN.md's instruction so dispatch.go's
 // diff for wiring this verb in stays a one-line handler change.
+//
+// --produce (spec/remote-and-ci dc-1) is the CI-provenance producer: it
+// assembles the same four-file bundle but stamps provenance.source: ci
+// instead of local, for the verdi-evidence workflow to upload. See
+// runProduce below for the trust-boundary discipline this flag observes.
 package main
 
 import (
@@ -17,13 +22,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/forge"
-	forgegithub "github.com/OWNER/verdi/internal/forge/github"
-	forgegitlab "github.com/OWNER/verdi/internal/forge/gitlab"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/forge"
+	forgegithub "github.com/jyang234/verdi/internal/forge/github"
+	forgegitlab "github.com/jyang234/verdi/internal/forge/gitlab"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 // derivedFileNames are the four files a materialized bundle must contain
@@ -48,12 +54,28 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 	ctx := context.Background()
 
 	orRegen := false
+	produce := false
+	forceLocal := false
 	for _, a := range args {
-		if a != "--or-regen" {
+		switch a {
+		case "--or-regen":
+			orRegen = true
+		case "--produce":
+			produce = true
+		case "--force-local":
+			forceLocal = true
+		default:
 			fmt.Fprintf(stderr, "sync: unknown argument %q\n", a)
 			return 2
 		}
-		orRegen = true
+	}
+	if orRegen && produce {
+		fmt.Fprintln(stderr, "sync: --or-regen and --produce are mutually exclusive (--or-regen falls back to source: local; --produce always stamps source: ci for the verdi-evidence workflow, spec/remote-and-ci dc-1)")
+		return 2
+	}
+	if forceLocal && !produce {
+		fmt.Fprintln(stderr, "sync: --force-local only applies to --produce")
+		return 2
 	}
 
 	root, err := store.FindRoot(".")
@@ -91,16 +113,24 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 	runner := upstream.RealRunner{Module: manifest.Toolchain.Module, Commit: manifest.Toolchain.Commit, Dir: root}
 
 	deps := syncDeps{Runner: runner, Forge: fg, GoTest: realGoTestRunner{}, Stdout: stdout, Stderr: stderr}
-	return runSync(ctx, root, ref, commit, orRegen, deps)
+	return runSync(ctx, root, ref, commit, orRegen, produce, forceLocal, deps)
 }
 
 // runSync is the testable core: given an already-resolved root/ref/commit
 // and injected deps, materialize the bundle and return the exit code.
-func runSync(ctx context.Context, root, ref, commit string, orRegen bool, deps syncDeps) int {
+func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, forceLocal bool, deps syncDeps) int {
 	derivedDir := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(ref), commit)
 	if err := os.MkdirAll(derivedDir, 0o755); err != nil {
 		fmt.Fprintln(deps.Stderr, "sync:", err)
 		return 2
+	}
+
+	// --produce never fetches — it IS the producer the verdi-evidence
+	// workflow invokes to build the artifact a later `sync` fetches back
+	// (spec/remote-and-ci dc-1); there is nothing to pull yet for the
+	// commit that is producing it.
+	if produce {
+		return runProduce(ctx, root, commit, derivedDir, forceLocal, deps)
 	}
 
 	// The CI bundle is authoritative and always preferred when available,
@@ -117,7 +147,8 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen bool, deps s
 		return evaluateBundle(deps, derivedDir)
 
 	case errors.Is(err, forge.ErrNoBundle) && orRegen:
-		if regenErr := regenerate(ctx, root, commit, derivedDir, deps); regenErr != nil {
+		prov := artifact.EvidenceProvenance{Source: artifact.SourceLocal, Commit: commit}
+		if regenErr := regenerate(ctx, root, commit, derivedDir, prov, deps); regenErr != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", regenErr)
 			return 2
 		}
@@ -132,6 +163,56 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen bool, deps s
 		fmt.Fprintln(deps.Stderr, "sync:", err)
 		return 2
 	}
+}
+
+// runProduce implements `verdi sync --produce` (spec/remote-and-ci dc-1):
+// the CI-provenance producer, intended to be invoked only by the
+// verdi-evidence workflow (.github/workflows/verdi-evidence.yml). It
+// assembles the derived bundle exactly like --or-regen's regeneration
+// path (regenerate/regenerateServices, internal/bundle), but stamps
+// provenance.source: ci instead of local, pulling Pipeline/Job
+// identifiers from the forge's CIContext when present (03 §Evidence
+// records).
+//
+// This invocation itself never makes a bundle authoritative: dc-1 —
+// "its output is authoritative solely because it is fetched back from
+// the forge artifact store by (ref, commit) — not because the flag was
+// passed." Every gate (cmd/verdi/gate.go, matrix.go, closuregate.go,
+// rollup.go, via internal/evidence.LoadRecords/Fold) reads whatever
+// provenance.source a record on disk claims, from whatever wrote it —
+// the fold does not and structurally cannot verify provenance
+// cryptographically. What keeps a locally produced bundle from quietly
+// passing as the real thing is discipline, not a lock: --produce refuses
+// to run outside a detected CI environment (internal/lint.ReadCIEnv)
+// unless --force-local overrides it, mirroring rollup's --force-local
+// precedent (I-32) and printing the same class of disclosed,
+// non-authoritative warning when it does — so a locally produced
+// source:ci bundle is always a deliberate, visible act, and the ordinary
+// path to an authoritative bundle stays exactly what dc-1 describes: a
+// real verdi-evidence run, fetched back through the forge port.
+func runProduce(ctx context.Context, root, commit, derivedDir string, forceLocal bool, deps syncDeps) int {
+	inCI := lint.ReadCIEnv().InCI
+	if !inCI && !forceLocal {
+		fmt.Fprintln(deps.Stderr, "sync: --produce refuses to run outside CI (spec/remote-and-ci dc-1: this producer is authoritative only once the verdi-evidence workflow's uploaded artifact is fetched back through the forge); pass --force-local for local testing only")
+		return 2
+	}
+	if !inCI {
+		fmt.Fprintln(deps.Stderr, "sync: --force-local: producing a source:ci-stamped bundle outside CI; this escape hatch is for local testing only and is NON-AUTHORITATIVE (spec/remote-and-ci dc-1: a local --produce bundle is never fetched by a gate)")
+	}
+
+	ciInfo, err := deps.Forge.CIContext(ctx)
+	if err != nil {
+		fmt.Fprintln(deps.Stderr, "sync:", err)
+		return 2
+	}
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Commit: commit, Pipeline: ciInfo.Pipeline, Job: ciInfo.Job}
+
+	if regenErr := regenerate(ctx, root, commit, derivedDir, prov, deps); regenErr != nil {
+		fmt.Fprintln(deps.Stderr, "sync:", regenErr)
+		return 2
+	}
+	fmt.Fprintf(deps.Stdout, "sync: produced CI evidence bundle at %s\n", derivedDir)
+	return evaluateBundle(deps, derivedDir)
 }
 
 // writeRawBundle writes a CI-pulled bundle's four files verbatim: the CI

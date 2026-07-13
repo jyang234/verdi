@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/provider"
-	"github.com/OWNER/verdi/internal/provider/jira"
-	"github.com/OWNER/verdi/internal/provider/jira/jiratest"
+	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider/jira"
+	"github.com/jyang234/verdi/internal/provider/jira/jiratest"
 )
 
 func newAdapter(t *testing.T, server *jiratest.Server, getenv func(string) string) *jira.Adapter {
@@ -396,10 +396,10 @@ func TestCILink(t *testing.T) {
 			name: "github actions run URL",
 			env: map[string]string{
 				"GITHUB_SERVER_URL": "https://github.com",
-				"GITHUB_REPOSITORY": "OWNER/verdi",
+				"GITHUB_REPOSITORY": "jyang234/verdi",
 				"GITHUB_RUN_ID":     "123456",
 			},
-			want: "https://github.com/OWNER/verdi/actions/runs/123456",
+			want: "https://github.com/jyang234/verdi/actions/runs/123456",
 		},
 		{
 			name: "nothing present",

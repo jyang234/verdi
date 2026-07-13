@@ -6,11 +6,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	forgepkg "github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/fake"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/artifact"
+	forgepkg "github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 const svcfixSrcDir = "../../testdata/svcfix"
@@ -47,6 +49,32 @@ func buildTestStore(t *testing.T) string {
 
 	manifest := `schema: verdi.layout/v1
 forge: gitlab
+services:
+  discovery: flowmap
+toolchain:
+  module: github.com/jyang234/golang-code-graph
+  commit: cd38b1a56bb7deadbeefdeadbeefdeadbeefdead
+`
+	if err := os.MkdirAll(filepath.Join(root, ".verdi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".verdi", "verdi.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("writing verdi.yaml: %v", err)
+	}
+	return root
+}
+
+// buildTestStoreNoServices is buildTestStore's manifest without copying
+// any service in — this repo's own self-hosted .verdi/ store has exactly
+// this shape (zero discoverable .flowmap.yaml roots: verdi tracks its own
+// feature/story specs, not a flowmap-bound service of itself), the real
+// case sync_regen.go's regenerate() discloses honestly rather than
+// erroring on.
+func buildTestStoreNoServices(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	manifest := `schema: verdi.layout/v1
+forge: github
 services:
   discovery: flowmap
 toolchain:
@@ -154,7 +182,7 @@ func TestRunSync_OrRegen_MatchesGolden(t *testing.T) {
 		Stderr: &stderr,
 	}
 
-	code := runSync(context.Background(), root, testRef, testCommit, true, deps)
+	code := runSync(context.Background(), root, testRef, testCommit, true, false, false, deps)
 	if code != 0 {
 		t.Fatalf("runSync(--or-regen) exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -172,6 +200,260 @@ func TestRunSync_OrRegen_MatchesGolden(t *testing.T) {
 		if string(got) != string(want) {
 			t.Errorf("%s differs from golden:\n--- got ---\n%s\n--- want ---\n%s", name, got, want)
 		}
+	}
+}
+
+// buildProduceDeps assembles a produce-ready syncDeps against a fresh
+// buildTestStore root: seeded upstream runner, canned go test output, and
+// a fake forge whose CIContext reports pipeline "913" / job "7" — no
+// network, no exec (CLAUDE.md).
+func buildProduceDeps(t *testing.T) (root string, deps syncDeps) {
+	t.Helper()
+	root = buildTestStore(t)
+	f := fake.New()
+	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7"})
+	var stdout, stderr bytes.Buffer
+	deps = syncDeps{
+		Runner: seedRunner(t, root),
+		Forge:  f,
+		GoTest: fakeGoTest{output: []byte(svcfixGoTestJSON)},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+	return root, deps
+}
+
+func readProducedVerdicts(t *testing.T, root string) []artifact.Evidence {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "data", "derived", "spec--stale-decline", testCommit)
+	var records []artifact.Evidence
+	if err := decodeBundleFile(dir, "verdicts.json", &records); err != nil {
+		t.Fatalf("decoding produced verdicts.json: %v", err)
+	}
+	return records
+}
+
+// TestRunSync_Produce_StampsSourceCI_AndPipelineJob proves --produce
+// (spec/remote-and-ci dc-1), run inside a detected CI environment,
+// assembles the same evidence internal/bundle would assemble for
+// --or-regen (identical schema/evidence_for/kind/verdict/witness/producer/
+// digest — verified against the committed local-regen golden) but stamps
+// provenance.source: ci and pulls pipeline/job from the forge's CIContext,
+// never provenance.source: local.
+func TestRunSync_Produce_StampsSourceCI_AndPipelineJob(t *testing.T) {
+	t.Setenv("CI", "true")
+	root, deps := buildProduceDeps(t)
+
+	code := runSync(context.Background(), root, testRef, testCommit, false, true, false, deps)
+	stderrBuf := deps.Stderr.(*bytes.Buffer)
+	if code != 0 {
+		t.Fatalf("runSync(--produce) exit = %d, want 0; stderr=%s", code, stderrBuf.String())
+	}
+
+	got := readProducedVerdicts(t, root)
+	golden := readCannedFile(t, bundleGoldenDir, "verdicts.json")
+	var want []artifact.Evidence
+	if err := artifact.DecodeStrictJSON(golden, &want); err != nil {
+		t.Fatalf("decoding golden verdicts.json: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("produced %d records, want %d (golden)", len(got), len(want))
+	}
+	for i := range got {
+		if got[i].Provenance.Source != artifact.SourceCI {
+			t.Errorf("record %d provenance.source = %q, want ci", i, got[i].Provenance.Source)
+		}
+		if got[i].Provenance.Pipeline != "913" {
+			t.Errorf("record %d provenance.pipeline = %q, want 913", i, got[i].Provenance.Pipeline)
+		}
+		if got[i].Provenance.Job != "7" {
+			t.Errorf("record %d provenance.job = %q, want 7", i, got[i].Provenance.Job)
+		}
+		if got[i].Provenance.Commit != testCommit {
+			t.Errorf("record %d provenance.commit = %q, want %s", i, got[i].Provenance.Commit, testCommit)
+		}
+		// Everything but provenance must match the local-regen golden
+		// exactly: --produce and --or-regen share the same assembly
+		// mechanics (regenerate/regenerateServices) and differ only in
+		// the provenance they stamp.
+		if got[i].Schema != want[i].Schema || got[i].Kind != want[i].Kind || got[i].Verdict != want[i].Verdict ||
+			got[i].Witness != want[i].Witness || got[i].Producer != want[i].Producer || got[i].Digest != want[i].Digest ||
+			strings.Join(got[i].EvidenceFor, ",") != strings.Join(want[i].EvidenceFor, ",") {
+			t.Errorf("record %d non-provenance fields differ from golden:\ngot  %+v\nwant %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestRunSync_Produce_DeterministicAcrossRuns proves --produce is
+// byte-stable (co-1: "assembles a byte-stable bundle"): the same inputs,
+// run twice into independent roots, produce byte-identical bundle files.
+func TestRunSync_Produce_DeterministicAcrossRuns(t *testing.T) {
+	t.Setenv("CI", "true")
+	root1, deps1 := buildProduceDeps(t)
+	root2, deps2 := buildProduceDeps(t)
+
+	if code := runSync(context.Background(), root1, testRef, testCommit, false, true, false, deps1); code != 0 {
+		t.Fatalf("first runSync(--produce) exit = %d, want 0", code)
+	}
+	if code := runSync(context.Background(), root2, testRef, testCommit, false, true, false, deps2); code != 0 {
+		t.Fatalf("second runSync(--produce) exit = %d, want 0", code)
+	}
+
+	dir1 := filepath.Join(root1, ".verdi", "data", "derived", "spec--stale-decline", testCommit)
+	dir2 := filepath.Join(root2, ".verdi", "data", "derived", "spec--stale-decline", testCommit)
+	for _, name := range derivedFileNames {
+		got1, err := os.ReadFile(filepath.Join(dir1, name))
+		if err != nil {
+			t.Fatalf("reading run1 %s: %v", name, err)
+		}
+		got2, err := os.ReadFile(filepath.Join(dir2, name))
+		if err != nil {
+			t.Fatalf("reading run2 %s: %v", name, err)
+		}
+		if string(got1) != string(got2) {
+			t.Errorf("%s not byte-stable across two --produce runs:\n--- run1 ---\n%s\n--- run2 ---\n%s", name, got1, got2)
+		}
+	}
+}
+
+// TestRunSync_Produce_Negative_RefusesOutsideCI proves --produce, run
+// with no detected CI environment and no --force-local, refuses (exit 2)
+// rather than silently stamping source: ci from a plain developer
+// laptop — dc-1's "a local --produce bundle must never reach a gate"
+// starts with this refusal.
+func TestRunSync_Produce_Negative_RefusesOutsideCI(t *testing.T) {
+	t.Setenv("CI", "")
+	t.Setenv("GITHUB_ACTIONS", "")
+	root, deps := buildProduceDeps(t)
+
+	code := runSync(context.Background(), root, testRef, testCommit, false, true, false, deps)
+	stderrBuf := deps.Stderr.(*bytes.Buffer)
+	if code != 2 {
+		t.Fatalf("runSync(--produce) outside CI without --force-local: exit = %d, want 2; stderr=%s", code, stderrBuf.String())
+	}
+	if !strings.Contains(stderrBuf.String(), "--force-local") {
+		t.Errorf("stderr = %q, want a mention of --force-local", stderrBuf.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".verdi", "data", "derived", "spec--stale-decline", testCommit, "verdicts.json")); err == nil {
+		t.Error("refused --produce still wrote verdicts.json; want no bundle written")
+	}
+}
+
+// TestRunSync_Produce_ForceLocalOverride_ProceedsWithDisclosure proves
+// --force-local lets --produce run outside CI for local testing, but
+// prints a disclosed, NON-AUTHORITATIVE warning (mirroring rollup's
+// --force-local precedent, I-32) rather than proceeding silently.
+func TestRunSync_Produce_ForceLocalOverride_ProceedsWithDisclosure(t *testing.T) {
+	t.Setenv("CI", "")
+	t.Setenv("GITHUB_ACTIONS", "")
+	root, deps := buildProduceDeps(t)
+
+	code := runSync(context.Background(), root, testRef, testCommit, false, true, true, deps)
+	stderrBuf := deps.Stderr.(*bytes.Buffer)
+	if code != 0 {
+		t.Fatalf("runSync(--produce --force-local) exit = %d, want 0; stderr=%s", code, stderrBuf.String())
+	}
+	if !strings.Contains(stderrBuf.String(), "NON-AUTHORITATIVE") {
+		t.Errorf("stderr = %q, want a NON-AUTHORITATIVE disclosure", stderrBuf.String())
+	}
+
+	got := readProducedVerdicts(t, root)
+	for i, r := range got {
+		if r.Provenance.Source != artifact.SourceCI {
+			t.Errorf("record %d provenance.source = %q, want ci even under --force-local (the stamp is still source: ci; only the disclosure differs)", i, r.Provenance.Source)
+		}
+	}
+}
+
+// TestRunSync_Produce_Negative_MutuallyExclusiveWithOrRegen proves
+// cmdSync's argument parsing rejects --or-regen combined with --produce
+// before ever touching the filesystem (store.FindRoot) — the two flags
+// express incompatible provenance intents.
+func TestRunSync_Produce_Negative_MutuallyExclusiveWithOrRegen(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := cmdSync([]string{"--or-regen", "--produce"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("cmdSync(--or-regen --produce) exit = %d, want 2", code)
+	}
+	if stderr.Len() == 0 {
+		t.Error("expected an explanatory stderr message")
+	}
+}
+
+// TestRunSync_Produce_Negative_ForceLocalWithoutProduce proves --force-local
+// alone (without --produce) is a usage error, not a silently ignored flag.
+func TestRunSync_Produce_Negative_ForceLocalWithoutProduce(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := cmdSync([]string{"--force-local"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("cmdSync(--force-local) exit = %d, want 2", code)
+	}
+	if stderr.Len() == 0 {
+		t.Error("expected an explanatory stderr message")
+	}
+}
+
+// TestRunSync_Produce_Negative_UnknownForgeCIContextError proves a forge
+// CIContext error surfaces as an operational failure (exit 2), not a
+// silently-empty pipeline/job stamp.
+func TestRunSync_Produce_Negative_ForgeCIContextError(t *testing.T) {
+	t.Setenv("CI", "true")
+	root := buildTestStore(t)
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{
+		Runner: seedRunner(t, root),
+		Forge:  erroringForge{},
+		GoTest: fakeGoTest{output: []byte(svcfixGoTestJSON)},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	code := runSync(context.Background(), root, testRef, testCommit, false, true, false, deps)
+	if code != 2 {
+		t.Fatalf("runSync(--produce) with a CIContext error: exit = %d, want 2; stderr=%s", code, stderr.String())
+	}
+}
+
+// TestRunSync_Produce_NoServicesDiscovered_StillSucceeds proves --produce
+// against a store with zero discoverable services (this repo's own
+// self-hosted .verdi/ store, in real life, once verdi-evidence.yml runs
+// it for real) still succeeds honestly with an empty-but-well-formed
+// bundle, rather than failing with "nothing to regenerate" — hermetic:
+// DiscoverServices finding nothing means the toolchain Runner is never
+// invoked at all.
+func TestRunSync_Produce_NoServicesDiscovered_StillSucceeds(t *testing.T) {
+	t.Setenv("CI", "true")
+	root := buildTestStoreNoServices(t)
+	f := fake.New()
+	f.SetCIContext(forgepkg.CIInfo{Pipeline: "913", Job: "7"})
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{
+		Runner: upstream.NewFakeRunner(), // never called: no service to regenerate
+		Forge:  f,
+		GoTest: fakeGoTest{},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	code := runSync(context.Background(), root, testRef, testCommit, false, true, false, deps)
+	if code != 0 {
+		t.Fatalf("runSync(--produce, no services) exit = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "no services") {
+		t.Errorf("stdout = %q, want a disclosed \"no services\" notice", stdout.String())
+	}
+
+	got := readProducedVerdicts(t, root)
+	if len(got) != 0 {
+		t.Errorf("verdicts = %+v, want none (no service to bind evidence to)", got)
+	}
+	dir := filepath.Join(root, ".verdi", "data", "derived", "spec--stale-decline", testCommit)
+	testsData, err := os.ReadFile(filepath.Join(dir, "tests.json"))
+	if err != nil {
+		t.Fatalf("reading tests.json: %v", err)
+	}
+	if strings.Contains(string(testsData), "null") {
+		t.Errorf("tests.json = %s, want no null fields (bundle.Assemble's never-null contract)", testsData)
 	}
 }
 
@@ -198,7 +480,7 @@ func TestRunSync_CI_PullsBundle(t *testing.T) {
 		Stderr: &stderr,
 	}
 
-	code := runSync(context.Background(), root, testRef, testCommit, false, deps)
+	code := runSync(context.Background(), root, testRef, testCommit, false, false, false, deps)
 	if code != 0 {
 		t.Fatalf("runSync exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
@@ -228,7 +510,7 @@ func TestRunSync_NoBundle_NoRegen_ExitsOperational(t *testing.T) {
 		Stderr: &stderr,
 	}
 
-	code := runSync(context.Background(), root, testRef, testCommit, false, deps)
+	code := runSync(context.Background(), root, testRef, testCommit, false, false, false, deps)
 	if code != 2 {
 		t.Fatalf("runSync (no bundle, no --or-regen) exit = %d, want 2", code)
 	}
@@ -257,7 +539,7 @@ func TestRunSync_BlockingReview_ExitsOne(t *testing.T) {
 		Stderr: &stderr,
 	}
 
-	code := runSync(context.Background(), root, testRef, testCommit, true, deps)
+	code := runSync(context.Background(), root, testRef, testCommit, true, false, false, deps)
 	if code != 1 {
 		t.Fatalf("runSync with a BLOCK review: exit = %d, want 1; stderr=%s", code, stderr.String())
 	}
@@ -295,7 +577,7 @@ func TestRunSync_Negative_BoundaryDiffCrossCheckDisagreement(t *testing.T) {
 		Stderr: &stderr,
 	}
 
-	code := runSync(context.Background(), root, testRef, testCommit, true, deps)
+	code := runSync(context.Background(), root, testRef, testCommit, true, false, false, deps)
 	if code != 2 {
 		t.Fatalf("runSync with a boundary-diff cross-check disagreement: exit = %d, want 2; stderr=%s", code, stderr.String())
 	}
@@ -312,7 +594,7 @@ func TestRunSync_Negative_ForgeError(t *testing.T) {
 		Stdout: &bytes.Buffer{},
 		Stderr: &bytes.Buffer{},
 	}
-	code := runSync(context.Background(), root, testRef, testCommit, true, deps)
+	code := runSync(context.Background(), root, testRef, testCommit, true, false, false, deps)
 	if code != 2 {
 		t.Fatalf("runSync with a forge error: exit = %d, want 2", code)
 	}
@@ -328,7 +610,7 @@ func (erroringForge) FetchEvidenceBundle(ctx context.Context, ref, commit string
 }
 func (erroringForge) GeneratedAttribute() string { return "x-generated" }
 func (erroringForge) CIContext(ctx context.Context) (forgepkg.CIInfo, error) {
-	return forgepkg.CIInfo{}, nil
+	return forgepkg.CIInfo{}, errors.New("forge: simulated CIContext failure")
 }
 func (erroringForge) ListOpenMRs(ctx context.Context, targetBranch string) ([]forgepkg.OpenMR, error) {
 	return nil, nil

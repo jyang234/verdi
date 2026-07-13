@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/fake"
 )
 
 // newFeedForTest wires a forgeCommentFeed over the fake with a resolvable

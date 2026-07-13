@@ -3,10 +3,10 @@ package jira_test
 import (
 	"testing"
 
-	"github.com/OWNER/verdi/internal/provider"
-	"github.com/OWNER/verdi/internal/provider/jira"
-	"github.com/OWNER/verdi/internal/provider/jira/jiratest"
-	"github.com/OWNER/verdi/internal/provider/providertest"
+	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider/jira"
+	"github.com/jyang234/verdi/internal/provider/jira/jiratest"
+	"github.com/jyang234/verdi/internal/provider/providertest"
 )
 
 const testRollupField = "customfield_rollup"

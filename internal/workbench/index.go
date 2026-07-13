@@ -19,11 +19,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/artifactview"
-	"github.com/OWNER/verdi/internal/boardio"
-	"github.com/OWNER/verdi/internal/index"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifactview"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // indexHandler answers GET / with the store's home index. It owns exactly

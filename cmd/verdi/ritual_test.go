@@ -32,11 +32,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/provider"
-	providerfake "github.com/OWNER/verdi/internal/provider/fake"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/provider"
+	providerfake "github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // seedRitualProvider seeds titles for both tracker refs the round-four

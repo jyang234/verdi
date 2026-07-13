@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
-	forgefake "github.com/OWNER/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/forge"
+	forgefake "github.com/jyang234/verdi/internal/forge/fake"
 )
 
 func TestCheckReviewThreadsCondition_NilForge_Disclosed(t *testing.T) {

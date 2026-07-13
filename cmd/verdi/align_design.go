@@ -16,10 +16,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/align"
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/storyresolve"
+	"github.com/jyang234/verdi/internal/align"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
 // runDesignAlign is the design-branch mode's testable core, mirroring

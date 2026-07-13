@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 func baseGenerateInput(t *testing.T, repoDir, svcDir, covers string, spec *artifact.SpecFrontmatter) Input {

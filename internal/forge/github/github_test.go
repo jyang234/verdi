@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/forgetest"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/forgetest"
 )
 
 func buildBundleZip(t *testing.T, b forge.EvidenceBundle) []byte {
@@ -322,6 +322,8 @@ func TestGitHub_CIContext(t *testing.T) {
 		"VERDI_GITHUB_DEFAULT_BRANCH": "main",
 		"GITHUB_EVENT_NAME":           "pull_request",
 		"GITHUB_BASE_REF":             "main",
+		"GITHUB_RUN_ID":               "913",
+		"GITHUB_RUN_ATTEMPT":          "1",
 	}
 	a := New(Config{Owner: "acme", Repo: "svcfix", Getenv: func(k string) string { return env[k] }})
 
@@ -331,6 +333,26 @@ func TestGitHub_CIContext(t *testing.T) {
 	}
 	if info.DefaultBranch != "main" || !info.IsMergeRequest || info.TargetBranch != "main" {
 		t.Errorf("CIContext = %+v", info)
+	}
+	if info.Pipeline != "913" || info.Job != "1" {
+		t.Errorf("CIContext Pipeline/Job = %q/%q, want 913/1", info.Pipeline, info.Job)
+	}
+}
+
+// TestGitHub_CIContext_OutsideCI proves Pipeline/Job come back empty when
+// none of GitHub Actions' own env vars are set — the "not running in CI
+// at all" case --produce's CI-only guard (cmd/verdi/sync.go) relies on
+// indirectly through internal/lint.ReadCIEnv, kept independent here at
+// the port level.
+func TestGitHub_CIContext_OutsideCI(t *testing.T) {
+	a := New(Config{Owner: "acme", Repo: "svcfix", Getenv: func(string) string { return "" }})
+
+	info, err := a.CIContext(context.Background())
+	if err != nil {
+		t.Fatalf("CIContext: %v", err)
+	}
+	if info.Pipeline != "" || info.Job != "" {
+		t.Errorf("CIContext outside CI = %+v, want empty Pipeline/Job", info)
 	}
 }
 
@@ -365,5 +387,76 @@ func TestGitHub_FetchEvidenceBundle_Negative_ServerError(t *testing.T) {
 	a := New(Config{BaseURL: ts.URL, Owner: "acme", Repo: "svcfix", HTTPClient: ts.Client()})
 	if _, err := a.FetchEvidenceBundle(context.Background(), "ref", "commit"); err == nil {
 		t.Fatal("FetchEvidenceBundle against a 500 server: want error, got nil")
+	}
+}
+
+// TestGitHub_FetchEvidenceBundle_MultipleRuns_PicksTheOneWithTheArtifact
+// proves FetchEvidenceBundle keeps searching when a commit has more than
+// one successful workflow run — the real shape once this repo runs both
+// verify.yml and verdi-evidence.yml on the same push/PR (spec/remote-and-ci):
+// GitHub Actions scopes "runs" per workflow file, unlike GitLab's one
+// pipeline covering every job, so the head_sha query can return several
+// runs and only one of them is verdi-evidence's.
+func TestGitHub_FetchEvidenceBundle_MultipleRuns_PicksTheOneWithTheArtifact(t *testing.T) {
+	want := forge.EvidenceBundle{
+		Verdicts:     []byte(`[]` + "\n"),
+		Tests:        []byte(`{"schema":"verdi.tests/v1","suite":"pass"}` + "\n"),
+		Review:       []byte(`[]` + "\n"),
+		BoundaryDiff: []byte(`[]` + "\n"),
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/svcfix/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		// verify.yml's run (100, no verdi-evidence artifact) is listed
+		// before verdi-evidence.yml's own run (200) — FetchEvidenceBundle
+		// must not stop at the first one.
+		_ = json.NewEncoder(w).Encode(runsResponse{WorkflowRuns: []run{
+			{ID: 100, Status: "completed", Conclusion: "success"},
+			{ID: 200, Status: "completed", Conclusion: "success"},
+		}})
+	})
+	mux.HandleFunc("/repos/acme/svcfix/actions/runs/100/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(artifactsResponse{Artifacts: []artifact{{ID: 1, Name: "some-other-workflows-artifact"}}})
+	})
+	mux.HandleFunc("/repos/acme/svcfix/actions/runs/200/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(artifactsResponse{Artifacts: []artifact{{ID: 2, Name: defaultArtifactName}}})
+	})
+	mux.HandleFunc("/repos/acme/svcfix/actions/artifacts/2/zip", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(buildBundleZip(t, want))
+	})
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	a := New(Config{BaseURL: ts.URL, Owner: "acme", Repo: "svcfix", HTTPClient: ts.Client()})
+
+	got, err := a.FetchEvidenceBundle(context.Background(), "ref", "deadbeef")
+	if err != nil {
+		t.Fatalf("FetchEvidenceBundle: %v", err)
+	}
+	if string(got.Verdicts) != string(want.Verdicts) {
+		t.Errorf("Verdicts = %q, want %q", got.Verdicts, want.Verdicts)
+	}
+}
+
+// TestGitHub_FetchEvidenceBundle_Negative_NoRunHasTheArtifact proves the
+// search across multiple runs still fails loudly, wrapping ErrNoBundle,
+// when NONE of the commit's successful runs carry the wanted artifact —
+// it must not report success just because *a* run existed.
+func TestGitHub_FetchEvidenceBundle_Negative_NoRunHasTheArtifact(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/svcfix/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(runsResponse{WorkflowRuns: []run{{ID: 100, Status: "completed", Conclusion: "success"}}})
+	})
+	mux.HandleFunc("/repos/acme/svcfix/actions/runs/100/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(artifactsResponse{Artifacts: []artifact{{ID: 1, Name: "some-other-workflows-artifact"}}})
+	})
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	a := New(Config{BaseURL: ts.URL, Owner: "acme", Repo: "svcfix", HTTPClient: ts.Client()})
+
+	_, err := a.FetchEvidenceBundle(context.Background(), "ref", "deadbeef")
+	if !errors.Is(err, forge.ErrNoBundle) {
+		t.Fatalf("error = %v, want errors.Is(err, forge.ErrNoBundle)", err)
 	}
 }

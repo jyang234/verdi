@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider"
 )
 
 // Config configures Adapter. BaseURL and HTTPClient are overridable so

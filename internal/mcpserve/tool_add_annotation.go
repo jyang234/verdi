@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardio"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // addAnnotationArgs is add_annotation's flattened argument shape (tooldefs.go's

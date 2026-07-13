@@ -30,7 +30,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge"
 )
 
 // defaultJobName is verdi's own CI job name (I-8: "job/workflow
@@ -492,13 +492,19 @@ func (a *Adapter) GeneratedAttribute() string { return "gitlab-generated" }
 
 // CIContext implements forge.Forge, reading GitLab CI's own predefined
 // variables: CI_DEFAULT_BRANCH, CI_MERGE_REQUEST_IID (presence signals an
-// MR pipeline), CI_MERGE_REQUEST_TARGET_BRANCH_NAME.
+// MR pipeline), CI_MERGE_REQUEST_TARGET_BRANCH_NAME. Pipeline/Job read
+// CI_PIPELINE_ID and CI_JOB_ID (both numeric and both increase
+// monotonically — a retried job gets a fresh, higher CI_JOB_ID within the
+// same CI_PIPELINE_ID, which is exactly the (pipeline id, job id)
+// ordering 03 §The fold's "current" selection wants, I-25).
 func (a *Adapter) CIContext(ctx context.Context) (forge.CIInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return forge.CIInfo{}, err
 	}
 	info := forge.CIInfo{
 		DefaultBranch: a.cfg.Getenv("CI_DEFAULT_BRANCH"),
+		Pipeline:      a.cfg.Getenv("CI_PIPELINE_ID"),
+		Job:           a.cfg.Getenv("CI_JOB_ID"),
 	}
 	if mrIID := a.cfg.Getenv("CI_MERGE_REQUEST_IID"); mrIID != "" {
 		info.IsMergeRequest = true

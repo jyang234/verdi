@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 func TestLoadManifest_Happy(t *testing.T) {

@@ -5,10 +5,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/provider"
-	providerfake "github.com/OWNER/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/provider"
+	providerfake "github.com/jyang234/verdi/internal/provider/fake"
 )
 
 func seedFakeProvider(t *testing.T) *providerfake.Provider {

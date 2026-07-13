@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 // runFeatureVerb dispatches `verdi feature <subcommand>`. There is exactly

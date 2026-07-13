@@ -12,8 +12,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/OWNER/verdi/internal/dex"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/dex"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // runDexVerb dispatches `verdi dex <subcommand>`. v0 has exactly one

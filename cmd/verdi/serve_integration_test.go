@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
-	"github.com/OWNER/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/mcpserve"
 )
 
 var (

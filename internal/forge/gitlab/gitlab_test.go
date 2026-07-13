@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/forgetest"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/forgetest"
 )
 
 // buildBundleZip zips the four bundle files under derived/<slug>/<commit>/,
@@ -308,6 +308,8 @@ func TestGitLab_CIContext(t *testing.T) {
 		"CI_DEFAULT_BRANCH":                   "main",
 		"CI_MERGE_REQUEST_IID":                "42",
 		"CI_MERGE_REQUEST_TARGET_BRANCH_NAME": "main",
+		"CI_PIPELINE_ID":                      "913",
+		"CI_JOB_ID":                           "4021",
 	}
 	a := New(Config{ProjectID: "1", Getenv: func(k string) string { return env[k] }})
 
@@ -317,6 +319,23 @@ func TestGitLab_CIContext(t *testing.T) {
 	}
 	if info.DefaultBranch != "main" || !info.IsMergeRequest || info.TargetBranch != "main" {
 		t.Errorf("CIContext = %+v", info)
+	}
+	if info.Pipeline != "913" || info.Job != "4021" {
+		t.Errorf("CIContext Pipeline/Job = %q/%q, want 913/4021", info.Pipeline, info.Job)
+	}
+}
+
+// TestGitLab_CIContext_OutsideCI proves Pipeline/Job come back empty when
+// none of GitLab CI's own env vars are set.
+func TestGitLab_CIContext_OutsideCI(t *testing.T) {
+	a := New(Config{ProjectID: "1", Getenv: func(string) string { return "" }})
+
+	info, err := a.CIContext(context.Background())
+	if err != nil {
+		t.Fatalf("CIContext: %v", err)
+	}
+	if info.Pipeline != "" || info.Job != "" {
+		t.Errorf("CIContext outside CI = %+v, want empty Pipeline/Job", info)
 	}
 }
 

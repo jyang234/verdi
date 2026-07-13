@@ -13,9 +13,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/bundle"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/bundle"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // regenerateBaseline computes branch's local baseline for spec's impacted
@@ -53,7 +53,8 @@ func regenerateBaseline(ctx context.Context, root, branch, commit string, spec *
 		return
 	}
 
-	serviceBundles, merged, err := regenerateServices(ctx, root, commit, impacted, deps)
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceLocal, Commit: commit}
+	serviceBundles, merged, err := regenerateServices(ctx, root, commit, impacted, prov, deps)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: skipping baseline regeneration: toolchain unreachable: %v\n", verb, err)
 		return

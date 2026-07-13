@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardio"
 )
 
 // annotationItem is one list_annotations/list_tasks result row.

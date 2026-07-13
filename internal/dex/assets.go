@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/render"
+	"github.com/jyang234/verdi/internal/render"
 )
 
 // The two placeholder markers in assets/style.css that StyleCSS replaces

@@ -1,6 +1,6 @@
 package evidence
 
-import "github.com/OWNER/verdi/internal/artifact"
+import "github.com/jyang234/verdi/internal/artifact"
 
 // hex64 is a 64-hex-character placeholder used to satisfy Evidence's
 // sha256:<64 hex> digest shape check across this package's tests — the

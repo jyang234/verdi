@@ -14,9 +14,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardlayout"
-	"github.com/OWNER/verdi/internal/designscaffold"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/designscaffold"
 )
 
 // boardClientPayload is the JSON state embedded for boardspec.js: the
@@ -109,7 +109,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 		Legal:        legalPairTable(),
 		Consequences: consequenceLabels,
 		Removals:     removalConsequenceLabels,
-		Gate:         []string{"supersedes", "exempts"},
+		Gate:         gateBearingTypes(),
 	}
 	stateJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -455,10 +455,10 @@ func writeScopingReceipts(b *strings.Builder, p *BoardProjection, c cardView) {
 	switch boardlayout.ZoneKind(c.Kind) {
 	case boardlayout.ZoneAC:
 		n := p.ACCoverage[c.ID]
-		switch {
-		case n == 0:
+		switch n {
+		case 0:
 			b.WriteString(`<span class="coverage-chip coverage-chip--none" data-testid="coverage-` + esc(c.ID) + `" data-coverage="0">no stub</span>`)
-		case n == 1:
+		case 1:
 			b.WriteString(`<span class="coverage-chip coverage-chip--covered" data-testid="coverage-` + esc(c.ID) + `" data-coverage="1">covered by 1 stub</span>`)
 		default:
 			b.WriteString(`<span class="coverage-chip coverage-chip--covered" data-testid="coverage-` + esc(c.ID) + `" data-coverage="` + strconv.Itoa(n) + `">covered by ` + strconv.Itoa(n) + ` stubs</span>`)

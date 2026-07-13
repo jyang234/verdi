@@ -16,9 +16,9 @@ import (
 	"os"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/disclosure"
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // checkReviewThreadsCondition evaluates 05's spec-MR review-thread

@@ -15,10 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/bundle"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/bundle"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 // goTestRunner abstracts `go test -json` execution so tests can supply
@@ -55,17 +55,30 @@ func (realGoTestRunner) RunGoTest(ctx context.Context, dir string) ([]byte, erro
 // (PLAN.md Phase 5 stub: "impacted-service scoping is exact-match on
 // impacts: (widen-on-demand later)" — v0 has no story context to scope
 // sync's regeneration to, so every discovered service is regenerated) and
-// assembles the four bundle files into derivedDir.
-func regenerate(ctx context.Context, root, commit, derivedDir string, deps syncDeps) error {
+// assembles the four bundle files into derivedDir, with every evidence
+// record carrying prov as its provenance. prov is the caller's to set:
+// --or-regen's fallback path passes source: local (03 §Provenance
+// classes: "source: local is advisory"); --produce (sync.go's runProduce,
+// spec/remote-and-ci dc-1) passes source: ci — the assembly mechanics
+// here are identical either way, only the provenance stamp differs.
+//
+// A store with NO discoverable service at all — this repo's own
+// self-hosted .verdi/ store included: verdi tracks its own feature/story
+// specs, not a flowmap-bound service of itself — is not an operational
+// error. It produces a valid, honest, EMPTY bundle (bundle.Assemble's own
+// "never a JSON null" contract): disclosed on deps.Stdout so the state is
+// never silent (CLAUDE.md's three-valued honesty), but not a failure,
+// since nothing here actually failed to exec, decode, or write.
+func regenerate(ctx context.Context, root, commit, derivedDir string, prov artifact.EvidenceProvenance, deps syncDeps) error {
 	services, err := store.DiscoverServices(root)
 	if err != nil {
 		return fmt.Errorf("discovering services: %w", err)
 	}
 	if len(services) == 0 {
-		return fmt.Errorf("no services discovered under %s (nothing to regenerate)", root)
+		fmt.Fprintln(deps.Stdout, "sync: no services (.flowmap.yaml roots) discovered under this store; assembling an empty evidence bundle — disclosed, not a failure")
 	}
 
-	serviceBundles, merged, err := regenerateServices(ctx, root, commit, services, deps)
+	serviceBundles, merged, err := regenerateServices(ctx, root, commit, services, prov, deps)
 	if err != nil {
 		return err
 	}
@@ -80,12 +93,9 @@ func regenerate(ctx context.Context, root, commit, derivedDir string, deps syncD
 // design/feature-start baseline scopes to a spec's impacted services only
 // — baseline.go's regenerateBaseline) and returns each service's
 // ServiceBundle contribution plus one merged TestSummary for the whole
-// regeneration, both ready for bundle.Assemble. Every record carries
-// provenance source: local (03 §Provenance classes: "source: local is
-// advisory").
-func regenerateServices(ctx context.Context, root, commit string, services []store.Service, deps syncDeps) ([]bundle.ServiceBundle, *bundle.TestSummary, error) {
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceLocal, Commit: commit}
-
+// regeneration, both ready for bundle.Assemble. Every record carries prov
+// as its provenance, as given by the caller (regenerate's doc comment).
+func regenerateServices(ctx context.Context, root, commit string, services []store.Service, prov artifact.EvidenceProvenance, deps syncDeps) ([]bundle.ServiceBundle, *bundle.TestSummary, error) {
 	var serviceBundles []bundle.ServiceBundle
 	var testSummaries []*bundle.TestSummary
 	for _, svc := range services {

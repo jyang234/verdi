@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 const fakeDecisionJudgeOKScript = `cat <<'EOF'

@@ -3,7 +3,7 @@ package index
 import (
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // Backlink is one inverted edge: From names the artifact whose forward

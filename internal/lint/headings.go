@@ -1,7 +1,7 @@
 package lint
 
 import (
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // headingAnchors extracts every ATX ("# ", "## ", ...) heading in body and

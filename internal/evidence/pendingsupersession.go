@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/forge"
 )
 
 // OpenSupersessionCandidate is one open MR's decoded, confirmed candidate

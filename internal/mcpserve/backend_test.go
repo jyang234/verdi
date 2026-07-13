@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/boardio"
 )
 
 // annotationIDShapeRe mirrors artifact's private annotationIDRe (I-11):

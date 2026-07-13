@@ -10,8 +10,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/OWNER/verdi/internal/lint"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // runLintVerb resolves the store root from the current working directory,

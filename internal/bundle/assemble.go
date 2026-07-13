@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/canonjson"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 // ServiceBundle is one service's contribution to a derived bundle: the
@@ -71,6 +71,9 @@ func Assemble(dir string, services []ServiceBundle, tests *TestSummary) error {
 	}
 	if tests == nil {
 		return fmt.Errorf("bundle: Assemble: tests summary must not be nil")
+	}
+	if tests.Packages == nil {
+		tests.Packages = []PackageResult{}
 	}
 
 	if err := writeCanon(filepath.Join(dir, "verdicts.json"), verdicts); err != nil {
