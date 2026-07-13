@@ -309,6 +309,45 @@ func TestCmdRollup_Negative(t *testing.T) {
 	})
 }
 
+// TestBuildProviderRegistry_FakeMode proves providers.jira.mode: fake
+// (spec/close-verb dc-2) selects the in-process fake adapter — Resolve
+// against an unseeded ref degrades to provider.ErrNotFound (the fake's own
+// documented behavior), never a real HTTP call, and the registered adapter
+// is concretely *fake.Provider so a caller (runClose) can seed/inspect it
+// directly in hermetic tests.
+func TestBuildProviderRegistry_FakeMode(t *testing.T) {
+	m, err := store.DecodeManifest([]byte("schema: verdi.layout/v1\nproviders:\n  jira:\n    mode: fake\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\n"))
+	if err != nil {
+		t.Fatalf("DecodeManifest: %v", err)
+	}
+	reg := buildProviderRegistry(m)
+	p, err := reg.Provider("jira")
+	if err != nil {
+		t.Fatalf("reg.Provider(jira): %v", err)
+	}
+	if _, ok := p.(*fake.Provider); !ok {
+		t.Fatalf("provider registered for jira = %T, want *fake.Provider under mode: fake", p)
+	}
+}
+
+// TestBuildProviderRegistry_RealModeUnchanged proves the default (mode: ""
+// or absent) still wires the real Jira adapter — this addition must not
+// change existing behavior for every store that never sets mode:.
+func TestBuildProviderRegistry_RealModeUnchanged(t *testing.T) {
+	m, err := store.DecodeManifest([]byte("schema: verdi.layout/v1\nproviders:\n  jira:\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\n"))
+	if err != nil {
+		t.Fatalf("DecodeManifest: %v", err)
+	}
+	reg := buildProviderRegistry(m)
+	p, err := reg.Provider("jira")
+	if err != nil {
+		t.Fatalf("reg.Provider(jira): %v", err)
+	}
+	if _, ok := p.(*fake.Provider); ok {
+		t.Fatal("provider registered for jira is *fake.Provider, want the real jira.Adapter when mode: is absent")
+	}
+}
+
 // TestRun_RollupDispatchesToRealVerb proves dispatch.go routes "rollup" to
 // the real implementation, matching the equivalent matrix/sync tests.
 func TestRun_RollupDispatchesToRealVerb(t *testing.T) {

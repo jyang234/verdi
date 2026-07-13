@@ -61,6 +61,52 @@ func TestDecodeManifest_Happy(t *testing.T) {
 	}
 }
 
+// TestDecodeManifest_JiraFakeMode proves providers.jira.mode: fake decodes
+// (spec/close-verb dc-2, D6-2): the config-selectable fake tracker mode that
+// lets buildProviderRegistry (rollup.go) select the in-process fake adapter
+// instead of egressing to a real Jira host, hermetically, while base_url and
+// rollup_field stay present so flipping back to real Jira is a pure config
+// change (no code path change, true-closure dc-2).
+func TestDecodeManifest_JiraFakeMode(t *testing.T) {
+	data := "schema: verdi.layout/v1\nproviders:\n  jira:\n    mode: fake\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\n"
+	m, err := DecodeManifest([]byte(data))
+	if err != nil {
+		t.Fatalf("DecodeManifest(mode: fake): %v", err)
+	}
+	if m.Providers == nil || m.Providers.Jira == nil || m.Providers.Jira.Mode != "fake" {
+		t.Fatalf("Providers.Jira = %+v, want Mode fake", m.Providers)
+	}
+	// base_url/rollup_field survive decode unchanged even under fake mode —
+	// switching back to real Jira must stay a pure config change.
+	if m.Providers.Jira.BaseURL != "https://example.atlassian.net" {
+		t.Fatalf("Providers.Jira.BaseURL = %q, want it preserved under fake mode", m.Providers.Jira.BaseURL)
+	}
+}
+
+// TestDecodeManifest_JiraModeDefaultEmpty proves mode is optional and
+// defaults to "" (the real adapter), so every pre-existing verdi.yaml
+// without a mode: key keeps behaving exactly as before this addition.
+func TestDecodeManifest_JiraModeDefaultEmpty(t *testing.T) {
+	data := "schema: verdi.layout/v1\nproviders:\n  jira:\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\n"
+	m, err := DecodeManifest([]byte(data))
+	if err != nil {
+		t.Fatalf("DecodeManifest: %v", err)
+	}
+	if m.Providers.Jira.Mode != "" {
+		t.Fatalf("Providers.Jira.Mode = %q, want empty (real adapter) when absent", m.Providers.Jira.Mode)
+	}
+}
+
+// TestDecodeManifest_JiraModeInvalid proves mode is a closed enum ("" or
+// "fake") — an unknown value fails closed rather than being silently
+// ignored or treated as real.
+func TestDecodeManifest_JiraModeInvalid(t *testing.T) {
+	data := "schema: verdi.layout/v1\nproviders:\n  jira:\n    mode: bogus\n    base_url: https://example.atlassian.net\n"
+	if _, err := DecodeManifest([]byte(data)); err == nil {
+		t.Fatal("DecodeManifest(mode: bogus): want error, got nil")
+	}
+}
+
 // TestDecodeManifest_AuditAndSpikePathsOptional proves both R4-I-10
 // additions are decode-optional: a manifest carrying neither still decodes,
 // with Audit nil and SpikePaths empty — "fails closed empty by default"
