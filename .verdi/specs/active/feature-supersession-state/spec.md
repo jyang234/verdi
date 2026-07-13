@@ -4,7 +4,7 @@ kind: spec
 title: "Feature Supersession State"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-4
 problem: { text: "a superseded spec's terminal state is not legible where an operator looks, and at the feature rung it does not exist at all. Round 5's D-12 gave the STORY rung a real terminal state — `verdi accept` flips a superseded predecessor story's `status` to `superseded` — but that flip has only ever been proven to change the frontmatter field; it has never been shown legible on the surfaces that render specs (`verdi matrix` prints no status line at all; the board renders no superseded badge; dex has latent badge CSS + a `superseded-by` backlink but no test that either renders for a spec). Worse, at the FEATURE rung there is no terminal-state mechanism whatsoever: accepting a feature v2 that carries a whole-spec `supersedes` edge to v1 prints a blast-radius label but never flips v1's status, so a superseded feature is discoverable only by consulting backlinks — the exact thing the rung-3 design set out to avoid (03 §rung 3: `superseded` is legible \"everywhere without consulting backlinks\"). 02 §Kind registry names this gap and carried the feature-predecessor terminal-state question to round 6.", anchor: "#problem" }
 outcome: { text: "a superseded spec's terminal state is legible at both rungs on every surface that renders specs. The story-rung flip is proven visible on `verdi matrix`, the board, and dex; and an equivalent feature-rung mechanism — `verdi accept` flips a superseded feature predecessor's `status` to `superseded` in the same ritual, a sanctioned status-only edit — makes a superseded feature's terminal state readable the same way, from the spec's own rendered status, without consulting backlinks.", anchor: "#outcome" }
@@ -24,6 +24,7 @@ constraints:
   - { id: co-3, text: "\"legible without consulting backlinks\" (03 §rung 3) is the operative property: the terminal state must be readable from the spec's own rendered `status` on each surface, not merely inferable from a `superseded-by` relation. The story satisfies this at both rungs on all three surfaces or it is not done", anchor: "#co-3" }
 open_questions:
   - { id: oq-1, text: "RESOLVED (owner, 2026-07-13): should a superseded feature predecessor's terminal state be a status flip (mirroring stories) or a rendered relation only? Owner chose the status flip; resolved into dc-1. The residual closed->superseded sub-case is deferred by dc-2", anchor: "#oq-1" }
+frozen: { at: 2026-07-13, commit: dab21cfcca85a497b80a1bc8be9ba7cdde856476, stub_matched: true }
 ---
 # Feature Supersession State
 
