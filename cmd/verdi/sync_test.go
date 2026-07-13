@@ -416,8 +416,9 @@ func TestRunSync_Produce_Negative_ForgeCIContextError(t *testing.T) {
 
 // TestRunSync_Produce_NoServicesDiscovered_StillSucceeds proves --produce
 // against a store with zero discoverable services (this repo's own
-// self-hosted .verdi/ store, in real life, once verdi-evidence.yml runs
-// it for real) still succeeds honestly with an empty-but-well-formed
+// self-hosted .verdi/ store, in real life, once verify.yml's own
+// `sync --produce` step runs it for real, round 6) still succeeds honestly
+// with an empty-but-well-formed
 // bundle, rather than failing with "nothing to regenerate" — hermetic:
 // DiscoverServices finding nothing means the toolchain Runner is never
 // invoked at all.

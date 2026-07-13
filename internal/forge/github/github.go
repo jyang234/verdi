@@ -88,12 +88,16 @@ type artifact struct {
 
 // FetchEvidenceBundle implements forge.Forge: a commit can carry MORE
 // THAN ONE successful workflow run — GitHub Actions runs are scoped per
-// workflow FILE (unlike GitLab, where one pipeline covers every job), so
-// once this repo runs both verify.yml and verdi-evidence.yml on the same
-// push/PR (spec/remote-and-ci), the head_sha query below returns both.
-// This tries every successful run for commit, in the order the API
-// returns them, until one actually carries the wanted artifact — it never
-// assumes the first successful run is the verdi-evidence one.
+// workflow FILE (unlike GitLab, where one pipeline covers every job), and
+// this repo has run more than one workflow against the same commit before
+// (spec/remote-and-ci's original verify.yml + verdi-evidence.yml split;
+// round 6/spec/close-verb folded the evidence-producing steps into
+// verify.yml's own job, but a manual re-run or a future second workflow
+// could still reintroduce more than one candidate run for one commit), so
+// the head_sha query below may return more than one id. This tries every
+// successful run for commit, in the order the API returns them, until one
+// actually carries the wanted artifact — it never assumes the first
+// successful run is the verdi-evidence one.
 func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (*forge.EvidenceBundle, error) {
 	runIDs, err := a.findRuns(ctx, commit)
 	if err != nil {

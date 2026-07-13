@@ -1,0 +1,27 @@
+schema: verdi.bindings/v1
+# This is the STORE-ROOT self-hosted evidence sidecar (spec/close-verb
+# ac-3, dc-1) — sibling of .verdi/, NOT nested inside any .flowmap.yaml
+# service root, because the verdi repo is not a flowmap service of itself
+# (D6-4). See cmd/verdi/selfevidence.go's package doc for the producer that
+# consumes this file: it binds `make verify`'s own pass, witnessed only by
+# having been reached as a step AFTER make verify succeeded in the SAME CI
+# job (verify.yml), never a divergent re-run.
+#
+# `spec:` names the primary/owning spec for this file's bare ac-<slug>
+# entries (03 §Declarations and binding); other self-hosted stories' ACs
+# are named via the fragment-qualified spec/<name>#<ac-id> form
+# (artifact.ResolveBindingAC) — here, remote-and-ci#ac-1, the candidate
+# real merged story close-verb's own ac-1 names as the demonstration target.
+spec: spec/close-verb
+bindings:
+  - producer: verdi-verify-behavioral
+    kind: behavioral
+    acs:
+      - ac-1
+      - ac-3
+      - "spec/remote-and-ci#ac-1"
+  - producer: verdi-verify-static
+    kind: static
+    acs:
+      - ac-3
+      - "spec/remote-and-ci#ac-1"

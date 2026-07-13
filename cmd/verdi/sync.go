@@ -166,9 +166,12 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 }
 
 // runProduce implements `verdi sync --produce` (spec/remote-and-ci dc-1):
-// the CI-provenance producer, intended to be invoked only by the
-// verdi-evidence workflow (.github/workflows/verdi-evidence.yml). It
-// assembles the derived bundle exactly like --or-regen's regeneration
+// the CI-provenance producer, intended to be invoked only by CI, strictly
+// after `make verify` has already succeeded in the same job (round 6,
+// spec/close-verb ac-3/dc-1: `.github/workflows/verify.yml` — see its own
+// header comment for why the formerly-separate verdi-evidence.yml workflow
+// was folded into this one job rather than left standalone). It assembles
+// the derived bundle exactly like --or-regen's regeneration
 // path (regenerate/regenerateServices, internal/bundle), but stamps
 // provenance.source: ci instead of local, pulling Pipeline/Job
 // identifiers from the forge's CIContext when present (03 §Evidence
@@ -211,6 +214,19 @@ func runProduce(ctx context.Context, root, commit, derivedDir string, forceLocal
 		fmt.Fprintln(deps.Stderr, "sync:", regenErr)
 		return 2
 	}
+
+	// The self-hosted evidence producer (spec/close-verb ac-3, dc-1;
+	// selfevidence.go): verdi is not a flowmap service of itself (D6-4), so
+	// regenerate() above always assembles an empty bundle for THIS repo.
+	// Reaching this line means make verify already succeeded earlier in
+	// THIS SAME CI job (see verify.yml's wiring comment) — the honest basis
+	// for the pass records this step binds, never a divergent re-run. A
+	// store with no root verdi.bindings.yaml yet is a silent no-op.
+	if err := produceSelfHostedEvidence(root, commit, prov); err != nil {
+		fmt.Fprintln(deps.Stderr, "sync:", err)
+		return 2
+	}
+
 	fmt.Fprintf(deps.Stdout, "sync: produced CI evidence bundle at %s\n", derivedDir)
 	return evaluateBundle(deps, derivedDir)
 }

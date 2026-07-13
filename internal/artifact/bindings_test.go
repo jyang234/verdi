@@ -28,6 +28,54 @@ func TestDecodeBindings_Happy(t *testing.T) {
 	}
 }
 
+// TestDecodeBindings_FragmentQualifiedAC proves a Binding.ACs entry may be a
+// spec/<name>#<ac-id> fragment ref naming a DIFFERENT spec than
+// Bindings.Spec (round-6, spec/close-verb ac-3/dc-1: 03 §Declarations and
+// binding's object-fragment disambiguation, generalized to any other spec,
+// not only "a story and its feature") — needed so the self-hosted evidence
+// producer's one bindings.yaml can bind several self-hosted stories' ACs.
+func TestDecodeBindings_FragmentQualifiedAC(t *testing.T) {
+	data := "schema: verdi.bindings/v1\nspec: spec/close-verb\nbindings:\n  - { producer: verdi-verify-behavioral, kind: behavioral, acs: [ac-1, \"spec/remote-and-ci#ac-1\"] }\n"
+	got, err := DecodeBindings([]byte(data))
+	if err != nil {
+		t.Fatalf("DecodeBindings: %v", err)
+	}
+	if len(got.Bindings) != 1 || len(got.Bindings[0].ACs) != 2 {
+		t.Fatalf("got %+v, want one binding with two ACs", got)
+	}
+	if got.Bindings[0].ACs[1] != "spec/remote-and-ci#ac-1" {
+		t.Fatalf("ACs[1] = %q, want the fragment ref preserved verbatim", got.Bindings[0].ACs[1])
+	}
+}
+
+func TestResolveBindingAC(t *testing.T) {
+	t.Run("bare ac resolves against the default spec", func(t *testing.T) {
+		specRef, acID, err := ResolveBindingAC("spec/close-verb", "ac-3")
+		if err != nil {
+			t.Fatalf("ResolveBindingAC: %v", err)
+		}
+		if specRef != "spec/close-verb" || acID != "ac-3" {
+			t.Fatalf("got (%q, %q), want (spec/close-verb, ac-3)", specRef, acID)
+		}
+	})
+
+	t.Run("fragment ref resolves against its own named spec, ignoring the default", func(t *testing.T) {
+		specRef, acID, err := ResolveBindingAC("spec/close-verb", "spec/remote-and-ci#ac-1")
+		if err != nil {
+			t.Fatalf("ResolveBindingAC: %v", err)
+		}
+		if specRef != "spec/remote-and-ci" || acID != "ac-1" {
+			t.Fatalf("got (%q, %q), want (spec/remote-and-ci, ac-1)", specRef, acID)
+		}
+	})
+
+	t.Run("malformed entry is rejected", func(t *testing.T) {
+		if _, _, err := ResolveBindingAC("spec/close-verb", "not-an-ac-or-fragment"); err == nil {
+			t.Fatal("ResolveBindingAC(malformed): want error, got nil")
+		}
+	})
+}
+
 func TestDecodeBindings_Negative(t *testing.T) {
 	cases := []struct {
 		name string
