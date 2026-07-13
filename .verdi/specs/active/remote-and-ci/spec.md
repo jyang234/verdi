@@ -4,7 +4,7 @@ kind: spec
 title: "Remote and CI"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-1
 problem: { text: "verdi has never had a remote: no origin, no forge, no CI job producing anything, so `source: ci` evidence — the only kind a gate may consume authoritatively (constitution 4, dc-1) — has never existed for any story here, and the module path is still the `github.com/OWNER/verdi` placeholder across the tree. The trust root true-closure#ac-1 depends on does not exist yet.", anchor: "#problem" }
 outcome: { text: "the module identity settles to `github.com/jyang234/verdi` end to end, a `verdi-evidence` CI workflow produces the authoritative derived bundle on the real remote, and `verdi sync` fetches `source: ci` evidence by (ref, commit) — the trust root exercised for real.", anchor: "#outcome" }
@@ -19,6 +19,7 @@ decisions:
   - { id: dc-2, text: "the module-path rename is one mechanical change (I-4's one-MR precedent for pin/shim churn): go.mod + all imports + the verdi-mcp/groundwork-mcp shims + .mcp.json, plus verdi.yaml forge:github and the .gitattributes forge token, land together", anchor: "#dc-2" }
 constraints:
   - { id: co-1, text: "no network in any test: the producer and forge fetch are exercised hermetically (fixturegit, httptest forge doubles, canned upstream JSON); only the real-remote proof run exercises the live artifact round-trip, disclosed as such", anchor: "#co-1" }
+frozen: { at: 2026-07-12, commit: 6b7b6afcf54b2fb6882076455a67a0fae99be435, stub_matched: true }
 ---
 # Remote and CI
 
