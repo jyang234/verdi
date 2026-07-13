@@ -4,7 +4,7 @@ kind: spec
 title: "True Closure"
 owners: [platform-team]
 class: feature
-status: draft
+status: accepted-pending-build
 problem: { text: "verdi's closure ritual is ratified text the binary declines to run: `verdi close` is recognized by dispatch only to answer \"not implemented (out of v0 scope)\" (I-23), so no story built against this system has ever reached a true, archived closure. Every gate proven to date — merge, lint, align — has consumed local/advisory evidence or fixture bundles; authoritative evidence has never once come from this repo's own CI, so constitution 4 (\"artifacts that gate come from trusted CI, never from the author under review\") has been asserted in prose and never actually exercised end to end. Runtime evidence, the third leg of the evidence model, has no producing mechanism at all — OQ-2 is deferred with only a decoder-level placeholder (`kind: runtime` parses; nothing ever emits or queries one). And two supersession-legibility gaps carry forward from round 5's D-12 fix pass: the story-predecessor terminal-state flip now has a scoped mechanism but no proven legibility at the surfaces that render it, and the feature-predecessor terminal-state question was explicitly deferred to this round (02 §Kind registry: \"its terminal-state question is carried to round 6\"). Taken together, the system's central promise — that what lands is in alignment with what was agreed — has never been proven past the merge gate. A merged story is not a closed story, and nothing has ever tested whether it could become one.", anchor: "#problem" }
 outcome: { text: "a story travels from accepted spec to true, archived closure on authoritative CI evidence alone, its rollup published — and every evidence kind a spec can declare has a real producing mechanism.", anchor: "#outcome" }
 acceptance_criteria:
@@ -22,6 +22,7 @@ stubs:
   - { slug: close-verb, acceptance_criteria: [ac-1, ac-2] }
   - { slug: runtime-evidence, acceptance_criteria: [ac-3] }
   - { slug: feature-supersession-state, acceptance_criteria: [ac-4] }
+frozen: { at: 2026-07-11, commit: dd871ca09001c61c28687349fce70bc48f1313cb }
 ---
 # True Closure
 
