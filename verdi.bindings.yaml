@@ -18,10 +18,23 @@ bindings:
     kind: behavioral
     acs:
       - ac-1
+      # close-verb ac-2 (its own [behavioral, attestation] AC): the closed
+      # story's rollup publishes to the tracker and reads back — proven by
+      # close_test.go / close_runtime_test.go's PublishedField assertions,
+      # part of make verify's suite. Its attestation leg is authored at
+      # .verdi/attestations/jira-verdi-2/ac-2.md.
+      - ac-2
       - ac-3
       - "spec/remote-and-ci#ac-1"
       - "spec/remote-and-ci#ac-2"
       - "spec/remote-and-ci#ac-3"
+      # spec/feature-supersession-state (true-closure#ac-4): ac-1 declares
+      # [static, behavioral], ac-2 declares [behavioral]. Behavioral leg =
+      # the accept-flip tests (TestFlipPredecessorToSuperseded_*, ritual),
+      # the matrix/dex/board render tests, and the board e2e — all under
+      # make verify.
+      - "spec/feature-supersession-state#ac-1"
+      - "spec/feature-supersession-state#ac-2"
       # spec/runtime-evidence (true-closure#ac-3): both ACs declare
       # evidence: [static, behavioral]. The behavioral leg is the
       # internal/runtime + fold + close_runtime tests (probe emits a
@@ -35,6 +48,10 @@ bindings:
     acs:
       - ac-3
       - "spec/remote-and-ci#ac-1"
+      # spec/feature-supersession-state ac-1 static leg: the flip logic and
+      # its VL-010 status-only-exception compatibility compile, vet, and
+      # lint-store clean under make verify.
+      - "spec/feature-supersession-state#ac-1"
       # spec/runtime-evidence static leg: the verdi.evidence/v1 record
       # schema and this binding are declared and strict-decoded (they
       # compile, vet, and lint-store clean under make verify), and
