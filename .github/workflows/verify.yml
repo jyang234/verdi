@@ -74,6 +74,7 @@ on:
       - ".github/workflows/**"
       - "testdata/**"
       - "scripts/**"
+      - "verdi.bindings.yaml"
   pull_request:
     paths:
       - "**.go"
@@ -84,6 +85,7 @@ on:
       - ".github/workflows/**"
       - "testdata/**"
       - "scripts/**"
+      - "verdi.bindings.yaml"
 
 jobs:
   verify:
