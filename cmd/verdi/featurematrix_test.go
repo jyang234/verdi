@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 )
 
 // v2FixtureRoot is testdata/corpus's own directory, relative to this
@@ -93,6 +97,7 @@ func TestCmdMatrix_FeatureRef_Golden(t *testing.T) {
 	}
 
 	want := `feature: spec/accepted-pending-build
+status: accepted-pending-build
 
 AC    STATUS     EVIDENCE             IMPLEMENTING STORIES                                   TEXT
 ac-1  pending    attestation:present  spec/borrower-update-api, spec/borrower-update-mobile  a borrower can update their application
@@ -205,6 +210,7 @@ func TestCmdMatrix_FeatureRef_SupersededStoryRendersTerminalMarker(t *testing.T)
 	}
 
 	want := `feature: spec/accepted-pending-build
+status: accepted-pending-build
 
 AC    STATUS     EVIDENCE             IMPLEMENTING STORIES                                                TEXT
 ac-1  pending    attestation:present  spec/borrower-update-api, spec/borrower-update-mobile [superseded]  a borrower can update their application
@@ -222,5 +228,22 @@ stub_reconciliation.blocked: true
 `
 	if stdout.String() != want {
 		t.Fatalf("matrix feature output mismatch:\n--- got ---\n%s\n--- want ---\n%s", stdout.String(), want)
+	}
+}
+
+// TestPrintFeatureMatrix_SupersededFeatureStatusLine is ac-2's feature-rung
+// own-status proof on the matrix surface: a superseded FEATURE, pointed at
+// by `verdi matrix`, announces its own terminal state directly (03 §rung 3,
+// "without consulting backlinks") — the feature-rung mirror of
+// TestCmdMatrix_StatusLine_Superseded's story-rung proof. Empty ACs/stubs
+// keep it a focused rendering unit test: the only claim is the status line.
+func TestPrintFeatureMatrix_SupersededFeatureStatusLine(t *testing.T) {
+	var buf bytes.Buffer
+	spec := &artifact.SpecFrontmatter{Status: artifact.Status("superseded")}
+	result := evidence.FeatureResult{SpecRef: "spec/legacy-feature"}
+	printFeatureMatrix(&buf, spec, result, evidence.StubReconciliation{}, nil, nil, false)
+
+	if !strings.Contains(buf.String(), "\nstatus: superseded\n") {
+		t.Fatalf("feature matrix must render the feature's own superseded status line; got:\n%s", buf.String())
 	}
 }

@@ -237,6 +237,14 @@ func foldImplementingStory(ctx context.Context, root, commit string, storySpec *
 // no change to the eligibility math computed above.
 func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededByAC map[string][]string, preview bool) {
 	fmt.Fprintf(w, "feature: %s\n", result.SpecRef)
+	// ac-2 (feature-supersession-state): the feature's own frontmatter
+	// `status`, printed unconditionally so a superseded FEATURE's terminal
+	// state is legible on this surface directly — the feature-rung mirror of
+	// printMatrix's own status line, satisfying ac-2's "every surface ... at
+	// both the story and feature rungs" (03 §rung 3, "without consulting
+	// backlinks") for a feature you point `verdi matrix` at, not only for a
+	// superseded story rendered inside a feature's fold.
+	fmt.Fprintf(w, "status: %s\n", spec.Status)
 	if preview {
 		fmt.Fprintln(w, "PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)")
 	}
