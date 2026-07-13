@@ -261,7 +261,7 @@ func writeSelfHostedEvidence(root, commit string, bySpec map[string][]artifact.E
 			return fmt.Errorf("self-hosted evidence: mkdir %s: %w", dir, err)
 		}
 		path := filepath.Join(dir, "verdicts.json")
-		existing, err := readExistingSelfHostedVerdicts(path)
+		existing, err := readExistingEvidenceRecords(path)
 		if err != nil {
 			return err
 		}
@@ -277,26 +277,32 @@ func writeSelfHostedEvidence(root, commit string, bySpec map[string][]artifact.E
 	return nil
 }
 
-// readExistingSelfHostedVerdicts reads and strict-decodes an already
-// present verdicts.json at path, if any — (nil, nil) when the file does not
-// exist yet (the ordinary first-write case).
-func readExistingSelfHostedVerdicts(path string) ([]artifact.Evidence, error) {
+// readExistingEvidenceRecords reads and strict-decodes an already present
+// verdi.evidence/v1 array file at path, if any — (nil, nil) when the file
+// does not exist yet (the ordinary first-write case). Generic over which
+// derived-tree file it reads: produceSelfHostedEvidence uses it for
+// verdicts.json, runtimeprobe.go's writeRuntimeRecord reuses it unchanged
+// for runtime.json (dc-2's sibling file) — both are the same schema, one
+// array of records (03 §Evidence records), so one reader serves both
+// producers rather than each copy-pasting its own (CLAUDE.md: shared code
+// is never copy-pasted across call sites in the same package either).
+func readExistingEvidenceRecords(path string) ([]artifact.Evidence, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("self-hosted evidence: reading %s: %w", path, err)
+		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 	var raw []json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("self-hosted evidence: unmarshaling %s: %w", path, err)
+		return nil, fmt.Errorf("unmarshaling %s: %w", path, err)
 	}
 	out := make([]artifact.Evidence, 0, len(raw))
 	for i, rm := range raw {
 		rec, err := artifact.DecodeEvidence(rm)
 		if err != nil {
-			return nil, fmt.Errorf("self-hosted evidence: %s record %d: %w", path, i, err)
+			return nil, fmt.Errorf("%s record %d: %w", path, i, err)
 		}
 		out = append(out, *rec)
 	}

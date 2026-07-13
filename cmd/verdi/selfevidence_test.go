@@ -72,9 +72,9 @@ bindings:
 func readVerdicts(t *testing.T, root, specRef, commit string) []artifact.Evidence {
 	t.Helper()
 	path := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(specRef), commit, "verdicts.json")
-	recs, err := readExistingSelfHostedVerdicts(path)
+	recs, err := readExistingEvidenceRecords(path)
 	if err != nil {
-		t.Fatalf("readExistingSelfHostedVerdicts(%s): %v", path, err)
+		t.Fatalf("readExistingEvidenceRecords(%s): %v", path, err)
 	}
 	return recs
 }

@@ -15,11 +15,18 @@ import (
 // views (derived/<key>/<commit>/views/…) and any other incidental file are
 // ignored, keeping the fetched-and-written tree bounded to what a fold or
 // sync's own evaluation reads.
+//
+// runtime.json (spec/runtime-evidence dc-2) is a sibling of verdicts.json,
+// carrying kind: runtime records a real service's scheduled probe writes
+// per owning-spec key (internal/runtime); recognizing it here is what lets
+// `verdi sync`'s forge fetch carry it through DerivedTree unchanged, same as
+// every other bundle file — no new forge-port method needed.
 var bundleFileNames = map[string]bool{
 	"verdicts.json":      true,
 	"tests.json":         true,
 	"review.json":        true,
 	"boundary-diff.json": true,
+	"runtime.json":       true,
 }
 
 // ExtractTreeFromZip reads a verdi-evidence artifact zip (shared by the
@@ -74,7 +81,7 @@ func ExtractTreeFromZip(data []byte) (DerivedTree, error) {
 	}
 
 	if len(tree) == 0 {
-		return nil, fmt.Errorf("forge: evidence bundle zip carries no recognized derived file (verdicts.json/tests.json/review.json/boundary-diff.json)")
+		return nil, fmt.Errorf("forge: evidence bundle zip carries no recognized derived file (verdicts.json/tests.json/review.json/boundary-diff.json/runtime.json)")
 	}
 	return tree, nil
 }
