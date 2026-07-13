@@ -13,9 +13,9 @@ type harness struct{ f *Forge }
 
 func (h harness) Forge() forge.Forge { return h.f }
 
-func (h harness) SeedBundle(t *testing.T, ref, commit string, bundle forge.EvidenceBundle) {
+func (h harness) SeedBundle(t *testing.T, ref, commit string, tree forge.DerivedTree) {
 	t.Helper()
-	h.f.SeedBundle(ref, commit, bundle)
+	h.f.SeedBundle(ref, commit, tree)
 }
 
 func (h harness) WantGeneratedAttribute() string { return "fake-generated" }

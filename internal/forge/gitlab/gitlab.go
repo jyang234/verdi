@@ -95,7 +95,7 @@ type job struct {
 // FetchEvidenceBundle implements forge.Forge: find the latest successful
 // pipeline for commit, find its verdi-evidence job, download and unzip
 // that job's artifact.
-func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (*forge.EvidenceBundle, error) {
+func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (forge.DerivedTree, error) {
 	pipelineID, err := a.findPipeline(ctx, commit)
 	if err != nil {
 		return nil, err
@@ -108,11 +108,11 @@ func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (
 	if err != nil {
 		return nil, err
 	}
-	bundle, err := forge.ExtractBundleFromZip(data)
+	tree, err := forge.ExtractTreeFromZip(data)
 	if err != nil {
 		return nil, fmt.Errorf("gitlab: %w", err)
 	}
-	return bundle, nil
+	return tree, nil
 }
 
 func (a *Adapter) findPipeline(ctx context.Context, commit string) (int64, error) {

@@ -98,7 +98,7 @@ type artifact struct {
 // successful run for commit, in the order the API returns them, until one
 // actually carries the wanted artifact — it never assumes the first
 // successful run is the verdi-evidence one.
-func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (*forge.EvidenceBundle, error) {
+func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (forge.DerivedTree, error) {
 	runIDs, err := a.findRuns(ctx, commit)
 	if err != nil {
 		return nil, err
@@ -117,11 +117,11 @@ func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (
 		if err != nil {
 			return nil, err
 		}
-		bundle, err := forge.ExtractBundleFromZip(data)
+		tree, err := forge.ExtractTreeFromZip(data)
 		if err != nil {
 			return nil, fmt.Errorf("github: %w", err)
 		}
-		return bundle, nil
+		return tree, nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("github: no successful workflow run for commit %s: %w", commit, forge.ErrNoBundle)

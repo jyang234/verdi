@@ -20,18 +20,28 @@ import (
 // (05 §CLI: "regenerates locally when no bundle exists").
 var ErrNoBundle = errors.New("forge: no evidence bundle available for this ref/commit")
 
-// EvidenceBundle is the CI evidence bundle FetchEvidenceBundle retrieves:
-// the raw bytes of each of the four derived-bundle files (I-8: verdi's own
-// CI job "verdi-evidence" uploads the derived/<ref-slug>/<commit>/ tree as
-// its artifact). Callers (cmd/verdi/sync.go) write these bytes straight to
-// disk under data/derived/<ref-slug>/<commit>/ — this package does not
-// decode them; that is internal/upstream's and internal/bundle's job.
-type EvidenceBundle struct {
-	Verdicts     []byte
-	Tests        []byte
-	Review       []byte
-	BoundaryDiff []byte
-}
+// DerivedTree is the verdi-evidence CI artifact's full contents: every
+// derived bundle file one (ref, commit) CI run wrote under
+// .verdi/data/derived/, keyed by path RELATIVE to that directory (e.g.
+// "spec--close-verb/7f3c2a1c.../verdicts.json"). Callers (cmd/verdi/sync.go)
+// write each entry straight back to disk under data/derived/<key> — this
+// package does not decode them; that is internal/upstream's and
+// internal/bundle's job.
+//
+// A single CI run's tree spans MORE THAN ONE key subdir — the branch-keyed
+// per-service bundle plus one per-spec subdir per self-hosted story
+// (cmd/verdi/selfevidence.go writes derived/<spec-ref-slug>/<commit>/
+// directly) — because verdi's own CI uploads the WHOLE derived/ tree
+// (verify.yml: `path: .verdi/data/derived/`), not a single
+// derived/<ref-slug>/<commit>/ leaf. That is precisely why the artifact is
+// a TREE, never a single four-file bundle: the earlier collapse-to-one-
+// bundle port shape (a) dropped every per-spec subdir the fold's readers
+// (gate/matrix/close/rollup/…, all keyed by RefSlug(spec.id)) look under,
+// so a fetched bundle was never reachable by any gate, and (b) failed
+// outright on the duplicate verdicts.json that a per-spec tree necessarily
+// carries. Preserving the tree's internal keys on write is what lets CI's
+// per-spec producer output land exactly where every reader looks.
+type DerivedTree map[string][]byte
 
 // CIInfo is what CIContext detects from the forge's own CI environment:
 // the default branch and, if the current run is building a merge/pull
@@ -62,10 +72,12 @@ type CIInfo struct {
 // Forge is the I-22 port.
 type Forge interface {
 	// FetchEvidenceBundle retrieves the latest successful verdi-evidence
-	// CI run's artifact for (ref, commit) through the forge's own API.
-	// Returns an error wrapping ErrNoBundle if no successful run exists
-	// for that (ref, commit).
-	FetchEvidenceBundle(ctx context.Context, ref, commit string) (*EvidenceBundle, error)
+	// CI run's artifact for (ref, commit) through the forge's own API and
+	// returns its full derived tree (every bundle file keyed by path
+	// relative to data/derived/, DerivedTree's doc). Returns an error
+	// wrapping ErrNoBundle if no successful run exists for that
+	// (ref, commit).
+	FetchEvidenceBundle(ctx context.Context, ref, commit string) (DerivedTree, error)
 	// GeneratedAttribute returns the forge-appropriate git-attribute
 	// token marking a path generated (02 §Repository plumbing, VL-012):
 	// "gitlab-generated" or "linguist-generated".

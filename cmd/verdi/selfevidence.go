@@ -27,28 +27,23 @@
 // because the flag was passed"): here, solely because this step in THIS
 // job, after that step, was reached.
 //
-// DIRECTORY CONVENTION — a disclosed, PRE-EXISTING finding this story
-// surfaced, not introduced by it: the regular regenerate() path
-// (sync_regen.go, invoked by both --or-regen and --produce) writes its
-// bundle to ONE branch-ref-keyed directory, derived/<ref-slug>/<commit>/
-// (01 §Directory layout: "prunes derived/<ref>/ for refs merged or
-// deleted" — <ref> is a git ref, store.RefSlug(gitRef), exactly what
-// sync.go's runSync/runProduce and baseline.go both key by) — but every
-// fold consumer this repo has (gate.go's checkNoACViolated, closuregate.go's
-// checkClosureEligible, rollup.go's runRollup, matrix.go, featurematrix.go)
-// reads from a PER-SPEC directory instead: derived/<spec-ref-slug>/<commit>/
-// (store.RefSlug(spec.ID)). These two conventions disagree: `verdi sync`'s
-// own regenerate() output is never actually reachable by any of those five
-// readers today. No existing test catches this because every one of them
-// hand-writes its fixture verdicts.json directly at the reader's own
-// (spec.ID-keyed) path rather than exercising `sync` for real end to end.
-// This producer deliberately writes to THAT convention — the one every
-// reader (including runClosureGate, reused unchanged by close.go, spec/
-// close-verb ac-1) actually consumes — so its own records are reachable at
-// all; the phase report discloses this as an invention-ledger candidate for
-// the pre-existing writer/reader mismatch, left unresolved outside this
-// producer's own narrow write path (fixing sync.go's/baseline.go's general
-// convention is a bigger, separate change this story does not attempt).
+// DIRECTORY CONVENTION — RECONCILED by true-closure. The fold's canonical
+// local key is the OWNING SPEC's ref slug, derived/<spec-ref-slug>/<commit>/
+// (store.RefSlug(spec.ID)) — what every fold consumer reads (gate.go,
+// closuregate.go, rollup.go, matrix.go, featurematrix.go, close.go) and what
+// this producer writes. The pieces that formerly disagreed are now aligned
+// with it: `verdi sync`'s forge-PULL path preserves the fetched artifact's
+// per-spec subdirs verbatim (writeDerivedTree) instead of collapsing them to
+// one branch-ref-keyed bundle, so exactly the per-spec records this producer
+// uploads in CI land back where the readers look; and baseline.go keys its
+// advisory local baseline by the spec ref too. The one convention still
+// branch-ref-keyed is regenerate()'s WHOLE-BRANCH per-service bundle
+// (sync_regen.go, the transport/gc unit, 01 §gc) — for THIS repo (no flowmap
+// services, D6-4) that bundle is always empty, so the reachable fold records
+// are solely the per-spec ones this producer writes. Per-service-spec demux
+// of a real multi-service regenerate() is the disclosed follow-up (see the
+// controller's residual-hardening note); it does not affect verdi's own
+// self-hosted closure, which folds entirely on this producer's output.
 package main
 
 import (

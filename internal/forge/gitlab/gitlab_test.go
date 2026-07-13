@@ -18,25 +18,20 @@ import (
 	"github.com/jyang234/verdi/internal/forge/forgetest"
 )
 
-// buildBundleZip zips the four bundle files under derived/<slug>/<commit>/,
-// mirroring what verdi's own CI template would produce.
-func buildBundleZip(t *testing.T, b forge.EvidenceBundle) []byte {
+// buildBundleZip zips a DerivedTree under a derived/ prefix, mirroring what
+// verdi's own CI template uploads (the whole data/derived/ subtree) — every
+// key preserved.
+func buildBundleZip(t *testing.T, tree forge.DerivedTree) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
-	files := map[string][]byte{
-		"derived/spec--x/deadbeef/verdicts.json":      b.Verdicts,
-		"derived/spec--x/deadbeef/tests.json":         b.Tests,
-		"derived/spec--x/deadbeef/review.json":        b.Review,
-		"derived/spec--x/deadbeef/boundary-diff.json": b.BoundaryDiff,
-	}
-	for name, content := range files {
-		fw, err := w.Create(name)
+	for key, content := range tree {
+		fw, err := w.Create("derived/" + key)
 		if err != nil {
-			t.Fatalf("zip.Create(%s): %v", name, err)
+			t.Fatalf("zip.Create(%s): %v", key, err)
 		}
 		if _, err := fw.Write(content); err != nil {
-			t.Fatalf("writing %s into zip: %v", name, err)
+			t.Fatalf("writing %s into zip: %v", key, err)
 		}
 	}
 	if err := w.Close(); err != nil {
@@ -192,9 +187,9 @@ type harness struct {
 
 func (h *harness) Forge() forge.Forge { return h.adapter }
 
-func (h *harness) SeedBundle(t *testing.T, ref, commit string, bundle forge.EvidenceBundle) {
+func (h *harness) SeedBundle(t *testing.T, ref, commit string, tree forge.DerivedTree) {
 	t.Helper()
-	h.srv.mu[commit] = buildBundleZip(t, bundle)
+	h.srv.mu[commit] = buildBundleZip(t, tree)
 }
 
 func (h *harness) WantGeneratedAttribute() string { return "gitlab-generated" }

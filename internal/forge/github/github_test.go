@@ -17,23 +17,20 @@ import (
 	"github.com/jyang234/verdi/internal/forge/forgetest"
 )
 
-func buildBundleZip(t *testing.T, b forge.EvidenceBundle) []byte {
+// buildBundleZip zips a DerivedTree under a derived/ prefix, the way verdi's
+// own CI uploads the whole data/derived/ subtree — every key preserved, so a
+// tree spanning multiple per-spec subdirs round-trips intact.
+func buildBundleZip(t *testing.T, tree forge.DerivedTree) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
-	files := map[string][]byte{
-		"derived/spec--x/deadbeef/verdicts.json":      b.Verdicts,
-		"derived/spec--x/deadbeef/tests.json":         b.Tests,
-		"derived/spec--x/deadbeef/review.json":        b.Review,
-		"derived/spec--x/deadbeef/boundary-diff.json": b.BoundaryDiff,
-	}
-	for name, content := range files {
-		fw, err := w.Create(name)
+	for key, content := range tree {
+		fw, err := w.Create("derived/" + key)
 		if err != nil {
-			t.Fatalf("zip.Create(%s): %v", name, err)
+			t.Fatalf("zip.Create(%s): %v", key, err)
 		}
 		if _, err := fw.Write(content); err != nil {
-			t.Fatalf("writing %s into zip: %v", name, err)
+			t.Fatalf("writing %s into zip: %v", key, err)
 		}
 	}
 	if err := w.Close(); err != nil {
@@ -206,9 +203,9 @@ func newHarnessForTest(t *testing.T) *harness {
 
 func (h *harness) Forge() forge.Forge { return h.adapter }
 
-func (h *harness) SeedBundle(t *testing.T, ref, commit string, bundle forge.EvidenceBundle) {
+func (h *harness) SeedBundle(t *testing.T, ref, commit string, tree forge.DerivedTree) {
 	t.Helper()
-	h.srv.byCommit[commit] = buildBundleZip(t, bundle)
+	h.srv.byCommit[commit] = buildBundleZip(t, tree)
 }
 
 func (h *harness) WantGeneratedAttribute() string { return "linguist-generated" }
@@ -398,11 +395,11 @@ func TestGitHub_FetchEvidenceBundle_Negative_ServerError(t *testing.T) {
 // pipeline covering every job, so the head_sha query can return several
 // runs and only one of them is verdi-evidence's.
 func TestGitHub_FetchEvidenceBundle_MultipleRuns_PicksTheOneWithTheArtifact(t *testing.T) {
-	want := forge.EvidenceBundle{
-		Verdicts:     []byte(`[]` + "\n"),
-		Tests:        []byte(`{"schema":"verdi.tests/v1","suite":"pass"}` + "\n"),
-		Review:       []byte(`[]` + "\n"),
-		BoundaryDiff: []byte(`[]` + "\n"),
+	want := forge.DerivedTree{
+		"spec--x/deadbeef/verdicts.json":      []byte(`[]` + "\n"),
+		"spec--x/deadbeef/tests.json":         []byte(`{"schema":"verdi.tests/v1","suite":"pass"}` + "\n"),
+		"spec--x/deadbeef/review.json":        []byte(`[]` + "\n"),
+		"spec--x/deadbeef/boundary-diff.json": []byte(`[]` + "\n"),
 	}
 
 	mux := http.NewServeMux()
@@ -433,8 +430,8 @@ func TestGitHub_FetchEvidenceBundle_MultipleRuns_PicksTheOneWithTheArtifact(t *t
 	if err != nil {
 		t.Fatalf("FetchEvidenceBundle: %v", err)
 	}
-	if string(got.Verdicts) != string(want.Verdicts) {
-		t.Errorf("Verdicts = %q, want %q", got.Verdicts, want.Verdicts)
+	if string(got["spec--x/deadbeef/verdicts.json"]) != string(want["spec--x/deadbeef/verdicts.json"]) {
+		t.Errorf("verdicts.json = %q, want %q", got["spec--x/deadbeef/verdicts.json"], want["spec--x/deadbeef/verdicts.json"])
 	}
 }
 
