@@ -85,6 +85,7 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doc
 <header class="page-header board-head">
 <h1>{{.Title}}</h1>
 <span class="board-mode-tag board-mode-tag--{{.Mode}}">{{.ModeLabel}}</span>
+{{if .StatusBadge}}<span class="badge badge-{{.StatusBadge}} board-status-badge" data-testid="board-status-badge">{{.StatusBadge}}</span>{{end}}
 <div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>
 </header>
 <div id="boardv2-region">
@@ -117,27 +118,48 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 	}
 
 	data := struct {
-		Name      string
-		Title     string
-		Mode      string
-		ModeLabel string
-		Region    template.HTML
-		Dialogs   template.HTML
-		StateJSON template.JS
+		Name        string
+		Title       string
+		Mode        string
+		ModeLabel   string
+		StatusBadge string
+		Region      template.HTML
+		Dialogs     template.HTML
+		StateJSON   template.JS
 	}{
-		Name:      p.Spec,
-		Title:     p.Title,
-		Mode:      string(p.Mode),
-		ModeLabel: modeStampLabels[p.Mode],
-		Region:    template.HTML(renderBoardRegion(p, git)),
-		Dialogs:   template.HTML(renderBoardDialogs(p)),
-		StateJSON: template.JS(stateJSON),
+		Name:        p.Spec,
+		Title:       p.Title,
+		Mode:        string(p.Mode),
+		ModeLabel:   modeStampLabels[p.Mode],
+		StatusBadge: terminalStatusBadge(p.Status),
+		Region:      template.HTML(renderBoardRegion(p, git)),
+		Dialogs:     template.HTML(renderBoardDialogs(p)),
+		StateJSON:   template.JS(stateJSON),
 	}
 	var buf bytes.Buffer
 	if err := boardSpecPageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("workbench: rendering board page: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// terminalStatusBadge returns the spec status to stamp as a badge on the
+// board head, or "" to suppress it. It is scoped to the terminal `superseded`
+// state (spec/feature-supersession-state ac-2; 03 §rung 3: a superseded spec's
+// terminal state must be legible on its own wall "without consulting
+// backlinks"): every other lifecycle state is already spoken by the mode stamp
+// beside it (authoring/review/read-only), and the `closed` terminal case is
+// deferred (dc-2 — a closed spec is already terminally legible). The badge
+// reuses the `.badge-superseded` vocabulary the index list and dex page carry,
+// so a spec's status reads the same on every surface that renders it. Kept a
+// single-status gate rather than a general per-status stamp: the smallest
+// reversible option ac-2 requires proven now, generalisable later without
+// churn.
+func terminalStatusBadge(status string) string {
+	if status == "superseded" {
+		return status
+	}
+	return ""
 }
 
 // renderBoardRegion renders the placards, canvas, and side rail — the
