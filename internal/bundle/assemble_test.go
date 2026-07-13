@@ -1,6 +1,7 @@
 package bundle
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -119,6 +120,20 @@ func TestAssemble_EmptyArraysNotNull(t *testing.T) {
 		if got != "[]\n" {
 			t.Errorf("%s = %q, want an empty JSON array, not null", name, got)
 		}
+	}
+
+	// tests.json's packages field is array-shaped too (TestSummary.Packages)
+	// but lives inside a caller-supplied *TestSummary rather than one of
+	// Assemble's own local slices, so it needs its own assertion: a store
+	// with zero discovered services (e.g. this repo's own self-hosted
+	// .verdi/ store, spec/remote-and-ci) has nothing to summarize into
+	// Packages at all, and that must still write [] , never null.
+	data, err := os.ReadFile(filepath.Join(dir, "tests.json"))
+	if err != nil {
+		t.Fatalf("reading tests.json: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"packages":[]`)) {
+		t.Errorf("tests.json = %s, want packages: [], not null", data)
 	}
 }
 

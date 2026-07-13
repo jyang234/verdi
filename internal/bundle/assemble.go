@@ -72,6 +72,9 @@ func Assemble(dir string, services []ServiceBundle, tests *TestSummary) error {
 	if tests == nil {
 		return fmt.Errorf("bundle: Assemble: tests summary must not be nil")
 	}
+	if tests.Packages == nil {
+		tests.Packages = []PackageResult{}
+	}
 
 	if err := writeCanon(filepath.Join(dir, "verdicts.json"), verdicts); err != nil {
 		return err

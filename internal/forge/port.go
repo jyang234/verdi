@@ -36,11 +36,27 @@ type EvidenceBundle struct {
 // CIInfo is what CIContext detects from the forge's own CI environment:
 // the default branch and, if the current run is building a merge/pull
 // request, its target branch (feeds I-14's lint baselines in a later
-// phase).
+// phase), plus the running pipeline/job identifiers (spec/remote-and-ci
+// dc-1): the `verdi sync --produce` CI-provenance producer stamps these
+// into `provenance.pipeline`/`provenance.job` (03 §Evidence records)
+// rather than inventing a second CI-detection path.
 type CIInfo struct {
 	DefaultBranch  string
 	IsMergeRequest bool
 	TargetBranch   string // "" if not in an MR/PR context
+	// Pipeline is the current CI run's identifier (GitLab: CI_PIPELINE_ID;
+	// GitHub Actions: GITHUB_RUN_ID), "" outside CI.
+	Pipeline string
+	// Job is the current CI run's job-level ordinal within Pipeline
+	// (GitLab: CI_JOB_ID, which strictly increases across a same-pipeline
+	// retry; GitHub Actions: GITHUB_RUN_ATTEMPT, which increments on a
+	// workflow re-run — GitHub exposes no job-scoped numeric id as an env
+	// var, so the run-attempt counter is the closest analogue of
+	// GitLab's monotonic per-retry job id), "" outside CI. 03 §The fold
+	// orders "current" record selection by (pipeline id, job id); I-25
+	// treats an absent Job as sorting before any present Job in the same
+	// Pipeline.
+	Job string
 }
 
 // Forge is the I-22 port.

@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -85,41 +86,63 @@ type artifact struct {
 	Name string `json:"name"`
 }
 
-// FetchEvidenceBundle implements forge.Forge: find the latest successful
-// workflow run for commit, find its verdi-evidence artifact, download and
-// unzip it.
+// FetchEvidenceBundle implements forge.Forge: a commit can carry MORE
+// THAN ONE successful workflow run — GitHub Actions runs are scoped per
+// workflow FILE (unlike GitLab, where one pipeline covers every job), so
+// once this repo runs both verify.yml and verdi-evidence.yml on the same
+// push/PR (spec/remote-and-ci), the head_sha query below returns both.
+// This tries every successful run for commit, in the order the API
+// returns them, until one actually carries the wanted artifact — it never
+// assumes the first successful run is the verdi-evidence one.
 func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (*forge.EvidenceBundle, error) {
-	runID, err := a.findRun(ctx, commit)
+	runIDs, err := a.findRuns(ctx, commit)
 	if err != nil {
 		return nil, err
 	}
-	artifactID, err := a.findArtifact(ctx, runID)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for _, runID := range runIDs {
+		artifactID, err := a.findArtifact(ctx, runID)
+		if err != nil {
+			if errors.Is(err, forge.ErrNoBundle) {
+				lastErr = err
+				continue
+			}
+			return nil, err
+		}
+		data, err := a.downloadArtifact(ctx, artifactID)
+		if err != nil {
+			return nil, err
+		}
+		bundle, err := forge.ExtractBundleFromZip(data)
+		if err != nil {
+			return nil, fmt.Errorf("github: %w", err)
+		}
+		return bundle, nil
 	}
-	data, err := a.downloadArtifact(ctx, artifactID)
-	if err != nil {
-		return nil, err
+	if lastErr == nil {
+		lastErr = fmt.Errorf("github: no successful workflow run for commit %s: %w", commit, forge.ErrNoBundle)
 	}
-	bundle, err := forge.ExtractBundleFromZip(data)
-	if err != nil {
-		return nil, fmt.Errorf("github: %w", err)
-	}
-	return bundle, nil
+	return nil, lastErr
 }
 
-func (a *Adapter) findRun(ctx context.Context, commit string) (int64, error) {
+// findRuns returns every successful workflow run's id for commit, in the
+// order GitHub's API lists them.
+func (a *Adapter) findRuns(ctx context.Context, commit string) ([]int64, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/actions/runs?head_sha=%s&status=success", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, commit)
 	var resp runsResponse
 	if err := a.getJSON(ctx, url, &resp); err != nil {
-		return 0, err
+		return nil, err
 	}
+	var ids []int64
 	for _, r := range resp.WorkflowRuns {
 		if r.Conclusion == "success" {
-			return r.ID, nil
+			ids = append(ids, r.ID)
 		}
 	}
-	return 0, fmt.Errorf("github: no successful workflow run for commit %s: %w", commit, forge.ErrNoBundle)
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("github: no successful workflow run for commit %s: %w", commit, forge.ErrNoBundle)
+	}
+	return ids, nil
 }
 
 func (a *Adapter) findArtifact(ctx context.Context, runID int64) (int64, error) {
@@ -553,12 +576,24 @@ func (a *Adapter) GeneratedAttribute() string { return "linguist-generated" }
 // limitation — GitHub does not expose this without an API call this
 // package deliberately avoids making from CIContext, which must stay a
 // pure, offline env-var read).
+//
+// Pipeline reads GITHUB_RUN_ID (a unique id per workflow run — GitHub
+// Actions' nearest analogue of GitLab's pipeline id). Job reads
+// GITHUB_RUN_ATTEMPT rather than GITHUB_JOB: GITHUB_JOB is the constant
+// job-key string from the workflow YAML (e.g. "verdi-evidence") and does
+// not change across a re-run, so it cannot order retries; GITHUB_RUN_ATTEMPT
+// increments by 1 each time a run is re-run and is GitHub's closest
+// analogue of GitLab's monotonically-increasing per-retry CI_JOB_ID (03
+// §The fold's (pipeline id, job id) ordering, I-25) — a disclosed choice,
+// since GitHub exposes no job-scoped numeric id as an env var at all.
 func (a *Adapter) CIContext(ctx context.Context) (forge.CIInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return forge.CIInfo{}, err
 	}
 	info := forge.CIInfo{
 		DefaultBranch: a.cfg.Getenv("VERDI_GITHUB_DEFAULT_BRANCH"),
+		Pipeline:      a.cfg.Getenv("GITHUB_RUN_ID"),
+		Job:           a.cfg.Getenv("GITHUB_RUN_ATTEMPT"),
 	}
 	if a.cfg.Getenv("GITHUB_EVENT_NAME") == "pull_request" {
 		info.IsMergeRequest = true
