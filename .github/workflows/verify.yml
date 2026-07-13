@@ -23,11 +23,34 @@
 # that runs `make verify`; pages.yml only builds the dex site (no lint), so
 # it needs no linter. golangci-lint's version must stay in lockstep with
 # Makefile's GOLANGCI_LINT_VERSION.
+#
+# Phase 4 (spec-only vs code CI differentiation): path-filtered to code
+# paths only — a spec/doc-only PR touches none of these and gets
+# spec-gate.yml's fast check instead, never full `make verify`; a PR
+# touching both gets both workflows, since this filter still matches.
 name: verify
 
 on:
   push:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "e2e/**"
+      - ".github/workflows/**"
+      - "testdata/**"
+      - "scripts/**"
   pull_request:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "e2e/**"
+      - ".github/workflows/**"
+      - "testdata/**"
+      - "scripts/**"
 
 jobs:
   verify:
