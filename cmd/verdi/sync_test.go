@@ -10,8 +10,11 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/evidence"
 	forgepkg "github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
 )
 
@@ -339,11 +342,13 @@ func TestRunSync_Produce_Negative_RefusesOutsideCI(t *testing.T) {
 	}
 }
 
-// TestRunSync_Produce_ForceLocalOverride_ProceedsWithDisclosure proves
-// --force-local lets --produce run outside CI for local testing, but
-// prints a disclosed, NON-AUTHORITATIVE warning (mirroring rollup's
-// --force-local precedent, I-32) rather than proceeding silently.
-func TestRunSync_Produce_ForceLocalOverride_ProceedsWithDisclosure(t *testing.T) {
+// TestRunSync_Produce_ForceLocalOverride_StampsSourceLocal proves
+// --force-local lets --produce run outside CI for local testing, prints a
+// disclosed NON-AUTHORITATIVE warning (mirroring rollup's --force-local
+// precedent, I-32), AND — the true-closure fix — stamps the records
+// source:LOCAL, never source:ci: no local invocation may emit an
+// authoritative record, so a fabricated bundle can never fold as trusted.
+func TestRunSync_Produce_ForceLocalOverride_StampsSourceLocal(t *testing.T) {
 	t.Setenv("CI", "")
 	t.Setenv("GITHUB_ACTIONS", "")
 	root, deps := buildProduceDeps(t)
@@ -358,9 +363,12 @@ func TestRunSync_Produce_ForceLocalOverride_ProceedsWithDisclosure(t *testing.T)
 	}
 
 	got := readProducedVerdicts(t, root)
+	if len(got) == 0 {
+		t.Fatal("expected produced records to assert their provenance on")
+	}
 	for i, r := range got {
-		if r.Provenance.Source != artifact.SourceCI {
-			t.Errorf("record %d provenance.source = %q, want ci even under --force-local (the stamp is still source: ci; only the disclosure differs)", i, r.Provenance.Source)
+		if r.Provenance.Source != artifact.SourceLocal {
+			t.Errorf("record %d provenance.source = %q, want local under --force-local (only a genuine CI run may stamp source:ci, true-closure)", i, r.Provenance.Source)
 		}
 	}
 }
@@ -416,8 +424,9 @@ func TestRunSync_Produce_Negative_ForgeCIContextError(t *testing.T) {
 
 // TestRunSync_Produce_NoServicesDiscovered_StillSucceeds proves --produce
 // against a store with zero discoverable services (this repo's own
-// self-hosted .verdi/ store, in real life, once verdi-evidence.yml runs
-// it for real) still succeeds honestly with an empty-but-well-formed
+// self-hosted .verdi/ store, in real life, once verify.yml's own
+// `sync --produce` step runs it for real, round 6) still succeeds honestly
+// with an empty-but-well-formed
 // bundle, rather than failing with "nothing to regenerate" — hermetic:
 // DiscoverServices finding nothing means the toolchain Runner is never
 // invoked at all.
@@ -464,11 +473,13 @@ func TestRunSync_Produce_NoServicesDiscovered_StillSucceeds(t *testing.T) {
 func TestRunSync_CI_PullsBundle(t *testing.T) {
 	root := buildTestStore(t)
 	f := fake.New()
-	f.SeedBundle(testRef, testCommit, forgepkg.EvidenceBundle{
-		Verdicts:     readCannedFile(t, bundleGoldenDir, "verdicts.json"),
-		Tests:        readCannedFile(t, bundleGoldenDir, "tests.json"),
-		Review:       readCannedFile(t, bundleGoldenDir, "review.json"),
-		BoundaryDiff: readCannedFile(t, bundleGoldenDir, "boundary-diff.json"),
+	// The fetched artifact is the whole derived subtree CI uploaded, keyed
+	// relative to data/derived/ — here the per-spec bundle for stale-decline.
+	f.SeedBundle(testRef, testCommit, forgepkg.DerivedTree{
+		"spec--stale-decline/" + testCommit + "/verdicts.json":      readCannedFile(t, bundleGoldenDir, "verdicts.json"),
+		"spec--stale-decline/" + testCommit + "/tests.json":         readCannedFile(t, bundleGoldenDir, "tests.json"),
+		"spec--stale-decline/" + testCommit + "/review.json":        readCannedFile(t, bundleGoldenDir, "review.json"),
+		"spec--stale-decline/" + testCommit + "/boundary-diff.json": readCannedFile(t, bundleGoldenDir, "boundary-diff.json"),
 	})
 
 	var stdout, stderr bytes.Buffer
@@ -493,6 +504,135 @@ func TestRunSync_CI_PullsBundle(t *testing.T) {
 	want := readCannedFile(t, bundleGoldenDir, "verdicts.json")
 	if string(data) != string(want) {
 		t.Errorf("materialized verdicts.json (source: ci pull) differs from golden")
+	}
+}
+
+// TestRunSync_CIFetch_ReachableByReaderFold is the true-closure keying
+// regression test (Part 1's "B" test): a bundle FETCHED through the forge
+// port and written by `verdi sync` — pulled while checked out on a GENUINE
+// git branch whose slug differs from the spec ref — must land at exactly the
+// per-spec key every fold reader looks under, and a reader fold (the exact
+// evidence.LoadRecords + evidence.Fold every gate wraps) must reach it and
+// fold the story to eligible.
+//
+// Before the fix this could never pass: sync wrote the fetched bundle to
+// derived/RefSlug(gitRef)/ (here build--close-fixture) while readers read
+// derived/RefSlug(spec.id)/ (spec--close-fixture) — disjoint keys — and the
+// port collapsed the multi-verdicts.json artifact to a single bundle, or
+// errored on the duplicate.
+func TestRunSync_CIFetch_ReachableByReaderFold(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	const specRef = "spec/close-fixture"
+
+	// The authoritative (source: ci) records a genuine verdi-evidence CI
+	// run would have produced and uploaded, keyed per spec — assembled
+	// through the real self-hosted producer path so they are byte-for-byte
+	// what CI serves.
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "913", Job: "7", Commit: repo.Head}
+	bySpec, err := selfHostedEvidence(repo.Dir, prov)
+	if err != nil {
+		t.Fatalf("selfHostedEvidence: %v", err)
+	}
+	if len(bySpec[specRef]) == 0 {
+		t.Fatalf("fixture produced no records for %s (bindings: %v)", specRef, bySpec)
+	}
+
+	// Build the derived tree exactly as CI uploads it: one per-spec subdir
+	// per bound spec (keyed by spec ref) PLUS a branch-keyed whole-branch
+	// bundle. The branch ref is deliberately distinct from every spec ref.
+	branchRef := "build/close-fixture"
+	tree := forgepkg.DerivedTree{
+		store.RefSlug(branchRef) + "/" + repo.Head + "/verdicts.json": []byte("[]\n"),
+	}
+	for sref, recs := range bySpec {
+		data, err := canonjson.Marshal(recs)
+		if err != nil {
+			t.Fatalf("marshaling %s records: %v", sref, err)
+		}
+		tree[store.RefSlug(sref)+"/"+repo.Head+"/verdicts.json"] = data
+	}
+
+	f := fake.New()
+	f.SeedBundle(branchRef, repo.Head, tree)
+	deps := syncDeps{
+		Runner: upstream.NewFakeRunner(), // never called: the CI-pull path never execs
+		Forge:  f,
+		GoTest: fakeGoTest{},
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	}
+
+	if code := runSync(ctx, repo.Dir, branchRef, repo.Head, false, false, false, deps); code != 0 {
+		t.Fatalf("runSync(fetch) exit = %d, want 0; stderr=%s", code, deps.Stderr.(*bytes.Buffer).String())
+	}
+
+	// (1) The per-spec records landed at the READER key, not the branch key.
+	readerRoot := filepath.Join(repo.Dir, ".verdi", "data", "derived", store.RefSlug(specRef))
+	if _, err := os.Stat(filepath.Join(readerRoot, repo.Head, "verdicts.json")); err != nil {
+		t.Fatalf("fetched per-spec bundle did not land at the reader key %s: %v", readerRoot, err)
+	}
+
+	// (2) A reader fold reaches those records and folds the story eligible.
+	spec, _ := readSpec(t, repo.Dir, "close-fixture")
+	records, err := evidence.LoadRecords(ctx, repo.Dir, readerRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("LoadRecords at the reader key: %v", err)
+	}
+	result, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: false, StoreRoot: repo.Dir, StorySlug: store.RefSlug(spec.Story)})
+	if err != nil {
+		t.Fatalf("Fold: %v", err)
+	}
+	if !result.Eligible {
+		t.Errorf("reader fold over the forge-fetched bundle: eligible=false, want true (loaded %d authoritative records) — the pulled evidence was NOT reachable by the fold", len(records))
+	}
+}
+
+// TestRunSync_ForceLocalRecords_IgnoredByAuthoritativeFold proves Part 2's
+// trust floor with a witness: records a local (--force-local) --produce run
+// wrote are stamped source: local and are therefore INVISIBLE to an
+// authoritative fold (Preview false) — only a --preview fold sees them. A
+// locally fabricated bundle can never fold as trusted.
+func TestRunSync_ForceLocalRecords_IgnoredByAuthoritativeFold(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	const specRef = "spec/close-fixture"
+
+	// A local --produce run stamps source: local (Part 2). Exercise that
+	// exact stamp via the producer with a local provenance.
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceLocal, Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence(local): %v", err)
+	}
+
+	spec, _ := readSpec(t, repo.Dir, "close-fixture")
+	derivedRoot := filepath.Join(repo.Dir, ".verdi", "data", "derived", store.RefSlug(specRef))
+	records, err := evidence.LoadRecords(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("LoadRecords: %v", err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected the local records to be on disk (LoadRecords returns both sources)")
+	}
+
+	// Authoritative fold (Preview false): the source: local records are
+	// ignored, so the story cannot be eligible from them.
+	auth, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: false, StoreRoot: repo.Dir, StorySlug: store.RefSlug(spec.Story)})
+	if err != nil {
+		t.Fatalf("authoritative Fold: %v", err)
+	}
+	if auth.Eligible {
+		t.Error("authoritative fold folded local (advisory) records as evidence — the trust boundary leaked")
+	}
+
+	// Preview fold: the same advisory records ARE folded in, proving they
+	// were written correctly and are only gated by provenance, not absent.
+	preview, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: true, StoreRoot: repo.Dir, StorySlug: store.RefSlug(spec.Story)})
+	if err != nil {
+		t.Fatalf("preview Fold: %v", err)
+	}
+	if !preview.Eligible {
+		t.Errorf("preview fold: eligible=false, want true (the advisory records should satisfy the ACs under --preview)")
 	}
 }
 
@@ -605,7 +745,7 @@ func TestRunSync_Negative_ForgeError(t *testing.T) {
 // treats that as operational regardless of --or-regen.
 type erroringForge struct{}
 
-func (erroringForge) FetchEvidenceBundle(ctx context.Context, ref, commit string) (*forgepkg.EvidenceBundle, error) {
+func (erroringForge) FetchEvidenceBundle(ctx context.Context, ref, commit string) (forgepkg.DerivedTree, error) {
 	return nil, errors.New("forge: simulated transport failure")
 }
 func (erroringForge) GeneratedAttribute() string { return "x-generated" }

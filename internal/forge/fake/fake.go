@@ -16,7 +16,7 @@ import (
 type Forge struct {
 	mu sync.Mutex
 
-	bundles   map[string]forge.EvidenceBundle
+	bundles   map[string]forge.DerivedTree
 	attribute string
 	ci        forge.CIInfo
 	openMRs   map[string][]forge.OpenMR    // targetBranch -> open MRs
@@ -31,7 +31,7 @@ type Forge struct {
 // returns "fake-generated", CIContext returns a zero CIInfo, no open MRs.
 func New() *Forge {
 	return &Forge{
-		bundles:    make(map[string]forge.EvidenceBundle),
+		bundles:    make(map[string]forge.DerivedTree),
 		attribute:  "fake-generated",
 		openMRs:    make(map[string][]forge.OpenMR),
 		files:      make(map[string]map[string][]byte),
@@ -43,11 +43,13 @@ func New() *Forge {
 
 func bundleKey(ref, commit string) string { return ref + "@" + commit }
 
-// SeedBundle makes FetchEvidenceBundle(ref, commit) succeed with bundle.
-func (f *Forge) SeedBundle(ref, commit string, bundle forge.EvidenceBundle) {
+// SeedBundle makes FetchEvidenceBundle(ref, commit) succeed with tree — the
+// derived subtree a real CI run would have uploaded for (ref, commit),
+// keyed by path relative to data/derived/.
+func (f *Forge) SeedBundle(ref, commit string, tree forge.DerivedTree) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.bundles[bundleKey(ref, commit)] = bundle
+	f.bundles[bundleKey(ref, commit)] = tree
 }
 
 // SetGeneratedAttribute overrides GeneratedAttribute's return value.
@@ -65,18 +67,24 @@ func (f *Forge) SetCIContext(info forge.CIInfo) {
 }
 
 // FetchEvidenceBundle implements forge.Forge.
-func (f *Forge) FetchEvidenceBundle(ctx context.Context, ref, commit string) (*forge.EvidenceBundle, error) {
+func (f *Forge) FetchEvidenceBundle(ctx context.Context, ref, commit string) (forge.DerivedTree, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	b, ok := f.bundles[bundleKey(ref, commit)]
+	tree, ok := f.bundles[bundleKey(ref, commit)]
 	if !ok {
 		return nil, fmt.Errorf("fake: no bundle seeded for ref %q commit %q: %w", ref, commit, forge.ErrNoBundle)
 	}
-	return &b, nil
+	// Return an independent copy so a caller mutating the map cannot
+	// corrupt the fake's seeded state.
+	out := make(forge.DerivedTree, len(tree))
+	for k, v := range tree {
+		out[k] = v
+	}
+	return out, nil
 }
 
 // GeneratedAttribute implements forge.Forge.

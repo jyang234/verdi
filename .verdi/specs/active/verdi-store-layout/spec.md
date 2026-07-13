@@ -96,6 +96,18 @@ Notes:
   mapped to `--` and every remaining byte outside `[a-z0-9._-]` mapped to
   `-`. Two refs that collide after mapping are a hard error naming both —
   never a silent merge. `feature/stale-decline` → `feature--stale-decline`.
+  **Which ref it is depends on the bundle (round 6; 08 §Round 6).** A
+  whole-branch or per-service regeneration bundle is keyed by the **git
+  ref** it was produced on — the transport and gc unit (§gc's
+  merged/deleted-ref pruning applies to these). The **per-spec evidence
+  records the fold consumes** are keyed by the **owning spec's ref**
+  (`RefSlug(spec.id)`): the fold accumulates a story's records across every
+  branch and commit that ever produced evidence for it, so a git-ref key
+  would scatter records the fold must see together. `verdi sync` fetches the
+  per-(git-ref, commit) `verdi-evidence` artifact and preserves its internal
+  per-spec keys on write, so CI's per-spec producer output lands exactly
+  where the fold's readers look; gc of per-spec dirs follows the owning
+  spec's active/archive lifecycle, not git-ref merge detection.
 - Flowmap and groundwork artifacts (`.flowmap.yaml`, `policy.json`, goldens,
   boundary contracts) stay in their service directories. The store **reads
   them in place** and never relocates them. The index unifies; the layout does

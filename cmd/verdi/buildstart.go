@@ -133,7 +133,7 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 		return 2
 	}
 
-	regenerateBaseline(ctx, root, branch, commit, spec, deps, "build start", stderr)
+	regenerateBaseline(ctx, root, commit, spec, deps, "build start", stderr)
 
 	fmt.Fprintf(stdout, "build start: created branch %s from %s (status: accepted-pending-build)\n", branch, spec.ID)
 	return 0

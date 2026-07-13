@@ -28,6 +28,39 @@
 # paths only — a spec/doc-only PR touches none of these and gets
 # spec-gate.yml's fast check instead, never full `make verify`; a PR
 # touching both gets both workflows, since this filter still matches.
+#
+# Round 6 (spec/close-verb ac-3, dc-1): this job now ALSO does what the
+# formerly-separate verdi-evidence.yml workflow did (produce + upload the
+# "verdi-evidence" artifact), folded in as the LAST two steps below, after
+# `./.build/verdi lint`. Why folded in rather than left as its own workflow:
+#
+#   - The self-hosted evidence producer (cmd/verdi/selfevidence.go) binds
+#     verdi's own make-verify outcome as static/behavioral evidence, and its
+#     honesty rests entirely on being invoked strictly AFTER `make verify`
+#     already exited 0 in the SAME job — never a second, independent
+#     make-verify run that could disagree with the real (blocking) gate. A
+#     separate workflow either re-runs make verify itself (a forbidden
+#     divergent re-run — see selfevidence.go's package doc) or requires
+#     fragile cross-workflow signaling (workflow_run, artifact hand-off)
+#     just to learn "did the other workflow's make verify pass yet".
+#   - Two workflows both uploading an artifact literally named
+#     "verdi-evidence" for the same commit is itself ambiguous:
+#     internal/forge/github's FetchEvidenceBundle tries every successful run
+#     for a commit IN API ORDER until one carries that artifact name — with
+#     two candidates it would silently pick whichever the API happens to
+#     list first, not "the real one".
+#
+# Disclosed consequence (a deviation from remote-and-ci's original
+# two-workflow delivery, flagged for `verdi align`/`verdi accept`
+# disposition): evidence production is now path-filtered exactly like this
+# job (verify.yml's own `paths:` above), not unconditional on every push the
+# way the old verdi-evidence.yml was. This repo has no flowmap services
+# (D6-4) — the self-hosted records are the ONLY evidence content this
+# store's bundle has ever carried — and they are inherently code-outcome
+# scoped, so a doc/spec-only commit producing no fresh evidence is honest,
+# not a regression: the fold's ancestor-based "current" rule (03 §The fold)
+# means an earlier code commit's evidence stays valid until a newer one
+# supersedes it. verdi-evidence.yml is retired; its content lives here now.
 name: verify
 
 on:
@@ -92,3 +125,10 @@ jobs:
       - run: make verify
       - run: go build -o .build/verdi ./cmd/verdi
       - run: ./.build/verdi lint
+      - name: "Produce the CI-provenance evidence bundle (source: ci), incl. verdi's own self-hosted static/behavioral evidence"
+        run: ./.build/verdi sync --produce
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verdi-evidence
+          path: .verdi/data/derived/
+          if-no-files-found: error
