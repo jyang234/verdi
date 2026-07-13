@@ -307,20 +307,36 @@ func TestRunClose_NotEligible_ExitsOneWithNoSideEffects(t *testing.T) {
 	}
 }
 
-// TestRunClose_FeatureClass_NotYetImplemented proves feature closure is a
-// clear, honest "not yet" (exit 2), never a silent no-op or a lie.
-func TestRunClose_FeatureClass_NotYetImplemented(t *testing.T) {
+// TestRunClose_FeatureClass_DispatchesToFeatureClosure proves runClose no
+// longer answers a feature-class target with I-23's old "not yet
+// implemented" stub (superseded now that closefeature.go completes
+// spec/close-verb's deferred feature half) — it reaches the REAL feature
+// closure gate instead. buildCloseFixtureRepo's loan-mgmt feature has one
+// implementing story (close-fixture, via its own implements edge into
+// loan-mgmt#ac-1) that is still accepted-pending-build, not closed, so the
+// feature gate's "every implementing story closed" condition fails and
+// closure is refused (exit 1) — never the old exit-2 "not yet implemented"
+// operational error. The full happy/negative feature-closure ritual is
+// proven end to end in closefeature_test.go; this test only pins that
+// close.go's dispatch is wired to it.
+func TestRunClose_FeatureClass_DispatchesToFeatureClosure(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
-	deps := closeDeps{Forge: forgefake.New(), Registry: fake.New()}
+	deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
 
 	var stdout, stderr bytes.Buffer
 	got := runClose(ctx, repo.Dir, "spec/loan-mgmt", &store.Manifest{}, deps, &stdout, &stderr)
-	if got != 2 {
-		t.Fatalf("runClose(feature spec) = %d, want 2; stderr=%s", got, stderr.String())
+	if got != 1 {
+		t.Fatalf("runClose(feature spec) = %d, want 1 (feature closure gate refused, not an operational error); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "not yet implemented") {
-		t.Fatalf("stderr = %q, want it to say feature closure is not yet implemented", stderr.String())
+	if strings.Contains(stderr.String(), "not yet implemented") {
+		t.Fatalf("stderr = %q, the old not-yet-implemented refusal must be gone now that feature closure is real", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "closure(feature):") {
+		t.Fatalf("stdout = %q, want it to show the real feature closure gate's conditions", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "loan-mgmt")); !os.IsNotExist(err) {
+		t.Fatal("specs/archive/loan-mgmt should not exist after a refused feature closure")
 	}
 }
 
