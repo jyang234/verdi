@@ -142,6 +142,56 @@ func TestVL010_FrozenStampStrippedAndEdited(t *testing.T) {
 	}
 }
 
+// vl010FeaturePredecessorBaseSpec mirrors vl010SupersededBaseSpec exactly in
+// shape (frozen, accepted-pending-build, class: feature) but is named and
+// scoped explicitly for round 6's ac-1 (feature-supersession-state): this
+// rule is class-agnostic (it diffs raw frontmatter lines and never inspects
+// `class:`), so the SAME exception TestVL010_StatusOnlySupersededFlipAllowed
+// already proves for the rung-3 story flip also, unmodified, admits ac-1's
+// feature-predecessor flip (accept.go's flipPredecessorToSuperseded, shared
+// by both call sites). This fixture/test pair exists to make that
+// class-agnostic coverage explicit and traceable to ac-1, not because VL-010
+// needed any change.
+const vl010FeaturePredecessorBaseSpec = `---
+id: spec/vl-010-feature-predecessor
+kind: spec
+class: feature
+title: "VL-010: feature predecessor superseded flip"
+status: accepted-pending-build
+owners: [platform-team]
+story: jira:LOAN-0015
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+---
+# VL-010: feature predecessor superseded flip
+`
+
+// TestVL010_FeaturePredecessorSupersededFlipAllowed proves ac-1's
+// (feature-supersession-state) own diff shape — accept.go's
+// flipPredecessorToSuperseded status-only-flipping a FEATURE-class
+// predecessor to `superseded` — is admitted by the SAME D-12 exception
+// TestVL010_StatusOnlySupersededFlipAllowed proves for a story predecessor:
+// VL-010 never inspects `class:`, so no rule change was needed here, only
+// this explicit proof.
+func TestVL010_FeaturePredecessorSupersededFlipAllowed(t *testing.T) {
+	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-feature-predecessor/spec.md", vl010FeaturePredecessorBaseSpec)
+	repo := buildLintRepo(t, beforeDir)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	after := strings.Replace(vl010FeaturePredecessorBaseSpec, "status: accepted-pending-build", "status: superseded", 1)
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-feature-predecessor", "spec.md")
+	writeTestFile(t, specPath, after)
+	commitAll(t, repo.Dir, "supersede feature predecessor flip (ac-1)")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-010" {
+			t.Fatalf("VL-010 fired on a status-only feature-predecessor superseded flip (ac-1): %s", f.String())
+		}
+	}
+}
+
 // vl010ClosedMoveBaseSpec is a frozen, accepted-pending-build spec used by
 // round-6's closed-flip-within-archive-move exception tests (D6-11). Feature
 // class (grandfathered — no problem/outcome required) keeps the fixture

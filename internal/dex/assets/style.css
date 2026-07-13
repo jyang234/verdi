@@ -1120,6 +1120,14 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .board-mode-tag--review { color: var(--authored); border-color: var(--authored); }
 .board-mode-tag--readonly { color: var(--frozen); border-color: var(--frozen); }
 
+/* the terminal-status badge on the board head: a superseded spec's own
+   `superseded` status made legible on its wall (spec/feature-supersession-
+   state ac-2), in the same badge vocabulary the index and dex pages carry so
+   status reads identically on every surface. Set just off square so it joins
+   the murder board's stamped family beside the mode tag, without taking on the
+   heavier rubber-stamp border of its own. */
+.board-status-badge { align-self: center; transform: rotate(-0.7deg); }
+
 /* the case file: problem → outcome as ONE header lockup — the folder
    the wall opens with. Problem wears the violated ink, outcome the
    evidenced one; the arrow between them is the arc the wall below

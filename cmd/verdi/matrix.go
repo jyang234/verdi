@@ -125,16 +125,22 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	printMatrix(stdout, result, preview)
+	printMatrix(stdout, result, spec.Status, preview)
 	return 0
 }
 
 // printMatrix renders result as a per-AC table plus the story eligibility
-// line. preview only controls the banner — Fold already decided what's in
-// scope.
-func printMatrix(w io.Writer, result evidence.StoryResult, preview bool) {
+// line. status is the resolved spec's own frontmatter `status` (ac-2,
+// feature-supersession-state): printed unconditionally so a superseded (or
+// any other) terminal state is legible on this surface directly — 03
+// §rung 3's "everywhere without consulting backlinks" property — rather
+// than only inferable by opening the raw spec or chasing a
+// `superseded-by` backlink. preview only controls the banner — Fold
+// already decided what's in scope.
+func printMatrix(w io.Writer, result evidence.StoryResult, status artifact.Status, preview bool) {
 	fmt.Fprintf(w, "story: %s\n", result.Story)
 	fmt.Fprintf(w, "spec:  %s\n", result.SpecRef)
+	fmt.Fprintf(w, "status: %s\n", status)
 	if preview {
 		fmt.Fprintln(w, "PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)")
 	}

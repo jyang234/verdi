@@ -165,6 +165,7 @@ func TestCmdMatrix_Golden(t *testing.T) {
 
 	want := `story: jira:LOAN-1482
 spec:  spec/stale-decline
+status: accepted-pending-build
 
 AC    STATUS     EVIDENCE                      TEXT
 ac-1  evidenced  static:pass                   static obligation holds for the retry path
@@ -201,6 +202,7 @@ func TestCmdMatrix_RoundFourStory_RendersStoryFold(t *testing.T) {
 
 	want := `story: jira:LOAN-1482
 spec:  spec/borrower-update-api
+status: accepted-pending-build
 
 AC    STATUS     EVIDENCE                      TEXT
 ac-1  no-signal  static:none; behavioral:none  PUT /applications/:id/update returns 200 with the new state
@@ -237,6 +239,7 @@ func TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords(t *testing.T) {
 
 	wantPreview := `story: jira:LOAN-1482
 spec:  spec/stale-decline
+status: accepted-pending-build
 PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)
 
 AC    STATUS     EVIDENCE                      TEXT
@@ -278,6 +281,59 @@ story.eligible: false
 	}
 	if diffCount != 1 {
 		t.Fatalf("expected exactly 1 differing row (ac-3), got %d", diffCount)
+	}
+}
+
+// matrixSupersededStorySpecMD is a minimal frozen, superseded spec fixture
+// (ac-2, feature-supersession-state): grandfathered class: feature shape (no
+// problem/outcome required, mirroring accept_test.go's own
+// alreadyAcceptedSpecMD) so it folds through the story-level path
+// (printMatrix), proving the story-rung `status:` line hermetically rather
+// than depending on this meta-repo's own real, evolving spec/disclosure-seam
+// corpus data as a test fixture — the same honest, smallest-reversible-scope
+// choice dc-4 makes for the feature rung, applied here to the story rung's
+// own proof.
+const matrixSupersededStorySpecMD = `---
+id: spec/superseded-story-fixture
+kind: spec
+title: "Superseded story fixture"
+owners: [platform-team]
+class: feature
+status: superseded
+story: jira:LOAN-9000
+acceptance_criteria:
+  - { id: ac-1, text: "x", evidence: [static] }
+frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
+---
+# Superseded story fixture
+`
+
+// TestCmdMatrix_StatusLine_Superseded proves ac-2/dc-3's story-rung fix:
+// `verdi matrix` now prints the resolved spec's own `status:` line, so a
+// superseded spec's terminal state is announced directly on this surface —
+// closing the exact blindness `verdi matrix spec/disclosure-seam` (this
+// corpus's real superseded story) exhibited before this story (no status
+// line at all, 03 §rung 3's "legible ... without consulting backlinks").
+func TestCmdMatrix_StatusLine_Superseded(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml": phase7ManifestYAML,
+				".verdi/specs/active/superseded-story-fixture/spec.md": matrixSupersededStorySpecMD,
+			},
+			Message: "init store with a superseded spec",
+		},
+	})
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runMatrixForTest(t, []string{"spec/superseded-story-fixture"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdMatrix exit = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	want := "story: jira:LOAN-9000\nspec:  spec/superseded-story-fixture\nstatus: superseded\n"
+	if !strings.HasPrefix(stdout.String(), want) {
+		t.Fatalf("matrix output = %q, want it to start with %q (the status: line announcing the terminal state)", stdout.String(), want)
 	}
 }
 

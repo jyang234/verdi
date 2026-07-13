@@ -223,6 +223,21 @@ export const INSTANTIATE_SLUG = "borrower-update-audit-log";
 // (in this repo's own .verdi store) — asserted only through the Go
 // render tests; the e2e store's stub fixture is FEATURE_SPEC above.
 
+// ---------------------------------------------------------------------------
+// Supersession terminal state (spec/feature-supersession-state ac-2)
+// ---------------------------------------------------------------------------
+
+// A superseded FEATURE predecessor (rung 4) and a superseded STORY
+// predecessor (rung 3), committed on main via testdata/dexoverlay
+// (provision.go) — so their boards render READ-ONLY. Each is the superseded
+// predecessor of a v2 successor that carries the `supersedes` edge, and each
+// wears the terminal `superseded` status badge on its board head (and, on
+// dex, the same `.badge-superseded` status badge). The Go build/render tests
+// prove the same committed fixtures; these constants drive the Playwright
+// proof of the board surface.
+export const SUPERSEDED_FEATURE_SPEC = "rate-lock";
+export const SUPERSEDED_STORY_SPEC = "escrow-notify";
+
 // data-testid helpers for the scoping surface (binding selector
 // contract, like refCardTestId above).
 export function stubCardTestId(slug: string): string {

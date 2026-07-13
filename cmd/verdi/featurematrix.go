@@ -48,7 +48,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 		return fmt.Errorf("matrix: building index: %w", err)
 	}
 
-	stories, storiesByAC, err := discoverImplementingStories(ctx, root, commit, ix, featureName, spec)
+	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, commit, ix, featureName, spec)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 		return fmt.Errorf("matrix: %w", err)
 	}
 
-	printFeatureMatrix(stdout, spec, result, reconciliation, stories, preview)
+	printFeatureMatrix(stdout, spec, result, reconciliation, stories, supersededByAC, preview)
 	return nil
 }
 
@@ -108,10 +108,28 @@ type implementingStoryEdges struct {
 // edge into featureName's ACs (via the index's computed backlink
 // inversion — 03 §The feature fold: "the authoritative AC->story mapping
 // is computed ... the set of story specs whose implements edges name the
-// feature AC"), story-folds each exactly once, and returns both a flat
-// per-story view (for stub reconciliation) and an AC-grouped view (for
-// the feature fold).
-func discoverImplementingStories(ctx context.Context, root, commit string, ix *index.Index, featureName string, spec *artifact.SpecFrontmatter) ([]implementingStoryEdges, map[string][]evidence.ImplementingStory, error) {
+// feature AC"), story-folds each exactly once, and returns a flat per-story
+// view (for stub reconciliation), an AC-grouped view (for the feature
+// fold), and an AC-grouped view of excluded SUPERSEDED stories (for
+// rendering only — see below).
+//
+// Round-5 amendment (D-16): a superseded story is excluded from the
+// feature fold's AC->story mapping (the second return value) and from
+// stub reconciliation's live-story set (the first) — it can never close,
+// so folding it in would make "every implementing story closed or
+// eligible" permanently unreachable for any feature that ever had a
+// rung-3 event; its successor (the story that supersedes it) carries the
+// same implements edges and remains in the mapping in its place.
+//
+// ac-2 (feature-supersession-state) amends the RENDERING half only: D-16's
+// exclusion silently dropped a superseded story from the printed matrix
+// entirely, the exact backlink-only blindness 03 §rung 3 exists to avoid.
+// The third return value carries every excluded story back out, keyed by
+// the feature AC ids it used to implement, purely so printFeatureMatrix can
+// render it with a terminal marker instead of it vanishing — the fold and
+// reconciliation inputs above are computed exactly as D-16 shipped them,
+// unaffected by this third value's existence.
+func discoverImplementingStories(ctx context.Context, root, commit string, ix *index.Index, featureName string, spec *artifact.SpecFrontmatter) ([]implementingStoryEdges, map[string][]evidence.ImplementingStory, map[string][]string, error) {
 	// acsByStory accumulates every feature AC id each story ref
 	// implements, deduped and in first-seen order per story.
 	order := make([]string, 0)
@@ -138,34 +156,33 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 
 	var flat []implementingStoryEdges
 	byAC := make(map[string][]evidence.ImplementingStory)
+	supersededByAC := make(map[string][]string)
 	for _, storyRef := range order {
 		storyName, err := artifact.ParseRef(storyRef)
 		if err != nil {
-			return nil, nil, fmt.Errorf("matrix: implementing story ref %q: %w", storyRef, err)
+			return nil, nil, nil, fmt.Errorf("matrix: implementing story ref %q: %w", storyRef, err)
 		}
 		storySpec, err := storyresolve.LoadActiveSpec(root, storyName.Name)
 		if err != nil {
-			return nil, nil, fmt.Errorf("matrix: loading implementing story %s: %w", storyRef, err)
+			return nil, nil, nil, fmt.Errorf("matrix: loading implementing story %s: %w", storyRef, err)
 		}
 
-		// Round-5 amendment (D-16): a superseded story is excluded from the
-		// feature fold's AC→story mapping entirely. It can never close, so
-		// leaving it in the mapping makes "every implementing story closed or
-		// eligible" permanently unreachable for any feature that ever had a
-		// rung-3 event; its successor (the story that supersedes it) carries
-		// the same implements edges and remains in the mapping in its place.
+		acIDs := acsByStory[storyRef]
+		sort.Strings(acIDs)
+
 		if storySpec.Status == artifact.Status("superseded") {
+			for _, acID := range acIDs {
+				supersededByAC[acID] = append(supersededByAC[acID], storyRef)
+			}
 			continue
 		}
 
 		closed := storySpec.Status == artifact.Status("closed")
 		folded, err := foldImplementingStory(ctx, root, commit, storySpec)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
-		acIDs := acsByStory[storyRef]
-		sort.Strings(acIDs)
 		flat = append(flat, implementingStoryEdges{SpecRef: storyRef, ACIDs: acIDs, Closed: closed, Slug: store.RefSlug(storySpec.Title)})
 
 		for _, acID := range acIDs {
@@ -178,7 +195,7 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 			})
 		}
 	}
-	return flat, byAC, nil
+	return flat, byAC, supersededByAC, nil
 }
 
 // foldImplementingStory runs the ordinary story-level fold (evidence.Fold)
@@ -210,8 +227,24 @@ func foldImplementingStory(ctx context.Context, root, commit string, storySpec *
 // paired with the computed live implements mapping under an explicit
 // 'acceptance-time plan; current mapping computed below' banner (never the
 // frozen stubs alone)".
-func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, preview bool) {
+//
+// supersededByAC (ac-2, feature-supersession-state) is discoverImplementing-
+// Stories' third return value: every superseded implementing story,
+// excluded from result/reconciliation's own fold inputs exactly as D-16
+// shipped, rendered here with a terminal `[superseded]` marker appended to
+// its ref instead of silently vanishing from the row it used to occupy —
+// legible without consulting a `superseded-by` backlink (03 §rung 3), with
+// no change to the eligibility math computed above.
+func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededByAC map[string][]string, preview bool) {
 	fmt.Fprintf(w, "feature: %s\n", result.SpecRef)
+	// ac-2 (feature-supersession-state): the feature's own frontmatter
+	// `status`, printed unconditionally so a superseded FEATURE's terminal
+	// state is legible on this surface directly — the feature-rung mirror of
+	// printMatrix's own status line, satisfying ac-2's "every surface ... at
+	// both the story and feature rungs" (03 §rung 3, "without consulting
+	// backlinks") for a feature you point `verdi matrix` at, not only for a
+	// superseded story rendered inside a feature's fold.
+	fmt.Fprintf(w, "status: %s\n", spec.Status)
 	if preview {
 		fmt.Fprintln(w, "PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)")
 	}
@@ -220,9 +253,13 @@ func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evid
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "AC\tSTATUS\tEVIDENCE\tIMPLEMENTING STORIES\tTEXT")
 	for _, ac := range result.ACs {
+		entries := append([]string(nil), ac.ImplementingStories...)
+		for _, s := range supersededByAC[ac.ID] {
+			entries = append(entries, s+" [superseded]")
+		}
 		stories := "-"
-		if len(ac.ImplementingStories) > 0 {
-			stories = joinComma(ac.ImplementingStories)
+		if len(entries) > 0 {
+			stories = joinComma(entries)
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", ac.ID, ac.Status, ac.Summary, stories, ac.Text)
 	}
