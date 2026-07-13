@@ -4,7 +4,7 @@ kind: spec
 title: "Remote and CI"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-1
 problem: { text: "verdi has never had a remote: no origin, no forge, no CI job producing anything, so `source: ci` evidence — the only kind a gate may consume authoritatively (constitution 4, dc-1) — has never existed for any story here, and the module path is still the `github.com/OWNER/verdi` placeholder across the tree. The trust root true-closure#ac-1 depends on does not exist yet.", anchor: "#problem" }
 outcome: { text: "the module identity settles to `github.com/jyang234/verdi` end to end, a `verdi-evidence` CI workflow produces the authoritative derived bundle on the real remote, and `verdi sync` fetches `source: ci` evidence by (ref, commit) — the trust root exercised for real.", anchor: "#outcome" }
