@@ -18,13 +18,15 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// regenerateBaseline computes branch's local baseline for spec's impacted
+// regenerateBaseline computes spec's local baseline for its impacted
 // services at commit and writes it to
-// .verdi/data/derived/<ref-slug(branch)>/<commit>/ via internal/bundle
+// .verdi/data/derived/<ref-slug(spec.id)>/<commit>/ via internal/bundle
 // (the same four-file shape `verdi sync --or-regen` writes, provenance
 // local) — reusing regenerateServices, the exact producer path sync's own
 // regeneration uses, scoped down to spec.Impacts instead of every
-// discovered service.
+// discovered service. Keyed by the spec ref (not the design/build branch)
+// so the workbench preview matrix — which reads a spec's advisory local
+// evidence at RefSlug(spec.id) — actually reaches it (true-closure).
 //
 // This baseline is advisory local convenience, not a gate (03 §Provenance
 // classes: "source: local is advisory"), so every failure mode here is a
@@ -36,7 +38,7 @@ import (
 // fake success): either the whole four-file bundle is written, or nothing
 // is. verb names the calling verb ("design start" / "feature start") for
 // the disclosed message's prefix.
-func regenerateBaseline(ctx context.Context, root, branch, commit string, spec *artifact.SpecFrontmatter, deps syncDeps, verb string, stderr io.Writer) {
+func regenerateBaseline(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, deps syncDeps, verb string, stderr io.Writer) {
 	if deps.Runner == nil {
 		fmt.Fprintf(stderr, "%s: no toolchain configured (verdi.yaml toolchain: block, I-4); skipping baseline regeneration\n", verb)
 		return
@@ -60,7 +62,13 @@ func regenerateBaseline(ctx context.Context, root, branch, commit string, spec *
 		return
 	}
 
-	derivedDir := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(branch), commit)
+	// Key by the SPEC ref, not the git branch (true-closure): this baseline
+	// is spec's own impacted-service regeneration, and the fold's readers
+	// (RefSlug(spec.id)) — the workbench preview matrix that consumes an
+	// advisory local baseline included — look under the spec-ref key, never
+	// the branch-ref key. A per-branch key here left every baseline
+	// unreachable by the very preview it exists to feed.
+	derivedDir := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID), commit)
 	if err := os.MkdirAll(derivedDir, 0o755); err != nil {
 		fmt.Fprintf(stderr, "%s: skipping baseline regeneration: %v\n", verb, err)
 		return

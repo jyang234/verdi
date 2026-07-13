@@ -305,7 +305,7 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		return 2
 	}
 
-	regenerateBaseline(ctx, root, branch, headCommit, spec, syncDeps{Runner: deps.Runner, GoTest: deps.GoTest, Stdout: stdout, Stderr: stderr}, "design start", stderr)
+	regenerateBaseline(ctx, root, headCommit, spec, syncDeps{Runner: deps.Runner, GoTest: deps.GoTest, Stdout: stdout, Stderr: stderr}, "design start", stderr)
 
 	fmt.Fprintf(stdout, "design start: created branch %s\n", branch)
 	fmt.Fprintf(stdout, "design start: scaffolded %s (kind: %s, status: draft)\n", specRef.String(), kind)
