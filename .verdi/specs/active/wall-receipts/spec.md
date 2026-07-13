@@ -24,9 +24,8 @@ constraints:
 decisions:
   - { id: dc-1, text: "the v1 badge set is existing computes only — VL lint findings scoped to this spec, spec-stale, pending-supersession, empty evidence slots, size-smell; no computation is invented for a badge", anchor: "#dc-1" }
   - { id: dc-2, text: "a derivation drawer names the rule id, the pinned inputs with revisions, and the firing records — receipts, not verdicts; an unexplained badge trains authors to game it", anchor: "#dc-2" }
-open_questions:
-  - { id: oq-1, text: "which VL rules are wall-relevant per spec versus store-wide noise the wall should not carry?", anchor: "#oq-1" }
-  - { id: oq-2, text: "does the ADR exemption count join the reference-card peek in this spec or ride a later context-rail pass?", anchor: "#oq-2" }
+  - { id: dc-3, text: "a VL finding is a wall badge only if it anchors to a rendered element (ac-2/dc-2: a receipt must name a firing record) — object-anchored findings badge their card, spec-level findings badge the case file, and store-structural or plumbing findings (gitattributes, data-tracking, status-path, dangling layout keys, decode failures) stay in verdi lint/CI, off the wall; a new rule classifies itself by whether it anchors", anchor: "#dc-3" }
+  - { id: dc-4, text: "the ADR exemption count is out of v1 scope — it attaches to an external reference card, not this spec's own objects, so it rides the later context-rail pass (with parent-feature fold-status cards), reusing this spec's derivation-drawer machinery (ac-2) rather than being owned here", anchor: "#dc-4" }
 ---
 # Wall Receipts
 
@@ -82,10 +81,32 @@ the v1 badge set is existing computes only — VL lint findings scoped to this s
 
 a derivation drawer names the rule id, the pinned inputs with revisions, and the firing records — receipts, not verdicts; an unexplained badge trains authors to game it
 
-## oq-1
+## dc-3
 
-which VL rules are wall-relevant per spec versus store-wide noise the wall should not carry?
+The discriminator is not a hand-picked allowlist; it falls out of ac-2
+and dc-2. A wall badge opens a drawer naming the records that fired it, so
+a finding can only be a badge if it has a rendered record to point at.
+Three buckets: object-anchored findings (a dangling link ref, a missing
+evidence kind, a dangling stub ref, an unresolved open question) badge the
+card of the object they name; spec-level findings with no single object
+anchor (a missing required attribute, size-smell, spec-stale,
+pending-supersession) badge the case file; store-structural and
+cross-file plumbing findings (gitattributes, the data-tracking rule,
+status-in-path, a dangling layout.json key, and decode failures — which
+are unparsed-island territory, not a badge at all) have no record the
+author can act on from the wall and stay in verdi lint / CI. The partition
+is self-maintaining: a new VL rule becomes a wall badge iff it anchors to
+a rendered element, satisfying ac-2 by construction.
 
-## oq-2
+## dc-4
 
-does the ADR exemption count join the reference-card peek in this spec or ride a later context-rail pass?
+The "ADR-N: M active exemptions" count at the point of temptation is
+on-thesis — a computed claim with a real derivation — but it attaches to
+an external reference card (an ADR this spec exempts), not to any of this
+spec's own objects, which is what every wall-receipts AC is about.
+Reference cards with live counts are the context rail's domain (with
+parent-feature fold-status cards), a distinct later pass. So the count is
+out of v1 scope here — but wall-receipts builds the machinery it will
+reuse: the derivation drawer (ac-2) is exactly the receipt surface the
+count needs when the context-rail pass lands. This spec enables it without
+owning it.
