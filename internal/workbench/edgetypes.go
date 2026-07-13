@@ -61,6 +61,29 @@ func gateBearing(edgeType string) bool {
 	return edgeType == string(artifact.LinkSupersedes) || edgeType == string(artifact.LinkExempts)
 }
 
+// gateBearingTypes returns every edge type gateBearing marks
+// confirmation-required, in a fixed, deterministic order — the source
+// boardspecrender.go's rendered client payload draws its "gate" list
+// from, so the confirmation-required set the picker enforces client-side
+// is computed from the same single table gateBearing itself consults,
+// never a second, independently maintained literal.
+func gateBearingTypes() []string {
+	all := []string{
+		string(artifact.LinkSupersedes),
+		string(artifact.LinkExempts),
+		string(artifact.LinkImplements),
+		string(artifact.LinkResolves),
+		string(artifact.LinkDependsOn),
+	}
+	out := make([]string, 0, len(all))
+	for _, t := range all {
+		if gateBearing(t) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // consequenceLabels is the one-line consequence per pickable edge type —
 // calm warnings, not modal nagging (05 §Workbench's own example wording
 // for supersedes), phrased as what the choice DOES to the spec document

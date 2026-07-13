@@ -70,8 +70,8 @@ func TestGitHub_Captures_ListComments_TokenBodyByteIdentical(t *testing.T) {
 	}
 	var sawToken, sawTokenFreeDiff, sawGeneral bool
 	for _, c := range comments {
-		switch {
-		case c.Body == "[vd:ac-2] outcome AC reads implementation-scoped — reword?":
+		switch c.Body {
+		case "[vd:ac-2] outcome AC reads implementation-scoped — reword?":
 			sawToken = true
 			if id, ok := forge.ParseCommentToken(c.Body); !ok || id != "ac-2" {
 				t.Errorf("ParseCommentToken(%q) = (%q, %v), want (\"ac-2\", true)", c.Body, id, ok)
@@ -79,9 +79,9 @@ func TestGitHub_Captures_ListComments_TokenBodyByteIdentical(t *testing.T) {
 			if c.ThreadID == "" {
 				t.Error("token-bearing diff comment has no ThreadID (should join to a GraphQL reviewThreads node)")
 			}
-		case c.Body == "nit: this comment has no vd token, should land in the inbox tray":
+		case "nit: this comment has no vd token, should land in the inbox tray":
 			sawTokenFreeDiff = true
-		case c.Body == "General PR conversation comment, not tied to a diff line at all.":
+		case "General PR conversation comment, not tied to a diff line at all.":
 			sawGeneral = true
 		}
 	}
