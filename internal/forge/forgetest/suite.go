@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge"
 )
 
 // Run executes the forge contract suite against the harness newHarness

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/OWNER/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider"
 )
 
 // Comment is one human-comment side effect a PublishRollup call fired,

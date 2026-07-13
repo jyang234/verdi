@@ -14,9 +14,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardlayout"
-	"github.com/OWNER/verdi/internal/designscaffold"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/designscaffold"
 )
 
 // boardClientPayload is the JSON state embedded for boardspec.js: the

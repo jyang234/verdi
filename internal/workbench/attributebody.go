@@ -19,8 +19,8 @@ import (
 	"html/template"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/render"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/render"
 )
 
 // attributeBodyHTML resolves attr's anchor to its body section (the

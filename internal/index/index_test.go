@@ -3,7 +3,7 @@ package index
 import (
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 func TestBuild_Happy(t *testing.T) {

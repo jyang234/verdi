@@ -3,9 +3,9 @@ package fake_test
 import (
 	"testing"
 
-	"github.com/OWNER/verdi/internal/provider"
-	"github.com/OWNER/verdi/internal/provider/fake"
-	"github.com/OWNER/verdi/internal/provider/providertest"
+	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/provider/providertest"
 )
 
 // fakeHarness adapts fake.Provider to providertest.Harness. It is the

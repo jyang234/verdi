@@ -3,7 +3,7 @@ package mcpserve
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // toolText wraps text as an MCP tool result (one text content item),

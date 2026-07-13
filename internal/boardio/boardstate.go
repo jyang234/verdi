@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // boardStateSchema is verdi.board/v1 (02 §Record schemas). Duplicated here

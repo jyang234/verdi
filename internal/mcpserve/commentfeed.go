@@ -14,9 +14,9 @@ package mcpserve
 import (
 	"context"
 
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/lint"
-	"github.com/OWNER/verdi/internal/workbench"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 // backendCommentFeed adapts f (a Backend.Forge) over workbench.CommentFeed

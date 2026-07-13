@@ -5,8 +5,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // vl016 enforces "spike path fence: a build branch built from a spike:

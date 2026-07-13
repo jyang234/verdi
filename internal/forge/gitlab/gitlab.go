@@ -30,7 +30,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge"
 )
 
 // defaultJobName is verdi's own CI job name (I-8: "job/workflow

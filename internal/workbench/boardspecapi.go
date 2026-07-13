@@ -19,13 +19,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/artifact/splice"
-	"github.com/OWNER/verdi/internal/boardio"
-	"github.com/OWNER/verdi/internal/boardlayout"
-	"github.com/OWNER/verdi/internal/designscaffold"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact/splice"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/designscaffold"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // boardAPIRequest is the one strict-decoded body shape every action

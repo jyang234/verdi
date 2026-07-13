@@ -34,9 +34,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/OWNER/verdi/internal/dex"
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/dex"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/fake"
 )
 
 const (

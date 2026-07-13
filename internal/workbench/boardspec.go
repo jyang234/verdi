@@ -16,11 +16,11 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardio"
-	"github.com/OWNER/verdi/internal/boardlayout"
-	"github.com/OWNER/verdi/internal/disclosure"
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // Deps carries the workbench's injected collaborators (04 §port

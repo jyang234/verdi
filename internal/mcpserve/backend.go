@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardio"
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/index"
 )
 
 // Backend is the one real implementation behind every MCP tool: a store

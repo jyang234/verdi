@@ -18,11 +18,11 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/disclosure"
-	"github.com/OWNER/verdi/internal/evidence"
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // runClosureGate evaluates 03 §Gates' closure gate for spec at head:

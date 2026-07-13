@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/forgetest"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/forgetest"
 )
 
 // buildBundleZip zips the four bundle files under derived/<slug>/<commit>/,

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider"
 )
 
 func TestSentinelErrors_DistinctAndWrappable(t *testing.T) {

@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge"
 )
 
 // defaultArtifactName is verdi's own CI workflow's uploaded artifact name

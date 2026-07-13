@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/fake"
-	"github.com/OWNER/verdi/internal/workbench"
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 const reviewFeedIntegSpecName = "refi-decline-flow"

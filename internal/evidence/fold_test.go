@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 func ac(id string, kinds ...artifact.EvidenceKind) artifact.AcceptanceCriterion {

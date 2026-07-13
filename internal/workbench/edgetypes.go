@@ -8,8 +8,8 @@
 package workbench
 
 import (
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardlayout"
 )
 
 // targetKindOf classifies a yarn target for the legality table: an

@@ -3,7 +3,7 @@ package evidence
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // CascadeStory is one story's edges into a feature that has since been

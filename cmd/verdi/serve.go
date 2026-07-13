@@ -20,9 +20,9 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/OWNER/verdi/internal/mcpserve"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/workbench"
+	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 // defaultWorkbenchAddr is the workbench HTTP listener's default bind

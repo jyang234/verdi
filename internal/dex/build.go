@@ -10,9 +10,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/index"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // Options configures Build.

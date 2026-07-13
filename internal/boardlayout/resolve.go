@@ -12,7 +12,7 @@ package boardlayout
 import (
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // Rect is an axis-aligned card footprint at a board position (px).

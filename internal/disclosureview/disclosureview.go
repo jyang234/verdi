@@ -24,8 +24,8 @@ import (
 	"html/template"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/disclosure"
-	"github.com/OWNER/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/lint"
 )
 
 // Current enumerates every current disclosure for the checkout at root,

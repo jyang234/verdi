@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // corpusDir and violationsDir mirror internal/corpus and internal/index's

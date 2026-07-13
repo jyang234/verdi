@@ -1,5 +1,5 @@
 schema: verdi.layout/v1
-forge: gitlab                  # or github; auto-detected from the remote URL when omitted
+forge: github                  # or gitlab; auto-detected from the remote URL when omitted
 providers:                     # story-provider spec owns semantics
   jira:
     base_url: https://example.atlassian.net

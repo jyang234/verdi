@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // componentSpecWithExempts renders a minimal component-class spec.md

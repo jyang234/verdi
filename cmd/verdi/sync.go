@@ -17,13 +17,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/forge"
-	forgegithub "github.com/OWNER/verdi/internal/forge/github"
-	forgegitlab "github.com/OWNER/verdi/internal/forge/gitlab"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/forge"
+	forgegithub "github.com/jyang234/verdi/internal/forge/github"
+	forgegitlab "github.com/jyang234/verdi/internal/forge/gitlab"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 // derivedFileNames are the four files a materialized bundle must contain

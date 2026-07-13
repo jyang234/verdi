@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // This file is V1-P1's "table-driven decode goldens over the extended

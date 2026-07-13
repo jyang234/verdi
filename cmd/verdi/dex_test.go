@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // buildDexTestStore assembles a minimal, real git-backed store (verdi

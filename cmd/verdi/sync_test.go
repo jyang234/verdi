@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	forgepkg "github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/fake"
-	"github.com/OWNER/verdi/internal/upstream"
+	forgepkg "github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 const svcfixSrcDir = "../../testdata/svcfix"

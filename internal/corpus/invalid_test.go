@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // invalidDir holds the decode-failure twins (PLAN.md phase 2 deliverable

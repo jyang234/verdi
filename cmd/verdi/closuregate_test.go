@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
-	"github.com/OWNER/verdi/internal/forge"
-	forgefake "github.com/OWNER/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/forge"
+	forgefake "github.com/jyang234/verdi/internal/forge/fake"
 )
 
 const closureGateStorySpecMD = `---

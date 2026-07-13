@@ -1,6 +1,6 @@
 package index
 
-import "github.com/OWNER/verdi/internal/artifact"
+import "github.com/jyang234/verdi/internal/artifact"
 
 // Entry is one indexed artifact — either a committed-zone kind (spec, adr,
 // diagram, attestation, waiver, conflict) or an index-minted external ref

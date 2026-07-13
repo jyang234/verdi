@@ -3,7 +3,7 @@ package jira
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider"
 )
 
 // ciLink reads a link to the current MR/pipeline from CI-provided

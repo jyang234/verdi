@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/lint"
 )
 
 // TestRun_OutputPassesVL014 is the VL-014 interplay test PLAN.md Phase 10's

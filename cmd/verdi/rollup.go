@@ -38,12 +38,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/evidence"
-	"github.com/OWNER/verdi/internal/lint"
-	"github.com/OWNER/verdi/internal/provider"
-	"github.com/OWNER/verdi/internal/provider/jira"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/storyresolve"
+	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider/jira"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
 // rollupDeps bundles rollup's injectable dependencies so runRollup can be

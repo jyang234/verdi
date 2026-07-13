@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // anyStatusLineRe / supersededStatusLineRe recognize a frontmatter status

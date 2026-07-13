@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // DefaultJudgeTimeout is S5's observed-safe ceiling: "Timeout ~120s via exec

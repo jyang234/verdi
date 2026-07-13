@@ -15,10 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/bundle"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/bundle"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 // goTestRunner abstracts `go test -json` execution so tests can supply

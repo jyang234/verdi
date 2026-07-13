@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // transcodeOpenAPI reads path (a discovered

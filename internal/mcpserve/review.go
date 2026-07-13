@@ -20,10 +20,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/lint"
 )
 
 // reviewMirroredAnnotations returns unpinned's live forge review comments

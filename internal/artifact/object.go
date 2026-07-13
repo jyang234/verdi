@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // Attribute is one of a feature or story spec's two required spec

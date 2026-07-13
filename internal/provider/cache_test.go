@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OWNER/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider"
 )
 
 // manualClock is an injectable provider.Clock for deterministic TTL

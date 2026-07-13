@@ -15,8 +15,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 const decisionGeneratorVersion = "v1"

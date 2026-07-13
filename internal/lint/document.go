@@ -1,6 +1,6 @@
 package lint
 
-import "github.com/OWNER/verdi/internal/artifact"
+import "github.com/jyang234/verdi/internal/artifact"
 
 // Document is one committed-zone artifact file, tolerantly decoded: even a
 // file that fails VL-001 appears here (DecodeErr set, every other field

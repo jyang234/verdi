@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // RenderBody renders deviation-report.md's markdown body: computed and

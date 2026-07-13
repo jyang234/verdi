@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // knownTopLevelEntries is D1's fixed set of names legal directly under

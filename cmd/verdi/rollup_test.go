@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
-	"github.com/OWNER/verdi/internal/provider"
-	"github.com/OWNER/verdi/internal/provider/fake"
-	"github.com/OWNER/verdi/internal/provider/jira/jiratest"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/provider/jira/jiratest"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // rollupFixtureSpec is a scratch (not testdata/corpus) feature spec

@@ -14,8 +14,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/commitdesign"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/commitdesign"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // runBoardVerb dispatches `verdi board <subcommand>`. v0 has exactly one
