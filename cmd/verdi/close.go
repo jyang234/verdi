@@ -53,6 +53,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -214,6 +215,18 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		return 2
 	}
 
+	// Flip the spec's status accepted-pending-build → closed as part of the
+	// archive step (02 §Kind registry: story/feature specs transition
+	// "… → closed(archive)"). Done in the active-zone spec.md BEFORE
+	// ArchiveMove renames the directory, so the whole quartet moves in one
+	// shot: the spec.md moves with its sole status-line change and everything
+	// else byte-identical — VL-010's round-6 status-only archive-flip
+	// exception (D6-11), not the pure-rename one, is what admits the move.
+	if err := flipSpecStatusToClosed(root, specRef.Name); err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+
 	if err := store.ArchiveMove(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
@@ -270,6 +283,38 @@ func foldStory(ctx context.Context, root string, spec *artifact.SpecFrontmatter,
 		return evidence.StoryResult{}, fmt.Errorf("folding evidence: %w", err)
 	}
 	return result, nil
+}
+
+// closeAcceptedStatusLineRe matches the sole `status: accepted-pending-build`
+// frontmatter line the closure flip rewrites to `status: closed`. Same
+// anchored, multiline shape accept.go's acceptedStatusLineRe uses for its own
+// predecessor flip — a raw, status-line-only ReplaceAll so the archived
+// spec.md differs from its active original on exactly that one line, keeping
+// VL-010's status-only archive-flip exception (D6-11) cleanly satisfiable.
+var closeAcceptedStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?accepted-pending-build"?\s*$`)
+
+// flipSpecStatusToClosed rewrites the active-zone spec.md's status line from
+// accepted-pending-build to closed (02 §Kind registry's "… → closed(archive)"
+// transition), preserving every other byte — including the `frozen:` stamp: a
+// closed spec is a post-acceptance, frozen artifact, exactly as a superseded
+// one is (cmd/verdi/accept.go's predecessor flip). It insists on exactly one
+// matching line so a spec whose status is not the expected pre-closure value
+// (already closed, or malformed) is a loud internal error, never a silent
+// no-op or a double flip.
+func flipSpecStatusToClosed(root, name string) error {
+	specPath := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")
+	raw, err := os.ReadFile(specPath)
+	if err != nil {
+		return fmt.Errorf("close: reading %s to flip status to closed: %w", specPath, err)
+	}
+	if n := len(closeAcceptedStatusLineRe.FindAll(raw, -1)); n != 1 {
+		return fmt.Errorf("close: %s: expected exactly one status: accepted-pending-build line to flip to closed, found %d", specPath, n)
+	}
+	newRaw := closeAcceptedStatusLineRe.ReplaceAll(raw, []byte("status: closed"))
+	if err := os.WriteFile(specPath, newRaw, 0o644); err != nil {
+		return fmt.Errorf("close: writing %s after flipping status to closed: %w", specPath, err)
+	}
+	return nil
 }
 
 // writeRollup builds, self-validates, and writes rollup.json into

@@ -105,3 +105,21 @@ func TestVL002_ClosedStoryUnderArchive_Clean(t *testing.T) {
 		}
 	}
 }
+
+// TestVL002_AcceptedPendingUnderArchive_Fires locks in the exact defect
+// symptom the round-6 close-status flip (D6-11) removes: an archived spec
+// left at status: accepted-pending-build — the un-flipped state the close
+// verb used to produce — fires VL-002. A terminal status (closed) is what
+// belongs under specs/archive/, never accepted-pending-build. `verdi close`
+// now flips the status AS the archive move, so this state never reaches the
+// store; this test guards against a regression that would let it.
+func TestVL002_AcceptedPendingUnderArchive_Fires(t *testing.T) {
+	apbStorySpec := strings.Replace(closedStorySpec, "status: closed", "status: accepted-pending-build", 1)
+	dir := adHocOverlayDir(t, ".verdi/specs/archive/vl-002-closed-story/spec.md", apbStorySpec)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-002")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1 (accepted-pending-build belongs under specs/active/, not archive/):\n%s", len(findings), findingsString(findings))
+	}
+}
