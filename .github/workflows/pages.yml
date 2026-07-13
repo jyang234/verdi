@@ -21,9 +21,17 @@
 # (if the repo is private) is confirmed.
 name: pages
 
+# TRIGGER NEUTRALIZED (round 6 cleanup): this repo is a PRIVATE GitHub repo
+# without GitHub Enterprise Cloud, so Pages cannot be enabled on it at all
+# (see the capability-gap note above), and a `push: [main]` trigger therefore
+# failed this workflow on EVERY push — noise, never a real deploy. Reduced to
+# `workflow_dispatch` (manual) only. To restore automatic dex publishing:
+# obtain Enterprise Cloud (for a private repo) or make the repo public, enable
+# Pages under Settings > Pages with source "GitHub Actions", then re-add:
+#   push:
+#     branches: [main]
 on:
-  push:
-    branches: [main]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
