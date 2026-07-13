@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/provider/fake"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -157,15 +159,20 @@ func TestRunClose_EndToEnd(t *testing.T) {
 	}
 	archiveDir := filepath.Join(repo.Dir, ".verdi", "specs", "archive", "close-fixture")
 
-	// spec.md moved byte-identical (VL-010's sole legal exception: a pure
-	// rename) — proven at the git level below; here, content is unchanged
-	// from what fixturegit committed.
+	// spec.md moved active→archive with its status line flipped
+	// accepted-pending-build→closed (D6-11; 02 §Kind registry's
+	// "… → closed(archive)" transition) and NOTHING else changed — the only
+	// content change VL-010 admits within the archive move.
 	archivedSpec, err := os.ReadFile(filepath.Join(archiveDir, "spec.md"))
 	if err != nil {
 		t.Fatalf("reading archived spec.md: %v", err)
 	}
-	if string(archivedSpec) != closeFixtureStorySpecMD {
-		t.Fatalf("archived spec.md content changed by close (VL-010 would reject this as not a pure rename):\n%s", archivedSpec)
+	wantArchivedSpec := strings.Replace(closeFixtureStorySpecMD, "status: accepted-pending-build", "status: closed", 1)
+	if string(archivedSpec) != wantArchivedSpec {
+		t.Fatalf("archived spec.md is not the pre-close content with a sole status: closed flip:\n--- got ---\n%s\n--- want ---\n%s", archivedSpec, wantArchivedSpec)
+	}
+	if !strings.Contains(string(archivedSpec), "\nstatus: closed\n") {
+		t.Fatalf("archived spec.md does not carry status: closed:\n%s", archivedSpec)
 	}
 
 	// deviation-report.md is frozen.
@@ -235,15 +242,36 @@ func TestRunClose_EndToEnd(t *testing.T) {
 		t.Fatalf("stdout = %q, want the push instruction naming the closure branch", stdout.String())
 	}
 
-	// Git-level proof: the archive move is a 100%-similarity rename on the
-	// closure branch, over spec.md specifically (VL-010's own check shape).
+	// Git-level proof: the archive move is a rename of spec.md active→archive
+	// on the closure branch. Because the status line flips in the move, it is
+	// NO LONGER a 100%-similarity (R100) rename — VL-010's round-6 status-only
+	// closed-flip exception, not the pure-rename one, is what admits it.
 	branch := gitCurrentBranch(t, repo.Dir)
 	if branch != "close/close-fixture" {
 		t.Fatalf("current branch = %q, want close/close-fixture", branch)
 	}
 	diffOut := gitOutput(t, repo.Dir, "diff", "--name-status", "-M", repo.Head, "HEAD")
-	if !strings.Contains(diffOut, "R100\t.verdi/specs/active/close-fixture/spec.md\t.verdi/specs/archive/close-fixture/spec.md") {
-		t.Fatalf("git diff --name-status -M did not report a pure (R100) rename for spec.md:\n%s", diffOut)
+	renameLine := regexp.MustCompile(`R\d+\t\.verdi/specs/active/close-fixture/spec\.md\t\.verdi/specs/archive/close-fixture/spec\.md`)
+	if !renameLine.MatchString(diffOut) {
+		t.Fatalf("git diff --name-status -M did not report a rename for spec.md active->archive:\n%s", diffOut)
+	}
+	if strings.Contains(diffOut, "R100\t.verdi/specs/active/close-fixture/spec.md") {
+		t.Fatalf("archive move is still R100 — the status flip should make it a sub-100%% rename:\n%s", diffOut)
+	}
+
+	// The load-bearing proof of the round-6 fix: re-linting the post-close
+	// store in-process is clean of the two rules the un-flipped archive
+	// tripped — VL-002 (status: closed under specs/archive/ is correct
+	// placement) and VL-010 (the status-only apb→closed flip within the
+	// active→archive move is admitted).
+	lintFindings, err := lint.NewEngine().Run(ctx, repo.Dir, lint.Context{DiffBase: repo.Head}, lint.Options{})
+	if err != nil {
+		t.Fatalf("re-lint of post-close store: %v", err)
+	}
+	for _, f := range lintFindings {
+		if f.Rule == "VL-002" || f.Rule == "VL-010" {
+			t.Fatalf("re-lint of post-close store fired %s (the round-6 fix should make the archived quartet clean of it): %s", f.Rule, f.String())
+		}
 	}
 }
 
