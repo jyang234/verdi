@@ -59,7 +59,7 @@ bindings:
 	return fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
-				".verdi/verdi.yaml":                  "schema: verdi.layout/v1\nforge: gitlab\n",
+				".verdi/verdi.yaml":                   "schema: verdi.layout/v1\nforge: gitlab\n",
 				".verdi/specs/active/story-a/spec.md": selfEvidenceSpecMD("story-a", "behavioral"),
 				".verdi/specs/active/story-b/spec.md": selfEvidenceSpecMD("story-b", "static, behavioral"),
 				"verdi.bindings.yaml":                 bindingsYAML,
