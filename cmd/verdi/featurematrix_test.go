@@ -156,14 +156,23 @@ func bytesContains(b []byte, s string) bool {
 	return bytes.Contains(b, []byte(s))
 }
 
-// TestCmdMatrix_FeatureRef_ExcludesSupersededStory proves D-16: a superseded
-// implementing story is dropped from the feature fold's AC→story mapping
-// entirely. Starting from the golden fixture, flipping borrower-update-mobile
-// (which implements ac-1 and ac-2) to `superseded` on disk must remove it from
-// every AC's implementing set — ac-2, which it was the sole implementer of,
-// falls back to no-signal — so a rung-3 predecessor can never permanently
-// hold a feature AC below `evidenced`.
-func TestCmdMatrix_FeatureRef_ExcludesSupersededStory(t *testing.T) {
+// TestCmdMatrix_FeatureRef_SupersededStoryRendersTerminalMarker proves D-16's
+// fold exclusion continues to hold (a superseded implementing story can never
+// close, so it is still excluded from the feature fold's AC->story mapping
+// and from stub reconciliation's live-story set — ac-2, whose sole implementer
+// was mobile, still falls back to no-signal, and mobile still reads "-" as
+// borrower-update-ui's LIVE STORIES), while ac-2 (feature-supersession-state)
+// amends the RENDERING: the superseded story is no longer silently dropped
+// from the printed matrix — it appears in its former AC rows tagged
+// `[superseded]`, a terminal marker legible without consulting a
+// `superseded-by` backlink (03 §rung 3). Starting from the golden fixture,
+// flipping borrower-update-mobile (which implements ac-1 and ac-2) to
+// `superseded` on disk must therefore show it, marked, in both ac-1's and
+// ac-2's IMPLEMENTING STORIES cell, alongside ac-1's still-live
+// borrower-update-api, with feature.violated/stub_reconciliation.blocked
+// unchanged from the golden (the visibility change carries no eligibility
+// consequence).
+func TestCmdMatrix_FeatureRef_SupersededStoryRendersTerminalMarker(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,
 		"specs/active/accepted-pending-build",
@@ -194,13 +203,24 @@ func TestCmdMatrix_FeatureRef_ExcludesSupersededStory(t *testing.T) {
 	if got != 0 {
 		t.Fatalf("cmdMatrix exit = %d, want 0; stderr=%q", got, stderr.String())
 	}
-	out := stdout.String()
-	if bytes.Contains([]byte(out), []byte("borrower-update-mobile")) {
-		t.Fatalf("superseded story borrower-update-mobile must not appear in the feature mapping:\n%s", out)
-	}
-	// ac-2's only implementer was the now-superseded mobile story, so it must
-	// fall back to no-signal with an empty implementing set.
-	if !bytes.Contains([]byte(out), []byte("ac-2  no-signal")) {
-		t.Fatalf("ac-2 should read no-signal once its sole (superseded) implementer is excluded:\n%s", out)
+
+	want := `feature: spec/accepted-pending-build
+
+AC    STATUS     EVIDENCE             IMPLEMENTING STORIES                                                TEXT
+ac-1  pending    attestation:present  spec/borrower-update-api, spec/borrower-update-mobile [superseded]  a borrower can update their application
+ac-2  no-signal  attestation:absent   spec/borrower-update-mobile [superseded]                            a borrower can see the change reflected
+ac-3  no-signal  attestation:absent   -                                                                   support can audit every update
+
+stubs: acceptance-time plan; current mapping computed below
+STUB                       DECLARED ACS  LIVE STORIES              RECONCILIATION
+borrower-update-api        ac-1          spec/borrower-update-api  unreconciled
+borrower-update-ui         ac-1, ac-2    -                         unreconciled
+borrower-update-audit-log  ac-3          -                         unreconciled
+
+feature.violated: false
+stub_reconciliation.blocked: true
+`
+	if stdout.String() != want {
+		t.Fatalf("matrix feature output mismatch:\n--- got ---\n%s\n--- want ---\n%s", stdout.String(), want)
 	}
 }
