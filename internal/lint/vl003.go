@@ -21,13 +21,9 @@ import (
 // by its own VL-xxx rule rather than centralized) — so this rule is the
 // sole place that both an unknown link type at all, and a known type
 // outside the closed five-value vocabulary targeting a fragment, are
-// caught, by calling artifact.ValidateLinkForKind(l, owner) per link — owner
-// is the document's own Base.Kind, threaded through so the one documented
-// exception (an obligation's verifies-to-fragment edge, spec/
-// obligation-artifact DC-1/DC-2) widens here exactly as it does at decode
-// time, rather than an otherwise-valid obligation tripping this rule right
-// after it decoded clean. This rule's other new work (R4-I-3) is resolving
-// a fragment's object id against the target spec's declared objects.
+// caught, by calling artifact.Link.Validate() itself per link. This rule's
+// other new work (R4-I-3) is resolving a fragment's object id against the
+// target spec's declared objects.
 type vl003 struct{}
 
 func (vl003) ID() string { return "VL-003" }
@@ -43,7 +39,7 @@ func (r vl003) Check(in *RunInput) []Finding {
 			continue
 		}
 		for _, l := range d.Base.Links {
-			findings = append(findings, r.checkLink(l, d.RelPath, "links[].ref", in.Snapshot, externalRefs, d.Base.Kind)...)
+			findings = append(findings, r.checkLink(l, d.RelPath, "links[].ref", in.Snapshot, externalRefs)...)
 		}
 
 		if d.Spec != nil {
@@ -52,7 +48,7 @@ func (r vl003) Check(in *RunInput) []Finding {
 			}
 			for _, dc := range d.Spec.Decisions {
 				for _, l := range dc.Links {
-					findings = append(findings, r.checkLink(l, d.RelPath, fmt.Sprintf("decisions[%s].links[].ref", dc.ID), in.Snapshot, externalRefs, d.Base.Kind)...)
+					findings = append(findings, r.checkLink(l, d.RelPath, fmt.Sprintf("decisions[%s].links[].ref", dc.ID), in.Snapshot, externalRefs)...)
 				}
 			}
 		}
@@ -72,31 +68,25 @@ func (r vl003) Check(in *RunInput) []Finding {
 	return findings
 }
 
-// checkLink resolves a single link's ref: first,
-// artifact.ValidateLinkForKind(l, owner) — owner-scoped Link.Validate(),
-// save for the single documented exception an obligation's own
-// verifies-to-fragment edge needs (spec/obligation-artifact DC-1/DC-2; see
-// that function's doc comment) — covering both an unknown link type
-// outright and, per R4-I-3, a known type outside the closed five-value
-// spec-object edge vocabulary (implements/resolves/supersedes/exempts/
-// depends-on) targeting a fragment (02 §Link taxonomy) — since internal/
-// lint's walk deliberately decodes via artifact.DecodeStrict only, never
-// the kind's own Validate() (see doc.go's design note: every semantic
-// check is re-implemented by its own VL-xxx rule rather than centralized),
-// nothing else in this engine would ever catch either case. Then: a story
-// link is a tracker ref, not a corpus ref (02 §External refs scope), and
-// is skipped; an svc/... external ref is checked against discovery only
-// (fragments are not modeled for the provisional external-ref form, 02
-// §Identity: "External refs (provisional)"); every other ref is checked
-// against the committed zone by its unpinned kind/name half, and, when it
-// carries an object-id fragment (§Identity and references), the fragment
-// is additionally resolved against the target's parsed frontmatter objects
-// (§Object model) — the generic "does this id exist at all" check, which
-// still applies to an obligation's verifies edge even though VL-019 alone
-// owns the stricter "is it specifically a STORY acceptance criterion"
-// policy (spec/obligation-artifact AC-2).
-func (vl003) checkLink(l artifact.Link, path, field string, snap *Snapshot, externalRefs map[string]bool, owner artifact.Kind) []Finding {
-	if err := artifact.ValidateLinkForKind(l, owner); err != nil {
+// checkLink resolves a single link's ref: first, l.Validate() itself —
+// covering both an unknown link type outright and, per R4-I-3, a known
+// type outside the closed five-value spec-object edge vocabulary
+// (implements/resolves/supersedes/exempts/depends-on) targeting a
+// fragment (02 §Link taxonomy) — since internal/lint's walk deliberately
+// decodes via artifact.DecodeStrict only, never the kind's own Validate()
+// (see doc.go's design note: every semantic check is re-implemented by its
+// own VL-xxx rule rather than centralized), nothing else in this engine
+// would ever catch either case. Then: a story link is a tracker ref, not a
+// corpus ref (02 §External refs scope), and is skipped; an svc/... external
+// ref is checked against discovery only (fragments are not modeled for the
+// provisional external-ref form, 02 §Identity: "External refs
+// (provisional)"); every other ref is checked against the committed zone
+// by its unpinned kind/name half, and, when it carries an object-id
+// fragment (§Identity and references), the fragment is additionally
+// resolved against the target's parsed frontmatter objects (§Object
+// model).
+func (vl003) checkLink(l artifact.Link, path, field string, snap *Snapshot, externalRefs map[string]bool) []Finding {
+	if err := l.Validate(); err != nil {
 		return []Finding{{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q: %v", field, l.Ref, err)}}
 	}
 	if l.Type == artifact.LinkStory {

@@ -109,48 +109,6 @@ func (l Link) Validate() error {
 	return nil
 }
 
-// ValidateLinkForKind is Link.Validate(), widened by exactly one documented
-// exception: an obligation artifact's own single `verifies` edge
-// (spec/obligation-artifact DC-1/DC-2) legitimately targets an object
-// fragment — a story acceptance criterion — which 02 §Link taxonomy's
-// closed five-value spec-object edge vocabulary does not name, since the
-// obligation kind postdates that enumeration and closedEdgeVocab is a
-// blanket, kind-agnostic gate shared by every other artifact kind's own
-// top-level links (attestation, waiver, adr, diagram, conflict,
-// reaffirmation, spec, and a spec's decisions). Widening closedEdgeVocab
-// itself would legalize a `verifies`-to-fragment edge on ALL of those other
-// kinds too — a materially bigger, less reversible change than this
-// feature asks for, and one that would silently flip two already-disclosed,
-// deliberately-negative cases (TestLink_Validate_Negative's
-// `{LinkVerifies, "...#ac-1"}`; TestVL003_UnknownEdgeTypeOnFragment_FailsClosed's
-// plain story spec). Which fragment classes are actually legal for an
-// obligation to verify — a STORY AC vs a feature AC vs a non-AC fragment vs
-// a whole spec — needs the corpus/index to resolve and is VL-019's job
-// (internal/lint), never this bare frontmatter decode's; this function only
-// widens the SHAPE gate enough to let a well-formed obligation decode at
-// all (non-empty ref, parses as a ref of any shape — fragment or not).
-//
-// Two call sites thread owner-kind context through to reach this: Base's
-// own validateBase (every kind's frontmatter decode) and internal/lint's
-// VL-003 (which independently re-validates every link's shape via
-// Link.Validate() rather than a kind's Validate(), since internal/lint's
-// walk deliberately decodes via DecodeStrict only — see internal/lint/doc.go's
-// design note). Every other (kind, link type) pair gets EXACTLY
-// Link.Validate()'s existing, unchanged behavior: no existing kind's
-// accepted/rejected link set shifts by so much as one case.
-func ValidateLinkForKind(l Link, owner Kind) error {
-	if owner == KindObligation && l.Type == LinkVerifies {
-		if l.Ref == "" {
-			return fmt.Errorf("artifact: link of type %q has an empty ref", l.Type)
-		}
-		if _, err := ParseRef(l.Ref); err != nil {
-			return fmt.Errorf("artifact: link of type %q: %w", l.Type, err)
-		}
-		return nil
-	}
-	return l.Validate()
-}
-
 var (
 	dateRe   = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	sha256Re = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -316,7 +274,7 @@ func (b Base) validateBase(wantKind Kind) error {
 		}
 	}
 	for i, l := range b.Links {
-		if err := ValidateLinkForKind(l, wantKind); err != nil {
+		if err := l.Validate(); err != nil {
 			return fmt.Errorf("artifact: links[%d]: %w", i, err)
 		}
 	}

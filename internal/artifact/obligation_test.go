@@ -12,7 +12,7 @@ func TestDecodeObligation_Happy(t *testing.T) {
 		"owners: [platform-team]\n" +
 		"for_kind: behavioral\n" +
 		"links:\n" +
-		"  - { type: verifies, ref: \"spec/loan-refi#ac-2\" }\n" +
+		"  - { type: verifies, ref: \"spec/loan-refi\" }\n" +
 		"frozen: { at: 2026-07-13, commit: 3e91ab2 }\n"
 	fm, err := DecodeObligation([]byte(y))
 	if err != nil {
@@ -24,7 +24,7 @@ func TestDecodeObligation_Happy(t *testing.T) {
 	if fm.ForKind != EvidenceBehavioral {
 		t.Fatalf("ForKind = %q, want %q", fm.ForKind, EvidenceBehavioral)
 	}
-	if len(fm.Links) != 1 || fm.Links[0].Type != LinkVerifies || fm.Links[0].Ref != "spec/loan-refi#ac-2" {
+	if len(fm.Links) != 1 || fm.Links[0].Type != LinkVerifies || fm.Links[0].Ref != "spec/loan-refi" {
 		t.Fatalf("Links = %+v", fm.Links)
 	}
 }
@@ -42,7 +42,7 @@ title: "Charge API retried on stale decline"
 owners: [platform-team]
 for_kind: behavioral
 links:
-  - { type: verifies, ref: "spec/loan-refi#ac-2" }
+  - { type: verifies, ref: "spec/loan-refi" }
 frozen: { at: 2026-07-13, commit: 3e91ab2 }
 ---
 # Charge API retried on stale decline
@@ -73,27 +73,27 @@ func TestDecodeObligation_Negative(t *testing.T) {
 	cases := map[string]string{
 		"malformed id: only two segments": "id: obligation/loan-refi--ac-2\n" +
 			"kind: obligation\ntitle: Foo\nowners: [x]\nfor_kind: behavioral\n" +
-			"links:\n  - { type: verifies, ref: \"spec/loan-refi#ac-2\" }\n" +
+			"links:\n  - { type: verifies, ref: \"spec/loan-refi\" }\n" +
 			"frozen: { at: 2026-07-13, commit: 3e91ab2 }\n",
 
 		"malformed id: single segment": "id: obligation/loan-refi\n" +
 			"kind: obligation\ntitle: Foo\nowners: [x]\nfor_kind: behavioral\n" +
-			"links:\n  - { type: verifies, ref: \"spec/loan-refi#ac-2\" }\n" +
+			"links:\n  - { type: verifies, ref: \"spec/loan-refi\" }\n" +
 			"frozen: { at: 2026-07-13, commit: 3e91ab2 }\n",
 
 		"malformed id: four segments": "id: obligation/loan-refi--ac-2--behavioral--extra\n" +
 			"kind: obligation\ntitle: Foo\nowners: [x]\nfor_kind: behavioral\n" +
-			"links:\n  - { type: verifies, ref: \"spec/loan-refi#ac-2\" }\n" +
+			"links:\n  - { type: verifies, ref: \"spec/loan-refi\" }\n" +
 			"frozen: { at: 2026-07-13, commit: 3e91ab2 }\n",
 
 		"id/for_kind disagreement": "id: obligation/loan-refi--ac-2--behavioral\n" +
 			"kind: obligation\ntitle: Foo\nowners: [x]\nfor_kind: static\n" +
-			"links:\n  - { type: verifies, ref: \"spec/loan-refi#ac-2\" }\n" +
+			"links:\n  - { type: verifies, ref: \"spec/loan-refi\" }\n" +
 			"frozen: { at: 2026-07-13, commit: 3e91ab2 }\n",
 
 		"unknown frontmatter field": "id: obligation/loan-refi--ac-2--behavioral\n" +
 			"kind: obligation\ntitle: Foo\nowners: [x]\nfor_kind: behavioral\nbogus_field: true\n" +
-			"links:\n  - { type: verifies, ref: \"spec/loan-refi#ac-2\" }\n" +
+			"links:\n  - { type: verifies, ref: \"spec/loan-refi\" }\n" +
 			"frozen: { at: 2026-07-13, commit: 3e91ab2 }\n",
 
 		"missing verifies (no links at all)": "id: obligation/loan-refi--ac-2--behavioral\n" +
@@ -102,20 +102,30 @@ func TestDecodeObligation_Negative(t *testing.T) {
 
 		"verifies wrong link type": "id: obligation/loan-refi--ac-2--behavioral\n" +
 			"kind: obligation\ntitle: Foo\nowners: [x]\nfor_kind: behavioral\n" +
-			"links:\n  - { type: implements, ref: \"spec/loan-refi#ac-2\" }\n" +
+			"links:\n  - { type: implements, ref: \"spec/loan-refi\" }\n" +
 			"frozen: { at: 2026-07-13, commit: 3e91ab2 }\n",
 
 		"more than one verifies link": "id: obligation/loan-refi--ac-2--behavioral\n" +
 			"kind: obligation\ntitle: Foo\nowners: [x]\nfor_kind: behavioral\n" +
-			"links:\n  - { type: verifies, ref: \"spec/loan-refi#ac-2\" }\n  - { type: verifies, ref: \"spec/loan-refi#ac-3\" }\n" +
+			"links:\n  - { type: verifies, ref: \"spec/loan-refi\" }\n  - { type: verifies, ref: \"spec/loan-refi\" }\n" +
 			"frozen: { at: 2026-07-13, commit: 3e91ab2 }\n",
 
 		"missing frozen": "id: obligation/loan-refi--ac-2--behavioral\n" +
 			"kind: obligation\ntitle: Foo\nowners: [x]\nfor_kind: behavioral\n" +
-			"links:\n  - { type: verifies, ref: \"spec/loan-refi#ac-2\" }\n",
+			"links:\n  - { type: verifies, ref: \"spec/loan-refi\" }\n",
 
 		"for_kind not a known evidence kind": "id: obligation/loan-refi--ac-2--bogus\n" +
 			"kind: obligation\ntitle: Foo\nowners: [x]\nfor_kind: bogus\n" +
+			"links:\n  - { type: verifies, ref: \"spec/loan-refi\" }\n" +
+			"frozen: { at: 2026-07-13, commit: 3e91ab2 }\n",
+
+		// The canonical verifies form is a WHOLE story spec (the AC is named
+		// by the id, mirroring an attestation). A verifies edge carrying an
+		// object fragment is rejected by the base link vocabulary (02 §Link
+		// taxonomy: verifies is not one of the five fragment-eligible edge
+		// types), so it never decodes.
+		"verifies ref carries a fragment": "id: obligation/loan-refi--ac-2--behavioral\n" +
+			"kind: obligation\ntitle: Foo\nowners: [x]\nfor_kind: behavioral\n" +
 			"links:\n  - { type: verifies, ref: \"spec/loan-refi#ac-2\" }\n" +
 			"frozen: { at: 2026-07-13, commit: 3e91ab2 }\n",
 	}
