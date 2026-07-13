@@ -22,8 +22,22 @@ bindings:
       - "spec/remote-and-ci#ac-1"
       - "spec/remote-and-ci#ac-2"
       - "spec/remote-and-ci#ac-3"
+      # spec/runtime-evidence (true-closure#ac-3): both ACs declare
+      # evidence: [static, behavioral]. The behavioral leg is the
+      # internal/runtime + fold + close_runtime tests (probe emits a
+      # well-formed (story,AC)-keyed record a query returns; a story
+      # declaring evidence:[runtime] folds pending->evidenced from a
+      # source:ci record) — all part of make verify's own test suite.
+      - "spec/runtime-evidence#ac-1"
+      - "spec/runtime-evidence#ac-2"
   - producer: verdi-verify-static
     kind: static
     acs:
       - ac-3
       - "spec/remote-and-ci#ac-1"
+      # spec/runtime-evidence static leg: the verdi.evidence/v1 record
+      # schema and this binding are declared and strict-decoded (they
+      # compile, vet, and lint-store clean under make verify), and
+      # LoadRecords' runtime.json wiring is statically sound.
+      - "spec/runtime-evidence#ac-1"
+      - "spec/runtime-evidence#ac-2"
