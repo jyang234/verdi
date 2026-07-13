@@ -20,6 +20,8 @@ bindings:
       - ac-1
       - ac-3
       - "spec/remote-and-ci#ac-1"
+      - "spec/remote-and-ci#ac-2"
+      - "spec/remote-and-ci#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
