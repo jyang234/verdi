@@ -74,6 +74,8 @@ func classifyArtifactPath(rel string) (kind string, ok bool) {
 		return "waiver", true
 	case strings.HasPrefix(rel, "conflicts/") && strings.HasSuffix(rel, ".md"):
 		return "conflict", true
+	case strings.HasPrefix(rel, "obligations/") && strings.HasSuffix(rel, ".md"):
+		return "obligation", true
 	case (strings.HasPrefix(rel, "specs/active/") || strings.HasPrefix(rel, "specs/archive/")) &&
 		strings.HasSuffix(rel, "/spec.md"):
 		return "spec", true
@@ -133,6 +135,13 @@ func decodeEntry(kind string, data []byte, path string) (*Entry, error) {
 			return nil, err
 		}
 		return &Entry{Ref: c.ID, Kind: kind, Title: c.Title, Status: string(c.Status), Path: path, Body: string(body), Links: c.Links}, nil
+
+	case "obligation":
+		o, err := artifact.DecodeObligation(fm)
+		if err != nil {
+			return nil, err
+		}
+		return &Entry{Ref: o.ID, Kind: kind, Title: o.Title, Path: path, Body: string(body), Links: o.Links}, nil
 
 	default:
 		return nil, fmt.Errorf("index: unreachable: unhandled kind %q", kind)

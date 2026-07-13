@@ -50,6 +50,7 @@ would independently reject the same file as defense in depth.
 | `VL-014/incorporated-without-where/.../spec.md` | VL-014 | 1 | `incorporated` disposition has no `where` |
 | `VL-014/contradicted-without-note/.../spec.md` | VL-014 | 1 | `contradicted` disposition has no `note` |
 | `VL-014/unresolvable-where-anchor/` | VL-014 | 1 | `where: "#does-not-exist"` names no heading in the spec body |
+| `VL-019/.verdi/obligations/stale-decline/ac-1--static.md` | VL-019 | 1 | obligation `verifies` targets `spec/stale-decline#ac-1`, a FEATURE ac — obligations attach to STORY ACs only |
 
 VL-001's overlays cover both halves of the rule: strict decode (unknown
 field) and the restricted dialect (anchor/alias/custom-tag, PLAN.md I-1).

@@ -21,6 +21,11 @@ import (
 // exit criterion (a real reaffirmation record under .verdi/reaffirmations/
 // tripped a spurious VL-007 finding); fixed here rather than worked around,
 // since the gap is in the rule's own enumeration, not the fixture.
+//
+// "obligations" (spec/obligation-artifact DC-2, evidence-obligations wave
+// 1) is the obligation kind's own top-level directory, added alongside its
+// decoder — 01 §Directory layout's ".verdi/obligations/<story-ref-slug>/
+// <ac-id>--<for-kind>.md".
 var knownTopLevelEntries = map[string]bool{
 	"verdi.yaml":     true,
 	".gitignore":     true,
@@ -31,6 +36,7 @@ var knownTopLevelEntries = map[string]bool{
 	"waivers":        true,
 	"conflicts":      true,
 	"reaffirmations": true,
+	"obligations":    true,
 	"bin":            true,
 	"data":           true,
 }
@@ -54,6 +60,8 @@ func classifyArtifactPath(rel string) (kind string, ok bool) {
 		return "conflict", true
 	case strings.HasPrefix(rel, "reaffirmations/") && strings.HasSuffix(rel, ".md"):
 		return "reaffirmation", true
+	case strings.HasPrefix(rel, "obligations/") && strings.HasSuffix(rel, ".md"):
+		return "obligation", true
 	case (strings.HasPrefix(rel, "specs/active/") || strings.HasPrefix(rel, "specs/archive/")) &&
 		strings.HasSuffix(rel, "/spec.md"):
 		return "spec", true
@@ -187,6 +195,15 @@ func decodeDocument(doc *Document) {
 			return
 		}
 		doc.Reaffirmation = &fmv
+		doc.Base = fmv.Base
+
+	case "obligation":
+		var fmv artifact.ObligationFrontmatter
+		if err := artifact.DecodeStrict(fm, &fmv); err != nil {
+			doc.DecodeErr = err
+			return
+		}
+		doc.Obligation = &fmv
 		doc.Base = fmv.Base
 
 	default:

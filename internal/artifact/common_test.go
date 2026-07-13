@@ -72,6 +72,57 @@ func TestLink_Validate_Negative(t *testing.T) {
 	}
 }
 
+// TestValidateLinkForKind_ObligationWidensVerifiesToFragment proves the one
+// documented exception ValidateLinkForKind carves out (common.go's doc
+// comment, spec/obligation-artifact DC-1/DC-2): a KindObligation owner's
+// `verifies` link may target an object fragment, where Link.Validate()
+// itself (and every other owner kind) rejects it as outside the closed
+// five-value spec-object edge vocabulary.
+func TestValidateLinkForKind_ObligationWidensVerifiesToFragment(t *testing.T) {
+	l := Link{Type: LinkVerifies, Ref: "spec/loan-update#ac-1"}
+
+	if err := ValidateLinkForKind(l, KindObligation); err != nil {
+		t.Fatalf("ValidateLinkForKind(%+v, KindObligation): %v, want nil", l, err)
+	}
+
+	// The exact same link, for every OTHER owner kind, keeps
+	// Link.Validate()'s existing rejection — the widening is scoped to
+	// KindObligation alone, never bled into any other kind.
+	for _, owner := range []Kind{KindSpec, KindAttestation, KindWaiver, KindADR, KindDiagram, KindConflict, KindReaffirmation} {
+		if err := ValidateLinkForKind(l, owner); err == nil {
+			t.Errorf("ValidateLinkForKind(%+v, %s): want error (unchanged Link.Validate() behavior), got nil", l, owner)
+		}
+	}
+}
+
+// TestValidateLinkForKind_ObligationStillRejectsBadRef proves the widening
+// is narrow — non-empty, parseable ref only — not a blanket bypass: an
+// obligation-owned verifies link with an empty or malformed ref still fails.
+func TestValidateLinkForKind_ObligationStillRejectsBadRef(t *testing.T) {
+	cases := []Link{
+		{Type: LinkVerifies, Ref: ""},
+		{Type: LinkVerifies, Ref: "not-a-ref"},
+	}
+	for _, l := range cases {
+		t.Run(l.Ref, func(t *testing.T) {
+			if err := ValidateLinkForKind(l, KindObligation); err == nil {
+				t.Fatalf("ValidateLinkForKind(%+v, KindObligation): want error, got nil", l)
+			}
+		})
+	}
+}
+
+// TestValidateLinkForKind_NonVerifiesUnchangedForObligation proves the
+// widening is scoped to the verifies link TYPE too: an obligation-owned
+// link of any other type still gets Link.Validate()'s ordinary behavior
+// (including the closed edge vocabulary for a fragment target).
+func TestValidateLinkForKind_NonVerifiesUnchangedForObligation(t *testing.T) {
+	l := Link{Type: LinkAnnotates, Ref: "spec/loan-update#ac-1"}
+	if err := ValidateLinkForKind(l, KindObligation); err == nil {
+		t.Fatalf("ValidateLinkForKind(%+v, KindObligation): want error (non-verifies type, unchanged), got nil", l)
+	}
+}
+
 func TestFrozen_Validate_Happy(t *testing.T) {
 	f := Frozen{At: "2026-05-14", Commit: "3e91ab2"}
 	if err := f.Validate(); err != nil {
