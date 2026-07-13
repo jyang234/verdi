@@ -4,7 +4,7 @@ kind: spec
 title: "Close Verb"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-2
 problem: { text: "`verdi close` is a phase-0 stub (I-23): recognized, exits 2 'not implemented'. No story has ever reached a true, archived closure, and — because the verdi repo is not a flowmap service of itself — the `verdi-evidence` bundle is EMPTY (D6-4), so verdi's own stories have no CI-produced static/behavioral evidence to fold. Without both the verb and a self-hosted evidence producer, true-closure#ac-1 ('archived closure on authoritative CI-produced evidence alone') is unreachable in this arena, and #ac-2 ('rollup published and readable') has no verb reaching the publish step.", anchor: "#problem" }
 outcome: { text: "`verdi close <story>` drives a merged verdi story to a true, archived quartet on `source: ci` evidence alone and publishes its rollup to the configured tracker, readably — and verdi's self-hosted stories earn real CI static+behavioral evidence, so the fold reaches evidenced rather than stalling empty.", anchor: "#outcome" }
