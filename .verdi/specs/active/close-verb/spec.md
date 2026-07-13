@@ -4,7 +4,7 @@ kind: spec
 title: "Close Verb"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-2
 problem: { text: "`verdi close` is a phase-0 stub (I-23): recognized, exits 2 'not implemented'. No story has ever reached a true, archived closure, and — because the verdi repo is not a flowmap service of itself — the `verdi-evidence` bundle is EMPTY (D6-4), so verdi's own stories have no CI-produced static/behavioral evidence to fold. Without both the verb and a self-hosted evidence producer, true-closure#ac-1 ('archived closure on authoritative CI-produced evidence alone') is unreachable in this arena, and #ac-2 ('rollup published and readable') has no verb reaching the publish step.", anchor: "#problem" }
 outcome: { text: "`verdi close <story>` drives a merged verdi story to a true, archived quartet on `source: ci` evidence alone and publishes its rollup to the configured tracker, readably — and verdi's self-hosted stories earn real CI static+behavioral evidence, so the fold reaches evidenced rather than stalling empty.", anchor: "#outcome" }
@@ -22,6 +22,7 @@ decisions:
 constraints:
   - { id: co-1, text: "authoritative evidence only: every record folded into the decision to close carries `provenance.source: ci`; no local/advisory record is load-bearing (true-closure dc-1, constitution 4)", anchor: "#co-1" }
   - { id: co-2, text: "the archived quartet is frozen and the active→archive move is a pure rename (VL-009/VL-010); no network in any test — closure is exercised hermetically over fixturegit + httptest forge doubles + canned source:ci bundles + the fake provider", anchor: "#co-2" }
+frozen: { at: 2026-07-12, commit: 244f42bc9d3f7d76b3377a626bb492b787969941, stub_matched: true }
 ---
 # Close Verb
 
