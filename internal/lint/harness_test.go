@@ -335,3 +335,37 @@ func onlyRule(t *testing.T, got []Finding, want string) {
 		}
 	}
 }
+
+// onlyRules is onlyRule's multi-rule sibling: asserts every finding in got
+// has Rule in the allowed set (and that there is at least one) — for a
+// fixture that legitimately trips more than one rule at once (e.g. an ad hoc
+// fixture predating VL-020 that, having no backing obligation, now also
+// correctly trips it alongside whatever rule the fixture was originally
+// built to test). Any rule id outside the allowed set is still the storm
+// onlyRule guards against.
+func onlyRules(t *testing.T, got []Finding, allowed ...string) {
+	t.Helper()
+	if len(got) == 0 {
+		t.Fatalf("no findings at all, want at least one of %v", allowed)
+	}
+	ok := make(map[string]bool, len(allowed))
+	for _, r := range allowed {
+		ok[r] = true
+	}
+	for _, f := range got {
+		if !ok[f.Rule] {
+			t.Fatalf("unexpected rule %s fired (rule storm): %s\nfull findings:\n%s", f.Rule, f.String(), findingsString(got))
+		}
+	}
+}
+
+// countRule counts how many findings in got have the given Rule id.
+func countRule(got []Finding, rule string) int {
+	n := 0
+	for _, f := range got {
+		if f.Rule == rule {
+			n++
+		}
+	}
+	return n
+}
