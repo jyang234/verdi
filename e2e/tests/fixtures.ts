@@ -257,6 +257,24 @@ export const SIZE_FIT_SPEC = "decline-ac-trim";
 export const SIZE_SMELL_ESTIMATE = 920;
 export const SIZE_SMELL_REFERENCE = 900;
 
+// ---------------------------------------------------------------------------
+// Workbench (derivation drawer, spec/derivation-drawer ac-3)
+// ---------------------------------------------------------------------------
+
+// Three walls each carrying a REAL committed decision-conflict-report.md
+// (provisioned by cmd/e2eharness/provision_board.go, sweepSpec/sweepReport):
+// fresh (covers pins the commit whose spec bytes the wall still renders,
+// decisions_scanned complete → no mismatch line), stale (the spec was
+// rewritten after the covered commit → the drawer discloses the covers
+// contrast), and partial (declared dc-2 absent from decisions_scanned →
+// the drawer names it). Every report carries one dispositioned judged
+// finding (no-conflict + note) and one explicitly undispositioned one.
+export const SWEEP_FRESH_SPEC = "decline-sweep-fresh";
+export const SWEEP_STALE_SPEC = "decline-sweep-stale";
+export const SWEEP_PARTIAL_SPEC = "decline-sweep-partial";
+// The declared decision id the partial fixture's sweep misses.
+export const SWEEP_MISSING_DECISION = "dc-2";
+
 // Corpus artifacts nothing on DESIGN_SPEC's wall names (real on main,
 // so real on the design branch) — the pin toolbox's import fixtures.
 export const PIN_ADR = "adr/0002-outbox-events";

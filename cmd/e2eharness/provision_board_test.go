@@ -92,6 +92,55 @@ func TestACCountSpecDecodesAndStraddlesTheThreshold(t *testing.T) {
 	}
 }
 
+// TestSweepFixturesDecode proves the judged-sweep fixtures the harness
+// provisions (spec/derivation-drawer ac-3) are VALID artifacts: both spec
+// revisions strict-decode as feature drafts declaring dc-1/dc-2, and the
+// report — fresh-shaped and partial-shaped alike — strict-decodes through
+// the same artifact.DecodeDecisionConflict the wall itself uses, carrying
+// one dispositioned and one undispositioned judged finding plus the
+// sweep_provenance block.
+func TestSweepFixturesDecode(t *testing.T) {
+	for _, outcome := range []string{sweepOutcomeV1, sweepOutcomeStaleV2} {
+		fmBytes, _, err := artifact.SplitFrontmatter([]byte(sweepSpec(sweepFreshSpecName, outcome)))
+		if err != nil {
+			t.Fatalf("SplitFrontmatter(%q): %v", outcome, err)
+		}
+		fm, err := artifact.DecodeSpec(fmBytes)
+		if err != nil {
+			t.Fatalf("DecodeSpec(%q): %v", outcome, err)
+		}
+		if len(fm.Decisions) != 2 || fm.Decisions[0].ID != "dc-1" || fm.Decisions[1].ID != "dc-2" {
+			t.Errorf("decisions = %+v, want declared dc-1 and dc-2 (the comparison operand)", fm.Decisions)
+		}
+	}
+
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	for name, scanned := range map[string]string{
+		"full":    "spec/x#dc-1, spec/x#dc-2",
+		"partial": "spec/x#dc-1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			fmBytes, _, err := artifact.SplitFrontmatter([]byte(sweepReport(sha, scanned)))
+			if err != nil {
+				t.Fatalf("SplitFrontmatter: %v", err)
+			}
+			report, err := artifact.DecodeDecisionConflict(fmBytes)
+			if err != nil {
+				t.Fatalf("DecodeDecisionConflict: %v", err)
+			}
+			if report.Covers != sha {
+				t.Errorf("covers = %q, want the pinned sha", report.Covers)
+			}
+			if len(report.Findings) != 2 || !report.Findings[0].Dispositioned() || report.Findings[1].Dispositioned() {
+				t.Errorf("findings = %+v, want one dispositioned + one undispositioned", report.Findings)
+			}
+			if report.SweepProvenance == nil || len(report.SweepProvenance.DecisionsScanned) == 0 {
+				t.Error("sweep_provenance block missing from the fixture report")
+			}
+		})
+	}
+}
+
 // TestBadgeSpecSealedRequiresFrozen is the negative path: the sealed
 // status without its frozen stamp must FAIL validation (the frozenLine
 // parameter is load-bearing, not decoration).
