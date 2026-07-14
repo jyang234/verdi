@@ -55,7 +55,7 @@ func RegisterRoutesWith(mux *http.ServeMux, root string, deps Deps) {
 	// "/board/spec/{name}" is strictly more specific than the v0
 	// "/board/{key}/{action}" patterns below, so ServeMux routes every
 	// /board/spec/* request here without conflict.
-	bs := &boardSpecServer{root: root, feed: deps.CommentFeed, reviewUnavailable: deps.ReviewUnavailable}
+	bs := &boardSpecServer{root: root, feed: deps.CommentFeed, reviewUnavailable: deps.ReviewUnavailable, supersession: deps.SupersessionCandidates}
 	mux.HandleFunc("/board/spec/{name}", bs.boardSpecPageHandler())
 	mux.HandleFunc("/board/spec/{name}/fragment", bs.boardSpecFragmentHandler())
 	mux.HandleFunc("/board/spec/{name}/api/{action}", bs.boardSpecAPIHandler())

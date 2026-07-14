@@ -108,6 +108,13 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 	switch {
 	case forgePort != nil:
 		deps.CommentFeed = newForgeCommentFeed(forgePort, root)
+		// The pending-supersession wall badge's forge access (spec/badge-
+		// computes ac-3): the same best-effort forge construction above,
+		// reused — no second construction. nil (no forge configured/
+		// reachable) leaves Deps.SupersessionCandidates at its zero value,
+		// so every pending-supersession outcome renders as a disclosed-
+		// unproven notice rather than a badge (never silently unflagged).
+		deps.SupersessionCandidates = newForgeSupersessionLoader(forgePort, root)
 	case os.Getenv("VERDI_REVIEW_FEED") != "":
 		feed, ferr := workbench.LoadCannedCommentFeed(os.Getenv("VERDI_REVIEW_FEED"))
 		if ferr != nil {
