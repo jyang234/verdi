@@ -20,8 +20,8 @@ links:
 decisions:
   - { id: dc-1, text: "a new internal/wtmanager package exposes EnsureWorktree(ctx, root, branch) (path string, err error): lazy, synchronous (blocks until the cut completes or fails - no interstitial, matching the sibling draft-boards story's own dc-2 consumption contract verbatim), idempotent (a worktree already present at the deterministic path for branch is reused, never re-cut). Layout under the data zone (co-1): .verdi/data/worktrees/<name>/, where <name> is the design branch's own spec name (branch design/<name> to path <name> - a direct, collision-free mapping since spec names are already globally unique, VL-002 - never a hash or re-slugging scheme this story would have to invent). EnsureWorktree runs exactly one git command class against the serving checkout's root - worktree add <path> <branch> - and never checkout/switch on that root, so the serving checkout is provably undisturbed the same way ref-index's ComputeIndex is (co-1)", anchor: "#dc-1" }
   - { id: dc-2, text: "ownership mechanism: a per-managed-worktree lockfile at .verdi/data/worktrees/<name>.lock, using the EXACT algorithm this store already ratified for its per-checkout data/writer.lock (internal/mcpserve/lock.go's O_CREATE|O_EXCL {pid,start} JSON, kill(pid,0)-plus-ps -o lstart= liveness cross-check closing the PID-reuse gap, stale-lock takeover) - extracted into a new, shared internal/filelock package (CLAUDE.md: anything used by two or more packages lives in a shared internal/ package) rather than copy-pasted a second time or imported from the semantically-mismatched internal/mcpserve. cmd/verdi/serve.go's existing writer-lock call sites move to internal/filelock unchanged in behavior. The lock is held ONLY for the duration of a git-worktree-mutating operation on that worktree - EnsureWorktree's own git worktree add, or gc's git worktree remove - never for the worktree's whole idle lifetime between operations: ordinary board reads/edits inside an already-cut worktree are ordinary git commands against an ordinary directory and need no lock of their own. This bounds every lock hold to a single short git invocation, so a live-lock skip (dc-4) is always a narrow, transient race window - never a multi-minute or whole-serve-session deferral", anchor: "#dc-2" }
-  - { id: dc-3, text: "gc's merged signal reuses gitx.IsAncestor (the same primitive the sibling ref-index story's dc-5 already uses). Its deleted signal is LOCAL-ONLY (the branch no longer resolves under refs/heads/design/* at all) - deliberately narrower than verdi-store-layout's ratified derived-cache deleted-signal (git fetch --prune, then neither-local-nor-remote), because the two mechanisms answer different questions about different kinds of target: a derived-cache entry is valid content derivable from ANY reachable ref, local or remote, so store-layout correctly protects it as long as the ref survives anywhere; a managed worktree is a live checkout bound to a SPECIFIC LOCAL BRANCH (dc-1: cut from local branches only) - once that local branch is gone, the worktree is orphaned regardless of whether a same-named remote-tracking ref persists, since resurrecting it would require explicitly minting a new local branch, an act dc-1 already forbids doing implicitly. This is not a redefinition of store-layout's ratified signal, it is this story's own, necessarily different signal for a target (managed worktrees) store-layout's existing definition was never written to cover; store-layout's own derived-cache pruning is untouched. Separately, retention_days: verdi-store-layout's config comment ('gc horizon for merged/deleted refs') is worded generally enough that whether it binds every future merged/deleted-ref reclaim mechanism or only the derived-cache one that existed when it was ratified is genuinely ambiguous - store-layout predates managed worktrees and cannot have decided this. This story chooses NOT to apply retention_days to managed worktrees (reclaim-eligible the instant its signal fires, no grace period) as the smallest reversible starting point, explicitly recorded as a choice rather than silently assumed. Neither divergence carries a supersedes/exempts edge against verdi-store-layout because none is available to carry: verdi-store-layout is a component spec (02 §Kind registry - 'no story, no ACs'), which the artifact contract's object model explicitly excludes from carrying declared decision/constraint objects at all, and the exempts edge type's own definition (02 §Link taxonomy) targets only an ADR or a feature-decision FRAGMENT - there is no declared object id anywhere in verdi-store-layout's prose for such an edge to name. Explicit, honest prose disclosure - what this decision does - is the only discipline this contract makes available for a divergence from a component spec's free-standing prose; it is not a lesser substitute for a structurally-impossible edge", anchor: "#dc-3" }
-  - { id: dc-4, text: "gc never forces a removal. It checks gitx.StatusDirty (existing function, reused unchanged) before attempting anything, producing a clear disclosed message ('kept: uncommitted changes') rather than parsing git's own refusal text; only a clean, reclaim-eligible worktree reaches git worktree remove, called WITHOUT --force, so git's own dirty-tree safety net is a second, redundant guard rather than the only one. A worktree whose lockfile (dc-2) is currently held by a live process is equally skipped and disclosed ('kept: in use by pid N') rather than removed out from under its owner. Because dc-2 holds this lock only for the duration of a single git-worktree-mutating call (never the worktree's whole idle lifetime), this skip is a NARROW, single-operation race window, not an extended deferral: no exempts edge is needed against parent dc-4 because the exact same merged/deleted worktree is fully reclaim-eligible again the moment that one operation finishes, ordinarily within the same gc run's next pass or the very next invocation - never withheld for the life of a long-running serve session. This is materially different from the dirty-worktree case (kept until a human resolves the uncommitted changes, an indefinite hold dc-4 of the parent feature spec explicitly names), so the two kept-reasons are not analogous in duration, only in disclosure shape. Every skip and every reclaim is printed, one line per worktree; gc performs no removal a human cannot see in its own output", anchor: "#dc-4" }
+  - { id: dc-3, text: "gc's merged signal reuses gitx.IsAncestor (the same primitive the sibling ref-index story's dc-5 already uses). Its deleted signal is LOCAL-ONLY (the branch no longer resolves under refs/heads/design/* at all) - narrower than the ratified store-layout gc deleted-signal (git fetch --prune, then neither-local-nor-remote) that parent dc-4 invokes generically as 'the ratified gc signals', and EXEMPTED from that general reading via the declared edge below: a managed worktree is a live checkout bound to a SPECIFIC LOCAL BRANCH (dc-1: cut from local branches only) - once that local branch is gone, the worktree is orphaned regardless of whether a same-named remote-tracking ref persists, since resurrecting it would require explicitly minting a new local branch, an act dc-1 already forbids doing implicitly - so a derived-cache-shaped 'alive anywhere' check would be actively wrong for this target, not merely different. Separately, retention_days: verdi-store-layout's config comment ('gc horizon for merged/deleted refs') is worded generally enough that whether it binds every future merged/deleted-ref reclaim mechanism or only the derived-cache one that existed when it was ratified is genuinely ambiguous - store-layout predates managed worktrees and cannot have decided this. This story chooses NOT to apply retention_days to managed worktrees (reclaim-eligible the instant its signal fires, no grace period) as the smallest reversible starting point. This second divergence carries no edge because none is available to carry: verdi-store-layout is a component spec (02 §Kind registry), excluded by the artifact contract's object model from carrying declared decision objects at all, and the exempts edge type targets only an ADR or a feature-decision fragment - no such id exists in store-layout's prose to name", anchor: "#dc-3", links: [ { type: exempts, ref: "spec/workbench-directory#dc-4", note: "the deleted signal for a MANAGED WORKTREE is checked local-ref-only, narrower than the general store-layout gc deleted-definition dc-4 invokes by reference, because a worktree is bound to one specific local branch (this story's own dc-1) and cannot be resurrected from a surviving remote-tracking ref without an explicit act dc-1 already forbids; dc-4's general reclamation model (merged-or-deleted, dirty-is-kept) stays valid and unweakened, this story's worktree-specific implementation of the deleted leg is excused from the broader multi-target reading" } ] }
+  - { id: dc-4, text: "gc never forces a removal. It checks gitx.StatusDirty (existing function, reused unchanged) before attempting anything, producing a clear disclosed message ('kept: uncommitted changes') rather than parsing git's own refusal text; only a clean, reclaim-eligible worktree reaches git worktree remove, called WITHOUT --force, so git's own dirty-tree safety net is a second, redundant guard rather than the only one. A worktree whose lockfile (dc-2) is currently held by a live process is equally skipped and disclosed ('kept: in use by pid N') rather than removed out from under its owner - a keep-reason beyond parent dc-4's single named exception (uncommitted changes), EXEMPTED via the declared edge below. Because dc-2 holds this lock only for the duration of a single git-worktree-mutating call (never the worktree's whole idle lifetime), this skip is a NARROW, single-operation race window: the exact same merged/deleted worktree is fully reclaim-eligible again the moment that one operation finishes, ordinarily within the same gc run's next pass or the very next invocation - never withheld for the life of a long-running serve session, and materially different in duration from the dirty-worktree case (an indefinite hold until a human acts). Every skip and every reclaim is printed, one line per worktree; gc performs no removal a human cannot see in its own output", anchor: "#dc-4", links: [ { type: exempts, ref: "spec/workbench-directory#dc-4", note: "this story adds a keep-and-disclose reason (a live-locked worktree, dc-2) beyond dc-4's one named exception (uncommitted changes); excused because the lock hold is bounded to a single git-worktree-mutating operation - a transient, self-resolving race window, never an indefinite hold - so dc-4's reclamation model stays valid and unweakened, this story adds a narrow safety margin around it rather than a competing kept-forever category" } ] }
   - { id: dc-5, text: "scope line: this story implements ONLY the managed-worktree reclamation slice of verdi gc. verdi-store-layout's Garbage collection section also ratifies derived-cache pruning (data/derived/<ref>/ for refs merged/deleted past derived.retention_days) and layout/tree-hash cache pruning - neither is touched here; cmd/verdi gc's own printed output says so explicitly on every run, so a human is never left inferring full gc coverage from a partial implementation. This is incremental delivery of an already-ratified, already-recognized-but-unimplemented verb (dispatch.go's gc entry was phase 0, 'out of v0 scope', before this story - PLAN.md's own build contract stages every verb across phases; no verb here has ever been required to land in one shot), not a redefinition or narrowing of verdi-store-layout's Garbage collection section, which remains fully valid, unedited, and awaiting its own future story for the two slices left undone. No supersedes/exempts edge is needed for the same structural reason dc-3 gives: verdi-store-layout is a component spec carrying no declared decision objects (02 Object model: component specs 'have no object model, carry neither'), so the exempts edge type's required target - an ADR or feature-decision fragment - does not exist to be named here either; dispatch.go's gc entry moves from phase 0 to a real, implemented phase, the same flip close-verb already made for its own verb in round 6", anchor: "#dc-5" }
 constraints:
   - { id: co-1, text: "inherited verbatim from the feature (co-1): managed worktrees live under the data zone, never committed. EnsureWorktree's every write happens under .verdi/data/worktrees/; nothing it creates is ever git-added or git-committed, and gc's own removals touch only that same subtree", anchor: "#co-1" }
@@ -212,25 +212,28 @@ cross-referenced with the current `refs/heads/design/*` listing: merged
 means the worktree's recorded branch tip is an ancestor of the default
 branch's tip.
 
-**Deleted signal, deliberately narrower than store-layout's, closing a
-decision-conflict finding raised against an earlier draft:** deleted means
-the branch no longer resolves under `refs/heads/design/*` AT ALL — checked
-LOCALLY ONLY. This is narrower than `verdi-store-layout`'s ratified
-derived-cache deleted-signal (`git fetch --prune` first, then deleted means
-the ref exists neither locally nor on the remote), and deliberately so: the
-two mechanisms answer different questions about different kinds of target.
-A derived-cache entry is valid, reusable content derivable from ANY
-reachable ref, local or remote — store-layout correctly protects it as long
-as the ref survives anywhere. A managed worktree is a live checkout bound
-to one SPECIFIC LOCAL BRANCH (dc-1: cut from local branches only); once
-that local branch is gone, the worktree is orphaned regardless of whether a
-same-named remote-tracking ref still exists, because resurrecting it would
-require explicitly minting a new local branch — an act dc-1 already
-forbids doing implicitly. This is not a redefinition of store-layout's
-ratified signal; it is this story's own, necessarily different signal for a
-target (managed worktrees) that store-layout's existing definition was
-never written to cover, and store-layout's own derived-cache pruning is
-untouched by this story either way.
+**Deleted signal, deliberately narrower than the general ratified reading,
+declared via an exempts edge — closing a decision-conflict finding raised
+against an earlier draft, which argued this in prose alone against the
+wrong document:** deleted means the branch no longer resolves under
+`refs/heads/design/*` AT ALL — checked LOCALLY ONLY. Parent feature dc-4
+binds worktree reclamation to "the ratified gc signals," and the only
+ratified deleted-signal in this store (`verdi-store-layout`'s Garbage
+collection section) is `git fetch --prune` first, then neither-local-
+nor-remote. Parent dc-4 IS a feature-decision fragment — a valid
+`exempts`-edge target (02 §Link taxonomy) — so this decision declares one
+against it (frontmatter `links:`), rather than arguing the narrowing away
+in prose alone as an earlier draft did. The reason: a managed worktree is a
+live checkout bound to one SPECIFIC LOCAL BRANCH (dc-1: cut from local
+branches only); once that local branch is gone, the worktree is orphaned
+regardless of whether a same-named remote-tracking ref still exists,
+because resurrecting it would require explicitly minting a new local
+branch — an act dc-1 already forbids doing implicitly. Parent dc-4's
+general reclamation model (merged-or-deleted, dirty-is-kept) stays valid
+and unweakened; this story's worktree-specific implementation of the
+deleted leg is excused from the broader, multi-target reading that binds
+`verdi-store-layout`'s own derived-cache pruning (left untouched by this
+story either way).
 
 **Retention window, a disclosed judgment call, not a claimed fact about
 another document** (an earlier draft of this decision asserted
@@ -249,21 +252,22 @@ a choice here rather than silently assumed as settled fact. A later
 revision may unify the two under one shared knob, or may deliberately keep
 them separate, without breaking this story's own contract either way.
 
-**Why neither divergence carries a supersedes/exempts edge:**
-`verdi-store-layout` is a component spec (02 §Kind registry: "system
-source-of-truth documents ... no story, no ACs"), and the artifact
-contract's object model explicitly excludes component specs from carrying
-any declared `decisions:`/`constraints:` objects at all — "Component and
-ADR specs, having no object model, carry neither" (02 §Object model). The
-`exempts` edge type's own definition (02 §Link taxonomy) targets only an
-ADR or a feature-decision FRAGMENT; there is no declared object id anywhere
-in `verdi-store-layout`'s "Garbage collection" prose for such an edge to
-name — the target this contract requires does not exist to be named.
-Explicit, honest prose disclosure of what this decision does differently,
-and why, is the only discipline this contract makes available for a
-divergence from a component spec's free-standing prose; it is a
-substitute for nothing, since no structurally-legal edge is available here
-to substitute for.
+**Why the retention_days divergence carries no edge, while the deleted-
+signal divergence above does:** `verdi-store-layout` is a component spec
+(02 §Kind registry: "system source-of-truth documents ... no story, no
+ACs"), and the artifact contract's object model explicitly excludes
+component specs from carrying any declared `decisions:`/`constraints:`
+objects at all — "Component and ADR specs, having no object model, carry
+neither" (02 §Object model). The `exempts` edge type's own definition (02
+§Link taxonomy) targets only an ADR or a feature-decision FRAGMENT; there
+is no declared object id anywhere in `verdi-store-layout`'s "Garbage
+collection" prose for such an edge to name — the target this contract
+requires does not exist to be named. This is why the retention_days
+choice, which is about `verdi-store-layout`'s own config comment
+specifically (not about anything parent feature dc-4 says), stays a prose
+disclosure rather than a declared edge: no structurally-legal target is
+available for it, unlike the deleted-signal divergence above, whose target
+(parent dc-4) does exist and is now named.
 
 ## DC-4
 
@@ -278,25 +282,30 @@ relies on.
 
 A worktree whose lockfile (dc-2) is currently held by a live process is
 equally skipped and disclosed ("kept: in use by pid N") rather than removed
-out from under its owner — yanking a clean-but-currently-served worktree
-out from under a live process would be exactly the kind of surprise a lock
-exists to prevent, and it never forces a takeover of a live lock to do so.
+out from under its owner — a keep-reason beyond parent dc-4's one named
+exception (uncommitted changes) — yanking a clean-but-currently-served
+worktree out from under a live process would be exactly the kind of
+surprise a lock exists to prevent, and it never forces a takeover of a live
+lock to do so.
 
-**No exempts edge against parent dc-4, closing a decision-conflict finding
-raised against an earlier draft:** because dc-2's lock is held only for the
-duration of a single git-worktree-mutating call (never the worktree's whole
-idle lifetime, per dc-2's own correction above), this skip is a NARROW,
-single-operation race window — not the extended, session-length deferral
-an earlier draft's "temporary, this-run-only" framing left ambiguous room
-for. No exempts edge is needed against parent dc-4: the exact same
-merged-or-deleted worktree is fully reclaim-eligible again the moment that
-one `git worktree add`/`remove` call finishes, ordinarily within the same
-`gc` run's next pass or the very next invocation — never withheld for the
-life of a long-running serve session. This is materially different in kind
-from the dirty-worktree case (feature dc-4's own, kept until a human
-resolves the uncommitted changes — an indefinite hold with no natural
-expiry), so the two kept-reasons share a disclosure shape but not a
-duration, and only the dirty case is the parent spec's own indefinite hold.
+**Declared via an exempts edge, closing a decision-conflict finding raised
+against an earlier draft (which argued this in prose alone rather than
+declaring the available edge):** parent dc-4 is a feature-decision
+fragment, a valid `exempts`-edge target (02 §Link taxonomy), so this
+decision declares one against it (frontmatter `links:`) rather than only
+arguing materiality in prose. The reason: because dc-2's lock is held only
+for the duration of a single git-worktree-mutating call (never the
+worktree's whole idle lifetime, per dc-2's own correction), this skip is a
+NARROW, single-operation race window — the exact same merged-or-deleted
+worktree is fully reclaim-eligible again the moment that one `git worktree
+add`/`remove` call finishes, ordinarily within the same `gc` run's next
+pass or the very next invocation, never withheld for the life of a
+long-running serve session. This is materially different in kind from the
+dirty-worktree case (feature dc-4's own, kept until a human resolves the
+uncommitted changes — an indefinite hold with no natural expiry): parent
+dc-4's reclamation model stays valid and unweakened, and this decision adds
+a narrow, self-resolving safety margin around it rather than a competing
+kept-forever category.
 
 Every skip and every reclaim is printed, one line per worktree; `gc`
 performs no removal a human running it cannot see named in its own output.
