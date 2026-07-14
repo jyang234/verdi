@@ -4,7 +4,7 @@ kind: spec
 title: "File Topics"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-QH-4
 problem: { text: "files hold topics they do not own and one package name misleads — the audit's remaining low-severity organizational findings, all confirmed. sync.go carries four store/forge bootstrap helpers (loadManifest, resolveRefCommit, buildForge, githubOwnerRepo) consumed by eight OTHER verb files, which point at sync.go as their home — the sync verb file became the binary's de facto manifest/forge module against dispatch.go's own charter. accept.go is 587 lines holding three subsystems: runAccept, the predecessor-supersession flip flow, and the ~180-line stub-match algorithm — whose test file stubmatch_test.go names a production file that does not exist. internal/runtime shadows the stdlib package name, and every one of its three import sites already pays an alias to call it what it is (runtimeprobe). And cmd/e2eharness — the weakest 700 lines in the repo — types its run-git closure three times (only one pinning deterministic dates), threads no context or client timeout through its exec/HTTP surface, installs signal handling only after build/provision so an early interrupt leaks the scratch dir, and names its board-fixture seeding provisionv2, which reads as a second provisioner and is not.", anchor: "#problem" }
 outcome: { text: "every file owns one topic and no name misleads. The four bootstrap helpers live in their own cmd/verdi topic file; accept.go holds only runAccept, with stub-match in the production file its test always named and the supersession flow in its own; internal/runtime is internal/runtimeprobe and the three aliases are gone; e2eharness has one run-git helper carrying the deterministic-date env, context and a bounded client through its exec/HTTP surface, signal handling installed before any scratch state exists, and provision_board named for what it seeds. Every move is equivalence-preserving — no exported API, no behavior, no output changes except e2eharness's disclosed hygiene additions — proven by the untouched suites and the e2e gate.", anchor: "#outcome" }
@@ -23,6 +23,7 @@ constraints:
   - { id: co-1, text: "no network in any test; e2eharness's timeout/signal behavior is proven by the e2e gate still passing plus targeted unit tests where a helper is extractable without a browser", anchor: "#co-1" }
   - { id: co-2, text: "make verify green at every commit; one topic per commit (bootstrap file, accept split, rename, harness) so any regression bisects to one move", anchor: "#co-2" }
   - { id: co-3, text: "scope excludes everything the siblings own and everything adjudicated as churn: no dispatch-table refactor, no workbench split, no synonym renames, no shared-home extractions", anchor: "#co-3" }
+frozen: { at: 2026-07-13, commit: efd8b5bcab91a2a5ee46c3e91e35a8fe5122369a, stub_matched: true }
 ---
 # File Topics
 
