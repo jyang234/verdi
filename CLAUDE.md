@@ -15,4 +15,4 @@ invention ledger: `../PLAN.md`. Read both before writing code here.
 - `make e2e` — the Playwright suite (e2e/) alone.
 - `make tidy` — `go mod tidy`.
 
-CLI verbs: 05 §CLI's table plus invented `gate` (I-7) and `board` (I-20) are real v0 verbs; `close`/`gc`/`waivers`/`verify-artifact` are recognized but out of v0 scope.
+CLI verbs: 05 §CLI's table plus invented `gate` (I-7), `board` (I-20), and `audit` (R4-I-10) are real verbs; `close` (round 6, spec/close-verb) and `gc` (round 6, spec/worktree-manager — managed-worktree reclamation) are real too; only `waivers`/`verify-artifact` remain recognized but out of scope.
