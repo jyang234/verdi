@@ -2,6 +2,8 @@ package evidence
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -17,6 +19,16 @@ import (
 type OpenSupersessionCandidate struct {
 	MRID string
 	Spec *artifact.SpecFrontmatter
+	// Digest is "sha256:<hex>" over the EXACT bytes fetched from the MR's
+	// source branch at the probed spec path (spec/badge-computes dc-5):
+	// the honest revision for a pending-supersession derivation record's
+	// candidate input, since the candidate is read from a moving ref (an
+	// open MR's source branch) that carries no commit sha of its own to
+	// pin — a bare MR id names WHICH record fired (dc-2's records array),
+	// never the revision of what it fired from. Computed once, here, at
+	// the exact point the bytes are read, so no caller ever re-fetches the
+	// same (possibly since-moved) ref just to reproduce this digest.
+	Digest string
 }
 
 // LoadPendingSupersessionCandidates lists MRs open against targetBranch
@@ -68,7 +80,8 @@ func LoadPendingSupersessionCandidates(ctx context.Context, f forge.Forge, targe
 		if !supersedesRef(spec, featureRef) {
 			continue
 		}
-		out = append(out, OpenSupersessionCandidate{MRID: mr.ID, Spec: spec})
+		sum := sha256.Sum256(data)
+		out = append(out, OpenSupersessionCandidate{MRID: mr.ID, Spec: spec, Digest: "sha256:" + hex.EncodeToString(sum[:])})
 	}
 	return out, nil
 }

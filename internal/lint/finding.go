@@ -41,6 +41,55 @@ type Finding struct {
 	// Severity is SeverityViolation (the zero value — a verdict failure) or
 	// SeverityDisclosure (a printed notice that does not flip the exit code).
 	Severity Severity
+	// Locus is this finding's optional, SELF-DECLARED wall badge placement
+	// (spec/badge-computes dc-3, spec/wall-receipts dc-3): populated ONLY
+	// by the rule that raises the finding, at the exact point it builds
+	// the Finding — never inferred afterward from Rule or Path by any
+	// consumer (a wall-side allowlist of rule ids is exactly what dc-3
+	// forbids). nil — the zero value, so a rule that says nothing about
+	// placement gets it automatically, with no per-rule opt-out to forget
+	// — means the finding declares no wall locus at all and never reaches
+	// a board projection, fail-closed, regardless of Path: this is how
+	// store-structural/plumbing findings (gitattributes, data-tracking,
+	// status-in-path, a dangling layout.json key) and decode failures
+	// (unparsed-island territory) stay off the wall without the wall ever
+	// naming their rule ids.
+	Locus *WallLocus
+}
+
+// WallLocus is a Finding's self-declared badge placement: either an
+// OBJECT ANCHOR (Object non-empty — an acceptance criterion, constraint,
+// decision, or open-question id, or a declared stub's "stub:<slug>" key —
+// naming the rendered card this finding badges) or a SPEC-LEVEL marker
+// (Object empty — the finding badges the case file, not any single
+// object's card). Both forms are non-nil *WallLocus values; only a nil
+// Locus on the Finding itself means "declares nothing" (off the wall).
+type WallLocus struct {
+	// Object is the rendered board object id this finding anchors to, or
+	// "" for a spec-level finding.
+	Object string
+}
+
+// ObjectLocus declares a finding as object-anchored: it badges the
+// rendered card of id (an acceptance criterion, constraint, decision, or
+// open-question id, or a declared stub's "stub:<slug>" key — every id
+// shape internal/workbench's board projection can render a card for).
+func ObjectLocus(id string) *WallLocus { return &WallLocus{Object: id} }
+
+// SpecLocus declares a finding as spec-level: it badges the case file
+// (the spec as a whole), never a single object's card.
+func SpecLocus() *WallLocus { return &WallLocus{} }
+
+// locusAll stamps every finding in fs with locus and returns fs — a small
+// shared helper for the common case of a rule sub-check whose entire
+// return value shares one wall placement (e.g. every finding from one
+// spec-level sub-check), so call sites read as a one-line wrap rather
+// than a manual loop repeated per rule.
+func locusAll(fs []Finding, locus *WallLocus) []Finding {
+	for i := range fs {
+		fs[i].Locus = locus
+	}
+	return fs
 }
 
 // String formats f as "VL-xxx path: message" — the CLI's one-line-per-

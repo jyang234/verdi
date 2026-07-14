@@ -40,11 +40,21 @@ func (r vl006) Check(in *RunInput) []Finding {
 		}
 		for _, ac := range d.Spec.AcceptanceCriteria {
 			if len(ac.Evidence) == 0 {
-				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("acceptance criterion %s declares no expected evidence kind", ac.ID)})
+				// Object-anchored (badge-computes dc-3's "missing evidence
+				// kind" bucket): this finding names exactly the AC card that
+				// declares no evidence.
+				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("acceptance criterion %s declares no expected evidence kind", ac.ID), Locus: ObjectLocus(ac.ID)})
 			}
 		}
 		if isNewClassSpec(d.Spec) {
-			findings = append(findings, r.checkRequiredness(d)...)
+			// checkRequiredness is the "missing required attribute"
+			// family (problem/outcome/anchor requiredness, badge-computes
+			// dc-3) — none of its findings name a single object the way
+			// the evidence-kind check above does (an anchor-missing
+			// finding is about the SPEC's round-four completeness, not a
+			// defect the author fixes only on that one card), so the
+			// whole family is spec-level.
+			findings = append(findings, locusAll(r.checkRequiredness(d), SpecLocus())...)
 		}
 		findings = append(findings, r.checkStubACs(d)...)
 		findings = append(findings, r.checkStubResolves(d)...)
@@ -74,7 +84,12 @@ func (vl006) checkStubACs(d *Document) []Finding {
 	for _, st := range d.Spec.Stubs {
 		for _, acID := range st.AcceptanceCriteria {
 			if !declaredAC[acID] {
-				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("stub %q names acceptance_criteria %s, which is not a declared acceptance criterion of this spec", st.Slug, acID)})
+				// Object-anchored to the STUB's own card (badge-computes
+				// dc-3's "dangling stub ref" bucket): the dangling claim is
+				// a property of the stub (a rendered ZoneStub card,
+				// internal/workbench/projection.go), not of the
+				// nonexistent target it names.
+				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("stub %q names acceptance_criteria %s, which is not a declared acceptance criterion of this spec", st.Slug, acID), Locus: ObjectLocus("stub:" + st.Slug)})
 			}
 		}
 	}
@@ -100,7 +115,8 @@ func (vl006) checkStubResolves(d *Document) []Finding {
 	for _, st := range d.Spec.Stubs {
 		for _, oqID := range st.Resolves {
 			if !declaredOQ[oqID] {
-				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("spike stub %q names resolves %s, which is not a declared open question of this spec", st.Slug, oqID)})
+				// Same object-anchor as checkStubACs: the stub's own card.
+				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("spike stub %q names resolves %s, which is not a declared open question of this spec", st.Slug, oqID), Locus: ObjectLocus("stub:" + st.Slug)})
 			}
 		}
 	}

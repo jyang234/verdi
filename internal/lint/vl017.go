@@ -93,7 +93,13 @@ func (vl017) Check(in *RunInput) []Finding {
 			continue // target isn't a feature/story spec in this snapshot
 		}
 		if !carriedAsOpenQuestion(spec.Spec, a.Body) {
-			findings = append(findings, Finding{Rule: "VL-017", Path: spec.RelPath, Message: fmt.Sprintf("open-question annotation %s (%q) is neither status:resolved nor carried as a declared open_questions object on %s", a.ID, a.Body, spec.Base.ID)})
+			// Object-anchored (badge-computes dc-3's "unresolved open
+			// question" bucket) to the annotation's own id: an
+			// unresolved, non-graduated question annotation renders as its
+			// own sticky card on its board (buildProjection's Stickies),
+			// so the finding badges that sticky directly rather than the
+			// case file.
+			findings = append(findings, Finding{Rule: "VL-017", Path: spec.RelPath, Message: fmt.Sprintf("open-question annotation %s (%q) is neither status:resolved nor carried as a declared open_questions object on %s", a.ID, a.Body, spec.Base.ID), Locus: ObjectLocus(a.ID)})
 		}
 	}
 	return findings

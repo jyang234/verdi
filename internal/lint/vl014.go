@@ -52,10 +52,17 @@ func (r vl014) Check(in *RunInput) []Finding {
 			// stale/leftover board.json sibling disagrees with this spec.
 			continue
 		}
-		findings = append(findings, r.checkEntries(spec)...)
+		// checkEntries/reconcile are badge-computes dc-3's "spec-stale
+		// adjacent rules" spec-level bucket: disposition completeness is a
+		// whole-spec readiness property (the VL-014 predecessor of the
+		// spec-stale ladder flag for pre-R4 grandfathered specs), never a
+		// single card's own defect — even a per-sticky message names a
+		// sticky id, not a rendered board object this wall's card taxonomy
+		// has a slot for.
+		findings = append(findings, locusAll(r.checkEntries(spec), SpecLocus())...)
 
 		if b, ok := boardBySpecDir[specDirOf(spec)]; ok && b.DecodeErr == nil {
-			findings = append(findings, r.reconcile(spec, b)...)
+			findings = append(findings, locusAll(r.reconcile(spec, b), SpecLocus())...)
 		}
 	}
 
