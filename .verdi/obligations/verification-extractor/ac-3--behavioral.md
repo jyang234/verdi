@@ -22,5 +22,8 @@ fixturegit-backed test proving witness-commit resolution: a repository
 with a scripted history where a known commit removed a known identity
 string, asserting the comparison names that exact commit sha as witness;
 and a companion test where no commit in the fixture history ever touched
-the identity string, asserting the witness is disclosed absent rather than
-guessed.
+the identity string, asserting the witness is disclosed absent (never
+guessed). Neither test's naming or assertions may claim the resolved
+witness is a verified cause of the removal — only that it is the most
+recent commit whose diff touched the identity string under the service
+directory (DC-4's candidate-not-causal disclosure).
