@@ -33,7 +33,6 @@ import (
 	"errors"
 	"fmt"
 	stdhtml "html"
-	"html/template"
 	"net/http"
 	"strings"
 	"sync"
@@ -276,30 +275,24 @@ func (b *branchBoards) renderCutFailure(w http.ResponseWriter, r *http.Request, 
 
 // renderBranchGone is dc-4's no-ref shape: the disclosed notice page —
 // HTTP 404, a body naming the branch that resolves to no ref (local or
-// remote-tracking), and a working link back to the directory. The same
-// stale-entry surface the directory-home story discloses (its dc-5), so
-// the markup carries the same stable test ids ("stale-entry-notice",
-// "back-to-directory").
+// remote-tracking), and a working link back to the directory. It IS the
+// stale-entry surface the directory-home story discloses (its dc-5) —
+// notfound.go's renderStaleEntryNotice, reused verbatim: with these
+// routes registered, the grammar-matching paths its "/" catch-all used
+// to answer resolve here instead, and both surfaces must stay one.
 func (b *branchBoards) renderBranchGone(w http.ResponseWriter, r *http.Request, branch string, rt boardSpecRoute) {
 	if rt.json {
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("design branch %s no longer resolves to any ref in this store", branch))
 		return
 	}
 	_ = r
-	var body strings.Builder
-	body.WriteString(`<div class="error-page" role="alert" data-testid="stale-entry-notice">`)
-	body.WriteString(`<p class="error-message"><strong>This entry&rsquo;s design branch is gone.</strong></p>`)
-	body.WriteString(`<p>The design branch <code>`)
-	body.WriteString(stdhtml.EscapeString(branch))
-	body.WriteString(`</code> no longer resolves to any ref in this store &mdash; neither a local branch nor a remote-tracking one. It may have been deleted or merged after the directory page was rendered.</p>`)
-	body.WriteString(`<p class="error-hint"><a href="/" data-testid="back-to-directory">Back to the directory</a></p>`)
-	body.WriteString(`</div>`)
-	writeBranchBoardNotFound(w, body.String())
+	renderStaleEntryNotice(w, branch)
 }
 
 // renderSpecNotOnRef is the sealed path's own 404: the branch's
 // remote-tracking ref exists but carries no such spec — still a legible
-// page with a way back, never a bare NotFound.
+// page with a way back (notfound.go's shared shell), never a bare
+// NotFound.
 func (b *branchBoards) renderSpecNotOnRef(w http.ResponseWriter, name, ref string) {
 	var body strings.Builder
 	body.WriteString(`<div class="error-page" role="alert" data-testid="stale-entry-notice">`)
@@ -309,26 +302,7 @@ func (b *branchBoards) renderSpecNotOnRef(w http.ResponseWriter, name, ref strin
 	body.WriteString(`</code> exists, but carries no spec named <code>`)
 	body.WriteString(stdhtml.EscapeString(name))
 	body.WriteString(`</code> under <code>.verdi/specs/active/</code>.</p>`)
-	body.WriteString(`<p class="error-hint"><a href="/" data-testid="back-to-directory">Back to the directory</a></p>`)
+	writeBackToDirectory(&body)
 	body.WriteString(`</div>`)
-	writeBranchBoardNotFound(w, body.String())
-}
-
-// writeBranchBoardNotFound writes bodyHTML through the shared page shell
-// at HTTP 404 — the status stays loud and honest, only the body becomes
-// legible (errorpage.go's posture). If the shell itself fails, it falls
-// back to a bare text 404 rather than a blank success.
-func writeBranchBoardNotFound(w http.ResponseWriter, bodyHTML string) {
-	out, err := renderPage(pageData{
-		Title:    "Not found",
-		Nav:      template.HTML(`<span class="current">not found</span>`),
-		BodyHTML: template.HTML(bodyHTML),
-	})
-	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusNotFound)
-	_, _ = w.Write(out) // response body write; post-header error is unactionable
+	writeNotFoundPage(w, body.String())
 }

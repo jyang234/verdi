@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -47,7 +46,7 @@ func inspectHandler(storeRoot string) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
-			"branch":    strings.TrimSpace(branch),
+			"branch":    branch,
 			"porcelain": porcelain,
 		})
 	})
@@ -74,17 +73,6 @@ func inspectHandler(storeRoot string) http.Handler {
 		_, _ = w.Write(data)
 	})
 	return mux
-}
-
-// gitOutput runs one read-only git query in dir and returns its stdout.
-func gitOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
 }
 
 // containsDotDot reports whether any slash-separated segment of rel is

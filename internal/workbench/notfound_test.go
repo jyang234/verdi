@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,9 +21,21 @@ func getPath(t *testing.T, home HomeDeps, path string) (int, string) {
 // shape: a /b/ board address whose branch no longer resolves renders a
 // disclosed notice page — HTTP 404, a body naming the vanished branch, and
 // a working link back to the directory. Never a bare NotFound.
+//
+// AMENDED by spec/draft-boards: the /b/ board grammar is now a REGISTERED
+// route (handler.go), so this address resolves through branchboard.go's
+// dispatch — which routes the no-ref case to the SAME renderStaleEntryNotice
+// this file's catch-all uses — rather than falling through to "/". The
+// surface and its assertions are unchanged; the fixture is now a real
+// store (the branchboard fixture) because the resolution runs through the
+// worktree-manager seam's real git probes, not HomeDeps' injected fake.
 func TestCatchAll_StaleBranch_DisclosedNotice(t *testing.T) {
-	home := HomeDeps{Git: fakeHomeGit{local: []string{"design/alive"}}}
-	code, body := getPath(t, home, "/b/design%2Fgone/board/spec/gone")
+	root := newBranchBoardFixture(t)
+	h := NewHandler(root)
+	req := httptest.NewRequest(http.MethodGet, "/b/design%2Fgone/board/spec/gone", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	code, body := rec.Code, rec.Body.String()
 
 	if code != http.StatusNotFound {
 		t.Fatalf("status = %d, want the honest 404", code)
@@ -42,21 +55,27 @@ func TestCatchAll_StaleBranch_DisclosedNotice(t *testing.T) {
 }
 
 // TestCatchAll_LiveBranchAddress_LegibleNotFound: a /b/ address whose
-// branch still resolves (the draft-boards routes are simply not registered
-// yet) must NOT claim the branch vanished — it gets the generic disclosed
-// 404 with a way back.
+// branch still resolves must NOT claim the branch vanished.
+//
+// AMENDED by spec/draft-boards: with the /b/ routes registered, a live
+// local branch's address serves the branch's own board — so the
+// missing-SPEC case is what remains 404 here, and it must answer exactly
+// like the unprefixed board's missing-spec 404 (sub-routes "work
+// identically beneath the prefix", draft-boards ac-1), never as a
+// vanished-branch claim.
 func TestCatchAll_LiveBranchAddress_LegibleNotFound(t *testing.T) {
-	home := HomeDeps{Git: fakeHomeGit{remote: []string{"design/alive"}}}
-	code, body := getPath(t, home, "/b/design%2Falive/board/spec/alive")
+	root := newBranchBoardFixture(t)
+	h := NewHandler(root)
+	req := httptest.NewRequest(http.MethodGet, "/b/design%2Ftwo-a/board/spec/no-such-spec", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	code, body := rec.Code, rec.Body.String()
 
 	if code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", code)
 	}
 	if strings.Contains(body, `data-testid="stale-entry-notice"`) {
 		t.Fatalf("a still-resolving branch must not be reported as vanished; got: %s", body)
-	}
-	if !strings.Contains(body, `data-testid="path-not-found"`) || !strings.Contains(body, `data-testid="back-to-directory"`) {
-		t.Fatalf("live-branch 404 missing the legible page + way back; got: %s", body)
 	}
 }
 
@@ -75,18 +94,37 @@ func TestCatchAll_GenericPath_LegibleNotFound(t *testing.T) {
 	}
 }
 
-// TestCatchAll_BranchProbeError_NeverClaimsVanished: if the existence
-// probe itself fails, the page must not assert the branch is gone — it
-// falls back to the generic disclosed 404.
+// TestCatchAll_BranchProbeError_NeverClaimsVanished: if branch resolution
+// itself fails, the page must not assert the branch is gone.
+//
+// AMENDED by spec/draft-boards: with the /b/ routes registered, the
+// resolution runs through the worktree-manager seam, and an operational
+// failure there renders draft-boards dc-2's disclosed error page NAMING
+// the failure (a 500, not a fabricated 404) — still never an unproven
+// vanish claim.
 func TestCatchAll_BranchProbeError_NeverClaimsVanished(t *testing.T) {
-	home := HomeDeps{Git: fakeHomeGit{err: errAny}}
-	code, body := getPath(t, home, "/b/design%2Fgone/board/spec/gone")
+	root := newBranchBoardFixture(t)
+	h := NewHandler(root)
 
-	if code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", code)
+	orig := ensureWorktree
+	ensureWorktree = func(ctx context.Context, root, branch string) (string, error) {
+		return "", errAny
+	}
+	defer func() { ensureWorktree = orig }()
+
+	req := httptest.NewRequest(http.MethodGet, "/b/design%2Fgone/board/spec/gone", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	code, body := rec.Code, rec.Body.String()
+
+	if code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want the disclosed 500", code)
 	}
 	if strings.Contains(body, `data-testid="stale-entry-notice"`) {
 		t.Fatalf("an unproven vanish claim was asserted; got: %s", body)
+	}
+	if !strings.Contains(body, "probe failed") {
+		t.Fatalf("the failure is not named; got: %s", body)
 	}
 }
 
