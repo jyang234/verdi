@@ -4,7 +4,7 @@ kind: spec
 title: "Worktree Manager"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-19
 problem: { text: "spec/workbench-directory ac-3 and ac-4 require that opening a draft board serves its own design branch's working tree in authoring mode without disturbing any other board or the serving checkout, and that a single serve process owns every working tree it writes - but verdi serve is bound to exactly one working tree today, with no mechanism to lazily materialize a second, third, or Nth working tree per design branch, and no ownership discipline over any it might create. The sibling draft-boards story already assumes this seam exists ('a managed worktree for branch X' consumed from 'the worktree-manager story's seam') without providing it.", anchor: problem }
 outcome: { text: "a backend seam lazily cuts a managed git worktree for a local design branch on first request, reuses it on every later request, lives entirely under the data zone (never committed), and is owned by exactly one process - guarded by a lockfile with liveness semantics mirroring this store's existing writer-lock discipline. verdi gc becomes a real, implemented verb for the managed-worktree reclamation slice: a merged or deleted branch's worktree is reaped once its lock is not live and it carries no uncommitted changes; a dirty or currently-owned worktree is disclosed and kept, never force-removed, and reads never delete.", anchor: outcome }
@@ -26,6 +26,7 @@ decisions:
 constraints:
   - { id: co-1, text: "inherited verbatim from the feature (co-1): managed worktrees live under the data zone, never committed. EnsureWorktree's every write happens under .verdi/data/worktrees/; nothing it creates is ever git-added or git-committed, and gc's own removals touch only that same subtree", anchor: "#co-1" }
   - { id: co-2, text: "no network in any test (CLAUDE.md): every EnsureWorktree and gc behavior - the cut, the lock contention, the merged/deleted/dirty/locked reclaim decisions - is proven against fixturegit repositories with real local branches and real worktrees on local disk; no live clone or fetch", anchor: "#co-2" }
+frozen: { at: 2026-07-14, commit: cd108d7b507b94cff567f56b24cd4fa3de636f63, stub_matched: true }
 ---
 # Worktree Manager
 
