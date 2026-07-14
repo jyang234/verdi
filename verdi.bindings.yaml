@@ -93,6 +93,27 @@ bindings:
       - "spec/evidence-obligations#ac-2"
       - "spec/evidence-obligations#ac-3"
       - "spec/evidence-obligations#ac-4"
+      # spec/ref-index behavioral legs (all 5 ACs declare [static,
+      # behavioral]): internal/refindex/refindex_test.go's fixturegit
+      # suite — TestComputeIndex_OneEntryPerSpecOrDraft_MergedBranchExcluded
+      # (ac-1: N+M entries, no dup/drop, dc-5's merged-branch exclusion,
+      # determinism), TestComputeIndex_Sources (ac-2: local/remote/both
+      # Source values, one entry for a both-sourced branch),
+      # TestComputeIndex_StatusGroups (ac-3: mixed default-branch statuses
+      # + an unconditionally drafts-in-progress design draft, deterministic
+      # across two calls), TestComputeIndex_DisclosedNoDraftSpec (ac-4: a
+      # branch cut but never given a spec.md yields nil error + one
+      # disclosed entry), TestComputeIndex_NeverMovesHEAD (ac-5: HEAD/
+      # working-tree byte-identical before and after) — plus
+      # fake_test.go's in-process GitRunner-double unit tests (dc-2's port
+      # pattern) and the two new gitx primitives' own tests
+      # (gitx/lstree_test.go, gitx/remotedesignbranches_test.go). All under
+      # make verify.
+      - "spec/ref-index#ac-1"
+      - "spec/ref-index#ac-2"
+      - "spec/ref-index#ac-3"
+      - "spec/ref-index#ac-4"
+      - "spec/ref-index#ac-5"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -142,3 +163,20 @@ bindings:
       - "spec/obligation-gate#ac-1"
       - "spec/obligation-gate#ac-2"
       - "spec/obligation-wall#ac-1"
+      # spec/ref-index static legs (all 5 ACs declare [static, behavioral]):
+      # ComputeIndex's signature and the GitRunner port's method set are
+      # read directly (internal/refindex/port.go) — ac-1/ac-5's "no
+      # checkout-mutating method exists at all" claim is witnessed by
+      # fake_test.go's TestGitRunner_MethodSet_ExposesNoCheckoutCapability
+      # and TestGitRunner_MethodNames (reflection over the interface,
+      # pinning its exact method set); ac-2's "one shared enumeration path"
+      # and the closed 4-value Source enum, and ac-3's closed 4-value
+      # StatusGroup enum with a fail-closed total mapping function
+      # (status_test.go's TestMapStatusGroup_Negative_FailsClosed), and
+      # ac-4's Disclosed field wired only through internal/disclosure.New,
+      # all compile, vet, lint, and lint-store clean under make verify.
+      - "spec/ref-index#ac-1"
+      - "spec/ref-index#ac-2"
+      - "spec/ref-index#ac-3"
+      - "spec/ref-index#ac-4"
+      - "spec/ref-index#ac-5"
