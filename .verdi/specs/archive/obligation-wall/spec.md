@@ -4,7 +4,7 @@ kind: spec
 title: "Obligation Wall"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-7
 problem: { text: "obligations now exist, are authored on the wall, and gate activation — but they are still not READ where an operator looks. `verdi matrix` shows only `kind:verdict` for a story AC's evidence; the board AC card renders no evidence at all. So the specific thing an AC demands — 'a Playwright test that drives the edit form and asserts persistence' — lives only in the obligation file, recovered by opening it, exactly the sidecar-illegibility the feature set out to end (feature co-3: legible-without-the-sidecar).", anchor: "#problem" }
 outcome: { text: "a story AC's obligations are legible on the wall: `verdi matrix` renders, for each declared evidence kind, that kind's obligation (its title, read from `.verdi/obligations/<spec-name>/<ac-id>--<kind>.md`), and the board AC card renders the same — so what an AC demands is read from the AC's own rendered obligations, never recovered from `verdi.bindings.yaml`. A declared kind with no obligation shows a disclosed badge (the wall-receipts posture: disclosure, not refusal), never blocking the render.", anchor: "#outcome" }
