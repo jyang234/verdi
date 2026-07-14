@@ -11,10 +11,13 @@ import (
 // judged sections, each rendered form labeling its findings' disposition
 // (02 §Generated artifacts and digests: "its rendered form labels each
 // section computed or judged"), plus the acceptance-baseline boundary diff
-// as supporting, undispositioned context (computed.go's doc comment on why
-// it is not itself a finding). Deterministic given deterministic inputs —
-// Compute and PreserveDispositions both guarantee that.
-func RenderBody(findings []artifact.Finding, baselineDiffs []ServiceBoundaryDiff) string {
+// and the diagram-alignment section as supporting, undispositioned context
+// (computed.go's doc comment on why neither is itself a finding — the
+// diagram Findings that DO ride the dispositionable path are already among
+// findings above, rendered by the renderFindings call). Deterministic given
+// deterministic inputs — Compute and PreserveDispositions both guarantee
+// that.
+func RenderBody(findings []artifact.Finding, baselineDiffs []ServiceBoundaryDiff, diagramProposals []DiagramAlignmentEntry, illustrativeDiagrams []IllustrativeFigure) string {
 	var b strings.Builder
 	b.WriteString("# Alignment report\n\n")
 
@@ -23,6 +26,9 @@ func RenderBody(findings []artifact.Finding, baselineDiffs []ServiceBoundaryDiff
 
 	b.WriteString("\n### Boundary diff vs acceptance baseline\n\n")
 	renderBaselineDiffs(&b, baselineDiffs)
+
+	b.WriteString("\n### Diagram alignment\n\n")
+	renderDiagramAlignment(&b, diagramProposals, illustrativeDiagrams)
 
 	b.WriteString("\n## Judged\n\n")
 	renderFindings(&b, findingsOfKind(findings, artifact.FindingJudged))
@@ -79,6 +85,32 @@ func renderBaselineDiffs(b *strings.Builder, diffs []ServiceBoundaryDiff) {
 				breaking = " (BREAKING)"
 			}
 			fmt.Fprintf(b, "  - %s %s %s%s\n", e.Op, e.Surface, e.Name, breaking)
+		}
+	}
+}
+
+// renderDiagramAlignment renders the "### Diagram alignment" subsection
+// (spec/alignment-section ac-3), mirroring renderBaselineDiffs' shape
+// exactly: one line per accepted proposal, one line per illustrative
+// diagram, each an explicit placeholder line when its own set is empty
+// (never an omitted heading — CLAUDE.md: "silence is never a pass").
+// Every proposal line's text is diagramFindingText's own output (the SAME
+// substance the proposal's Finding carries, diagram_computed.go) so the
+// coverage tier and any deltas are never dropped or restated differently
+// between the two renderings.
+func renderDiagramAlignment(b *strings.Builder, proposals []DiagramAlignmentEntry, illustrative []IllustrativeFigure) {
+	if len(proposals) == 0 {
+		b.WriteString("- (no accepted proposals)\n")
+	} else {
+		for _, p := range proposals {
+			fmt.Fprintf(b, "- %s: %s\n", p.Name, diagramFindingText(p))
+		}
+	}
+	if len(illustrative) == 0 {
+		b.WriteString("- (no illustrative diagrams in this spec's body)\n")
+	} else {
+		for _, f := range illustrative {
+			fmt.Fprintf(b, "- %s: unverifiable (illustrative — no truth generator)\n", f.Name)
 		}
 	}
 }

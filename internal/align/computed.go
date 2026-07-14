@@ -44,12 +44,24 @@ type ServiceBoundaryDiff struct {
 // ComputedResult is Compute's output: the declares:-boundaries three-valued
 // diff findings (kind: computed, one per declared boundary plus one per
 // undeclared-but-present boundary discovered in a regenerated contract),
-// the per-service acceptance-baseline boundary diff, and the impacted
-// service names actually regenerated (for rendering and provenance.inputs).
+// the per-service acceptance-baseline boundary diff, the impacted
+// service names actually regenerated (for rendering and provenance.inputs),
+// and the diagram-alignment section's own findings plus its two rendering
+// sets (spec/alignment-section ac-1..3): DiagramProposals (one entry per
+// accepted proposal corpus-wide) and IllustrativeDiagrams (one per fenced
+// body figure in THIS spec's own body). DiagramProposals/IllustrativeDiagrams
+// are supporting, undispositioned context for the "### Diagram alignment"
+// subsection only — like BaselineDiffs, neither is digest-covered
+// (ComputeDigest's signature is unchanged, spec/alignment-section ac-4);
+// the diagram Findings folded into Findings above are what rides the
+// digest-covered, dispositionable path.
 type ComputedResult struct {
 	Findings      []artifact.Finding
 	BaselineDiffs []ServiceBoundaryDiff
 	Impacted      []string
+
+	DiagramProposals     []DiagramAlignmentEntry
+	IllustrativeDiagrams []IllustrativeFigure
 }
 
 // Compute regenerates graph and boundary contract for spec's impacted
@@ -125,12 +137,30 @@ func Compute(ctx context.Context, in ComputedInput) (*ComputedResult, error) {
 	var findings []artifact.Finding
 	findings = append(findings, declaredBoundaryFindings(in.Spec, contracts)...)
 	findings = append(findings, undeclaredBoundaryFindings(in.Spec, impacted, contracts)...)
+
+	// Diagram alignment (spec/alignment-section, implementing
+	// spec/diagram-proposals ac-5): corpus-wide, independent of this spec's
+	// own impacts: — every accepted proposal in the store is in-scope for
+	// every alignment run (dc-1), while illustrative discovery is scoped to
+	// THIS spec's own body (diagram_computed.go).
+	diagramFindings, diagramProposals, illustrative, err := ComputeDiagramAlignment(ctx, in.Root, in.Runner, in.Spec, in.Covers)
+	if err != nil {
+		return nil, err
+	}
+	findings = append(findings, diagramFindings...)
+
 	sort.Slice(findings, func(i, j int) bool { return findings[i].ID < findings[j].ID })
 
 	sort.Strings(impactedNames)
 	sort.Slice(baselineDiffs, func(i, j int) bool { return baselineDiffs[i].Service < baselineDiffs[j].Service })
 
-	return &ComputedResult{Findings: findings, BaselineDiffs: baselineDiffs, Impacted: impactedNames}, nil
+	return &ComputedResult{
+		Findings:             findings,
+		BaselineDiffs:        baselineDiffs,
+		Impacted:             impactedNames,
+		DiagramProposals:     diagramProposals,
+		IllustrativeDiagrams: illustrative,
+	}, nil
 }
 
 // declaredBoundaryFindings computes one Finding per spec.Declares.Boundaries

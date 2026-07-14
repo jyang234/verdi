@@ -132,7 +132,7 @@ func Generate(ctx context.Context, in Input) (*Report, error) {
 		return nil, fmt.Errorf("align: internal error: generated frontmatter failed self-validation: %w", err)
 	}
 
-	body := RenderBody(preserved, computed.BaselineDiffs)
+	body := RenderBody(preserved, computed.BaselineDiffs, computed.DiagramProposals, computed.IllustrativeDiagrams)
 	return &Report{Frontmatter: fm, Body: body, Markdown: RenderMarkdown(fm, body)}, nil
 }
 
