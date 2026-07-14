@@ -1,10 +1,10 @@
 ---
 schema: verdi.deviation/v1
-covers: 403d03f207844f72eaef0bfd5be4052c68f9cc8c
+covers: 0064b23298a9444e68a4f9ffa900bab2cfe1f67f
 findings:
   - { id: judged-coverage-absent, kind: judged, text: "judged coverage absent: no result within 2m0s (stage=timeout, exit=0, cmd=\"claude -p --output-format json\")" }
-digest: sha256:842b1f66fc353ac835c60b6433be21b48f5c9dabdad59a5d71678f1a5a1c543e
-provenance: { generator: verdi-align, version: v0, inputs: [spec/alignment-section@403d03f207844f72eaef0bfd5be4052c68f9cc8c, spec/alignment-section@864d6d5ca280d7e6d28e63a7fd1f491b6bc3637b], digest: sha256:842b1f66fc353ac835c60b6433be21b48f5c9dabdad59a5d71678f1a5a1c543e }
+digest: sha256:4de5956c3d1ea6d937e69b2b5ec087e682e0ca6db882382dc32184afcaae7543
+provenance: { generator: verdi-align, version: v0, inputs: [spec/alignment-section@0064b23298a9444e68a4f9ffa900bab2cfe1f67f, spec/alignment-section@864d6d5ca280d7e6d28e63a7fd1f491b6bc3637b], digest: sha256:4de5956c3d1ea6d937e69b2b5ec087e682e0ca6db882382dc32184afcaae7543 }
 ---
 # Alignment report
 
