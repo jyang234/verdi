@@ -4,7 +4,7 @@ kind: spec
 title: "Evidence Slot"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-16
 problem: { text: "a story AC card already discloses what each declared evidence kind DEMANDS (the obligation rows) but not what each kind HOLDS: the fold already computes per-kind record presence, yet the wall renders none of it, so an author cannot see that a declared kind has no folded record until the matrix or the MR gate says so", anchor: "#problem" }
 outcome: { text: "an acceptance-criterion card renders its declared evidence kinds with their fold-derived record state, and an empty slot — a declared kind with no current folded record, by the fold's own definition — badges with a full derivation record, disclosed and never blocking, extending the existing per-kind obligation row rather than duplicating it", anchor: "#outcome" }
