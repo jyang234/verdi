@@ -4,7 +4,7 @@ kind: spec
 title: "Derivation Drawer"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-15
 problem: { text: "wall badges carry derivation records but nothing opens them — a chip with an unreadable receipt is still an unexplained verdict (wall-receipts dc-2) — and the decision-conflict report records its sweep's own inputs (covers, sweep_provenance) that no wall surface shows, so a stale or partial judged sweep is indistinguishable from a fresh, complete one", anchor: "#problem" }
 outcome: { text: "every wall badge opens a derivation drawer naming the rule that fired, the pinned inputs with their revisions, and the records that fired it — server-rendered from the badge's own derivation record, never a second computation — and judged findings surface on the case file wearing their sweep provenance (covers, adr_corpus_digest, decisions_scanned), so a stale or partial sweep looks stale, proven by Playwright", anchor: "#outcome" }
@@ -25,6 +25,7 @@ constraints:
   - { id: co-1, text: "wall-receipts co-1 carried: the drawer cites input revisions, never wall-clock time; nothing in the drawer computes with an LLM or reads an unpinned input", anchor: "#co-1" }
   - { id: co-2, text: "wall-receipts co-2 carried: the drawer is disclosure — opening and reading it never blocks or mutates anything, in any mode", anchor: "#co-2" }
   - { id: co-3, text: "the drawer consumes the badge compute layer's canonical derivation record schema as-is: if the drawer needs a field the record lacks, the record schema is amended at its one defining seam — the drawer never recomputes or side-channels the missing datum", anchor: "#co-3" }
+frozen: { at: 2026-07-14, commit: 9da4a87698b8e7face661eed035b148fc792f0f0, stub_matched: true }
 ---
 # Derivation Drawer
 
