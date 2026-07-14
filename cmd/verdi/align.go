@@ -5,6 +5,12 @@
 // story/spec argument, matching 05 §CLI's table). --freeze produces the
 // closure edition (a Frozen stamp at the build head).
 //
+// verdi align --diagram-sweep <diagram-ref> (spec/judged-sweep ac-1, dc-1)
+// is a THIRD, wholly on-demand mode: unlike the build-branch and
+// design-branch modes, it takes its own diagram-ref argument, infers
+// nothing from the checked-out branch, is never required by any gate, and
+// writes a disposable sibling report — see aligndiagramsweep.go.
+//
 // Exit contract (CLAUDE.md 0/1/2, PLAN.md Phase 8's exit criteria):
 // 0 report written; 1 align.judge_required is true and no judge produced a
 // judged section; 2 every other operational failure.
@@ -42,13 +48,23 @@ type alignDeps struct {
 // verdi.yaml's align: block, then delegates to runAlign.
 func cmdAlign(args []string, stdout, stderr io.Writer) int {
 	freeze := false
-	for _, a := range args {
-		if a == "--freeze" {
+	diagramRef := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch a {
+		case "--freeze":
 			freeze = true
-			continue
+		case "--diagram-sweep":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "align: --diagram-sweep requires a <diagram-ref> argument")
+				return 2
+			}
+			i++
+			diagramRef = args[i]
+		default:
+			fmt.Fprintf(stderr, "align: unexpected argument %q; usage: verdi align [--freeze] | verdi align --diagram-sweep <diagram-ref>\n", a)
+			return 2
 		}
-		fmt.Fprintf(stderr, "align: unexpected argument %q; usage: verdi align [--freeze]\n", a)
-		return 2
 	}
 
 	ctx := context.Background()
@@ -70,6 +86,18 @@ func cmdAlign(args []string, stdout, stderr io.Writer) int {
 	if manifest.Align != nil {
 		deps.JudgeCmd = manifest.Align.JudgeCmd
 		deps.JudgeRequired = manifest.Align.JudgeRequired
+	}
+
+	// Diagram-sweep mode (spec/judged-sweep ac-1, dc-1): a THIRD, wholly
+	// on-demand mode of this verb, dispatched before branch resolution since
+	// it takes its own <diagram-ref> argument and never infers anything from
+	// the checked-out branch — see aligndiagramsweep.go.
+	if diagramRef != "" {
+		if freeze {
+			fmt.Fprintln(stderr, "align: --freeze and --diagram-sweep are mutually exclusive (a sweep report is never frozen, spec/judged-sweep dc-3)")
+			return 2
+		}
+		return runDiagramSweepAlign(ctx, root, diagramRef, deps, stdout, stderr)
 	}
 
 	return runAlign(ctx, root, freeze, deps, stdout, stderr)
