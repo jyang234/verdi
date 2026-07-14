@@ -4,7 +4,7 @@ kind: spec
 title: "Ref Index"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-18
 problem: { text: "spec/workbench-directory ac-2 requires the home directory to list every spec on the default branch and every draft on a design branch, grouped and status-chipped, computed deterministically from git refs — but no code computes this today. verdi serve only ever knows about the one working tree it is bound to. Deciding which refs count, what a design branch with no draft spec looks like, and how status is derived, are all backend seam questions the directory-home page cannot honestly answer for itself.", anchor: problem }
 outcome: { text: "an internal package exposes a pure ComputeIndex function that, given only git refs (no checkout switch, ever - feature co-1), returns a deterministic index of every default-branch spec and every design branch's draft, each entry carrying its source (local/remote), its computed status-group (feature dc-2's vocabulary), and - for a design branch with no draft spec - a disclosed entry rather than an omission. directory-home renders this output; it invents none of the computation.", anchor: outcome }

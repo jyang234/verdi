@@ -4,7 +4,7 @@ kind: spec
 title: "Workbench Directory"
 owners: [platform-team]
 class: feature
-status: accepted-pending-build
+status: closed
 problem: { text: "verdi serve is bound to a working tree, so it is bound to a branch. Every draft in progress therefore lives at its own port, invented ad hoc, while the main address's home page silently under-reports the store: an operator looking at the directory cannot see the work most in motion. The distinction the operator needs is status — draft, accepted, active, terminal — and the tool is expressing it as network addresses.", anchor: problem }
 outcome: { text: "One address is the whole directory. The home page enumerates the default branch and every design branch, groups by status, and links every board. Drafts open as authoring walls backed by their own branch's working tree; accepted specs stay sealed records; nothing the operator clicks ever mutates the state under another tab. The port pattern retires.", anchor: outcome }
 acceptance_criteria:
