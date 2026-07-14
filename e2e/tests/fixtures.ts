@@ -181,6 +181,20 @@ export const EMPTY_SPEC = "income-verification";
 // "story · <tracker-ref>" (provisioned by cmd/e2eharness/provisionv2.go).
 export const EMPTY_SPEC_STORY_REF = "jira:LOAN-2201";
 
+// ---------------------------------------------------------------------------
+// Workbench (obligation authoring, spec/obligation-artifact ac-3)
+// ---------------------------------------------------------------------------
+
+// A STORY-class draft on the design branch that DECLARES acceptance criteria
+// — the wall on which a sticky graduates into an evidence obligation (a
+// sticky's yarn dropped on a story AC). Distinct from EMPTY_SPEC, which is
+// deliberately object-less; this one carries the AC targets and a non-AC
+// decision card (OBLIGATION_STORY_NON_AC) the invalid-drop refusal lands on.
+// Provisioned by cmd/e2eharness/provisionv2.go.
+export const OBLIGATION_STORY_SPEC = "refi-decline-audit";
+export const OBLIGATION_STORY_AC = "ac-1";
+export const OBLIGATION_STORY_NON_AC = "dc-1";
+
 // Corpus artifacts nothing on DESIGN_SPEC's wall names (real on main,
 // so real on the design branch) — the pin toolbox's import fixtures.
 export const PIN_ADR = "adr/0002-outbox-events";

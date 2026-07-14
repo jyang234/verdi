@@ -319,8 +319,16 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// handle that draws their attribution thread, and a Graduate that
 	// routes to stub-graduate instead of the object menu (the sticky's
 	// type already names what it becomes).
+	// On a STORY wall every scratch sticky carries the obligation pushpin:
+	// dragging its yarn onto a story AC authors that AC's evidence
+	// obligation (spec/obligation-artifact ac-3) — the story wall's
+	// counterpart to the feature wall's proto-sticky attribution. There are
+	// no proto-stickies on a story wall (the server refuses them), so the
+	// two handles never coexist on one sticky.
+	storyWall := p.Class == string(artifact.ClassStory)
 	for _, s := range p.Stickies {
 		proto := s.Type == string(artifact.AnnotationStory) || s.Type == string(artifact.AnnotationSpike)
+		obligationYarn := storyWall && !proto
 		b.WriteString(`<div class="sticky sticky--` + stickyTypeClass(s.Type) + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
 		b.WriteString(`<span class="sticky-type">` + esc(s.Type) + `</span>`)
 		b.WriteString(`<p class="sticky-body">` + esc(s.Body) + `</p>`)
@@ -333,6 +341,9 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 				target = "an open question"
 			}
 			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw attribution yarn from this ` + esc(s.Type) + ` sticky" title="drag to ` + target + ` to claim it"></button>`)
+		}
+		if authoring && obligationYarn {
+			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto yarn-handle--obligation" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw an obligation thread from this sticky" title="drag to a story acceptance criterion to author its evidence obligation"></button>`)
 		}
 		if authoring {
 			if proto {
