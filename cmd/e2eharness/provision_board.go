@@ -11,7 +11,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -246,49 +245,39 @@ const cannedReviewFeed = `{
 }
 `
 
-// provisionBoardV2 sets the store up for the v1 board specs: a local
-// bare origin (push target), the design branch carrying both draft
-// specs plus the exempted ADR, and the canned review feed file. It runs
-// AFTER the dex site is built, so the static site keeps reflecting
-// main. Returns the feed file's path for the serve subprocess's env.
-func provisionBoardV2(scratch, storeRoot string) (feedPath string, err error) {
-	git := func(args ...string) error {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = storeRoot
-		out, gerr := cmd.CombinedOutput()
-		if gerr != nil {
-			return fmt.Errorf("git %v: %w\n%s", args, gerr, out)
-		}
-		return nil
-	}
-
+// provisionBoard sets the store up for the v1 board specs: a local bare
+// origin (push target), the design branch carrying both draft specs plus
+// the exempted ADR, and the canned review feed file. It runs AFTER the dex
+// site is built, so the static site keeps reflecting main. Returns the feed
+// file's path for the serve subprocess's env.
+func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 	// The board's commit affordance uses the checkout's own identity.
-	if err := git("config", "user.name", "verdi-e2e"); err != nil {
+	if err := runGit(storeRoot, nil, "config", "user.name", "verdi-e2e"); err != nil {
 		return "", err
 	}
-	if err := git("config", "user.email", "e2e@verdi.invalid"); err != nil {
+	if err := runGit(storeRoot, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
 		return "", err
 	}
-	if err := git("config", "commit.gpgsign", "false"); err != nil {
+	if err := runGit(storeRoot, nil, "config", "commit.gpgsign", "false"); err != nil {
 		return "", err
 	}
 
 	// A bare local origin makes "Commit & push" a real round-trip with no
 	// network.
 	originDir := filepath.Join(scratch, "origin.git")
-	if out, oerr := exec.Command("git", "init", "--bare", "--quiet", "--initial-branch=main", originDir).CombinedOutput(); oerr != nil {
-		return "", fmt.Errorf("git init --bare: %w\n%s", oerr, out)
+	if err := runGit("", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+		return "", fmt.Errorf("git init --bare: %w", err)
 	}
-	if err := git("remote", "add", "origin", originDir); err != nil {
+	if err := runGit(storeRoot, nil, "remote", "add", "origin", originDir); err != nil {
 		return "", err
 	}
-	if err := git("push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
+	if err := runGit(storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
 		return "", err
 	}
 
 	// The design branch: both draft specs (draft never lands on main —
 	// VL-004); the ADR dc-1 exempts is the corpus's own adr/0001-outbox-events.
-	if err := git("checkout", "--quiet", "-b", designBranch); err != nil {
+	if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", designBranch); err != nil {
 		return "", err
 	}
 	// ADR_REF's target (adr/0001-outbox-events, V1-P8's fixtures.ts
@@ -304,25 +293,25 @@ func provisionBoardV2(scratch, storeRoot string) (feedPath string, err error) {
 	for rel, content := range files {
 		path := filepath.Join(storeRoot, rel)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return "", err
+			return "", fmt.Errorf("creating %s: %w", filepath.Dir(rel), err)
 		}
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			return "", err
+			return "", fmt.Errorf("writing %s: %w", rel, err)
 		}
 	}
-	if err := git("add", "-A"); err != nil {
+	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
 		return "", err
 	}
-	if err := git("commit", "--quiet", "--no-verify", "-m", "design: refi-decline-flow + stale-decline-notices fixtures"); err != nil {
+	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: refi-decline-flow + stale-decline-notices fixtures"); err != nil {
 		return "", err
 	}
-	if err := git("push", "--quiet", "--set-upstream", "origin", designBranch); err != nil {
+	if err := runGit(storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", designBranch); err != nil {
 		return "", err
 	}
 
 	feedPath = filepath.Join(scratch, "review-feed.json")
 	if err := os.WriteFile(feedPath, []byte(cannedReviewFeed), 0o644); err != nil {
-		return "", err
+		return "", fmt.Errorf("writing review feed: %w", err)
 	}
 	return feedPath, nil
 }
