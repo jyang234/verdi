@@ -342,14 +342,16 @@ func TestVL020_ClosedStoryMissingObligation_StillRefuses(t *testing.T) {
 }
 
 // vl020BaselineStandInMD is a synthetic spec using the literal id/directory
-// name "obligation-gate" — one of obligationGateBaseline's real entries —
+// name "disclosures-panel" — one of obligationGateBaseline's real entries —
 // to pin the disclosed pre-existing-corpus exemption's actual mechanism
 // under this package's hermetic test harness (testdata/corpus does not
-// carry the real spec/obligation-gate content at all, so this is a
-// deliberate stand-in exercising the exemption map, not a re-test of this
-// story's own real spec).
+// carry the real spec/disclosures-panel content at all, so this is a
+// deliberate stand-in exercising the exemption map). obligation-artifact/
+// -gate/-wall were removed from the baseline once they carried their own
+// obligations (the feature dogfooding itself), so a still-baselined name is
+// used here.
 const vl020BaselineStandInMD = `---
-id: spec/obligation-gate
+id: spec/disclosures-panel
 kind: spec
 class: story
 title: "VL-020: baseline-exempt pre-existing spec (synthetic stand-in)"
@@ -385,7 +387,7 @@ Placeholder.
 // disclosed, one-time, pre-existing-corpus exemption (see the map's doc
 // comment in vl020.go).
 func TestVL020_BaselineExemptSpec_Tolerated(t *testing.T) {
-	dir := adHocOverlayDir(t, ".verdi/specs/active/obligation-gate/spec.md", vl020BaselineStandInMD)
+	dir := adHocOverlayDir(t, ".verdi/specs/active/disclosures-panel/spec.md", vl020BaselineStandInMD)
 	repo := buildLintRepo(t, dir)
 	findings := runLint(t, repo.Dir, Context{}, Options{})
 	for _, f := range findings {
