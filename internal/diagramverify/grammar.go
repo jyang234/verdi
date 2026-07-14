@@ -179,6 +179,41 @@ func Parse(source string, truthFQNs []string) *Extraction {
 	return ext
 }
 
+// ComparableNodeIdentities returns the RawIDs of every non-Ambiguous node,
+// in Extraction order — dc-1: "an element whose parse was uncertain is
+// excluded from the three-way comparison rather than guessed." Feed this
+// (not e.Nodes directly) to Compare.
+func (e *Extraction) ComparableNodeIdentities() []string {
+	out := make([]string, 0, len(e.Nodes))
+	for _, n := range e.Nodes {
+		if !n.Ambiguous {
+			out = append(out, n.RawID)
+		}
+	}
+	return out
+}
+
+// ComparableEdgeIdentities returns EdgeIdentity strings (truth.go) for
+// every edge whose BOTH endpoints are non-Ambiguous. An edge naming an
+// ambiguous node is equally uncertain (dc-1) and is excluded the same way
+// a bare ambiguous node is.
+func (e *Extraction) ComparableEdgeIdentities() []string {
+	ambiguous := make(map[string]bool, len(e.Nodes))
+	for _, n := range e.Nodes {
+		if n.Ambiguous {
+			ambiguous[n.RawID] = true
+		}
+	}
+	out := make([]string, 0, len(e.Edges))
+	for _, edge := range e.Edges {
+		if ambiguous[edge.From] || ambiguous[edge.To] {
+			continue
+		}
+		out = append(out, EdgeIdentity(edge.From, edge.To))
+	}
+	return out
+}
+
 // parseNodeDecl recognizes the bare-id and shape-delimited-quoted-label
 // (optionally :::classname) node-declaration forms (dc-1).
 func parseNodeDecl(line string) (id string, ok bool) {
