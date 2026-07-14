@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider"
 )
 
 // Run executes the story-provider contract suite (04 §Testing) against

@@ -23,8 +23,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 )
 
 // QuorumSingleOwner and QuorumTwoCodeOwner are the two blast-radius-priced

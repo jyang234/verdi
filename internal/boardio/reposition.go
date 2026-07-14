@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/jyang234/verdi/internal/atomicfile"
 )
 
 // RepositionSticky rewrites the annotation record with the given id to
@@ -76,33 +78,8 @@ func repositionInFile(path, id string, x, y float64) (bool, error) {
 		buf.Write(line)
 		buf.WriteByte('\n')
 	}
-	if err := writeFileAtomic(path, buf.Bytes()); err != nil {
-		return false, err
+	if err := atomicfile.Write(path, buf.Bytes(), 0o600); err != nil {
+		return false, fmt.Errorf("boardio: %w", err)
 	}
 	return true, nil
-}
-
-// writeFileAtomic is the temp-then-rename replace graduate.go also uses
-// (D3's pattern for every non-append mutable-zone write).
-func writeFileAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".annotations-*.jsonl")
-	if err != nil {
-		return fmt.Errorf("boardio: temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("boardio: writing %s: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("boardio: closing %s: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("boardio: replacing %s: %w", path, err)
-	}
-	return nil
 }

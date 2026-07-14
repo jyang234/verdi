@@ -14,7 +14,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // HumanizeName renders a kebab-case name as a Title Case placeholder

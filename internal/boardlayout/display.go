@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // ResolveDisplayOverlaps computes the RENDERED position of every object:

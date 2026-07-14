@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/workbench"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 // boardResult is get_board's result shape: workbench.BoardProjection
@@ -29,19 +29,9 @@ type boardResult struct {
 // (05 §MCP server's get_board row). Read-only: get_board never mutates
 // anything; add_annotation stays the only write tool.
 func (b *Backend) GetBoard(ctx context.Context, argsRaw json.RawMessage) map[string]any {
-	var args struct {
-		Ref string `json:"ref"`
-	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
-		return toolError("get_board: malformed arguments: " + err.Error())
-	}
-	if args.Ref == "" {
-		return toolError("get_board: ref is required")
-	}
-
-	ref, err := artifact.ParseRef(args.Ref)
-	if err != nil {
-		return toolError("get_board: " + err.Error())
+	ref, errResult, ok := decodeRefArg("get_board", argsRaw)
+	if !ok {
+		return errResult
 	}
 	if ref.Kind != artifact.KindSpec {
 		return toolError("get_board: ref must name a spec (kind \"spec\"); got kind " + string(ref.Kind))
@@ -65,7 +55,7 @@ func (b *Backend) GetBoard(ctx context.Context, argsRaw json.RawMessage) map[str
 
 	proj, reviewNotice, err := workbench.LoadProjection(ctx, b.Root, ref.Name, feed, b.ReviewUnavailable)
 	if errors.Is(err, workbench.ErrBoardNotFound) {
-		return toolError("get_board: no such spec board: " + args.Ref)
+		return toolError("get_board: no such spec board: " + ref.String())
 	}
 	if err != nil {
 		return toolError("get_board: " + err.Error())

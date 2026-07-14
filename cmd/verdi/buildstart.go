@@ -22,11 +22,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/storyresolve"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/storyresolve"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 // runBuildVerb dispatches `verdi build <subcommand>`. There is exactly one
@@ -133,7 +133,7 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 		return 2
 	}
 
-	regenerateBaseline(ctx, root, branch, commit, spec, deps, "build start", stderr)
+	regenerateBaseline(ctx, root, commit, spec, deps, "build start", stderr)
 
 	fmt.Fprintf(stdout, "build start: created branch %s from %s (status: accepted-pending-build)\n", branch, spec.ID)
 	return 0

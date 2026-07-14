@@ -1,15 +1,13 @@
 package decisionsweep
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // DefaultExemptsConflictThreshold is audit.exempts_conflict_threshold's
@@ -147,8 +145,8 @@ type exemptionDigestSource struct {
 }
 
 // exemptionDigest hashes the triggering exemption sources deterministically
-// (canonjson, sha256) — the same convention internal/align's ComputeDigest
-// uses.
+// via canonjson.Digest (spec/shared-homes ac-2) — the same convention
+// internal/align's ComputeDigest uses.
 func exemptionDigest(adrRef string, count *ExemptionCount) (string, error) {
 	sources := make([]exemptionDigestSource, 0, len(count.Sources))
 	for _, s := range count.Sources {
@@ -164,12 +162,11 @@ func exemptionDigest(adrRef string, count *ExemptionCount) (string, error) {
 		ADRRef  string                  `json:"adr_ref"`
 		Sources []exemptionDigestSource `json:"sources"`
 	}{ADRRef: adrRef, Sources: sources}
-	data, err := canonjson.Marshal(payload)
+	digest, err := canonjson.Digest(payload)
 	if err != nil {
 		return "", fmt.Errorf("decisionsweep: marshaling exemption digest input: %w", err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return digest, nil
 }
 
 func renderExemptionBody(adrRef string, count *ExemptionCount, digest string) string {

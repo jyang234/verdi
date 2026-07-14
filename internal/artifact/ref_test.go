@@ -15,6 +15,7 @@ func TestParseRef_Happy(t *testing.T) {
 		{"attestation/story-1482--ac-2", Ref{Kind: KindAttestation, Name: "story-1482--ac-2"}},
 		{"waiver/story-1482--ac-4", Ref{Kind: KindWaiver, Name: "story-1482--ac-4"}},
 		{"reaffirmation/jira-loan-1482--ac-2", Ref{Kind: KindReaffirmation, Name: "jira-loan-1482--ac-2"}},
+		{"obligation/loan-refi--ac-2--behavioral", Ref{Kind: KindObligation, Name: "loan-refi--ac-2--behavioral"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
@@ -93,6 +94,8 @@ func TestParseRef_Negative(t *testing.T) {
 		"waiver/ac-2",                // waiver requires compound name
 		"attestation/story-1482--",   // compound name missing second half
 		"reaffirmation/story-1482",   // reaffirmation requires compound name
+		"obligation/loan-refi--ac-2", // obligation requires a THREE-segment compound name
+		"obligation/loan-refi",       // obligation requires a three-segment compound name
 	}
 	for _, in := range cases {
 		t.Run(in, func(t *testing.T) {
@@ -140,6 +143,7 @@ func TestRef_Validate_Negative(t *testing.T) {
 		{Kind: KindSpec, Name: ""},
 		{Kind: KindSpec, Name: "Not-Kebab"},
 		{Kind: KindAttestation, Name: "not-compound"},
+		{Kind: KindObligation, Name: "not-compound"},
 		{Kind: KindSpec, Name: "foo", Commit: "not-hex!!"},
 	}
 	for _, r := range cases {
@@ -152,7 +156,7 @@ func TestRef_Validate_Negative(t *testing.T) {
 }
 
 func TestKind_Valid(t *testing.T) {
-	for _, k := range []Kind{KindSpec, KindADR, KindDiagram, KindAttestation, KindWaiver, KindConflict, KindReaffirmation} {
+	for _, k := range []Kind{KindSpec, KindADR, KindDiagram, KindAttestation, KindWaiver, KindConflict, KindReaffirmation, KindObligation} {
 		if !k.Valid() {
 			t.Fatalf("Kind(%q).Valid() = false, want true", k)
 		}

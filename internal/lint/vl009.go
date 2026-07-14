@@ -3,7 +3,7 @@ package lint
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // vl009 enforces "frozen artifacts carry valid frozen stamp and provenance

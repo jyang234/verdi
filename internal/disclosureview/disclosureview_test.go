@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/disclosure"
 )
 
 // storySpecMD is a minimal, decodable new-class (story) spec — the shape

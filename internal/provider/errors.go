@@ -17,7 +17,9 @@ var (
 	// the tracker.
 	ErrUnauthorized = errors.New("provider: unauthorized")
 
-	// ErrUnavailable means the tracker could not be reached, or the
-	// call timed out.
+	// ErrUnavailable means the tracker could not be reached, the call
+	// timed out, or the tracker rate-limited the call (HTTP 429 classifies
+	// here too, spec/forge-transport ac-3: an uncached rate-limited call
+	// must route to the same degrade/retry path a 5xx does, not hard-fail).
 	ErrUnavailable = errors.New("provider: unavailable")
 )

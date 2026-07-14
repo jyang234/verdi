@@ -3,7 +3,7 @@ package evidence
 import (
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // TestCurrent_FlakeResolvesToLatestByPipelineJob proves the flake case:

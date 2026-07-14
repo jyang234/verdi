@@ -5,7 +5,7 @@ import (
 	stdhtml "html"
 	"html/template"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // DispositionsTable renders a feature spec's I-5 `dispositions:` block as an

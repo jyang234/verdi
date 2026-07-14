@@ -9,6 +9,8 @@ package canonjson
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -48,6 +50,28 @@ func Marshal(v interface{}) ([]byte, error) {
 	}
 	buf.WriteByte('\n')
 	return buf.Bytes(), nil
+}
+
+// Digest returns v's content-address: "sha256:" followed by the lowercase
+// hex encoding of the SHA-256 sum of v's canonical JSON encoding (Marshal).
+// This is the one home for the canonjson-then-sha256-then-"sha256:"+hex
+// tail that spec/shared-homes ac-2/dc-2 collapse from ten hand-rolled
+// copies across seven packages: internal/bundle's recordDigest, internal/
+// runtime probe's recordDigest, internal/decisionsweep's exemptionDigest,
+// internal/align's ComputeDigest / ComputeDecisionDigest / adrCorpusDigest
+// tails, internal/artifact.ObjectContentHash, internal/commitdesign's
+// freezeBoard, and cmd/verdi's rollupDigest and selfHostedDigest. Digest
+// lives here rather than in internal/artifact because the digest IS a
+// property of the canonical encoding (dc-2): field-projecting callers keep
+// their own projection structs/types and call Digest on them — this helper
+// owns only the hash tail, never the shape being hashed.
+func Digest(v interface{}) (string, error) {
+	data, err := Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 // encode writes v's canonical form to buf: map keys sorted, arrays in

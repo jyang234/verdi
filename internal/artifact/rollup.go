@@ -57,16 +57,27 @@ func DecodeRollup(data []byte) (*Rollup, error) {
 	return &r, nil
 }
 
-// Validate checks the schema literal, story is a scheme:key tracker ref,
-// ref is a valid (unpinned) spec ref, commit and digest are well-formed,
-// every criterion is individually valid with a unique id, and Eligible
-// agrees with 03 §The fold's definition ("every AC in {evidenced,
-// waived}") given the decoded criteria.
+// Validate checks the schema literal, story (when present) is a
+// scheme:key tracker ref, ref is a valid (unpinned) spec ref, commit and
+// digest are well-formed, every criterion is individually valid with a
+// unique id, and Eligible agrees with 03 §The fold's definition ("every AC
+// in {evidenced, waived}") given the decoded criteria.
+//
+// Story is OPTIONAL (empty string), unlike a story-spec rollup, which
+// always carries one: a feature spec's story: tracker ref is itself
+// OPTIONAL (R4-I-2, 02 §Kind registry — "an epic/objective tracker ref,
+// not a per-story binding"), and spec/true-closure is a real, in-repo
+// example of a feature with none at all. A feature rollup with no story
+// to publish against is still a valid, honest record of the fold — the
+// closure ritual (03 §Closure ritual; cmd/verdi/closefeature.go) still
+// writes and archives it, it simply has nowhere to publish (never a
+// fabricated tracker ref). When Story is non-empty it is validated exactly
+// as before — a malformed non-empty story is still rejected.
 func (r Rollup) Validate() error {
 	if r.Schema != rollupSchema {
 		return fmt.Errorf("artifact: rollup schema %q, want %q", r.Schema, rollupSchema)
 	}
-	if !storyRefRe.MatchString(r.Story) {
+	if r.Story != "" && !storyRefRe.MatchString(r.Story) {
 		return fmt.Errorf("artifact: rollup story %q must be scheme:key form", r.Story)
 	}
 	ref, err := ParseRef(r.Ref)

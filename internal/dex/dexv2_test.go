@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/fake"
 )
 
 // seededSupersessionForge builds the hermetic forge double the

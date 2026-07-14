@@ -778,6 +778,95 @@
     }
   }
 
+  // -- obligation authoring (spec/obligation-artifact ac-3) ------------------
+  //
+  // The story wall's counterpart to the feature wall's scoping canvas: a
+  // scratch sticky's yarn dropped on a story acceptance criterion authors
+  // that AC's evidence obligation. The endpoint must be an AC card
+  // (obligations attach to STORY acceptance criteria only, 03 §The feature
+  // fold); any other target gets the picker's plain-language refusal. A
+  // legal drop opens the evidence-kind picker — the one choice the
+  // (sticky, AC) pair leaves open — and choosing a kind graduates the
+  // sticky into the obligation, seeding its verifies edge (→ the whole
+  // story spec) and its for_kind.
+
+  var FOR_KINDS = [
+    ["static", "a code-fact the store can prove"],
+    ["behavioral", "a test the suite runs"],
+    ["runtime", "a probe against a live surface"],
+    ["attestation", "a human sign-off on file"],
+  ];
+
+  function routeObligationYarn(g, target) {
+    var toKind = kindOfElement(target);
+    var to = keyOfElement(target);
+    if (toKind !== "acceptance-criterion") {
+      protoRefusal(
+        "obligation",
+        to,
+        "An obligation binds to a story acceptance criterion — this thread lands on " +
+          to + ", which is not one. Draw it to an AC card instead."
+      );
+      return;
+    }
+    openForKindPicker(g.from, to);
+  }
+
+  // openForKindPicker offers the four evidence kinds an obligation can be
+  // FOR (spec/obligation-artifact DC-1), reusing the yarn picker's own
+  // dialog: choosing is part of authoring, nothing defaults silently
+  // (the same posture "Add sticky" wears).
+  function openForKindPicker(stickyID, acID) {
+    pending = { obligationGraduate: { sticky: stickyID, ac: acID } };
+    var items = document.getElementById("edge-picker-items");
+    var pair = document.getElementById("edge-picker-pair");
+    if (!items) return;
+    items.innerHTML = "";
+    if (pair) pair.textContent = "obligation → " + acID;
+    FOR_KINDS.forEach(function (fk) {
+      var row = document.createElement("div");
+      row.className = "picker-item";
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("role", "menuitem");
+      btn.setAttribute("data-forkind", fk[0]);
+      btn.textContent = fk[0];
+      row.appendChild(btn);
+      var why = document.createElement("span");
+      why.className = "consequence";
+      why.setAttribute("data-testid", "for-kind-" + fk[0]);
+      why.textContent = fk[1];
+      row.appendChild(why);
+      items.appendChild(row);
+    });
+    show("edge-picker");
+  }
+
+  // pickForKind graduates the sticky into its obligation. The server's
+  // refusals — a missing AC, a non-story wall, an obligation that already
+  // exists — come back in plain language and surface in the confirm
+  // dialog's own voice (the same posture stub-graduate wears), never a raw
+  // toast.
+  function pickForKind(forKind) {
+    hide("edge-picker");
+    if (!pending || !pending.obligationGraduate) return;
+    var og = pending.obligationGraduate;
+    pending = null;
+    setStatus("saving…");
+    api("sticky-graduate", { id: og.sticky, ref: og.ac, kind: "obligation:" + forKind })
+      .then(function (data) {
+        if (typeof data.dirty === "boolean") state.git.dirty = data.dirty;
+        return refreshFragment().then(function () {
+          setStatus("saved");
+        });
+      })
+      .catch(function (err) {
+        setStatus("");
+        openConfirm("Not yet an obligation", err.message, false);
+        document.getElementById("edge-confirm-ok").hidden = true;
+      });
+  }
+
   // -- pointer gestures: drag, yarn draw ------------------------------------
   //
   // Pointer Events, not mouse events: the e2e suite's synthetic mouse
@@ -1194,7 +1283,15 @@
       }
       if (!target || target === g.fromEl) return;
       if (g.proto) {
-        routeProtoYarn(g, target);
+        // A sticky's yarn. On a STORY wall it authors an evidence
+        // obligation on the AC it lands on (spec/obligation-artifact ac-3);
+        // on a FEATURE wall it is a proto-sticky's stub attribution (dc-5).
+        // The two never mix: proto-stickies are feature-class only.
+        if (state.class === "story") {
+          routeObligationYarn(g, target);
+        } else {
+          routeProtoYarn(g, target);
+        }
         return;
       }
       openPicker({
@@ -1651,6 +1748,14 @@
     var choice = t.closest("[data-edge-choice]");
     if (choice) {
       pickEdgeType(choice.getAttribute("data-edge-choice"));
+      return;
+    }
+
+    // The obligation's evidence-kind pick (spec/obligation-artifact ac-3):
+    // choosing a for_kind graduates the dropped sticky into its obligation.
+    var forKind = t.closest("[data-forkind]");
+    if (forKind) {
+      pickForKind(forKind.getAttribute("data-forkind"));
       return;
     }
 

@@ -181,6 +181,40 @@ export const EMPTY_SPEC = "income-verification";
 // "story · <tracker-ref>" (provisioned by cmd/e2eharness/provisionv2.go).
 export const EMPTY_SPEC_STORY_REF = "jira:LOAN-2201";
 
+// ---------------------------------------------------------------------------
+// Workbench (obligation authoring, spec/obligation-artifact ac-3)
+// ---------------------------------------------------------------------------
+
+// A STORY-class draft on the design branch that DECLARES acceptance criteria
+// — the wall on which a sticky graduates into an evidence obligation (a
+// sticky's yarn dropped on a story AC). Distinct from EMPTY_SPEC, which is
+// deliberately object-less; this one carries the AC targets and a non-AC
+// decision card (OBLIGATION_STORY_NON_AC) the invalid-drop refusal lands on.
+// Provisioned by cmd/e2eharness/provisionv2.go.
+export const OBLIGATION_STORY_SPEC = "refi-decline-audit";
+export const OBLIGATION_STORY_AC = "ac-1";
+export const OBLIGATION_STORY_NON_AC = "dc-1";
+
+// ---------------------------------------------------------------------------
+// Workbench (obligation wall, spec/obligation-wall ac-2)
+// ---------------------------------------------------------------------------
+
+// A STORY-class draft on the design branch whose ac-1 declares TWO evidence
+// kinds (behavioral, static) and carries a COMMITTED obligation for the
+// behavioral one only — so its board AC card reads out both halves of ac-2 on
+// first load: the authored obligation's title (behavioral) and the disclosed
+// "no obligation" badge (static). Distinct from OBLIGATION_STORY_SPEC, whose
+// obligation the graduate journey authors at runtime; this one is pre-authored
+// so the card renders it without any interaction. Provisioned by
+// cmd/e2eharness/provisionv2.go.
+export const OBLIGATION_WALL_SPEC = "refi-decline-replay";
+export const OBLIGATION_WALL_AC = "ac-1";
+export const OBLIGATION_WALL_PRESENT_KIND = "behavioral";
+export const OBLIGATION_WALL_MISSING_KIND = "static";
+// A substring of the committed obligation's title — the specific demand the
+// card reads out on the wall (feature co-3, legible-without-the-sidecar).
+export const OBLIGATION_WALL_DEMAND = "drives the replay view";
+
 // Corpus artifacts nothing on DESIGN_SPEC's wall names (real on main,
 // so real on the design branch) — the pin toolbox's import fixtures.
 export const PIN_ADR = "adr/0002-outbox-events";
@@ -222,6 +256,21 @@ export const INSTANTIATE_SLUG = "borrower-update-audit-log";
 // The live corpus's other committed stub fixture: disclosure-legibility
 // (in this repo's own .verdi store) — asserted only through the Go
 // render tests; the e2e store's stub fixture is FEATURE_SPEC above.
+
+// ---------------------------------------------------------------------------
+// Supersession terminal state (spec/feature-supersession-state ac-2)
+// ---------------------------------------------------------------------------
+
+// A superseded FEATURE predecessor (rung 4) and a superseded STORY
+// predecessor (rung 3), committed on main via testdata/dexoverlay
+// (provision.go) — so their boards render READ-ONLY. Each is the superseded
+// predecessor of a v2 successor that carries the `supersedes` edge, and each
+// wears the terminal `superseded` status badge on its board head (and, on
+// dex, the same `.badge-superseded` status badge). The Go build/render tests
+// prove the same committed fixtures; these constants drive the Playwright
+// proof of the board surface.
+export const SUPERSEDED_FEATURE_SPEC = "rate-lock";
+export const SUPERSEDED_STORY_SPEC = "escrow-notify";
 
 // data-testid helpers for the scoping surface (binding selector
 // contract, like refCardTestId above).

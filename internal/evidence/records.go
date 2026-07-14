@@ -10,8 +10,8 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // commitDirRe matches a derived tree's commit-named subdirectories
@@ -19,12 +19,26 @@ import (
 // artifact's own (unexported) commit sha pattern.
 var commitDirRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 
-// LoadRecords loads every verdicts.json record found in derivedRoot's
-// immediate commit-named subdirectories and keeps only those whose
-// provenance.commit is commit itself or a real ancestor of commit in
-// gitDir's history (03 §The fold: "current ... whose commit is an
-// ancestor of C"). Both provenance classes (ci and local) are returned —
-// Fold decides which to trust via its Preview flag.
+// derivedRecordFiles are the derived-tree files under one commit directory
+// that carry verdi.evidence/v1 records (01 §Directory layout). verdicts.json
+// carries static/behavioral (and, for a hand-assembled fixture, any other
+// kind); runtime.json is spec/runtime-evidence dc-2's sibling file — "a
+// runtime.json per owning-spec key alongside verdicts.json" — so that
+// `verdi sync`'s forge fetch (internal/forge.DerivedTree; zip.go's
+// bundleFileNames) carries a real service's probe output through
+// unchanged. Both are loaded and merged into one record set here: this is
+// the missing link spec/runtime-evidence closes — the fold
+// (internal/evidence/fold.go) already handles kind: runtime records, but
+// nothing ever loaded one until now.
+var derivedRecordFiles = []string{"verdicts.json", "runtime.json"}
+
+// LoadRecords loads every evidence record found in derivedRoot's immediate
+// commit-named subdirectories (both verdicts.json and runtime.json,
+// derivedRecordFiles) and keeps only those whose provenance.commit is
+// commit itself or a real ancestor of commit in gitDir's history (03 §The
+// fold: "current ... whose commit is an ancestor of C"). Both provenance
+// classes (ci and local) are returned — Fold decides which to trust via its
+// Preview flag.
 //
 // A derivedRoot that does not exist on disk is not an error: a story that
 // has never been synced yet has no derived data, which the fold reads
@@ -53,11 +67,13 @@ func LoadRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]art
 			continue
 		}
 
-		recs, err := loadVerdicts(filepath.Join(derivedRoot, recordCommit, "verdicts.json"))
-		if err != nil {
-			return nil, err
+		for _, name := range derivedRecordFiles {
+			recs, err := loadEvidenceArray(filepath.Join(derivedRoot, recordCommit, name))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, recs...)
 		}
-		out = append(out, recs...)
 	}
 
 	// Deterministic output order, independent of os.ReadDir's directory
@@ -69,12 +85,13 @@ func LoadRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]art
 	return out, nil
 }
 
-// loadVerdicts strict-decodes each record in a verdicts.json array. A
-// commit directory with no verdicts.json yet is not an error (empty
-// slice, nil error); a verdicts.json that exists but fails to decode is a
-// real, surfaced error — a derived record that is on disk but broken is
-// worse than absent.
-func loadVerdicts(path string) ([]artifact.Evidence, error) {
+// loadEvidenceArray strict-decodes each record in a verdi.evidence/v1 array
+// file (verdicts.json or runtime.json alike — both are the same schema, one
+// array of records, 03 §Evidence records). A commit directory with no such
+// file yet is not an error (empty slice, nil error); a file that exists but
+// fails to decode is a real, surfaced error — a derived record that is on
+// disk but broken is worse than absent.
+func loadEvidenceArray(path string) ([]artifact.Evidence, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

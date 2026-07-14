@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"html/template"
 
-	"github.com/OWNER/verdi/internal/canonjson"
-	"github.com/OWNER/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/index"
 )
 
 // tokenPosting is one entry of search-index.json's per-token postings

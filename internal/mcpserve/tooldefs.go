@@ -22,8 +22,13 @@ func boolean(desc string) map[string]any {
 	return map[string]any{"type": "boolean", "description": desc}
 }
 
+// obj additionally sets additionalProperties: false on every tool's
+// argument schema (spec/fail-loud ac-3/dc-2): the schema advertises the
+// same closed-set contract strictUnmarshal enforces server-side, so a
+// well-behaved client sees the rejection coming rather than discovering it
+// only at call time.
 func obj(props map[string]any, required ...string) map[string]any {
-	s := map[string]any{"type": "object", "properties": props}
+	s := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
 	if len(required) > 0 {
 		s["required"] = required
 	}

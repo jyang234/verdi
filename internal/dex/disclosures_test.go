@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/disclosureview"
+	"github.com/jyang234/verdi/internal/disclosureview"
 )
 
 // TestBuild_DisclosuresPage: the dex ships the read-only edition of the

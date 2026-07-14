@@ -50,13 +50,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/disclosure"
-	"github.com/OWNER/verdi/internal/evidence"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/lint"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/storyresolve"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
 // cmdGate is `verdi gate`'s entry point, invoked by dispatch.go.
@@ -262,15 +262,11 @@ func checkNoACViolated(ctx context.Context, root string, spec *artifact.SpecFron
 		}, nil
 	}
 
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
-	records, err := evidence.LoadRecords(ctx, root, derivedRoot, head)
+	// Preview stays false — 03 §Gates: "the gate ... consume[s]
+	// authoritative evidence only", never --preview.
+	result, err := foldStoryEvidence(ctx, root, spec, head, false)
 	if err != nil {
-		return gateCondition{}, fmt.Errorf("loading evidence records: %w", err)
-	}
-	slug := store.RefSlug(spec.Story)
-	result, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: false, StoreRoot: root, StorySlug: slug})
-	if err != nil {
-		return gateCondition{}, fmt.Errorf("folding evidence: %w", err)
+		return gateCondition{}, err
 	}
 	if !result.Violated {
 		return gateCondition{Name: name, OK: true}, nil

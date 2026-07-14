@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/evidence"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/storyresolve"
+	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
 // acRow is one get_matrix result row.
@@ -39,7 +39,7 @@ func (b *Backend) GetMatrix(ctx context.Context, argsRaw json.RawMessage) map[st
 		Story   string `json:"story"`
 		Preview bool   `json:"preview"`
 	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
+	if err := strictUnmarshal(argsRaw, &args); err != nil {
 		return toolError("get_matrix: malformed arguments: " + err.Error())
 	}
 	if args.Story == "" {

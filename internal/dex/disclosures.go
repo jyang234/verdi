@@ -19,7 +19,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/disclosureview"
+	"github.com/jyang234/verdi/internal/disclosureview"
 )
 
 // dexDisclosuresNote is this edition's compute-provenance line — the one

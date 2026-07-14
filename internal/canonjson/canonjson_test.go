@@ -2,6 +2,8 @@ package canonjson
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -112,7 +114,80 @@ func TestMarshal_PreservesNumberFormatting(t *testing.T) {
 	}
 }
 
+// --- Digest: dc-2's byte-equivalence witness ---
+
+// digestFixture stands in for the shape every former hand-rolled digest
+// tail hashed (an id/kind/text-style projection struct) — spec/shared-
+// homes ac-2's callers keep exactly this kind of projection type and pass
+// it to Digest; Digest itself owns only the hash tail (dc-2).
+type digestFixture struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// TestDigest_ByteEquivalentToOldHandRolledTail is the ac-2/dc-2 witness:
+// it computes the digest of a committed fixture value two ways — the OLD
+// hand-copied pattern (inline here: canonjson.Marshal, sha256.Sum256,
+// "sha256:"+hex, exactly as bundle.recordDigest / artifact.ObjectContentHash
+// / etc. used to each spell it out independently) and the NEW canonjson.
+// Digest — and asserts they are byte-identical, additionally pinning the
+// exact golden digest string as a literal so any future drift in either
+// Marshal's canonical form or Digest's hash tail fails loudly here first,
+// before any of the ten collapsed call sites.
+func TestDigest_ByteEquivalentToOldHandRolledTail(t *testing.T) {
+	v := digestFixture{Kind: "acceptance_criteria", ID: "ac-2", Text: "shared homes digest collapse"}
+
+	// OLD pattern: hand-rolled inline, exactly as every pre-collapse call
+	// site spelled it out.
+	data, err := Marshal(v)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	sum := sha256.Sum256(data)
+	oldDigest := "sha256:" + hex.EncodeToString(sum[:])
+
+	// NEW pattern: the collapsed helper.
+	newDigest, err := Digest(v)
+	if err != nil {
+		t.Fatalf("Digest: %v", err)
+	}
+
+	if newDigest != oldDigest {
+		t.Fatalf("Digest = %q, old hand-rolled pattern = %q: not byte-equivalent", newDigest, oldDigest)
+	}
+
+	const golden = "sha256:c565185ee3a4278abe9b3d829d296799d1ff08d5ef04be1c7bbabad6b1fd77d7"
+	if newDigest != golden {
+		t.Fatalf("Digest = %q, want pinned golden %q", newDigest, golden)
+	}
+}
+
+func TestDigest_DeterministicAcrossCalls(t *testing.T) {
+	v := digestFixture{Kind: "constraints", ID: "co-1", Text: "no network in any test"}
+	first, err := Digest(v)
+	if err != nil {
+		t.Fatalf("Digest: %v", err)
+	}
+	for i := 0; i < 10; i++ {
+		got, err := Digest(v)
+		if err != nil {
+			t.Fatalf("Digest (call %d): %v", i, err)
+		}
+		if got != first {
+			t.Fatalf("Digest call %d = %q, want %q (not deterministic)", i, got, first)
+		}
+	}
+}
+
 // --- negative / error-path tests ---
+
+func TestDigest_UnsupportedType(t *testing.T) {
+	_, err := Digest(map[string]interface{}{"bad": make(chan int)})
+	if err == nil {
+		t.Fatal("Digest: want error for unmarshalable value (chan), got nil")
+	}
+}
 
 func TestMarshal_UnsupportedType(t *testing.T) {
 	_, err := Marshal(map[string]interface{}{"bad": make(chan int)})

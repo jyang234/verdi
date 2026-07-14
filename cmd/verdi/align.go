@@ -19,12 +19,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/align"
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/storyresolve"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/align"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/storyresolve"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 // alignDeps is cmdAlign's injectable dependency set — the same seam
@@ -102,7 +102,19 @@ func runAlign(ctx context.Context, root string, freeze bool, deps alignDeps, std
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
 	}
+	return runAlignForSpec(ctx, root, spec, covers, freeze, deps, stdout, stderr)
+}
 
+// runAlignForSpec is runAlign's spec-taking core, factored out (round 6,
+// spec/close-verb ac-1) so a caller that has ALREADY resolved its own spec
+// by a means other than the feature/<name> build-branch convention —
+// `verdi close` resolves the story via internal/storyresolve.Resolve, a
+// story or spec-ref argument, never a branch name — can run the exact same
+// generate-freeze-write logic runAlign uses for the frozen closure report,
+// rather than duplicating it (CLAUDE.md: no copy-paste across call sites).
+// runAlign itself is unchanged in behavior: it still resolves branch ->
+// spec -> covers first, then delegates here.
+func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontmatter, covers string, freeze bool, deps alignDeps, stdout, stderr io.Writer) int {
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		fmt.Fprintln(stderr, "align: internal error: resolved spec has an invalid id:", err)

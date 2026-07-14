@@ -1,10 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -114,33 +115,25 @@ const mermaidDemoSpec = "---\n" +
 	"```\n"
 
 func gitInitAndCommit(dir string) error {
-	env := append(os.Environ(),
-		"GIT_AUTHOR_NAME=verdi-e2e", "GIT_AUTHOR_EMAIL=e2e@verdi.invalid", "GIT_AUTHOR_DATE=1704067200 +0000",
-		"GIT_COMMITTER_NAME=verdi-e2e", "GIT_COMMITTER_EMAIL=e2e@verdi.invalid", "GIT_COMMITTER_DATE=1704067200 +0000",
-	)
-	run := func(args ...string) error {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = env
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("git %v: %w\n%s", args, err, out)
-		}
-		return nil
-	}
-	if err := run("init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := runGit(dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
 		return err
 	}
-	if err := run("add", "-A"); err != nil {
+	if err := runGit(dir, nil, "add", "-A"); err != nil {
 		return err
 	}
-	return run("commit", "--quiet", "--no-verify", "-m", "e2e scratch store: seeded from testdata/corpus")
+	return runGit(dir, nil, "commit", "--quiet", "--no-verify", "-m", "e2e scratch store: seeded from testdata/corpus")
 }
 
-// copyTree recursively copies every regular file under src to dst.
+// copyTree recursively copies every regular file under src to dst. A
+// missing src is tolerated (some callers pass optional overlay trees); any
+// other stat failure (e.g. permission denied) is a real error and returns
+// wrapped, not silently swallowed alongside the absent case.
 func copyTree(src, dst string) error {
-	if _, err := os.Stat(src); os.IsNotExist(err) {
-		return nil
+	if _, err := os.Stat(src); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat %s: %w", src, err)
 	}
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -152,7 +145,10 @@ func copyTree(src, dst string) error {
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
-			return os.MkdirAll(target, 0o755)
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return fmt.Errorf("creating %s: %w", target, err)
+			}
+			return nil
 		}
 		return copyFile(path, target)
 	})

@@ -4,3 +4,6 @@
 # hygiene for the repo root.
 /.build/
 /verdi
+# The e2e Playwright harness binary (playwright.config.ts runs it via `go
+# run`, never a committed build) — spec/fail-loud ac-1.
+/e2eharness

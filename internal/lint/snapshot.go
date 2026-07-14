@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // Board is a committed board.json found under a spec directory, alongside
@@ -39,7 +39,7 @@ type Layout struct {
 	DecodeErr error
 }
 
-// Snapshot is everything the fourteen rules read: every committed-zone
+// Snapshot is everything the rules read: every committed-zone
 // document (decoded or not), every committed board.json, the repo-root
 // .gitattributes, the store manifest, and discovered services. Building a
 // Snapshot never fails on a single bad artifact file — only on an

@@ -10,6 +10,7 @@ package workbench
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,13 +20,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/artifact/splice"
-	"github.com/OWNER/verdi/internal/boardio"
-	"github.com/OWNER/verdi/internal/boardlayout"
-	"github.com/OWNER/verdi/internal/designscaffold"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact/splice"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/designscaffold"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // boardAPIRequest is the one strict-decoded body shape every action
@@ -83,7 +84,7 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		}
 
 		proj, _, _, err := s.loadBoard(r.Context(), name)
-		if err == ErrBoardNotFound {
+		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
 		}
@@ -115,7 +116,17 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		case "sticky":
 			err = s.actionSticky(name, proj, req)
 		case "sticky-graduate":
-			err = s.actionStickyGraduate(name, proj, req)
+			// A sticky graduates into a declared spec object (the object
+			// menu's ac/co/dc/oq) OR — on a story wall, kind
+			// "obligation:<for-kind>" — into an evidence-obligation artifact
+			// bound to the story AC it was dropped on (spec/obligation-
+			// artifact ac-3). One action, one graduation ritual; the kind
+			// prefix selects the destination.
+			if strings.HasPrefix(req.Kind, obligationGraduatePrefix) {
+				err = s.actionObligationGraduate(ctx, name, proj, req)
+			} else {
+				err = s.actionStickyGraduate(name, proj, req)
+			}
 		case "stub-graduate":
 			err = s.actionStubGraduate(name, proj, req)
 		case "stub-instantiate":
