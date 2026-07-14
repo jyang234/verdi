@@ -4,7 +4,7 @@ kind: spec
 title: "Case File Flags"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-17
 problem: { text: "the case file — the wall's spec-level surface — wears no spec-level state: the spec-stale and pending-supersession ladder flags exist (the dex story-lens renders them) but the board's case file does not, and nothing observes an acceptance-criteria column outgrowing a screen, so the two spec-level truths an author most needs while authoring are invisible exactly where authoring happens", anchor: "#problem" }
 outcome: { text: "spec-stale and pending-supersession render as case-file stamps computed by the exact code path the dex story-lens uses (three-valued: flagged, unflagged, or disclosed-unproven), and an acceptance-criteria column whose estimated rendered height at the declared reference-viewport constant exceeds it raises a size-smell badge — an observation, never a rule, with a derivation that discloses its proxy and never cites a client viewport measurement", anchor: "#outcome" }
@@ -24,6 +24,7 @@ constraints:
   - { id: co-1, text: "wall-receipts co-1 carried: the flags compute with no LLM over pinned inputs, and every drawer citation is an input revision, never wall-clock time and never a client measurement", anchor: "#co-1" }
   - { id: co-2, text: "wall-receipts co-2 carried, sharpened by ac-5's own words: size-smell is an observation, never a rule — nothing blocks, gates, or refuses on it, at authoring or MR time", anchor: "#co-2" }
   - { id: co-3, text: "the ac-4 trap: the case file's spec-stale and pending-supersession values MUST come from the same code path the dex story-lens uses (internal/dex lens.go/ladder.go's decisionsweep and evidence entry points) — a lookalike reimplementation is a defect, and static evidence must witness the shared call sites", anchor: "#co-3" }
+frozen: { at: 2026-07-14, commit: 22d30fda57e76b240d6e2930b9b4653a290c8bad, stub_matched: true }
 ---
 # Case File Flags
 
