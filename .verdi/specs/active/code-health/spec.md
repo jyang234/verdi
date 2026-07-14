@@ -4,7 +4,7 @@ kind: spec
 title: "Code Health"
 owners: [platform-team]
 class: feature
-status: draft
+status: accepted-pending-build
 problem: { text: "a seven-reviewer quality audit of main (ad012a6), pressure-tested by six adversarial verifiers against the specs and PLAN.md's ledger, confirmed real defects the gate does not see. The forge boundary silently truncates every paginated read — GetThreadResolution caps at 100 threads and feeds gate_threads.go, so a PR with an unresolved thread beyond the cap can PASS the gate; ListOpenMRs truncation can drop a pending-supersession candidate — while no outbound HTTP call carries any deadline, the tolerant decode posture is documented in one adapter of three, and I-4's promised refuse-a-mismatched-bundle defense (CheckToolPin) is built, tested, and never invoked. Shared logic has drifted into hand copies against the never-copy-paste rule: the atomic-write idiom four times (two beside the very helper they re-inline, all four missing fsync), the canonjson→sha256 digest tail ten times, the YAML-quote helper three times — and the twin classifyArtifactPath tables have SILENTLY DIVERGED: index omits reaffirmation while lint's comment still claims a mirror, the exact bug class walk.go's own comment memorializes. Honesty gaps: cascadecheck masks a permission error as a clean no-supersession pass; lint's own docs say fourteen rules while nineteen are registered; VL-019 exists in no ratified table. And a 21.8 MB compiled e2eharness binary is tracked at the repo root.", anchor: "#problem" }
 outcome: { text: "every witnessed gap fails loud and every shared behavior has exactly one home. All forge/tracker list reads drain pagination and every outbound call carries a deadline, through one shared transport seam whose tolerant-foreign-payload decode policy is stated once and ratified; CheckToolPin guards the fetched-bundle path. The atomic write, the digest tail, the YAML quote, and the path-classification table each live in a single shared package — the classification divergence healed so index classifies reaffirmations — with extraction proven byte-identical where outputs are load-bearing. cascadecheck distinguishes absent from unreadable; stale counts are corrected; VL-019's provenance is ratified; mcpserve's verdi-owned decodes fail closed under a ledgered posture; no build output is tracked. And every finding the pressure test REFUTED is recorded here as a deliberate non-change, so the audit's negative space is as legible as its fixes.", anchor: "#outcome" }
 acceptance_criteria:
@@ -28,6 +28,7 @@ stubs:
   - { slug: shared-homes, acceptance_criteria: [ac-3] }
   - { slug: fail-loud, acceptance_criteria: [ac-1, ac-4] }
   - { slug: file-topics, acceptance_criteria: [ac-5] }
+frozen: { at: 2026-07-13, commit: f5dc17abd699a5a35f0d9ea221a13b83e2bfc458 }
 ---
 # Code Health
 
