@@ -9,7 +9,7 @@ story: jira:VERDI-18
 problem: { text: "spec/workbench-directory ac-2 requires the home directory to list every spec on the default branch and every draft on a design branch, grouped and status-chipped, computed deterministically from git refs — but no code computes this today. verdi serve only ever knows about the one working tree it is bound to. Deciding which refs count, what a design branch with no draft spec looks like, and how status is derived, are all backend seam questions the directory-home page cannot honestly answer for itself.", anchor: problem }
 outcome: { text: "an internal package exposes a pure ComputeIndex function that, given only git refs (no checkout switch, ever - feature co-1), returns a deterministic index of every default-branch spec and every design branch's draft, each entry carrying its source (local/remote), its computed status-group (feature dc-2's vocabulary), and - for a design branch with no draft spec - a disclosed entry rather than an omission. directory-home renders this output; it invents none of the computation.", anchor: outcome }
 acceptance_criteria:
-  - { id: ac-1, text: "ComputeIndex enumerates the default branch's specs (walking the tree at the default-branch ref) and, separately, every design branch's draft spec (reading refs/heads/design/* at HEAD via ref-scoped plumbing only - git show <ref>:<path> and for-each-ref, never checkout), returning one entry per spec/draft with no ref read twice and no ref silently skipped", evidence: [static, behavioral], anchor: "#ac-1" }
+  - { id: ac-1, text: "ComputeIndex enumerates the default branch's specs (walking the tree at the default-branch ref) and, separately, every UNMERGED design branch's draft spec (reading refs/heads/design/* at HEAD via ref-scoped plumbing only - git show <ref>:<path> and for-each-ref, never checkout; a design branch already merged into the default branch is excluded per dc-5, its spec already present as a default-branch entry), returning one entry per spec/draft with no ref read twice, no ref silently skipped, and no spec double-counted across the two walks", evidence: [static, behavioral], anchor: "#ac-1" }
   - { id: ac-2, text: "local refs/heads/design/* and remote-tracking refs/remotes/origin/design/* both join the enumeration (feature dc-5): an entry that exists as both a local and a remote-tracking ref is a single entry disclosing both sources; an entry that exists only remotely is disclosed as remote-only; the deterministic, refs-only property holds for both sources", evidence: [static, behavioral], anchor: "#ac-2" }
   - { id: ac-3, text: "every entry's status chip is computed from the spec content reachable at that ref (never the working tree) - the default branch's specs chip by their own frontmatter status field, and a design branch's draft chips drafts-in-progress (feature dc-2's vocabulary: drafts in progress / accepted-pending-build / active components / terminal) UNCONDITIONALLY - every design-branch entry, ordinary or degraded (ac-4), is drafts-in-progress by definition of being on a design branch, never derived from readable content - grouping is a pure function of the entries, never an incidental ordering", evidence: [static, behavioral], anchor: "#ac-3" }
   - { id: ac-4, text: "a design branch ref that resolves but carries no spec.md reachable at <ref>:.verdi/specs/active/<name>/spec.md (no draft has been authored yet on that branch, or the branch predates a scaffold) yields a disclosed entry - a defined field on that entry's output, never a Go error, a panic, or a silent drop from the returned slice - feeding directory-home's ac-5 notice", evidence: [static, behavioral], anchor: "#ac-4" }
@@ -18,9 +18,10 @@ links:
   - { type: implements, ref: "spec/workbench-directory#ac-2" }
 decisions:
   - { id: dc-1, text: "backend seam only: a new internal/refindex package exposes ComputeIndex(ctx, root, deps) ([]Entry, error) as a pure function of ref state - no HTTP handler, no page, no rendering, and no forge/network call of any kind. directory-home (a separate stub under the same feature) is the only consumer that turns Entry values into markup; ref-index's output type is designed so that story never needs to touch git plumbing itself. Explicit scope boundary, closing a decision-conflict finding against this draft: parent dc-5's forge-sourced in-review chip is, by dc-5's own words, 'a second, non-ref source' layered on top of the refs-computed directory - it is not part of ac-2's 'computed deterministically from git refs' claim this story implements, and Entry (dc-3) deliberately carries no forge/MR field. Composing that second source onto ComputeIndex's output is directory-home's job (it implements both ac-2 and ac-5); this is a disclosed scope line, not an oversight, and no exempts edge is needed because nothing here contradicts dc-5 - it only implements the ref-only half dc-5 itself distinguishes", anchor: "#dc-1" }
-  - { id: dc-2, text: "a consumer-defined git runner port, not the concrete internal/gitx functions directly: internal/refindex declares its own narrow interface (list local design refs, list remote-tracking design refs, resolve the default branch, show a path at a ref, list the default branch's spec directories at that ref) that internal/gitx's existing free functions (LocalBranches, Show, DefaultBranch - gitx/branch.go, gitx/show.go) satisfy via a small adapter; new plumbing this story needs (a for-each-ref query scoped to refs/remotes/origin/design/*, and a tree-listing at a ref) is added to gitx as more of the same shape, not invented ad hoc inside refindex. The port exists so ComputeIndex is testable against a fake with no real git process at all, alongside the hermetic fixturegit exercise (04 §port pattern). The remote name is hardcoded to 'origin', matching this codebase's existing single-remote convention verbatim - gitx.DefaultBranch already resolves refs/remotes/origin/HEAD, gitx.Push already pushes to 'origin', and gitx.HasRemote's callers already treat 'origin' as the one configured remote (gitx/branch.go, gitx/worktree.go) - so this is not a new narrowing this story invents; it is consistent with every other remote-naming assumption already load-bearing in this store. A repo with a differently-named remote is already unsupported by those existing functions, not newly unsupported by this one. Parent dc-5 never mandates multi-remote support - it says only that local and remote-tracking design refs 'alike' join the enumeration, silent on remote naming - so hardcoding origin fills a gap dc-5 leaves open using this store's one existing convention, rather than narrowing an explicit dc-5 promise; no exempts edge is warranted because nothing in dc-5's text is being excused from, only an unstated detail being filled in the same way the rest of the codebase already fills it", anchor: "#dc-2" }
+  - { id: dc-2, text: "a consumer-defined git runner port, not the concrete internal/gitx functions directly: internal/refindex declares its own narrow interface (list local design refs, list remote-tracking design refs, resolve the default branch, show a path at a ref, list the default branch's spec directories at that ref, test whether one commit is an ancestor of another - dc-5's merged-branch check, reusing gitx.IsAncestor's existing primitive) that internal/gitx's existing free functions (LocalBranches, Show, DefaultBranch - gitx/branch.go, gitx/show.go) satisfy via a small adapter; new plumbing this story needs (a for-each-ref query scoped to refs/remotes/origin/design/*, and a tree-listing at a ref) is added to gitx as more of the same shape, not invented ad hoc inside refindex. The port exists so ComputeIndex is testable against a fake with no real git process at all, alongside the hermetic fixturegit exercise (04 §port pattern). The remote name is hardcoded to 'origin', matching this codebase's existing single-remote convention verbatim - gitx.DefaultBranch already resolves refs/remotes/origin/HEAD, gitx.Push already pushes to 'origin', and gitx.HasRemote's callers already treat 'origin' as the one configured remote (gitx/branch.go, gitx/worktree.go) - so this is not a new narrowing this story invents; it is consistent with every other remote-naming assumption already load-bearing in this store. A repo with a differently-named remote is already unsupported by those existing functions, not newly unsupported by this one. Parent dc-5 never mandates multi-remote support - it says only that local and remote-tracking design refs 'alike' join the enumeration, silent on remote naming - so hardcoding origin fills a gap dc-5 leaves open using this store's one existing convention, rather than narrowing an explicit dc-5 promise; no exempts edge is warranted because nothing in dc-5's text is being excused from, only an unstated detail being filled in the same way the rest of the codebase already fills it", anchor: "#dc-2" }
   - { id: dc-3, text: "the Entry output type carries {Ref (kind/name-shaped local identity), Source (enum: default | local | remote | both), StatusGroup (feature dc-2's four-value vocabulary), SpecStatus (the raw frontmatter status where a spec was readable, empty otherwise), Disclosed (*disclosure.Disclosure, nil when the entry is ordinary)}. Source is a CLOSED, always-populated four-value enum covering every source ComputeIndex reads (dc-4 adds a third kind of entry - a default-branch spec, neither a local nor a remote-tracking design ref - so Source gains a fourth value, default, rather than leaving those entries un-sourced against dc-3's original three-value design-branch-only framing). Source itself IS the mechanism that satisfies parent dc-5's 'each entry discloses its source' and 'a remote-only branch renders sealed with its remoteness disclosed': Source is a plain, always-populated field on every entry (never omitted, never defaulted away), so a remote-only entry's remoteness, or a default-branch entry's default-ness, is disclosed simply by directory-home rendering its Source value - no disclosure.Disclosure wrapper is needed or created for that ordinary case. Disclosed is reserved narrowly for a DEGRADED entry whose content could not be read at all (ac-4's no-draft-spec case, and any future such case) - a materially different situation (absent content, not merely a sourcing fact) from an ordinary remote-only or default-branch entry (present content, just sourced from a particular place). This closes two decision-conflict findings against this draft's earlier wording: Source's ambiguity against Disclosed, and Source's original three-value vocabulary having no value for dc-4's default-branch entries", anchor: "#dc-3" }
   - { id: dc-4, text: "default-branch enumeration walks the default branch's OWN tree at its resolved ref (git ls-tree under .verdi/specs/active/ and .verdi/specs/archive/ at that ref, mirroring internal/index's existing corpus-walk shape but ref-scoped rather than working-tree-scoped) rather than reusing the live corpus index (internal/index), because the live index reads the working tree/checkout the serving process happens to be on - exactly the coupling co-1 forbids for index computation. A future consolidation of the two walkers is left open, not invented here. Scope note, closing a decision-conflict finding: this is not an extension of parent dc-5's source taxonomy needing dc-5's own blessing - dc-5 resolves oq-2 (whether remote-tracking design refs join the enumeration), a strictly narrower question than ac-2's own base text, which already requires 'every spec on the default branch' independent of dc-5. dc-4 realizes that pre-existing ac-2 requirement; Source=default (dc-3) discloses it by source exactly as dc-5's disclosed-by-source rule asks, and parent dc-2's accepted-pending-build/active/terminal groups can only ever be populated from default-branch content, so dc-4 is required scaffolding for dc-2, not a competing enumeration", anchor: "#dc-4" }
+  - { id: dc-5, text: "a design branch already merged into the default branch (its tip is an ancestor of the default-branch tip, tested with the same gitx.IsAncestor primitive feature dc-4 prescribes for gc's merged signal) is EXCLUDED from the design-branch enumeration entirely, for local and remote-tracking design refs alike - its spec is already reachable, correctly grouped, as a default-branch entry (dc-4), so re-enumerating the same spec a second time as a draft would violate dc-2's one-spec-one-status premise and fabricate a duplicate entry from a source (Source: both is reserved for genuinely un-merged local+remote design refs, never for a merged-but-not-yet-gc'd leftover). This is a merged/unmerged filter, independent of dc-5's (parent feature's) local/remote axis, applied identically on both sides; it also means ComputeIndex's exclusion rule and verdi gc's reclaim rule (parent dc-4) agree by construction - a design branch invisible to the directory is always exactly a design branch verdi gc is entitled to reap", anchor: "#dc-5" }
 constraints:
   - { id: co-1, text: "inherited verbatim from the feature (co-1): managed worktrees live under the data zone, never committed (not this story's concern - see worktree-manager); index computation reads refs and never switches a checkout. ComputeIndex takes the serving checkout's root only to resolve .git and run ref-scoped plumbing against it - it never runs checkout, switch, or any working-tree-mutating command against that root or any other", anchor: "#co-1" }
   - { id: co-2, text: "no network in any test (CLAUDE.md): every ComputeIndex behavior is proven against a fixturegit repository carrying real local and (simulated) remote-tracking design refs, or against the fake git-runner-port double from dc-2 - never a live clone or fetch", anchor: "#co-2" }
@@ -58,16 +59,21 @@ no rendering and no HTTP surface.
 `ComputeIndex` enumerates the default branch's specs by walking the tree
 reachable at the default-branch ref (resolved via `gitx.DefaultBranch`,
 falling back honestly per that function's own contract when unconfigured),
-and — separately — every design branch's draft spec by reading
-`refs/heads/design/*` at each ref's current tip via ref-scoped plumbing
-only: `git show <ref>:<path>` (`gitx.Show`) and `for-each-ref`-style listing
-(`gitx.LocalBranches`'s shape, scoped to `refs/heads/design`), never
+and — separately — every UNMERGED design branch's draft spec (dc-5) by
+reading `refs/heads/design/*` at each ref's current tip via ref-scoped
+plumbing only: `git show <ref>:<path>` (`gitx.Show`) and `for-each-ref`-style
+listing (`gitx.LocalBranches`'s shape, scoped to `refs/heads/design`), never
 `git checkout` or `git switch`. Every ref is read exactly once; a ref
 that fails to resolve at all (a documented git-level error, not "no spec
 present") propagates as a real Go error rather than a silently-skipped
-entry. Evidence: static (the function signature takes no checkout-mutating
-dependency) and behavioral (a fixturegit repo with a default branch and two
-design branches proves one entry per branch, no duplicates, no drops).
+entry. A design branch already merged (dc-5) contributes no entry from this
+walk at all — its spec is already counted once, from the default-branch
+walk — so no spec is ever double-counted across the two walks. Evidence:
+static (the function signature takes no checkout-mutating dependency) and
+behavioral (a fixturegit repo with a default branch, two unmerged design
+branches, and one ALREADY-MERGED-but-not-yet-deleted design branch proves
+one entry per unmerged branch, ONE entry — not two — for the merged spec,
+no duplicates, no drops).
 
 ## AC-2
 
@@ -177,12 +183,14 @@ A consumer-defined git runner port, not `internal/gitx`'s existing free
 functions called directly. `internal/refindex` declares its own narrow
 interface — list local design refs, list remote-tracking design refs,
 resolve the default branch, read a path's content at a ref, list the
-default branch's spec directories at that ref — that a small adapter over
-`internal/gitx`'s existing functions (`LocalBranches`, `Show`,
-`DefaultBranch` — `gitx/branch.go`, `gitx/show.go`) satisfies. The two
-plumbing primitives this story needs that `gitx` does not yet have — a
-`for-each-ref`-style query scoped to `refs/remotes/origin/design/*`, and a
-tree-listing (`git ls-tree`) at an arbitrary ref — are added to `gitx` as
+default branch's spec directories at that ref, and test whether one commit
+is an ancestor of another (dc-5's merged-branch check) — that a small
+adapter over `internal/gitx`'s existing functions (`LocalBranches`, `Show`,
+`DefaultBranch`, `IsAncestor` — `gitx/branch.go`, `gitx/show.go`,
+`gitx/ancestry.go`) satisfies. The two plumbing primitives this story needs
+that `gitx` does not yet have — a `for-each-ref`-style query scoped to
+`refs/remotes/origin/design/*`, and a tree-listing (`git ls-tree`) at an
+arbitrary ref — are added to `gitx` as
 more of the same shape (a thin wrapper over one `git` invocation, returning
 parsed, deterministic output), never invented ad hoc inside `refindex`. The
 port exists precisely so `ComputeIndex` is unit-testable against an
@@ -305,6 +313,37 @@ components` / `terminal` groups can only ever be populated from
 default-branch content in the first place — dc-4 is required scaffolding
 for dc-2's own grouping vocabulary, not a competing or undeclared
 enumeration source.
+
+## DC-5
+
+A design branch already merged into the default branch — its tip is an
+ancestor of the default-branch tip, tested with the same `gitx.IsAncestor`
+primitive parent feature dc-4 already prescribes for `verdi gc`'s merged
+signal — is EXCLUDED from the design-branch enumeration entirely, for local
+and remote-tracking design refs alike. Closing a decision-conflict finding
+raised against an earlier draft: parent feature dc-4 makes a
+merged-but-not-yet-`gc`'d design branch a normal, expected state (`gc`
+reclaims lazily on its own schedule; "directory reads never delete"), so
+`ComputeIndex` must have a defined answer for it. Without this exclusion, a
+just-accepted spec would show up TWICE — once from the default-branch walk
+(dc-4, correctly grouped `accepted-pending-build`/`active`/`terminal`) and
+once from the design-branch walk (always `drafts-in-progress`, ac-3) —
+violating parent dc-2's "the status is the distinction" premise (one spec,
+two statuses) however the duplicate was resolved: two entries contradicts
+dc-2 directly, and a single entry that silently dropped one source would
+have contradicted parent dc-5's "each entry disclosed by source" instead.
+
+This exclusion is a merged/unmerged filter, orthogonal to parent dc-5's
+local/remote axis — it applies identically whether the merged branch is
+local, remote-tracking, or both. It also means `ComputeIndex`'s exclusion
+rule and `verdi gc`'s reclaim rule (parent dc-4, realized by the
+`worktree-manager` story) agree by construction: a design branch invisible
+to this index is always exactly a design branch `verdi gc` is entitled to
+reap, and neither rule can drift from the other since both test the same
+ancestor relationship. `Source: both` (dc-3) is thereby reserved
+specifically for a genuinely still-open (unmerged) local+remote design
+branch; it is never emitted for a merged leftover, since a merged branch
+now contributes no design-branch entry at all.
 
 ## CO-1
 
