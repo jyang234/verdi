@@ -4,7 +4,7 @@ kind: spec
 title: "Diagram Proposals"
 owners: [platform-team]
 class: feature
-status: accepted-pending-build
+status: closed
 problem: { text: "generated diagrams describe only what exists; design intent about future state has no honest home — a mutated copy of a generated diagram masquerades as truth, an outside drawing drifts silently, and nothing reconciles a shipped build against the diagram that motivated it", anchor: problem }
 outcome: { text: "a designer proposes future-state diagrams — from scratch or derived from a generated base — that always disclose, per element, what exists versus what is proposed; that are verified deterministically wherever a truth generator exists; and that are reconciled against built reality in the pre-review alignment verdict", anchor: outcome }
 acceptance_criteria:
