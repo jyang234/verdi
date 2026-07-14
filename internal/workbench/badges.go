@@ -46,7 +46,11 @@ func attachBadges(ctx context.Context, proj *BoardProjection, root, specName str
 		}
 	}
 	proj.CaseFileBadges = badgeViewsFrom(badges.CaseFile)
-	proj.Notices = append(proj.Notices, badges.Disclosures...)
+	// Ladder disclosures are CASE-FILE lines, not board-chrome notices
+	// (spec/case-file-flags dc-4): a disclosed-unproven outcome renders on
+	// the case-file lockup in the board's notice vocabulary — where the
+	// stamp it stands in for would hang — never as a stamp, never silent.
+	proj.CaseFileDisclosures = append(proj.CaseFileDisclosures, badges.Disclosures...)
 	return nil
 }
 

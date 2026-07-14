@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -265,6 +267,78 @@ func TestComputeBadges_Deterministic(t *testing.T) {
 	}
 	if string(firstJSON) != string(secondJSON) {
 		t.Fatalf("non-deterministic render:\nfirst:  %s\nsecond: %s", firstJSON, secondJSON)
+	}
+}
+
+// manyACSpec renders a decodable spec fixture of the given class whose
+// declared AC count is exactly n (spec/case-file-flags ac-2's fixture
+// shape) — each AC valid on its own, so only the COUNT drives the smell.
+func manyACSpec(class string, n int) string {
+	var sb strings.Builder
+	sb.WriteString(`---
+id: spec/sprawl-` + class + `
+kind: spec
+class: ` + class + `
+title: "Sprawl ` + class + `"
+status: draft
+owners: [platform-team]
+`)
+	if class == "story" {
+		sb.WriteString("story: jira:SPR-1\n")
+	}
+	sb.WriteString(`problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+`)
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&sb, "  - { id: ac-%d, text: \"does thing %d\", evidence: [runtime], anchor: \"#ac-%d\" }\n", i, i, i)
+	}
+	sb.WriteString("---\n# Sprawl\n\n## Problem\n\np\n\n## Outcome\n\no\n")
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&sb, "\n## ac-%d\n\nProse.\n", i)
+	}
+	return sb.String()
+}
+
+// TestComputeBadges_SizeSmellOnAnyACDeclaringWall is spec/case-file-flags
+// dc-3's surface contract at the compute layer: the size-smell badge
+// attaches to the case file of ANY spec wall whose declared AC count
+// drives the dc-1 estimate over the reference constant — feature and
+// story alike — and never to a wall whose column fits.
+func TestComputeBadges_SizeSmellOnAnyACDeclaringWall(t *testing.T) {
+	maxUnder, minOver := thresholdCounts()
+	tests := map[string]struct {
+		class string
+		count int
+		want  bool
+	}{
+		"feature over":  {class: "feature", count: minOver, want: true},
+		"story over":    {class: "story", count: minOver, want: true},
+		"feature under": {class: "feature", count: maxUnder, want: false},
+		"story under":   {class: "story", count: maxUnder, want: false},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			specName := "sprawl-" + tc.class
+			root, fm := writeStoreSpec(t, specName, manyACSpec(tc.class, tc.count))
+			raw, err := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", specName, "spec.md"))
+			if err != nil {
+				t.Fatalf("read spec.md: %v", err)
+			}
+			got, err := ComputeBadges(context.Background(), root, specRelPathFor(specName), digestOf(raw), fm, nil)
+			if err != nil {
+				t.Fatalf("ComputeBadges: %v", err)
+			}
+			found := false
+			for _, r := range got.CaseFile {
+				if r.Source == "observe:size-smell" {
+					found = true
+				}
+			}
+			if found != tc.want {
+				t.Fatalf("CaseFile = %+v, want size-smell badge present=%v (class %s, %d ACs)", got.CaseFile, tc.want, tc.class, tc.count)
+			}
+		})
 	}
 }
 

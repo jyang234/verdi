@@ -1,9 +1,11 @@
 // Package wallbadge computes the board wall's badges (spec/badge-computes,
 // spec/wall-receipts): VL lint findings partitioned by their own
-// wall-locus self-classification (lint.Finding.Locus, dc-3), and the
+// wall-locus self-classification (lint.Finding.Locus, dc-3), the
 // spec-stale/pending-supersession ladder flags through the EXACT exported
 // entry points internal/dex/lens.go's story-lens uses — never a second,
-// drifting logic path (co-3). Every result is a canonical derivation
+// drifting logic path (co-3) — and the size-smell observation
+// (spec/case-file-flags ac-2: dc-1's deterministic viewport proxy, an
+// observation and never a rule). Every result is a canonical derivation
 // record (dc-2): the rule id, the pinned inputs with their revisions, and
 // the firing records, sufficient for the derivation drawer to render
 // receipts without recomputing anything.

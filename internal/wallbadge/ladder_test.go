@@ -245,6 +245,13 @@ func TestPendingSupersessionBadge_FlaggedWithWitness(t *testing.T) {
 	if got.Source != "ladder:pending-supersession" {
 		t.Errorf("Source = %q", got.Source)
 	}
+	// spec/case-file-flags dc-4: one vocabulary across surfaces — the
+	// stamp wears the SAME flag name the dex story-lens badge wears
+	// (internal/dex/ladder.go appends "pending-supersession", hyphenated),
+	// so the flag reads identically on the wall and on the dex page.
+	if got.Label != "pending-supersession" {
+		t.Errorf("Label = %q, want pending-supersession (the dex story-lens's own flag name, spec/case-file-flags dc-4)", got.Label)
+	}
 	if len(got.Inputs) != 1 || got.Inputs[0].Revision != "sha256:cccc" {
 		t.Fatalf("Inputs = %+v, want the candidate's own digest, never its MR id", got.Inputs)
 	}

@@ -173,8 +173,12 @@ func PendingSupersessionBadge(ctx context.Context, loader SupersessionCandidateL
 	}
 
 	return &DerivationRecord{
-		Source:  "ladder:pending-supersession",
-		Label:   "pending supersession",
+		Source: "ladder:pending-supersession",
+		// The dex story-lens's own flag name, verbatim (spec/case-file-
+		// flags dc-4: the same computation must wear the same name on
+		// every surface that renders it — internal/dex/ladder.go's badge
+		// is the string "pending-supersession").
+		Label:   "pending-supersession",
 		Inputs:  inputs,
 		Records: records,
 	}, "", nil

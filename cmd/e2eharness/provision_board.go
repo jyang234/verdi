@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -30,6 +31,19 @@ const (
 	badgeWallSpecName   = "decline-badge-wall"
 	badgeReviewSpecName = "decline-badge-review"
 	badgeSealedSpecName = "decline-badge-sealed"
+
+	// The size-smell fixture pair (spec/case-file-flags ac-2/ac-3): two
+	// authoring walls that differ ONLY in declared AC count, straddling
+	// dc-1's deterministic proxy — estimated AC-column height
+	// (boardlayout.ZoneOriginY 40 + count × RowPitch 176) vs the declared
+	// reference-viewport-height constant 900. Five ACs estimate 920
+	// (badge); four estimate 744 (no badge). If the declared layout
+	// geometry or the reference constant is ever amended, these counts
+	// move with it (the sizeSmellAC*Count constants below).
+	sizeSmellWallSpecName = "decline-ac-sprawl"
+	sizeFitWallSpecName   = "decline-ac-trim"
+	sizeSmellACCount      = 5 // smallest count whose dc-1 estimate exceeds 900
+	sizeFitACCount        = 4 // largest count whose dc-1 estimate fits
 )
 
 // designSpec is DESIGN_SPEC: the object model fixtures.ts binds (3 ACs,
@@ -324,6 +338,37 @@ Deliberately dangling refs; see the frontmatter.
 `
 }
 
+// acCountSpec renders one size-smell fixture spec (spec/case-file-flags
+// ac-2/ac-3): a feature draft on the design branch whose ONE variable is
+// its declared acceptance-criteria count — every AC individually valid,
+// no other badge-triggering state, so the wall's only computed case-file
+// state is whatever the AC COUNT drives. Both fixture walls render in
+// authoring mode, so the Playwright suite can also drag an AC card and
+// add a sticky on the badged wall (positions are not an operand; writes
+// never blocked).
+func acCountSpec(name string, n int) string {
+	var sb strings.Builder
+	sb.WriteString(`---
+id: spec/` + name + `
+kind: spec
+class: feature
+title: "Decline acceptance ledger"
+status: draft
+owners: [platform-team]
+problem: { text: "every decline path accretes its own acceptance criterion and nobody watches the column grow", anchor: "#problem" }
+outcome: { text: "the criteria ledger stays scoped to what one wall can carry", anchor: "#outcome" }
+acceptance_criteria:
+`)
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&sb, "  - { id: ac-%d, text: \"decline path %d keeps its promise\", evidence: [behavioral], anchor: \"#ac-%d\" }\n", i, i, i)
+	}
+	sb.WriteString("---\n# Decline acceptance ledger\n\n## Problem\n\n## Outcome\n")
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&sb, "\n## ac-%d\n\nDecline path %d.\n", i, i)
+	}
+	return sb.String()
+}
+
 // reviewSpec is REVIEW_SPEC: the board opens it in review mode (its
 // canned feed reports an open MR); ac-2 is the anchored comment's
 // target.
@@ -443,6 +488,10 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 		filepath.Join(".verdi", "specs", "active", badgeWallSpecName, "spec.md"):   badgeSpec(badgeWallSpecName, "draft", ""),
 		filepath.Join(".verdi", "specs", "active", badgeReviewSpecName, "spec.md"): badgeSpec(badgeReviewSpecName, "draft", ""),
 		filepath.Join(".verdi", "specs", "active", badgeSealedSpecName, "spec.md"): badgeSpec(badgeSealedSpecName, "accepted-pending-build", "frozen: { at: 2024-01-01, commit: "+mainSHA+" }\n"),
+		// The size-smell pair (spec/case-file-flags): same wall, one AC
+		// count over dc-1's estimate and one under it.
+		filepath.Join(".verdi", "specs", "active", sizeSmellWallSpecName, "spec.md"): acCountSpec(sizeSmellWallSpecName, sizeSmellACCount),
+		filepath.Join(".verdi", "specs", "active", sizeFitWallSpecName, "spec.md"):   acCountSpec(sizeFitWallSpecName, sizeFitACCount),
 	}
 	for rel, content := range files {
 		path := filepath.Join(storeRoot, rel)

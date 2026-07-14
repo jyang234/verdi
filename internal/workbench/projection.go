@@ -249,6 +249,18 @@ type BoardProjection struct {
 	// enrichment tier as Notices/Obligations — never a projection of
 	// buildProjection's four in-memory inputs.
 	CaseFileBadges []badgeView `json:"case_file_badges,omitempty"`
+	// CaseFileDisclosures are the ladder computes' disclosed-unproven
+	// outcomes (spec/case-file-flags ac-1/dc-4): spec-level state that
+	// could not be proven either way — e.g. pending-supersession with no
+	// forge to enumerate open MRs. Rendered as a disclosure LINE on the
+	// case-file lockup in the board's notice vocabulary, never a stamp
+	// (unproven is never dressed as a verdict in either direction) and
+	// never silence. Kept apart from Notices — those are board-chrome
+	// banners about the SERVING context (an unreachable review feed, an
+	// assumed default branch); these are spec-level truths that belong on
+	// the case file, exactly where the stamps they stand in for would
+	// hang. Same I/O-enrichment tier as CaseFileBadges (badges.go).
+	CaseFileDisclosures []string `json:"case_file_disclosures,omitempty"`
 }
 
 // buildProjection computes the deterministic projection of the four

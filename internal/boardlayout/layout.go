@@ -113,13 +113,23 @@ const (
 
 	// ZoneOriginY is the first row's y origin — exported alongside the
 	// column bands so the sticky landing policy can start an empty lane
-	// at the same first slot the zoned algorithm uses.
+	// at the same first slot the zoned algorithm uses. It doubles as the
+	// AC zone's top offset in the size-smell observation's estimate
+	// (spec/case-file-flags dc-1).
 	ZoneOriginY = 40
+
+	// RowPitch is the row rhythm — one card footprint plus the vertical
+	// gap between rows. Exported by name (not just by value) because the
+	// size-smell observation's derivation record discloses its operands
+	// as DECLARED layout constants (spec/case-file-flags dc-1: "the board
+	// layout's declared row pitch (card height + gap)"), never a measured
+	// or client-supplied value.
+	RowPitch = CardHeight + 36
 
 	zoneOriginY = ZoneOriginY
 	zoneMarginX = 40
-	zonePitchX  = CardWidth + 28  // column rhythm: footprint + gutter
-	rowPitch    = CardHeight + 36 // row rhythm: footprint + gap
+	zonePitchX  = CardWidth + 28 // column rhythm: footprint + gutter
+	rowPitch    = RowPitch
 )
 
 // Generate computes every object's position: stored positions verbatim,
