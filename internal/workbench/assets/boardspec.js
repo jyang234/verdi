@@ -11,6 +11,9 @@
 //   GET  /board/spec/<name>              -> the page (this script + state)
 //   GET  /board/spec/<name>/fragment     -> re-rendered board region
 //   POST /board/spec/<name>/api/<action> -> mutations; JSON {dirty} or {error}
+// The same routes also serve beneath a /b/<branch-escaped>/ prefix
+// (spec/draft-boards): every request below is issued relative to the
+// page's own mount (mountPrefix), so one client works at both addresses.
 (function () {
   "use strict";
 
@@ -20,6 +23,17 @@
   var region = document.getElementById("boardv2-region");
   var statusEl = document.getElementById("autosave-status");
   var authoring = state.mode === "authoring";
+
+  // The board's own mount prefix (spec/draft-boards dc-1): the same page
+  // serves at the unprefixed /board/spec/<name> and beneath a
+  // /b/<branch-escaped>/ prefix, so every request this file issues is
+  // addressed relative to the page's own mount — derived from
+  // location.pathname (which keeps the branch segment's %2F escaped),
+  // never a hardcoded root path. Unprefixed pages derive "".
+  var mountPrefix = window.location.pathname.replace(/\/board\/spec\/[^/]+$/, "");
+  function boardURL(rest) {
+    return mountPrefix + "/board/spec/" + encodeURIComponent(state.spec) + rest;
+  }
 
   function canvas() {
     return document.getElementById("board-canvas");
@@ -89,7 +103,7 @@
 
   function api(action, body) {
     return fetch(
-      "/board/spec/" + encodeURIComponent(state.spec) + "/api/" + action,
+      boardURL("/api/" + action),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -110,7 +124,7 @@
 
   function refreshFragment() {
     return fetch(
-      "/board/spec/" + encodeURIComponent(state.spec) + "/fragment"
+      boardURL("/fragment")
     ).then(function (resp) {
       if (!resp.ok) throw new Error("fragment: HTTP " + resp.status);
       return resp.text().then(function (html) {
@@ -1671,7 +1685,7 @@
     document.body.appendChild(panel);
 
     fetch(
-      "/board/spec/" + encodeURIComponent(state.spec) + "/peek?ref=" + encodeURIComponent(ref)
+      boardURL("/peek?ref=" + encodeURIComponent(ref))
     )
       .then(function (resp) {
         if (!resp.ok) throw new Error("HTTP " + resp.status);
@@ -1708,7 +1722,7 @@
     if (!results) return;
     var seq = ++pinFetchSeq;
     fetch(
-      "/board/spec/" + encodeURIComponent(state.spec) + "/pinsearch?q=" + encodeURIComponent(q)
+      boardURL("/pinsearch?q=" + encodeURIComponent(q))
     )
       .then(function (resp) {
         if (!resp.ok) throw new Error("HTTP " + resp.status);

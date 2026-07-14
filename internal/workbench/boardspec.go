@@ -97,6 +97,18 @@ type boardSpecServer struct {
 	// not-under-review is legitimate) or a live feed is wired.
 	reviewUnavailable string
 
+	// fixedBranch, when non-empty, marks this instance as a per-branch
+	// draft board (spec/draft-boards): it serves exactly one branch's
+	// managed worktree at that branch's own /b/ address, so the branch IS
+	// the address. The branch switcher's git-switch action refuses on such
+	// an instance — switching the worktree underneath would break the
+	// branch<->worktree mapping the worktree-manager seam owns (its reuse
+	// contract keys purely on the deterministic path) and mutate the tree
+	// under any other tab on the same address (feature dc-1's
+	// no-surprise-mutation law). The serving checkout's own instance
+	// leaves this empty and keeps today's switch semantics.
+	fixedBranch string
+
 	// writeMu serializes board MUTATIONS within this process. D3's
 	// process-level writer lock (I-12) keeps other processes out, but the
 	// board's HTTP handlers run as concurrent goroutines against the same
