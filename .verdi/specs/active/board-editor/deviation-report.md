@@ -1,10 +1,10 @@
 ---
 schema: verdi.deviation/v1
-covers: caaf99a8f11f6df8c2c740c648914768a7ac58fa
+covers: 3b39555646b82531e80424c0c451bf4c4e8fa783
 findings:
   - { id: judged-coverage-absent, kind: judged, text: "judged coverage absent: no result within 2m0s (stage=timeout, exit=0, cmd=\"claude -p --output-format json\")" }
-digest: sha256:85e6cb6f0c658c948a4334904e4485f3c3953f4a9b60f7a337aeecc0a5acd345
-provenance: { generator: verdi-align, version: v0, inputs: [spec/board-editor@caaf99a8f11f6df8c2c740c648914768a7ac58fa, spec/board-editor@0781efbfac98ccfe474f4bf93b68f88f90c60299], digest: sha256:85e6cb6f0c658c948a4334904e4485f3c3953f4a9b60f7a337aeecc0a5acd345 }
+digest: sha256:7468a707a0008e01009d5862b3618b2d70abffcaadb40fe4d5523e699c7534b1
+provenance: { generator: verdi-align, version: v0, inputs: [spec/board-editor@3b39555646b82531e80424c0c451bf4c4e8fa783, spec/board-editor@0781efbfac98ccfe474f4bf93b68f88f90c60299], digest: sha256:7468a707a0008e01009d5862b3618b2d70abffcaadb40fe4d5523e699c7534b1 }
 ---
 # Alignment report
 
@@ -15,6 +15,11 @@ provenance: { generator: verdi-align, version: v0, inputs: [spec/board-editor@ca
 ### Boundary diff vs acceptance baseline
 
 (no impacted services)
+
+### Diagram alignment
+
+- (no accepted proposals)
+- (no illustrative diagrams in this spec's body)
 
 ## Judged
 
