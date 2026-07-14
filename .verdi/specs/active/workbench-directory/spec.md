@@ -4,7 +4,7 @@ kind: spec
 title: "Workbench Directory"
 owners: [platform-team]
 class: feature
-status: draft
+status: accepted-pending-build
 problem: { text: "verdi serve is bound to a working tree, so it is bound to a branch. Every draft in progress therefore lives at its own port, invented ad hoc, while the main address's home page silently under-reports the store: an operator looking at the directory cannot see the work most in motion. The distinction the operator needs is status — draft, accepted, active, terminal — and the tool is expressing it as network addresses.", anchor: problem }
 outcome: { text: "One address is the whole directory. The home page enumerates the default branch and every design branch, groups by status, and links every board. Drafts open as authoring walls backed by their own branch's working tree; accepted specs stay sealed records; nothing the operator clicks ever mutates the state under another tab. The port pattern retires.", anchor: outcome }
 acceptance_criteria:
@@ -26,6 +26,7 @@ decisions:
   - { id: dc-3, text: "one address: the per-draft port pattern is retired the day this lands", anchor: "#dc-3" }
   - { id: dc-4, text: "managed worktrees are reclaimed by verdi gc on the ratified gc signals — a branch merged (tip is an ancestor of the default-branch tip) or deleted (absent) is reclaimable; directory reads never delete and there is no background daemon; a worktree with uncommitted changes is never reclaimed but disclosed and kept", anchor: "#dc-4" }
   - { id: dc-5, text: "oq-2 resolved now that the remote exists (round-6 remote-and-ci): remote design branches join the enumeration — the index reads local design refs and remote-tracking design refs alike, still refs-only and deterministic (co-1 unchanged), each entry disclosed by source; only a local design branch opens as an authoring wall (managed worktrees are cut from local branches only), a remote-only branch renders sealed with its remoteness disclosed; an entry whose branch has an open MR is chipped in-review from the forge port — a second, non-ref source that is disclosed and degradable: an unreachable forge yields a disclosed absence, never a dead link, never a blocked directory", anchor: "#dc-5" }
+frozen: { at: 2026-07-14, commit: 972351b43e5c0a27aa30f18d2f20c43a39881aa2 }
 ---
 # Workbench Directory
 
