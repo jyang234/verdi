@@ -1,4 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
+import { resolvePorts } from "./ports";
+
+// VERDI_E2E_PORT_BASE (D6-28, ports.ts): unset, PORTS.workbench is the
+// historical 4173 — zero behavior change. Set, cmd/e2eharness/ports.go
+// derives its listeners from the SAME variable via the SAME base,
+// base+1, base+2 rule, so this config's baseURL/health-check URL and the
+// harness's actual bind address always agree.
+const PORTS = resolvePorts();
 
 // Chromium only (task instruction: "package.json + playwright.config
 // (chromium only)"). The suite runs fully serially (workers: 1): every
@@ -38,18 +46,21 @@ export default defineConfig({
   retries: 0,
   reporter: [["list"]],
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: `http://127.0.0.1:${PORTS.workbench}`,
     trace: "retain-on-failure",
   },
   // Builds the binary, provisions the scratch store, starts `verdi serve`
-  // (workbench, :4173) and a static file server over the built dex site
-  // (:4174) — see cmd/e2eharness/main.go's own doc comment. cwd: ".."
-  // points the harness's `go build`/`go run` at the verdi module root
-  // (this config file lives in verdi/e2e/).
+  // (workbench, :4173 by default) and a static file server over the built
+  // dex site (:4174 by default) — see cmd/e2eharness/main.go's own doc
+  // comment. cwd: ".." points the harness's `go build`/`go run` at the
+  // verdi module root (this config file lives in verdi/e2e/). The child
+  // process inherits this Node process's env unchanged, so
+  // VERDI_E2E_PORT_BASE (ports.ts) reaches cmd/e2eharness/ports.go's own
+  // resolution with no extra plumbing here.
   webServer: {
     command: "go run ./cmd/e2eharness",
     cwd: "..",
-    url: "http://127.0.0.1:4173/healthz",
+    url: `http://127.0.0.1:${PORTS.workbench}/healthz`,
     // reuseExistingServer MUST stay false. Playwright's readiness probe hits
     // only ONE url (:4173/healthz), but a single harness process owns TWO
     // ports: :4173 (workbench) and :4174 (dex static site). If reuse were

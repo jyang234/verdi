@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { DESIGN_SPEC, boardPath } from "./fixtures";
+import { DESIGN_SPEC, boardPath, DEX_BASE as dexBase } from "./fixtures";
 
 // Presentation-meaningful assertions for the visual system ("the registry"):
 // the board is a real spatial canvas (absolute positioning, SVG yarn that
@@ -11,8 +11,6 @@ import { DESIGN_SPEC, boardPath } from "./fixtures";
 // Runs after 02/03 in the serial suite: earlier tests may have moved the
 // first sticky and committed the board, so nothing here depends on the
 // fixture's original coordinates — only on structural presentation truths.
-
-const dexBase = "http://127.0.0.1:4174";
 
 test("board stickies are absolutely positioned at their coordinates", async ({ page }) => {
   await page.goto("/board/STORY-1482");

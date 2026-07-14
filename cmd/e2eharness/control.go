@@ -22,9 +22,10 @@ import (
 	"sync"
 )
 
-// controlAddr is the control server's fixed loopback address, bound by
-// e2e/tests/fixtures.ts (CONTROL_URL).
-const controlAddr = "127.0.0.1:4177"
+// The control server's loopback address is resolved in main.go's run()
+// (ports.go's resolvePorts, D6-28) and passed to main.go's own use, not
+// held here — e2e/tests/fixtures.ts's CONTROL_URL derives the matching
+// value via e2e/ports.ts's mirror of the same derivation.
 
 // openMRFeedJSON is the canned happy-path feed: the board suite's design
 // branch carries the one open MR.
