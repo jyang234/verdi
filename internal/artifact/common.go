@@ -114,6 +114,18 @@ var (
 	sha256Re = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
+// ValidDigest reports whether s has the sha256:<64-hex> shape
+// (02 §Generated artifacts and digests) — the one definition every
+// Provenance/evidence/rollup digest field already decodes against,
+// exported so a caller outside this package that needs to validate a
+// digest-shaped field without owning its own copy of the pattern
+// (internal/lint's VL-021, spec/proposal-artifact ac-5's
+// `derived_from.digest` check) can reuse it rather than duplicate the
+// regex (CLAUDE.md: shared code lives in a shared internal/ package).
+func ValidDigest(s string) bool {
+	return sha256Re.MatchString(s)
+}
+
 // Frozen is the point-in-time stamp carried by frozen artifacts
 // (01 §Temporal classes): `frozen: { at: date, commit: sha }`.
 //
