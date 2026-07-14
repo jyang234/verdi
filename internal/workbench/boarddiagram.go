@@ -147,20 +147,16 @@ func (s *boardDiagramServer) loadDiagram(ctx context.Context, name string) (*dia
 	// The rail consumes, never computes (dc-4): unwired, or any error,
 	// renders the disclosed unavailable state — NON-BLOCKING by
 	// construction (the load carries on either way).
-	switch {
-	case s.verifier == nil:
+	if s.verifier == nil {
 		v.VerificationUnavailable = "no verification extractor is wired for this checkout"
-	default:
-		report, verr := s.verifier.VerifyDiagram(ctx, name)
-		if verr != nil {
-			v.VerificationUnavailable = verr.Error()
-		} else if rerr := report.Validate(); rerr != nil {
-			// A malformed report is an extractor error, disclosed the same
-			// way — never rendered as a fabricated tier.
-			v.VerificationUnavailable = rerr.Error()
-		} else {
-			v.Verification = report
-		}
+	} else if report, verr := s.verifier.VerifyDiagram(ctx, name); verr != nil {
+		v.VerificationUnavailable = verr.Error()
+	} else if rerr := report.Validate(); rerr != nil {
+		// A malformed report is an extractor error, disclosed the same
+		// way — never rendered as a fabricated tier.
+		v.VerificationUnavailable = rerr.Error()
+	} else {
+		v.Verification = report
 	}
 
 	// The same authoring-mode gate as spec-board writes (dc-1): a
