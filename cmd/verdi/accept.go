@@ -34,7 +34,7 @@ var draftStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?draft"?\s*$`)
 // cmdAccept is `verdi accept`'s entry point, invoked by dispatch.go.
 func cmdAccept(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "accept: usage: verdi accept <spec-ref> (e.g. spec/stale-decline)")
+		fmt.Fprintln(stderr, "accept: usage: verdi accept <spec-ref|diagram-ref> (e.g. spec/stale-decline, diagram/loansvc-target-topology)")
 		return 2
 	}
 	specArg := args[0]
