@@ -31,6 +31,60 @@
     return window.CSS && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&");
   }
 
+  // -- client-side mermaid over injected fragments ---------------------------
+  //
+  // The board's spec-body surfaces (the placard body dialog and the
+  // reference peek) inject SERVER-rendered HTML that may carry the badged
+  // <figure><pre class="mermaid"> from internal/render's one seam
+  // (spec/illustrative-class dc-1 — the badge markup is server-emitted;
+  // this script computes NOTHING about the tier). All the client does is
+  // what the dex page's inline init does for static pages: hand the pre
+  // to the one vendored mermaid asset (/assets/mermaid.min.js, the
+  // dex-embedded copy the workbench re-serves — same renderer bytes on
+  // every surface, no CDN, spec/illustrative-class co-2) so the source
+  // becomes an SVG. Loaded lazily, once, and only when a fragment
+  // actually carries a diagram — most walls never pay the asset's cost.
+
+  var mermaidLoad = null;
+
+  function ensureMermaid() {
+    if (!mermaidLoad) {
+      mermaidLoad = new Promise(function (resolve, reject) {
+        var s = document.createElement("script");
+        s.src = "/assets/mermaid.min.js";
+        s.onload = function () {
+          window.mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: "strict",
+            theme:
+              window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "default",
+          });
+          resolve();
+        };
+        s.onerror = function () {
+          reject(new Error("mermaid.min.js failed to load"));
+        };
+        document.head.appendChild(s);
+      });
+    }
+    return mermaidLoad;
+  }
+
+  function renderMermaidIn(container) {
+    var nodes = container.querySelectorAll("pre.mermaid");
+    if (!nodes.length) return;
+    ensureMermaid()
+      .then(function () {
+        return window.mermaid.run({ nodes: nodes });
+      })
+      .catch(function () {
+        // The un-rendered <pre> stays visible — the diagram source is
+        // legible text, never a dead hole; nothing here is load-bearing.
+      });
+  }
+
   // -- server round-trips --------------------------------------------------
 
   function api(action, body) {
@@ -534,6 +588,9 @@
       // committed spec, never user input) — the same bytes the corpus page
       // injects. Surfacing it as markup is the point of the seam.
       richBody.innerHTML = full.innerHTML;
+      // A body section may carry a badged mermaid figure (the fenced
+      // illustrative register) — same pinned renderer as every surface.
+      renderMermaidIn(richBody);
       return;
     }
     var headline = placard.querySelector(".placard-text");
@@ -1569,6 +1626,10 @@
       })
       .then(function (html) {
         content.innerHTML = html;
+        // A peeked artifact body may carry a badged mermaid figure (a
+        // diagram-kind target, or a fenced block in spec prose) — same
+        // pinned renderer as every surface.
+        renderMermaidIn(content);
       })
       .catch(function (err) {
         content.textContent = "peek failed: " + err.message;

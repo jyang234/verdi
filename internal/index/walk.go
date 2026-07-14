@@ -97,7 +97,7 @@ func decodeEntry(kind string, data []byte, path string) (*Entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Entry{Ref: d.ID, Kind: kind, Title: d.Title, Status: string(d.Status), Path: path, Body: string(body), Links: d.Links}, nil
+		return &Entry{Ref: d.ID, Kind: kind, Title: d.Title, Status: string(d.Status), Path: path, Body: string(body), Links: d.Links, DiagramClass: d.Class}, nil
 
 	case "attestation":
 		at, err := artifact.DecodeAttestation(fm)

@@ -16,7 +16,12 @@ func TestRenderMarkdown_Happy(t *testing.T) {
 		t.Fatalf("missing auto-id heading: %s", out)
 	}
 	if !strings.Contains(out, `<pre class="mermaid">`) {
-		t.Fatalf("mermaid fence not left bare for client-side rendering: %s", out)
+		t.Fatalf("mermaid fence not wrapped for client-side rendering: %s", out)
+	}
+	// The fenced path emits the illustrative badged figure (dc-1) — the
+	// full grammar is pinned by diagramtier_test.go; this guards the seam.
+	if !strings.Contains(out, `data-diagram-tier="illustrative"`) {
+		t.Fatalf("fenced mermaid missing the illustrative tier marker: %s", out)
 	}
 }
 
@@ -42,10 +47,10 @@ func TestRenderMarkdown_CodeBlockIsClassBased(t *testing.T) {
 func TestRenderBody_DiagramKindIsMermaidNotMarkdown(t *testing.T) {
 	// The user-reported defect: a diagram-kind body ran through the markdown
 	// renderer, collapsing the diagram DSL into a <p>graph TD ...</p>. It must
-	// instead become the bare <pre class="mermaid"> the client-side engine
-	// turns into an SVG.
+	// instead become the <pre class="mermaid"> the client-side engine
+	// turns into an SVG (now inside the illustrative badged figure, dc-1).
 	body := "graph TD\n  loansvc --> notification-svc\n  loansvc --> charge-svc\n"
-	out, err := RenderBody(string(artifact.KindDiagram), body)
+	out, err := RenderBody(string(artifact.KindDiagram), "", body)
 	if err != nil {
 		t.Fatalf("RenderBody: %v", err)
 	}
@@ -63,7 +68,7 @@ func TestRenderBody_DiagramKindIsMermaidNotMarkdown(t *testing.T) {
 }
 
 func TestRenderBody_NonDiagramKindIsMarkdown(t *testing.T) {
-	out, err := RenderBody(string(artifact.KindSpec), "# Title\n\nBody.\n")
+	out, err := RenderBody(string(artifact.KindSpec), "", "# Title\n\nBody.\n")
 	if err != nil {
 		t.Fatalf("RenderBody: %v", err)
 	}

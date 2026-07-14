@@ -193,6 +193,16 @@ func TestBuild_Happy(t *testing.T) {
 		if !strings.Contains(page, "/assets/mermaid.min.js") {
 			t.Fatalf("diagram page missing the mermaid client script; got:\n%s", page)
 		}
+		// spec/illustrative-class ac-2: loansvc-topology carries no
+		// class: proposal, so its page inherits the illustrative badged
+		// figure from the shared render seam — the machine-readable tier
+		// marker and the visible chip.
+		if !strings.Contains(page, `data-diagram-tier="illustrative"`) {
+			t.Fatalf("non-proposal diagram page missing the illustrative tier marker; got:\n%s", page)
+		}
+		if !strings.Contains(page, "illustrative · not deterministically verifiable") {
+			t.Fatalf("non-proposal diagram page missing the visible illustrative badge chip; got:\n%s", page)
+		}
 	})
 
 	t.Run("mermaid client is gated off a diagram-free page", func(t *testing.T) {

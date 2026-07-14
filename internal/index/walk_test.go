@@ -52,3 +52,49 @@ func TestBuild_IndexesReaffirmation(t *testing.T) {
 		t.Errorf("entry.Title = %q, want %q", entry.Title, "witness reaffirmation")
 	}
 }
+
+// syntheticProposalDiagram is a valid `kind: diagram` proposal fixture
+// (02 §Diagram proposals: class: proposal, authored status proposed).
+const syntheticProposalDiagram = `---
+id: diagram/future-topology
+kind: diagram
+class: proposal
+title: "future topology proposal"
+status: proposed
+owners: [platform-team]
+---
+graph TD
+  loansvc --> audit-svc
+`
+
+// TestBuild_DiagramClassCarried: the diagram kind's class discriminator
+// rides the Entry (spec/illustrative-class ac-2's dispatch input), and an
+// incumbent diagram — like every non-diagram kind — carries "" (the
+// negative case: nothing but a real class: proposal may ever route a body
+// away from the illustrative badge).
+func TestBuild_DiagramClassCarried(t *testing.T) {
+	root := buildSyntheticStore(t)
+	writeIndexFile(t, root, ".verdi/diagrams/future-topology.mermaid", syntheticProposalDiagram)
+
+	ix, err := Build(root)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	proposal, ok := ix.Get("diagram/future-topology")
+	if !ok {
+		t.Fatal("Build: diagram/future-topology not indexed")
+	}
+	if proposal.DiagramClass != "proposal" {
+		t.Errorf("proposal entry.DiagramClass = %q, want %q", proposal.DiagramClass, "proposal")
+	}
+
+	for _, e := range ix.All() {
+		if e.Ref == "diagram/future-topology" {
+			continue
+		}
+		if e.DiagramClass != "" {
+			t.Errorf("entry %s carries DiagramClass %q, want \"\" (only a class: proposal diagram carries one)", e.Ref, e.DiagramClass)
+		}
+	}
+}

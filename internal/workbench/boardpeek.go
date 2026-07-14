@@ -68,7 +68,7 @@ func peekFragment(root, ref string) string {
 		return peekErrorFragment(ref, "is not in this corpus — it may name something outside this repository")
 	}
 
-	bodyHTML, err := render.RenderBody(entry.Kind, entry.Body)
+	bodyHTML, err := render.RenderBody(entry.Kind, entry.DiagramClass, entry.Body)
 	if err != nil {
 		return peekErrorFragment(ref, "resolved, but its body could not be rendered: "+err.Error())
 	}

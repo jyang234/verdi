@@ -107,7 +107,16 @@ servicing system of record rather than any cached copy. Concretely:
 - every notice ever shown stays **audit-visible**, so support can
   reconstruct exactly what the borrower saw, and when.
 
-The wall below exists to close that gap.
+The wall below exists to close that gap. How the single source fans out
+(an illustrative sketch — drawn, not verified; the body-figure fixture
+for spec/illustrative-class, rendered by the placard body dialog):
+
+` + "```mermaid\n" +
+	"graph TD\n" +
+	"  servicing --> decline-state\n" +
+	"  decline-state --> borrower-ui\n" +
+	"  decline-state --> support-desk\n" +
+	"```" + `
 
 ## ac-1
 
