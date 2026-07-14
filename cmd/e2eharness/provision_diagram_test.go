@@ -42,8 +42,9 @@ func TestRunGitOut_Failure(t *testing.T) {
 }
 
 // TestProvisionDiagrams provisions into a scratch store and proves the
-// derived fixture's pinned digest genuinely verifies through the SAME
-// diagrambase seam the server gates with (never a stubbed comparison),
+// derived fixture's pinned source_digest genuinely verifies through the
+// SAME diagrambase seam the server gates with (never a stubbed
+// comparison, ADJ-16 — the editor gates on source_digest, not digest),
 // and the corrupted twin genuinely does not.
 func TestProvisionDiagrams(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -86,8 +87,9 @@ func TestProvisionDiagrams(t *testing.T) {
 		t.Fatal("no verification path returned")
 	}
 
-	// The pinned digest matches the base body under the real formula.
-	digest, err := diagrambase.CanonicalGraphDigest([]byte(diagramBaseBody))
+	// The pinned source_digest matches the base body under the real
+	// formula — the field peek/reset gate on (ADJ-16).
+	sourceDigest, err := diagrambase.CanonicalGraphDigest([]byte(diagramBaseBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,14 +97,14 @@ func TestProvisionDiagrams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(derivedRaw, "digest: "+digest) {
-		t.Fatalf("derived fixture does not pin the real base digest %s:\n%s", digest, derivedRaw)
+	if !strings.Contains(derivedRaw, "source_digest: "+sourceDigest) {
+		t.Fatalf("derived fixture does not pin the real base source_digest %s:\n%s", sourceDigest, derivedRaw)
 	}
 	corruptRaw, err := runGitOut(storeRoot, "show", "HEAD:.verdi/diagrams/"+diagramCorruptName+".mermaid")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(corruptRaw, "digest: "+digest) {
-		t.Fatalf("corrupted fixture pins the MATCHING digest; it must not verify")
+	if strings.Contains(corruptRaw, "source_digest: "+sourceDigest) {
+		t.Fatalf("corrupted fixture pins the MATCHING source_digest; it must not verify")
 	}
 }

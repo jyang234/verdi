@@ -345,9 +345,12 @@ func (s *boardDiagramServer) boardDiagramAPIHandler() http.HandlerFunc {
 			status := http.StatusBadRequest
 			var outside *diagramedit.OutsideSubsetError
 			var mismatch *diagrambase.DigestMismatchError
-			if errors.As(err, &outside) || errors.As(err, &mismatch) {
+			var noSrc *diagrambase.NoSourceDigestError
+			if errors.As(err, &outside) || errors.As(err, &mismatch) || errors.As(err, &noSrc) {
 				// Disclosed refusals with their own vocabulary: ops
-				// unavailable on this source; a base that does not verify.
+				// unavailable on this source; a base that does not verify;
+				// a derived proposal with no source_digest to gate on
+				// (ADJ-16). Each fails visible and writes nothing.
 				status = http.StatusConflict
 			}
 			writeJSONError(w, status, err.Error())
@@ -431,7 +434,11 @@ func (s *boardDiagramServer) actionDiagramPeek(ctx context.Context, w http.Respo
 	if err != nil {
 		status := http.StatusBadRequest
 		var mismatch *diagrambase.DigestMismatchError
-		if errors.As(err, &mismatch) {
+		var noSrc *diagrambase.NoSourceDigestError
+		if errors.As(err, &mismatch) || errors.As(err, &noSrc) {
+			// A base that does not verify, or a derived proposal with no
+			// source_digest to gate on (ADJ-16): disclosed unavailable,
+			// painted in the peek panel's failure slot, nothing written.
 			status = http.StatusConflict
 		}
 		writeJSONError(w, status, err.Error())

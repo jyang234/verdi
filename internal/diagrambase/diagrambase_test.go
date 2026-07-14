@@ -65,11 +65,18 @@ func TestCanonicalGraphDigest_DeterministicPureFunction(t *testing.T) {
 
 func TestRecover_HappyPath_ReturnsBaseBytesExactly(t *testing.T) {
 	dir, commit := newBaseRepo(t)
-	digest, err := CanonicalGraphDigest([]byte(baseBody))
+	sourceDigest, err := CanonicalGraphDigest([]byte(baseBody))
 	if err != nil {
-		t.Fatalf("digest: %v", err)
+		t.Fatalf("source digest: %v", err)
 	}
-	df := &artifact.DiagramDerivedFrom{Ref: "diagram/loansvc-topology@" + commit, Digest: digest}
+	// digest carries the flowmap stale-base value; Recover gates on
+	// source_digest (ADJ-16), so a deliberately-wrong digest must NOT
+	// affect recovery.
+	df := &artifact.DiagramDerivedFrom{
+		Ref:          "diagram/loansvc-topology@" + commit,
+		Digest:       "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		SourceDigest: sourceDigest,
+	}
 
 	got, err := Recover(context.Background(), dir, df)
 	if err != nil {
@@ -84,7 +91,7 @@ func TestRecover_Negative(t *testing.T) {
 	dir, commit := newBaseRepo(t)
 	goodDigest, err := CanonicalGraphDigest([]byte(baseBody))
 	if err != nil {
-		t.Fatalf("digest: %v", err)
+		t.Fatalf("source digest: %v", err)
 	}
 
 	cases := []struct {
@@ -93,16 +100,24 @@ func TestRecover_Negative(t *testing.T) {
 		wantErr func(error) bool
 	}{
 		{
-			name: "digest mismatch fails closed with both digests disclosed",
-			df:   &artifact.DiagramDerivedFrom{Ref: "diagram/loansvc-topology@" + commit, Digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+			name: "source_digest mismatch fails closed with both digests disclosed",
+			df:   &artifact.DiagramDerivedFrom{Ref: "diagram/loansvc-topology@" + commit, Digest: goodDigest, SourceDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
 			wantErr: func(err error) bool {
 				var m *DigestMismatchError
 				return errors.As(err, &m) && m.Got == goodDigest && m.Pinned != m.Got
 			},
 		},
 		{
+			name: "no source_digest renders disclosed-unavailable",
+			df:   &artifact.DiagramDerivedFrom{Ref: "diagram/loansvc-topology@" + commit, Digest: goodDigest},
+			wantErr: func(err error) bool {
+				var n *NoSourceDigestError
+				return errors.As(err, &n) && n.Ref == "diagram/loansvc-topology@"+commit
+			},
+		},
+		{
 			name: "unresolvable pinned commit",
-			df:   &artifact.DiagramDerivedFrom{Ref: "diagram/loansvc-topology@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Digest: goodDigest},
+			df:   &artifact.DiagramDerivedFrom{Ref: "diagram/loansvc-topology@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", SourceDigest: goodDigest},
 			wantErr: func(err error) bool {
 				var u *UnavailableError
 				return errors.As(err, &u)
@@ -110,7 +125,7 @@ func TestRecover_Negative(t *testing.T) {
 		},
 		{
 			name: "base path absent at the pinned commit",
-			df:   &artifact.DiagramDerivedFrom{Ref: "diagram/no-such-diagram@" + commit, Digest: goodDigest},
+			df:   &artifact.DiagramDerivedFrom{Ref: "diagram/no-such-diagram@" + commit, SourceDigest: goodDigest},
 			wantErr: func(err error) bool {
 				var u *UnavailableError
 				return errors.As(err, &u)
@@ -118,7 +133,7 @@ func TestRecover_Negative(t *testing.T) {
 		},
 		{
 			name: "unpinned ref refused",
-			df:   &artifact.DiagramDerivedFrom{Ref: "diagram/loansvc-topology", Digest: goodDigest},
+			df:   &artifact.DiagramDerivedFrom{Ref: "diagram/loansvc-topology", SourceDigest: goodDigest},
 			wantErr: func(err error) bool {
 				var u *UnpinnedRefError
 				return errors.As(err, &u)
@@ -134,7 +149,7 @@ func TestRecover_Negative(t *testing.T) {
 		},
 		{
 			name: "non-diagram ref refused",
-			df:   &artifact.DiagramDerivedFrom{Ref: "spec/loansvc@" + commit, Digest: goodDigest},
+			df:   &artifact.DiagramDerivedFrom{Ref: "spec/loansvc@" + commit, SourceDigest: goodDigest},
 			wantErr: func(err error) bool {
 				var u *UnavailableError
 				return errors.As(err, &u)

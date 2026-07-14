@@ -17,8 +17,11 @@ import (
 // genuinely new, corpus-aware check the class needs: derived_from.ref
 // must resolve to a real diagram artifact in the corpus, and
 // derived_from.digest must have the sha256:<64-hex> shape
-// (artifact.ValidDigest). Every refusal names the offending field
-// (D6-18: never a silent absence).
+// (artifact.ValidDigest). The OPTIONAL derived_from.source_digest (ADJ-16)
+// is format-checked the same way ONLY when present — its absence is never
+// a finding (a derived proposal may legitimately omit it, rendering
+// peek/reset disclosed-unavailable). Every refusal names the offending
+// field (D6-18: never a silent absence).
 //
 // internal/artifact/diagram.go's DiagramDerivedFrom.Validate deliberately
 // does NOT check either of these two things at decode time (see its own
@@ -45,6 +48,12 @@ func (vl021) Check(in *RunInput) []Finding {
 		}
 		if !artifact.ValidDigest(df.Digest) {
 			findings = append(findings, Finding{Rule: "VL-021", Path: d.RelPath, Message: fmt.Sprintf("derived_from.digest %q is not sha256:<64-hex>", df.Digest)})
+		}
+		// source_digest is OPTIONAL (ADJ-16): absence is never a finding.
+		// When present, it is format-checked exactly like digest — a
+		// malformed source_digest would gate peek/reset on garbage.
+		if df.SourceDigest != "" && !artifact.ValidDigest(df.SourceDigest) {
+			findings = append(findings, Finding{Rule: "VL-021", Path: d.RelPath, Message: fmt.Sprintf("derived_from.source_digest %q is not sha256:<64-hex>", df.SourceDigest)})
 		}
 	}
 	return findings

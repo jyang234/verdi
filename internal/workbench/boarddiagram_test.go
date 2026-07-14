@@ -98,10 +98,17 @@ func newDiagramFixture(t *testing.T) (root string, baseCommit string) {
 	return repo.Dir, repo.Head
 }
 
+// placeholderDiagramDigest is a syntactically-valid derived_from.digest
+// (flowmap stale-base semantics); nothing in the editor serve path
+// consumes it, so the fixtures carry a constant. peek/reset gate on
+// source_digest (ADJ-16), which is the field these fixtures vary.
+const placeholderDiagramDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+
 // writeDerivedFixture writes a derived proposal into root's working tree
-// pinning baseCommit with the given digest (a matching one via
-// diagrambase.CanonicalGraphDigest, or a corrupted constant).
-func writeDerivedFixture(t *testing.T, root, name, baseCommit, digest, body string) {
+// pinning baseCommit with the given source_digest (a matching one via
+// diagrambase.CanonicalGraphDigest, or a corrupted constant) — the field
+// peek/reset gate on (ADJ-16). digest carries the placeholder constant.
+func writeDerivedFixture(t *testing.T, root, name, baseCommit, sourceDigest, body string) {
 	t.Helper()
 	content := fmt.Sprintf(`---
 id: diagram/%s
@@ -110,9 +117,31 @@ class: proposal
 title: "Derived"
 status: proposed
 owners: [platform-team]
+derived_from: { ref: diagram/%s@%s, digest: %s, source_digest: %s }
+---
+%s`, name, diagramBaseName, baseCommit, placeholderDiagramDigest, sourceDigest, body)
+	path := filepath.Join(root, ".verdi", "diagrams", name+".mermaid")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing derived fixture: %v", err)
+	}
+}
+
+// writeDerivedNoSourceFixture writes a derived proposal that OMITS
+// source_digest (ADJ-16): legal to decode (source_digest is optional),
+// but peek/reset render disclosed-unavailable rather than gate on the
+// wrong digest.
+func writeDerivedNoSourceFixture(t *testing.T, root, name, baseCommit, body string) {
+	t.Helper()
+	content := fmt.Sprintf(`---
+id: diagram/%s
+kind: diagram
+class: proposal
+title: "Derived without source_digest"
+status: proposed
+owners: [platform-team]
 derived_from: { ref: diagram/%s@%s, digest: %s }
 ---
-%s`, name, diagramBaseName, baseCommit, digest, body)
+%s`, name, diagramBaseName, baseCommit, placeholderDiagramDigest, body)
 	path := filepath.Join(root, ".verdi", "diagrams", name+".mermaid")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("writing derived fixture: %v", err)
@@ -476,14 +505,15 @@ func TestLoadCannedDiagramVerifier_Negative(t *testing.T) {
 // visible on both with the artifact untouched.
 func TestBoardDiagram_PeekAndReset(t *testing.T) {
 	root, baseCommit := newDiagramFixture(t)
-	digest, err := diagrambase.CanonicalGraphDigest([]byte(diagramBaseBody))
+	sourceDigest, err := diagrambase.CanonicalGraphDigest([]byte(diagramBaseBody))
 	if err != nil {
-		t.Fatalf("digest: %v", err)
+		t.Fatalf("source digest: %v", err)
 	}
 	workingBody := diagramBaseBody + "  loansvc --> audit\n"
-	writeDerivedFixture(t, root, "derived-good", baseCommit, digest, workingBody)
+	writeDerivedFixture(t, root, "derived-good", baseCommit, sourceDigest, workingBody)
 	writeDerivedFixture(t, root, "derived-corrupt", baseCommit,
 		"sha256:0000000000000000000000000000000000000000000000000000000000000000", workingBody)
+	writeDerivedNoSourceFixture(t, root, "derived-no-source", baseCommit, workingBody)
 	h := NewHandler(root)
 
 	t.Run("page offers the affordances for a derived proposal", func(t *testing.T) {
@@ -542,6 +572,29 @@ func TestBoardDiagram_PeekAndReset(t *testing.T) {
 		}
 		if string(beforeRaw) != string(afterRaw) {
 			t.Fatalf("a refused peek/reset changed the artifact on disk")
+		}
+	})
+
+	t.Run("no source_digest: both affordances disclosed unavailable, nothing written", func(t *testing.T) {
+		beforeRaw, err := os.ReadFile(filepath.Join(root, ".verdi", "diagrams", "derived-no-source.mermaid"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, action := range []string{"peek", "reset"} {
+			rec := postDiagramAPI(t, h, "derived-no-source", action, `{}`)
+			if rec.Code != http.StatusConflict {
+				t.Errorf("%s without source_digest = %d, want 409 (disclosed unavailable): %s", action, rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "source_digest") {
+				t.Errorf("%s refusal does not name the missing source_digest: %s", action, rec.Body.String())
+			}
+		}
+		afterRaw, err := os.ReadFile(filepath.Join(root, ".verdi", "diagrams", "derived-no-source.mermaid"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(beforeRaw) != string(afterRaw) {
+			t.Fatalf("a disclosed-unavailable peek/reset changed the artifact on disk")
 		}
 	})
 

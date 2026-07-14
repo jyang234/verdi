@@ -84,15 +84,25 @@ func TestDecodeDiagram_Proposal(t *testing.T) {
 			name: "7b: incumbent diagram (class absent), status superseded — unaffected",
 			yaml: "id: diagram/loansvc-topology\nkind: diagram\ntitle: LoanSvc topology\nstatus: superseded\nowners: [platform-team]\n",
 		},
+		{
+			name: "8: derived_from carrying the optional source_digest (ADJ-16) decodes and validates",
+			yaml: "id: diagram/loansvc-target\nkind: diagram\ntitle: Target\nclass: proposal\nstatus: proposed\nowners: [platform-team]\n" +
+				"derived_from: { ref: diagram/loansvc-topology, digest: sha256:" + hex64 + ", source_digest: sha256:" + hex64 + " }\n",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := DecodeDiagram([]byte(tc.yaml))
+			fm, err := DecodeDiagram([]byte(tc.yaml))
 			if tc.wantErr && err == nil {
 				t.Fatalf("DecodeDiagram: want error, got nil")
 			}
 			if !tc.wantErr && err != nil {
 				t.Fatalf("DecodeDiagram: %v", err)
+			}
+			// Round-trip check for the source_digest case: the optional
+			// field must survive strict decode onto the struct.
+			if tc.name[:1] == "8" && fm.DerivedFrom != nil && fm.DerivedFrom.SourceDigest != "sha256:"+hex64 {
+				t.Fatalf("source_digest did not round-trip: got %q", fm.DerivedFrom.SourceDigest)
 			}
 		})
 	}
@@ -127,8 +137,9 @@ func TestDiagramDerivedFrom_Negative(t *testing.T) {
 func TestDiagramDerivedFrom_DanglingRefAndMalformedDigestDecodeClean(t *testing.T) {
 	base := "id: diagram/loansvc-target\nkind: diagram\ntitle: Target\nclass: proposal\nstatus: proposed\nowners: [platform-team]\n"
 	cases := map[string]string{
-		"dangling ref":     base + "derived_from: { ref: diagram/does-not-exist, digest: sha256:" + hex64 + " }\n",
-		"malformed digest": base + "derived_from: { ref: diagram/loansvc-topology, digest: not-a-digest }\n",
+		"dangling ref":            base + "derived_from: { ref: diagram/does-not-exist, digest: sha256:" + hex64 + " }\n",
+		"malformed digest":        base + "derived_from: { ref: diagram/loansvc-topology, digest: not-a-digest }\n",
+		"malformed source_digest": base + "derived_from: { ref: diagram/loansvc-topology, digest: sha256:" + hex64 + ", source_digest: not-a-digest }\n",
 	}
 	for name, y := range cases {
 		t.Run(name, func(t *testing.T) {

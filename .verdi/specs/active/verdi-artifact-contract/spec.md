@@ -406,9 +406,21 @@ derived_from:              # optional; present iff derived from a generated base
   field, orthogonal to `derived_from`, which names the base a DERIVED
   proposal forked from — a from-scratch proposal may still carry scope.
 - **`derived_from.digest`** is sha256 of the base's canonical graph JSON
-  (§Generated artifacts and digests) at the pinned commit — the
-  digest-verified input the mechanical before-peek and reset (ac-3)
-  reproduce the base from, and the stale-base detector's reference point.
+  (§Generated artifacts and digests) at the pinned commit — the truth
+  generator's own graph, and the stale-base detector's reference point
+  (verification-extractor ac-4 recomputes it by the same flowmap
+  invocation at current HEAD).
+- **`derived_from.source_digest`** (optional; round-6 clarification,
+  ADJ-16) is sha256 of the canonical JSON of the node/edge graph the
+  verification extractor's own one-way grammar extracts from the base's
+  COMMITTED mermaid body at the pinned commit. It exists because the two
+  digest consumers need different recoverability: flowmap's graph JSON is
+  never committed and cannot be hermetically regenerated at a historical
+  commit, so the mechanical before-peek and reset (ac-3) — pure functions
+  of provenance — gate on `source_digest`, which is recomputable from git
+  history alone; `digest` stays the truth-movement comparand. A derived
+  proposal without `source_digest` renders peek/reset
+  disclosed-unavailable — never guessed, never gated on the wrong digest.
 
 **The illustrative marker** (diagram-proposals dc-8/dc-3): a diagram with
 no truth generator — sequence, state, ER, or any flowchart vocabulary the

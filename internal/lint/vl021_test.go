@@ -36,6 +36,40 @@ func TestVL021_MalformedDigest(t *testing.T) {
 	}
 }
 
+// TestVL021_MalformedSourceDigest proves VL-021 fires, naming the
+// offending value, when a class: proposal diagram carries a present but
+// pattern-invalid derived_from.source_digest (ADJ-16) — even though its
+// ref and digest are both well-formed. This is the present-bad half of
+// the source_digest table (absence is proven never-a-finding by every
+// other VL-021 fixture, which omits source_digest entirely).
+func TestVL021_MalformedSourceDigest(t *testing.T) {
+	repo := buildLintRepo(t, filepath.Join(violationsDir, "VL-021", "malformed-source-digest"))
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-021")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	if !strings.Contains(findings[0].Message, "not-a-source-digest") {
+		t.Errorf("finding does not name the offending source_digest value: %s", findings[0].Message)
+	}
+	if !strings.Contains(findings[0].Message, "source_digest") {
+		t.Errorf("finding does not name the source_digest field: %s", findings[0].Message)
+	}
+}
+
+// TestVL021_CleanSourceDigest is the present-good half: a class: proposal
+// diagram whose OPTIONAL derived_from.source_digest is well-formed
+// sha256:<64-hex> trips nothing.
+func TestVL021_CleanSourceDigest(t *testing.T) {
+	repo := buildLintRepo(t, filepath.Join(violationsDir, "VL-021", "clean-source-digest"))
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-021" {
+			t.Fatalf("VL-021 fired on a clean source_digest: %s", f.String())
+		}
+	}
+}
+
 // TestVL021_Clean proves VL-021 is silent for a class: proposal diagram
 // whose derived_from correctly names a real corpus diagram with a
 // well-formed sha256:<64-hex> digest — a test that only exercised the

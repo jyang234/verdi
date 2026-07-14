@@ -6,10 +6,10 @@ package main
 // a from-scratch proposal within the op grammar's flowchart subset (the
 // ops/rail/save journeys), one outside it (the disclosed-unavailable
 // journey), a pinned base plus a derived proposal whose derived_from
-// digest is computed with the REAL formula (internal/diagrambase — the
-// same seam the server verifies with), and a corrupted-digest twin (the
-// disclosed-failure journey). Every name and body below is bound by
-// e2e/tests/fixtures.ts — change them together.
+// source_digest is computed with the REAL formula (internal/diagrambase —
+// the same seam the server verifies with, ADJ-16), and a
+// corrupted-source_digest twin (the disclosed-failure journey). Every name
+// and body below is bound by e2e/tests/fixtures.ts — change them together.
 
 import (
 	"fmt"
@@ -158,11 +158,18 @@ func provisionDiagrams(scratch, storeRoot string) (verificationPath string, err 
 		return "", err
 	}
 
-	digest, err := diagrambase.CanonicalGraphDigest([]byte(diagramBaseBody))
+	// source_digest is the field peek/reset gate on (ADJ-16), computed with
+	// the REAL diagrambase formula — the same seam the server verifies with.
+	// digest keeps the flowmap stale-base semantics; nothing in the editor
+	// serve path consumes it, so it carries a syntactically-valid placeholder
+	// (a distinct constant, plausibly flowmap-form) purely so the schema's
+	// required digest field is present and VL-021's format check passes.
+	sourceDigest, err := diagrambase.CanonicalGraphDigest([]byte(diagramBaseBody))
 	if err != nil {
-		return "", fmt.Errorf("computing base digest: %w", err)
+		return "", fmt.Errorf("computing base source digest: %w", err)
 	}
-	derived := func(name, digest string) string {
+	const placeholderDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	derived := func(name, sourceDigest string) string {
 		return `---
 id: diagram/` + name + `
 kind: diagram
@@ -170,14 +177,17 @@ class: proposal
 title: "Derived target topology"
 status: proposed
 owners: [platform-team]
-derived_from: { ref: diagram/` + diagramBaseName + `@` + baseCommit + `, digest: ` + digest + ` }
+derived_from: { ref: diagram/` + diagramBaseName + `@` + baseCommit + `, digest: ` + placeholderDigest + `, source_digest: ` + sourceDigest + ` }
 ---
 ` + diagramDerivedBody
 	}
-	const corruptedDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	// The corrupt twin corrupts source_digest — the field the editor gates
+	// on — so peek/reset fail visible with a digest mismatch (its digest
+	// stays well-formed; the mismatch is the point, not a decode error).
+	const corruptedSourceDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 	if err := writeFiles(map[string]string{
-		filepath.Join(".verdi", "diagrams", diagramDerivedName+".mermaid"): derived(diagramDerivedName, digest),
-		filepath.Join(".verdi", "diagrams", diagramCorruptName+".mermaid"): derived(diagramCorruptName, corruptedDigest),
+		filepath.Join(".verdi", "diagrams", diagramDerivedName+".mermaid"): derived(diagramDerivedName, sourceDigest),
+		filepath.Join(".verdi", "diagrams", diagramCorruptName+".mermaid"): derived(diagramCorruptName, corruptedSourceDigest),
 	}); err != nil {
 		return "", err
 	}

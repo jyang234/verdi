@@ -1,0 +1,11 @@
+---
+id: diagram/vl-021-malformed-source-digest
+kind: diagram
+title: "VL-021: malformed derived_from.source_digest"
+class: proposal
+status: proposed
+owners: [platform-team]
+derived_from: { ref: diagram/loansvc-topology, digest: sha256:abababababababababababababababababababababababababababababababab, source_digest: not-a-source-digest }
+---
+graph TD
+  loansvc --> notification-svc
