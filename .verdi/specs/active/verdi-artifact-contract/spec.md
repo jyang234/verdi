@@ -202,6 +202,7 @@ registry, R4-I-4): the same `id` with an unchanged hash across revisions is
 | spec (component) | specs/active/           | dir  | draft → active → superseded       | authored-living           |
 | adr         | adr/             | file | proposed → accepted → superseded  | frozen at acceptance      |
 | diagram     | diagrams/        | file | active → superseded               | authored-living           |
+| diagram (proposal, round 6) | diagrams/ | file | proposed → accepted | frozen at acceptance (merge of its design MR); realized/stale are computed states, never statuses (§Diagram proposals) |
 | attestation | attestations/    | file | (none — existence is the record)  | frozen at commit          |
 | waiver      | waivers/         | file | active → expired                  | frozen at commit          |
 | reaffirmation | reaffirmations/ | file | (none — existence is the record)  | frozen at commit          |
@@ -358,6 +359,67 @@ story: jira:LOAN-1490
 links:
   - { type: resolves, ref: "spec/loan-update#oq-1" }
 ```
+
+## Diagram proposals
+
+Ratified by the acceptance of `spec/diagram-proposals` (its dc-7, per its
+co-2: the schema surface freezes as one batch before any implementation
+consumes it — the scoping-canvas round-5.4 pattern). A **proposal** is the
+diagram kind's future-state form: authored mermaid making a claim about
+what should exist, disclosed per element against generated truth.
+
+```yaml
+id: diagram/loansvc-target-topology
+kind: diagram
+class: proposal            # discriminator; absent = the incumbent authored-living diagram
+title: "loansvc target topology"
+status: proposed           # proposed → accepted; frozen at acceptance (merge of its design MR)
+owners: [platform-team]
+scope: "svc/loansvc"       # optional; the flowmap --root selector truth is regenerated under
+                           # (diagram-proposals dc-6); absent = whole graph, hairball cap disclosed
+derived_from:              # optional; present iff derived from a generated base (orthogonal to scope)
+  ref: diagram/loansvc-flow@3e91ab2   # the pinned base the proposal forked from
+  digest: sha256:...       # digest of the base's canonical graph JSON at that commit
+```
+
+- **The body below the frontmatter is the mermaid source, byte-preserved
+  by every write path** (diagram-proposals ac-2: the splice ethos applied
+  to diagrams). The verification graph is extracted from it one-way and
+  read-only; there is no board→graph→mermaid round-trip anywhere, so
+  nothing ever normalizes the author's text.
+- **Status vocabulary.** The authored enum is exactly
+  `proposed → accepted` — acceptance is the merge of the proposal's design
+  MR, the total law applied to diagrams identically (ac-6), and VL-004
+  admits that transition for this class. The four-value *disclosed*
+  vocabulary — proposed / accepted / **realized** / **stale** — has two
+  computed members: `realized` (regeneration diff against current truth
+  leaves an empty residual) and `stale` (truth has diverged from an
+  accepted proposal — computed the way spec-stale is) are
+  verification-computed states, rendered wherever the proposal renders but
+  **never written to the artifact**. Writing them would violate VL-010
+  (the proposal is frozen at acceptance) and reintroduce exactly the
+  hand-mutated-status lie this class exists to kill.
+- **`scope`** pins the flowmap `--root` selector the proposal was generated
+  (or intends to be verified) under, so verification regenerates truth at
+  the same scope and the diff is comparable; an unscoped proposal verifies
+  against the whole graph with the hairball cap disclosed. Scope is its own
+  field, orthogonal to `derived_from`, which names the base a DERIVED
+  proposal forked from — a from-scratch proposal may still carry scope.
+- **`derived_from.digest`** is sha256 of the base's canonical graph JSON
+  (§Generated artifacts and digests) at the pinned commit — the
+  digest-verified input the mechanical before-peek and reset (ac-3)
+  reproduce the base from, and the stale-base detector's reference point.
+
+**The illustrative marker** (diagram-proposals dc-8/dc-3): a diagram with
+no truth generator — sequence, state, ER, or any flowchart vocabulary the
+extractor cannot claim — is the *illustrative* class, and it is a **body
+figure, not a first-class artifact**: a fenced ```mermaid block (or a
+`diagrams/` file reference) in a spec's own body prose, prose register,
+rendered by the dex, and always badged deterministically-unverifiable.
+This is deliberately NOT a new edge type: the closed five-value edge
+vocabulary (§Link taxonomy) is untouched. The two coverage tiers become
+two document locations — a verified proposal is a `class: proposal`
+artifact; an illustrative figure lives in body prose.
 
 ## Link taxonomy
 
