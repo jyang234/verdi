@@ -14,7 +14,7 @@ import (
 // writeArtifactPage renders and writes one committed-zone permalink page
 // (05 §Verdi-dex mechanics: "/a/<kind>/<name>").
 func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, stamp buildStamp, ix *index.Index, known map[string]bool, lens *lensData, p *artifactPage) error {
-	bodyHTML, err := renderBody(p.Entry.Kind, p.Entry.Body)
+	bodyHTML, err := renderBody(p.Entry.Kind, p.Entry.DiagramClass, p.Entry.Body)
 	if err != nil {
 		return fmt.Errorf("dex: rendering %s: %w", p.Entry.Ref, err)
 	}

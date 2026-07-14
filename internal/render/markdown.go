@@ -3,7 +3,6 @@ package render
 import (
 	"bytes"
 	"fmt"
-	"html"
 	"html/template"
 	"io"
 
@@ -47,9 +46,11 @@ func mustStyle(name string) *chroma.Style {
 // plus a chroma-backed code renderer (05 §Verdi-dex mechanics: "markdown
 // via goldmark and syntax highlighting via chroma at build time (pure
 // Go)"). Fenced ```mermaid blocks are a deliberate exception: they render
-// as a bare `<pre class="mermaid">`, left for the vendored client-side
-// mermaid.js to turn into a diagram rather than being chroma-highlighted
-// as code.
+// through the tier-badged mermaid seam (diagramtier.go) — a
+// `<pre class="mermaid">` left for the vendored client-side mermaid.js to
+// turn into a diagram rather than being chroma-highlighted as code,
+// wrapped in the illustrative badged figure (a fenced body figure is
+// illustrative BY LOCATION, spec/illustrative-class dc-2).
 var markdownRenderer = gm.New(
 	gm.WithExtensions(extension.GFM),
 	gm.WithParserOptions(parser.WithAutoHeadingID()),
@@ -70,32 +71,47 @@ func RenderMarkdown(body string) (string, error) {
 }
 
 // RenderBody renders an artifact body (the content after frontmatter) to a
-// self-contained HTML fragment, dispatching on the artifact's kind. A
-// "diagram" body is mermaid diagram source: it is emitted verbatim through
-// RenderMermaidBlock — never through goldmark, which would treat the diagram
-// DSL as prose and collapse it into a `<p>graph TD ...</p>` (the
-// user-reported defect). Every other kind renders as markdown. Both
-// HTML-producing surfaces (internal/dex's static pages and
+// self-contained HTML fragment, dispatching on the artifact's kind and —
+// for the diagram kind — its class discriminator. A "diagram" body is
+// mermaid diagram source: it is emitted verbatim through the tier-badged
+// mermaid seam (diagramtier.go) — never through goldmark, which would
+// treat the diagram DSL as prose and collapse it into a
+// `<p>graph TD ...</p>` (the user-reported defect). A diagram without
+// class: proposal is illustrative BY CLASS (spec/illustrative-class dc-2)
+// and wears the illustrative badge; a class: proposal wears the
+// extractor-computed tier instead and is never painted illustrative
+// (ac-2); any other class fails closed rather than guessing a tier
+// (unknown enum values fail closed — and a mis-badged proposal would be
+// the blending lie ac-2 exists to kill). Every other kind renders as
+// markdown. Both HTML-producing surfaces (internal/dex's static pages and
 // internal/workbench's server-rendered pages) route their artifact bodies
 // through here, so the diagram special-case is defined once and cannot
 // drift between them.
-func RenderBody(kind, body string) (string, error) {
+func RenderBody(kind, class, body string) (string, error) {
 	if kind == string(artifact.KindDiagram) {
-		return RenderMermaidBlock(body), nil
+		switch class {
+		case "":
+			return RenderMermaidBlock(body), nil
+		case artifact.DiagramClassProposal:
+			return proposalFigure(body), nil
+		default:
+			return "", fmt.Errorf("render: diagram class %q is not a known class (only %q, or absent)", class, artifact.DiagramClassProposal)
+		}
 	}
 	return RenderMarkdown(body)
 }
 
-// RenderMermaidBlock wraps mermaid diagram source in the bare
-// `<pre class="mermaid">` element the vendored client-side mermaid.js turns
-// into an SVG diagram. The source is HTML-escaped because mermaid reads the
-// element's textContent — escaping is the correct (and only) transform, so
-// `-->` survives as diagram syntax rather than becoming an HTML entity the
-// diagram engine never sees. These are byte-for-byte the same wrapper the
-// fenced ```mermaid special case (renderFencedCodeBlock) emits, so a
-// diagram-kind body and an inline fenced block render identically.
+// RenderMermaidBlock renders illustrative mermaid diagram source as the
+// dc-1 badged figure: a `<figure data-diagram-tier="illustrative">`
+// wrapping the `<pre class="mermaid">` the vendored client-side mermaid.js
+// turns into an SVG diagram, plus the visible figcaption badge chip
+// disclosing it as deterministically unverifiable (spec/illustrative-class
+// ac-2). These are byte-for-byte the same wrapper the fenced ```mermaid
+// special case (renderFencedCodeBlock) emits, so a non-proposal
+// diagram-kind body and an inline fenced block render identically — the
+// two illustrative locations of dc-2, one seam.
 func RenderMermaidBlock(source string) string {
-	return fmt.Sprintf("<pre class=\"mermaid\">%s</pre>\n", html.EscapeString(source))
+	return illustrativeFigure(source)
 }
 
 // chromaCodeRenderer is a goldmark renderer.NodeRenderer that replaces

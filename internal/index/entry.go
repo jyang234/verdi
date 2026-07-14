@@ -33,4 +33,12 @@ type Entry struct {
 	// Always empty for external entries — index-minted refs carry no
 	// frontmatter of their own.
 	Links []artifact.Link
+	// DiagramClass is the diagram kind's class discriminator
+	// (02 §Diagram proposals): "" for an incumbent diagram — and for
+	// every non-diagram kind — or artifact.DiagramClassProposal for a
+	// future-state proposal. Carried so body-rendering surfaces (dex
+	// artifact pages, the workbench corpus page and reference peek) can
+	// dispatch the diagram tier badge at internal/render's shared seam
+	// (spec/illustrative-class ac-2) without re-reading frontmatter.
+	DiagramClass string
 }

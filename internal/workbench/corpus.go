@@ -63,7 +63,7 @@ func corpusHandler(root string) http.HandlerFunc {
 			return
 		}
 
-		bodyHTML, err := render.RenderBody(entry.Kind, entry.Body)
+		bodyHTML, err := render.RenderBody(entry.Kind, entry.DiagramClass, entry.Body)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
 			return
