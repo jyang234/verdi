@@ -196,6 +196,41 @@ pre {
 }
 pre.mermaid { background: var(--card); text-align: center; }
 
+/* ---------- diagram tier disclosure (spec/illustrative-class dc-1) ----------
+
+   Every mermaid render arrives wrapped in a badged <figure> from
+   internal/render's one seam. The figure flows exactly like the bare pre
+   it wraps (same vertical rhythm, no indent), and the badge is a quiet
+   chip in the record-apparatus voice — a tier disclosure, not a warning.
+   The proposal variant speaks in the verified register instead, so the
+   two tiers are visually distinct wherever diagrams render (ac-3). */
+figure.diagram-figure { margin: 1em 0; }
+figure.diagram-figure > pre.mermaid { margin: 0; }
+.diagram-tier-badge {
+  display: inline-block;
+  margin-top: 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted-solid);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.12rem 0.6rem;
+  white-space: nowrap;
+}
+.diagram-tier-badge--proposal {
+  color: var(--st-evidenced);
+  border-color: var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+}
+figure[data-diagram-tier="partial"] > .diagram-tier-badge--proposal {
+  color: var(--st-pending);
+  border-color: var(--st-pending);
+  background: var(--st-pending-tint);
+}
+
 hr { border: 0; border-top: 1px solid var(--rule); margin: 2rem 0; }
 
 blockquote {
