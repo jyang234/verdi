@@ -10,6 +10,7 @@ lint:
 align:                         # evidence-model spec owns semantics
   judge_cmd: [claude, -p, --output-format, json]  # argv array (Phase 8 S5, flagged: 01 shows a string)
   judge_required: false        # true: `verdi align` fails outright without a judge
+  judge_timeout_seconds: 600   # D6-21: default 120s ceiling timed out on every real build diff; raised per-repo
 audit:                         # R4-I-10; exemption/deviation counterweights
   exempts_conflict_threshold: 3
   deviations_stale_threshold: 3

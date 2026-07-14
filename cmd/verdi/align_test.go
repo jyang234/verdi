@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -90,6 +91,21 @@ func alignFakeJudgeFailing(t *testing.T) []string {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fakejudge.sh")
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 7\n"), 0o755); err != nil {
+		t.Fatalf("writing fake judge: %v", err)
+	}
+	return []string{path}
+}
+
+// alignFakeJudgeSleepy writes a fake judge that always sleeps 5s regardless
+// of scheduling load (mirrors internal/align/judge_test.go's own
+// fakeJudgeTimeoutScript) — used to prove a configured JudgeTimeout (D6-21)
+// actually reaches the exec, rather than internal/align's own
+// DefaultJudgeTimeout (120s) always winning.
+func alignFakeJudgeSleepy(t *testing.T) []string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fakejudge.sh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nsleep 5\necho \"should never get here\"\n"), 0o755); err != nil {
 		t.Fatalf("writing fake judge: %v", err)
 	}
 	return []string{path}
@@ -216,6 +232,42 @@ func TestRunAlign_JudgeRequiredAndNotConfigured_ExitsOne(t *testing.T) {
 	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runAlign(judge_required, no judge_cmd) = %d, want 1; stderr=%s", got, stderr.String())
+	}
+}
+
+// TestRunAlign_ConfiguredJudgeTimeoutReachesInvocation proves D6-21's
+// wiring end to end at the cmd layer: verdi.yaml's align.judge_timeout_seconds,
+// threaded by cmdAlign into alignDeps.JudgeTimeout and from there into
+// align.Input.JudgeTimeout, actually reaches the judge exec — not just
+// internal/align's own DefaultJudgeTimeout (120s), which would make this
+// test hang for two minutes instead of returning promptly. A short
+// (100ms) configured JudgeTimeout against a judge that always sleeps 5s
+// must fail at the timeout stage well within seconds, and (JudgeRequired:
+// true) surface as `verdi align`'s own exit 1 — mirroring
+// TestRunAlign_JudgeRequiredAndFailing_ExitsOne's shape and
+// internal/align/judge_test.go's TestRunJudgeOnce_Timeout's timing
+// reasoning (fakeJudgeTimeoutScript sleeps 5s regardless of scheduling
+// load, so a 100ms timeout fires deterministically either way).
+func TestRunAlign_ConfiguredJudgeTimeoutReachesInvocation(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	deps := alignDeps{
+		Runner:        alignRunner(svcDir),
+		JudgeCmd:      alignFakeJudgeSleepy(t),
+		JudgeRequired: true,
+		JudgeTimeout:  100 * time.Millisecond,
+	}
+
+	var stdout, stderr bytes.Buffer
+	start := time.Now()
+	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
+	elapsed := time.Since(start)
+
+	if got != 1 {
+		t.Fatalf("runAlign(configured 100ms timeout, sleepy judge, judge_required) = %d, want 1; stderr=%s", got, stderr.String())
+	}
+	if elapsed > 4*time.Second {
+		t.Fatalf("runAlign took %s, want it to return promptly after the configured 100ms timeout, not wait for the sleep 5 or the 120s default", elapsed)
 	}
 }
 

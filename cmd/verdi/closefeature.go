@@ -112,7 +112,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 	// degenerates to freezing an empty-computed-section report; a
 	// grandfathered v0 feature that DOES carry impacts: is handled exactly
 	// as align.go already handles any spec.
-	alignD := alignDeps{Runner: deps.Runner, JudgeCmd: deps.JudgeCmd, JudgeRequired: deps.JudgeRequired}
+	alignD := alignDeps{Runner: deps.Runner, JudgeCmd: deps.JudgeCmd, JudgeRequired: deps.JudgeRequired, JudgeTimeout: deps.JudgeTimeout}
 	if rc := runAlignForSpec(ctx, root, spec, head, true, alignD, stdout, stderr); rc != 0 {
 		fmt.Fprintln(stderr, "close: freezing the alignment report failed (see above)")
 		return rc

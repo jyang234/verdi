@@ -56,6 +56,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -78,8 +79,12 @@ type closeDeps struct {
 	Runner        upstream.Runner
 	JudgeCmd      []string
 	JudgeRequired bool
-	Forge         forge.Forge
-	Registry      provider.StoryProvider
+	// JudgeTimeout mirrors verdi.yaml's align.judge_timeout_seconds (D6-21);
+	// threaded through to the freeze-time runAlignForSpec call below exactly
+	// like align.go's own alignDeps.JudgeTimeout.
+	JudgeTimeout time.Duration
+	Forge        forge.Forge
+	Registry     provider.StoryProvider
 }
 
 // cmdClose is `verdi close`'s entry point, invoked by dispatch.go.
@@ -132,15 +137,20 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 	}
 	var judgeCmd []string
 	judgeRequired := false
+	var judgeTimeout time.Duration
 	if manifest.Align != nil {
 		judgeCmd = manifest.Align.JudgeCmd
 		judgeRequired = manifest.Align.JudgeRequired
+		if manifest.Align.JudgeTimeoutSeconds > 0 {
+			judgeTimeout = time.Duration(manifest.Align.JudgeTimeoutSeconds) * time.Second
+		}
 	}
 
 	deps := closeDeps{
 		Runner:        runner,
 		JudgeCmd:      judgeCmd,
 		JudgeRequired: judgeRequired,
+		JudgeTimeout:  judgeTimeout,
 		Forge:         buildForgeBestEffort(ctx, root),
 		Registry:      buildProviderRegistry(manifest),
 	}
@@ -205,7 +215,7 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	// Freeze the alignment report in place, still under specs/active/ (the
 	// same generate-freeze-write logic `verdi align --freeze` uses,
 	// align.go's runAlignForSpec).
-	alignD := alignDeps{Runner: deps.Runner, JudgeCmd: deps.JudgeCmd, JudgeRequired: deps.JudgeRequired}
+	alignD := alignDeps{Runner: deps.Runner, JudgeCmd: deps.JudgeCmd, JudgeRequired: deps.JudgeRequired, JudgeTimeout: deps.JudgeTimeout}
 	if rc := runAlignForSpec(ctx, root, spec, head, true, alignD, stdout, stderr); rc != 0 {
 		fmt.Fprintln(stderr, "close: freezing the alignment report failed (see above)")
 		return rc

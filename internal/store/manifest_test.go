@@ -161,6 +161,45 @@ func TestDecodeManifest_JudgeCmdStringRejected(t *testing.T) {
 	}
 }
 
+// TestDecodeManifest_JudgeTimeoutSecondsPresent proves align.judge_timeout_seconds
+// (D6-21: a configurable per-repo override for internal/align's hardcoded
+// 120s judge ceiling) decodes when present.
+func TestDecodeManifest_JudgeTimeoutSecondsPresent(t *testing.T) {
+	data := "schema: verdi.layout/v1\nalign:\n  judge_cmd: [claude, -p]\n  judge_timeout_seconds: 600\n"
+	m, err := DecodeManifest([]byte(data))
+	if err != nil {
+		t.Fatalf("DecodeManifest(judge_timeout_seconds: 600): %v", err)
+	}
+	if m.Align == nil || m.Align.JudgeTimeoutSeconds != 600 {
+		t.Fatalf("Align.JudgeTimeoutSeconds = %+v, want 600", m.Align)
+	}
+}
+
+// TestDecodeManifest_JudgeTimeoutSecondsAbsentDefaultsZero proves the
+// default-unchanged guarantee: an absent judge_timeout_seconds decodes to
+// zero, meaning "use align.DefaultJudgeTimeout" (D6-21) — every pre-existing
+// verdi.yaml without the key keeps behaving exactly as before this addition.
+func TestDecodeManifest_JudgeTimeoutSecondsAbsentDefaultsZero(t *testing.T) {
+	data := "schema: verdi.layout/v1\nalign:\n  judge_cmd: [claude, -p]\n"
+	m, err := DecodeManifest([]byte(data))
+	if err != nil {
+		t.Fatalf("DecodeManifest: %v", err)
+	}
+	if m.Align == nil || m.Align.JudgeTimeoutSeconds != 0 {
+		t.Fatalf("Align.JudgeTimeoutSeconds = %+v, want 0 (absent -> default)", m.Align)
+	}
+}
+
+// TestDecodeManifest_JudgeTimeoutSecondsNegativeRejected proves a negative
+// timeout fails closed (D6-21: a negative duration can never elapse
+// meaningfully, so silently coercing it would hide a manifest typo).
+func TestDecodeManifest_JudgeTimeoutSecondsNegativeRejected(t *testing.T) {
+	data := "schema: verdi.layout/v1\nalign:\n  judge_timeout_seconds: -1\n"
+	if _, err := DecodeManifest([]byte(data)); err == nil {
+		t.Fatal("DecodeManifest(judge_timeout_seconds: -1): want error, got nil")
+	}
+}
+
 // TestDecodeManifest_ThisRepoOwnManifest proves DecodeManifest reads this
 // module's own self-hosted .verdi/verdi.yaml (PLAN.md A7/00 §index: "this
 // repo's own self-hosted .verdi/"), not just a synthetic fixture.
