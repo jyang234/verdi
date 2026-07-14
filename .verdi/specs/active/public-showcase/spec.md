@@ -3,7 +3,7 @@ id: spec/public-showcase
 kind: spec
 class: feature
 title: "Public showcase corpus, drift gate, and README"
-status: draft
+status: accepted-pending-build
 owners: [platform-team]
 problem: { text: "verdi has no public README and no canonical example store; e2e fixtures sprawl per-feature with no gate keeping new capabilities showcased", anchor: "#problem" }
 outcome: { text: "a vetted showcase store at examples/showcase is the e2e feature corpus, make verify fails on unshowcased capabilities, and the README quick-starts from it", anchor: "#outcome" }
@@ -15,6 +15,7 @@ stubs:
   - { slug: showcase-corpus-renovation, acceptance_criteria: [ac-1] }
   - { slug: showcase-drift-gate, acceptance_criteria: [ac-2] }
   - { slug: public-readme, acceptance_criteria: [ac-3] }
+frozen: { at: 2026-07-14, commit: ea1fb2c365953b559dff02f5c98e237c406c12a7 }
 ---
 # Public showcase
 
