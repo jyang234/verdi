@@ -18,10 +18,8 @@
 package gitlab
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/httpjson"
 )
 
 // defaultJobName is verdi's own CI job name (I-8: "job/workflow
@@ -56,14 +55,20 @@ type Config struct {
 	// JobName is the CI job whose artifact is fetched. Defaults to
 	// "verdi-evidence".
 	JobName string
-	// HTTPClient defaults to http.DefaultClient.
+	// HTTPClient defaults to nil: the adapter rides internal/httpjson's
+	// shared transport, which itself defaults to a client bounded by
+	// httpjson.DefaultTimeout (30s, spec/forge-transport dc-2) when this
+	// field is left nil. A caller-supplied client is used AS-IS.
 	HTTPClient *http.Client
 	// Getenv defaults to os.Getenv; overridable for hermetic CIContext tests.
 	Getenv func(string) string
 }
 
 // Adapter implements forge.Forge against the GitLab API.
-type Adapter struct{ cfg Config }
+type Adapter struct {
+	cfg       Config
+	transport *httpjson.Client
+}
 
 // New returns an Adapter with cfg's defaults filled in.
 func New(cfg Config) *Adapter {
@@ -73,13 +78,10 @@ func New(cfg Config) *Adapter {
 	if cfg.JobName == "" {
 		cfg.JobName = defaultJobName
 	}
-	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = http.DefaultClient
-	}
 	if cfg.Getenv == nil {
 		cfg.Getenv = os.Getenv
 	}
-	return &Adapter{cfg: cfg}
+	return &Adapter{cfg: cfg, transport: &httpjson.Client{HTTPClient: cfg.HTTPClient}}
 }
 
 type pipeline struct {
@@ -141,15 +143,13 @@ func (a *Adapter) findJob(ctx context.Context, pipelineID int64) (int64, error) 
 	return 0, fmt.Errorf("gitlab: pipeline %d has no successful %q job: %w", pipelineID, a.cfg.JobName, forge.ErrNoBundle)
 }
 
+// downloadArtifact rides httpjson.Client.RawDo rather than Do: the response
+// body is a binary zip, not a JSON payload this package should decode
+// (dc-1's tolerant-subset decode does not apply — there is nothing to
+// decode).
 func (a *Adapter) downloadArtifact(ctx context.Context, jobID int64) ([]byte, error) {
 	url := fmt.Sprintf("%s/projects/%s/jobs/%d/artifacts", a.cfg.BaseURL, a.cfg.ProjectID, jobID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("gitlab: building artifact request: %w", err)
-	}
-	a.setAuth(req)
-
-	resp, err := a.cfg.HTTPClient.Do(req)
+	resp, err := a.transport.RawDo(ctx, http.MethodGet, url, nil, a.setAuth)
 	if err != nil {
 		return nil, fmt.Errorf("gitlab: downloading job %d artifact: %w", jobID, err)
 	}
@@ -167,25 +167,20 @@ func (a *Adapter) downloadArtifact(ctx context.Context, jobID int64) ([]byte, er
 	return data, nil
 }
 
+// getJSON/postJSON are the thin bindings the ac-1 seam calls for: they bind
+// httpjson.Client.Do to this adapter's own auth header, error prefix, and
+// status classification (2xx-family success; 429 named as rate-limited,
+// since forge carries no unavailable-style sentinel today — spec/forge-
+// transport ac-3; anything else a generic "unexpected status" error) —
+// httpjson itself owns none of that taxonomy (dc-1).
 func (a *Adapter) getJSON(ctx context.Context, url string, out interface{}) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("gitlab: building request: %w", err)
-	}
-	a.setAuth(req)
+	return a.transport.Do(ctx, http.MethodGet, url, nil, a.setAuth, a.classify(http.MethodGet, url, http.StatusOK), out)
+}
 
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("gitlab: GET %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("gitlab: GET %s: unexpected status %s", url, resp.Status)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("gitlab: decoding response from %s: %w", url, err)
-	}
-	return nil
+// postJSON mirrors getJSON for the write direction: encode body as the
+// JSON request payload, decode the response into out.
+func (a *Adapter) postJSON(ctx context.Context, url string, body, out interface{}) error {
+	return a.transport.Do(ctx, http.MethodPost, url, body, a.setAuth, a.classifyPost(url), out)
 }
 
 func (a *Adapter) setAuth(req *http.Request) {
@@ -194,32 +189,38 @@ func (a *Adapter) setAuth(req *http.Request) {
 	}
 }
 
-// postJSON mirrors getJSON for the write direction: encode body as the
-// JSON request payload, decode the response into out.
-func (a *Adapter) postJSON(ctx context.Context, url string, body, out interface{}) error {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("gitlab: encoding request body: %w", err)
+// classify builds the httpjson.Classify getJSON binds: wantStatus is the
+// one success status (200 for every GitLab GET this adapter issues).
+func (a *Adapter) classify(method, url string, wantStatus int) httpjson.Classify {
+	return func(resp *http.Response, transportErr error) error {
+		if transportErr != nil {
+			return fmt.Errorf("gitlab: %s %s: %w", method, url, transportErr)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("gitlab: %s %s: rate limited: status %s", method, url, resp.Status)
+		}
+		if resp.StatusCode != wantStatus {
+			return fmt.Errorf("gitlab: %s %s: unexpected status %s", method, url, resp.Status)
+		}
+		return nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("gitlab: building request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	a.setAuth(req)
+}
 
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("gitlab: POST %s: %w", url, err)
+// classifyPost mirrors classify for POST, whose success is 200 OR 201
+// depending on the endpoint.
+func (a *Adapter) classifyPost(url string) httpjson.Classify {
+	return func(resp *http.Response, transportErr error) error {
+		if transportErr != nil {
+			return fmt.Errorf("gitlab: POST %s: %w", url, transportErr)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("gitlab: POST %s: rate limited: status %s", url, resp.Status)
+		}
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			return fmt.Errorf("gitlab: POST %s: unexpected status %s", url, resp.Status)
+		}
+		return nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("gitlab: POST %s: unexpected status %s", url, resp.Status)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("gitlab: decoding response from %s: %w", url, err)
-	}
-	return nil
 }
 
 // mergeRequestJSON is the subset of GitLab's merge request object
@@ -260,27 +261,26 @@ type repositoryFileJSON struct {
 func (a *Adapter) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error) {
 	reqURL := fmt.Sprintf("%s/projects/%s/repository/files/%s?ref=%s",
 		a.cfg.BaseURL, a.cfg.ProjectID, url.PathEscape(path), url.QueryEscape(ref))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("gitlab: building file request: %w", err)
-	}
-	a.setAuth(req)
 
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("gitlab: GET %s: %w", reqURL, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("gitlab: file %q not found at ref %q: %w", path, ref, forge.ErrFileNotFound)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gitlab: GET %s: unexpected status %s", reqURL, resp.Status)
+	classify := func(resp *http.Response, transportErr error) error {
+		if transportErr != nil {
+			return fmt.Errorf("gitlab: GET %s: %w", reqURL, transportErr)
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("gitlab: file %q not found at ref %q: %w", path, ref, forge.ErrFileNotFound)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("gitlab: GET %s: rate limited: status %s", reqURL, resp.Status)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("gitlab: GET %s: unexpected status %s", reqURL, resp.Status)
+		}
+		return nil
 	}
 
 	var rf repositoryFileJSON
-	if err := json.NewDecoder(resp.Body).Decode(&rf); err != nil {
-		return nil, fmt.Errorf("gitlab: decoding file response from %s: %w", reqURL, err)
+	if err := a.transport.Do(ctx, http.MethodGet, reqURL, nil, a.setAuth, classify, &rf); err != nil {
+		return nil, err
 	}
 	if rf.Encoding != "" && rf.Encoding != "base64" {
 		return nil, fmt.Errorf("gitlab: file %q at ref %q: unsupported encoding %q", path, ref, rf.Encoding)

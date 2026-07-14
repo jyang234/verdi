@@ -5,10 +5,8 @@
 package github
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/httpjson"
 )
 
 // defaultArtifactName is verdi's own CI workflow's uploaded artifact name
@@ -41,14 +40,20 @@ type Config struct {
 	// ArtifactName is the workflow artifact fetched. Defaults to
 	// "verdi-evidence".
 	ArtifactName string
-	// HTTPClient defaults to http.DefaultClient.
+	// HTTPClient defaults to nil: the adapter rides internal/httpjson's
+	// shared transport, which itself defaults to a client bounded by
+	// httpjson.DefaultTimeout (30s, spec/forge-transport dc-2) when this
+	// field is left nil. A caller-supplied client is used AS-IS.
 	HTTPClient *http.Client
 	// Getenv defaults to os.Getenv; overridable for hermetic CIContext tests.
 	Getenv func(string) string
 }
 
 // Adapter implements forge.Forge against the GitHub REST API.
-type Adapter struct{ cfg Config }
+type Adapter struct {
+	cfg       Config
+	transport *httpjson.Client
+}
 
 // New returns an Adapter with cfg's defaults filled in.
 func New(cfg Config) *Adapter {
@@ -58,13 +63,10 @@ func New(cfg Config) *Adapter {
 	if cfg.ArtifactName == "" {
 		cfg.ArtifactName = defaultArtifactName
 	}
-	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = http.DefaultClient
-	}
 	if cfg.Getenv == nil {
 		cfg.Getenv = os.Getenv
 	}
-	return &Adapter{cfg: cfg}
+	return &Adapter{cfg: cfg, transport: &httpjson.Client{HTTPClient: cfg.HTTPClient}}
 }
 
 type runsResponse struct {
@@ -163,15 +165,13 @@ func (a *Adapter) findArtifact(ctx context.Context, runID int64) (int64, error) 
 	return 0, fmt.Errorf("github: run %d has no %q artifact: %w", runID, a.cfg.ArtifactName, forge.ErrNoBundle)
 }
 
+// downloadArtifact rides httpjson.Client.RawDo rather than Do: the response
+// body is a binary zip, not a JSON payload this package should decode
+// (dc-1's tolerant-subset decode does not apply — there is nothing to
+// decode).
 func (a *Adapter) downloadArtifact(ctx context.Context, artifactID int64) ([]byte, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/actions/artifacts/%d/zip", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, artifactID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("github: building artifact request: %w", err)
-	}
-	a.setAuth(req)
-
-	resp, err := a.cfg.HTTPClient.Do(req)
+	resp, err := a.transport.RawDo(ctx, http.MethodGet, url, nil, a.setAuth)
 	if err != nil {
 		return nil, fmt.Errorf("github: downloading artifact %d: %w", artifactID, err)
 	}
@@ -189,25 +189,22 @@ func (a *Adapter) downloadArtifact(ctx context.Context, artifactID int64) ([]byt
 	return data, nil
 }
 
+// getJSON/postJSON are the thin bindings the ac-1 seam calls for: they bind
+// httpjson.Client.Do to this adapter's own auth header, error prefix, and
+// status classification (2xx-family success; 429 named as rate-limited,
+// since forge carries no unavailable-style sentinel today — spec/forge-
+// transport ac-3; anything else a generic "unexpected status" error) —
+// httpjson itself owns none of that taxonomy (dc-1).
 func (a *Adapter) getJSON(ctx context.Context, url string, out interface{}) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("github: building request: %w", err)
-	}
-	a.setAuth(req)
+	return a.transport.Do(ctx, http.MethodGet, url, nil, a.setAuth, a.classify(http.MethodGet, url, http.StatusOK), out)
+}
 
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("github: GET %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("github: GET %s: unexpected status %s", url, resp.Status)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("github: decoding response from %s: %w", url, err)
-	}
-	return nil
+// postJSON mirrors getJSON for the write direction: encode body as the
+// JSON request payload, decode the response into out. GitHub's create
+// endpoints (comments) reply 201 Created rather than 200, so the success
+// status is a parameter (classify's third argument).
+func (a *Adapter) postJSON(ctx context.Context, url string, body, out interface{}) error {
+	return a.transport.Do(ctx, http.MethodPost, url, body, a.setAuth, a.classifyPost(url), out)
 }
 
 func (a *Adapter) setAuth(req *http.Request) {
@@ -216,32 +213,39 @@ func (a *Adapter) setAuth(req *http.Request) {
 	}
 }
 
-// postJSON mirrors getJSON for the write direction: encode body as the
-// JSON request payload, decode the response into out.
-func (a *Adapter) postJSON(ctx context.Context, url string, body, out interface{}) error {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("github: encoding request body: %w", err)
+// classify builds the httpjson.Classify getJSON binds: wantStatus is the
+// one success status (200 for every GitHub GET this adapter issues).
+func (a *Adapter) classify(method, url string, wantStatus int) httpjson.Classify {
+	return func(resp *http.Response, transportErr error) error {
+		if transportErr != nil {
+			return fmt.Errorf("github: %s %s: %w", method, url, transportErr)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("github: %s %s: rate limited: status %s", method, url, resp.Status)
+		}
+		if resp.StatusCode != wantStatus {
+			return fmt.Errorf("github: %s %s: unexpected status %s", method, url, resp.Status)
+		}
+		return nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("github: building request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	a.setAuth(req)
+}
 
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("github: POST %s: %w", url, err)
+// classifyPost mirrors classify for POST, whose success is 200 OR 201
+// depending on the endpoint (GitHub's create-comment endpoints reply 201;
+// the GraphQL endpoint replies 200).
+func (a *Adapter) classifyPost(url string) httpjson.Classify {
+	return func(resp *http.Response, transportErr error) error {
+		if transportErr != nil {
+			return fmt.Errorf("github: POST %s: %w", url, transportErr)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("github: POST %s: rate limited: status %s", url, resp.Status)
+		}
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			return fmt.Errorf("github: POST %s: unexpected status %s", url, resp.Status)
+		}
+		return nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("github: POST %s: unexpected status %s", url, resp.Status)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("github: decoding response from %s: %w", url, err)
-	}
-	return nil
 }
 
 // pullRequestJSON is the subset of GitHub's pull request object
@@ -283,27 +287,26 @@ type repoContentJSON struct {
 func (a *Adapter) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error) {
 	reqURL := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s",
 		a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, path, url.QueryEscape(ref))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("github: building file request: %w", err)
-	}
-	a.setAuth(req)
 
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("github: GET %s: %w", reqURL, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("github: file %q not found at ref %q: %w", path, ref, forge.ErrFileNotFound)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github: GET %s: unexpected status %s", reqURL, resp.Status)
+	classify := func(resp *http.Response, transportErr error) error {
+		if transportErr != nil {
+			return fmt.Errorf("github: GET %s: %w", reqURL, transportErr)
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("github: file %q not found at ref %q: %w", path, ref, forge.ErrFileNotFound)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("github: GET %s: rate limited: status %s", reqURL, resp.Status)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("github: GET %s: unexpected status %s", reqURL, resp.Status)
+		}
+		return nil
 	}
 
 	var rc repoContentJSON
-	if err := json.NewDecoder(resp.Body).Decode(&rc); err != nil {
-		return nil, fmt.Errorf("github: decoding content response from %s: %w", reqURL, err)
+	if err := a.transport.Do(ctx, http.MethodGet, reqURL, nil, a.setAuth, classify, &rc); err != nil {
+		return nil, err
 	}
 	if rc.Encoding != "" && rc.Encoding != "base64" {
 		return nil, fmt.Errorf("github: file %q at ref %q: unsupported encoding %q", path, ref, rc.Encoding)
