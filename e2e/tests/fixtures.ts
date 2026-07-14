@@ -260,6 +260,33 @@ export const PIN_ADR = "adr/0002-outbox-events";
 export const PIN_DIAGRAM = "diagram/loansvc-topology";
 export const PIN_TRASH_ADR = "adr/0003-retry-policy";
 
+// ---------------------------------------------------------------------------
+// Diagram tiers (spec/illustrative-class) — 39-diagram-tier
+// ---------------------------------------------------------------------------
+
+// The spec whose markdown body carries a fenced ```mermaid block
+// (cmd/e2eharness/provision.go's mermaidDemoSpec — scratch-store only):
+// the body-figure fixture, illustrative BY LOCATION (dc-2).
+export const MERMAID_SPEC = "mermaid-demo";
+export const MERMAID_SPEC_REF = `spec/${MERMAID_SPEC}`;
+
+// The incumbent diagram-kind artifact (testdata/corpus, no class:
+// discriminator): illustrative BY CLASS (dc-2). Same artifact PIN_DIAGRAM
+// names — aliased so the tier tests read in tier vocabulary.
+export const ILLUSTRATIVE_DIAGRAM = PIN_DIAGRAM;
+
+// The class: proposal diagram (provision.go's proposalDiagram — scratch
+// store only): its surfaces carry the extractor-computed tier
+// (data-diagram-tier="full"; its body sits inside the declared grammar)
+// and must NEVER wear the illustrative badge (ac-2's negative case).
+export const PROPOSAL_DIAGRAM = "diagram/decline-flow-future";
+
+// The dc-1 badge grammar, verbatim: the machine-readable tier marker
+// (a selector over the figure wrapper) and the visible figcaption chip.
+export const ILLUSTRATIVE_FIGURE = 'figure[data-diagram-tier="illustrative"]';
+export const ILLUSTRATIVE_CHIP = "illustrative · not deterministically verifiable";
+export const PROPOSAL_FULL_FIGURE = 'figure[data-diagram-tier="full"]';
+
 // READONLY_SPEC's one closed-vocabulary DOCUMENT-LEVEL edge (02 §Object
 // model: frontmatter `links:` declared on the spec document itself, so
 // the projection emits it with From:"spec"). The document is not a card —

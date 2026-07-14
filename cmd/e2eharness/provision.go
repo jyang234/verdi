@@ -68,6 +68,16 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return fmt.Errorf("writing mermaid-demo spec: %w", err)
 	}
 
+	// A class: proposal diagram (spec/illustrative-class ac-3's second
+	// tier): its pages must carry the extractor-computed tier marker and
+	// NEVER the illustrative badge, so the e2e store holds both tiers —
+	// this proposal beside the corpus's incumbent loansvc-topology.mermaid
+	// (illustrative by class). Scratch-store-only for the same golden-SHA
+	// reason as mermaidDemoSpec above.
+	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", "diagrams", "decline-flow-future.mermaid"), []byte(proposalDiagram), 0o644); err != nil {
+		return fmt.Errorf("writing proposal diagram fixture: %w", err)
+	}
+
 	manifest := "schema: verdi.layout/v1\nforge: gitlab\nproviders:\n  jira:\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\nservices:\n  discovery: flowmap\n"
 	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", "verdi.yaml"), []byte(manifest), 0o644); err != nil {
 		return err
@@ -113,6 +123,25 @@ const mermaidDemoSpec = "---\n" +
 	"  a --> b\n" +
 	"  b --> c\n" +
 	"```\n"
+
+// proposalDiagram is a class: proposal diagram fixture
+// (spec/illustrative-class ac-3): a from-scratch proposal whose mermaid
+// body sits entirely inside the verification extractor's declared grammar,
+// so its rendered surfaces carry data-diagram-tier="full" (the
+// extractor-computed vocabulary) and must never wear the illustrative
+// badge (ac-2's negative case). Nothing here runs flowmap — the tier is
+// grammar coverage, a pure function of these bytes.
+const proposalDiagram = "---\n" +
+	"id: diagram/decline-flow-future\n" +
+	"kind: diagram\n" +
+	"class: proposal\n" +
+	"title: \"Decline flow, future state (e2e fixture)\"\n" +
+	"status: proposed\n" +
+	"owners: [platform-team]\n" +
+	"---\n" +
+	"graph TD\n" +
+	"  decline --> audit\n" +
+	"  audit --> notify\n"
 
 func gitInitAndCommit(dir string) error {
 	if err := runGit(dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {

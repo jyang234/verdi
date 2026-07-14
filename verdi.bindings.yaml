@@ -305,6 +305,29 @@ bindings:
       - "spec/case-file-flags#ac-1"
       - "spec/case-file-flags#ac-2"
       - "spec/case-file-flags#ac-3"
+      # spec/illustrative-class (diagram-proposals ac-4) behavioral legs,
+      # all under make verify:
+      # ac-1: e2e/tests/39-diagram-tier.spec.ts — the fenced body figure
+      # renders to an SVG on the dex spec page, the workbench corpus page,
+      # the board placard body dialog, and the board reference peek, with
+      # every test recording that /assets/mermaid.min.js (the one vendored
+      # asset) was loaded from the local origin and failing on ANY
+      # non-loopback request (the suite runs network-free).
+      # ac-2: the same spec file — the visible illustrative chip + the
+      # data-diagram-tier="illustrative" marker on the SAME figure as the
+      # rendered SVG, on the dex spec page, the dex diagram page
+      # (loansvc-topology, no class), the corpus page, the placard dialog,
+      # and the peek; the class: proposal page/peek (decline-flow-future)
+      # never painted illustrative.
+      # ac-3: the same spec file — both tiers rendered from one store,
+      # marker distinctness asserted (illustrative vs full), and the
+      # every-mermaid-pre-sits-inside-a-badged-figure sweep on every
+      # exercised page. Server-side seam halves are also witnessed by
+      # internal/workbench/diagramtier_test.go (corpus + peek handlers)
+      # and internal/dex/build_test.go's badged-diagram-page assertions.
+      - "spec/illustrative-class#ac-1"
+      - "spec/illustrative-class#ac-2"
+      - "spec/illustrative-class#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -545,3 +568,17 @@ bindings:
       - "spec/case-file-flags#ac-1"
       - "spec/case-file-flags#ac-2"
       - "spec/case-file-flags#ac-3"
+      # spec/illustrative-class ac-2 static leg (its declared
+      # [static, behavioral] pair): the badge lives at internal/render's
+      # one mermaid seam (diagramtier.go — RenderMermaidBlock and the
+      # fenced-mermaid path share illustrativeFigure; no per-surface
+      # duplicate), pinned by internal/render/diagramtier_test.go —
+      # TestRenderMermaidBlock_IllustrativeFigure (dc-1 markup verbatim,
+      # source still HTML-escaped), TestRenderBody_TierDispatch (the
+      # table: fenced-by-location, diagram-kind-by-class, the
+      # class: proposal NEGATIVE, unknown class fails closed),
+      # TestDiagramFigure_Determinism (byte-identical across repeated
+      # calls, no clock/randomness/store input), and
+      # TestProposalFigure_ChipIsVisibleAndDistinct — all under make
+      # verify.
+      - "spec/illustrative-class#ac-2"
