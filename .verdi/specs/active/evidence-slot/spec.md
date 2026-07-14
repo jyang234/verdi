@@ -4,7 +4,7 @@ kind: spec
 title: "Evidence Slot"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-16
 problem: { text: "a story AC card already discloses what each declared evidence kind DEMANDS (the obligation rows) but not what each kind HOLDS: the fold already computes per-kind record presence, yet the wall renders none of it, so an author cannot see that a declared kind has no folded record until the matrix or the MR gate says so", anchor: "#problem" }
 outcome: { text: "an acceptance-criterion card renders its declared evidence kinds with their fold-derived record state, and an empty slot — a declared kind with no current folded record, by the fold's own definition — badges with a full derivation record, disclosed and never blocking, extending the existing per-kind obligation row rather than duplicating it", anchor: "#outcome" }
@@ -23,6 +23,7 @@ constraints:
   - { id: co-1, text: "wall-receipts co-1 carried: the slot computes with no LLM over pinned inputs (the spec, the derived tree, attestation files) and its derivation cites input revisions, never wall-clock time", anchor: "#co-1" }
   - { id: co-2, text: "wall-receipts co-2 carried, this story's own AC text: an empty slot is disclosed, never blocking — no write path, gate, or lint verdict consumes slot state", anchor: "#co-2" }
   - { id: co-3, text: "one fold, one reader: the slot's record loading and per-kind reduction reuse the evidence package's existing loader and Current reduction — a wall-private record scan or a lookalike per-kind reduction is a defect", anchor: "#co-3" }
+frozen: { at: 2026-07-14, commit: f81a043ba5dc42f49f05605abd97bfa351839e10, stub_matched: true }
 ---
 # Evidence Slot
 
