@@ -218,6 +218,37 @@ bindings:
       - "spec/directory-home#ac-1"
       - "spec/directory-home#ac-2"
       - "spec/directory-home#ac-3"
+      # spec/judged-sweep (diagram-proposals ac-8) behavioral legs, all
+      # under make verify:
+      # ac-1: cmd/verdi/aligndiagramsweep_test.go's
+      # TestRunDiagramSweepAlign_WritesReport (a CLI invocation over a
+      # fixture class: proposal diagram writes a well-formed
+      # verdi.diagramsweep/v1 sweep-report.md) and
+      # TestGate_UnaffectedByDiagramSweepFinding (verdi gate's pass/fail
+      # outcome is unaffected by an undispositioned sweep finding present
+      # in the corpus).
+      # ac-2: internal/align/diagram_judge_test.go's
+      # TestRunDiagramSweep_Success (a fake judge response decodes into an
+      # artifact.ConflictFinding) and
+      # TestRunDiagramSweep_NotConfiguredDegradesToAbsence /
+      # _FailingJudgeDegradesToAbsence (a missing or failing judge degrades
+      # to the synthetic DiagramAbsenceFindingID finding).
+      # ac-3: internal/align/diagram_report_test.go's
+      # TestGenerateDiagramSweep_RoundTripIntegrity (decodes a rendered
+      # report, recomputes computeIntegrity from its own persisted
+      # judge_integrity fields, and asserts it matches the stored integrity
+      # value byte-for-byte).
+      # ac-4: cmd/verdi/aligndiagramsweep_test.go's
+      # TestRunDiagramSweepAlign_ByteIdentity (SHA-256 of the target
+      # diagram file before/after a real sweep run) and
+      # internal/align/diagram_report_test.go's
+      # TestGenerateDiagramSweep_DisclosureLineAlwaysPresent (the fixed
+      # advisory/non-exhaustive disclosure line present verbatim on both a
+      # findings-present and a findings-absent report).
+      - "spec/judged-sweep#ac-1"
+      - "spec/judged-sweep#ac-2"
+      - "spec/judged-sweep#ac-3"
+      - "spec/judged-sweep#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -371,3 +402,36 @@ bindings:
       # byGroup in directory.go), never an address or on-disk path.
       # Compiles, vets, and lints clean under make verify.
       - "spec/directory-home#ac-1"
+      # spec/judged-sweep static legs (all 4 ACs declare [static,
+      # behavioral]):
+      # ac-1: align.go declares the --diagram-sweep flag and dispatches to
+      # runDiagramSweepAlign (cmd/verdi/aligndiagramsweep.go), a code path
+      # distinct from runAlign/runDesignAlign — witnessed by
+      # aligndiagramsweepstatic_test.go's
+      # TestDiagramSweepStatic_AlignDispatchesANewMode; that same file's
+      # TestDiagramSweepStatic_GateSourceNeverReferencesTheSweepReport and
+      # TestDiagramSweepStatic_LintSourceNeverReferencesTheSweepReport grep
+      # gate.go and every internal/lint/*.go file for zero references to
+      # sweep-report.md/DiagramSweepFrontmatter/DecodeDiagramSweep.
+      # ac-2: internal/align/diagram_judge.go's RunDiagramSweep calls
+      # execJudgeEnvelope (judge.go) — the same seam RunDecisionSweep uses
+      # — and decodes findings into []artifact.ConflictFinding, no new
+      # finding/disposition type declared; BuildDiagramSweepPrompt renders
+      # the ADR corpus and the resolved spec's declared constraints/
+      # decisions, not the diagram body alone.
+      # ac-3: internal/artifact/diagramsweep.go's DiagramSweepFrontmatter
+      # carries Integrity/JudgeIntegrity fields (reusing the existing
+      # JudgeIntegrity type) and a Validate rule requiring JudgeIntegrity to
+      # imply a non-empty Integrity, mirroring DecisionConflictFrontmatter.
+      # Validate exactly; internal/align/diagram_report.go's
+      # GenerateDiagramSweep calls computeIntegrity (judge.go), never a new
+      # hash formula.
+      # ac-4: internal/align/diagram_judge.go's RunDiagramSweep/
+      # DiagramJudgedInput.Body is a []byte value parameter, never a file
+      # path or writable handle; internal/align/diagram_render.go's
+      # RenderDiagramSweepBody emits DiagramSweepDisclosureLine
+      # unconditionally, before any finding.
+      - "spec/judged-sweep#ac-1"
+      - "spec/judged-sweep#ac-2"
+      - "spec/judged-sweep#ac-3"
+      - "spec/judged-sweep#ac-4"
