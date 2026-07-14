@@ -4,7 +4,7 @@ kind: spec
 title: "Board Editor"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-10
 problem: { text: "diagram-proposals ratified an authoring surface (ac-7) and mechanical before-peek/reset (ac-3), but the workbench has no diagram surface at all: the board renders spec projections only, a class: proposal artifact (ratified 02 §Diagram proposals) has no route, no editor, no preview, and nothing binds structural-operations-only, byte preservation, or position refusal to an interactive surface", anchor: problem }
 outcome: { text: "a drafting-focus editor on the board for class: proposal diagrams — code pane plus live preview under the one pinned vendored mermaid, failing visible on render errors; a verification rail consuming the extractor's tier and findings; structural operations landing as deterministic source-text edits with no positions anywhere; and mechanical before-peek and reset reproducing a derived proposal's pinned base from digest-verified inputs", anchor: outcome }

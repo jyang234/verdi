@@ -4,7 +4,7 @@ kind: spec
 title: "Proposal Artifact"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-8
 problem: { text: "the ratified 02 §Diagram proposals schema — class: proposal, the proposed→accepted authored enum, scope, derived_from + base digest — exists only as prose. internal/artifact/diagram.go's DiagramFrontmatter has no class discriminator, no scope/derived_from fields, and its status enum (active/superseded) has no room for proposed/accepted; nothing enforces that a diagram's mermaid body survives every write path byte-for-byte; nothing accepts a proposal at merge the way a spec is accepted; nothing computes the disclosed realized/stale states without writing them. diagram-proposals#ac-2 and #ac-6 are unreachable until this artifact is real.", anchor: problem }
 outcome: { text: "DiagramFrontmatter gains an optional class discriminator, a class-conditioned status enum, and optional scope/derived_from fields, strict-decoded through the single internal/artifact seam with unknown fields failing closed; the mermaid body is byte-preserved by every write path; verdi accept admits a class: proposal diagram's proposed→accepted transition at the merge of its own design MR, exactly as it accepts a spec; and a pure, never-written computed-status function discloses the four-value proposed/accepted/realized/stale vocabulary from an externally supplied truth comparison.", anchor: outcome }

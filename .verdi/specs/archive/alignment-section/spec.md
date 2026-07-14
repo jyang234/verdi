@@ -4,7 +4,7 @@ kind: spec
 title: "Alignment Section"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-12
 problem: { text: "internal/align's build-branch deviation report reconciles a spec's declared boundaries against regenerated reality, but a diagram proposal has no reconciliation at all: an accepted future-state flowchart could sit realized or badly diverged from what actually shipped and the pre-review verdict would never say so — the one ruling that turns diagram-proposals from a drawing feature into a loop (feature ac-5) does not exist yet.", anchor: problem }
 outcome: { text: "verdi align's computed section gains a diagram-alignment subsection: every accepted class: proposal diagram in the corpus is regenerated and diffed via verification-extractor's shared comparison — an empty residual renders realized, a non-empty one renders divergent with each delta's witness — folded into the SAME computed findings/digest machinery every other computed finding already uses; every illustrative diagram living in the spec's own body is listed as unverifiable rather than silently dropped. Never judged, never blocking merge on its own — surfaced for review exactly as a boundary deviation is.", anchor: outcome }

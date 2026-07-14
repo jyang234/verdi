@@ -4,7 +4,7 @@ kind: spec
 title: "Judged Sweep"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-13
 problem: { text: "a diagram proposal has no scrutiny-predictor: nothing reads a proposed change against the corpus of ADRs, constraints, and decisions and warns a designer what review will catch before it catches it. Every other judged surface this codebase has (the build-branch deviation report, the design-branch decision-conflict sweep) is EITHER mandatory machinery in a gate's own path or scoped to specs, never diagrams; a proposal author has no on-demand, disposable way to ask 'does this collide with something we already decided?' without waiting for a human reviewer to notice.", anchor: problem }
 outcome: { text: "an on-demand verdi align --diagram-sweep <diagram-ref> mode reads a class: proposal diagram's mermaid body against the ADR/constraint/decision corpus through the SAME judge exec seam the design-branch decision-conflict sweep already proved, reusing the existing four-value ConflictFinding disposition machinery unchanged; findings are provenance-stamped (the existing judged-content integrity contract) and persisted to a sibling sweep-report file, never consulted by any gate, never run except on demand, and never phrased as a completeness guarantee — the AI reads and reports, a human disposes, and nothing here ever edits the diagram it just read.", anchor: outcome }
