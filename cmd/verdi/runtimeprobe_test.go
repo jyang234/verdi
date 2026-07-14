@@ -13,7 +13,7 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 	forgepkg "github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/forge/fake"
-	runtimeprobe "github.com/jyang234/verdi/internal/runtime"
+	"github.com/jyang234/verdi/internal/runtimeprobe"
 	"github.com/jyang234/verdi/internal/store"
 )
 

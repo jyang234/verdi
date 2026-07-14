@@ -1,6 +1,6 @@
 // verdi sync --produce-runtime (spec/runtime-evidence dc-1, dc-3): the
 // scheduled-probe producer entrypoint. It writes one kind: runtime
-// artifact.Evidence record — built by internal/runtime.Emit — into
+// artifact.Evidence record — built by internal/runtimeprobe.Emit — into
 // derived/<RefSlug(spec.ID)>/<commit>/runtime.json, the sibling of
 // verdicts.json dc-2 describes, so `verdi sync`'s ordinary forge-pull path
 // (writeDerivedTree, unchanged) and internal/evidence.LoadRecords (extended
@@ -54,7 +54,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/lint"
-	runtimeprobe "github.com/jyang234/verdi/internal/runtime"
+	"github.com/jyang234/verdi/internal/runtimeprobe"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )

@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	runtimeprobe "github.com/jyang234/verdi/internal/runtime"
+	"github.com/jyang234/verdi/internal/runtimeprobe"
 )
 
 // This file is spec/runtime-evidence ac-2's end-to-end proof: a fixture
 // story declaring evidence: [runtime], combined with a REAL runtime.json
-// record built via internal/runtime.Emit (not hand-crafted JSON) and loaded
+// record built via internal/runtimeprobe.Emit (not hand-crafted JSON) and loaded
 // through the real LoadRecords path (ancestry-checked against a real git
 // history, exactly as `verdi close`/`verdi gate`/`verdi rollup` do), proves
 // the whole chain — probe emits, LoadRecords loads runtime.json, Fold
@@ -29,7 +29,7 @@ func runtimeFixtureSpec() *artifact.SpecFrontmatter {
 }
 
 // writeDerivedRuntimeRecord builds one runtime record via
-// internal/runtime.Emit — proving real integration with that package, not
+// internal/runtimeprobe.Emit — proving real integration with that package, not
 // just that hand-crafted JSON happens to satisfy the fold — and writes it to
 // derivedRoot/commit/runtime.json.
 func writeDerivedRuntimeRecord(t *testing.T, derivedRoot, commit string, inCI bool) {

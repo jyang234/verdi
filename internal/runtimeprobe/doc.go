@@ -1,4 +1,4 @@
-// Package runtime implements spec/runtime-evidence's scheduled-probe
+// Package runtimeprobe implements spec/runtime-evidence's scheduled-probe
 // mechanism (dc-1), resolving true-closure's oq-1 and delivering its own
 // ac-3: every evidence kind a spec can declare — runtime included — needs a
 // producing mechanism queryable by (story, AC) at close time (03 §Runtime
@@ -42,4 +42,4 @@
 // evidence's precedent for the static/behavioral kinds: "No adapter design
 // is specified here — this section states the seam and the principle only;
 // the producer side is out of scope for this contract."
-package runtime
+package runtimeprobe
