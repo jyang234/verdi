@@ -415,6 +415,39 @@ bindings:
       - "spec/draft-boards#ac-1"
       - "spec/draft-boards#ac-2"
       - "spec/draft-boards#ac-3"
+      # ROUND-6 FEATURE ACs (closure sweep): the three features' outcome ACs,
+      # evidenced by the implementing stories' merged behavioral suites under
+      # make verify (feature fold floor = attestation OR pass-record; the
+      # attestation legs live at .verdi/attestations/<feature>/).
+      # diagram-proposals: ac-1 extractor three-way disclosure suite; ac-3
+      # peek/reset journeys; ac-4 illustrative-tier e2e; ac-5 diagram-
+      # alignment golden + disposition-survival tests; ac-6 accept ritual +
+      # stale flag tests; ac-7 editor op-grammar + byte-identity e2e; ac-8
+      # sweep mode tests (never-in-gate statics).
+      - "spec/diagram-proposals#ac-1"
+      - "spec/diagram-proposals#ac-3"
+      - "spec/diagram-proposals#ac-4"
+      - "spec/diagram-proposals#ac-5"
+      - "spec/diagram-proposals#ac-6"
+      - "spec/diagram-proposals#ac-7"
+      - "spec/diagram-proposals#ac-8"
+      # wall-receipts: ac-2 drawer e2e (both surfaces); ac-3 slot e2e;
+      # ac-4 same-code-path statics + case-file stamps; ac-5 size-smell
+      # two-viewport invariance; ac-6 sweep-provenance staleness e2e.
+      - "spec/wall-receipts#ac-2"
+      - "spec/wall-receipts#ac-3"
+      - "spec/wall-receipts#ac-4"
+      - "spec/wall-receipts#ac-5"
+      - "spec/wall-receipts#ac-6"
+      # workbench-directory: ac-2 directory groups/chips e2e; ac-3 two-tab
+      # isolation proof; ac-4 concurrent-cut + gc lock suites; ac-5
+      # disclosed-notice e2e (empty + deleted-mid-session); ac-6 same-spec
+      # two-modes e2e.
+      - "spec/workbench-directory#ac-2"
+      - "spec/workbench-directory#ac-3"
+      - "spec/workbench-directory#ac-4"
+      - "spec/workbench-directory#ac-5"
+      - "spec/workbench-directory#ac-6"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -751,3 +784,8 @@ bindings:
       # All compile, vet, lint, and lint-store clean under make verify.
       - "spec/draft-boards#ac-1"
       - "spec/draft-boards#ac-3"
+      # ROUND-6 FEATURE ACs, static legs: diagram-proposals ac-1 (extractor
+      # grammar/compare statics) and ac-2 (byte-preservation regression +
+      # write-path inventory statics).
+      - "spec/diagram-proposals#ac-1"
+      - "spec/diagram-proposals#ac-2"
