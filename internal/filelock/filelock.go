@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -179,7 +180,42 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 	}
 	info, jerr := decodeLockInfo(path, data)
 	if jerr != nil {
-		return nil, fmt.Errorf("filelock: lock %s exists but is malformed (%q): %w", path, string(data), jerr)
+		// A decode failure is a HARD malformed error ONLY for a
+		// complete-but-garbled body. An empty or truncated body is the
+		// signature of a mid-flush partial write: Acquire's own
+		// O_CREATE|O_EXCL makes the path exist an instant before the winner
+		// flushes its {pid,start} JSON, so a racing acquirer can read the
+		// bytes-not-landed-yet file (the ""/EOF this closes). Resolve that by
+		// the file's age rather than failing hard.
+		if !lockBodyIncomplete(jerr) {
+			return nil, fmt.Errorf("filelock: lock %s exists but is malformed (%q): %w", path, string(data), jerr)
+		}
+		young, serr := lockFileYoung(path)
+		if serr != nil {
+			// Lost the race with a concurrent remover between our read and
+			// this stat — retry acquisition rather than fail hard.
+			if errors.Is(serr, os.ErrNotExist) && retriesLeft > 0 {
+				return acquire(path, retriesLeft-1)
+			}
+			return nil, fmt.Errorf("filelock: lock %s exists but its empty/partial body could not be aged: %w", path, serr)
+		}
+		if young {
+			// Freshly created, not-yet-flushed: HELD, never a hard error —
+			// the winner is mid-write, so the caller must keep polling. No
+			// {pid} body has landed yet, hence the zero-value Info.
+			return nil, &ErrHeld{Info: Info{}}
+		}
+		// An empty/partial body older than the mid-flush window is a writer
+		// that crashed between create and flush. No {pid} survives for a
+		// liveness probe, so age is the honest staleness signal: take it over
+		// exactly like a dead-pid lock.
+		if retriesLeft <= 0 {
+			return nil, fmt.Errorf("filelock: stale lock %s (empty/partial body older than %s) but exceeded takeover retries", path, lockMidFlushWindow)
+		}
+		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("filelock: stale lock %s (empty/partial body) but could not remove: %w", path, rmErr)
+		}
+		return acquire(path, retriesLeft-1)
 	}
 	if alive(info.PID, info.Start) {
 		return nil, &ErrHeld{Info: info}
@@ -227,9 +263,57 @@ func Peek(path string) (Info, bool, error) {
 	}
 	info, jerr := decodeLockInfo(path, data)
 	if jerr != nil {
-		return Info{}, false, fmt.Errorf("filelock: lock %s exists but is malformed (%q): %w", path, string(data), jerr)
+		// Same mid-flush window Acquire honours (above): a complete-but-garbled
+		// body is a hard malformed error, but an empty/partial body is judged
+		// by age — young = a live holder still mid-write (held); old = a
+		// crashed writer (stale, reported not-held exactly like no lock, per
+		// gc's Peek contract).
+		if !lockBodyIncomplete(jerr) {
+			return Info{}, false, fmt.Errorf("filelock: lock %s exists but is malformed (%q): %w", path, string(data), jerr)
+		}
+		young, serr := lockFileYoung(path)
+		if serr != nil {
+			if errors.Is(serr, os.ErrNotExist) {
+				return Info{}, false, nil // removed under us: no lock at all
+			}
+			return Info{}, false, fmt.Errorf("filelock: lock %s exists but its empty/partial body could not be aged: %w", path, serr)
+		}
+		return Info{}, young, nil
 	}
 	return info, alive(info.PID, info.Start), nil
+}
+
+// lockMidFlushWindow bounds how long after a lock file's last modification an
+// empty or truncated (mid-flush) body is still charitably read as "the winner
+// is mid-write, HELD" rather than "a writer crashed between O_CREATE|O_EXCL
+// and its flush, stale". Conservative on purpose: the real mid-flush gap is
+// sub-millisecond (one Encode call), so 2s is enormously generous for a live
+// holder yet still lets a genuinely crashed writer's empty lock be taken over
+// promptly. An empty body carries no {pid} for a liveness probe, so age is the
+// only honest staleness signal available for it.
+const lockMidFlushWindow = 2 * time.Second
+
+// lockBodyIncomplete reports whether a decode error is the signature of a
+// mid-flush partial write — an empty file (io.EOF) or a truncated JSON prefix
+// (io.ErrUnexpectedEOF) — as opposed to a complete-but-garbled body (a syntax
+// or unknown-field error), which is a genuine malformed lock and stays a hard
+// error. artifact.DecodeStrictJSON wraps the underlying error with %w, so
+// errors.Is sees through it.
+func lockBodyIncomplete(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+// lockFileYoung reports whether path was last modified within
+// lockMidFlushWindow of now — recent enough that an empty/partial body is a
+// live holder still mid-write rather than a crashed one. The stat error is
+// returned unwrapped so the caller can distinguish os.ErrNotExist (the file
+// was removed out from under us — lost a race) from a real stat failure.
+func lockFileYoung(path string) (bool, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return time.Since(st.ModTime()) <= lockMidFlushWindow, nil
 }
 
 // lockDecodeRetries/lockDecodeRetryDelay bound decodeLockInfo's tolerance

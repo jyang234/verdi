@@ -231,6 +231,126 @@ func TestAlive_DeadPIDIsNeverAliveRegardlessOfPS(t *testing.T) {
 	}
 }
 
+// TestAcquire_YoungEmptyBodyIsHeld proves the mid-flush-window semantic: a
+// lock file that EXISTS but whose {pid,start} body has not landed yet (empty,
+// i.e. the winner is between O_CREATE|O_EXCL and its flush) is reported HELD,
+// never a hard malformed error — so the losing acquirer keeps polling instead
+// of failing. This is the exact race the CI flake hit (empty "" body → EOF).
+func TestAcquire_YoungEmptyBodyIsHeld(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	// Fresh, empty (just-created) lock body: the create landed, the flush
+	// has not. mtime is now, so it is inside lockMidFlushWindow.
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("seeding young empty lock: %v", err)
+	}
+
+	_, err := Acquire(path)
+	if err == nil {
+		t.Fatal("Acquire(young empty body): want ErrHeld, got nil (would have cut a second worktree)")
+	}
+	if _, ok := err.(*ErrHeld); !ok {
+		t.Fatalf("Acquire(young empty body) error type = %T, want *ErrHeld: %v", err, err)
+	}
+	// Must NOT have been taken over/removed: the holder is still mid-write.
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("young empty lock was removed, want it left for the mid-flush holder: %v", statErr)
+	}
+}
+
+// TestAcquire_OldEmptyBodyIsStaleTakeover proves the crash-recovery half of
+// the same semantic: an empty/partial body OLDER than lockMidFlushWindow is a
+// writer that crashed between create and flush. No {pid} survives for a
+// liveness probe, so age is the honest staleness signal — the lock is taken
+// over (removed and reacquired under our own pid), not left held forever.
+func TestAcquire_OldEmptyBodyIsStaleTakeover(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("seeding empty lock: %v", err)
+	}
+	// Backdate mtime well past the mid-flush window: a crashed writer.
+	old := time.Now().Add(-lockMidFlushWindow - time.Minute)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("backdating empty lock mtime: %v", err)
+	}
+
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire(old empty body): want stale takeover, got error: %v", err)
+	}
+	defer func() { _ = Release(f, path) }()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading reacquired lock: %v", err)
+	}
+	var info Info
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatalf("decoding reacquired lock %q: %v", string(data), err)
+	}
+	if info.PID != os.Getpid() {
+		t.Fatalf("after takeover, lock pid = %d, want our own pid %d", info.PID, os.Getpid())
+	}
+}
+
+// TestPeek_YoungAndOldEmptyBody proves Peek honours the same mid-flush window:
+// a young empty body is held=true (a live holder mid-write), an old empty body
+// is held=false (a crashed writer, treated like no lock) — and neither is
+// reported as a malformed error, unlike a complete-but-garbled body.
+func TestPeek_YoungAndOldEmptyBody(t *testing.T) {
+	t.Run("young empty body reports held", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "worktree.lock")
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatalf("seeding young empty lock: %v", err)
+		}
+		_, held, err := Peek(path)
+		if err != nil {
+			t.Fatalf("Peek(young empty body): want no error, got %v", err)
+		}
+		if !held {
+			t.Fatal("Peek(young empty body) held = false, want true (holder mid-flush)")
+		}
+	})
+
+	t.Run("old empty body reports not held (stale)", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "worktree.lock")
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatalf("seeding empty lock: %v", err)
+		}
+		old := time.Now().Add(-lockMidFlushWindow - time.Minute)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatalf("backdating empty lock mtime: %v", err)
+		}
+		_, held, err := Peek(path)
+		if err != nil {
+			t.Fatalf("Peek(old empty body): want no error, got %v", err)
+		}
+		if held {
+			t.Fatal("Peek(old empty body) held = true, want false (crashed writer, stale)")
+		}
+	})
+}
+
+// TestAcquire_YoungGarbledBodyStaysMalformed proves the boundary the window
+// does NOT cross: a complete-but-garbled body (valid bytes, not a truncation)
+// is a hard malformed error even when freshly written — only empty/truncated
+// bodies get the age-based charity, so real corruption is never masked as HELD.
+func TestAcquire_YoungGarbledBodyStaysMalformed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+		t.Fatalf("seeding young garbled lock: %v", err)
+	}
+	_, err := Acquire(path)
+	if err == nil {
+		t.Fatal("Acquire(young garbled body): want malformed error, got nil")
+	}
+	if _, ok := err.(*ErrHeld); ok {
+		t.Fatalf("Acquire(young garbled body) returned ErrHeld, want a hard malformed error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "malformed") {
+		t.Fatalf("Acquire(young garbled body) error = %v, want a malformed error", err)
+	}
+}
+
 // TestPeek_NoFile proves Peek reports (Info{}, false, nil) for a lock path
 // that does not exist — not held, not an error.
 func TestPeek_NoFile(t *testing.T) {
