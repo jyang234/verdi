@@ -15,7 +15,6 @@ package workbench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -154,10 +153,10 @@ func renderObligation(id, title, forKind, verifiesRef, body string, owners []str
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "id: %s\n", id)
 	b.WriteString("kind: obligation\n")
-	fmt.Fprintf(&b, "title: %s\n", yamlDoubleQuote(title))
+	fmt.Fprintf(&b, "title: %s\n", artifact.YAMLDoubleQuote(title))
 	quotedOwners := make([]string, len(owners))
 	for i, o := range owners {
-		quotedOwners[i] = yamlDoubleQuote(o)
+		quotedOwners[i] = artifact.YAMLDoubleQuote(o)
 	}
 	fmt.Fprintf(&b, "owners: [%s]\n", strings.Join(quotedOwners, ", "))
 	fmt.Fprintf(&b, "for_kind: %s\n", forKind)
@@ -208,17 +207,4 @@ func firstLine(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return s
-}
-
-// yamlDoubleQuote renders s as a YAML double-quoted scalar via encoding/json,
-// whose string escaping is a valid subset of YAML's — the same safe,
-// hand-render quoting internal/align/render.go's yamlDQ uses, so a title
-// carrying a quote or colon lands in the frontmatter without a second
-// hand-rolled escaper.
-func yamlDoubleQuote(s string) string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return `""`
-	}
-	return string(b)
 }

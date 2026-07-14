@@ -1,7 +1,6 @@
 package align
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -109,12 +108,12 @@ func renderFrontmatter(b *strings.Builder, fm *artifact.DeviationFrontmatter) {
 	} else {
 		b.WriteString("findings:\n")
 		for _, f := range fm.Findings {
-			fmt.Fprintf(b, "  - { id: %s, kind: %s, text: %s", f.ID, f.Kind, yamlDQ(f.Text))
+			fmt.Fprintf(b, "  - { id: %s, kind: %s, text: %s", f.ID, f.Kind, artifact.YAMLDoubleQuote(f.Text))
 			if f.Disposition != "" {
 				fmt.Fprintf(b, ", disposition: %s", f.Disposition)
 			}
 			if f.Note != "" {
-				fmt.Fprintf(b, ", note: %s", yamlDQ(f.Note))
+				fmt.Fprintf(b, ", note: %s", artifact.YAMLDoubleQuote(f.Note))
 			}
 			b.WriteString(" }\n")
 		}
@@ -125,7 +124,7 @@ func renderFrontmatter(b *strings.Builder, fm *artifact.DeviationFrontmatter) {
 		fmt.Fprintf(b, "integrity: %s\n", fm.Integrity)
 	}
 	if fm.JudgeIntegrity != nil {
-		fmt.Fprintf(b, "judge_integrity: { stdin_b64: %s, raw_result: %s }\n", fm.JudgeIntegrity.StdinB64, yamlDQ(fm.JudgeIntegrity.RawResult))
+		fmt.Fprintf(b, "judge_integrity: { stdin_b64: %s, raw_result: %s }\n", fm.JudgeIntegrity.StdinB64, artifact.YAMLDoubleQuote(fm.JudgeIntegrity.RawResult))
 	}
 	if fm.Frozen != nil {
 		fmt.Fprintf(b, "frozen: { at: %s, commit: %s }\n", fm.Frozen.At, fm.Frozen.Commit)
@@ -140,21 +139,4 @@ func renderFrontmatter(b *strings.Builder, fm *artifact.DeviationFrontmatter) {
 		}
 		b.WriteString(" }\n")
 	}
-}
-
-// yamlDQ renders s as a YAML double-quoted scalar. encoding/json's string
-// escaping (\", \\, \n, \t, \r, control chars via \u00XX) is a valid subset
-// of YAML double-quoted scalar escaping, so json.Marshal on a plain string
-// is a safe, well-tested way to quote arbitrary finding/judge text (which
-// may itself contain quotes, colons, or newlines) into this hand-rendered
-// frontmatter without a second, hand-rolled escaper.
-func yamlDQ(s string) string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		// json.Marshal on a string cannot fail for well-formed UTF-8/any Go
-		// string (invalid UTF-8 is replaced, not rejected); this exists only
-		// to satisfy err-checking discipline, never to be reached.
-		return `""`
-	}
-	return string(b)
 }

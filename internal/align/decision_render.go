@@ -80,12 +80,12 @@ func renderDecisionFrontmatter(b *strings.Builder, fm *artifact.DecisionConflict
 	} else {
 		b.WriteString("findings:\n")
 		for _, f := range fm.Findings {
-			fmt.Fprintf(b, "  - { id: %s, kind: %s, text: %s", f.ID, f.Kind, yamlDQ(f.Text))
+			fmt.Fprintf(b, "  - { id: %s, kind: %s, text: %s", f.ID, f.Kind, artifact.YAMLDoubleQuote(f.Text))
 			if f.Disposition != "" {
 				fmt.Fprintf(b, ", disposition: %s", f.Disposition)
 			}
 			if f.Note != "" {
-				fmt.Fprintf(b, ", note: %s", yamlDQ(f.Note))
+				fmt.Fprintf(b, ", note: %s", artifact.YAMLDoubleQuote(f.Note))
 			}
 			if f.TargetRef != "" {
 				fmt.Fprintf(b, ", target_ref: %s", f.TargetRef)
@@ -107,7 +107,7 @@ func renderDecisionFrontmatter(b *strings.Builder, fm *artifact.DecisionConflict
 		fmt.Fprintf(b, "integrity: %s\n", fm.Integrity)
 	}
 	if fm.JudgeIntegrity != nil {
-		fmt.Fprintf(b, "judge_integrity: { stdin_b64: %s, raw_result: %s }\n", fm.JudgeIntegrity.StdinB64, yamlDQ(fm.JudgeIntegrity.RawResult))
+		fmt.Fprintf(b, "judge_integrity: { stdin_b64: %s, raw_result: %s }\n", fm.JudgeIntegrity.StdinB64, artifact.YAMLDoubleQuote(fm.JudgeIntegrity.RawResult))
 	}
 	if fm.Frozen != nil {
 		fmt.Fprintf(b, "frozen: { at: %s, commit: %s }\n", fm.Frozen.At, fm.Frozen.Commit)
