@@ -45,6 +45,7 @@ func testService(t *testing.T) ServiceBundle {
 		Verdicts:     recs,
 		Review:       review,
 		BoundaryDiff: upstream.ComputeBoundaryDiff(base, branch),
+		Tool:         in.Graph.Tool,
 	}
 }
 
@@ -135,6 +136,56 @@ func TestAssemble_EmptyArraysNotNull(t *testing.T) {
 	if !bytes.Contains(data, []byte(`"packages":[]`)) {
 		t.Errorf("tests.json = %s, want packages: [], not null", data)
 	}
+}
+
+// TestAssemble_ToolchainJSON covers the toolchain.json provenance carrier
+// (spec/forge-transport ac-4/dc-4): written canonically when a service's
+// graph recorded a tool, omitted when none did (never fabricated), and
+// refused when two services disagree on the tool string.
+func TestAssemble_ToolchainJSON(t *testing.T) {
+	t.Run("written when a tool is recorded", func(t *testing.T) {
+		dir := t.TempDir()
+		svc := testService(t)
+		if svc.Tool == "" {
+			t.Fatal("fixture precondition: svcfix's canned graph must carry a tool pseudo-version")
+		}
+		if err := Assemble(dir, []ServiceBundle{svc}, passingTestSummary()); err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "toolchain.json"))
+		if err != nil {
+			t.Fatalf("reading toolchain.json: %v", err)
+		}
+		p, err := upstream.DecodeToolProvenance(data)
+		if err != nil {
+			t.Fatalf("toolchain.json does not strict-decode: %v", err)
+		}
+		if p.Tool != svc.Tool {
+			t.Errorf("toolchain.json tool = %q, want %q (the graph's recorded tool)", p.Tool, svc.Tool)
+		}
+	})
+
+	t.Run("omitted when no tool is recorded", func(t *testing.T) {
+		dir := t.TempDir()
+		svc := testService(t)
+		svc.Tool = ""
+		if err := Assemble(dir, []ServiceBundle{svc}, passingTestSummary()); err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "toolchain.json")); !os.IsNotExist(err) {
+			t.Errorf("toolchain.json exists (stat err = %v), want it omitted when no tool was recorded — fabricated provenance", err)
+		}
+	})
+
+	t.Run("disagreeing tools refused", func(t *testing.T) {
+		dir := t.TempDir()
+		a, b := testService(t), testService(t)
+		b.Tool = "v0.0.0-20260101000000-ffffffffffff"
+		err := Assemble(dir, []ServiceBundle{a, b}, passingTestSummary())
+		if err == nil {
+			t.Fatal("Assemble with two disagreeing tool strings: want error, got nil")
+		}
+	})
 }
 
 func TestAssemble_Negative(t *testing.T) {

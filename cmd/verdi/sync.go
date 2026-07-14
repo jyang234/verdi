@@ -35,8 +35,19 @@ import (
 )
 
 // derivedFileNames are the four files a materialized bundle must contain
-// (01 §Directory layout's derived tree).
+// (01 §Directory layout's derived tree). toolchain.json
+// (derivedToolchainFile) is deliberately NOT in this list: it is the
+// bundle's OPTIONAL recorded-tool provenance carrier (spec/forge-transport
+// ac-4/dc-4), written by bundle.Assemble only when an upstream tool
+// actually ran (a non-empty Graph.Tool) — e.g. the self-hosted producer
+// (selfevidence.go) runs no upstream tool and honestly carries none — so
+// requiring it here would spuriously fail every honest tool-less bundle.
 var derivedFileNames = []string{"verdicts.json", "tests.json", "review.json", "boundary-diff.json"}
+
+// derivedToolchainFile is the bundle's recorded tool provenance carrier
+// (upstream.ToolProvenance), checked against verdi.yaml's toolchain.commit
+// at fetched-bundle intake — the I-4 secondary defense (ac-4/dc-4).
+const derivedToolchainFile = "toolchain.json"
 
 // syncDeps bundles sync's injectable dependencies so runSync can be driven
 // hermetically in tests (CLAUDE.md: no network, no exec in any test);
@@ -193,6 +204,17 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 	tree, err := deps.Forge.FetchEvidenceBundle(ctx, ref, commit)
 	switch {
 	case err == nil:
+		// The I-4 secondary defense (spec/forge-transport ac-4/dc-4):
+		// check the fetched bundle's recorded tool provenance against the
+		// manifest pin BEFORE any of its records are accepted onto disk. A
+		// mismatch is an operational refusal; an absent carrier is a
+		// disclosed-unproven notice (checkFetchedToolPin prints it), never
+		// a silent skip and never a spurious refusal of a pre-carrier or
+		// tool-less (self-hosted producer) bundle.
+		if pinErr := checkFetchedToolPin(root, tree, deps.Stdout); pinErr != nil {
+			fmt.Fprintln(deps.Stderr, "sync:", pinErr)
+			return 2
+		}
 		if writeErr := writeDerivedTree(derivedRoot, tree); writeErr != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", writeErr)
 			return 2
@@ -329,6 +351,54 @@ func writeDerivedTree(derivedRoot string, tree forge.DerivedTree) error {
 		}
 		if err := os.WriteFile(dest, tree[key], 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", dest, err)
+		}
+	}
+	return nil
+}
+
+// checkFetchedToolPin is the I-4 secondary defense at fetched-bundle
+// intake (spec/forge-transport ac-4/dc-4; adjudicated 2026-07-13: the
+// carrier is toolchain.json, since no other bundle artifact records the
+// tool): every toolchain.json in the fetched tree is strict-decoded and
+// its recorded tool checked with upstream.CheckToolPin against verdi.yaml's
+// toolchain.commit. A mismatch (or a malformed carrier, or a carrier
+// present with no pin configured) returns an error — the caller's
+// operational refusal (exit 2) — with CheckToolPin's own message naming
+// both the recorded tool string and the pinned commit. A tree with NO
+// carrier anywhere prints a one-line disclosed-unproven notice on stdout
+// and returns nil: a pre-carrier bundle, or one whose producer ran no
+// upstream tool (the self-hosted producer, selfevidence.go), is honestly
+// tool-less — disclosed, never silently passed and never spuriously
+// refused. The manifest is read only when a carrier is present, so
+// tool-less intake works even in a store without a toolchain: block.
+func checkFetchedToolPin(root string, tree forge.DerivedTree, stdout io.Writer) error {
+	var keys []string
+	for key := range tree {
+		if filepath.Base(key) == derivedToolchainFile {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		fmt.Fprintln(stdout, "sync: fetched bundle carries no toolchain.json (a pre-carrier bundle, or its producer ran no upstream tool); the I-4 tool-pin check is disclosed-unproven for this intake")
+		return nil
+	}
+	sort.Strings(keys) // deterministic check/refusal order
+
+	manifest, err := loadManifest(root)
+	if err != nil {
+		return err
+	}
+	pinned := ""
+	if manifest.Toolchain != nil {
+		pinned = manifest.Toolchain.Commit
+	}
+	for _, key := range keys {
+		prov, err := upstream.DecodeToolProvenance(tree[key])
+		if err != nil {
+			return fmt.Errorf("fetched bundle %s: %w", key, err)
+		}
+		if err := upstream.CheckToolPin(prov.Tool, pinned); err != nil {
+			return fmt.Errorf("refusing fetched evidence bundle (%s): %w", key, err)
 		}
 	}
 	return nil

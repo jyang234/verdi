@@ -191,7 +191,11 @@ func TestRunSync_OrRegen_MatchesGolden(t *testing.T) {
 	}
 
 	gotDir := filepath.Join(root, ".verdi", "data", "derived", "spec--stale-decline", testCommit)
-	for _, name := range derivedFileNames {
+	// The four required files plus toolchain.json: svcfix's canned graph
+	// records a tool, so this regeneration writes the optional provenance
+	// carrier too (spec/forge-transport ac-4/dc-4), byte-stably.
+	names := append(append([]string{}, derivedFileNames...), derivedToolchainFile)
+	for _, name := range names {
 		got, err := os.ReadFile(filepath.Join(gotDir, name))
 		if err != nil {
 			t.Fatalf("reading materialized %s: %v", name, err)
@@ -564,6 +568,105 @@ func TestRunSync_CI_PullsBundle(t *testing.T) {
 	if string(data) != string(want) {
 		t.Errorf("materialized verdicts.json (source: ci pull) differs from golden")
 	}
+}
+
+// seedGoldenTree builds the derived tree TestRunSync_CI_PullsBundle seeds —
+// the per-spec golden bundle for stale-decline — plus, when toolchain is
+// non-nil, a toolchain.json carrying those exact bytes, so the tool-pin
+// intake tests below can vary only the provenance carrier.
+func seedGoldenTree(t *testing.T, toolchain []byte) forgepkg.DerivedTree {
+	t.Helper()
+	tree := forgepkg.DerivedTree{
+		"spec--stale-decline/" + testCommit + "/verdicts.json":      readCannedFile(t, bundleGoldenDir, "verdicts.json"),
+		"spec--stale-decline/" + testCommit + "/tests.json":         readCannedFile(t, bundleGoldenDir, "tests.json"),
+		"spec--stale-decline/" + testCommit + "/review.json":        readCannedFile(t, bundleGoldenDir, "review.json"),
+		"spec--stale-decline/" + testCommit + "/boundary-diff.json": readCannedFile(t, bundleGoldenDir, "boundary-diff.json"),
+	}
+	if toolchain != nil {
+		tree["spec--stale-decline/"+testCommit+"/toolchain.json"] = toolchain
+	}
+	return tree
+}
+
+// runSeededFetch drives runSync's plain fetch path (no --or-regen, no
+// --produce) against a fake forge seeded with tree, returning the exit
+// code and both output streams.
+func runSeededFetch(t *testing.T, tree forgepkg.DerivedTree) (code int, stdout, stderr *bytes.Buffer) {
+	t.Helper()
+	root := buildTestStore(t)
+	f := fake.New()
+	f.SeedBundle(testRef, testCommit, tree)
+	stdout, stderr = &bytes.Buffer{}, &bytes.Buffer{}
+	deps := syncDeps{
+		Runner: upstream.NewFakeRunner(), // never called: the CI-pull path never execs
+		Forge:  f,
+		GoTest: fakeGoTest{},
+		Stdout: stdout,
+		Stderr: stderr,
+	}
+	code = runSync(context.Background(), root, testRef, testCommit, false, false, false, deps)
+	return code, stdout, stderr
+}
+
+// TestRunSync_CIFetch_ToolPin covers the I-4 secondary defense at
+// fetched-bundle intake (spec/forge-transport ac-4/dc-4): a fetched
+// toolchain.json whose recorded tool pseudo-version was built from
+// verdi.yaml's pinned toolchain.commit is accepted silently; a mismatch is
+// an operational refusal (exit 2) naming both the recorded tool string and
+// the pinned commit; an ABSENT carrier (pre-carrier bundle, or the
+// self-hosted producer, which runs no upstream tool) is a disclosed-
+// unproven stdout notice — never a silent pass, never a spurious refusal;
+// and a malformed carrier fails strict decode (operational).
+// buildTestStore pins toolchain.commit cd38b1a56bb7deadbeef... — the same
+// commit the canned graph's tool pseudo-version
+// (v0.0.0-20260707202836-cd38b1a56bb7) truncates to 12 hex chars.
+func TestRunSync_CIFetch_ToolPin(t *testing.T) {
+	const pinnedTool = "v0.0.0-20260707202836-cd38b1a56bb7"
+	const mismatchedTool = "v0.0.0-20260707202836-ffffffffffff"
+	const pinnedCommit = "cd38b1a56bb7deadbeefdeadbeefdeadbeefdead"
+
+	t.Run("matching pin accepted without notice", func(t *testing.T) {
+		code, stdout, stderr := runSeededFetch(t, seedGoldenTree(t, []byte(`{"tool":"`+pinnedTool+`"}`+"\n")))
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
+		}
+		if strings.Contains(stdout.String(), "disclosed-unproven") {
+			t.Errorf("stdout = %q: a bundle WITH a matching toolchain.json must not print the disclosed-unproven notice", stdout.String())
+		}
+	})
+
+	t.Run("mismatched pin refused naming both commits", func(t *testing.T) {
+		code, _, stderr := runSeededFetch(t, seedGoldenTree(t, []byte(`{"tool":"`+mismatchedTool+`"}`+"\n")))
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2 (operational refusal); stderr=%s", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), mismatchedTool) {
+			t.Errorf("stderr = %q, want the recorded tool string %q named", stderr.String(), mismatchedTool)
+		}
+		if !strings.Contains(stderr.String(), pinnedCommit) {
+			t.Errorf("stderr = %q, want the pinned commit %q named", stderr.String(), pinnedCommit)
+		}
+	})
+
+	t.Run("absent carrier is a disclosed-unproven notice, not a refusal", func(t *testing.T) {
+		code, stdout, stderr := runSeededFetch(t, seedGoldenTree(t, nil))
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (a pre-carrier bundle is never refused); stderr=%s", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "disclosed-unproven") {
+			t.Errorf("stdout = %q, want the disclosed-unproven tool-pin notice (ac-4: never a silent skip)", stdout.String())
+		}
+	})
+
+	t.Run("malformed carrier fails strict decode", func(t *testing.T) {
+		code, _, stderr := runSeededFetch(t, seedGoldenTree(t, []byte(`{"tool":"`+pinnedTool+`","extra":1}`+"\n")))
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2 (strict decode failure is operational); stderr=%s", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "toolchain.json") {
+			t.Errorf("stderr = %q, want the failing file named", stderr.String())
+		}
+	})
 }
 
 // TestRunSync_CIFetch_ReachableByReaderFold is the true-closure keying
