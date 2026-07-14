@@ -26,7 +26,6 @@ decisions:
 constraints:
   - { id: co-1, text: "inherited verbatim from the feature (co-1): managed worktrees live under the data zone, never committed. EnsureWorktree's every write happens under .verdi/data/worktrees/; nothing it creates is ever git-added or git-committed, and gc's own removals touch only that same subtree", anchor: "#co-1" }
   - { id: co-2, text: "no network in any test (CLAUDE.md): every EnsureWorktree and gc behavior - the cut, the lock contention, the merged/deleted/dirty/locked reclaim decisions - is proven against fixturegit repositories with real local branches and real worktrees on local disk; no live clone or fetch", anchor: "#co-2" }
-frozen: { at: 2026-07-14, commit: c464efb6133e449257c48738ab66ae93a0e071e5 }
 ---
 # Worktree Manager
 
