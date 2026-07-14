@@ -252,6 +252,13 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		if feature {
 			writeScopingReceipts(&b, p, c)
 		}
+		// A STORY AC card discloses its evidence obligations (ac-2) —
+		// populated for story-wall AC cards only (attachObligations), so a
+		// non-empty list is a sufficient guard; the render never re-checks
+		// class.
+		if len(c.Obligations) > 0 {
+			writeObligations(&b, c)
+		}
 		if authoring {
 			b.WriteString(`<button type="button" class="yarn-handle" data-testid="yarn-handle-` + esc(c.ID) + `" aria-label="Draw yarn from ` + esc(c.ID) + `" title="drag to another card to string yarn"></button>`)
 		}
@@ -501,6 +508,46 @@ func writeScopingReceipts(b *strings.Builder, p *BoardProjection, c cardView) {
 			b.WriteString(`<span class="oq-claims" data-testid="oq-claims-` + esc(c.ID) + `" data-claims="` + strconv.Itoa(n) + `" title="one spike answering many questions is normal; many spikes on one question is worth a look">claimed by ` + strconv.Itoa(n) + ` spikes</span>`)
 		}
 	}
+}
+
+// writeObligations renders a STORY AC card's evidence obligations
+// (spec/obligation-wall ac-2): one compact row per DECLARED evidence kind,
+// disclosing what that kind's obligation demands right on the wall (feature
+// co-3, legible-without-the-sidecar). A kind WITH an authored obligation
+// shows its title — the specific demand, read from the obligation's own
+// rendered content, never recovered from verdi.bindings.yaml — with the
+// obligation's fuller prose body in the row's tooltip (the board's
+// established "headline visible, full form in title=" idiom the card text
+// and case-file placards already use). A declared kind with NO obligation
+// yet shows a disclosed "no obligation" badge in the SAME dashed pending
+// vocabulary the coverage receipt's "no stub" chip wears (dc-2: the wall
+// discloses, it never refuses). The list is populated only for story-wall AC
+// cards (attachObligations), so a non-empty c.Obligations is the render's
+// whole gate.
+func writeObligations(b *strings.Builder, c cardView) {
+	esc := stdhtml.EscapeString
+	b.WriteString(`<div class="card-obligations" data-testid="obligations-` + esc(c.ID) + `">`)
+	for _, o := range c.Obligations {
+		if o.Present {
+			// The tooltip carries the obligation's prose so its full argument
+			// is a hover away on the wall itself; it falls back to the title
+			// when an obligation has no body, never an empty tooltip.
+			tip := o.Body
+			if tip == "" {
+				tip = o.Title
+			}
+			b.WriteString(`<div class="obligation obligation--present" data-obligation-kind="` + esc(o.Kind) + `" data-obligation-present="true">`)
+			b.WriteString(`<span class="obligation-kind">` + esc(o.Kind) + `</span>`)
+			b.WriteString(`<span class="obligation-title" title="` + esc(tip) + `">` + esc(o.Title) + `</span>`)
+			b.WriteString(`</div>`)
+			continue
+		}
+		b.WriteString(`<div class="obligation obligation--none" data-obligation-kind="` + esc(o.Kind) + `" data-obligation-present="false">`)
+		b.WriteString(`<span class="obligation-kind">` + esc(o.Kind) + `</span>`)
+		b.WriteString(`<span class="obligation-badge" data-testid="obligation-none-` + esc(c.ID) + `-` + esc(o.Kind) + `">no obligation</span>`)
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</div>`)
 }
 
 // zoneLabelText names each zone band as a newcomer reads it.

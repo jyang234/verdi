@@ -21,6 +21,7 @@ const (
 	reviewSpecName     = "stale-decline-notices"
 	emptySpecName      = "income-verification"
 	obligationSpecName = "refi-decline-audit"
+	replaySpecName     = "refi-decline-replay"
 )
 
 // designSpec is DESIGN_SPEC: the object model fixtures.ts binds (3 ACs,
@@ -197,6 +198,68 @@ Tamper-evident audit log.
 Outbox as the audit source.
 `
 
+// replaySpec is OBLIGATION_WALL_SPEC (fixtures.ts): a STORY-class draft
+// whose ac-1 declares TWO evidence kinds (behavioral, static). The wall's
+// COMMITTED obligation (replayObligation, below) authors the behavioral one
+// only, so ac-1's board card proves both halves of spec/obligation-wall ac-2
+// at once — the authored obligation's title for behavioral, and the disclosed
+// "no obligation" badge for the still-un-obligated static (dc-2). Distinct
+// from obligationSpec (refi-decline-audit), whose ac-1 the graduate journey
+// AUTHORS at runtime into an ephemeral store; this wall's obligation is
+// committed up front, so the card reads it out on first load.
+const replaySpec = `---
+id: spec/refi-decline-replay
+kind: spec
+class: story
+title: "Refinancing decline replay"
+status: draft
+owners: [platform-team]
+story: jira:LOAN-2203
+problem: { text: "a decline notice cannot be replayed after the fact, so support cannot see what an applicant actually saw", anchor: "#problem" }
+outcome: { text: "every decline notice shown is reconstructable on demand", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "support can replay every decline notice shown to an applicant", evidence: [behavioral, static], anchor: "#ac-1" }
+  - { id: ac-2, text: "the replay is tamper-evident", evidence: [static], anchor: "#ac-2" }
+links:
+  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+---
+# Refinancing decline replay
+
+## Problem
+
+## Outcome
+
+## ac-1
+
+Replayable decline notices.
+
+## ac-2
+
+Tamper-evident replay.
+`
+
+// replayObligation is the committed evidence-obligation artifact for
+// replaySpec's ac-1 BEHAVIORAL kind — the obligation the board card reads out
+// on the wall (spec/obligation-wall ac-2). Fully valid (id/for_kind
+// agreement, exactly one verifies edge to the whole story spec, frozen), so
+// evidence.Obligations strict-decodes it exactly as `verdi matrix` does. Its
+// on-disk home is the loader's convention: .verdi/obligations/<spec>/<ac>--<kind>.md.
+const replayObligation = `---
+id: obligation/refi-decline-replay--ac-1--behavioral
+kind: obligation
+title: "a Playwright test drives the replay view and asserts the notice reappears"
+owners: [platform-team]
+for_kind: behavioral
+links:
+  - { type: verifies, ref: "spec/refi-decline-replay" }
+frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+---
+# a Playwright test drives the replay view and asserts the notice reappears
+
+Open a decline, mutate the underlying data, and assert the applicant-facing
+notice reappears with the corrected reason — not a unit test of the projector.
+`
+
 // reviewSpec is REVIEW_SPEC: the board opens it in review mode (its
 // canned feed reports an open MR); ac-2 is the anchored comment's
 // target.
@@ -295,11 +358,13 @@ func provisionBoardV2(scratch, storeRoot string) (feedPath string, err error) {
 	// finalization) is the corpus's own real ADR — already on main and so
 	// on this branch; nothing to author here.
 	files := map[string]string{
-		filepath.Join(".verdi", "specs", "active", designSpecName, "spec.md"):     designSpec,
-		filepath.Join(".verdi", "specs", "active", designSpecName, "layout.json"): designSpecLayout,
-		filepath.Join(".verdi", "specs", "active", reviewSpecName, "spec.md"):     reviewSpec,
-		filepath.Join(".verdi", "specs", "active", emptySpecName, "spec.md"):      emptySpec,
-		filepath.Join(".verdi", "specs", "active", obligationSpecName, "spec.md"): obligationSpec,
+		filepath.Join(".verdi", "specs", "active", designSpecName, "spec.md"):         designSpec,
+		filepath.Join(".verdi", "specs", "active", designSpecName, "layout.json"):     designSpecLayout,
+		filepath.Join(".verdi", "specs", "active", reviewSpecName, "spec.md"):         reviewSpec,
+		filepath.Join(".verdi", "specs", "active", emptySpecName, "spec.md"):          emptySpec,
+		filepath.Join(".verdi", "specs", "active", obligationSpecName, "spec.md"):     obligationSpec,
+		filepath.Join(".verdi", "specs", "active", replaySpecName, "spec.md"):         replaySpec,
+		filepath.Join(".verdi", "obligations", replaySpecName, "ac-1--behavioral.md"): replayObligation,
 	}
 	for rel, content := range files {
 		path := filepath.Join(storeRoot, rel)

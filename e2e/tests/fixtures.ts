@@ -195,6 +195,26 @@ export const OBLIGATION_STORY_SPEC = "refi-decline-audit";
 export const OBLIGATION_STORY_AC = "ac-1";
 export const OBLIGATION_STORY_NON_AC = "dc-1";
 
+// ---------------------------------------------------------------------------
+// Workbench (obligation wall, spec/obligation-wall ac-2)
+// ---------------------------------------------------------------------------
+
+// A STORY-class draft on the design branch whose ac-1 declares TWO evidence
+// kinds (behavioral, static) and carries a COMMITTED obligation for the
+// behavioral one only — so its board AC card reads out both halves of ac-2 on
+// first load: the authored obligation's title (behavioral) and the disclosed
+// "no obligation" badge (static). Distinct from OBLIGATION_STORY_SPEC, whose
+// obligation the graduate journey authors at runtime; this one is pre-authored
+// so the card renders it without any interaction. Provisioned by
+// cmd/e2eharness/provisionv2.go.
+export const OBLIGATION_WALL_SPEC = "refi-decline-replay";
+export const OBLIGATION_WALL_AC = "ac-1";
+export const OBLIGATION_WALL_PRESENT_KIND = "behavioral";
+export const OBLIGATION_WALL_MISSING_KIND = "static";
+// A substring of the committed obligation's title — the specific demand the
+// card reads out on the wall (feature co-3, legible-without-the-sidecar).
+export const OBLIGATION_WALL_DEMAND = "drives the replay view";
+
 // Corpus artifacts nothing on DESIGN_SPEC's wall names (real on main,
 // so real on the design branch) — the pin toolbox's import fixtures.
 export const PIN_ADR = "adr/0002-outbox-events";
