@@ -81,13 +81,26 @@ Placeholder.
 // only class: feature). Status-in-path is the sole enforcement site for the
 // active→archive invariant (no close verb performs the move), so this is the
 // only place the invariant is caught.
+//
+// closedStorySpec deliberately carries no frozen: block (this const's own
+// doc comment: "so the frozen-scoped rules VL-008/009/015 never engage") —
+// but that same omission means storyresolve.LoadSpec (VL-019's own
+// resolution, which fully re-validate-decodes a target, not just
+// artifact.DecodeStrict) can never resolve it, so this fixture cannot ALSO
+// carry a clean backing obligation the way vl019_test.go's own fixtures do
+// (giving it one would only trade a VL-020 finding for a VL-019 one). VL-020
+// (evidence-obligations wave 2, added after this fixture was written)
+// therefore legitimately fires here too now, alongside VL-002: a real,
+// non-draft story AC declaring a kind with no obligation. Both are the
+// expected, correct findings; onlyRules (unlike onlyRule) guards against any
+// OTHER rule storm while tolerating exactly these two.
 func TestVL002_ClosedStoryUnderActive_Fires(t *testing.T) {
 	dir := adHocOverlayDir(t, ".verdi/specs/active/vl-002-closed-story/spec.md", closedStorySpec)
 	repo := buildLintRepo(t, dir)
 	findings := runLint(t, repo.Dir, Context{}, Options{})
-	onlyRule(t, findings, "VL-002")
-	if len(findings) != 1 {
-		t.Fatalf("got %d findings, want 1 (closed story belongs under specs/archive/):\n%s", len(findings), findingsString(findings))
+	onlyRules(t, findings, "VL-002", "VL-020")
+	if n := countRule(findings, "VL-002"); n != 1 {
+		t.Fatalf("got %d VL-002 findings, want 1 (closed story belongs under specs/archive/):\n%s", n, findingsString(findings))
 	}
 }
 
@@ -113,13 +126,16 @@ func TestVL002_ClosedStoryUnderArchive_Clean(t *testing.T) {
 // belongs under specs/archive/, never accepted-pending-build. `verdi close`
 // now flips the status AS the archive move, so this state never reaches the
 // store; this test guards against a regression that would let it.
+// closedStorySpec's own "no frozen: block" design (see
+// TestVL002_ClosedStoryUnderActive_Fires's doc comment) means VL-020 also
+// legitimately fires here alongside VL-002, for the same reason.
 func TestVL002_AcceptedPendingUnderArchive_Fires(t *testing.T) {
 	apbStorySpec := strings.Replace(closedStorySpec, "status: closed", "status: accepted-pending-build", 1)
 	dir := adHocOverlayDir(t, ".verdi/specs/archive/vl-002-closed-story/spec.md", apbStorySpec)
 	repo := buildLintRepo(t, dir)
 	findings := runLint(t, repo.Dir, Context{}, Options{})
-	onlyRule(t, findings, "VL-002")
-	if len(findings) != 1 {
-		t.Fatalf("got %d findings, want 1 (accepted-pending-build belongs under specs/active/, not archive/):\n%s", len(findings), findingsString(findings))
+	onlyRules(t, findings, "VL-002", "VL-020")
+	if n := countRule(findings, "VL-002"); n != 1 {
+		t.Fatalf("got %d VL-002 findings, want 1 (accepted-pending-build belongs under specs/active/, not archive/):\n%s", n, findingsString(findings))
 	}
 }

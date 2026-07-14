@@ -187,6 +187,29 @@ z
 `
 }
 
+// closeFeatureStoryObligationMD renders the companion evidence-obligation
+// for a closeFeatureStorySpecMD fixture's ac-1 (evidence: [static]) — added
+// so this file's own "fully clean verdi lint pass over the post-close
+// store" promise (top doc comment) still holds now that VL-020
+// (evidence-obligations wave 2, added after this fixture was first written)
+// requires one for every non-draft story AC's declared kind.
+func closeFeatureStoryObligationMD(name, scaffoldSHA string) string {
+	return `---
+id: obligation/` + name + `--ac-1--static
+kind: obligation
+title: "Fixture ` + name + ` ac-1 static obligation"
+owners: [platform-team]
+for_kind: static
+links:
+  - { type: verifies, ref: "spec/` + name + `" }
+frozen: { at: 2024-01-01, commit: ` + scaffoldSHA + ` }
+---
+# Fixture ` + name + ` ac-1 static obligation
+
+What the static evidence must specifically show.
+`
+}
+
 // storyDirFor returns the specs/{active,archive} zone a story spec at
 // status must live under (02 §Kind registry / VL-002: status-in-path for
 // the story class).
@@ -214,6 +237,8 @@ func buildCloseFeatureRepo(t *testing.T, opts closeFeatureFixtureOpts) *fixtureg
 				".verdi/specs/active/close-feature-fixture/spec.md":        closeFeatureSpecMD(scaffoldSHA, opts.FeatureStory),
 				".verdi/specs/archive/fixture-story-one/spec.md":           closeFeatureStorySpecMD("fixture-story-one", scaffoldSHA, "closed", "jira:FIXTURE-STORY-1", "ac-1"),
 				".verdi/specs/" + story2Dir + "/fixture-story-two/spec.md": closeFeatureStorySpecMD("fixture-story-two", scaffoldSHA, opts.Story2Status, "jira:FIXTURE-STORY-2", "ac-2"),
+				".verdi/obligations/fixture-story-one/ac-1--static.md":     closeFeatureStoryObligationMD("fixture-story-one", scaffoldSHA),
+				".verdi/obligations/fixture-story-two/ac-1--static.md":     closeFeatureStoryObligationMD("fixture-story-two", scaffoldSHA),
 			},
 			Message: "add close-feature-fixture + its two implementing stories",
 		},
