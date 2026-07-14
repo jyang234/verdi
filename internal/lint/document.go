@@ -9,8 +9,9 @@ import "github.com/jyang234/verdi/internal/artifact"
 // regardless of whether it decodes.
 type Document struct {
 	// Kind is the artifact kind implied by the file's location: "spec",
-	// "adr", "diagram", "attestation", "waiver", "conflict", or
-	// "reaffirmation" (R4-I-4).
+	// "adr", "diagram", "attestation", "waiver", "conflict",
+	// "reaffirmation" (R4-I-4), or "obligation" (spec/obligation-artifact,
+	// evidence-obligations wave 1).
 	Kind string
 	// Path is the file's absolute filesystem path.
 	Path string
@@ -51,4 +52,5 @@ type Document struct {
 	Waiver        *artifact.WaiverFrontmatter
 	Conflict      *artifact.ConflictFrontmatter
 	Reaffirmation *artifact.ReaffirmationFrontmatter
+	Obligation    *artifact.ObligationFrontmatter
 }

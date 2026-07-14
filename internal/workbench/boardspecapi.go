@@ -115,7 +115,17 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		case "sticky":
 			err = s.actionSticky(name, proj, req)
 		case "sticky-graduate":
-			err = s.actionStickyGraduate(name, proj, req)
+			// A sticky graduates into a declared spec object (the object
+			// menu's ac/co/dc/oq) OR — on a story wall, kind
+			// "obligation:<for-kind>" — into an evidence-obligation artifact
+			// bound to the story AC it was dropped on (spec/obligation-
+			// artifact ac-3). One action, one graduation ritual; the kind
+			// prefix selects the destination.
+			if strings.HasPrefix(req.Kind, obligationGraduatePrefix) {
+				err = s.actionObligationGraduate(ctx, name, proj, req)
+			} else {
+				err = s.actionStickyGraduate(name, proj, req)
+			}
 		case "stub-graduate":
 			err = s.actionStubGraduate(name, proj, req)
 		case "stub-instantiate":

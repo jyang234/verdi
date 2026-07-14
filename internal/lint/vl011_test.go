@@ -2,6 +2,7 @@ package lint
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,6 +104,49 @@ func TestVL007_ReaffirmationsTopLevelDir_Known(t *testing.T) {
 	for _, f := range findings {
 		if f.Rule == "VL-007" {
 			t.Fatalf("VL-007 fired on the reaffirmations/ top-level directory: %s", f.String())
+		}
+	}
+}
+
+// TestVL011_ObligationPathIDMismatch proves VL-011's obligation-kind
+// extension (spec/obligation-artifact DC-2): an obligation id
+// "<story-slug>--<ac-id>--<for-kind>" implies path
+// ".verdi/obligations/<story-slug>/<ac-id>--<for-kind>.md" — one level
+// deeper than attestation/waiver/reaffirmation's two-segment shape, since
+// the filename itself folds in the id's last two segments. A file at any
+// other path disagrees. Reuses vl019_test.go's own vl019StorySpecMD /
+// vl019StoryACCleanMD fixtures (same package) rather than duplicating a
+// second small story-spec-plus-obligation pair.
+func TestVL011_ObligationPathIDMismatch(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi/specs/active/vl-019-story/spec.md"), vl019StorySpecMD)
+	writeTestFile(t, filepath.Join(dir, ".verdi/obligations/wrong-story/ac-1--behavioral.md"), vl019StoryACCleanMD)
+
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-011")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	for _, want := range []string{"vl-019-story", "ac-1", "behavioral"} {
+		if !strings.Contains(findings[0].Message, want) {
+			t.Errorf("finding does not mention %q: %s", want, findings[0].Message)
+		}
+	}
+}
+
+// TestVL011_ObligationCorrectPath_Clean is the positive complement: an
+// obligation placed exactly where its id implies never fires VL-011.
+func TestVL011_ObligationCorrectPath_Clean(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi/specs/active/vl-019-story/spec.md"), vl019StorySpecMD)
+	writeTestFile(t, filepath.Join(dir, ".verdi/obligations/vl-019-story/ac-1--behavioral.md"), vl019StoryACCleanMD)
+
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-011" {
+			t.Fatalf("VL-011 fired on a correctly-nested obligation: %s", f.String())
 		}
 	}
 }

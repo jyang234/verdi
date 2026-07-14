@@ -17,6 +17,7 @@ const (
 	KindWaiver        Kind = "waiver"
 	KindConflict      Kind = "conflict"
 	KindReaffirmation Kind = "reaffirmation" // R4-I-4, 02 §Kind registry
+	KindObligation    Kind = "obligation"    // spec/obligation-artifact DC-1, evidence-obligations wave 1
 )
 
 // knownKinds is the closed set of artifact kinds. Any other value fails
@@ -29,6 +30,7 @@ var knownKinds = map[Kind]bool{
 	KindWaiver:        true,
 	KindConflict:      true,
 	KindReaffirmation: true,
+	KindObligation:    true,
 }
 
 // Valid reports whether k is one of the known kinds.
@@ -49,6 +51,16 @@ var (
 	// reaffirmations/<story>/<object-id>.md, 01 §Directory layout); only
 	// the ref's name field is compounded.
 	compoundNameRe = regexp.MustCompile(`^` + nameSegment + `--` + nameSegment + `$`)
+
+	// obligationNameRe matches the obligation ref's compound name shape
+	// (spec/obligation-artifact DC-2): "<story-slug>--<ac-id>--<for-kind>",
+	// three independently kebab-case segments joined by literal "--" — one
+	// level deeper than compoundNameRe's two-segment shape, since an
+	// obligation's id names a (story, ac, evidence-kind) triple rather than
+	// a pair. Because nameSegment itself never contains "--", the two "--"
+	// occurrences are unambiguous segment delimiters (no segment can ever
+	// swallow one).
+	obligationNameRe = regexp.MustCompile(`^` + nameSegment + `--` + nameSegment + `--` + nameSegment + `$`)
 
 	// commitRe matches a short-or-full lowercase hex git commit sha.
 	commitRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
@@ -115,6 +127,10 @@ func (r Ref) Validate() error {
 	case KindAttestation, KindWaiver, KindReaffirmation:
 		if !compoundNameRe.MatchString(r.Name) {
 			return fmt.Errorf("artifact: %s name %q must be <story>--<ac-id>, kebab-case on each side (I-6, R4-I-4)", r.Kind, r.Name)
+		}
+	case KindObligation:
+		if !obligationNameRe.MatchString(r.Name) {
+			return fmt.Errorf("artifact: %s name %q must be <story-slug>--<ac-id>--<for-kind>, kebab-case on each part (spec/obligation-artifact DC-2)", r.Kind, r.Name)
 		}
 	default:
 		if !simpleNameRe.MatchString(r.Name) {

@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	designSpecName = "refi-decline-flow"
-	designBranch   = "design/" + designSpecName
-	reviewSpecName = "stale-decline-notices"
-	emptySpecName  = "income-verification"
+	designSpecName     = "refi-decline-flow"
+	designBranch       = "design/" + designSpecName
+	reviewSpecName     = "stale-decline-notices"
+	emptySpecName      = "income-verification"
+	obligationSpecName = "refi-decline-audit"
 )
 
 // designSpec is DESIGN_SPEC: the object model fixtures.ts binds (3 ACs,
@@ -153,6 +154,49 @@ links:
 ## Outcome
 `
 
+// obligationSpec is OBLIGATION_STORY_SPEC (fixtures.ts): a STORY-class
+// draft on the design branch — the wall on which a sticky graduates into an
+// evidence obligation (spec/obligation-artifact ac-3). It declares two
+// acceptance criteria (ac-1/ac-2, the obligation targets) and one decision
+// (dc-1, a non-AC card the invalid-drop refusal lands on). Like every story
+// it points up at a feature AC (accepted-pending-build#ac-1, real on main).
+const obligationSpec = `---
+id: spec/refi-decline-audit
+kind: spec
+class: story
+title: "Refinancing decline audit"
+status: draft
+owners: [platform-team]
+story: jira:LOAN-2202
+problem: { text: "decline notices are not auditable after the fact", anchor: "#problem" }
+outcome: { text: "every decline notice shown is reconstructable", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "support can replay every decline notice shown to an applicant", evidence: [behavioral], anchor: "#ac-1" }
+  - { id: ac-2, text: "the audit log is tamper-evident", evidence: [static], anchor: "#ac-2" }
+decisions:
+  - { id: dc-1, text: "reuse the outbox stream as the audit source", anchor: "#dc-1" }
+links:
+  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+---
+# Refinancing decline audit
+
+## Problem
+
+## Outcome
+
+## ac-1
+
+Replayable decline notices.
+
+## ac-2
+
+Tamper-evident audit log.
+
+## dc-1
+
+Outbox as the audit source.
+`
+
 // reviewSpec is REVIEW_SPEC: the board opens it in review mode (its
 // canned feed reports an open MR); ac-2 is the anchored comment's
 // target.
@@ -255,6 +299,7 @@ func provisionBoardV2(scratch, storeRoot string) (feedPath string, err error) {
 		filepath.Join(".verdi", "specs", "active", designSpecName, "layout.json"): designSpecLayout,
 		filepath.Join(".verdi", "specs", "active", reviewSpecName, "spec.md"):     reviewSpec,
 		filepath.Join(".verdi", "specs", "active", emptySpecName, "spec.md"):      emptySpec,
+		filepath.Join(".verdi", "specs", "active", obligationSpecName, "spec.md"): obligationSpec,
 	}
 	for rel, content := range files {
 		path := filepath.Join(storeRoot, rel)
