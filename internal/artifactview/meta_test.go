@@ -24,6 +24,16 @@ decided: 2026-01-01
 frozen: { at: 2026-01-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
 `
 
+const obligationYAML = `id: obligation/fail-loud--ac-1--static
+kind: obligation
+title: "The gate refuses tracked binaries"
+owners: [platform-team]
+for_kind: static
+links:
+  - { type: verifies, ref: "spec/fail-loud" }
+frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+`
+
 func TestDecodeMeta_Happy(t *testing.T) {
 	t.Run("spec", func(t *testing.T) {
 		m, err := DecodeMeta("spec", []byte(featureSpecYAML))
@@ -47,6 +57,18 @@ func TestDecodeMeta_Happy(t *testing.T) {
 		}
 		if m.Decided != "2026-01-01" {
 			t.Errorf("Decided = %q", m.Decided)
+		}
+	})
+	t.Run("obligation", func(t *testing.T) {
+		m, err := DecodeMeta("obligation", []byte(obligationYAML))
+		if err != nil {
+			t.Fatalf("DecodeMeta: %v", err)
+		}
+		if m.ForKind != "static" {
+			t.Errorf("ForKind = %q, want static", m.ForKind)
+		}
+		if m.Base.Title != "The gate refuses tracked binaries" {
+			t.Errorf("Base.Title = %q", m.Base.Title)
 		}
 	})
 }

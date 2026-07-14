@@ -37,6 +37,13 @@ type Meta struct {
 	// Waiver-only fields.
 	Reason string
 	Expiry string
+
+	// Obligation-only field (spec/obligation-artifact dc-1): the one
+	// evidence kind this obligation states the specific proof for. First
+	// exercised by real store obligations landing with spec/fail-loud —
+	// before that, no committed store carried the kind and DecodeMeta
+	// failed closed on it (dex could not build such a store at all).
+	ForKind artifact.EvidenceKind
 }
 
 // DecodeMeta dispatches to internal/artifact's typed decoder for kind and
@@ -84,6 +91,13 @@ func DecodeMeta(kind string, fm []byte) (Meta, error) {
 			return Meta{}, err
 		}
 		return Meta{Base: w.Base, Status: string(w.Status), Reason: w.Reason, Expiry: w.Expiry}, nil
+
+	case "obligation":
+		o, err := artifact.DecodeObligation(fm)
+		if err != nil {
+			return Meta{}, err
+		}
+		return Meta{Base: o.Base, ForKind: o.ForKind}, nil
 
 	case "conflict":
 		c, err := artifact.DecodeConflict(fm)
