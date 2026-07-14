@@ -4,7 +4,7 @@ kind: spec
 title: "Proposal Artifact"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-8
 problem: { text: "the ratified 02 §Diagram proposals schema — class: proposal, the proposed→accepted authored enum, scope, derived_from + base digest — exists only as prose. internal/artifact/diagram.go's DiagramFrontmatter has no class discriminator, no scope/derived_from fields, and its status enum (active/superseded) has no room for proposed/accepted; nothing enforces that a diagram's mermaid body survives every write path byte-for-byte; nothing accepts a proposal at merge the way a spec is accepted; nothing computes the disclosed realized/stale states without writing them. diagram-proposals#ac-2 and #ac-6 are unreachable until this artifact is real.", anchor: problem }
 outcome: { text: "DiagramFrontmatter gains an optional class discriminator, a class-conditioned status enum, and optional scope/derived_from fields, strict-decoded through the single internal/artifact seam with unknown fields failing closed; the mermaid body is byte-preserved by every write path; verdi accept admits a class: proposal diagram's proposed→accepted transition at the merge of its own design MR, exactly as it accepts a spec; and a pure, never-written computed-status function discloses the four-value proposed/accepted/realized/stale vocabulary from an externally supplied truth comparison.", anchor: outcome }
@@ -25,6 +25,7 @@ decisions:
 constraints:
   - { id: co-1, text: "no LLM anywhere in this story's code (parent co-1): schema validation, the accept-ritual extension, and the disclosed-status mapping are pure, deterministic Go", anchor: co-1 }
   - { id: co-2, text: "no network in any test: decode/validate is table-driven (happy path plus every negative — unknown field, wrong status for class, missing/extra frozen, malformed digest); the accept-ritual extension is exercised over a fixturegit checkout; the disclosed-status mapping is a pure-function unit test needing no fixture at all", anchor: co-2 }
+frozen: { at: 2026-07-14, commit: 3427df94dafda631fb425e1cd9f2a6d825aaf02c, stub_matched: true }
 ---
 # Proposal Artifact
 
