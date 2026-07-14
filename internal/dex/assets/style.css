@@ -2387,6 +2387,41 @@ button.yarn-chip-type {
   color: var(--st-pending);
   background: transparent;
 }
+/* evidence slots (spec/evidence-slot ac-3/dc-2): the record-state chip
+   joins each obligation row at its tail — demand reads left, holdings
+   right, one line per kind. An EMPTY slot wears the exact dashed pending
+   vocabulary "no stub" and "no obligation" already speak (a calm fact of
+   the authoring state, never an alarm — dc-1's never-synced wall is the
+   ordinary one); a HELD slot wears the coverage receipt's covered
+   register (record presence, the same claim "covered by 1 stub" makes —
+   presence, never a pass/fail verdict, dc-4). */
+.slot-chip {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.02rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.slot-chip--empty {
+  border-style: dashed;
+  border-color: var(--st-pending);
+  color: var(--st-pending);
+  background: transparent;
+}
+.slot-chip--held {
+  color: var(--st-evidenced);
+  border-color: color-mix(in srgb, var(--st-evidenced) 55%, transparent);
+  background: color-mix(in srgb, var(--st-evidenced-tint) 75%, transparent);
+}
+/* the un-obligated row's "no obligation" badge sits directly against its
+   slot chip; keep the pair from touching when the row runs tight */
+.obligation .obligation-badge { margin-right: 0.1rem; }
 /* a story AC card wearing obligations gives its text two clamped lines back
    so the disclosures sit below the prose, never on it (mirrors coverage) */
 .objcard:has(.card-obligations) .card-text { -webkit-line-clamp: 2; }
