@@ -33,7 +33,7 @@ func (b *Backend) GetArtifact(ctx context.Context, argsRaw json.RawMessage) map[
 	var args struct {
 		Ref string `json:"ref"`
 	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
+	if err := strictUnmarshal(argsRaw, &args); err != nil {
 		return toolError("get_artifact: malformed arguments: " + err.Error())
 	}
 	if args.Ref == "" {

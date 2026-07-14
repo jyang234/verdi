@@ -39,7 +39,7 @@ type Layout struct {
 	DecodeErr error
 }
 
-// Snapshot is everything the fourteen rules read: every committed-zone
+// Snapshot is everything the rules read: every committed-zone
 // document (decoded or not), every committed board.json, the repo-root
 // .gitattributes, the store manifest, and discovered services. Building a
 // Snapshot never fails on a single bad artifact file — only on an

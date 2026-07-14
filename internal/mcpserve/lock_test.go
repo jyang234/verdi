@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -157,6 +158,25 @@ func TestAcquireLock_Negative(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "nonexistent-subdir", "writer.lock")
 		if _, err := AcquireLock(path); err == nil {
 			t.Fatal("AcquireLock(no parent dir): want error, got nil")
+		}
+	})
+
+	// spec/fail-loud ac-3/dc-2: LockInfo is a file verdi itself writes, so
+	// an unrecognized field means a malformed/foreign lock file, not a
+	// forward-compat member to tolerate — the strict decode in lock.go's
+	// acquireLock must refuse it BY NAME, same as a tool-argument typo.
+	t.Run("lock file has an unknown field (strict decode refuses it by name)", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "writer.lock")
+		seed := `{"pid":1,"start":2,"holder_reff":"bogus"}`
+		if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+			t.Fatalf("seeding lock file with unknown field: %v", err)
+		}
+		_, err := AcquireLock(path)
+		if err == nil {
+			t.Fatal("AcquireLock(lock file with unknown field): want error, got nil")
+		}
+		if !strings.Contains(err.Error(), "holder_reff") {
+			t.Fatalf("AcquireLock error does not NAME the unknown field %q: %v", "holder_reff", err)
 		}
 	})
 }

@@ -43,7 +43,7 @@ func (b *Backend) ListAnnotations(ctx context.Context, argsRaw json.RawMessage) 
 	var args struct {
 		Ref string `json:"ref"`
 	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
+	if err := strictUnmarshal(argsRaw, &args); err != nil {
 		return toolError("list_annotations: malformed arguments: " + err.Error())
 	}
 	if args.Ref == "" {

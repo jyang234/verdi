@@ -32,7 +32,7 @@ func (b *Backend) GetBoard(ctx context.Context, argsRaw json.RawMessage) map[str
 	var args struct {
 		Ref string `json:"ref"`
 	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
+	if err := strictUnmarshal(argsRaw, &args); err != nil {
 		return toolError("get_board: malformed arguments: " + err.Error())
 	}
 	if args.Ref == "" {

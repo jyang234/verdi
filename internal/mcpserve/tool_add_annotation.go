@@ -41,7 +41,7 @@ type addAnnotationArgs struct {
 // unresolvable target is rejected before anything is written.
 func (b *Backend) AddAnnotation(ctx context.Context, argsRaw json.RawMessage) map[string]any {
 	var args addAnnotationArgs
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
+	if err := strictUnmarshal(argsRaw, &args); err != nil {
 		return toolError("add_annotation: malformed arguments: " + err.Error())
 	}
 	if args.Author == "" {

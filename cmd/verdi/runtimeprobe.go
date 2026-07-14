@@ -30,6 +30,19 @@
 // governs both shapes: a stamp of source: ci requires a genuine, detected CI
 // environment (internal/lint.ReadCIEnv) and no --force-local override;
 // anything else stamps source: local, folded only under --preview.
+//
+// TRANSCRIPTION semantic (spec/fail-loud ac-2): verdi STAMPS an externally
+// computed verdict here; it does not compute one. So emission SUCCESS is
+// exit 0 REGARDLESS of the stamped verdict's value — a --verdict fail run
+// that successfully writes its record is exit 0, exactly like a --verdict
+// pass run; only a failure to write the record (a dangling AC, an I/O
+// error, refusing to run outside CI) is exit 2. Contrast sync.go's
+// --produce path: runProduce's evaluateBundle computes its OWN verdicts
+// from the bundle it just assembled and surfaces THAT verdict as exit 1 on
+// failure — a genuinely different contract for a genuinely different
+// producer. Here the fail verdict itself is real signal, but it is
+// consumed downstream by the fold (evidence.Fold reading runtime.json),
+// never by this producer's own exit code.
 package main
 
 import (

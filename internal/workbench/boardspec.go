@@ -9,6 +9,7 @@ package workbench
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -256,7 +257,7 @@ func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 			return
 		}
 		proj, git, _, err := s.loadBoard(r.Context(), r.PathValue("name"))
-		if err == ErrBoardNotFound {
+		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
 		}
@@ -285,7 +286,7 @@ func (s *boardSpecServer) boardSpecFragmentHandler() http.HandlerFunc {
 			return
 		}
 		proj, git, _, err := s.loadBoard(r.Context(), r.PathValue("name"))
-		if err == ErrBoardNotFound {
+		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
 		}
