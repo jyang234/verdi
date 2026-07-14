@@ -4,7 +4,7 @@ kind: spec
 title: "Badge Computes"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-14
 problem: { text: "the store already computes what the wall should wear — VL lint findings, the spec-stale and pending-supersession ladder flags — but the board projection carries none of them: no compute layer runs those existing computations at render time, so no card or case file can badge, and any badge added without a derivation record would be an unexplained verdict (wall-receipts dc-2: exactly what trains authors to game it)", anchor: "#problem" }
 outcome: { text: "a badge compute layer in the board's I/O enrichment tier runs the existing computes — VL findings scoped to this spec through the dc-3 partition, spec-stale and pending-supersession through the exact code path the dex story-lens uses — and attaches every result to the projection as a badge carrying its full derivation record (rule id, pinned inputs with revisions, firing records), rendered as chips on cards and stamps on the case file, disclosed and never blocking", anchor: "#outcome" }

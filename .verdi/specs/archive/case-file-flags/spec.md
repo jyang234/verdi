@@ -4,7 +4,7 @@ kind: spec
 title: "Case File Flags"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-17
 problem: { text: "the case file — the wall's spec-level surface — wears no spec-level state: the spec-stale and pending-supersession ladder flags exist (the dex story-lens renders them) but the board's case file does not, and nothing observes an acceptance-criteria column outgrowing a screen, so the two spec-level truths an author most needs while authoring are invisible exactly where authoring happens", anchor: "#problem" }
 outcome: { text: "spec-stale and pending-supersession render as case-file stamps computed by the exact code path the dex story-lens uses (three-valued: flagged, unflagged, or disclosed-unproven), and an acceptance-criteria column whose estimated rendered height at the declared reference-viewport constant exceeds it raises a size-smell badge — an observation, never a rule, with a derivation that discloses its proxy and never cites a client viewport measurement", anchor: "#outcome" }

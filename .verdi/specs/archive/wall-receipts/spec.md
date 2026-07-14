@@ -4,7 +4,7 @@ kind: spec
 title: "Wall Receipts"
 owners: [platform-team]
 class: feature
-status: accepted-pending-build
+status: closed
 problem: { text: "the wall computes nothing it knows: lint findings, ladder flags, and evidence folds all exist, but no card carries them, so readiness is discovered at MR time and an unexplained verdict trains authors to game the badge rather than fix the cause", anchor: problem }
 outcome: { text: "every computed claim on the wall is a badge that opens its derivation — the rule, the pinned inputs, the firing records — and readiness is ambient during authoring, never a surprise at review", anchor: outcome }
 acceptance_criteria:
