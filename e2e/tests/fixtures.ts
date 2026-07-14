@@ -483,8 +483,9 @@ export const DIAGRAM_RAIL_FINDINGS: ReadonlyArray<[string, string]> = [
 
 // The e2e inspection server (cmd/e2eharness/inspect.go): the suite's
 // read-only window into the serving checkout's git state and the managed
-// worktrees' files. Loopback only; it mutates nothing.
-export const INSPECT_URL = "http://127.0.0.1:4178";
+// worktrees' files. Loopback only; it mutates nothing. :4178 by default
+// (VERDI_E2E_PORT_BASE, D6-28, shifts it — see ../ports.ts).
+export const INSPECT_URL = `http://127.0.0.1:${resolvePorts().inspect}`;
 
 // Draft-board fixture branches (cmd/e2eharness/provision_draftboards.go):
 // each name is both the design branch's slug (design/<name>) and its

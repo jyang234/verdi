@@ -39,9 +39,10 @@ import (
 	"github.com/jyang234/verdi/internal/forge/fake"
 )
 
-// workbenchAddr/dexAddr/controlAddr are resolved once, at the top of run(),
-// from resolvePorts (ports.go) — VERDI_E2E_PORT_BASE (D6-28) shifts all
-// three in lockstep; unset, they are the historical 4173/4174/4177.
+// workbenchAddr/dexAddr/controlAddr/inspectAddr are resolved once, at the
+// top of run(), from resolvePorts (ports.go) — VERDI_E2E_PORT_BASE (D6-28)
+// shifts all four in lockstep; unset, they are the historical
+// 4173/4174/4177/4178.
 
 func main() {
 	if err := run(); err != nil {
@@ -51,7 +52,7 @@ func main() {
 
 func run() error {
 	p := resolvePorts(os.Getenv)
-	workbenchAddr, dexAddr, controlAddr := p.workbench, p.dex, p.control
+	workbenchAddr, dexAddr, controlAddr, inspectAddr := p.workbench, p.dex, p.control, p.inspect
 
 	moduleRoot, err := os.Getwd()
 	if err != nil {

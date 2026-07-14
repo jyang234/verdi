@@ -9,7 +9,7 @@ import (
 
 func TestResolvePorts_Unset(t *testing.T) {
 	got := resolvePorts(func(string) string { return "" })
-	want := ports{workbench: "127.0.0.1:4173", dex: "127.0.0.1:4174", control: "127.0.0.1:4177"}
+	want := ports{workbench: "127.0.0.1:4173", dex: "127.0.0.1:4174", control: "127.0.0.1:4177", inspect: "127.0.0.1:4178"}
 	if got != want {
 		t.Fatalf("resolvePorts(unset) = %+v, want %+v", got, want)
 	}
@@ -17,14 +17,14 @@ func TestResolvePorts_Unset(t *testing.T) {
 
 func TestResolvePorts_HappyOverride(t *testing.T) {
 	got := resolvePorts(stubGetenv(portBaseEnvVar, "4300"))
-	want := ports{workbench: "127.0.0.1:4300", dex: "127.0.0.1:4301", control: "127.0.0.1:4302"}
+	want := ports{workbench: "127.0.0.1:4300", dex: "127.0.0.1:4301", control: "127.0.0.1:4302", inspect: "127.0.0.1:4303"}
 	if got != want {
 		t.Fatalf("resolvePorts(4300) = %+v, want %+v", got, want)
 	}
 }
 
 func TestResolvePorts_GarbageFailsClosedToDefaults(t *testing.T) {
-	defaults := ports{workbench: "127.0.0.1:4173", dex: "127.0.0.1:4174", control: "127.0.0.1:4177"}
+	defaults := ports{workbench: "127.0.0.1:4173", dex: "127.0.0.1:4174", control: "127.0.0.1:4177", inspect: "127.0.0.1:4178"}
 
 	cases := []struct {
 		name string
@@ -61,7 +61,7 @@ func TestResolvePorts_GarbageFailsClosedToDefaults(t *testing.T) {
 
 func TestResolvePorts_OtherEnvVarsIgnored(t *testing.T) {
 	got := resolvePorts(stubGetenv("SOME_OTHER_VAR", "4300"))
-	want := ports{workbench: "127.0.0.1:4173", dex: "127.0.0.1:4174", control: "127.0.0.1:4177"}
+	want := ports{workbench: "127.0.0.1:4173", dex: "127.0.0.1:4174", control: "127.0.0.1:4177", inspect: "127.0.0.1:4178"}
 	if got != want {
 		t.Fatalf("resolvePorts(irrelevant env) = %+v, want %+v", got, want)
 	}

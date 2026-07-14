@@ -22,9 +22,11 @@ import (
 	"strings"
 )
 
-// inspectAddr is the inspection server's fixed loopback address, bound by
-// e2e/tests/fixtures.ts (INSPECT_URL).
-const inspectAddr = "127.0.0.1:4178"
+// The inspection server's address is resolved once, in run(), from
+// resolvePorts (ports.go) — VERDI_E2E_PORT_BASE (D6-28) shifts it in
+// lockstep with the workbench/dex/control trio; unset, it is the
+// historical 127.0.0.1:4178 that e2e/tests/fixtures.ts's INSPECT_URL
+// falls back to.
 
 // inspectHandler wires the two read-only endpoints onto a fresh mux.
 func inspectHandler(storeRoot string) http.Handler {
