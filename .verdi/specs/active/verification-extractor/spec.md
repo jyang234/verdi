@@ -24,7 +24,6 @@ decisions:
 constraints:
   - { id: co-1, text: "no LLM anywhere in this story's code (parent co-1): grammar parsing, identity normalization, truth regeneration, the three-way comparison, witness discovery, and the digest comparison are all pure/deterministic or hermetically-exec'd Go", anchor: co-1 }
   - { id: co-2, text: "no network in any test (parent co-2): flowmap exec is tested through internal/upstream's existing fake-Runner seam over testdata/svcfix-canned captures, never a live binary; witness-commit discovery is tested over a fixturegit repository with a scripted, known history", anchor: co-2 }
-frozen: { at: 2026-07-14, commit: e65c4341b3724b921786cc764fbc98e854b7033c }
 ---
 # Verification Extractor
 
