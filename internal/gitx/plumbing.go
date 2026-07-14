@@ -70,7 +70,7 @@ func BuildTreeWithFile(ctx context.Context, dir, baseTree, path, blobSHA string)
 		_ = os.Remove(idxPath)
 		return "", fmt.Errorf("gitx: BuildTreeWithFile: closing scratch index: %w", cerr)
 	}
-	defer os.Remove(idxPath)
+	defer func() { _ = os.Remove(idxPath) }()
 	env := []string{"GIT_INDEX_FILE=" + idxPath}
 
 	if _, err := runStdin(ctx, dir, env, nil, "read-tree", baseTree); err != nil {

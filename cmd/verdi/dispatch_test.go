@@ -9,19 +9,19 @@ import (
 // TestRun_KnownVerbs is the happy path: every spec-named verb still
 // stubbed at this phase parses and exits 2 with a one-line "not
 // implemented" message on stderr. design/accept/feature graduated to real
-// implementations in Phase 7, align/gate in Phase 8 — see
-// TestRun_DesignDispatchesToRealVerb (design_test.go),
+// implementations in Phase 7, align/gate in Phase 8, close in round 6 —
+// see TestRun_DesignDispatchesToRealVerb (design_test.go),
 // TestRun_AcceptDispatchesToRealVerb (accept_test.go),
-// TestRun_FeatureDispatchesToRealVerb (feature_test.go), and
-// TestRun_AlignDispatchesToRealVerb/TestRun_GateDispatchesToRealVerb below
-// for their dispatch coverage, matching the lint/dex pattern. Table-driven
-// per CLAUDE.md's testing rules.
+// TestRun_FeatureDispatchesToRealVerb (feature_test.go),
+// TestRun_AlignDispatchesToRealVerb/TestRun_GateDispatchesToRealVerb/
+// TestRun_CloseDispatchesToRealVerb below for their dispatch coverage,
+// matching the lint/dex pattern. Table-driven per CLAUDE.md's testing
+// rules.
 func TestRun_KnownVerbs(t *testing.T) {
 	cases := []struct {
 		verb       string
 		wantSubstr string
 	}{
-		{"close", "not implemented (out of v0 scope)"},
 		{"waivers", "not implemented (out of v0 scope)"},
 		{"verify-artifact", "not implemented (out of v0 scope)"},
 		{"gc", "not implemented (out of v0 scope)"},
@@ -88,6 +88,25 @@ func TestRun_GateDispatchesToRealVerb(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "not implemented") {
 		t.Fatalf("stderr = %q, want a real store-root error, not the generic stub message", stderr.String())
+	}
+}
+
+// TestRun_CloseDispatchesToRealVerb proves `run` routes "close" to the real
+// implementation (close.go, round 6/spec/close-verb) rather than the
+// generic phase-stub path (I-23's old "not implemented (out of v0 scope)"):
+// a bare "close" (no story/spec argument) must produce close's own usage
+// message, never the generic stub message.
+func TestRun_CloseDispatchesToRealVerb(t *testing.T) {
+	var stderr bytes.Buffer
+	got := run([]string{"close"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([close]) = %d, want 2 (usage error, no story/spec argument given)", got)
+	}
+	if strings.Contains(stderr.String(), "not implemented") {
+		t.Fatalf("stderr = %q, want close's own usage message, not the generic stub message", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "usage: verdi close") {
+		t.Fatalf("stderr = %q, want it to mention 'usage: verdi close'", stderr.String())
 	}
 }
 

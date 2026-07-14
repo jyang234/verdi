@@ -34,9 +34,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/OWNER/verdi/internal/dex"
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/dex"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/fake"
 )
 
 const (
@@ -67,8 +67,15 @@ func run() error {
 	}
 	defer func() { _ = os.RemoveAll(scratch) }()
 
+	// Signal handling installs before build/provisioning touches the
+	// scratch dir: an interrupt from here on cancels ctx, which every
+	// exec/HTTP call below observes, instead of killing the process
+	// outright and skipping the deferred RemoveAll above.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	binPath := filepath.Join(scratch, "verdi")
-	if err := buildBinary(moduleRoot, binPath); err != nil {
+	if err := buildBinary(ctx, moduleRoot, binPath); err != nil {
 		return fmt.Errorf("building verdi binary: %w", err)
 	}
 
@@ -87,7 +94,7 @@ func run() error {
 	}
 
 	dexOut := filepath.Join(scratch, "dexsite")
-	if err := dex.Build(context.Background(), dex.Options{Root: storeRoot, OutDir: dexOut, Forge: supersessionForge, DefaultBranch: "main"}); err != nil {
+	if err := dex.Build(ctx, dex.Options{Root: storeRoot, OutDir: dexOut, Forge: supersessionForge, DefaultBranch: "main"}); err != nil {
 		return fmt.Errorf("building dex site: %w", err)
 	}
 
@@ -95,7 +102,7 @@ func run() error {
 	// so the static site keeps reflecting main while `verdi serve`'s
 	// working tree sits on the design branch (authoring mode's branch
 	// state — 05 §Workbench "Two modes").
-	feedPath, err := provisionBoardV2(scratch, storeRoot)
+	feedPath, err := provisionBoard(scratch, storeRoot)
 	if err != nil {
 		return fmt.Errorf("provisioning v1 board fixtures: %w", err)
 	}
@@ -108,7 +115,12 @@ func run() error {
 	go func() { _ = dexSrv.Serve(dexLn) }()
 	log.Printf("e2eharness: dex site at http://%s (source: %s)", dexAddr, dexOut)
 
-	serveCmd := exec.Command(binPath, "serve", "--http", workbenchAddr)
+	serveCmd := exec.CommandContext(ctx, binPath, "serve", "--http", workbenchAddr)
+	// A graceful stop on interrupt — SIGTERM, then up to 5s before the
+	// stdlib force-kills — rather than exec.CommandContext's default of
+	// killing the subprocess the instant ctx is done.
+	serveCmd.Cancel = func() error { return serveCmd.Process.Signal(syscall.SIGTERM) }
+	serveCmd.WaitDelay = 5 * time.Second
 	serveCmd.Dir = storeRoot
 	// The hermetic review-mode feed (workbench.CommentFeed's canned-file
 	// implementation): REVIEW_SPEC reads as under MR review, with the
@@ -121,25 +133,15 @@ func run() error {
 	}
 	log.Printf("e2eharness: verdi serve (pid %d) at http://%s (store: %s)", serveCmd.Process.Pid, workbenchAddr, storeRoot)
 
-	if err := waitHealthy("http://"+workbenchAddr+"/healthz", 20*time.Second); err != nil {
+	if err := waitHealthy(ctx, "http://"+workbenchAddr+"/healthz", 20*time.Second); err != nil {
 		_ = serveCmd.Process.Kill()
 		return fmt.Errorf("waiting for verdi serve to become healthy: %w", err)
 	}
 	log.Println("e2eharness: ready")
 
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-	<-sigc
+	<-ctx.Done()
 	log.Println("e2eharness: signal received, shutting down")
-
-	_ = serveCmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() { _ = serveCmd.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		_ = serveCmd.Process.Kill()
-	}
+	_ = serveCmd.Wait()
 	_ = dexSrv.Close()
 	return nil
 }
@@ -162,20 +164,32 @@ func seedSupersessionForge(moduleRoot string) (*fake.Forge, error) {
 // buildBinary builds ./cmd/verdi from moduleRoot into out (build-then-exec,
 // mirroring the Makefile's lint-store target — the e2e suite exercises the
 // real binary, never `go run`).
-func buildBinary(moduleRoot, out string) error {
-	cmd := exec.Command("go", "build", "-o", out, "./cmd/verdi")
+func buildBinary(ctx context.Context, moduleRoot, out string) error {
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", out, "./cmd/verdi")
 	cmd.Dir = moduleRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
-// waitHealthy polls url until it returns 200 or timeout elapses.
-func waitHealthy(url string, timeout time.Duration) error {
+// waitHealthy polls url until it returns 200, ctx is done, or timeout
+// elapses. Each poll is bounded by its own client timeout rather than
+// blocking indefinitely on a wedged connection.
+func waitHealthy(ctx context.Context, url string, timeout time.Duration) error {
+	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(url)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return fmt.Errorf("building healthz request: %w", err)
+		}
+		resp, err := client.Do(req)
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {

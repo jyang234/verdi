@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // LayoutVersion is the store layout schema's version segment, embedded in

@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // CIEnv is the generic CI environment signal this package reads directly:

@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 func sampleObjects() []Object {

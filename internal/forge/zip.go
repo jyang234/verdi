@@ -6,60 +6,109 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strings"
 )
 
-// bundleFileNames are the four files a verdi-evidence CI artifact must
-// contain (01 §Directory layout's derived tree), matched by base name
-// regardless of the directory prefix the archive stores them under —
-// verdi's own CI templates zip the derived/<ref-slug>/<commit>/ directory
-// as-is, but this package does not need to recompute the ref slug to find
-// them.
-var bundleFileNames = []string{"verdicts.json", "tests.json", "review.json", "boundary-diff.json"}
+// bundleFileNames are the derived bundle files a verdi-evidence CI artifact
+// carries (01 §Directory layout's derived tree). Only entries whose base
+// name is one of these are preserved from the artifact zip; regenerated
+// views (derived/<key>/<commit>/views/…) and any other incidental file are
+// ignored, keeping the fetched-and-written tree bounded to what a fold or
+// sync's own evaluation reads.
+//
+// runtime.json (spec/runtime-evidence dc-2) is a sibling of verdicts.json,
+// carrying kind: runtime records a real service's scheduled probe writes
+// per owning-spec key (internal/runtime); recognizing it here is what lets
+// `verdi sync`'s forge fetch carry it through DerivedTree unchanged, same as
+// every other bundle file — no new forge-port method needed.
+var bundleFileNames = map[string]bool{
+	"verdicts.json":      true,
+	"tests.json":         true,
+	"review.json":        true,
+	"boundary-diff.json": true,
+	"runtime.json":       true,
+}
 
-// ExtractBundleFromZip reads a verdi-evidence artifact zip (shared by the
+// ExtractTreeFromZip reads a verdi-evidence artifact zip (shared by the
 // gitlab and github adapters, since verdi's own CI templates produce the
-// same archive shape on both forges) and returns the four bundle files'
-// raw content. It fails loudly if any of the four is missing or
-// duplicated — a partial or malformed artifact is never silently
-// accepted.
-func ExtractBundleFromZip(data []byte) (*EvidenceBundle, error) {
+// same archive shape on both forges) and returns its full DerivedTree: each
+// recognized bundle file's raw content keyed by its path relative to
+// data/derived/.
+//
+// The artifact is the WHOLE derived/ subtree CI uploaded for one
+// (ref, commit) run (verify.yml: `path: .verdi/data/derived/`), so it
+// legitimately carries MORE THAN ONE verdicts.json — one per per-spec
+// subdir selfevidence.go wrote, plus the branch-keyed per-service bundle.
+// Preserving each at its own key (rather than collapsing to a single
+// four-file bundle, the pre-fix behavior that both dropped the per-spec
+// subdirs and errored on the duplicate) is exactly what lets a fetched
+// bundle reach the fold's per-spec readers.
+//
+// Keys are normalized to be relative to derived/: a leading "derived/"
+// path prefix (present when CI zips the parent of derived/, absent when it
+// zips derived/'s contents) is stripped so the returned key is always the
+// <key>/<commit>/<file> form readers and sync write under
+// .verdi/data/derived/. Entries that would escape derived/ (absolute paths
+// or any ".." segment — a zip-slip attempt) are rejected loudly. An archive
+// carrying no recognized bundle file at all is an error: a verdi-evidence
+// artifact always has at least one verdicts.json.
+func ExtractTreeFromZip(data []byte) (DerivedTree, error) {
 	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, fmt.Errorf("forge: reading evidence bundle zip: %w", err)
 	}
 
-	var bundle EvidenceBundle
-	targets := map[string]*[]byte{
-		"verdicts.json":      &bundle.Verdicts,
-		"tests.json":         &bundle.Tests,
-		"review.json":        &bundle.Review,
-		"boundary-diff.json": &bundle.BoundaryDiff,
-	}
-	found := make(map[string]bool, len(bundleFileNames))
-
+	tree := make(DerivedTree)
 	for _, f := range r.File {
-		base := path.Base(f.Name)
-		target, ok := targets[base]
-		if !ok {
+		if f.FileInfo().IsDir() {
 			continue
 		}
-		if found[base] {
-			return nil, fmt.Errorf("forge: evidence bundle zip contains more than one %s", base)
+		if !bundleFileNames[path.Base(f.Name)] {
+			continue
+		}
+		key, err := derivedRelKey(f.Name)
+		if err != nil {
+			return nil, err
+		}
+		if _, dup := tree[key]; dup {
+			return nil, fmt.Errorf("forge: evidence bundle zip contains more than one entry for key %q", key)
 		}
 		content, err := readZipFile(f)
 		if err != nil {
-			return nil, fmt.Errorf("forge: reading %s from evidence bundle zip: %w", base, err)
+			return nil, fmt.Errorf("forge: reading %s from evidence bundle zip: %w", f.Name, err)
 		}
-		*target = content
-		found[base] = true
+		tree[key] = content
 	}
 
-	for _, name := range bundleFileNames {
-		if !found[name] {
-			return nil, fmt.Errorf("forge: evidence bundle zip is missing %s", name)
+	if len(tree) == 0 {
+		return nil, fmt.Errorf("forge: evidence bundle zip carries no recognized derived file (verdicts.json/tests.json/review.json/boundary-diff.json/runtime.json)")
+	}
+	return tree, nil
+}
+
+// derivedRelKey normalizes a zip entry name to a store-relative derived key
+// (relative to data/derived/), rejecting any path that would escape that
+// directory.
+func derivedRelKey(name string) (string, error) {
+	// Zip paths are conventionally slash-separated (archive/zip); normalize
+	// any backslash first. Reject any ".." segment in the RAW entry path
+	// before path.Clean can silently collapse it into an in-bounds path —
+	// a traversal attempt must fail loudly, never be quietly contained.
+	slashed := strings.ReplaceAll(name, "\\", "/")
+	for _, seg := range strings.Split(slashed, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("forge: evidence bundle zip entry %q escapes derived/ (rejected)", name)
 		}
 	}
-	return &bundle, nil
+	// Drop any "./" noise (path.Clean), then a leading slash and a single
+	// leading "derived/" prefix, so the key is always relative to derived/.
+	clean := path.Clean(slashed)
+	clean = strings.TrimPrefix(clean, "/")
+	clean = strings.TrimPrefix(clean, "derived/")
+	if clean == "" || clean == "." {
+		return "", fmt.Errorf("forge: evidence bundle zip entry %q has no path under derived/", name)
+	}
+	return clean, nil
 }
 
 func readZipFile(f *zip.File) ([]byte, error) {

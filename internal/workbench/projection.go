@@ -14,8 +14,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardlayout"
 )
 
 // boardModeKind is the board's mode, keyed by branch state (05
@@ -42,6 +42,36 @@ type cardView struct {
 	X        float64            `json:"x"`
 	Y        float64            `json:"y"`
 	Anchored []reviewStickyView `json:"anchored,omitempty"`
+	// Obligations is a STORY AC card's evidence-obligation disclosures
+	// (spec/obligation-wall ac-2/dc-3): one entry PER DECLARED evidence kind,
+	// each carrying either that kind's authored obligation (title + prose) or
+	// a disclosed "no obligation" marker (dc-2). Empty on every non-AC card
+	// and on every non-story wall (a feature AC wears its coverage receipt
+	// instead). It is a STORE-DERIVED enrichment — attached by
+	// attachObligations (boardspec.go) from the one loader both the board and
+	// `verdi matrix` consume (evidence.Obligations, dc-1: "not two readers"),
+	// NOT a projection of buildProjection's four in-memory inputs, which is
+	// why it is populated after buildProjection returns (the same posture
+	// proj.Notices takes). JSON-tagged because get_board (internal/mcpserve)
+	// re-marshals cardView as its wire result: an agent reads the same
+	// obligations a human sees on the wall.
+	Obligations []obligationView `json:"obligations,omitempty"`
+}
+
+// obligationView is one declared evidence kind's obligation as it renders on
+// a STORY AC card (spec/obligation-wall ac-2). Present is true when an
+// obligation has been authored for that kind, carrying its Title — the
+// specific demand, read from the obligation's own content, never recovered
+// from verdi.bindings.yaml (feature co-3, legible-without-the-sidecar) — and
+// its prose Body. Present is false for a declared kind with no obligation
+// yet: the card shows a disclosed "no obligation" badge (dc-2, the
+// wall-receipts posture — disclosure, never refusal; the activation gate is
+// what refuses at accept, so a draft in progress still renders legibly).
+type obligationView struct {
+	Kind    string `json:"kind"`
+	Title   string `json:"title,omitempty"`
+	Body    string `json:"body,omitempty"`
+	Present bool   `json:"present"`
 }
 
 // refCardView is a reference card — an edge target outside this spec,

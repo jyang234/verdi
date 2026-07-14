@@ -25,6 +25,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/jyang234/verdi/internal/atomicfile"
 )
 
 // GraduateStickies rewrites every annotation record in dir whose id is in
@@ -100,24 +102,8 @@ func graduateFile(path string, want map[string]bool) (int, error) {
 		return 0, nil
 	}
 
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".annotations.tmp-*")
-	if err != nil {
-		return 0, fmt.Errorf("boardio: creating temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, werr := tmp.Write(buf.Bytes()); werr != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return 0, fmt.Errorf("boardio: writing temp file: %w", werr)
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		_ = os.Remove(tmpName)
-		return 0, fmt.Errorf("boardio: closing temp file: %w", cerr)
-	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
-		_ = os.Remove(tmpName)
-		return 0, fmt.Errorf("boardio: renaming into place: %w", rerr)
+	if err := atomicfile.Write(path, buf.Bytes(), 0o600); err != nil {
+		return 0, fmt.Errorf("boardio: %w", err)
 	}
 	return changed, nil
 }

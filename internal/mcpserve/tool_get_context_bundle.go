@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/storyresolve"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
 // contextItem is one resolved pinned ref in a get_context_bundle result.
@@ -27,7 +27,7 @@ func (b *Backend) GetContextBundle(ctx context.Context, argsRaw json.RawMessage)
 		Refs []string `json:"refs"`
 		Spec string   `json:"spec"`
 	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
+	if err := strictUnmarshal(argsRaw, &args); err != nil {
 		return toolError("get_context_bundle: malformed arguments: " + err.Error())
 	}
 	if len(args.Refs) == 0 && args.Spec == "" {

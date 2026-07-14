@@ -2,8 +2,6 @@ package commitdesign
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardio"
-	"github.com/OWNER/verdi/internal/canonjson"
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/designscaffold"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // storyRefShapeRe mirrors internal/artifact's own (unexported) story-ref
@@ -185,7 +184,7 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 // criterion (artifact.SpecFrontmatter.Validate requires at least one),
 // and the dispositions block.
 func scaffoldSpec(specRef, storyRef, specName string, pins []artifact.Pin, dispositions []artifact.Disposition) string {
-	title := titleCase(specName)
+	title := designscaffold.HumanizeName(specName)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "---\nid: %s\nkind: spec\ntitle: %q\nowners: [unassigned]\nclass: feature\nstatus: draft\nstory: %s\n", specRef, title, storyRef)
@@ -210,19 +209,6 @@ func scaffoldSpec(specRef, storyRef, specName string, pins []artifact.Pin, dispo
 	return b.String()
 }
 
-// titleCase turns a kebab-case spec name into a human-readable title
-// placeholder ("stale-decline-v2" -> "Stale Decline V2").
-func titleCase(name string) string {
-	parts := strings.Split(name, "-")
-	for i, p := range parts {
-		if p == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
-	}
-	return strings.Join(parts, " ")
-}
-
 // boardContent is the hashable content of a board snapshot — pins,
 // stickies, and yarn only, never Frozen/Provenance (which would make the
 // digest self-referential).
@@ -240,12 +226,10 @@ type boardContent struct {
 // digests).
 func freezeBoard(board *artifact.Board, boardPath, commit, at string) (*artifact.Board, error) {
 	content := boardContent{Pins: board.Pins, Stickies: board.Stickies, Yarn: board.Yarn}
-	canon, err := canonjson.Marshal(content)
+	digest, err := canonjson.Digest(content)
 	if err != nil {
 		return nil, fmt.Errorf("computing board digest: %w", err)
 	}
-	sum := sha256.Sum256(canon)
-	digest := "sha256:" + hex.EncodeToString(sum[:])
 
 	inputs := []string{fmt.Sprintf("%s@%s", filepath.ToSlash(boardPath), commit)}
 	seen := map[string]bool{}

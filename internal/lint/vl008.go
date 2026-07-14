@@ -3,7 +3,7 @@ package lint
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // vl008 enforces "generated provenance in committed zone ⇒ on

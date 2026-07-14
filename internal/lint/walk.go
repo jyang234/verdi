@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // knownTopLevelEntries is D1's fixed set of names legal directly under
@@ -21,6 +21,11 @@ import (
 // exit criterion (a real reaffirmation record under .verdi/reaffirmations/
 // tripped a spurious VL-007 finding); fixed here rather than worked around,
 // since the gap is in the rule's own enumeration, not the fixture.
+//
+// "obligations" (spec/obligation-artifact DC-2, evidence-obligations wave
+// 1) is the obligation kind's own top-level directory, added alongside its
+// decoder — 01 §Directory layout's ".verdi/obligations/<story-ref-slug>/
+// <ac-id>--<for-kind>.md".
 var knownTopLevelEntries = map[string]bool{
 	"verdi.yaml":     true,
 	".gitignore":     true,
@@ -31,35 +36,19 @@ var knownTopLevelEntries = map[string]bool{
 	"waivers":        true,
 	"conflicts":      true,
 	"reaffirmations": true,
+	"obligations":    true,
 	"bin":            true,
 	"data":           true,
 }
 
 // classifyArtifactPath maps a .verdi/-relative slash path to the artifact
-// kind it should decode as, mirroring internal/index/walk.go's
-// classifyArtifactPath (duplicated rather than imported: that function is
-// unexported, and lint's tolerant walk needs different failure handling —
-// it never aborts on a single bad file).
+// kind it should decode as. It is a thin call into the shared
+// internal/artifact.ClassifyPath table (spec/shared-homes ac-4, dc-3) —
+// index/walk.go's classifyArtifactPath calls the same table. The walks
+// stay separate functions because lint's tolerant walk needs different
+// failure handling than index's: it never aborts on a single bad file.
 func classifyArtifactPath(rel string) (kind string, ok bool) {
-	switch {
-	case strings.HasPrefix(rel, "adr/") && strings.HasSuffix(rel, ".md"):
-		return "adr", true
-	case strings.HasPrefix(rel, "diagrams/") && strings.HasSuffix(rel, ".mermaid"):
-		return "diagram", true
-	case strings.HasPrefix(rel, "attestations/") && strings.HasSuffix(rel, ".md"):
-		return "attestation", true
-	case strings.HasPrefix(rel, "waivers/") && strings.HasSuffix(rel, ".md"):
-		return "waiver", true
-	case strings.HasPrefix(rel, "conflicts/") && strings.HasSuffix(rel, ".md"):
-		return "conflict", true
-	case strings.HasPrefix(rel, "reaffirmations/") && strings.HasSuffix(rel, ".md"):
-		return "reaffirmation", true
-	case (strings.HasPrefix(rel, "specs/active/") || strings.HasPrefix(rel, "specs/archive/")) &&
-		strings.HasSuffix(rel, "/spec.md"):
-		return "spec", true
-	default:
-		return "", false
-	}
+	return artifact.ClassifyPath(rel)
 }
 
 // walkDocuments walks root/.verdi (skipping data/) and tolerantly decodes
@@ -187,6 +176,15 @@ func decodeDocument(doc *Document) {
 			return
 		}
 		doc.Reaffirmation = &fmv
+		doc.Base = fmv.Base
+
+	case "obligation":
+		var fmv artifact.ObligationFrontmatter
+		if err := artifact.DecodeStrict(fm, &fmv); err != nil {
+			doc.DecodeErr = err
+			return
+		}
+		doc.Obligation = &fmv
 		doc.Base = fmv.Base
 
 	default:

@@ -22,8 +22,8 @@ import (
 	"io"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/decisionsweep"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/decisionsweep"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // cmdAudit is `verdi audit`'s entry point, invoked by dispatch.go.

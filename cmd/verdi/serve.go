@@ -20,9 +20,9 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/OWNER/verdi/internal/mcpserve"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/workbench"
+	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 // defaultWorkbenchAddr is the workbench HTTP listener's default bind
@@ -156,6 +156,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "serve: workbench at http://%s\n", httpLn.Addr())
 
 	srv := mcpserve.NewServer(root)
+	srv.ErrLog = os.Stderr // spec/fail-loud dc-3: a dropped socket connection leaves a trace, matching mcp.go's stdio scrutiny
 	// Best-effort (V1-P7): see mcp.go's identical comment — a
 	// missing/unreachable forge never blocks `verdi serve` from starting;
 	// list_annotations' review-sticky mirrored population (05 §MCP

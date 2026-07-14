@@ -6,20 +6,32 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
-// anyStatusLineRe / supersededStatusLineRe recognize a frontmatter status
-// line and, specifically, a `status: superseded` one — the base and head
-// sides of VL-010's round-5 status-only supersession exception (D-12): a
-// diff that touches an otherwise-frozen spec on ONLY its status line,
-// flipping it to `superseded`, is legal (the accept ritual's predecessor
-// flip, cmd/verdi/accept.go), alongside the pre-existing active→archive
-// rename exception.
+// The status-line regexes below recognize a frontmatter status line and,
+// specifically, the base/head sides of VL-010's two status-only exceptions on
+// an otherwise-frozen spec:
+//
+//   - Round-5 supersession (D-12): a diff that touches an otherwise-frozen
+//     spec IN PLACE on ONLY its status line, flipping it to `superseded`, is
+//     legal (the accept ritual's predecessor flip, cmd/verdi/accept.go).
+//   - Round-6 closure (D6-11): a spec.md moving specs/active→specs/archive
+//     while its status line flips `accepted-pending-build`→`closed` and
+//     nothing else changes is legal (the close ritual's archive step,
+//     cmd/verdi/close.go, implementing 02 §Kind registry's `… → closed(archive)`
+//     transition). The move is no longer the byte-identical R100 rename the
+//     pure-rename exception covers, so this narrower exception admits it.
+//
+// Both reuse one line-diff core (statusOnlyFlip): exactly one changed line,
+// that line a status line matching the expected base pattern, its head
+// counterpart matching the expected terminal status.
 var (
-	anyStatusLineRe        = regexp.MustCompile(`^status:\s*"?[a-z][a-z-]*"?\s*$`)
-	supersededStatusLineRe = regexp.MustCompile(`^status:\s*"?superseded"?\s*$`)
+	anyStatusLineRe             = regexp.MustCompile(`^status:\s*"?[a-z][a-z-]*"?\s*$`)
+	acceptedPendingStatusLineRe = regexp.MustCompile(`^status:\s*"?accepted-pending-build"?\s*$`)
+	supersededStatusLineRe      = regexp.MustCompile(`^status:\s*"?superseded"?\s*$`)
+	closedStatusLineRe          = regexp.MustCompile(`^status:\s*"?closed"?\s*$`)
 )
 
 // vl010 enforces "frozen artifacts are immutable: any diff touching a
@@ -94,10 +106,20 @@ func (vl010) Check(in *RunInput) []Finding {
 		case "D":
 			findings = append(findings, Finding{Rule: "VL-010", Path: e.Path, Message: fmt.Sprintf("frozen file deleted between %s and HEAD", in.LintCtx.DiffBase)})
 		case "R":
-			if e.Pure() && isActiveArchiveMove(e.OldPath, e.Path) {
-				continue // 02's sole legal exception
+			if isActiveArchiveMove(e.OldPath, e.Path) {
+				// Byte-identical move (the other quartet members, and any spec
+				// already at status: closed before the move).
+				if e.Pure() {
+					continue
+				}
+				// Round-6 (D6-11): spec.md's status-only accepted-pending-build
+				// →closed flip performed AS the archive move (cmd/verdi/close.go).
+				// The only content change the move may carry; anything else fails.
+				if ok, cerr := isStatusOnlyClosedArchiveFlip(in.Ctx, in.Root, in.LintCtx.DiffBase, e.OldPath, e.Path); cerr == nil && ok {
+					continue
+				}
 			}
-			findings = append(findings, Finding{Rule: "VL-010", Path: e.Path, Message: fmt.Sprintf("frozen file renamed from %s (not a pure active->archive move) between %s and HEAD", e.OldPath, in.LintCtx.DiffBase)})
+			findings = append(findings, Finding{Rule: "VL-010", Path: e.Path, Message: fmt.Sprintf("frozen file renamed from %s (not a pure active->archive move, nor a status-only accepted-pending-build->closed archive flip) between %s and HEAD", e.OldPath, in.LintCtx.DiffBase)})
 		}
 	}
 	return findings
@@ -126,12 +148,10 @@ func baseFrozen(ctx context.Context, root, diffBase, basePath string) (bool, err
 
 // isStatusOnlySupersededFlip reports whether the change to path between
 // diffBase and HEAD is exactly a status-line flip to `superseded` and
-// nothing else (D-12). It reads both historical sides via `git show`,
-// compares them line by line, and returns true only when precisely one line
-// differs, that line is a frontmatter status line on the base, and its HEAD
-// counterpart reads `status: superseded`. Any read failure is surfaced as an
-// error so the caller can fall through to the ordinary frozen-modification
-// finding rather than silently admitting the diff.
+// nothing else (D-12) — the round-5 in-place supersession exception (path
+// unchanged on both sides). Any read failure is surfaced as an error so the
+// caller can fall through to the ordinary frozen-modification finding rather
+// than silently admitting the diff.
 func isStatusOnlySupersededFlip(ctx context.Context, root, diffBase, path string) (bool, error) {
 	baseContent, err := gitx.Show(ctx, root, diffBase, path)
 	if err != nil {
@@ -141,10 +161,38 @@ func isStatusOnlySupersededFlip(ctx context.Context, root, diffBase, path string
 	if err != nil {
 		return false, err
 	}
+	return statusOnlyFlip(baseContent, headContent, anyStatusLineRe, supersededStatusLineRe), nil
+}
+
+// isStatusOnlyClosedArchiveFlip reports whether the rename oldPath→newPath
+// between diffBase and HEAD carries exactly one content change: the spec's
+// status line flipping `accepted-pending-build`→`closed` (D6-11) — the
+// round-6 archive-move exception (the base holds the active/ copy at oldPath,
+// HEAD the archive/ copy at newPath). Any read failure is surfaced as an
+// error so the caller falls through to the ordinary finding.
+func isStatusOnlyClosedArchiveFlip(ctx context.Context, root, diffBase, oldPath, newPath string) (bool, error) {
+	baseContent, err := gitx.Show(ctx, root, diffBase, oldPath)
+	if err != nil {
+		return false, err
+	}
+	headContent, err := gitx.Show(ctx, root, "HEAD", newPath)
+	if err != nil {
+		return false, err
+	}
+	return statusOnlyFlip(baseContent, headContent, acceptedPendingStatusLineRe, closedStatusLineRe), nil
+}
+
+// statusOnlyFlip is the shared core of VL-010's two status-only exceptions
+// (D-12 superseded, D6-11 closed): it compares baseContent and headContent
+// line by line and returns true only when precisely one line differs, that
+// line matches baseStatusRe on the base, and its head counterpart matches
+// headStatusRe. Everything else must be byte-identical — the flip is the sole
+// admissible content change on an otherwise-frozen spec.
+func statusOnlyFlip(baseContent, headContent []byte, baseStatusRe, headStatusRe *regexp.Regexp) bool {
 	baseLines := strings.Split(string(baseContent), "\n")
 	headLines := strings.Split(string(headContent), "\n")
 	if len(baseLines) != len(headLines) {
-		return false, nil
+		return false
 	}
 	diffIdx := -1
 	for i := range baseLines {
@@ -152,14 +200,14 @@ func isStatusOnlySupersededFlip(ctx context.Context, root, diffBase, path string
 			continue
 		}
 		if diffIdx != -1 {
-			return false, nil // more than one line changed — not status-only
+			return false // more than one line changed — not status-only
 		}
 		diffIdx = i
 	}
 	if diffIdx == -1 {
-		return false, nil
+		return false
 	}
-	return anyStatusLineRe.MatchString(baseLines[diffIdx]) && supersededStatusLineRe.MatchString(headLines[diffIdx]), nil
+	return baseStatusRe.MatchString(baseLines[diffIdx]) && headStatusRe.MatchString(headLines[diffIdx])
 }
 
 // isActiveArchiveMove reports whether oldPath -> newPath is a spec

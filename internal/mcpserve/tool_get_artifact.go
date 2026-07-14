@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // artifactResult is get_artifact's result shape: the ref resolved,
@@ -30,19 +30,9 @@ type artifactResult struct {
 // current working tree or, for a pin, `git show` — directly rather than
 // going through index.Entry.Body a second time).
 func (b *Backend) GetArtifact(ctx context.Context, argsRaw json.RawMessage) map[string]any {
-	var args struct {
-		Ref string `json:"ref"`
-	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
-		return toolError("get_artifact: malformed arguments: " + err.Error())
-	}
-	if args.Ref == "" {
-		return toolError("get_artifact: ref is required")
-	}
-
-	ref, err := artifact.ParseRef(args.Ref)
-	if err != nil {
-		return toolError("get_artifact: " + err.Error())
+	ref, errResult, ok := decodeRefArg("get_artifact", argsRaw)
+	if !ok {
+		return errResult
 	}
 
 	ix, err := b.buildIndex()
@@ -64,7 +54,7 @@ func (b *Backend) GetArtifact(ctx context.Context, argsRaw json.RawMessage) map[
 		}
 		data, serr := gitx.Show(ctx, b.Root, ref.Commit, filepath.ToSlash(relPath))
 		if serr != nil {
-			return toolError(fmt.Sprintf("get_artifact: resolving %s: %v", args.Ref, serr))
+			return toolError(fmt.Sprintf("get_artifact: resolving %s: %v", ref.String(), serr))
 		}
 		raw = data
 	} else {

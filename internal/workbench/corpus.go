@@ -15,10 +15,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/artifactview"
-	"github.com/OWNER/verdi/internal/index"
-	"github.com/OWNER/verdi/internal/render"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifactview"
+	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/render"
 )
 
 // corpusHandler answers GET /a/{kind}/{name}.

@@ -4,7 +4,7 @@ import (
 	"embed"
 	"net/http"
 
-	"github.com/OWNER/verdi/internal/dex"
+	"github.com/jyang234/verdi/internal/dex"
 )
 
 //go:embed assets/board.js assets/boardspec.js

@@ -3,7 +3,7 @@ package evidence
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // StubStory is one candidate implementing story for stub reconciliation:

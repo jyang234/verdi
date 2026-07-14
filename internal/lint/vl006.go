@@ -3,7 +3,7 @@ package lint
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // vl006 enforces "every AC declares ≥1 expected evidence kind (activation

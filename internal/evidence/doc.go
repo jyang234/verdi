@@ -3,11 +3,14 @@
 // into a per-AC status and a story-level eligibility verdict.
 //
 // It is deliberately separate from internal/bundle (which assembles
-// verdicts.json in the first place, on the producing side) and from
-// cmd/verdi (which resolves a story/spec ref, finds the store root, and
-// prints the result — see cmd/verdi/matrix.go). This package only folds an
-// already-loaded record set; it does the loading itself (LoadRecords) but
-// leaves ref/story resolution to its caller.
+// verdicts.json in the first place, on the producing side), from
+// internal/runtime (which emits runtime.json's records, spec/runtime-
+// evidence dc-1/dc-2), and from cmd/verdi (which resolves a story/spec ref,
+// finds the store root, and prints the result — see cmd/verdi/matrix.go).
+// This package only folds an already-loaded record set; it does the loading
+// itself (LoadRecords, which reads both verdicts.json and runtime.json —
+// records.go's derivedRecordFiles) but leaves ref/story resolution to its
+// caller.
 //
 // The fold, verbatim (03 §The fold):
 //
@@ -39,8 +42,14 @@
 //     artifact.Evidence's Producer field doc for the resolution (an
 //     optional explicit field, stamped by internal/bundle, falling back to
 //     grouping by witness text when absent).
-//   - Runtime evidence has no v0 producer (OQ-2): a declared runtime kind
-//     is therefore always "awaited post-merge" regardless of whether any
-//     record exists, which the fold reads as unconditionally contributing
-//     to the pending branch (never no-signal) for that kind — see foldAC.
+//   - A declared runtime kind is always "awaited post-merge" regardless of
+//     whether a record exists yet (03 §The fold's own text — runtime
+//     records "attach by timestamp after merge"), which the fold reads as
+//     unconditionally contributing to the pending branch (never no-signal)
+//     for that kind — see foldAC. This predates and is unchanged by
+//     spec/runtime-evidence's producer (internal/runtime, OQ-2/true-closure
+//     ac-3 resolved): even with a real producer wired up, a story can be
+//     merged before its first scheduled probe run ever fires, so "no
+//     record yet" must still read as pending, never no-signal, exactly as
+//     it did when runtime had no producer at all.
 package evidence

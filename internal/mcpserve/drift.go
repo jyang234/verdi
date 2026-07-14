@@ -9,7 +9,7 @@ package mcpserve
 import (
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // DriftStatus is one target selector's drift state against the current

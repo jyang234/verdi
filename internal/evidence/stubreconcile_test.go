@@ -3,7 +3,7 @@ package evidence
 import (
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 func featureSpecWithStubs(t *testing.T, stubs ...artifact.Stub) *artifact.SpecFrontmatter {

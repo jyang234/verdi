@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // corpusTestdataDir is testdata/corpus relative to this package, the same
@@ -153,6 +153,13 @@ func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 // is reachable and ac-4 folds to waived. Story: not violated, but not
 // eligible either — ac-2 (pending) and ac-3 (no-signal) keep it short of
 // the all-evidenced-or-waived bar.
+//
+// Note on OBLIGATION (spec/obligation-wall ac-1): testdata/corpus carries
+// no .verdi/obligations/ tree at all, so every declared kind reads as the
+// disclosed "(no obligation)" marker (dc-2) — this golden is also the
+// proof that a wholly un-obligated story still renders fully and exits 0
+// (disclosure never blocks). TestCmdMatrix_ObligationColumn below is the
+// dedicated proof that a PRESENT obligation's title actually renders.
 func TestCmdMatrix_Golden(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	t.Chdir(repo.Dir)
@@ -165,12 +172,13 @@ func TestCmdMatrix_Golden(t *testing.T) {
 
 	want := `story: jira:LOAN-1482
 spec:  spec/stale-decline
+status: accepted-pending-build
 
-AC    STATUS     EVIDENCE                      TEXT
-ac-1  evidenced  static:pass                   static obligation holds for the retry path
-ac-2  pending    static:none; behavioral:pass  static and behavioral: charge API retried on stale decline
-ac-3  no-signal  behavioral:none               behavioral: golden flow for partial refunds
-ac-4  waived     runtime:awaited               runtime: post-deploy decline-rate check
+AC    STATUS     EVIDENCE                      TEXT                                                        OBLIGATION
+ac-1  evidenced  static:pass                   static obligation holds for the retry path                  static: (no obligation)
+ac-2  pending    static:none; behavioral:pass  static and behavioral: charge API retried on stale decline  static: (no obligation); behavioral: (no obligation)
+ac-3  no-signal  behavioral:none               behavioral: golden flow for partial refunds                 behavioral: (no obligation)
+ac-4  waived     runtime:awaited               runtime: post-deploy decline-rate check                     runtime: (no obligation)
 
 story.violated: false
 story.eligible: false
@@ -201,9 +209,10 @@ func TestCmdMatrix_RoundFourStory_RendersStoryFold(t *testing.T) {
 
 	want := `story: jira:LOAN-1482
 spec:  spec/borrower-update-api
+status: accepted-pending-build
 
-AC    STATUS     EVIDENCE                      TEXT
-ac-1  no-signal  static:none; behavioral:none  PUT /applications/:id/update returns 200 with the new state
+AC    STATUS     EVIDENCE                      TEXT                                                         OBLIGATION
+ac-1  no-signal  static:none; behavioral:none  PUT /applications/:id/update returns 200 with the new state  static: (no obligation); behavioral: (no obligation)
 
 story.violated: false
 story.eligible: false
@@ -237,13 +246,14 @@ func TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords(t *testing.T) {
 
 	wantPreview := `story: jira:LOAN-1482
 spec:  spec/stale-decline
+status: accepted-pending-build
 PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)
 
-AC    STATUS     EVIDENCE                      TEXT
-ac-1  evidenced  static:pass                   static obligation holds for the retry path
-ac-2  pending    static:none; behavioral:pass  static and behavioral: charge API retried on stale decline
-ac-3  pending    behavioral:abstain            behavioral: golden flow for partial refunds
-ac-4  waived     runtime:awaited               runtime: post-deploy decline-rate check
+AC    STATUS     EVIDENCE                      TEXT                                                        OBLIGATION
+ac-1  evidenced  static:pass                   static obligation holds for the retry path                  static: (no obligation)
+ac-2  pending    static:none; behavioral:pass  static and behavioral: charge API retried on stale decline  static: (no obligation); behavioral: (no obligation)
+ac-3  pending    behavioral:abstain            behavioral: golden flow for partial refunds                 behavioral: (no obligation)
+ac-4  waived     runtime:awaited               runtime: post-deploy decline-rate check                     runtime: (no obligation)
 
 story.violated: false
 story.eligible: false
@@ -278,6 +288,208 @@ story.eligible: false
 	}
 	if diffCount != 1 {
 		t.Fatalf("expected exactly 1 differing row (ac-3), got %d", diffCount)
+	}
+}
+
+// matrixSupersededStorySpecMD is a minimal frozen, superseded spec fixture
+// (ac-2, feature-supersession-state): grandfathered class: feature shape (no
+// problem/outcome required, mirroring accept_test.go's own
+// alreadyAcceptedSpecMD) so it folds through the story-level path
+// (printMatrix), proving the story-rung `status:` line hermetically rather
+// than depending on this meta-repo's own real, evolving spec/disclosure-seam
+// corpus data as a test fixture — the same honest, smallest-reversible-scope
+// choice dc-4 makes for the feature rung, applied here to the story rung's
+// own proof.
+const matrixSupersededStorySpecMD = `---
+id: spec/superseded-story-fixture
+kind: spec
+title: "Superseded story fixture"
+owners: [platform-team]
+class: feature
+status: superseded
+story: jira:LOAN-9000
+acceptance_criteria:
+  - { id: ac-1, text: "x", evidence: [static] }
+frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
+---
+# Superseded story fixture
+`
+
+// TestCmdMatrix_StatusLine_Superseded proves ac-2/dc-3's story-rung fix:
+// `verdi matrix` now prints the resolved spec's own `status:` line, so a
+// superseded spec's terminal state is announced directly on this surface —
+// closing the exact blindness `verdi matrix spec/disclosure-seam` (this
+// corpus's real superseded story) exhibited before this story (no status
+// line at all, 03 §rung 3's "legible ... without consulting backlinks").
+func TestCmdMatrix_StatusLine_Superseded(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml": phase7ManifestYAML,
+				".verdi/specs/active/superseded-story-fixture/spec.md": matrixSupersededStorySpecMD,
+			},
+			Message: "init store with a superseded spec",
+		},
+	})
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runMatrixForTest(t, []string{"spec/superseded-story-fixture"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdMatrix exit = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	want := "story: jira:LOAN-9000\nspec:  spec/superseded-story-fixture\nstatus: superseded\n"
+	if !strings.HasPrefix(stdout.String(), want) {
+		t.Fatalf("matrix output = %q, want it to start with %q (the status: line announcing the terminal state)", stdout.String(), want)
+	}
+}
+
+// matrixObligationFixtureSpecMD is a minimal grandfathered class: feature
+// story fixture (no problem/outcome needed, the same shape
+// matrixSupersededStorySpecMD uses) declaring two ACs across three (ac,
+// kind) pairs, so TestCmdMatrix_ObligationColumn can prove spec/
+// obligation-wall ac-1 hermetically: ac-1 declares static+behavioral, ac-2
+// declares runtime; only ac-1's static kind gets a fixture obligation
+// (matrixObligationFixtureAC1StaticMD) below, leaving ac-1's behavioral
+// kind and every one of ac-2's kinds deliberately un-obligated to exercise
+// the disclosed "(no obligation)" marker (dc-2) alongside a real,
+// rendered obligation title in the very same row.
+const matrixObligationFixtureSpecMD = `---
+id: spec/matrix-obligation-fixture
+kind: spec
+title: "Matrix obligation fixture"
+owners: [platform-team]
+class: feature
+status: accepted-pending-build
+story: jira:MATRIX-1
+acceptance_criteria:
+  - { id: ac-1, text: "widget can be edited and saved", evidence: [static, behavioral] }
+  - { id: ac-2, text: "widget edit is probed post-deploy", evidence: [runtime] }
+frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
+---
+# Matrix obligation fixture
+`
+
+// matrixObligationFixtureAC1StaticMD is ac-1's static obligation — the
+// on-disk home spec/obligation-artifact DC-2 fixes:
+// .verdi/obligations/matrix-obligation-fixture/ac-1--static.md, its id's
+// first segment naming the spec's own directory name (never the
+// jira:MATRIX-1 tracker slug above), exactly as spec/obligation-wall DC-1
+// requires internal/evidence.Obligations to key its lookup.
+const matrixObligationFixtureAC1StaticMD = `---
+id: obligation/matrix-obligation-fixture--ac-1--static
+kind: obligation
+title: "Static analysis obligation for AC-1"
+owners: [platform-team]
+for_kind: static
+links:
+  - { type: verifies, ref: "spec/matrix-obligation-fixture" }
+frozen: { at: 2026-01-01, commit: 3e91ab2 }
+---
+# Static analysis obligation for AC-1
+
+A golangci-lint pass over the touched packages must be clean.
+`
+
+// TestCmdMatrix_ObligationColumn proves spec/obligation-wall ac-1 end to
+// end over a hermetic fixture story with a real obligation on disk: for
+// each declared evidence kind, matrix's OBLIGATION column renders that
+// kind's obligation TITLE when one exists (ac-1's static kind — the
+// obligation's own prose title, not the AC's `text` field, must be
+// legible directly on this surface, co-2's "legible without the
+// sidecar"), and a disclosed "(no obligation)" marker — never a blocking
+// error — when it does not (ac-1's behavioral kind, and ac-2's runtime
+// kind, which also proves this reaches every declared kind, not just the
+// first). The fixture carries no evidence records, waivers, or
+// attestations at all — deliberately, since the OBLIGATION column is
+// independent of fold status (evidence-obligations oq-1: "no fold
+// change") — and matrix still exits 0 and renders the full table.
+func TestCmdMatrix_ObligationColumn(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml": phase7ManifestYAML,
+				".verdi/specs/active/matrix-obligation-fixture/spec.md":        matrixObligationFixtureSpecMD,
+				".verdi/obligations/matrix-obligation-fixture/ac-1--static.md": matrixObligationFixtureAC1StaticMD,
+			},
+			Message: "init store with a partially-obligated story",
+		},
+	})
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runMatrixForTest(t, []string{"spec/matrix-obligation-fixture"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdMatrix exit = %d, want 0 (disclosure never blocks the render); stderr=%q", got, stderr.String())
+	}
+
+	want := `story: jira:MATRIX-1
+spec:  spec/matrix-obligation-fixture
+status: accepted-pending-build
+
+AC    STATUS     EVIDENCE                      TEXT                               OBLIGATION
+ac-1  no-signal  static:none; behavioral:none  widget can be edited and saved     static: Static analysis obligation for AC-1; behavioral: (no obligation)
+ac-2  pending    runtime:awaited               widget edit is probed post-deploy  runtime: (no obligation)
+
+story.violated: false
+story.eligible: false
+`
+	if stdout.String() != want {
+		t.Fatalf("matrix output mismatch:\n--- got ---\n%s\n--- want ---\n%s", stdout.String(), want)
+	}
+}
+
+// matrixObligationFixtureBrokenMD is byte-identical to
+// matrixObligationFixtureAC1StaticMD except its for_kind disagrees with
+// its own id's <for-kind> segment — a decode-time Validate failure
+// (artifact.ObligationFrontmatter's own id/for_kind agreement check), the
+// same "present but malformed" shape internal/evidence's own
+// TestObligations_Broken proves in isolation. This fixture instead proves
+// the CLI wiring: cmdMatrix must surface it as an operational error (exit
+// 2), never a silently-disclosed "(no obligation)" marker.
+const matrixObligationFixtureBrokenMD = `---
+id: obligation/matrix-obligation-fixture--ac-1--static
+kind: obligation
+title: "Broken obligation"
+owners: [platform-team]
+for_kind: behavioral
+links:
+  - { type: verifies, ref: "spec/matrix-obligation-fixture" }
+frozen: { at: 2026-01-01, commit: 3e91ab2 }
+---
+# Broken obligation
+`
+
+// TestCmdMatrix_BrokenObligation_OperationalError proves a present-but-
+// malformed obligation file is a surfaced operational error (exit 2, no
+// stdout), not silently treated as absent — spec/obligation-wall DC-1/DC-2:
+// "a broken obligation is not 'no obligation'". This complements
+// TestCmdMatrix_ObligationColumn's happy/absent-path coverage by proving
+// cmd/verdi/matrix.go's own obligationCellsFor wiring (not just the
+// internal/evidence loader in isolation) fails closed.
+func TestCmdMatrix_BrokenObligation_OperationalError(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml": phase7ManifestYAML,
+				".verdi/specs/active/matrix-obligation-fixture/spec.md":        matrixObligationFixtureSpecMD,
+				".verdi/obligations/matrix-obligation-fixture/ac-1--static.md": matrixObligationFixtureBrokenMD,
+			},
+			Message: "init store with a broken obligation",
+		},
+	})
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runMatrixForTest(t, []string{"spec/matrix-obligation-fixture"}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdMatrix exit = %d, want 2 (a broken obligation file is an operational error); stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on an operational error", stdout.String())
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("stderr empty, want an error naming the broken obligation")
 	}
 }
 

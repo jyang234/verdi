@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // vl015LoanWorkflowV1DraftYAML and vl015LoanWorkflowV1FrozenTmpl mirror

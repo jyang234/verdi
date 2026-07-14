@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // Input is Fold's input: an already-resolved, already-decoded feature
@@ -57,24 +57,11 @@ func Fold(in Input) (StoryResult, error) {
 		acSet[ac.ID] = true
 	}
 
-	candidates := make([]artifact.Evidence, 0, len(in.Records))
-	for _, r := range in.Records {
-		switch r.Provenance.Source {
-		case artifact.SourceCI:
-			candidates = append(candidates, r)
-		case artifact.SourceLocal:
-			if in.Preview {
-				candidates = append(candidates, r)
-			}
-		}
-	}
-
-	for _, r := range candidates {
-		for _, ac := range r.EvidenceFor {
-			if !acSet[ac] {
-				return StoryResult{}, fmt.Errorf("evidence: record (kind %s, witness %q) is evidence-for unknown AC %q (dangling binding, 03 §Declarations: \"a misspelled ac-3 must never surface as a silent no-signal\")", r.Kind, r.Witness, ac)
-			}
-		}
+	candidates, err := filterCandidates(in.Records, in.Preview, acSet, func(r artifact.Evidence, ac string) error {
+		return fmt.Errorf("evidence: record (kind %s, witness %q) is evidence-for unknown AC %q (dangling binding, 03 §Declarations: \"a misspelled ac-3 must never surface as a silent no-signal\")", r.Kind, r.Witness, ac)
+	})
+	if err != nil {
+		return StoryResult{}, err
 	}
 
 	result := StoryResult{Story: in.Spec.Story, SpecRef: in.Spec.ID}

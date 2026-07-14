@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/disclosure"
 )
 
 // disclosuresFixtureStore writes a minimal bare store (no mutable zone)

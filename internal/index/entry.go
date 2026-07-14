@@ -1,10 +1,10 @@
 package index
 
-import "github.com/OWNER/verdi/internal/artifact"
+import "github.com/jyang234/verdi/internal/artifact"
 
 // Entry is one indexed artifact — either a committed-zone kind (spec, adr,
-// diagram, attestation, waiver, conflict) or an index-minted external ref
-// (02 §External refs: Kind "external").
+// diagram, attestation, waiver, conflict, obligation) or an index-minted
+// external ref (02 §External refs: Kind "external").
 type Entry struct {
 	// Ref is the canonical ref string: "<kind>/<name>" for committed-zone
 	// kinds (taken verbatim from the decoded frontmatter's `id:` field —
@@ -13,7 +13,7 @@ type Entry struct {
 	// refs).
 	Ref string
 	// Kind is one of "spec", "adr", "diagram", "attestation", "waiver",
-	// "conflict", or "external".
+	// "conflict", "obligation", or "external".
 	Kind string
 	// Title is the artifact's title (committed-zone) or a synthesized
 	// human-readable label (external).

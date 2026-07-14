@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Commit is one entry from `git log`: enough to render dex's temporal
@@ -84,7 +85,15 @@ func CommitDate(ctx context.Context, dir, rev string) (string, error) {
 	if date == "" {
 		return "", fmt.Errorf("gitx: CommitDate(%s): no such commit", rev)
 	}
-	return date, nil
+	// git's %cI renders a UTC offset as "+00:00" or "Z" depending on the git
+	// version — non-deterministic output (CLAUDE.md: deterministic artifacts).
+	// Normalize to a canonical numeric offset, git-version-independent,
+	// preserving any non-UTC offset.
+	t, perr := time.Parse(time.RFC3339, date)
+	if perr != nil {
+		return "", fmt.Errorf("gitx: CommitDate(%s): parsing %q: %w", rev, date, perr)
+	}
+	return t.Format("2006-01-02T15:04:05-07:00"), nil
 }
 
 // parseLog splits raw `git log --format=logFormat` output into Commits.

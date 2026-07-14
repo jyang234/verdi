@@ -1120,6 +1120,14 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .board-mode-tag--review { color: var(--authored); border-color: var(--authored); }
 .board-mode-tag--readonly { color: var(--frozen); border-color: var(--frozen); }
 
+/* the terminal-status badge on the board head: a superseded spec's own
+   `superseded` status made legible on its wall (spec/feature-supersession-
+   state ac-2), in the same badge vocabulary the index and dex pages carry so
+   status reads identically on every surface. Set just off square so it joins
+   the murder board's stamped family beside the mode tag, without taking on the
+   heavier rubber-stamp border of its own. */
+.board-status-badge { align-self: center; transform: rotate(-0.7deg); }
+
 /* the case file: problem → outcome as ONE header lockup — the folder
    the wall opens with. Problem wears the violated ink, outcome the
    evidenced one; the arrow between them is the arc the wall below
@@ -2289,6 +2297,64 @@ button.yarn-chip-type {
    the chip never sits on the prose */
 .objcard:has(.coverage-chip) .card-text,
 .objcard:has(.oq-claims) .card-text { -webkit-line-clamp: 3; }
+
+/* obligation disclosures (spec/obligation-wall ac-2): a STORY AC card reads
+   out, per declared evidence kind, what that kind's obligation demands —
+   read on the wall itself, never recovered from the sidecar (feature co-3).
+   One compact row per kind, in the receipts register: a mono kind tag, then
+   the demand (the obligation's title, in the reading ink, its fuller prose a
+   hover away) or a disclosed "no obligation" badge in the SAME dashed
+   pending vocabulary the "no stub" coverage chip wears (dc-2 discloses, it
+   never refuses). */
+.card-obligations {
+  position: absolute;
+  left: 0.9rem;
+  right: 0.9rem;
+  bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+.obligation {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.obligation-kind {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-solid);
+}
+.obligation-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.64rem;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.obligation-badge {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.02rem 0.4rem;
+  border-radius: 999px;
+  border: 1px dashed var(--st-pending);
+  color: var(--st-pending);
+  background: transparent;
+}
+/* a story AC card wearing obligations gives its text two clamped lines back
+   so the disclosures sit below the prose, never on it (mirrors coverage) */
+.objcard:has(.card-obligations) .card-text { -webkit-line-clamp: 2; }
 
 /* ---------- click-to-expand: truncation is visible, never silent ----------
 

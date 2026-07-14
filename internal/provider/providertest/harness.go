@@ -3,7 +3,7 @@ package providertest
 import (
 	"testing"
 
-	"github.com/OWNER/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider"
 )
 
 // Harness lets Run drive an adapter under test and observe its published

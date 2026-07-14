@@ -19,6 +19,7 @@ package workbench
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdhtml "html"
 	"net/http"
@@ -27,13 +28,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/artifact/splice"
-	"github.com/OWNER/verdi/internal/boardio"
-	"github.com/OWNER/verdi/internal/boardlayout"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/index"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact/splice"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // referenceLane is the references column band — the pin's landing lane.
@@ -374,7 +375,7 @@ func (s *boardSpecServer) boardPinSearchHandler() http.HandlerFunc {
 		}
 		name := r.PathValue("name")
 		proj, _, _, err := s.loadBoard(r.Context(), name)
-		if err == ErrBoardNotFound {
+		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
 		}

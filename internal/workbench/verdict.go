@@ -18,9 +18,9 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/storyresolve"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
 // commitDirRe matches a derived tree's commit-named subdirectories,

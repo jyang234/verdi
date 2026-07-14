@@ -1,0 +1,144 @@
+schema: verdi.bindings/v1
+# This is the STORE-ROOT self-hosted evidence sidecar (spec/close-verb
+# ac-3, dc-1) — sibling of .verdi/, NOT nested inside any .flowmap.yaml
+# service root, because the verdi repo is not a flowmap service of itself
+# (D6-4). See cmd/verdi/selfevidence.go's package doc for the producer that
+# consumes this file: it binds `make verify`'s own pass, witnessed only by
+# having been reached as a step AFTER make verify succeeded in the SAME CI
+# job (verify.yml), never a divergent re-run.
+#
+# `spec:` names the primary/owning spec for this file's bare ac-<slug>
+# entries (03 §Declarations and binding); other self-hosted stories' ACs
+# are named via the fragment-qualified spec/<name>#<ac-id> form
+# (artifact.ResolveBindingAC) — here, remote-and-ci#ac-1, the candidate
+# real merged story close-verb's own ac-1 names as the demonstration target.
+spec: spec/close-verb
+bindings:
+  - producer: verdi-verify-behavioral
+    kind: behavioral
+    acs:
+      - ac-1
+      # close-verb ac-2 (its own [behavioral, attestation] AC): the closed
+      # story's rollup publishes to the tracker and reads back — proven by
+      # close_test.go / close_runtime_test.go's PublishedField assertions,
+      # part of make verify's suite. Its attestation leg is authored at
+      # .verdi/attestations/jira-verdi-2/ac-2.md.
+      - ac-2
+      - ac-3
+      - "spec/remote-and-ci#ac-1"
+      - "spec/remote-and-ci#ac-2"
+      - "spec/remote-and-ci#ac-3"
+      # spec/feature-supersession-state (true-closure#ac-4): ac-1 declares
+      # [static, behavioral], ac-2 declares [behavioral]. Behavioral leg =
+      # the accept-flip tests (TestFlipPredecessorToSuperseded_*, ritual),
+      # the matrix/dex/board render tests, and the board e2e — all under
+      # make verify.
+      - "spec/feature-supersession-state#ac-1"
+      - "spec/feature-supersession-state#ac-2"
+      # spec/runtime-evidence (true-closure#ac-3): both ACs declare
+      # evidence: [static, behavioral]. The behavioral leg is the
+      # internal/runtime + fold + close_runtime tests (probe emits a
+      # well-formed (story,AC)-keyed record a query returns; a story
+      # declaring evidence:[runtime] folds pending->evidenced from a
+      # source:ci record) — all part of make verify's own test suite.
+      - "spec/runtime-evidence#ac-1"
+      - "spec/runtime-evidence#ac-2"
+      # spec/code-health wave stories (all merged to main). fail-loud's
+      # behavioral legs: the specalign repo-hygiene red->green witness, the
+      # cascadecheck unreadable-spec exit-2 test, the wrapped-sentinel 404
+      # test, the runtimeprobe fail-verdict pin, mcpserve's unknown-field
+      # refusals and ServeConn trace tests -- all under make verify.
+      - "spec/fail-loud#ac-1"
+      - "spec/fail-loud#ac-2"
+      - "spec/fail-loud#ac-3"
+      # forge-transport behavioral legs: contract suites unchanged over the
+      # seam, multi-page drain witnesses (unresolved thread past 100), the
+      # stall-timeout and 429 witnesses, and the toolchain.json pin
+      # accept/refuse/disclose tests -- all under make verify.
+      - "spec/forge-transport#ac-1"
+      - "spec/forge-transport#ac-2"
+      - "spec/forge-transport#ac-3"
+      - "spec/forge-transport#ac-4"
+      # shared-homes behavioral legs: atomicfile table tests + green
+      # consumer suites, the pinned digest golden, the 15-case quote
+      # equivalence table, the reaffirmation-indexed witness, and the
+      # scaffold byte-pin -- all under make verify.
+      - "spec/shared-homes#ac-1"
+      - "spec/shared-homes#ac-2"
+      - "spec/shared-homes#ac-3"
+      - "spec/shared-homes#ac-4"
+      - "spec/shared-homes#ac-5"
+      # spec/file-topics behavioral legs: the untouched cmd/verdi suites
+      # over the verbatim moves (ac-1/ac-2), the module-wide suites over
+      # the runtimeprobe rename (ac-3), and the full e2e gate through the
+      # reworked harness plus the runGit/copyTree unit tests (ac-4) -- all
+      # under make verify.
+      - "spec/file-topics#ac-1"
+      - "spec/file-topics#ac-2"
+      - "spec/file-topics#ac-3"
+      - "spec/file-topics#ac-4"
+      # spec/evidence-obligations stories (obligation-artifact/gate/wall):
+      # behavioral legs = the decode/round-trip, VL-019/VL-020 lint, matrix
+      # render, and board graduation/render tests + e2e, all under make
+      # verify. Plus the FEATURE evidence-obligations#ac-1..4 behavioral leg
+      # (the whole obligation mechanism proven by make verify's suite).
+      - "spec/obligation-artifact#ac-1"
+      - "spec/obligation-artifact#ac-2"
+      - "spec/obligation-artifact#ac-3"
+      - "spec/obligation-gate#ac-1"
+      - "spec/obligation-gate#ac-2"
+      - "spec/obligation-wall#ac-1"
+      - "spec/obligation-wall#ac-2"
+      - "spec/evidence-obligations#ac-1"
+      - "spec/evidence-obligations#ac-2"
+      - "spec/evidence-obligations#ac-3"
+      - "spec/evidence-obligations#ac-4"
+  - producer: verdi-verify-static
+    kind: static
+    acs:
+      - ac-3
+      - "spec/remote-and-ci#ac-1"
+      # spec/feature-supersession-state ac-1 static leg: the flip logic and
+      # its VL-010 status-only-exception compatibility compile, vet, and
+      # lint-store clean under make verify.
+      - "spec/feature-supersession-state#ac-1"
+      # spec/runtime-evidence static leg: the verdi.evidence/v1 record
+      # schema and this binding are declared and strict-decoded (they
+      # compile, vet, and lint-store clean under make verify), and
+      # LoadRecords' runtime.json wiring is statically sound.
+      - "spec/runtime-evidence#ac-1"
+      - "spec/runtime-evidence#ac-2"
+      # spec/code-health wave stories' static legs: the gate/refusal code,
+      # seam packages (httpjson, atomicfile, canonjson.Digest,
+      # artifact.ClassifyPath/YAMLDoubleQuote), strict decodes, and doc
+      # contracts compile, vet, lint, and lint-store clean under make
+      # verify; fail-loud ac-4 is static-only (stated contracts + corrected
+      # counts + the VL-019 registry row).
+      - "spec/fail-loud#ac-1"
+      - "spec/fail-loud#ac-2"
+      - "spec/fail-loud#ac-3"
+      - "spec/fail-loud#ac-4"
+      - "spec/forge-transport#ac-1"
+      - "spec/forge-transport#ac-2"
+      - "spec/forge-transport#ac-3"
+      - "spec/forge-transport#ac-4"
+      - "spec/shared-homes#ac-1"
+      - "spec/shared-homes#ac-2"
+      - "spec/shared-homes#ac-3"
+      - "spec/shared-homes#ac-4"
+      - "spec/shared-homes#ac-5"
+      # spec/file-topics static legs: the relocated files, the renamed
+      # package with zero stragglers, and the harness's ctx/timeout/signal
+      # wiring compile, vet, lint, and lint-store clean under make verify.
+      - "spec/file-topics#ac-1"
+      - "spec/file-topics#ac-2"
+      - "spec/file-topics#ac-3"
+      - "spec/file-topics#ac-4"
+      # spec/evidence-obligations stories' static legs: the obligation kind
+      # + VL-019/VL-020 rules + the loader are declared and compile/vet/
+      # lint-store clean under make verify.
+      - "spec/obligation-artifact#ac-1"
+      - "spec/obligation-artifact#ac-2"
+      - "spec/obligation-gate#ac-1"
+      - "spec/obligation-gate#ac-2"
+      - "spec/obligation-wall#ac-1"

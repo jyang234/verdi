@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // MRComment is one comment of a spec-MR's feed, in the only shape the

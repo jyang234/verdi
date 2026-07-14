@@ -7,11 +7,11 @@ import (
 	"html/template"
 	"io"
 
-	"github.com/OWNER/verdi/internal/artifact"
 	"github.com/alecthomas/chroma/v2"
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
+	"github.com/jyang234/verdi/internal/artifact"
 	gm "github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"

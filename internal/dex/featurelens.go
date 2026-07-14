@@ -14,7 +14,7 @@ import (
 	"html/template"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/index"
 )
 
 // featureLensHTML renders the paired stub-plan/live-mapping section for a

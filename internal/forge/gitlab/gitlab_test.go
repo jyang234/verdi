@@ -14,29 +14,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/forgetest"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/forgetest"
 )
 
-// buildBundleZip zips the four bundle files under derived/<slug>/<commit>/,
-// mirroring what verdi's own CI template would produce.
-func buildBundleZip(t *testing.T, b forge.EvidenceBundle) []byte {
+// buildBundleZip zips a DerivedTree under a derived/ prefix, mirroring what
+// verdi's own CI template uploads (the whole data/derived/ subtree) — every
+// key preserved.
+func buildBundleZip(t *testing.T, tree forge.DerivedTree) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
-	files := map[string][]byte{
-		"derived/spec--x/deadbeef/verdicts.json":      b.Verdicts,
-		"derived/spec--x/deadbeef/tests.json":         b.Tests,
-		"derived/spec--x/deadbeef/review.json":        b.Review,
-		"derived/spec--x/deadbeef/boundary-diff.json": b.BoundaryDiff,
-	}
-	for name, content := range files {
-		fw, err := w.Create(name)
+	for key, content := range tree {
+		fw, err := w.Create("derived/" + key)
 		if err != nil {
-			t.Fatalf("zip.Create(%s): %v", name, err)
+			t.Fatalf("zip.Create(%s): %v", key, err)
 		}
 		if _, err := fw.Write(content); err != nil {
-			t.Fatalf("writing %s into zip: %v", name, err)
+			t.Fatalf("writing %s into zip: %v", key, err)
 		}
 	}
 	if err := w.Close(); err != nil {
@@ -192,9 +187,9 @@ type harness struct {
 
 func (h *harness) Forge() forge.Forge { return h.adapter }
 
-func (h *harness) SeedBundle(t *testing.T, ref, commit string, bundle forge.EvidenceBundle) {
+func (h *harness) SeedBundle(t *testing.T, ref, commit string, tree forge.DerivedTree) {
 	t.Helper()
-	h.srv.mu[commit] = buildBundleZip(t, bundle)
+	h.srv.mu[commit] = buildBundleZip(t, tree)
 }
 
 func (h *harness) WantGeneratedAttribute() string { return "gitlab-generated" }
@@ -308,6 +303,8 @@ func TestGitLab_CIContext(t *testing.T) {
 		"CI_DEFAULT_BRANCH":                   "main",
 		"CI_MERGE_REQUEST_IID":                "42",
 		"CI_MERGE_REQUEST_TARGET_BRANCH_NAME": "main",
+		"CI_PIPELINE_ID":                      "913",
+		"CI_JOB_ID":                           "4021",
 	}
 	a := New(Config{ProjectID: "1", Getenv: func(k string) string { return env[k] }})
 
@@ -317,6 +314,23 @@ func TestGitLab_CIContext(t *testing.T) {
 	}
 	if info.DefaultBranch != "main" || !info.IsMergeRequest || info.TargetBranch != "main" {
 		t.Errorf("CIContext = %+v", info)
+	}
+	if info.Pipeline != "913" || info.Job != "4021" {
+		t.Errorf("CIContext Pipeline/Job = %q/%q, want 913/4021", info.Pipeline, info.Job)
+	}
+}
+
+// TestGitLab_CIContext_OutsideCI proves Pipeline/Job come back empty when
+// none of GitLab CI's own env vars are set.
+func TestGitLab_CIContext_OutsideCI(t *testing.T) {
+	a := New(Config{ProjectID: "1", Getenv: func(string) string { return "" }})
+
+	info, err := a.CIContext(context.Background())
+	if err != nil {
+		t.Fatalf("CIContext: %v", err)
+	}
+	if info.Pipeline != "" || info.Job != "" {
+		t.Errorf("CIContext outside CI = %+v, want empty Pipeline/Job", info)
 	}
 }
 

@@ -1,6 +1,6 @@
 package lint
 
-// Options controls engine behavior beyond the fourteen rules themselves.
+// Options controls engine behavior beyond the rules themselves.
 type Options struct {
 	// GrandfatherArchive skips VL-001..VL-006 for files under
 	// specs/archive/ (02 §Open questions OQ-3: "the lint grandfather flag

@@ -9,14 +9,16 @@
 # (I-4's discipline, applied here to verdi's own module rather than
 # verdi-go's): `go run <module>@<version>` resolves publicly via the Go
 # module proxy once verdi has a real remote (spike S1's finding for
-# verdi-go's pin applies identically here). It is a PLACEHOLDER
-# pseudo-version today — OQ-5's residual: the literal OWNER in the module
-# path, and this pin, are both settled by whoever creates verdi's real
-# remote (PLAN.md §8 OQ-5). Replace both together in one edit; nothing
-# else in this script needs to change.
+# verdi-go's pin applies identically here). VERDI_MODULE is settled
+# (spec/remote-and-ci dc-2: OQ-5's residual literal OWNER is now
+# github.com/jyang234/verdi end to end). VERDI_VERSION is still a
+# PLACEHOLDER pseudo-version: it resolves to a real commit only once this
+# module has actually been pushed to that remote and a real SHA exists to
+# pin — replace it in one edit the first time that is true; nothing else
+# in this script needs to change.
 set -eu
 
-VERDI_MODULE="github.com/OWNER/verdi"
+VERDI_MODULE="github.com/jyang234/verdi"
 VERDI_VERSION="v0.0.0-00010101000000-000000000000"
 
 # Resolve the repo root from this script's own location (two directories

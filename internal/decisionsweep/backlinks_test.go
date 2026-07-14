@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/lint"
 )
 
 func writeFile(t *testing.T, root, relPath, content string) {

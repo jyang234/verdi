@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/fake"
 )
 
 // TestFindOpenMR covers the one branch-scoped MR-discovery mechanism three

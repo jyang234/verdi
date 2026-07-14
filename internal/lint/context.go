@@ -3,7 +3,7 @@ package lint
 import (
 	"context"
 
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // Context carries the git- and CI-derived facts the git-aware rules need

@@ -3,7 +3,7 @@ package store
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 const manifestSchema = "verdi.layout/v1"
@@ -11,9 +11,32 @@ const manifestSchema = "verdi.layout/v1"
 // JiraConfig is the `providers.jira` block of verdi.yaml (04 §Story
 // provider owns semantics; this package only decodes the shape 01 §Store
 // manifest shows). Secrets never live here — only ids.
+//
+// Mode is spec/close-verb dc-2's config-selectable fake tracker: "" (the
+// zero value) selects the real Jira adapter unchanged; "fake" selects the
+// in-process internal/provider/fake adapter instead (buildProviderRegistry,
+// cmd/verdi/rollup.go), keeping ac-2's publish + read-back proof hermetic
+// and stopping routine verbs from egressing to a real host (D6-2).
+// BaseURL/RollupField stay decodable and present under fake mode — true-
+// closure dc-2 requires switching to real Jira to stay a pure config change
+// (flip mode back to "" or remove it), never a code change, so this field
+// must not require removing the other two.
 type JiraConfig struct {
+	Mode        string `yaml:"mode,omitempty"`
 	BaseURL     string `yaml:"base_url"`
 	RollupField string `yaml:"rollup_field"`
+}
+
+// validJiraModes is Mode's closed enum (CLAUDE.md: "unknown enum values
+// fail closed").
+var validJiraModes = map[string]bool{"": true, "fake": true}
+
+// Validate checks Mode is a known value.
+func (j JiraConfig) Validate() error {
+	if !validJiraModes[j.Mode] {
+		return fmt.Errorf("store: verdi.yaml providers.jira.mode %q is not \"\" (real) or \"fake\"", j.Mode)
+	}
+	return nil
 }
 
 // ProvidersConfig is verdi.yaml's `providers:` block.
@@ -160,6 +183,11 @@ func (m Manifest) Validate() error {
 	}
 	if m.Audit != nil {
 		if err := m.Audit.Validate(); err != nil {
+			return err
+		}
+	}
+	if m.Providers != nil && m.Providers.Jira != nil {
+		if err := m.Providers.Jira.Validate(); err != nil {
 			return err
 		}
 	}

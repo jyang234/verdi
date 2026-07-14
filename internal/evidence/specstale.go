@@ -1,6 +1,6 @@
 package evidence
 
-import "github.com/OWNER/verdi/internal/artifact"
+import "github.com/jyang234/verdi/internal/artifact"
 
 // DefaultDeviationsStaleThreshold is the spec-stale flag's threshold-count
 // trigger's default (03 §The amendment ladder: "more than a configured
