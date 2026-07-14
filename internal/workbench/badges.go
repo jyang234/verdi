@@ -39,6 +39,14 @@ func attachBadges(ctx context.Context, proj *BoardProjection, root, specName str
 		if recs, ok := badges.ByObject[proj.Cards[i].ID]; ok {
 			proj.Cards[i].Badges = badgeViewsFrom(recs)
 		}
+		// The evidence-slot join (spec/evidence-slot ac-3/dc-2): each
+		// declared kind's fold-derived record state lands ON the card's
+		// existing per-kind obligation row (attachObligations built one
+		// view per declared kind, in the same declared order the slot
+		// compute walked) — never a second per-kind list.
+		if states, ok := badges.EvidenceSlots[proj.Cards[i].ID]; ok {
+			mergeSlotStates(proj.Cards[i].Obligations, states)
+		}
 	}
 	for i := range proj.StubViews {
 		key := "stub:" + proj.StubViews[i].Slug
@@ -104,6 +112,30 @@ func (g gitCoversResolver) SpecDigestAtCommit(ctx context.Context, commit, relPa
 		return "", false, nil // path absent at the pinned commit: unprovable, disclosed
 	}
 	return contentDigest(data), true, nil
+}
+
+// mergeSlotStates folds one AC card's computed slot states onto its
+// existing obligation views, matched by declared kind — the join that
+// keeps demand and holdings ONE row per kind (spec/evidence-slot ac-3):
+// no view is added or removed here, only enriched. A kind with no
+// matching state (impossible when both sides walk the same declared
+// list, but never assumed) keeps Slot == "" and renders chip-free rather
+// than guessing.
+func mergeSlotStates(views []obligationView, states []wallbadge.SlotState) {
+	for i := range views {
+		for _, st := range states {
+			if st.Kind != views[i].Kind {
+				continue
+			}
+			if st.Empty {
+				views[i].Slot = "empty"
+			} else {
+				views[i].Slot = "held"
+			}
+			views[i].SlotRecords = st.Records
+			break
+		}
+	}
 }
 
 // badgeViewsFrom converts wallbadge.DerivationRecord values into this

@@ -354,6 +354,24 @@ bindings:
       - "spec/derivation-drawer#ac-2"
       - "spec/derivation-drawer#ac-3"
       - "spec/derivation-drawer#ac-4"
+      # spec/evidence-slot behavioral legs (all three ACs declare
+      # [static, behavioral]), all under make verify: ac-1 = wallbadge's
+      # TestEmptySlotBadges_FilledVersusEmpty/_NoDerivedTreeIsCalm/
+      # _Negative (a record fills exactly its kind, attestation via the
+      # fold's own file check, the never-synced wall calm, Current's
+      # retry reduction in the path) + workbench's TestEvidenceSlot_
+      # HeldSlotRendersCount + 38-board-evidence-slot.spec.ts's
+      # filled-versus-empty wall; ac-2 = the same Playwright suite's
+      # derivation-record asserts (source fold:empty-slot, spec digest +
+      # derived-tree probe + record-file sha256 inputs, per-kind
+      # findings, no timestamp) + the addSticky write-path success on
+      # the badged wall (co-2) + wallbadge's input/record pins; ac-3 =
+      # workbench's TestEvidenceSlot_JoinsObligationRow (one row per
+      # kind carrying demand AND holdings, one card-obligations block)
+      # + the Playwright assertOneRowPerKind proof on both fixture walls.
+      - "spec/evidence-slot#ac-1"
+      - "spec/evidence-slot#ac-2"
+      - "spec/evidence-slot#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -628,3 +646,21 @@ bindings:
       - "spec/derivation-drawer#ac-2"
       - "spec/derivation-drawer#ac-3"
       - "spec/derivation-drawer#ac-4"
+      # spec/evidence-slot static legs (all three ACs declare [static,
+      # behavioral]), all under make verify: ac-1 = wallbadge's
+      # TestEmptySlotStaticCallSites (emptyslot.go calls the fold's exact
+      # seams — evidence.LoadRecordsWithSources / RecordsForAC / Current /
+      # AttestationExists — and carries no private walk/parse/reduction
+      # markers) + workbench's TestEvidenceSlot_StaticOneReader (the wall
+      # surface's own files never load records); ac-2 = workbench's
+      # TestEvidenceSlot_StaticDisclosureNeverConsumed (boardspecapi.go's
+      # write handlers and internal/lint read no slot/badge state) plus
+      # the badge constructed only in wallbadge and attached only through
+      # loadBoard's single attachBadges call site (badgesstatic_test's
+      # pinned witnesses); ac-3 = workbench's TestEvidenceSlot_
+      # StaticOneRowRenderer (the chip is emitted inside writeObligations,
+      # the one per-kind row renderer; exactly one card-obligations
+      # container; no second slot-chip emission site).
+      - "spec/evidence-slot#ac-1"
+      - "spec/evidence-slot#ac-2"
+      - "spec/evidence-slot#ac-3"

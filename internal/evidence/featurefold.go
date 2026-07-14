@@ -127,7 +127,7 @@ func FoldFeature(in FeatureInput) (FeatureResult, error) {
 	result := FeatureResult{SpecRef: in.Spec.ID}
 	for _, ac := range in.Spec.AcceptanceCriteria {
 		stories := in.Stories[ac.ID]
-		current := Current(filterEvidenceFor(candidates, ac.ID))
+		current := Current(RecordsForAC(candidates, ac.ID))
 
 		attested := false
 		if declaresKind(ac, artifact.EvidenceAttestation) {

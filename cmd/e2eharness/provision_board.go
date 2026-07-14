@@ -55,6 +55,14 @@ const (
 	sweepFreshSpecName   = "decline-sweep-fresh"
 	sweepStaleSpecName   = "decline-sweep-stale"
 	sweepPartialSpecName = "decline-sweep-partial"
+
+	// The evidence-slot fixture (spec/evidence-slot ac-1): a story wall
+	// with REAL derived-tree state — a committed static record for ac-1
+	// (fills exactly that kind's slot), an attestation file on disk
+	// (fills the attestation slot), and a declared behavioral kind with
+	// neither (the empty slot that badges). The no-derived-tree calm
+	// state is proven on replaySpecName's wall, which has none.
+	slotWallSpecName = "decline-slot-wall"
 )
 
 // designSpec is DESIGN_SPEC: the object model fixtures.ts binds (3 ACs,
@@ -301,6 +309,89 @@ frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
 Open a decline, mutate the underlying data, and assert the applicant-facing
 notice reappears with the corrected reason — not a unit test of the projector.
 `
+
+// slotWallSpec is SLOT_WALL_SPEC (fixtures.ts): a STORY-class draft on
+// the design branch whose ac-1 declares THREE evidence kinds. The
+// provisioned derived tree (writeSlotWallDerived) holds one CI static
+// record bound to ac-1 at main's own sha — a real ancestor of the design
+// branch's HEAD, so the fold's ancestry filter genuinely admits it — and
+// slotWallAttestation sits at the fold's exact attestation path, so the
+// wall renders held (static), held (attestation), and empty (behavioral)
+// side by side on one card: spec/evidence-slot ac-1's filled-versus-
+// empty proof, with the empty kind badging (ac-2).
+const slotWallSpec = `---
+id: spec/decline-slot-wall
+kind: spec
+class: story
+title: "Decline slot wall"
+status: draft
+owners: [platform-team]
+story: jira:LOAN-2204
+problem: { text: "what each declared evidence kind already holds is invisible while authoring", anchor: "#problem" }
+outcome: { text: "each declared kind's record state reads on its own obligation row", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "each declared kind shows what it holds", evidence: [static, behavioral, attestation], anchor: "#ac-1" }
+links:
+  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+---
+# Decline slot wall
+
+## Problem
+
+## Outcome
+
+## ac-1
+
+Holdings read on the row.
+`
+
+// slotWallAttestation fills decline-slot-wall ac-1's attestation slot:
+// a fully valid attestation artifact at the fold's own on-disk home
+// (.verdi/attestations/<story-slug>/<ac>.md, evidence.AttestationExists'
+// exact path — story jira:LOAN-2204 slugs to jira-loan-2204).
+func slotWallAttestation(commit string) string {
+	return `---
+id: attestation/jira-loan-2204--ac-1
+kind: attestation
+title: "ac-1 slot rendering attested by QA (fixture)"
+owners: [qa-lead]
+links:
+  - { type: verifies, ref: spec/decline-slot-wall }
+frozen: { at: 2026-07-14, commit: ` + commit + ` }
+---
+# ac-1 attestation
+
+Existence is the record: this file filling the attestation slot IS the
+fixture's claim.
+`
+}
+
+// slotWallVerdicts is the derived-tree record set filling exactly ONE of
+// decline-slot-wall ac-1's three declared kinds (static): a verdi.
+// evidence/v1 CI record at commit (the harness store's main sha). The
+// behavioral kind deliberately has no record — the empty slot under test.
+func slotWallVerdicts(commit string) string {
+	return `[
+  { "schema": "verdi.evidence/v1", "evidence_for": ["ac-1"], "kind": "static", "verdict": "pass", "witness": "slotRenderer -> obligationRow", "producer": "slot-static-check", "provenance": { "source": "ci", "pipeline": "914", "job": "static-verify", "commit": "` + commit + `" }, "digest": "sha256:1f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a79881f2e3d4c5b6a7988" }
+]
+`
+}
+
+// writeSlotWallDerived writes decline-slot-wall's derived tree at the
+// fold's conventional location (.verdi/data/derived/<ref-slug>/<commit>/
+// verdicts.json). The data/ zone is gitignored (provisionStore's
+// .verdi/.gitignore) and never committed — VL-013's rule, same as the
+// corpus's own derived overlay.
+func writeSlotWallDerived(storeRoot, commit string) error {
+	dir := filepath.Join(storeRoot, ".verdi", "data", "derived", "spec--"+slotWallSpecName, commit)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("creating slot-wall derived tree: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte(slotWallVerdicts(commit)), 0o644); err != nil {
+		return fmt.Errorf("writing slot-wall verdicts.json: %w", err)
+	}
+	return nil
+}
 
 // badgeSpec renders one wall-badge fixture spec (spec/badge-computes
 // ac-5): a feature wall carrying every badge-triggering shape the e2e
@@ -574,6 +665,11 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 		filepath.Join(".verdi", "specs", "active", obligationSpecName, "spec.md"):     obligationSpec,
 		filepath.Join(".verdi", "specs", "active", replaySpecName, "spec.md"):         replaySpec,
 		filepath.Join(".verdi", "obligations", replaySpecName, "ac-1--behavioral.md"): replayObligation,
+		// The evidence-slot wall (spec/evidence-slot ac-1): the story spec
+		// plus the attestation that fills its attestation slot; its derived
+		// tree is written UNTRACKED below (data/ is gitignored, VL-013).
+		filepath.Join(".verdi", "specs", "active", slotWallSpecName, "spec.md"): slotWallSpec,
+		filepath.Join(".verdi", "attestations", "jira-loan-2204", "ac-1.md"):    slotWallAttestation(mainSHA),
 		// The three wall-badge fixtures (spec/badge-computes ac-5): one per
 		// board mode, same badge-triggering state.
 		filepath.Join(".verdi", "specs", "active", badgeWallSpecName, "spec.md"):   badgeSpec(badgeWallSpecName, "draft", ""),
@@ -642,6 +738,13 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 	}
 
 	if err := runGit(storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", designBranch); err != nil {
+		return "", err
+	}
+
+	// The slot wall's derived tree: keyed by main's sha (a real ancestor
+	// of the design branch HEAD the board renders at), written after the
+	// commit purely for narrative order — data/ is untracked either way.
+	if err := writeSlotWallDerived(storeRoot, mainSHA); err != nil {
 		return "", err
 	}
 

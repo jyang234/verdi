@@ -2,6 +2,8 @@ package evidence
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +34,19 @@ var commitDirRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 // nothing ever loaded one until now.
 var derivedRecordFiles = []string{"verdicts.json", "runtime.json"}
 
+// RecordFile identifies one derived-tree record file LoadRecords actually
+// read: its slash-separated path relative to derivedRoot (e.g.
+// "<commit>/verdicts.json") and the sha256 content digest
+// ("sha256:<hex>") of the exact bytes read. It exists so a fold consumer
+// that must RECEIPT its inputs (spec/evidence-slot dc-3: "the derived-tree
+// path probed with the digests of any record files read") can cite what
+// this loader read without a second, drifting derived-tree walk of its
+// own (evidence-slot co-3: one fold, one reader).
+type RecordFile struct {
+	Path   string
+	Digest string
+}
+
 // LoadRecords loads every evidence record found in derivedRoot's immediate
 // commit-named subdirectories (both verdicts.json and runtime.json,
 // derivedRecordFiles) and keeps only those whose provenance.commit is
@@ -44,15 +59,28 @@ var derivedRecordFiles = []string{"verdicts.json", "runtime.json"}
 // has never been synced yet has no derived data, which the fold reads
 // honestly as "no records" rather than failing operationally.
 func LoadRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]artifact.Evidence, error) {
+	out, _, err := LoadRecordsWithSources(ctx, gitDir, derivedRoot, commit)
+	return out, err
+}
+
+// LoadRecordsWithSources is LoadRecords plus a manifest of the record
+// files it actually read (existing files under ancestor-or-self commit
+// directories), each with the content digest of the exact bytes decoded.
+// It is the SAME single walk — LoadRecords delegates here — so a receipt
+// built from the manifest can never disagree with the records loaded.
+// The manifest order is deterministic (os.ReadDir's sorted directory
+// order, then derivedRecordFiles order within a commit directory).
+func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit string) ([]artifact.Evidence, []RecordFile, error) {
 	entries, err := os.ReadDir(derivedRoot)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, fmt.Errorf("evidence: reading %s: %w", derivedRoot, err)
+		return nil, nil, fmt.Errorf("evidence: reading %s: %w", derivedRoot, err)
 	}
 
 	var out []artifact.Evidence
+	var sources []RecordFile
 	for _, e := range entries {
 		if !e.IsDir() || !commitDirRe.MatchString(e.Name()) {
 			continue
@@ -61,16 +89,19 @@ func LoadRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]art
 
 		isAncestor, err := gitx.IsAncestor(ctx, gitDir, recordCommit, commit)
 		if err != nil {
-			return nil, fmt.Errorf("evidence: checking ancestry of %s: %w", recordCommit, err)
+			return nil, nil, fmt.Errorf("evidence: checking ancestry of %s: %w", recordCommit, err)
 		}
 		if !isAncestor {
 			continue
 		}
 
 		for _, name := range derivedRecordFiles {
-			recs, err := loadEvidenceArray(filepath.Join(derivedRoot, recordCommit, name))
+			recs, digest, err := loadEvidenceArray(filepath.Join(derivedRoot, recordCommit, name))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
+			}
+			if digest != "" {
+				sources = append(sources, RecordFile{Path: recordCommit + "/" + name, Digest: digest})
 			}
 			out = append(out, recs...)
 		}
@@ -82,38 +113,42 @@ func LoadRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]art
 	// from a stable, content-derived order rather than one incidentally
 	// tied to directory listing order.
 	sort.SliceStable(out, func(i, j int) bool { return recordSortKey(out[i]) < recordSortKey(out[j]) })
-	return out, nil
+	return out, sources, nil
 }
 
 // loadEvidenceArray strict-decodes each record in a verdi.evidence/v1 array
 // file (verdicts.json or runtime.json alike — both are the same schema, one
 // array of records, 03 §Evidence records). A commit directory with no such
-// file yet is not an error (empty slice, nil error); a file that exists but
-// fails to decode is a real, surfaced error — a derived record that is on
-// disk but broken is worse than absent.
-func loadEvidenceArray(path string) ([]artifact.Evidence, error) {
+// file yet is not an error (empty slice, empty digest, nil error); a file
+// that exists but fails to decode is a real, surfaced error — a derived
+// record that is on disk but broken is worse than absent. digest is the
+// sha256 of the exact bytes read ("sha256:<hex>"), non-empty exactly when
+// the file existed.
+func loadEvidenceArray(path string) (recs []artifact.Evidence, digest string, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+			return nil, "", nil
 		}
-		return nil, fmt.Errorf("evidence: reading %s: %w", path, err)
+		return nil, "", fmt.Errorf("evidence: reading %s: %w", path, err)
 	}
+	sum := sha256.Sum256(data)
+	digest = "sha256:" + hex.EncodeToString(sum[:])
 
 	var raw []json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("evidence: unmarshaling %s: %w", path, err)
+		return nil, "", fmt.Errorf("evidence: unmarshaling %s: %w", path, err)
 	}
 
 	out := make([]artifact.Evidence, 0, len(raw))
 	for i, rm := range raw {
 		rec, err := artifact.DecodeEvidence(rm)
 		if err != nil {
-			return nil, fmt.Errorf("evidence: %s record %d: %w", path, i, err)
+			return nil, "", fmt.Errorf("evidence: %s record %d: %w", path, i, err)
 		}
 		out = append(out, *rec)
 	}
-	return out, nil
+	return out, digest, nil
 }
 
 // recordSortKey is a deterministic composite key for LoadRecords's output

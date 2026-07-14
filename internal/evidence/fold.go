@@ -66,7 +66,7 @@ func Fold(in Input) (StoryResult, error) {
 
 	result := StoryResult{Story: in.Spec.Story, SpecRef: in.Spec.ID}
 	for _, ac := range in.Spec.AcceptanceCriteria {
-		current := Current(filterEvidenceFor(candidates, ac.ID))
+		current := Current(RecordsForAC(candidates, ac.ID))
 
 		waived, err := WaiverActive(in.StoreRoot, in.StorySlug, ac.ID)
 		if err != nil {
@@ -167,9 +167,14 @@ func kindStatus(kind artifact.EvidenceKind, current []artifact.Evidence, atteste
 	return satisfied, hasRecords
 }
 
-// filterEvidenceFor returns the subset of records whose evidence_for
-// names ac.
-func filterEvidenceFor(records []artifact.Evidence, ac string) []artifact.Evidence {
+// RecordsForAC returns the subset of records whose evidence_for names ac
+// — the fold's own per-AC candidate filter (the exact step Fold applies
+// before its Current reduction). Exported so a fold consumer computing
+// per-AC record presence (spec/evidence-slot dc-1/co-3: "the slot's
+// record loading and per-kind reduction reuse the evidence package's
+// existing loader and Current reduction") shares this one filter instead
+// of growing a lookalike.
+func RecordsForAC(records []artifact.Evidence, ac string) []artifact.Evidence {
 	var out []artifact.Evidence
 	for _, r := range records {
 		for _, a := range r.EvidenceFor {

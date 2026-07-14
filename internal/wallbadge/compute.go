@@ -20,6 +20,14 @@ type BoardBadges struct {
 	// Disclosures are ladder outcomes that could not be proven (ac-3's
 	// disclosed-unproven case) — never a badge, never silence.
 	Disclosures []string
+	// EvidenceSlots is, per STORY acceptance-criterion id, the
+	// fold-derived record state of each DECLARED evidence kind in the
+	// AC's own declared order (spec/evidence-slot ac-1) — the data the
+	// card's per-kind obligation rows wear as record-state chips (ac-3).
+	// Nil on non-story specs and on specs declaring no evidence kinds.
+	// The matching fold:empty-slot badges ride ByObject like every other
+	// card badge (dc-3: one attachment path, one record shape).
+	EvidenceSlots map[string][]SlotState
 }
 
 // ComputeBadges runs the full v1 badge set (dc-1) for one spec: the
@@ -94,6 +102,20 @@ func ComputeBadges(ctx context.Context, root, specRelPath, specRevision string, 
 	}
 	if disclosure != "" {
 		out.Disclosures = append(out.Disclosures, disclosure)
+	}
+
+	// The evidence-slot compute (spec/evidence-slot ac-1/ac-2): a story
+	// AC card's per-declared-kind record state, plus a fold:empty-slot
+	// badge on each AC holding an empty slot — attached through this one
+	// entry point and ByObject like every other card badge (dc-3), never
+	// a second attachment path.
+	slots, slotBadges, err := EmptySlotBadges(ctx, root, specRelPath, specRevision, fm)
+	if err != nil {
+		return nil, err
+	}
+	out.EvidenceSlots = slots
+	for _, b := range slotBadges {
+		out.ByObject[b.Target] = append(out.ByObject[b.Target], b)
 	}
 
 	return out, nil
