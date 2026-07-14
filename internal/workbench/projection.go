@@ -78,11 +78,24 @@ type cardView struct {
 // yet: the card shows a disclosed "no obligation" badge (dc-2, the
 // wall-receipts posture — disclosure, never refusal; the activation gate is
 // what refuses at accept, so a draft in progress still renders legibly).
+// The Slot fields are spec/evidence-slot ac-3/dc-2: the kind's
+// fold-derived record state JOINS this same view — one row per declared
+// kind carrying both what the kind demands (the obligation) and what it
+// holds (the record-state chip) — rather than riding a second per-kind
+// list. Slot is "empty" (the fold's own per-kind no-record state, dc-1)
+// or "held"; SlotRecords counts the CURRENT records of the kind
+// (attestation: 1 when the attestation file exists). Both are
+// store-derived enrichments attached by attachBadges (badges.go) from
+// wallbadge.EmptySlotBadges — populated after attachObligations, in the
+// same I/O tier; Slot is "" only when badges have not been attached.
+// Presence disclosure only, never the fold's AC verdicts (dc-4).
 type obligationView struct {
-	Kind    string `json:"kind"`
-	Title   string `json:"title,omitempty"`
-	Body    string `json:"body,omitempty"`
-	Present bool   `json:"present"`
+	Kind        string `json:"kind"`
+	Title       string `json:"title,omitempty"`
+	Body        string `json:"body,omitempty"`
+	Present     bool   `json:"present"`
+	Slot        string `json:"slot,omitempty"`
+	SlotRecords int    `json:"slot_records,omitempty"`
 }
 
 // badgeInputView is one pinned input a badge's derivation record cites —

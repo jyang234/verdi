@@ -552,6 +552,12 @@ func writeScopingReceipts(b *strings.Builder, p *BoardProjection, c cardView) {
 // discloses, it never refuses). The list is populated only for story-wall AC
 // cards (attachObligations), so a non-empty c.Obligations is the render's
 // whole gate.
+//
+// The same row also carries the kind's record-state chip when slot state
+// was computed (spec/evidence-slot ac-3/dc-2: demand and holdings read
+// as ONE line per kind — this renderer is the single per-kind emitter
+// for the page and the fragment alike, never a second list) —
+// writeSlotChip.
 func writeObligations(b *strings.Builder, c cardView) {
 	esc := stdhtml.EscapeString
 	b.WriteString(`<div class="card-obligations" data-testid="obligations-` + esc(c.ID) + `">`)
@@ -567,15 +573,60 @@ func writeObligations(b *strings.Builder, c cardView) {
 			b.WriteString(`<div class="obligation obligation--present" data-obligation-kind="` + esc(o.Kind) + `" data-obligation-present="true">`)
 			b.WriteString(`<span class="obligation-kind">` + esc(o.Kind) + `</span>`)
 			b.WriteString(`<span class="obligation-title" title="` + esc(tip) + `">` + esc(o.Title) + `</span>`)
+			writeSlotChip(b, c.ID, o)
 			b.WriteString(`</div>`)
 			continue
 		}
 		b.WriteString(`<div class="obligation obligation--none" data-obligation-kind="` + esc(o.Kind) + `" data-obligation-present="false">`)
 		b.WriteString(`<span class="obligation-kind">` + esc(o.Kind) + `</span>`)
 		b.WriteString(`<span class="obligation-badge" data-testid="obligation-none-` + esc(c.ID) + `-` + esc(o.Kind) + `">no obligation</span>`)
+		writeSlotChip(b, c.ID, o)
 		b.WriteString(`</div>`)
 	}
 	b.WriteString(`</div>`)
+}
+
+// writeSlotChip writes one declared kind's record-state chip at the tail
+// of its obligation row (spec/evidence-slot ac-3/dc-2): what the kind
+// HOLDS, beside what it demands. An empty slot wears the board's
+// established dashed pending vocabulary — the same disclosed register as
+// "no stub" and "no obligation" (calm fact, never alarm; a
+// design-branch wall with no derived tree yet is the ordinary state,
+// dc-1); a held slot wears the calm covered register with its record
+// count. Presence only, never a pass/fail verdict (dc-4). A view with no
+// computed slot state (Slot == "") writes nothing — the pre-badge markup
+// stays byte-identical for callers that never attach badges.
+func writeSlotChip(b *strings.Builder, cardID string, o obligationView) {
+	if o.Slot == "" {
+		return
+	}
+	esc := stdhtml.EscapeString
+	state := "empty"
+	if o.Slot != "empty" {
+		state = "held"
+	}
+	b.WriteString(`<span class="slot-chip slot-chip--` + state + `" data-testid="slot-` + esc(cardID) + `-` + esc(o.Kind) + `" data-slot-state="` + state + `">` + esc(slotChipText(o)) + `</span>`)
+}
+
+// slotChipText is the chip's short text — record presence in the fold's
+// own terms. The attestation kind speaks its own noun ("existence is the
+// record", 02 §Kind registry): "attested" / "no attestation"; every
+// record kind counts its current records: "no record" / "1 record" /
+// "N records".
+func slotChipText(o obligationView) string {
+	if o.Kind == string(artifact.EvidenceAttestation) {
+		if o.Slot == "empty" {
+			return "no attestation"
+		}
+		return "attested"
+	}
+	if o.Slot == "empty" {
+		return "no record"
+	}
+	if o.SlotRecords == 1 {
+		return "1 record"
+	}
+	return strconv.Itoa(o.SlotRecords) + " records"
 }
 
 // zoneLabelText names each zone band as a newcomer reads it.
