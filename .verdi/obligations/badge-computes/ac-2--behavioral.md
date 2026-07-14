@@ -14,7 +14,8 @@ The behavioral evidence must render fixture stores exercising all three
 buckets: (a) an object-anchored finding (e.g. VL-006's AC-with-no-evidence-
 kind) badges exactly the card of the object it names; (b) a spec-level
 finding with no single object anchor badges the case file and no card;
-(c) a store-structural finding (e.g. a .gitattributes or data-tracking
-violation) present in `verdi lint` output produces NO badge anywhere on
-the wall. Findings scoped to a DIFFERENT spec's directory must not badge
-this wall.
+(c) a plumbing finding present in `verdi lint` output produces NO badge
+anywhere on the wall — including one whose path lies INSIDE this spec's
+own directory (e.g. VL-018's dangling layout.json key), the fail-closed
+case, not only repo-wide loci like .gitattributes. Findings scoped to a
+DIFFERENT spec's directory must not badge this wall.

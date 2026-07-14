@@ -20,7 +20,7 @@ links:
 decisions:
   - { id: dc-1, text: "the compute layer lives in loadBoard's I/O enrichment tier and is the ONE attachment point for every wall badge: this story delivers the layer, the VL-finding badges, and the ladder-flag values; evidence-slot and case-file-flags add their computes (empty slots, size-smell) and surface polish through this same layer and record schema — never a second attachment path", anchor: "#dc-1" }
   - { id: dc-2, text: "the derivation record schema is { source, label, target, inputs: [{name, path, revision}], records: [...], disclosures: [...] } — source is a namespaced rule id (lint:VL-006, ladder:spec-stale, ladder:pending-supersession, fold:empty-slot, observe:size-smell), target is an object id for a card badge or empty for a case-file badge, every input carries a revision, and disclosures carry the unproven inputs", anchor: "#dc-2" }
-  - { id: dc-3, text: "finding self-classification is realized as an optional object-anchor on lint.Finding populated by the rule that raises it: the wall keeps findings whose Path lies in this spec's directory, routes anchored findings to their card and unanchored ones to the case file, and drops repo-wide loci and decode failures — a new rule classifies itself by whether it anchors, exactly wall-receipts dc-3", anchor: "#dc-3" }
+  - { id: dc-3, text: "finding self-classification is realized as an optional wall-locus declaration on lint.Finding populated by the rule that raises it — an object anchor (that object's card) or a spec-level marker (the case file); a finding that declares no locus stays off the wall even when its Path lies inside this spec's directory, so plumbing rules (status-path, dangling layout keys, data-tracking) and decode failures are excluded fail-closed, and the wall additionally keeps only declared-locus findings scoped to this spec's directory — a new rule classifies itself, exactly wall-receipts dc-3", anchor: "#dc-3" }
   - { id: dc-4, text: "badge visual grammar: card badges are compact chips in the card's existing receipt-row vocabulary (the coverage-chip/obligation idiom); case-file badges are stamps on the case-file lockup beside the class tag; every badge element is a button carrying data-badge-source and its serialized derivation record — the derivation-drawer story's opener contract", anchor: "#dc-4" }
   - { id: dc-5, text: "an input's revision is a content digest (sha256 over the exact bytes read) or an already-pinned revision field the compute carries (the deviation report's covers sha, sweep_provenance.adr_corpus_digest, open-MR ids) — never a wall-clock time: the live wall reads the working tree, which has no commit for dirty state, so the digest is the honest revision", anchor: "#dc-5" }
 constraints:
@@ -139,16 +139,22 @@ and from what, so the drawer can show the whole derivation.
 
 ## dc-3
 
-Finding self-classification is realized as an optional object-anchor on
-lint.Finding, populated by the rule that raises it — the smallest seam
-that makes wall-receipts dc-3's partition self-maintaining. The wall then
-(a) keeps only findings whose Path lies within this spec's directory
-(wall-receipts dc-1: "VL lint findings scoped to this spec"), (b) routes
-a finding with an object anchor to that object's card and an unanchored
-finding to the case file, and (c) never sees repo-wide loci
-(.gitattributes, data-tracking, status-in-path, layout plumbing) or
-decode failures, which have no rendered record to point at. A new rule
-classifies itself by whether it anchors; the wall changes not at all.
+Finding self-classification is realized as an optional wall-locus
+declaration on lint.Finding, populated by the rule that raises it — the
+smallest seam that makes wall-receipts dc-3's partition self-maintaining.
+A rule declares one of two loci for its findings: an object anchor (the
+finding badges that object's card) or a spec-level marker (the finding
+badges the case file). A finding that declares NO locus stays off the
+wall — fail-closed — even when its Path lies inside this spec's
+directory: that is what keeps spec-local plumbing findings (a dangling
+layout.json key in this spec's own directory, status-in-path,
+data-tracking) and decode failures (unparsed-island territory) in
+`verdi lint`/CI and off the wall, reproducing wall-receipts dc-3's third
+bucket exactly rather than approximating it by path. On top of the
+declared locus, the wall keeps only findings whose Path lies within this
+spec's directory (wall-receipts dc-1: "VL lint findings scoped to this
+spec"). A new rule classifies itself by what it declares; the wall
+changes not at all.
 
 ## dc-4
 
