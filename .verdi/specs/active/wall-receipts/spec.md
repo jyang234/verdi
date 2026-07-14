@@ -4,7 +4,7 @@ kind: spec
 title: "Wall Receipts"
 owners: [platform-team]
 class: feature
-status: draft
+status: accepted-pending-build
 problem: { text: "the wall computes nothing it knows: lint findings, ladder flags, and evidence folds all exist, but no card carries them, so readiness is discovered at MR time and an unexplained verdict trains authors to game the badge rather than fix the cause", anchor: problem }
 outcome: { text: "every computed claim on the wall is a badge that opens its derivation — the rule, the pinned inputs, the firing records — and readiness is ambient during authoring, never a surprise at review", anchor: outcome }
 acceptance_criteria:
@@ -26,6 +26,7 @@ decisions:
   - { id: dc-2, text: "a derivation drawer names the rule id, the pinned inputs with revisions, and the firing records — receipts, not verdicts; an unexplained badge trains authors to game it", anchor: "#dc-2" }
   - { id: dc-3, text: "a VL finding is a wall badge only if it anchors to a rendered element (ac-2/dc-2: a receipt must name a firing record) — object-anchored findings badge their card, spec-level findings badge the case file, and store-structural or plumbing findings (gitattributes, data-tracking, status-path, dangling layout keys, decode failures) stay in verdi lint/CI, off the wall; a new rule classifies itself by whether it anchors", anchor: "#dc-3" }
   - { id: dc-4, text: "the ADR exemption count is out of v1 scope — it attaches to an external reference card, not this spec's own objects, so it rides the later context-rail pass (with parent-feature fold-status cards), reusing this spec's derivation-drawer machinery (ac-2) rather than being owned here", anchor: "#dc-4" }
+frozen: { at: 2026-07-13, commit: d3b4a012200f29116ea8e5842922a2f1dbafd429 }
 ---
 # Wall Receipts
 
