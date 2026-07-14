@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/wallbadge"
 )
 
 // TestBadgeSpecDecodes proves every wall-badge fixture instance the
@@ -47,6 +49,44 @@ func TestBadgeSpecDecodes(t *testing.T) {
 			}
 			if len(fm.Decisions) != 1 || len(fm.Decisions[0].Links) != 1 || fm.Decisions[0].Links[0].Ref != "adr/0099-no-such-adr" {
 				t.Errorf("decisions = %+v, want dc-1 carrying the dangling exempts link", fm.Decisions)
+			}
+		})
+	}
+}
+
+// TestACCountSpecDecodesAndStraddlesTheThreshold proves the size-smell
+// fixture pair (spec/case-file-flags ac-2/ac-3) is valid and HONEST:
+// both instances strict-decode with exactly their declared AC counts,
+// and the counts genuinely straddle dc-1's threshold as computed from
+// the SAME declared constants the compute reads — so a future amendment
+// of the layout geometry or the reference constant fails here, loudly,
+// instead of silently hollowing out the Playwright proof.
+func TestACCountSpecDecodesAndStraddlesTheThreshold(t *testing.T) {
+	cases := []struct {
+		spec  string
+		count int
+		over  bool
+	}{
+		{sizeSmellWallSpecName, sizeSmellACCount, true},
+		{sizeFitWallSpecName, sizeFitACCount, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.spec, func(t *testing.T) {
+			doc := acCountSpec(tc.spec, tc.count)
+			fmBytes, _, err := artifact.SplitFrontmatter([]byte(doc))
+			if err != nil {
+				t.Fatalf("SplitFrontmatter: %v", err)
+			}
+			fm, err := artifact.DecodeSpec(fmBytes)
+			if err != nil {
+				t.Fatalf("DecodeSpec: %v", err)
+			}
+			if fm.ID != "spec/"+tc.spec || len(fm.AcceptanceCriteria) != tc.count {
+				t.Errorf("decoded id/AC count = %q/%d, want spec/%s with %d ACs", fm.ID, len(fm.AcceptanceCriteria), tc.spec, tc.count)
+			}
+			estimate := boardlayout.ZoneOriginY + tc.count*boardlayout.RowPitch
+			if got := estimate > wallbadge.ReferenceViewportHeight; got != tc.over {
+				t.Errorf("dc-1 estimate for %d ACs = %d vs reference %d: over=%v, want %v — the fixture no longer straddles the threshold", tc.count, estimate, wallbadge.ReferenceViewportHeight, got, tc.over)
 			}
 		})
 	}

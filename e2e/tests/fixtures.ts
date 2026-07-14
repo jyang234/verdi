@@ -236,6 +236,24 @@ export const BADGE_SEALED_SPEC = "decline-badge-sealed";
 export const BADGE_DECISION = "dc-1";
 export const BADGE_STUB_SLUG = "badge-orphan";
 
+// ---------------------------------------------------------------------------
+// Workbench (size-smell, spec/case-file-flags ac-2/ac-3)
+// ---------------------------------------------------------------------------
+
+// The size-smell fixture pair: two authoring walls differing ONLY in
+// declared AC count, straddling dc-1's deterministic proxy (estimated
+// AC-column height = ZoneOriginY 40 + count × RowPitch 176, vs the
+// declared reference-viewport-height constant 900 — never a client
+// measurement). SIZE_SMELL_SPEC declares 5 ACs (estimate 920 → badge);
+// SIZE_FIT_SPEC declares 4 (estimate 744 → no badge). Provisioned by
+// cmd/e2eharness/provision_board.go (acCountSpec).
+export const SIZE_SMELL_SPEC = "decline-ac-sprawl";
+export const SIZE_FIT_SPEC = "decline-ac-trim";
+// The badged wall's estimate operands, mirrored for the drawer-content
+// assertions (constants disclosed by name and value, dc-1).
+export const SIZE_SMELL_ESTIMATE = 920;
+export const SIZE_SMELL_REFERENCE = 900;
+
 // Corpus artifacts nothing on DESIGN_SPEC's wall names (real on main,
 // so real on the design branch) — the pin toolbox's import fixtures.
 export const PIN_ADR = "adr/0002-outbox-events";
