@@ -172,9 +172,9 @@ func TestEmptySlotBadges_FilledVersusEmpty(t *testing.T) {
 	// name, no timestamp anywhere (co-1).
 	sum := sha256.Sum256([]byte(body))
 	wantInputs := map[string][2]string{
-		"derived-tree": {".verdi/data/derived/spec--slot-story", repo.Head},
+		"derived-tree":                           {".verdi/data/derived/spec--slot-story", repo.Head},
 		"record:" + repo.Head + "/verdicts.json": {".verdi/data/derived/spec--slot-story/" + repo.Head + "/verdicts.json", "sha256:" + hex.EncodeToString(sum[:])},
-		"spec": {".verdi/specs/active/slot-story/spec.md", "sha256:fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe"},
+		"spec":                                   {".verdi/specs/active/slot-story/spec.md", "sha256:fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe"},
 	}
 	if len(b1.Inputs) != len(wantInputs) {
 		t.Fatalf("ac-1 badge inputs = %+v, want %d entries", b1.Inputs, len(wantInputs))
