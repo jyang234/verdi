@@ -1,50 +1,45 @@
-// The workbench home page: GET / — a real, server-rendered index of this
-// store (DEFECT A), replacing Phase 9's health skeleton that printed the
-// store root and a list of route patterns as dead-end plain text. It lists
-// active specs (title, status badge, corpus link; feature specs also link
-// their verdict/matrix pages via the spec's scalar story ref), archived
-// specs, the other kinds grouped with counts, discovered services, and the
-// store's boards — every entry a real, clickable link, so a human landing
-// on the workbench has somewhere to go (05 §Workbench).
+// The workbench home page: GET / — since spec/directory-home, the
+// whole-store DIRECTORY (dc-1): the computed directory index rendered as
+// the page's organizing structure (directory.go), replacing the old
+// single-checkout active/archived listing in place — no new route, no
+// second landing page. The surviving home affordances keep their sections
+// beneath the directory: the disclosures pointer, the other-artifacts
+// corpus index, discovered services, and the grandfathered v0 boards.
 package workbench
 
 import (
 	"bytes"
+	"context"
 	stdhtml "html"
 	"html/template"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/artifactview"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// indexHandler answers GET / with the store's home index. It owns exactly
-// the "/" route; any other path 404s here (RegisterRoutes maps "/" to this
-// catch-all).
-//
-// The page is built defensively: a section whose data cannot be read
-// (a store with no committed zone, an unreadable boards dir) renders an
-// honest note rather than failing the whole page — the home page is the
-// one landing surface that must never itself be a dead end.
-func indexHandler(root string) http.HandlerFunc {
+// indexHandler answers GET / with the whole-store directory home. It owns
+// exactly the "/" route; any other path that falls through to this
+// catch-all renders the disclosed 404 surface (notfound.go — dc-5: never a
+// bare NotFound), including the stale-entry shape for a deleted design
+// branch's board address.
+func indexHandler(root string, home HomeDeps) http.HandlerFunc {
+	home = home.resolve(root)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
-			http.NotFound(w, r)
+			renderCatchAllNotFound(w, r, root, home.Git)
 			return
 		}
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		out, err := renderHome(root)
+		out, err := renderHome(r.Context(), root, home)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
 			return
@@ -57,8 +52,15 @@ func indexHandler(root string) http.HandlerFunc {
 // renderHome assembles the home page body and renders it through the shared
 // shell. It returns an error only if the shell template itself fails to
 // execute — every data-source failure is captured inline as an honest note,
-// keeping the landing page reachable even for a half-initialised store.
-func renderHome(root string) ([]byte, error) {
+// keeping the landing page reachable even for a half-initialised store
+// (dc-5: the home page is never itself a dead end).
+//
+// The directory is computed through the ref-index seam — ONE call per
+// render (dc-2); this renderer enumerates no git refs of its own and holds
+// no second copy of the grouping rules. The in-review consultation (dc-4)
+// is per-render, bounded, and non-blocking: its failure is disclosed while
+// the refs-computed directory still renders fully.
+func renderHome(ctx context.Context, root string, home HomeDeps) ([]byte, error) {
 	var body bytes.Buffer
 
 	body.WriteString(`<p class="store-root">Store root: <code>`)
@@ -68,14 +70,22 @@ func renderHome(root string) ([]byte, error) {
 	// The disclosures view (spec/disclosures-panel): one landing-page
 	// pointer so the checkout's "what is verdi not proving right now"
 	// surface is discoverable, not tribal knowledge.
-	body.WriteString(`<p class="home-disclosures"><a href="/disclosures">Disclosures</a> — every claim this checkout is currently not proving, in one view.</p>`)
+	body.WriteString(`<p class="home-disclosures"><a href="/disclosures">Disclosures</a> &mdash; every claim this checkout is currently not proving, in one view.</p>`)
 
+	// The whole-store directory (spec/directory-home ac-1): the ref-index
+	// seam consumed once, then the per-render forge consultation.
+	entries, indexErr := home.Index(ctx)
+	inReview, mrNotice := consultOpenMRs(ctx, home.OpenMRs)
+	writeDirectorySection(&body, root, entries, indexErr, inReview, mrNotice, home.OpenMRs != nil)
+
+	// The non-spec corpus kinds (adr, diagram, attestation, waiver,
+	// conflict) — a surviving affordance of the old home page, still read
+	// from the serving working tree (they have no per-branch story).
 	if ix, err := index.Build(root); err != nil {
 		body.WriteString(`<p class="notice">Could not read the corpus for this store: `)
 		body.WriteString(stdhtml.EscapeString(err.Error()))
 		body.WriteString(`</p>`)
 	} else {
-		writeSpecsSections(&body, ix)
 		writeOtherKindsSection(&body, ix)
 	}
 
@@ -86,112 +96,6 @@ func renderHome(root string) ([]byte, error) {
 		Title:    "Workbench",
 		BodyHTML: template.HTML(body.String()),
 	})
-}
-
-// writeSpecsSections renders the active- and archived-spec sections. Active
-// vs archived is read from each spec's on-disk path (specs/active/ vs
-// specs/archive/ — 01 §Directory layout), the only signal that distinguishes
-// them; the index Entry itself carries no zone field.
-func writeSpecsSections(buf *bytes.Buffer, ix *index.Index) {
-	var active, archived []*index.Entry
-	for _, e := range ix.All() {
-		if e.Kind != "spec" {
-			continue
-		}
-		if strings.Contains(filepath.ToSlash(e.Path), "/specs/archive/") {
-			archived = append(archived, e)
-		} else {
-			active = append(active, e)
-		}
-	}
-
-	buf.WriteString(`<section class="home-specs"><h2>Active specs</h2>`)
-	if len(active) == 0 {
-		buf.WriteString(`<p class="empty">No active specs.</p>`)
-	} else {
-		buf.WriteString("<ul>")
-		for _, e := range active {
-			writeSpecItem(buf, e, true)
-		}
-		buf.WriteString("</ul>")
-	}
-	buf.WriteString(`</section>`)
-
-	buf.WriteString(`<section class="home-specs-archived"><h2>Archived specs</h2>`)
-	if len(archived) == 0 {
-		buf.WriteString(`<p class="empty">No archived specs.</p>`)
-	} else {
-		buf.WriteString("<ul>")
-		for _, e := range archived {
-			writeSpecItem(buf, e, false)
-		}
-		buf.WriteString("</ul>")
-	}
-	buf.WriteString(`</section>`)
-}
-
-// writeSpecItem renders one spec as a list entry: title (linked to its
-// corpus page), a status badge, and — when withStory is set and the spec is
-// a feature spec with a scalar story ref — links to its verdict and matrix
-// pages, keyed by that story ref (the same argument form storyresolve
-// accepts, 05 §CLI). The class/story fields are not on the index Entry, so
-// this re-decodes the spec's frontmatter through the shared artifactview
-// seam; a decode failure degrades to "just the corpus link", never a broken
-// page.
-func writeSpecItem(buf *bytes.Buffer, e *index.Entry, withStory bool) {
-	name := strings.TrimPrefix(e.Ref, "spec/")
-
-	buf.WriteString(`<li><a href="/a/spec/`)
-	buf.WriteString(stdhtml.EscapeString(name))
-	buf.WriteString(`">`)
-	buf.WriteString(stdhtml.EscapeString(e.Title))
-	buf.WriteString(`</a>`)
-	if e.Status != "" {
-		// badge-<status> is the same per-status styling hook internal/dex's
-		// listing pages emit, so a draft reads ochre and an accepted spec
-		// green on both surfaces.
-		buf.WriteString(` <span class="badge badge-`)
-		buf.WriteString(stdhtml.EscapeString(e.Status))
-		buf.WriteString(`">`)
-		buf.WriteString(stdhtml.EscapeString(e.Status))
-		buf.WriteString(`</span>`)
-	}
-
-	if withStory {
-		// Every active spec has a projection board (05 §Workbench, R4:
-		// the board is a view of the spec) — the four-concept minimum
-		// path starts from this link.
-		buf.WriteString(` &middot; <a href="/board/spec/`)
-		buf.WriteString(stdhtml.EscapeString(name))
-		buf.WriteString(`">board</a>`)
-		if class, story := specClassStory(e); class == artifact.ClassFeature && story != "" {
-			buf.WriteString(` <a href="/matrix/`)
-			buf.WriteString(stdhtml.EscapeString(story))
-			buf.WriteString(`">matrix</a> <a href="/verdict/`)
-			buf.WriteString(stdhtml.EscapeString(story))
-			buf.WriteString(`">verdict</a>`)
-		}
-	}
-	buf.WriteString(`</li>`)
-}
-
-// specClassStory re-decodes a spec entry's frontmatter for its class and
-// scalar story ref. Returns zero values on any read/decode failure — the
-// caller treats that as "not a linkable feature spec".
-func specClassStory(e *index.Entry) (artifact.SpecClass, string) {
-	data, err := os.ReadFile(e.Path)
-	if err != nil {
-		return "", ""
-	}
-	fm, _, err := artifact.SplitFrontmatter(data)
-	if err != nil {
-		return "", ""
-	}
-	m, err := artifactview.DecodeMeta(e.Kind, fm)
-	if err != nil {
-		return "", ""
-	}
-	return m.Class, m.Story
 }
 
 // writeOtherKindsSection groups every non-spec, non-external committed-zone
