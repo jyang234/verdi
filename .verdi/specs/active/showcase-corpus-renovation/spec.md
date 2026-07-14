@@ -4,7 +4,7 @@ kind: spec
 title: "Showcase Corpus Renovation"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-22
 problem: { text: "the fixture corpus that will become examples/showcase is scattered across testdata/corpus (the primary e2e feature corpus) and testdata/dexoverlay (a second, separately-layered tree grafted on for dex/supersession coverage), named after test concerns (accepted-pending-build, new-feature-x) rather than a coherent domain, and written to pass lint and assertions rather than to read well — no artifact in it has ever been vetted against a reader-facing bar. Public-showcase#ac-1 requires a single vetted store at examples/showcase where every artifact earns its place; today there is no such store, no domain, and no vetting record.", anchor: "#problem" }
 outcome: { text: "testdata/corpus and testdata/dexoverlay are relocated and merged into one committed store at examples/showcase, renamed onto a coherent LoanServ domain (services, dates, jira keys, and prose drawn from a single canon), and every artifact in it is renovated to and recorded against the three-column vetting bar — lint-clean, editorially exemplary, and narrative-coherent — with the store lint-clean end to end as a provisioned checkout.", anchor: "#outcome" }
@@ -19,6 +19,7 @@ decisions:
 constraints:
   - { id: co-1, text: "no network in any test: the relocated, renovated tree is exercised over fixturegit stable SHAs and a provisioned scratch checkout exactly as the e2e harness constructs one — never against a live service", anchor: "#co-1" }
   - { id: co-2, text: "every artifact under examples/showcase gets a row in verdi/docs/showcase-vetting.md recording all three bar columns or an explicit cut; a frozen archived artifact that needs a content edit is never edited in place — it goes through layers.txt content replacement and a full re-pin, noted in the vetting doc", anchor: "#co-2" }
+frozen: { at: 2026-07-14, commit: e046518e66ec45c9a89a47f289aa7fa3cd992139, stub_matched: true }
 ---
 # Showcase Corpus Renovation
 
