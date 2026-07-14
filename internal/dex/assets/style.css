@@ -2579,7 +2579,6 @@ button.yarn-chip-type {
 }
 .drawer-inputs caption,
 .drawer-section-label {
-  display: block;
   text-align: left;
   font-family: var(--mono);
   font-size: 0.62rem;
@@ -2589,6 +2588,11 @@ button.yarn-chip-type {
   color: var(--muted-solid);
   margin: 0 0 0.3rem;
 }
+/* the caption keeps its native table-caption display (display:block
+   would drop it into the row flow, under the header row); the section
+   labels are plain spans and need the block themselves */
+.drawer-inputs caption { caption-side: top; padding: 0 0 0.3rem; }
+.drawer-section-label { display: block; }
 .drawer-inputs th {
   font-family: var(--mono);
   font-size: 0.6rem;
