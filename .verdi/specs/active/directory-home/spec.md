@@ -4,7 +4,7 @@ kind: spec
 title: "Directory Home"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-20
 problem: { text: "the workbench home page is a single-checkout view: it lists what the serving working tree contains and nothing else, so every draft in progress on a design branch is invisible at the one address the operator actually visits — the work most in motion is exactly the work the directory under-reports (workbench-directory#problem), and the distinction the operator needs, status, is never the page's organizing structure", anchor: "#problem" }
 outcome: { text: "GET / at the one serve address is the whole-store directory: it renders the computed directory index — every spec on the default branch and every draft on a design branch — grouped by status per the feature's dc-2, every entry status-chipped and linking to its board, disclosed by source, chipped in-review from the forge when an MR is open, and degrading every absence to a disclosed notice: never a dead link, never a silent absence", anchor: "#outcome" }
@@ -24,6 +24,7 @@ decisions:
 constraints:
   - { id: co-1, text: "rendering the directory reads the computed index — refs only — and never switches a checkout, never cuts a worktree, never deletes one: a directory READ mutates nothing (feature co-1, dc-1, dc-4)", anchor: "#co-1" }
   - { id: co-2, text: "no network in any test: the in-review chip and its degradation are proven against hermetic doubles (httptest forge / canned fixtures), and the Playwright suite under e2e/ is the behavioral evidence register for every directory surface", anchor: "#co-2" }
+frozen: { at: 2026-07-14, commit: 4a5a9e169801c3860ae1c5e90ac21512a6884f10, stub_matched: true }
 ---
 # Directory Home
 
