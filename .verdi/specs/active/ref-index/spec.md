@@ -19,7 +19,7 @@ links:
 decisions:
   - { id: dc-1, text: "backend seam only: a new internal/refindex package exposes ComputeIndex(ctx, root, deps) ([]Entry, error) as a pure function of ref state - no HTTP handler, no page, no rendering, and no forge/network call of any kind. directory-home (a separate stub under the same feature) is the only consumer that turns Entry values into markup; ref-index's output type is designed so that story never needs to touch git plumbing itself. Explicit scope boundary, closing a decision-conflict finding against this draft: parent dc-5's forge-sourced in-review chip is, by dc-5's own words, 'a second, non-ref source' layered on top of the refs-computed directory - it is not part of ac-2's 'computed deterministically from git refs' claim this story implements, and Entry (dc-3) deliberately carries no forge/MR field. Composing that second source onto ComputeIndex's output is directory-home's job (it implements both ac-2 and ac-5); this is a disclosed scope line, not an oversight, and no exempts edge is needed because nothing here contradicts dc-5 - it only implements the ref-only half dc-5 itself distinguishes", anchor: "#dc-1" }
   - { id: dc-2, text: "a consumer-defined git runner port, not the concrete internal/gitx functions directly: internal/refindex declares its own narrow interface (list local design refs, list remote-tracking design refs, resolve the default branch, show a path at a ref, list the default branch's spec directories at that ref) that internal/gitx's existing free functions (LocalBranches, Show, DefaultBranch - gitx/branch.go, gitx/show.go) satisfy via a small adapter; new plumbing this story needs (a for-each-ref query scoped to refs/remotes/origin/design/*, and a tree-listing at a ref) is added to gitx as more of the same shape, not invented ad hoc inside refindex. The port exists so ComputeIndex is testable against a fake with no real git process at all, alongside the hermetic fixturegit exercise (04 §port pattern). The remote name is hardcoded to 'origin', matching this codebase's existing single-remote convention verbatim - gitx.DefaultBranch already resolves refs/remotes/origin/HEAD, gitx.Push already pushes to 'origin', and gitx.HasRemote's callers already treat 'origin' as the one configured remote (gitx/branch.go, gitx/worktree.go) - so this is not a new narrowing this story invents; it is consistent with every other remote-naming assumption already load-bearing in this store. A repo with a differently-named remote is already unsupported by those existing functions, not newly unsupported by this one", anchor: "#dc-2" }
-  - { id: dc-3, text: "the Entry output type carries {Ref (kind/name-shaped local identity), Source (enum: local | remote | both), StatusGroup (feature dc-2's four-value vocabulary), SpecStatus (the raw frontmatter status where a spec was readable, empty otherwise), Disclosed (*disclosure.Disclosure, nil when the entry is ordinary)}. Source itself IS the mechanism that satisfies parent dc-5's 'each entry discloses its source' and 'a remote-only branch renders sealed with its remoteness disclosed': Source is a plain, always-populated field on every entry (never omitted, never defaulted away), so a remote-only entry's remoteness is disclosed simply by directory-home rendering its Source value - no disclosure.Disclosure wrapper is needed or created for that ordinary case. Disclosed is reserved narrowly for a DEGRADED entry whose content could not be read at all (ac-4's no-draft-spec case, and any future such case) - a materially different situation (absent content, not merely a sourcing fact) from an ordinary remote-only entry (present content, sourced remotely). This closes a decision-conflict finding against this draft's earlier, ambiguous wording: the two fields serve two distinct kinds of disclosure, both real, neither redundant with the other", anchor: "#dc-3" }
+  - { id: dc-3, text: "the Entry output type carries {Ref (kind/name-shaped local identity), Source (enum: default | local | remote | both), StatusGroup (feature dc-2's four-value vocabulary), SpecStatus (the raw frontmatter status where a spec was readable, empty otherwise), Disclosed (*disclosure.Disclosure, nil when the entry is ordinary)}. Source is a CLOSED, always-populated four-value enum covering every source ComputeIndex reads (dc-4 adds a third kind of entry - a default-branch spec, neither a local nor a remote-tracking design ref - so Source gains a fourth value, default, rather than leaving those entries un-sourced against dc-3's original three-value design-branch-only framing). Source itself IS the mechanism that satisfies parent dc-5's 'each entry discloses its source' and 'a remote-only branch renders sealed with its remoteness disclosed': Source is a plain, always-populated field on every entry (never omitted, never defaulted away), so a remote-only entry's remoteness, or a default-branch entry's default-ness, is disclosed simply by directory-home rendering its Source value - no disclosure.Disclosure wrapper is needed or created for that ordinary case. Disclosed is reserved narrowly for a DEGRADED entry whose content could not be read at all (ac-4's no-draft-spec case, and any future such case) - a materially different situation (absent content, not merely a sourcing fact) from an ordinary remote-only or default-branch entry (present content, just sourced from a particular place). This closes two decision-conflict findings against this draft's earlier wording: Source's ambiguity against Disclosed, and Source's original three-value vocabulary having no value for dc-4's default-branch entries", anchor: "#dc-3" }
   - { id: dc-4, text: "default-branch enumeration walks the default branch's OWN tree at its resolved ref (git ls-tree under .verdi/specs/active/ and .verdi/specs/archive/ at that ref, mirroring internal/index's existing corpus-walk shape but ref-scoped rather than working-tree-scoped) rather than reusing the live corpus index (internal/index), because the live index reads the working tree/checkout the serving process happens to be on - exactly the coupling co-1 forbids for index computation. A future consolidation of the two walkers is left open, not invented here", anchor: "#dc-4" }
 constraints:
   - { id: co-1, text: "inherited verbatim from the feature (co-1): managed worktrees live under the data zone, never committed (not this story's concern - see worktree-manager); index computation reads refs and never switches a checkout. ComputeIndex takes the serving checkout's root only to resolve .git and run ref-scoped plumbing against it - it never runs checkout, switch, or any working-tree-mutating command against that root or any other", anchor: "#co-1" }
@@ -203,12 +203,24 @@ The `Entry` output type is:
 ```go
 type Entry struct {
     Ref         string // "spec/<name>" - the canonical kind/name identity
-    Source      Source // local | remote | both
+    Source      Source // default | local | remote | both
     StatusGroup string // feature dc-2's four-value vocabulary
     SpecStatus  string // the raw frontmatter status, where a spec was readable; "" otherwise
     Disclosed   *disclosure.Disclosure // non-nil only for a degraded entry (ac-4)
 }
 ```
+
+`Source` is a closed, always-populated four-value enum, not the
+design-branch-only three values an earlier draft of this spec declared:
+`default` names an entry read from the default branch's own tree (dc-4) —
+neither a local nor a remote-tracking design ref at all — and `local` /
+`remote` / `both` name a design-branch draft's ref sourcing exactly as
+before. Closing a decision-conflict finding raised against the earlier
+draft: without a fourth value, dc-4's default-branch entries would have no
+defined `Source`, leaving parent dc-5's "each entry disclosed by source"
+obligation unmet for that whole class of entry — misstating a
+default-branch spec as `local` or `remote` would be actively wrong, since
+it did not come from a design ref at all.
 
 `Disclosed` reuses `internal/disclosure`'s existing shared shape
 (`disclosure.New`, `disclosure.Render`) rather than a bespoke ad hoc
@@ -223,15 +235,17 @@ against an earlier draft of this spec:** `Source` itself is the mechanism
 that satisfies parent dc-5's "each entry discloses its source" and "a
 remote-only branch renders sealed with its remoteness disclosed" — `Source`
 is a plain, always-populated field on every entry (never omitted, never
-silently defaulted), so a remote-only entry's remoteness is disclosed
-simply by `directory-home` rendering its `Source` value; no
-`disclosure.Disclosure` wrapper is created for that ordinary case.
-`Disclosed` is reserved narrowly for a genuinely degraded entry whose
-content could not be read at all (ac-4's no-draft-spec case, and any future
-case like it) — materially different from an ordinary remote-only entry,
-whose content is present, just sourced remotely. The two fields are not in
-tension: they disclose two different kinds of fact (sourcing vs. absence),
-and only one of them ever needs the heavier shared-disclosure shape.
+silently defaulted), so a remote-only entry's remoteness, or a
+default-branch entry's default-ness, is disclosed simply by
+`directory-home` rendering its `Source` value; no `disclosure.Disclosure`
+wrapper is created for that ordinary case. `Disclosed` is reserved narrowly
+for a genuinely degraded entry whose content could not be read at all
+(ac-4's no-draft-spec case, and any future case like it) — materially
+different from an ordinary remote-only or default-branch entry, whose
+content is present, just sourced from a particular place. The two fields
+are not in tension: they disclose two different kinds of fact (sourcing vs.
+absence), and only one of them ever needs the heavier shared-disclosure
+shape.
 
 ## DC-4
 
