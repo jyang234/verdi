@@ -34,19 +34,20 @@ func buildRepo(t *testing.T) *fixturegit.Repo {
 	if err := os.WriteFile(filepath.Join(repo.Dir, "spec.md"), []byte("draft content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runGit(t, repo.Dir, "add", "-A"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGit(t, repo.Dir, "commit", "--quiet", "-m", "draft"); err != nil {
-		t.Fatal(err)
-	}
+	runGit(t, repo.Dir, "add", "-A")
+	runGit(t, repo.Dir, "commit", "--quiet", "-m", "draft")
 	if err := gitx.Checkout(ctx, repo.Dir, "main"); err != nil {
 		t.Fatalf("Checkout(main): %v", err)
 	}
 	return repo
 }
 
-func runGit(t *testing.T, dir string, args ...string) error {
+// runGit runs git in dir with a fixed author/committer identity (for any
+// invocation that creates a commit) and fails the test on a non-zero
+// exit — there is nothing meaningful for a caller to do with a failure
+// here beyond that, so it reports via t.Fatalf rather than returning an
+// error.
+func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -58,7 +59,6 @@ func runGit(t *testing.T, dir string, args ...string) error {
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
-	return nil
 }
 
 // worktreeListCount counts `git worktree list --porcelain` entries whose
