@@ -127,6 +127,17 @@ e2e-check-node:
 # local/CI parity holds (CLAUDE.md: "CI runs exactly `make verify` —
 # trust parity"). Depends on e2e-check-node so a missing toolchain fails
 # with the install message above, not a raw shell error.
+#
+# VERDI_E2E_PORT_BASE (D6-28): the harness (cmd/e2eharness/ports.go) and
+# this suite's runner (e2e/ports.ts) both hard-code 4173/4174/4177 unless
+# this var is set, in which case every port derives from it as base,
+# base+1, base+2 in lockstep on both sides — letting concurrent `make
+# verify` runs in sibling git worktrees each claim a disjoint port range
+# instead of racing for the same three. It is a plain env var, not a make
+# variable, so it needs no plumbing here: export it before invoking make
+# (e.g. `VERDI_E2E_PORT_BASE=4300 make e2e`) and the recipe's child
+# processes (npm/npx/go run) inherit it automatically. Unset: unchanged
+# behavior.
 e2e: e2e-check-node
 	cd e2e && npm install && npx playwright install --with-deps chromium && npx playwright test
 

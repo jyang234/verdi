@@ -18,6 +18,8 @@
 // (adr/0001-outbox-events, real on main), and provisionv2.go's design
 // spec exempts the same one; recorded as a V1-P8 ledger deviation.
 
+import { resolvePorts } from "../ports";
+
 // ---------------------------------------------------------------------------
 // Workbench (V1-P6 board v2) — authoring mode
 // ---------------------------------------------------------------------------
@@ -92,10 +94,11 @@ export const REVIEW_COMMENT_UNRESOLVABLE = {
 export const REVIEW_FEED_TOTAL = 3;
 
 // ---------------------------------------------------------------------------
-// Dex (V1-P8) — served statically on :4174 by cmd/e2eharness
+// Dex (V1-P8) — served statically on :4174 by default (VERDI_E2E_PORT_BASE,
+// D6-28, shifts it — see ../ports.ts) by cmd/e2eharness
 // ---------------------------------------------------------------------------
 
-export const DEX_BASE = "http://127.0.0.1:4174";
+export const DEX_BASE = `http://127.0.0.1:${resolvePorts().dex}`;
 
 // The v2 fixture feature spec (three outcome ACs, three stubs, dc-1
 // exempting ADR_NAME — PLAN-V1 §4's overlay, testdata/corpus). Finalized
@@ -353,8 +356,9 @@ export function coverageChipTestId(acId: string): string {
 
 // The e2e control server (cmd/e2eharness/control.go): the hermetic open-MR
 // feed `verdi serve` consults per render, plus the outage and delete-branch
-// toggles the directory specs drive. Loopback only.
-export const CONTROL_URL = "http://127.0.0.1:4177";
+// toggles the directory specs drive. Loopback only. :4177 by default
+// (VERDI_E2E_PORT_BASE, D6-28, shifts it — see ../ports.ts).
+export const CONTROL_URL = `http://127.0.0.1:${resolvePorts().control}`;
 
 // Directory fixture branches (cmd/e2eharness/provision_directory.go):
 // each name is both the design branch's slug (design/<name>) and the

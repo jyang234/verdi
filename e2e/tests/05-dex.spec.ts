@@ -1,12 +1,13 @@
 import { test, expect } from "@playwright/test";
+import { DEX_BASE as dexBase } from "./fixtures";
 
-// A dex-built page (served statically by cmd/e2eharness on :4174, over
+// A dex-built page (served statically by cmd/e2eharness on :4174 by
+// default — VERDI_E2E_PORT_BASE, D6-28, shifts it, see ../ports.ts — over
 // the same scratch store `verdi dex build` produced from): the temporal
 // banner renders honestly per class, and search over the build-emitted
 // inverted index returns a known hit (PLAN.md Phase 10 exit criteria: "a
 // dex-built page renders its temporal banner + search returns a known
 // hit").
-const dexBase = "http://127.0.0.1:4174";
 
 test("a frozen dex page renders its point-in-time temporal banner", async ({ page }) => {
   await page.goto(`${dexBase}/a/adr/0001-outbox-events/`);
