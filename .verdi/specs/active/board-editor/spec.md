@@ -4,7 +4,7 @@ kind: spec
 title: "Board Editor"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-10
 problem: { text: "diagram-proposals ratified an authoring surface (ac-7) and mechanical before-peek/reset (ac-3), but the workbench has no diagram surface at all: the board renders spec projections only, a class: proposal artifact (ratified 02 §Diagram proposals) has no route, no editor, no preview, and nothing binds structural-operations-only, byte preservation, or position refusal to an interactive surface", anchor: problem }
 outcome: { text: "a drafting-focus editor on the board for class: proposal diagrams — code pane plus live preview under the one pinned vendored mermaid, failing visible on render errors; a verification rail consuming the extractor's tier and findings; structural operations landing as deterministic source-text edits with no positions anywhere; and mechanical before-peek and reset reproducing a derived proposal's pinned base from digest-verified inputs", anchor: outcome }
@@ -28,6 +28,7 @@ constraints:
   - { id: co-2, text: "no author-positioned layout: no position field in any editor request, record, or artifact write; drag connects, it never places (feature dc-2, co-3)", anchor: co-2 }
   - { id: co-3, text: "no LLM in any editor computation; the rail consumes extractor findings through its seam and never reimplements flowmap's graph semantics (feature co-1, co-2)", anchor: co-3 }
   - { id: co-4, text: "no network in any test: unit and integration tests are hermetic; Playwright e2e under e2e/ drives the built binary against the vendored asset only — the behavioral register for every editor path", anchor: co-4 }
+frozen: { at: 2026-07-14, commit: 0781efbfac98ccfe474f4bf93b68f88f90c60299, stub_matched: true }
 ---
 # Board Editor
 
