@@ -249,6 +249,42 @@ bindings:
       - "spec/judged-sweep#ac-2"
       - "spec/judged-sweep#ac-3"
       - "spec/judged-sweep#ac-4"
+      # spec/alignment-section (diagram-proposals ac-5) behavioral legs,
+      # all under make verify, internal/align:
+      # ac-1: diagram_computed_test.go's TestDiscoverAcceptedProposals_
+      # CorpusWideNoLeakage (two accepted proposals + one not-yet-accepted
+      # discovered corpus-wide, exactly), TestDiscoverAcceptedProposals_
+      # EmptyCorpus_ExplicitEmpty, TestDiscoverIllustrativeFigures_
+      # ScopedToCurrentSpecOnly (two specs each with their own fenced
+      # block; no cross-leakage), and TestDiscoverIllustrativeFigures_
+      # NoFencedBlocks_ExplicitEmpty.
+      # ac-2: TestComputeDiagramAlignment_Realized_FullCoverage (a
+      # from-scratch proposal, all elements exist -> "realized (full
+      # coverage)"), TestComputeDiagramAlignment_Divergent_WithWitness (a
+      # derived proposal's base-inherited node truth no longer has ->
+      # divergent, naming the fixturegit-scripted removal commit as
+      # candidate witness), and TestComputeDiagramAlignment_
+      # PartialCoverage_StillRealized (an out-of-grammar construct ->
+      # "realized (partial coverage ...)", never a bare realized) — all
+      # over upstream.FakeRunner, never a live flowmap exec.
+      # ac-3: diagram_render_test.go's TestRenderDiagramAlignment_
+      # MixedFixture_GoldenText (exact byte-for-byte subsection text over
+      # one full-coverage realized, one divergent, one partial-coverage
+      # realized, and one illustrative fixture) and
+      # TestRenderDiagramAlignment_EmptySets_ExplicitPlaceholders /
+      # TestRenderBody_DiagramAlignmentSubsection_NeverOmitted (the
+      # heading and both explicit-empty placeholders always render).
+      # ac-4: diagram_disposition_test.go's TestGenerate_
+      # DiagramFindingDispositionSurvivesRegeneration (a divergent diagram
+      # finding hand-dispositioned accepted-deviation survives an
+      # unchanged regeneration through the SAME PreserveDispositions path
+      # a boundary finding already rides). ac-4's attestation leg is
+      # authored at closure (a real accepted, genuinely-diverged
+      # proposal), not bound here.
+      - "spec/alignment-section#ac-1"
+      - "spec/alignment-section#ac-2"
+      - "spec/alignment-section#ac-3"
+      - "spec/alignment-section#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -435,3 +471,39 @@ bindings:
       - "spec/judged-sweep#ac-2"
       - "spec/judged-sweep#ac-3"
       - "spec/judged-sweep#ac-4"
+      # spec/alignment-section static legs (all 4 ACs declare
+      # [static, behavioral]; ac-4 additionally declares attestation,
+      # authored separately at closure), internal/align:
+      # ac-1: diagram_computed.go names two distinct discovery functions —
+      # DiscoverAcceptedProposals (walks .verdi/diagrams/*.mermaid
+      # corpus-wide, no impacts:/links: filter) and
+      # DiscoverIllustrativeFigures (scans only the string body passed to
+      # it — readCurrentSpecBody supplies exactly the current spec's own
+      # body, never another spec's) — both return an explicit non-nil
+      # empty slice rather than nil.
+      # ac-2: computeOneProposal is the one call site invoking
+      # diagramverify.RegenerateTruth, diagramverify.CompareWithWitness
+      # (twice: node-identity and edge-identity spaces), and
+      # diagramverify.StaleBase directly, over the SAME upstream.Runner
+      # Compute's own boundary-contract regeneration already threads
+      # through — no parallel graph-JSON parsing, mermaid extraction, or
+      # structural diffing anywhere in diagram_computed.go (grep-verifiable:
+      # the file imports internal/diagramverify and calls only its
+      # exported functions).
+      # ac-3: render.go's RenderBody emits "### Diagram alignment"
+      # unconditionally under "## Computed" (no len(...) > 0 guard around
+      # the heading or the renderDiagramAlignment call), which itself
+      # renders one line per proposal/illustrative diagram or an explicit
+      # placeholder line per set, mirroring renderBaselineDiffs' shape.
+      # ac-4: Compute (computed.go) appends ComputeDiagramAlignment's
+      # findings into the SAME []artifact.Finding slice its existing
+      # boundary findings populate, before ComputeDigest is called;
+      # ComputeDigest's signature (verify.go) is untouched (still exactly
+      # covers, findings, baselineDiffs) and artifact.DeviationFrontmatter
+      # gains no new digest-shaped field — diagram findings use id
+      # "diagram-<name>" (diagram_computed.go's computeOneProposal),
+      # mirroring the existing "boundary-..." convention.
+      - "spec/alignment-section#ac-1"
+      - "spec/alignment-section#ac-2"
+      - "spec/alignment-section#ac-3"
+      - "spec/alignment-section#ac-4"
