@@ -285,6 +285,26 @@ bindings:
       - "spec/alignment-section#ac-2"
       - "spec/alignment-section#ac-3"
       - "spec/alignment-section#ac-4"
+      # spec/case-file-flags behavioral legs, all under make verify:
+      # ac-1 = workbench's caseflags_test surface-contract tables (the
+      # spec-stale and pending-supersession stamps rendered on a story
+      # case file across all three lens outcomes — flagged via a real
+      # deviation report / a hermetic fake candidate loader, proven-
+      # unflagged bare, disclosed-unproven as a case-file disclosure
+      # line, never a stamp — plus the never-on-a-feature-wall negative)
+      # + 38-board-size-smell.spec.ts's disclosure-line proof on the
+      # no-forge story wall; ac-2 = wallbadge's SizeSmellBadge tables
+      # (threshold straddling derived from the declared constants,
+      # every-operand derivation record, observation register) +
+      # workbench's TestCaseFileSizeSmell over both wall classes +
+      # 38-board-size-smell.spec.ts (drag invariance, write path
+      # succeeding on the badged wall); ac-3 = 38-board-size-smell.
+      # spec.ts's two-viewport proof (byte-identical badge + derivation
+      # record at 700 and 1100 px heights, no drawer number equal to
+      # either actual viewport dimension).
+      - "spec/case-file-flags#ac-1"
+      - "spec/case-file-flags#ac-2"
+      - "spec/case-file-flags#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -507,3 +527,21 @@ bindings:
       - "spec/alignment-section#ac-2"
       - "spec/alignment-section#ac-3"
       - "spec/alignment-section#ac-4"
+      # spec/case-file-flags static legs (ac-1..3 all declare [static,
+      # behavioral]), all under make verify: ac-1 = wallbadge's
+      # staticcallsites_test (the dex lens's exact entry points, co-3) +
+      # workbench's TestCaseFileLadder_NoLocalRederivationInWorkbench
+      # (no decisionsweep call, accepted-deviation counter, or open-MR
+      # fold marker anywhere under internal/workbench; the one route is
+      # wallbadge.ComputeBadges); ac-2 = TestSizeSmell_PureFunctionOf-
+      # DeclaredInputs (sizesmell.go reads only boardlayout.ZoneOriginY /
+      # RowPitch and the declared ReferenceViewportHeight = 900 const —
+      # no file I/O, positions, clock, or client value) + TestSizeSmell_
+      # NothingConsumesTheBadge (a repo-wide walk: no gate, lint rule, or
+      # write path names the badge); ac-3 = TestSizeSmell_NoClient-
+      # ViewportFeedsBadgeState (no boardspec.js line reading a viewport
+      # dimension touches badge state; data-badge-record is fed solely by
+      # the serialized derivation record).
+      - "spec/case-file-flags#ac-1"
+      - "spec/case-file-flags#ac-2"
+      - "spec/case-file-flags#ac-3"
