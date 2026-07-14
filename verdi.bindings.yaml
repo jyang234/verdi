@@ -93,6 +93,16 @@ bindings:
       - "spec/evidence-obligations#ac-2"
       - "spec/evidence-obligations#ac-3"
       - "spec/evidence-obligations#ac-4"
+      # spec/code-health FEATURE ACs, bound directly (03 §The feature fold:
+      # kind coverage for a feature AC needs records bound to it; story
+      # closures satisfy condition 3, not the static/behavioral legs).
+      # The behavioral leg: the four archived story closures' witness
+      # suites, all under make verify.
+      - "spec/code-health#ac-1"
+      - "spec/code-health#ac-2"
+      - "spec/code-health#ac-3"
+      - "spec/code-health#ac-4"
+      - "spec/code-health#ac-5"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -142,3 +152,11 @@ bindings:
       - "spec/obligation-gate#ac-1"
       - "spec/obligation-gate#ac-2"
       - "spec/obligation-wall#ac-1"
+      # spec/code-health FEATURE ACs' static legs: the gates, seams, and
+      # contracts land compiled, vetted, linted, and lint-store clean
+      # under make verify.
+      - "spec/code-health#ac-1"
+      - "spec/code-health#ac-2"
+      - "spec/code-health#ac-3"
+      - "spec/code-health#ac-4"
+      - "spec/code-health#ac-5"
