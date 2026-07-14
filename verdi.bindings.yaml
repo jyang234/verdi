@@ -372,6 +372,34 @@ bindings:
       - "spec/evidence-slot#ac-1"
       - "spec/evidence-slot#ac-2"
       - "spec/evidence-slot#ac-3"
+      # spec/board-editor behavioral legs (ac-1/ac-5 declare [behavioral];
+      # ac-2/ac-3/ac-4 declare [static, behavioral]), all under make
+      # verify's e2e gate (e2e/tests/37-board-diagram-editor.spec.ts,
+      # against the vendored mermaid asset only — no network):
+      # ac-1: "the pane holds the artifact's source ..." + "rejected
+      # source paints the renderer's own error ..." (SVG on valid source,
+      # visible renderer-message error state, no retained picture, pane
+      # untouched). ac-2: the structural-operations describe block — all
+      # four ops through the real UI asserting the exact pane text,
+      # connect via BOTH click-click and drag-to-connect, the
+      # connects-nothing drag, and the disclosed-unavailable journey with
+      # the pane still live — plus internal/workbench's
+      # TestBoardDiagramOps_ThroughAPI/_DisclosedUnavailable. ac-3: the
+      # byte-preservation describe block (adversarial paste survives the
+      # save-reload loop bit-identical; one op changes only its own
+      # lines). ac-4: the before-peek/reset describe block (peek renders
+      # the base read-only, reset lands the base byte-for-byte, the
+      # corrupted-digest fixture fails visible with no write, a
+      # from-scratch proposal offers nothing) plus
+      # TestBoardDiagram_PeekAndReset. ac-5: the verification-rail
+      # describe block (canned report rendered verbatim through the dc-4
+      # port; disclosed unavailable without one; saves succeed in both
+      # states) plus TestBoardDiagram_RailStates.
+      - "spec/board-editor#ac-1"
+      - "spec/board-editor#ac-2"
+      - "spec/board-editor#ac-3"
+      - "spec/board-editor#ac-4"
+      - "spec/board-editor#ac-5"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -664,3 +692,31 @@ bindings:
       - "spec/evidence-slot#ac-1"
       - "spec/evidence-slot#ac-2"
       - "spec/evidence-slot#ac-3"
+      # spec/board-editor static legs (ac-2/ac-3/ac-4 declare [static,
+      # behavioral]; ac-1/ac-5 are behavioral-only and have no entry
+      # here), all under make verify's test suite:
+      # ac-2: internal/diagramedit — the op transform as pure functions
+      # (diagramedit.go) with table-driven grammar pins byte-for-byte
+      # (TestAddNode/TestConnect/TestRename/TestDeleteNode/TestDeleteEdge),
+      # the determinism property (TestOps_Determinism), the typed
+      # ops-unavailable result on out-of-subset source
+      # (TestParse_OutsideSubset, TestOps_OutsideSubset_TypedRefusal),
+      # and the position-key fail-closed request schema
+      # (TestBoardDiagramAPI_PositionKeyFailsClosed over the strict-
+      # decoded diagramAPIRequest, which declares no position field).
+      # ac-3: TestOps_PreserveUntouchedBytes (exhaustive-diff over
+      # adversarial fixtures) and TestBoardDiagramSave_ByteVerbatim (the
+      # save handler writes its input verbatim, frontmatter prefix
+      # untouched; the adversarial fixtures a graph round-trip would
+      # reformat survive bit-for-bit — no parse-then-serialize on any
+      # write path).
+      # ac-4: internal/diagrambase — the digest-verified base recovery as
+      # a unit-tested function over fixturegit history
+      # (TestRecover_HappyPath_ReturnsBaseBytesExactly, table-driven
+      # TestRecover_Negative: mismatch/unresolvable-pin/missing-
+      # derived_from each typed with NO bytes), and reset writing the
+      # recovered base through the ordinary save path
+      # (TestBoardDiagram_PeekAndReset's reset case).
+      - "spec/board-editor#ac-2"
+      - "spec/board-editor#ac-3"
+      - "spec/board-editor#ac-4"

@@ -235,7 +235,10 @@
 
   // annotatePreview stamps data hooks on the rendered SVG (stable
   // contract for gestures and e2e): data-node-id on each recognized
-  // node, data-from/data-to on each recognized edge path.
+  // node, data-from/data-to on each recognized edge path — plus, per
+  // edge, a transparent wide-stroke HIT twin over the same geometry, so
+  // a hand (or a test) can actually land on a hairline curve. The twin
+  // is pure gesture surface: presentation-less, never sent anywhere.
   function annotatePreview() {
     if (!state.opsAvailable) return;
     preview.querySelectorAll("g.node").forEach(function (g) {
@@ -244,10 +247,19 @@
     });
     preview.querySelectorAll("path.flowchart-link").forEach(function (p) {
       var ends = edgeEndpointsOf(p);
-      if (ends) {
-        p.setAttribute("data-from", ends.from);
-        p.setAttribute("data-to", ends.to);
-      }
+      if (!ends) return;
+      p.setAttribute("data-from", ends.from);
+      p.setAttribute("data-to", ends.to);
+      var hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      hit.setAttribute("d", p.getAttribute("d") || "");
+      hit.setAttribute("class", "diagram-edge-hit");
+      hit.setAttribute("data-from", ends.from);
+      hit.setAttribute("data-to", ends.to);
+      hit.setAttribute("fill", "none");
+      hit.setAttribute("stroke", "transparent");
+      hit.setAttribute("stroke-width", "14");
+      hit.style.pointerEvents = "stroke";
+      p.parentNode.insertBefore(hit, p.nextSibling);
     });
     restoreSelection();
   }
@@ -386,7 +398,9 @@
       showToolbox(nodeEl, id);
       return;
     }
-    var edgeEl = ev.target.closest && ev.target.closest("path.flowchart-link[data-from]");
+    var edgeEl =
+      ev.target.closest &&
+      ev.target.closest("path.flowchart-link[data-from], path.diagram-edge-hit[data-from]");
     if (edgeEl && preview.contains(edgeEl)) {
       clearSelection();
       showEdgeToolbox(edgeEl);

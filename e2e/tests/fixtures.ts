@@ -429,3 +429,52 @@ export function dirEntryTestId(name: string): string {
 export function dirGroupTestId(group: string): string {
   return `dir-group-${group}`;
 }
+
+// ---------------------------------------------------------------------------
+// Workbench (diagram-proposal editor, spec/board-editor)
+// ---------------------------------------------------------------------------
+
+// Provisioned by cmd/e2eharness/provision_diagram.go on the design branch
+// (BINDING: names and bodies below mirror that file verbatim — change
+// them together). The editor page for a class: proposal diagram:
+export function diagramEditorPath(name: string): string {
+  return `/board/diagram/${name}`;
+}
+
+// A from-scratch proposal WITHIN the op grammar's flowchart subset — the
+// structural-ops, save, and rail (canned report) journeys.
+export const DIAGRAM_PROPOSAL = "editor-proposal";
+export const DIAGRAM_PROPOSAL_BODY = `flowchart TD
+  loansvc["Loan service"]
+  billing["Billing"]
+  %% drafted on the wall
+  loansvc --> billing
+`;
+
+// A renderer-legal proposal OUTSIDE the op subset (sequenceDiagram): the
+// disclosed-unavailable journey. Its rail also has NO canned report, so
+// it doubles as the verification-unavailable fixture (ac-5).
+export const DIAGRAM_OUTSIDE_OPS = "editor-illustrative-ops";
+
+// The pinned base and its two derived twins (ac-4): the good one's
+// derived_from.digest is computed with the REAL diagrambase formula at
+// provision time; the corrupt one pins sha256:000…0 and must fail
+// visible with no write.
+export const DIAGRAM_BASE_BODY = `graph TD
+  loansvc --> notification-svc
+  loansvc --> charge-svc
+`;
+export const DIAGRAM_DERIVED = "editor-derived";
+export const DIAGRAM_DERIVED_BODY = DIAGRAM_BASE_BODY + `  loansvc --> audit-svc
+`;
+export const DIAGRAM_DERIVED_CORRUPT = "editor-derived-corrupt";
+
+// The canned verification report's rendered claims (provision_diagram.go's
+// cannedDiagramVerification, rendered VERBATIM by the rail — ac-5).
+export const DIAGRAM_RAIL_TIER = "partial";
+export const DIAGRAM_RAIL_FINDINGS: ReadonlyArray<[string, string]> = [
+  ["loansvc", "exists"],
+  ["billing", "proposed-new"],
+  ["audit-log", "contradicted"],
+  ["charge-svc", "stale-base"],
+];

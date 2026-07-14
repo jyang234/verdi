@@ -2898,7 +2898,8 @@ button.yarn-chip-type {
 .diagram-preview svg { max-width: 100%; height: auto; }
 /* structural gestures live on the picture (authoring, in-subset only) */
 .mode-authoring .diagram-preview g.node[data-node-id] { cursor: pointer; }
-.mode-authoring .diagram-preview path.flowchart-link[data-from] { cursor: pointer; }
+.mode-authoring .diagram-preview path.flowchart-link[data-from],
+.mode-authoring .diagram-preview path.diagram-edge-hit { cursor: pointer; }
 .diagram-preview g.node[data-node-selected] rect,
 .diagram-preview g.node[data-node-selected] polygon,
 .diagram-preview g.node[data-node-selected] circle {
