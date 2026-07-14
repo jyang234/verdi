@@ -4,7 +4,7 @@ kind: spec
 title: "Illustrative Class"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-11
 problem: { text: "fenced mermaid blocks in spec bodies and generator-less diagram artifacts already render (internal/render's one mermaid seam, the vendored pinned asset, dex and workbench alike) but carry no tier at all: nothing badges them deterministically unverifiable, no coverage disclosure separates them from the verified proposals the feature introduces, so the moment a verified diagram exists the two tiers blend silently — the one lie feature ac-4 exists to kill", anchor: problem }
 outcome: { text: "the illustrative tier made legible: body figures and generator-less diagram artifacts render under the same pinned mermaid version on the dex and the board's spec-body surfaces, each wearing a deterministic badge disclosing it as deterministically unverifiable and tied to its spec, with coverage disclosure keeping verified proposals and illustrative figures visually and semantically distinct — never silently blended; the judged sweep remains available to both tiers", anchor: outcome }
@@ -23,6 +23,7 @@ constraints:
   - { id: co-1, text: "no LLM and no clock or randomness anywhere in badge or coverage computation (feature co-1): the markup is a deterministic pure function of the artifact bytes", anchor: co-1 }
   - { id: co-2, text: "one pinned renderer: the vendored mermaid 10.9.1 asset serves every surface; no CDN, no second copy, no network in any test (feature co-3)", anchor: co-2 }
   - { id: co-3, text: "never silently blended (feature ac-4 verbatim): no surface renders a body-figure diagram without its badge; illustrative stays a body-figure convention in the prose register, never a first-class artifact or a new edge type (feature dc-8); the judged sweep (feature ac-8) remains available to both tiers — the judged-sweep story owns that surface", anchor: co-3 }
+frozen: { at: 2026-07-14, commit: 941e68b442168a6c9c8e6832c7f3b6929b9cbe9b, stub_matched: true }
 ---
 # Illustrative Class
 
