@@ -4,7 +4,7 @@ kind: spec
 title: "Obligation Gate"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-6
 problem: { text: "the obligation artifact now exists and can be authored on the wall, but nothing REQUIRES it: a story AC can still declare `evidence: [behavioral]` with no obligation stating what that behavioral evidence must show, and the spec activates anyway. The whole point of evidence-obligations (feature ac-2) is that a declared kind without an obligation cannot activate — otherwise obligations are optional decoration, not a gate.", anchor: "#problem" }
 outcome: { text: "an activation lint — VL-006's obligation-shaped sibling — refuses a STORY spec whose acceptance criterion declares an evidence kind with no matching obligation object (the file `.verdi/obligations/<spec-name>/<ac-id>--<kind>.md`, the spec-name keying obligation-artifact settled). A spec may not be accepted saying what KIND of evidence it wants without an obligation saying what that evidence must specifically show; the refusal names each missing (ac, kind). Feature ACs are exempt (obligations are story-only), authoring a draft is never blocked (only activation is), and the fold is unchanged — the gate is at activation, not on the evidence record (feature oq-1's resolution).", anchor: "#outcome" }
@@ -20,6 +20,7 @@ decisions:
 constraints:
   - { id: co-1, text: "no network in any test: the lint is exercised table-driven over hermetic fixtures — a story AC with a declared kind and no obligation (refused, naming the missing (ac,kind)); the same with the obligation present (clean); a feature AC with kinds and no obligation (clean — exempt); the VL-006 timing mirrored", anchor: "#co-1" }
   - { id: co-2, text: "authoring is never blocked (feature co-2): the gate fires only at activation, exactly as VL-006 does — a draft story with an un-obligated kind is not refused for that reason; the refusal is reserved for the accept/activation path. Drafting an obligation on the wall to satisfy the gate is the intended authoring loop", anchor: "#co-2" }
+frozen: { at: 2026-07-13, commit: f877ff019cda7d7271aeea9f4fb1d36a3449c4dd, stub_matched: true }
 ---
 # Obligation Gate
 
