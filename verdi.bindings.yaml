@@ -68,6 +68,15 @@ bindings:
       - "spec/shared-homes#ac-3"
       - "spec/shared-homes#ac-4"
       - "spec/shared-homes#ac-5"
+      # spec/file-topics behavioral legs: the untouched cmd/verdi suites
+      # over the verbatim moves (ac-1/ac-2), the module-wide suites over
+      # the runtimeprobe rename (ac-3), and the full e2e gate through the
+      # reworked harness plus the runGit/copyTree unit tests (ac-4) -- all
+      # under make verify.
+      - "spec/file-topics#ac-1"
+      - "spec/file-topics#ac-2"
+      - "spec/file-topics#ac-3"
+      - "spec/file-topics#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -102,3 +111,10 @@ bindings:
       - "spec/shared-homes#ac-3"
       - "spec/shared-homes#ac-4"
       - "spec/shared-homes#ac-5"
+      # spec/file-topics static legs: the relocated files, the renamed
+      # package with zero stragglers, and the harness's ctx/timeout/signal
+      # wiring compile, vet, lint, and lint-store clean under make verify.
+      - "spec/file-topics#ac-1"
+      - "spec/file-topics#ac-2"
+      - "spec/file-topics#ac-3"
+      - "spec/file-topics#ac-4"
