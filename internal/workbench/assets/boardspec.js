@@ -114,6 +114,10 @@
     ).then(function (resp) {
       if (!resp.ok) throw new Error("fragment: HTTP " + resp.status);
       return resp.text().then(function (html) {
+        // An open derivation drawer's element lives at the body while
+        // open; put it back before the region it came from is replaced,
+        // so the swap never strands it.
+        closeBadgeDrawer();
         region.innerHTML = html;
         layoutYarn();
         markClamped();
@@ -617,6 +621,51 @@
       clearTimeout(expandTimer);
       expandTimer = null;
     }
+  }
+
+  // -- derivation drawer: open, position, close — NOTHING else --------------
+  //
+  // Every wall badge is a button whose drawer body the server already
+  // rendered as its hidden sibling (spec/derivation-drawer dc-1 — the
+  // writePlacardFull idiom). This code never reads or templates the
+  // derivation data: opening moves the server's own element to the body
+  // (so no card clipping can cut a receipt off) behind a scrim, closing
+  // puts the untouched element back where the server rendered it, and a
+  // comment marker remembers that exact slot. Reading a receipt is never
+  // a write, so this works identically in every board mode (dc-4).
+  var openDrawer = null; // {el, marker, opener}
+
+  function openBadgeDrawer(btn) {
+    closeBadgeDrawer();
+    var drawer = btn.nextElementSibling;
+    if (!drawer || !drawer.classList || !drawer.classList.contains("badge-drawer")) return;
+    var backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop drawer-backdrop";
+    backdrop.id = "drawer-backdrop";
+    var marker = document.createComment("badge-drawer-home");
+    drawer.parentNode.insertBefore(marker, drawer);
+    document.body.appendChild(backdrop);
+    document.body.appendChild(drawer);
+    drawer.hidden = false;
+    openDrawer = { el: drawer, marker: marker, opener: btn };
+    // Focus moves into the dialog on open and back to the opener on
+    // close (dc-4) — the close control is the drawer's one affordance.
+    var close = drawer.querySelector(".drawer-close");
+    if (close) close.focus();
+  }
+
+  function closeBadgeDrawer() {
+    if (!openDrawer) return;
+    var st = openDrawer;
+    openDrawer = null;
+    st.el.hidden = true;
+    if (st.marker && st.marker.parentNode) {
+      st.marker.parentNode.insertBefore(st.el, st.marker);
+      st.marker.parentNode.removeChild(st.marker);
+    }
+    var bd = document.getElementById("drawer-backdrop");
+    if (bd) bd.remove();
+    if (st.opener && document.contains(st.opener)) st.opener.focus();
   }
 
   // -- dialogs ---------------------------------------------------------------
@@ -1747,6 +1796,21 @@
       return;
     }
 
+    // The derivation drawer (spec/derivation-drawer dc-4): activating a
+    // badge button — pointer here, and Enter/Space through the button's
+    // own native click synthesis — opens its server-rendered sibling;
+    // its ×, the scrim, or Escape closes it. Available in every mode:
+    // reading a receipt is never a write.
+    if (t.closest(".drawer-close") || t.id === "drawer-backdrop") {
+      closeBadgeDrawer();
+      return;
+    }
+    var badgeBtn = t.closest(".badge-chip, .case-stamp");
+    if (badgeBtn) {
+      openBadgeDrawer(badgeBtn);
+      return;
+    }
+
     // The supply toolbox: the tab toggles the tray; a result row pins;
     // any click outside closes the tray without residue.
     if (t.closest("#pin-toolbox-tab")) {
@@ -2081,6 +2145,7 @@
       hideAllDialogs();
       closeRefPeek();
       closeExpandDialog();
+      closeBadgeDrawer();
       closePinTray();
     }
   }
