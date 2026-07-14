@@ -403,6 +403,14 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 	if err := runGit(storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
 		return "", err
 	}
+	// origin/HEAD is the default-branch resolution gitx.DefaultBranch (and
+	// so the directory home's ref index) keys off; `git remote add` alone
+	// never sets it, so pin it to main explicitly (spec/directory-home's
+	// harness obligation — without it the whole-store directory would
+	// honestly render an empty default-branch walk).
+	if err := runGit(storeRoot, nil, "remote", "set-head", "origin", "main"); err != nil {
+		return "", err
+	}
 
 	// The sealed badge fixture freezes at the store's own main tip — a
 	// real commit in this scratch repo's history (frozen.commit must be

@@ -107,6 +107,13 @@ func run() error {
 		return fmt.Errorf("provisioning v1 board fixtures: %w", err)
 	}
 
+	// The directory-home ref fixtures (local-only / remote-only / empty /
+	// doomed design branches) — after the board fixtures, restoring the
+	// board suite's serving checkout when done.
+	if err := provisionDirectory(storeRoot); err != nil {
+		return fmt.Errorf("provisioning directory fixtures: %w", err)
+	}
+
 	dexSrv := &http.Server{Addr: dexAddr, Handler: http.FileServer(http.Dir(dexOut))}
 	dexLn, err := net.Listen("tcp", dexAddr)
 	if err != nil {
@@ -114,6 +121,18 @@ func run() error {
 	}
 	go func() { _ = dexSrv.Serve(dexLn) }()
 	log.Printf("e2eharness: dex site at http://%s (source: %s)", dexAddr, dexOut)
+
+	// The control server (control.go): the hermetic open-MR feed the
+	// directory home consults per render, plus the outage and
+	// delete-branch toggles the directory e2e drives — loopback only.
+	ctrl := newControlServer(storeRoot)
+	ctrlSrv := &http.Server{Addr: controlAddr, Handler: ctrl.handler()}
+	ctrlLn, err := net.Listen("tcp", controlAddr)
+	if err != nil {
+		return fmt.Errorf("binding control server: %w", err)
+	}
+	go func() { _ = ctrlSrv.Serve(ctrlLn) }()
+	log.Printf("e2eharness: control server at http://%s", controlAddr)
 
 	serveCmd := exec.CommandContext(ctx, binPath, "serve", "--http", workbenchAddr)
 	// A graceful stop on interrupt — SIGTERM, then up to 5s before the
@@ -125,7 +144,13 @@ func run() error {
 	// The hermetic review-mode feed (workbench.CommentFeed's canned-file
 	// implementation): REVIEW_SPEC reads as under MR review, with the
 	// three fixtures.ts comments — no network (CLAUDE.md).
-	serveCmd.Env = append(os.Environ(), "VERDI_REVIEW_FEED="+feedPath)
+	serveCmd.Env = append(os.Environ(),
+		"VERDI_REVIEW_FEED="+feedPath,
+		// The directory home's hermetic in-review feed (openmrfeed.go's
+		// httpOpenMRFeed) — served by the control server above, loopback
+		// only, no network (CLAUDE.md).
+		"VERDI_OPENMR_FEED=http://"+controlAddr+"/openmrs",
+	)
 	serveCmd.Stdout = os.Stdout
 	serveCmd.Stderr = os.Stderr
 	if err := serveCmd.Start(); err != nil {
@@ -143,6 +168,7 @@ func run() error {
 	log.Println("e2eharness: signal received, shutting down")
 	_ = serveCmd.Wait()
 	_ = dexSrv.Close()
+	_ = ctrlSrv.Close()
 	return nil
 }
 
