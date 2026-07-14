@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/canonjson"
 )
 
@@ -52,23 +53,8 @@ func WriteFile(specDir string, positions map[string]artifact.Position, live map[
 		return fmt.Errorf("boardlayout: marshal: %w", err)
 	}
 	path := FilePath(specDir)
-	tmp, err := os.CreateTemp(specDir, ".layout-*.json")
-	if err != nil {
-		return fmt.Errorf("boardlayout: temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(out); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("boardlayout: writing %s: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("boardlayout: closing %s: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("boardlayout: replacing %s: %w", path, err)
+	if err := atomicfile.Write(path, out, 0o600); err != nil {
+		return fmt.Errorf("boardlayout: %w", err)
 	}
 	return nil
 }

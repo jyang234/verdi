@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/fixturegit"
 	forgepkg "github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/forge/fake"
-	runtimeprobe "github.com/jyang234/verdi/internal/runtime"
+	"github.com/jyang234/verdi/internal/runtimeprobe"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -259,5 +261,52 @@ func TestRunProduceRuntime_MergeIdempotentAcrossRuns(t *testing.T) {
 	}
 	if recs[0].Verdict != artifact.VerdictPass || recs[0].Witness != "retry check: 200" {
 		t.Fatalf("records[0] = %+v, want the LATEST run's verdict/witness to have won", recs[0])
+	}
+}
+
+// TestRunProduceRuntime_Binary_FailVerdictExitsZero pins runtimeprobe.go's
+// header-stated transcription semantic (spec/fail-loud ac-2) end to end,
+// driving the real, compiled verdi binary against a fixturegit store
+// (co-1) rather than calling runProduceRuntime in-process like every test
+// above: verdi STAMPS an externally computed verdict, it does not compute
+// one, so a --verdict fail emission that successfully writes its record
+// is still exit 0 (emission success, regardless of the verdict's value) —
+// contrast sync.go's --produce path, whose evaluateBundle surfaces its
+// OWN computed verdicts as exit 1. The fail verdict itself is real and
+// recorded; it is consumed downstream by the fold, never by this
+// producer's exit code.
+func TestRunProduceRuntime_Binary_FailVerdictExitsZero(t *testing.T) {
+	bin := buildVerdiBinary(t)
+
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                           "schema: verdi.layout/v1\nforge: gitlab\n",
+			".verdi/specs/active/runtime-fixture/spec.md": runtimeProbeFixtureSpecMD,
+		},
+		Message: "seed runtime-fixture store",
+	}})
+
+	t.Setenv("CI", "true")
+	cmd := exec.Command(bin, "sync", "--produce-runtime",
+		"--story", "spec/runtime-fixture",
+		"--ac", "ac-2",
+		"--verdict", "fail",
+		"--witness", "GET /healthz -> 500",
+	)
+	cmd.Dir = repo.Dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("verdi sync --produce-runtime --verdict fail exited %d, want 0 (emission success is exit 0 regardless of the stamped verdict's value); output:\n%s", exitErr.ExitCode(), out)
+		}
+		t.Fatalf("running verdi sync --produce-runtime: %v; output:\n%s", err, out)
+	}
+
+	recs := readRuntimeRecords(t, repo.Dir, "spec/runtime-fixture", repo.Head)
+	if len(recs) != 1 {
+		t.Fatalf("runtime.json = %+v, want exactly 1 record", recs)
+	}
+	if recs[0].Verdict != artifact.VerdictFail {
+		t.Fatalf("recs[0].Verdict = %q, want fail — the exit-0 emission must still durably record the real fail verdict, never launder it", recs[0].Verdict)
 	}
 }

@@ -17,7 +17,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -108,7 +110,10 @@ func checkCascadeReaffirmation(root string, spec *artifact.SpecFrontmatter) (ok 
 // findSupersedingSpec scans specs/active/ for a spec carrying a
 // `supersedes` link to targetRef (e.g. "spec/loan-mgmt"), returning nil
 // (not an error) when none exists — the ordinary case for a feature that
-// has never been superseded.
+// has never been superseded. An operational read error from
+// loadActiveSpecTolerant (spec/fail-loud ac-2) propagates rather than
+// being treated the same as the tolerated nil-spec case — this loop must
+// not mask a permission/IO failure as "no superseding spec found".
 func findSupersedingSpec(root, targetRef string) (*artifact.SpecFrontmatter, error) {
 	dir := filepath.Join(root, ".verdi", "specs", "active")
 	entries, err := os.ReadDir(dir)
@@ -123,7 +128,10 @@ func findSupersedingSpec(root, targetRef string) (*artifact.SpecFrontmatter, err
 			continue
 		}
 		spec, err := loadActiveSpecTolerant(root, e.Name())
-		if err != nil || spec == nil {
+		if err != nil {
+			return nil, err
+		}
+		if spec == nil {
 			continue
 		}
 		for _, l := range spec.Links {
@@ -135,23 +143,35 @@ func findSupersedingSpec(root, targetRef string) (*artifact.SpecFrontmatter, err
 	return nil, nil
 }
 
-// loadActiveSpecTolerant loads one active spec, returning
-// (nil, nil) instead of propagating a decode error — this scan must not
-// let one unrelated malformed spec directory (out of scope for this
-// check) abort the whole cascade lookup.
+// loadActiveSpecTolerant loads one active spec. Two different failure
+// classes get two different treatments (spec/fail-loud ac-2): a MISSING
+// spec.md (os.IsNotExist) returns (nil, nil) — an ordinary, tolerated
+// absence, since not every specs/active/ entry need carry a spec.md this
+// scan cares about. Any OTHER read error (permission denied, an I/O
+// failure, a directory where a file was expected) is an operational
+// failure and propagates as a wrapped error, surfacing at exit 2 through
+// this function's callers — it must never be swallowed into a silent
+// no-supersession pass. The SplitFrontmatter/DecodeSpec tolerance below
+// stays exactly as before (disclosed decision): one unrelated malformed
+// spec directory, out of scope for this check, must not abort the whole
+// cascade lookup, and lint-store already backstops malformed specs
+// elsewhere.
 func loadActiveSpecTolerant(root, name string) (*artifact.SpecFrontmatter, error) {
 	path := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil //nolint:nilerr // tolerant scan, see doc comment
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 	fm, _, err := artifact.SplitFrontmatter(raw)
 	if err != nil {
-		return nil, nil //nolint:nilerr
+		return nil, nil //nolint:nilerr // tolerant: malformed spec, out of scope, lint-store backstops
 	}
 	spec, err := artifact.DecodeSpec(fm)
 	if err != nil {
-		return nil, nil //nolint:nilerr
+		return nil, nil //nolint:nilerr // tolerant: malformed spec, out of scope, lint-store backstops
 	}
 	return spec, nil
 }

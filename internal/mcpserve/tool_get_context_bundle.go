@@ -27,7 +27,7 @@ func (b *Backend) GetContextBundle(ctx context.Context, argsRaw json.RawMessage)
 		Refs []string `json:"refs"`
 		Spec string   `json:"spec"`
 	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
+	if err := strictUnmarshal(argsRaw, &args); err != nil {
 		return toolError("get_context_bundle: malformed arguments: " + err.Error())
 	}
 	if len(args.Refs) == 0 && args.Spec == "" {

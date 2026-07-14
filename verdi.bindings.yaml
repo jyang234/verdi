@@ -43,6 +43,31 @@ bindings:
       # source:ci record) — all part of make verify's own test suite.
       - "spec/runtime-evidence#ac-1"
       - "spec/runtime-evidence#ac-2"
+      # spec/code-health wave stories (all merged to main). fail-loud's
+      # behavioral legs: the specalign repo-hygiene red->green witness, the
+      # cascadecheck unreadable-spec exit-2 test, the wrapped-sentinel 404
+      # test, the runtimeprobe fail-verdict pin, mcpserve's unknown-field
+      # refusals and ServeConn trace tests -- all under make verify.
+      - "spec/fail-loud#ac-1"
+      - "spec/fail-loud#ac-2"
+      - "spec/fail-loud#ac-3"
+      # forge-transport behavioral legs: contract suites unchanged over the
+      # seam, multi-page drain witnesses (unresolved thread past 100), the
+      # stall-timeout and 429 witnesses, and the toolchain.json pin
+      # accept/refuse/disclose tests -- all under make verify.
+      - "spec/forge-transport#ac-1"
+      - "spec/forge-transport#ac-2"
+      - "spec/forge-transport#ac-3"
+      - "spec/forge-transport#ac-4"
+      # shared-homes behavioral legs: atomicfile table tests + green
+      # consumer suites, the pinned digest golden, the 15-case quote
+      # equivalence table, the reaffirmation-indexed witness, and the
+      # scaffold byte-pin -- all under make verify.
+      - "spec/shared-homes#ac-1"
+      - "spec/shared-homes#ac-2"
+      - "spec/shared-homes#ac-3"
+      - "spec/shared-homes#ac-4"
+      - "spec/shared-homes#ac-5"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -58,3 +83,22 @@ bindings:
       # LoadRecords' runtime.json wiring is statically sound.
       - "spec/runtime-evidence#ac-1"
       - "spec/runtime-evidence#ac-2"
+      # spec/code-health wave stories' static legs: the gate/refusal code,
+      # seam packages (httpjson, atomicfile, canonjson.Digest,
+      # artifact.ClassifyPath/YAMLDoubleQuote), strict decodes, and doc
+      # contracts compile, vet, lint, and lint-store clean under make
+      # verify; fail-loud ac-4 is static-only (stated contracts + corrected
+      # counts + the VL-019 registry row).
+      - "spec/fail-loud#ac-1"
+      - "spec/fail-loud#ac-2"
+      - "spec/fail-loud#ac-3"
+      - "spec/fail-loud#ac-4"
+      - "spec/forge-transport#ac-1"
+      - "spec/forge-transport#ac-2"
+      - "spec/forge-transport#ac-3"
+      - "spec/forge-transport#ac-4"
+      - "spec/shared-homes#ac-1"
+      - "spec/shared-homes#ac-2"
+      - "spec/shared-homes#ac-3"
+      - "spec/shared-homes#ac-4"
+      - "spec/shared-homes#ac-5"

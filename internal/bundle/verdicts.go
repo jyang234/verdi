@@ -1,8 +1,6 @@
 package bundle
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -216,12 +214,11 @@ func behavioralRecord(in JoinInput, b artifact.Binding) (artifact.Evidence, erro
 // summary) that produced one evidence record, in the spirit of 02
 // §Generated artifacts and digests's "recomputable from inputs" — a future
 // `verdi verify-artifact` (out of v0 scope) could recompute it the same
-// way.
+// way. The hash tail itself is canonjson.Digest (spec/shared-homes ac-2).
 func recordDigest(v interface{}) (string, error) {
-	data, err := canonjson.Marshal(v)
+	digest, err := canonjson.Digest(v)
 	if err != nil {
 		return "", fmt.Errorf("bundle: computing record digest: %w", err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return digest, nil
 }

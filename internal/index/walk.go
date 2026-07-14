@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 )
@@ -59,29 +58,14 @@ func walkCommittedZone(root string) ([]*Entry, error) {
 }
 
 // classifyArtifactPath maps a .verdi/-relative path to the artifact kind
-// it decodes as, per 02 §Kind registry's Dir column. It returns ok=false
-// for every file that is not itself an indexed artifact: verdi.yaml,
-// .gitignore, and specs/*/*/{board.json,rollup.json,deviation-report.md}.
+// it decodes as. It is a thin call into the shared
+// internal/artifact.ClassifyPath table (spec/shared-homes ac-4, dc-3) —
+// lint/walk.go's classifyArtifactPath calls the same table. It returns
+// ok=false for every file that is not itself an indexed artifact:
+// verdi.yaml, .gitignore, and
+// specs/*/*/{board.json,rollup.json,deviation-report.md}.
 func classifyArtifactPath(rel string) (kind string, ok bool) {
-	switch {
-	case strings.HasPrefix(rel, "adr/") && strings.HasSuffix(rel, ".md"):
-		return "adr", true
-	case strings.HasPrefix(rel, "diagrams/") && strings.HasSuffix(rel, ".mermaid"):
-		return "diagram", true
-	case strings.HasPrefix(rel, "attestations/") && strings.HasSuffix(rel, ".md"):
-		return "attestation", true
-	case strings.HasPrefix(rel, "waivers/") && strings.HasSuffix(rel, ".md"):
-		return "waiver", true
-	case strings.HasPrefix(rel, "conflicts/") && strings.HasSuffix(rel, ".md"):
-		return "conflict", true
-	case strings.HasPrefix(rel, "obligations/") && strings.HasSuffix(rel, ".md"):
-		return "obligation", true
-	case (strings.HasPrefix(rel, "specs/active/") || strings.HasPrefix(rel, "specs/archive/")) &&
-		strings.HasSuffix(rel, "/spec.md"):
-		return "spec", true
-	default:
-		return "", false
-	}
+	return artifact.ClassifyPath(rel)
 }
 
 // decodeEntry dispatches to the right internal/artifact decoder for kind
@@ -135,6 +119,13 @@ func decodeEntry(kind string, data []byte, path string) (*Entry, error) {
 			return nil, err
 		}
 		return &Entry{Ref: c.ID, Kind: kind, Title: c.Title, Status: string(c.Status), Path: path, Body: string(body), Links: c.Links}, nil
+
+	case "reaffirmation":
+		r, err := artifact.DecodeReaffirmation(fm)
+		if err != nil {
+			return nil, err
+		}
+		return &Entry{Ref: r.ID, Kind: kind, Title: r.Title, Path: path, Body: string(body), Links: r.Links}, nil
 
 	case "obligation":
 		o, err := artifact.DecodeObligation(fm)

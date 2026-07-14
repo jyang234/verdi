@@ -16,6 +16,7 @@ import (
 	"regexp"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/canonjson"
 )
 
@@ -89,28 +90,8 @@ func SaveBoardState(path string, b *artifact.Board) error {
 		return fmt.Errorf("boardio: encoding board: %w", err)
 	}
 
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := atomicfile.Write(path, data, 0o600); err != nil {
 		return fmt.Errorf("boardio: %w", err)
-	}
-
-	tmp, err := os.CreateTemp(dir, ".board.json.tmp-*")
-	if err != nil {
-		return fmt.Errorf("boardio: creating temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, werr := tmp.Write(data); werr != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("boardio: writing temp file: %w", werr)
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("boardio: closing temp file: %w", cerr)
-	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("boardio: renaming into place: %w", rerr)
 	}
 	return nil
 }

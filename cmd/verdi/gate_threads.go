@@ -112,7 +112,7 @@ func checkReviewThreadsCondition(ctx context.Context, f forge.Forge, defaultBran
 }
 
 // forgeBestEffort constructs the real forge adapter for root's
-// configured/detected kind (sync.go's buildForge/loadManifest/
+// configured/detected kind (forgeboot.go's buildForge/loadManifest/
 // forge.DetectKind, reused verbatim — no second construction path). It
 // returns two facts the read surfaces both need (I-1):
 //
@@ -169,7 +169,7 @@ func buildForgeBestEffort(ctx context.Context, root string) forge.Forge {
 }
 
 // forgeCredentialsPresent reports whether a live adapter can be built for
-// kind — the auth TOKEN the buildForge (sync.go) adapters read must be
+// kind — the auth TOKEN the buildForge (forgeboot.go) adapters read must be
 // present, and the repo IDENTIFIER must be resolvable. Present, the forge
 // can authenticate (in the forge's own CI or a local shell that exported the
 // token); absent, no live adapter is built, so we never build a forge doomed

@@ -10,6 +10,7 @@ package workbench
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -83,7 +84,7 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		}
 
 		proj, _, _, err := s.loadBoard(r.Context(), name)
-		if err == ErrBoardNotFound {
+		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
 		}

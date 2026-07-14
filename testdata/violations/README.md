@@ -1,6 +1,6 @@
 # testdata/violations
 
-One minimal DATA overlay per lint rule VL-001..VL-014 (02 §Lint rules),
+One minimal DATA overlay per lint rule VL-001..VL-019 (02 §Lint rules),
 each a small set of files that, layered onto `testdata/corpus/`, violates
 exactly that rule. **Data only** — `artifactlint`, the engine that
 consumes these and asserts "rule id equality, not just failure"

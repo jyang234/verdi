@@ -19,6 +19,7 @@ package workbench
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdhtml "html"
 	"net/http"
@@ -374,7 +375,7 @@ func (s *boardSpecServer) boardPinSearchHandler() http.HandlerFunc {
 		}
 		name := r.PathValue("name")
 		proj, _, _, err := s.loadBoard(r.Context(), name)
-		if err == ErrBoardNotFound {
+		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
 		}

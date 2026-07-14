@@ -40,19 +40,9 @@ type targetItem struct {
 // ListAnnotations implements the list_annotations tool: every annotation
 // targeting ref, each with its I-17 three-valued drift status.
 func (b *Backend) ListAnnotations(ctx context.Context, argsRaw json.RawMessage) map[string]any {
-	var args struct {
-		Ref string `json:"ref"`
-	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
-		return toolError("list_annotations: malformed arguments: " + err.Error())
-	}
-	if args.Ref == "" {
-		return toolError("list_annotations: ref is required")
-	}
-
-	ref, err := artifact.ParseRef(args.Ref)
-	if err != nil {
-		return toolError("list_annotations: " + err.Error())
+	ref, errResult, ok := decodeRefArg("list_annotations", argsRaw)
+	if !ok {
+		return errResult
 	}
 	unpinned := artifact.Ref{Kind: ref.Kind, Name: ref.Name}
 

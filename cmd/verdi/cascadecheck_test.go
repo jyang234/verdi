@@ -200,6 +200,104 @@ func TestCheckCascadeReaffirmation(t *testing.T) {
 	})
 }
 
+// TestCheckCascadeReaffirmation_Negative_UnreadableSpec proves spec/
+// fail-loud ac-2: loadActiveSpecTolerant tolerates ONLY a missing spec.md
+// (os.IsNotExist). A spec.md that EXISTS but cannot be read (permission
+// denied) is an operational failure and must propagate out of
+// findSupersedingSpec's scan, through checkCascadeReaffirmation, as a
+// non-nil error — never masquerade as "no superseding spec found" (which
+// would let a permission error mask as a clean, exit-0 pass at the
+// build-start/gate verb level, co-2's witness-scoped 0->2 fix).
+func TestCheckCascadeReaffirmation_Negative_UnreadableSpec(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-spec path under this user")
+	}
+
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                      phase7ManifestYAML,
+			".verdi/specs/active/loan-mgmt/spec.md":  featureV1SpecMD,
+			".verdi/specs/active/unreadable/spec.md": featureV1SpecMD,
+		},
+		Message: "scaffold + one unreadable spec directory",
+	}})
+
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "unreadable", "spec.md")
+	if err := os.Chmod(specPath, 0o000); err != nil {
+		t.Fatalf("os.Chmod(%s, 0o000): %v", specPath, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(specPath, 0o644) // restore so t.TempDir()'s own cleanup can remove it
+	})
+
+	_, _, err := checkCascadeReaffirmation(repo.Dir, storySpecForCascade(t))
+	if err == nil {
+		t.Fatal("checkCascadeReaffirmation() err = nil, want a propagated read error over the unreadable spec directory")
+	}
+	if !contains(err.Error(), "unreadable") {
+		t.Fatalf("err = %q, want it to name the unreadable spec's path", err.Error())
+	}
+}
+
+// TestRunBuildStart_Negative_UnreadableSupersedingSpec proves the same
+// gap one layer up, at the real verb (spec/fail-loud ac-2, co-2): a
+// story whose feature has an unreadable sibling spec directory under
+// specs/active/ makes `verdi build start` exit 2 (operational failure),
+// not 0 (a clean pass) or 1 (a business-precondition refusal) — the sole
+// exit-code behavior change this story makes.
+func TestRunBuildStart_Negative_UnreadableSupersedingSpec(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-spec path under this user")
+	}
+
+	storySpecMD := `---
+id: spec/stale-decline-story
+kind: spec
+class: story
+title: "Stale Decline"
+status: accepted-pending-build
+owners: [platform-team]
+story: jira:LOAN-1482
+problem: { text: "x", anchor: problem }
+outcome: { text: "y", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+links:
+  - { type: implements, ref: "spec/loan-mgmt#ac-1" }
+frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }
+---
+# body
+`
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                               phase7ManifestYAML,
+			".verdi/specs/active/loan-mgmt/spec.md":           featureV1SpecMD,
+			".verdi/specs/active/stale-decline-story/spec.md": storySpecMD,
+			".verdi/specs/active/unreadable/spec.md":          featureV1SpecMD,
+		},
+		Message: "scaffold + story + one unreadable spec directory",
+	}})
+
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "unreadable", "spec.md")
+	if err := os.Chmod(specPath, 0o000); err != nil {
+		t.Fatalf("os.Chmod(%s, 0o000): %v", specPath, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(specPath, 0o644)
+	})
+
+	ctx := context.Background()
+	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	var stdout, stderr bytes.Buffer
+	got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runBuildStart(unreadable superseding-spec scan) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !contains(stderr.String(), "unreadable") {
+		t.Fatalf("stderr = %q, want it to name the unreadable spec's path", stderr.String())
+	}
+}
+
 func reaffirmationMD(t *testing.T) string {
 	t.Helper()
 	return `---

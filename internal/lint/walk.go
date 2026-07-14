@@ -42,32 +42,13 @@ var knownTopLevelEntries = map[string]bool{
 }
 
 // classifyArtifactPath maps a .verdi/-relative slash path to the artifact
-// kind it should decode as, mirroring internal/index/walk.go's
-// classifyArtifactPath (duplicated rather than imported: that function is
-// unexported, and lint's tolerant walk needs different failure handling —
-// it never aborts on a single bad file).
+// kind it should decode as. It is a thin call into the shared
+// internal/artifact.ClassifyPath table (spec/shared-homes ac-4, dc-3) —
+// index/walk.go's classifyArtifactPath calls the same table. The walks
+// stay separate functions because lint's tolerant walk needs different
+// failure handling than index's: it never aborts on a single bad file.
 func classifyArtifactPath(rel string) (kind string, ok bool) {
-	switch {
-	case strings.HasPrefix(rel, "adr/") && strings.HasSuffix(rel, ".md"):
-		return "adr", true
-	case strings.HasPrefix(rel, "diagrams/") && strings.HasSuffix(rel, ".mermaid"):
-		return "diagram", true
-	case strings.HasPrefix(rel, "attestations/") && strings.HasSuffix(rel, ".md"):
-		return "attestation", true
-	case strings.HasPrefix(rel, "waivers/") && strings.HasSuffix(rel, ".md"):
-		return "waiver", true
-	case strings.HasPrefix(rel, "conflicts/") && strings.HasSuffix(rel, ".md"):
-		return "conflict", true
-	case strings.HasPrefix(rel, "reaffirmations/") && strings.HasSuffix(rel, ".md"):
-		return "reaffirmation", true
-	case strings.HasPrefix(rel, "obligations/") && strings.HasSuffix(rel, ".md"):
-		return "obligation", true
-	case (strings.HasPrefix(rel, "specs/active/") || strings.HasPrefix(rel, "specs/archive/")) &&
-		strings.HasSuffix(rel, "/spec.md"):
-		return "spec", true
-	default:
-		return "", false
-	}
+	return artifact.ClassifyPath(rel)
 }
 
 // walkDocuments walks root/.verdi (skipping data/) and tolerantly decodes

@@ -26,8 +26,6 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/forge"
-	forgegithub "github.com/jyang234/verdi/internal/forge/github"
-	forgegitlab "github.com/jyang234/verdi/internal/forge/gitlab"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/store"
@@ -35,8 +33,19 @@ import (
 )
 
 // derivedFileNames are the four files a materialized bundle must contain
-// (01 §Directory layout's derived tree).
+// (01 §Directory layout's derived tree). toolchain.json
+// (derivedToolchainFile) is deliberately NOT in this list: it is the
+// bundle's OPTIONAL recorded-tool provenance carrier (spec/forge-transport
+// ac-4/dc-4), written by bundle.Assemble only when an upstream tool
+// actually ran (a non-empty Graph.Tool) — e.g. the self-hosted producer
+// (selfevidence.go) runs no upstream tool and honestly carries none — so
+// requiring it here would spuriously fail every honest tool-less bundle.
 var derivedFileNames = []string{"verdicts.json", "tests.json", "review.json", "boundary-diff.json"}
+
+// derivedToolchainFile is the bundle's recorded tool provenance carrier
+// (upstream.ToolProvenance), checked against verdi.yaml's toolchain.commit
+// at fetched-bundle intake — the I-4 secondary defense (ac-4/dc-4).
+const derivedToolchainFile = "toolchain.json"
 
 // syncDeps bundles sync's injectable dependencies so runSync can be driven
 // hermetically in tests (CLAUDE.md: no network, no exec in any test);
@@ -193,6 +202,17 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 	tree, err := deps.Forge.FetchEvidenceBundle(ctx, ref, commit)
 	switch {
 	case err == nil:
+		// The I-4 secondary defense (spec/forge-transport ac-4/dc-4):
+		// check the fetched bundle's recorded tool provenance against the
+		// manifest pin BEFORE any of its records are accepted onto disk. A
+		// mismatch is an operational refusal; an absent carrier is a
+		// disclosed-unproven notice (checkFetchedToolPin prints it), never
+		// a silent skip and never a spurious refusal of a pre-carrier or
+		// tool-less (self-hosted producer) bundle.
+		if pinErr := checkFetchedToolPin(root, tree, deps.Stdout); pinErr != nil {
+			fmt.Fprintln(deps.Stderr, "sync:", pinErr)
+			return 2
+		}
 		if writeErr := writeDerivedTree(derivedRoot, tree); writeErr != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", writeErr)
 			return 2
@@ -334,6 +354,54 @@ func writeDerivedTree(derivedRoot string, tree forge.DerivedTree) error {
 	return nil
 }
 
+// checkFetchedToolPin is the I-4 secondary defense at fetched-bundle
+// intake (spec/forge-transport ac-4/dc-4; adjudicated 2026-07-13: the
+// carrier is toolchain.json, since no other bundle artifact records the
+// tool): every toolchain.json in the fetched tree is strict-decoded and
+// its recorded tool checked with upstream.CheckToolPin against verdi.yaml's
+// toolchain.commit. A mismatch (or a malformed carrier, or a carrier
+// present with no pin configured) returns an error — the caller's
+// operational refusal (exit 2) — with CheckToolPin's own message naming
+// both the recorded tool string and the pinned commit. A tree with NO
+// carrier anywhere prints a one-line disclosed-unproven notice on stdout
+// and returns nil: a pre-carrier bundle, or one whose producer ran no
+// upstream tool (the self-hosted producer, selfevidence.go), is honestly
+// tool-less — disclosed, never silently passed and never spuriously
+// refused. The manifest is read only when a carrier is present, so
+// tool-less intake works even in a store without a toolchain: block.
+func checkFetchedToolPin(root string, tree forge.DerivedTree, stdout io.Writer) error {
+	var keys []string
+	for key := range tree {
+		if filepath.Base(key) == derivedToolchainFile {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		fmt.Fprintln(stdout, "sync: fetched bundle carries no toolchain.json (a pre-carrier bundle, or its producer ran no upstream tool); the I-4 tool-pin check is disclosed-unproven for this intake")
+		return nil
+	}
+	sort.Strings(keys) // deterministic check/refusal order
+
+	manifest, err := loadManifest(root)
+	if err != nil {
+		return err
+	}
+	pinned := ""
+	if manifest.Toolchain != nil {
+		pinned = manifest.Toolchain.Commit
+	}
+	for _, key := range keys {
+		prov, err := upstream.DecodeToolProvenance(tree[key])
+		if err != nil {
+			return fmt.Errorf("fetched bundle %s: %w", key, err)
+		}
+		if err := upstream.CheckToolPin(prov.Tool, pinned); err != nil {
+			return fmt.Errorf("refusing fetched evidence bundle (%s): %w", key, err)
+		}
+	}
+	return nil
+}
+
 // safeJoin joins a fetched tree key onto root, refusing any key that would
 // escape root — defense in depth against a malicious or malformed artifact
 // at the real trust boundary (the disk write), even though the zip
@@ -434,110 +502,4 @@ func decodeBundleFile(dir, name string, out interface{}) error {
 		return fmt.Errorf("decoding materialized %s: %w", name, err)
 	}
 	return nil
-}
-
-// loadManifest reads and strict-decodes root's verdi.yaml.
-func loadManifest(root string) (*store.Manifest, error) {
-	data, err := os.ReadFile(filepath.Join(root, ".verdi", "verdi.yaml"))
-	if err != nil {
-		return nil, fmt.Errorf("reading verdi.yaml: %w", err)
-	}
-	m, err := store.DecodeManifest(data)
-	if err != nil {
-		return nil, fmt.Errorf("decoding verdi.yaml: %w", err)
-	}
-	return m, nil
-}
-
-// resolveRefCommit determines the current ref and commit sync operates
-// on. Ref resolution prefers forge-provided CI environment variables
-// (GitLab's CI_COMMIT_REF_NAME, GitHub's GITHUB_HEAD_REF for a PR run or
-// GITHUB_REF_NAME for a push) over `git symbolic-ref`, since CI checkouts
-// are usually detached HEAD, where symbolic-ref fails.
-func resolveRefCommit(ctx context.Context, root string) (ref, commit string, err error) {
-	commit, err = gitx.RevParse(ctx, root, "HEAD")
-	if err != nil {
-		return "", "", fmt.Errorf("resolving current commit: %w", err)
-	}
-
-	for _, envVar := range []string{"CI_COMMIT_REF_NAME", "GITHUB_HEAD_REF", "GITHUB_REF_NAME"} {
-		if v := os.Getenv(envVar); v != "" {
-			return v, commit, nil
-		}
-	}
-	branch, err := gitx.CurrentBranch(ctx, root)
-	if err != nil {
-		return "", "", fmt.Errorf("resolving current ref: %w", err)
-	}
-	// CurrentBranch returns ("", nil) for a detached HEAD (a normal git
-	// state lint tolerates — I-14); sync, unlike lint, cannot proceed
-	// without a ref name to slug, so absence is an operational error here.
-	if branch == "" {
-		return "", "", fmt.Errorf("resolving current ref: detached HEAD and no CI ref env var set (CI_COMMIT_REF_NAME / GITHUB_REF_NAME)")
-	}
-	return branch, commit, nil
-}
-
-// buildForge constructs the real adapter for kind ("gitlab" or "github"),
-// reading connection secrets from CI-provided environment variables (never
-// verdi.yaml — 01 §Store manifest: "secrets come from env/CI vars"). The
-// github REPO IDENTIFIER (owner/repo), unlike the token, is not a secret and
-// falls back to the origin remote URL when GitHub Actions' env vars are
-// absent (D6-14; githubOwnerRepo) — so a local `verdi sync`/`close`/`gate`
-// no longer needs GITHUB_REPOSITORY[_OWNER] exported by hand. remoteURL is
-// the `origin` remote (best-effort; "" when none) both callers already read.
-func buildForge(kind, remoteURL string) (forge.Forge, error) {
-	switch kind {
-	case "gitlab":
-		return forgegitlab.New(forgegitlab.Config{
-			BaseURL:   os.Getenv("CI_API_V4_URL"),
-			ProjectID: os.Getenv("CI_PROJECT_ID"),
-			Token:     os.Getenv("CI_JOB_TOKEN"),
-		}), nil
-	case "github":
-		owner, repo := githubOwnerRepo(remoteURL)
-		return forgegithub.New(forgegithub.Config{
-			Owner: owner,
-			Repo:  repo,
-			Token: os.Getenv("GITHUB_TOKEN"),
-		}), nil
-	default:
-		return nil, fmt.Errorf("unknown forge kind %q", kind)
-	}
-}
-
-// githubOwnerRepo resolves the GitHub (owner, repo) the adapter needs,
-// preferring GitHub Actions' own GITHUB_REPOSITORY_OWNER / GITHUB_REPOSITORY
-// env vars (authoritative inside CI) and falling back per-field to parsing
-// the origin remote URL (D6-14) for a local run where those vars are unset.
-// The env wins where it is set, so a partial CI environment is never
-// overridden.
-func githubOwnerRepo(remoteURL string) (owner, repo string) {
-	owner = os.Getenv("GITHUB_REPOSITORY_OWNER")
-	repo = githubRepoName()
-	if owner != "" && repo != "" {
-		return owner, repo
-	}
-	if o, r, ok := forgegithub.OwnerRepoFromURL(remoteURL); ok {
-		if owner == "" {
-			owner = o
-		}
-		if repo == "" {
-			repo = r
-		}
-	}
-	return owner, repo
-}
-
-// githubRepoName extracts the repo name from GITHUB_REPOSITORY
-// ("owner/repo"), GitHub Actions' own combined env var. "" when unset — the
-// local case githubOwnerRepo then resolves from the origin URL.
-func githubRepoName() string {
-	full := os.Getenv("GITHUB_REPOSITORY")
-	for i := len(full) - 1; i >= 0; i-- {
-		if full[i] == '/' {
-			return full[i+1:]
-		}
-	}
-	return full
 }
