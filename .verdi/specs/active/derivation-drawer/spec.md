@@ -18,7 +18,7 @@ links:
   - { type: implements, ref: "spec/wall-receipts#ac-6" }
 decisions:
   - { id: dc-1, text: "the drawer body is server-rendered per badge as a hidden sibling element of the badge button (the board's established writePlacardFull idiom): assets/boardspec.js only opens, positions, and closes it — the DOM stays the server's own projection, one renderer, no client-side templating of derivation data", anchor: "#dc-1" }
-  - { id: dc-2, text: "judged findings enter the wall as ONE case-file chip reading the spec's own decision-conflict-report.md — an existing verdi align artifact, so no computation is invented (wall-receipts dc-1) — whose drawer lists each finding with its disposition state (or undispositioned, disclosed) and stamps the sweep provenance block", anchor: "#dc-2" }
+  - { id: dc-2, text: "judged findings enter the wall as ONE case-file chip — the surface wall-receipts ac-6 itself requires — reading the spec's own decision-conflict-report.md, an existing verdi align artifact, so no computation is invented (wall-receipts dc-1); the chip rides the same canonical derivation record as every badge (source align:judged-sweep, inputs = the report with its digest and covers, records = the findings with their disposition state or an explicit undispositioned disclosure) and its drawer additionally stamps the sweep provenance block", anchor: "#dc-2" }
   - { id: dc-3, text: "staleness legibility is comparison, not verdict: the drawer contrasts the report's covers against the current spec content digest and decisions_scanned against the currently-declared decision ids — deterministic equality/set comparisons over pinned inputs, rendered as disclosure lines, never a blocking rule and never a computed 'stale' verdict badge of its own", anchor: "#dc-3" }
   - { id: dc-4, text: "interaction shape: the badge is a button (the opener contract), the drawer is a role=dialog panel with keyboard open and Esc close, available in every board mode — reading a receipt is never a write, so review and read-only walls open drawers exactly as authoring does", anchor: "#dc-4" }
 constraints:
@@ -106,13 +106,19 @@ post-mutation fragment, no client-side duplicate.
 
 ## dc-2
 
-Judged findings enter the wall as ONE case-file chip that reads the
-spec's own decision-conflict-report.md — an artifact `verdi align`
-already writes, so surfacing it invents no computation (wall-receipts
-dc-1's rule) while satisfying ac-6's requirement that judged findings be
-on the wall at all. The chip's drawer lists each finding: id, text,
+Judged findings enter the wall as ONE case-file chip — the surface
+wall-receipts ac-6 itself requires (its stub assigns ac-6 to this story)
+— that reads the spec's own decision-conflict-report.md, an artifact
+`verdi align` already writes, so surfacing it invents no computation
+(wall-receipts dc-1's rule constrains computation, not the reading of an
+existing report). The chip rides the same canonical derivation record as
+every other badge, so the parent drawer contract (wall-receipts dc-2:
+rule id, pinned inputs with revisions, firing records) holds by
+construction: source is the namespaced sweep id (align:judged-sweep),
+the pinned inputs are the report itself with its digest and covers sha,
+and the firing records are the findings — each listed with id, text,
 disposition + note when dispositioned, an explicit undispositioned
-disclosure when not — never a silently omitted finding. The sweep
+disclosure when not, never a silently omitted finding. The sweep
 provenance block renders once, at the drawer's head, for all findings it
 covers. A spec with no report gets no chip: absence of a sweep is not a
 finding, and inventing a "no sweep yet" verdict would be a new
