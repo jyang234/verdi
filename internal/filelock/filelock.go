@@ -177,8 +177,8 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 		}
 		return nil, fmt.Errorf("filelock: lock %s exists but is unreadable: %w", path, rerr)
 	}
-	var info Info
-	if jerr := strictUnmarshal(data, &info); jerr != nil {
+	info, jerr := decodeLockInfo(path, data)
+	if jerr != nil {
 		return nil, fmt.Errorf("filelock: lock %s exists but is malformed (%q): %w", path, string(data), jerr)
 	}
 	if alive(info.PID, info.Start) {
@@ -225,9 +225,49 @@ func Peek(path string) (Info, bool, error) {
 		}
 		return Info{}, false, fmt.Errorf("filelock: peeking lock %s: %w", path, err)
 	}
-	var info Info
-	if jerr := strictUnmarshal(data, &info); jerr != nil {
+	info, jerr := decodeLockInfo(path, data)
+	if jerr != nil {
 		return Info{}, false, fmt.Errorf("filelock: lock %s exists but is malformed (%q): %w", path, string(data), jerr)
 	}
 	return info, alive(info.PID, info.Start), nil
+}
+
+// lockDecodeRetries/lockDecodeRetryDelay bound decodeLockInfo's tolerance
+// for a benign, extremely short race: Acquire's own O_CREATE|O_EXCL
+// succeeds (the path exists) a moment before its JSON body is fully
+// flushed, so a concurrent reader (another Acquire call racing for the
+// same lock, or a Peek) can observe a transiently empty or truncated
+// file. 25 attempts at 2ms apart bounds the wait at ~50ms — generous
+// under -race/heavy goroutine contention, still tiny next to any real
+// git-worktree-mutating call this lock actually guards (dc-2).
+const (
+	lockDecodeRetries    = 25
+	lockDecodeRetryDelay = 2 * time.Millisecond
+)
+
+// decodeLockInfo strict-decodes data (already read from path) as Info. If
+// that fails, it re-reads path a bounded number of times before giving
+// up — closing the transient partial-write race described above — and
+// returns the LAST attempt's decode error if every retry still fails
+// (a genuinely malformed or foreign lock file decodes the same way every
+// time, so this adds bounded latency to that case, never a wrong
+// answer).
+func decodeLockInfo(path string, data []byte) (Info, error) {
+	var info Info
+	err := strictUnmarshal(data, &info)
+	if err == nil {
+		return info, nil
+	}
+	for i := 0; i < lockDecodeRetries; i++ {
+		time.Sleep(lockDecodeRetryDelay)
+		data2, rerr := os.ReadFile(path)
+		if rerr != nil {
+			continue // e.g. removed by a concurrent takeover; keep retrying within budget
+		}
+		err = strictUnmarshal(data2, &info)
+		if err == nil {
+			return info, nil
+		}
+	}
+	return Info{}, err
 }
