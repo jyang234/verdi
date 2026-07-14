@@ -335,15 +335,45 @@ have contradicted parent dc-5's "each entry disclosed by source" instead.
 
 This exclusion is a merged/unmerged filter, orthogonal to parent dc-5's
 local/remote axis — it applies identically whether the merged branch is
-local, remote-tracking, or both. It also means `ComputeIndex`'s exclusion
-rule and `verdi gc`'s reclaim rule (parent dc-4, realized by the
-`worktree-manager` story) agree by construction: a design branch invisible
-to this index is always exactly a design branch `verdi gc` is entitled to
-reap, and neither rule can drift from the other since both test the same
-ancestor relationship. `Source: both` (dc-3) is thereby reserved
+local, remote-tracking, or both. `Source: both` (dc-3) is thereby reserved
 specifically for a genuinely still-open (unmerged) local+remote design
 branch; it is never emitted for a merged leftover, since a merged branch
 now contributes no design-branch entry at all.
+
+**Narrower claim than an earlier draft made, closing a decision-conflict
+finding raised against it (confidence 0.65 — the highest of this story's
+review, taken seriously):** this exclusion test is REFS-ONLY (an ancestry
+check, co-1), and is therefore structurally blind to one thing parent
+dc-4's reclaim rule also depends on: whether the branch's MANAGED WORKTREE
+(if one exists) carries uncommitted changes. Parent dc-4 forbids `gc` from
+reaping a dirty worktree even when its branch is merged, and requires that
+case be disclosed and kept — a worktree-state fact ref-index cannot see and
+must not try to, since co-1 forbids it from ever reading a worktree's
+dirty/clean status (that is a filesystem check, not a ref-scoped one, and
+is exactly the `worktree-manager` story's domain, not this one's). So the
+correct claim is narrower than "by construction agreement": `ComputeIndex`'s
+merged-branch exclusion answers the DIRECTORY-LISTING half of dc-4 honestly
+(a merged branch is not re-listed as a draft — dc-2's one-spec-one-status
+premise, above) using only the signal it is allowed to read; the DIRTY-
+WORKTREE-DISCLOSURE half of dc-4 (a merged-but-dirty worktree must still be
+disclosed and kept, never silently reaped) is realized entirely by
+`worktree-manager` (ac-3/ac-4), the story that actually manages worktrees
+and can see their dirtiness — not by this story, and not by this exclusion
+rule. The two stories' outputs are expected to be composed by
+`directory-home`, exactly as dc-1 already scopes the forge/in-review chip;
+no `exempts` edge is needed against parent dc-4 because this decision
+narrows nothing dc-4 promises — `verdi gc`'s own dirty-worktree carve-out
+is `worktree-manager`'s obligation to satisfy, not this refs-only index's.
+Equally, no `exempts` edge is needed against parent dc-5's unqualified "the
+index reads local design refs and remote-tracking design refs alike": that
+sentence describes which REF NAMESPACES join the enumeration (local vs.
+remote-tracking — the axis dc-5 itself is about, resolving oq-2), not
+whether every ref that resolves is retained regardless of merge state: a
+merged branch's ref still joins the read (it is inspected by the ancestry
+check), it is only excluded from the OUTPUT once recognized as already
+counted elsewhere (dc-2's one-status premise) — the same "read, then dedup"
+relationship dc-4's own default-branch entries already have to the design-
+branch entries they are never confused with.
 
 ## CO-1
 
