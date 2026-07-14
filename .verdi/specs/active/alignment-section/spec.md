@@ -4,7 +4,7 @@ kind: spec
 title: "Alignment Section"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-12
 problem: { text: "internal/align's build-branch deviation report reconciles a spec's declared boundaries against regenerated reality, but a diagram proposal has no reconciliation at all: an accepted future-state flowchart could sit realized or badly diverged from what actually shipped and the pre-review verdict would never say so — the one ruling that turns diagram-proposals from a drawing feature into a loop (feature ac-5) does not exist yet.", anchor: problem }
 outcome: { text: "verdi align's computed section gains a diagram-alignment subsection: every accepted class: proposal diagram in the corpus is regenerated and diffed via verification-extractor's shared comparison — an empty residual renders realized, a non-empty one renders divergent with each delta's witness — folded into the SAME computed findings/digest machinery every other computed finding already uses; every illustrative diagram living in the spec's own body is listed as unverifiable rather than silently dropped. Never judged, never blocking merge on its own — surfaced for review exactly as a boundary deviation is.", anchor: outcome }
@@ -23,6 +23,7 @@ decisions:
 constraints:
   - { id: co-1, text: "no LLM anywhere in this story's code (parent co-1): the diagram-alignment subsection is entirely computed, added to the SAME digest-covered findings list, never touching RunJudged/JudgedInput at all", anchor: co-1 }
   - { id: co-2, text: "no network in any test (parent co-2): the discovery, regeneration, and rendering are exercised over a fixture corpus (accepted proposals with a known realized case and a known divergent case, plus a fixture spec body carrying an illustrative fenced block) through internal/upstream's existing fake-Runner seam", anchor: co-2 }
+frozen: { at: 2026-07-14, commit: 864d6d5ca280d7e6d28e63a7fd1f491b6bc3637b, stub_matched: true }
 ---
 # Alignment Section
 
