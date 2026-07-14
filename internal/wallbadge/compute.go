@@ -22,8 +22,10 @@ type BoardBadges struct {
 	Disclosures []string
 }
 
-// ComputeBadges runs this story's full v1 badge set (dc-1) for one spec:
-// the VL-finding partition (ac-2), scoped to specRelPath, plus — on a
+// ComputeBadges runs the full v1 badge set (dc-1) for one spec: the
+// VL-finding partition (ac-2), scoped to specRelPath; the size-smell
+// observation (spec/case-file-flags ac-2) on ANY spec wall that declares
+// acceptance criteria, feature and story alike (its dc-3); plus — on a
 // STORY-class spec only, mirroring internal/dex/lens.go's own
 // isStoryPage/computeLensData gate — the spec-stale and pending-
 // supersession ladder badges (ac-3).
@@ -48,6 +50,14 @@ func ComputeBadges(ctx context.Context, root, specRelPath, specRevision string, 
 			continue
 		}
 		out.ByObject[b.Target] = append(out.ByObject[b.Target], b)
+	}
+
+	// The size-smell observation (spec/case-file-flags ac-2/dc-3): class-
+	// blind — any spec wall that declares acceptance criteria can outgrow
+	// a screen — and a pure function of the already-decoded frontmatter's
+	// AC count plus declared constants (dc-1), so it needs no store I/O.
+	if smell := SizeSmellBadge(specRelPath, specRevision, len(fm.AcceptanceCriteria)); smell != nil {
+		out.CaseFile = append(out.CaseFile, *smell)
 	}
 
 	if fm.Class != artifact.ClassStory {
