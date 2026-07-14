@@ -4,7 +4,7 @@ kind: spec
 title: "Draft Boards"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-21
 problem: { text: "the board serves exactly one working tree — boardSpecServer reads specs/active/ under the serving checkout's root — so a draft's authoring wall exists only in a checkout sitting on that design branch: the per-draft port pattern. The mode law already renders authoring vs read-only purely from branch state; what is missing is ROUTING — one address that reaches every draft's own branch tree without disturbing any other board or the serving checkout", anchor: "#problem" }
 outcome: { text: "clicking a draft in the directory opens that spec's authoring wall served from its design branch's managed worktree, under one address grammar (/b/<branch-escaped>/board/spec/<name>): two boards from two branches are usable in two tabs simultaneously, nothing an operator does under one address mutates the tree under another, the mode law is unchanged — the same spec sealed from the default branch, authoring from its own design branch — and the per-draft port pattern retires", anchor: "#outcome" }
@@ -23,6 +23,7 @@ decisions:
 constraints:
   - { id: co-1, text: "the one-writer law is the worktree-manager story's contract (feature ac-4), consumed here: per-branch boards obtain worktrees only through that seam, introduce no second writer and no worktree lifecycle of their own, and every managed worktree lives under the data zone, never committed (feature co-1)", anchor: "#co-1" }
   - { id: co-2, text: "no surprise mutation (feature dc-1): serving a per-branch board never switches any checkout and never mutates the state under another tab; reads never delete (feature dc-4); no network in any test — fixturegit stores and hermetic doubles, with the Playwright suite under e2e/ as the behavioral evidence register", anchor: "#co-2" }
+frozen: { at: 2026-07-14, commit: 26646b193ba1be5466d3a7158e56d203bb7a08d2, stub_matched: true }
 ---
 # Draft Boards
 
