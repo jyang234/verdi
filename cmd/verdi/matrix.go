@@ -30,9 +30,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -103,25 +103,15 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
-	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
+	// foldStoryEvidence (foldload.go) wraps LoadRecords/Fold failures with
+	// its own "loading evidence records: "/"folding evidence: " prefix;
+	// unwrap one level here so matrix's stderr output stays exactly what
+	// it printed before this prologue was shared (bit-for-bit, dc-4) —
+	// the fold's waiver/attestation directories are keyed by the story's
+	// own ref slug (I-30), threaded through unchanged.
+	result, err := foldStoryEvidence(ctx, root, spec, commit, preview)
 	if err != nil {
-		fmt.Fprintln(stderr, "matrix:", err)
-		return 2
-	}
-
-	// The fold's waiver/attestation directories are keyed by the story's
-	// own ref slug (I-30): store.RefSlug of the resolved spec's story: field.
-	slug := store.RefSlug(spec.Story)
-	result, err := evidence.Fold(evidence.Input{
-		Spec:      spec,
-		Records:   records,
-		Preview:   preview,
-		StoreRoot: root,
-		StorySlug: slug,
-	})
-	if err != nil {
-		fmt.Fprintln(stderr, "matrix:", err)
+		fmt.Fprintln(stderr, "matrix:", errors.Unwrap(err))
 		return 2
 	}
 

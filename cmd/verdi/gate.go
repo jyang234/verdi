@@ -262,15 +262,11 @@ func checkNoACViolated(ctx context.Context, root string, spec *artifact.SpecFron
 		}, nil
 	}
 
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
-	records, err := evidence.LoadRecords(ctx, root, derivedRoot, head)
+	// Preview stays false — 03 §Gates: "the gate ... consume[s]
+	// authoritative evidence only", never --preview.
+	result, err := foldStoryEvidence(ctx, root, spec, head, false)
 	if err != nil {
-		return gateCondition{}, fmt.Errorf("loading evidence records: %w", err)
-	}
-	slug := store.RefSlug(spec.Story)
-	result, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: false, StoreRoot: root, StorySlug: slug})
-	if err != nil {
-		return gateCondition{}, fmt.Errorf("folding evidence: %w", err)
+		return gateCondition{}, err
 	}
 	if !result.Violated {
 		return gateCondition{Name: name, OK: true}, nil

@@ -47,8 +47,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -201,19 +199,19 @@ func selfHostedWitness(kind artifact.EvidenceKind) string {
 // AC set it attests) — recomputable from those pinned inputs, mirroring
 // internal/bundle's own recordDigest posture (02 §Generated artifacts and
 // digests): a content-address of the upstream fact this record asserts,
-// not of wall-clock or provenance metadata.
+// not of wall-clock or provenance metadata. The hash tail itself is
+// canonjson.Digest (spec/shared-homes ac-2).
 func selfHostedDigest(rec artifact.Evidence) (string, error) {
 	keyed := struct {
 		Kind        artifact.EvidenceKind `json:"kind"`
 		Producer    string                `json:"producer"`
 		EvidenceFor []string              `json:"evidence_for"`
 	}{Kind: rec.Kind, Producer: rec.Producer, EvidenceFor: rec.EvidenceFor}
-	data, err := canonjson.Marshal(keyed)
+	digest, err := canonjson.Digest(keyed)
 	if err != nil {
 		return "", fmt.Errorf("self-hosted evidence: computing digest: %w", err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return digest, nil
 }
 
 // verifySelfHostedACDeclared fails loudly when specRef does not resolve in

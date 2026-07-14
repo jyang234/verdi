@@ -1,8 +1,6 @@
 package runtime
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -141,7 +139,8 @@ func Query(records []artifact.Evidence, storyRef, acID string) []artifact.Eviden
 // verdict, witness) — recomputable from those pinned inputs, mirroring
 // internal/bundle's recordDigest / cmd/verdi's selfHostedDigest posture (02
 // §Generated artifacts and digests): a content-address of the fact this
-// record asserts, not of wall-clock or provenance metadata.
+// record asserts, not of wall-clock or provenance metadata. The hash tail
+// itself is canonjson.Digest (spec/shared-homes ac-2).
 func recordDigest(rec artifact.Evidence) (string, error) {
 	keyed := struct {
 		Kind        artifact.EvidenceKind    `json:"kind"`
@@ -150,10 +149,9 @@ func recordDigest(rec artifact.Evidence) (string, error) {
 		Verdict     artifact.EvidenceVerdict `json:"verdict"`
 		Witness     string                   `json:"witness"`
 	}{Kind: rec.Kind, Producer: rec.Producer, EvidenceFor: rec.EvidenceFor, Verdict: rec.Verdict, Witness: rec.Witness}
-	data, err := canonjson.Marshal(keyed)
+	digest, err := canonjson.Digest(keyed)
 	if err != nil {
 		return "", fmt.Errorf("runtime: computing record digest: %w", err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return digest, nil
 }

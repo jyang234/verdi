@@ -59,6 +59,24 @@ func TestDecodeMeta_Happy(t *testing.T) {
 			t.Errorf("Decided = %q", m.Decided)
 		}
 	})
+	t.Run("reaffirmation", func(t *testing.T) {
+		const reaffYAML = `id: reaffirmation/jira-loan-1483--ac-1
+kind: reaffirmation
+title: "re-affirm ac-1 as amended"
+schema: verdi.reaffirmation/v1
+owners: [loansvc-team]
+frozen: { at: 2026-07-14, commit: 06a3f4cabb226fe9344e1645e27c344493b6b62b }
+object: spec/loan-workflow-v2@06a3f4cabb226fe9344e1645e27c344493b6b62b#ac-1
+hash: { old: sha256:20bb0d914cc85a12dbb4c5e85f099b69cae126b0a395780d10b98327da844bfc, new: sha256:ca80c24cd423a030096c07d690b96bfd7dcc801219a5815e0679269a6d699c97 }
+`
+		m, err := DecodeMeta("reaffirmation", []byte(reaffYAML))
+		if err != nil {
+			t.Fatalf("DecodeMeta: %v", err)
+		}
+		if m.Base.Title != "re-affirm ac-1 as amended" {
+			t.Errorf("Base.Title = %q", m.Base.Title)
+		}
+	})
 	t.Run("obligation", func(t *testing.T) {
 		m, err := DecodeMeta("obligation", []byte(obligationYAML))
 		if err != nil {

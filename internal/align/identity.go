@@ -62,39 +62,45 @@ func identityOf(kind, id, text string) string {
 // entry of newFindings whose Identity matches — everything else (new
 // findings, and findings whose content changed) is left as newFindings
 // gave it (undispositioned, per computed.go/judged.go's own construction).
-// Output preserves newFindings' order.
+// Output preserves newFindings' order. Thin wrapper over preserve —
+// see preserve's doc comment for the shared mechanics.
 func PreserveDispositions(newFindings, existing []artifact.Finding) []artifact.Finding {
-	byIdentity := make(map[string]artifact.Finding, len(existing))
-	for _, f := range existing {
-		byIdentity[Identity(f)] = f
-	}
-
-	out := make([]artifact.Finding, len(newFindings))
-	for i, f := range newFindings {
-		if prior, ok := byIdentity[Identity(f)]; ok {
-			f.Disposition = prior.Disposition
-			f.Note = prior.Note
-		}
-		out[i] = f
-	}
-	return out
+	return preserve(newFindings, existing, Identity, func(dst *artifact.Finding, src artifact.Finding) {
+		dst.Disposition = src.Disposition
+		dst.Note = src.Note
+	})
 }
 
 // PreserveConflictDispositions is PreserveDispositions' decision-conflict-
 // report analogue, matching by ConflictIdentity instead of Identity —
 // otherwise byte-identical logic (03 §Decision-conflict gate: "the same
-// ... finding-identity rule" as the build-branch report).
+// ... finding-identity rule" as the build-branch report). Thin wrapper
+// over preserve.
 func PreserveConflictDispositions(newFindings, existing []artifact.ConflictFinding) []artifact.ConflictFinding {
-	byIdentity := make(map[string]artifact.ConflictFinding, len(existing))
+	return preserve(newFindings, existing, ConflictIdentity, func(dst *artifact.ConflictFinding, src artifact.ConflictFinding) {
+		dst.Disposition = src.Disposition
+		dst.Note = src.Note
+	})
+}
+
+// preserve is the one generic disposition-carry-forward mechanism
+// PreserveDispositions and PreserveConflictDispositions both wrap: index
+// existing by identity(f), then for each entry of new whose identity
+// matches a prior entry, carry(dst, prior) copies forward whatever fields
+// the caller considers "state being preserved" (disposition and note, for
+// both current callers — see Identity's own doc comment for why the rest
+// of a finding's content is deliberately part of the identity, not the
+// carried state). Output preserves new's order and length.
+func preserve[T any](new, existing []T, identity func(T) string, carry func(dst *T, src T)) []T {
+	byIdentity := make(map[string]T, len(existing))
 	for _, f := range existing {
-		byIdentity[ConflictIdentity(f)] = f
+		byIdentity[identity(f)] = f
 	}
 
-	out := make([]artifact.ConflictFinding, len(newFindings))
-	for i, f := range newFindings {
-		if prior, ok := byIdentity[ConflictIdentity(f)]; ok {
-			f.Disposition = prior.Disposition
-			f.Note = prior.Note
+	out := make([]T, len(new))
+	for i, f := range new {
+		if prior, ok := byIdentity[identity(f)]; ok {
+			carry(&f, prior)
 		}
 		out[i] = f
 	}
