@@ -77,6 +77,22 @@ bindings:
       - "spec/file-topics#ac-2"
       - "spec/file-topics#ac-3"
       - "spec/file-topics#ac-4"
+      # spec/evidence-obligations stories (obligation-artifact/gate/wall):
+      # behavioral legs = the decode/round-trip, VL-019/VL-020 lint, matrix
+      # render, and board graduation/render tests + e2e, all under make
+      # verify. Plus the FEATURE evidence-obligations#ac-1..4 behavioral leg
+      # (the whole obligation mechanism proven by make verify's suite).
+      - "spec/obligation-artifact#ac-1"
+      - "spec/obligation-artifact#ac-2"
+      - "spec/obligation-artifact#ac-3"
+      - "spec/obligation-gate#ac-1"
+      - "spec/obligation-gate#ac-2"
+      - "spec/obligation-wall#ac-1"
+      - "spec/obligation-wall#ac-2"
+      - "spec/evidence-obligations#ac-1"
+      - "spec/evidence-obligations#ac-2"
+      - "spec/evidence-obligations#ac-3"
+      - "spec/evidence-obligations#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -118,3 +134,11 @@ bindings:
       - "spec/file-topics#ac-2"
       - "spec/file-topics#ac-3"
       - "spec/file-topics#ac-4"
+      # spec/evidence-obligations stories' static legs: the obligation kind
+      # + VL-019/VL-020 rules + the loader are declared and compile/vet/
+      # lint-store clean under make verify.
+      - "spec/obligation-artifact#ac-1"
+      - "spec/obligation-artifact#ac-2"
+      - "spec/obligation-gate#ac-1"
+      - "spec/obligation-gate#ac-2"
+      - "spec/obligation-wall#ac-1"
