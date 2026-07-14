@@ -2,6 +2,8 @@ package evidence
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,5 +167,66 @@ func TestLoadRecords_SkipsNonCommitShapedEntries(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("LoadRecords = %v, want empty (only a non-commit-shaped dir present)", got)
+	}
+}
+
+// TestLoadRecordsWithSources_Happy proves the manifest names exactly the
+// record files the walk read (existing files under ancestor-or-self
+// commit directories), each with the sha256 of the exact bytes read —
+// spec/evidence-slot dc-3's receipt inputs, produced by the ONE loader
+// walk rather than a second one (co-3).
+func TestLoadRecordsWithSources_Happy(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	body := recordJSON(repo.Heads[0], "ci")
+	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], body)
+
+	recs, sources, err := LoadRecordsWithSources(context.Background(), repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("LoadRecordsWithSources: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("records = %d, want 1", len(recs))
+	}
+	if len(sources) != 1 {
+		t.Fatalf("sources = %+v, want exactly one entry (runtime.json does not exist and must not be listed)", sources)
+	}
+	wantPath := repo.Heads[0] + "/verdicts.json"
+	if sources[0].Path != wantPath {
+		t.Errorf("sources[0].Path = %q, want %q (slash-separated, derivedRoot-relative)", sources[0].Path, wantPath)
+	}
+	sum := sha256.Sum256([]byte(body))
+	wantDigest := "sha256:" + hex.EncodeToString(sum[:])
+	if sources[0].Digest != wantDigest {
+		t.Errorf("sources[0].Digest = %q, want %q (the exact bytes read)", sources[0].Digest, wantDigest)
+	}
+}
+
+// TestLoadRecordsWithSources_Negative proves the manifest never cites
+// what the walk did not read: a non-ancestor sibling commit's file is
+// excluded, and a missing derivedRoot yields a nil manifest and nil
+// error (the never-synced authoring state, not a failure).
+func TestLoadRecordsWithSources_Negative(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+
+	sibling := branchSiblingCommit(t, repo.Dir, repo.Heads[0])
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	writeDerivedVerdicts(t, derivedRoot, sibling, recordJSON(sibling, "ci"))
+
+	recs, sources, err := LoadRecordsWithSources(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("LoadRecordsWithSources: %v", err)
+	}
+	if len(recs) != 0 || len(sources) != 0 {
+		t.Fatalf("records = %+v, sources = %+v, want both empty (sibling commit is not an ancestor)", recs, sources)
+	}
+
+	recs, sources, err = LoadRecordsWithSources(ctx, repo.Dir, filepath.Join(repo.Dir, "derived", "never-synced"), repo.Head)
+	if err != nil {
+		t.Fatalf("LoadRecordsWithSources(missing derivedRoot): %v", err)
+	}
+	if recs != nil || sources != nil {
+		t.Fatalf("missing derivedRoot: records = %+v, sources = %+v, want nil/nil", recs, sources)
 	}
 }
