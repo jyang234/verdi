@@ -64,7 +64,7 @@ func TestIntegration_LocalBinaries(t *testing.T) {
 		t.Fatalf("resolving testdata/svcfix: %v", err)
 	}
 
-	base, err := RunGraph(ctx, runner, svcDir, "deadbeef")
+	base, err := RunGraph(ctx, runner, svcDir, "deadbeef", "")
 	if err != nil {
 		t.Fatalf("Graph: %v", err)
 	}

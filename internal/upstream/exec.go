@@ -10,14 +10,27 @@ import (
 // 2 = operational error").
 const operationalExit = 2
 
-// RunGraph runs `flowmap graph -stamp <stamp> <dir>` and strict-decodes its
-// stdout. flowmap graph is verdict-neutral (it prints a view, never gates):
-// any nonzero exit is an operational error (bad flags, unreadable dir).
-func RunGraph(ctx context.Context, runner Runner, dir, stamp string) (*Graph, error) {
+// RunGraph runs `flowmap graph -stamp <stamp> [-entry <entry>] <dir>` and
+// strict-decodes its stdout. flowmap graph is verdict-neutral (it prints a
+// view, never gates): any nonzero exit is an operational error (bad flags,
+// unreadable dir).
+//
+// entry, when non-empty, appends flowmap's own `-entry` flag (spec/
+// verification-extractor dc-3: the JSON-decodable, build-time equivalent of
+// the render-time-only `--root` flag over the same selector value space),
+// scoping the build to one entry point's reachable subgraph. Every call
+// site that existed before spec/verification-extractor passes entry == ""
+// and gets byte-for-byte today's unscoped argv and behavior — this is the
+// same RunGraph, extended in place, not a second exec path.
+func RunGraph(ctx context.Context, runner Runner, dir, stamp, entry string) (*Graph, error) {
+	flags := []string{"-stamp", stamp}
+	if entry != "" {
+		flags = append(flags, "-entry", entry)
+	}
 	req := Request{
 		Bin:        "flowmap",
 		Subcommand: "graph",
-		Flags:      []string{"-stamp", stamp},
+		Flags:      flags,
 		Positional: []string{dir},
 	}
 	res, err := runner.Run(ctx, req)

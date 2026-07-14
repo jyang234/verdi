@@ -103,7 +103,7 @@ func Compute(ctx context.Context, in ComputedInput) (*ComputedResult, error) {
 		// v0's declares: diff is boundary-contract-only (03 §Alignment
 		// report's "declares.boundaries", not obligations), so the decoded
 		// graph itself is not otherwise consulted here.
-		if _, err := upstream.RunGraph(ctx, in.Runner, svc.Dir, in.Covers); err != nil {
+		if _, err := upstream.RunGraph(ctx, in.Runner, svc.Dir, in.Covers, ""); err != nil {
 			return nil, fmt.Errorf("align: regenerating graph for %s: %w", svc.Name, err)
 		}
 		if err := upstream.BoundaryGenerate(ctx, in.Runner, svc.Dir); err != nil {

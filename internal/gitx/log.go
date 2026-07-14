@@ -96,6 +96,38 @@ func CommitDate(ctx context.Context, dir, rev string) (string, error) {
 	return t.Format("2006-01-02T15:04:05-07:00"), nil
 }
 
+// PickaxeCommit runs `git log -S<identity> -1 --format=%H -- <paths...>`
+// (or the whole tree, if paths is empty) — spec/verification-extractor
+// dc-4's witness-commit discovery mechanism, the smallest honest tool
+// available without building history-walking graph-diff machinery. ok is
+// false, with a nil error, when no commit in the repository's history ever
+// changed identity's occurrence count under paths (a moved directory, an
+// unrelated rename): the caller discloses this as witness-unresolved,
+// never fabricates a placeholder commit.
+//
+// This is a strict, fixed-string pickaxe search, not a causal claim: a hit
+// only proves identity's occurrence count changed in that commit somewhere
+// under paths (a comment, a test, an unrelated symbol sharing the name) —
+// never that the commit removed one specific graph element. Every caller
+// of this function must disclose its result as a CANDIDATE witness, never
+// as a causally-verified removal (dc-4's corrected candor).
+func PickaxeCommit(ctx context.Context, dir, identity string, paths ...string) (sha string, ok bool, err error) {
+	args := []string{"log", "-S" + identity, "-1", "--format=%H"}
+	if len(paths) > 0 {
+		args = append(args, "--")
+		args = append(args, paths...)
+	}
+	out, err := run(ctx, dir, args...)
+	if err != nil {
+		return "", false, fmt.Errorf("gitx: PickaxeCommit(%s): %w", identity, err)
+	}
+	sha = strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", false, nil
+	}
+	return sha, true, nil
+}
+
 // parseLog splits raw `git log --format=logFormat` output into Commits.
 func parseLog(raw string) ([]Commit, error) {
 	records := strings.Split(raw, logRecordSep)

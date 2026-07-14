@@ -9,7 +9,7 @@ func TestGraph_Happy(t *testing.T) {
 	f := NewFakeRunner()
 	f.Enqueue("flowmap", "graph", Result{Stdout: readCanned(t, "graph.json"), ExitCode: 0})
 
-	g, err := RunGraph(context.Background(), f, "testdata/svcfix", "deadbeef")
+	g, err := RunGraph(context.Background(), f, "testdata/svcfix", "deadbeef", "")
 	if err != nil {
 		t.Fatalf("Graph: %v", err)
 	}
@@ -30,11 +30,41 @@ func TestGraph_Happy(t *testing.T) {
 	}
 }
 
+// TestGraph_Scoped_AppendsEntryFlag proves RunGraph's entry parameter
+// appends flowmap's own `-entry` flag (spec/verification-extractor dc-3)
+// only when non-empty, and that TestGraph_Happy's unscoped call above kept
+// behaving identically (no -entry token in its argv) — the two tests
+// together are this codebase's evidence for obligation
+// verification-extractor--ac-2--behavioral's scoped/unscoped split.
+func TestGraph_Scoped_AppendsEntryFlag(t *testing.T) {
+	f := NewFakeRunner()
+	f.Enqueue("flowmap", "graph", Result{Stdout: readCanned(t, "graph.json"), ExitCode: 0})
+
+	g, err := RunGraph(context.Background(), f, "testdata/svcfix", "deadbeef", "POST /loan-application")
+	if err != nil {
+		t.Fatalf("Graph: %v", err)
+	}
+	if g.Stamp != "deadbeef" {
+		t.Errorf("Stamp = %q, want %q", g.Stamp, "deadbeef")
+	}
+
+	argv := f.Calls[0].buildArgv()
+	want := []string{"graph", "-stamp", "deadbeef", "-entry", "POST /loan-application", "testdata/svcfix"}
+	if len(argv) != len(want) {
+		t.Fatalf("argv = %v, want %v", argv, want)
+	}
+	for i, w := range want {
+		if argv[i] != w {
+			t.Fatalf("argv = %v, want %v", argv, want)
+		}
+	}
+}
+
 func TestGraph_Negative_OperationalError(t *testing.T) {
 	f := NewFakeRunner()
 	f.Enqueue("flowmap", "graph", Result{Stderr: []byte("bad flag"), ExitCode: 2})
 
-	if _, err := RunGraph(context.Background(), f, "dir", "sha"); err == nil {
+	if _, err := RunGraph(context.Background(), f, "dir", "sha", ""); err == nil {
 		t.Fatal("Graph with exit 2: want error, got nil")
 	}
 }
@@ -43,7 +73,7 @@ func TestGraph_Negative_ExecError(t *testing.T) {
 	f := NewFakeRunner()
 	f.EnqueueError("flowmap", "graph", context.DeadlineExceeded)
 
-	if _, err := RunGraph(context.Background(), f, "dir", "sha"); err == nil {
+	if _, err := RunGraph(context.Background(), f, "dir", "sha", ""); err == nil {
 		t.Fatal("Graph with exec error: want error, got nil")
 	}
 }
