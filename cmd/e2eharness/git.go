@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // deterministicGitEnv pins author/committer identity and timestamps so
@@ -34,4 +35,21 @@ func runGit(dir string, extraEnv []string, args ...string) error {
 		return fmt.Errorf("git %v: %w\n%s", args, err, out)
 	}
 	return nil
+}
+
+// gitOutput runs git in dir and returns its trimmed stdout — the query
+// twin of runGit (same env pinning), for provisioning steps that need a
+// value back (e.g. the store HEAD sha the sealed badge fixture's frozen
+// stamp pins). On failure the error wraps stderr.
+func gitOutput(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), deterministicGitEnv...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git %v: %w\n%s", args, err, stderr.String())
+	}
+	return strings.TrimSpace(string(out)), nil
 }

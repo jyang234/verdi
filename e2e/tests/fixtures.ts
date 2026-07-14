@@ -215,6 +215,27 @@ export const OBLIGATION_WALL_MISSING_KIND = "static";
 // card reads out on the wall (feature co-3, legible-without-the-sidecar).
 export const OBLIGATION_WALL_DEMAND = "drives the replay view";
 
+// ---------------------------------------------------------------------------
+// Workbench (wall badges, spec/badge-computes ac-5)
+// ---------------------------------------------------------------------------
+
+// Three walls carrying the SAME real badge-triggering state (a stub whose
+// acceptance_criteria names an undeclared AC → VL-006 chip on the stub
+// card; a decision exempting a nonexistent ADR → VL-003 chip on the
+// decision card; a top-level depends-on to a nonexistent spec → VL-003
+// stamp on the case file), one per board mode: a draft on the design
+// branch (authoring), a draft with an entry in the canned MR feed
+// (review), and an accepted-pending-build instance (read-only — branch
+// state cannot make a non-draft wall authoring). Provisioned by
+// cmd/e2eharness/provision_board.go (badgeSpec).
+export const BADGE_WALL_SPEC = "decline-badge-wall";
+export const BADGE_REVIEW_SPEC = "decline-badge-review";
+export const BADGE_SEALED_SPEC = "decline-badge-sealed";
+// The badge anchors: the decision card wearing the VL-003 chip and the
+// stub card wearing the VL-006 chip.
+export const BADGE_DECISION = "dc-1";
+export const BADGE_STUB_SLUG = "badge-orphan";
+
 // Corpus artifacts nothing on DESIGN_SPEC's wall names (real on main,
 // so real on the design branch) — the pin toolbox's import fixtures.
 export const PIN_ADR = "adr/0002-outbox-events";

@@ -2430,7 +2430,11 @@ button.yarn-chip-type {
   top: -1.05rem;
   right: 0.85rem;
   display: flex;
-  align-items: flex-end;
+  /* top-aligned: the class tag deliberately tucks its foot behind the
+     placard's paper (the stamped-folder look), but a stamp is shorter
+     than the tag — bottom-aligning would sink half of it behind the
+     folder. Top-aligned it sits fully legible on the folder's lip. */
+  align-items: flex-start;
   gap: 0.45rem;
 }
 .case-stamp-row .case-class-tag { position: static; top: auto; right: auto; }
