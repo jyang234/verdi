@@ -36,6 +36,18 @@ var (
 		"active":     true,
 		"superseded": true,
 	}
+	// proposalStatuses is the class: proposal diagram's AUTHORED status
+	// enum (02 §Diagram proposals, spec/proposal-artifact ac-1/dc-1):
+	// "proposed -> accepted" only. realized/stale (the four-value
+	// DISCLOSED vocabulary's two computed members, DiagramDisclosedStatus
+	// in diagram.go) are deliberately ABSENT from this map — that absence
+	// is itself the enforcement mechanism (ac-4/dc-3) making strict decode
+	// refuse them as authored frontmatter, with no separate runtime guard
+	// needed.
+	proposalStatuses = map[Status]bool{
+		"proposed": true,
+		"accepted": true,
+	}
 	waiverStatuses = map[Status]bool{
 		"active":  true,
 		"expired": true,

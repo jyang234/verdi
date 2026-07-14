@@ -34,7 +34,7 @@ var draftStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?draft"?\s*$`)
 // cmdAccept is `verdi accept`'s entry point, invoked by dispatch.go.
 func cmdAccept(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "accept: usage: verdi accept <spec-ref> (e.g. spec/stale-decline)")
+		fmt.Fprintln(stderr, "accept: usage: verdi accept <spec-ref|diagram-ref> (e.g. spec/stale-decline, diagram/loansvc-target-topology)")
 		return 2
 	}
 	specArg := args[0]
@@ -53,9 +53,17 @@ func cmdAccept(args []string, stdout, stderr io.Writer) int {
 // 1 verdict — the spec fails an accept precondition — 2 operational).
 func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writer) int {
 	ref, err := artifact.ParseRef(specArg)
-	if err != nil || ref.Kind != artifact.KindSpec || ref.Pinned() {
-		fmt.Fprintf(stderr, "accept: %q is not a spec ref (want spec/<name>, e.g. spec/stale-decline)\n", specArg)
+	if err != nil || ref.Pinned() || (ref.Kind != artifact.KindSpec && ref.Kind != artifact.KindDiagram) {
+		fmt.Fprintf(stderr, "accept: %q is not a spec or diagram ref (want spec/<name> or diagram/<name>, e.g. spec/stale-decline)\n", specArg)
 		return 2
+	}
+
+	// spec/proposal-artifact ac-3/dc-2: a diagram/... ref dispatches to the
+	// new, narrower ritual entirely — no stub-match, no CODEOWNERS routing,
+	// no supersedes cascade, since a diagram carries no ACs or stubs to
+	// match against. The spec ritual below is unchanged for spec/... refs.
+	if ref.Kind == artifact.KindDiagram {
+		return runAcceptDiagram(ctx, root, ref, stdout, stderr)
 	}
 
 	specPath := filepath.Join(root, ".verdi", "specs", "active", ref.Name, "spec.md")
