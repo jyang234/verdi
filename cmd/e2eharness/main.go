@@ -124,6 +124,13 @@ func run() error {
 		return fmt.Errorf("provisioning directory fixtures: %w", err)
 	}
 
+	// The draft-boards branch fixtures (spec/draft-boards; see
+	// provision_draftboards.go) — cut from main AFTER the dex build like
+	// the board fixtures above, restoring the serving checkout when done.
+	if err := provisionDraftBoards(storeRoot); err != nil {
+		return fmt.Errorf("provisioning draft-boards fixtures: %w", err)
+	}
+
 	dexSrv := &http.Server{Addr: dexAddr, Handler: http.FileServer(http.Dir(dexOut))}
 	dexLn, err := net.Listen("tcp", dexAddr)
 	if err != nil {
@@ -143,6 +150,18 @@ func run() error {
 	}
 	go func() { _ = ctrlSrv.Serve(ctrlLn) }()
 	log.Printf("e2eharness: control server at http://%s", controlAddr)
+
+	// The read-only inspection server (inspect.go): the suite's window
+	// into the serving checkout's git state and the managed worktrees'
+	// files (spec/draft-boards ac-2's isolation and clean-checkout proof).
+	inspectSrv := &http.Server{Addr: inspectAddr, Handler: inspectHandler(storeRoot)}
+	inspectLn, err := net.Listen("tcp", inspectAddr)
+	if err != nil {
+		return fmt.Errorf("binding inspection server: %w", err)
+	}
+	go func() { _ = inspectSrv.Serve(inspectLn) }()
+	defer func() { _ = inspectSrv.Close() }()
+	log.Printf("e2eharness: inspection server at http://%s (store: %s)", inspectAddr, storeRoot)
 
 	serveCmd := exec.CommandContext(ctx, binPath, "serve", "--http", workbenchAddr)
 	// A graceful stop on interrupt — SIGTERM, then up to 5s before the
