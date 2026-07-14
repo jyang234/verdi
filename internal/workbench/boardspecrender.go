@@ -192,7 +192,9 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	if p.Problem != "" || p.Outcome != "" {
 		b.WriteString(`<header class="board-placards case-file">`)
 		b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
-		writeCaseClassTag(&b, p)
+		// The class tag, wearing the spec-level badge stamps beside it when
+		// any were computed (spec/badge-computes dc-4) — badgerender.go.
+		writeCaseTopline(&b, p)
 		if p.Problem != "" {
 			b.WriteString(`<div class="placard placard--problem" data-testid="placard-problem"><span class="placard-tag">problem</span><p class="placard-text">` + esc(p.Problem) + `</p>`)
 			writePlacardFull(&b, "problem", p.ProblemBodyHTML)
@@ -259,6 +261,11 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		if len(c.Obligations) > 0 {
 			writeObligations(&b, c)
 		}
+		// Computed wall badges (spec/badge-computes ac-5, dc-4): the card's
+		// chip row, in every mode — badgerender.go. Populated only for cards
+		// a locus-declaring finding names, so the non-empty slice is the
+		// whole gate, exactly like Obligations above.
+		writeBadgeChips(&b, c.ID, c.Badges)
 		if authoring {
 			b.WriteString(`<button type="button" class="yarn-handle" data-testid="yarn-handle-` + esc(c.ID) + `" aria-label="Draw yarn from ` + esc(c.ID) + `" title="drag to another card to string yarn"></button>`)
 		}
@@ -310,6 +317,11 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		b.WriteString(`<span class="stub-tab">` + esc(sv.Slug) + `</span>`)
 		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + kindLabel + `</span><span class="card-kind-id">declared</span></span>`)
 		b.WriteString(`<p class="stub-title" title="` + esc(title) + `">` + esc(title) + `</p>`)
+		// A stub is a rendered board object too (spec/badge-computes dc-3:
+		// a dangling stub reference anchors to the stub's own card) — its
+		// chip row rides the card in every mode, before the sealed wall's
+		// Instantiate affordance so the receipt never displaces the action.
+		writeBadgeChips(&b, "stub-"+sv.Slug, sv.Badges)
 		if instantiable {
 			verbLabel := "Instantiate story"
 			if sv.Spike {

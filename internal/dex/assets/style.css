@@ -2356,6 +2356,91 @@ button.yarn-chip-type {
    so the disclosures sit below the prose, never on it (mirrors coverage) */
 .objcard:has(.card-obligations) .card-text { -webkit-line-clamp: 2; }
 
+/* wall badges (spec/badge-computes ac-5, dc-4): computed receipts the
+   wall wears — a VL-finding chip on the card it anchors to, a ladder or
+   spec-level stamp on the case-file lockup. Disclosure, not alarm
+   (wall-receipts dc-2): every badge speaks the board's disclosed ochre —
+   the authored/"hand-off, unverified input" voice the board-notice and
+   the pending receipts already use — never an error red. Each badge is a
+   real BUTTON (keyboard-focusable; data-badge-source + data-badge-record
+   are the derivation drawer's opener contract), so it takes the pointer
+   cue and focus ring every live control on the wall takes. */
+.card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.18rem;
+  min-width: 0;
+}
+/* on an object card the chip row joins the receipts column pinned at the
+   card's foot, exactly where the coverage chip sits */
+.objcard .card-badges {
+  position: absolute;
+  left: 0.9rem;
+  right: 0.9rem;
+  bottom: 0.5rem;
+}
+.badge-chip, .case-stamp {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: left;
+  color: var(--authored);
+  background: color-mix(in srgb, var(--authored-tint) 75%, transparent);
+  border: 1px solid color-mix(in srgb, var(--authored) 55%, transparent);
+  border-radius: 999px;
+  padding: 0.06rem 0.45rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.badge-chip:hover, .badge-chip:focus-visible,
+.case-stamp:hover, .case-stamp:focus-visible {
+  border-color: var(--authored);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--authored) 18%, transparent);
+}
+/* a card wearing badges keeps its receipts a COLUMN (dc-4: "one column
+   of receipts"): the chip row takes the foot, an existing receipt on the
+   same card moves up one row, and the clamped text gives lines back so
+   nothing sits on the prose (mirrors the coverage/obligation rules) */
+.objcard:has(.card-badges) .coverage-chip,
+.objcard:has(.card-badges) .oq-claims,
+.objcard:has(.card-badges) .card-obligations { bottom: 1.75rem; }
+.objcard:has(.card-badges) .card-text { -webkit-line-clamp: 3; }
+.objcard:has(.card-badges):has(.coverage-chip) .card-text,
+.objcard:has(.card-badges):has(.oq-claims) .card-text,
+.objcard:has(.card-badges):has(.card-obligations) .card-text { -webkit-line-clamp: 2; }
+/* on a stub card (a flex column, not absolute-positioned innards) the
+   chip row sits in flow at the card's foot; the sealed wall's
+   Instantiate keeps its own place right below it */
+.stubcard .card-badges { margin-top: auto; }
+.stubcard:has(.card-badges) .stub-instantiate { margin-top: 0; }
+
+/* the case-file stamps: spec-level badges beside the class tag (dc-4) —
+   the same top-right lockup, the stamps first, the class tag keeping its
+   own stamped look inside the row (position handled by the row now). A
+   stamp joins the folder's stamped family — squared corners, the slight
+   off-square set every stamp on this board wears — but keeps the
+   disclosed ochre voice and its prose label's own case (a receipt's
+   message, not stamp lettering). */
+.case-stamp-row {
+  position: absolute;
+  top: -1.05rem;
+  right: 0.85rem;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45rem;
+}
+.case-stamp-row .case-class-tag { position: static; top: auto; right: auto; }
+.case-stamp {
+  border-radius: 4px;
+  background: var(--paper);
+  max-width: 18rem;
+  transform: rotate(-0.8deg);
+}
+
 /* ---------- click-to-expand: truncation is visible, never silent ----------
 
    Any wall text the layout clamps (a case-file placard, an object card's
