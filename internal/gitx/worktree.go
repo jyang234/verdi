@@ -69,6 +69,32 @@ func Push(ctx context.Context, dir string) error {
 	return nil
 }
 
+// WorktreeAdd cuts a new git worktree at path, checked out to branch —
+// `git worktree add <path> <branch>` against dir (spec/worktree-manager
+// dc-1's single git-worktree-mutating command class internal/wtmanager's
+// EnsureWorktree ever runs against the serving checkout's own root; dir's
+// own branch/index/working tree are untouched by this call, the same way
+// `checkout`/`switch` never appear here).
+func WorktreeAdd(ctx context.Context, dir, path, branch string) error {
+	if _, err := run(ctx, dir, "worktree", "add", path, branch); err != nil {
+		return fmt.Errorf("gitx: WorktreeAdd(%q, %q): %w", path, branch, err)
+	}
+	return nil
+}
+
+// WorktreeRemove removes the linked worktree at path — `git worktree
+// remove <path>` against dir, deliberately WITHOUT --force
+// (spec/worktree-manager dc-4: git's own dirty-tree refusal is a second,
+// redundant guard behind the caller's own gitx.StatusDirty check, never
+// the only one relied on; a worktree git itself refuses to remove is
+// surfaced as an ordinary error, never silently forced through).
+func WorktreeRemove(ctx context.Context, dir, path string) error {
+	if _, err := run(ctx, dir, "worktree", "remove", path); err != nil {
+		return fmt.Errorf("gitx: WorktreeRemove(%q): %w", path, err)
+	}
+	return nil
+}
+
 // HasRemote reports whether dir has a remote named name configured — the
 // commit affordance pushes only when an origin exists (a purely local
 // checkout can still commit durably).

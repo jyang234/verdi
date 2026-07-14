@@ -85,6 +85,69 @@ func TestDefaultBranch_Negative(t *testing.T) {
 	}
 }
 
+func TestHasLocalBranch_Happy(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := CheckoutNewBranch(ctx, repo.Dir, "design/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+
+	has, err := HasLocalBranch(ctx, repo.Dir, "design/x")
+	if err != nil {
+		t.Fatalf("HasLocalBranch(design/x): %v", err)
+	}
+	if !has {
+		t.Fatal("HasLocalBranch(design/x) = false, want true")
+	}
+
+	has, err = HasLocalBranch(ctx, repo.Dir, "main")
+	if err != nil {
+		t.Fatalf("HasLocalBranch(main): %v", err)
+	}
+	if !has {
+		t.Fatal("HasLocalBranch(main) = false, want true")
+	}
+}
+
+func TestHasLocalBranch_Negative(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	t.Run("branch resolves nowhere at all", func(t *testing.T) {
+		has, err := HasLocalBranch(ctx, repo.Dir, "design/nope")
+		if err != nil {
+			t.Fatalf("HasLocalBranch(design/nope): unexpected error: %v", err)
+		}
+		if has {
+			t.Fatal("HasLocalBranch(design/nope) = true, want false")
+		}
+	})
+
+	t.Run("remote-tracking-only branch is not a local branch", func(t *testing.T) {
+		// Fabricate a remote-tracking ref directly (no clone/fetch, co-2:
+		// no network in any test) — HasLocalBranch must say false for
+		// this even though *some* ref named design/remote-only exists.
+		if err := UpdateRef(ctx, repo.Dir, "refs/remotes/origin/design/remote-only", repo.Head); err != nil {
+			t.Fatalf("seeding remote-tracking ref: %v", err)
+		}
+		has, err := HasLocalBranch(ctx, repo.Dir, "design/remote-only")
+		if err != nil {
+			t.Fatalf("HasLocalBranch(design/remote-only): unexpected error: %v", err)
+		}
+		if has {
+			t.Fatal("HasLocalBranch(design/remote-only) = true, want false (remote-tracking ref must not count as local)")
+		}
+	})
+
+	t.Run("not a repository at all", func(t *testing.T) {
+		notARepo := t.TempDir()
+		if _, err := HasLocalBranch(ctx, notARepo, "main"); err == nil {
+			t.Fatal("HasLocalBranch outside a repo: want error, got nil")
+		}
+	})
+}
+
 func TestMergeBase_Happy(t *testing.T) {
 	repo := buildRepo(t)
 	ctx := context.Background()
