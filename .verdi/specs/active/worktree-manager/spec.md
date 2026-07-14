@@ -19,9 +19,9 @@ links:
   - { type: implements, ref: "spec/workbench-directory#ac-4" }
 decisions:
   - { id: dc-1, text: "a new internal/wtmanager package exposes EnsureWorktree(ctx, root, branch) (path string, err error): lazy, synchronous (blocks until the cut completes or fails - no interstitial, matching the sibling draft-boards story's own dc-2 consumption contract verbatim), idempotent (a worktree already present at the deterministic path for branch is reused, never re-cut). Layout under the data zone (co-1): .verdi/data/worktrees/<name>/, where <name> is the design branch's own spec name (branch design/<name> to path <name> - a direct, collision-free mapping since spec names are already globally unique, VL-002 - never a hash or re-slugging scheme this story would have to invent). EnsureWorktree runs exactly one git command class against the serving checkout's root - worktree add <path> <branch> - and never checkout/switch on that root, so the serving checkout is provably undisturbed the same way ref-index's ComputeIndex is (co-1)", anchor: "#dc-1" }
-  - { id: dc-2, text: "ownership mechanism: a per-managed-worktree lockfile at .verdi/data/worktrees/<name>.lock, using the EXACT algorithm this store already ratified for its per-checkout data/writer.lock (internal/mcpserve/lock.go's O_CREATE|O_EXCL {pid,start} JSON, kill(pid,0)-plus-ps -o lstart= liveness cross-check closing the PID-reuse gap, stale-lock takeover) - extracted into a new, shared internal/filelock package (CLAUDE.md: anything used by two or more packages lives in a shared internal/ package) rather than copy-pasted a second time or imported from the semantically-mismatched internal/mcpserve. cmd/verdi/serve.go's existing writer-lock call sites move to internal/filelock unchanged in behavior. The lock is held for the managed worktree's whole lifetime once acquired by its owning serve process (mirroring the per-checkout lock's own lifecycle), not merely during the cut - so gc (a separate process invocation) can test liveness before ever touching a worktree", anchor: "#dc-2" }
-  - { id: dc-3, text: "gc's merged-or-deleted signal reuses gitx.IsAncestor (the same primitive the sibling ref-index story's dc-5 already uses for its own merged-branch check) against each directory entry under .verdi/data/worktrees/ cross-referenced with the current refs/heads/design/* listing: merged = the worktree's branch tip is an ancestor of the default-branch tip; deleted = the branch no longer resolves at all. No retention_days grace period applies to managed worktrees (unlike verdi.yaml's derived.retention_days, which the store-layout spec's OTHER gc bullet already reserves for the derived-cache prune, a different mechanism this story does not touch) - a worktree becomes reclaim-eligible the instant its signal fires, the plain reading of feature dc-4's text, which names no time buffer for worktrees specifically; a future revision may add one without breaking this contract, the smallest reversible starting point", anchor: "#dc-3" }
-  - { id: dc-4, text: "gc never forces a removal. It checks gitx.StatusDirty (existing function, reused unchanged) before attempting anything, producing a clear disclosed message ('kept: uncommitted changes') rather than parsing git's own refusal text; only a clean, reclaim-eligible worktree reaches git worktree remove, called WITHOUT --force, so git's own dirty-tree safety net is a second, redundant guard rather than the only one. A worktree whose lockfile (dc-2) is currently held by a live process is equally skipped and disclosed ('kept: in use by pid N') rather than removed out from under its owner. No exempts edge is needed against parent dc-4 for this: the lock-liveness skip is TEMPORARY and this-run-only, never a permanent exemption from dc-4's reclamation contract - the exact same merged/deleted worktree remains fully reclaim-eligible on the very next gc invocation once its owner exits and the lock goes stale (unlike the dirty-worktree case, which stays kept until a HUMAN resolves it). Feature dc-4 already establishes that gc is a deliberately-invoked, non-daemon process running on ITS OWN schedule, never instantaneous - a live-lock skip is that same 'runs on its own schedule, not a background process' property applied to a single worktree that happens to be mid-use exactly when this particular invocation ran, not a new kept-forever category dc-4 would need to bless. Every skip and every reclaim is printed, one line per worktree; gc performs no removal a human cannot see in its own output", anchor: "#dc-4" }
+  - { id: dc-2, text: "ownership mechanism: a per-managed-worktree lockfile at .verdi/data/worktrees/<name>.lock, using the EXACT algorithm this store already ratified for its per-checkout data/writer.lock (internal/mcpserve/lock.go's O_CREATE|O_EXCL {pid,start} JSON, kill(pid,0)-plus-ps -o lstart= liveness cross-check closing the PID-reuse gap, stale-lock takeover) - extracted into a new, shared internal/filelock package (CLAUDE.md: anything used by two or more packages lives in a shared internal/ package) rather than copy-pasted a second time or imported from the semantically-mismatched internal/mcpserve. cmd/verdi/serve.go's existing writer-lock call sites move to internal/filelock unchanged in behavior. The lock is held ONLY for the duration of a git-worktree-mutating operation on that worktree - EnsureWorktree's own git worktree add, or gc's git worktree remove - never for the worktree's whole idle lifetime between operations: ordinary board reads/edits inside an already-cut worktree are ordinary git commands against an ordinary directory and need no lock of their own. This bounds every lock hold to a single short git invocation, so a live-lock skip (dc-4) is always a narrow, transient race window - never a multi-minute or whole-serve-session deferral", anchor: "#dc-2" }
+  - { id: dc-3, text: "gc's merged-or-deleted signal reuses gitx.IsAncestor (the same primitive the sibling ref-index story's dc-5 already uses for its own merged-branch check) against each directory entry under .verdi/data/worktrees/ cross-referenced with the current refs/heads/design/* listing: merged = the worktree's branch tip is an ancestor of the default-branch tip; deleted = the branch no longer resolves at all. Disclosed judgment call, not a claimed fact about another document: verdi-store-layout's derived.retention_days bullet is written against derived/<ref>/ specifically, but its config comment ('gc horizon for merged/deleted refs') is worded generally enough that whether it was meant to bind every future merged/deleted-ref reclaim mechanism, or only the one that existed when it was ratified, is genuinely ambiguous - store-layout predates managed worktrees entirely and cannot have decided this. This story chooses NOT to apply retention_days to managed worktrees - a worktree becomes reclaim-eligible the instant its merged/deleted signal fires, no grace period - as the smallest reversible starting point, explicitly recorded here rather than silently assumed; a later revision may unify the two under one shared knob, or may not, without breaking this story's own contract either way", anchor: "#dc-3" }
+  - { id: dc-4, text: "gc never forces a removal. It checks gitx.StatusDirty (existing function, reused unchanged) before attempting anything, producing a clear disclosed message ('kept: uncommitted changes') rather than parsing git's own refusal text; only a clean, reclaim-eligible worktree reaches git worktree remove, called WITHOUT --force, so git's own dirty-tree safety net is a second, redundant guard rather than the only one. A worktree whose lockfile (dc-2) is currently held by a live process is equally skipped and disclosed ('kept: in use by pid N') rather than removed out from under its owner. Because dc-2 holds this lock only for the duration of a single git-worktree-mutating call (never the worktree's whole idle lifetime), this skip is a NARROW, single-operation race window, not an extended deferral: no exempts edge is needed against parent dc-4 because the exact same merged/deleted worktree is fully reclaim-eligible again the moment that one operation finishes, ordinarily within the same gc run's next pass or the very next invocation - never withheld for the life of a long-running serve session. This is materially different from the dirty-worktree case (kept until a human resolves the uncommitted changes, an indefinite hold dc-4 of the parent feature spec explicitly names), so the two kept-reasons are not analogous in duration, only in disclosure shape. Every skip and every reclaim is printed, one line per worktree; gc performs no removal a human cannot see in its own output", anchor: "#dc-4" }
   - { id: dc-5, text: "scope line: this story implements ONLY the managed-worktree reclamation slice of verdi gc. verdi-store-layout's Garbage collection section also ratifies derived-cache pruning (data/derived/<ref>/ for refs merged/deleted past derived.retention_days) and layout/tree-hash cache pruning - neither is touched here; cmd/verdi gc's own printed output says so explicitly on every run, so a human is never left inferring full gc coverage from a partial implementation. dispatch.go's gc entry moves from phase 0 (out of v0 scope) to a real, implemented phase, the same flip close-verb already made for its own verb in round 6", anchor: "#dc-5" }
 constraints:
   - { id: co-1, text: "inherited verbatim from the feature (co-1): managed worktrees live under the data zone, never committed. EnsureWorktree's every write happens under .verdi/data/worktrees/; nothing it creates is ever git-added or git-committed, and gc's own removals touch only that same subtree", anchor: "#co-1" }
@@ -184,12 +184,24 @@ lives in a shared `internal/` package"). `cmd/verdi/serve.go`'s existing
 writer-lock call sites move to `internal/filelock` unchanged in behavior —
 this story widens the mechanism's packaging, not its algorithm.
 
-The lock is held for the managed worktree's WHOLE LIFETIME once acquired by
-its owning process — mirroring the per-checkout lock's own lifecycle —
-rather than only during the cut, so a separate `gc` invocation can test
-liveness before ever touching a worktree (ac-3, ac-4), the same way the
-existing per-checkout lock lets `verdi mcp` decide whether to proxy or
-serve standalone.
+**Hold duration, closing a decision-conflict finding raised against an
+earlier draft:** the lock is held ONLY for the duration of a single
+git-worktree-mutating operation on that worktree — `EnsureWorktree`'s own
+`git worktree add`, or `gc`'s own `git worktree remove` — never for the
+worktree's whole idle lifetime between operations. An earlier draft of this
+decision held the lock for "the managed worktree's whole lifetime once
+acquired," mirroring the per-checkout writer lock's own lifecycle; that
+framing is corrected here because it would leave a long-running `verdi
+serve` process holding every worktree it ever cut for its entire uptime,
+making `gc`'s live-lock skip (dc-4) an unbounded, session-length deferral
+rather than the narrow, transient race window dc-4 needs it to be. Ordinary
+board reads and edits inside an already-cut worktree are ordinary git
+commands against an ordinary directory and need no lock of their own — only
+the two operations that mutate `git worktree`'s own administrative state
+(`add`, `remove`) ever take it, briefly, so a separate `gc` invocation
+testing liveness only ever observes a live holder during that narrow
+window, never for as long as the serve process merely happens to be
+running.
 
 ## DC-3
 
@@ -199,16 +211,24 @@ merged-branch exclusion — against each directory entry under
 `.verdi/data/worktrees/`, cross-referenced with the current
 `refs/heads/design/*` listing: merged means the worktree's recorded branch
 tip is an ancestor of the default branch's tip; deleted means the branch no
-longer resolves to anything at all. No `retention_days` grace period
-applies to managed worktrees, unlike `verdi.yaml`'s `derived.retention_days`
-(which `verdi-store-layout`'s OTHER `gc` bullet reserves for the
-derived-cache prune — a different mechanism this story does not touch): a
-managed worktree becomes reclaim-eligible the instant its merged-or-deleted
-signal fires, the plain reading of feature dc-4's text, which names no time
-buffer for worktrees specifically. A future revision may add a grace period
-without breaking this contract — the smallest reversible starting point,
-not a value derived from data (mirroring `verdi.yaml`'s own documented
-posture for its other tunables).
+longer resolves to anything at all.
+
+**Disclosed judgment call, not a claimed fact about another document**
+(closing a decision-conflict finding raised against an earlier draft, which
+asserted `verdi-store-layout`'s `derived.retention_days` bullet was
+unambiguously "reserved" for the derived-cache prune alone): that bullet is
+written against `derived/<ref>/` specifically, but its own config comment —
+"gc horizon for merged/deleted refs" — is worded generally enough that
+whether it was meant to bind every future merged/deleted-ref reclaim
+mechanism, or only the one that existed when it was ratified, is genuinely
+ambiguous. `verdi-store-layout` predates managed worktrees entirely and
+cannot have decided this either way. This story chooses NOT to apply
+`retention_days` to managed worktrees — a worktree becomes reclaim-eligible
+the instant its merged-or-deleted signal fires, no grace period — as the
+smallest reversible starting point, explicitly recorded as a choice here
+rather than silently assumed as settled fact. A later revision may unify
+the two under one shared knob, or may deliberately keep them separate,
+without breaking this story's own contract either way.
 
 ## DC-4
 
@@ -228,19 +248,20 @@ out from under a live process would be exactly the kind of surprise a lock
 exists to prevent, and it never forces a takeover of a live lock to do so.
 
 **No exempts edge against parent dc-4, closing a decision-conflict finding
-raised against an earlier draft:** the lock-liveness skip is TEMPORARY and
-this-run-only, never a permanent exemption from feature dc-4's
-reclamation contract. The exact same merged-or-deleted worktree stays
-fully reclaim-eligible on the very next `gc` invocation, the moment its
-owning process exits and the lock goes stale — unlike the dirty-worktree
-case (feature dc-4's own, which stays kept until a human resolves the
-uncommitted changes, an indefinite hold). Feature dc-4 already establishes
-`gc` as a deliberately-invoked process with no background daemon, running
-on its own schedule rather than continuously; a live-lock skip is that
-exact "runs on its own schedule" property applied to a single worktree that
-happens to be mid-use precisely when one particular invocation ran — not a
-new permanently-kept category the parent spec would need to bless, only an
-ordinary missed cycle.
+raised against an earlier draft:** because dc-2's lock is held only for the
+duration of a single git-worktree-mutating call (never the worktree's whole
+idle lifetime, per dc-2's own correction above), this skip is a NARROW,
+single-operation race window — not the extended, session-length deferral
+an earlier draft's "temporary, this-run-only" framing left ambiguous room
+for. No exempts edge is needed against parent dc-4: the exact same
+merged-or-deleted worktree is fully reclaim-eligible again the moment that
+one `git worktree add`/`remove` call finishes, ordinarily within the same
+`gc` run's next pass or the very next invocation — never withheld for the
+life of a long-running serve session. This is materially different in kind
+from the dirty-worktree case (feature dc-4's own, kept until a human
+resolves the uncommitted changes — an indefinite hold with no natural
+expiry), so the two kept-reasons share a disclosure shape but not a
+duration, and only the dirty case is the parent spec's own indefinite hold.
 
 Every skip and every reclaim is printed, one line per worktree; `gc`
 performs no removal a human running it cannot see named in its own output.
