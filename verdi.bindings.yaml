@@ -114,6 +114,28 @@ bindings:
       - "spec/ref-index#ac-3"
       - "spec/ref-index#ac-4"
       - "spec/ref-index#ac-5"
+      # spec/proposal-artifact (diagram-proposals ac-2/ac-6) behavioral
+      # legs, all under make verify:
+      # ac-1: internal/artifact/diagram_test.go's TestDecodeDiagram_Proposal
+      # (obligation ac-1--behavioral's full 7-case table) plus
+      # TestDiagramDerivedFrom_Negative/_DanglingRefAndMalformedDigestDecodeClean.
+      # ac-2: cmd/verdi/acceptdiagram_test.go's
+      # TestRunAccept_Diagram_ByteIdentityRegression (SHA-256 body-identity
+      # regression over the accept ritual's frontmatter-only flip).
+      # ac-3: cmd/verdi/acceptdiagram_test.go's TestRunAccept_Diagram_Happy
+      # plus the three refusal tests (incumbent, already-accepted,
+      # unresolved target) — ac-3 is behavioral-only, no static leg.
+      # ac-4: internal/artifact/diagram_test.go's
+      # TestDiagramDisclosedStatus (the full input table) plus
+      # TestDecodeDiagram_RealizedStaleRejected (decode-rejects
+      # status: realized/stale).
+      # ac-5: internal/lint/vl021_test.go's TestVL021_DanglingRef/
+      # _MalformedDigest/_Clean/_IncumbentDiagramIgnored.
+      - "spec/proposal-artifact#ac-1"
+      - "spec/proposal-artifact#ac-2"
+      - "spec/proposal-artifact#ac-3"
+      - "spec/proposal-artifact#ac-4"
+      - "spec/proposal-artifact#ac-5"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -162,6 +184,24 @@ bindings:
       - "spec/obligation-artifact#ac-2"
       - "spec/obligation-gate#ac-1"
       - "spec/obligation-gate#ac-2"
+      # spec/proposal-artifact static legs (ac-3 declares [behavioral] only
+      # and has no entry here): ac-1's DiagramFrontmatter.Class/Scope/
+      # DerivedFrom fields and the class-conditioned Validate branch
+      # (internal/artifact/diagram.go); ac-2's write-path inventory (the
+      # doc comment on cmd/verdi/acceptdiagram.go's package clause naming
+      # every real diagram write path and showing each touches frontmatter
+      # bytes only); ac-4's DiagramDisclosedStatus signature plus
+      # proposalStatuses' absence of realized/stale (internal/artifact/
+      # diagram.go, internal/artifact/status.go); ac-5's VL-021 rule
+      # declaration (internal/lint/vl021.go) and its doc comment pointing
+      # to VL-002's singleFileKindDir["diagram"] entry and VL-001's
+      # baseline decode-cleanliness check as the "no new coverage needed"
+      # evidence — all compile, vet, lint, and lint-store clean under make
+      # verify.
+      - "spec/proposal-artifact#ac-1"
+      - "spec/proposal-artifact#ac-2"
+      - "spec/proposal-artifact#ac-4"
+      - "spec/proposal-artifact#ac-5"
       - "spec/obligation-wall#ac-1"
       # spec/ref-index static legs (all 5 ACs declare [static, behavioral]):
       # ComputeIndex's signature and the GitRunner port's method set are
