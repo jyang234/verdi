@@ -136,6 +136,34 @@ bindings:
       - "spec/proposal-artifact#ac-3"
       - "spec/proposal-artifact#ac-4"
       - "spec/proposal-artifact#ac-5"
+      # spec/verification-extractor (diagram-proposals ac-1) behavioral
+      # legs, all under make verify, internal/diagramverify:
+      # ac-1: grammar_test.go's TestParse_Pristine_FullCoverage (every
+      # edge form, both node forms, a %% comment, and a classDef/
+      # :::classname assignment -> full coverage), TestParse_
+      # OutOfGrammarConstruct_DowngradesWholeArtifact (a subgraph block ->
+      # whole-artifact partial, recognized lines still extract), and
+      # TestParse_IdentityCollision_DowngradesWholeArtifact (two truth
+      # FQNs colliding on ShortName -> partial).
+      # ac-2: truth_test.go's TestRegenerateTruth_Unscoped/_Scoped (the
+      # fake Runner observes an -entry flag only when scope is non-empty)
+      # and TestRegenerateTruth_Negative_OperationalError (a non-zero fake
+      # exit surfaces as an error), all over upstream.FakeRunner + the
+      # canned testdata/svcfix-canned/graph.json capture.
+      # ac-3: compare_test.go's TestCompare_ThreeWayTable (exists/
+      # proposed-new/kept-but-gone), TestCompare_Rename_TwoIndependentFacts
+      # (a dropped+added pair renders as kept-but-gone + proposed-new, never
+      # one fact), and the fixturegit-backed TestCompareWithWitness_Resolved/
+      # _Unresolved (a scripted repo history's removal commit resolves as
+      # candidate witness; an untouched identity discloses unresolved).
+      # ac-4: stale_test.go's TestStaleBase_MatchingDigest_NoStaleness/
+      # _MismatchedDigest_Stale plus TestStaleBase_IndependentOfThreeWayComparison
+      # (a 2x2 table over stale x residual proving the two checks vary
+      # independently).
+      - "spec/verification-extractor#ac-1"
+      - "spec/verification-extractor#ac-2"
+      - "spec/verification-extractor#ac-3"
+      - "spec/verification-extractor#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -220,3 +248,32 @@ bindings:
       - "spec/ref-index#ac-3"
       - "spec/ref-index#ac-4"
       - "spec/ref-index#ac-5"
+      # spec/verification-extractor static legs (all 4 ACs declare
+      # [static, behavioral]), internal/diagramverify:
+      # ac-1: grammar.go's Parse enumerates the recognized token forms in
+      # code (directionRe/commentRe/classDefRe/bareNodeRe/nodeDeclRes/the
+      # four edge*Re regexes) and Extraction.Coverage is the single
+      # whole-artifact verdict Parse returns per call (one Coverage field,
+      # never a per-element slice).
+      # ac-2: truth.go's RegenerateTruth is the one call site building an
+      # upstream.Request{Bin: "flowmap", Subcommand: "graph", ...} with
+      # -entry appended only when scope != "" — RunGraph itself
+      # (internal/upstream/exec.go), extended in place with an entry
+      # parameter; every pre-existing call site (cmd/verdi/sync_regen.go,
+      # internal/align/computed.go) now passes "" and keeps today's argv
+      # byte-identical (proven by TestGraph_Happy alongside the new
+      # TestGraph_Scoped_AppendsEntryFlag).
+      # ac-3: compare.go's Classification is a closed 3-value type (Exists/
+      # ProposedNew/KeptButGone, no "renamed" anywhere in the type or its
+      # consumers) and Result.Witness is an optional *string populated only
+      # by ResolveWitness, which wraps gitx.PickaxeCommit — the only
+      # commit-discovery mechanism in this story.
+      # ac-4: stale.go's StaleBase calls canonjson.Digest (the same shared
+      # formula every other computed digest in this codebase uses) over
+      # RegenerateTruth's result and compares it to baseDigest with plain
+      # string equality (!=); it is a standalone function, never invoked
+      # from Compare or vice versa.
+      - "spec/verification-extractor#ac-1"
+      - "spec/verification-extractor#ac-2"
+      - "spec/verification-extractor#ac-3"
+      - "spec/verification-extractor#ac-4"
