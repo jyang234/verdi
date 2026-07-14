@@ -42,4 +42,15 @@ type DerivationRecord struct {
 	Inputs      []InputRecord `json:"inputs"`
 	Records     []string      `json:"records"`
 	Disclosures []string      `json:"disclosures,omitempty"`
+
+	// Provenance is an optional pinned-provenance block the derivation
+	// drawer stamps once at its head (spec/derivation-drawer ac-3/dc-2) —
+	// added HERE, at the record schema's one defining seam, per that
+	// story's co-3 (the drawer never side-channels a datum the record
+	// lacks). Each line is built ONLY from already-pinned fields of a
+	// compute's own inputs (the judged sweep's covers sha,
+	// adr_corpus_digest, decisions_scanned) — never wall-clock time, never
+	// a recomputation. Most computes supply none (the zero value): a
+	// record without a provenance block renders a drawer without one.
+	Provenance []string `json:"provenance,omitempty"`
 }
