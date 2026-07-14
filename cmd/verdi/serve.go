@@ -140,12 +140,30 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 		deps.Disclosures = append(deps.Disclosures, reviewUnavailableDisclosure(configuredKind))
 	}
 
+	// The directory home's in-review consultation (spec/directory-home
+	// dc-4), wired in the same precedence order as the review feed above:
+	// the live forge, else the hermetic harness feed (VERDI_OPENMR_FEED, a
+	// loopback URL), else — when a forge IS configured but unreachable —
+	// the always-erroring lister whose disclosed reason the home page
+	// renders as its "MR status unavailable" notice (I-1(b)). With none of
+	// the three, no forge is configured and the chips are silently,
+	// legitimately absent (home.OpenMRs nil).
+	home := workbench.HomeDeps{}
+	switch {
+	case forgePort != nil:
+		home.OpenMRs = newForgeOpenMRs(forgePort, root)
+	case os.Getenv("VERDI_OPENMR_FEED") != "":
+		home.OpenMRs = httpOpenMRFeed{url: os.Getenv("VERDI_OPENMR_FEED")}
+	case configuredKind != "":
+		home.OpenMRs = unavailableOpenMRs{reason: reviewUnavailableReason(configuredKind)}
+	}
+
 	httpLn, err := net.Listen("tcp", httpAddr)
 	if err != nil {
 		fmt.Fprintln(stderr, "serve: binding workbench HTTP:", err)
 		return 2
 	}
-	httpSrv := &http.Server{Handler: workbench.NewHandlerWith(root, deps)}
+	httpSrv := &http.Server{Handler: workbench.NewHandlerWithHome(root, deps, home)}
 	go func() {
 		_ = httpSrv.Serve(httpLn)
 	}()

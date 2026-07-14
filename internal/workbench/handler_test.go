@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,12 +49,70 @@ func TestIndexHandler_Happy(t *testing.T) {
 	}
 }
 
-// TestIndexHandler_Home is DEFECT A's witness: the home page must be a real
-// index, not a dead end — it lists a fixture spec, a board, and a service,
-// every one a working href. It also follows one href (the spec page) to
-// prove the link resolves.
+// gitHome execs one git command for the home-page fixture provisioning
+// below — a real local git repo, no network (co-2).
+func gitHome(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=workbench-test", "GIT_AUTHOR_EMAIL=t@verdi.invalid",
+		"GIT_COMMITTER_NAME=workbench-test", "GIT_COMMITTER_EMAIL=t@verdi.invalid",
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// wipDraftSpec is the design-branch draft provisionHomeRefs commits: the
+// leanest valid feature-class draft.
+const wipDraftSpec = `---
+id: spec/wip-draft
+kind: spec
+class: feature
+title: "WIP draft (fixture)"
+status: draft
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "holds", evidence: [static] }
+---
+# WIP draft
+`
+
+// provisionHomeRefs gives the fixture repo the ref state the whole-store
+// directory reads: a local bare origin with origin/HEAD set (the default-
+// branch resolution refindex keys off) and one draft on a local design
+// branch — the entry the old single-checkout home page could not show.
+func provisionHomeRefs(t *testing.T, dir string) {
+	t.Helper()
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	gitHome(t, ".", "init", "--bare", "--quiet", "--initial-branch=main", origin)
+	gitHome(t, dir, "remote", "add", "origin", origin)
+	gitHome(t, dir, "push", "--quiet", "origin", "main")
+	gitHome(t, dir, "remote", "set-head", "origin", "main")
+
+	gitHome(t, dir, "checkout", "--quiet", "-b", "design/wip-draft")
+	specDir := filepath.Join(dir, ".verdi", "specs", "active", "wip-draft")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(wipDraftSpec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitHome(t, dir, "add", ".verdi/specs/active/wip-draft")
+	gitHome(t, dir, "commit", "--quiet", "--no-verify", "-m", "design: wip-draft")
+	gitHome(t, dir, "checkout", "--quiet", "main")
+}
+
+// TestIndexHandler_Home is the whole-store directory's integration witness
+// (spec/directory-home ac-1 over the real seam): production HomeDeps, a
+// real git fixture repo with an origin and a design branch — the home page
+// renders the grouped directory (default-branch specs AND the design-branch
+// draft), the surviving sections, and working links.
 func TestIndexHandler_Home(t *testing.T) {
 	repo := buildWorkbenchFixtureRepo(t)
+	provisionHomeRefs(t, repo.Dir)
 
 	// Add a discoverable service so the Services section has real data
 	// (testdata/corpus carries no .flowmap.yaml of its own).
@@ -75,9 +134,26 @@ func TestIndexHandler_Home(t *testing.T) {
 	}
 	body := rec.Body.String()
 
-	// A fixture spec, linked to its corpus page.
+	// The four dc-2 groups organize the page.
+	for _, g := range []string{"drafts-in-progress", "accepted-pending-build", "active-components", "terminal"} {
+		if !strings.Contains(body, `data-testid="dir-group-`+g+`"`) {
+			t.Fatalf("home missing status group %s; got: %s", g, body)
+		}
+	}
+	// The design-branch draft — the entry the old home could not show —
+	// linked under the /b/ per-branch grammar with its source disclosed.
+	if !strings.Contains(body, `href="/b/design%2Fwip-draft/board/spec/wip-draft"`) {
+		t.Fatalf("home missing the design-branch draft's /b/ board link; got: %s", body)
+	}
+	if !strings.Contains(body, `badge-src-local">local branch</span>`) {
+		t.Fatalf("home missing the design entry's source disclosure; got: %s", body)
+	}
+	// A fixture spec, linked to its corpus page and its unprefixed board.
 	if !strings.Contains(body, `href="/a/spec/stale-decline"`) {
 		t.Fatalf("home missing the fixture spec's corpus link; got: %s", body)
+	}
+	if !strings.Contains(body, `href="/board/spec/stale-decline"`) {
+		t.Fatalf("home missing the fixture spec's board link; got: %s", body)
 	}
 	// stale-decline is a feature spec (story jira:LOAN-1482): it also links
 	// its matrix and verdict pages via that scalar story ref.
@@ -87,7 +163,7 @@ func TestIndexHandler_Home(t *testing.T) {
 	if !strings.Contains(body, `href="/verdict/jira:LOAN-1482"`) {
 		t.Fatalf("home missing the feature spec's verdict link; got: %s", body)
 	}
-	// The archived spec appears (separately from active).
+	// The archived spec appears, in the terminal group.
 	if !strings.Contains(body, `href="/a/spec/loan-refi-2023"`) {
 		t.Fatalf("home missing the archived spec; got: %s", body)
 	}
@@ -95,7 +171,7 @@ func TestIndexHandler_Home(t *testing.T) {
 	if !strings.Contains(body, `href="/a/adr/0002-outbox-events"`) {
 		t.Fatalf("home missing an other-kind (adr) link; got: %s", body)
 	}
-	// The board, linked to its board page.
+	// The grandfathered v0 board, linked to its board page.
 	if !strings.Contains(body, `href="/board/STORY-1482"`) {
 		t.Fatalf("home missing the board link; got: %s", body)
 	}

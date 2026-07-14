@@ -2611,6 +2611,29 @@ button.yarn-chip-type {
   .placard-more::after { transition: opacity 120ms ease; }
 }
 
+/* ---------- the directory home (spec/directory-home) ----------
+   The whole-store directory: four status groups (workbench-directory
+   dc-2) as the page's organizing structure, each entry chipped by status
+   (the shared badge vocabulary above) and by ref source (feature dc-5),
+   absences disclosed inline. Deliberately calm and information-dense:
+   the existing list/badge apparatus, no new design system. */
+.home-directory { margin: 0.4rem 0 1.2rem; }
+.dir-provenance { font-size: 0.78rem; color: var(--muted-solid); margin: 0.1rem 0 0.9rem; }
+.dir-group { margin: 0 0 0.9rem; }
+.dir-group h3 { margin: 0.7rem 0 0.25rem; }
+.dir-group ul { list-style: none; margin: 0; padding: 0; }
+.dir-entry { padding: 0.3rem 0.1rem; border-top: 1px dashed var(--rule); font-size: 0.95rem; }
+.dir-group li:last-child { border-bottom: 1px dashed var(--rule); }
+.dir-entry a { text-decoration: none; }
+.dir-entry a:hover { text-decoration: underline; }
+/* an active component is living, in the temporal palette's sense */
+.badge-active { color: var(--living); border-color: var(--living); background: var(--living-tint); }
+/* the source chip is quieter than a status chip: informative, not a state */
+.badge-src { color: var(--muted-solid); border-color: var(--rule); background: none; font-weight: 400; }
+.dir-ref { font-family: var(--mono); font-size: 0.88rem; }
+.dir-disclosed { font-size: 0.82rem; font-style: italic; color: var(--st-pending); }
+.dir-mr-unavailable, .dir-index-failed { margin: 0.4rem 0 0.8rem; }
+
 /* Syntax-highlighting palettes. Chroma emits no inline colour, so these two
    class-based palettes are the ONLY place code colour is defined — which is
    what lets a dark-mode browser restyle highlighted code instead of showing

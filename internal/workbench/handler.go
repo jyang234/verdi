@@ -9,10 +9,19 @@ func NewHandler(root string) http.Handler {
 	return NewHandlerWith(root, Deps{})
 }
 
-// NewHandlerWith builds the handler with injected collaborators (Deps).
+// NewHandlerWith builds the handler with injected collaborators (Deps)
+// and the home page's production wiring (HomeDeps' zero value).
 func NewHandlerWith(root string, deps Deps) http.Handler {
+	return NewHandlerWithHome(root, deps, HomeDeps{})
+}
+
+// NewHandlerWithHome builds the handler with injected collaborators for
+// both the board (Deps) and the directory home page (HomeDeps —
+// spec/directory-home; a separate struct so the board's dependency
+// surface is untouched).
+func NewHandlerWithHome(root string, deps Deps, home HomeDeps) http.Handler {
 	mux := http.NewServeMux()
-	RegisterRoutesWith(mux, root, deps)
+	RegisterRoutesWithHome(mux, root, deps, home)
 	return mux
 }
 
@@ -22,11 +31,17 @@ func RegisterRoutes(mux *http.ServeMux, root string) {
 	RegisterRoutesWith(mux, root, Deps{})
 }
 
-// RegisterRoutesWith wires every workbench route onto mux. The single
-// place a phase adds a page.
+// RegisterRoutesWith wires every workbench route onto mux with the home
+// page's production wiring.
 func RegisterRoutesWith(mux *http.ServeMux, root string, deps Deps) {
+	RegisterRoutesWithHome(mux, root, deps, HomeDeps{})
+}
+
+// RegisterRoutesWithHome wires every workbench route onto mux. The single
+// place a phase adds a page.
+func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home HomeDeps) {
 	mux.HandleFunc("/healthz", healthHandler())
-	mux.HandleFunc("/", indexHandler(root))
+	mux.HandleFunc("/", indexHandler(root, home))
 
 	// Corpus artifact pages (05 §Workbench: server-rendered, goldmark +
 	// client-side mermaid). Registered WITHOUT a method prefix (unlike

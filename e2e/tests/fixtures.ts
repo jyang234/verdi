@@ -301,3 +301,40 @@ export function stubCardTestId(slug: string): string {
 export function coverageChipTestId(acId: string): string {
   return `coverage-${acId}`;
 }
+
+// ---------------------------------------------------------------------------
+// Directory home (spec/directory-home) — the whole-store directory at GET /
+// ---------------------------------------------------------------------------
+
+// The e2e control server (cmd/e2eharness/control.go): the hermetic open-MR
+// feed `verdi serve` consults per render, plus the outage and delete-branch
+// toggles the directory specs drive. Loopback only.
+export const CONTROL_URL = "http://127.0.0.1:4177";
+
+// Directory fixture branches (cmd/e2eharness/provision_directory.go):
+// each name is both the design branch's slug (design/<name>) and the
+// draft spec's name.
+export const DIR_LOCAL_DRAFT = "audit-trail"; // local branch only
+export const DIR_REMOTE_DRAFT = "vendor-onboarding"; // remote-tracking only
+export const DIR_EMPTY_BRANCH = "uncharted-idea"; // no draft spec → disclosed notice entry
+export const DIR_DOOMED_DRAFT = "doomed-draft"; // deleted mid-session via CONTROL_URL
+
+// The entry the control server's open-MR feed chips "in review": the board
+// suite's design branch (DESIGN_SPEC), which exists locally AND pushed.
+export const DIR_INREVIEW_SPEC = DESIGN_SPEC;
+
+// The per-branch board address grammar the directory emits for a
+// design-branch entry (draft-boards dc-1: the branch rides one path
+// segment, its slash percent-encoded). The routes themselves are the
+// draft-boards story's; the directory only emits them.
+export function draftBoardHref(name: string): string {
+  return `/b/design%2F${name}/board/spec/${name}`;
+}
+
+// data-testid helpers for the directory surface (binding selector contract).
+export function dirEntryTestId(name: string): string {
+  return `dir-entry-${name}`;
+}
+export function dirGroupTestId(group: string): string {
+  return `dir-group-${group}`;
+}

@@ -201,6 +201,23 @@ bindings:
       - "spec/badge-computes#ac-3"
       - "spec/badge-computes#ac-4"
       - "spec/badge-computes#ac-5"
+      # spec/directory-home behavioral legs (ac-1 declares [static,
+      # behavioral]; ac-2/ac-3 [behavioral]): the Playwright suite's
+      # e2e/tests/37-directory-home.spec.ts over the harness's directory
+      # ref fixtures — the four-group/once-each/chipped/linked directory
+      # (ac-1), the local/remote/both/default source chips, the open-MR
+      # in-review chip and its outage degradation to the disclosed "MR
+      # status unavailable" notice with a complete directory (ac-2), and
+      # the empty-branch notice entry plus the deleted-mid-session click
+      # resolving to the disclosed 404 with a way back (ac-3) — plus
+      # workbench's directory_test.go/notfound_test.go render+catch-all
+      # suites, handler_test.go's TestIndexHandler_Home real-seam
+      # integration, and cmd/verdi/openmrfeed_test.go's httptest
+      # forge-double integration (TestDirectoryHome_Integration_HTTPFeed).
+      # All under make verify.
+      - "spec/directory-home#ac-1"
+      - "spec/directory-home#ac-2"
+      - "spec/directory-home#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -345,3 +362,12 @@ bindings:
       - "spec/badge-computes#ac-2"
       - "spec/badge-computes#ac-3"
       - "spec/badge-computes#ac-4"
+      # spec/directory-home ac-1 static leg: the home renderer consumes
+      # the ref-index seam — internal/workbench/directory.go's HomeDeps
+      # defaults to refindex.ComputeIndex, ONE call per render (index.go's
+      # renderHome), the renderer performs no git ref enumeration of its
+      # own (the home files import no gitx and exec no git), and grouping
+      # keys off the index entry's StatusGroup field (statusGroupOrder /
+      # byGroup in directory.go), never an address or on-disk path.
+      # Compiles, vets, and lints clean under make verify.
+      - "spec/directory-home#ac-1"
