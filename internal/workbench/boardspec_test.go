@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -244,6 +245,51 @@ func TestBoardSpecPage_NotFound(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("GET board %q = %d, want 404", name, rec.Code)
 		}
+	}
+}
+
+// TestErrBoardNotFound_MatchesThroughWrap proves spec/fail-loud ac-2's
+// workbench half: every 404 branch in this package now checks
+// errors.Is(err, ErrBoardNotFound), not err == ErrBoardNotFound (four
+// sites: boardSpecPageHandler and boardSpecFragmentHandler here,
+// boardspecapi.go's write-action handler, boardpin.go's pin-search
+// handler). A bare `==` comparison silently degrades to a 500 the day
+// any caller %w-wraps the sentinel with its own context (e.g. "loading
+// board %q: %w") — this table proves the sentinel is still recognized
+// once wrapped, and documents (via the parallel `==` check below) that
+// the old comparison would NOT have recognized it, which is exactly the
+// honesty gap this AC closes.
+func TestErrBoardNotFound_MatchesThroughWrap(t *testing.T) {
+	wrapped := fmt.Errorf("loading board %q: %w", "refi-test", ErrBoardNotFound)
+	otherErr := errors.New("some unrelated operational failure")
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"bare sentinel", ErrBoardNotFound, true},
+		{"%w-wrapped sentinel", wrapped, true},
+		{"unrelated error", otherErr, false},
+		{"nil error", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := errors.Is(tt.err, ErrBoardNotFound); got != tt.want {
+				t.Errorf("errors.Is(%v, ErrBoardNotFound) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+
+	// The regression this AC guards against: a bare `==` comparison
+	// recognizes the unwrapped sentinel but NOT the wrapped one — proving
+	// why the four handler sites had to move off `==` and onto
+	// errors.Is.
+	if wrapped == ErrBoardNotFound { //nolint:errorlint // deliberate: proving the old, now-replaced comparison's failure mode
+		t.Fatal("wrapped error unexpectedly == ErrBoardNotFound (sentinel identity should not survive wrapping)")
+	}
+	if !errors.Is(wrapped, ErrBoardNotFound) {
+		t.Fatal("errors.Is failed to see through the %w-wrap — the fix this test guards would be broken")
 	}
 }
 
