@@ -51,8 +51,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -377,13 +375,13 @@ func mapRollupCriteria(acs []evidence.ACResult) []artifact.RollupCriterion {
 
 // rollupDigest hashes r's canonical JSON with Digest itself blanked out —
 // recomputable by any verifier (02 §Generated artifacts and digests):
-// read rollup.json, blank its own digest field, recompute, compare.
+// read rollup.json, blank its own digest field, recompute, compare. The
+// hash tail itself is canonjson.Digest (spec/shared-homes ac-2).
 func rollupDigest(r artifact.Rollup) (string, error) {
 	r.Digest = ""
-	data, err := canonjson.Marshal(r)
+	digest, err := canonjson.Digest(r)
 	if err != nil {
 		return "", fmt.Errorf("close: computing rollup digest: %w", err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return digest, nil
 }

@@ -2,8 +2,6 @@ package commitdesign
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -240,12 +238,10 @@ type boardContent struct {
 // digests).
 func freezeBoard(board *artifact.Board, boardPath, commit, at string) (*artifact.Board, error) {
 	content := boardContent{Pins: board.Pins, Stickies: board.Stickies, Yarn: board.Yarn}
-	canon, err := canonjson.Marshal(content)
+	digest, err := canonjson.Digest(content)
 	if err != nil {
 		return nil, fmt.Errorf("computing board digest: %w", err)
 	}
-	sum := sha256.Sum256(canon)
-	digest := "sha256:" + hex.EncodeToString(sum[:])
 
 	inputs := []string{fmt.Sprintf("%s@%s", filepath.ToSlash(boardPath), commit)}
 	seen := map[string]bool{}

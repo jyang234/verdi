@@ -9,8 +9,6 @@ package align
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"time"
@@ -217,18 +215,18 @@ type decisionDigestInput struct {
 
 // ComputeDecisionDigest hashes the decision-conflict report's computed
 // section content, mirroring verify.go's ComputeDigest formula
-// (canonjson, sha256) so both reports share one digest convention.
+// (canonjson.Digest, spec/shared-homes ac-2) so both reports share one
+// digest convention.
 func ComputeDecisionDigest(covers string, computedFindings []artifact.ConflictFinding, adrCorpusDigest string, decisionsScanned []string) (string, error) {
 	in := decisionDigestInput{Covers: covers, ADRCorpusDigest: adrCorpusDigest, DecisionsScanned: decisionsScanned}
 	for _, f := range computedFindings {
 		in.ComputedFindings = append(in.ComputedFindings, findingIdentityOnly{ID: f.ID, Kind: string(f.Kind), Text: f.Text})
 	}
-	data, err := canonjson.Marshal(in)
+	digest, err := canonjson.Digest(in)
 	if err != nil {
 		return "", fmt.Errorf("align: marshaling decision-conflict digest input: %w", err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return digest, nil
 }
 
 // DecisionGateStatuses computes the report's two status labels — computed
