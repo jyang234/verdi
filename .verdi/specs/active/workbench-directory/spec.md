@@ -25,8 +25,7 @@ decisions:
   - { id: dc-2, text: "the directory groups by status — drafts in progress, accepted-pending-build, active components, terminal — the status is the distinction, never the address", anchor: "#dc-2" }
   - { id: dc-3, text: "one address: the per-draft port pattern is retired the day this lands", anchor: "#dc-3" }
   - { id: dc-4, text: "managed worktrees are reclaimed by verdi gc on the ratified gc signals — a branch merged (tip is an ancestor of the default-branch tip) or deleted (absent) is reclaimable; directory reads never delete and there is no background daemon; a worktree with uncommitted changes is never reclaimed but disclosed and kept", anchor: "#dc-4" }
-open_questions:
-  - { id: oq-2, text: "once the PR flow lands a remote (round-6 work): do remote design branches join the directory enumeration, and how are they told apart from local drafts? Carried with a recommended shape (see body) pending the remote", anchor: "#oq-2" }
+  - { id: dc-5, text: "oq-2 resolved now that the remote exists (round-6 remote-and-ci): remote design branches join the enumeration — the index reads local design refs and remote-tracking design refs alike, still refs-only and deterministic (co-1 unchanged), each entry disclosed by source; only a local design branch opens as an authoring wall (managed worktrees are cut from local branches only), a remote-only branch renders sealed with its remoteness disclosed; an entry whose branch has an open MR is chipped in-review from the forge port — a second, non-ref source that is disclosed and degradable: an unreachable forge yields a disclosed absence, never a dead link, never a blocked directory", anchor: "#dc-5" }
 ---
 # Workbench Directory
 
@@ -97,15 +96,31 @@ uncommitted changes is never reclaimed: it is disclosed in the directory
 and kept until the human resolves it — three-valued honesty applied to
 cleanup; clean-and-merged is safe to drop, dirty is disclosed and held.
 
-## oq-2
+## dc-5
 
-Carried, not resolved: this binds only once the PR flow lands a remote,
-which does not exist yet (round-6 work), and deciding against an unbuilt
-mechanism is what the invention discipline forbids. Recommended shape to
-inherit when the remote lands: remote design branches DO join the
-directory, keyed by status per dc-2 — a local design branch with no MR is
-a local-authoring draft; a remote branch with an open MR is "in review"
-and renders as the review mirror (the mode law: an open MR wins as review
-mode). Enumeration sources differ and are disclosed — local drafts from
-local refs, remote ones from the forge port's ListOpenMRs — and a forge
-that cannot be reached is disclosed, never silently dropped.
+Resolved at acceptance review, not carried: oq-2's carry justification —
+"this binds only once the PR flow lands a remote, which does not exist
+yet" — stopped being true when round 6's remote-and-ci story landed the
+real remote and the forge port (ListOpenMRs included). The question is
+also forced, not optional: the ref index must decide whether
+`refs/remotes/origin/design/*` entries appear in the directory the day it
+enumerates refs at all, so declining to answer would be answering silently.
+
+The resolution inherits oq-2's own recommended shape, tightened where the
+one-writer and no-surprise-mutation laws bite. Remote design branches DO
+join the enumeration, and the deterministic core stays refs-only: local
+design refs and remote-tracking design refs are both git refs, so ac-2's
+"computed deterministically from git refs" claim is unchanged (co-1
+holds). Every entry discloses its source. Only a local design branch
+opens as an authoring wall — managed worktrees (dc-1) are cut from local
+branches only, because silently minting a local branch from a
+remote-tracking ref on click would be exactly the surprise mutation dc-1
+forbids. A remote-only branch renders sealed, its remoteness disclosed. An
+entry whose branch has an open MR is chipped "in review" via the forge
+port's ListOpenMRs — a second, non-ref enumeration source, disclosed as
+such and degradable per ac-5: a forge that cannot be reached yields a
+disclosed absence ("MR status unavailable"), never a dead link and never
+a blocked directory, because the refs-computed directory must not depend
+on network reachability. The mode law (ac-6) is untouched: this decision
+adds no new render mode, it only routes entries to the modes that already
+exist.
