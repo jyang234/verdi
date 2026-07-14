@@ -16,6 +16,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/jyang234/verdi/internal/atomicfile"
 )
 
 // DeleteAnnotations removes every annotation record in dir whose id is
@@ -86,8 +88,8 @@ func deleteFromFile(path string, want map[string]bool) (int, error) {
 	if deleted == 0 {
 		return 0, nil
 	}
-	if err := writeFileAtomic(path, buf.Bytes()); err != nil {
-		return 0, err
+	if err := atomicfile.Write(path, buf.Bytes(), 0o600); err != nil {
+		return 0, fmt.Errorf("boardio: %w", err)
 	}
 	return deleted, nil
 }
