@@ -117,10 +117,15 @@ func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (
 	return tree, nil
 }
 
+// findPipeline drains every page (dc-3): the newest successful pipeline for
+// commit could sit past the default page size on a busy project, and this
+// still must return pipelines[0] — GitLab's own "sha=" filter already
+// narrows the result set; draining just means a filtered-but-large result
+// set is not silently truncated at page one.
 func (a *Adapter) findPipeline(ctx context.Context, commit string) (int64, error) {
-	url := fmt.Sprintf("%s/projects/%s/pipelines?sha=%s&status=success", a.cfg.BaseURL, a.cfg.ProjectID, commit)
-	var pipelines []pipeline
-	if err := a.getJSON(ctx, url, &pipelines); err != nil {
+	listURL := fmt.Sprintf("%s/projects/%s/pipelines?sha=%s&status=success", a.cfg.BaseURL, a.cfg.ProjectID, commit)
+	pipelines, err := gitlabDrainList[pipeline](ctx, a, listURL)
+	if err != nil {
 		return 0, err
 	}
 	if len(pipelines) == 0 {
@@ -130,9 +135,9 @@ func (a *Adapter) findPipeline(ctx context.Context, commit string) (int64, error
 }
 
 func (a *Adapter) findJob(ctx context.Context, pipelineID int64) (int64, error) {
-	url := fmt.Sprintf("%s/projects/%s/pipelines/%d/jobs?scope=success", a.cfg.BaseURL, a.cfg.ProjectID, pipelineID)
-	var jobs []job
-	if err := a.getJSON(ctx, url, &jobs); err != nil {
+	listURL := fmt.Sprintf("%s/projects/%s/pipelines/%d/jobs?scope=success", a.cfg.BaseURL, a.cfg.ProjectID, pipelineID)
+	jobs, err := gitlabDrainList[job](ctx, a, listURL)
+	if err != nil {
 		return 0, err
 	}
 	for _, j := range jobs {
@@ -233,11 +238,13 @@ type mergeRequestJSON struct {
 
 // ListOpenMRs implements forge.Forge: GitLab's "list merge requests"
 // endpoint, filtered server-side to opened MRs targeting targetBranch.
+// Drains every page (dc-3): an open MR beyond the default page size must
+// still be seen by pendingsupersession.go's scan, not silently dropped.
 func (a *Adapter) ListOpenMRs(ctx context.Context, targetBranch string) ([]forge.OpenMR, error) {
 	reqURL := fmt.Sprintf("%s/projects/%s/merge_requests?state=opened&target_branch=%s",
 		a.cfg.BaseURL, a.cfg.ProjectID, url.QueryEscape(targetBranch))
-	var mrs []mergeRequestJSON
-	if err := a.getJSON(ctx, reqURL, &mrs); err != nil {
+	mrs, err := gitlabDrainList[mergeRequestJSON](ctx, a, reqURL)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]forge.OpenMR, len(mrs))
@@ -353,13 +360,12 @@ type discussionJSON struct {
 // GitLab API. Re-verify against a live instance before trusting this
 // adapter in production (S6 findings.md, PLAN-V1.md §5 V1-P7 spike
 // findings block).
+// listDiscussions drains every page (dc-3): a discussion — including the
+// one carrying the decisive unresolved thread — past the default page size
+// must still be seen by both ListComments and GetThreadResolution.
 func (a *Adapter) listDiscussions(ctx context.Context, mrID string) ([]discussionJSON, error) {
 	reqURL := fmt.Sprintf("%s/projects/%s/merge_requests/%s/discussions", a.cfg.BaseURL, a.cfg.ProjectID, mrID)
-	var discussions []discussionJSON
-	if err := a.getJSON(ctx, reqURL, &discussions); err != nil {
-		return nil, err
-	}
-	return discussions, nil
+	return gitlabDrainList[discussionJSON](ctx, a, reqURL)
 }
 
 // ListComments implements forge.Forge against GitLab's discussions listing

@@ -132,15 +132,17 @@ func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (
 }
 
 // findRuns returns every successful workflow run's id for commit, in the
-// order GitHub's API lists them.
+// order GitHub's API lists them. Drains every page (dc-3): a commit whose
+// matching run is NOT among the first 100 runs GitHub returns (an
+// active/busy repo) must still be found, not silently missed.
 func (a *Adapter) findRuns(ctx context.Context, commit string) ([]int64, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/actions/runs?head_sha=%s&status=success", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, commit)
-	var resp runsResponse
-	if err := a.getJSON(ctx, url, &resp); err != nil {
+	listURL := fmt.Sprintf("%s/repos/%s/%s/actions/runs?head_sha=%s&status=success", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, commit)
+	runs, err := githubDrainList(ctx, a, listURL, func(p runsResponse) []run { return p.WorkflowRuns })
+	if err != nil {
 		return nil, err
 	}
 	var ids []int64
-	for _, r := range resp.WorkflowRuns {
+	for _, r := range runs {
 		if r.Conclusion == "success" {
 			ids = append(ids, r.ID)
 		}
@@ -152,12 +154,12 @@ func (a *Adapter) findRuns(ctx context.Context, commit string) ([]int64, error) 
 }
 
 func (a *Adapter) findArtifact(ctx context.Context, runID int64) (int64, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/actions/runs/%d/artifacts", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, runID)
-	var resp artifactsResponse
-	if err := a.getJSON(ctx, url, &resp); err != nil {
+	listURL := fmt.Sprintf("%s/repos/%s/%s/actions/runs/%d/artifacts", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, runID)
+	artifacts, err := githubDrainList(ctx, a, listURL, func(p artifactsResponse) []artifact { return p.Artifacts })
+	if err != nil {
 		return 0, err
 	}
-	for _, art := range resp.Artifacts {
+	for _, art := range artifacts {
 		if art.Name == a.cfg.ArtifactName {
 			return art.ID, nil
 		}
@@ -259,12 +261,14 @@ type pullRequestJSON struct {
 }
 
 // ListOpenMRs implements forge.Forge: GitHub's "list pull requests"
-// endpoint, filtered server-side to open PRs based on targetBranch.
+// endpoint, filtered server-side to open PRs based on targetBranch. Drains
+// every page (dc-3): an open PR beyond the default page size must still be
+// seen by pendingsupersession.go's scan, not silently dropped.
 func (a *Adapter) ListOpenMRs(ctx context.Context, targetBranch string) ([]forge.OpenMR, error) {
 	reqURL := fmt.Sprintf("%s/repos/%s/%s/pulls?state=open&base=%s",
 		a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, url.QueryEscape(targetBranch))
-	var prs []pullRequestJSON
-	if err := a.getJSON(ctx, reqURL, &prs); err != nil {
+	prs, err := githubDrainList(ctx, a, reqURL, func(p []pullRequestJSON) []pullRequestJSON { return p })
+	if err != nil {
 		return nil, err
 	}
 	out := make([]forge.OpenMR, len(prs))
@@ -355,19 +359,44 @@ type issueCommentJSON struct {
 // databaseId lets the REST-sourced diff comments above (ListComments) be
 // grouped into the same threads this query reports resolution for,
 // without ListComments itself depending on GraphQL for body/author/path —
-// only for the thread-id/resolution join.
-const reviewThreadsQuery = `query($owner: String!, $repo: String!, $number: Int!) {
+// only for the thread-id/resolution join. after:$cursor plus the outer
+// pageInfo drains reviewThreads to exhaustion (dc-3: "an unresolved state
+// can hide" past first:100); each node's own comments pageInfo is carried
+// back too, so fetchReviewThreads can tell which threads need their INNER
+// comments cursor walked as well (threadCommentsQuery below) — comments
+// beyond first:100 on one thread would otherwise never be joined to a diff
+// comment ListComments read from REST.
+const reviewThreadsQuery = `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           isResolved
           resolvedBy { login }
           comments(first: 100) {
+            pageInfo { hasNextPage endCursor }
             nodes { databaseId }
           }
         }
+      }
+    }
+  }
+}`
+
+// threadCommentsQuery continues one thread's comments cursor past
+// reviewThreadsQuery's own first:100 (dc-3's inner walk). GitHub's global
+// object identification (`node(id: ID!)`) re-fetches the same
+// PullRequestReviewThread node fetchReviewThreads already has the id for,
+// asking only for the next comments page — no second reviewThreads round
+// trip, no owner/repo/number needed again.
+const threadCommentsQuery = `query($threadID: ID!, $cursor: String) {
+  node(id: $threadID) {
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { databaseId }
       }
     }
   }
@@ -382,6 +411,15 @@ type graphQLError struct {
 	Message string `json:"message"`
 }
 
+type graphQLPageInfo struct {
+	HasNextPage bool   `json:"hasNextPage"`
+	EndCursor   string `json:"endCursor"`
+}
+
+type threadCommentNode struct {
+	DatabaseID int64 `json:"databaseId"`
+}
+
 type reviewThreadNode struct {
 	ID         string `json:"id"`
 	IsResolved bool   `json:"isResolved"`
@@ -389,9 +427,8 @@ type reviewThreadNode struct {
 		Login string `json:"login"`
 	} `json:"resolvedBy"`
 	Comments struct {
-		Nodes []struct {
-			DatabaseID int64 `json:"databaseId"`
-		} `json:"nodes"`
+		PageInfo graphQLPageInfo     `json:"pageInfo"`
+		Nodes    []threadCommentNode `json:"nodes"`
 	} `json:"comments"`
 }
 
@@ -400,12 +437,36 @@ type reviewThreadsResponse struct {
 		Repository struct {
 			PullRequest struct {
 				ReviewThreads struct {
-					Nodes []reviewThreadNode `json:"nodes"`
+					PageInfo graphQLPageInfo    `json:"pageInfo"`
+					Nodes    []reviewThreadNode `json:"nodes"`
 				} `json:"reviewThreads"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
 	} `json:"data"`
 	Errors []graphQLError `json:"errors"`
+}
+
+type threadCommentsResponse struct {
+	Data struct {
+		Node struct {
+			Comments struct {
+				PageInfo graphQLPageInfo     `json:"pageInfo"`
+				Nodes    []threadCommentNode `json:"nodes"`
+			} `json:"comments"`
+		} `json:"node"`
+	} `json:"data"`
+	Errors []graphQLError `json:"errors"`
+}
+
+// graphQLCursor renders a walker's cursor variable: "" (the initial/no-
+// cursor state) becomes GraphQL null, not the literal empty string — a
+// server that treats `after: ""` differently from `after: null` must still
+// see the standard "no cursor yet" shape on the first request.
+func graphQLCursor(cursor string) any {
+	if cursor == "" {
+		return nil
+	}
+	return cursor
 }
 
 // fetchReviewThreads runs reviewThreadsQuery against GitHub's GraphQL v4
@@ -414,24 +475,93 @@ type reviewThreadsResponse struct {
 // needed; httptest doubles serve it from the same mux). Shared by
 // ListComments (thread-id grouping only) and GetThreadResolution (full
 // resolution state) — one query, two consumers, no duplicated transport
-// code (CLAUDE.md).
+// code (CLAUDE.md). Drains BOTH cursors (dc-3): the outer reviewThreads
+// list via pageInfo/endCursor, and — for any thread whose OWN comments
+// page is not exhausted — that thread's inner comments cursor too, via
+// fetchThreadCommentsOverflow.
 func (a *Adapter) fetchReviewThreads(ctx context.Context, mrID string) ([]reviewThreadNode, error) {
 	number, err := strconv.Atoi(mrID)
 	if err != nil {
 		return nil, fmt.Errorf("github: mrID %q is not a PR number: %w", mrID, err)
 	}
-	reqBody := graphQLRequest{
-		Query:     reviewThreadsQuery,
-		Variables: map[string]any{"owner": a.cfg.Owner, "repo": a.cfg.Repo, "number": number},
+
+	var all []reviewThreadNode
+	cursor := ""
+	for {
+		reqBody := graphQLRequest{
+			Query:     reviewThreadsQuery,
+			Variables: map[string]any{"owner": a.cfg.Owner, "repo": a.cfg.Repo, "number": number, "cursor": graphQLCursor(cursor)},
+		}
+		var parsed reviewThreadsResponse
+		if err := a.postJSON(ctx, a.cfg.BaseURL+"/graphql", reqBody, &parsed); err != nil {
+			return nil, fmt.Errorf("github: GraphQL reviewThreads query: %w", err)
+		}
+		if len(parsed.Errors) > 0 {
+			return nil, fmt.Errorf("github: GraphQL reviewThreads query failed: %s", parsed.Errors[0].Message)
+		}
+		all = append(all, parsed.Data.Repository.PullRequest.ReviewThreads.Nodes...)
+
+		pi := parsed.Data.Repository.PullRequest.ReviewThreads.PageInfo
+		if !pi.HasNextPage {
+			break
+		}
+		if pi.EndCursor == cursor {
+			return nil, fmt.Errorf("github: GraphQL reviewThreads pagination loop detected: endCursor repeats %q", cursor)
+		}
+		cursor = pi.EndCursor
 	}
-	var parsed reviewThreadsResponse
-	if err := a.postJSON(ctx, a.cfg.BaseURL+"/graphql", reqBody, &parsed); err != nil {
-		return nil, fmt.Errorf("github: GraphQL reviewThreads query: %w", err)
+
+	// dc-3's inner walk: a thread's own comments page not yet exhausted
+	// cannot itself flip isResolved (thread-level field — see
+	// GetThreadResolution's doc comment: resolution here is NOT
+	// comment-derived), but it CAN hide a diff comment's databaseId from
+	// ListComments' thread-id join, so it is drained too rather than
+	// silently left at first:100.
+	for i := range all {
+		if !all[i].Comments.PageInfo.HasNextPage {
+			continue
+		}
+		more, err := a.fetchThreadCommentsOverflow(ctx, all[i].ID, all[i].Comments.PageInfo.EndCursor)
+		if err != nil {
+			return nil, err
+		}
+		all[i].Comments.Nodes = append(all[i].Comments.Nodes, more...)
 	}
-	if len(parsed.Errors) > 0 {
-		return nil, fmt.Errorf("github: GraphQL reviewThreads query failed: %s", parsed.Errors[0].Message)
+
+	return all, nil
+}
+
+// fetchThreadCommentsOverflow continues threadID's comments cursor past
+// wherever reviewThreadsQuery's own embedded first:100 page left off (dc-3
+// inner walk); startCursor is that page's endCursor, never "" (the caller
+// only invokes this when hasNextPage was true, i.e. an endCursor exists).
+func (a *Adapter) fetchThreadCommentsOverflow(ctx context.Context, threadID, startCursor string) ([]threadCommentNode, error) {
+	var all []threadCommentNode
+	cursor := startCursor
+	for {
+		reqBody := graphQLRequest{
+			Query:     threadCommentsQuery,
+			Variables: map[string]any{"threadID": threadID, "cursor": graphQLCursor(cursor)},
+		}
+		var parsed threadCommentsResponse
+		if err := a.postJSON(ctx, a.cfg.BaseURL+"/graphql", reqBody, &parsed); err != nil {
+			return nil, fmt.Errorf("github: GraphQL thread %q comments query: %w", threadID, err)
+		}
+		if len(parsed.Errors) > 0 {
+			return nil, fmt.Errorf("github: GraphQL thread %q comments query failed: %s", threadID, parsed.Errors[0].Message)
+		}
+		all = append(all, parsed.Data.Node.Comments.Nodes...)
+
+		pi := parsed.Data.Node.Comments.PageInfo
+		if !pi.HasNextPage {
+			break
+		}
+		if pi.EndCursor == cursor {
+			return nil, fmt.Errorf("github: GraphQL thread %q comments pagination loop detected: endCursor repeats %q", threadID, cursor)
+		}
+		cursor = pi.EndCursor
 	}
-	return parsed.Data.Repository.PullRequest.ReviewThreads.Nodes, nil
+	return all, nil
 }
 
 // ListComments implements forge.Forge: merges GitHub's two comment
@@ -440,16 +570,16 @@ func (a *Adapter) fetchReviewThreads(ctx context.Context, mrID string) ([]review
 // comment to its GraphQL thread id (fetchReviewThreads) so
 // GetThreadResolution's entries can be matched back to it. General
 // comments carry no thread id at all (ThreadID stays "") — GitHub's model
-// has no resolution concept for them.
+// has no resolution concept for them. Both feeds drain every page (dc-3).
 func (a *Adapter) ListComments(ctx context.Context, mrID string) ([]forge.Comment, error) {
-	var diff []reviewCommentJSON
 	diffURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%s/comments", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, mrID)
-	if err := a.getJSON(ctx, diffURL, &diff); err != nil {
+	diff, err := githubDrainList(ctx, a, diffURL, func(p []reviewCommentJSON) []reviewCommentJSON { return p })
+	if err != nil {
 		return nil, err
 	}
-	var general []issueCommentJSON
 	generalURL := fmt.Sprintf("%s/repos/%s/%s/issues/%s/comments", a.cfg.BaseURL, a.cfg.Owner, a.cfg.Repo, mrID)
-	if err := a.getJSON(ctx, generalURL, &general); err != nil {
+	general, err := githubDrainList(ctx, a, generalURL, func(p []issueCommentJSON) []issueCommentJSON { return p })
+	if err != nil {
 		return nil, err
 	}
 

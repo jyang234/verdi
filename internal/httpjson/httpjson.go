@@ -125,31 +125,47 @@ func (c *Client) RawDo(ctx context.Context, method, url string, body interface{}
 //
 // classify must be non-nil.
 func (c *Client) Do(ctx context.Context, method, url string, body interface{}, setAuth func(*http.Request), classify Classify, out interface{}) error {
+	_, err := c.DoHeaders(ctx, method, url, body, setAuth, classify, out)
+	return err
+}
+
+// DoHeaders is Do plus the successful response's header set (spec/forge-
+// transport ac-2/dc-3's small seam extension): a caller draining a
+// paginated REST list needs its OWN pagination signal read off the
+// response — GitHub's Link header, GitLab's X-Next-Page — after Do's
+// tolerant-subset decode has already run. That signal is adapter-specific
+// (dc-3: "the Link-header format is GitHub-specific and GitLab uses page
+// params"), so this package does not interpret it; it only hands the
+// header set back unchanged, keeping the decode policy's single disclosure
+// site here (dc-1) while the pagination WALK itself stays per-adapter. Do
+// is the thin wrapper every non-paginating call keeps using; DoHeaders is
+// for the adapter-side page-walk helpers only.
+func (c *Client) DoHeaders(ctx context.Context, method, url string, body interface{}, setAuth func(*http.Request), classify Classify, out interface{}) (http.Header, error) {
 	resp, err := c.RawDo(ctx, method, url, body, setAuth)
 	if err != nil {
 		if cerr := classify(nil, err); cerr != nil {
-			return cerr
+			return nil, cerr
 		}
 		// classify chose not to override a transport failure — should not
 		// happen for a well-behaved classifier (see Classify's doc), but
 		// still surfaced rather than silently swallowed.
-		return fmt.Errorf("httpjson: %s %s: %w", method, url, err)
+		return nil, fmt.Errorf("httpjson: %s %s: %w", method, url, err)
 	}
 	defer resp.Body.Close()
 
 	if cerr := classify(resp, nil); cerr != nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return cerr
+		return nil, cerr
 	}
 
 	if out == nil {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil
+		return resp.Header, nil
 	}
 	// Tolerant-subset decode — see the package doc's DECODE POLICY section,
 	// the single disclosure site for all three adapters riding this seam.
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("httpjson: decoding response from %s %s: %w", method, url, err)
+		return nil, fmt.Errorf("httpjson: decoding response from %s %s: %w", method, url, err)
 	}
-	return nil
+	return resp.Header, nil
 }
