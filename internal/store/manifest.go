@@ -61,9 +61,35 @@ type LintConfig struct {
 // a manifest schema change candidate for ratification into 01 §Store
 // manifest; flagged here rather than silently reconciled, per CLAUDE.md
 // ("never resolve a spec ambiguity silently ... record it").
+// JudgeTimeoutSeconds is an INVENTED key: 01 §Store manifest's example
+// YAML shows only judge_cmd/judge_required under align: — this field has
+// no spec citation, mirroring judge_cmd's own argv-array disclosed
+// deviation on this same struct. Added per D6-21
+// (docs/design/plans/round6-divergences.md): the judge (`claude -p`,
+// exec'd as a subprocess) was timing out at internal/align's hardcoded
+// 120s ceiling on every real build diff, so automated alignment coverage
+// never landed; this key lets a repo raise (or lower) that ceiling via
+// verdi.yaml without a code change. Zero/absent means "use
+// align.DefaultJudgeTimeout unchanged" (default-unchanged guarantee); a
+// negative value fails decode/validation loudly rather than being
+// silently clamped or ignored (CLAUDE.md: "unknown enum values fail
+// closed" — the same fail-closed posture applied to an invalid duration).
+// A manifest schema change candidate for ratification into 01 §Store
+// manifest, flagged here rather than silently reconciled.
 type AlignConfig struct {
-	JudgeCmd      []string `yaml:"judge_cmd,omitempty"`
-	JudgeRequired bool     `yaml:"judge_required"`
+	JudgeCmd            []string `yaml:"judge_cmd,omitempty"`
+	JudgeRequired       bool     `yaml:"judge_required"`
+	JudgeTimeoutSeconds int      `yaml:"judge_timeout_seconds,omitempty"`
+}
+
+// Validate checks JudgeTimeoutSeconds is non-negative (D6-21: a negative
+// timeout can never elapse meaningfully, so it fails closed rather than
+// being silently coerced to the default or to zero).
+func (a AlignConfig) Validate() error {
+	if a.JudgeTimeoutSeconds < 0 {
+		return fmt.Errorf("store: verdi.yaml align.judge_timeout_seconds %d must not be negative", a.JudgeTimeoutSeconds)
+	}
+	return nil
 }
 
 // DerivedConfig is verdi.yaml's `derived:` block.
@@ -183,6 +209,11 @@ func (m Manifest) Validate() error {
 	}
 	if m.Audit != nil {
 		if err := m.Audit.Validate(); err != nil {
+			return err
+		}
+	}
+	if m.Align != nil {
+		if err := m.Align.Validate(); err != nil {
 			return err
 		}
 	}

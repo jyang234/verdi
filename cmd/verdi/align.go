@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
@@ -35,6 +36,10 @@ type alignDeps struct {
 	Runner        upstream.Runner
 	JudgeCmd      []string
 	JudgeRequired bool
+	// JudgeTimeout mirrors verdi.yaml's align.judge_timeout_seconds (D6-21);
+	// zero leaves internal/align's own DefaultJudgeTimeout fallback
+	// unchanged (align.Input.JudgeTimeout's zero-value contract).
+	JudgeTimeout time.Duration
 }
 
 // cmdAlign is `verdi align`'s entry point, invoked by dispatch.go: resolves
@@ -70,6 +75,9 @@ func cmdAlign(args []string, stdout, stderr io.Writer) int {
 	if manifest.Align != nil {
 		deps.JudgeCmd = manifest.Align.JudgeCmd
 		deps.JudgeRequired = manifest.Align.JudgeRequired
+		if manifest.Align.JudgeTimeoutSeconds > 0 {
+			deps.JudgeTimeout = time.Duration(manifest.Align.JudgeTimeoutSeconds) * time.Second
+		}
 	}
 
 	return runAlign(ctx, root, freeze, deps, stdout, stderr)
@@ -143,6 +151,7 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		Covers:           covers,
 		JudgeCmd:         deps.JudgeCmd,
 		JudgeRequired:    deps.JudgeRequired,
+		JudgeTimeout:     deps.JudgeTimeout,
 		ExistingFindings: existingFindings,
 	}
 	if freeze {

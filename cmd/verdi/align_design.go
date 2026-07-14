@@ -70,6 +70,7 @@ func runDesignAlign(ctx context.Context, root string, freeze bool, deps alignDep
 		Covers:           covers,
 		JudgeCmd:         deps.JudgeCmd,
 		JudgeRequired:    deps.JudgeRequired,
+		JudgeTimeout:     deps.JudgeTimeout,
 		ExistingFindings: existingFindings,
 	}
 	if freeze {
