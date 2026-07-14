@@ -126,7 +126,7 @@ func regenerateServices(ctx context.Context, root, commit string, services []sto
 func regenerateService(ctx context.Context, root string, svc store.Service, commit string, prov artifact.EvidenceProvenance, deps syncDeps) (bundle.ServiceBundle, *bundle.TestSummary, error) {
 	sb := bundle.ServiceBundle{ServiceName: svc.Name}
 
-	graph, err := upstream.RunGraph(ctx, deps.Runner, svc.Dir, commit)
+	graph, err := upstream.RunGraph(ctx, deps.Runner, svc.Dir, commit, "")
 	if err != nil {
 		return sb, nil, fmt.Errorf("flowmap graph: %w", err)
 	}

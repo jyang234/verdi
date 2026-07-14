@@ -154,6 +154,46 @@ func TestCommitDate_HappyPath(t *testing.T) {
 	}
 }
 
+func TestPickaxeCommit_HappyPath(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"svc/a.go": "package svc\n\nfunc Alpha() {}\n"}, Message: "add Alpha"},
+		{Files: map[string]string{"svc/b.go": "package svc\n\nfunc Beta() {}\n"}, Message: "add Beta"},
+		{Files: map[string]string{"svc/a.go": "package svc\n\nfunc Alpha() {}\nfunc Gamma() {}\n"}, Message: "add Gamma"},
+		{Files: map[string]string{"svc/b.go": "package svc\n"}, Message: "remove Beta"},
+	})
+
+	sha, ok, err := gitx.PickaxeCommit(context.Background(), repo.Dir, "Beta", "svc")
+	if err != nil {
+		t.Fatalf("PickaxeCommit: %v", err)
+	}
+	if !ok {
+		t.Fatal("PickaxeCommit: ok = false, want true")
+	}
+	// The most recent commit whose diff changed "Beta"'s occurrence count
+	// under svc/ is the removal commit (repo.Heads[3], 1 -> 0) — "add Beta"
+	// (Heads[1], 0 -> 1) also touched the count but is not the MOST RECENT hit.
+	if sha != repo.Heads[3] {
+		t.Errorf("PickaxeCommit sha = %q, want the removal commit %q", sha, repo.Heads[3])
+	}
+}
+
+func TestPickaxeCommit_NoHit_DisclosesUnresolved(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"svc/a.go": "package svc\n\nfunc Alpha() {}\n"}, Message: "add Alpha"},
+	})
+
+	sha, ok, err := gitx.PickaxeCommit(context.Background(), repo.Dir, "NeverMentioned", "svc")
+	if err != nil {
+		t.Fatalf("PickaxeCommit: %v", err)
+	}
+	if ok {
+		t.Fatalf("PickaxeCommit: ok = true, want false; got sha %q", sha)
+	}
+	if sha != "" {
+		t.Errorf("PickaxeCommit sha = %q, want empty on no-hit", sha)
+	}
+}
+
 func TestCommitDate_UnknownRev_Errors(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{"a.txt": "hello\n"}, Message: "add a"},
