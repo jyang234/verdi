@@ -18,7 +18,7 @@ links:
 decisions:
   - { id: dc-1, text: "the directory IS the home page: GET / at the one serve address, replacing the current single-checkout active/archived listing in place — no new route, no second landing page (feature dc-3, one address); the surviving home affordances (disclosures pointer, services, grandfathered v0 boards) keep their sections", anchor: "#dc-1" }
   - { id: dc-2, text: "the page consumes the computed directory index through the sibling ref-index story's seam and performs no ref enumeration of its own — the handler renders index output; grouping keys off the index entry's status, never its address (feature dc-2)", anchor: "#dc-2" }
-  - { id: dc-3, text: "link grammar consumed, not invented: default-branch entries keep today's unprefixed addresses (/board/spec/<name>, /a/spec/<name>); a design-branch entry links to its per-branch board address under the sibling draft-boards grammar (/b/<branch-escaped>/board/spec/<name>) — the directory emits only addresses the routing story serves", anchor: "#dc-3" }
+  - { id: dc-3, text: "link grammar consumed, not invented: default-branch entries keep today's unprefixed addresses (/board/spec/<name>, /a/spec/<name>); a design-branch entry links to its per-branch board address under the sibling draft-boards grammar (/b/<branch-escaped>/board/spec/<name>), behind which only a LOCAL design branch opens as an authoring wall while a remote-only branch renders sealed with its remoteness disclosed — feature dc-5's split is enforced by the routing story behind the one grammar, never by the directory minting different link shapes; the directory emits only addresses the routing story serves", anchor: "#dc-3" }
   - { id: dc-4, text: "the in-review chip is a per-render, non-blocking consultation of the forge port's ListOpenMRs — a second, non-ref source disclosed as such (feature dc-5); it never enters the deterministic index computation, and every failure degrades to the disclosed absence, never a blocked or delayed directory", anchor: "#dc-4" }
   - { id: dc-5, text: "error surfaces: an index-computation failure renders as a disclosed inline notice in a still-served page (the home page is never itself a dead end — the existing renderHome posture); a stale entry click resolves to a rendered disclosed notice page with HTTP 404 and a link back to the directory, never a bare NotFound", anchor: "#dc-5" }
 constraints:
@@ -115,9 +115,14 @@ Link grammar consumed, not invented. Default-branch entries keep today's
 unprefixed addresses — `/board/spec/<name>` for the board, `/a/spec/<name>`
 for the corpus page. A design-branch entry links to its per-branch board
 address under the sibling draft-boards story's grammar,
-`/b/<branch-escaped>/board/spec/<name>`. The directory emits only addresses
-the routing story serves; it never mints a third grammar, so a link on this
-page is live by construction or disclosed per AC-3.
+`/b/<branch-escaped>/board/spec/<name>` — one grammar for local and
+remote-tracking entries alike, behind which the routing story enforces
+feature dc-5's split: only a local design branch opens as an authoring wall
+(managed worktrees are cut from local branches only), while a remote-only
+branch renders sealed, read-only, with its remoteness disclosed. The
+directory never encodes that split as different link shapes and never mints
+a third grammar; it emits only addresses the routing story serves, so a
+link on this page is live by construction or disclosed per AC-3.
 
 ## DC-4
 
