@@ -4,7 +4,7 @@ kind: spec
 title: "Obligation Artifact"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-5
 problem: { text: "the evidence-obligations feature needs its load-bearing object — a first-class evidence-obligation artifact — before anything can gate on it or render it. Today no such kind exists: `internal/artifact` knows spec, attestation, adr, diagram, waiver, board, evidence, rollup, deviation, bindings — nothing that states what a story AC's declared evidence kind must specifically show. And there is no way to author one on the wall.", anchor: "#problem" }
 outcome: { text: "a new `kind: obligation` markdown artifact exists, strict-decoded through the single `internal/artifact` seam: id `obligation/<story-slug>--<ac-id>--<for-kind>`, a `for_kind` evidence-kind, the obligation prose (title + body), a `verifies` edge to a STORY AC fragment, and a frozen stamp — living at `.verdi/obligations/<story-ref-slug>/<ac-id>--<for-kind>.md`. It validates that its id, `for_kind`, and path agree and that its `verifies` target is a STORY AC (a feature-AC or non-AC target is refused). And it is authored the way every wall object is: a board sticky graduates into one, bound to the AC it is dropped on.", anchor: "#outcome" }
