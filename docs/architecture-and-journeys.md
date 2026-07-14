@@ -14,7 +14,7 @@ unproven** — never silently green.
 > specs (`docs/design/specs/`, self-hosted at `.verdi/specs/active/` and
 > `.verdi/specs/archive/`), the invention ledger (`PLAN.md §7`),
 > `08-revision-notes.md` (ratification rounds 1–6), and
-> `round6-adjudications.ndjson` (ADJ-13, ADJ-16, …).
+> `round6-adjudications.ndjson` (ADJ-6 realized/stale-computed, ADJ-16 source_digest, …).
 
 ---
 
@@ -101,7 +101,7 @@ flowchart TD
 
 Every semantic choice made during the build lives in a ledger: `PLAN.md §7`
 (I-1…I-39) for v0, the round-4 realignment forks (R4-I-1…41), each later spec's own
-`dc-*` decision objects, and the round-6 adjudications (ADJ-13, ADJ-16). This table
+`dc-*` decision objects, and the round-6 adjudications (ADJ-6, ADJ-16). This table
 attributes the load-bearing ones to the component that embodies them.
 
 | Component | Owns | Ratified design decisions |
@@ -186,7 +186,7 @@ attributes the load-bearing ones to the component that embodies them.
 4. **Accept at merge.** `verdi accept diagram/<name>` flips `proposed → accepted`
    and writes the frozen stamp; merge of its design MR is acceptance. The other
    two words in the vocabulary — **realized** and **stale** — are *computed
-   states, never written statuses* (ADJ-13): strict decode refuses them as
+   states, never written statuses* (ADJ-6): strict decode refuses them as
    authored frontmatter.
 5. **The build proves it.** `verdi align`'s computed section carries a
    **diagram-alignment subsection**: every accepted proposal corpus-wide is
@@ -428,7 +428,7 @@ closure gate all speak): `evidenced` · `violated` · `pending` · `no-signal` �
 `waived` — total precedence waived > violated > evidenced > pending > no-signal.
 Diagram proposals speak their own four-value disclosed vocabulary: authored
 `proposed → accepted`, computed `realized` / `stale` — the computed pair is never
-written to any artifact (ADJ-13).
+written to any artifact (ADJ-6).
 
 ---
 
