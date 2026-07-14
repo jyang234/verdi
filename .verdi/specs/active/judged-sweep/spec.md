@@ -4,7 +4,7 @@ kind: spec
 title: "Judged Sweep"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-13
 problem: { text: "a diagram proposal has no scrutiny-predictor: nothing reads a proposed change against the corpus of ADRs, constraints, and decisions and warns a designer what review will catch before it catches it. Every other judged surface this codebase has (the build-branch deviation report, the design-branch decision-conflict sweep) is EITHER mandatory machinery in a gate's own path or scoped to specs, never diagrams; a proposal author has no on-demand, disposable way to ask 'does this collide with something we already decided?' without waiting for a human reviewer to notice.", anchor: problem }
 outcome: { text: "an on-demand verdi align --diagram-sweep <diagram-ref> mode reads a class: proposal diagram's mermaid body against the ADR/constraint/decision corpus through the SAME judge exec seam the design-branch decision-conflict sweep already proved, reusing the existing four-value ConflictFinding disposition machinery unchanged; findings are provenance-stamped (the existing judged-content integrity contract) and persisted to a sibling sweep-report file, never consulted by any gate, never run except on demand, and never phrased as a completeness guarantee — the AI reads and reports, a human disposes, and nothing here ever edits the diagram it just read.", anchor: outcome }
@@ -24,6 +24,7 @@ decisions:
 constraints:
   - { id: co-1, text: "never in any gate's deterministic path (parent co-1): verdi gate's source contains no reference to sweep-report.md or DiagramSweepFrontmatter, verified by a static grep-style check in this story's own test suite, not merely by convention", anchor: co-1 }
   - { id: co-2, text: "no network in any test (parent co-2): the judge exchange is exercised over the SAME fake JudgeRunner seam decision_judge_test.go already establishes; the corpus read (ADRs, a spec's declared decisions/constraints) is exercised over a fixture corpus, never a live judge binary or live corpus fetch", anchor: co-2 }
+frozen: { at: 2026-07-14, commit: 1f7f9fc4b769bd20f47bd4620ef6ad3c3cec043e, stub_matched: true }
 ---
 # Judged Sweep
 
