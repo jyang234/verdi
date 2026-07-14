@@ -2,10 +2,10 @@ package gitx
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -154,8 +154,16 @@ func TestWorktreeAdd_Negative(t *testing.T) {
 		if err == nil {
 			t.Fatal("WorktreeAdd(branch checked out at dir): want error, got nil")
 		}
-		if !strings.Contains(err.Error(), "already checked out") {
-			t.Fatalf("WorktreeAdd error = %v, want it to mention \"already checked out\"", err)
+		// Assert the typed refusal, not git's version-dependent stderr
+		// text: the proactive current-branch check must classify this as
+		// ErrBranchCheckedOut regardless of how the installed git words it.
+		if !errors.Is(err, ErrBranchCheckedOut) {
+			t.Fatalf("WorktreeAdd error = %v, want ErrBranchCheckedOut", err)
+		}
+		// The proactive guard runs before `git worktree add`, so no
+		// worktree directory is ever left behind.
+		if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+			t.Fatalf("WorktreeAdd(branch checked out at dir) left a directory behind: err=%v", err)
 		}
 	})
 }

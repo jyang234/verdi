@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/jyang234/verdi/internal/filelock"
@@ -115,12 +114,14 @@ func pathExists(path string) bool {
 	return err == nil
 }
 
-// isAlreadyCheckedOut reports whether err is git's own "worktree add"
-// refusal for a branch already checked out somewhere (root itself, in
-// EnsureWorktree's calling convention, since a managed worktree is never
-// cut twice for the same branch — reuse always wins first). Matched by
-// git's stable stderr phrasing ("is already checked out at") rather than
-// an exit code, since worktree add's failure modes share exit code 128.
+// isAlreadyCheckedOut reports whether err is WorktreeAdd's checked-out-here
+// refusal for a branch already checked out at root itself (the only such
+// case reachable here, since a managed worktree is never cut twice for the
+// same branch — reuse always wins first). It matches gitx's TYPED
+// gitx.ErrBranchCheckedOut, which gitx.WorktreeAdd raises proactively from
+// root's own current branch before `git worktree add` runs — never from
+// parsing git's version-dependent "already checked out" stderr, whose
+// wording differs across git builds (the D6-8 environment-parity class).
 func isAlreadyCheckedOut(err error) bool {
-	return strings.Contains(err.Error(), "already checked out")
+	return errors.Is(err, gitx.ErrBranchCheckedOut)
 }

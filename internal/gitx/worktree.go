@@ -8,9 +8,20 @@ package gitx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrBranchCheckedOut is WorktreeAdd's typed refusal when branch is
+// already checked out in dir itself (the serving checkout). It is
+// detected PROACTIVELY — by asking git for dir's current branch before
+// `git worktree add` ever runs — so the refusal never depends on parsing
+// git's version-dependent "already checked out" stderr text (the D6-8
+// environment-parity failure class: local git and a CI runner's git word
+// the same fatal differently, and a string match that passes on one
+// silently misclassifies on the other).
+var ErrBranchCheckedOut = errors.New("gitx: branch is already checked out in this checkout")
 
 // StatusDirty reports whether dir's working tree has any uncommitted
 // change (staged, unstaged, or untracked-and-unignored) — the
@@ -76,7 +87,26 @@ func Push(ctx context.Context, dir string) error {
 // own branch/index/working tree are untouched by this call, the same way
 // `checkout`/`switch` never appear here).
 func WorktreeAdd(ctx context.Context, dir, path, branch string) error {
+	// Proactive checked-out-here guard: ask git directly for dir's own
+	// current branch before mutating anything. A worktree cannot be cut
+	// for a branch that dir already has checked out, and detecting that
+	// here — rather than from git's post-hoc failure text — keeps the
+	// refusal robust across git versions (see ErrBranchCheckedOut).
+	current, err := CurrentBranch(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("gitx: WorktreeAdd(%q, %q): checking current branch: %w", path, branch, err)
+	}
+	if current == branch {
+		return fmt.Errorf("gitx: WorktreeAdd(%q, %q): %w", path, branch, ErrBranchCheckedOut)
+	}
+
 	if _, err := run(ctx, dir, "worktree", "add", path, branch); err != nil {
+		// Defensive fallback only: if git refuses because branch is
+		// checked out in some worktree the proactive check above did not
+		// cover, still surface the typed refusal rather than raw stderr.
+		if strings.Contains(err.Error(), "already checked out") {
+			return fmt.Errorf("gitx: WorktreeAdd(%q, %q): %w", path, branch, ErrBranchCheckedOut)
+		}
 		return fmt.Errorf("gitx: WorktreeAdd(%q, %q): %w", path, branch, err)
 	}
 	return nil
