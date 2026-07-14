@@ -164,6 +164,24 @@ bindings:
       - "spec/verification-extractor#ac-2"
       - "spec/verification-extractor#ac-3"
       - "spec/verification-extractor#ac-4"
+      # spec/worktree-manager behavioral legs (all five ACs declare
+      # [static, behavioral]): ac-1 = TestEnsureWorktree_FirstCallCutsReal
+      # Worktree + TestEnsureWorktree_SecondCallReusesNoRecut
+      # (internal/wtmanager); ac-2 = TestEnsureWorktree_Negative_
+      # RemoteTrackingOnly/_NonexistentBranch/_AlreadyCheckedOutHere; ac-3
+      # = TestEnsureWorktree_Concurrent_ExactlyOneCut +
+      # TestGC_ConcurrentLiveLockSurvivesGC; ac-4 =
+      # TestGC_FourWorktrees_EachRatifiedOutcome +
+      # TestGC_DeletedBranchSignal_LocalOnly; ac-5 =
+      # TestGc_CLI_ReclaimsAndDisclosesScope/_KeepsDirtyAndDiscloses
+      # (cmd/verdi, driving the built binary) + TestRun_
+      # GcDispatchesToRealVerb + specalign's TestV0CLIVerbInventory
+      # real_gc case -- all under make verify.
+      - "spec/worktree-manager#ac-1"
+      - "spec/worktree-manager#ac-2"
+      - "spec/worktree-manager#ac-3"
+      - "spec/worktree-manager#ac-4"
+      - "spec/worktree-manager#ac-5"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -277,3 +295,16 @@ bindings:
       - "spec/verification-extractor#ac-2"
       - "spec/verification-extractor#ac-3"
       - "spec/verification-extractor#ac-4"
+      # spec/worktree-manager static legs (all five ACs declare [static,
+      # behavioral]): the extracted internal/filelock algorithm, gitx's
+      # HasLocalBranch/WorktreeAdd/WorktreeRemove primitives, wtmanager's
+      # EnsureWorktree (lock-before-add, local-ref gate, typed refusals)
+      # and GC (decideReclaim's total four-outcome map reusing
+      # gitx.IsAncestor/StatusDirty unchanged, no --force), and
+      # dispatch.go's verbPhase["gc"] flip to a real, routed verb all
+      # compile, vet, lint, and lint-store clean under make verify.
+      - "spec/worktree-manager#ac-1"
+      - "spec/worktree-manager#ac-2"
+      - "spec/worktree-manager#ac-3"
+      - "spec/worktree-manager#ac-4"
+      - "spec/worktree-manager#ac-5"
