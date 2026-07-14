@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/provider"
-	"github.com/OWNER/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider/fake"
 )
 
 func TestProvider_Resolve_Unseeded(t *testing.T) {

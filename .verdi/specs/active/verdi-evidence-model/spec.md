@@ -313,10 +313,13 @@ load-bearing trust boundary: artifacts that gate come from trusted CI, never
 from the author under review.
 
 CI publishes this bundle under one fixed convention: the job (GitLab) or
-workflow (GitHub) named `verdi-evidence` uploads the
-`data/derived/<ref-slug>/<commit>/` tree as its artifact, identical on
-both forges; `verdi sync` (surfaces spec) pulls the latest successful
-`verdi-evidence` run for the current ref through the forge port.
+workflow (GitHub) named `verdi-evidence` uploads the whole
+`data/derived/` tree as its artifact, identical on both forges (round 6;
+08 §Round 6 — the tree carries per-spec records keyed by the owning spec's
+ref, 01 §Ref slugging); `verdi sync` (surfaces spec) pulls the latest
+successful `verdi-evidence` run for the current ref through the forge port
+and **preserves the tree's internal per-spec keys on write**, so CI's
+per-spec producer output lands exactly where the fold's readers look.
 
 ## The fold
 

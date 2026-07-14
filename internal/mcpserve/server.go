@@ -3,7 +3,9 @@ package mcpserve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 )
@@ -21,6 +23,14 @@ const ServerVersion = "dev"
 // connection; ServeConn keeps dispatch sequential within each one).
 type Server struct {
 	Backend *Backend
+
+	// ErrLog receives one line per dropped socket connection (spec/fail-loud
+	// dc-3): a non-EOF, non-shutdown error returned by ServeConn for a
+	// connection Serve accepted. nil (the zero value) is silent — matching
+	// the stdio path (cmd/verdi/mcp.go's serveStandalone), which already
+	// inspects its own ServeConn error and stays untouched by this field.
+	// `verdi serve` wires os.Stderr; tests inject a bytes.Buffer.
+	ErrLog io.Writer
 }
 
 // NewServer constructs a Server over root (a resolved store root —
@@ -113,9 +123,37 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		go func() {
 			defer wg.Done()
 			defer conn.Close()
-			_ = ServeConn(ctx, conn, conn, s)
+			if cerr := ServeConn(ctx, conn, conn, s); cerr != nil {
+				s.logConnErr(conn, cerr)
+			}
 		}()
 	}
 	wg.Wait()
 	return acceptErr
+}
+
+// logConnErr writes one line to s.ErrLog for a dropped connection (dc-3):
+// a genuine ServeConn error (a scan failure such as an oversized line, or a
+// write failure such as a broken pipe) leaves a trace. Two cases are
+// deliberately excluded, matching a CLEAN close: io.EOF (bufio.Scanner
+// already treats plain EOF as termination, not an error — ServeConn only
+// ever returns io.EOF itself if a caller's io.Reader does, which none of
+// this package's callers do, but the check stays defensive) and
+// net.ErrClosed (the connection or its underlying fd was closed out from
+// under the read/write, e.g. during shutdown — not a protocol-level
+// failure worth a line). s.ErrLog nil (the zero-value Server) is silent.
+func (s *Server) logConnErr(conn net.Conn, err error) {
+	if s.ErrLog == nil || err == nil {
+		return
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+		return
+	}
+	remote := "unknown"
+	if conn != nil {
+		if addr := conn.RemoteAddr(); addr != nil && addr.String() != "" {
+			remote = addr.String()
+		}
+	}
+	fmt.Fprintf(s.ErrLog, "mcpserve: dropped connection (remote %s): %v\n", remote, err)
 }

@@ -1,7 +1,8 @@
 schema: verdi.layout/v1
-forge: gitlab                  # or github; auto-detected from the remote URL when omitted
+forge: github                  # or gitlab; auto-detected from the remote URL when omitted
 providers:                     # story-provider spec owns semantics
   jira:
+    mode: fake                 # round-6 (spec/close-verb dc-2): hermetic fake tracker; flip to "" (or remove) to restore the real adapter below — config-only, no code change (true-closure dc-2)
     base_url: https://example.atlassian.net
     rollup_field: customfield_00000     # ids only; secrets come from env/CI vars
 lint:

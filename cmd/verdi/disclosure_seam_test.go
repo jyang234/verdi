@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/disclosure"
-	"github.com/OWNER/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/lint"
 )
 
 // TestDisclosureSeam_AC1_RenderThroughTheSharedSeam is spec/disclosure-

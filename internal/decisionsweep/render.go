@@ -1,11 +1,10 @@
 package decisionsweep
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // renderConflictMarkdown hand-renders a ConflictFrontmatter + body into the
@@ -21,14 +20,14 @@ func renderConflictMarkdown(fm *artifact.ConflictFrontmatter, body string) []byt
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "id: %s\n", fm.ID)
 	fmt.Fprintf(&b, "kind: %s\n", fm.Kind)
-	fmt.Fprintf(&b, "title: %s\n", yamlDQ(fm.Title))
+	fmt.Fprintf(&b, "title: %s\n", artifact.YAMLDoubleQuote(fm.Title))
 	fmt.Fprintf(&b, "owners: [%s]\n", strings.Join(fm.Owners, ", "))
 	if len(fm.Links) > 0 {
 		b.WriteString("links:\n")
 		for _, l := range fm.Links {
 			fmt.Fprintf(&b, "  - { type: %s, ref: %s", l.Type, l.Ref)
 			if l.Note != "" {
-				fmt.Fprintf(&b, ", note: %s", yamlDQ(l.Note))
+				fmt.Fprintf(&b, ", note: %s", artifact.YAMLDoubleQuote(l.Note))
 			}
 			b.WriteString(" }\n")
 		}
@@ -47,15 +46,4 @@ func renderConflictMarkdown(fm *artifact.ConflictFrontmatter, body string) []byt
 	b.WriteString("---\n")
 	b.WriteString(body)
 	return []byte(b.String())
-}
-
-// yamlDQ renders s as a YAML double-quoted scalar (align/render.go's own
-// doc comment explains why json.Marshal is a safe, well-tested quoter for
-// this restricted dialect).
-func yamlDQ(s string) string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return `""`
-	}
-	return string(b)
 }

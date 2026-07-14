@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // Index is the in-memory index built by Build: every committed-zone

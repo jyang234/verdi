@@ -20,12 +20,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/dex"
-	"github.com/OWNER/verdi/internal/fixturegit"
-	"github.com/OWNER/verdi/internal/index"
-	"github.com/OWNER/verdi/internal/lint"
-	"github.com/OWNER/verdi/internal/workbench"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/dex"
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 func TestV0ThinSliceChecklist(t *testing.T) {

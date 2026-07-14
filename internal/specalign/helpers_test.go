@@ -26,9 +26,10 @@
 //     its mirrored review-sticky population, not just its existence.
 //   - TestV0CLIVerbInventory (05 §CLI): every verb the spec (plus the
 //     I-7/I-20 invented verbs) names responds per its v0 status — real
-//     verbs never say "not implemented"; the four explicitly
-//     out-of-v0 verbs (PLAN.md §5: close, gc, waivers,
-//     verify-artifact) always do, with the out-of-scope message.
+//     verbs never say "not implemented"; the three explicitly
+//     out-of-v0 verbs (PLAN.md §5: gc, waivers, verify-artifact) always
+//     do, with the out-of-scope message (`close` graduated to real,
+//     round 6, spec/close-verb).
 package specalign
 
 import (
@@ -42,7 +43,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/lint"
 )
 
 // verdiRepoRoot and verdiBinPath are populated once by TestMain and read

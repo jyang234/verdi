@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // corpusDir and svcfixDir are testdata/corpus and testdata/svcfix relative

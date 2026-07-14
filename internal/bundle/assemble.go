@@ -5,20 +5,25 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/canonjson"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 // ServiceBundle is one service's contribution to a derived bundle: the
 // evidence records BuildVerdicts joined for it, its review artifact (nil
-// if no review was computed — e.g. a service with no policy.json), and its
-// computed boundary diff (nil/empty if no branch contract was diffed).
+// if no review was computed — e.g. a service with no policy.json), its
+// computed boundary diff (nil/empty if no branch contract was diffed), and
+// the pseudo-version of the toolchain that generated its graph
+// (upstream.Graph.Tool; "" when the graph carried none) — the recorded
+// tool provenance toolchain.json carries for the I-4 secondary defense
+// (spec/forge-transport ac-4/dc-4).
 type ServiceBundle struct {
 	ServiceName  string
 	Verdicts     []artifact.Evidence
 	Review       *upstream.Review
 	BoundaryDiff []upstream.BoundaryDiffEntry
+	Tool         string
 }
 
 // filePerm is the file mode every bundle file is written with — readable
@@ -72,6 +77,9 @@ func Assemble(dir string, services []ServiceBundle, tests *TestSummary) error {
 	if tests == nil {
 		return fmt.Errorf("bundle: Assemble: tests summary must not be nil")
 	}
+	if tests.Packages == nil {
+		tests.Packages = []PackageResult{}
+	}
 
 	if err := writeCanon(filepath.Join(dir, "verdicts.json"), verdicts); err != nil {
 		return err
@@ -84,6 +92,34 @@ func Assemble(dir string, services []ServiceBundle, tests *TestSummary) error {
 	}
 	if err := writeCanon(filepath.Join(dir, "tests.json"), tests); err != nil {
 		return err
+	}
+
+	// toolchain.json — the bundle's recorded tool provenance
+	// (spec/forge-transport ac-4/dc-4): written ONLY when an upstream tool
+	// actually ran (some service's graph carried a non-empty Tool). A
+	// bundle assembled with no upstream tool run — no discovered services,
+	// or a graph without the field — omits the file rather than fabricating
+	// provenance; intake (cmd/verdi/sync.go) discloses that absence as
+	// unproven. Two services disagreeing on the tool string would mean one
+	// regeneration ran two different toolchain builds — refused loudly,
+	// never averaged or silently picked from.
+	tool := ""
+	for _, s := range services {
+		if s.Tool == "" {
+			continue
+		}
+		if tool == "" {
+			tool = s.Tool
+			continue
+		}
+		if s.Tool != tool {
+			return fmt.Errorf("bundle: Assemble: services disagree on the recorded tool (%q vs %q) — one bundle must come from one toolchain build", tool, s.Tool)
+		}
+	}
+	if tool != "" {
+		if err := writeCanon(filepath.Join(dir, "toolchain.json"), upstream.ToolProvenance{Tool: tool}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

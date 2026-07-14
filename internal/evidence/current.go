@@ -3,7 +3,7 @@ package evidence
 import (
 	"strconv"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // Current reduces records to the latest per (kind, producer) — falling

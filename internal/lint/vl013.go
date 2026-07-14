@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // vl013 enforces "nothing under .verdi/data/ is ever git-tracked (git add

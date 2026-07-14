@@ -14,7 +14,7 @@ import (
 	"html/template"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/decisionsweep"
+	"github.com/jyang234/verdi/internal/decisionsweep"
 )
 
 // exemptionsURL is the per-ADR exemption page's URL, a subpage of the

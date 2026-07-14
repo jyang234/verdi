@@ -17,10 +17,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardio"
-	"github.com/OWNER/verdi/internal/fixturegit"
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 func getPinSearch(t *testing.T, h http.Handler, name, query string) *httptest.ResponseRecorder {

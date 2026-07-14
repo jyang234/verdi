@@ -10,13 +10,13 @@ import (
 	"io"
 	"os"
 
-	"github.com/OWNER/verdi/internal/lint"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // runLintVerb resolves the store root from the current working directory,
 // builds a lint.Context from git and CI environment signals, runs every
-// VL-001..VL-018 rule, and prints one line per finding to stdout. Exit
+// VL-001..VL-020 rule, and prints one line per finding to stdout. Exit
 // contract (CLAUDE.md): 0 clean, 1 findings present, 2 operational error
 // (can't resolve the store root, can't build the snapshot). A
 // SeverityDisclosure finding (VL-017's disclosed-unproven notice on a bare

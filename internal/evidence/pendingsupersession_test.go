@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/fake"
 )
 
 // erroringOpenMRForge and erroringFileForge are minimal forge.Forge

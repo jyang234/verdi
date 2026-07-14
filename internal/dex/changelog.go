@@ -6,7 +6,7 @@ import (
 	"html/template"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // writeChangelog emits dex's "what changed" feed (05 §Verdi-dex mechanics:

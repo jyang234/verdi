@@ -1,12 +1,10 @@
 package artifact
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // Attribute is one of a feature or story spec's two required spec
@@ -190,15 +188,16 @@ func (s Stub) Validate() error {
 // (problem/outcome) are excluded, per 02 §Object model's "attributes are
 // distinct from objects below" (no id, so no content-hash identity of their
 // own). Computed over the canonical JSON form (02 §Generated artifacts and
-// digests) so the hash is stable regardless of map/struct field order.
+// digests) so the hash is stable regardless of map/struct field order. The
+// hash tail itself is canonjson.Digest (spec/shared-homes ac-2/dc-2: this
+// wrapper's exported API and doc survive the collapse; only its body did).
 func ObjectContentHash(kind ObjectKind, id, text string) (string, error) {
 	payload := map[string]interface{}{"kind": string(kind), "id": id, "text": text}
-	b, err := canonjson.Marshal(payload)
+	digest, err := canonjson.Digest(payload)
 	if err != nil {
 		return "", fmt.Errorf("artifact: object content hash: %w", err)
 	}
-	sum := sha256.Sum256(b)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return digest, nil
 }
 
 // ObjectKind discriminates the three frontmatter-declared object block

@@ -7,7 +7,7 @@ package forgetest
 import (
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge"
 )
 
 // Harness lets Run drive an adapter under test without knowing which forge
@@ -17,9 +17,11 @@ type Harness interface {
 	// Forge returns the forge.Forge under test.
 	Forge() forge.Forge
 	// SeedBundle arranges for FetchEvidenceBundle(ref, commit) to
-	// succeed with bundle, via whatever means the underlying forge API
-	// double requires (e.g. registering an httptest handler response).
-	SeedBundle(t *testing.T, ref, commit string, bundle forge.EvidenceBundle)
+	// succeed with tree (the derived subtree a CI run would have uploaded,
+	// keyed by path relative to data/derived/), via whatever means the
+	// underlying forge API double requires (e.g. registering an httptest
+	// handler serving the corresponding artifact zip).
+	SeedBundle(t *testing.T, ref, commit string, tree forge.DerivedTree)
 	// WantGeneratedAttribute is the token Forge().GeneratedAttribute()
 	// must return for this forge kind.
 	WantGeneratedAttribute() string

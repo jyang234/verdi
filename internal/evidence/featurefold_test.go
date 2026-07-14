@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // featureSpec builds a minimal, valid feature spec with one AC declaring

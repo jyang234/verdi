@@ -20,7 +20,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge"
 )
 
 func docDerivedCaptureBytes(t *testing.T, name string) []byte {

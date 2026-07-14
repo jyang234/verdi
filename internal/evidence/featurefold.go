@@ -3,7 +3,7 @@ package evidence
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // ImplementingStory is one story's already-folded contribution to a
@@ -117,23 +117,11 @@ func FoldFeature(in FeatureInput) (FeatureResult, error) {
 		acSet[ac.ID] = true
 	}
 
-	candidates := make([]artifact.Evidence, 0, len(in.Records))
-	for _, r := range in.Records {
-		switch r.Provenance.Source {
-		case artifact.SourceCI:
-			candidates = append(candidates, r)
-		case artifact.SourceLocal:
-			if in.Preview {
-				candidates = append(candidates, r)
-			}
-		}
-	}
-	for _, r := range candidates {
-		for _, ac := range r.EvidenceFor {
-			if !acSet[ac] {
-				return FeatureResult{}, fmt.Errorf("evidence: FoldFeature: record (kind %s, witness %q) is evidence-for unknown feature AC %q (dangling binding, 03 §Declarations)", r.Kind, r.Witness, ac)
-			}
-		}
+	candidates, err := filterCandidates(in.Records, in.Preview, acSet, func(r artifact.Evidence, ac string) error {
+		return fmt.Errorf("evidence: FoldFeature: record (kind %s, witness %q) is evidence-for unknown feature AC %q (dangling binding, 03 §Declarations)", r.Kind, r.Witness, ac)
+	})
+	if err != nil {
+		return FeatureResult{}, err
 	}
 
 	result := FeatureResult{SpecRef: in.Spec.ID}

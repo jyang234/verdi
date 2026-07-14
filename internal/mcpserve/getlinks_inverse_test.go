@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // TestGetLinks_SurfacesExemptedBy proves D-7 end-to-end through the tool: an

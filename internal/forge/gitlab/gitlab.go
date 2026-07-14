@@ -18,10 +18,8 @@
 package gitlab
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,7 +28,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/httpjson"
 )
 
 // defaultJobName is verdi's own CI job name (I-8: "job/workflow
@@ -56,14 +55,20 @@ type Config struct {
 	// JobName is the CI job whose artifact is fetched. Defaults to
 	// "verdi-evidence".
 	JobName string
-	// HTTPClient defaults to http.DefaultClient.
+	// HTTPClient defaults to nil: the adapter rides internal/httpjson's
+	// shared transport, which itself defaults to a client bounded by
+	// httpjson.DefaultTimeout (30s, spec/forge-transport dc-2) when this
+	// field is left nil. A caller-supplied client is used AS-IS.
 	HTTPClient *http.Client
 	// Getenv defaults to os.Getenv; overridable for hermetic CIContext tests.
 	Getenv func(string) string
 }
 
 // Adapter implements forge.Forge against the GitLab API.
-type Adapter struct{ cfg Config }
+type Adapter struct {
+	cfg       Config
+	transport *httpjson.Client
+}
 
 // New returns an Adapter with cfg's defaults filled in.
 func New(cfg Config) *Adapter {
@@ -73,13 +78,10 @@ func New(cfg Config) *Adapter {
 	if cfg.JobName == "" {
 		cfg.JobName = defaultJobName
 	}
-	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = http.DefaultClient
-	}
 	if cfg.Getenv == nil {
 		cfg.Getenv = os.Getenv
 	}
-	return &Adapter{cfg: cfg}
+	return &Adapter{cfg: cfg, transport: &httpjson.Client{HTTPClient: cfg.HTTPClient}}
 }
 
 type pipeline struct {
@@ -95,7 +97,7 @@ type job struct {
 // FetchEvidenceBundle implements forge.Forge: find the latest successful
 // pipeline for commit, find its verdi-evidence job, download and unzip
 // that job's artifact.
-func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (*forge.EvidenceBundle, error) {
+func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (forge.DerivedTree, error) {
 	pipelineID, err := a.findPipeline(ctx, commit)
 	if err != nil {
 		return nil, err
@@ -108,17 +110,22 @@ func (a *Adapter) FetchEvidenceBundle(ctx context.Context, ref, commit string) (
 	if err != nil {
 		return nil, err
 	}
-	bundle, err := forge.ExtractBundleFromZip(data)
+	tree, err := forge.ExtractTreeFromZip(data)
 	if err != nil {
 		return nil, fmt.Errorf("gitlab: %w", err)
 	}
-	return bundle, nil
+	return tree, nil
 }
 
+// findPipeline drains every page (dc-3): the newest successful pipeline for
+// commit could sit past the default page size on a busy project, and this
+// still must return pipelines[0] — GitLab's own "sha=" filter already
+// narrows the result set; draining just means a filtered-but-large result
+// set is not silently truncated at page one.
 func (a *Adapter) findPipeline(ctx context.Context, commit string) (int64, error) {
-	url := fmt.Sprintf("%s/projects/%s/pipelines?sha=%s&status=success", a.cfg.BaseURL, a.cfg.ProjectID, commit)
-	var pipelines []pipeline
-	if err := a.getJSON(ctx, url, &pipelines); err != nil {
+	listURL := fmt.Sprintf("%s/projects/%s/pipelines?sha=%s&status=success", a.cfg.BaseURL, a.cfg.ProjectID, commit)
+	pipelines, err := gitlabDrainList[pipeline](ctx, a, listURL)
+	if err != nil {
 		return 0, err
 	}
 	if len(pipelines) == 0 {
@@ -128,9 +135,9 @@ func (a *Adapter) findPipeline(ctx context.Context, commit string) (int64, error
 }
 
 func (a *Adapter) findJob(ctx context.Context, pipelineID int64) (int64, error) {
-	url := fmt.Sprintf("%s/projects/%s/pipelines/%d/jobs?scope=success", a.cfg.BaseURL, a.cfg.ProjectID, pipelineID)
-	var jobs []job
-	if err := a.getJSON(ctx, url, &jobs); err != nil {
+	listURL := fmt.Sprintf("%s/projects/%s/pipelines/%d/jobs?scope=success", a.cfg.BaseURL, a.cfg.ProjectID, pipelineID)
+	jobs, err := gitlabDrainList[job](ctx, a, listURL)
+	if err != nil {
 		return 0, err
 	}
 	for _, j := range jobs {
@@ -141,15 +148,13 @@ func (a *Adapter) findJob(ctx context.Context, pipelineID int64) (int64, error) 
 	return 0, fmt.Errorf("gitlab: pipeline %d has no successful %q job: %w", pipelineID, a.cfg.JobName, forge.ErrNoBundle)
 }
 
+// downloadArtifact rides httpjson.Client.RawDo rather than Do: the response
+// body is a binary zip, not a JSON payload this package should decode
+// (dc-1's tolerant-subset decode does not apply — there is nothing to
+// decode).
 func (a *Adapter) downloadArtifact(ctx context.Context, jobID int64) ([]byte, error) {
 	url := fmt.Sprintf("%s/projects/%s/jobs/%d/artifacts", a.cfg.BaseURL, a.cfg.ProjectID, jobID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("gitlab: building artifact request: %w", err)
-	}
-	a.setAuth(req)
-
-	resp, err := a.cfg.HTTPClient.Do(req)
+	resp, err := a.transport.RawDo(ctx, http.MethodGet, url, nil, a.setAuth)
 	if err != nil {
 		return nil, fmt.Errorf("gitlab: downloading job %d artifact: %w", jobID, err)
 	}
@@ -167,25 +172,20 @@ func (a *Adapter) downloadArtifact(ctx context.Context, jobID int64) ([]byte, er
 	return data, nil
 }
 
+// getJSON/postJSON are the thin bindings the ac-1 seam calls for: they bind
+// httpjson.Client.Do to this adapter's own auth header, error prefix, and
+// status classification (2xx-family success; 429 named as rate-limited,
+// since forge carries no unavailable-style sentinel today — spec/forge-
+// transport ac-3; anything else a generic "unexpected status" error) —
+// httpjson itself owns none of that taxonomy (dc-1).
 func (a *Adapter) getJSON(ctx context.Context, url string, out interface{}) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("gitlab: building request: %w", err)
-	}
-	a.setAuth(req)
+	return a.transport.Do(ctx, http.MethodGet, url, nil, a.setAuth, a.classify(http.MethodGet, url, http.StatusOK), out)
+}
 
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("gitlab: GET %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("gitlab: GET %s: unexpected status %s", url, resp.Status)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("gitlab: decoding response from %s: %w", url, err)
-	}
-	return nil
+// postJSON mirrors getJSON for the write direction: encode body as the
+// JSON request payload, decode the response into out.
+func (a *Adapter) postJSON(ctx context.Context, url string, body, out interface{}) error {
+	return a.transport.Do(ctx, http.MethodPost, url, body, a.setAuth, a.classifyPost(url), out)
 }
 
 func (a *Adapter) setAuth(req *http.Request) {
@@ -194,32 +194,38 @@ func (a *Adapter) setAuth(req *http.Request) {
 	}
 }
 
-// postJSON mirrors getJSON for the write direction: encode body as the
-// JSON request payload, decode the response into out.
-func (a *Adapter) postJSON(ctx context.Context, url string, body, out interface{}) error {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("gitlab: encoding request body: %w", err)
+// classify builds the httpjson.Classify getJSON binds: wantStatus is the
+// one success status (200 for every GitLab GET this adapter issues).
+func (a *Adapter) classify(method, url string, wantStatus int) httpjson.Classify {
+	return func(resp *http.Response, transportErr error) error {
+		if transportErr != nil {
+			return fmt.Errorf("gitlab: %s %s: %w", method, url, transportErr)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("gitlab: %s %s: rate limited: status %s", method, url, resp.Status)
+		}
+		if resp.StatusCode != wantStatus {
+			return fmt.Errorf("gitlab: %s %s: unexpected status %s", method, url, resp.Status)
+		}
+		return nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("gitlab: building request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	a.setAuth(req)
+}
 
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("gitlab: POST %s: %w", url, err)
+// classifyPost mirrors classify for POST, whose success is 200 OR 201
+// depending on the endpoint.
+func (a *Adapter) classifyPost(url string) httpjson.Classify {
+	return func(resp *http.Response, transportErr error) error {
+		if transportErr != nil {
+			return fmt.Errorf("gitlab: POST %s: %w", url, transportErr)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("gitlab: POST %s: rate limited: status %s", url, resp.Status)
+		}
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			return fmt.Errorf("gitlab: POST %s: unexpected status %s", url, resp.Status)
+		}
+		return nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("gitlab: POST %s: unexpected status %s", url, resp.Status)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("gitlab: decoding response from %s: %w", url, err)
-	}
-	return nil
 }
 
 // mergeRequestJSON is the subset of GitLab's merge request object
@@ -232,11 +238,13 @@ type mergeRequestJSON struct {
 
 // ListOpenMRs implements forge.Forge: GitLab's "list merge requests"
 // endpoint, filtered server-side to opened MRs targeting targetBranch.
+// Drains every page (dc-3): an open MR beyond the default page size must
+// still be seen by pendingsupersession.go's scan, not silently dropped.
 func (a *Adapter) ListOpenMRs(ctx context.Context, targetBranch string) ([]forge.OpenMR, error) {
 	reqURL := fmt.Sprintf("%s/projects/%s/merge_requests?state=opened&target_branch=%s",
 		a.cfg.BaseURL, a.cfg.ProjectID, url.QueryEscape(targetBranch))
-	var mrs []mergeRequestJSON
-	if err := a.getJSON(ctx, reqURL, &mrs); err != nil {
+	mrs, err := gitlabDrainList[mergeRequestJSON](ctx, a, reqURL)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]forge.OpenMR, len(mrs))
@@ -260,27 +268,26 @@ type repositoryFileJSON struct {
 func (a *Adapter) FetchFileAtRef(ctx context.Context, ref, path string) ([]byte, error) {
 	reqURL := fmt.Sprintf("%s/projects/%s/repository/files/%s?ref=%s",
 		a.cfg.BaseURL, a.cfg.ProjectID, url.PathEscape(path), url.QueryEscape(ref))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("gitlab: building file request: %w", err)
-	}
-	a.setAuth(req)
 
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("gitlab: GET %s: %w", reqURL, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("gitlab: file %q not found at ref %q: %w", path, ref, forge.ErrFileNotFound)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gitlab: GET %s: unexpected status %s", reqURL, resp.Status)
+	classify := func(resp *http.Response, transportErr error) error {
+		if transportErr != nil {
+			return fmt.Errorf("gitlab: GET %s: %w", reqURL, transportErr)
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("gitlab: file %q not found at ref %q: %w", path, ref, forge.ErrFileNotFound)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("gitlab: GET %s: rate limited: status %s", reqURL, resp.Status)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("gitlab: GET %s: unexpected status %s", reqURL, resp.Status)
+		}
+		return nil
 	}
 
 	var rf repositoryFileJSON
-	if err := json.NewDecoder(resp.Body).Decode(&rf); err != nil {
-		return nil, fmt.Errorf("gitlab: decoding file response from %s: %w", reqURL, err)
+	if err := a.transport.Do(ctx, http.MethodGet, reqURL, nil, a.setAuth, classify, &rf); err != nil {
+		return nil, err
 	}
 	if rf.Encoding != "" && rf.Encoding != "base64" {
 		return nil, fmt.Errorf("gitlab: file %q at ref %q: unsupported encoding %q", path, ref, rf.Encoding)
@@ -353,13 +360,12 @@ type discussionJSON struct {
 // GitLab API. Re-verify against a live instance before trusting this
 // adapter in production (S6 findings.md, PLAN-V1.md §5 V1-P7 spike
 // findings block).
+// listDiscussions drains every page (dc-3): a discussion — including the
+// one carrying the decisive unresolved thread — past the default page size
+// must still be seen by both ListComments and GetThreadResolution.
 func (a *Adapter) listDiscussions(ctx context.Context, mrID string) ([]discussionJSON, error) {
 	reqURL := fmt.Sprintf("%s/projects/%s/merge_requests/%s/discussions", a.cfg.BaseURL, a.cfg.ProjectID, mrID)
-	var discussions []discussionJSON
-	if err := a.getJSON(ctx, reqURL, &discussions); err != nil {
-		return nil, err
-	}
-	return discussions, nil
+	return gitlabDrainList[discussionJSON](ctx, a, reqURL)
 }
 
 // ListComments implements forge.Forge against GitLab's discussions listing
@@ -492,13 +498,19 @@ func (a *Adapter) GeneratedAttribute() string { return "gitlab-generated" }
 
 // CIContext implements forge.Forge, reading GitLab CI's own predefined
 // variables: CI_DEFAULT_BRANCH, CI_MERGE_REQUEST_IID (presence signals an
-// MR pipeline), CI_MERGE_REQUEST_TARGET_BRANCH_NAME.
+// MR pipeline), CI_MERGE_REQUEST_TARGET_BRANCH_NAME. Pipeline/Job read
+// CI_PIPELINE_ID and CI_JOB_ID (both numeric and both increase
+// monotonically — a retried job gets a fresh, higher CI_JOB_ID within the
+// same CI_PIPELINE_ID, which is exactly the (pipeline id, job id)
+// ordering 03 §The fold's "current" selection wants, I-25).
 func (a *Adapter) CIContext(ctx context.Context) (forge.CIInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return forge.CIInfo{}, err
 	}
 	info := forge.CIInfo{
 		DefaultBranch: a.cfg.Getenv("CI_DEFAULT_BRANCH"),
+		Pipeline:      a.cfg.Getenv("CI_PIPELINE_ID"),
+		Job:           a.cfg.Getenv("CI_JOB_ID"),
 	}
 	if mrIID := a.cfg.Getenv("CI_MERGE_REQUEST_IID"); mrIID != "" {
 		info.IsMergeRequest = true

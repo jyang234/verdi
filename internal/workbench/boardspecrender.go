@@ -14,9 +14,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardlayout"
-	"github.com/OWNER/verdi/internal/designscaffold"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/designscaffold"
 )
 
 // boardClientPayload is the JSON state embedded for boardspec.js: the
@@ -85,6 +85,7 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doc
 <header class="page-header board-head">
 <h1>{{.Title}}</h1>
 <span class="board-mode-tag board-mode-tag--{{.Mode}}">{{.ModeLabel}}</span>
+{{if .StatusBadge}}<span class="badge badge-{{.StatusBadge}} board-status-badge" data-testid="board-status-badge">{{.StatusBadge}}</span>{{end}}
 <div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>
 </header>
 <div id="boardv2-region">
@@ -109,7 +110,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 		Legal:        legalPairTable(),
 		Consequences: consequenceLabels,
 		Removals:     removalConsequenceLabels,
-		Gate:         []string{"supersedes", "exempts"},
+		Gate:         gateBearingTypes(),
 	}
 	stateJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -117,27 +118,48 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 	}
 
 	data := struct {
-		Name      string
-		Title     string
-		Mode      string
-		ModeLabel string
-		Region    template.HTML
-		Dialogs   template.HTML
-		StateJSON template.JS
+		Name        string
+		Title       string
+		Mode        string
+		ModeLabel   string
+		StatusBadge string
+		Region      template.HTML
+		Dialogs     template.HTML
+		StateJSON   template.JS
 	}{
-		Name:      p.Spec,
-		Title:     p.Title,
-		Mode:      string(p.Mode),
-		ModeLabel: modeStampLabels[p.Mode],
-		Region:    template.HTML(renderBoardRegion(p, git)),
-		Dialogs:   template.HTML(renderBoardDialogs(p)),
-		StateJSON: template.JS(stateJSON),
+		Name:        p.Spec,
+		Title:       p.Title,
+		Mode:        string(p.Mode),
+		ModeLabel:   modeStampLabels[p.Mode],
+		StatusBadge: terminalStatusBadge(p.Status),
+		Region:      template.HTML(renderBoardRegion(p, git)),
+		Dialogs:     template.HTML(renderBoardDialogs(p)),
+		StateJSON:   template.JS(stateJSON),
 	}
 	var buf bytes.Buffer
 	if err := boardSpecPageTemplate.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("workbench: rendering board page: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// terminalStatusBadge returns the spec status to stamp as a badge on the
+// board head, or "" to suppress it. It is scoped to the terminal `superseded`
+// state (spec/feature-supersession-state ac-2; 03 §rung 3: a superseded spec's
+// terminal state must be legible on its own wall "without consulting
+// backlinks"): every other lifecycle state is already spoken by the mode stamp
+// beside it (authoring/review/read-only), and the `closed` terminal case is
+// deferred (dc-2 — a closed spec is already terminally legible). The badge
+// reuses the `.badge-superseded` vocabulary the index list and dex page carry,
+// so a spec's status reads the same on every surface that renders it. Kept a
+// single-status gate rather than a general per-status stamp: the smallest
+// reversible option ac-2 requires proven now, generalisable later without
+// churn.
+func terminalStatusBadge(status string) string {
+	if status == "superseded" {
+		return status
+	}
+	return ""
 }
 
 // renderBoardRegion renders the placards, canvas, and side rail — the
@@ -230,6 +252,13 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		if feature {
 			writeScopingReceipts(&b, p, c)
 		}
+		// A STORY AC card discloses its evidence obligations (ac-2) —
+		// populated for story-wall AC cards only (attachObligations), so a
+		// non-empty list is a sufficient guard; the render never re-checks
+		// class.
+		if len(c.Obligations) > 0 {
+			writeObligations(&b, c)
+		}
 		if authoring {
 			b.WriteString(`<button type="button" class="yarn-handle" data-testid="yarn-handle-` + esc(c.ID) + `" aria-label="Draw yarn from ` + esc(c.ID) + `" title="drag to another card to string yarn"></button>`)
 		}
@@ -297,8 +326,16 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// handle that draws their attribution thread, and a Graduate that
 	// routes to stub-graduate instead of the object menu (the sticky's
 	// type already names what it becomes).
+	// On a STORY wall every scratch sticky carries the obligation pushpin:
+	// dragging its yarn onto a story AC authors that AC's evidence
+	// obligation (spec/obligation-artifact ac-3) — the story wall's
+	// counterpart to the feature wall's proto-sticky attribution. There are
+	// no proto-stickies on a story wall (the server refuses them), so the
+	// two handles never coexist on one sticky.
+	storyWall := p.Class == string(artifact.ClassStory)
 	for _, s := range p.Stickies {
 		proto := s.Type == string(artifact.AnnotationStory) || s.Type == string(artifact.AnnotationSpike)
+		obligationYarn := storyWall && !proto
 		b.WriteString(`<div class="sticky sticky--` + stickyTypeClass(s.Type) + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
 		b.WriteString(`<span class="sticky-type">` + esc(s.Type) + `</span>`)
 		b.WriteString(`<p class="sticky-body">` + esc(s.Body) + `</p>`)
@@ -311,6 +348,9 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 				target = "an open question"
 			}
 			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw attribution yarn from this ` + esc(s.Type) + ` sticky" title="drag to ` + target + ` to claim it"></button>`)
+		}
+		if authoring && obligationYarn {
+			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto yarn-handle--obligation" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw an obligation thread from this sticky" title="drag to a story acceptance criterion to author its evidence obligation"></button>`)
 		}
 		if authoring {
 			if proto {
@@ -455,10 +495,10 @@ func writeScopingReceipts(b *strings.Builder, p *BoardProjection, c cardView) {
 	switch boardlayout.ZoneKind(c.Kind) {
 	case boardlayout.ZoneAC:
 		n := p.ACCoverage[c.ID]
-		switch {
-		case n == 0:
+		switch n {
+		case 0:
 			b.WriteString(`<span class="coverage-chip coverage-chip--none" data-testid="coverage-` + esc(c.ID) + `" data-coverage="0">no stub</span>`)
-		case n == 1:
+		case 1:
 			b.WriteString(`<span class="coverage-chip coverage-chip--covered" data-testid="coverage-` + esc(c.ID) + `" data-coverage="1">covered by 1 stub</span>`)
 		default:
 			b.WriteString(`<span class="coverage-chip coverage-chip--covered" data-testid="coverage-` + esc(c.ID) + `" data-coverage="` + strconv.Itoa(n) + `">covered by ` + strconv.Itoa(n) + ` stubs</span>`)
@@ -468,6 +508,46 @@ func writeScopingReceipts(b *strings.Builder, p *BoardProjection, c cardView) {
 			b.WriteString(`<span class="oq-claims" data-testid="oq-claims-` + esc(c.ID) + `" data-claims="` + strconv.Itoa(n) + `" title="one spike answering many questions is normal; many spikes on one question is worth a look">claimed by ` + strconv.Itoa(n) + ` spikes</span>`)
 		}
 	}
+}
+
+// writeObligations renders a STORY AC card's evidence obligations
+// (spec/obligation-wall ac-2): one compact row per DECLARED evidence kind,
+// disclosing what that kind's obligation demands right on the wall (feature
+// co-3, legible-without-the-sidecar). A kind WITH an authored obligation
+// shows its title — the specific demand, read from the obligation's own
+// rendered content, never recovered from verdi.bindings.yaml — with the
+// obligation's fuller prose body in the row's tooltip (the board's
+// established "headline visible, full form in title=" idiom the card text
+// and case-file placards already use). A declared kind with NO obligation
+// yet shows a disclosed "no obligation" badge in the SAME dashed pending
+// vocabulary the coverage receipt's "no stub" chip wears (dc-2: the wall
+// discloses, it never refuses). The list is populated only for story-wall AC
+// cards (attachObligations), so a non-empty c.Obligations is the render's
+// whole gate.
+func writeObligations(b *strings.Builder, c cardView) {
+	esc := stdhtml.EscapeString
+	b.WriteString(`<div class="card-obligations" data-testid="obligations-` + esc(c.ID) + `">`)
+	for _, o := range c.Obligations {
+		if o.Present {
+			// The tooltip carries the obligation's prose so its full argument
+			// is a hover away on the wall itself; it falls back to the title
+			// when an obligation has no body, never an empty tooltip.
+			tip := o.Body
+			if tip == "" {
+				tip = o.Title
+			}
+			b.WriteString(`<div class="obligation obligation--present" data-obligation-kind="` + esc(o.Kind) + `" data-obligation-present="true">`)
+			b.WriteString(`<span class="obligation-kind">` + esc(o.Kind) + `</span>`)
+			b.WriteString(`<span class="obligation-title" title="` + esc(tip) + `">` + esc(o.Title) + `</span>`)
+			b.WriteString(`</div>`)
+			continue
+		}
+		b.WriteString(`<div class="obligation obligation--none" data-obligation-kind="` + esc(o.Kind) + `" data-obligation-present="false">`)
+		b.WriteString(`<span class="obligation-kind">` + esc(o.Kind) + `</span>`)
+		b.WriteString(`<span class="obligation-badge" data-testid="obligation-none-` + esc(c.ID) + `-` + esc(o.Kind) + `">no obligation</span>`)
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</div>`)
 }
 
 // zoneLabelText names each zone band as a newcomer reads it.

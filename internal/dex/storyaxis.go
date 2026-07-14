@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // storyAxisURL is an archived story record's by-story page URL, keyed by

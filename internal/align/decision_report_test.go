@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // TestGenerateDecisionConflict_JudgeSkipped_DisclosedUnprovenComplete is

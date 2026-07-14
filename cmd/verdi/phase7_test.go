@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/fixturegit"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 // phase7ManifestYAML is a self-contained verdi.yaml for Phase 7's own

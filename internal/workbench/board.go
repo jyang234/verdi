@@ -20,9 +20,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/boardio"
-	"github.com/OWNER/verdi/internal/commitdesign"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/commitdesign"
 )
 
 const boardStateSchema = "verdi.board/v1"

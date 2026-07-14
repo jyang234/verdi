@@ -5,17 +5,17 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/forge/forgetest"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge/forgetest"
 )
 
 type harness struct{ f *Forge }
 
 func (h harness) Forge() forge.Forge { return h.f }
 
-func (h harness) SeedBundle(t *testing.T, ref, commit string, bundle forge.EvidenceBundle) {
+func (h harness) SeedBundle(t *testing.T, ref, commit string, tree forge.DerivedTree) {
 	t.Helper()
-	h.f.SeedBundle(ref, commit, bundle)
+	h.f.SeedBundle(ref, commit, tree)
 }
 
 func (h harness) WantGeneratedAttribute() string { return "fake-generated" }

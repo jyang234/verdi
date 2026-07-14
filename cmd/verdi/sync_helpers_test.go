@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 func TestLoadManifest_Happy(t *testing.T) {
@@ -155,16 +155,41 @@ func TestGithubRepoName(t *testing.T) {
 }
 
 func TestBuildForge_Negative_UnknownKind(t *testing.T) {
-	if _, err := buildForge("bitbucket"); err == nil {
+	if _, err := buildForge("bitbucket", ""); err == nil {
 		t.Fatal("buildForge(unknown kind): want error, got nil")
 	}
 }
 
 func TestBuildForge_Happy(t *testing.T) {
 	for _, kind := range []string{"gitlab", "github"} {
-		if _, err := buildForge(kind); err != nil {
+		if _, err := buildForge(kind, ""); err != nil {
 			t.Errorf("buildForge(%q): %v", kind, err)
 		}
+	}
+}
+
+// TestGithubOwnerRepo covers D6-14: the github owner/repo resolves from
+// GitHub Actions' env when set, and otherwise falls back to the origin
+// remote URL for a local run.
+func TestGithubOwnerRepo(t *testing.T) {
+	// Env is authoritative when set — the origin URL is not consulted.
+	t.Setenv("GITHUB_REPOSITORY_OWNER", "envowner")
+	t.Setenv("GITHUB_REPOSITORY", "envowner/envrepo")
+	if o, r := githubOwnerRepo("https://github.com/urlowner/urlrepo.git"); o != "envowner" || r != "envrepo" {
+		t.Errorf("env should win: githubOwnerRepo = (%q, %q), want (envowner, envrepo)", o, r)
+	}
+
+	// Env unset → origin remote URL fallback (D6-14).
+	t.Setenv("GITHUB_REPOSITORY_OWNER", "")
+	t.Setenv("GITHUB_REPOSITORY", "")
+	if o, r := githubOwnerRepo("git@github.com:urlowner/urlrepo.git"); o != "urlowner" || r != "urlrepo" {
+		t.Errorf("origin fallback: githubOwnerRepo = (%q, %q), want (urlowner, urlrepo)", o, r)
+	}
+
+	// Neither env nor a resolvable URL → empty, the honest can't-identify
+	// case (forgeCredentialsPresent then declines to build a doomed forge).
+	if o, r := githubOwnerRepo(""); o != "" || r != "" {
+		t.Errorf("no identifier: githubOwnerRepo = (%q, %q), want empty", o, r)
 	}
 }
 

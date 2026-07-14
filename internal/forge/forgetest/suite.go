@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/forge"
 )
 
 // Run executes the forge contract suite against the harness newHarness
@@ -170,32 +170,48 @@ func testGetThreadResolutionExcludesGeneralComments(t *testing.T, h Harness) {
 	}
 }
 
+// testFetchHappyPath proves a seeded derived tree — deliberately spanning
+// MORE THAN ONE key subdir (a branch-keyed per-service bundle plus a
+// per-spec subdir, the real verdi-evidence artifact shape) — round-trips
+// through FetchEvidenceBundle with every key preserved, never collapsed to
+// a single four-file bundle.
 func testFetchHappyPath(t *testing.T, h Harness) {
 	t.Helper()
-	want := forge.EvidenceBundle{
-		Verdicts:     []byte(`[{"schema":"verdi.evidence/v1"}]` + "\n"),
-		Tests:        []byte(`{"schema":"verdi.tests/v1","suite":"pass"}` + "\n"),
-		Review:       []byte(`[{"service":"svcfix","verdict":"STRUCTURALLY-CLEAR"}]` + "\n"),
-		BoundaryDiff: []byte(`[]` + "\n"),
+	const commit = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	want := forge.DerivedTree{
+		"build--stale-decline/" + commit + "/verdicts.json":      []byte(`[]` + "\n"),
+		"build--stale-decline/" + commit + "/tests.json":         []byte(`{"schema":"verdi.tests/v1","suite":"pass"}` + "\n"),
+		"build--stale-decline/" + commit + "/review.json":        []byte(`[{"service":"svcfix","verdict":"STRUCTURALLY-CLEAR"}]` + "\n"),
+		"build--stale-decline/" + commit + "/boundary-diff.json": []byte(`[]` + "\n"),
+		"spec--stale-decline/" + commit + "/verdicts.json":       []byte(`[{"schema":"verdi.evidence/v1"}]` + "\n"),
 	}
-	h.SeedBundle(t, "spec/stale-decline", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", want)
+	h.SeedBundle(t, "build/stale-decline", commit, want)
 
-	got, err := h.Forge().FetchEvidenceBundle(context.Background(), "spec/stale-decline", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	got, err := h.Forge().FetchEvidenceBundle(context.Background(), "build/stale-decline", commit)
 	if err != nil {
 		t.Fatalf("FetchEvidenceBundle: %v", err)
 	}
-	if string(got.Verdicts) != string(want.Verdicts) {
-		t.Errorf("Verdicts = %q, want %q", got.Verdicts, want.Verdicts)
+	if len(got) != len(want) {
+		t.Fatalf("fetched tree has %d entries, want %d: got keys %v", len(got), len(want), keysOf(got))
 	}
-	if string(got.Tests) != string(want.Tests) {
-		t.Errorf("Tests = %q, want %q", got.Tests, want.Tests)
+	for key, wantBytes := range want {
+		gotBytes, ok := got[key]
+		if !ok {
+			t.Errorf("fetched tree missing key %q (got keys %v)", key, keysOf(got))
+			continue
+		}
+		if string(gotBytes) != string(wantBytes) {
+			t.Errorf("key %q: fetched %q, want %q", key, gotBytes, wantBytes)
+		}
 	}
-	if string(got.Review) != string(want.Review) {
-		t.Errorf("Review = %q, want %q", got.Review, want.Review)
+}
+
+func keysOf(tree forge.DerivedTree) []string {
+	out := make([]string, 0, len(tree))
+	for k := range tree {
+		out = append(out, k)
 	}
-	if string(got.BoundaryDiff) != string(want.BoundaryDiff) {
-		t.Errorf("BoundaryDiff = %q, want %q", got.BoundaryDiff, want.BoundaryDiff)
-	}
+	return out
 }
 
 func testFetchNoBundle(t *testing.T, h Harness) {

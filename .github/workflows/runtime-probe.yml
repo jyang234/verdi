@@ -1,0 +1,51 @@
+# runtime-probe (spec/runtime-evidence dc-1, dc-3): the SCHEDULED CI trigger
+# the scheduled-probe runtime-evidence mechanism requires — "a probe running
+# as a scheduled CI job emits a kind: runtime record keyed by (story, AC)"
+# (dc-1). Deliberately a SMALL, SEPARATE workflow rather than a `schedule:`
+# trigger folded into verify.yml: verify.yml's own header comment already
+# explains why its evidence-production step must run strictly after `make
+# verify` succeeds IN THE SAME JOB (never a second, divergent re-run) — that
+# constraint has nothing to do with the runtime mechanism, which is not
+# gated on this repo's own test suite at all, so conflating the two would
+# either force a full make verify + e2e run on every cron tick for no
+# reason, or awkwardly bolt a schedule: trigger onto a job whose whole
+# shape is justified by a DIFFERENT constraint.
+#
+# HONEST SCOPE (dc-3): verdi itself has no live service to probe. This job
+# invokes `verdi sync --produce-runtime` BARE — no --story/--ac/--verdict/
+# --witness — which is the mechanism's own disclosed, honest no-op for
+# exactly this case (cmd/verdi/runtimeprobe.go): it proves the cron trigger
+# and the producer entrypoint are real, wired, and reachable in this repo's
+# own CI, without fabricating a "passing" record for a check that does not
+# exist (spec/runtime-evidence dc-3 forbids exactly that). The mechanism's
+# actual correctness — that a REAL (story, AC, verdict, witness) input
+# round-trips into a queryable, fold-consumable record — is proven
+# hermetically instead, over a fixture story (internal/runtime's own tests,
+# cmd/verdi/runtimeprobe_test.go, internal/evidence's fold tests). A real
+# service with a real check plugs its own probe in behind this same seam by
+# invoking `verdi sync --produce-runtime --story <ref> --ac <id> --verdict
+# <pass|fail|abstain> --witness "<text>"` from ITS OWN scheduled job, after
+# running its own check (out of scope for verdi — 03 §Pluggable evidence's
+# precedent: "the producer side is out of scope for this contract").
+name: runtime-probe
+
+on:
+  schedule:
+    # Once daily. The exact cadence is not load-bearing for dc-1 (a
+    # "scheduled" trigger, not a specific frequency) — daily is cheap and
+    # legible; tighten or loosen freely if a real consumer's probe needs a
+    # different cadence.
+    - cron: "17 6 * * *"
+  workflow_dispatch: {} # manual trigger, for exercising this job on demand
+
+jobs:
+  runtime-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: go build -o .build/verdi ./cmd/verdi
+      - name: "Run the scheduled runtime probe (spec/runtime-evidence dc-1; bare = the honest no-op, dc-3)"
+        run: ./.build/verdi sync --produce-runtime

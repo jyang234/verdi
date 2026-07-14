@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/index"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // dependencyMapCap is the anti-hairball law's cap for a service's

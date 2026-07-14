@@ -3,8 +3,8 @@ package decisionsweep
 import (
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/lint"
 )
 
 // ExemptSource is one decision's `exempts` edge targeting an ADR — one

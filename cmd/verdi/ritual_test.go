@@ -32,11 +32,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/gitx"
-	"github.com/OWNER/verdi/internal/provider"
-	providerfake "github.com/OWNER/verdi/internal/provider/fake"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/provider"
+	providerfake "github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // seedRitualProvider seeds titles for both tracker refs the round-four
@@ -414,6 +414,27 @@ x
 	}
 	featureV2Spec, _ := readSpec(t, repo.Dir, "loan-mgmt-v2")
 	v2Commit := featureV2Spec.Frozen.Commit
+
+	// --- ac-1 (feature-supersession-state, round 6): accepting loan-mgmt-v2
+	// — which carries a WHOLE-SPEC supersedes edge to its feature
+	// predecessor spec/loan-mgmt — also flipped that predecessor's status to
+	// `superseded` in the SAME ritual, mirroring D-12's story-rung flip
+	// above exactly (status-only edit, frozen stamp preserved, stays in
+	// specs/active/). This is orthogonal to the rung-4 cascade/blast-radius
+	// machinery just verified above (the computed quorum, the
+	// re-affirmation enforcement below): a statement about the predecessor
+	// FEATURE's own terminal lifecycle, not its downstream stories'
+	// verdicts.
+	predFeatureV1, _ := readSpec(t, repo.Dir, "loan-mgmt")
+	if predFeatureV1.Status != "superseded" {
+		t.Fatalf("predecessor feature v1 (loan-mgmt) status = %q, want superseded (accept of its successor must flip it, ac-1)", predFeatureV1.Status)
+	}
+	if predFeatureV1.Frozen == nil {
+		t.Fatal("predecessor feature v1 (loan-mgmt) must keep its frozen stamp across the superseded flip (status-only edit)")
+	}
+	if !contains(stdout.String(), "superseded by spec/loan-mgmt-v2") {
+		t.Fatalf("accept (feature v2) stdout = %q, want a disclosed predecessor-superseded line for the feature flip too", stdout.String())
+	}
 
 	// --- 14. verify a stale story is refused by verdi build start until a
 	// re-affirmation record exists (story v2 has not been built yet — its

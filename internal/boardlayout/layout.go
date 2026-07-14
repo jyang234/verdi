@@ -29,7 +29,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // ZoneKind is the closed enum of board zones. Unknown kinds fail closed

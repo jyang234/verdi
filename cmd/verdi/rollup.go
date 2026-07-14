@@ -38,12 +38,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/OWNER/verdi/internal/evidence"
-	"github.com/OWNER/verdi/internal/lint"
-	"github.com/OWNER/verdi/internal/provider"
-	"github.com/OWNER/verdi/internal/provider/jira"
-	"github.com/OWNER/verdi/internal/store"
-	"github.com/OWNER/verdi/internal/storyresolve"
+	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/provider/jira"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
 // rollupDeps bundles rollup's injectable dependencies so runRollup can be
@@ -187,14 +188,26 @@ func mapCriteria(acs []evidence.ACResult) []provider.CriterionStatus {
 // verdi.yaml's providers: map (04 §Reference scheme). Only ids and URLs
 // come from the manifest; the Jira token comes from VERDI_JIRA_TOKEN (04
 // §Jira adapter: "Secrets ... never committed"), never verdi.yaml.
+//
+// providers.jira.mode: fake (spec/close-verb dc-2, D6-2) selects the
+// in-process internal/provider/fake adapter instead of the real Jira
+// adapter — a config-only switch: base_url/rollup_field stay decoded and
+// ignored, so flipping mode back to "" (or removing it) restores the real
+// adapter with no code change (true-closure dc-2: "real Jira is a config
+// change, not a code change" — the SAME boundary 04 already proved, now
+// exercised for the fake side too).
 func buildProviderRegistry(m *store.Manifest) *provider.Registry {
 	providers := map[string]provider.StoryProvider{}
 	if m.Providers != nil && m.Providers.Jira != nil {
-		providers["jira"] = jira.New(jira.Config{
-			BaseURL:     m.Providers.Jira.BaseURL,
-			RollupField: m.Providers.Jira.RollupField,
-			Token:       os.Getenv("VERDI_JIRA_TOKEN"),
-		})
+		if m.Providers.Jira.Mode == "fake" {
+			providers["jira"] = fake.New()
+		} else {
+			providers["jira"] = jira.New(jira.Config{
+				BaseURL:     m.Providers.Jira.BaseURL,
+				RollupField: m.Providers.Jira.RollupField,
+				Token:       os.Getenv("VERDI_JIRA_TOKEN"),
+			})
+		}
 	}
 	return provider.NewRegistry(providers)
 }

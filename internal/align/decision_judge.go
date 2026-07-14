@@ -18,9 +18,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/canonjson"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // DecisionAbsenceFindingID is the design-branch mode's synthetic
@@ -92,20 +92,21 @@ type adrDigestEntry struct {
 }
 
 // adrCorpusDigest hashes the sorted (ref, content-sha256) list via
-// canonjson, mirroring verify.go's own ComputeDigest formula (sha256 over
-// canonical JSON of pinned, deterministic inputs).
+// canonjson.Digest (spec/shared-homes ac-2), mirroring verify.go's own
+// ComputeDigest formula. The per-entry content-sha256 stays a raw
+// crypto/sha256 sum (it identifies one ADR file's bytes, not the digest
+// tail itself); only the outer hash-of-the-list collapses to Digest.
 func adrCorpusDigest(entries []adrCorpusEntry) (string, error) {
 	digestEntries := make([]adrDigestEntry, 0, len(entries))
 	for _, e := range entries {
 		sum := sha256.Sum256(e.raw)
 		digestEntries = append(digestEntries, adrDigestEntry{Ref: e.ref, Content: hex.EncodeToString(sum[:])})
 	}
-	data, err := canonjson.Marshal(digestEntries)
+	digest, err := canonjson.Digest(digestEntries)
 	if err != nil {
 		return "", fmt.Errorf("align: marshaling ADR corpus digest input: %w", err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return digest, nil
 }
 
 // resolveFeatureSpec finds story's owning feature spec by scanning its own

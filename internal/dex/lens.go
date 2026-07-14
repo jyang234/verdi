@@ -12,11 +12,11 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/decisionsweep"
-	"github.com/OWNER/verdi/internal/evidence"
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/decisionsweep"
+	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/lint"
 )
 
 // pendingState is one story ref's pending-supersession outcome — a proper

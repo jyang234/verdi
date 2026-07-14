@@ -3,7 +3,7 @@ package lint
 import (
 	"testing"
 
-	"github.com/OWNER/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/disclosure"
 )
 
 func TestFinding_String(t *testing.T) {

@@ -19,7 +19,7 @@ func (b *Backend) SearchArtifacts(ctx context.Context, argsRaw json.RawMessage) 
 	var args struct {
 		Query string `json:"query"`
 	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
+	if err := strictUnmarshal(argsRaw, &args); err != nil {
 		return toolError("search_artifacts: malformed arguments: " + err.Error())
 	}
 	if args.Query == "" {

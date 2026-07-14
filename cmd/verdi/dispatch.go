@@ -26,9 +26,9 @@ var verbPhase = map[string]int{
 	"mcp":             9,
 	"matrix":          6,
 	"rollup":          11,
-	"close":           0, // out of v0 (PLAN.md §5)
-	"waivers":         0, // out of v0 (PLAN.md §5)
-	"verify-artifact": 0, // out of v0 (PLAN.md §5)
+	"close":           14, // round 6, spec/close-verb — flipped from I-23's phase-0 stub
+	"waivers":         0,  // out of v0 (PLAN.md §5)
+	"verify-artifact": 0,  // out of v0 (PLAN.md §5)
 	"dex":             12,
 	"gc":              0,  // out of v0 (PLAN.md §5)
 	"gate":            8,  // I-7, not in 05 §CLI's table
@@ -103,6 +103,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if verb == "audit" {
 		return cmdAudit(args[1:], os.Stdout, stderr)
+	}
+	if verb == "close" {
+		return cmdClose(args[1:], os.Stdout, stderr)
 	}
 
 	if phase == 0 {

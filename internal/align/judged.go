@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // AbsenceFindingID is the synthetic "judged coverage absent" finding's

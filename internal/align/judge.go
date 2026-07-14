@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // DefaultJudgeTimeout is S5's observed-safe ceiling: "Timeout ~120s via exec
@@ -58,6 +58,12 @@ func (ExecJudgeRunner) RunJudge(ctx context.Context, argv []string, stdin []byte
 		return JudgeExecResult{}, fmt.Errorf("align: RunJudge: argv must not be empty")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	// When ctx expires, CommandContext SIGKILLs the judge, but cmd.Run() can
+	// still block until the process's grandchildren (e.g. a shell's `sleep`)
+	// release the inherited stdout/stderr pipes — the classic WaitDelay gotcha,
+	// env-dependent (prompt locally, up to the child's lifetime in CI). Bound
+	// it so a timed-out judge returns promptly.
+	cmd.WaitDelay = 2 * time.Second
 	cmd.Stdin = bytes.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

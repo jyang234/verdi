@@ -1,6 +1,6 @@
 package forge
 
-import "github.com/OWNER/verdi/internal/artifact"
+import "github.com/jyang234/verdi/internal/artifact"
 
 // ParseCommentToken extracts the object id from a comment body beginning
 // with a `[vd:<object-id>]` token — forge-agnostic (05: "identical on

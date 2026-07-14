@@ -1,4 +1,4 @@
-module github.com/OWNER/verdi
+module github.com/jyang234/verdi
 
 go 1.25
 

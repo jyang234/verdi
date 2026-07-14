@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OWNER/verdi/internal/render"
+	"github.com/jyang234/verdi/internal/render"
 )
 
 // renderMarkdown and highlightCode delegate to internal/render, the shared

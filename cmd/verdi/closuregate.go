@@ -18,11 +18,11 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/disclosure"
-	"github.com/OWNER/verdi/internal/evidence"
-	"github.com/OWNER/verdi/internal/forge"
-	"github.com/OWNER/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // runClosureGate evaluates 03 §Gates' closure gate for spec at head:
@@ -79,15 +79,11 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 func checkClosureEligible(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string) (gateCondition, error) {
 	name := "1. story eligible (every AC evidenced or waived, authoritative evidence)"
 
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
-	records, err := evidence.LoadRecords(ctx, root, derivedRoot, head)
+	// Preview stays false — co-1: the closure gate folds ONLY source: ci
+	// evidence, never the --preview escape hatch.
+	result, err := foldStoryEvidence(ctx, root, spec, head, false)
 	if err != nil {
-		return gateCondition{}, fmt.Errorf("closure gate: loading evidence records: %w", err)
-	}
-	slug := store.RefSlug(spec.Story)
-	result, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: false, StoreRoot: root, StorySlug: slug})
-	if err != nil {
-		return gateCondition{}, fmt.Errorf("closure gate: folding evidence: %w", err)
+		return gateCondition{}, fmt.Errorf("closure gate: %w", err)
 	}
 	if result.Eligible {
 		return gateCondition{Name: name, OK: true}, nil

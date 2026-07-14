@@ -11,8 +11,8 @@ import (
 	"html/template"
 	"net/http"
 
-	"github.com/OWNER/verdi/internal/disclosure"
-	"github.com/OWNER/verdi/internal/disclosureview"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/disclosureview"
 )
 
 // disclosuresNote is the workbench edition's compute-provenance line —

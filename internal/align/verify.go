@@ -1,13 +1,11 @@
 package align
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // digestInput is the exact, ordered content ComputeDigest hashes. Every
@@ -32,19 +30,18 @@ type findingIdentityOnly struct {
 
 // ComputeDigest hashes the computed section's content — declares.boundaries
 // finding id/kind/text (never Disposition/Note, which are human state) plus
-// the acceptance-baseline boundary diffs — over covers, via canonjson for
-// byte-identical, deterministic output.
+// the acceptance-baseline boundary diffs — over covers, via canonjson.Digest
+// (spec/shared-homes ac-2) for byte-identical, deterministic output.
 func ComputeDigest(covers string, computedFindings []artifact.Finding, baselineDiffs []ServiceBoundaryDiff) (string, error) {
 	in := digestInput{Covers: covers, BaselineDiffs: baselineDiffs}
 	for _, f := range computedFindings {
 		in.Findings = append(in.Findings, findingIdentityOnly{ID: f.ID, Kind: string(f.Kind), Text: f.Text})
 	}
-	data, err := canonjson.Marshal(in)
+	digest, err := canonjson.Digest(in)
 	if err != nil {
 		return "", fmt.Errorf("align: marshaling digest input: %w", err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return digest, nil
 }
 
 // VerifyIntegrity recomputes fm's judged-section integrity hash from its

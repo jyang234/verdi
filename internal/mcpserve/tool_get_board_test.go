@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/forge"
-	forgefake "github.com/OWNER/verdi/internal/forge/fake"
-	"github.com/OWNER/verdi/internal/workbench"
+	"github.com/jyang234/verdi/internal/forge"
+	forgefake "github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 // getBoardOut is the shape TestGetBoard_* tests decode: workbench's

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OWNER/verdi/internal/artifact"
-	"github.com/OWNER/verdi/internal/upstream"
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/upstream"
 )
 
 func specWithImpacts(impacts []string) *artifact.SpecFrontmatter {
@@ -24,15 +24,16 @@ func specWithImpacts(impacts []string) *artifact.SpecFrontmatter {
 // TestRegenerateBaseline_Happy proves regenerateBaseline scopes to the
 // spec's impacted services (loansvc, matched by store.Service.Name against
 // spec.Impacts) and writes the same four-file bundle shape sync's own
-// regeneration writes, keyed by branch/commit.
+// regeneration writes, keyed by the SPEC ref/commit (RefSlug(spec.id)) so
+// the workbench preview matrix actually reaches it (true-closure).
 func TestRegenerateBaseline_Happy(t *testing.T) {
 	repo := buildPhase7Repo(t)
 	var stderr bytes.Buffer
 	deps := syncDeps{Runner: fakeGraphRunner(), GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &stderr}
 
-	regenerateBaseline(context.Background(), repo.Dir, "design/stale-decline", repo.Head, specWithImpacts([]string{"loansvc"}), deps, "design start", &stderr)
+	regenerateBaseline(context.Background(), repo.Dir, repo.Head, specWithImpacts([]string{"loansvc"}), deps, "design start", &stderr)
 
-	dir := filepath.Join(repo.Dir, ".verdi", "data", "derived", "design--stale-decline", repo.Head)
+	dir := filepath.Join(repo.Dir, ".verdi", "data", "derived", "spec--stale-decline", repo.Head)
 	for _, name := range derivedFileNames {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Fatalf("expected %s to exist: %v (stderr=%s)", name, err, stderr.String())
@@ -48,12 +49,12 @@ func TestRegenerateBaseline_NoToolchain(t *testing.T) {
 	var stderr bytes.Buffer
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &stderr}
 
-	regenerateBaseline(context.Background(), repo.Dir, "design/stale-decline", repo.Head, specWithImpacts([]string{"loansvc"}), deps, "design start", &stderr)
+	regenerateBaseline(context.Background(), repo.Dir, repo.Head, specWithImpacts([]string{"loansvc"}), deps, "design start", &stderr)
 
 	if !contains(stderr.String(), "no toolchain configured") {
 		t.Fatalf("stderr = %q, want a disclosed no-toolchain message", stderr.String())
 	}
-	assertNoDerivedDir(t, repo.Dir, "design--stale-decline", repo.Head)
+	assertNoDerivedDir(t, repo.Dir, "spec--stale-decline", repo.Head)
 }
 
 // TestRegenerateBaseline_NoImpactedService proves an empty (or
@@ -65,15 +66,15 @@ func TestRegenerateBaseline_NoImpactedService(t *testing.T) {
 	var stderr bytes.Buffer
 	deps := syncDeps{Runner: fakeGraphRunner(), GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &stderr}
 
-	regenerateBaseline(context.Background(), repo.Dir, "design/stale-decline", repo.Head, specWithImpacts(nil), deps, "design start", &stderr)
+	regenerateBaseline(context.Background(), repo.Dir, repo.Head, specWithImpacts(nil), deps, "design start", &stderr)
 
 	if !contains(stderr.String(), "declares no impacted service") {
 		t.Fatalf("stderr = %q, want a disclosed no-impacted-service message", stderr.String())
 	}
-	assertNoDerivedDir(t, repo.Dir, "design--stale-decline", repo.Head)
+	assertNoDerivedDir(t, repo.Dir, "spec--stale-decline", repo.Head)
 
 	stderr.Reset()
-	regenerateBaseline(context.Background(), repo.Dir, "design/stale-decline", repo.Head, specWithImpacts([]string{"no-such-service"}), deps, "design start", &stderr)
+	regenerateBaseline(context.Background(), repo.Dir, repo.Head, specWithImpacts([]string{"no-such-service"}), deps, "design start", &stderr)
 	if !contains(stderr.String(), "declares no impacted service") {
 		t.Fatalf("stderr = %q, want a disclosed no-impacted-service message for an unmatched impact", stderr.String())
 	}
@@ -91,12 +92,12 @@ func TestRegenerateBaseline_ToolchainUnreachable(t *testing.T) {
 	var stderr bytes.Buffer
 	deps := syncDeps{Runner: fr, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &stderr}
 
-	regenerateBaseline(context.Background(), repo.Dir, "design/stale-decline", repo.Head, specWithImpacts([]string{"loansvc"}), deps, "design start", &stderr)
+	regenerateBaseline(context.Background(), repo.Dir, repo.Head, specWithImpacts([]string{"loansvc"}), deps, "design start", &stderr)
 
 	if !contains(stderr.String(), "toolchain unreachable") {
 		t.Fatalf("stderr = %q, want a disclosed toolchain-unreachable message", stderr.String())
 	}
-	assertNoDerivedDir(t, repo.Dir, "design--stale-decline", repo.Head)
+	assertNoDerivedDir(t, repo.Dir, "spec--stale-decline", repo.Head)
 }
 
 // store.FilterImpacted itself (hoisted from this file's former private

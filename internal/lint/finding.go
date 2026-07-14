@@ -3,7 +3,7 @@ package lint
 import (
 	"fmt"
 
-	"github.com/OWNER/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/disclosure"
 )
 
 // Severity distinguishes a verdict failure from a printed disclosure.

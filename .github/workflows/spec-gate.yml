@@ -1,0 +1,43 @@
+# spec-gate (Phase 4, spec-only vs code CI differentiation; owner
+# request mirroring the round-4 two-tier gate): the FAST gate for
+# spec/doc-only changes. verify.yml is now path-filtered to code paths
+# only, so a PR that touches only `.verdi/specs/**`, `docs/**`, or a bare
+# `.md` file never triggers it — this workflow covers exactly that case
+# instead, so no PR is ever silently ungated. It intentionally runs a
+# light check only (build + `verdi lint` + `make spec-align`), never the
+# full `make verify` (no unit tests, no e2e) — that's the whole point of
+# the split: spec MRs gate on lint/readiness, code MRs pay the full gate.
+# A PR touching both code and spec paths gets BOTH workflows, since
+# verify.yml's own path filter still matches it.
+#
+# No branch protection / required-check wiring here by design: a
+# path-filtered required check can never report on a PR outside its
+# paths, which deadlocks a solo operator who can't also satisfy a
+# required-approval quorum — out of scope for this round.
+name: spec-gate
+
+on:
+  push:
+    paths:
+      - ".verdi/specs/**"
+      - "docs/**"
+      - "**/*.md"
+  pull_request:
+    paths:
+      - ".verdi/specs/**"
+      - "docs/**"
+      - "**/*.md"
+
+jobs:
+  spec-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: go build -o .build/verdi ./cmd/verdi
+      - run: ./.build/verdi lint
+      - run: make spec-align

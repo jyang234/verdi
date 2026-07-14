@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/OWNER/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/provider"
 )
 
 // Comment is one human-comment side effect a PublishRollup call fired,
@@ -138,24 +138,13 @@ func (p *Provider) PublishRollup(ctx context.Context, r provider.Rollup) error {
 // between a and b, comparing by ID (order-independent, per 04
 // §Semantics's "any AC status changed since the last publish"). A
 // criterion appearing in one set but not the other counts as a change.
+// Thin wrapper over provider.StatusesChanged (spec/shared-homes ac-5) —
+// see there for the shared comparison this package's fake and the jira
+// adapter both call with their own projection.
 func criteriaStatusesChanged(a, b []provider.CriterionStatus) bool {
-	statusesByID := func(cs []provider.CriterionStatus) map[string]string {
-		m := make(map[string]string, len(cs))
-		for _, c := range cs {
-			m[c.ID] = c.Status
-		}
-		return m
-	}
-	am, bm := statusesByID(a), statusesByID(b)
-	if len(am) != len(bm) {
-		return true
-	}
-	for id, st := range am {
-		if bm[id] != st {
-			return true
-		}
-	}
-	return false
+	return provider.StatusesChanged(a, b, func(c provider.CriterionStatus) (id, status string) {
+		return c.ID, c.Status
+	})
 }
 
 // PublishedField returns the most recently published rollup for story
