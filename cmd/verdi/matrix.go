@@ -26,6 +26,17 @@
 // heuristic's job. The board file (mutable/boards/STORY-1482.json) is board
 // state owned by a different subsystem — keyed by the tracker's own board key,
 // not by RefSlug — and is never an input to matrix's resolution.
+//
+// spec/obligation-wall ac-1 adds the table's OBLIGATION column: per AC, for
+// every evidence kind it declares, that kind's obligation title (read
+// through internal/evidence.Obligations, keyed by the spec's OWN directory
+// name — specDirName — never the story tracker slug above) or a disclosed
+// "(no obligation)" marker when none exists yet (dc-2: disclosure, never a
+// blocking error here). This is additive only: the fold itself is
+// unchanged (evidence-obligations oq-1 — "no fold change, no record
+// field") — obligationCellsFor and specDirName below compute the new
+// column entirely outside evidence.Fold, and printMatrix stays a pure
+// formatter over already-computed data.
 package main
 
 import (
@@ -33,6 +44,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -125,8 +137,73 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	printMatrix(stdout, result, spec.Status, preview)
+	// spec/obligation-wall ac-1: obligations are loaded by (spec-name,
+	// ac-id) — the spec's OWN directory name, distinct from the story
+	// tracker slug the fold's waiver/attestation lookups above use. specName
+	// is not carried by evidence.Fold's own output (obligations do not
+	// change the fold, feature evidence-obligations oq-1); it is derived
+	// here, independently, from the resolved spec's canonical ref.
+	specName, err := specDirName(spec.ID)
+	if err != nil {
+		fmt.Fprintln(stderr, "matrix:", err)
+		return 2
+	}
+	obligationCells, err := obligationCellsFor(root, specName, spec.AcceptanceCriteria)
+	if err != nil {
+		fmt.Fprintln(stderr, "matrix:", err)
+		return 2
+	}
+
+	printMatrix(stdout, result, spec.Status, preview, obligationCells)
 	return 0
+}
+
+// specDirName returns the <name> segment of a spec ref "spec/<name>" — the
+// same directory-basename convention .verdi/obligations/<name>/ is keyed
+// by (spec/obligation-wall DC-1). For any spec resolved through
+// storyresolve.Resolve this is exactly the directory storyresolve read it
+// from: LoadActiveSpec keys specs/active/<name>/spec.md by this same name,
+// and every consumer of a resolved spec already trusts spec.ID as that
+// spec's own canonical ref (e.g. this file's own `spec: %s` matrix header
+// line prints it directly).
+func specDirName(specRef string) (string, error) {
+	ref, err := artifact.ParseRef(specRef)
+	if err != nil {
+		return "", fmt.Errorf("resolved spec ref %q does not parse: %w", specRef, err)
+	}
+	return ref.Name, nil
+}
+
+// obligationCellsFor builds each AC's OBLIGATION column entry ahead of
+// rendering (spec/obligation-wall ac-1, dc-1): for every evidence kind ac
+// declares, in that AC's own declared order, that kind's obligation title —
+// read through the one loader internal/evidence.Obligations backs (dc-1:
+// "not two readers", shared with the board's own follow-on render) — or a
+// disclosed "(no obligation)" marker when the kind has none yet (dc-2:
+// disclosure, never a blocking error on this read surface). A file that
+// exists but fails strict decode is a real operational error, not a
+// disclosed marker — matrix already treats a decode error as operational
+// (this file's own top doc comment: "a decode error" is one of the named
+// exit-2 cases), and a broken obligation is not "no obligation."
+func obligationCellsFor(root, specName string, acs []artifact.AcceptanceCriterion) (map[string]string, error) {
+	cells := make(map[string]string, len(acs))
+	for _, ac := range acs {
+		obls, err := evidence.Obligations(root, specName, ac.ID)
+		if err != nil {
+			return nil, fmt.Errorf("loading obligations for %s: %w", ac.ID, err)
+		}
+
+		parts := make([]string, 0, len(ac.Evidence))
+		for _, kind := range ac.Evidence {
+			if o, ok := obls[kind]; ok {
+				parts = append(parts, fmt.Sprintf("%s: %s", kind, o.Title))
+			} else {
+				parts = append(parts, fmt.Sprintf("%s: (no obligation)", kind))
+			}
+		}
+		cells[ac.ID] = strings.Join(parts, "; ")
+	}
+	return cells, nil
 }
 
 // printMatrix renders result as a per-AC table plus the story eligibility
@@ -137,7 +214,13 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 // than only inferable by opening the raw spec or chasing a
 // `superseded-by` backlink. preview only controls the banner — Fold
 // already decided what's in scope.
-func printMatrix(w io.Writer, result evidence.StoryResult, status artifact.Status, preview bool) {
+//
+// obligationCells is spec/obligation-wall ac-1's addition: each AC's
+// pre-rendered OBLIGATION column entry (obligationCellsFor), keyed by AC
+// id — kept as a caller-supplied map, rather than looked up here, so this
+// function stays a pure formatter over already-computed data (no disk I/O),
+// exactly as it was before this story.
+func printMatrix(w io.Writer, result evidence.StoryResult, status artifact.Status, preview bool, obligationCells map[string]string) {
 	fmt.Fprintf(w, "story: %s\n", result.Story)
 	fmt.Fprintf(w, "spec:  %s\n", result.SpecRef)
 	fmt.Fprintf(w, "status: %s\n", status)
@@ -147,9 +230,9 @@ func printMatrix(w io.Writer, result evidence.StoryResult, status artifact.Statu
 	fmt.Fprintln(w)
 
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "AC\tSTATUS\tEVIDENCE\tTEXT")
+	fmt.Fprintln(tw, "AC\tSTATUS\tEVIDENCE\tTEXT\tOBLIGATION")
 	for _, r := range result.ACs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.ID, r.Status, r.Summary, r.Text)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.ID, r.Status, r.Summary, r.Text, obligationCells[r.ID])
 	}
 	_ = tw.Flush() // tabwriter over stdout; flush error is unactionable CLI output
 
