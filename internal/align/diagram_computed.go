@@ -215,9 +215,14 @@ type DiagramAlignmentEntry struct {
 	Coverage      diagramverify.Coverage
 	ExcludedCount int // ambiguous identities excluded from comparison (dc-3's "N elements excluded")
 	Divergent     bool
-	// Deltas is one human-legible line per kept-but-gone element, its
-	// candidate witness folded in when resolved (dc-3: "the schema carries
-	// no separate witness field").
+	// Deltas is the proposal's realization residual: one human-legible line
+	// per divergence, of two self-labeled kinds — a kept-but-gone element
+	// (contradicted; its candidate witness folded in when resolved, dc-3:
+	// "the schema carries no separate witness field") and a proposed-new
+	// element still absent from regenerated truth (unrealized; no witness,
+	// there is no removing commit for something never built). Realized fires
+	// only when this residual is empty (parent spec/diagram-proposals ac-5:
+	// realized means the future state EXISTS in regenerated truth).
 	Deltas []string
 	// StaleBase is true when the proposal's derived_from base has moved
 	// since acceptance (independent of Divergent — diagramverify's own
@@ -307,17 +312,17 @@ func computeOneProposal(ctx context.Context, root string, runner upstream.Runner
 		return artifact.Finding{}, DiagramAlignmentEntry{}, fmt.Errorf("align: comparing edges for %s: %w", p.RelPath, err)
 	}
 
+	// The realization residual folds in BOTH kinds of divergence (parent
+	// spec/diagram-proposals ac-5: an accepted future-state flowchart is
+	// "realized" only when the future state EXISTS in regenerated truth):
+	// kept-but-gone elements the truth has dropped (contradicted, witnessed)
+	// AND proposed-new elements the truth still lacks (unrealized, never
+	// built — no removing commit, so no witness). Exists-classified elements
+	// contribute nothing. Realized therefore fires only when the residual is
+	// truly empty.
 	var deltas []string
-	for _, r := range nodeResults {
-		if r.Classification == diagramverify.KeptButGone {
-			deltas = append(deltas, formatDelta("node", r))
-		}
-	}
-	for _, r := range edgeResults {
-		if r.Classification == diagramverify.KeptButGone {
-			deltas = append(deltas, formatDelta("edge", r))
-		}
-	}
+	deltas = append(deltas, deltasFor("node", nodeResults)...)
+	deltas = append(deltas, deltasFor("edge", edgeResults)...)
 	sort.Strings(deltas)
 
 	stale := false
@@ -385,6 +390,24 @@ func countAmbiguous(ext *diagramverify.Extraction) int {
 	return n
 }
 
+// deltasFor turns one identity space's comparison results into residual
+// lines: a kept-but-gone element becomes a contradicted delta (formatDelta,
+// witness folded in), a proposed-new element becomes an unrealized delta
+// (formatUnrealized, no witness). An Exists result contributes nothing —
+// the future state it depicts is present in regenerated truth.
+func deltasFor(kind string, results []diagramverify.Result) []string {
+	var out []string
+	for _, r := range results {
+		switch r.Classification {
+		case diagramverify.KeptButGone:
+			out = append(out, formatDelta(kind, r))
+		case diagramverify.ProposedNew:
+			out = append(out, formatUnrealized(kind, r))
+		}
+	}
+	return out
+}
+
 // formatDelta renders one kept-but-gone comparison result as a single
 // human-legible line, folding its candidate witness in when resolved
 // (dc-3: "the schema carries no separate witness field ... folds every
@@ -394,6 +417,16 @@ func formatDelta(kind string, r diagramverify.Result) string {
 		return fmt.Sprintf("%s %q: contradicted — truth no longer has it (candidate witness %s)", kind, r.Identity, *r.Witness)
 	}
 	return fmt.Sprintf("%s %q: contradicted — truth no longer has it (no candidate witness resolved)", kind, r.Identity)
+}
+
+// formatUnrealized renders one proposed-new comparison result as a single
+// human-legible line: the proposal draws this element but regenerated truth
+// does not yet have it (parent spec/diagram-proposals ac-5 — the future
+// state is not realized). It carries no witness, ever: there is no removing
+// commit for something never built, so the pickaxe search that resolves a
+// kept-but-gone witness has nothing to find here (dc-4's candor).
+func formatUnrealized(kind string, r diagramverify.Result) string {
+	return fmt.Sprintf("%s %q: unrealized — proposed-new, not in truth", kind, r.Identity)
 }
 
 // coverageText renders entry's coverage tier as dc-3's disclosed clause —

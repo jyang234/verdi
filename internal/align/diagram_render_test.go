@@ -20,6 +20,9 @@ func TestRenderDiagramAlignment_MixedFixture_GoldenText(t *testing.T) {
 		{Name: "loan-flow-target", Coverage: diagramverify.CoverageFull, Divergent: true, Deltas: []string{
 			`node "LegacyStep": contradicted — truth no longer has it (candidate witness deadbeefcafebabe)`,
 		}},
+		{Name: "loan-flow-unbuilt", Coverage: diagramverify.CoverageFull, Divergent: true, Deltas: []string{
+			`node "NewThing": unrealized — proposed-new, not in truth`,
+		}},
 		{Name: "loan-flow-partial", Coverage: diagramverify.CoveragePartial, ExcludedCount: 2, Divergent: false},
 	}
 	illustrative := []IllustrativeFigure{{Name: "figure 1"}}
@@ -31,6 +34,7 @@ func TestRenderDiagramAlignment_MixedFixture_GoldenText(t *testing.T) {
 	want := "" +
 		"- loan-flow-clean: realized (full coverage)\n" +
 		`- loan-flow-target: divergent (full coverage): node "LegacyStep": contradicted — truth no longer has it (candidate witness deadbeefcafebabe)` + "\n" +
+		`- loan-flow-unbuilt: divergent (full coverage): node "NewThing": unrealized — proposed-new, not in truth` + "\n" +
 		"- loan-flow-partial: realized (partial coverage — 2 elements excluded from comparison)\n" +
 		"- figure 1: unverifiable (illustrative — no truth generator)\n"
 

@@ -269,6 +269,97 @@ func TestComputeDiagramAlignment_Divergent_WithWitness(t *testing.T) {
 	}
 }
 
+// TestComputeDiagramAlignment_Divergent_UnbuiltProposedNew is the ADJ-10
+// obligation (parent spec/diagram-proposals ac-5): an accepted from-scratch
+// proposal whose PROPOSED-NEW element was never built (absent from
+// regenerated truth) must NOT read realized — it discloses divergent with an
+// unrealized delta naming that element, and that delta carries NO candidate
+// witness (there is no removing commit for something never built).
+func TestComputeDiagramAlignment_Divergent_UnbuiltProposedNew(t *testing.T) {
+	root := t.TempDir()
+	writeDiagramFixture(t, root, "loan-flow-unbuilt",
+		diagramFrontmatterYAML("diagram/loan-flow-unbuilt", "accepted"),
+		"flowchart LR\n    NewThing[\"NewThing\"]\n")
+
+	runner := upstream.NewFakeRunner()
+	// Truth has an unrelated node but NOT NewThing — the proposed-new node
+	// was accepted but never actually built.
+	runner.Enqueue("flowmap", "graph", upstream.Result{Stdout: minimalGraphJSON("pkg.Unrelated"), ExitCode: 0})
+
+	spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/whatever"}}
+	findings, entries, _, err := ComputeDiagramAlignment(context.Background(), root, runner, spec, "deadbeef")
+	if err != nil {
+		t.Fatalf("ComputeDiagramAlignment: %v", err)
+	}
+	if len(findings) != 1 || len(entries) != 1 {
+		t.Fatalf("findings/entries = %+v/%+v, want exactly 1 each", findings, entries)
+	}
+	f := findings[0]
+	if !strings.Contains(f.Text, "divergent") {
+		t.Fatalf("finding text = %q, want it to disclose divergent (unbuilt proposed-new is not realized)", f.Text)
+	}
+	if !strings.Contains(f.Text, "unrealized") {
+		t.Fatalf("finding text = %q, want it to disclose the unrealized delta kind", f.Text)
+	}
+	if !strings.Contains(f.Text, "NewThing") {
+		t.Fatalf("finding text = %q, want it to name the unbuilt NewThing identity", f.Text)
+	}
+	// No witness on an unrealized delta — nothing removed something that was
+	// never built.
+	if strings.Contains(f.Text, "witness") {
+		t.Fatalf("finding text = %q, want NO candidate witness on an unrealized delta", f.Text)
+	}
+	if !entries[0].Divergent {
+		t.Fatalf("entry = %+v, want Divergent", entries[0])
+	}
+}
+
+// TestComputeDiagramAlignment_Realized_ProposedNewNowExists is the ADJ-10
+// realized-side obligation: a derived proposal whose proposed-new node NOW
+// EXISTS in regenerated truth (classified Exists), together with its
+// base-inherited kept element still present in truth, has an empty
+// realization residual and therefore reads realized.
+func TestComputeDiagramAlignment_Realized_ProposedNewNowExists(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"svc/a.go": "package svc\n"}, Message: "seed"},
+	})
+	root := repo.Dir
+
+	writeDiagramFixture(t, root, "loan-flow-base",
+		"id: diagram/loan-flow-base\nkind: diagram\ntitle: Base\nowners: [platform-team]\nstatus: active\n",
+		"flowchart LR\n    KeptElem[\"KeptElem\"]\n")
+	writeDiagramFixture(t, root, "loan-flow-built",
+		"id: diagram/loan-flow-built\nkind: diagram\ntitle: Target\nclass: proposal\nstatus: accepted\nowners: [platform-team]\n"+
+			"frozen: { at: 2026-07-14, commit: 3e91ab2 }\n"+
+			"derived_from: { ref: diagram/loan-flow-base, digest: sha256:"+hex64Diagram+" }\n",
+		"flowchart LR\n    KeptElem[\"KeptElem\"]\n    NewThing[\"NewThing\"]\n")
+
+	runner := upstream.NewFakeRunner()
+	// Truth has BOTH the kept element and the once-proposed-new one: the
+	// future state is fully built. Served sticky for RegenerateTruth and
+	// StaleBase's own internal call.
+	runner.Enqueue("flowmap", "graph", upstream.Result{Stdout: minimalGraphJSON("pkg.KeptElem", "pkg.NewThing"), ExitCode: 0})
+
+	spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/whatever"}}
+	findings, entries, _, err := ComputeDiagramAlignment(context.Background(), root, runner, spec, repo.Head)
+	if err != nil {
+		t.Fatalf("ComputeDiagramAlignment: %v", err)
+	}
+	if len(findings) != 1 || len(entries) != 1 {
+		t.Fatalf("findings/entries = %+v/%+v, want exactly 1 each", findings, entries)
+	}
+	f := findings[0]
+	if !strings.HasPrefix(f.Text, "realized") {
+		t.Fatalf("finding text = %q, want realized (every element exists in truth)", f.Text)
+	}
+	if entries[0].Divergent {
+		t.Fatalf("entry = %+v, want not divergent", entries[0])
+	}
+	if len(entries[0].Deltas) != 0 {
+		t.Fatalf("entry deltas = %+v, want empty residual", entries[0].Deltas)
+	}
+}
+
 // TestComputeDiagramAlignment_PartialCoverage_StillRealized is obligation
 // ac-2--behavioral case (3): a proposal whose mermaid source falls outside
 // verification-extractor's declared grammar (an unrecognized `subgraph`
