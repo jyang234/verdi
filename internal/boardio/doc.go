@@ -11,4 +11,15 @@
 // verdi.board/v1's mutable-zone document — new in phase 10) lives here
 // too, since it is the same "read/write one JSON-shaped file under the
 // mutable zone, atomically" concern.
+//
+// Caller contract (spec/fail-loud ac-4): the read-modify-write helpers —
+// RepositionSticky, GraduateStickies, DeleteAnnotations — are NOT
+// internally synchronized. Each one loads a file, mutates it, and writes
+// it back; the caller MUST hold the store's single write lock across that
+// load→write span, or two overlapping calls can lose an update (last
+// writer wins). In production that lock is workbench's per-dispatch
+// writeMu, held inside the one process the writer.lock file admits
+// (internal/workbench/boardspec.go's M-2 window). Atomic temp+rename
+// prevents a torn file either way, but does not by itself prevent a lost
+// update — only the caller-held lock does.
 package boardio
