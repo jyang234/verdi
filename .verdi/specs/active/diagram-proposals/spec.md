@@ -4,7 +4,7 @@ kind: spec
 title: "Diagram Proposals"
 owners: [platform-team]
 class: feature
-status: draft
+status: accepted-pending-build
 problem: { text: "generated diagrams describe only what exists; design intent about future state has no honest home — a mutated copy of a generated diagram masquerades as truth, an outside drawing drifts silently, and nothing reconciles a shipped build against the diagram that motivated it", anchor: problem }
 outcome: { text: "a designer proposes future-state diagrams — from scratch or derived from a generated base — that always disclose, per element, what exists versus what is proposed; that are verified deterministically wherever a truth generator exists; and that are reconciled against built reality in the pre-review alignment verdict", anchor: outcome }
 acceptance_criteria:
@@ -36,6 +36,7 @@ stubs:
   - { slug: illustrative-class, acceptance_criteria: [ac-4] }
   - { slug: alignment-section, acceptance_criteria: [ac-5] }
   - { slug: judged-sweep, acceptance_criteria: [ac-8] }
+frozen: { at: 2026-07-13, commit: 245eae286b7484f65c633ee5962592bcc1d58d02 }
 ---
 # Diagram Proposals
 
