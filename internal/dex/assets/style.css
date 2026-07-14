@@ -2493,6 +2493,151 @@ button.yarn-chip-type {
   margin: 0;
 }
 
+/* ---------- the derivation drawer: a receipt, opened ----------
+
+   Every wall badge's server-rendered drawer body (spec/derivation-drawer
+   dc-1): hidden beside its badge button until boardspec.js moves it to
+   the body and lifts the scrim — the same paper modal vocabulary as
+   every board dialog, deliberately calm and document-like (a receipt is
+   read, never alarmed at): the rule id and every cited digest/sha in the
+   record's own monospace, the firing records as quiet prose, the
+   disclosure contrasts in the pending ochre the wall's other disclosed
+   receipts already wear — never the violated red. */
+.badge-drawer {
+  position: fixed;
+  top: 16%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: 66vh;
+  overflow-y: auto;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3);
+  padding: 1rem 1.2rem 1.1rem;
+  z-index: 21;
+  text-align: left;
+  white-space: normal;
+  cursor: auto;
+}
+.drawer-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0 0 0.15rem;
+}
+.drawer-source {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--authored);
+  overflow-wrap: anywhere;
+}
+.drawer-close {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted-solid);
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  cursor: pointer;
+}
+.drawer-close:hover, .drawer-close:focus-visible { color: var(--ink); }
+.drawer-label {
+  font-family: var(--serif);
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: var(--ink);
+  margin: 0 0 0.7rem;
+}
+/* the sweep-provenance block, stamped once at the drawer's head: pinned
+   identifiers, so the record's own monospace, framed like the wall's
+   dashed receipt vocabulary */
+.drawer-provenance {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  margin: 0 0 0.8rem;
+}
+.drawer-provenance-line {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  line-height: 1.45;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
+.drawer-inputs {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 0.8rem;
+}
+.drawer-inputs caption,
+.drawer-section-label {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-solid);
+  margin: 0 0 0.3rem;
+}
+/* the caption keeps its native table-caption display (display:block
+   would drop it into the row flow, under the header row); the section
+   labels are plain spans and need the block themselves */
+.drawer-inputs caption { caption-side: top; padding: 0 0 0.3rem; }
+.drawer-section-label { display: block; }
+.drawer-inputs th {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-solid);
+  text-align: left;
+  padding: 0 0.7rem 0.2rem 0;
+}
+.drawer-inputs td {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--ink);
+  border-top: 1px dashed var(--rule);
+  padding: 0.3rem 0.7rem 0.3rem 0;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.drawer-records ul, .drawer-disclosures ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.drawer-record {
+  font-family: var(--serif);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 0.2rem 0;
+  overflow-wrap: anywhere;
+}
+.drawer-record::marker, .drawer-disclosure::marker { color: var(--muted-solid); }
+.drawer-records { margin: 0 0 0.8rem; }
+/* disclosures are the receipt's own honesty — the disclosed ochre voice
+   (the "no stub"/"no obligation" pending vocabulary), never alarm red */
+.drawer-disclosure {
+  font-family: var(--serif);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--st-pending);
+  margin: 0.2rem 0;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- click-to-expand: truncation is visible, never silent ----------
 
    Any wall text the layout clamps (a case-file placard, an object card's

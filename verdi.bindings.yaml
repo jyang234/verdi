@@ -328,6 +328,32 @@ bindings:
       - "spec/illustrative-class#ac-1"
       - "spec/illustrative-class#ac-2"
       - "spec/illustrative-class#ac-3"
+      # spec/derivation-drawer behavioral legs, all under make verify:
+      # ac-1 = the 38-derivation-drawer.spec.ts Playwright suite's ac-1
+      # block (a card chip's and a case-file stamp's drawer opened by
+      # pointer AND keyboard, rule/inputs/records read, closed by the
+      # close control and Escape, wall byte-identical after — plus the
+      # sealed read-only wall).
+      # ac-2 = the same suite's ac-2 block (drawer outerHTML byte-
+      # identical across two page renders; field-for-field equality with
+      # data-badge-record, entry counts exact) + workbench's
+      # TestWriteBadgeDrawer_RendersEveryRecordField /
+      # _NothingBeyondTheRecord / TestRenderBoardRegion_DrawerIsHidden-
+      # SiblingOfEveryBadge.
+      # ac-3 = the suite's ac-3 block over the harness's real committed
+      # fresh/stale/partial decision-conflict reports (provenance stamped,
+      # covers contrast disclosed, missing decision id named, disposition
+      # states rendered) + workbench's TestJudgedSweepChip_* (fixturegit)
+      # + wallbadge's TestJudgedSweepBadge_* tables.
+      # ac-4 = TestWriteBadgeDrawer_PureFunctionAcrossTime (same record
+      # rendered across a real wall-clock second boundary, byte-identical
+      # — a smuggled clock read fails the test) +
+      # _RevisionsAreDigestsOrShas and the suite's per-drawer no-date/
+      # digest-shape assertions.
+      - "spec/derivation-drawer#ac-1"
+      - "spec/derivation-drawer#ac-2"
+      - "spec/derivation-drawer#ac-3"
+      - "spec/derivation-drawer#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -582,3 +608,23 @@ bindings:
       # TestProposalFigure_ChipIsVisibleAndDistinct — all under make
       # verify.
       - "spec/illustrative-class#ac-2"
+      # spec/derivation-drawer static legs (ac-1 is behavioral-only), all
+      # under make verify:
+      # ac-2 = workbench's TestDrawerRenderer_StaticEvidence (exactly one
+      # writeBadgeDrawer definition, one call site in badgerender.go
+      # reached by page and fragment alike through renderBoardRegion;
+      # drawerrender.go imports no lint/decisionsweep/evidence/wallbadge/
+      # os; assets/boardspec.js never reads data-badge-record — no client
+      # templating of derivation data).
+      # ac-3 = wallbadge's TestJudgedSweep_StaticEvidence (the judged
+      # surface decodes ONLY through artifact.DecodeDecisionConflict, no
+      # yaml reference; surfaces .Covers/.ADRCorpusDigest/
+      # .DecisionsScanned; declares no staleness verdict type and cannot
+      # block).
+      # ac-4 = TestDrawerNoClock_StaticEvidence (workbench) +
+      # TestJudgedSweep_StaticEvidence's clock clause (wallbadge): no
+      # time import, time.Now, or timestamp formatting on any drawer
+      # content path.
+      - "spec/derivation-drawer#ac-2"
+      - "spec/derivation-drawer#ac-3"
+      - "spec/derivation-drawer#ac-4"

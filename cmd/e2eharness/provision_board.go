@@ -44,6 +44,17 @@ const (
 	sizeFitWallSpecName   = "decline-ac-trim"
 	sizeSmellACCount      = 5 // smallest count whose dc-1 estimate exceeds 900
 	sizeFitACCount        = 4 // largest count whose dc-1 estimate fits
+
+	// The judged-sweep fixtures (spec/derivation-drawer ac-3): three walls
+	// each carrying a REAL decision-conflict-report.md whose covers pins
+	// the design branch's first fixture commit — one fresh and complete
+	// (no mismatch line), one stale (the spec was rewritten after that
+	// commit, so covers no longer matches the wall's content digest), one
+	// partial (decisions_scanned misses declared dc-2). See
+	// provisionBoard's second commit.
+	sweepFreshSpecName   = "decline-sweep-fresh"
+	sweepStaleSpecName   = "decline-sweep-stale"
+	sweepPartialSpecName = "decline-sweep-partial"
 )
 
 // designSpec is DESIGN_SPEC: the object model fixtures.ts binds (3 ACs,
@@ -378,6 +389,77 @@ acceptance_criteria:
 	return sb.String()
 }
 
+// sweepSpec renders one judged-sweep fixture spec (spec/derivation-drawer
+// ac-3): a lint-quiet feature draft declaring TWO decisions — the
+// currently-declared set dc-3's decisions_scanned comparison runs
+// against. outcome parameterizes the document bytes so the stale fixture
+// can be rewritten AFTER the commit its report covers (a real content
+// drift, never a canned mismatch).
+func sweepSpec(name, outcome string) string {
+	return `---
+id: spec/` + name + `
+kind: spec
+class: feature
+title: "Decline sweep receipts"
+status: draft
+owners: [platform-team]
+problem: { text: "a judged sweep's own inputs are invisible on the wall", anchor: "#problem" }
+outcome: { text: "` + outcome + `", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "the case file wears the judged chip", evidence: [behavioral], anchor: "#ac-1" }
+decisions:
+  - { id: dc-1, text: "surface the sweep on the case file", anchor: "#dc-1" }
+  - { id: dc-2, text: "compare, never verdict", anchor: "#dc-2" }
+---
+# Decline sweep receipts
+
+## Problem
+
+The sweep fixtures need walls whose reports are real.
+
+## Outcome
+
+` + outcome + `
+
+## ac-1
+
+The judged chip.
+
+## dc-1
+
+Case-file surface.
+
+## dc-2
+
+Comparison, not verdict.
+`
+}
+
+// sweepReport renders one fixture decision-conflict-report.md: covers
+// pins a real commit of this scratch repo's history, findings carry one
+// dispositioned judged finding (disposition + note) and one explicitly
+// undispositioned one, and decisions_scanned lists exactly `scanned`.
+func sweepReport(covers, scanned string) string {
+	return `---
+schema: verdi.decisionconflict/v1
+covers: ` + covers + `
+findings:
+  - { id: judged-dcf-1, kind: judged, text: "dc-1 may collide with an ADR nobody declared an edge against", disposition: no-conflict, note: "reviewed against the corpus; no ADR governs this surface" }
+  - { id: judged-dcf-2, kind: judged, text: "dc-2 reads as a policy the parent may already own" }
+sweep_provenance: { adr_corpus_digest: sha256:37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570, decisions_scanned: [` + scanned + `] }
+---
+# Decision-conflict report
+
+## Judged (undeclared-conflict sweep)
+
+- **judged-dcf-1** [no-conflict]: dc-1 may collide with an ADR nobody declared an edge against
+- **judged-dcf-2** [UNDISPOSITIONED]: dc-2 reads as a policy the parent may already own
+`
+}
+
+const sweepOutcomeV1 = "every case file wears its sweep provenance"
+const sweepOutcomeStaleV2 = "the wall drifted after the sweep pinned it"
+
 // reviewSpec is REVIEW_SPEC: the board opens it in review mode (its
 // canned feed reports an open MR); ac-2 is the anchored comment's
 // target.
@@ -501,6 +583,12 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 		// count over dc-1's estimate and one under it.
 		filepath.Join(".verdi", "specs", "active", sizeSmellWallSpecName, "spec.md"): acCountSpec(sizeSmellWallSpecName, sizeSmellACCount),
 		filepath.Join(".verdi", "specs", "active", sizeFitWallSpecName, "spec.md"):   acCountSpec(sizeFitWallSpecName, sizeFitACCount),
+		// The three judged-sweep fixtures (spec/derivation-drawer ac-3):
+		// committed HERE so the branch's first fixture commit is the real
+		// spec revision their reports' covers pins.
+		filepath.Join(".verdi", "specs", "active", sweepFreshSpecName, "spec.md"):   sweepSpec(sweepFreshSpecName, sweepOutcomeV1),
+		filepath.Join(".verdi", "specs", "active", sweepStaleSpecName, "spec.md"):   sweepSpec(sweepStaleSpecName, sweepOutcomeV1),
+		filepath.Join(".verdi", "specs", "active", sweepPartialSpecName, "spec.md"): sweepSpec(sweepPartialSpecName, sweepOutcomeV1),
 	}
 	for rel, content := range files {
 		path := filepath.Join(storeRoot, rel)
@@ -517,6 +605,42 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: refi-decline-flow + stale-decline-notices fixtures"); err != nil {
 		return "", err
 	}
+
+	// Second fixture commit (spec/derivation-drawer ac-3): each sweep
+	// report's covers pins the FIRST fixture commit — resolved from this
+	// branch's real history, never invented — and the stale wall's spec is
+	// rewritten in the same commit, so at serve time the fresh/partial
+	// walls' content still matches their covers while the stale wall's
+	// genuinely drifted. Committing (rather than leaving the tree dirty)
+	// keeps the git affordance's uncommitted-changes indicator honest for
+	// the other board specs.
+	coversSHA, err := gitOutput(storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolving the design fixture commit for sweep covers: %w", err)
+	}
+	fullScan := func(name string) string {
+		return "spec/" + name + "#dc-1, spec/" + name + "#dc-2"
+	}
+	sweepFiles := map[string]string{
+		filepath.Join(".verdi", "specs", "active", sweepFreshSpecName, "decision-conflict-report.md"): sweepReport(coversSHA, fullScan(sweepFreshSpecName)),
+		filepath.Join(".verdi", "specs", "active", sweepStaleSpecName, "decision-conflict-report.md"): sweepReport(coversSHA, fullScan(sweepStaleSpecName)),
+		// The partial sweep: declared dc-2 is missing from decisions_scanned.
+		filepath.Join(".verdi", "specs", "active", sweepPartialSpecName, "decision-conflict-report.md"): sweepReport(coversSHA, "spec/"+sweepPartialSpecName+"#dc-1"),
+		// The stale wall's drift: same spec, rewritten outcome.
+		filepath.Join(".verdi", "specs", "active", sweepStaleSpecName, "spec.md"): sweepSpec(sweepStaleSpecName, sweepOutcomeStaleV2),
+	}
+	for rel, content := range sweepFiles {
+		if err := os.WriteFile(filepath.Join(storeRoot, rel), []byte(content), 0o644); err != nil {
+			return "", fmt.Errorf("writing %s: %w", rel, err)
+		}
+	}
+	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+		return "", err
+	}
+	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: judged-sweep report fixtures (fresh/stale/partial)"); err != nil {
+		return "", err
+	}
+
 	if err := runGit(storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", designBranch); err != nil {
 		return "", err
 	}

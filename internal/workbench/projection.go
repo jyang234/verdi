@@ -110,6 +110,12 @@ type badgeView struct {
 	Inputs      []badgeInputView `json:"inputs"`
 	Records     []string         `json:"records"`
 	Disclosures []string         `json:"disclosures,omitempty"`
+	// Provenance mirrors wallbadge.DerivationRecord.Provenance
+	// (spec/derivation-drawer ac-3/co-3): the optional pinned-provenance
+	// block the derivation drawer stamps once at its head — populated by
+	// the judged-sweep case-file chip (covers sha, adr_corpus_digest,
+	// decisions_scanned), empty for every other badge.
+	Provenance []string `json:"provenance,omitempty"`
 }
 
 // refCardView is a reference card — an edge target outside this spec,

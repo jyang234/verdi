@@ -76,6 +76,12 @@ func writeCaseDisclosures(b *strings.Builder, p *BoardProjection) {
 // opener contract — data-badge-source (the namespaced rule id) and
 // data-badge-record (the derivation record, serialized). Everything is
 // HTML-escaped: a finding message is document-derived text.
+//
+// Immediately after the button it writes the badge's derivation-drawer
+// body as a hidden sibling element (spec/derivation-drawer dc-1 — the
+// writePlacardFull idiom), rendered by the one drawer renderer
+// (writeBadgeDrawer, drawerrender.go) from the same record the button
+// carries: opening a receipt never recomputes it.
 func writeBadgeButton(b *strings.Builder, class string, bd badgeView) {
 	esc := stdhtml.EscapeString
 	title := bd.Source
@@ -86,6 +92,7 @@ func writeBadgeButton(b *strings.Builder, class string, bd badgeView) {
 	}
 	b.WriteString(`<button type="button" class="` + class + `" data-badge-source="` + esc(bd.Source) +
 		`" data-badge-record="` + esc(badgeRecordJSON(bd)) + `" title="` + esc(title) + `">` + esc(bd.Label) + `</button>`)
+	writeBadgeDrawer(b, bd)
 }
 
 // badgeRecordJSON serializes one badge's derivation record for its

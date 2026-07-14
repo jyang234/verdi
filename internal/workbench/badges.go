@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/wallbadge"
 )
 
@@ -45,13 +46,64 @@ func attachBadges(ctx context.Context, proj *BoardProjection, root, specName str
 			proj.StubViews[i].Badges = badgeViewsFrom(recs)
 		}
 	}
-	proj.CaseFileBadges = badgeViewsFrom(badges.CaseFile)
+	caseFile := badges.CaseFile
 	// Ladder disclosures are CASE-FILE lines, not board-chrome notices
 	// (spec/case-file-flags dc-4): a disclosed-unproven outcome renders on
 	// the case-file lockup in the board's notice vocabulary — where the
 	// stamp it stands in for would hang — never as a stamp, never silent.
-	proj.CaseFileDisclosures = append(proj.CaseFileDisclosures, badges.Disclosures...)
+	caseFileDisclosures := append([]string{}, badges.Disclosures...)
+
+	// The judged-findings case-file chip (spec/derivation-drawer ac-3,
+	// dc-2): the spec's own decision-conflict report surfaced on the case
+	// file, wearing its sweep provenance and dc-3's staleness comparisons.
+	// Added here — the one attachment point every wall badge shares (badge-
+	// computes dc-1) — so the page, the fragment, and get_board all carry
+	// it identically. Its three-valued outcome mirrors the ladder badges':
+	// chip, disclosed-unproven case-file line (an unreadable report), or
+	// nothing (no report — absence of a sweep is not a finding). The
+	// disclosure rides CaseFileDisclosures, not Notices — same case-file-
+	// flags dc-4 posture as the ladder disclosures above: it stands in for
+	// a chip on the case-file lockup, not board chrome.
+	judged, judgedDisclosure, err := wallbadge.JudgedSweepBadge(ctx, root, specName, specRevision, fm, gitCoversResolver{root: root})
+	if err != nil {
+		return fmt.Errorf("workbench: computing judged-sweep badge for %s: %w", specName, err)
+	}
+	if judged != nil {
+		caseFile = append(caseFile, *judged)
+	}
+	if judgedDisclosure != "" {
+		caseFileDisclosures = append(caseFileDisclosures, judgedDisclosure)
+	}
+
+	proj.CaseFileBadges = badgeViewsFrom(caseFile)
+	proj.CaseFileDisclosures = append(proj.CaseFileDisclosures, caseFileDisclosures...)
 	return nil
+}
+
+// gitCoversResolver is wallbadge.CoversResolver over the store's own git
+// checkout (04 §port pattern: the interface lives at its consumer,
+// internal/wallbadge; this is the gitx-backed adapter). A covers sha that
+// does not exist in this checkout — or a spec path absent at it — is the
+// port's disclosed-unproven case (ok=false), never an error: dc-3's
+// comparison then discloses its own inability instead of claiming a
+// mismatch.
+type gitCoversResolver struct {
+	root string
+}
+
+func (g gitCoversResolver) SpecDigestAtCommit(ctx context.Context, commit, relPath string) (string, bool, error) {
+	exists, err := gitx.CommitExists(ctx, g.root, commit)
+	if err != nil || !exists {
+		// A root that is not a git repository at all surfaces as err here:
+		// disclosed-unproven (the comparison cannot be made), never a
+		// wall-breaking failure — the drawer is a reading aid (co-2).
+		return "", false, nil
+	}
+	data, err := gitx.Show(ctx, g.root, commit, relPath)
+	if err != nil {
+		return "", false, nil // path absent at the pinned commit: unprovable, disclosed
+	}
+	return contentDigest(data), true, nil
 }
 
 // badgeViewsFrom converts wallbadge.DerivationRecord values into this
@@ -75,6 +127,7 @@ func badgeViewsFrom(recs []wallbadge.DerivationRecord) []badgeView {
 			Inputs:      inputs,
 			Records:     r.Records,
 			Disclosures: r.Disclosures,
+			Provenance:  r.Provenance,
 		}
 	}
 	return out
