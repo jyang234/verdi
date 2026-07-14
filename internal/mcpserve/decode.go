@@ -1,12 +1,17 @@
 // Strict-decode posture for what mcpserve itself owns, ratified at
 // spec/fail-loud dc-2: tool arguments (05's tool table publishes each
-// schema) and the writer-lock file (lock.go writes it) decode STRICT —
-// DisallowUnknownFields plus trailing-data rejection, so a typo'd field
-// (target_reff) is refused NAMING the unknown field rather than silently
-// dropped (ac-3). JSON-RPC protocol envelopes (wire.go's rpcRequest,
-// server.go's tools/call name/arguments) stay TOLERANT — unknown members
-// there are expected forward-compat, not a mistake to catch — and are left
-// on bare json.Unmarshal, untouched by this file.
+// schema) decode STRICT — DisallowUnknownFields plus trailing-data
+// rejection, so a typo'd field (target_reff) is refused NAMING the
+// unknown field rather than silently dropped (ac-3). The writer-lock file
+// this package's callers acquire (cmd/verdi/serve.go, cmd/verdi/mcp.go)
+// applies this exact same posture too, but the lock algorithm itself
+// moved to the shared internal/filelock package (spec/worktree-manager
+// dc-2) since a second caller (internal/wtmanager) needs the identical
+// mechanism for a different lockfile. JSON-RPC protocol envelopes
+// (wire.go's rpcRequest, server.go's tools/call name/arguments) stay
+// TOLERANT — unknown members there are expected forward-compat, not a
+// mistake to catch — and are left on bare json.Unmarshal, untouched by
+// this file.
 package mcpserve
 
 import (

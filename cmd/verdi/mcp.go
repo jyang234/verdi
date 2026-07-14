@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -98,9 +99,9 @@ func serveStandalone(root string, stdin io.Reader, stdout, stderr io.Writer) int
 	}
 
 	lockPath := filepath.Join(dataDir, "writer.lock")
-	lockFile, err := mcpserve.AcquireLock(lockPath)
+	lockFile, err := filelock.Acquire(lockPath)
 	if err != nil {
-		var held *mcpserve.ErrLockHeld
+		var held *filelock.ErrHeld
 		if errors.As(err, &held) {
 			// Held by a live process we could not reach via the pointer
 			// file (e.g. its own socket bind failed after taking the
@@ -112,7 +113,7 @@ func serveStandalone(root string, stdin io.Reader, stdout, stderr io.Writer) int
 		fmt.Fprintln(stderr, "mcp:", err)
 		return 2
 	}
-	defer func() { _ = mcpserve.ReleaseLock(lockFile, lockPath) }()
+	defer func() { _ = filelock.Release(lockFile, lockPath) }()
 
 	srv := mcpserve.NewServer(root)
 	// Best-effort (V1-P7): list_annotations' review-sticky mirrored

@@ -9,14 +9,14 @@ import (
 // TestRun_KnownVerbs is the happy path: every spec-named verb still
 // stubbed at this phase parses and exits 2 with a one-line "not
 // implemented" message on stderr. design/accept/feature graduated to real
-// implementations in Phase 7, align/gate in Phase 8, close in round 6 —
+// implementations in Phase 7, align/gate in Phase 8, close/gc in round 6 —
 // see TestRun_DesignDispatchesToRealVerb (design_test.go),
 // TestRun_AcceptDispatchesToRealVerb (accept_test.go),
 // TestRun_FeatureDispatchesToRealVerb (feature_test.go),
 // TestRun_AlignDispatchesToRealVerb/TestRun_GateDispatchesToRealVerb/
-// TestRun_CloseDispatchesToRealVerb below for their dispatch coverage,
-// matching the lint/dex pattern. Table-driven per CLAUDE.md's testing
-// rules.
+// TestRun_CloseDispatchesToRealVerb/TestRun_GcDispatchesToRealVerb below
+// for their dispatch coverage, matching the lint/dex pattern. Table-driven
+// per CLAUDE.md's testing rules.
 func TestRun_KnownVerbs(t *testing.T) {
 	cases := []struct {
 		verb       string
@@ -24,7 +24,6 @@ func TestRun_KnownVerbs(t *testing.T) {
 	}{
 		{"waivers", "not implemented (out of v0 scope)"},
 		{"verify-artifact", "not implemented (out of v0 scope)"},
-		{"gc", "not implemented (out of v0 scope)"},
 	}
 
 	for _, tc := range cases {
@@ -47,11 +46,12 @@ func TestRun_KnownVerbs(t *testing.T) {
 
 // TestRun_KnownVerbs_ExtraArgs asserts that trailing arguments after a known
 // verb do not change dispatch (verb-only parsing at phase 1). `lint`,
-// `design`/`accept`/`feature`, and `align`/`gate` are now implemented
-// (phases 4, 7, and 8), so this uses a still-stubbed verb.
+// `design`/`accept`/`feature`, `align`/`gate`, and `close`/`gc` are now
+// implemented (phases 4, 7, 8, and round 6), so this uses a still-stubbed
+// verb.
 func TestRun_KnownVerbs_ExtraArgs(t *testing.T) {
 	var stderr bytes.Buffer
-	got := run([]string{"gc", "--some-flag", "extra"}, &stderr)
+	got := run([]string{"waivers", "--some-flag", "extra"}, &stderr)
 	if got != 2 {
 		t.Fatalf("run with extra args exit = %d, want 2", got)
 	}
@@ -107,6 +107,24 @@ func TestRun_CloseDispatchesToRealVerb(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "usage: verdi close") {
 		t.Fatalf("stderr = %q, want it to mention 'usage: verdi close'", stderr.String())
+	}
+}
+
+// TestRun_GcDispatchesToRealVerb proves `run` routes "gc" to the real
+// implementation (gc.go, round 6/spec/worktree-manager) rather than the
+// generic phase-stub path (I-23's old "not implemented (out of v0
+// scope)"): outside any store root it must fail with gc's own store-root
+// error, never the generic "not implemented" message.
+func TestRun_GcDispatchesToRealVerb(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stderr bytes.Buffer
+	got := run([]string{"gc"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([gc]) outside a store = %d, want 2 (operational)", got)
+	}
+	if strings.Contains(stderr.String(), "not implemented") {
+		t.Fatalf("stderr = %q, want a real store-root error, not the generic stub message", stderr.String())
 	}
 }
 

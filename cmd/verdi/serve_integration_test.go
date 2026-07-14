@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/mcpserve"
 )
@@ -91,13 +92,13 @@ func waitForPointerFile(t *testing.T, root string, timeout time.Duration) string
 }
 
 // readLockInfo reads and decodes root's writer.lock.
-func readLockInfo(t *testing.T, root string) mcpserve.LockInfo {
+func readLockInfo(t *testing.T, root string) filelock.Info {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, ".verdi", "data", "writer.lock"))
 	if err != nil {
 		t.Fatalf("reading writer.lock: %v", err)
 	}
-	var info mcpserve.LockInfo
+	var info filelock.Info
 	if err := json.Unmarshal(data, &info); err != nil {
 		t.Fatalf("decoding writer.lock: %v", err)
 	}
@@ -111,14 +112,14 @@ func readLockInfo(t *testing.T, root string) mcpserve.LockInfo {
 // file left behind by a crashed holder is indistinguishable, by content
 // alone, from a fresh one the new holder just wrote — polling the lock's
 // pid is what actually proves a specific process is the current writer.
-func waitForLockPID(t *testing.T, root string, wantPID int, timeout time.Duration) mcpserve.LockInfo {
+func waitForLockPID(t *testing.T, root string, wantPID int, timeout time.Duration) filelock.Info {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	var last mcpserve.LockInfo
+	var last filelock.Info
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(filepath.Join(root, ".verdi", "data", "writer.lock"))
 		if err == nil {
-			var info mcpserve.LockInfo
+			var info filelock.Info
 			if json.Unmarshal(data, &info) == nil {
 				last = info
 				if info.PID == wantPID {
@@ -129,7 +130,7 @@ func waitForLockPID(t *testing.T, root string, wantPID int, timeout time.Duratio
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("writer.lock never showed pid %d within %s (last seen: %+v)", wantPID, timeout, last)
-	return mcpserve.LockInfo{}
+	return filelock.Info{}
 }
 
 // ndjsonRPC sends one JSON-RPC request over w and reads/decodes one

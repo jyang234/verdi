@@ -2,6 +2,7 @@ package gitx
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,6 +95,132 @@ func TestCheckout_Negative_UnknownBranch(t *testing.T) {
 	repo := buildRepo(t)
 	if err := Checkout(context.Background(), repo.Dir, "no-such-branch"); err == nil {
 		t.Fatal("Checkout of a missing branch succeeded")
+	}
+}
+
+func TestWorktreeAdd_Happy(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := CheckoutNewBranch(ctx, repo.Dir, "design/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	if err := Checkout(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("Checkout(main): %v", err)
+	}
+
+	wtPath := filepath.Join(t.TempDir(), "x")
+	if err := WorktreeAdd(ctx, repo.Dir, wtPath, "design/x"); err != nil {
+		t.Fatalf("WorktreeAdd: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, "a.txt")); err != nil {
+		t.Fatalf("cut worktree missing expected file: %v", err)
+	}
+	got, err := CurrentBranch(ctx, wtPath)
+	if err != nil {
+		t.Fatalf("CurrentBranch(cut worktree): %v", err)
+	}
+	if got != "design/x" {
+		t.Fatalf("cut worktree's branch = %q, want design/x", got)
+	}
+
+	// The serving checkout's own branch is untouched.
+	rootBranch, _ := CurrentBranch(ctx, repo.Dir)
+	if rootBranch != "main" {
+		t.Fatalf("WorktreeAdd changed the serving checkout's own branch to %q", rootBranch)
+	}
+}
+
+func TestWorktreeAdd_Negative(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	t.Run("nonexistent branch", func(t *testing.T) {
+		wtPath := filepath.Join(t.TempDir(), "nope")
+		if err := WorktreeAdd(ctx, repo.Dir, wtPath, "design/nope"); err == nil {
+			t.Fatal("WorktreeAdd(nonexistent branch): want error, got nil")
+		}
+		if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+			t.Fatalf("WorktreeAdd(nonexistent branch) left a directory behind: err=%v", err)
+		}
+	})
+
+	t.Run("branch already checked out at dir itself", func(t *testing.T) {
+		if err := CheckoutNewBranch(ctx, repo.Dir, "design/here"); err != nil {
+			t.Fatalf("CheckoutNewBranch: %v", err)
+		}
+		wtPath := filepath.Join(t.TempDir(), "here")
+		err := WorktreeAdd(ctx, repo.Dir, wtPath, "design/here")
+		if err == nil {
+			t.Fatal("WorktreeAdd(branch checked out at dir): want error, got nil")
+		}
+		// Assert the typed refusal, not git's version-dependent stderr
+		// text: the proactive current-branch check must classify this as
+		// ErrBranchCheckedOut regardless of how the installed git words it.
+		if !errors.Is(err, ErrBranchCheckedOut) {
+			t.Fatalf("WorktreeAdd error = %v, want ErrBranchCheckedOut", err)
+		}
+		// The proactive guard runs before `git worktree add`, so no
+		// worktree directory is ever left behind.
+		if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+			t.Fatalf("WorktreeAdd(branch checked out at dir) left a directory behind: err=%v", err)
+		}
+	})
+}
+
+func TestWorktreeRemove_Happy(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := CheckoutNewBranch(ctx, repo.Dir, "design/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	if err := Checkout(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("Checkout(main): %v", err)
+	}
+	wtPath := filepath.Join(t.TempDir(), "x")
+	if err := WorktreeAdd(ctx, repo.Dir, wtPath, "design/x"); err != nil {
+		t.Fatalf("WorktreeAdd: %v", err)
+	}
+
+	if err := WorktreeRemove(ctx, repo.Dir, wtPath); err != nil {
+		t.Fatalf("WorktreeRemove: %v", err)
+	}
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Fatalf("worktree directory still present after WorktreeRemove: err=%v", err)
+	}
+}
+
+func TestWorktreeRemove_Negative_DirtyRefusedWithoutForce(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := CheckoutNewBranch(ctx, repo.Dir, "design/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	if err := Checkout(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("Checkout(main): %v", err)
+	}
+	wtPath := filepath.Join(t.TempDir(), "x")
+	if err := WorktreeAdd(ctx, repo.Dir, wtPath, "design/x"); err != nil {
+		t.Fatalf("WorktreeAdd: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "a.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WorktreeRemove(ctx, repo.Dir, wtPath); err == nil {
+		t.Fatal("WorktreeRemove(dirty worktree, no --force): want error, got nil")
+	}
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Fatalf("dirty worktree removed despite refusal: %v", err)
+	}
+}
+
+func TestWorktreeRemove_Negative_NoSuchWorktree(t *testing.T) {
+	repo := buildRepo(t)
+	if err := WorktreeRemove(context.Background(), repo.Dir, filepath.Join(t.TempDir(), "nope")); err == nil {
+		t.Fatal("WorktreeRemove(never-added path): want error, got nil")
 	}
 }
 

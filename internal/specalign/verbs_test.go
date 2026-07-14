@@ -2,8 +2,8 @@
 // table names, plus the invention ledger's gate (I-7) and board (I-20)
 // (which 05 §CLI's own table predates and dispatch.go recognizes
 // alongside it), responds per its v0 status. Real v0 verbs never print
-// "not implemented"; the three verbs PLAN.md §5 puts explicitly out of
-// v0 scope (gc, waivers, verify-artifact) always do, with the exact
+// "not implemented"; the two verbs PLAN.md §5 puts explicitly out of
+// v0 scope (waivers, verify-artifact) always do, with the exact
 // out-of-scope message.
 //
 // Grown at V1-P9 (item 4, the spec-align regrowth) to cover the v2
@@ -18,6 +18,13 @@
 // out-of-v0-scope list to a real, dispatched verb (I-23's phase-0 stub
 // flipped in cmd/verdi/close.go) — moved from outOfV0 to inV0 below, with
 // its own hermeticity note next to serve/mcp/audit/align's.
+//
+// Round 6 (spec/worktree-manager): `gc` graduates the same way — I-23's
+// phase-0 stub flipped in cmd/verdi/gc.go, scoped honestly to the
+// managed-worktree reclamation slice only (dc-5). Moved from outOfV0 to
+// inV0 below, with its own hermeticity note (gc can REMOVE a managed
+// worktree, a real mutation this inventory check must never risk against
+// the shared self-hosted checkout).
 package specalign
 
 import "testing"
@@ -31,18 +38,19 @@ func TestV0CLIVerbInventory(t *testing.T) {
 	inV0 := []string{
 		"lint", "design", "accept", "feature", "build", "align", "sync",
 		"serve", "mcp", "matrix", "rollup", "dex", "gate", "board", "audit",
-		"close",
+		"close", "gc",
 	}
-	// PLAN.md §5 scope discipline, verbatim (as amended: `close` graduated
-	// to real, round 6): "Explicitly out of v0 (not stubbed — absent ...):
-	// `verdi gc`, `verdi waivers` audit verb, `verdi verify-artifact`".
-	outOfV0 := []string{"gc", "waivers", "verify-artifact"}
+	// PLAN.md §5 scope discipline, verbatim (as amended: `close`/`gc`
+	// graduated to real, round 6): "Explicitly out of v0 (not stubbed —
+	// absent ...): `verdi gc`, `verdi waivers` audit verb, `verdi
+	// verify-artifact`".
+	outOfV0 := []string{"waivers", "verify-artifact"}
 
 	for _, verb := range inV0 {
 		t.Run("real_"+verb, func(t *testing.T) {
 			var stderr string
 			switch verb {
-			case "serve", "mcp", "audit", "align":
+			case "serve", "mcp", "audit", "align", "gc":
 				// serve/mcp resolve the store root before doing anything
 				// else (socket bind, lock acquire, ...); audit (bare, no
 				// args) resolves the store root and then actually RUNS the
@@ -60,7 +68,12 @@ func TestV0CLIVerbInventory(t *testing.T) {
 				// CLAUDE.md: no network in any test) and writing a real
 				// deviation-report.md into the shared working tree
 				// (round5-divergences.md D-14, the same hermeticity class
-				// as D-11's checklist-probe fix). All four fail fast and
+				// as D-11's checklist-probe fix). gc (spec/worktree-manager)
+				// resolves the store root and then actually SCANS/RECLAIMS
+				// managed worktrees, including real `git worktree remove`
+				// calls for any that are eligible — a real mutation this
+				// inventory check must never risk against the shared
+				// self-hosted checkout either. All five fail fast and
 				// honestly from a rootless tempdir instead, while still
 				// proving the verb is dispatched as real.
 				_, stderr, _ = runBinary(t, t.TempDir(), verb)

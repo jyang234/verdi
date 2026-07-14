@@ -30,7 +30,7 @@ var verbPhase = map[string]int{
 	"waivers":         0,  // out of v0 (PLAN.md §5)
 	"verify-artifact": 0,  // out of v0 (PLAN.md §5)
 	"dex":             12,
-	"gc":              0,  // out of v0 (PLAN.md §5)
+	"gc":              15, // round 6, spec/worktree-manager — flipped from I-23's phase-0 stub (managed-worktree reclamation slice only, dc-5)
 	"gate":            8,  // I-7, not in 05 §CLI's table
 	"board":           10, // I-20, not in 05 §CLI's table (like "gate")
 	"audit":           13, // R4-I-10, V1-P5 — beyond v0's numbered phases; a real, implemented verb, never "out of scope" (phase 0)
@@ -106,6 +106,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if verb == "close" {
 		return cmdClose(args[1:], os.Stdout, stderr)
+	}
+	if verb == "gc" {
+		return cmdGc(args[1:], os.Stdout, stderr)
 	}
 
 	if phase == 0 {
