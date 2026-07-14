@@ -18,7 +18,7 @@ links:
 decisions:
   - { id: dc-1, text: "the claimed grammar: a direction line (flowchart|graph <DIR>, DIR ignored — layout is renderer-owned, co-3), node declarations of the bare-id or id+shape-delimited-quoted-label forms mermaid/flowmap both use, and edge declarations id --> id / id -->|label| id / id -.-> id / id -. label .-> id (arrow style and label text read but NOT part of identity — only the ordered (from, to) id pair is). Anything else — subgraphs, classDef/style/click, %% comments the parser does not need, any other mermaid diagram type's syntax — is OUTSIDE the grammar. Coverage is an artifact-wide, not a line-by-line, verdict (dc-3 of the parent feature is read as classifying the WHOLE flowchart): the instant one line falls outside the declared grammar, the artifact's coverage is partial, though the extractor still attempts a best-effort parse of the recognized lines for disclosure — an element whose parse was uncertain is excluded from the three-way comparison rather than guessed", anchor: dc-1 }
   - { id: dc-2, text: "identity normalization: a proposal's raw mermaid node-id token is compared against shortName(fqn) for every truth node, where shortName is a small function THIS package defines and tests (strip a leading (*pkg.Type). or pkg.Type. receiver/package prefix, keep the trailing name) — never verdi-go's own frontier.ShortName (CLAUDE.md: never import verdi-go packages). Two truth nodes whose shortName collides make that name AMBIGUOUS: a proposal node using it cannot be classified with confidence and the WHOLE artifact falls to partial coverage (dc-1) rather than guessing which truth node was meant. This is a display-name convenience, not a reimplementation of flowmap's own call-graph construction (parent co-2's forbidden reimplementation), and it is honestly narrower than flowmap's internal collision-disambiguation scheme — disclosed, not hidden", anchor: dc-2 }
-  - { id: dc-3, text: "truth regeneration execs flowmap graph -entry <scope> <dir> when scope is present, or flowmap graph <dir> unscoped, through internal/upstream's existing RunGraph/DecodeGraph strict-JSON seam (extended with an optional entry-scope argument; no new exec surface). Parent dc-6 names the proposal's scope field after flowmap's --root selector, but --root is documented (verdi-go cmd/flowmap/main.go) as a MERMAID-render-time-only scoping flag, not a JSON-mode one; --entry is the JSON-decodable build-time equivalent over the same selector value space (e.g. \"POST /loan-application\"). This is the smallest reversible reading of dc-6 that stays inside co-2's JSON-only truth channel; a future flowmap release exposing root-scoped JSON directly is a one-line swap behind this same seam. Unscoped regeneration accepts dc-6's disclosed hairball-cap case as-is — capping/indexing presentation is a different story's concern", anchor: dc-3 }
+  - { id: dc-3, text: "truth regeneration execs flowmap graph -entry <scope> <dir> when scope is present, or flowmap graph <dir> unscoped, through internal/upstream's existing RunGraph/DecodeGraph strict-JSON seam (extended with an optional entry-scope argument; no new exec surface). Parent dc-6 names the proposal's scope field after flowmap's --root selector, but --root is documented (verdi-go cmd/flowmap/main.go) as a MERMAID-render-time-only scoping flag, not a JSON-mode one; --entry is the JSON-decodable build-time equivalent over the same selector value space — not merely asserted: both flags' own --help text in verdi-go cmd/flowmap/main.go uses the identical example \"POST /loan-application\", concrete textual evidence they share one selector grammar. This is the smallest reversible reading of dc-6 that stays inside co-2's JSON-only truth channel, disclosed as build-time-verifiable rather than a closed fact: a real flowmap accepting a --root value --entry rejects would be a build-time invention-ledger finding, not a silent assumption. Unscoped regeneration accepts dc-6's disclosed hairball-cap case as-is — capping/indexing presentation is a different story's concern", anchor: dc-3 }
   - { id: dc-4, text: "witness-commit discovery: git log -S<identity-string> -1 --format=%H -- <service-dir> (fixed-string pickaxe, most recent hit) over the element's normalized identity string — the smallest honest mechanism available without building history-walking graph-diff machinery. When the search finds no hit (a moved directory, an unrelated rename) the witness is disclosed as unresolved rather than fabricated or blocked — kept-but-gone still renders, just without a named commit, honestly short of the ideal rather than silently wrong", anchor: dc-4 }
   - { id: dc-5, text: "stale-base recomputes the base's canonical graph JSON at current HEAD using the SAME flowmap invocation ac-2/dc-3 already performs (same scope), canonicalizes it via the shared 02 §Generated artifacts and digests formula (the same canonjson.Digest this codebase already uses for every other computed digest), and compares the result to derived_from.digest byte-for-byte. This story detects and discloses the mismatch only; the rebase affordance the mismatch motivates (parent ac-3, \"disclosed with a rebase affordance\") is board-editor's concern, out of scope here", anchor: dc-5 }
 constraints:
@@ -148,12 +148,19 @@ optional entry-scope argument; no new exec surface). The parent feature's
 selector, but `--root` is documented (verdi-go's `cmd/flowmap/main.go`) as
 a MERMAID-render-time-only scoping flag, not a JSON-mode one; `--entry` is
 the JSON-decodable build-time equivalent over the same selector value
-space (e.g. `"POST /loan-application"`). This is the smallest reversible
-reading of `dc-6` that stays inside `co-2`'s JSON-only truth channel; a
-future flowmap release exposing root-scoped JSON directly is a one-line
-swap behind this same seam. Unscoped regeneration accepts `dc-6`'s
-disclosed hairball-cap case as-is — capping/indexing presentation is a
-different story's concern.
+space — not merely asserted: verdi-go's `cmd/flowmap/main.go` own
+`--help` text for BOTH flags uses the identical example
+`"POST /loan-application"`, concrete textual evidence the two flags share
+one selector grammar. This is the smallest reversible reading of `dc-6`
+that stays inside `co-2`'s JSON-only truth channel, disclosed as a
+build-time-verifiable reading rather than a closed fact: if a real flowmap
+release ever accepts a `--root` value `--entry` rejects (or vice versa),
+that is a build-time finding for this story's implementer to record in
+`PLAN.md`'s invention ledger, not a silent assumption here. A future
+flowmap release exposing root-scoped JSON directly is a one-line swap
+behind this same seam. Unscoped regeneration accepts `dc-6`'s disclosed
+hairball-cap case as-is — capping/indexing presentation is a different
+story's concern.
 
 ## DC-4
 
