@@ -177,9 +177,6 @@ var obligationGateBaseline = map[string]bool{
 	"disclosure-seam-v2":         true, // 2 (ac,kind) pairs, accepted-pending-build
 	"disclosure-seam":            true, // 1 pair, superseded
 	"disclosures-panel":          true, // 3 pairs, accepted-pending-build
-	"obligation-artifact":        true, // 5 pairs, accepted-pending-build (evidence-obligations wave 1)
-	"obligation-gate":            true, // 4 pairs, accepted-pending-build (THIS story: it cannot obligate itself before its own gate exists)
-	"obligation-wall":            true, // 3 pairs, accepted-pending-build (evidence-obligations wave 3, not yet built)
 	"close-verb":                 true, // 6 pairs, closed (archive)
 	"feature-supersession-state": true, // 3 pairs, closed (archive)
 	"remote-and-ci":              true, // 6 pairs, closed (archive)
