@@ -21,6 +21,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
@@ -184,6 +185,12 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if err != nil {
 		return nil, nil, "", err
 	}
+	// Obligations are a store-derived enrichment, loaded and attached HERE
+	// (the I/O layer) rather than inside the pure projector — the same
+	// posture proj.Notices takes below (spec/obligation-wall ac-2/dc-3).
+	if err := attachObligations(proj, s.root, name, fm); err != nil {
+		return nil, nil, "", err
+	}
 	if reviewNotice != "" {
 		proj.Notices = append(proj.Notices, reviewNotice)
 	}
@@ -191,6 +198,67 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 		proj.Notices = append(proj.Notices, gitNotice)
 	}
 	return proj, git, reviewNotice, nil
+}
+
+// attachObligations enriches a STORY board's AC cards with their evidence
+// obligations (spec/obligation-wall ac-2), so what each AC demands is read on
+// the wall itself (feature co-3, legible-without-the-sidecar) rather than
+// recovered by opening the obligation file. For each evidence kind an AC
+// DECLARES it projects onto that card either the kind's authored obligation
+// (title + prose) or a disclosed "no obligation" marker — the wall-receipts
+// posture (dc-2): the read surface DISCLOSES, it never refuses; the
+// activation gate (obligation-gate) is what refuses at accept, so a draft in
+// progress renders legibly.
+//
+// Obligations are loaded by (spec-name, ac-id) through the ONE reader both
+// this surface and `verdi matrix` consume (evidence.Obligations, dc-1: "a
+// small loader ... both surfaces consume it, not two readers"). Genuine
+// absence (no obligation authored yet for a declared kind) is the ordinary
+// case and reads as Present=false, never an error; only a malformed
+// obligation on disk is a surfaced (operational) error — the loader's own
+// three-valued posture, propagated here as loadBoard's error, never silently
+// swallowed.
+//
+// This is a no-op on any non-story wall: obligations attach to STORY
+// acceptance criteria (a feature AC wears its coverage receipt instead), so
+// gating on class here mirrors the projection's own feature/story split. It
+// runs AFTER buildProjection — the projector stays a pure function of its
+// four in-memory inputs; this store-derived enrichment lives in the I/O
+// layer, exactly like proj.Notices.
+func attachObligations(proj *BoardProjection, root, specName string, fm *artifact.SpecFrontmatter) error {
+	if fm.Class != artifact.ClassStory {
+		return nil
+	}
+	declaredKinds := make(map[string][]artifact.EvidenceKind, len(fm.AcceptanceCriteria))
+	for _, ac := range fm.AcceptanceCriteria {
+		declaredKinds[ac.ID] = ac.Evidence
+	}
+	for i := range proj.Cards {
+		c := &proj.Cards[i]
+		if boardlayout.ZoneKind(c.Kind) != boardlayout.ZoneAC {
+			continue
+		}
+		kinds := declaredKinds[c.ID]
+		if len(kinds) == 0 {
+			continue
+		}
+		obs, err := evidence.Obligations(root, specName, c.ID)
+		if err != nil {
+			return fmt.Errorf("workbench: obligations for %s %s: %w", specName, c.ID, err)
+		}
+		views := make([]obligationView, 0, len(kinds))
+		for _, k := range kinds {
+			ov := obligationView{Kind: string(k)}
+			if ob, ok := obs[k]; ok {
+				ov.Present = true
+				ov.Title = ob.Title
+				ov.Body = ob.Body
+			}
+			views = append(views, ov)
+		}
+		c.Obligations = views
+	}
+	return nil
 }
 
 // LoadProjection computes the deterministic board projection for a spec —
