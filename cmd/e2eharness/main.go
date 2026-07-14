@@ -109,6 +109,14 @@ func run() error {
 		return fmt.Errorf("provisioning v1 board fixtures: %w", err)
 	}
 
+	// The diagram editor's fixtures (spec/board-editor) land on the same
+	// design branch provisionBoard just checked out, plus the canned
+	// verification report the rail consumes through its dc-4 port.
+	verificationPath, err := provisionDiagrams(scratch, storeRoot)
+	if err != nil {
+		return fmt.Errorf("provisioning diagram editor fixtures: %w", err)
+	}
+
 	// The directory-home ref fixtures (local-only / remote-only / empty /
 	// doomed design branches) — after the board fixtures, restoring the
 	// board suite's serving checkout when done.
@@ -152,6 +160,7 @@ func run() error {
 		// httpOpenMRFeed) — served by the control server above, loopback
 		// only, no network (CLAUDE.md).
 		"VERDI_OPENMR_FEED=http://"+controlAddr+"/openmrs",
+		"VERDI_DIAGRAM_VERIFICATION="+verificationPath,
 	)
 	serveCmd.Stdout = os.Stdout
 	serveCmd.Stderr = os.Stderr

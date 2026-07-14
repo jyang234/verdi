@@ -1117,7 +1117,11 @@
       }
     }
 
-    if (e.target.closest("button, textarea, input, .review-sticky")) return;
+    // A real link inside a card (the proposal-diagram ref card's
+    // "open in editor" doorway, spec/board-editor dc-1) stays a link:
+    // capturing the pointer here would retarget its click and swallow
+    // the navigation.
+    if (e.target.closest("a, button, textarea, input, .review-sticky")) return;
 
     var el = e.target.closest(".objcard, .sticky, .refcard, .stubcard, .yarn-chip--annotation");
     if (!el || !c.contains(el)) return;
@@ -1833,6 +1837,7 @@
     var refcard = t.closest(".refcard");
     if (refcard) {
       if (refcard === dragGhost) return; // a drag's tail, not a peek click
+      if (t.closest("a")) return; // the card's editor doorway is a real link, not a peek click
       openRefPeek(refcard.getAttribute("data-ref"));
       return;
     }

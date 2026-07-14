@@ -69,13 +69,26 @@ func corpusHandler(root string) http.HandlerFunc {
 			return
 		}
 
+		extra := corpusConnectionsHTML(ix, ref, entry.Links)
+		// A class: proposal diagram's corpus page links to its board
+		// editor (spec/board-editor dc-1: "reachable from ... the corpus
+		// page"). Incumbent authored-living diagrams have no editor
+		// surface, so they get no link.
+		if entry.Kind == "diagram" {
+			if d, derr := artifact.DecodeDiagram(fm); derr == nil && d.Class == artifact.DiagramClassProposal {
+				link := `<p class="diagram-editor-link"><a data-testid="open-editor-link" href="/board/diagram/` +
+					stdhtml.EscapeString(name) + `">Open in the board editor</a> &#8212; draft this proposal with a live preview and structural operations.</p>`
+				extra = template.HTML(link) + extra
+			}
+		}
+
 		page := pageData{
 			Title:            entry.Title,
 			Nav:              template.HTML(`<a href="/">index</a>`),
 			MetaRows:         corpusMetaRows(entry, meta),
 			BodyHTML:         template.HTML(bodyHTML),
 			DispositionsHTML: render.DispositionsTable(meta.Dispositions),
-			ExtraHTML:        corpusConnectionsHTML(ix, ref, entry.Links),
+			ExtraHTML:        extra,
 		}
 		out, err := renderPage(page)
 		if err != nil {

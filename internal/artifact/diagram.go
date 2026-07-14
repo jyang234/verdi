@@ -37,8 +37,20 @@ type DiagramFrontmatter struct {
 // forked from (02 §Diagram proposals): Ref is the base diagram ref (a
 // diagram/<name> ref, optionally @commit-pinned to the fork point);
 // Digest is the sha256 of that base's canonical graph JSON at that
-// commit — the digest-verified input the mechanical before-peek/reset
-// (spec/diagram-proposals ac-3) reproduce the base from.
+// commit — the truth generator's own graph and the stale-base detector's
+// reference point (internal/diagramverify's StaleBase recomputes it by
+// re-running flowmap at current HEAD).
+//
+// SourceDigest is the OPTIONAL round-6 (ADJ-16) companion: sha256 of the
+// canonical JSON of the node/edge graph the verification extractor's own
+// one-way grammar extracts from the base's COMMITTED mermaid body at the
+// pinned commit — recomputable from git history alone, unlike Digest's
+// flowmap graph JSON, which is never committed. The mechanical
+// before-peek and reset (spec/diagram-proposals ac-3), pure functions of
+// provenance, gate on SourceDigest (internal/diagrambase); Digest stays
+// the truth-movement comparand. A derived proposal without SourceDigest
+// renders peek/reset disclosed-unavailable — never guessed, never gated
+// on the wrong digest.
 //
 // Validate here checks only presence and ref-SHAPE, deliberately NOT
 // corpus resolution or the sha256:<64-hex> digest FORMAT: spec/
@@ -47,15 +59,20 @@ type DiagramFrontmatter struct {
 // or a malformed digest to decode cleanly in the first place in order to
 // distinguish "present but wrong" (its own finding) from "absent or
 // structurally malformed" (a decode failure) — see vl021.go's doc comment
-// for the fixture that exercises exactly this split.
+// for the fixture that exercises exactly this split. SourceDigest is
+// optional and, like Digest, format-checked by VL-021 (only when present),
+// not here.
 type DiagramDerivedFrom struct {
-	Ref    string `yaml:"ref" json:"ref"`
-	Digest string `yaml:"digest" json:"digest"`
+	Ref          string `yaml:"ref" json:"ref"`
+	Digest       string `yaml:"digest" json:"digest"`
+	SourceDigest string `yaml:"source_digest,omitempty" json:"source_digest,omitempty"`
 }
 
 // Validate checks Ref is present and parses as a ref (pinned or
 // unpinned — a derived proposal's base is typically pinned to its fork
 // commit, but this package does not require it) and Digest is present.
+// SourceDigest is optional (ADJ-16): its absence is legal here and renders
+// peek/reset disclosed-unavailable at the editor seam, never an error.
 func (d DiagramDerivedFrom) Validate() error {
 	if d.Ref == "" {
 		return fmt.Errorf("artifact: derived_from.ref is required")

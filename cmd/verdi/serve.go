@@ -158,6 +158,23 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 		home.OpenMRs = unavailableOpenMRs{reason: reviewUnavailableReason(configuredKind)}
 	}
 
+	// The diagram editor's verification rail (spec/board-editor dc-4): the
+	// canned-file verifier is the hermetic e2e harness's injection
+	// (VERDI_DIAGRAM_VERIFICATION — a strict-decoded local JSON file, no
+	// network), mirroring VERDI_REVIEW_FEED above. With nothing wired the
+	// rail renders its disclosed verification-unavailable state — the
+	// verification-extractor story's live adapter arrives through this
+	// same Deps seam when its wiring lands, keeping the two stories
+	// buildable in either order.
+	if p := os.Getenv("VERDI_DIAGRAM_VERIFICATION"); p != "" {
+		verifier, verr := workbench.LoadCannedDiagramVerifier(p)
+		if verr != nil {
+			fmt.Fprintln(stderr, "serve:", verr)
+			return 2
+		}
+		deps.DiagramVerifier = verifier
+	}
+
 	httpLn, err := net.Listen("tcp", httpAddr)
 	if err != nil {
 		fmt.Fprintln(stderr, "serve: binding workbench HTTP:", err)
