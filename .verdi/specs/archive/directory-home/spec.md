@@ -4,7 +4,7 @@ kind: spec
 title: "Directory Home"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-20
 problem: { text: "the workbench home page is a single-checkout view: it lists what the serving working tree contains and nothing else, so every draft in progress on a design branch is invisible at the one address the operator actually visits — the work most in motion is exactly the work the directory under-reports (workbench-directory#problem), and the distinction the operator needs, status, is never the page's organizing structure", anchor: "#problem" }
 outcome: { text: "GET / at the one serve address is the whole-store directory: it renders the computed directory index — every spec on the default branch and every draft on a design branch — grouped by status per the feature's dc-2, every entry status-chipped and linking to its board, disclosed by source, chipped in-review from the forge when an MR is open, and degrading every absence to a disclosed notice: never a dead link, never a silent absence", anchor: "#outcome" }
