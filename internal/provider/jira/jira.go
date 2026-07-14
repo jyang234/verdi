@@ -1,15 +1,14 @@
 package jira
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
 
+	"github.com/jyang234/verdi/internal/httpjson"
 	"github.com/jyang234/verdi/internal/provider"
 )
 
@@ -30,7 +29,10 @@ type Config struct {
 	// the environment for it itself, so it stays testable with an
 	// arbitrary or absent token.
 	Token string
-	// HTTPClient defaults to http.DefaultClient.
+	// HTTPClient defaults to nil: the adapter rides internal/httpjson's
+	// shared transport, which itself defaults to a client bounded by
+	// httpjson.DefaultTimeout (30s, spec/forge-transport dc-2) when this
+	// field is left nil. A caller-supplied client is used AS-IS.
 	HTTPClient *http.Client
 	// Getenv defaults to os.Getenv; overridden in tests so the MR/pipeline
 	// link in the human comment is hermetically testable.
@@ -39,7 +41,10 @@ type Config struct {
 
 // Adapter implements provider.StoryProvider against the Jira Cloud REST
 // API v3 (04 §Jira adapter).
-type Adapter struct{ cfg Config }
+type Adapter struct {
+	cfg       Config
+	transport *httpjson.Client
+}
 
 // New returns an Adapter with cfg's defaults filled in. A trailing slash on
 // BaseURL is trimmed once here so both request paths and the constructed
@@ -47,13 +52,10 @@ type Adapter struct{ cfg Config }
 // without a trailing "/").
 func New(cfg Config) *Adapter {
 	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
-	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = http.DefaultClient
-	}
 	if cfg.Getenv == nil {
 		cfg.Getenv = os.Getenv
 	}
-	return &Adapter{cfg: cfg}
+	return &Adapter{cfg: cfg, transport: &httpjson.Client{HTTPClient: cfg.HTTPClient}}
 }
 
 var _ provider.StoryProvider = (*Adapter)(nil)
@@ -257,58 +259,49 @@ func (a *Adapter) postComment(ctx context.Context, key string, r provider.Rollup
 	return nil
 }
 
-// doJSON issues an HTTP request against a.cfg.BaseURL+path, optionally
-// encoding body as the JSON request body and decoding the response into
-// out (skipped when out is nil). Every failure is classified into 04's
-// failure-table sentinels.
+// doJSON is the thin binding the ac-1 seam calls for: it binds
+// httpjson.Client.Do to this adapter's own auth/Accept headers and status
+// classification into 04's failure-table sentinels — httpjson itself owns
+// none of that taxonomy (dc-1). body is optionally encoded as the JSON
+// request body; the response decodes into out (skipped when out is nil).
 func (a *Adapter) doJSON(ctx context.Context, method, path string, body, out interface{}) error {
-	var reader io.Reader
-	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("encoding request body: %w", err)
-		}
-		reader = bytes.NewReader(encoded)
-	}
+	return a.transport.Do(ctx, method, a.cfg.BaseURL+path, body, a.setAuth, a.classify(method, path), out)
+}
 
-	req, err := http.NewRequestWithContext(ctx, method, a.cfg.BaseURL+path, reader)
-	if err != nil {
-		return fmt.Errorf("building request: %w", err)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
+// setAuth sets this adapter's request headers: Accept always, Authorization
+// only when a token is configured (Jira accepts unauthenticated requests in
+// some test/dev setups, mirrored by this package's own tests).
+func (a *Adapter) setAuth(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 	if a.cfg.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+a.cfg.Token)
 	}
+}
 
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		// A network failure, DNS failure, connection refusal, or a context
-		// deadline/cancellation all read as "the tracker could not be
-		// reached" (04's failure table: "Unavailable/timeout").
-		return fmt.Errorf("%s %s: %w: %v", method, path, provider.ErrUnavailable, err)
-	}
-	defer resp.Body.Close()
-
-	switch {
-	case resp.StatusCode >= 200 && resp.StatusCode < 300:
-		if out == nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
+// classify maps one round trip's outcome onto 04's failure-table sentinels.
+// A network failure, DNS failure, connection refusal, or a context
+// deadline/cancellation all read as "the tracker could not be reached" (04's
+// failure table: "Unavailable/timeout") — ditto HTTP 429: an uncached
+// rate-limited call must route to the same degrade/retry path a 5xx does
+// (spec/forge-transport ac-3), not hard-fail as an "unexpected status".
+func (a *Adapter) classify(method, path string) httpjson.Classify {
+	return func(resp *http.Response, transportErr error) error {
+		if transportErr != nil {
+			return fmt.Errorf("%s %s: %w: %v", method, path, provider.ErrUnavailable, transportErr)
+		}
+		switch {
+		case resp.StatusCode >= 200 && resp.StatusCode < 300:
 			return nil
+		case resp.StatusCode == http.StatusNotFound:
+			return fmt.Errorf("%s %s: %w", method, path, provider.ErrNotFound)
+		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+			return fmt.Errorf("%s %s: %w", method, path, provider.ErrUnauthorized)
+		case resp.StatusCode == http.StatusTooManyRequests:
+			return fmt.Errorf("%s %s: %w: status %s", method, path, provider.ErrUnavailable, resp.Status)
+		case resp.StatusCode >= 500:
+			return fmt.Errorf("%s %s: %w: status %s", method, path, provider.ErrUnavailable, resp.Status)
+		default:
+			return fmt.Errorf("%s %s: unexpected status %s", method, path, resp.Status)
 		}
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return fmt.Errorf("decoding response from %s %s: %w", method, path, err)
-		}
-		return nil
-	case resp.StatusCode == http.StatusNotFound:
-		return fmt.Errorf("%s %s: %w", method, path, provider.ErrNotFound)
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("%s %s: %w", method, path, provider.ErrUnauthorized)
-	case resp.StatusCode >= 500:
-		return fmt.Errorf("%s %s: %w: status %s", method, path, provider.ErrUnavailable, resp.Status)
-	default:
-		return fmt.Errorf("%s %s: unexpected status %s", method, path, resp.Status)
 	}
 }

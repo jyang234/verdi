@@ -130,6 +130,12 @@ func regenerateService(ctx context.Context, root string, svc store.Service, comm
 	if err != nil {
 		return sb, nil, fmt.Errorf("flowmap graph: %w", err)
 	}
+	// The graph's recorded tool pseudo-version rides into the bundle as
+	// toolchain.json (bundle.Assemble), the provenance carrier a later
+	// fetched-bundle intake checks against the manifest pin
+	// (spec/forge-transport ac-4/dc-4). "" when the graph carried none —
+	// Assemble then omits the carrier rather than fabricating it.
+	sb.Tool = graph.Tool
 
 	if svc.BoundaryContractPath != "" {
 		baseRaw, err := os.ReadFile(svc.BoundaryContractPath)
