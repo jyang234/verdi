@@ -13,6 +13,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
@@ -183,7 +184,7 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 // criterion (artifact.SpecFrontmatter.Validate requires at least one),
 // and the dispositions block.
 func scaffoldSpec(specRef, storyRef, specName string, pins []artifact.Pin, dispositions []artifact.Disposition) string {
-	title := titleCase(specName)
+	title := designscaffold.HumanizeName(specName)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "---\nid: %s\nkind: spec\ntitle: %q\nowners: [unassigned]\nclass: feature\nstatus: draft\nstory: %s\n", specRef, title, storyRef)
@@ -206,19 +207,6 @@ func scaffoldSpec(specRef, storyRef, specName string, pins []artifact.Pin, dispo
 
 	fmt.Fprintf(&b, "---\n# %s\n\nTODO: design notes.\n\nDrafted by commit-to-design from board %q. Every board sticky above is\ncarried as `open-question` until the commit-to-design skill (or a human)\npromotes it to `incorporated` or `contradicted` (I-5).\n", title, specRef)
 	return b.String()
-}
-
-// titleCase turns a kebab-case spec name into a human-readable title
-// placeholder ("stale-decline-v2" -> "Stale Decline V2").
-func titleCase(name string) string {
-	parts := strings.Split(name, "-")
-	for i, p := range parts {
-		if p == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
-	}
-	return strings.Join(parts, " ")
 }
 
 // boardContent is the hashable content of a board snapshot — pins,

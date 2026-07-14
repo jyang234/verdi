@@ -131,29 +131,17 @@ func toCriteriaPayload(cs []provider.CriterionStatus) []criterionPayload {
 }
 
 // criteriaChanged reports whether the per-AC Status values differ between a
-// and b, comparing by ID (order-independent) — mirrors
-// internal/provider/fake's criteriaStatusesChanged so both the fake and
-// this adapter implement 04 §Semantics's "any AC status changed since the
-// last publish" identically. A criterion appearing in one set but not the
-// other counts as a change.
+// and b, comparing by ID (order-independent) — 04 §Semantics's "any AC
+// status changed since the last publish", the same rule
+// internal/provider/fake's criteriaStatusesChanged implements. A criterion
+// appearing in one set but not the other counts as a change. Thin wrapper
+// over provider.StatusesChanged (spec/shared-homes ac-5) — see there for
+// the shared comparison this adapter and the fake both call with their
+// own projection.
 func criteriaChanged(a, b []criterionPayload) bool {
-	statusesByID := func(cs []criterionPayload) map[string]string {
-		m := make(map[string]string, len(cs))
-		for _, c := range cs {
-			m[c.ID] = c.Status
-		}
-		return m
-	}
-	am, bm := statusesByID(a), statusesByID(b)
-	if len(am) != len(bm) {
-		return true
-	}
-	for id, st := range am {
-		if bm[id] != st {
-			return true
-		}
-	}
-	return false
+	return provider.StatusesChanged(a, b, func(c criterionPayload) (id, status string) {
+		return c.ID, c.Status
+	})
 }
 
 // PublishRollup implements provider.StoryProvider (04 §Jira adapter +

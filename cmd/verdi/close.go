@@ -266,24 +266,14 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	return 0
 }
 
-// foldStory loads spec's authoritative (source: ci) evidence and folds it —
-// the shared shape gate.go/closuregate.go/rollup.go/matrix.go each already
-// repeat inline; kept here as its own small helper since close.go needs the
-// full evidence.StoryResult (not just the closure gate's bool).
+// foldStory loads spec's authoritative (source: ci) evidence and folds it,
+// via the shared foldStoryEvidence prologue (foldload.go) — kept here as
+// its own small wrapper since close.go needs the full evidence.StoryResult
+// (not just the closure gate's bool).
 func foldStory(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string) (evidence.StoryResult, error) {
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
-	records, err := evidence.LoadRecords(ctx, root, derivedRoot, head)
-	if err != nil {
-		return evidence.StoryResult{}, fmt.Errorf("loading evidence records: %w", err)
-	}
-	slug := store.RefSlug(spec.Story)
 	// Preview stays false — co-1: closure folds ONLY source: ci evidence,
 	// never the --preview escape hatch.
-	result, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: false, StoreRoot: root, StorySlug: slug})
-	if err != nil {
-		return evidence.StoryResult{}, fmt.Errorf("folding evidence: %w", err)
-	}
-	return result, nil
+	return foldStoryEvidence(ctx, root, spec, head, false)
 }
 
 // closeAcceptedStatusLineRe matches the sole `status: accepted-pending-build`

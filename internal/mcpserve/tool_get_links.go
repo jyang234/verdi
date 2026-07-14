@@ -23,19 +23,9 @@ type backlinkItem struct {
 // GetLinks implements the get_links tool: an artifact's typed outgoing
 // links plus computed backlinks (internal/index's inverted edge table).
 func (b *Backend) GetLinks(ctx context.Context, argsRaw json.RawMessage) map[string]any {
-	var args struct {
-		Ref string `json:"ref"`
-	}
-	if err := strictUnmarshal(argsRaw, &args); err != nil {
-		return toolError("get_links: malformed arguments: " + err.Error())
-	}
-	if args.Ref == "" {
-		return toolError("get_links: ref is required")
-	}
-
-	ref, err := artifact.ParseRef(args.Ref)
-	if err != nil {
-		return toolError("get_links: " + err.Error())
+	ref, errResult, ok := decodeRefArg("get_links", argsRaw)
+	if !ok {
+		return errResult
 	}
 	unpinned := artifact.Ref{Kind: ref.Kind, Name: ref.Name}
 
