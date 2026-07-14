@@ -51,6 +51,9 @@ would independently reject the same file as defense in depth.
 | `VL-014/contradicted-without-note/.../spec.md` | VL-014 | 1 | `contradicted` disposition has no `note` |
 | `VL-014/unresolvable-where-anchor/` | VL-014 | 1 | `where: "#does-not-exist"` names no heading in the spec body |
 | `VL-019/.verdi/obligations/stale-decline/ac-1--static.md` | VL-019 | 1 | obligation `verifies` targets `spec/stale-decline` (a whole FEATURE spec, not a STORY) — obligations attach to STORY ACs only |
+| `VL-021/dangling-ref/.../vl-021-dangling-ref.mermaid` | VL-021 | 1 | `class: proposal` diagram's `derived_from.ref` names no diagram in the corpus |
+| `VL-021/malformed-digest/.../vl-021-malformed-digest.mermaid` | VL-021 | 1 | `derived_from.ref` is real, but `derived_from.digest` is not `sha256:<64-hex>` |
+| `VL-021/clean/.../vl-021-clean.mermaid` | VL-021 | 0 | a well-formed `derived_from` naming the real `diagram/loansvc-topology` — the positive control, no finding |
 
 VL-001's overlays cover both halves of the rule: strict decode (unknown
 field) and the restricted dialect (anchor/alias/custom-tag, PLAN.md I-1).
