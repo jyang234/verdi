@@ -78,6 +78,21 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return fmt.Errorf("writing proposal diagram fixture: %w", err)
 	}
 
+	// The draft-boards same-spec fixture's LANDED half (spec/draft-boards
+	// ac-3): a spec landed on main whose name also exists as a DRAFT
+	// edition on its own design branch (provision_draftboards.go). Landed
+	// here — before the corpus commit — so it is on main and on every
+	// branch cut from main, including the serving checkout's. Scratch-only
+	// like mermaid-demo (a name reused across main and a design branch
+	// cannot live in testdata/corpus without perturbing other suites).
+	ledgerDir := filepath.Join(storeRoot, ".verdi", "specs", "active", dbSameSpecName)
+	if err := os.MkdirAll(ledgerDir, 0o755); err != nil {
+		return fmt.Errorf("creating %s spec dir: %w", dbSameSpecName, err)
+	}
+	if err := os.WriteFile(filepath.Join(ledgerDir, "spec.md"), []byte(dbSameSpecLanded), 0o644); err != nil {
+		return fmt.Errorf("writing %s spec: %w", dbSameSpecName, err)
+	}
+
 	manifest := "schema: verdi.layout/v1\nforge: gitlab\nproviders:\n  jira:\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\nservices:\n  discovery: flowmap\n"
 	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", "verdi.yaml"), []byte(manifest), 0o644); err != nil {
 		return err

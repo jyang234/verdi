@@ -400,6 +400,21 @@ bindings:
       - "spec/board-editor#ac-3"
       - "spec/board-editor#ac-4"
       - "spec/board-editor#ac-5"
+      # spec/draft-boards behavioral legs (ac-1/ac-3 declare [static,
+      # behavioral], ac-2 [behavioral]): the Playwright e2e
+      # 38-draft-boards.spec.ts against the served binary — a draft opens
+      # under /b/ in authoring mode with its sub-routes working beneath
+      # the prefix (ac-1), the two-tab isolation proof with the
+      # inspection-server porcelain/worktree-file witnesses (ac-2), and
+      # the same spec sealed unprefixed + authoring under /b/ in one
+      # session (ac-3) — plus the workbench Go integration tests
+      # (branchboard_test.go: TestBranchBoard_AuthoringFromManagedWorktree,
+      # _SubroutesBeneathPrefix, _TwoBranches_EditIsolation,
+      # _ModeLawPerInstance, and the dc-2/dc-4 refusal/sealed/notice
+      # shapes) — all under make verify.
+      - "spec/draft-boards#ac-1"
+      - "spec/draft-boards#ac-2"
+      - "spec/draft-boards#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -720,3 +735,19 @@ bindings:
       - "spec/board-editor#ac-2"
       - "spec/board-editor#ac-3"
       - "spec/board-editor#ac-4"
+      # spec/draft-boards static legs: ac-1 — internal/workbench's ONE
+      # board route table (handler.go's boardSpecRoutes) is mounted
+      # unprefixed and beneath /b/{branch}; branchboard.go's dispatch
+      # resolves the decoded branch segment through exactly one call into
+      # the worktree-manager seam (wtmanager.EnsureWorktree behind the
+      # ensureWorktree var; no `git worktree` invocation and no lifecycle
+      # code in the routing layer) and constructs the existing
+      # boardSpecServer over the seam-obtained root. ac-3 — the mode
+      # vocabulary is the unchanged modeAuthoring/modeReview/modeReadOnly
+      # set (projection.go; no /b/-specific value), per-branch instances
+      # reach their mode through loadBoard's untouched branch-state
+      # switch evaluated against their own tree, and the unprefixed
+      # /board/spec/{name} route is present unchanged in the same table.
+      # All compile, vet, lint, and lint-store clean under make verify.
+      - "spec/draft-boards#ac-1"
+      - "spec/draft-boards#ac-3"

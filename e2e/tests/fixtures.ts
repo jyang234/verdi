@@ -478,3 +478,41 @@ export const DIAGRAM_RAIL_FINDINGS: ReadonlyArray<[string, string]> = [
   ["audit-log", "contradicted"],
   ["charge-svc", "stale-base"],
 ];
+// Draft boards (spec/draft-boards) — the /b/<branch-escaped>/ routes
+// ---------------------------------------------------------------------------
+
+// The e2e inspection server (cmd/e2eharness/inspect.go): the suite's
+// read-only window into the serving checkout's git state and the managed
+// worktrees' files. Loopback only; it mutates nothing. :4178 by default
+// (VERDI_E2E_PORT_BASE, D6-28, shifts it — see ../ports.ts).
+export const INSPECT_URL = `http://127.0.0.1:${resolvePorts().inspect}`;
+
+// Draft-board fixture branches (cmd/e2eharness/provision_draftboards.go):
+// each name is both the design branch's slug (design/<name>) and its
+// draft spec's name.
+export const DB_TAB_A = "draft-tab-a"; // local; tab A of the two-tab proof
+export const DB_TAB_B = "draft-tab-b"; // local; tab B
+export const DB_SEALED_REMOTE = "sealed-remote"; // remote-tracking ref ONLY (dc-4)
+// The same-spec-two-modes fixture (ac-3): DB_SAME_SPEC is landed
+// (accepted-pending-build) on main by cmd/e2eharness/provision.go AND
+// exists as a DRAFT edition on DB_SAME_SPEC_BRANCH — sealed at its
+// unprefixed address, authoring under /b/, simultaneously.
+export const DB_SAME_SPEC = "decline-ledger";
+export const DB_SAME_SPEC_BRANCH = "design/decline-ledger-v2";
+// A substring of the draft edition's outcome text — present under /b/,
+// absent from the landed record's unprefixed render.
+export const DB_SAME_SPEC_DRAFT_SNIPPET = "draft edition outcome (draft boards e2e)";
+
+// The per-branch board address (draft-boards dc-1): the branch rides one
+// path segment with its slashes percent-encoded; beneath the prefix the
+// existing board addresses apply unchanged.
+export function branchBoardPath(branch: string, spec: string): string {
+  return `/b/${encodeURIComponent(branch)}${boardPath(spec)}`;
+}
+
+// The managed worktree's deterministic store-relative home (worktree-manager
+// dc-1: design/<name> maps to .verdi/data/worktrees/<name>/) — where the
+// inspection server reads a branch's tree.
+export function worktreeSpecPath(name: string, spec: string): string {
+  return `.verdi/data/worktrees/${name}/.verdi/specs/active/${spec}/spec.md`;
+}
