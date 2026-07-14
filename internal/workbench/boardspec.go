@@ -23,6 +23,7 @@ import (
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/wallbadge"
 )
 
 // Deps carries the workbench's injected collaborators (04 §port
@@ -55,12 +56,28 @@ type Deps struct {
 	// view. Only the caller that computes that context (cmd/verdi's
 	// serve.go) can supply them.
 	Disclosures []disclosure.Disclosure
+
+	// SupersessionCandidates is the pending-supersession wall badge's
+	// forge access (spec/badge-computes ac-3) — a consumer-defined port
+	// (wallbadge.SupersessionCandidateLoader, 04 §port pattern) so this
+	// package never imports internal/forge, exactly like CommentFeed
+	// above. nil means no forge is configured: every pending-
+	// supersession outcome on this checkout renders as a disclosed-
+	// unproven notice rather than a badge (ac-3's three-valued outcome)
+	// — never silently "not flagged". Only the caller that builds the
+	// real forge-backed adapter (cmd/verdi's serve.go) sets it.
+	SupersessionCandidates wallbadge.SupersessionCandidateLoader
 }
 
 // boardSpecServer holds the board's dependencies for one store root.
 type boardSpecServer struct {
 	root string
 	feed CommentFeed
+
+	// supersession is the pending-supersession wall badge's forge access
+	// (Deps.SupersessionCandidates, see that field's doc comment). nil is
+	// a fully valid zero value, mirroring feed above.
+	supersession wallbadge.SupersessionCandidateLoader
 
 	// reviewUnavailable, when non-empty, is a disclosed reason the review
 	// feed is CONFIGURED (a forge is named in verdi.yaml) but cannot be
@@ -191,6 +208,14 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if err := attachObligations(proj, s.root, name, fm); err != nil {
 		return nil, nil, "", err
 	}
+	// Wall badges (spec/badge-computes dc-1): the SAME store-derived I/O
+	// enrichment posture as attachObligations above — runs after
+	// buildProjection, never inside it — so the full page, the post-
+	// mutation fragment, and get_board's LoadProjection all see the same
+	// badges (ac-1).
+	if err := attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession); err != nil {
+		return nil, nil, "", err
+	}
 	if reviewNotice != "" {
 		proj.Notices = append(proj.Notices, reviewNotice)
 	}
@@ -270,13 +295,15 @@ func attachObligations(proj *BoardProjection, root, specName string, fm *artifac
 // entrypoint mcpserve's get_board tool uses — it never reimplements the
 // projection. feed may be nil (no live review population, matching a nil
 // Deps.CommentFeed); reviewUnavailable carries the same configured-but-
-// unreachable disclosure Deps.ReviewUnavailable does. The returned
-// reviewNotice is the review-feed disclosure alone (see loadBoard's doc
-// comment) — get_board surfaces it as its own review_unavailable field,
+// unreachable disclosure Deps.ReviewUnavailable does. superseLoader mirrors
+// Deps.SupersessionCandidates — nil is a fully valid "no forge configured"
+// zero value (spec/badge-computes ac-3's disclosed-unproven case). The
+// returned reviewNotice is the review-feed disclosure alone (see loadBoard's
+// doc comment) — get_board surfaces it as its own review_unavailable field,
 // never folded silently into the generic notices a human board's chrome
 // shows.
-func LoadProjection(ctx context.Context, root, name string, feed CommentFeed, reviewUnavailable string) (proj *BoardProjection, reviewNotice string, err error) {
-	s := &boardSpecServer{root: root, feed: feed, reviewUnavailable: reviewUnavailable}
+func LoadProjection(ctx context.Context, root, name string, feed CommentFeed, reviewUnavailable string, superseLoader wallbadge.SupersessionCandidateLoader) (proj *BoardProjection, reviewNotice string, err error) {
+	s := &boardSpecServer{root: root, feed: feed, reviewUnavailable: reviewUnavailable, supersession: superseLoader}
 	proj, _, reviewNotice, err = s.loadBoard(ctx, name)
 	return proj, reviewNotice, err
 }

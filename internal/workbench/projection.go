@@ -56,6 +56,17 @@ type cardView struct {
 	// re-marshals cardView as its wire result: an agent reads the same
 	// obligations a human sees on the wall.
 	Obligations []obligationView `json:"obligations,omitempty"`
+	// Badges is this card's computed wall badges (spec/badge-computes
+	// ac-1/ac-2/dc-2): every derivation record whose Target names this
+	// object's own id, attached by attachBadges (badges.go) AFTER
+	// buildProjection returns — a store-derived I/O enrichment, exactly
+	// like Obligations above, never a projection of buildProjection's
+	// four in-memory inputs. Empty on every card no locus-declaring VL
+	// finding names. The frontend phase renders each entry as a chip
+	// carrying data-badge-source and the entry's own serialized JSON
+	// (dc-4's opener contract) — this field only carries the DATA; no
+	// chip markup is emitted here.
+	Badges []badgeView `json:"badges,omitempty"`
 }
 
 // obligationView is one declared evidence kind's obligation as it renders on
@@ -72,6 +83,33 @@ type obligationView struct {
 	Title   string `json:"title,omitempty"`
 	Body    string `json:"body,omitempty"`
 	Present bool   `json:"present"`
+}
+
+// badgeInputView is one pinned input a badge's derivation record cites —
+// a local mirror of wallbadge.InputRecord's JSON shape. Kept as a
+// package-local view type, exactly like obligationView above (rather than
+// importing internal/wallbadge's own struct into this file), so
+// projection.go — the pure projector — stays free of any enrichment
+// package's import; badges.go (the I/O tier) does the field-by-field copy
+// when it attaches computed badges.
+type badgeInputView struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Revision string `json:"revision"`
+}
+
+// badgeView is one computed wall badge (spec/badge-computes dc-2) — a
+// local mirror of wallbadge.DerivationRecord's JSON shape, for the same
+// reason badgeInputView is: this file (the pure projector) never imports
+// the compute package that produces the real value. badges.go converts
+// wallbadge.DerivationRecord into this shape at attach time.
+type badgeView struct {
+	Source      string           `json:"source"`
+	Label       string           `json:"label"`
+	Target      string           `json:"target,omitempty"`
+	Inputs      []badgeInputView `json:"inputs"`
+	Records     []string         `json:"records"`
+	Disclosures []string         `json:"disclosures,omitempty"`
 }
 
 // refCardView is a reference card — an edge target outside this spec,
@@ -133,6 +171,11 @@ type StubView struct {
 	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
 	X                  float64  `json:"x"`
 	Y                  float64  `json:"y"`
+	// Badges mirrors cardView.Badges (spec/badge-computes dc-3): a stub is
+	// a rendered board object too (keyed "stub:<slug>"), and a dangling
+	// stub reference (VL-006's checkStubACs/checkStubResolves) anchors to
+	// the stub's own card, not the case file.
+	Badges []badgeView `json:"badges,omitempty"`
 }
 
 // BoardProjection is the full render model for one spec's board — the
@@ -199,6 +242,13 @@ type BoardProjection struct {
 	// board never renders as if a skipped input were simply absent
 	// (constitution 2/10: silence is never a pass).
 	Notices []string `json:"notices,omitempty"`
+	// CaseFileBadges is every spec-level computed wall badge (spec/badge-
+	// computes ac-1/ac-2/ac-3/dc-2): a VL finding declaring a spec-level
+	// locus, plus the spec-stale and pending-supersession ladder flags on
+	// a story wall. Attached by attachBadges (badges.go), the same I/O
+	// enrichment tier as Notices/Obligations — never a projection of
+	// buildProjection's four in-memory inputs.
+	CaseFileBadges []badgeView `json:"case_file_badges,omitempty"`
 }
 
 // buildProjection computes the deterministic projection of the four

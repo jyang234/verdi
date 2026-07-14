@@ -21,6 +21,15 @@ const (
 	emptySpecName      = "income-verification"
 	obligationSpecName = "refi-decline-audit"
 	replaySpecName     = "refi-decline-replay"
+
+	// The wall-badge fixtures (spec/badge-computes ac-5): one badge-bearing
+	// wall per board mode — authoring (draft on the design branch), review
+	// (draft + an entry in the canned MR feed), and read-only (status
+	// accepted-pending-build, which branch state cannot make authoring).
+	// All three carry the same badge-triggering state (badgeSpecBody).
+	badgeWallSpecName   = "decline-badge-wall"
+	badgeReviewSpecName = "decline-badge-review"
+	badgeSealedSpecName = "decline-badge-sealed"
 )
 
 // designSpec is DESIGN_SPEC: the object model fixtures.ts binds (3 ACs,
@@ -259,6 +268,62 @@ Open a decline, mutate the underlying data, and assert the applicant-facing
 notice reappears with the corrected reason — not a unit test of the projector.
 `
 
+// badgeSpec renders one wall-badge fixture spec (spec/badge-computes
+// ac-5): a feature wall carrying every badge-triggering shape the e2e
+// suite asserts, all of them REAL lint-firing state, never a canned badge:
+//
+//   - stub "badge-orphan" names acceptance criterion ac-99, which the spec
+//     does not declare → VL-006, object-anchored to the stub's own card
+//     (dc-3) → a chip on the stub card;
+//   - decision dc-1 exempts adr/0099-no-such-adr, which does not resolve
+//     → VL-003, object-anchored to dc-1 → a chip on the decision card;
+//   - the spec's own top-level depends-on names spec/no-such-parent,
+//     which does not resolve → VL-003, spec-level (no single object)
+//     → a stamp on the case-file lockup.
+//
+// name/status/frozenLine vary per mode fixture; frozenLine is "" for a
+// draft and a full "frozen: {...}\n" line for the sealed instance (status
+// accepted-pending-build requires the stamp, artifact.validateFeature).
+func badgeSpec(name, status, frozenLine string) string {
+	return `---
+id: spec/` + name + `
+kind: spec
+class: feature
+title: "Decline badge rack"
+status: ` + status + `
+owners: [platform-team]
+` + frozenLine + `problem: { text: "the store computes receipts this wall cannot yet wear", anchor: "#problem" }
+outcome: { text: "every computed receipt hangs on the exact surface it belongs to", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "the wall wears its computed receipts", evidence: [behavioral], anchor: "#ac-1" }
+decisions:
+  - { id: dc-1, text: "excuse the badge rack from a rule recorded nowhere", anchor: "#dc-1",
+      links: [ { type: exempts, ref: adr/0099-no-such-adr, note: "deliberately dangling: the object-anchored VL-003 badge fixture" } ] }
+stubs:
+  - { slug: badge-orphan, acceptance_criteria: [ac-99] }
+links:
+  - { type: depends-on, ref: spec/no-such-parent }
+---
+# Decline badge rack
+
+## Problem
+
+The badge fixtures need a wall whose lint findings are real.
+
+## Outcome
+
+Chips on cards, stamps on the case file.
+
+## ac-1
+
+The wall wears its computed receipts.
+
+## dc-1
+
+Deliberately dangling refs; see the frontmatter.
+`
+}
+
 // reviewSpec is REVIEW_SPEC: the board opens it in review mode (its
 // canned feed reports an open MR); ac-2 is the anchored comment's
 // target.
@@ -304,7 +369,8 @@ const cannedReviewFeed = `{
     { "id": "n-1", "author": "alice", "body": "[vd:ac-2] this outcome AC reads as implementation-scoped — reword?", "resolved": false },
     { "id": "n-2", "author": "bob", "body": "overall direction looks right; one naming nit inline", "resolved": false },
     { "id": "n-3", "author": "carol", "body": "[vd:zz-99] does this still apply after the split?", "resolved": true }
-  ]
+  ],
+  "decline-badge-review": []
 }
 `
 
@@ -338,6 +404,16 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 		return "", err
 	}
 
+	// The sealed badge fixture freezes at the store's own main tip — a
+	// real commit in this scratch repo's history (frozen.commit must be
+	// sha-shaped and honest; a made-up sha would be a lie the fixtures
+	// don't need to tell). Resolved BEFORE the design branch is cut, so
+	// the sha is main's.
+	mainSHA, err := gitOutput(storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolving main HEAD for the sealed badge fixture: %w", err)
+	}
+
 	// The design branch: both draft specs (draft never lands on main —
 	// VL-004); the ADR dc-1 exempts is the corpus's own adr/0001-outbox-events.
 	if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", designBranch); err != nil {
@@ -354,6 +430,11 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 		filepath.Join(".verdi", "specs", "active", obligationSpecName, "spec.md"):     obligationSpec,
 		filepath.Join(".verdi", "specs", "active", replaySpecName, "spec.md"):         replaySpec,
 		filepath.Join(".verdi", "obligations", replaySpecName, "ac-1--behavioral.md"): replayObligation,
+		// The three wall-badge fixtures (spec/badge-computes ac-5): one per
+		// board mode, same badge-triggering state.
+		filepath.Join(".verdi", "specs", "active", badgeWallSpecName, "spec.md"):   badgeSpec(badgeWallSpecName, "draft", ""),
+		filepath.Join(".verdi", "specs", "active", badgeReviewSpecName, "spec.md"): badgeSpec(badgeReviewSpecName, "draft", ""),
+		filepath.Join(".verdi", "specs", "active", badgeSealedSpecName, "spec.md"): badgeSpec(badgeSealedSpecName, "accepted-pending-build", "frozen: { at: 2024-01-01, commit: "+mainSHA+" }\n"),
 	}
 	for rel, content := range files {
 		path := filepath.Join(storeRoot, rel)

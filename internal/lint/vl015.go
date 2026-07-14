@@ -28,7 +28,12 @@ func (r vl015) Check(in *RunInput) []Finding {
 		if d.Grandfathered || d.DecodeErr != nil || d.Spec == nil || d.Spec.Supersession == nil {
 			continue
 		}
-		findings = append(findings, r.checkOne(in, d)...)
+		// badge-computes dc-3's "spec-stale adjacent rules" spec-level
+		// bucket: supersession-manifest fidelity is a whole-revision
+		// property (every predecessor object classified exactly once), not
+		// any single card's own defect, even where a message names one
+		// object id among many it checks.
+		findings = append(findings, locusAll(r.checkOne(in, d), SpecLocus())...)
 	}
 	return findings
 }

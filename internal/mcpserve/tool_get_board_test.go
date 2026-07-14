@@ -189,7 +189,7 @@ func TestGetBoard_MatchesWorkbenchProjection(t *testing.T) {
 	b, _, _ := newTestBackend(t)
 	ctx := context.Background()
 
-	direct, _, err := workbench.LoadProjection(ctx, b.Root, "widget-retry", nil, "")
+	direct, _, err := workbench.LoadProjection(ctx, b.Root, "widget-retry", nil, "", nil)
 	if err != nil {
 		t.Fatalf("workbench.LoadProjection: %v", err)
 	}

@@ -182,6 +182,25 @@ bindings:
       - "spec/worktree-manager#ac-3"
       - "spec/worktree-manager#ac-4"
       - "spec/worktree-manager#ac-5"
+      # spec/badge-computes behavioral legs, all under make verify:
+      # ac-1 = workbench's TestAttachBadges_SameAcrossPageFragmentAndLoad-
+      # Projection (one attachment feeds page, fragment, get_board's
+      # LoadProjection identically); ac-2 = TestAttachBadges_VLPartition +
+      # wallbadge's VLBadges tables (object-anchored / spec-level /
+      # no-locus fail-closed); ac-3 = wallbadge's ladder tables (flagged /
+      # proven-unflagged / disclosed-unproven) + TestAttachBadges_Pending-
+      # SupersessionDisclosedUnproven + the cmd/verdi + mcpserve
+      # supersessionfeed adapter tables; ac-4 = wallbadge's determinism
+      # test (byte-identical JSON across two renders); ac-5 = the
+      # 37-board-wall-badges.spec.ts Playwright suite (chips + case-file
+      # stamps in authoring/review/read-only, data-badge-source +
+      # data-badge-record on every badge button, a write path succeeding
+      # on a badged wall) + workbench's TestRenderBadges tables.
+      - "spec/badge-computes#ac-1"
+      - "spec/badge-computes#ac-2"
+      - "spec/badge-computes#ac-3"
+      - "spec/badge-computes#ac-4"
+      - "spec/badge-computes#ac-5"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -308,3 +327,21 @@ bindings:
       - "spec/worktree-manager#ac-3"
       - "spec/worktree-manager#ac-4"
       - "spec/worktree-manager#ac-5"
+      # spec/badge-computes static legs (ac-1..4 declare [static,
+      # behavioral]; ac-5 is behavioral-only), all under make verify:
+      # ac-1 = workbench's badgesstatic_test source-inspection witnesses
+      # (loadBoard's single attachBadges call site after buildProjection;
+      # the pure projector imports no lint/decisionsweep/evidence);
+      # ac-2 = the lint.Finding.Locus seam + wallbadge's static witness
+      # that no rule-id switch/map decides wall placement; ac-3 =
+      # wallbadge's staticcallsites_test (the dex lens's own
+      # decisionsweep.ScanSpecStale / evidence.PendingSupersession /
+      # LoadPendingSupersessionCandidates / ImplementsByFeature call
+      # sites, no local reimplementation); ac-4 = the one shared
+      # wallbadge.DerivationRecord schema (record.go) every badge
+      # constructor fills, revisions from content digests / pinned
+      # fields only — plus compile/vet/lint-store clean.
+      - "spec/badge-computes#ac-1"
+      - "spec/badge-computes#ac-2"
+      - "spec/badge-computes#ac-3"
+      - "spec/badge-computes#ac-4"

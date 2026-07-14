@@ -2,7 +2,9 @@ package evidence
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -80,6 +82,13 @@ func TestPendingSupersession_EndToEnd(t *testing.T) {
 	if len(candidates) != 1 {
 		t.Fatalf("candidates = %+v, want exactly 1", candidates)
 	}
+
+	t.Run("candidate carries a content digest of the exact bytes fetched (dc-5)", func(t *testing.T) {
+		want := "sha256:" + fmt.Sprintf("%x", sha256.Sum256([]byte(pendingCandidateSpecMD)))
+		if candidates[0].Digest != want {
+			t.Fatalf("Digest = %q, want %q (sha256 of the exact fetched bytes)", candidates[0].Digest, want)
+		}
+	})
 
 	t.Run("touches amended object: flagged", func(t *testing.T) {
 		got := PendingSupersession(PendingSupersessionInput{ObjectIDs: []string{"ac-1"}, Candidates: candidates})

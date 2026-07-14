@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/wallbadge"
 	"github.com/jyang234/verdi/internal/workbench"
 )
 
@@ -49,11 +50,13 @@ func (b *Backend) GetBoard(ctx context.Context, argsRaw json.RawMessage) map[str
 	// with no live adapter (b.ReviewUnavailable set) is disclosed; a live
 	// forge is used to build the review-mode comment feed.
 	var feed workbench.CommentFeed
+	var superseLoader wallbadge.SupersessionCandidateLoader
 	if b.Forge != nil {
 		feed = backendCommentFeed{f: b.Forge, root: b.Root}
+		superseLoader = backendSupersessionLoader{f: b.Forge, root: b.Root}
 	}
 
-	proj, reviewNotice, err := workbench.LoadProjection(ctx, b.Root, ref.Name, feed, b.ReviewUnavailable)
+	proj, reviewNotice, err := workbench.LoadProjection(ctx, b.Root, ref.Name, feed, b.ReviewUnavailable, superseLoader)
 	if errors.Is(err, workbench.ErrBoardNotFound) {
 		return toolError("get_board: no such spec board: " + ref.String())
 	}

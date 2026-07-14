@@ -38,22 +38,38 @@ func (r vl003) Check(in *RunInput) []Finding {
 		if d.Grandfathered || d.DecodeErr != nil {
 			continue
 		}
+		// The spec's own top-level links: (implements/supersedes/etc, 02
+		// §Object model — "belong to the spec itself") name no single
+		// declared object, so a dangling one is a SPEC-LEVEL wall locus
+		// (badge-computes dc-3) — the case file, not any one card.
 		for _, l := range d.Base.Links {
-			findings = append(findings, r.checkLink(l, d.RelPath, "links[].ref", in.Snapshot, externalRefs)...)
+			findings = append(findings, locusAll(r.checkLink(l, d.RelPath, "links[].ref", in.Snapshot, externalRefs), SpecLocus())...)
 		}
 
 		if d.Spec != nil {
+			// context[] refs are likewise the spec's own declared surface,
+			// not any one object's — spec-level.
 			for _, ctxRef := range d.Spec.Context {
-				findings = append(findings, r.checkPin(in, d.RelPath, "context[]", ctxRef)...)
+				findings = append(findings, locusAll(r.checkPin(in, d.RelPath, "context[]", ctxRef), SpecLocus())...)
 			}
+			// A decision's own links[] DO name a single rendered card (that
+			// decision's own) — a dangling one badges exactly that card
+			// (badge-computes dc-3's "dangling link refs" object-anchored
+			// bucket).
 			for _, dc := range d.Spec.Decisions {
 				for _, l := range dc.Links {
-					findings = append(findings, r.checkLink(l, d.RelPath, fmt.Sprintf("decisions[%s].links[].ref", dc.ID), in.Snapshot, externalRefs)...)
+					findings = append(findings, locusAll(r.checkLink(l, d.RelPath, fmt.Sprintf("decisions[%s].links[].ref", dc.ID), in.Snapshot, externalRefs), ObjectLocus(dc.ID))...)
 				}
 			}
 		}
 	}
 
+	// Board pins (the v0 board.json artifact, a separate superseded
+	// mechanism) and the cross-spec verdi.bindings.yaml join below declare
+	// NO wall locus at all: neither names a single object this spec's own
+	// wall renders, and both are store-structural/cross-file plumbing in
+	// exactly wall-receipts dc-3's third bucket's sense — they stay in
+	// `verdi lint`/CI, off the wall, fail-closed by omission.
 	for _, b := range in.Snapshot.Boards {
 		if b.DecodeErr != nil || b.Board == nil {
 			continue
