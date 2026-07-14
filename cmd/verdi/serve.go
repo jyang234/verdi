@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/workbench"
@@ -55,9 +56,9 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 	}
 
 	lockPath := filepath.Join(dataDir, "writer.lock")
-	lockFile, err := mcpserve.AcquireLock(lockPath)
+	lockFile, err := filelock.Acquire(lockPath)
 	if err != nil {
-		var held *mcpserve.ErrLockHeld
+		var held *filelock.ErrHeld
 		if errors.As(err, &held) {
 			fmt.Fprintf(stderr, "serve: %v — another verdi serve is already the writer for this checkout; use `verdi mcp` to reach it\n", err)
 		} else {
@@ -65,7 +66,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 		}
 		return 2
 	}
-	defer func() { _ = mcpserve.ReleaseLock(lockFile, lockPath) }()
+	defer func() { _ = filelock.Release(lockFile, lockPath) }()
 
 	sockPath, err := mcpserve.SocketPath(root)
 	if err != nil {
