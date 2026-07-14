@@ -2445,6 +2445,19 @@ button.yarn-chip-type {
   transform: rotate(-0.8deg);
 }
 
+/* the case-file disclosure line (spec/case-file-flags dc-4): a ladder
+   outcome that could not be PROVEN either way renders on the case-file
+   lockup as a line in the board's notice vocabulary — the same
+   "disclosed" ochre voice .board-notice speaks — never a stamp
+   (unproven is never dressed as a verdict) and never silence. It spans
+   the folder's full width under the placards; the placards row wraps to
+   give it its own line. */
+.case-file { flex-wrap: wrap; }
+.case-disclosure {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
 /* ---------- click-to-expand: truncation is visible, never silent ----------
 
    Any wall text the layout clamps (a case-file placard, an object card's

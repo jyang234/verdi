@@ -241,12 +241,13 @@ func TestAttachBadges_VLPartition(t *testing.T) {
 }
 
 // TestAttachBadges_PendingSupersessionDisclosedUnproven proves ac-3's
-// disclosed-unproven outcome reaches the projection's Notices (the one
-// existing generic disclosure surface every board mode already renders,
-// spec/badge-computes co-2/ac-3): a story implementing a feature, with no
-// forge configured (Deps{} zero value — this test's server carries no
-// SupersessionCandidates loader), gets a disclosure, never a badge and
-// never silence.
+// disclosed-unproven outcome reaches the projection's disclosure surface
+// (spec/badge-computes co-2/ac-3 — originally proj.Notices; since
+// spec/case-file-flags dc-4 the ladder's own CaseFileDisclosures field,
+// rendered as a disclosure line on the case-file lockup): a story
+// implementing a feature, with no forge configured (Deps{} zero value —
+// this test's server carries no SupersessionCandidates loader), gets a
+// disclosure, never a badge and never silence.
 func TestAttachBadges_PendingSupersessionDisclosedUnproven(t *testing.T) {
 	root := newBadgeStoryFixture(t)
 	s := &boardSpecServer{root: root}
@@ -255,13 +256,13 @@ func TestAttachBadges_PendingSupersessionDisclosedUnproven(t *testing.T) {
 		t.Fatalf("loadBoard: %v", err)
 	}
 	found := false
-	for _, n := range proj.Notices {
+	for _, n := range proj.CaseFileDisclosures {
 		if strings.Contains(n, "pending-supersession is disclosed-unproven") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("Notices = %+v, want a pending-supersession disclosed-unproven notice", proj.Notices)
+		t.Fatalf("CaseFileDisclosures = %+v, want a pending-supersession disclosed-unproven line", proj.CaseFileDisclosures)
 	}
 	for _, b := range proj.CaseFileBadges {
 		if b.Source == "ladder:pending-supersession" {
@@ -306,13 +307,13 @@ func TestAttachBadges_SameAcrossPageFragmentAndLoadProjection(t *testing.T) {
 		t.Fatalf("LoadProjection: %v", err)
 	}
 	foundDisclosure := false
-	for _, n := range direct.Notices {
+	for _, n := range direct.CaseFileDisclosures {
 		if strings.Contains(n, "pending-supersession is disclosed-unproven") {
 			foundDisclosure = true
 		}
 	}
 	if !foundDisclosure {
-		t.Fatalf("LoadProjection's Notices = %+v, want the pending-supersession disclosure (same as the page/fragment)", direct.Notices)
+		t.Fatalf("LoadProjection's CaseFileDisclosures = %+v, want the pending-supersession disclosure (same as the page/fragment)", direct.CaseFileDisclosures)
 	}
 }
 

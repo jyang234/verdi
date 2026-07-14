@@ -57,6 +57,18 @@ func writeCaseTopline(b *strings.Builder, p *BoardProjection) {
 	b.WriteString(`</span>`)
 }
 
+// writeCaseDisclosures writes the case file's disclosed-unproven lines
+// (spec/case-file-flags ac-1/dc-4): one line per ladder disclosure, in
+// the board's notice vocabulary (the board-notice voice, role="status"),
+// rendered on the case-file lockup itself — never a stamp (unproven is
+// never dressed as a verdict) and never silence. A disclosure-free wall
+// writes nothing.
+func writeCaseDisclosures(b *strings.Builder, p *BoardProjection) {
+	for _, d := range p.CaseFileDisclosures {
+		b.WriteString(`<p class="board-notice case-disclosure" data-testid="case-file-disclosure" role="status">` + stdhtml.EscapeString(d) + `</p>`)
+	}
+}
+
 // writeBadgeButton writes one badge element: a button (dc-4 verbatim)
 // whose visible text is the record's short label, whose tooltip carries
 // the full firing records (the board's established "headline visible,

@@ -174,10 +174,20 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// FIRST, in every mode, and included in the post-mutation fragment
 	// (renderBoardRegion feeds both page and fragment) so the board never
 	// renders as if a skipped input were simply absent (constitution 2/10).
-	if len(p.Notices) > 0 {
+	hasCaseFile := p.Problem != "" || p.Outcome != ""
+	if len(p.Notices) > 0 || (!hasCaseFile && len(p.CaseFileDisclosures) > 0) {
 		b.WriteString(`<div class="board-notices">`)
 		for _, n := range p.Notices {
 			b.WriteString(`<div class="board-notice" data-testid="board-notice" role="status">` + esc(n) + `</div>`)
+		}
+		// A wall with no case-file header at all (a grandfathered spec
+		// carrying neither problem nor outcome) still discloses its
+		// unproven ladder state — here, in the notice chrome, rather than
+		// nowhere (spec/case-file-flags dc-4: never a stamp, never
+		// silence). Every wall WITH a header wears the line on the case
+		// file itself, below.
+		if !hasCaseFile {
+			writeCaseDisclosures(&b, p)
 		}
 		b.WriteString(`</div>`)
 	}
@@ -189,7 +199,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// wall below exists to get from the left card to the right one.
 	// A spec carrying neither attribute (grandfathered v0 artifacts)
 	// gets no header at all — never an empty folder tab.
-	if p.Problem != "" || p.Outcome != "" {
+	if hasCaseFile {
 		b.WriteString(`<header class="board-placards case-file">`)
 		b.WriteString(`<span class="case-tab" aria-hidden="true">case file</span>`)
 		// The class tag, wearing the spec-level badge stamps beside it when
@@ -208,6 +218,12 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			writePlacardFull(&b, "outcome", p.OutcomeBodyHTML)
 			b.WriteString(`</div>`)
 		}
+		// The case file's disclosed-unproven lines (spec/case-file-flags
+		// dc-4): spec-level ladder state that could not be proven renders
+		// as a disclosure line on this lockup — the board's notice
+		// vocabulary, in the folder where the stamp would hang — never a
+		// stamp and never silence.
+		writeCaseDisclosures(&b, p)
 		b.WriteString(`</header>`)
 	}
 
