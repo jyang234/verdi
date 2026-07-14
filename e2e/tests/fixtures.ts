@@ -219,6 +219,30 @@ export const OBLIGATION_WALL_MISSING_KIND = "static";
 export const OBLIGATION_WALL_DEMAND = "drives the replay view";
 
 // ---------------------------------------------------------------------------
+// Workbench (evidence slot, spec/evidence-slot)
+// ---------------------------------------------------------------------------
+
+// A STORY-class draft on the design branch whose ac-1 declares THREE
+// evidence kinds, with REAL fold-visible state for two of them: a
+// derived-tree CI static record at main's sha (fills the static slot), an
+// attestation file at the fold's own path (fills the attestation slot),
+// and nothing for behavioral (the empty slot that badges). Provisioned by
+// cmd/e2eharness/provision_board.go (slotWallSpec / slotWallAttestation /
+// writeSlotWallDerived). The no-derived-tree CALM state (evidence-slot
+// dc-1) is proven on OBLIGATION_WALL_SPEC, which has no derived tree.
+export const SLOT_WALL_SPEC = "decline-slot-wall";
+export const SLOT_WALL_AC = "ac-1";
+export const SLOT_HELD_KIND = "static";
+export const SLOT_EMPTY_KIND = "behavioral";
+export const SLOT_ATTESTED_KIND = "attestation";
+
+// data-testid helper for a kind's record-state chip on its obligation row
+// (binding selector contract, like coverageChipTestId).
+export function slotChipTestId(acId: string, kind: string): string {
+  return `slot-${acId}-${kind}`;
+}
+
+// ---------------------------------------------------------------------------
 // Workbench (wall badges, spec/badge-computes ac-5)
 // ---------------------------------------------------------------------------
 
