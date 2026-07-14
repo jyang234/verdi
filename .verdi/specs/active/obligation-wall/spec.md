@@ -4,7 +4,7 @@ kind: spec
 title: "Obligation Wall"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-7
 problem: { text: "obligations now exist, are authored on the wall, and gate activation — but they are still not READ where an operator looks. `verdi matrix` shows only `kind:verdict` for a story AC's evidence; the board AC card renders no evidence at all. So the specific thing an AC demands — 'a Playwright test that drives the edit form and asserts persistence' — lives only in the obligation file, recovered by opening it, exactly the sidecar-illegibility the feature set out to end (feature co-3: legible-without-the-sidecar).", anchor: "#problem" }
 outcome: { text: "a story AC's obligations are legible on the wall: `verdi matrix` renders, for each declared evidence kind, that kind's obligation (its title, read from `.verdi/obligations/<spec-name>/<ac-id>--<kind>.md`), and the board AC card renders the same — so what an AC demands is read from the AC's own rendered obligations, never recovered from `verdi.bindings.yaml`. A declared kind with no obligation shows a disclosed badge (the wall-receipts posture: disclosure, not refusal), never blocking the render.", anchor: "#outcome" }
@@ -20,6 +20,7 @@ decisions:
 constraints:
   - { id: co-1, text: "no network in any test: the matrix render is a CLI end-to-end over a hermetic fixture story with obligations on disk; the board card render is a Go render test plus a Playwright e2e over a fixture wall carrying an obligation and a kind-without-one (the disclosed badge)", anchor: "#co-1" }
   - { id: co-2, text: "legible-without-the-sidecar (feature co-3) is the bar: the obligation's own prose must be readable from the AC's rendered obligations on matrix AND the board, not only by opening the obligation file or `verdi.bindings.yaml`. The story satisfies this at both surfaces or it is not done", anchor: "#co-2" }
+frozen: { at: 2026-07-13, commit: 54b01d9bedf2cc4389b46d8b09cbc5077b19c53b, stub_matched: true }
 ---
 # Obligation Wall
 
