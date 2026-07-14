@@ -39,7 +39,7 @@ func (b *Backend) GetMatrix(ctx context.Context, argsRaw json.RawMessage) map[st
 		Story   string `json:"story"`
 		Preview bool   `json:"preview"`
 	}
-	if err := json.Unmarshal(argsRaw, &args); err != nil {
+	if err := strictUnmarshal(argsRaw, &args); err != nil {
 		return toolError("get_matrix: malformed arguments: " + err.Error())
 	}
 	if args.Story == "" {

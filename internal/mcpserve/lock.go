@@ -157,8 +157,13 @@ func acquireLock(path string, retriesLeft int) (*os.File, error) {
 		}
 		return nil, fmt.Errorf("mcpserve: lock %s exists but is unreadable: %w", path, rerr)
 	}
+	// Strict decode (spec/fail-loud ac-3/dc-2): LockInfo is a file verdi
+	// itself writes (AcquireLock, above), so an unexpected extra field is
+	// never a forward-compat signal to tolerate — it means a malformed or
+	// foreign lock file, and the read should refuse it by name rather than
+	// silently drop the field.
 	var info LockInfo
-	if jerr := json.Unmarshal(data, &info); jerr != nil {
+	if jerr := strictUnmarshal(data, &info); jerr != nil {
 		return nil, fmt.Errorf("mcpserve: lock %s exists but is malformed (%q): %w", path, string(data), jerr)
 	}
 	if alive(info.PID, info.Start) {
