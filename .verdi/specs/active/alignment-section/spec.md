@@ -23,7 +23,6 @@ decisions:
 constraints:
   - { id: co-1, text: "no LLM anywhere in this story's code (parent co-1): the diagram-alignment subsection is entirely computed, added to the SAME digest-covered findings list, never touching RunJudged/JudgedInput at all", anchor: co-1 }
   - { id: co-2, text: "no network in any test (parent co-2): the discovery, regeneration, and rendering are exercised over a fixture corpus (accepted proposals with a known realized case and a known divergent case, plus a fixture spec body carrying an illustrative fenced block) through internal/upstream's existing fake-Runner seam", anchor: co-2 }
-frozen: { at: 2026-07-14, commit: bd4e93b262179dc1ff3d3c363fd66addb1a875c9 }
 ---
 # Alignment Section
 
