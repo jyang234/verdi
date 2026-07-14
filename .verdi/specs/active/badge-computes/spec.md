@@ -22,7 +22,7 @@ decisions:
   - { id: dc-2, text: "the derivation record schema is { source, label, target, inputs: [{name, path, revision}], records: [...], disclosures: [...] } — source is a namespaced rule id (lint:VL-006, ladder:spec-stale, ladder:pending-supersession, fold:empty-slot, observe:size-smell), target is an object id for a card badge or empty for a case-file badge, every input carries a revision, and disclosures carry the unproven inputs", anchor: "#dc-2" }
   - { id: dc-3, text: "finding self-classification is realized as an optional wall-locus declaration on lint.Finding populated by the rule that raises it — an object anchor (that object's card) or a spec-level marker (the case file); a finding that declares no locus stays off the wall even when its Path lies inside this spec's directory, so plumbing rules (status-path, dangling layout keys, data-tracking) and decode failures are excluded fail-closed, and the wall additionally keeps only declared-locus findings scoped to this spec's directory — a new rule classifies itself, exactly wall-receipts dc-3", anchor: "#dc-3" }
   - { id: dc-4, text: "badge visual grammar: card badges are compact chips in the card's existing receipt-row vocabulary (the coverage-chip/obligation idiom); case-file badges are stamps on the case-file lockup beside the class tag; every badge element is a button carrying data-badge-source and its serialized derivation record — the derivation-drawer story's opener contract", anchor: "#dc-4" }
-  - { id: dc-5, text: "an input's revision is a content digest (sha256 over the exact bytes read) or an already-pinned revision field the compute carries (the deviation report's covers sha, sweep_provenance.adr_corpus_digest, open-MR ids) — never a wall-clock time: the live wall reads the working tree, which has no commit for dirty state, so the digest is the honest revision", anchor: "#dc-5" }
+  - { id: dc-5, text: "an input's revision is a content digest (sha256 over the exact bytes read) or an already-pinned digest/sha field the compute carries (the deviation report's covers sha, sweep_provenance.adr_corpus_digest, the digest of each candidate superseding spec fetched from an open MR) — a mutable ref like a bare MR id is a firing record (dc-2's records), never a revision, and no revision is ever wall-clock time: the live wall reads the working tree, which has no commit for dirty state, so the digest is the honest revision", anchor: "#dc-5" }
 constraints:
   - { id: co-1, text: "wall-receipts co-1 carried: badges compute with no LLM and read only pinned inputs; every revision a derivation record cites is an input revision, never wall-clock time", anchor: "#co-1" }
   - { id: co-2, text: "wall-receipts co-2 carried: badges never block authoring — disclosure, not refusal; no board write path, gate, or lint verdict consumes a wall badge", anchor: "#co-2" }
@@ -171,9 +171,14 @@ opener contract the derivation-drawer story binds to.
 ## dc-5
 
 An input's revision is a content digest — sha256 over the exact bytes the
-compute read — or an already-pinned revision field the compute carries:
+compute read — or an already-pinned digest/sha field the compute carries:
 the deviation report's covers sha, sweep_provenance.adr_corpus_digest,
-the open-MR ids pending-supersession probed. Never a wall-clock time
+and for pending-supersession the digest of each candidate superseding
+spec's bytes as fetched from the open MR's source branch. A mutable ref
+is not a revision: a bare MR id names WHICH record fired (dc-2's records
+array), while the revision of that input is the digest of the candidate
+spec bytes actually read, so the receipt stays re-verifiable against the
+state that fired it even after the MR moves. Never a wall-clock time
 (co-1): the live wall reads the working tree, and dirty state has no
 commit sha, so the content digest is the honest, recomputable revision.
 
