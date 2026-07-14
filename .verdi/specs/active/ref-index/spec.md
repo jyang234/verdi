@@ -4,7 +4,7 @@ kind: spec
 title: "Ref Index"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-18
 problem: { text: "spec/workbench-directory ac-2 requires the home directory to list every spec on the default branch and every draft on a design branch, grouped and status-chipped, computed deterministically from git refs — but no code computes this today. verdi serve only ever knows about the one working tree it is bound to. Deciding which refs count, what a design branch with no draft spec looks like, and how status is derived, are all backend seam questions the directory-home page cannot honestly answer for itself.", anchor: problem }
 outcome: { text: "an internal package exposes a pure ComputeIndex function that, given only git refs (no checkout switch, ever - feature co-1), returns a deterministic index of every default-branch spec and every design branch's draft, each entry carrying its source (local/remote), its computed status-group (feature dc-2's vocabulary), and - for a design branch with no draft spec - a disclosed entry rather than an omission. directory-home renders this output; it invents none of the computation.", anchor: outcome }
@@ -25,6 +25,7 @@ decisions:
 constraints:
   - { id: co-1, text: "inherited verbatim from the feature (co-1): managed worktrees live under the data zone, never committed (not this story's concern - see worktree-manager); index computation reads refs and never switches a checkout. ComputeIndex takes the serving checkout's root only to resolve .git and run ref-scoped plumbing against it - it never runs checkout, switch, or any working-tree-mutating command against that root or any other", anchor: "#co-1" }
   - { id: co-2, text: "no network in any test (CLAUDE.md): every ComputeIndex behavior is proven against a fixturegit repository carrying real local and (simulated) remote-tracking design refs, or against the fake git-runner-port double from dc-2 - never a live clone or fetch", anchor: "#co-2" }
+frozen: { at: 2026-07-14, commit: 7e425b6ed982b44605c29bef0b0580565e8a9cbc, stub_matched: true }
 ---
 # Ref Index
 
