@@ -92,6 +92,17 @@ func DecodeMeta(kind string, fm []byte) (Meta, error) {
 		}
 		return Meta{Base: w.Base, Status: string(w.Status), Reason: w.Reason, Expiry: w.Expiry}, nil
 
+	case "reaffirmation":
+		r, err := artifact.DecodeReaffirmation(fm)
+		if err != nil {
+			return Meta{}, err
+		}
+		// Base only, like an attestation: a reaffirmation's existence is
+		// the record. First reached when shared-homes ac-4 healed the
+		// index's silently-missing reaffirmation case — before that, dex
+		// never received the kind from a real store walk.
+		return Meta{Base: r.Base}, nil
+
 	case "obligation":
 		o, err := artifact.DecodeObligation(fm)
 		if err != nil {
