@@ -34,14 +34,20 @@
 //     diagram-scaffolding path at all.
 //  4. internal/workbench's board/spec save API (board.go, boardspecapi.go,
 //     boardpin.go) — every write there goes through boardSpecServer.
-//     specDir(name), hardcoded to .verdi/specs/active/<name>; no handler
-//     in that package references "diagrams" or ".mermaid" anywhere. The
-//     board can PIN a diagram as a link (an ordinary links: edge into a
-//     spec, per spec/diagram-proposals' own problem statement) but never
-//     writes bytes into the diagram file itself. Named explicitly rather
-//     than silently omitted, matching this story's own obligation
-//     (spec/proposal-artifact ac-2--static): "an enumeration that turns up
-//     a path this story does not yet cover must say so explicitly."
+//     specDir(name), hardcoded to .verdi/specs/active/<name>. The board
+//     can PIN a diagram as a link (an ordinary links: edge into a spec,
+//     per spec/diagram-proposals' own problem statement) but never writes
+//     bytes into the diagram file itself. AMENDED by spec/board-editor:
+//     the diagram-proposal EDITOR (boarddiagram.go) is now a real write
+//     path into .verdi/diagrams/<name>.mermaid — the mirror image of this
+//     inventory's rule: its every write (save, structural op, reset)
+//     replaces the BODY with the author's exact bytes and splices the
+//     frontmatter prefix back UNTOUCHED (boardDiagramServer.writeBody;
+//     spec/board-editor ac-3's static obligation is its byte-identity
+//     proof). Named explicitly rather than silently omitted, matching
+//     this story's own obligation (spec/proposal-artifact ac-2--static):
+//     "an enumeration that turns up a path this story does not yet cover
+//     must say so explicitly."
 //  5. cmd/e2eharness/provision.go's copyTree/copyFile — copies
 //     testdata/corpus/.verdi/diagrams/loansvc-topology.mermaid wholesale
 //     into the e2e harness's throwaway scratch store via a raw io.Copy (no

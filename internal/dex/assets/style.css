@@ -2814,6 +2814,249 @@ button.yarn-chip-type {
 
 /* ---------- responsive + motion ---------- */
 
+/* ------------------------------------------------------------------ */
+/* The diagram-proposal editor (spec/board-editor): drafting focus.
+   Three sheets on the wall's paper vocabulary — the code pane is the
+   draftsman's source sheet (mono, quiet), the live preview is the large
+   working sheet the drawing dominates, and the verification rail is a
+   slim margin column that informs and never blocks. Render errors are
+   PAINTED on the working sheet in the violated voice: never a blank,
+   never a stale picture. */
+.diagram-editor {
+  display: grid;
+  grid-template-columns: minmax(18rem, 26rem) minmax(0, 1fr) 16rem;
+  gap: 1.1rem;
+  align-items: stretch;
+  margin-top: 1.4rem;
+}
+.diagram-code, .diagram-stage, .diagram-rail {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 1.1rem 0.9rem 0.9rem;
+}
+/* each sheet wears a tape tab, the board's filing voice */
+.panel-tab {
+  position: absolute;
+  top: -0.72rem;
+  left: 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted-solid);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.1rem 0.5rem;
+  transform: rotate(-0.6deg);
+}
+.diagram-code { display: flex; flex-direction: column; }
+#diagram-source {
+  flex: 1;
+  width: 100%;
+  min-height: 24rem;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  outline: none;
+  white-space: pre;
+  overflow: auto;
+}
+.mode-readonly #diagram-source { color: var(--muted-solid); }
+.diagram-code-note { margin: 0.5rem 0 0; font-size: 0.72rem; }
+
+/* the working sheet: the drawing dominates the room */
+.diagram-stage { display: flex; flex-direction: column; background: var(--wall); }
+.diagram-toolbar {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  margin-bottom: 0.7rem;
+}
+.diagram-toolbar-hint { font-size: 0.72rem; color: var(--muted-solid); }
+.diagram-stage-panels { display: flex; gap: 0.9rem; flex: 1; min-height: 24rem; }
+.diagram-preview-wrap { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.diagram-preview {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 1rem;
+  overflow: auto;
+}
+.diagram-preview svg { max-width: 100%; height: auto; }
+/* structural gestures live on the picture (authoring, in-subset only) */
+.mode-authoring .diagram-preview g.node[data-node-id] { cursor: pointer; }
+.mode-authoring .diagram-preview path.flowchart-link[data-from] { cursor: pointer; }
+.diagram-preview g.node[data-node-selected] rect,
+.diagram-preview g.node[data-node-selected] polygon,
+.diagram-preview g.node[data-node-selected] circle {
+  stroke: var(--accent) !important;
+  stroke-width: 2.5px !important;
+}
+/* the painted render-error state (ac-1): it replaces the picture */
+.diagram-render-error {
+  border: 2px solid var(--st-violated);
+  border-left-width: 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--st-violated-tint) 80%, transparent);
+  color: var(--ink);
+  padding: 0.8rem 0.9rem;
+  margin-top: 0.6rem;
+}
+.diagram-render-error-tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--st-violated);
+  margin-bottom: 0.4rem;
+}
+.diagram-render-error-msg {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* the before-peek panel (ac-4): the pinned base beside the working
+   preview, read-only — it wears the frozen (pinned record) voice */
+.diagram-peek {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--frozen);
+  border-radius: 4px;
+  background: var(--paper);
+  padding: 1.1rem 0.7rem 0.7rem;
+}
+.panel-tab--peek { color: var(--frozen); border-color: var(--frozen); }
+.diagram-preview--peek { border-style: dashed; }
+.diagram-peek-close {
+  align-self: flex-end;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+}
+
+/* the slim verification rail (ac-5): chips in the wall's receipt voice */
+.diagram-rail { font-size: 0.78rem; }
+.diagram-rail h2 { font-size: 0.8rem; margin: 0 0 0.6rem; }
+.rail-verification { margin-bottom: 1.2rem; }
+.rail-tier-row { color: var(--muted-solid); margin-bottom: 0.6rem; }
+.rail-tier {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.08rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid;
+  margin-left: 0.3rem;
+}
+.rail-tier--full { color: var(--st-evidenced); border-color: color-mix(in srgb, var(--st-evidenced) 55%, transparent); background: color-mix(in srgb, var(--st-evidenced-tint) 75%, transparent); }
+.rail-tier--partial { color: var(--st-pending); border-style: dashed; border-color: var(--st-pending); background: transparent; }
+.rail-tier--illustrative { color: var(--st-nosignal); border-style: dashed; border-color: color-mix(in srgb, var(--st-nosignal) 60%, transparent); background: color-mix(in srgb, var(--st-nosignal-tint) 70%, transparent); }
+.rail-findings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.rail-finding { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; }
+.rail-finding-id { font-size: 0.72rem; }
+.rail-finding-kind {
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.rail-finding-kind--exists { color: var(--st-evidenced); border-color: color-mix(in srgb, var(--st-evidenced) 55%, transparent); background: color-mix(in srgb, var(--st-evidenced-tint) 75%, transparent); }
+.rail-finding-kind--proposed-new { color: var(--authored); border-color: color-mix(in srgb, var(--authored) 55%, transparent); background: color-mix(in srgb, var(--authored-tint) 75%, transparent); }
+.rail-finding-kind--contradicted { color: var(--st-violated); border-color: color-mix(in srgb, var(--st-violated) 55%, transparent); background: color-mix(in srgb, var(--st-violated-tint) 75%, transparent); }
+.rail-finding-kind--stale-base { color: var(--st-pending); border-style: dashed; border-color: var(--st-pending); background: transparent; }
+.rail-finding-witness { flex-basis: 100%; font-size: 0.66rem; color: var(--muted-solid); }
+/* the disclosed unavailable state: the board-notice voice, boxed so it
+   is unmistakably a state, never an empty region */
+.rail-unavailable {
+  border: 1px dashed var(--authored);
+  border-left: 3px solid var(--authored);
+  border-radius: 0 4px 4px 0;
+  padding: 0.5rem 0.7rem;
+  color: var(--muted-solid);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+.rail-unavailable-tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--authored);
+  margin-right: 0.45rem;
+}
+.rail-note { font-size: 0.68rem; margin: 0.6rem 0 0; }
+.rail-provenance-ref { font-size: 0.72rem; color: var(--muted-solid); overflow-wrap: anywhere; }
+.rail-provenance-actions { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; }
+
+/* the node/edge toolbox popover and the inline rename input */
+.diagram-node-toolbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
+  padding: 0.3rem 0.5rem;
+  z-index: 30;
+}
+.diagram-node-toolbox-hint { font-family: var(--mono); font-size: 0.66rem; color: var(--muted-solid); }
+.diagram-node-toolbox button { font-size: 0.7rem; }
+.diagram-rename-input {
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  padding: 0.2rem 0.4rem;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  background: var(--paper);
+  color: var(--ink);
+  z-index: 30;
+}
+
+/* the diagram status badge shares the board head's stamp row */
+.diagram-status-badge { text-transform: uppercase; }
+
+/* a proposal-diagram reference card's editor doorway (board wall) */
+.refcard-editor-link {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.diagram-editor-link { margin: 1rem 0 0; }
+
 @media (max-width: 60rem) {
   body { padding: 0 1rem 3rem; }
   .page-body { flex-direction: column; }
@@ -2821,6 +3064,8 @@ button.yarn-chip-type {
   .board-layout { flex-direction: column; }
   .board-side { flex: none; width: 100%; position: static; }
   .board-canvas { min-height: 30rem; }
+  .diagram-editor { grid-template-columns: 1fr; }
+  .diagram-stage-panels { flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: no-preference) {

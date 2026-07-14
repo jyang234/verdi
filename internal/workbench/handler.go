@@ -77,6 +77,16 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	mux.HandleFunc("/board/spec/{name}/peek", bs.boardPeekHandler())
 	mux.HandleFunc("/board/spec/{name}/pinsearch", bs.boardPinSearchHandler())
 
+	// The diagram-proposal editor (spec/board-editor dc-1): its own board
+	// surface at /board/diagram/{name} — page, fragment, and POST api —
+	// the same routing grammar as the spec board's trio above. The literal
+	// "diagram" segment coexists with "spec" the same way "spec" coexists
+	// with the v0 "{key}" patterns below.
+	bd := &boardDiagramServer{root: root, verifier: deps.DiagramVerifier}
+	mux.HandleFunc("/board/diagram/{name}", bd.boardDiagramPageHandler())
+	mux.HandleFunc("/board/diagram/{name}/fragment", bd.boardDiagramFragmentHandler())
+	mux.HandleFunc("/board/diagram/{name}/api/{action}", bd.boardDiagramAPIHandler())
+
 	// The v0 board — superseded by board-as-projection (R4-I-9) but kept
 	// reachable for grandfathered v0 board.json state. Its two POST
 	// routes share one {action} pattern so the v1 literal "spec" segment
@@ -101,4 +111,5 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	mux.HandleFunc("/assets/mermaid.min.js", mermaidHandler())
 	mux.HandleFunc("/assets/board.js", boardJSHandler())
 	mux.HandleFunc("/assets/boardspec.js", boardSpecJSHandler())
+	mux.HandleFunc("/assets/boarddiagram.js", boardDiagramJSHandler())
 }

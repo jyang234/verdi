@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/board.js assets/boardspec.js
+//go:embed assets/board.js assets/boardspec.js assets/boarddiagram.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -60,6 +60,12 @@ func boardJSHandler() http.HandlerFunc {
 // dependency-free posture as the v0 board's.
 func boardSpecJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/boardspec.js")
+}
+
+// boardDiagramJSHandler serves the diagram editor's one JS file
+// (spec/board-editor) — same minimal, dependency-free posture.
+func boardDiagramJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/boarddiagram.js")
 }
 
 func embeddedJSHandler(name string) http.HandlerFunc {

@@ -67,6 +67,14 @@ type Deps struct {
 	// — never silently "not flagged". Only the caller that builds the
 	// real forge-backed adapter (cmd/verdi's serve.go) sets it.
 	SupersessionCandidates wallbadge.SupersessionCandidateLoader
+
+	// DiagramVerifier is the diagram editor's verification-rail seam
+	// (spec/board-editor dc-4, 04 §port pattern): the rail consumes the
+	// extractor's tier and findings through this interface and never
+	// computes them. nil means no extractor is wired — the rail renders
+	// its disclosed verification-unavailable state, and nothing on the
+	// editor blocks (verification informs, never gates).
+	DiagramVerifier DiagramVerifier
 }
 
 // boardSpecServer holds the board's dependencies for one store root.
@@ -216,6 +224,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if err := attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession); err != nil {
 		return nil, nil, "", err
 	}
+	attachDiagramEditorHrefs(proj, s.root)
 	if reviewNotice != "" {
 		proj.Notices = append(proj.Notices, reviewNotice)
 	}

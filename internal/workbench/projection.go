@@ -142,6 +142,12 @@ type refCardView struct {
 	Y      float64 `json:"y"`
 	Pinned bool    `json:"pinned,omitempty"`
 	PinID  string  `json:"pinId,omitempty"`
+	// EditorHref links a diagram reference card whose target is a class:
+	// proposal artifact to its board editor (spec/board-editor dc-1:
+	// "reachable from a spec board's pinned diagram reference card").
+	// Store-derived enrichment attached in the I/O layer
+	// (attachDiagramEditorHrefs), never computed by the pure projector.
+	EditorHref string `json:"editorHref,omitempty"`
 }
 
 // edgeView is one yarn element: a declared spec edge or an

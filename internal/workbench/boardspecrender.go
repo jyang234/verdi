@@ -307,6 +307,12 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		b.WriteString(`<div class="` + cls + `" data-testid="` + esc(refCardTestID(rc.Ref)) + `" data-ref="` + esc(rc.Ref) + `" data-ref-kind="` + esc(refKindOf(rc.Ref)) + `"` + pinAttrs + ` style="left:` + px(rc.X) + `;top:` + px(rc.Y) + `">`)
 		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + label + `</span><span class="card-kind-id">` + esc(refKindOf(rc.Ref)) + `</span></span>`)
 		b.WriteString(`<span class="card-ref" title="` + esc(rc.Ref) + `">` + esc(rc.Ref) + `</span>`)
+		if rc.EditorHref != "" {
+			// A proposal-diagram reference opens its own editor surface
+			// (spec/board-editor dc-1) — every mode: reading a proposal's
+			// draft is a read; the editor page gates its own writes.
+			b.WriteString(`<a class="refcard-editor-link" data-testid="refcard-editor-link" href="` + esc(rc.EditorHref) + `">open in editor</a>`)
+		}
 		b.WriteString(`</div>`)
 	}
 
