@@ -4,7 +4,7 @@ kind: spec
 title: "Public Readme"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-24
 problem: { text: "verdi has no public README: nothing explains what verdi is or lets a newcomer see it work in minutes, and public-showcase#ac-3 requires the quick start's commands to reproduce verbatim against examples/showcase — but even once written, nothing would keep those commands honest as the binary's behavior changes over time, the same silent-drift risk showcase-drift-gate closed for capability coverage, left open here for the README's own prose", anchor: "#problem" }
 outcome: { text: "a top-level README.md quick-starts a reader from examples/showcase through core concepts, MCP, and the showcase's own drift gate, documents starting a fresh store with no verdi init verb (ledger L-A), and every console block claiming verbatim reproduction is tagged <!-- showcase-verify --> and re-run by a new TestReadmeExamplesFresh (ledger L-D) wired into the existing showcase-coverage make target, so a drifted example is a named make verify failure rather than a silently stale doc", anchor: "#outcome" }
@@ -19,6 +19,7 @@ decisions:
 constraints:
   - { id: co-1, text: "no network, ever: the README's paste-verbatim output is captured by hand once against a real scratch store during authoring (no hand-typed output), and thereafter verified continuously by TestReadmeExamplesFresh, which provisions its own showcase store exactly as Task 3.1's provisionShowcaseStore helper does (fixturegit stable SHAs) and execs the already-built verdi binary exactly as every other Go e2e test in this repo does — never a live service", anchor: "#co-1" }
   - { id: co-2, text: "silence is never a pass: a README with zero showcase-verify blocks, or a malformed tag, is a hard test failure rather than a vacuous green; a genuinely drifted example names the exact command line and a want/got diff rather than a bare pass/fail, mirroring showcase-drift-gate's own naming discipline; and the showcase-coverage Makefile guard's two-step wire-up (dc-3) means the freshness test's own deletion or renaming is caught as a named guard failure, not a silent pass", anchor: "#co-2" }
+frozen: { at: 2026-07-15, commit: b867ac0682a63260e31974298bcf85d2f8428df6, stub_matched: true }
 ---
 # Public Readme
 
