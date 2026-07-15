@@ -17,40 +17,45 @@
 // exist under the repo root and its bytes must match its marker regexp —
 // a mapping is proof, not a wish.
 //
-// THIS TEST IS EXPECTED TO BE RED AT THIS COMMIT. Task 3.2's own
-// instructions require writing the true, honest map — mapping only
-// capabilities that ALREADY have genuine showcase-backed evidence — and
-// leaving every other capability unmapped so this test names it as a gap.
-// Task 3.4 closes those gaps (new Playwright specs and Go e2e tests); this
-// file's failure output IS Task 3.4's punch list. Faking a mapping to turn
-// this test green would defeat the entire gate — never done here.
+// Task 3.2 committed this test RED (30 gaps: most CLI verbs, all nine MCP
+// tools, seven workbench surfaces — .superpowers/sdd/task-3.2-report.md
+// has the full original gap list and, for every candidate file rejected
+// along the way, why). Task 3.4 (.superpowers/sdd/task-3.4-report.md)
+// closed every one of them with genuine showcase-backed evidence — two new
+// Go e2e test files (internal/showcasealign/{mcp_showcase_test.go,
+// cli_showcase_test.go}) for the CLI and MCP axes, re-pointed or
+// content-upgraded Playwright specs for the seven workbench gaps, and one
+// documented, reversible exclusion (cli:feature, PLAN-V1.md ledger
+// R4-I-54) — never by faking a mapping or weakening this test's own two
+// checks (capability-set equality, and every mapped file's bytes actually
+// matching its marker). This test is expected to be GREEN as of Task 3.4;
+// a regression here means a real capability lost its showcase backing,
+// not a defect in the test.
 //
-// Three kinds of gap are recorded in the map below, each real and
-// disclosed rather than papered over:
+// The three gap kinds Task 3.2 recorded (all now closed; kept here as
+// history/context for how each was closed):
 //
-//  1. No candidate evidence file exists at all yet (most CLI verbs, all
-//     MCP tools, wall-badges, derivation-drawer, disclosures).
-//  2. A candidate Playwright spec exists and carries the SHOWCASE. marker,
+//  1. No candidate evidence file existed yet (most CLI verbs, all MCP
+//     tools, wall-badges, derivation-drawer, disclosures) — closed by a
+//     new, genuine test/spec per Task 3.4.
+//  2. A candidate Playwright spec existed and carried the SHOWCASE. marker,
 //     but ONLY via a SHOWCASE-classified fixture whose provisioner prose
-//     is still rudimentary (fixtures.ts's own NOTE: income-verification,
-//     refi-decline-audit, refi-decline-replay, decline-slot-wall,
-//     stale-decline-notices, the draft-boards family) — the controller
-//     directive for this task requires leaving these unmapped rather than
-//     counting rudimentary-fixture backing as real coverage
-//     (board-review-mode, obligation-wall, evidence-slot; wall-receipts
-//     transitively, since its only two natural host specs are these same
-//     two rudimentary-backed files).
-//  3. A candidate Go test file matches the /examples\/showcase/ marker
-//     textually (usually in a comment) but its own doc comment discloses
-//     that it deliberately does NOT exercise the showcase corpus (a
-//     scratch/self-contained fixture instead, to avoid coupling to golden
-//     SHAs another task is still rebaking) — mapping it would be a false
-//     mapping, not evidence (cli:rollup: cmd/verdi/rollup_test.go; the
-//     whole MCP axis: internal/mcpserve/fixture_test.go).
+//     was still rudimentary (board-review-mode, obligation-wall,
+//     evidence-slot; wall-receipts transitively) — closed by re-pointing
+//     at, or upgrading, a genuinely-vetted fixture (task-3.4-report.md
+//     records which for each).
+//  3. A candidate Go test file matched the /examples\/showcase/ marker
+//     textually but its own doc comment disclosed it deliberately does
+//     NOT exercise the showcase corpus (cli:rollup:
+//     cmd/verdi/rollup_test.go; the whole MCP axis:
+//     internal/mcpserve/fixture_test.go) — closed by a NEW test that
+//     genuinely does exercise real showcase content instead of relying on
+//     the disclaimed scratch fixture.
 //
-// Full reasoning for every mapped and every gapped capability lives in
-// .superpowers/sdd/task-3.2-report.md (not duplicated here at length, to
-// keep this file's signal — the map itself — legible).
+// Full reasoning for every mapped and every gapped (now closed)
+// capability lives in .superpowers/sdd/task-3.{2,4}-report.md (not
+// duplicated here at length, to keep this file's signal — the map itself
+// — legible).
 package showcasealign
 
 import (
@@ -105,17 +110,64 @@ var goE2E = func(f string) coverageEvidence { return coverageEvidence{f, `exampl
 //     store, and TestRunSync_* call runSync (cmdSync's own entry point)
 //     against it.
 //
-// Every other CLI verb (design, accept, feature, build, align, serve, mcp,
-// rollup, close, dex, gc, gate, board, audit) and every MCP tool remain
-// UNMAPPED below — real gaps, not oversights; see the report for why each
-// candidate file was rejected.
+// Every other CLI verb (design, accept, build, align, serve, mcp, rollup,
+// close, dex, gc, gate, board, audit) and every MCP tool are mapped below
+// via Task 3.4's two new e2e test files — see cli_showcase_test.go's and
+// mcp_showcase_test.go's own package doc comments for exactly what real
+// showcase content and assertion backs each one. "feature" is deliberately
+// excluded from the enumerated set (featureVerbExcluded's doc comment,
+// PLAN-V1.md ledger R4-I-54) rather than mapped.
 var showcaseCoverage = map[string][]coverageEvidence{
 	// --- CLI verbs (verbPhase>0 entries, plus "lint") ---
 	"cli:lint":   {goE2E("internal/showcasealign/lintclean_test.go")},
 	"cli:matrix": {goE2E("cmd/verdi/matrix_test.go")},
 	"cli:sync":   {goE2E("cmd/verdi/sync_test.go")},
 
-	// --- MCP tools: none genuinely showcase-backed yet (Task 3.4 gap) ---
+	// Task 3.4: cli_showcase_test.go drives each of these against a real
+	// provisioned examples/showcase store via runBinary (the exact
+	// build-then-exec discipline cli:lint/cli:matrix/cli:sync already use)
+	// — see that file's own package-level doc comment for exactly which
+	// real showcase content and deterministic outcome each verb proves.
+	"cli:audit":  {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:dex":    {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:board":  {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:rollup": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:design": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:accept": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:build":  {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:align":  {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:gate":   {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:close":  {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:gc":     {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
+	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
+	// --http <addr>` subprocess every Playwright spec in the suite runs
+	// against (never a fake/stub server) — so any SHOWCASE.-marked spec
+	// already proves serve's own real startup+request path against the
+	// provisioned showcase store. Reuses wb:board's own evidence file
+	// rather than duplicating a second, redundant server-startup proof.
+	"cli:serve": {playwright("10-board-projection.spec.ts")},
+	// cli:mcp: `verdi mcp` is byte-for-byte ServeConn piped over stdio
+	// (mcpserve/wire.go's own doc comment: "the shim degenerates to a
+	// pipe") — mcp_showcase_test.go drives that exact ServeConn/NewServer
+	// pair against a provisioned showcase store, tool by tool.
+	"cli:mcp": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+
+	// --- MCP tools: Task 3.4's mcp_showcase_test.go drives each of the
+	// nine live tools (via mcpserve.NewServer + mcpserve.ServeConn, the
+	// real wire protocol) against a provisioned examples/showcase store,
+	// asserting a genuine showcase-derived result per tool — see that
+	// file's own doc comment for the specific real content and assertion
+	// behind each one. ---
+	"mcp:search_artifacts":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:get_artifact":       {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:get_links":          {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:get_matrix":         {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:get_context_bundle": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:list_annotations":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:list_tasks":         {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:get_board":          {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:add_annotation":     {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 
 	// --- Workbench surfaces ---
 	"wb:board":                {playwright("10-board-projection.spec.ts")},
@@ -131,9 +183,47 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	"wb:dex-by-story": {playwright("18-dex-by-story.spec.ts")},
 	"wb:presentation": {playwright("06-presentation.spec.ts")},
 	"wb:ref-peek":     {playwright("25-board-ref-peek.spec.ts")},
-	// wb:board-review-mode, wb:obligation-wall, wb:wall-badges,
-	// wb:wall-receipts, wb:evidence-slot, wb:derivation-drawer,
-	// wb:disclosures are all real gaps — see the report.
+
+	// Task 3.4's seven workbench closures. Per-surface disposition (full
+	// reasoning: task-3.4-report.md):
+	//
+	//   - board-review-mode / obligation-wall / evidence-slot: each
+	//     surface's only candidate spec already carried the SHOWCASE.
+	//     marker on a SHOWCASE-classified fixture (Task 2.2) — the gap was
+	//     the fixture's own rudimentary provisioner prose (fixtures.ts's
+	//     own flagged NOTE), never the marker or the assertions. Fixed by
+	//     UPGRADING cmd/e2eharness/provision_board.go's reviewSpec/
+	//     replaySpec/slotWallSpec body prose to the payoff-quote-portal bar
+	//     (production-quality, canon-consistent) — re-pointing at a
+	//     different spec was unnecessary since the existing one was
+	//     already the right surface on the right fixture.
+	//   - wall-receipts: internal/workbench/badges.go's own doc comment
+	//     names it "the wall-receipts story (evidence-slot,
+	//     case-file-flags)" — no dedicated page of its own. Mapped to the
+	//     now-vetted evidence-slot spec, its closest named sibling.
+	//   - wall-badges / derivation-drawer: 37-board-wall-badges.spec.ts and
+	//     38-derivation-drawer.spec.ts stay EDGE-only on purpose — a
+	//     deliberately-authored VL-003/VL-006 lint VIOLATION is not
+	//     showcase material by definition, so upgrading their prose would
+	//     misrepresent them. Closed instead by a NEW spec
+	//     (41-showcase-ladder-badge.spec.ts) proving the SAME wall-badge +
+	//     derivation-drawer contract on a genuinely real, committed
+	//     showcase fact: borrower-update-mobile's own accepted-deviation
+	//     scar computes a real ladder:spec-stale badge on its board, opened
+	//     to reveal its real derivation record.
+	//   - disclosures: 19-disclosures.spec.ts's content was already
+	//     genuine; it simply never spelled `SHOWCASE.` (task-3.2-report.md's
+	//     "marker-mechanical, not a content problem"). Fixed by adding
+	//     SHOWCASE.FORGE_KIND (examples/showcase/.verdi/verdi.yaml's own
+	//     committed `forge: gitlab` value) and routing the disclosure-text
+	//     assertion through it instead of a bare "gitlab" literal.
+	"wb:board-review-mode": {playwright("15-board-review-mode.spec.ts")},
+	"wb:obligation-wall":   {playwright("36-board-obligation-wall.spec.ts")},
+	"wb:evidence-slot":     {playwright("38-board-evidence-slot.spec.ts")},
+	"wb:wall-receipts":     {playwright("38-board-evidence-slot.spec.ts")},
+	"wb:wall-badges":       {playwright("41-showcase-ladder-badge.spec.ts")},
+	"wb:derivation-drawer": {playwright("41-showcase-ladder-badge.spec.ts")},
+	"wb:disclosures":       {playwright("19-disclosures.spec.ts")},
 }
 
 // workbenchSurfaces is the one hand-maintained axis (spec §10 mitigation).
@@ -144,13 +234,33 @@ var workbenchSurfaces = []string{
 	"dex", "dex-by-story", "disclosures", "presentation", "ref-peek",
 }
 
+// featureVerbExcluded is "feature", REMOVED from the enumerated CLI
+// capability set (Task 3.4, PLAN-V1.md ledger R4-I-54): dispatch.go's own
+// comment marks it "R4-I-6: deprecation alias for build", and its
+// dispatch entry (`if verb == "feature" { return runFeatureVerb(...) }`)
+// resolves to runBuildVerb — the exact same function `verb == "build"`
+// calls (cmd/verdi/feature.go). There is no second code path for this
+// verb to showcase-back: cli:build's mapping (cli_showcase_test.go)
+// already exercises the one dispatch target both names share. Mapping
+// "cli:feature" to the same evidence file as "cli:build" would be a
+// technically-satisfiable but hollow entry (the marker regexp would
+// match, but the file proves nothing "feature"-specific that "build"
+// doesn't already prove byte-for-byte) — smallest reversible choice per
+// CLAUDE.md's provenance discipline: exclude the alias from the
+// enumerated set instead of faking a distinct mapping. Reversible the
+// moment `feature` stops being a pure alias (its own removal from
+// verbPhase, or a divergent implementation, would need this line
+// removed and a real mapping added back).
+const featureVerbExcluded = "feature"
+
 // cliVerbs parses cmd/verdi/dispatch.go with go/parser and returns every
 // verb name whose verbPhase entry is greater than zero — dispatch.go's own
 // convention for "a real, dispatched v1 verb" (phase 0 means "recognized
 // but explicitly out of v0 scope", PLAN.md §5: waivers, verify-artifact) —
 // plus "lint", which dispatch.go's run() special-cases before verbPhase is
 // even consulted (its own comment: "No verb's semantics live here" is true
-// of every verb except lint, dispatched first).
+// of every verb except lint, dispatched first). "feature" is filtered back
+// out immediately below — see featureVerbExcluded's doc comment.
 //
 // Every unexpected shape fails the test outright with a clear message
 // (never silently missing a verb): this is the robustness the task
@@ -230,7 +340,15 @@ func cliVerbs(t *testing.T) []string {
 	}
 
 	verbs = append(verbs, "lint")
-	return verbs
+
+	filtered := verbs[:0]
+	for _, v := range verbs {
+		if v == featureVerbExcluded {
+			continue
+		}
+		filtered = append(filtered, v)
+	}
+	return filtered
 }
 
 // mcpToolDef is one tools/list entry's shape this test needs.
