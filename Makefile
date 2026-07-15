@@ -188,7 +188,7 @@ showcase-coverage:
 	status=$$?; \
 	printf '%s\n' "$$out"; \
 	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
-	required='TestShowcaseCoverage TestShowcaseCoverage_DetectsGaps'; \
+	required='TestShowcaseCoverage TestShowcaseCoverage_DetectsGaps TestReadmeExamplesFresh'; \
 	for tc in $$required; do \
 		if ! printf '%s\n' "$$out" | grep -qF -- "--- PASS: $$tc ("; then \
 			echo "ERROR: showcase-coverage guard: required test $$tc did NOT run+pass (deleted, renamed, or skipped?)." >&2; \

@@ -4,10 +4,11 @@
 // verdi-go's own hand-rolled server (cmd/groundwork/mcp.go) and on the
 // wave-4 S4 spike's prototype (read-only references, not imported).
 //
-// It hosts the eight tools 05 §MCP server's table names
+// It hosts the nine tools 05 §MCP server's table names
 // (search_artifacts, get_artifact, get_links, get_matrix,
-// get_context_bundle, list_annotations, list_tasks, add_annotation — the
-// only write) over the checkout's unix socket (01 §D3), guarded by the
+// get_context_bundle, list_annotations, list_tasks, get_board,
+// add_annotation — the only write) over the checkout's unix socket (01
+// §D3), guarded by the
 // single-writer lock (I-12). `verdi serve` is the process that owns both;
 // `verdi mcp` (cmd/verdi/mcp.go) is a stdio<->socket shim that proxies to
 // a running serve, or falls back to acquiring the lock and serving
