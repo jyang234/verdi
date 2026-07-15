@@ -517,6 +517,42 @@ func computeCoverageGaps(capabilities map[string]bool, inventory map[string][]co
 	return res
 }
 
+// e2eTestsPresent reports whether e2e/tests exists under the repo root — the
+// single detector the gate and its red-direction proof both use to decide
+// whether the Playwright-backed axes (workbench, and the lone cross-axis
+// cli:serve) are checkable or disclosed-as-unproven.
+func e2eTestsPresent() bool {
+	_, err := os.Stat(filepath.Join(verdiRepoRoot, "e2e", "tests"))
+	return err == nil
+}
+
+// realCapabilities enumerates every shipped capability along all three axes
+// from their REAL sources — cliVerbs' go/parser walk of dispatch.go's verbPhase
+// literal, mcpTools' live tools/list against internal/mcpserve, and the
+// hand-listed workbenchSurfaces — exactly as the green gate consumes them. The
+// workbench axis is Playwright-only, so it is enumerated only when e2e/tests is
+// present; otherwise its keys would be spuriously flagged stale and its gaps
+// could not be proven either way, so it is disclosed-unproven and left OUT of
+// the set rather than silently treated as covered. Shared by TestShowcaseCoverage
+// (the green gate) and TestShowcaseCoverage_RealEnumerationDetectsGaps (the red
+// proof), so both bind to one enumeration, not two divergent copies.
+func realCapabilities(t *testing.T, e2ePresent bool) map[string]bool {
+	t.Helper()
+	capabilities := map[string]bool{}
+	for _, v := range cliVerbs(t) {
+		capabilities["cli:"+v] = true
+	}
+	for _, tool := range mcpTools(t) {
+		capabilities["mcp:"+tool] = true
+	}
+	if e2ePresent {
+		for _, s := range workbenchSurfaces {
+			capabilities["wb:"+s] = true
+		}
+	}
+	return capabilities
+}
+
 // TestShowcaseCoverage is the showcase-coverage gate itself: see this
 // file's package-level doc comment for the full rationale. It is GREEN as of
 // Task 3.4 (every enumerated capability mapped and every mapped file matching
@@ -544,31 +580,15 @@ func TestShowcaseCoverage(t *testing.T) {
 	// THREE axes, far wider than the disclosure text claimed; that over-broad
 	// skip was the defect. The residual precision fix is to stop calling the CLI
 	// axis "fully" enforced in this path when cli:serve is disclosed, not checked.
-	e2eDir := filepath.Join(verdiRepoRoot, "e2e", "tests")
-	e2ePresent := true
-	if _, err := os.Stat(e2eDir); err != nil {
-		e2ePresent = false
-		t.Logf("DISCLOSURE: e2e/tests is absent (%v); the workbench axis and every Playwright-backed evidence marker — including cli:serve, whose sole evidence is a Playwright spec — are DISCLOSED-AS-UNPROVEN from this checkout. Every Go-backed (examples/showcase) CLI and MCP evidence file is still fully enforced below: that is every MCP tool and every CLI verb except cli:serve, NOT the CLI axis in full.", err)
+	e2ePresent := e2eTestsPresent()
+	if !e2ePresent {
+		t.Logf("DISCLOSURE: e2e/tests is absent; the workbench axis and every Playwright-backed evidence marker — including cli:serve, whose sole evidence is a Playwright spec — are DISCLOSED-AS-UNPROVEN from this checkout. Every Go-backed (examples/showcase) CLI and MCP evidence file is still fully enforced below: that is every MCP tool and every CLI verb except cli:serve, NOT the CLI axis in full.")
 	}
 
-	capabilities := map[string]bool{}
-	for _, v := range cliVerbs(t) {
-		capabilities["cli:"+v] = true
-	}
-	for _, tool := range mcpTools(t) {
-		capabilities["mcp:"+tool] = true
-	}
-	// The workbench axis is Playwright-only: enumerate it only when its specs
-	// are present. Otherwise its map entries would be spuriously flagged as
-	// stale "extra" entries below, and its gaps could not be proven either
-	// way — so when e2e/tests is absent it is disclosed-unproven (above) and
-	// deliberately left OUT of the enumerated set, never silently treated as
-	// covered.
-	if e2ePresent {
-		for _, s := range workbenchSurfaces {
-			capabilities["wb:"+s] = true
-		}
-	}
+	// realCapabilities runs the same three-axis enumeration the red-direction
+	// proof (TestShowcaseCoverage_RealEnumerationDetectsGaps) drives, so the
+	// green gate and the red proof bind to ONE enumeration, not two.
+	capabilities := realCapabilities(t, e2ePresent)
 
 	// The pure check does all three directions (gap, stale, marker) and the
 	// disclosure scoping; this test only enumerates the real capabilities,
@@ -590,33 +610,40 @@ func TestShowcaseCoverage(t *testing.T) {
 	}
 }
 
-// TestShowcaseCoverage_DetectsGaps is the gate's own negative-path proof: it
-// feeds computeCoverageGaps deliberately-broken inventories and asserts it
-// reports the RIGHT gap class naming the RIGHT capability. AC-1's behavioral
-// claim is that the gate fails naming the exact missing capability when a
-// mapping is removed or a capability is added unmapped; TestShowcaseCoverage
-// above proves the GREEN direction on the real inventory, and this proves the
-// RED direction is real and precise — without it the gate's failure mode would
-// be unexercised, itself a silent pass (CLAUDE.md: every function needs a
-// negative-path test). Each case isolates one deliberate break so exactly one
-// slice fires; the others are asserted empty, proving the signal is precise.
-func TestShowcaseCoverage_DetectsGaps(t *testing.T) {
+// detectsGapsCase is one deliberately-broken-inventory scenario for the gate's
+// negative-path proof. Hoisted to package scope (with detectsGapsCases below)
+// so the RED proof lives in a table a SECOND test —
+// TestShowcaseCoverage_DetectsGapsCoversAllClasses — can inspect and re-drive
+// at ROW granularity. That closes the blind spot the Makefile coverage-guard
+// cannot reach on its own: the make guard proves the driver test RAN (its
+// `--- PASS:` line), but not that its table still exercises every gap class, so
+// deleting the one row that makes an enforcement branch load-bearing would keep
+// the function passing and `make verify` green. The comprehensiveness test
+// fails when a class-critical row is deleted; both tests are in the Makefile's
+// `required` list so neither can be vacuously removed.
+type detectsGapsCase struct {
+	name         string
+	caps         map[string]bool
+	inv          map[string][]coverageEvidence
+	e2ePresent   bool
+	wantMissing  []string   // exact sorted res.missing
+	wantExtra    []string   // exact sorted res.extra
+	wantMismatch [][]string // one inner slice per expected mismatch entry (index-aligned, sorted); each substring must appear in that entry
+	wantDisclose []string   // each substring must appear in some res.disclosedPlaywright entry
+}
+
+// detectsGapsCases is the committed table of negative-path scenarios. It is
+// driven by TestShowcaseCoverage_DetectsGaps (asserts each case's exact output)
+// and re-driven by TestShowcaseCoverage_DetectsGapsCoversAllClasses (asserts
+// the table still covers every gap class plus a case-count floor).
+func detectsGapsCases() []detectsGapsCase {
 	// A stable known-good Go-backed evidence: this very file always contains
 	// the examples/showcase marker (goE2E's regexp literal is defined here), so
 	// it is a valid mapping to pair with each deliberate break without itself
 	// contributing a mismatch.
 	good := goE2E("internal/showcasealign/coverage_test.go")
 
-	tests := []struct {
-		name         string
-		caps         map[string]bool
-		inv          map[string][]coverageEvidence
-		e2ePresent   bool
-		wantMissing  []string   // exact sorted res.missing
-		wantExtra    []string   // exact sorted res.extra
-		wantMismatch [][]string // one inner slice per expected mismatch entry (index-aligned, sorted); each substring must appear in that entry
-		wantDisclose []string   // each substring must appear in some res.disclosedPlaywright entry
-	}{
+	return []detectsGapsCase{
 		{
 			name:        "gap: enumerated capability with no inventory entry is named in missing",
 			caps:        map[string]bool{"cli:phantom": true, "mcp:real": true},
@@ -651,6 +678,20 @@ func TestShowcaseCoverage_DetectsGaps(t *testing.T) {
 			inv:          map[string][]coverageEvidence{"cli:noevidence": {}},
 			e2ePresent:   true,
 			wantMismatch: [][]string{{"cli:noevidence", "zero evidence"}},
+		},
+		{
+			// The fourth markerMismatch producer, previously unexercised: an
+			// evidence file that EXISTS (go.mod) but whose marker is not a valid
+			// regexp ("[" fails regexp.Compile). computeCoverageGaps reads the
+			// file first, then compiles the marker, so this reaches the
+			// "does not compile as a regexp" branch specifically — the one
+			// failure class the table did not yet cover. Without this row that
+			// branch could be deleted or inverted with every gate signal green.
+			name:         "marker mismatch: mapped file with a non-compiling regexp marker is named",
+			caps:         map[string]bool{"cli:badregexp": true},
+			inv:          map[string][]coverageEvidence{"cli:badregexp": {{file: "go.mod", marker: "["}}},
+			e2ePresent:   true,
+			wantMismatch: [][]string{{"cli:badregexp", "does not compile as a regexp"}},
 		},
 		{
 			// The A2 claim made executable: a CLI verb backed only by a
@@ -696,8 +737,20 @@ func TestShowcaseCoverage_DetectsGaps(t *testing.T) {
 			e2ePresent: true,
 		},
 	}
+}
 
-	for _, tc := range tests {
+// TestShowcaseCoverage_DetectsGaps is the gate's own negative-path proof: it
+// feeds computeCoverageGaps deliberately-broken inventories (detectsGapsCases)
+// and asserts it reports the RIGHT gap class naming the RIGHT capability. AC-1's
+// behavioral claim is that the gate fails naming the exact missing capability
+// when a mapping is removed or a capability is added unmapped; TestShowcaseCoverage
+// proves the GREEN direction on the real inventory, this proves the pure check's
+// RED direction is real and precise, and TestShowcaseCoverage_RealEnumerationDetectsGaps
+// binds that RED direction to the REAL enumeration (dispatch.go's verbPhase walk
+// and the live tools/list). Each case isolates one deliberate break so exactly
+// one slice fires; the others are asserted empty, proving the signal is precise.
+func TestShowcaseCoverage_DetectsGaps(t *testing.T) {
+	for _, tc := range detectsGapsCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			res := computeCoverageGaps(tc.caps, tc.inv, verdiRepoRoot, tc.e2ePresent)
 
@@ -754,4 +807,175 @@ func anyContains(ss []string, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestShowcaseCoverage_DetectsGapsCoversAllClasses defends the RED proof at ROW
+// granularity — the layer the Makefile coverage-guard cannot reach. That guard
+// verifies TestShowcaseCoverage_DetectsGaps RAN (its `--- PASS:` line), but not
+// that its table still exercises every gap class; deleting the single row that
+// makes an enforcement branch load-bearing leaves the driver passing and
+// `make verify` green while that guarantee silently reverts to prose. This test
+// re-drives computeCoverageGaps over the SAME committed table (detectsGapsCases)
+// and buckets each case by the gap class it actually PRODUCES — observed output,
+// not a declared tag — then requires every class to be observed at least once,
+// plus a case-count floor. Deleting any class-critical row makes it FAIL. It is
+// a genuine second driver of the red direction (it runs the real check), so it
+// is not a tautology; it is added to the Makefile `required` list so it cannot
+// itself be vacuously deleted. It asserts a DIFFERENT property than the driver
+// (table-level class coverage, which the driver never checks — the driver would
+// happily pass a table missing an entire class), so the two are complementary,
+// not redundant.
+//
+// Residual (inherent, disclosed): a name-granular make guard cannot verify
+// arbitrary internal assertions, so gutting BOTH this test's body and the
+// driver's to empty would still pass the guard. That irreducible core is why
+// the coverage-guard finding is narrowed here, not erased: this closes the
+// concrete row-deletion attack the finding names, defense-in-depth across two
+// independently-required tests.
+func TestShowcaseCoverage_DetectsGapsCoversAllClasses(t *testing.T) {
+	cases := detectsGapsCases()
+
+	// Floor: any single row deletion drops below this, a backstop against bulk
+	// trimming that happens to preserve one-of-each-class. Raise it deliberately
+	// when adding cases; a drop is a conscious edit, never a silent one.
+	const floor = 10
+	if len(cases) < floor {
+		t.Fatalf("detectsGapsCases has %d case(s), want >= %d — rows were deleted; the RED proof must exercise every gap class", len(cases), floor)
+	}
+
+	var (
+		sawMissing            bool // enumerated capability with no mapping
+		sawExtra              bool // stale inventory key
+		sawMismatchE2EPresent bool // markerMismatch with e2e/tests present
+		sawMismatchE2EAbsent  bool // markerMismatch with e2e/tests ABSENT (Go-backed still enforced — the load-bearing row)
+		sawDiscloseE2EAbsent  bool // Playwright disclosure with e2e/tests absent
+		sawClean              bool // no gaps at all
+	)
+	for _, tc := range cases {
+		res := computeCoverageGaps(tc.caps, tc.inv, verdiRepoRoot, tc.e2ePresent)
+		hasMissing := len(res.missing) > 0
+		hasExtra := len(res.extra) > 0
+		hasMismatch := len(res.markerMismatches) > 0
+		hasDisclose := len(res.disclosedPlaywright) > 0
+		if hasMissing {
+			sawMissing = true
+		}
+		if hasExtra {
+			sawExtra = true
+		}
+		if hasMismatch && tc.e2ePresent {
+			sawMismatchE2EPresent = true
+		}
+		if hasMismatch && !tc.e2ePresent {
+			sawMismatchE2EAbsent = true
+		}
+		if hasDisclose && !tc.e2ePresent {
+			sawDiscloseE2EAbsent = true
+		}
+		if !hasMissing && !hasExtra && !hasMismatch && !hasDisclose {
+			sawClean = true
+		}
+	}
+
+	for _, req := range []struct {
+		ok   bool
+		what string
+	}{
+		{sawMissing, "a case producing a MISSING gap (enumerated capability with no mapping)"},
+		{sawExtra, "a case producing an EXTRA gap (stale/renamed inventory key)"},
+		{sawMismatchE2EPresent, "a case producing a markerMismatch with e2e/tests present"},
+		{sawMismatchE2EAbsent, "a case producing a markerMismatch with e2e/tests ABSENT (Go-backed evidence still enforced — the load-bearing row)"},
+		{sawDiscloseE2EAbsent, "a case producing a Playwright DISCLOSURE with e2e/tests absent"},
+		{sawClean, "a fully-clean case (no gaps at all)"},
+	} {
+		if !req.ok {
+			t.Errorf("detectsGapsCases no longer includes %s — a class-critical row was deleted; the RED proof is incomplete", req.what)
+		}
+	}
+}
+
+// inventoryWithout returns a copy of the real showcaseCoverage inventory with
+// one capability key removed — a deliberately-incomplete inventory for the
+// real-enumeration red-direction proof below.
+func inventoryWithout(cap string) map[string][]coverageEvidence {
+	inv := make(map[string][]coverageEvidence, len(showcaseCoverage))
+	for k, v := range showcaseCoverage {
+		if k == cap {
+			continue
+		}
+		inv[k] = v
+	}
+	return inv
+}
+
+// assertExactlyMissing asserts res names exactly the one expected missing
+// capability and reports no extra/markerMismatch noise — the signal is precise:
+// removing one real mapping (or adding one unmapped capability) surfaces exactly
+// that capability, nothing else. The remaining real inventory is marker-clean
+// (proven green by TestShowcaseCoverage), so extra and markerMismatches must be
+// empty here regardless of whether e2e/tests is present.
+func assertExactlyMissing(t *testing.T, res coverageResult, want string) {
+	t.Helper()
+	if !equalStrings(res.missing, []string{want}) {
+		t.Errorf("missing = %v, want exactly [%s]", res.missing, want)
+	}
+	if len(res.extra) != 0 {
+		t.Errorf("extra = %v, want none (a removed/added mapping must not create stale keys)", res.extra)
+	}
+	if len(res.markerMismatches) != 0 {
+		t.Errorf("markerMismatches = %v, want none (the remaining real inventory must still match its markers)", res.markerMismatches)
+	}
+}
+
+// TestShowcaseCoverage_RealEnumerationDetectsGaps closes AC-1's behavioral clause
+// on the REAL enumeration, not a fabricated caps map: it drives computeCoverageGaps
+// with the actual cliVerbs go/parser walk of dispatch.go's verbPhase and the
+// actual live mcpTools tools/list — the exact enumeration TestShowcaseCoverage
+// feeds the green gate — against a DELIBERATELY-INCOMPLETE inventory, and asserts
+// the specific REAL capability name surfaces as a named gap. TestShowcaseCoverage
+// proves the real enumeration is fully covered (green); TestShowcaseCoverage_DetectsGaps
+// proves the pure check's red direction on synthetic inputs; this binds the two —
+// a real capability from the real walk flowing into a named gap — so the
+// enumeration→check seam itself carries a red-direction proof ("when a real
+// capability's mapping is removed OR a new capability is added without one").
+func TestShowcaseCoverage_RealEnumerationDetectsGaps(t *testing.T) {
+	e2ePresent := e2eTestsPresent()
+	caps := realCapabilities(t, e2ePresent)
+
+	// Key the proof on real, Go-backed capabilities (checked in every checkout,
+	// e2e/tests present or not). The guard makes a rename fail this proof LOUDLY
+	// — the capability it names no longer exists — rather than silently exercise
+	// nothing.
+	for _, must := range []string{"cli:build", "mcp:get_artifact"} {
+		if !caps[must] {
+			t.Fatalf("real enumeration does not contain %q (renamed/removed capability?); this red-direction proof must key on a real capability", must)
+		}
+	}
+
+	t.Run("real CLI capability whose mapping is removed is named (dispatch.go verbPhase walk)", func(t *testing.T) {
+		const removed = "cli:build"
+		res := computeCoverageGaps(caps, inventoryWithout(removed), verdiRepoRoot, e2ePresent)
+		assertExactlyMissing(t, res, removed)
+	})
+
+	t.Run("real MCP capability whose mapping is removed is named (live tools/list)", func(t *testing.T) {
+		const removed = "mcp:get_artifact"
+		res := computeCoverageGaps(caps, inventoryWithout(removed), verdiRepoRoot, e2ePresent)
+		assertExactlyMissing(t, res, removed)
+	})
+
+	t.Run("a newly-shipped capability added to the real enumeration without a mapping is named", func(t *testing.T) {
+		// AC-1's "a new capability is added without one", modeled on the REAL
+		// enumeration: layer one synthetic just-shipped capability on top of the
+		// real caps, keep the complete real inventory, and assert it is the ONLY
+		// thing named — proving the real inventory covers the entire real
+		// enumeration today AND that one more unmapped capability is caught.
+		const added = "cli:__newly_shipped_verb__"
+		augmented := map[string]bool{added: true}
+		for k, v := range caps {
+			augmented[k] = v
+		}
+		res := computeCoverageGaps(augmented, showcaseCoverage, verdiRepoRoot, e2ePresent)
+		assertExactlyMissing(t, res, added)
+	})
 }

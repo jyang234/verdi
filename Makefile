@@ -154,6 +154,16 @@ lint-showcase:
 #     break the build), so it too MUST emit its own `--- PASS:` line. The `-run`
 #     pattern above already selects it (an unanchored TestShowcaseCoverage
 #     match); this makes its presence a demanded invariant, not incidental.
+#   - TestShowcaseCoverage_DetectsGapsCoversAllClasses guards the DetectsGaps
+#     table at ROW granularity, the layer this name-only guard cannot reach: it
+#     re-drives computeCoverageGaps over the same committed cases and fails if
+#     the table stops exercising any gap class (deleting the load-bearing row
+#     would otherwise keep DetectsGaps green). A hard FLOOR for the same
+#     vacuous-`-run` reason.
+#   - TestShowcaseCoverage_RealEnumerationDetectsGaps is the RED-direction proof
+#     on the REAL enumeration (dispatch.go's verbPhase walk + live tools/list),
+#     not a synthetic caps map: a real capability whose mapping is removed, and
+#     a newly-added capability, both surface as named gaps. A hard FLOOR too.
 #
 # TASK 4.2 WIRE-UP (README freshness, DC-3): the sibling public-readme story
 # adds a README-freshness gate. Folding it into this target is a DELIBERATE,
@@ -188,7 +198,7 @@ showcase-coverage:
 	status=$$?; \
 	printf '%s\n' "$$out"; \
 	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
-	required='TestShowcaseCoverage TestShowcaseCoverage_DetectsGaps TestReadmeExamplesFresh'; \
+	required='TestShowcaseCoverage TestShowcaseCoverage_DetectsGaps TestShowcaseCoverage_DetectsGapsCoversAllClasses TestShowcaseCoverage_RealEnumerationDetectsGaps TestReadmeExamplesFresh'; \
 	for tc in $$required; do \
 		if ! printf '%s\n' "$$out" | grep -qF -- "--- PASS: $$tc ("; then \
 			echo "ERROR: showcase-coverage guard: required test $$tc did NOT run+pass (deleted, renamed, or skipped?)." >&2; \
