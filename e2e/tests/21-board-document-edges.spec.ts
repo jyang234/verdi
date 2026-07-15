@@ -1,11 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import {
-  READONLY_SPEC,
-  DOC_EDGE_TYPE,
-  DOC_EDGE_TARGET,
-  boardPath,
-  refCardTestId,
-} from "./fixtures";
+import { SHOWCASE, boardPath, refCardTestId } from "./fixtures";
 
 // Document-level edges (projection.go: frontmatter `links:` declared on
 // the spec document itself, emitted with From:"spec") have exactly ONE
@@ -30,11 +24,11 @@ const offsetRect = (el: Locator) =>
   }));
 
 const docChip = (page: Page) =>
-  page.locator(`.yarn-chip[data-from="spec"][data-edge-type="${DOC_EDGE_TYPE}"]`);
+  page.locator(`.yarn-chip[data-from="spec"][data-edge-type="${SHOWCASE.DOC_EDGE_TYPE}"]`);
 
 test.describe("board: document-level edges hang from the top of the board", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(READONLY_SPEC));
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
@@ -46,10 +40,10 @@ test.describe("board: document-level edges hang from the top of the board", () =
   }) => {
     const chip = docChip(page);
     await expect(chip).toHaveCount(1);
-    await expect(chip).toHaveAttribute("data-to", DOC_EDGE_TARGET);
+    await expect(chip).toHaveAttribute("data-to", SHOWCASE.DOC_EDGE_TARGET);
     await expect(chip).toHaveAttribute("data-layer", "spec");
 
-    const ref = page.getByTestId(refCardTestId(DOC_EDGE_TARGET));
+    const ref = page.getByTestId(refCardTestId(SHOWCASE.DOC_EDGE_TARGET));
     await expect(ref).toBeVisible();
 
     const chipRect = await offsetRect(chip);
@@ -100,7 +94,7 @@ test.describe("board: document-level edges hang from the top of the board", () =
     const by = Number(byS);
 
     const refRect = await offsetRect(
-      page.getByTestId(refCardTestId(DOC_EDGE_TARGET)),
+      page.getByTestId(refCardTestId(SHOWCASE.DOC_EDGE_TARGET)),
     );
     expect(ay, "thread must start above the canvas (off-board)").toBeLessThan(0);
     expect(by).toBeCloseTo(refRect.y, 1);

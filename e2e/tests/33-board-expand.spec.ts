@@ -1,11 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  EMPTY_SPEC,
-  REVIEW_SPEC,
-  AC_IDS,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 import { expectAutosaved } from "./helpers";
 
 // Click-to-expand (owner directive: "the output is truncated. Clicking on
@@ -29,15 +23,15 @@ import { expectAutosaved } from "./helpers";
 //      so gets no affordance at all. When the headline ALSO clamps, the
 //      fade+⋯ still layers on top of the dog-ear.
 //
-// The fixtures (cmd/e2eharness/provisionv2.go): DESIGN_SPEC
+// The fixtures (cmd/e2eharness/provisionv2.go): SHOWCASE.DESIGN_SPEC
 // (refi-decline-flow) carries a deliberately long problem headline that
 // overflows the three-line clamp with an EMPTY `## Problem` body (the
 // no-body → headline-fallback path) and a short outcome headline with a
 // RICHER-than-headline `## Outcome` body (the always-expandable + show-body
 // path, and — since the outcome headline does not clamp at the wide e2e
-// viewport — the width-independence proof); REVIEW_SPEC
+// viewport — the width-independence proof); SHOWCASE.REVIEW_SPEC
 // (stale-decline-notices) carries a long problem headline, proving the
-// affordance works in a non-authoring room; EMPTY_SPEC (income-verification)
+// affordance works in a non-authoring room; SHOWCASE.EMPTY_SPEC (income-verification)
 // keeps a one-line problem headline with no body section — the degenerate
 // negative case.
 
@@ -45,7 +39,7 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
   test("a clamped placard shows the hint and expands to its full text", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const placard = page.getByTestId("placard-problem");
     await expect(placard).toBeVisible();
     // The HEADLINE paragraph, targeted unambiguously by its own class — the
@@ -99,7 +93,7 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
   test("the expand dialog closes from × and the backdrop too", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const p = page.getByTestId("placard-problem").locator(".placard-text");
 
     // × closes.
@@ -122,11 +116,11 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
   test("a short placard with no body section gets no affordance", async ({
     page,
   }) => {
-    // EMPTY_SPEC's one-line problem headline fits AND its `## Problem` body
+    // SHOWCASE.EMPTY_SPEC's one-line problem headline fits AND its `## Problem` body
     // section is empty — the one degenerate case: nothing more to show than
     // the three lines on its face, so the always-on dog-ear is suppressed.
     // No clamp, no body, no affordance, and a click does nothing.
-    await page.goto(boardPath(EMPTY_SPEC));
+    await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
     const placard = page.getByTestId("placard-problem");
     const p = placard.locator(".placard-text");
     await expect(p).toBeVisible();
@@ -149,7 +143,7 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
   test("the affordance works in a non-authoring (review) room too", async ({
     page,
   }) => {
-    await page.goto(boardPath(REVIEW_SPEC));
+    await page.goto(boardPath(SHOWCASE.REVIEW_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "review",
@@ -178,10 +172,10 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
   }) => {
     // The width-dependence fix, pinned: a case-file placard is expandable
     // because it HAS a fuller file to open, not because the viewport happened
-    // to clamp its headline. DESIGN_SPEC's OUTCOME headline is short — at the
+    // to clamp its headline. SHOWCASE.DESIGN_SPEC's OUTCOME headline is short — at the
     // config's wide viewport (1880px) it does NOT overflow — yet the placard
     // carries a rendered `## Outcome` body and stays expandable.
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const placard = page.getByTestId("placard-outcome");
     const p = placard.locator(".placard-text");
     await expect(p).toBeVisible();
@@ -227,11 +221,11 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
   test("a placard with no body section falls back to its headline", async ({
     page,
   }) => {
-    // DESIGN_SPEC's PROBLEM placard has an empty `## Problem` body: the seam
+    // SHOWCASE.DESIGN_SPEC's PROBLEM placard has an empty `## Problem` body: the seam
     // emits no `.placard-full`, so the dog-ear (present because the long
     // headline clamps) opens a plain-text dialog reading the headline back —
     // the documented no-body fallback, never an empty dialog.
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const placard = page.getByTestId("placard-problem");
     await expect(placard.getByTestId("placard-full-problem")).toHaveCount(0);
     await expect(placard).toHaveClass(/placard--expandable/);
@@ -257,7 +251,7 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
   test("a card double-click still edits; a single click expands", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -265,7 +259,7 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
 
     // Double-click still opens the inline editor (the click-to-expand must
     // not eat the dblclick) — no expand dialog appears.
-    const card = page.getByTestId(`card-${AC_IDS[0]}`);
+    const card = page.getByTestId(`card-${SHOWCASE.AC_IDS[0]}`);
     await card.dblclick();
     const editor = page.getByRole("textbox", { name: "Card text" });
     await expect(editor).toBeVisible();
@@ -289,14 +283,14 @@ test.describe("board expand: truncated text opens a read-only dialog", () => {
     const dialog = page.getByTestId("expand-dialog");
     await expect(dialog).toBeVisible();
     await expect(page.getByTestId("expand-text")).toHaveText(longText);
-    await expect(dialog.locator(".expand-kind")).toContainText(AC_IDS[0]);
+    await expect(dialog.locator(".expand-kind")).toContainText(SHOWCASE.AC_IDS[0]);
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
   });
 
   test("a drag is still a drag, not an expand", async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
-    const card = page.getByTestId(`card-${AC_IDS[0]}`);
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
+    const card = page.getByTestId(`card-${SHOWCASE.AC_IDS[0]}`);
     await card.scrollIntoViewIfNeeded();
 
     const before = await card.boundingBox();

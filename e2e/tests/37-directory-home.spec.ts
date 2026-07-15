@@ -1,12 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import {
+  SHOWCASE,
+  EDGE,
   CONTROL_URL,
-  DESIGN_SPEC,
-  DIR_DOOMED_DRAFT,
-  DIR_EMPTY_BRANCH,
-  DIR_INREVIEW_SPEC,
-  DIR_LOCAL_DRAFT,
-  DIR_REMOTE_DRAFT,
   dirEntryTestId,
   dirGroupTestId,
   draftBoardHref,
@@ -20,16 +16,16 @@ import {
 // degrading every absence to a disclosed notice.
 //
 // ORDER MATTERS within this file (the suite is serial, one shared store):
-// the delete-branch test permanently removes DIR_DOOMED_DRAFT's branch and
+// the delete-branch test permanently removes EDGE.DIR_DOOMED_DRAFT's branch and
 // the outage test permanently downs the open-MR feed, so both run last, in
 // that order.
 
 const ALL_DRAFTS = [
-  DESIGN_SPEC,
-  DIR_LOCAL_DRAFT,
-  DIR_REMOTE_DRAFT,
-  DIR_DOOMED_DRAFT,
-  DIR_EMPTY_BRANCH,
+  SHOWCASE.DESIGN_SPEC,
+  SHOWCASE.DIR_LOCAL_DRAFT,
+  SHOWCASE.DIR_REMOTE_DRAFT,
+  EDGE.DIR_DOOMED_DRAFT,
+  EDGE.DIR_EMPTY_BRANCH,
 ];
 
 // One representative default-branch spec per remaining group (statuses per
@@ -89,7 +85,7 @@ test("home renders the four status groups, each entry once, chipped and linked",
   }
 
   // (c) every ordinary entry carries a visible status chip.
-  await expect(entry(page, DESIGN_SPEC).locator(".badge-draft")).toHaveText("draft");
+  await expect(entry(page, SHOWCASE.DESIGN_SPEC).locator(".badge-draft")).toHaveText("draft");
   await expect(
     entry(page, ACCEPTED_SPEC).locator(".badge-accepted-pending-build"),
   ).toHaveText("accepted-pending-build");
@@ -106,7 +102,7 @@ test("home renders the four status groups, each entry once, chipped and linked",
     "href",
     `/board/spec/${ACCEPTED_SPEC}`,
   );
-  for (const name of [DESIGN_SPEC, DIR_LOCAL_DRAFT, DIR_REMOTE_DRAFT]) {
+  for (const name of [SHOWCASE.DESIGN_SPEC, SHOWCASE.DIR_LOCAL_DRAFT, SHOWCASE.DIR_REMOTE_DRAFT]) {
     await expect(entry(page, name).locator("a.dir-board")).toHaveAttribute(
       "href",
       draftBoardHref(name),
@@ -127,13 +123,13 @@ test("entries are disclosed by source: local, remote-tracking, both, default", a
 }) => {
   await page.goto("/");
 
-  await expect(entry(page, DIR_LOCAL_DRAFT).locator(".badge-src")).toHaveText(
+  await expect(entry(page, SHOWCASE.DIR_LOCAL_DRAFT).locator(".badge-src")).toHaveText(
     "local branch",
   );
-  await expect(entry(page, DIR_REMOTE_DRAFT).locator(".badge-src")).toHaveText(
+  await expect(entry(page, SHOWCASE.DIR_REMOTE_DRAFT).locator(".badge-src")).toHaveText(
     "remote-tracking",
   );
-  await expect(entry(page, DESIGN_SPEC).locator(".badge-src")).toHaveText(
+  await expect(entry(page, SHOWCASE.DESIGN_SPEC).locator(".badge-src")).toHaveText(
     "local + remote",
   );
   await expect(entry(page, ACCEPTED_SPEC).locator(".badge-src")).toHaveText(
@@ -146,7 +142,7 @@ test("entries are disclosed by source: local, remote-tracking, both, default", a
 test("an open MR chips its entry in review, and only that entry", async ({ page }) => {
   await page.goto("/");
 
-  await expect(entry(page, DIR_INREVIEW_SPEC).locator(".dir-inreview")).toHaveText(
+  await expect(entry(page, SHOWCASE.DIR_INREVIEW_SPEC).locator(".dir-inreview")).toHaveText(
     "in review",
   );
   await expect(page.locator(".dir-inreview")).toHaveCount(1);
@@ -163,16 +159,16 @@ test("a design branch with no draft spec is a disclosed notice entry, not a link
 }) => {
   await page.goto("/");
 
-  const notice = entry(page, DIR_EMPTY_BRANCH);
+  const notice = entry(page, EDGE.DIR_EMPTY_BRANCH);
   await expect(notice).toBeVisible();
-  await expect(notice).toContainText(`design/${DIR_EMPTY_BRANCH}`);
+  await expect(notice).toContainText(`design/${EDGE.DIR_EMPTY_BRANCH}`);
   await expect(notice.locator(".dir-disclosed")).toBeVisible();
   await expect(notice.locator("a")).toHaveCount(0);
 
   // One unresolvable entry never takes down the page: the rest of the
   // directory renders around it.
   await expect(entry(page, ACCEPTED_SPEC)).toBeVisible();
-  await expect(entry(page, DESIGN_SPEC)).toBeVisible();
+  await expect(entry(page, SHOWCASE.DESIGN_SPEC)).toBeVisible();
 });
 
 // AC-3 (deleted mid-session): the fixture deletes a listed design branch
@@ -183,17 +179,17 @@ test("a branch deleted mid-session resolves to a disclosed 404 with a way back",
   page,
 }) => {
   await page.goto("/");
-  const link = entry(page, DIR_DOOMED_DRAFT).locator("a.dir-board");
-  await expect(link).toHaveAttribute("href", draftBoardHref(DIR_DOOMED_DRAFT));
+  const link = entry(page, EDGE.DIR_DOOMED_DRAFT).locator("a.dir-board");
+  await expect(link).toHaveAttribute("href", draftBoardHref(EDGE.DIR_DOOMED_DRAFT));
 
   // The branch vanishes between render and click.
   const del = await page.request.post(
-    `${CONTROL_URL}/delete-branch?branch=${encodeURIComponent(`design/${DIR_DOOMED_DRAFT}`)}`,
+    `${CONTROL_URL}/delete-branch?branch=${encodeURIComponent(`design/${EDGE.DIR_DOOMED_DRAFT}`)}`,
   );
   expect(del.ok()).toBe(true);
 
   const responsePromise = page.waitForResponse(
-    (r) => r.request().isNavigationRequest() && r.url().includes(DIR_DOOMED_DRAFT),
+    (r) => r.request().isNavigationRequest() && r.url().includes(EDGE.DIR_DOOMED_DRAFT),
   );
   await link.click();
   const response = await responsePromise;
@@ -201,14 +197,14 @@ test("a branch deleted mid-session resolves to a disclosed 404 with a way back",
 
   const notice = page.getByTestId("stale-entry-notice");
   await expect(notice).toBeVisible();
-  await expect(notice).toContainText(`design/${DIR_DOOMED_DRAFT}`);
+  await expect(notice).toContainText(`design/${EDGE.DIR_DOOMED_DRAFT}`);
 
   // The way back works — and the re-rendered directory honestly no longer
   // lists the vanished branch, while everything else still renders.
   await page.getByTestId("back-to-directory").click();
   await expect(page.getByTestId(dirGroupTestId("drafts-in-progress"))).toBeVisible();
-  await expect(entry(page, DIR_DOOMED_DRAFT)).toHaveCount(0);
-  await expect(entry(page, DESIGN_SPEC)).toBeVisible();
+  await expect(entry(page, EDGE.DIR_DOOMED_DRAFT)).toHaveCount(0);
+  await expect(entry(page, SHOWCASE.DESIGN_SPEC)).toBeVisible();
 });
 
 // AC-2 (degradation) — LAST: with the forge feed unreachable, the SAME
@@ -238,10 +234,10 @@ test("an unreachable forge degrades to a disclosed notice while the directory re
     await expect(page.getByTestId(dirGroupTestId(g))).toBeVisible();
   }
   for (const name of [
-    DESIGN_SPEC,
-    DIR_LOCAL_DRAFT,
-    DIR_REMOTE_DRAFT,
-    DIR_EMPTY_BRANCH,
+    SHOWCASE.DESIGN_SPEC,
+    SHOWCASE.DIR_LOCAL_DRAFT,
+    SHOWCASE.DIR_REMOTE_DRAFT,
+    EDGE.DIR_EMPTY_BRANCH,
     ACCEPTED_SPEC,
     ACTIVE_SPEC,
     TERMINAL_SPEC,

@@ -1,12 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  READONLY_SPEC,
-  AC_IDS,
-  DECISION_WITH_EXEMPTS,
-  ADR_REF,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 import { addSticky, drawYarn, edgeTypePicker, expectAutosaved, uncommittedIndicator } from "./helpers";
 
 // Owner UAT (round 6, item 3 + the mid-pass retype directive): scratch
@@ -18,12 +11,12 @@ import { addSticky, drawYarn, edgeTypePicker, expectAutosaved, uncommittedIndica
 
 const dc1Chip = (page: Page, type: string): Locator =>
   page.locator(
-    `.yarn-chip[data-edge-type="${type}"][data-from="${DECISION_WITH_EXEMPTS}"]`,
+    `.yarn-chip[data-edge-type="${type}"][data-from="${SHOWCASE.DECISION_WITH_EXEMPTS}"]`,
   );
 
 test.describe("board: scratch records die, spec edges retype and remove", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -58,14 +51,14 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
   test("an untyped relates thread dies from the annotation layer", async ({
     page,
   }) => {
-    await drawYarn(page, AC_IDS[0], page.getByTestId(`card-${AC_IDS[2]}`));
+    await drawYarn(page, SHOWCASE.AC_IDS[0], page.getByTestId(`card-${SHOWCASE.AC_IDS[2]}`));
     const picker = edgeTypePicker(page);
     await expect(picker).toBeVisible();
     await picker.getByRole("menuitem", { name: /relates \(scratch\)/ }).click();
     await expectAutosaved(page);
 
     const thread = page.locator(
-      `.yarn-chip[data-edge-type="relates"][data-from="${AC_IDS[0]}"][data-to="${AC_IDS[2]}"]`,
+      `.yarn-chip[data-edge-type="relates"][data-from="${SHOWCASE.AC_IDS[0]}"][data-to="${SHOWCASE.AC_IDS[2]}"]`,
     );
     await expect(thread).toHaveCount(1);
 
@@ -116,7 +109,7 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
 
     await expect(dc1Chip(page, "supersedes")).toHaveCount(1);
     await expect(dc1Chip(page, "exempts")).toHaveCount(0);
-    await expect(dc1Chip(page, "supersedes")).toHaveAttribute("data-to", ADR_REF);
+    await expect(dc1Chip(page, "supersedes")).toHaveAttribute("data-to", SHOWCASE.ADR_REF);
     await expect(uncommittedIndicator(page)).toBeVisible();
 
     await page.reload();
@@ -131,7 +124,7 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
     // serial suite; in isolation this test still finds the fixture's
     // exempts edge and exercises the same ritual).
     const chip = page
-      .locator(`.yarn-chip[data-layer="spec"][data-from="${DECISION_WITH_EXEMPTS}"]`)
+      .locator(`.yarn-chip[data-layer="spec"][data-from="${SHOWCASE.DECISION_WITH_EXEMPTS}"]`)
       .first();
     await expect(chip).toBeVisible();
     const type = await chip.getAttribute("data-edge-type");
@@ -154,7 +147,7 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
     page,
   }) => {
     const chip = page
-      .locator(`.yarn-chip[data-layer="spec"][data-from="${DECISION_WITH_EXEMPTS}"]`)
+      .locator(`.yarn-chip[data-layer="spec"][data-from="${SHOWCASE.DECISION_WITH_EXEMPTS}"]`)
       .first();
     const type = await chip.getAttribute("data-edge-type");
 
@@ -166,21 +159,21 @@ test.describe("board: scratch records die, spec edges retype and remove", () => 
     await expectAutosaved(page);
 
     await expect(
-      page.locator(`.yarn-chip[data-layer="spec"][data-from="${DECISION_WITH_EXEMPTS}"]`),
+      page.locator(`.yarn-chip[data-layer="spec"][data-from="${SHOWCASE.DECISION_WITH_EXEMPTS}"]`),
     ).toHaveCount(0);
     // Removing a declared edge IS a spec edit.
     await expect(uncommittedIndicator(page)).toBeVisible();
 
     await page.reload();
     await expect(
-      page.locator(`.yarn-chip[data-layer="spec"][data-from="${DECISION_WITH_EXEMPTS}"]`),
+      page.locator(`.yarn-chip[data-layer="spec"][data-from="${SHOWCASE.DECISION_WITH_EXEMPTS}"]`),
     ).toHaveCount(0);
   });
 
   test("no deletion or retype affordance exists outside authoring", async ({
     page,
   }) => {
-    await page.goto(boardPath(READONLY_SPEC));
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",

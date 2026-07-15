@@ -1,14 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
-  SHOWCASE_DRAFT_SPEC,
-  SHOWCASE_DRAFT_BRANCH,
-  SHOWCASE_DRAFT_PROBLEM_SNIPPET,
-  SHOWCASE_DRAFT_OUTCOME_SNIPPET,
-  SHOWCASE_DRAFT_ACS,
-  SHOWCASE_DRAFT_OQ_ID,
-  SHOWCASE_DRAFT_OQ_CARRIED,
-  SHOWCASE_DRAFT_OQ_RESOLVED,
-  SHOWCASE_DRAFT_DIAGRAM,
+  SHOWCASE,
   INSPECT_URL,
   boardPath,
   branchBoardPath,
@@ -25,7 +17,7 @@ import {
 // canonical live draft a README reader is pointed at.
 
 function draftBoard(): string {
-  return branchBoardPath(SHOWCASE_DRAFT_BRANCH, SHOWCASE_DRAFT_SPEC);
+  return branchBoardPath(SHOWCASE.SHOWCASE_DRAFT_BRANCH, SHOWCASE.SHOWCASE_DRAFT_SPEC);
 }
 
 async function worktreeFile(
@@ -41,15 +33,15 @@ async function worktreeFile(
 // authoring affordance. It is NOT on the serving checkout: its unprefixed
 // address has nothing to serve.
 test("the payoff-quote-portal draft is a live authoring wall under /b/", async ({ page }) => {
-  const unprefixed = await page.request.get(boardPath(SHOWCASE_DRAFT_SPEC));
+  const unprefixed = await page.request.get(boardPath(SHOWCASE.SHOWCASE_DRAFT_SPEC));
   expect(unprefixed.status()).toBe(404);
 
   await page.goto(draftBoard());
   await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
-  await expect(page.getByTestId("placard-problem")).toContainText(SHOWCASE_DRAFT_PROBLEM_SNIPPET);
-  await expect(page.getByTestId("placard-outcome")).toContainText(SHOWCASE_DRAFT_OUTCOME_SNIPPET);
+  await expect(page.getByTestId("placard-problem")).toContainText(SHOWCASE.SHOWCASE_DRAFT_PROBLEM_SNIPPET);
+  await expect(page.getByTestId("placard-outcome")).toContainText(SHOWCASE.SHOWCASE_DRAFT_OUTCOME_SNIPPET);
 
-  for (const ac of SHOWCASE_DRAFT_ACS) {
+  for (const ac of SHOWCASE.SHOWCASE_DRAFT_ACS) {
     await expect(page.getByTestId(`card-${ac}`)).toBeVisible();
   }
   // The authoring affordance is present (a draft on its design branch).
@@ -66,17 +58,17 @@ test("the wall showcases VL-017 both paths: a carried open question and a resolv
   await page.goto(draftBoard());
 
   // Carried path: the declared open_questions object renders as its card.
-  await expect(page.getByTestId(`card-${SHOWCASE_DRAFT_OQ_ID}`)).toContainText(
-    SHOWCASE_DRAFT_OQ_CARRIED,
+  await expect(page.getByTestId(`card-${SHOWCASE.SHOWCASE_DRAFT_OQ_ID}`)).toContainText(
+    SHOWCASE.SHOWCASE_DRAFT_OQ_CARRIED,
   );
 
   // The still-open question sticky carries the same text (the annotation the
   // carried object formalizes), and a second sticky is resolved in place.
   const stickies = page.locator('[data-testid^="sticky-"]');
   await expect(
-    stickies.filter({ hasText: SHOWCASE_DRAFT_OQ_CARRIED }),
+    stickies.filter({ hasText: SHOWCASE.SHOWCASE_DRAFT_OQ_CARRIED }),
   ).toHaveCount(1);
-  const resolved = stickies.filter({ hasText: SHOWCASE_DRAFT_OQ_RESOLVED });
+  const resolved = stickies.filter({ hasText: SHOWCASE.SHOWCASE_DRAFT_OQ_RESOLVED });
   await expect(resolved).toHaveCount(1);
   await expect(resolved).toHaveAttribute("data-annotation-type", "question");
 });
@@ -89,7 +81,7 @@ test("a proposal-tier diagram is authored on the draft branch", async ({ page })
 
   const diagram = await worktreeFile(
     page.request,
-    worktreeDiagramPath(SHOWCASE_DRAFT_SPEC, SHOWCASE_DRAFT_DIAGRAM),
+    worktreeDiagramPath(SHOWCASE.SHOWCASE_DRAFT_SPEC, SHOWCASE.SHOWCASE_DRAFT_DIAGRAM),
   );
   expect(diagram.status).toBe(200);
   expect(diagram.body).toContain("class: proposal");

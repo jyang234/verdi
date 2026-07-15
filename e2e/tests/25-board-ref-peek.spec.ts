@@ -1,12 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  READONLY_SPEC,
-  ADR_REF,
-  DOC_EDGE_TARGET,
-  boardPath,
-  refCardTestId,
-} from "./fixtures";
+import { SHOWCASE, boardPath, refCardTestId } from "./fixtures";
 
 // Owner UAT (round 6, item 4): "the reference object is an ADR, which is
 // unclickable… The user shouldn't be forced to exit the focused view to
@@ -22,13 +15,13 @@ test.describe("board: reference cards peek their artifact", () => {
   test("read-only board: click opens the peek; ×, Escape, and outside-click close it", async ({
     page,
   }) => {
-    await page.goto(boardPath(READONLY_SPEC));
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
     );
 
-    await page.getByTestId(refCardTestId(DOC_EDGE_TARGET)).click();
+    await page.getByTestId(refCardTestId(SHOWCASE.DOC_EDGE_TARGET)).click();
     await expect(peek(page)).toBeVisible();
     await expect(peek(page)).toContainText(
       "Transactional outbox for domain events",
@@ -38,7 +31,7 @@ test.describe("board: reference cards peek their artifact", () => {
     // The body is rendered content, not raw markdown.
     await expect(peek(page).locator(".peek-body")).not.toContainText("##");
     const open = peek(page).getByRole("link", { name: /open full page/i });
-    await expect(open).toHaveAttribute("href", `/a/${DOC_EDGE_TARGET}`);
+    await expect(open).toHaveAttribute("href", `/a/${SHOWCASE.DOC_EDGE_TARGET}`);
     // Owner directive: the full-page link spawns a NEW tab — the peek
     // exists so the board is never lost, so the link must never navigate
     // the board's own tab away.
@@ -49,12 +42,12 @@ test.describe("board: reference cards peek their artifact", () => {
     await peek(page).getByRole("button", { name: "Close peek" }).click();
     await expect(peek(page)).toHaveCount(0);
 
-    await page.getByTestId(refCardTestId(DOC_EDGE_TARGET)).click();
+    await page.getByTestId(refCardTestId(SHOWCASE.DOC_EDGE_TARGET)).click();
     await expect(peek(page)).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(peek(page)).toHaveCount(0);
 
-    await page.getByTestId(refCardTestId(DOC_EDGE_TARGET)).click();
+    await page.getByTestId(refCardTestId(SHOWCASE.DOC_EDGE_TARGET)).click();
     await expect(peek(page)).toBeVisible();
     // Any click outside the peek dismisses it — empty corkboard here.
     await page.getByTestId("board").click({ position: { x: 600, y: 350 } });
@@ -64,18 +57,18 @@ test.describe("board: reference cards peek their artifact", () => {
   test("authoring board: the same peek works alongside the editing surface", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
     );
 
-    await page.getByTestId(refCardTestId(ADR_REF)).click();
+    await page.getByTestId(refCardTestId(SHOWCASE.ADR_REF)).click();
     await expect(peek(page)).toBeVisible();
     await expect(peek(page).locator(".peek-kind")).toHaveText("adr");
     await expect(
       peek(page).getByRole("link", { name: /open full page/i }),
-    ).toHaveAttribute("href", `/a/${ADR_REF}`);
+    ).toHaveAttribute("href", `/a/${SHOWCASE.ADR_REF}`);
     await page.keyboard.press("Escape");
     await expect(peek(page)).toHaveCount(0);
   });
@@ -88,7 +81,7 @@ test.describe("board: reference cards peek their artifact", () => {
     // resolves every closed-edge endpoint), so the disclosed state is
     // asserted at the fragment seam the click renders.
     const resp = await request.get(
-      `/board/spec/${READONLY_SPEC}/peek?ref=${encodeURIComponent("jira:LOAN-1482")}`,
+      `/board/spec/${SHOWCASE.READONLY_SPEC}/peek?ref=${encodeURIComponent("jira:LOAN-1482")}`,
     );
     expect(resp.status()).toBe(200);
     const body = await resp.text();

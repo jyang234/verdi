@@ -1,12 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  AC_IDS,
-  DECISION_PLAIN,
-  ADR_REF,
-  boardPath,
-  refCardTestId,
-} from "./fixtures";
+import { SHOWCASE, boardPath, refCardTestId } from "./fixtures";
 import { drawYarn, edgeTypePicker } from "./helpers";
 
 // EXECUTABLE ACCEPTANCE CRITERIA — PLAN-V1.md §5 Phase V1-P6, exit
@@ -20,7 +13,7 @@ import { drawYarn, edgeTypePicker } from "./helpers";
 // — a menu misclick must not summon an org-wide supersession flow".
 test.describe("V1-P6: context-sensitive edge-type picker", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -37,8 +30,8 @@ test.describe("V1-P6: context-sensitive edge-type picker", () => {
   }) => {
     await drawYarn(
       page,
-      DECISION_PLAIN,
-      page.getByTestId(refCardTestId(ADR_REF)),
+      SHOWCASE.DECISION_PLAIN,
+      page.getByTestId(refCardTestId(SHOWCASE.ADR_REF)),
     );
 
     const picker = edgeTypePicker(page);
@@ -82,14 +75,14 @@ test.describe("V1-P6: context-sensitive edge-type picker", () => {
     page,
   }) => {
     const supersedesYarn = page.locator(
-      `[data-edge-type="supersedes"][data-from="${DECISION_PLAIN}"]`,
+      `[data-edge-type="supersedes"][data-from="${SHOWCASE.DECISION_PLAIN}"]`,
     );
     await expect(supersedesYarn).toHaveCount(0);
 
     await drawYarn(
       page,
-      DECISION_PLAIN,
-      page.getByTestId(refCardTestId(ADR_REF)),
+      SHOWCASE.DECISION_PLAIN,
+      page.getByTestId(refCardTestId(SHOWCASE.ADR_REF)),
     );
     const picker = edgeTypePicker(page);
     await expect(picker).toBeVisible();
@@ -118,7 +111,7 @@ test.describe("V1-P6: context-sensitive edge-type picker", () => {
   test("an illegal (source,target) pair offers no typed edge", async ({
     page,
   }) => {
-    await drawYarn(page, AC_IDS[0], page.getByTestId(`card-${AC_IDS[1]}`));
+    await drawYarn(page, SHOWCASE.AC_IDS[0], page.getByTestId(`card-${SHOWCASE.AC_IDS[1]}`));
 
     const picker = edgeTypePicker(page);
     await expect(picker).toBeVisible();

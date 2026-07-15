@@ -1,17 +1,5 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  MERMAID_SPEC,
-  MERMAID_SPEC_REF,
-  ILLUSTRATIVE_DIAGRAM,
-  PROPOSAL_DIAGRAM,
-  ILLUSTRATIVE_FIGURE,
-  ILLUSTRATIVE_CHIP,
-  PROPOSAL_FULL_FIGURE,
-  DEX_BASE,
-  dexSpecPath,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, DEX_BASE, dexSpecPath, boardPath } from "./fixtures";
 import { pinArtifact } from "./helpers";
 
 // spec/illustrative-class — the diagram-tier disclosure. Every mermaid
@@ -63,14 +51,14 @@ test.afterEach(() => {
 // figcaption chip — the badge sits on the diagram, not elsewhere on the
 // page (the ac-2 obligation's same-figure requirement).
 async function expectIllustrativeFigure(scope: Page | Locator) {
-  const figure = (scope as Page | Locator).locator(ILLUSTRATIVE_FIGURE).first();
+  const figure = (scope as Page | Locator).locator(SHOWCASE.ILLUSTRATIVE_FIGURE).first();
   await expect(figure).toBeVisible();
   // mermaid swaps the pre's text for an <svg> asynchronously — poll.
   await expect(figure.locator("pre.mermaid svg")).toBeVisible({
     timeout: 10_000,
   });
   await expect(figure.locator("figcaption.diagram-tier-badge")).toHaveText(
-    ILLUSTRATIVE_CHIP,
+    SHOWCASE.ILLUSTRATIVE_CHIP,
   );
 }
 
@@ -100,7 +88,7 @@ function expectVendoredAssetLoaded(origin: string) {
 test("dex spec page: the fenced body figure renders to an SVG inside the illustrative badged figure", async ({
   page,
 }) => {
-  await page.goto(dexSpecPath(MERMAID_SPEC));
+  await page.goto(dexSpecPath(SHOWCASE.MERMAID_SPEC));
   await expectIllustrativeFigure(page);
   expectVendoredAssetLoaded(DEX_BASE);
   await expectNoUnbadgedMermaid(page);
@@ -109,7 +97,7 @@ test("dex spec page: the fenced body figure renders to an SVG inside the illustr
 test("dex diagram page: a non-proposal diagram-kind artifact wears the illustrative badge", async ({
   page,
 }) => {
-  await page.goto(`${DEX_BASE}/a/${ILLUSTRATIVE_DIAGRAM}/`);
+  await page.goto(`${DEX_BASE}/a/${SHOWCASE.ILLUSTRATIVE_DIAGRAM}/`);
   await expectIllustrativeFigure(page);
   expectVendoredAssetLoaded(DEX_BASE);
   await expectNoUnbadgedMermaid(page);
@@ -119,7 +107,7 @@ test("dex proposal page: the extractor-computed tier, never the illustrative bad
   page,
 }) => {
   // The illustrative tier's marker, read for the distinctness assertion.
-  await page.goto(`${DEX_BASE}/a/${ILLUSTRATIVE_DIAGRAM}/`);
+  await page.goto(`${DEX_BASE}/a/${SHOWCASE.ILLUSTRATIVE_DIAGRAM}/`);
   const illustrativeTier = await page
     .locator("figure[data-diagram-tier]")
     .first()
@@ -129,8 +117,8 @@ test("dex proposal page: the extractor-computed tier, never the illustrative bad
   // sits inside the declared grammar → "full", computed by
   // internal/diagramverify, never re-derived client-side), rendered to a
   // real SVG under the same vendored asset, wearing its own visible chip.
-  await page.goto(`${DEX_BASE}/a/${PROPOSAL_DIAGRAM}/`);
-  const figure = page.locator(PROPOSAL_FULL_FIGURE).first();
+  await page.goto(`${DEX_BASE}/a/${SHOWCASE.PROPOSAL_DIAGRAM}/`);
+  const figure = page.locator(SHOWCASE.PROPOSAL_FULL_FIGURE).first();
   await expect(figure).toBeVisible();
   await expect(figure.locator("pre.mermaid svg")).toBeVisible({
     timeout: 10_000,
@@ -142,7 +130,7 @@ test("dex proposal page: the extractor-computed tier, never the illustrative bad
   // ac-2's negative case: the proposal render path is NEVER painted with
   // the illustrative badge or marker — anywhere on its page.
   await expect(page.locator("main")).not.toContainText("illustrative");
-  await expect(page.locator(ILLUSTRATIVE_FIGURE)).toHaveCount(0);
+  await expect(page.locator(SHOWCASE.ILLUSTRATIVE_FIGURE)).toHaveCount(0);
 
   // ac-3 distinctness: two different, non-empty DOM tier markers — a
   // regression that collapses the tiers fails here, never silently.
@@ -163,7 +151,7 @@ test("workbench corpus page: the same fixture spec renders the badged SVG under 
   page,
   baseURL,
 }) => {
-  await page.goto(`/a/${MERMAID_SPEC_REF}`);
+  await page.goto(`/a/${SHOWCASE.MERMAID_SPEC_REF}`);
   await expectIllustrativeFigure(page);
   expectVendoredAssetLoaded(baseURL!);
   await expectNoUnbadgedMermaid(page);
@@ -173,13 +161,13 @@ test("board placard body dialog: the outcome section's body figure renders badge
   page,
   baseURL,
 }) => {
-  await page.goto(boardPath(DESIGN_SPEC));
+  await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
   await expect(page.getByTestId("board")).toHaveAttribute(
     "data-board-mode",
     "authoring",
   );
 
-  // DESIGN_SPEC's `## Outcome` body carries the fixture's fenced mermaid
+  // SHOWCASE.DESIGN_SPEC's `## Outcome` body carries the fixture's fenced mermaid
   // block (cmd/e2eharness/provision_board.go). Opening the placard's
   // expand dialog injects the server-rendered body — the badge arrived in
   // that HTML from internal/render's seam; the client only hands the pre
@@ -197,7 +185,7 @@ test("board reference peek: both tiers peek badged, distinct, never blended", as
   page,
   baseURL,
 }) => {
-  await page.goto(boardPath(DESIGN_SPEC));
+  await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
   await expect(page.getByTestId("board")).toHaveAttribute(
     "data-board-mode",
     "authoring",
@@ -207,7 +195,7 @@ test("board reference peek: both tiers peek badged, distinct, never blended", as
   // The illustrative tier through the peek: pin the fenced-body fixture
   // spec and peek it — the injected fragment carries the badged figure
   // and the vendored asset turns it into an SVG.
-  const specCard = await pinArtifact(page, MERMAID_SPEC_REF, "mermaid");
+  const specCard = await pinArtifact(page, SHOWCASE.MERMAID_SPEC_REF, "mermaid");
   await specCard.click();
   await expect(peek).toBeVisible();
   await expectIllustrativeFigure(peek);
@@ -217,10 +205,10 @@ test("board reference peek: both tiers peek badged, distinct, never blended", as
   // The verified tier through the same surface: peek the class: proposal
   // diagram — the extractor-computed tier marker, its own chip, and no
   // illustrative paint anywhere in the fragment (ac-2's negative case).
-  const proposalCard = await pinArtifact(page, PROPOSAL_DIAGRAM, "future");
+  const proposalCard = await pinArtifact(page, SHOWCASE.PROPOSAL_DIAGRAM, "future");
   await proposalCard.click();
   await expect(peek).toBeVisible();
-  const proposalFigure = peek.locator(PROPOSAL_FULL_FIGURE).first();
+  const proposalFigure = peek.locator(SHOWCASE.PROPOSAL_FULL_FIGURE).first();
   await expect(proposalFigure).toBeVisible();
   await expect(proposalFigure.locator("pre.mermaid svg")).toBeVisible({
     timeout: 10_000,
@@ -228,7 +216,7 @@ test("board reference peek: both tiers peek badged, distinct, never blended", as
   await expect(
     proposalFigure.locator("figcaption.diagram-tier-badge"),
   ).toHaveText("proposal · full coverage");
-  await expect(peek.locator(ILLUSTRATIVE_FIGURE)).toHaveCount(0);
+  await expect(peek.locator(SHOWCASE.ILLUSTRATIVE_FIGURE)).toHaveCount(0);
   await expect(peek.locator(".peek-body")).not.toContainText("illustrative");
 
   expectVendoredAssetLoaded(baseURL!);

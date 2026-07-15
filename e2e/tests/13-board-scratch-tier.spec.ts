@@ -1,12 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  AC_IDS,
-  DECISION_PLAIN,
-  ADR_REF,
-  boardPath,
-  refCardTestId,
-} from "./fixtures";
+import { SHOWCASE, boardPath, refCardTestId } from "./fixtures";
 import { addSticky, drawYarn, edgeTypePicker, expectAutosaved, uncommittedIndicator } from "./helpers";
 
 // EXECUTABLE ACCEPTANCE CRITERIA — PLAN-V1.md §5 Phase V1-P6, exit
@@ -20,7 +13,7 @@ import { addSticky, drawYarn, edgeTypePicker, expectAutosaved, uncommittedIndica
 // edit, not an automatic promotion".
 test.describe("V1-P6: scratch tier", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -101,14 +94,14 @@ test.describe("V1-P6: scratch tier", () => {
   test("an untyped relates thread stays annotation-layer across reloads", async ({
     page,
   }) => {
-    await drawYarn(page, AC_IDS[0], page.getByTestId(`card-${AC_IDS[1]}`));
+    await drawYarn(page, SHOWCASE.AC_IDS[0], page.getByTestId(`card-${SHOWCASE.AC_IDS[1]}`));
     const picker = edgeTypePicker(page);
     await expect(picker).toBeVisible();
     await picker.getByRole("menuitem", { name: /relates \(scratch\)/ }).click();
     await expectAutosaved(page);
 
     const relatesYarn = page.locator(
-      `[data-edge-type="relates"][data-from="${AC_IDS[0]}"][data-to="${AC_IDS[1]}"]`,
+      `[data-edge-type="relates"][data-from="${SHOWCASE.AC_IDS[0]}"][data-to="${SHOWCASE.AC_IDS[1]}"]`,
     );
     await expect(relatesYarn).toHaveCount(1);
     await expect(relatesYarn).toHaveAttribute("data-layer", "annotation");
@@ -129,8 +122,8 @@ test.describe("V1-P6: scratch tier", () => {
     // Scratch first: an untyped thread decision→ADR.
     await drawYarn(
       page,
-      DECISION_PLAIN,
-      page.getByTestId(refCardTestId(ADR_REF)),
+      SHOWCASE.DECISION_PLAIN,
+      page.getByTestId(refCardTestId(SHOWCASE.ADR_REF)),
     );
     const picker = edgeTypePicker(page);
     await expect(picker).toBeVisible();
@@ -138,7 +131,7 @@ test.describe("V1-P6: scratch tier", () => {
     await expectAutosaved(page);
 
     const scratchThread = page.locator(
-      `[data-edge-type="relates"][data-from="${DECISION_PLAIN}"]`,
+      `[data-edge-type="relates"][data-from="${SHOWCASE.DECISION_PLAIN}"]`,
     );
     await expect(scratchThread).toHaveCount(1);
     await expect(scratchThread).toHaveAttribute("data-layer", "annotation");
@@ -158,7 +151,7 @@ test.describe("V1-P6: scratch tier", () => {
     // The scratch thread is gone; a typed spec-layer edge replaced it.
     await expect(scratchThread).toHaveCount(0);
     const typedYarn = page.locator(
-      `[data-edge-type="exempts"][data-from="${DECISION_PLAIN}"]`,
+      `[data-edge-type="exempts"][data-from="${SHOWCASE.DECISION_PLAIN}"]`,
     );
     await expect(typedYarn).toHaveCount(1);
     await expect(typedYarn).toHaveAttribute("data-layer", "spec");

@@ -1,13 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { addSticky } from "./helpers";
-import {
-  SIZE_SMELL_SPEC,
-  SIZE_FIT_SPEC,
-  SIZE_SMELL_ESTIMATE,
-  SIZE_SMELL_REFERENCE,
-  EMPTY_SPEC,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, EDGE, boardPath } from "./fixtures";
 
 // spec/case-file-flags ac-2/ac-3 (and the parent wall-receipts ac-5): an
 // acceptance-criteria column whose dc-1 ESTIMATE exceeds the declared
@@ -47,11 +40,11 @@ test.describe("size-smell: an observation on the case file, invariant to the cli
     page,
   }) => {
     await page.setViewportSize(SHORT_VIEWPORT);
-    await page.goto(boardPath(SIZE_SMELL_SPEC));
+    await page.goto(boardPath(EDGE.SIZE_SMELL_SPEC));
     const shortRecord = await stampRecord(page);
 
     await page.setViewportSize(TALL_VIEWPORT);
-    await page.goto(boardPath(SIZE_SMELL_SPEC));
+    await page.goto(boardPath(EDGE.SIZE_SMELL_SPEC));
     const tallRecord = await stampRecord(page);
 
     // Byte-identical across viewports: the compute ran server-side over
@@ -69,10 +62,10 @@ test.describe("size-smell: an observation on the case file, invariant to the cli
     expect(all).toContain("boardlayout.ZoneOriginY");
     expect(all).toContain("boardlayout.RowPitch");
     expect(all).toContain(
-      `wallbadge.ReferenceViewportHeight = ${SIZE_SMELL_REFERENCE}`,
+      `wallbadge.ReferenceViewportHeight = ${EDGE.SIZE_SMELL_REFERENCE}`,
     );
     expect(all).toContain("declared acceptance criteria: 5");
-    expect(all).toContain(`${SIZE_SMELL_ESTIMATE}`);
+    expect(all).toContain(`${EDGE.SIZE_SMELL_ESTIMATE}`);
 
     // No rendered drawer value equals either ACTUAL viewport height —
     // the obligation's falsifiable form of "never a client measurement".
@@ -93,7 +86,7 @@ test.describe("size-smell: an observation on the case file, invariant to the cli
   }) => {
     for (const viewport of [SHORT_VIEWPORT, TALL_VIEWPORT]) {
       await page.setViewportSize(viewport);
-      await page.goto(boardPath(SIZE_FIT_SPEC));
+      await page.goto(boardPath(EDGE.SIZE_FIT_SPEC));
       // The wall renders (its ACs are on the board) but wears no
       // size-smell stamp: the estimate — not any client height — decides.
       await expect(page.getByTestId("card-ac-1")).toBeVisible();
@@ -104,7 +97,7 @@ test.describe("size-smell: an observation on the case file, invariant to the cli
   test("dragging an AC card never changes the badge — positions are not an operand", async ({
     page,
   }) => {
-    await page.goto(boardPath(SIZE_SMELL_SPEC));
+    await page.goto(boardPath(EDGE.SIZE_SMELL_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -140,7 +133,7 @@ test.describe("size-smell: an observation on the case file, invariant to the cli
   test("every write path still succeeds on the badged wall — an observation, never a rule", async ({
     page,
   }) => {
-    await page.goto(boardPath(SIZE_SMELL_SPEC));
+    await page.goto(boardPath(EDGE.SIZE_SMELL_SPEC));
     await expect(sizeSmellStamp(page)).toBeVisible();
 
     // A real write on the badged wall succeeds unchanged (co-2: nothing
@@ -153,7 +146,7 @@ test.describe("size-smell: an observation on the case file, invariant to the cli
 
 // spec/case-file-flags ac-1/dc-4: the ladder's disclosed-unproven outcome
 // on the case file. The harness's `verdi serve` runs with NO forge
-// configured, so EMPTY_SPEC — a story with an implements edge — cannot
+// configured, so SHOWCASE.EMPTY_SPEC — a story with an implements edge — cannot
 // have its open MRs enumerated: pending-supersession is disclosed-
 // unproven, and it renders as a case-file disclosure LINE in the board's
 // notice vocabulary, never a stamp (unproven is never dressed as a
@@ -162,7 +155,7 @@ test.describe("case-file flags: disclosed-unproven is a line, never a stamp", ()
   test("a story wall with no forge wears the pending-supersession disclosure line on its case file", async ({
     page,
   }) => {
-    await page.goto(boardPath(EMPTY_SPEC));
+    await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
     const line = page.getByTestId("case-file-disclosure");
     await expect(line).toBeVisible();
     await expect(line).toContainText("pending-supersession is disclosed-unproven");

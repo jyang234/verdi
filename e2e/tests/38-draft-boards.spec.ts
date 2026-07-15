@@ -1,12 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
-  DB_TAB_A,
-  DB_TAB_B,
-  DB_SEALED_REMOTE,
-  DB_SAME_SPEC,
-  DB_SAME_SPEC_BRANCH,
-  DB_SAME_SPEC_DRAFT_SNIPPET,
-  DESIGN_BRANCH,
+  SHOWCASE,
   INSPECT_URL,
   boardPath,
   branchBoardPath,
@@ -21,7 +15,7 @@ import { editCard } from "./helpers";
 // pattern retires (dc-3): everything here runs against the ONE serve on
 // :4173.
 //
-// The serving checkout sits on DESIGN_BRANCH (the board suite's authoring
+// The serving checkout sits on SHOWCASE.DESIGN_BRANCH (the board suite's authoring
 // fixture) and earlier specs in this serial suite legitimately dirty its
 // working tree with their own autosaves — so the clean-serving-checkout
 // law (ac-2) is witnessed as INVARIANCE: the porcelain status before the
@@ -57,10 +51,10 @@ test("a draft under /b/ is its authoring wall and its sub-routes work beneath th
   // The spec is NOT on the serving checkout's tree: its unprefixed
   // address has nothing to serve — the content below can only come from
   // the design branch's own tree.
-  const unprefixed = await page.request.get(boardPath(DB_TAB_A));
+  const unprefixed = await page.request.get(boardPath(SHOWCASE.DB_TAB_A));
   expect(unprefixed.status()).toBe(404);
 
-  await page.goto(draftBoard(DB_TAB_A)); // first open: the lazy worktree cut
+  await page.goto(draftBoard(SHOWCASE.DB_TAB_A)); // first open: the lazy worktree cut
   await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
   await expect(page.getByTestId("placard-problem")).toContainText("tab A problem");
 
@@ -72,12 +66,12 @@ test("a draft under /b/ is its authoring wall and its sub-routes work beneath th
 
   // The prefixed fragment route returns the re-rendered region
   // reflecting the mutation.
-  const fragment = await page.request.get(`${draftBoard(DB_TAB_A)}/fragment`);
+  const fragment = await page.request.get(`${draftBoard(SHOWCASE.DB_TAB_A)}/fragment`);
   expect(fragment.ok()).toBe(true);
   expect(await fragment.text()).toContain(edited);
 
   // And the edit landed in the managed worktree's own tree.
-  const wt = await worktreeFile(page.request, worktreeSpecPath(DB_TAB_A, DB_TAB_A));
+  const wt = await worktreeFile(page.request, worktreeSpecPath(SHOWCASE.DB_TAB_A, SHOWCASE.DB_TAB_A));
   expect(wt.status).toBe(200);
   expect(wt.body).toContain(edited);
 });
@@ -91,24 +85,24 @@ test("two draft boards in two tabs: edits are isolated and the serving checkout 
   context,
 }) => {
   const before = await porcelain(page.request);
-  expect(before.branch).toBe(DESIGN_BRANCH);
+  expect(before.branch).toBe(SHOWCASE.DESIGN_BRANCH);
 
   const tabA = page;
   const tabB = await context.newPage();
-  await tabA.goto(draftBoard(DB_TAB_A));
-  await tabB.goto(draftBoard(DB_TAB_B));
+  await tabA.goto(draftBoard(SHOWCASE.DB_TAB_A));
+  await tabB.goto(draftBoard(SHOWCASE.DB_TAB_B));
   await expect(tabA.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
   await expect(tabB.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
 
   // Board B's rendered region before A's edit — the byte-for-byte baseline.
-  const bBefore = await (await tabB.request.get(`${draftBoard(DB_TAB_B)}/fragment`)).text();
+  const bBefore = await (await tabB.request.get(`${draftBoard(SHOWCASE.DB_TAB_B)}/fragment`)).text();
 
   // Edit through tab A while tab B stays open.
   const editA = "edited only in tab A (two-tab proof)";
   await editCard(tabA, "ac-1", () => editA);
 
   // Tab B, re-fetched, is byte-for-byte unaffected by A's edit...
-  const bAfter = await (await tabB.request.get(`${draftBoard(DB_TAB_B)}/fragment`)).text();
+  const bAfter = await (await tabB.request.get(`${draftBoard(SHOWCASE.DB_TAB_B)}/fragment`)).text();
   expect(bAfter).toBe(bBefore);
 
   // ...and stays USABLE, not merely visible: an edit through B succeeds
@@ -119,8 +113,8 @@ test("two draft boards in two tabs: edits are isolated and the serving checkout 
   await expect(tabA.getByTestId("card-ac-1")).toContainText(editA);
 
   // Each edit lives in its own branch's managed worktree only.
-  const wtA = await worktreeFile(page.request, worktreeSpecPath(DB_TAB_A, DB_TAB_A));
-  const wtB = await worktreeFile(page.request, worktreeSpecPath(DB_TAB_B, DB_TAB_B));
+  const wtA = await worktreeFile(page.request, worktreeSpecPath(SHOWCASE.DB_TAB_A, SHOWCASE.DB_TAB_A));
+  const wtB = await worktreeFile(page.request, worktreeSpecPath(SHOWCASE.DB_TAB_B, SHOWCASE.DB_TAB_B));
   expect(wtA.body).toContain(editA);
   expect(wtA.body).not.toContain(editB);
   expect(wtB.body).toContain(editB);
@@ -131,10 +125,10 @@ test("two draft boards in two tabs: edits are isolated and the serving checkout 
   // never disturbs it (feature dc-1's no-surprise-mutation law). No
   // draft-board path ever appears in its porcelain.
   const after = await porcelain(page.request);
-  expect(after.branch).toBe(DESIGN_BRANCH);
+  expect(after.branch).toBe(SHOWCASE.DESIGN_BRANCH);
   expect(after.porcelain).toBe(before.porcelain);
-  expect(after.porcelain).not.toContain(DB_TAB_A);
-  expect(after.porcelain).not.toContain(DB_TAB_B);
+  expect(after.porcelain).not.toContain(SHOWCASE.DB_TAB_A);
+  expect(after.porcelain).not.toContain(SHOWCASE.DB_TAB_B);
 
   await tabB.close();
 });
@@ -146,23 +140,23 @@ test("two draft boards in two tabs: edits are isolated and the serving checkout 
 test("the same spec is sealed unprefixed and authoring under /b/, simultaneously", async ({
   page,
 }) => {
-  await page.goto(boardPath(DB_SAME_SPEC));
+  await page.goto(boardPath(SHOWCASE.DB_SAME_SPEC));
   await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "readonly");
   await expect(page.locator(".board-mode-tag")).toHaveText("read-only · sealed record");
-  await expect(page.locator("body")).not.toContainText(DB_SAME_SPEC_DRAFT_SNIPPET);
+  await expect(page.locator("body")).not.toContainText(SHOWCASE.DB_SAME_SPEC_DRAFT_SNIPPET);
   // No authoring affordances on the sealed record.
   await expect(page.getByRole("button", { name: "Add sticky" })).toHaveCount(0);
 
-  await page.goto(branchBoardPath(DB_SAME_SPEC_BRANCH, DB_SAME_SPEC));
+  await page.goto(branchBoardPath(SHOWCASE.DB_SAME_SPEC_BRANCH, SHOWCASE.DB_SAME_SPEC));
   await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
-  await expect(page.getByTestId("placard-outcome")).toContainText(DB_SAME_SPEC_DRAFT_SNIPPET);
+  await expect(page.getByTestId("placard-outcome")).toContainText(SHOWCASE.DB_SAME_SPEC_DRAFT_SNIPPET);
   await expect(page.getByRole("button", { name: "Add sticky" })).toBeVisible();
 
   // Back at the unprefixed address: still the sealed record — two
   // simultaneous truths of one spec, not a toggle.
-  await page.goto(boardPath(DB_SAME_SPEC));
+  await page.goto(boardPath(SHOWCASE.DB_SAME_SPEC));
   await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "readonly");
-  await expect(page.locator("body")).not.toContainText(DB_SAME_SPEC_DRAFT_SNIPPET);
+  await expect(page.locator("body")).not.toContainText(SHOWCASE.DB_SAME_SPEC_DRAFT_SNIPPET);
 });
 
 // DC-4 (remote-tracking only): a /b/ branch that resolves only to a
@@ -171,11 +165,11 @@ test("the same spec is sealed unprefixed and authoring under /b/, simultaneously
 // local branch minted (witnessed by the sealed render itself: a worktree
 // would have made it an authoring wall).
 test("a remote-only branch renders sealed with its remoteness disclosed", async ({ page }) => {
-  await page.goto(branchBoardPath(`design/${DB_SEALED_REMOTE}`, DB_SEALED_REMOTE));
+  await page.goto(branchBoardPath(`design/${SHOWCASE.DB_SEALED_REMOTE}`, SHOWCASE.DB_SEALED_REMOTE));
   await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "readonly");
   await expect(page.locator(".board-mode-tag")).toHaveText("read-only · sealed record");
   await expect(page.getByTestId("board-notice")).toContainText(
-    `remote-tracking ref origin/design/${DB_SEALED_REMOTE}`,
+    `remote-tracking ref origin/design/${SHOWCASE.DB_SEALED_REMOTE}`,
   );
   await expect(page.getByTestId("placard-problem")).toContainText("sealed remote problem");
   await expect(page.getByRole("button", { name: "Add sticky" })).toHaveCount(0);

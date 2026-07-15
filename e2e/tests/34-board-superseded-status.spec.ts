@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  FEATURE_SPEC,
-  SUPERSEDED_FEATURE_SPEC,
-  SUPERSEDED_STORY_SPEC,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 
 // spec/feature-supersession-state ac-2 on the BOARD surface: a superseded
 // spec's terminal `status` is legible on its own wall — a `superseded` status
@@ -16,8 +11,8 @@ import {
 // spec is rendered.
 
 for (const { rung, spec } of [
-  { rung: "feature", spec: SUPERSEDED_FEATURE_SPEC },
-  { rung: "story", spec: SUPERSEDED_STORY_SPEC },
+  { rung: "feature", spec: SHOWCASE.SUPERSEDED_FEATURE_SPEC },
+  { rung: "story", spec: SHOWCASE.SUPERSEDED_STORY_SPEC },
 ]) {
   test(`a superseded ${rung}'s board head wears the superseded status badge`, async ({
     page,
@@ -44,7 +39,7 @@ test("an accepted-pending-build board head wears no status badge", async ({
   // Only the terminal `superseded` state is stamped (ac-2 scope; the mode tag
   // already speaks an accepted spec's read-only lifecycle, and `closed` is
   // deferred by dc-2).
-  await page.goto(boardPath(FEATURE_SPEC));
+  await page.goto(boardPath(SHOWCASE.FEATURE_SPEC));
   await expect(page.getByTestId("board")).toHaveAttribute(
     "data-board-mode",
     "readonly",
