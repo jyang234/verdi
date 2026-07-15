@@ -172,6 +172,14 @@ export function refCardTestId(ref: string): string {
 // contract (a read-only board is never silently inert).
 export const READONLY_SPEC = "stale-decline";
 
+// A committed spec (examples/showcase, class: component) that carries
+// NEITHER problem nor outcome — so its wall renders no case-file lockup
+// at all, and the class stamp has nowhere to hang (boardspecrender.go:
+// writeCaseTopline runs only inside the hasCaseFile header). The fixture
+// for the never-an-orphaned-stamp contract, now that READONLY_SPEC's
+// renovation gave it a full case file.
+export const NO_CASEFILE_SPEC = "store-layout-notes";
+
 // A draft spec on the design branch with the two required attributes and
 // NO declared objects — the newcomer's first board. Its board opens in
 // authoring mode and must render the teaching empty-wall state, never a

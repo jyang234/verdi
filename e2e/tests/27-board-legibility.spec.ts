@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   DESIGN_SPEC,
+  NO_CASEFILE_SPEC,
   READONLY_SPEC,
   REVIEW_SPEC,
   EMPTY_SPEC,
@@ -171,20 +172,26 @@ test.describe("board legibility: the wall reads at a glance", () => {
     await page.goto(boardPath(STORY_STUB_MATCHED));
     await expect(page.getByTestId("case-class-tag")).toContainText("story ·");
 
-    // READONLY_SPEC (stale-decline) gained problem/outcome in its
-    // showcase renovation (public-rollout-plan Task 1.4), so its
-    // read-only wall now renders the case-file lockup and wears the
-    // feature stamp like every other room. The "a projection with no
-    // case file wears no orphaned stamp" semantic is pinned at the Go
-    // render level (internal/workbench/boardlegibility_test.go's bare-
-    // projection case) — no committed-corpus board fixture without
-    // problem/outcome remains to prove it end-to-end.
+    // READONLY_SPEC (stale-decline) gained problem/outcome + class:
+    // feature in its showcase renovation (public-rollout-plan Task 1.4),
+    // so its sealed wall now renders the case-file lockup and wears the
+    // feature stamp like every other room.
     await page.goto(boardPath(READONLY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
     );
     await expect(page.getByTestId("case-class-tag")).toHaveText("feature");
+
+    // A spec with neither problem nor outcome has no case-file lockup
+    // to wear the stamp — and never wears an orphaned one, even though
+    // the spec declares a class (component) the stamp could have named.
+    await page.goto(boardPath(NO_CASEFILE_SPEC));
+    await expect(page.getByTestId("board")).toHaveAttribute(
+      "data-board-mode",
+      "readonly",
+    );
+    await expect(page.getByTestId("case-class-tag")).toHaveCount(0);
   });
 
   test("the yarn key names exactly the threads on the wall", async ({
