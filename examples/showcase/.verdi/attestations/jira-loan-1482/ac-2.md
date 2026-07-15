@@ -5,7 +5,7 @@ title: "AC-2 attested: charge API retried on stale decline, observed in staging"
 owners: [qa-lead]
 links:
   - { type: verifies, ref: spec/stale-decline }
-frozen: { at: 2026-05-01, commit: 89f9926e9739b97e23eb52efb16206d0ff10ff4f }
+frozen: { at: 2026-05-01, commit: 9f5621543d6e5158ad3230a7febc83754f2be3dd }
 ---
 # AC-2 attestation
 

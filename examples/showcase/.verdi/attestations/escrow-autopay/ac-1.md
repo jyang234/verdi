@@ -5,7 +5,7 @@ title: "AC-1 outcome attested: autopay mandate created against the escrow accoun
 owners: [product-lead]
 links:
   - { type: verifies, ref: spec/escrow-autopay }
-frozen: { at: 2026-07-13, commit: 30c5ff945413930879823be6db0ccc07d5abd6b9 }
+frozen: { at: 2026-07-13, commit: 74c957aed504671bd4fc4ceb30907d2f4813e9b7 }
 ---
 # AC-1 outcome attestation
 

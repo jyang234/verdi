@@ -44,9 +44,9 @@ func TestBuild_Happy(t *testing.T) {
 	})
 
 	t.Run("frozen temporal banner", func(t *testing.T) {
-		// spec/stale-decline is frozen at layer-1's commit (89f9926...).
+		// spec/stale-decline is frozen at layer-1's commit (9f56215...).
 		page := readFile(t, outDir, "a/spec/stale-decline/index.html")
-		want := "point-in-time record · frozen 2026-05-14 @ 89f9926"
+		want := "point-in-time record · frozen 2026-05-14 @ 9f56215"
 		if !strings.Contains(page, want) {
 			t.Fatalf("spec/stale-decline page missing frozen banner %q; got:\n%s", want, page)
 		}
@@ -172,17 +172,20 @@ func TestBuild_Happy(t *testing.T) {
 
 	t.Run("diagram-kind page renders a mermaid block, not markdown prose", func(t *testing.T) {
 		// The fixture's diagram/loansvc-topology body is `graph TD\n  loansvc
-		// --> notification-svc ...`. Rendered through the markdown path (the
-		// user-reported defect) it collapsed into <p>graph TD loansvc --&gt;
-		// notification-svc ...</p>; it must instead be the bare
-		// <pre class="mermaid"> the vendored mermaid.js turns into an SVG.
+		// -->|events: decline-notice v1| notification-svc ...` (public-rollout-
+		// plan Task 1.7: expanded to the 7 canon services, edges labeled with
+		// the adr/0005 event-schema-registry class/version each depends on).
+		// Rendered through the markdown path (the user-reported defect) it
+		// collapsed into <p>graph TD loansvc --&gt; notification-svc ...</p>;
+		// it must instead be the bare <pre class="mermaid"> the vendored
+		// mermaid.js turns into an SVG.
 		page := readFile(t, outDir, "a/diagram/loansvc-topology/index.html")
 		if !strings.Contains(page, `<pre class="mermaid">`) {
 			t.Fatalf("diagram page missing the <pre class=\"mermaid\"> block; got:\n%s", page)
 		}
 		// The arrow must survive HTML-escaped inside the block (mermaid reads
 		// textContent), proving the source is preserved verbatim, not prose.
-		if !strings.Contains(page, "loansvc --&gt; notification-svc") {
+		if !strings.Contains(page, "loansvc --&gt;|events: decline-notice v1| notification-svc") {
 			t.Fatalf("diagram source not preserved verbatim in the mermaid block; got:\n%s", page)
 		}
 		// And the defect's markdown-collapsed form must be gone.
@@ -254,7 +257,7 @@ func TestBuild_Happy(t *testing.T) {
 
 	t.Run("copy-reference button carries the pinned form", func(t *testing.T) {
 		page := readFile(t, outDir, "a/spec/stale-decline/index.html")
-		if !strings.Contains(page, `data-copy-ref="spec/stale-decline@89f9926e9739b97e23eb52efb16206d0ff10ff4f"`) {
+		if !strings.Contains(page, `data-copy-ref="spec/stale-decline@9f5621543d6e5158ad3230a7febc83754f2be3dd"`) {
 			t.Fatalf("copy-reference button missing the expected pinned form; got:\n%s", page)
 		}
 	})

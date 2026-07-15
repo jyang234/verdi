@@ -7,7 +7,7 @@ owners: [platform-team]
 decided: 2025-11-05
 links:
   - { type: supersedes, ref: adr/0001-outbox-events }
-frozen: { at: 2025-11-05, commit: 89f9926e9739b97e23eb52efb16206d0ff10ff4f }
+frozen: { at: 2025-11-05, commit: 9f5621543d6e5158ad3230a7febc83754f2be3dd }
 ---
 # Transactional outbox for domain events
 
@@ -18,7 +18,7 @@ payments-gw inline, in the same request as the state-changing write)
 produces exactly the failure mode a dual-write always produces: the
 primary write and the downstream call are two separate operations, not
 one atomic one, so a fault between them either drops the consequence or
-delivers it twice. This stopped being theoretical on 2025-10-xx: a
+delivers it twice. This stopped being theoretical in October 2025: a
 mid-request failover on notification-svc left a batch of stale-decline
 notices in an ambiguous delivered/not-delivered state, and the
 request-level retry that followed re-sent every one of them — borrowers

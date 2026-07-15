@@ -10,7 +10,7 @@ problem: { text: "a borrower who wants their escrow payment collected automatica
 outcome: { text: "a borrower can enroll an escrow account in autopay, edit the mandate themselves, and trust that a failed scheduled charge is retried instead of silently dropped", anchor: "#outcome" }
 impacts: [loansvc, notification-svc, payments-gw]
 context:
-  - adr/0002-outbox-events@89f9926e9739b97e23eb52efb16206d0ff10ff4f
+  - adr/0002-outbox-events@9f5621543d6e5158ad3230a7febc83754f2be3dd
 declares:
   boundaries:
     - { from: loansvc, to: notification-svc, via: events }
@@ -34,7 +34,7 @@ open_questions:
 stubs:
   - { slug: autopay-mandate-api, acceptance_criteria: [ac-1, ac-2] }
   - { slug: autopay-retry-policy, acceptance_criteria: [ac-2, ac-3] }
-frozen: { at: 2026-06-30, commit: 30c5ff945413930879823be6db0ccc07d5abd6b9 }
+frozen: { at: 2026-06-30, commit: 74c957aed504671bd4fc4ceb30907d2f4813e9b7 }
 ---
 # Escrow autopay enrollment
 

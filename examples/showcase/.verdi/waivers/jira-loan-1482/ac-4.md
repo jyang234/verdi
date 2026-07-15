@@ -5,7 +5,7 @@ title: "ac-4 runtime probe deferred (active)"
 status: active
 owners: [platform-team]
 reason: "runtime probe mechanism not yet built (OQ-2)"
-frozen: { at: 2026-05-01, commit: 89f9926e9739b97e23eb52efb16206d0ff10ff4f }
+frozen: { at: 2026-05-01, commit: 9f5621543d6e5158ad3230a7febc83754f2be3dd }
 ---
 # Waiver: ac-4 runtime probe deferred (active)
 

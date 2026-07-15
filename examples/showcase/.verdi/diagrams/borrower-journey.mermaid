@@ -1,0 +1,30 @@
+---
+id: diagram/borrower-journey
+kind: diagram
+title: "Borrower journey: escrow autopay enrollment"
+status: active
+owners: [platform-team]
+---
+sequenceDiagram
+  participant Borrower
+  participant borrower-portal
+  participant loansvc
+  participant escrow-svc
+  participant payments-gw
+  participant notification-svc
+
+  Borrower->>borrower-portal: enroll escrow account in autopay
+  borrower-portal->>loansvc: create autopay mandate
+  loansvc-->>loansvc: write mandate + outbox row (one transaction)
+  loansvc->>escrow-svc: event: escrow-state-changed (mandate created)
+  escrow-svc-->>escrow-svc: invalidate cached account snapshot
+  loansvc-->>borrower-portal: mandate created (reflected before session ends)
+
+  Note over loansvc,payments-gw: on the mandate's schedule
+  loansvc->>payments-gw: event: charge-retry (scheduled charge)
+  payments-gw--xloansvc: charge fails (expired card)
+  loansvc->>payments-gw: event: charge-retry (retry, per adr/0003 budget)
+  payments-gw-->>loansvc: charge succeeds
+  loansvc->>escrow-svc: event: escrow-state-changed (charge settled)
+  escrow-svc-->>escrow-svc: invalidate cached account snapshot
+  Note over loansvc,notification-svc: decline-notice fires only if every retry in the budget is exhausted — not on this path

@@ -34,11 +34,11 @@ const corpusDir = "../../examples/showcase"
 // it appears here only to satisfy TestFixtureRepo_MatchesGoldenSHAs' final
 // Head check.
 var goldenHeads = []string{
-	"89f9926e9739b97e23eb52efb16206d0ff10ff4f", // layer 1
-	"4e5ef0b6b00f23c9faf7a9e4857255b7be5bea03", // layer 2
-	"30c5ff945413930879823be6db0ccc07d5abd6b9", // layer 3
-	"024b516641e9e229b0a156c636af59cda7c297d9", // layer 4
-	"82d1e540854dbafe0322fc3a4ea61de53ff54c83", // layer 5
+	"9f5621543d6e5158ad3230a7febc83754f2be3dd", // layer 1
+	"2350631724b1e69ccdd84da40686a8f079955dc4", // layer 2
+	"74c957aed504671bd4fc4ceb30907d2f4813e9b7", // layer 3
+	"09ed3760a09cc1ec9b0c5ccf78cebc3b1ca93fa5", // layer 4
+	"fd98ad21bfd79ccc2566f5b1f1cd2e48a77eca5e", // layer 5
 }
 
 // goldenHeadsV2 are the v1-P1 rung-4 supersession pair's own, separate
@@ -395,8 +395,8 @@ func TestFixtureCorpus_MutableAndDerivedFilesDecode(t *testing.T) {
 		dir        string
 		wantSource artifact.ProvenanceSource
 	}{
-		{"derived/spec--stale-decline/4e5ef0b6b00f23c9faf7a9e4857255b7be5bea03", artifact.SourceCI},
-		{"derived/spec--stale-decline/30c5ff945413930879823be6db0ccc07d5abd6b9", artifact.SourceLocal},
+		{"derived/spec--stale-decline/2350631724b1e69ccdd84da40686a8f079955dc4", artifact.SourceCI},
+		{"derived/spec--stale-decline/74c957aed504671bd4fc4ceb30907d2f4813e9b7", artifact.SourceLocal},
 	}
 	for _, dd := range derivedDirs {
 		dd := dd

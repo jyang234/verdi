@@ -6,7 +6,7 @@ owners: [platform-team]
 for_kind: behavioral
 links:
   - { type: verifies, ref: "spec/escrow-notify-v2" }
-frozen: { at: 2026-07-12, commit: 30c5ff945413930879823be6db0ccc07d5abd6b9 }
+frozen: { at: 2026-07-12, commit: 74c957aed504671bd4fc4ceb30907d2f4813e9b7 }
 ---
 # A triggered escrow shortfall produces a borrower notification within one hour, observed end to end
 

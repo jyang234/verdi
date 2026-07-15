@@ -6,7 +6,7 @@ status: expired
 owners: [platform-team]
 reason: "golden flow pending test-data fixture"
 expiry: 2026-06-01
-frozen: { at: 2026-05-01, commit: 89f9926e9739b97e23eb52efb16206d0ff10ff4f }
+frozen: { at: 2026-05-01, commit: 9f5621543d6e5158ad3230a7febc83754f2be3dd }
 ---
 # Waiver: ac-3 golden-flow evidence gap (expired)
 

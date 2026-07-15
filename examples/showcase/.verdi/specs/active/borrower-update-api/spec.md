@@ -12,7 +12,7 @@ links:
   - { type: implements, ref: "spec/stale-decline#ac-2" }
 acceptance_criteria:
   - { id: ac-1, text: "PUT /applications/:id/update returns 200 with the new state", evidence: [static, behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-12, commit: 30c5ff945413930879823be6db0ccc07d5abd6b9 }
+frozen: { at: 2026-07-12, commit: 74c957aed504671bd4fc4ceb30907d2f4813e9b7 }
 ---
 # Borrower update API
 

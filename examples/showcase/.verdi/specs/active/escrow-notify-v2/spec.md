@@ -13,7 +13,7 @@ acceptance_criteria:
 links:
   - { type: implements, ref: "spec/stale-decline#ac-4" }
   - { type: supersedes, ref: "spec/escrow-notify" }
-frozen: { at: 2026-07-12, commit: 30c5ff945413930879823be6db0ccc07d5abd6b9 }
+frozen: { at: 2026-07-12, commit: 74c957aed504671bd4fc4ceb30907d2f4813e9b7 }
 ---
 # Escrow notify v2 (fixture, supersedes escrow-notify)
 

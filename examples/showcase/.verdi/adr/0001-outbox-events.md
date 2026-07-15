@@ -5,7 +5,7 @@ title: "Synchronous dual-write for domain events"
 status: superseded
 owners: [platform-team]
 decided: 2025-08-20
-frozen: { at: 2025-08-20, commit: 89f9926e9739b97e23eb52efb16206d0ff10ff4f }
+frozen: { at: 2025-08-20, commit: 9f5621543d6e5158ad3230a7febc83754f2be3dd }
 ---
 # Synchronous dual-write for domain events
 

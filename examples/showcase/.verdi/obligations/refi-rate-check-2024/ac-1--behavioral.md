@@ -6,7 +6,7 @@ owners: [platform-team]
 for_kind: behavioral
 links:
   - { type: verifies, ref: "spec/refi-rate-check-2024" }
-frozen: { at: 2026-07-01, commit: 30c5ff945413930879823be6db0ccc07d5abd6b9 }
+frozen: { at: 2026-07-01, commit: 74c957aed504671bd4fc4ceb30907d2f4813e9b7 }
 ---
 # A refinance quote priced against a changed published table matches the table, not a stale cached rate
 

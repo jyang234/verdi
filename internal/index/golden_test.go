@@ -123,6 +123,9 @@ var wantCommittedRefs = []string{
 	"spec/stale-decline",
 	"spec/loan-refi-2023",
 	"diagram/loansvc-topology",
+	// public-rollout-plan Task 1.7: diagram/borrower-journey, new,
+	// illustrative-by-class second diagram artifact (layers.txt layer 1).
+	"diagram/borrower-journey",
 	"adr/0001-outbox-events",
 	"adr/0002-outbox-events",
 	"adr/0003-retry-policy",

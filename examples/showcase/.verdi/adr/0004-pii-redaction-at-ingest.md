@@ -7,7 +7,7 @@ owners: [platform-team]
 decided: 2026-03-12
 links:
   - { type: depends-on, ref: adr/0002-outbox-events }
-frozen: { at: 2026-03-12, commit: 024b516641e9e229b0a156c636af59cda7c297d9 }
+frozen: { at: 2026-03-12, commit: 09ed3760a09cc1ec9b0c5ccf78cebc3b1ca93fa5 }
 ---
 # Redact PII fields at outbox ingest
 
