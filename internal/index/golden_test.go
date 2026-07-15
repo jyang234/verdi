@@ -133,6 +133,11 @@ var wantCommittedRefs = []string{
 	"conflict/stale-decline-incident",
 	"conflict/legacy-cache-dispute",
 	"conflict/false-alarm",
+	"spec/escrow-notify",
+	"spec/escrow-notify-v2",
+	"spec/rate-lock",
+	"spec/rate-lock-v2",
+	"spec/refi-rate-check-2024",
 }
 
 var wantExternalRefs = []string{

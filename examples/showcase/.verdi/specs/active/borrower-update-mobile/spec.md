@@ -16,7 +16,7 @@ links:
 acceptance_criteria:
   - { id: ac-1, text: "mobile PUT /applications/:id/update returns 200 with the new state", evidence: [static, behavioral], anchor: "#ac-1" }
   - { id: ac-2, text: "mobile app reflects the change within the session", evidence: [behavioral], anchor: "#ac-2" }
-frozen: { at: 2026-07-12, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }
+frozen: { at: 2026-07-12, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
 ---
 # Borrower update, mobile app
 

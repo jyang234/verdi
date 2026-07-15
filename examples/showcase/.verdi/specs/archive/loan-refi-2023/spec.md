@@ -9,7 +9,7 @@ story: jira:LOAN-2023
 impacts: [loansvc]
 acceptance_criteria:
   - { id: ac-1, text: "refinance rate applied correctly", evidence: [static, behavioral] }
-frozen: { at: 2026-06-20, commit: 7176513ece8b608ab0911000691bb697ee7e75ec }
+frozen: { at: 2026-06-20, commit: 6a0c563e4f688acdb225fcbc5e6942a7431b05bf }
 ---
 # Loan refinance rollout 2023
 

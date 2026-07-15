@@ -12,7 +12,7 @@ links:
   - { type: impacts, ref: svc/loansvc/boundary-contract }
 impacts: [loansvc, notification-svc]
 context:
-  - adr/0002-outbox-events@c5e360a9ee5e9eb6089e54b772fa16959ada4662
+  - adr/0002-outbox-events@2f230011b192c5ac1c0ed5442be76fc401c4cbca
 declares:
   boundaries:
     - { from: loansvc, to: notification-svc, via: events }
@@ -25,7 +25,7 @@ dispositions:
   - { sticky: a-01J8Z0K3AAAAAAAAAAAAAAAAAA, disposition: incorporated, where: "#design-notes" }
   - { sticky: a-01J8Z0K4BBBBBBBBBBBBBBBBBB, disposition: contradicted, note: "partial refunds are out of scope for this story; tracked separately" }
   - { sticky: a-01J8Z0K5CCCCCCCCCCCCCCCCCC, disposition: open-question }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # Stale decline handling
 

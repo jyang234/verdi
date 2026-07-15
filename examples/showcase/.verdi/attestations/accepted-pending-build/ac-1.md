@@ -5,7 +5,7 @@ title: "AC-1 outcome attested: borrower can update their application (fixture)"
 owners: [product-lead]
 links:
   - { type: verifies, ref: spec/accepted-pending-build }
-frozen: { at: 2026-07-13, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }
+frozen: { at: 2026-07-13, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
 ---
 # AC-1 outcome attestation
 

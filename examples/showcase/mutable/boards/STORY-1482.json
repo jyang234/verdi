@@ -1,7 +1,7 @@
 {
   "schema": "verdi.board/v1",
   "pins": [
-    { "ref": "spec/stale-decline@7176513ece8b608ab0911000691bb697ee7e75ec", "x": 50, "y": 50 }
+    { "ref": "spec/stale-decline@6a0c563e4f688acdb225fcbc5e6942a7431b05bf", "x": 50, "y": 50 }
   ],
   "stickies": [
     { "id": "a-01J8Z0K3AAAAAAAAAAAAAAAAAA", "x": 200, "y": 60 },

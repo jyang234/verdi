@@ -9,7 +9,7 @@ problem: { text: "borrowers cannot self-serve an update to a submitted applicati
 outcome: { text: "a borrower can update their application and see the change reflected", anchor: "#outcome" }
 impacts: [loansvc, notification-svc]
 context:
-  - adr/0002-outbox-events@c5e360a9ee5e9eb6089e54b772fa16959ada4662
+  - adr/0002-outbox-events@2f230011b192c5ac1c0ed5442be76fc401c4cbca
 declares:
   boundaries:
     - { from: loansvc, to: notification-svc, via: events }
@@ -29,7 +29,7 @@ stubs:
   - { slug: borrower-update-api, acceptance_criteria: [ac-1] }
   - { slug: borrower-update-ui, acceptance_criteria: [ac-1, ac-2] }
   - { slug: borrower-update-audit-log, acceptance_criteria: [ac-3] }
-frozen: { at: 2026-07-11, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }
+frozen: { at: 2026-07-11, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
 ---
 # Accepted pending build (v2 fixture)
 

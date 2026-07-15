@@ -20,7 +20,7 @@ owners: [platform-team]
 story: jira:LOAN-0013
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-010: superseded flip
 `
@@ -162,7 +162,7 @@ owners: [platform-team]
 story: jira:LOAN-0015
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-010: feature predecessor superseded flip
 `
@@ -206,7 +206,7 @@ owners: [platform-team]
 story: jira:LOAN-0014
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-010: closed archive move
 `
@@ -326,7 +326,7 @@ owners: [platform-team]
 story: jira:LOAN-0012
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-010: legal archive move
 `

@@ -5,7 +5,7 @@ title: "VL-010 overlay: frozen ADR (to be deleted)"
 status: accepted
 owners: [platform-team]
 decided: 2026-04-01
-frozen: { at: 2026-04-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-04-01, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-010 overlay: frozen ADR (to be deleted)
 

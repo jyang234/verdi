@@ -7,7 +7,7 @@ owners: [platform-team]
 links:
   - { type: challenges, ref: spec/stale-decline }
   - { type: annotates, ref: spec/stale-decline }
-frozen: { at: 2026-05-12, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-12, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # Conflict: false alarm
 

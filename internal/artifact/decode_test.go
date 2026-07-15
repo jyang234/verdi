@@ -49,17 +49,17 @@ func TestProbeFrozen_Happy(t *testing.T) {
 	}{
 		{
 			name:       "plain frozen adr",
-			doc:        "---\nid: adr/x\nkind: adr\nfrozen: { at: 2026-04-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }\n---\nbody\n",
+			doc:        "---\nid: adr/x\nkind: adr\nfrozen: { at: 2026-04-01, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }\n---\nbody\n",
 			wantFrozen: true,
 		},
 		{
 			name:       "frozen beside a key the current schema does not know",
-			doc:        "---\nid: adr/x\nsome_future_field: 42\nfrozen: { at: 2026-04-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }\n---\nbody\n",
+			doc:        "---\nid: adr/x\nsome_future_field: 42\nfrozen: { at: 2026-04-01, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }\n---\nbody\n",
 			wantFrozen: true,
 		},
 		{
 			name:       "frozen in frontmatter using a YAML anchor elsewhere",
-			doc:        "---\nowners: &o [platform-team]\nalso: *o\nfrozen: { at: 2026-04-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }\n---\nbody\n",
+			doc:        "---\nowners: &o [platform-team]\nalso: *o\nfrozen: { at: 2026-04-01, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }\n---\nbody\n",
 			wantFrozen: true,
 		},
 		{

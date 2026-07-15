@@ -2,7 +2,7 @@
   "schema": "verdi.rollup/v1",
   "story": "jira:LOAN-2023",
   "ref": "spec/loan-refi-2023",
-  "commit": "7176513ece8b608ab0911000691bb697ee7e75ec",
+  "commit": "6a0c563e4f688acdb225fcbc5e6942a7431b05bf",
   "criteria": [
     { "id": "ac-1", "text": "refinance rate applied correctly", "status": "evidenced", "summary": "3/3 obligations pass; golden flow matches" }
   ],

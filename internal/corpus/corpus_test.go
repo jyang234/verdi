@@ -19,6 +19,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // corpusDir is examples/showcase relative to this package.
@@ -29,9 +30,10 @@ const corpusDir = "../../examples/showcase"
 // literal deterministic SHAs (build once, bake in, test forever)") and
 // reproduced by every corpus file's frozen stamps and pinned refs.
 var goldenHeads = []string{
-	"c5e360a9ee5e9eb6089e54b772fa16959ada4662", // layer 1
-	"7176513ece8b608ab0911000691bb697ee7e75ec", // layer 2
-	"93ddc5bbbb398cf747151e1c466afb83114398df", // layer 3
+	"2f230011b192c5ac1c0ed5442be76fc401c4cbca", // layer 1
+	"6a0c563e4f688acdb225fcbc5e6942a7431b05bf", // layer 2
+	"5507c6d963bd78d9eabed2324c3d380e678f891e", // layer 3
+	"7b2ae03f6d5ec8a23cccca4521d7f20553d4df0a", // layer 4
 }
 
 // goldenHeadsV2 are the v1-P1 rung-4 supersession pair's own, separate
@@ -205,6 +207,16 @@ func decodeCommittedFile(t *testing.T, rel string, data []byte) {
 	t.Helper()
 
 	switch {
+	case rel == ".verdi/verdi.yaml":
+		if _, err := store.DecodeManifest(data); err != nil {
+			t.Fatalf("%s: DecodeManifest: %v", rel, err)
+		}
+
+	case strings.HasSuffix(rel, "/layout.json"):
+		if _, err := artifact.DecodeBoardLayout(data); err != nil {
+			t.Fatalf("%s: DecodeBoardLayout: %v", rel, err)
+		}
+
 	case strings.HasSuffix(rel, "/spec.md"):
 		fm, body, err := artifact.SplitFrontmatter(data)
 		if err != nil {
@@ -357,8 +369,8 @@ func TestFixtureCorpus_MutableAndDerivedFilesDecode(t *testing.T) {
 		dir        string
 		wantSource artifact.ProvenanceSource
 	}{
-		{"derived/spec--stale-decline/7176513ece8b608ab0911000691bb697ee7e75ec", artifact.SourceCI},
-		{"derived/spec--stale-decline/93ddc5bbbb398cf747151e1c466afb83114398df", artifact.SourceLocal},
+		{"derived/spec--stale-decline/6a0c563e4f688acdb225fcbc5e6942a7431b05bf", artifact.SourceCI},
+		{"derived/spec--stale-decline/5507c6d963bd78d9eabed2324c3d380e678f891e", artifact.SourceLocal},
 	}
 	for _, dd := range derivedDirs {
 		dd := dd

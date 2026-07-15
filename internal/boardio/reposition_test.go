@@ -18,7 +18,7 @@ func repositionFixture(t *testing.T) (dir string) {
 	}
 	b := &artifact.Annotation{
 		ID: "a-01J8Z0K4BBBBBBBBBBBBBBBBBB", TS: "2026-07-10T14:03:11Z", Author: "john",
-		Target: &artifact.Target{Ref: "spec/refi-test@c5e360a9ee5e9eb6089e54b772fa16959ada4662"},
+		Target: &artifact.Target{Ref: "spec/refi-test@2f230011b192c5ac1c0ed5442be76fc401c4cbca"},
 		Type:   artifact.AnnotationComment, Body: "targeted, no board anchor", Status: artifact.AnnotationOpen,
 	}
 	for _, ann := range []*artifact.Annotation{a, b} {

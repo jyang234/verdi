@@ -12,7 +12,7 @@ links:
   - { type: implements, ref: "spec/accepted-pending-build#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "PUT /applications/:id/update returns 200 with the new state", evidence: [static, behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-12, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }
+frozen: { at: 2026-07-12, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
 ---
 # Borrower update API
 

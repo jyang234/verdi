@@ -49,7 +49,7 @@ problem: { text: "decline decisions are not ledgered durably", anchor: "#problem
 outcome: { text: "landed ledger outcome (draft boards e2e)", anchor: "#outcome" }
 acceptance_criteria:
   - { id: ac-1, text: "every decline decision is ledgered", evidence: [attestation], anchor: "#ac-1" }
-frozen: { at: 2026-07-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-01, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # Decline ledger
 

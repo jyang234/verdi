@@ -29,16 +29,16 @@ func TestClassify(t *testing.T) {
 }
 
 func TestLivingGatedBanner(t *testing.T) {
-	got := livingGatedBanner(buildStamp{SHA: "c5e360a9ee5e9eb6089e54b772fa16959ada4662", Date: "2024-01-01"})
-	want := "main @ c5e360a · 2024-01-01"
+	got := livingGatedBanner(buildStamp{SHA: "2f230011b192c5ac1c0ed5442be76fc401c4cbca", Date: "2024-01-01"})
+	want := "main @ 2f23001 · 2024-01-01"
 	if got != want {
 		t.Fatalf("livingGatedBanner = %q, want %q", got, want)
 	}
 }
 
 func TestFrozenBanner(t *testing.T) {
-	got := frozenBanner("2026-05-14", "c5e360a9ee5e9eb6089e54b772fa16959ada4662")
-	want := "point-in-time record · frozen 2026-05-14 @ c5e360a"
+	got := frozenBanner("2026-05-14", "2f230011b192c5ac1c0ed5442be76fc401c4cbca")
+	want := "point-in-time record · frozen 2026-05-14 @ 2f23001"
 	if got != want {
 		t.Fatalf("frozenBanner = %q, want %q", got, want)
 	}
@@ -88,8 +88,8 @@ func TestDateOnly(t *testing.T) {
 }
 
 func TestShortSHA(t *testing.T) {
-	if got := shortSHA("c5e360a9ee5e9eb6089e54b772fa16959ada4662"); got != "c5e360a" {
-		t.Errorf("shortSHA = %q, want c5e360a", got)
+	if got := shortSHA("2f230011b192c5ac1c0ed5442be76fc401c4cbca"); got != "2f23001" {
+		t.Errorf("shortSHA = %q, want 2f23001", got)
 	}
 	if got := shortSHA("abc"); got != "abc" {
 		t.Errorf("shortSHA(short) = %q, want abc", got)

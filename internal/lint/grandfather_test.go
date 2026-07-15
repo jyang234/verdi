@@ -87,7 +87,7 @@ dispositions:
   - { sticky: a-01J8Z0K3AAAAAAAAAAAAAAAAAA, disposition: incorporated, where: "#design-notes" }
   - { sticky: a-01J8Z0K4BBBBBBBBBBBBBBBBBB, disposition: contradicted, note: "superseded by the final ac-1 wording" }
   - { sticky: a-01J8Z0K5CCCCCCCCCCCCCCCCCC, disposition: open-question }
-frozen: { at: 2026-06-20, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }
+frozen: { at: 2026-06-20, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
 ---
 # Archived quartet: grandfathered dispositions, clean
 
@@ -157,7 +157,7 @@ problem: { text: "placeholder problem", anchor: "#problem" }
 outcome: { text: "placeholder outcome", anchor: "#outcome" }
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
-frozen: { at: 2026-06-20, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }
+frozen: { at: 2026-06-20, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
 ---
 # VL-014 grandfather-scope-negative: new-style spec, archived, no dispositions
 
@@ -236,7 +236,7 @@ outcome: { text: "an archived round-four quartet (spec + layout.json + rollup.js
 story: jira:LOAN-9002
 acceptance_criteria:
   - { id: ac-1, text: "the archived spec's positions resolve against its own declared objects", evidence: [static], anchor: "#ac-1" }
-frozen: { at: 2026-06-20, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }
+frozen: { at: 2026-06-20, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
 ---
 # Archived round-four feature (layout.json board slot)
 
@@ -278,7 +278,7 @@ const archivedRoundFourRollupJSON = `{
   "schema": "verdi.rollup/v1",
   "story": "jira:LOAN-9002",
   "ref": "spec/archived-round4-story",
-  "commit": "93ddc5bbbb398cf747151e1c466afb83114398df",
+  "commit": "5507c6d963bd78d9eabed2324c3d380e678f891e",
   "criteria": [
     { "id": "ac-1", "text": "the archived spec's positions resolve against its own declared objects", "status": "evidenced", "summary": "VL-018 passes; positions resolve" }
   ],
@@ -289,12 +289,12 @@ const archivedRoundFourRollupJSON = `{
 
 const archivedRoundFourDeviationReport = `---
 schema: verdi.deviation/v1
-covers: 93ddc5bbbb398cf747151e1c466afb83114398df
+covers: 5507c6d963bd78d9eabed2324c3d380e678f891e
 findings: []
 digest: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 integrity: sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddde
-frozen: { at: 2026-06-20, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }
-provenance: { generator: verdi-align, version: v1, inputs: [spec/archived-round4-story@93ddc5bbbb398cf747151e1c466afb83114398df], digest: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd }
+frozen: { at: 2026-06-20, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
+provenance: { generator: verdi-align, version: v1, inputs: [spec/archived-round4-story@5507c6d963bd78d9eabed2324c3d380e678f891e], digest: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd }
 ---
 # Alignment report: archived-round4-story (final edition)
 

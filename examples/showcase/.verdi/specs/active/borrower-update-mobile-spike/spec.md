@@ -11,7 +11,7 @@ spike: true
 story: jira:LOAN-1484
 links:
   - { type: resolves, ref: "spec/accepted-pending-build#oq-1" }
-frozen: { at: 2026-07-12, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }
+frozen: { at: 2026-07-12, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
 ---
 # Borrower update, mobile app: PUT vs PATCH spike
 

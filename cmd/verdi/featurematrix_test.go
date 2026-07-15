@@ -17,7 +17,7 @@ import (
 // (spec/accepted-pending-build and its stories) that V1-P1 committed
 // without wiring into layers.txt's shared fixturegit history (their
 // frozen.commit stamps intentionally cite that shared history's existing
-// HEAD — 93ddc5bbb..., proven by buildCorpusRepo(t).Head today — rather
+// HEAD — 5507c6d9..., proven by buildCorpusRepo(t).Head today — rather
 // than pinning a new layer of their own). copyV2FeatureFixture mirrors
 // buildCorpusRepo's own copyDerivedTree technique: these files are placed
 // on the built repo's working tree verbatim, uncommitted, exactly like

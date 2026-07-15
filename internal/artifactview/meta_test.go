@@ -21,7 +21,7 @@ title: "Outbox events"
 status: accepted
 owners: [platform-team]
 decided: 2026-01-01
-frozen: { at: 2026-01-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-01-01, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 `
 
 const obligationYAML = `id: obligation/fail-loud--ac-1--static
@@ -31,7 +31,7 @@ owners: [platform-team]
 for_kind: static
 links:
   - { type: verifies, ref: "spec/fail-loud" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 `
 
 func TestDecodeMeta_Happy(t *testing.T) {

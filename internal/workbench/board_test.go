@@ -36,7 +36,7 @@ func TestBoardHandler_Happy(t *testing.T) {
 		t.Fatalf("missing board canvas, got: %s", body)
 	}
 	// The pin (spec/stale-decline@...).
-	if !strings.Contains(body, "spec/stale-decline@7176513ece8b608ab0911000691bb697ee7e75ec") {
+	if !strings.Contains(body, "spec/stale-decline@6a0c563e4f688acdb225fcbc5e6942a7431b05bf") {
 		t.Fatalf("missing pinned card, got: %s", body)
 	}
 	// The targeted sticky's resolved body text.
@@ -106,7 +106,7 @@ func TestBoardAutosave_Happy_RoundTripsAndPersistsAcrossReload(t *testing.T) {
 
 	payload := map[string]any{
 		"pins": []map[string]any{
-			{"ref": "spec/stale-decline@7176513ece8b608ab0911000691bb697ee7e75ec", "x": 999, "y": 888},
+			{"ref": "spec/stale-decline@6a0c563e4f688acdb225fcbc5e6942a7431b05bf", "x": 999, "y": 888},
 		},
 		"stickies": []map[string]any{
 			{"id": "a-01J8Z0K3AAAAAAAAAAAAAAAAAA", "x": 111, "y": 222},
@@ -159,7 +159,7 @@ func TestBoardAutosave_Atomicity(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		payload := map[string]any{
-			"pins":     []map[string]any{{"ref": "spec/stale-decline@7176513ece8b608ab0911000691bb697ee7e75ec", "x": float64(i), "y": float64(i)}},
+			"pins":     []map[string]any{{"ref": "spec/stale-decline@6a0c563e4f688acdb225fcbc5e6942a7431b05bf", "x": float64(i), "y": float64(i)}},
 			"stickies": []map[string]any{},
 			"yarn":     []map[string]any{},
 		}
@@ -207,7 +207,7 @@ func TestBoardAutosave_Negative(t *testing.T) {
 	})
 
 	t.Run("frozen/provenance fields rejected", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/board/STORY-1482/autosave", strings.NewReader(`{"pins":[],"stickies":[],"yarn":[],"frozen":{"at":"2026-01-01","commit":"c5e360a9ee5e9eb6089e54b772fa16959ada4662"}}`))
+		req := httptest.NewRequest(http.MethodPost, "/board/STORY-1482/autosave", strings.NewReader(`{"pins":[],"stickies":[],"yarn":[],"frozen":{"at":"2026-01-01","commit":"2f230011b192c5ac1c0ed5442be76fc401c4cbca"}}`))
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {

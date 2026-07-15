@@ -20,14 +20,15 @@ import (
 const corpusDir = "../../examples/showcase"
 
 // corpusGoldenHeads mirrors internal/dex's own golden SHA constants:
-// layers 1-3 reproduce examples/showcase's own three layers byte-identically,
+// layers 1-4 reproduce examples/showcase's own four layers byte-identically,
 // so every frozen stamp and pinned ref those files carry stays honest, and
 // the derived/spec--stale-decline/<commit>/verdicts.json directories (keyed
 // by these exact SHAs) line up with the built repo's real history.
 var corpusGoldenHeads = []string{
-	"c5e360a9ee5e9eb6089e54b772fa16959ada4662", // layer 1
-	"7176513ece8b608ab0911000691bb697ee7e75ec", // layer 2
-	"93ddc5bbbb398cf747151e1c466afb83114398df", // layer 3
+	"2f230011b192c5ac1c0ed5442be76fc401c4cbca", // layer 1
+	"6a0c563e4f688acdb225fcbc5e6942a7431b05bf", // layer 2
+	"5507c6d963bd78d9eabed2324c3d380e678f891e", // layer 3
+	"7b2ae03f6d5ec8a23cccca4521d7f20553d4df0a", // layer 4
 }
 
 func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
