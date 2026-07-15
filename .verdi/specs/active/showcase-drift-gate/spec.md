@@ -4,7 +4,7 @@ kind: spec
 title: "Showcase Drift Gate"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-23
 problem: { text: "make verify has no drift gate over the showcase: nothing in the repository enumerates what capabilities exist on any axis (CLI verb, MCP tool, workbench surface) or cross-checks that enumeration against e2e evidence, so a capability can ship, its own tests can stay green, and examples/showcase (spec/showcase-corpus-renovation's freshly vetted corpus) can silently stop demonstrating it — spec/public-showcase#ac-2 requires this to fail the build, by name, and nothing today does.", anchor: "#problem" }
 outcome: { text: "a new internal/showcasealign package computes a three-axis capability-coverage inventory — CLI verbs parsed mechanically from dispatch.go, MCP tools queried live from tools/list, workbench surfaces hand-listed — checks every enumerated capability against a committed mapping to showcase-backed e2e evidence, and two new make targets (lint-showcase, showcase-coverage) wire this and the showcase's own lint-clean check into make verify, so an unshowcased capability is a named, red gate rather than a silent pass.", anchor: "#outcome" }
@@ -19,6 +19,7 @@ decisions:
 constraints:
   - { id: co-1, text: "no network in any test: the CLI axis is parsed from source text on disk, the MCP axis is driven through internal/mcpserve's in-process server exactly as the existing specalign harness drives it (loopback pipes, never a socket), and every evidence-file check reads the repository's own working tree — nothing in this gate ever reaches a live service", anchor: "#co-1" }
   - { id: co-2, text: "every gap is named, in both directions: an enumerated capability with no mapped evidence, and a mapped evidence file that no longer exists or no longer matches its marker, each produce their own finding naming the exact capability key (cli:<verb>, mcp:<tool>, or wb:<surface>) — the check never reports a bare pass/fail with no offending name (00 §Provenance discipline: silence is never a pass)", anchor: "#co-2" }
+frozen: { at: 2026-07-15, commit: 47882ae8664a27e6e2d3769d5594d4e3a61b4cbc, stub_matched: true }
 ---
 # Showcase Drift Gate
 
