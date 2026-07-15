@@ -11,18 +11,20 @@ import (
 
 // provisionStore builds a scratch store at storeRoot: examples/showcase's
 // committed zone (.verdi/{specs,adr,diagrams,attestations,waivers,
-// conflicts}) as one real git commit (a fresh, throwaway repo — not
-// fixturegit's golden-SHA-pinned build, since nothing here asserts a
+// conflicts,verdi.yaml}) as one real git commit (a fresh, throwaway repo —
+// not fixturegit's golden-SHA-pinned build, since nothing here asserts a
 // specific commit hash; it only needs REAL git history for gitx's
 // RevParse/CommitDate/AddAll/CreateCommit, which `verdi serve`'s backend
 // and commit-to-design both exercise), plus examples/showcase's mutable/ and
 // derived/ trees copied in UNTRACKED (VL-013: never git-add those).
 //
-// A minimal verdi.yaml is written too (not load-bearing for anything this
-// suite drives, since storyresolve/evidence/commitdesign none of them
-// require the manifest — kept for parity with a real store, and so a
-// human poking at the scratch store with other verdi verbs sees a
-// legible one).
+// verdi.yaml is committed at examples/showcase/.verdi/verdi.yaml (not
+// load-bearing for anything this suite drives, since
+// storyresolve/evidence/commitdesign none of them require the manifest —
+// kept for parity with a real store, and so a human poking at the scratch
+// store with other verdi verbs sees a legible one) and arrives with the
+// rest of the committed zone via the copyTree call below — this function no
+// longer writes it itself.
 func provisionStore(moduleRoot, storeRoot string) error {
 	if err := os.MkdirAll(storeRoot, 0o755); err != nil {
 		return err
@@ -43,15 +45,14 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return fmt.Errorf("copying svcfix service: %w", err)
 	}
 
-	// The V1-P8 dex overlay (testdata/dexoverlay, committed — see its
-	// README): the spec-stale living report for borrower-update-mobile and
-	// the round-four archived quartet, so the dex site's story-page ladder
-	// badges and by-story axis have their fixtures on MAIN (the dex is
-	// main-only; the open-MR half of the ladder is seeded through the fake
-	// forge in main.go, never written into the store).
-	if err := copyTree(filepath.Join(moduleRoot, "testdata", "dexoverlay", ".verdi"), filepath.Join(storeRoot, ".verdi")); err != nil {
-		return fmt.Errorf("copying dex overlay: %w", err)
-	}
+	// The spec-stale living report for borrower-update-mobile and the
+	// round-four archived quartet (formerly testdata/dexoverlay, folded
+	// into examples/showcase/.verdi/ as layers.txt layer 4 — see
+	// examples/showcase/OVERLAY-NOTES.md) are now part of the committed
+	// zone copied above, so the dex site's story-page ladder badges and
+	// by-story axis have their fixtures on MAIN without a separate copy
+	// (the dex is main-only; the open-MR half of the ladder is seeded
+	// through the fake forge in main.go, never written into the store).
 
 	// A component spec whose markdown body carries a fenced ```mermaid block.
 	// examples/showcase already provisions a diagram-KIND artifact
@@ -93,10 +94,9 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return fmt.Errorf("writing %s spec: %w", dbSameSpecName, err)
 	}
 
-	manifest := "schema: verdi.layout/v1\nforge: gitlab\nproviders:\n  jira:\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\nservices:\n  discovery: flowmap\n"
-	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", "verdi.yaml"), []byte(manifest), 0o644); err != nil {
-		return err
-	}
+	// verdi.yaml is no longer written here — it is now committed at
+	// examples/showcase/.verdi/verdi.yaml (layers.txt layer 1) and arrives
+	// via the copyTree call above.
 	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", ".gitignore"), []byte("data/\n"), 0o644); err != nil {
 		return err
 	}

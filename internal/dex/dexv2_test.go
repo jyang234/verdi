@@ -15,12 +15,12 @@ import (
 
 // seededSupersessionForge builds the hermetic forge double the
 // pending-supersession fold reads open MRs through: one MR open against
-// "main" whose source branch carries testdata/dexoverlay's candidate v2
+// "main" whose source branch carries examples/showcase/mr/'s candidate v2
 // spec for spec/accepted-pending-build (its manifest amends ac-2 only —
-// see the overlay README).
+// see examples/showcase/OVERLAY-NOTES.md, formerly the overlay README).
 func seededSupersessionForge(t *testing.T) *fake.Forge {
 	t.Helper()
-	candidate, err := os.ReadFile(filepath.Join(dexOverlayDir, "mr", "accepted-pending-build-v2.spec.md"))
+	candidate, err := os.ReadFile(filepath.Join(corpusDir, "mr", "accepted-pending-build-v2.spec.md"))
 	if err != nil {
 		t.Fatalf("reading MR candidate fixture: %v", err)
 	}

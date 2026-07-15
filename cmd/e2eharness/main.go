@@ -88,7 +88,7 @@ func run() error {
 	}
 
 	// The pending-supersession fixture (e2e/tests/16-dex-v2.spec.ts): one
-	// open MR against main carrying testdata/dexoverlay's candidate v2
+	// open MR against main carrying examples/showcase/mr/'s candidate v2
 	// spec for accepted-pending-build, served through internal/forge's
 	// hermetic fake — no network (CLAUDE.md), same seam the Go tests use.
 	supersessionForge, err := seedSupersessionForge(moduleRoot)
@@ -205,10 +205,12 @@ func run() error {
 
 // seedSupersessionForge builds the in-memory forge double the dex build
 // reads open supersession MRs through: MR "mr-7" open against main, its
-// source branch carrying the dexoverlay candidate at the conventional
-// R4-I-14 path — the exact seeding internal/dex's own tests use.
+// source branch carrying the examples/showcase/mr/ candidate at the
+// conventional R4-I-14 path (formerly testdata/dexoverlay/mr/, folded into
+// examples/showcase/mr/ — see examples/showcase/OVERLAY-NOTES.md) — the
+// exact seeding internal/dex's own tests use.
 func seedSupersessionForge(moduleRoot string) (*fake.Forge, error) {
-	candidate, err := os.ReadFile(filepath.Join(moduleRoot, "testdata", "dexoverlay", "mr", "accepted-pending-build-v2.spec.md"))
+	candidate, err := os.ReadFile(filepath.Join(moduleRoot, "examples", "showcase", "mr", "accepted-pending-build-v2.spec.md"))
 	if err != nil {
 		return nil, fmt.Errorf("reading MR candidate fixture: %w", err)
 	}

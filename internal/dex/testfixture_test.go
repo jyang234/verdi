@@ -21,13 +21,14 @@ const (
 )
 
 // corpusGoldenHeads mirrors internal/corpus's own golden SHA constants:
-// layers 1-3 here are byte-identical to examples/showcase/layers.txt's own
+// layers 1-4 here are byte-identical to examples/showcase/layers.txt's own
 // layers, so they reproduce the exact same commit SHAs the corpus fixture
 // files' own frozen stamps and pinned refs already bake in.
 var corpusGoldenHeads = []string{
-	"c5e360a9ee5e9eb6089e54b772fa16959ada4662", // layer 1
-	"7176513ece8b608ab0911000691bb697ee7e75ec", // layer 2
-	"93ddc5bbbb398cf747151e1c466afb83114398df", // layer 3
+	"2f230011b192c5ac1c0ed5442be76fc401c4cbca", // layer 1
+	"6a0c563e4f688acdb225fcbc5e6942a7431b05bf", // layer 2
+	"5507c6d963bd78d9eabed2324c3d380e678f891e", // layer 3
+	"7b2ae03f6d5ec8a23cccca4521d7f20553d4df0a", // layer 4
 }
 
 // parseCorpusLayers reads examples/showcase/layers.txt (the same format
@@ -100,27 +101,26 @@ func readTreeFiles(t *testing.T, dir, destPrefix string) map[string]string {
 	return out
 }
 
-// dexOverlayDir is testdata/dexoverlay — V1-P8's dex-only fixture overlay
-// (a spec-stale living report, a round-four archived quartet, and the
-// open-MR supersession candidate; see its README.md).
-const dexOverlayDir = "../../testdata/dexoverlay"
-
-// buildDexFixtureRepo builds a git repo whose first three commits are
-// byte-identical to examples/showcase's own three layers (reproducing
-// corpusGoldenHeads exactly — every frozen stamp and pinned ref inside
-// those corpus files stays honest), plus a fourth commit that folds in
-// testdata/svcfix wholesale at repo path "svcfix/" — giving dex's by-service
-// axis and svc/... external refs something real to discover, without
-// touching the first three commits' tree contents (and so their SHAs).
+// buildDexFixtureRepo builds a git repo whose first four commits are
+// byte-identical to examples/showcase's own four layers.txt layers
+// (reproducing corpusGoldenHeads exactly — every frozen stamp and pinned
+// ref inside those corpus files stays honest; layer 4 is the former
+// testdata/dexoverlay content — a spec-stale living report for
+// borrower-update-mobile, a round-four archived quartet, and the
+// supersession-chain surface fixtures — folded into layers.txt directly by
+// Task 1.2, see examples/showcase/OVERLAY-NOTES.md), plus a fifth commit
+// that folds in testdata/svcfix wholesale at repo path "svcfix/" — giving
+// dex's by-service axis and svc/... external refs something real to
+// discover, without touching the first four commits' tree contents (and so
+// their SHAs).
 //
-// V1-P8 appends two more layers, still leaving layers 1-3's SHAs
-// untouched: the v2 fixture-overlay corpus files layers.txt never listed
-// (the accepted-pending-build cluster, the loan-workflow supersession
-// pair, the outcome attestation, the reaffirmation — everything on disk
-// under examples/showcase/.verdi/ beyond the v0 layers), then
-// testdata/dexoverlay/'s dex-only files — so the built store matches what
-// cmd/e2eharness provisions and the feature-lens/ladder/by-story pages
-// have their fixtures.
+// V1-P8 appends one more layer, still leaving layers 1-4's SHAs untouched:
+// the v2 fixture-overlay corpus files layers.txt never listed (the
+// accepted-pending-build cluster, the loan-workflow supersession pair, the
+// outcome attestation, the reaffirmation — everything on disk under
+// examples/showcase/.verdi/ beyond the layers.txt layers) — so the built
+// store matches what cmd/e2eharness provisions and the
+// feature-lens/ladder/by-story pages have their fixtures.
 func buildDexFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	order, files := parseCorpusLayers(t)
@@ -151,14 +151,11 @@ func buildDexFixtureRepo(t *testing.T) *fixturegit.Repo {
 	}
 	layers = append(layers, fixturegit.Layer{Files: v2Files, Message: "v2 fixture overlay"})
 
-	overlay := readTreeFiles(t, filepath.Join(dexOverlayDir, ".verdi"), ".verdi")
-	layers = append(layers, fixturegit.Layer{Files: overlay, Message: "dex overlay: spec-stale report + round-four quartet"})
-
 	repo := fixturegit.Build(t, layers)
 
 	for i, want := range corpusGoldenHeads {
 		if repo.Heads[i] != want {
-			t.Fatalf("layer %d SHA = %s, want golden %s (corpus layers 1-3 must stay byte-identical to examples/showcase's own fixture)", i+1, repo.Heads[i], want)
+			t.Fatalf("layer %d SHA = %s, want golden %s (corpus layers 1-4 must stay byte-identical to examples/showcase's own fixture)", i+1, repo.Heads[i], want)
 		}
 	}
 	return repo

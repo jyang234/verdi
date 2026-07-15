@@ -20,6 +20,7 @@
 1 .verdi/diagrams/loansvc-topology.mermaid
 1 .verdi/adr/0003-retry-policy.md
 1 .verdi/specs/active/new-feature-x/spec.md
+1 .verdi/verdi.yaml
 #
 # Layer 2: frozen content pinned at layer 1's commit (fixturegit Heads[0]).
 2 .verdi/adr/0001-outbox-events.md
@@ -38,3 +39,36 @@
 3 .verdi/specs/archive/loan-refi-2023/board.json
 3 .verdi/specs/archive/loan-refi-2023/rollup.json
 3 .verdi/specs/archive/loan-refi-2023/deviation-report.md
+#
+# Layer 4: content pinned at layer 3's commit (fixturegit Heads[2]) — folded
+# in from the former testdata/dexoverlay/ (Task 1.2 of the public-rollout
+# plan; see examples/showcase/OVERLAY-NOTES.md). Supersession-chain surface
+# fixtures (rate-lock/rate-lock-v2, escrow-notify/escrow-notify-v2) and a
+# synthetic round-four archived quartet (refi-rate-check-2024) — all
+# frozen/covered at layer 3's head, so none of them can exist before it.
+#
+# borrower-update-mobile/deviation-report.md is deliberately NOT listed
+# here even though it also pins layer 3's head: its sibling spec.md is
+# itself not layers.txt-tracked (it is part of the pre-existing "v2
+# fixture overlay" set — examples/showcase/.verdi/ content beyond these
+# layers, folded by internal/dex's own buildDexFixtureRepo and decoded
+# directly by internal/artifact/v2fixture_test.go). Listing only the
+# deviation report here would orphan it inside the narrower
+# layers.txt-only builds (internal/corpus, internal/index,
+# internal/workbench): those build fixturegit repos strictly from this
+# file, so a specs/active/borrower-update-mobile/ directory would appear
+# with a deviation-report.md but no spec.md — internal/storyresolve's
+# matchStoryRef reads every specs/active/*/ directory's spec.md
+# unconditionally and errors on the missing file (proven by running the
+# suite before this note was added). Keeping the deviation report as a
+# plain, non-layered file (like its spec.md sibling) mirrors the existing
+# discipline instead of inventing a new one, and is still fully covered by
+# corpus_test.go's whole-tree pin-name walk.
+4 .verdi/specs/active/escrow-notify/spec.md
+4 .verdi/specs/active/escrow-notify-v2/spec.md
+4 .verdi/specs/active/rate-lock/spec.md
+4 .verdi/specs/active/rate-lock-v2/spec.md
+4 .verdi/specs/archive/refi-rate-check-2024/spec.md
+4 .verdi/specs/archive/refi-rate-check-2024/layout.json
+4 .verdi/specs/archive/refi-rate-check-2024/rollup.json
+4 .verdi/specs/archive/refi-rate-check-2024/deviation-report.md
