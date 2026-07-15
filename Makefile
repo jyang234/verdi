@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e
+.PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage
 
 # Pin for the lint target. Both CI workflows install golangci-lint at this
 # exact version before `make verify` (see .github/workflows/), so in CI the
@@ -100,6 +100,25 @@ lint-store:
 spec-align:
 	go test ./internal/specalign/...
 
+# lint-showcase and showcase-coverage are named gates over
+# internal/showcasealign (same rationale as spec-align: `test` already runs
+# this package, but a named target makes CI failure output name the gate
+# instead of burying it in the full `go test -race ./...` output).
+#
+# lint-showcase runs TestShowcaseLintClean: the showcase corpus's own
+# internal consistency check.
+lint-showcase:
+	go test ./internal/showcasealign/ -run TestShowcaseLintClean
+
+# showcase-coverage runs TestShowcaseCoverage plus TestReadmeExamplesFresh.
+# TestReadmeExamplesFresh does not exist until Task 4.2 (same feature) —
+# until then, -run's non-matching alternative passes vacuously ("no tests
+# to run" is exit 0), which is a disclosed gap, not a silent one: Task 4.2
+# lands TestReadmeExamplesFresh and this target starts exercising it with
+# no further Makefile changes.
+showcase-coverage:
+	go test ./internal/showcasealign/ -run 'TestShowcaseCoverage|TestReadmeExamplesFresh'
+
 # e2e-check-node is verify's Node/Playwright preflight: CLAUDE.md made
 # e2e a merge blocker ("every browser-facing behavioral path ... a
 # Playwright e2e test"), so a missing Node toolchain must FAIL verify
@@ -147,7 +166,7 @@ e2e: e2e-check-node
 # server round-trip) and every faster gate should fail first when
 # something's broken, so a run that fails early doesn't pay e2e's cost
 # for nothing.
-verify: build fmt-check vet lint test fixture lint-store spec-align e2e
+verify: build fmt-check vet lint test fixture lint-store spec-align lint-showcase showcase-coverage e2e
 	@echo "verify OK"
 
 tidy:
