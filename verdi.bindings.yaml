@@ -483,6 +483,24 @@ bindings:
       # `lint-showcase`/`showcase-coverage` targets in verify:'s chain), not
       # only the standalone test binary.
       - "spec/showcase-drift-gate#ac-1"
+      # spec/public-readme ac-1's sole evidence leg (declared [behavioral]
+      # only — no static leg): TestReadmeExamplesFresh
+      # (internal/showcasealign/readme_test.go) parses every README.md
+      # fenced ```console block tagged <!-- showcase-verify --> into argv
+      # plus expected stdout, provisions a showcase store exactly as Task
+      # 3.1's provisionShowcaseStore helper does, and re-runs each command
+      # through the same runBinary harness TestShowcaseCoverage already
+      # uses, requiring byte-identical stdout (after trailing-whitespace
+      # normalization) and matching exit code, in both directions — a
+      # zero-tagged-block README or a malformed tag is a hard t.Fatal,
+      # never a vacuous pass (dc-1, co-1, co-2). Wired into the
+      # pre-existing showcase-coverage make target's required-PASS guard
+      # list (this story's dc-3 half of showcase-drift-gate's anticipatory
+      # -run pattern), which is itself one of make verify's own chained
+      # targets (Makefile's verify: list) — so a drifted or deleted
+      # freshness test is a named make verify failure, not silent
+      # staleness.
+      - "spec/public-readme#ac-1"
   - producer: verdi-verify-static
     kind: static
     acs:
