@@ -10,10 +10,11 @@ import (
 // and a deterministically-sorted, empty finding set.
 func TestEngine_Run_Happy(t *testing.T) {
 	repo := buildLintRepo(t)
-	findings, err := NewEngine().Run(context.Background(), repo.Dir, Context{}, Options{})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	// runLint (not NewEngine().Run directly) so the known, documented
+	// corpus-baseline VL-020 findings (harness_test.go's
+	// knownCorpusBaselineFindings) are filtered exactly as every other
+	// test in this package expects.
+	findings := runLint(t, repo.Dir, Context{}, Options{})
 	if len(findings) != 0 {
 		t.Fatalf("got %d findings, want 0:\n%s", len(findings), findingsString(findings))
 	}

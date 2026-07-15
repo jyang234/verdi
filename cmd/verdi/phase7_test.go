@@ -16,7 +16,7 @@ import (
 // "is this scheme configured" check), a toolchain: block (so baseline
 // regeneration has something to key an injected FakeRunner off of), and
 // flowmap service discovery. Built fresh per test via fixturegit — never
-// testdata/corpus, per this phase's own instructions.
+// examples/showcase, per this phase's own instructions.
 const phase7ManifestYAML = `schema: verdi.layout/v1
 forge: gitlab
 providers:

@@ -12,9 +12,9 @@ test("board loads stickies, drag updates position, and autosave persists across 
   await expect(page.locator(".card")).toContainText("spec/stale-decline");
   const stickies = page.locator(".sticky");
   await expect(stickies).toHaveCount(3);
-  await expect(page.locator("#board-canvas")).toContainText("charge API needs a retry note");
+  await expect(page.locator("#board-canvas")).toContainText("write up a retry note for the charge API path");
   await expect(page.locator("#board-canvas")).toContainText("what about partial refunds?");
-  await expect(page.locator("#board-canvas")).toContainText("wire up the retry worker for stale declines");
+  await expect(page.locator("#board-canvas")).toContainText("should partial refunds share the stale-decline retry budget?");
 
   // Yarn.
   await expect(page.locator(".yarn")).toContainText("relates");

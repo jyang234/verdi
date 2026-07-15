@@ -8,10 +8,10 @@
 // BINDING NOTE (V1-P6, amended V1-P8): the workbench constants below are
 // FINAL — they are provisioned verbatim by cmd/e2eharness/provisionv2.go
 // (a draft spec on a design branch cannot live in the committed
-// testdata/corpus tree, VL-004, so the harness authors the board fixtures
+// examples/showcase tree, VL-004, so the harness authors the board fixtures
 // onto a scratch design branch at startup; see tests-v1/README.md
 // "Harness obligations"). The dex constants were finalized by V1-P8 to
-// the v2 fixture overlay's real refs (testdata/corpus +
+// the v2 fixture overlay's real refs (examples/showcase +
 // testdata/dexoverlay). One V1-P6 constant moved with them: ADR_NAME —
 // shared by the board's ref-card tests and the dex exemption-page test —
 // now names the ADR the v2 fixture feature's dc-1 actually exempts
@@ -101,9 +101,9 @@ export const REVIEW_FEED_TOTAL = 3;
 export const DEX_BASE = `http://127.0.0.1:${resolvePorts().dex}`;
 
 // The v2 fixture feature spec (three outcome ACs, three stubs, dc-1
-// exempting ADR_NAME — PLAN-V1 §4's overlay, testdata/corpus). Finalized
+// exempting ADR_NAME — PLAN-V1 §4's overlay, examples/showcase). Finalized
 // by V1-P8.
-export const FEATURE_SPEC = "accepted-pending-build";
+export const FEATURE_SPEC = "escrow-autopay";
 
 // The v2 fixture's two story specs (PLAN-V1 §4: one stub-matched, one
 // deviating). STORY_STUB_MATCHED doubles as the realized stub's slug
@@ -117,7 +117,7 @@ export const STORY_DEVIATING = "borrower-update-mobile";
 // assert: spec-stale comes from testdata/dexoverlay's living deviation
 // report (accepted-deviation on the story's own ac-1, R4-I-18);
 // pending-supersession from the fake forge's open MR whose candidate
-// manifest amends accepted-pending-build's ac-2 (which this story's
+// manifest amends escrow-autopay's ac-2 (which this story's
 // implements edges touch and STORY_STUB_MATCHED's do not).
 export const STORY_WITH_SPEC_STALE = "borrower-update-mobile";
 export const STORY_WITH_PENDING_SUPERSESSION = "borrower-update-mobile";
@@ -125,7 +125,7 @@ export const STORY_WITH_PENDING_SUPERSESSION = "borrower-update-mobile";
 // The by-story axis's two archived quartets (05 §Verdi-dex IA): the
 // round-four form archives layout.json in the board slot
 // (testdata/dexoverlay); the grandfathered v0 form keeps its frozen
-// board.json (testdata/corpus).
+// board.json (examples/showcase).
 export const ARCHIVED_STORY_ROUND4 = "refi-rate-check-2024";
 export const ARCHIVED_STORY_GRANDFATHERED = "loan-refi-2023";
 
@@ -171,6 +171,14 @@ export function refCardTestId(ref: string): string {
 // modes, keyed by branch state") — the fixture for the drag-refusal
 // contract (a read-only board is never silently inert).
 export const READONLY_SPEC = "stale-decline";
+
+// A committed spec (examples/showcase, class: component) that carries
+// NEITHER problem nor outcome — so its wall renders no case-file lockup
+// at all, and the class stamp has nowhere to hang (boardspecrender.go:
+// writeCaseTopline runs only inside the hasCaseFile header). The fixture
+// for the never-an-orphaned-stamp contract, now that READONLY_SPEC's
+// renovation gave it a full case file.
+export const NO_CASEFILE_SPEC = "store-layout-notes";
 
 // A draft spec on the design branch with the two required attributes and
 // NO declared objects — the newcomer's first board. Its board opens in
@@ -315,7 +323,7 @@ export const PIN_TRASH_ADR = "adr/0003-retry-policy";
 export const MERMAID_SPEC = "mermaid-demo";
 export const MERMAID_SPEC_REF = `spec/${MERMAID_SPEC}`;
 
-// The incumbent diagram-kind artifact (testdata/corpus, no class:
+// The incumbent diagram-kind artifact (examples/showcase, no class:
 // discriminator): illustrative BY CLASS (dc-2). Same artifact PIN_DIAGRAM
 // names — aliased so the tier tests read in tier vocabulary.
 export const ILLUSTRATIVE_DIAGRAM = PIN_DIAGRAM;
@@ -349,20 +357,22 @@ export const DOC_EDGE_TARGET = "adr/0002-outbox-events";
 // spike proto-sticky's resolution-yarn target.
 export const OQ_ID = "oq-1";
 
-// FEATURE_SPEC (accepted-pending-build, on main → sealed wall) declares
-// three stubs; its wall renders them as stub cards with Instantiate.
-// STUB_SLUGS mirrors the fixture's stubs: frontmatter verbatim.
-export const STUB_SLUGS = [
-  "borrower-update-api",
-  "borrower-update-ui",
-  "borrower-update-audit-log",
-] as const;
+// FEATURE_SPEC (escrow-autopay, on main → sealed wall) declares
+// two stubs (public-rollout-plan Task 1.5 renamed them from the former
+// borrower-update-* trio once those stories were rewired onto
+// spec/stale-decline instead); its wall renders them as stub cards with
+// Instantiate. STUB_SLUGS mirrors the fixture's stubs: frontmatter
+// verbatim.
+export const STUB_SLUGS = ["autopay-mandate-api", "autopay-retry-policy"] as const;
 
 // The stub the instantiate journey cuts a branch for: it must have NO
-// realized story spec in the corpus (borrower-update-api is realized;
-// the audit log story does not exist yet), so design/<slug> carries a
-// genuinely new scaffold.
-export const INSTANTIATE_SLUG = "borrower-update-audit-log";
+// realized story spec in the corpus — neither stub is realized any more
+// (Task 1.5: escrow-autopay's own implementing stories moved to
+// spec/stale-decline; the one residual borrower-update-mobile edge into
+// this feature only touches ac-2, whose AC-set does not equal either
+// stub's declared set), so design/<slug> carries a genuinely new
+// scaffold either way.
+export const INSTANTIATE_SLUG = "autopay-retry-policy";
 
 // The live corpus's other committed stub fixture: disclosure-legibility
 // (in this repo's own .verdi store) — asserted only through the Go
@@ -515,4 +525,48 @@ export function branchBoardPath(branch: string, spec: string): string {
 // inspection server reads a branch's tree.
 export function worktreeSpecPath(name: string, spec: string): string {
   return `.verdi/data/worktrees/${name}/.verdi/specs/active/${spec}/spec.md`;
+}
+
+// ---------------------------------------------------------------------------
+// Showcase live-draft feature (cmd/e2eharness/provision_showcase_draft.go)
+// ---------------------------------------------------------------------------
+
+// The canonical "one live draft on a design branch" lifecycle stage (public
+// rollout design §4.3): the payoff-quote-portal feature is authored on
+// design/payoff-quote-portal (jira:LOAN-1533) and never committed to main
+// (VL-004). The harness pre-cuts and seeds its managed worktree, so its
+// authoring board renders under /b/ with its object model AND its
+// open-question stickies. BINDING: every name/text below mirrors
+// provision_showcase_draft.go verbatim — change them together.
+export const SHOWCASE_DRAFT_SPEC = "payoff-quote-portal";
+export const SHOWCASE_DRAFT_BRANCH = `design/${SHOWCASE_DRAFT_SPEC}`;
+
+// Substrings of the draft's problem/outcome placards.
+export const SHOWCASE_DRAFT_PROBLEM_SNIPPET = "payoff quote";
+export const SHOWCASE_DRAFT_OUTCOME_SNIPPET = "good through a stated date";
+
+// The draft's two declared acceptance criteria (each declares evidence
+// kinds), rendered as object cards on the wall.
+export const SHOWCASE_DRAFT_ACS = ["ac-1", "ac-2"] as const;
+
+// The declared open question (rendered as an oq card) — VL-017's "carried"
+// path: the same text a still-open question sticky carries, formalized as a
+// real open_questions object on the spec.
+export const SHOWCASE_DRAFT_OQ_ID = "oq-1";
+export const SHOWCASE_DRAFT_OQ_CARRIED =
+  "does a payoff quote's good-through date have to honor a rate lock that expires inside the quote window?";
+
+// VL-017's "resolved" path: a question sticky settled in place (status
+// resolved) rather than carried onto the spec.
+export const SHOWCASE_DRAFT_OQ_RESOLVED =
+  "should the payoff quote require identity re-verification before it is shown?";
+
+// The proposal-tier diagram authored on the branch (VL-021: derived_from a
+// real corpus diagram + a well-formed sha256 digest).
+export const SHOWCASE_DRAFT_DIAGRAM = "payoff-quote-flow";
+
+// The managed worktree's deterministic store-relative home for a diagram —
+// where the inspection server reads the branch's committed proposal.
+export function worktreeDiagramPath(name: string, diagram: string): string {
+  return `.verdi/data/worktrees/${name}/.verdi/diagrams/${diagram}.mermaid`;
 }

@@ -12,7 +12,7 @@ import (
 )
 
 // This file is the "go run ./cmd/verdi lint exits 0 on the v2 fixture
-// corpus" exit criterion: it builds the real testdata/corpus v2 fixture
+// corpus" exit criterion: it builds the real examples/showcase v2 fixture
 // files (the rung-4 supersession pair, the round-four object-model
 // feature, its three stories/spike, the outcome attestation, and the
 // reaffirmation) into ONE git-real, fully-linted repo.
@@ -30,15 +30,15 @@ import (
 //     the v0 corpus (so it participates in the SAME repo everything else
 //     lives in), and substitutes the freshly-computed SHAs for the golden
 //     literals wherever they're cited.
-//   - accepted-pending-build / borrower-update-* / the outcome attestation
-//     cite "93ddc5bbbb398cf747151e1c466afb83114398df" — goldenHeads[2],
+//   - escrow-autopay / borrower-update-* / the outcome attestation
+//     cite "16219044c9d6d41de9a0de9464ed24d49283b40c" — goldenHeads[2],
 //     the v0 corpus's OWN layer-3 head (reused deliberately, per
 //     corpus_test.go's goldenHeads comment) — which IS already real,
 //     unchanged, once chained after the same v0 corpus layers.txt content
 //     this package's buildLintRepo already reproduces. No substitution
 //     needed for that family.
 //
-// accepted-pending-build's context: pin (adr/0002-outbox-events@<v0 layer
+// escrow-autopay's context: pin (adr/0002-outbox-events@<v0 layer
 // 1 head>) is likewise already real for the same reason.
 
 var (
@@ -53,8 +53,8 @@ func draftVariant(content string) string {
 	return strings.Replace(content, "status: accepted-pending-build\n", "status: draft\n", 1)
 }
 
-// readV2CorpusFile reads a testdata/corpus file (relative to this
-// package's own testdata/corpus, mirroring corpusDir).
+// readV2CorpusFile reads a examples/showcase file (relative to this
+// package's own examples/showcase, mirroring corpusDir).
 func readV2CorpusFile(t *testing.T, rel string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(corpusDir, rel))
@@ -110,15 +110,29 @@ func buildV2FixtureCorpusRepo(t *testing.T) *fixturegit.Repo {
 	layerC := fixturegit.Layer{
 		Files: map[string]string{
 			".verdi/specs/active/loan-workflow-v2/spec.md":             sub(".verdi/specs/active/loan-workflow-v2/spec.md"),
-			".verdi/specs/active/accepted-pending-build/spec.md":       sub(".verdi/specs/active/accepted-pending-build/spec.md"),
-			".verdi/specs/active/accepted-pending-build/layout.json":   sub(".verdi/specs/active/accepted-pending-build/layout.json"),
+			".verdi/specs/active/escrow-autopay/spec.md":               sub(".verdi/specs/active/escrow-autopay/spec.md"),
+			".verdi/specs/active/escrow-autopay/layout.json":           sub(".verdi/specs/active/escrow-autopay/layout.json"),
 			".verdi/specs/active/borrower-update-api/spec.md":          sub(".verdi/specs/active/borrower-update-api/spec.md"),
 			".verdi/specs/active/borrower-update-mobile/spec.md":       sub(".verdi/specs/active/borrower-update-mobile/spec.md"),
 			".verdi/specs/active/borrower-update-mobile-spike/spec.md": sub(".verdi/specs/active/borrower-update-mobile-spike/spec.md"),
-			".verdi/attestations/accepted-pending-build/ac-1.md":       sub(".verdi/attestations/accepted-pending-build/ac-1.md"),
+			".verdi/attestations/escrow-autopay/ac-1.md":               sub(".verdi/attestations/escrow-autopay/ac-1.md"),
 			".verdi/reaffirmations/jira-loan-1483/ac-1.md":             sub(".verdi/reaffirmations/jira-loan-1483/ac-1.md"),
+			// public-rollout-plan Task 1.4: real obligations for the two
+			// stub/deviating stories, replacing their former
+			// obligationGateBaseline exemption (vl020.go) — added here,
+			// alongside their sibling spec.md files, rather than
+			// layers.txt (which only this package's + internal/corpus's
+			// own v0-layer builds read; see layers.txt's own
+			// borrower-update-mobile/deviation-report.md precedent for why
+			// a file that verifies a non-layered spec must not be
+			// layers.txt-tracked on its own).
+			".verdi/obligations/borrower-update-api/ac-1--static.md":        sub(".verdi/obligations/borrower-update-api/ac-1--static.md"),
+			".verdi/obligations/borrower-update-api/ac-1--behavioral.md":    sub(".verdi/obligations/borrower-update-api/ac-1--behavioral.md"),
+			".verdi/obligations/borrower-update-mobile/ac-1--static.md":     sub(".verdi/obligations/borrower-update-mobile/ac-1--static.md"),
+			".verdi/obligations/borrower-update-mobile/ac-1--behavioral.md": sub(".verdi/obligations/borrower-update-mobile/ac-1--behavioral.md"),
+			".verdi/obligations/borrower-update-mobile/ac-2--behavioral.md": sub(".verdi/obligations/borrower-update-mobile/ac-2--behavioral.md"),
 		},
-		Message: "v2 corpus: loan-workflow-v2 frozen + accepted-pending-build cluster + reaffirmation",
+		Message: "v2 corpus: loan-workflow-v2 frozen + escrow-autopay cluster + reaffirmation + obligations",
 	}
 
 	layers := append(append([]fixturegit.Layer{}, base...), layerA, layerB, layerC)
@@ -136,6 +150,7 @@ func TestV2FixtureCorpus_LintsClean(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Engine.Run: %v", err)
 	}
+	findings = filterKnownBaseline(findings)
 	if len(findings) != 0 {
 		t.Fatalf("v2 fixture corpus: got %d findings, want 0:\n%s", len(findings), findingsString(findings))
 	}
@@ -160,6 +175,7 @@ func TestV2FixtureCorpus_BareClone_OnlyVL017Disclosures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Engine.Run: %v", err)
 	}
+	findings = filterKnownBaseline(findings)
 	if len(findings) == 0 {
 		t.Fatal("bare clone produced 0 findings — a vacuous green; want VL-017 disclosed-unproven notices")
 	}

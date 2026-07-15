@@ -48,7 +48,7 @@ story: ` + story + `
 problem: { text: "the ` + name + ` flow is untracked", anchor: "#problem" }
 outcome: { text: "the ` + name + ` flow is specified", anchor: "#outcome" }
 links:
-  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+  - { type: implements, ref: spec/escrow-autopay#ac-1 }
 ---
 # ` + name + `
 

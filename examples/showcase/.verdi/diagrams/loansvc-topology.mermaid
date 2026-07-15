@@ -1,0 +1,17 @@
+---
+id: diagram/loansvc-topology
+kind: diagram
+title: "LoanServ service topology"
+status: active
+owners: [platform-team]
+links:
+  - { type: derived-from, ref: spec/store-layout-notes }
+  - { type: depends-on, ref: adr/0005-event-schema-registry }
+---
+graph TD
+  loansvc -->|events: decline-notice v1| notification-svc
+  loansvc -->|events: charge-retry v1| payments-gw
+  loansvc -->|events: escrow-state-changed v1| escrow-svc
+  loansvc -->|events: rate-lock-status v1| rate-engine
+  loansvc -->|events: document-generated v1| doc-vault
+  loansvc -->|events: account-view-updated v1| borrower-portal

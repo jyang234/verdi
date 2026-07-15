@@ -49,7 +49,9 @@ test("highlighted code is legible in dark mode (light-on-dark, not github light 
 
 test("a diagram-kind page renders its mermaid source to an SVG", async ({ page }) => {
   // The corpus provisions diagram/loansvc-topology.mermaid, whose body is
-  // `graph TD\n  loansvc --> notification-svc ...`. Before the fix that body
+  // `graph TD\n  loansvc -->|events: decline-notice v1| notification-svc
+  // ...` (public-rollout-plan Task 1.7: the full 7-service topology).
+  // Before the fix that body
   // ran through the markdown renderer and collapsed into <p> prose, so
   // mermaid.js found no .mermaid element. Now the diagram KIND emits a bare
   // <pre class="mermaid"> the client turns into an <svg>. Default scheme.

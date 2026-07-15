@@ -9,7 +9,7 @@ import (
 )
 
 // The regression fixture's geometry (owner UAT, R4-I-35):
-// testdata/corpus/.verdi/specs/active/accepted-pending-build/layout.json
+// examples/showcase/.verdi/specs/active/escrow-autopay/layout.json
 // stores ac-1 at (40,20) and ac-2 at (220,20) — a 20px footprint overlap
 // under the uniform CardWidth=200 — plus dc-1 at (40,180), clear of both.
 // Positions saved before the footprint enlargement can collide like this

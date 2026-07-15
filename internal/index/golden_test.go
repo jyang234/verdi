@@ -13,10 +13,10 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
-const corpusDir = "../../testdata/corpus"
+const corpusDir = "../../examples/showcase"
 const svcfixDir = "../../testdata/svcfix"
 
-// parseCorpusLayers reads testdata/corpus/layers.txt (the same manifest
+// parseCorpusLayers reads examples/showcase/layers.txt (the same manifest
 // internal/corpus's own tests use) and returns, in ascending layer order,
 // each layer's corpus-relative file paths.
 func parseCorpusLayers(t testing.TB) []fixturegit.Layer {
@@ -104,7 +104,7 @@ func copyTree(t testing.TB, src, dst string) {
 	}
 }
 
-// buildGoldenRepo builds testdata/corpus via fixturegit (stable, golden
+// buildGoldenRepo builds examples/showcase via fixturegit (stable, golden
 // SHAs) and overlays testdata/svcfix as a real service root at
 // <repo>/svcfix/, matching PLAN.md phase 3's golden test: "the
 // fixturegit-built corpus + svcfix".
@@ -115,24 +115,46 @@ func buildGoldenRepo(t testing.TB) string {
 	return repo.Dir
 }
 
-// wantCommittedRefs is every ref testdata/corpus's committed zone must
+// wantCommittedRefs is every ref examples/showcase's committed zone must
 // produce (every kind and status the corpus exercises, per PLAN.md §4).
 var wantCommittedRefs = []string{
 	"spec/store-layout-notes",
 	"spec/legacy-cache-policy",
-	"spec/new-feature-x",
 	"spec/stale-decline",
 	"spec/loan-refi-2023",
 	"diagram/loansvc-topology",
+	// public-rollout-plan Task 1.7: diagram/borrower-journey, new,
+	// illustrative-by-class second diagram artifact (layers.txt layer 1).
+	"diagram/borrower-journey",
 	"adr/0001-outbox-events",
 	"adr/0002-outbox-events",
 	"adr/0003-retry-policy",
+	// public-rollout-plan Task 1.6: adr/0004 and adr/0005, both new,
+	// accepted ADRs (layers.txt layer 5).
+	"adr/0004-pii-redaction-at-ingest",
+	"adr/0005-event-schema-registry",
 	"attestation/jira-loan-1482--ac-2",
 	"waiver/jira-loan-1482--ac-3",
 	"waiver/jira-loan-1482--ac-4",
 	"conflict/stale-decline-incident",
-	"conflict/legacy-cache-dispute",
+	"conflict/pii-outbox-leak",
 	"conflict/false-alarm",
+	"spec/escrow-notify",
+	"spec/escrow-notify-v2",
+	"spec/refi-rate-check-2024",
+	// public-rollout-plan Task 1.5: spec/rate-lock and spec/rate-lock-v2
+	// moved out of layers.txt into their own dedicated, unchained
+	// fixturegit history (internal/artifact/v2fixture_test.go) once
+	// rate-lock-v2 grew a real `supersession:` block — VL-015 needs to
+	// read the predecessor's content back through git history at its own
+	// frozen.commit, which only a draft-then-frozen sub-history (not this
+	// shared layers.txt corpus) can satisfy for a file introduced fresh in
+	// a shared layer. They are no longer part of this fixturegit-built
+	// tree; see examples/showcase/layers.txt's own note.
+	"obligation/escrow-notify--ac-1--behavioral",
+	"obligation/escrow-notify-v2--ac-1--behavioral",
+	"obligation/refi-rate-check-2024--ac-1--static",
+	"obligation/refi-rate-check-2024--ac-1--behavioral",
 }
 
 var wantExternalRefs = []string{
@@ -185,7 +207,7 @@ func TestGolden_ExternalRefsMinted(t *testing.T) {
 
 // TestGolden_BacklinksCoverEveryExercisedInverseType asserts at least one
 // backlink of every 02 §Link taxonomy inverse type the corpus exercises
-// (every forward link type in testdata/corpus except `story`, which has no
+// (every forward link type in examples/showcase except `story`, which has no
 // inverse — verified against a full grep of the corpus in code review).
 func TestGolden_BacklinksCoverEveryExercisedInverseType(t *testing.T) {
 	root := buildGoldenRepo(t)
@@ -213,7 +235,7 @@ func TestGolden_BacklinksCoverEveryExercisedInverseType(t *testing.T) {
 		// not itself an indexed entry (lint, not the index, owns
 		// resolution — VL-003).
 		{"impacted-by", "svc/loansvc/boundary-contract", "spec/stale-decline"},
-		{"challenged-by", "spec/legacy-cache-policy", "conflict/legacy-cache-dispute"},
+		{"challenged-by", "adr/0002-outbox-events", "conflict/pii-outbox-leak"},
 		{"challenged-by", "spec/stale-decline", "conflict/false-alarm"},
 		{"challenged-by", "spec/stale-decline", "conflict/stale-decline-incident"},
 	}

@@ -1,0 +1,15 @@
+{
+  "schema": "verdi.board/v1",
+  "pins": [
+    { "ref": "spec/loan-refi-2023@f6dd4c4df724c0b16cae435e96f7e34ac94026c9", "x": 100, "y": 100 }
+  ],
+  "stickies": [],
+  "yarn": [],
+  "frozen": { "at": "2026-06-20", "commit": "f6dd4c4df724c0b16cae435e96f7e34ac94026c9" },
+  "provenance": {
+    "generator": "commit-to-design",
+    "version": "v0",
+    "inputs": ["spec/loan-refi-2023@f6dd4c4df724c0b16cae435e96f7e34ac94026c9"],
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

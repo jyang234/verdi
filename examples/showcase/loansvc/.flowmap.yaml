@@ -1,0 +1,21 @@
+version: 1
+service: loansvc
+
+# loansvc is the hub node in .verdi/diagrams/loansvc-topology.mermaid and
+# the service every canon story's own outbox boundary routes through
+# (spec/stale-decline, spec/escrow-autopay, spec/borrower-update-api). Its
+# own `impacts: { ref: svc/loansvc/boundary-contract }` link
+# (stale-decline/spec.md) needs a real, discoverable service root to
+# resolve (01 §Store manifest: "any directory containing .flowmap.yaml is
+# a service root") — this fixture is that root, shaped like
+# testdata/svcfix's own minimal convention: presence and the two consumed
+# keys (`service`, `obligations[].name`) via artifact.DecodeFlowmapLoose,
+# not a real flowmap-analyzed Go module (phase 5's own scope).
+classify:
+  busPublish:
+    - "example.com/loansvc/internal/outbox#Publish"
+
+obligations:
+  - name: stale-decline-retry-before-notify
+    require: "example.com/loansvc/internal/outbox#Publish"
+    before: "example.com/loansvc/internal/notify#Send"

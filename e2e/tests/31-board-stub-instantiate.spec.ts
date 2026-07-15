@@ -10,7 +10,7 @@ import {
 } from "./fixtures";
 
 // Instantiate-story-from-stub (spec/scoping-canvas ac-6) on the sealed
-// wall: FEATURE_SPEC is accepted-pending-build on main (the harness
+// wall: FEATURE_SPEC is escrow-autopay on main (the harness
 // store is a real git repository), so its board is READ-ONLY — and the
 // one live affordance a sealed record permits is Instantiate. The action
 // cuts design/<slug> via no-checkout plumbing: the serving checkout
@@ -42,13 +42,13 @@ test.describe("scoping canvas: the sealed wall instantiates its stubs", () => {
       await expect(stub.locator(".card-kind-label")).toHaveText("story stub");
     }
     // Coverage is computed from the same frontmatter (ac-4, co-2):
-    // ac-1 is claimed by the api and ui stubs, ac-2 by ui, ac-3 by the
-    // audit log.
+    // ac-1 is claimed by the mandate-api stub only, ac-2 by both stubs,
+    // ac-3 by the retry-policy stub only (public-rollout-plan Task 1.5).
     await expect(page.getByTestId(coverageChipTestId("ac-1"))).toHaveText(
-      "covered by 2 stubs",
+      "covered by 1 stub",
     );
     await expect(page.getByTestId(coverageChipTestId("ac-2"))).toHaveText(
-      "covered by 1 stub",
+      "covered by 2 stubs",
     );
     await expect(page.getByTestId(coverageChipTestId("ac-3"))).toHaveText(
       "covered by 1 stub",

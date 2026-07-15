@@ -26,10 +26,10 @@ links:
 `
 
 const featureSpecDraftYAML = `
-id: spec/new-feature-x
+id: spec/sample-new-feature
 kind: spec
 class: feature
-title: "New feature X"
+title: "Sample new feature"
 status: draft
 owners: [platform-team]
 story: jira:LOAN-9999

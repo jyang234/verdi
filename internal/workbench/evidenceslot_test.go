@@ -63,7 +63,7 @@ owners: [platform-team]
 for_kind: behavioral
 links:
   - { type: verifies, ref: "spec/widget-slot-story" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # a Playwright test drives the widget
 

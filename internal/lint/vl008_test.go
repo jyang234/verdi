@@ -55,7 +55,7 @@ owners: [platform-team]
 provenance:
   generator: some-generator
   version: v0
-  inputs: [spec/store-layout-notes@c5e360a9ee5e9eb6089e54b772fa16959ada4662]
+  inputs: [spec/store-layout-notes@78e3161594fb31fdad17f2ea8a96b52f33dbf0f3]
   digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
 ---
 # VL-008 overlay: allowlisted generated provenance

@@ -1,4 +1,4 @@
-// Package corpus builds the testdata/corpus fixture into a deterministic
+// Package corpus builds the examples/showcase fixture into a deterministic
 // git repository via internal/fixturegit and decodes every file in it
 // through internal/artifact, proving the whole fixture corpus is both
 // git-real (stable, golden SHAs) and contract-valid (every file decodes
@@ -19,19 +19,26 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/store"
 )
 
-// corpusDir is testdata/corpus relative to this package.
-const corpusDir = "../../testdata/corpus"
+// corpusDir is examples/showcase relative to this package.
+const corpusDir = "../../examples/showcase"
 
-// goldenHeads are the fixturegit commit SHAs for layers 1, 2, and 3,
+// goldenHeads are the fixturegit commit SHAs for layers 1 through 5,
 // baked in once per PLAN.md §4 ("Pins inside corpus files must be the
 // literal deterministic SHAs (build once, bake in, test forever)") and
 // reproduced by every corpus file's frozen stamps and pinned refs.
+// Layer 5 (public-rollout-plan Task 1.6: adr/0004, adr/0005) is nothing's
+// own predecessor citation, so nothing in the corpus cites its own head —
+// it appears here only to satisfy TestFixtureRepo_MatchesGoldenSHAs' final
+// Head check.
 var goldenHeads = []string{
-	"c5e360a9ee5e9eb6089e54b772fa16959ada4662", // layer 1
-	"7176513ece8b608ab0911000691bb697ee7e75ec", // layer 2
-	"93ddc5bbbb398cf747151e1c466afb83114398df", // layer 3
+	"78e3161594fb31fdad17f2ea8a96b52f33dbf0f3", // layer 1
+	"f6dd4c4df724c0b16cae435e96f7e34ac94026c9", // layer 2
+	"16219044c9d6d41de9a0de9464ed24d49283b40c", // layer 3
+	"38cc28c9f7bdf4098bccc724caddd0acdc2d17f6", // layer 4
+	"2fa709f0136849286c834a7de4777c47a752d731", // layer 5
 }
 
 // goldenHeadsV2 are the v1-P1 rung-4 supersession pair's own, separate
@@ -39,13 +46,25 @@ var goldenHeads = []string{
 // TestV2SupersessionRepo_MatchesGoldenSHAs builds and re-verifies this same
 // history) — a second, independent repo rather than a fourth layer on the
 // v0 corpus's history, since nothing about the v2 overlay needs to
-// interleave with v0's existing golden commits. testdata/corpus/'s v2
+// interleave with v0's existing golden commits. examples/showcase/'s v2
 // fixtures (loan-workflow, loan-workflow-v2, and the reaffirmation that
 // pins loan-workflow-v2's commit) cite these SHAs, so this walk test's
 // accepted-token set grows to include them.
+//
+// public-rollout-plan Task 1.5 extends the same dedicated history with two
+// more layers (chained after the first two) for rate-lock/rate-lock-v2 —
+// the feature-rung supersession pair whose v2 now carries a real
+// `supersession:` block (VL-015): a predecessor's object manifest is read
+// via `git show <pred.frozen.commit>:<pred.RelPath>`, which only succeeds
+// if the predecessor already exists, with matching content, at that exact
+// commit — impossible under the layers.txt main corpus's own "layer N
+// cites layer N-1" convention for a file introduced fresh in layer N. Both
+// pairs solve it the same way: a draft-then-frozen two-commit sub-history.
 var goldenHeadsV2 = []string{
 	"b5117ecc69b6779ad75cde60d4aec206ece0950b", // v2 layer 1 (loan-workflow v1 draft)
 	"06a3f4cabb226fe9344e1645e27c344493b6b62b", // v2 layer 2 (loan-workflow v1 frozen + loan-workflow-v2 draft)
+	"620ade86bbd810b440a0d995859745d4402d7be8", // v2 layer 3 (rate-lock v1 draft)
+	"87c65ef5e70024c112b12e275d550f1ca8584df3", // v2 layer 4 (rate-lock v1 frozen + rate-lock-v2 draft)
 }
 
 // parseLayers reads layers.txt and returns, for each layer number in
@@ -205,6 +224,16 @@ func decodeCommittedFile(t *testing.T, rel string, data []byte) {
 	t.Helper()
 
 	switch {
+	case rel == ".verdi/verdi.yaml":
+		if _, err := store.DecodeManifest(data); err != nil {
+			t.Fatalf("%s: DecodeManifest: %v", rel, err)
+		}
+
+	case strings.HasSuffix(rel, "/layout.json"):
+		if _, err := artifact.DecodeBoardLayout(data); err != nil {
+			t.Fatalf("%s: DecodeBoardLayout: %v", rel, err)
+		}
+
 	case strings.HasSuffix(rel, "/spec.md"):
 		fm, body, err := artifact.SplitFrontmatter(data)
 		if err != nil {
@@ -277,6 +306,15 @@ func decodeCommittedFile(t *testing.T, rel string, data []byte) {
 		}
 		if _, err := artifact.DecodeConflict(fm); err != nil {
 			t.Fatalf("%s: DecodeConflict: %v", rel, err)
+		}
+
+	case strings.HasPrefix(rel, ".verdi/obligations/"):
+		fm, _, err := artifact.SplitFrontmatter(data)
+		if err != nil {
+			t.Fatalf("%s: SplitFrontmatter: %v", rel, err)
+		}
+		if _, err := artifact.DecodeObligation(fm); err != nil {
+			t.Fatalf("%s: DecodeObligation: %v", rel, err)
 		}
 
 	default:
@@ -357,8 +395,8 @@ func TestFixtureCorpus_MutableAndDerivedFilesDecode(t *testing.T) {
 		dir        string
 		wantSource artifact.ProvenanceSource
 	}{
-		{"derived/spec--stale-decline/7176513ece8b608ab0911000691bb697ee7e75ec", artifact.SourceCI},
-		{"derived/spec--stale-decline/93ddc5bbbb398cf747151e1c466afb83114398df", artifact.SourceLocal},
+		{"derived/spec--stale-decline/f6dd4c4df724c0b16cae435e96f7e34ac94026c9", artifact.SourceCI},
+		{"derived/spec--stale-decline/16219044c9d6d41de9a0de9464ed24d49283b40c", artifact.SourceLocal},
 	}
 	for _, dd := range derivedDirs {
 		dd := dd

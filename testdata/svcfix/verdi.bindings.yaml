@@ -3,7 +3,7 @@
 # The obligation "audit-before-publish" supplies static evidence for ac-1
 # and ac-2; the golden flow "refund-flow" (testdata/flows/refund-flow —
 # phase 5 grows the actual golden file) supplies behavioral evidence for
-# ac-3. Matches testdata/corpus/.verdi/specs/active/stale-decline/spec.md's
+# ac-3. Matches examples/showcase/.verdi/specs/active/stale-decline/spec.md's
 # acceptance_criteria block.
 schema: verdi.bindings/v1
 spec: spec/stale-decline

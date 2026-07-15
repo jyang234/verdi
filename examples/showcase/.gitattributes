@@ -1,0 +1,3 @@
+.verdi/specs/*/*/board.json          gitlab-generated
+.verdi/specs/*/*/rollup.json         gitlab-generated
+.verdi/specs/*/*/deviation-report.md gitlab-generated

@@ -16,39 +16,41 @@ import (
 
 // corpusDir and violationsDir mirror internal/corpus and internal/index's
 // own testdata references (../../testdata/... from this package).
-const corpusDir = "../../testdata/corpus"
+const corpusDir = "../../examples/showcase"
 const violationsDir = "../../testdata/violations"
 
-// setupManifestYAML is the store manifest every lint test's repo carries —
+// setupManifestYAML is a store manifest for the STANDALONE lint fixtures
+// that build their own repo from scratch instead of chaining the committed
+// examples/showcase tree (buildVL015Repo) — it is byte-identical to
+// examples/showcase's own committed .verdi/verdi.yaml (layers.txt layer 1):
 // forge: gitlab (so VL-012 expects gitlab-generated), a configured jira
-// story-provider scheme (VL-005), and an empty gated_generated allowlist
-// (VL-008). Kept separate from testdata/corpus itself (which carries no
-// verdi.yaml of its own) so this package never touches phase 2/3's golden
-// corpus fixture or its pinned SHAs.
+// story-provider scheme (VL-005), and services.discovery: flowmap. The
+// corpus-chaining harnesses (buildLintRepo, buildV2FixtureCorpusRepo) do
+// NOT use this — they lint the committed manifest layers.txt already carries
+// as layer 1, unmodified, so those gates prove the real store's own manifest
+// rather than a synthetic variant.
 const setupManifestYAML = `schema: verdi.layout/v1
 forge: gitlab
 providers:
   jira:
     base_url: https://example.atlassian.net
     rollup_field: customfield_00000
-lint:
-  gated_generated: []
-derived:
-  retention_days: 14
 services:
   discovery: flowmap
 `
 
 // setupGitAttributes is the repository-root .gitattributes VL-012
 // requires (02 §Repository plumbing's literal example, gitlab-generated
-// token to match setupManifestYAML's forge: gitlab).
+// token to match forge: gitlab) — byte-identical to examples/showcase's
+// own committed .gitattributes, which layers.txt does not track (it lists
+// .verdi/ content only), so the setup layer supplies it to the built repo.
 const setupGitAttributes = `.verdi/specs/*/*/board.json          gitlab-generated
 .verdi/specs/*/*/rollup.json         gitlab-generated
 .verdi/specs/*/*/deviation-report.md gitlab-generated
 `
 
 // loansvcFlowmapYAML and loansvcBoundaryContractJSON satisfy
-// testdata/corpus's own `impacts: { ref: svc/loansvc/boundary-contract }`
+// examples/showcase's own `impacts: { ref: svc/loansvc/boundary-contract }`
 // link (stale-decline/spec.md) — the corpus fixture names a "loansvc"
 // service that phase 3's own svcfix fixture (named "svcfix") does not
 // provide. Written directly to the built repo's working tree, untracked:
@@ -67,7 +69,7 @@ const loansvcBoundaryContractJSON = `{
 }
 `
 
-// parseCorpusLayers reads testdata/corpus/layers.txt (the same manifest
+// parseCorpusLayers reads examples/showcase/layers.txt (the same manifest
 // internal/corpus and internal/index's own tests use) and returns, in
 // ascending layer order, each layer's corpus-relative file paths as
 // fixturegit Layers.
@@ -124,15 +126,20 @@ func parseCorpusLayers(t testing.TB) []fixturegit.Layer {
 	return layers
 }
 
-// setupLayer is the fixed fourth layer every lint test repo gets: the
-// store manifest and root .gitattributes.
+// setupLayer is the fixed layer buildLintRepo/buildV2FixtureCorpusRepo add
+// on top of the committed corpus: it carries ONLY the root .gitattributes
+// (byte-identical to examples/showcase's committed .gitattributes), which
+// VL-012 requires but which layers.txt does not track (layers.txt lists
+// .verdi/ content only). The store manifest is deliberately NOT re-added
+// here — the committed .verdi/verdi.yaml that layers.txt already carries as
+// layer 1 stands unmodified, so the lint-clean gates prove the real store's
+// own manifest, not a synthetic overwrite.
 func setupLayer() fixturegit.Layer {
 	return fixturegit.Layer{
 		Files: map[string]string{
-			".verdi/verdi.yaml": setupManifestYAML,
-			".gitattributes":    setupGitAttributes,
+			".gitattributes": setupGitAttributes,
 		},
-		Message: "phase 4 lint test setup: manifest + gitattributes",
+		Message: "lint test setup: root .gitattributes",
 	}
 }
 
@@ -216,10 +223,24 @@ func writeTestFile(t *testing.T, path, content string) {
 	}
 }
 
-// buildLintRepo builds the corpus (3 golden layers) + the fixed setup
-// layer + one additional layer per overlayDir (each layered as its own
-// commit, in order), then overlays the loansvc discovery fixture
-// untracked. Returns the built repo.
+// buildLintRepo builds the committed corpus (every layers.txt layer,
+// including its committed .verdi/verdi.yaml) + the fixed setup layer (root
+// .gitattributes only) + one additional layer per overlayDir (each layered
+// as its own commit, in order), then overlays the loansvc discovery fixture
+// untracked and provisions a present-but-empty mutable zone. Returns the
+// built repo.
+//
+// The mutable zone is materialized present-but-empty rather than populated
+// with examples/showcase's committed mutable/derived fixtures: the harness
+// thus lints the committed tree with an empty mutable zone, which is sound
+// because VL-017 — the only rule that reads the mutable zone (no rule reads
+// the derived zone) — keys off zone PRESENCE, so a present-empty zone makes
+// it run and disclose nothing rather than pass vacuously, and the committed
+// annotations are all agent-task / board-only / grandfathered-target and so
+// inert to VL-017 regardless. Populating the shared zone here would also
+// collide with the per-test annotations vl017_test writes into it. VL-017's
+// mutable-absent disclosure path is proven separately by
+// TestV2FixtureCorpus_BareClone_OnlyVL017Disclosures.
 func buildLintRepo(t *testing.T, overlayDirs ...string) *fixturegit.Repo {
 	t.Helper()
 	layers := parseCorpusLayers(t)
@@ -233,16 +254,55 @@ func buildLintRepo(t *testing.T, overlayDirs ...string) *fixturegit.Repo {
 	return repo
 }
 
+// knownCorpusBaselineFindings is the VL-020 tolerance list Task 1.2
+// introduced for the merged examples/showcase corpus's four then-real
+// findings (escrow-notify(-v2), refi-rate-check-2024's (ac, kind) pairs —
+// dex-only surface fixtures folded from testdata/dexoverlay, deliberately
+// never lint-clean at the time). public-rollout-plan Task 1.5 authored
+// real obligations for all four
+// (.verdi/obligations/escrow-notify/ac-1--behavioral.md;
+// .verdi/obligations/escrow-notify-v2/ac-1--behavioral.md;
+// .verdi/obligations/refi-rate-check-2024/ac-1--{static,behavioral}.md),
+// so the corpus now genuinely produces zero VL-020 findings on its own —
+// this list ends EMPTY, as Task 1.2's own doc comment anticipated
+// ("Task 1.8 ... is expected to author real obligations for these and
+// delete this filter"; landing earlier, in Task 1.5, changes nothing
+// about the mechanism itself). The mechanism (map + filterKnownBaseline)
+// stays rather than being deleted outright: it is still the single shared
+// entry point every buildLintRepo/buildV2FixtureCorpusRepo-based test
+// routes through, and remains available, empty, for any future genuinely
+// pre-existing corpus debt — an empty map is a no-op filter, not a
+// silently reintroduced tolerance.
+var knownCorpusBaselineFindings = map[[3]string]bool{}
+
+// filterKnownBaseline strips knownCorpusBaselineFindings (see its doc
+// comment) from findings. Every direct NewEngine().Run(...) call site in
+// this package's tests must route its result through this (or through
+// runLint, which already does) — buildLintRepo and buildV2FixtureCorpusRepo
+// both chain examples/showcase's real layers.txt content, so both inherit
+// the same baseline.
+func filterKnownBaseline(findings []Finding) []Finding {
+	out := findings[:0:0]
+	for _, f := range findings {
+		if knownCorpusBaselineFindings[[3]string{f.Rule, f.Path, f.Message}] {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 // runLint runs every rule over root and fails the test on an operational
 // error (BuildSnapshot/service-discovery failure) — the tests below only
-// ever expect Finding-shaped problems.
+// ever expect Finding-shaped problems. Strips knownCorpusBaselineFindings
+// (see its doc comment) before returning.
 func runLint(t *testing.T, root string, lctx Context, opts Options) []Finding {
 	t.Helper()
 	findings, err := NewEngine().Run(context.Background(), root, lctx, opts)
 	if err != nil {
 		t.Fatalf("Engine.Run: %v", err)
 	}
-	return findings
+	return filterKnownBaseline(findings)
 }
 
 // findingsString renders findings for a test failure message.

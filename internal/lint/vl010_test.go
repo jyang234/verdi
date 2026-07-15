@@ -20,7 +20,7 @@ owners: [platform-team]
 story: jira:LOAN-0013
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # VL-010: superseded flip
 `
@@ -162,7 +162,7 @@ owners: [platform-team]
 story: jira:LOAN-0015
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # VL-010: feature predecessor superseded flip
 `
@@ -206,7 +206,7 @@ owners: [platform-team]
 story: jira:LOAN-0014
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # VL-010: closed archive move
 `
@@ -297,6 +297,77 @@ func TestVL010_ArchiveMoveFlipToNonClosedStatusStillFails(t *testing.T) {
 	}
 }
 
+// vl010NestedProbeADR is a minimal frozen ADR used by
+// TestVL010_OnlyRootStoreArtifactsSwept to prove VL-010's sweep is scoped to
+// the root store's own .verdi/ tree: the SAME frozen-then-modified diff shape
+// fires when the file lives at the root store's `.verdi/adr/...` but is
+// ignored when it lives inside a nested/fixture store (`<dir>/.verdi/adr/...`,
+// e.g. examples/showcase's committed fixture store or a testdata/violations
+// overlay), whose frozen-stamped files are fixtures, not this store's
+// artifacts.
+const vl010NestedProbeADR = `---
+id: adr/vl-010-nested-probe
+kind: adr
+title: "VL-010 nested-store probe"
+status: accepted
+owners: [platform-team]
+decided: 2026-05-14
+frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
+---
+# VL-010 nested-store probe
+`
+
+// TestVL010_OnlyRootStoreArtifactsSwept proves VL-010 governs only the root
+// store's own frozen artifacts (paths under the root `.verdi/`) — exactly the
+// tree walk.go's walkDocuments walks — and never sweeps frozen-stamped files
+// inside a nested store or fixture overlay reached only by the whole-repo git
+// diff. Table-driven: the identical modify-a-frozen-file diff is a VL-010
+// violation at the root store path (happy path) and a no-op at a nested path
+// (negative path).
+func TestVL010_OnlyRootStoreArtifactsSwept(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		relPath   string
+		wantVL010 bool
+	}{
+		{
+			name:      "root store frozen file modified is swept",
+			relPath:   ".verdi/adr/vl-010-nested-probe.md",
+			wantVL010: true,
+		},
+		{
+			name:      "nested store frozen file modified is not swept",
+			relPath:   "vendored/nested-store/.verdi/adr/vl-010-nested-probe.md",
+			wantVL010: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			overlay := adHocOverlayDir(t, tc.relPath, vl010NestedProbeADR)
+			repo := buildLintRepo(t, overlay)
+			beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+			after := strings.Replace(vl010NestedProbeADR,
+				`title: "VL-010 nested-store probe"`,
+				`title: "VL-010 nested-store probe EDITED"`, 1)
+			probePath := filepath.Join(repo.Dir, filepath.FromSlash(tc.relPath))
+			writeTestFile(t, probePath, after)
+			commitAll(t, repo.Dir, "modify frozen probe adr")
+
+			findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+			var sawVL010 bool
+			for _, f := range findings {
+				if f.Rule == "VL-010" {
+					sawVL010 = true
+				}
+			}
+			if sawVL010 != tc.wantVL010 {
+				t.Fatalf("VL-010 fired = %v, want %v for a modified frozen file at %s:\n%s",
+					sawVL010, tc.wantVL010, tc.relPath, findingsString(findings))
+			}
+		})
+	}
+}
+
 // TestVL010_NoDiffBase_Silent proves the "can't prove it" posture: with no
 // DiffBase established, VL-010 does not guess.
 func TestVL010_NoDiffBase_Silent(t *testing.T) {
@@ -326,7 +397,7 @@ owners: [platform-team]
 story: jira:LOAN-0012
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # VL-010: legal archive move
 `

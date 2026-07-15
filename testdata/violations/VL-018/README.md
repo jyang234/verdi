@@ -6,7 +6,7 @@ rules, §Record schemas "Board layout"), implemented at V1-P2.
 - `.verdi/specs/active/vl-018-dangling-key/spec.md` — a minimal new-class
   feature spec declaring `ac-1` and `co-1`, each with a resolving anchor.
   Simplified at V1-P2 from V1-P1's original skeleton (a full copy of the
-  `accepted-pending-build` corpus fixture, complete with a `frozen:` stamp
+  `escrow-autopay` corpus fixture, complete with a `frozen:` stamp
   citing a commit that is not real git history in this package's own
   fixturegit-built test repos) down to the minimum this rule's own
   resolution logic needs, avoiding an unrelated VL-009 finding.

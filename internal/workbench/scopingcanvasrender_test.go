@@ -537,7 +537,7 @@ func TestScopingCanvas_ProtoStickyLandsInStubBand(t *testing.T) {
 }
 
 // The two committed fixtures that already declare stubs — the corpus's
-// accepted-pending-build (also driven end-to-end by e2e/tests/31) and
+// escrow-autopay (also driven end-to-end by e2e/tests/31) and
 // this repo's own live-store disclosure-legibility — render their stub
 // cards for free; assert them verbatim so the committed record and the
 // wall never drift apart silently.
@@ -547,10 +547,10 @@ func TestScopingCanvas_CommittedFixturesRenderStubCards(t *testing.T) {
 		slugs      []string
 	}{
 		{
-			name: "accepted-pending-build (testdata/corpus)",
-			path: "../../testdata/corpus/.verdi/specs/active/accepted-pending-build/spec.md",
+			name: "escrow-autopay (examples/showcase)",
+			path: "../../examples/showcase/.verdi/specs/active/escrow-autopay/spec.md",
 			slugs: []string{
-				"borrower-update-api", "borrower-update-ui", "borrower-update-audit-log",
+				"autopay-mandate-api", "autopay-retry-policy",
 			},
 		},
 		{

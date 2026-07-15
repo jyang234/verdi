@@ -448,6 +448,27 @@ bindings:
       - "spec/workbench-directory#ac-4"
       - "spec/workbench-directory#ac-5"
       - "spec/workbench-directory#ac-6"
+      # spec/showcase-corpus-renovation (public-rollout-plan Task 1.8)
+      # ac-1's behavioral leg: `verdi lint` run against a real, git-real
+      # rebuild of each of examples/showcase's two independent fixturegit
+      # histories. layers.txt family: internal/corpus/corpus_test.go's
+      # TestFixtureRepo_MatchesGoldenSHAs proves the fixturegit rebuild is
+      # golden-SHA-stable (the pin-resolution precondition — it asserts SHAs,
+      # not lint), and internal/lint's TestClean_CorpusLintsGreen is the
+      # lint-clean proof itself: every rule over that rebuilt tree, zero
+      # findings, mutable zone present. rung-4/escrow-autopay family:
+      # internal/lint's TestV2FixtureCorpus_LintsClean (zero findings, mutable
+      # zone present) and _BareClone_OnlyVL017Disclosures (VL-017-only
+      # disclosures when the mutable zone is removed). All re-verified this
+      # task against the real built binary, not just the go test assertion
+      # (task-1.8-report.md).
+      # Naming the two-history rebuild here (not the frozen obligation's
+      # literal single-commit wording) is the owner-ratified evidence
+      # definition, recorded in 08-revision-notes "Public rollout — showcase
+      # ac-1 evidence" (ADJ-16 class, 2026-07-15): the frozen obligation bytes
+      # stand (VL-010), and its behavioral evidence is this construction. This
+      # binding cites that ratification rather than substituting silently.
+      - "spec/showcase-corpus-renovation#ac-1"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -789,3 +810,11 @@ bindings:
       # write-path inventory statics).
       - "spec/diagram-proposals#ac-1"
       - "spec/diagram-proposals#ac-2"
+      # spec/showcase-corpus-renovation ac-1's static leg: examples/showcase
+      # exists as the single committed store (testdata/corpus and
+      # testdata/dexoverlay no longer present, grep-verified repo-wide),
+      # its layers.txt reflects the merged one-construction-path layering,
+      # and docs/showcase-vetting.md has a row for every file under
+      # examples/showcase plus every provisioned showcase artifact,
+      # zero unrecorded (file-list diff proof in task-1.8-report.md).
+      - "spec/showcase-corpus-renovation#ac-1"

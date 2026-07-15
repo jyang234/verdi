@@ -15,7 +15,7 @@ import (
 )
 
 // TestBoardHandler_Happy proves the board page loads the fixture's real
-// board (testdata/corpus/mutable/boards/STORY-1482.json): its pin, all
+// board (examples/showcase/mutable/boards/STORY-1482.json): its pin, all
 // three stickies with their RESOLVED annotation bodies (including the two
 // board-only ones per I-34 — 05 §Workbench's own "sticky ... including
 // board-only ones"), and the yarn strand.
@@ -36,19 +36,19 @@ func TestBoardHandler_Happy(t *testing.T) {
 		t.Fatalf("missing board canvas, got: %s", body)
 	}
 	// The pin (spec/stale-decline@...).
-	if !strings.Contains(body, "spec/stale-decline@7176513ece8b608ab0911000691bb697ee7e75ec") {
+	if !strings.Contains(body, "spec/stale-decline@f6dd4c4df724c0b16cae435e96f7e34ac94026c9") {
 		t.Fatalf("missing pinned card, got: %s", body)
 	}
 	// The targeted sticky's resolved body text.
-	if !strings.Contains(body, "charge API needs a retry note") {
+	if !strings.Contains(body, "write up a retry note for the charge API path") {
 		t.Fatalf("missing targeted sticky's resolved content, got: %s", body)
 	}
 	// The two board-only stickies (I-34) — no `target`, only `board`.
 	if !strings.Contains(body, "what about partial refunds?") {
 		t.Fatalf("missing board-only sticky (question), got: %s", body)
 	}
-	if !strings.Contains(body, "wire up the retry worker for stale declines") {
-		t.Fatalf("missing board-only sticky (agent-task), got: %s", body)
+	if !strings.Contains(body, "should partial refunds share the stale-decline retry budget?") {
+		t.Fatalf("missing board-only sticky (formal open question), got: %s", body)
 	}
 	// Yarn.
 	if !strings.Contains(body, "relates") {
@@ -106,7 +106,7 @@ func TestBoardAutosave_Happy_RoundTripsAndPersistsAcrossReload(t *testing.T) {
 
 	payload := map[string]any{
 		"pins": []map[string]any{
-			{"ref": "spec/stale-decline@7176513ece8b608ab0911000691bb697ee7e75ec", "x": 999, "y": 888},
+			{"ref": "spec/stale-decline@f6dd4c4df724c0b16cae435e96f7e34ac94026c9", "x": 999, "y": 888},
 		},
 		"stickies": []map[string]any{
 			{"id": "a-01J8Z0K3AAAAAAAAAAAAAAAAAA", "x": 111, "y": 222},
@@ -159,7 +159,7 @@ func TestBoardAutosave_Atomicity(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		payload := map[string]any{
-			"pins":     []map[string]any{{"ref": "spec/stale-decline@7176513ece8b608ab0911000691bb697ee7e75ec", "x": float64(i), "y": float64(i)}},
+			"pins":     []map[string]any{{"ref": "spec/stale-decline@f6dd4c4df724c0b16cae435e96f7e34ac94026c9", "x": float64(i), "y": float64(i)}},
 			"stickies": []map[string]any{},
 			"yarn":     []map[string]any{},
 		}
@@ -207,7 +207,7 @@ func TestBoardAutosave_Negative(t *testing.T) {
 	})
 
 	t.Run("frozen/provenance fields rejected", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/board/STORY-1482/autosave", strings.NewReader(`{"pins":[],"stickies":[],"yarn":[],"frozen":{"at":"2026-01-01","commit":"c5e360a9ee5e9eb6089e54b772fa16959ada4662"}}`))
+		req := httptest.NewRequest(http.MethodPost, "/board/STORY-1482/autosave", strings.NewReader(`{"pins":[],"stickies":[],"yarn":[],"frozen":{"at":"2026-01-01","commit":"78e3161594fb31fdad17f2ea8a96b52f33dbf0f3"}}`))
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {

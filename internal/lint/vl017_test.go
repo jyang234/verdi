@@ -67,10 +67,10 @@ Retry behavior is documented and configurable if needed.
 Should the retry window be configurable per tenant?
 `
 
-const openQuestionAnnotationJSONL = `{"id":"a-01J8Z0K9DDDDDDDDDDDDDDDDDD","ts":"2026-07-11T18:00:00Z","author":"jyang","target":{"ref":"spec/open-question-story@93ddc5bbbb398cf747151e1c466afb83114398df","selector":{"heading":"open-questions","quote":"should the retry window be configurable per tenant?","line":null}},"type":"question","body":"should the retry window be configurable per tenant?","status":"open"}
+const openQuestionAnnotationJSONL = `{"id":"a-01J8Z0K9DDDDDDDDDDDDDDDDDD","ts":"2026-07-11T18:00:00Z","author":"jyang","target":{"ref":"spec/open-question-story@16219044c9d6d41de9a0de9464ed24d49283b40c","selector":{"heading":"open-questions","quote":"should the retry window be configurable per tenant?","line":null}},"type":"question","body":"should the retry window be configurable per tenant?","status":"open"}
 `
 
-const resolvedOpenQuestionAnnotationJSONL = `{"id":"a-01J8Z0K9DDDDDDDDDDDDDDDDDD","ts":"2026-07-11T18:00:00Z","author":"jyang","target":{"ref":"spec/open-question-story@93ddc5bbbb398cf747151e1c466afb83114398df","selector":{"heading":"open-questions","quote":"should the retry window be configurable per tenant?","line":null}},"type":"question","body":"should the retry window be configurable per tenant?","status":"resolved"}
+const resolvedOpenQuestionAnnotationJSONL = `{"id":"a-01J8Z0K9DDDDDDDDDDDDDDDDDD","ts":"2026-07-11T18:00:00Z","author":"jyang","target":{"ref":"spec/open-question-story@16219044c9d6d41de9a0de9464ed24d49283b40c","selector":{"heading":"open-questions","quote":"should the retry window be configurable per tenant?","line":null}},"type":"question","body":"should the retry window be configurable per tenant?","status":"resolved"}
 `
 
 // writeMutableAnnotation writes content into root's untracked
@@ -107,19 +107,32 @@ func TestVL017_MutableZoneAbsent_DisclosedUnproven(t *testing.T) {
 
 	findings := runLint(t, repo.Dir, Context{}, Options{})
 	onlyRule(t, findings, "VL-017")
-	if len(findings) != 1 {
-		t.Fatalf("got %d findings, want 1 disclosed-unproven finding:\n%s", len(findings), findingsString(findings))
+	// Every new-class spec in the merged examples/showcase corpus (Task
+	// 1.2 folded testdata/dexoverlay's escrow-notify(-v2)/rate-lock(-v2)/
+	// refi-rate-check-2024 into layers.txt) trips this SAME disclosure on
+	// a bare clone, alongside this test's own added open-question-story
+	// fixture — so the count is no longer exactly 1; find THIS test's own
+	// finding by path instead of assuming it is the only one.
+	var got *Finding
+	for i := range findings {
+		if findings[i].Path == ".verdi/specs/active/open-question-story/spec.md" {
+			got = &findings[i]
+			break
+		}
 	}
-	if got := findings[0].Message; !containsAll(got, "disclosed-unproven", "data/mutable") {
-		t.Fatalf("message = %q, want it to name disclosed-unproven and data/mutable", got)
+	if got == nil {
+		t.Fatalf("no VL-017 disclosure for .verdi/specs/active/open-question-story/spec.md; findings:\n%s", findingsString(findings))
 	}
-	if findings[0].Severity != SeverityDisclosure {
-		t.Fatalf("severity = %v, want SeverityDisclosure (a printed notice, not a verdict failure)", findings[0].Severity)
+	if !containsAll(got.Message, "disclosed-unproven", "data/mutable") {
+		t.Fatalf("message = %q, want it to name disclosed-unproven and data/mutable", got.Message)
+	}
+	if got.Severity != SeverityDisclosure {
+		t.Fatalf("severity = %v, want SeverityDisclosure (a printed notice, not a verdict failure)", got.Severity)
 	}
 	// The disclosure is printed through the shared internal/disclosure seam
 	// (spec/disclosure-seam-v2, ac-1) — never silent.
-	if got := findings[0].String(); !strings.HasPrefix(got, "disclosed-unproven [lint:VL-017] ") {
-		t.Fatalf("String() = %q, want a printed \"disclosed-unproven [lint:VL-017] ...\" disclosure line", got)
+	if s := got.String(); !strings.HasPrefix(s, "disclosed-unproven [lint:VL-017] ") {
+		t.Fatalf("String() = %q, want a printed \"disclosed-unproven [lint:VL-017] ...\" disclosure line", s)
 	}
 }
 

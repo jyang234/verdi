@@ -6,7 +6,7 @@
 // "build + provision + start" third of that: builds the real verdi binary
 // (build-then-exec, not `go run`, so the suite exercises the exact binary
 // CI would ship — mirroring the Makefile's own lint-store target),
-// provisions a scratch store from testdata/corpus (the same fixture
+// provisions a scratch store from examples/showcase (the same fixture
 // internal/workbench's own Go tests build on — provision.go seeds it as
 // one throwaway real git commit, not fixturegit's golden-SHA-pinned
 // build, since nothing here asserts a specific commit hash), builds a
@@ -88,8 +88,8 @@ func run() error {
 	}
 
 	// The pending-supersession fixture (e2e/tests/16-dex-v2.spec.ts): one
-	// open MR against main carrying testdata/dexoverlay's candidate v2
-	// spec for accepted-pending-build, served through internal/forge's
+	// open MR against main carrying examples/showcase/mr/'s candidate v2
+	// spec for escrow-autopay, served through internal/forge's
 	// hermetic fake — no network (CLAUDE.md), same seam the Go tests use.
 	supersessionForge, err := seedSupersessionForge(moduleRoot)
 	if err != nil {
@@ -130,6 +130,15 @@ func run() error {
 	// the board fixtures above, restoring the serving checkout when done.
 	if err := provisionDraftBoards(storeRoot); err != nil {
 		return fmt.Errorf("provisioning draft-boards fixtures: %w", err)
+	}
+
+	// The showcase live-draft feature (payoff-quote-portal) on its own
+	// design branch — the "one live draft on a design branch" lifecycle
+	// stage (see provision_showcase_draft.go). Runs last among the branch
+	// provisioners; it pre-cuts and seeds its worktree and restores the
+	// serving checkout to designBranch when done.
+	if err := provisionShowcaseDraft(storeRoot); err != nil {
+		return fmt.Errorf("provisioning showcase draft fixtures: %w", err)
 	}
 
 	dexSrv := &http.Server{Addr: dexAddr, Handler: http.FileServer(http.Dir(dexOut))}
@@ -205,16 +214,18 @@ func run() error {
 
 // seedSupersessionForge builds the in-memory forge double the dex build
 // reads open supersession MRs through: MR "mr-7" open against main, its
-// source branch carrying the dexoverlay candidate at the conventional
-// R4-I-14 path — the exact seeding internal/dex's own tests use.
+// source branch carrying the examples/showcase/mr/ candidate at the
+// conventional R4-I-14 path (formerly testdata/dexoverlay/mr/, folded into
+// examples/showcase/mr/ — see examples/showcase/OVERLAY-NOTES.md) — the
+// exact seeding internal/dex's own tests use.
 func seedSupersessionForge(moduleRoot string) (*fake.Forge, error) {
-	candidate, err := os.ReadFile(filepath.Join(moduleRoot, "testdata", "dexoverlay", "mr", "accepted-pending-build-v2.spec.md"))
+	candidate, err := os.ReadFile(filepath.Join(moduleRoot, "examples", "showcase", "mr", "escrow-autopay-v2.spec.md"))
 	if err != nil {
 		return nil, fmt.Errorf("reading MR candidate fixture: %w", err)
 	}
 	f := fake.New()
-	f.SeedOpenMR("main", forge.OpenMR{ID: "mr-7", SourceBranch: "design/accepted-pending-build-v2"})
-	f.SeedFile("design/accepted-pending-build-v2", ".verdi/specs/active/accepted-pending-build-v2/spec.md", candidate)
+	f.SeedOpenMR("main", forge.OpenMR{ID: "mr-7", SourceBranch: "design/escrow-autopay-v2"})
+	f.SeedFile("design/escrow-autopay-v2", ".verdi/specs/active/escrow-autopay-v2/spec.md", candidate)
 	return f, nil
 }
 

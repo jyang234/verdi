@@ -354,7 +354,7 @@ story: jira:LOAN-9
 problem: { text: "p", anchor: "#problem" }
 outcome: { text: "o", anchor: "#outcome" }
 links:
-  - { type: implements, ref: "spec/accepted-pending-build#ac-1" }
+  - { type: implements, ref: "spec/escrow-autopay#ac-1" }
 ---
 # Refi story
 
@@ -378,7 +378,7 @@ Prose.
 	}
 	h := NewHandler(repo.Dir)
 
-	rec := postBoardAPI(t, h, "refi-story", "ref-trash", `{"ref":"spec/accepted-pending-build#ac-1"}`)
+	rec := postBoardAPI(t, h, "refi-story", "ref-trash", `{"ref":"spec/escrow-autopay#ac-1"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("ref-trash on a document-level edge = %d, want 400\n%s", rec.Code, rec.Body.String())
 	}

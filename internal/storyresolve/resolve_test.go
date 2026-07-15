@@ -17,7 +17,7 @@ owners: [platform-team]
 story: jira:LOAN-1482
 acceptance_criteria:
   - { id: ac-1, text: "t", evidence: [static] }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # body
 `
@@ -36,7 +36,7 @@ links:
   - { type: implements, ref: "spec/matrix-helper-test#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "t", evidence: [static] }
-frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-05-14, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # body
 `

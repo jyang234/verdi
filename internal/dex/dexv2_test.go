@@ -15,18 +15,18 @@ import (
 
 // seededSupersessionForge builds the hermetic forge double the
 // pending-supersession fold reads open MRs through: one MR open against
-// "main" whose source branch carries testdata/dexoverlay's candidate v2
-// spec for spec/accepted-pending-build (its manifest amends ac-2 only —
-// see the overlay README).
+// "main" whose source branch carries examples/showcase/mr/'s candidate v2
+// spec for spec/escrow-autopay (its manifest amends ac-2 only —
+// see examples/showcase/OVERLAY-NOTES.md, formerly the overlay README).
 func seededSupersessionForge(t *testing.T) *fake.Forge {
 	t.Helper()
-	candidate, err := os.ReadFile(filepath.Join(dexOverlayDir, "mr", "accepted-pending-build-v2.spec.md"))
+	candidate, err := os.ReadFile(filepath.Join(corpusDir, "mr", "escrow-autopay-v2.spec.md"))
 	if err != nil {
 		t.Fatalf("reading MR candidate fixture: %v", err)
 	}
 	f := fake.New()
-	f.SeedOpenMR("main", forge.OpenMR{ID: "mr-7", SourceBranch: "design/accepted-pending-build-v2"})
-	f.SeedFile("design/accepted-pending-build-v2", ".verdi/specs/active/accepted-pending-build-v2/spec.md", candidate)
+	f.SeedOpenMR("main", forge.OpenMR{ID: "mr-7", SourceBranch: "design/escrow-autopay-v2"})
+	f.SeedFile("design/escrow-autopay-v2", ".verdi/specs/active/escrow-autopay-v2/spec.md", candidate)
 	return f
 }
 
@@ -52,7 +52,7 @@ func buildV2Site(t *testing.T) string {
 // frozen stubs alone" (05 §Lenses, feature lens).
 func TestBuildV2_FeatureLens(t *testing.T) {
 	outDir := buildV2Site(t)
-	page := readFile(t, outDir, "a/spec/accepted-pending-build/index.html")
+	page := readFile(t, outDir, "a/spec/escrow-autopay/index.html")
 
 	t.Run("banner carries the exact honesty text", func(t *testing.T) {
 		if !strings.Contains(page, `data-testid="acceptance-plan-banner"`) {
@@ -67,7 +67,7 @@ func TestBuildV2_FeatureLens(t *testing.T) {
 		if !strings.Contains(page, `data-testid="stub-plan"`) {
 			t.Fatal("feature page missing the stub plan")
 		}
-		for _, slug := range []string{"borrower-update-api", "borrower-update-ui", "borrower-update-audit-log"} {
+		for _, slug := range []string{"autopay-mandate-api", "autopay-retry-policy"} {
 			if !strings.Contains(page, `data-testid="stub-`+slug+`"`) {
 				t.Fatalf("stub plan missing stub-%s", slug)
 			}
@@ -80,10 +80,18 @@ func TestBuildV2_FeatureLens(t *testing.T) {
 		}
 		liveIdx := strings.Index(page, `data-testid="live-mapping"`)
 		live := page[liveIdx:]
-		for _, ref := range []string{"spec/borrower-update-api", "spec/borrower-update-mobile"} {
-			if !strings.Contains(live, ref) {
-				t.Fatalf("live mapping missing implementing story %s; got:\n%s", ref, live)
-			}
+		// public-rollout-plan Task 1.5: escrow-autopay's stories were
+		// rewired to spec/stale-decline (the "built breadth" feature);
+		// only borrower-update-mobile keeps a residual implements edge into
+		// escrow-autopay#ac-2 (preserving the pending-supersession fixture
+		// below), so it is the sole implementing story on this page — ac-1
+		// and ac-3 render "no implementing story", proven honest by this
+		// same test's HTML above.
+		if !strings.Contains(live, "spec/borrower-update-mobile") {
+			t.Fatalf("live mapping missing implementing story spec/borrower-update-mobile; got:\n%s", live)
+		}
+		if strings.Contains(live, "spec/borrower-update-api") {
+			t.Fatalf("live mapping must not name spec/borrower-update-api — its implements edges moved to spec/stale-decline; got:\n%s", live)
 		}
 	})
 
@@ -122,12 +130,31 @@ func TestBuildV2_FeatureLens(t *testing.T) {
 		}
 	})
 
-	t.Run("grandfathered v0 feature and story pages carry no lens section", func(t *testing.T) {
-		for _, rel := range []string{"a/spec/stale-decline/index.html", "a/spec/borrower-update-api/index.html"} {
-			p := readFile(t, outDir, rel)
-			if strings.Contains(p, `data-testid="stub-plan"`) || strings.Contains(p, `data-testid="acceptance-plan-banner"`) {
-				t.Fatalf("%s must not render the feature lens section", rel)
-			}
+	t.Run("story pages carry no lens section", func(t *testing.T) {
+		// The feature lens only ever applies to spec pages (never story
+		// pages), so borrower-update-api (class: story) never renders it
+		// regardless of any frontmatter it carries.
+		p := readFile(t, outDir, "a/spec/borrower-update-api/index.html")
+		if strings.Contains(p, `data-testid="stub-plan"`) || strings.Contains(p, `data-testid="acceptance-plan-banner"`) {
+			t.Fatal("a/spec/borrower-update-api/index.html must not render the feature lens section")
+		}
+	})
+
+	t.Run("stale-decline carries the lens section once it declares problem/outcome", func(t *testing.T) {
+		// public-rollout-plan Task 1.4: stale-decline grew problem/outcome
+		// (and open_questions) frontmatter as part of its showcase
+		// renovation, which flips the SAME class==feature && Problem!=nil
+		// discriminator featurelens.go and cmdMatrix (cmd/verdi/matrix.go)
+		// both key off — it is no longer "grandfathered" by this test's own
+		// definition. Like loan-workflow (a round-four feature with no
+		// stubs), it renders the paired lens section with an empty stub
+		// plan and a live mapping computed from whatever implements edges
+		// exist — stale-decline's own three stories implement
+		// spec/escrow-autopay's ACs, not stale-decline's own, so its live
+		// mapping is legitimately empty too.
+		page := readFile(t, outDir, "a/spec/stale-decline/index.html")
+		if !strings.Contains(page, `data-testid="acceptance-plan-banner"`) || !strings.Contains(page, `data-testid="stub-plan"`) {
+			t.Fatalf("a/spec/stale-decline/index.html must render the feature lens section now that it carries problem/outcome; got:\n%s", page)
 		}
 	})
 }
@@ -158,7 +185,7 @@ func TestBuildV2_ExemptionPages(t *testing.T) {
 		if stated == 0 {
 			t.Fatal("fixture ADR must have at least one active exemption")
 		}
-		if !strings.Contains(page, "spec/accepted-pending-build") {
+		if !strings.Contains(page, "spec/escrow-autopay") {
 			t.Fatal("exemption item must name the exempting spec")
 		}
 		if !strings.Contains(page, "dc-1") {

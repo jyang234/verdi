@@ -49,7 +49,7 @@
 //     "an enumeration that turns up a path this story does not yet cover
 //     must say so explicitly."
 //  5. cmd/e2eharness/provision.go's copyTree/copyFile — copies
-//     testdata/corpus/.verdi/diagrams/loansvc-topology.mermaid wholesale
+//     examples/showcase/.verdi/diagrams/loansvc-topology.mermaid wholesale
 //     into the e2e harness's throwaway scratch store via a raw io.Copy (no
 //     parse, no re-marshal) — byte-preserving, and not a write path into
 //     this repository's own store in any case (it targets a disposable

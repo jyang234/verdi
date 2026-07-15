@@ -1,0 +1,22 @@
+{
+  "service": "loansvc",
+  "schema_version": "flowmap.boundary/v1",
+  "entrypoints": {
+    "http": [
+      { "method": "POST", "route": "/loans/{id}/declines/{declineId}/retry", "tier": 1 },
+      { "method": "GET", "route": "/loans/{id}/status", "tier": 1 }
+    ],
+    "consumers": []
+  },
+  "published": [
+    { "event": "decline-notice", "schema_version": "v1", "to": "notification-svc" },
+    { "event": "charge-retry", "schema_version": "v1", "to": "payments-gw" },
+    { "event": "escrow-state-changed", "schema_version": "v1", "to": "escrow-svc" },
+    { "event": "rate-lock-status", "schema_version": "v1", "to": "rate-engine" },
+    { "event": "document-generated", "schema_version": "v1", "to": "doc-vault" },
+    { "event": "account-view-updated", "schema_version": "v1", "to": "borrower-portal" }
+  ],
+  "consumed": [],
+  "external_dependencies": [],
+  "blind_spots": []
+}

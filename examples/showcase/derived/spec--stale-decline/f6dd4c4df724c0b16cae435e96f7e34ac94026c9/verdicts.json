@@ -1,0 +1,4 @@
+[
+  { "schema": "verdi.evidence/v1", "evidence_for": ["ac-1"], "kind": "static", "verdict": "pass", "witness": "retryWorker -> charge.Post", "producer": "retryWorker", "provenance": { "source": "ci", "pipeline": "913", "job": "static-verify", "commit": "f6dd4c4df724c0b16cae435e96f7e34ac94026c9" }, "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
+  { "schema": "verdi.evidence/v1", "evidence_for": ["ac-2"], "kind": "behavioral", "verdict": "pass", "witness": "golden: stale_decline_retry", "producer": "stale_decline_retry", "provenance": { "source": "ci", "pipeline": "913", "job": "golden-tests", "commit": "f6dd4c4df724c0b16cae435e96f7e34ac94026c9" }, "digest": "sha256:0d031e56e4f14329c4c0bd81a368b9ec01bd7fdf7f05206b17bf7f38931a78d7" }
+]

@@ -90,7 +90,7 @@ title: "Outbox pattern for domain events (board fixture)"
 status: accepted
 owners: [platform-team]
 decided: 2026-03-01
-frozen: { at: 2026-03-01, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-03-01, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # Outbox pattern for domain events
 
@@ -108,7 +108,7 @@ title: "Retry budget for downstream calls (board fixture)"
 status: accepted
 owners: [platform-team]
 decided: 2026-03-02
-frozen: { at: 2026-03-02, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-03-02, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # Retry budget for downstream calls
 
@@ -549,7 +549,7 @@ func TestBoardSpec_RefPeek(t *testing.T) {
 
 	t.Run("pinned and fragment refs resolve to the same artifact", func(t *testing.T) {
 		for _, ref := range []string{
-			"adr/0001-outbox-events@c5e360a9ee5e9eb6089e54b772fa16959ada4662",
+			"adr/0001-outbox-events@78e3161594fb31fdad17f2ea8a96b52f33dbf0f3",
 			"spec/" + boardFixtureName + "%23ac-1",
 		} {
 			rec := get("?ref=" + ref)

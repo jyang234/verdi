@@ -115,13 +115,13 @@ func TestFoldCascade_Negative_UnclassifiedObject(t *testing.T) {
 
 // TestFoldCascade_RealFixture runs the cascade fold against the real v2
 // fixture's rung-4 supersession pair (loan-workflow -> loan-workflow-v2,
-// testdata/corpus) rather than synthetic data — the brief's "the verb runs
+// examples/showcase) rather than synthetic data — the brief's "the verb runs
 // on fixturegit + the v2 fixture's supersession pair" exercised at the
 // fold level: spec/borrower-update-mobile's real implements edge into
 // spec/loan-workflow#ac-1 (an object loan-workflow-v2's real supersession
 // block marks amended) must fold to stale.
 func TestFoldCascade_RealFixture(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "corpus", ".verdi", "specs", "active", "loan-workflow-v2", "spec.md"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "examples", "showcase", ".verdi", "specs", "active", "loan-workflow-v2", "spec.md"))
 	if err != nil {
 		t.Fatalf("reading loan-workflow-v2 fixture: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestFoldCascade_RealFixture(t *testing.T) {
 	}
 
 	// spec/borrower-update-mobile's real links block: implements
-	// spec/loan-workflow#ac-1 (see testdata/corpus/.verdi/specs/active/
+	// spec/loan-workflow#ac-1 (see examples/showcase/.verdi/specs/active/
 	// borrower-update-mobile/spec.md).
 	got, err := FoldCascade(*v2.Supersession, []CascadeStory{
 		{SpecRef: "spec/borrower-update-mobile", ObjectIDs: []string{"ac-1"}},

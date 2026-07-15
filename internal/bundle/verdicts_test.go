@@ -41,7 +41,7 @@ func loadSvcfixBindings(t *testing.T) *artifact.Bindings {
 }
 
 // specACs mirrors spec/stale-decline's real acceptance_criteria ids
-// (testdata/corpus/.verdi/specs/active/stale-decline/spec.md), the spec
+// (examples/showcase/.verdi/specs/active/stale-decline/spec.md), the spec
 // testdata/svcfix's verdi.bindings.yaml binds to.
 func specACs() map[string]bool {
 	return map[string]bool{"ac-1": true, "ac-2": true, "ac-3": true, "ac-4": true}

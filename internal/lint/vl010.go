@@ -27,6 +27,13 @@ import (
 // Both reuse one line-diff core (statusOnlyFlip): exactly one changed line,
 // that line a status line matching the expected base pattern, its head
 // counterpart matching the expected terminal status.
+// rootStorePrefix is the slash-path prefix of every artifact in the root
+// store's own .verdi/ tree. VL-010's diff sweep is scoped to it so a
+// whole-repo git diff never treats a nested/fixture store's frozen-stamped
+// files (which always sit behind a directory prefix, e.g.
+// examples/showcase/.verdi/…) as this store's frozen artifacts (R4-I-52).
+const rootStorePrefix = ".verdi/"
+
 var (
 	anyStatusLineRe             = regexp.MustCompile(`^status:\s*"?[a-z][a-z-]*"?\s*$`)
 	acceptedPendingStatusLineRe = regexp.MustCompile(`^status:\s*"?accepted-pending-build"?\s*$`)
@@ -78,6 +85,23 @@ func (vl010) Check(in *RunInput) []Finding {
 		basePath := e.Path
 		if e.Status == "R" {
 			basePath = e.OldPath
+		}
+
+		// VL-010 governs THIS store's frozen artifacts, which live under the
+		// root store's own .verdi/ tree — exactly the subtree walk.go's
+		// walkDocuments walks and every other (snapshot-based) rule is scoped
+		// to. A whole-repo git diff also surfaces NESTED stores (a committed
+		// fixture store such as examples/showcase, which carries its own
+		// .verdi/verdi.yaml) and partial fixture overlays (testdata/violations/
+		// **/.verdi/…), whose frozen-stamped files are fixtures, not this
+		// store's artifacts; a nested .verdi/ tree always sits behind a
+		// directory prefix, so the root store's own tree is exactly the diff
+		// paths beginning ".verdi/". Restricting the sweep here keeps VL-010's
+		// frozen-immutability reading faithful to the root store without
+		// widening it to every .verdi/-shaped fixture the repo happens to
+		// carry (R4-I-52).
+		if !strings.HasPrefix(basePath, rootStorePrefix) {
+			continue
 		}
 
 		frozen, err := baseFrozen(in.Ctx, in.Root, in.LintCtx.DiffBase, basePath)

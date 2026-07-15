@@ -12,8 +12,9 @@ import (
 // legible "without consulting backlinks"), and the predecessor additionally
 // carries the computed `superseded-by` backlink to its successor.
 //
-// The fixtures live in testdata/dexoverlay (dex-only, never linted): a
-// superseded FEATURE predecessor `spec/rate-lock` superseded by
+// The fixtures live in examples/showcase (layers.txt layer 4, folded in
+// from the former testdata/dexoverlay by Task 1.2): a superseded FEATURE
+// predecessor `spec/rate-lock` superseded by
 // `spec/rate-lock-v2`, and a superseded STORY predecessor `spec/escrow-notify`
 // superseded by `spec/escrow-notify-v2` — the honest dc-4 scope, since verdi's
 // own corpus has no superseded feature. The badge itself was latent (the

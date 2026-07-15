@@ -12,7 +12,7 @@ func TestVerdictHandler_Diff_Happy(t *testing.T) {
 	repo := buildWorkbenchFixtureRepo(t)
 	h := NewHandler(repo.Dir)
 
-	q := url.Values{"a": {"7176513ece8b608ab0911000691bb697ee7e75ec"}, "b": {"93ddc5bbbb398cf747151e1c466afb83114398df"}}
+	q := url.Values{"a": {"f6dd4c4df724c0b16cae435e96f7e34ac94026c9"}, "b": {"16219044c9d6d41de9a0de9464ed24d49283b40c"}}
 	req := httptest.NewRequest(http.MethodGet, "/verdict/jira:LOAN-1482?"+q.Encode(), nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -51,10 +51,10 @@ func TestVerdictHandler_Picker_Happy(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "7176513ece8b608ab0911000691bb697ee7e75ec") {
+	if !strings.Contains(body, "f6dd4c4df724c0b16cae435e96f7e34ac94026c9") {
 		t.Fatalf("picker missing first snapshot commit, got: %s", body)
 	}
-	if !strings.Contains(body, "93ddc5bbbb398cf747151e1c466afb83114398df") {
+	if !strings.Contains(body, "16219044c9d6d41de9a0de9464ed24d49283b40c") {
 		t.Fatalf("picker missing second snapshot commit, got: %s", body)
 	}
 }

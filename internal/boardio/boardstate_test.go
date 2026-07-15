@@ -14,7 +14,7 @@ func TestLoadBoardState_Happy(t *testing.T) {
 	path := filepath.Join(dir, "STORY-1.json")
 	board := &artifact.Board{
 		Schema: boardStateSchema,
-		Pins:   []artifact.Pin{{Ref: "spec/stale-decline@7176513ece8b608ab0911000691bb697ee7e75ec", X: 1, Y: 2}},
+		Pins:   []artifact.Pin{{Ref: "spec/stale-decline@6a0c563e4f688acdb225fcbc5e6942a7431b05bf", X: 1, Y: 2}},
 		Stickies: []artifact.Sticky{
 			{ID: "a-01J8Z0K3AAAAAAAAAAAAAAAAAA", X: 3, Y: 4},
 		},
@@ -76,8 +76,8 @@ func TestSaveBoardState_Atomic(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "STORY-1.json")
 
-	board1 := &artifact.Board{Schema: boardStateSchema, Pins: []artifact.Pin{{Ref: "spec/a@7176513ece8b608ab0911000691bb697ee7e75ec", X: 1, Y: 1}}}
-	board2 := &artifact.Board{Schema: boardStateSchema, Pins: []artifact.Pin{{Ref: "spec/a@7176513ece8b608ab0911000691bb697ee7e75ec", X: 99, Y: 99}}}
+	board1 := &artifact.Board{Schema: boardStateSchema, Pins: []artifact.Pin{{Ref: "spec/a@6a0c563e4f688acdb225fcbc5e6942a7431b05bf", X: 1, Y: 1}}}
+	board2 := &artifact.Board{Schema: boardStateSchema, Pins: []artifact.Pin{{Ref: "spec/a@6a0c563e4f688acdb225fcbc5e6942a7431b05bf", X: 99, Y: 99}}}
 
 	if err := SaveBoardState(path, board1); err != nil {
 		t.Fatalf("SaveBoardState 1: %v", err)

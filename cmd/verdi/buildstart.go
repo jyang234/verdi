@@ -149,7 +149,7 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 // verdict viewer, MCP tools) whose corpus can legitimately carry a class:
 // feature spec's OPTIONAL epic/objective story: field and a class: story
 // spec's REQUIRED own story: field with the SAME tracker-ref value (no
-// reserved-uniqueness rule stops it, and this module's own testdata/corpus
+// reserved-uniqueness rule stops it, and this module's own examples/showcase
 // does exactly that: stale-decline, class: feature, and
 // borrower-update-api, class: story, both carry story: jira:LOAN-1482) —
 // widening the shared resolver silently changed which spec those other

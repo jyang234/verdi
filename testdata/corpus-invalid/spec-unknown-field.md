@@ -13,5 +13,5 @@ frozen: { at: 2026-05-14, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
 ---
 # Stale decline handling (unknown-field twin)
 
-Twin of testdata/corpus/.verdi/specs/active/stale-decline/spec.md with an
+Twin of examples/showcase/.verdi/specs/active/stale-decline/spec.md with an
 injected unknown top-level field. Must fail KnownFields(true) (VL-001).

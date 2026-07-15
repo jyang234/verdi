@@ -33,7 +33,7 @@ const ALL_DRAFTS = [
 ];
 
 // One representative default-branch spec per remaining group (statuses per
-// testdata/corpus): accepted-pending-build, active component, terminal —
+// examples/showcase): accepted-pending-build, active component, terminal —
 // both the active-zone superseded shape and the archive-zone closed shape.
 const ACCEPTED_SPEC = "stale-decline";
 const ACTIVE_SPEC = "store-layout-notes";

@@ -31,7 +31,7 @@ type Board struct {
 // and a clean signal when decode itself failed.
 type Layout struct {
 	// SpecDir is the RelPath of the spec directory this layout.json sits in
-	// (e.g. ".verdi/specs/active/accepted-pending-build").
+	// (e.g. ".verdi/specs/active/escrow-autopay").
 	SpecDir string
 	// RelPath is layout.json's own store-relative path.
 	RelPath   string

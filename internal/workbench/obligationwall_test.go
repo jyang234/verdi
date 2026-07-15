@@ -39,7 +39,7 @@ acceptance_criteria:
   - { id: ac-1, text: "support can replay every decline notice shown to an applicant", evidence: [behavioral, static], anchor: "#ac-1" }
   - { id: ac-2, text: "the audit log is tamper-evident", evidence: [static], anchor: "#ac-2" }
 links:
-  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+  - { type: implements, ref: spec/escrow-autopay#ac-1 }
 ---
 # Refinancing decline replay
 
@@ -70,7 +70,7 @@ owners: [platform-team]
 for_kind: behavioral
 links:
   - { type: verifies, ref: "spec/refi-decline-replay" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # a Playwright test drives the replay view and asserts the notice reappears
 
@@ -267,7 +267,7 @@ owners: [platform-team]
 for_kind: static
 links:
   - { type: verifies, ref: "spec/refi-decline-replay" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 broken
 `
