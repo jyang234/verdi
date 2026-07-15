@@ -233,28 +233,26 @@ func buildLintRepo(t *testing.T, overlayDirs ...string) *fixturegit.Repo {
 	return repo
 }
 
-// knownCorpusBaselineFindings are VL-020 findings the merged
-// examples/showcase corpus now genuinely, deterministically produces on
-// its own (public-rollout-plan Task 1.2 folded testdata/dexoverlay's
-// dex-only surface fixtures — escrow-notify(-v2), refi-rate-check-2024 —
-// into layers.txt; those fixtures were DELIBERATELY never lint-clean, per
-// the former overlay README: "deliberately NOT part of testdata/corpus/
-// (whose walkers — lint's corpus-clean gate ... — would all see any file
-// added there)"). Every buildLintRepo-based test now inherits these four
-// findings alongside whatever it adds of its own, which would otherwise
-// trip every single rule test's onlyRule/onlyRules "no unexpected rule"
-// storm guard. Filtered here, at the single shared entry point, rather
-// than taught to every call site. Task 1.8 ("lint-clean + full vetting
-// closure for the committed tree") is expected to author real obligations
-// for these and delete this filter; until then it is disclosed corpus
-// debt, not silently masked product behavior — VL-020 itself is still
-// exercised, by every VL-020-specific test's own added fixture.
-var knownCorpusBaselineFindings = map[[3]string]bool{
-	{"VL-020", ".verdi/specs/active/escrow-notify-v2/spec.md", "acceptance criterion ac-1 declares evidence kind behavioral with no obligation at .verdi/obligations/escrow-notify-v2/ac-1--behavioral.md"}:          true,
-	{"VL-020", ".verdi/specs/active/escrow-notify/spec.md", "acceptance criterion ac-1 declares evidence kind behavioral with no obligation at .verdi/obligations/escrow-notify/ac-1--behavioral.md"}:                true,
-	{"VL-020", ".verdi/specs/archive/refi-rate-check-2024/spec.md", "acceptance criterion ac-1 declares evidence kind behavioral with no obligation at .verdi/obligations/refi-rate-check-2024/ac-1--behavioral.md"}: true,
-	{"VL-020", ".verdi/specs/archive/refi-rate-check-2024/spec.md", "acceptance criterion ac-1 declares evidence kind static with no obligation at .verdi/obligations/refi-rate-check-2024/ac-1--static.md"}:         true,
-}
+// knownCorpusBaselineFindings is the VL-020 tolerance list Task 1.2
+// introduced for the merged examples/showcase corpus's four then-real
+// findings (escrow-notify(-v2), refi-rate-check-2024's (ac, kind) pairs —
+// dex-only surface fixtures folded from testdata/dexoverlay, deliberately
+// never lint-clean at the time). public-rollout-plan Task 1.5 authored
+// real obligations for all four
+// (.verdi/obligations/escrow-notify/ac-1--behavioral.md;
+// .verdi/obligations/escrow-notify-v2/ac-1--behavioral.md;
+// .verdi/obligations/refi-rate-check-2024/ac-1--{static,behavioral}.md),
+// so the corpus now genuinely produces zero VL-020 findings on its own —
+// this list ends EMPTY, as Task 1.2's own doc comment anticipated
+// ("Task 1.8 ... is expected to author real obligations for these and
+// delete this filter"; landing earlier, in Task 1.5, changes nothing
+// about the mechanism itself). The mechanism (map + filterKnownBaseline)
+// stays rather than being deleted outright: it is still the single shared
+// entry point every buildLintRepo/buildV2FixtureCorpusRepo-based test
+// routes through, and remains available, empty, for any future genuinely
+// pre-existing corpus debt — an empty map is a no-op filter, not a
+// silently reintroduced tolerance.
+var knownCorpusBaselineFindings = map[[3]string]bool{}
 
 // filterKnownBaseline strips knownCorpusBaselineFindings (see its doc
 // comment) from findings. Every direct NewEngine().Run(...) call site in

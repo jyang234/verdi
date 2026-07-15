@@ -20,7 +20,7 @@ owners: [platform-team]
 story: jira:LOAN-0013
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+frozen: { at: 2026-05-14, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # VL-010: superseded flip
 `
@@ -162,7 +162,7 @@ owners: [platform-team]
 story: jira:LOAN-0015
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+frozen: { at: 2026-05-14, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # VL-010: feature predecessor superseded flip
 `
@@ -206,7 +206,7 @@ owners: [platform-team]
 story: jira:LOAN-0014
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+frozen: { at: 2026-05-14, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # VL-010: closed archive move
 `
@@ -312,7 +312,7 @@ title: "VL-010 nested-store probe"
 status: accepted
 owners: [platform-team]
 decided: 2026-05-14
-frozen: { at: 2026-05-14, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+frozen: { at: 2026-05-14, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # VL-010 nested-store probe
 `
@@ -397,7 +397,7 @@ owners: [platform-team]
 story: jira:LOAN-0012
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static] }
-frozen: { at: 2026-05-14, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+frozen: { at: 2026-05-14, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # VL-010: legal archive move
 `

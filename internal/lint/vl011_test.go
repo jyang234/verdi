@@ -21,7 +21,7 @@ kind: waiver
 title: "VL-011: waiver missing owner and reason"
 owners: []
 status: active
-frozen: { at: 2026-05-01, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+frozen: { at: 2026-05-01, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # VL-011: missing owner and reason
 `
@@ -45,8 +45,8 @@ kind: reaffirmation
 title: "VL-011: reaffirmation path mismatch"
 schema: verdi.reaffirmation/v1
 owners: [loansvc-team]
-frozen: { at: 2026-07-14, commit: f80b677cac43645416a4a1441a258234e2ef763d }
-object: spec/stale-decline@f80b677cac43645416a4a1441a258234e2ef763d#ac-2
+frozen: { at: 2026-07-14, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
+object: spec/stale-decline@66588948af8b36c02c8fb8f423645afa0a58dbe4#ac-2
 hash: { old: sha256:20bb0d914cc85a12dbb4c5e85f099b69cae126b0a395780d10b98327da844bfc, new: sha256:ca80c24cd423a030096c07d690b96bfd7dcc801219a5815e0679269a6d699c97 }
 ---
 # VL-011: reaffirmation path mismatch
@@ -74,8 +74,8 @@ kind: reaffirmation
 title: "VL-011: reaffirmation at the correct nested path"
 schema: verdi.reaffirmation/v1
 owners: [loansvc-team]
-frozen: { at: 2026-07-14, commit: f80b677cac43645416a4a1441a258234e2ef763d }
-object: spec/stale-decline@f80b677cac43645416a4a1441a258234e2ef763d#ac-2
+frozen: { at: 2026-07-14, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
+object: spec/stale-decline@66588948af8b36c02c8fb8f423645afa0a58dbe4#ac-2
 hash: { old: sha256:20bb0d914cc85a12dbb4c5e85f099b69cae126b0a395780d10b98327da844bfc, new: sha256:ca80c24cd423a030096c07d690b96bfd7dcc801219a5815e0679269a6d699c97 }
 ---
 # VL-011: reaffirmation at the correct nested path

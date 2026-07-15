@@ -30,10 +30,10 @@ const corpusDir = "../../examples/showcase"
 // literal deterministic SHAs (build once, bake in, test forever)") and
 // reproduced by every corpus file's frozen stamps and pinned refs.
 var goldenHeads = []string{
-	"f80b677cac43645416a4a1441a258234e2ef763d", // layer 1
-	"8b6d22c4d82a3ca75becda551c39c122634d8f4f", // layer 2
-	"791108c9fbc210e4ca2a23ba5625c9071883118b", // layer 3
-	"c22d2113cf60dc62f75fad4416fabcc1f757d427", // layer 4
+	"66588948af8b36c02c8fb8f423645afa0a58dbe4", // layer 1
+	"d70cb19fa17ced67d27b8f9a63b47b3bf280b7d1", // layer 2
+	"faf8d8c412c9df35b5a445146a5fe0e8309caa71", // layer 3
+	"a02dd7dd74cf087aa5ce91a2b49447147dc2132e", // layer 4
 }
 
 // goldenHeadsV2 are the v1-P1 rung-4 supersession pair's own, separate
@@ -45,9 +45,21 @@ var goldenHeads = []string{
 // fixtures (loan-workflow, loan-workflow-v2, and the reaffirmation that
 // pins loan-workflow-v2's commit) cite these SHAs, so this walk test's
 // accepted-token set grows to include them.
+//
+// public-rollout-plan Task 1.5 extends the same dedicated history with two
+// more layers (chained after the first two) for rate-lock/rate-lock-v2 —
+// the feature-rung supersession pair whose v2 now carries a real
+// `supersession:` block (VL-015): a predecessor's object manifest is read
+// via `git show <pred.frozen.commit>:<pred.RelPath>`, which only succeeds
+// if the predecessor already exists, with matching content, at that exact
+// commit — impossible under the layers.txt main corpus's own "layer N
+// cites layer N-1" convention for a file introduced fresh in layer N. Both
+// pairs solve it the same way: a draft-then-frozen two-commit sub-history.
 var goldenHeadsV2 = []string{
 	"b5117ecc69b6779ad75cde60d4aec206ece0950b", // v2 layer 1 (loan-workflow v1 draft)
 	"06a3f4cabb226fe9344e1645e27c344493b6b62b", // v2 layer 2 (loan-workflow v1 frozen + loan-workflow-v2 draft)
+	"620ade86bbd810b440a0d995859745d4402d7be8", // v2 layer 3 (rate-lock v1 draft)
+	"87c65ef5e70024c112b12e275d550f1ca8584df3", // v2 layer 4 (rate-lock v1 frozen + rate-lock-v2 draft)
 }
 
 // parseLayers reads layers.txt and returns, for each layer number in
@@ -291,6 +303,15 @@ func decodeCommittedFile(t *testing.T, rel string, data []byte) {
 			t.Fatalf("%s: DecodeConflict: %v", rel, err)
 		}
 
+	case strings.HasPrefix(rel, ".verdi/obligations/"):
+		fm, _, err := artifact.SplitFrontmatter(data)
+		if err != nil {
+			t.Fatalf("%s: SplitFrontmatter: %v", rel, err)
+		}
+		if _, err := artifact.DecodeObligation(fm); err != nil {
+			t.Fatalf("%s: DecodeObligation: %v", rel, err)
+		}
+
 	default:
 		t.Fatalf("%s: no decoder dispatch rule matches this path (update decodeCommittedFile)", rel)
 	}
@@ -369,8 +390,8 @@ func TestFixtureCorpus_MutableAndDerivedFilesDecode(t *testing.T) {
 		dir        string
 		wantSource artifact.ProvenanceSource
 	}{
-		{"derived/spec--stale-decline/8b6d22c4d82a3ca75becda551c39c122634d8f4f", artifact.SourceCI},
-		{"derived/spec--stale-decline/791108c9fbc210e4ca2a23ba5625c9071883118b", artifact.SourceLocal},
+		{"derived/spec--stale-decline/d70cb19fa17ced67d27b8f9a63b47b3bf280b7d1", artifact.SourceCI},
+		{"derived/spec--stale-decline/faf8d8c412c9df35b5a445146a5fe0e8309caa71", artifact.SourceLocal},
 	}
 	for _, dd := range derivedDirs {
 		dd := dd

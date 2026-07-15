@@ -12,17 +12,22 @@ links:
   - { type: implements, ref: "spec/loan-refi-2023#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "a rate change is verified against the published table before rollout", evidence: [static, behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-01, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
+frozen: { at: 2026-07-01, commit: faf8d8c412c9df35b5a445146a5fe0e8309caa71 }
 ---
 # Refinance rate check 2024
 
-The V1-P8 dex-overlay fixture: a CLOSED round-four story archived as the
-round-four quartet — spec, `layout.json` in the board-artifact slot
-(00 §Glossary "the quartet": "new specs archive layout.json … in place of
-v0's frozen board.json"), rollup, deviation report. The dex by-story axis
-renders this quartet's board slot from the coordinate sidecar, while
-`loan-refi-2023` (testdata/corpus) keeps exercising the grandfathered
-`board.json` form.
+A year after `spec/loan-refi-2023` shipped the first automated rate check,
+the published-table format changed underneath it — a new column for
+promotional-rate expirations broke the parser's column-position
+assumptions and let two stale promotional rates through before anyone
+noticed. This story rebuilds the check against the new table format and
+closes it as a round-four story rather than the grandfathered v0 shape
+its predecessor used, so it archives `layout.json` in the board-artifact
+slot instead of a frozen `board.json` (00 §Glossary "the quartet": "new
+specs archive layout.json … in place of v0's frozen board.json") — the
+dex by-story axis renders this quartet's board slot from that coordinate
+sidecar, while `loan-refi-2023` keeps exercising the grandfathered
+`board.json` form it closed under.
 
 ## Problem
 

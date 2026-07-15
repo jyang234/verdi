@@ -67,19 +67,25 @@ func copyTree(t *testing.T, src, dst string) {
 // with the computed live mapping under the 'acceptance-time plan; current
 // mapping computed below' banner (05 §Lenses)".
 //
-// Fixture: spec/escrow-autopay (examples/showcase, V1-P1's round-
-// four feature-fold fixture) declares three stubs (borrower-update-api,
-// borrower-update-ui, borrower-update-audit-log) and three outcome ACs.
-// Two real story specs (borrower-update-api, borrower-update-mobile)
-// carry real `implements` edges into it; borrower-update-audit-log's
-// stub has no implementing story at all (ac-3 folds no-signal — the fold
-// exercising exactly the "left unreconciled" case PLAN-V1.md's fixture
-// design names for this phase's negative stub-reconciliation case).
-// ac-1 has a real bound outcome attestation
-// (attestations/escrow-autopay/ac-1.md); ac-2 and ac-3 have none.
-// No story in the fixture is closed, so every stub reads unreconciled and
-// every AC needing story bookkeeping reads pending — an honest, real-data
-// snapshot of an in-flight feature, not a cherry-picked all-green case.
+// Fixture: spec/escrow-autopay (examples/showcase). public-rollout-plan
+// Task 1.5 renamed its stubs to autopay-mandate-api ({ac-1, ac-2}) and
+// autopay-retry-policy ({ac-3}), and rewired its former implementing
+// stories (borrower-update-api, borrower-update-mobile) away to
+// spec/stale-decline — the feature genuinely built breadth around
+// (03 §The feature fold: escrow-autopay is the "accepted-pending-build,
+// only unbuilt stubs" fixture, stale-decline the "accepted + built,
+// evidence flowing" one; see cmd/verdi/matrix_test.go's TestCmdMatrix_Golden
+// for the rich fold this same rewire produces there). Only
+// borrower-update-mobile keeps a residual implements edge into this
+// feature's own ac-2 — preserving the pending-supersession fixture below
+// (spec/escrow-autopay-v2 amends exactly ac-2) — so ac-1 and ac-3 now
+// honestly fold no-signal (zero implementing stories), ac-2 pending (one
+// story, not yet closed/eligible). Neither declared stub realizes: no
+// story's title-slug or implements-AC-set matches either one exactly.
+// ac-1 still carries a real bound outcome attestation
+// (attestations/escrow-autopay/ac-1.md) — present even though the fold
+// reads no-signal, since an attestation alone was never sufficient
+// without an implementing story (03 §The feature fold).
 func TestCmdMatrix_FeatureRef_Golden(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,
@@ -100,16 +106,15 @@ func TestCmdMatrix_FeatureRef_Golden(t *testing.T) {
 	want := `feature: spec/escrow-autopay
 status: accepted-pending-build
 
-AC    STATUS     EVIDENCE             IMPLEMENTING STORIES                                   TEXT
-ac-1  pending    attestation:present  spec/borrower-update-api, spec/borrower-update-mobile  a borrower can update their application
-ac-2  pending    attestation:absent   spec/borrower-update-mobile                            a borrower can see the change reflected
-ac-3  no-signal  attestation:absent   -                                                      support can audit every update
+AC    STATUS     EVIDENCE             IMPLEMENTING STORIES         TEXT
+ac-1  no-signal  attestation:present  -                            an autopay mandate is created against a submitted application's escrow account, tied to the payment method already on file
+ac-2  pending    attestation:absent   spec/borrower-update-mobile  a borrower who edits an existing autopay mandate sees the change reflected in their account before they leave the session
+ac-3  no-signal  attestation:absent   -                            a scheduled autopay charge that fails retries according to the declared retry policy instead of silently dropping
 
 stubs: acceptance-time plan; current mapping computed below
-STUB                       DECLARED ACS  LIVE STORIES                 RECONCILIATION
-borrower-update-api        ac-1          spec/borrower-update-api     unreconciled
-borrower-update-ui         ac-1, ac-2    spec/borrower-update-mobile  unreconciled
-borrower-update-audit-log  ac-3          -                            unreconciled
+STUB                  DECLARED ACS  LIVE STORIES  RECONCILIATION
+autopay-mandate-api   ac-1, ac-2    -             unreconciled
+autopay-retry-policy  ac-3          -             unreconciled
 
 feature.violated: false
 stub_reconciliation.blocked: true
@@ -232,18 +237,18 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 // fold exclusion continues to hold (a superseded implementing story can never
 // close, so it is still excluded from the feature fold's AC->story mapping
 // and from stub reconciliation's live-story set — ac-2, whose sole implementer
-// was mobile, still falls back to no-signal, and mobile still reads "-" as
-// borrower-update-ui's LIVE STORIES), while ac-2 (feature-supersession-state)
-// amends the RENDERING: the superseded story is no longer silently dropped
-// from the printed matrix — it appears in its former AC rows tagged
-// `[superseded]`, a terminal marker legible without consulting a
-// `superseded-by` backlink (03 §rung 3). Starting from the golden fixture,
-// flipping borrower-update-mobile (which implements ac-1 and ac-2) to
-// `superseded` on disk must therefore show it, marked, in both ac-1's and
-// ac-2's IMPLEMENTING STORIES cell, alongside ac-1's still-live
-// borrower-update-api, with feature.violated/stub_reconciliation.blocked
-// unchanged from the golden (the visibility change carries no eligibility
-// consequence).
+// is mobile, falls back to no-signal once flipped), while ac-2
+// (feature-supersession-state) amends the RENDERING: the superseded story
+// is no longer silently dropped from the printed matrix — it appears in
+// its former AC row tagged `[superseded]`, a terminal marker legible
+// without consulting a `superseded-by` backlink (03 §rung 3). Starting
+// from the golden fixture (public-rollout-plan Task 1.5: mobile's sole
+// remaining implements edge into this feature is ac-2), flipping
+// borrower-update-mobile to `superseded` on disk must therefore show it,
+// marked, in ac-2's IMPLEMENTING STORIES cell (ac-1/ac-3 stay no-signal,
+// unchanged — neither ever had an implementer), with
+// feature.violated/stub_reconciliation.blocked unchanged from the golden
+// (the visibility change carries no eligibility consequence).
 func TestCmdMatrix_FeatureRef_SupersededStoryRendersTerminalMarker(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,
@@ -279,16 +284,15 @@ func TestCmdMatrix_FeatureRef_SupersededStoryRendersTerminalMarker(t *testing.T)
 	want := `feature: spec/escrow-autopay
 status: accepted-pending-build
 
-AC    STATUS     EVIDENCE             IMPLEMENTING STORIES                                                TEXT
-ac-1  pending    attestation:present  spec/borrower-update-api, spec/borrower-update-mobile [superseded]  a borrower can update their application
-ac-2  no-signal  attestation:absent   spec/borrower-update-mobile [superseded]                            a borrower can see the change reflected
-ac-3  no-signal  attestation:absent   -                                                                   support can audit every update
+AC    STATUS     EVIDENCE             IMPLEMENTING STORIES                      TEXT
+ac-1  no-signal  attestation:present  -                                         an autopay mandate is created against a submitted application's escrow account, tied to the payment method already on file
+ac-2  no-signal  attestation:absent   spec/borrower-update-mobile [superseded]  a borrower who edits an existing autopay mandate sees the change reflected in their account before they leave the session
+ac-3  no-signal  attestation:absent   -                                         a scheduled autopay charge that fails retries according to the declared retry policy instead of silently dropping
 
 stubs: acceptance-time plan; current mapping computed below
-STUB                       DECLARED ACS  LIVE STORIES              RECONCILIATION
-borrower-update-api        ac-1          spec/borrower-update-api  unreconciled
-borrower-update-ui         ac-1, ac-2    -                         unreconciled
-borrower-update-audit-log  ac-3          -                         unreconciled
+STUB                  DECLARED ACS  LIVE STORIES  RECONCILIATION
+autopay-mandate-api   ac-1, ac-2    -             unreconciled
+autopay-retry-policy  ac-3          -             unreconciled
 
 feature.violated: false
 stub_reconciliation.blocked: true

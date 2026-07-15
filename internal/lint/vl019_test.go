@@ -69,7 +69,7 @@ owners: [platform-team]
 for_kind: behavioral
 links:
   - { type: verifies, ref: "spec/vl-019-story" }
-frozen: { at: 2026-07-13, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+frozen: { at: 2026-07-13, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # VL-019: obligation verifies a real STORY AC
 
@@ -103,7 +103,7 @@ owners: [platform-team]
 for_kind: static
 links:
   - { type: verifies, ref: "spec/vl-019-story" }
-frozen: { at: 2026-07-13, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+frozen: { at: 2026-07-13, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # VL-019: obligation id names an AC the story does not declare
 
@@ -148,7 +148,7 @@ owners: [platform-team]
 for_kind: static
 links:
   - { type: verifies, ref: "spec/no-such-story" }
-frozen: { at: 2026-07-13, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+frozen: { at: 2026-07-13, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # VL-019: obligation verifies a spec that does not exist
 `
@@ -186,7 +186,7 @@ owners: [platform-team]
 for_kind: static
 links:
   - { type: verifies, ref: "spec/stale-decline#ac-1" }
-frozen: { at: 2026-07-13, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+frozen: { at: 2026-07-13, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # VL-019: obligation verifies a fragment (the old, invalid form)
 

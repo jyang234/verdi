@@ -23,14 +23,32 @@ exactly once. `frozen.commit` is a real fixturegit-built commit — this
 fixture's own small, dedicated git history (see
 `internal/artifact/v2fixture_test.go`), not the v0 corpus's history.
 
+Unlike `spec/rate-lock` (this corpus's other feature-rung supersession
+pair, `status: superseded`), this predecessor's own `status` stays
+`accepted-pending-build` rather than being flipped: the two fixtures
+deliberately cover different points in the amendment ladder's lifecycle —
+rate-lock demonstrates the terminal, already-flipped state a real accept
+ritual produces, while this pair demonstrates a `supersession:` manifest
+existing ahead of that flip (a real MR can be accepted with its
+predecessor's status update landing in the same commit or a follow-up
+one; VL-015's fidelity check does not itself require the flip to have
+happened yet). `spec/borrower-update-mobile` still carries a live
+`implements` edge into this revision's `ac-1` even though a successor
+exists — exactly the `spec-stale`/cascade scenario
+`internal/evidence/cascade.go` exists to detect (see its own
+`reaffirmations/jira-loan-1483/ac-1.md` record).
+
 ## Problem
 
 Loan officers only see workflow status changes on their next manual
-refresh.
+refresh — a dispatcher checking a loan's stage has to reload the queue
+page to notice anything moved, which on a busy morning means status
+changes routinely go unnoticed for tens of minutes at a time.
 
 ## Outcome
 
-Loan officers see workflow status changes within one minute of the change.
+Loan officers see workflow status changes within one minute of the
+change, without reloading.
 
 ## AC-1
 

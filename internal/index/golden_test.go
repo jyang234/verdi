@@ -134,9 +134,20 @@ var wantCommittedRefs = []string{
 	"conflict/false-alarm",
 	"spec/escrow-notify",
 	"spec/escrow-notify-v2",
-	"spec/rate-lock",
-	"spec/rate-lock-v2",
 	"spec/refi-rate-check-2024",
+	// public-rollout-plan Task 1.5: spec/rate-lock and spec/rate-lock-v2
+	// moved out of layers.txt into their own dedicated, unchained
+	// fixturegit history (internal/artifact/v2fixture_test.go) once
+	// rate-lock-v2 grew a real `supersession:` block — VL-015 needs to
+	// read the predecessor's content back through git history at its own
+	// frozen.commit, which only a draft-then-frozen sub-history (not this
+	// shared layers.txt corpus) can satisfy for a file introduced fresh in
+	// a shared layer. They are no longer part of this fixturegit-built
+	// tree; see examples/showcase/layers.txt's own note.
+	"obligation/escrow-notify--ac-1--behavioral",
+	"obligation/escrow-notify-v2--ac-1--behavioral",
+	"obligation/refi-rate-check-2024--ac-1--static",
+	"obligation/refi-rate-check-2024--ac-1--behavioral",
 }
 
 var wantExternalRefs = []string{

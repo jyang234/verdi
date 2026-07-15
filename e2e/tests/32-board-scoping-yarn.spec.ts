@@ -57,12 +57,12 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
     );
 
     // One covers thread per declared attribution — the fixture's stubs:
-    // block verbatim (api→ac-1, ui→ac-1+ac-2, audit-log→ac-3).
+    // block verbatim (mandate-api→ac-1+ac-2, retry-policy→ac-2+ac-3).
     for (const [slug, ac] of [
-      ["borrower-update-api", "ac-1"],
-      ["borrower-update-ui", "ac-1"],
-      ["borrower-update-ui", "ac-2"],
-      ["borrower-update-audit-log", "ac-3"],
+      ["autopay-mandate-api", "ac-1"],
+      ["autopay-mandate-api", "ac-2"],
+      ["autopay-retry-policy", "ac-2"],
+      ["autopay-retry-policy", "ac-3"],
     ] as const) {
       await expect(scopingChip(page, "covers", slug, ac)).toHaveCount(1);
     }
@@ -73,7 +73,7 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
     // representation now — while the AC-side coverage receipts stay
     // (ac-4: they complement the threads, they never duplicated them).
     await expect(page.locator(".stub-links, .stub-link-chip")).toHaveCount(0);
-    await expect(page.getByTestId(coverageChipTestId("ac-1"))).toHaveText(
+    await expect(page.getByTestId(coverageChipTestId("ac-2"))).toHaveText(
       "covered by 2 stubs",
     );
 
@@ -216,7 +216,7 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
       "data-board-mode",
       "readonly",
     );
-    const stub = page.getByTestId(stubCardTestId("borrower-update-ui"));
+    const stub = page.getByTestId(stubCardTestId("autopay-mandate-api"));
     const before = await position(stub);
 
     const grip = await grabPoint(page, stub);

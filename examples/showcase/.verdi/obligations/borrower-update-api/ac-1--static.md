@@ -6,7 +6,7 @@ owners: [platform-team]
 for_kind: static
 links:
   - { type: verifies, ref: "spec/borrower-update-api" }
-frozen: { at: 2026-07-12, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
+frozen: { at: 2026-07-12, commit: faf8d8c412c9df35b5a445146a5fe0e8309caa71 }
 ---
 # The PUT route is registered on the application resource and returns the full updated state's shape
 

@@ -41,10 +41,31 @@
 #
 # Layer 4: content pinned at layer 3's commit (fixturegit Heads[2]) — folded
 # in from the former testdata/dexoverlay/ (Task 1.2 of the public-rollout
-# plan; see examples/showcase/OVERLAY-NOTES.md). Supersession-chain surface
-# fixtures (rate-lock/rate-lock-v2, escrow-notify/escrow-notify-v2) and a
-# synthetic round-four archived quartet (refi-rate-check-2024) — all
-# frozen/covered at layer 3's head, so none of them can exist before it.
+# plan; see examples/showcase/OVERLAY-NOTES.md). A supersession-chain
+# surface fixture (escrow-notify/escrow-notify-v2) and a synthetic
+# round-four archived quartet (refi-rate-check-2024) — all frozen/covered
+# at layer 3's head, so none of them can exist before it.
+#
+# rate-lock/rate-lock-v2 (the OTHER supersession-chain fixture originally
+# folded in here) moved OUT to internal/artifact/v2fixture_test.go's own
+# dedicated, unchained fixturegit history (public-rollout-plan Task 1.5,
+# alongside loan-workflow/loan-workflow-v2, which already lived there for
+# the identical reason): Task 1.5 gives rate-lock-v2 a real
+# `supersession:` block, and VL-015 (internal/lint/vl015.go) reads a
+# predecessor's object manifest via `git show <pred.frozen.commit>:
+# <pred.RelPath>`, which only succeeds if the predecessor already exists,
+# with matching content, AT that exact commit — impossible for a file
+# introduced fresh in this shared layer, since every citable earlier
+# commit here predates rate-lock's own existence. The dedicated history
+# solves it with a draft-then-frozen two-commit sub-sequence, exactly as
+# loan-workflow's already did; see corpus_test.go's goldenHeadsV2 comment
+# and internal/lint/v2clean_test.go's own doc comment for the rest of the
+# mechanism. escrow-notify/escrow-notify-v2 did NOT need this: 02 §Object
+# model's `supersession:` field is feature-only
+# (artifact.SpecFrontmatter.Validate), so that STORY-rung pair is fully
+# expressed by `supersedes` plus the terminal status flip alone (03 §rung
+# 3) and never trips VL-015 — it stays a normal layers.txt-tracked pair,
+# both halves in this one shared commit.
 #
 # borrower-update-mobile/deviation-report.md is deliberately NOT listed
 # here even though it also pins layer 3's head: its sibling spec.md is
@@ -83,9 +104,18 @@
 # whole-tree pin-name walk, same as the deviation report above.
 4 .verdi/specs/active/escrow-notify/spec.md
 4 .verdi/specs/active/escrow-notify-v2/spec.md
-4 .verdi/specs/active/rate-lock/spec.md
-4 .verdi/specs/active/rate-lock-v2/spec.md
 4 .verdi/specs/archive/refi-rate-check-2024/spec.md
 4 .verdi/specs/archive/refi-rate-check-2024/layout.json
 4 .verdi/specs/archive/refi-rate-check-2024/rollup.json
 4 .verdi/specs/archive/refi-rate-check-2024/deviation-report.md
+#
+# public-rollout-plan Task 1.5 adds four obligation files verifying
+# escrow-notify/escrow-notify-v2/refi-rate-check-2024 (VL-020, retiring
+# internal/lint/harness_test.go's knownCorpusBaselineFindings tolerance).
+# Each verifies a spec already present in this same commit, so none is
+# orphaned (VL-019, same reasoning as the deviation-report/obligation note
+# above) — joining the same layer rather than a new one is simplest.
+4 .verdi/obligations/escrow-notify/ac-1--behavioral.md
+4 .verdi/obligations/escrow-notify-v2/ac-1--behavioral.md
+4 .verdi/obligations/refi-rate-check-2024/ac-1--static.md
+4 .verdi/obligations/refi-rate-check-2024/ac-1--behavioral.md

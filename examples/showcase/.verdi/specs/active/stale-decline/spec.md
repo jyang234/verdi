@@ -14,23 +14,26 @@ links:
   - { type: impacts, ref: svc/loansvc/boundary-contract }
 impacts: [loansvc, notification-svc, payments-gw]
 context:
-  - adr/0002-outbox-events@f80b677cac43645416a4a1441a258234e2ef763d
+  - adr/0002-outbox-events@66588948af8b36c02c8fb8f423645afa0a58dbe4
 declares:
   boundaries:
     - { from: loansvc, to: notification-svc, via: events }
     - { from: loansvc, to: payments-gw, via: events }
 acceptance_criteria:
-  - { id: ac-1, text: "static obligation holds for the retry path", evidence: [static], anchor: "#ac-1" }
-  - { id: ac-2, text: "static and behavioral: charge API retried on stale decline", evidence: [static, behavioral], anchor: "#ac-2" }
-  - { id: ac-3, text: "behavioral: golden flow for partial refunds", evidence: [behavioral], anchor: "#ac-3" }
-  - { id: ac-4, text: "runtime: post-deploy decline-rate check", evidence: [runtime], anchor: "#ac-4" }
+  - { id: ac-1, text: "every branch that classifies a decline as stale routes its consequence through the outbox — no direct call to notification-svc or payments-gw", evidence: [static], anchor: "#ac-1" }
+  - { id: ac-2, text: "loansvc retries the charge through the outbox exactly once per stale decline", evidence: [static, behavioral], anchor: "#ac-2" }
+  - { id: ac-3, text: "a partial refund against a stale-declined loan still reconciles correctly before any retried charge is issued", evidence: [behavioral], anchor: "#ac-3" }
+  - { id: ac-4, text: "the stale-decline rate for the affected cohort is checked against the pre-change baseline seven days post-deploy", evidence: [runtime], anchor: "#ac-4" }
 open_questions:
   - { id: oq-1, text: "should partial refunds share the stale-decline retry budget?", anchor: "#oq-1" }
 dispositions:
   - { sticky: a-01J8Z0K3AAAAAAAAAAAAAAAAAA, disposition: incorporated, where: "#design-notes" }
   - { sticky: a-01J8Z0K4BBBBBBBBBBBBBBBBBB, disposition: contradicted, note: "partial refunds are out of scope for this story; tracked separately as oq-1" }
   - { sticky: a-01J8Z0K5CCCCCCCCCCCCCCCCCC, disposition: open-question }
-frozen: { at: 2026-05-14, commit: f80b677cac43645416a4a1441a258234e2ef763d }
+stubs:
+  - { slug: borrower-update-api, acceptance_criteria: [ac-2] }
+  - { slug: borrower-update-mobile, acceptance_criteria: [ac-1, ac-3] }
+frozen: { at: 2026-05-14, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
 ---
 # Stale decline handling
 

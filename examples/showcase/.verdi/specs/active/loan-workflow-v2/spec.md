@@ -29,22 +29,26 @@ R4-I-4): `supersedes` v1, and the `supersession:` block above classifies
 every one of v1's three objects (ac-1, ac-2, co-1) exactly once — `co-1`
 carried (byte-identical text to v1's `co-1`, required by VL-015),
 `ac-1` amended (tightened wording), `ac-2` removed, plus `ac-3` newly
-added. `spec/borrower-update-mobile` (a story on `spec/escrow-autopay`)
-also carries an `implements` edge into `spec/loan-workflow#ac-1` — the
-amended object — and files a re-affirmation
-(`reaffirmations/jira-loan-1483/ac-1.md`) recording the old→new content
-hash. See also the two VL-015 negative-case twins under
+added. `spec/borrower-update-mobile` (a story primarily on
+`spec/stale-decline`, with a further residual `implements` edge into
+`spec/escrow-autopay#ac-2`) also carries an `implements` edge into
+`spec/loan-workflow#ac-1` — the amended object — and files a
+re-affirmation (`reaffirmations/jira-loan-1483/ac-1.md`) recording the
+old→new content hash. See also the two VL-015 negative-case twins under
 `testdata/violations/VL-015/`.
 
 ## Problem
 
 Loan officers only see workflow status changes on their next manual
-refresh.
+refresh — a dispatcher has to reload the queue page to notice anything
+moved.
 
 ## Outcome
 
 Loan officers see workflow status changes within thirty seconds of the
-change.
+change, tightened from v1's one-minute threshold after dispatchers kept
+missing time-sensitive stage transitions (a loan flagged for same-day
+funding, say) inside that wider window.
 
 ## AC-1
 

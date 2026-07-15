@@ -11,7 +11,7 @@ spike: true
 story: jira:LOAN-1484
 links:
   - { type: resolves, ref: "spec/escrow-autopay#oq-1" }
-frozen: { at: 2026-07-12, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
+frozen: { at: 2026-07-12, commit: faf8d8c412c9df35b5a445146a5fe0e8309caa71 }
 ---
 # Borrower update, mobile app: PUT vs PATCH spike
 

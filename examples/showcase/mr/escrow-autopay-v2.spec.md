@@ -5,14 +5,14 @@ class: feature
 title: "Escrow autopay v2 (open supersession MR fixture)"
 status: draft
 owners: [platform-team]
-problem: { text: "borrowers cannot self-serve an update to a submitted application", anchor: "#problem" }
-outcome: { text: "a borrower updates their application and sees the change reflected immediately", anchor: "#outcome" }
+problem: { text: "a borrower who wants their escrow payment collected automatically has to call servicing to set it up, and every mandate change after that is a manual back-office edit", anchor: "#problem" }
+outcome: { text: "a borrower can enroll an escrow account in autopay, edit the mandate themselves, and see the change reflected immediately, not merely within the session", anchor: "#outcome" }
 links:
   - { type: supersedes, ref: spec/escrow-autopay }
 acceptance_criteria:
-  - { id: ac-1, text: "a borrower can update their application", evidence: [attestation], anchor: "#ac-1" }
-  - { id: ac-2, text: "a borrower sees the change reflected immediately, not merely within the session", evidence: [behavioral, attestation], anchor: "#ac-2" }
-  - { id: ac-3, text: "support can audit every update", evidence: [static, attestation], anchor: "#ac-3" }
+  - { id: ac-1, text: "an autopay mandate is created against a submitted application's escrow account, tied to the payment method already on file", evidence: [static, behavioral, attestation], anchor: "#ac-1" }
+  - { id: ac-2, text: "a borrower who edits an existing autopay mandate sees the change reflected in their account immediately, not merely within the session", evidence: [behavioral], anchor: "#ac-2" }
+  - { id: ac-3, text: "a scheduled autopay charge that fails retries according to the declared retry policy instead of silently dropping", evidence: [static, behavioral], anchor: "#ac-3" }
 constraints:
   - { id: co-1, text: "must not touch the legacy schema", anchor: "#co-1" }
 supersession:
@@ -35,12 +35,15 @@ includes open supersession MRs"). Served only through the fake forge's
 
 ## Problem
 
-Borrowers cannot self-serve an update to a submitted application.
+A borrower who wants their escrow payment collected automatically has to
+call servicing to set it up, and every mandate change after that is a
+manual back-office edit.
 
 ## Outcome
 
-A borrower updates their application and sees the change reflected
-immediately.
+A borrower can enroll an escrow account in autopay, edit the mandate
+themselves, and see the change reflected immediately, not merely within
+the session.
 
 ## AC-1
 
@@ -48,7 +51,9 @@ Unchanged from v1.
 
 ## AC-2
 
-Tightened: immediate reflection.
+Tightened: immediate reflection, not merely within the session — the
+proposal drops the session-scoped window v1 accepted and requires the
+reflected state to be visible the moment the mandate write commits.
 
 ## AC-3
 

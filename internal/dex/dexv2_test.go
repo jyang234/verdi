@@ -67,7 +67,7 @@ func TestBuildV2_FeatureLens(t *testing.T) {
 		if !strings.Contains(page, `data-testid="stub-plan"`) {
 			t.Fatal("feature page missing the stub plan")
 		}
-		for _, slug := range []string{"borrower-update-api", "borrower-update-ui", "borrower-update-audit-log"} {
+		for _, slug := range []string{"autopay-mandate-api", "autopay-retry-policy"} {
 			if !strings.Contains(page, `data-testid="stub-`+slug+`"`) {
 				t.Fatalf("stub plan missing stub-%s", slug)
 			}
@@ -80,10 +80,18 @@ func TestBuildV2_FeatureLens(t *testing.T) {
 		}
 		liveIdx := strings.Index(page, `data-testid="live-mapping"`)
 		live := page[liveIdx:]
-		for _, ref := range []string{"spec/borrower-update-api", "spec/borrower-update-mobile"} {
-			if !strings.Contains(live, ref) {
-				t.Fatalf("live mapping missing implementing story %s; got:\n%s", ref, live)
-			}
+		// public-rollout-plan Task 1.5: escrow-autopay's stories were
+		// rewired to spec/stale-decline (the "built breadth" feature);
+		// only borrower-update-mobile keeps a residual implements edge into
+		// escrow-autopay#ac-2 (preserving the pending-supersession fixture
+		// below), so it is the sole implementing story on this page — ac-1
+		// and ac-3 render "no implementing story", proven honest by this
+		// same test's HTML above.
+		if !strings.Contains(live, "spec/borrower-update-mobile") {
+			t.Fatalf("live mapping missing implementing story spec/borrower-update-mobile; got:\n%s", live)
+		}
+		if strings.Contains(live, "spec/borrower-update-api") {
+			t.Fatalf("live mapping must not name spec/borrower-update-api — its implements edges moved to spec/stale-decline; got:\n%s", live)
 		}
 	})
 

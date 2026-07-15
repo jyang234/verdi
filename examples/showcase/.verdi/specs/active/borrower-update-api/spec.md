@@ -9,10 +9,10 @@ problem: { text: "the update API has no PUT route for a submitted application", 
 outcome: { text: "PUT /applications/:id/update returns 200 with the new state", anchor: "#outcome" }
 story: jira:LOAN-1482
 links:
-  - { type: implements, ref: "spec/escrow-autopay#ac-1" }
+  - { type: implements, ref: "spec/stale-decline#ac-2" }
 acceptance_criteria:
   - { id: ac-1, text: "PUT /applications/:id/update returns 200 with the new state", evidence: [static, behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-12, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
+frozen: { at: 2026-07-12, commit: faf8d8c412c9df35b5a445146a5fe0e8309caa71 }
 ---
 # Borrower update API
 
@@ -40,8 +40,13 @@ the two routes chose different verbs).
 ## Provenance
 
 **Stub-matched fast path fixture** (R4-I-12, 03 §Lifecycle "stub-matched
-fast path"): this story's implements-set ({ac-1}) equals the
-`borrower-update-api` stub's declared AC set exactly, and
+fast path"): this story's implements-set ({ac-2}) equals the
+`borrower-update-api` stub `spec/stale-decline` declares exactly, and
 `RefSlug("Borrower update API")` equals the stub's slug
 `borrower-update-api` exactly. No `supersedes`/`exempts` edges — eligible
-for single-approver acceptance.
+for single-approver acceptance. The implements edge targets
+`spec/stale-decline#ac-2` (the retried-charge AC) rather than a fragment
+on this feature's own umbrella spec — the desktop/API route is the
+canonical path the charge-retry obligation is proven against; the
+mobile route below reaches the same feature under a harder connectivity
+constraint via its own, separately-mapped edges.

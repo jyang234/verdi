@@ -47,6 +47,27 @@ const (
 	goldenShaB = "06a3f4cabb226fe9344e1645e27c344493b6b62b"
 )
 
+// public-rollout-plan Task 1.5 extends this same dedicated, unchained
+// history with two more layers for the rate-lock/rate-lock-v2 supersession
+// pair, for the identical reason loan-workflow needed one: VL-015
+// (internal/lint/vl015.go) reads a predecessor's object manifest via
+// `git show <pred.frozen.commit>:<pred.RelPath>`, which only succeeds if
+// the predecessor's file already exists, with matching content, AT that
+// exact commit — impossible for a file whose own committed frozen.commit
+// cites an ancestor from BEFORE the file was ever written (the layers.txt
+// main corpus's "layer N cites layer N-1" convention, which works for
+// every OTHER frozen file here only because nothing else needs to read
+// their content back through git history). Layer 3: spec/rate-lock DRAFT
+// (chained after layers 1-2, so it shares this same repo rather than
+// opening a third independent history). Layer 4: spec/rate-lock FROZEN
+// (frozen.commit = layer 3's head) plus spec/rate-lock-v2 DRAFT. The
+// resulting head (layer 4's SHA) is what examples/showcase's committed
+// rate-lock-v2/spec.md cites as its own frozen.commit.
+const (
+	goldenShaC = "620ade86bbd810b440a0d995859745d4402d7be8"
+	goldenShaD = "87c65ef5e70024c112b12e275d550f1ca8584df3"
+)
+
 const v2LoanWorkflowV1Draft = `---
 id: spec/loan-workflow
 kind: spec
@@ -170,6 +191,125 @@ Workflow status changes emit an audit event.
 Must not add new synchronous cross-service calls.
 `
 
+const v2RateLockV1Draft = `---
+id: spec/rate-lock
+kind: spec
+class: feature
+title: "Rate lock (fixture, superseded feature)"
+owners: [platform-team]
+status: draft
+problem: { text: "borrowers lose a good quoted rate the moment they pause the application", anchor: "#problem" }
+outcome: { text: "borrowers can lock a quoted rate for a fixed window and finish later", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a borrower can lock a quoted rate for 30 days", evidence: [static, attestation], anchor: "#ac-1" }
+  - { id: ac-2, text: "a locked rate survives a session restart", evidence: [static], anchor: "#ac-2" }
+constraints:
+  - { id: co-1, text: "must not lock a rate the pricing service has already retired", anchor: "#co-1" }
+---
+# Rate lock (fixture, superseded feature)
+
+## Problem
+
+Borrowers lose a good quoted rate the moment they pause the application.
+
+## Outcome
+
+Borrowers can lock a quoted rate for a fixed window and finish later.
+
+## AC-1
+
+A borrower can lock a quoted rate for 30 days.
+
+## AC-2
+
+A locked rate survives a session restart.
+
+## CO-1
+
+Must not lock a rate the pricing service has already retired.
+`
+
+const v2RateLockV1FrozenTemplate = `---
+id: spec/rate-lock
+kind: spec
+class: feature
+title: "Rate lock (fixture, superseded feature)"
+owners: [platform-team]
+status: superseded
+problem: { text: "borrowers lose a good quoted rate the moment they pause the application", anchor: "#problem" }
+outcome: { text: "borrowers can lock a quoted rate for a fixed window and finish later", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a borrower can lock a quoted rate for 30 days", evidence: [static, attestation], anchor: "#ac-1" }
+  - { id: ac-2, text: "a locked rate survives a session restart", evidence: [static], anchor: "#ac-2" }
+constraints:
+  - { id: co-1, text: "must not lock a rate the pricing service has already retired", anchor: "#co-1" }
+frozen: { at: 2026-07-11, commit: SHA_C_PLACEHOLDER }
+---
+# Rate lock (fixture, superseded feature)
+
+## Problem
+
+Borrowers lose a good quoted rate the moment they pause the application.
+
+## Outcome
+
+Borrowers can lock a quoted rate for a fixed window and finish later.
+
+## AC-1
+
+A borrower can lock a quoted rate for 30 days.
+
+## AC-2
+
+A locked rate survives a session restart.
+
+## CO-1
+
+Must not lock a rate the pricing service has already retired.
+`
+
+const v2RateLockV2Draft = `---
+id: spec/rate-lock-v2
+kind: spec
+class: feature
+title: "Rate lock v2 (fixture, supersedes rate-lock)"
+owners: [platform-team]
+status: draft
+problem: { text: "borrowers lose a good quoted rate the moment they pause the application", anchor: "#problem" }
+outcome: { text: "borrowers can lock a quoted rate for a configurable window and finish later", anchor: "#outcome" }
+links:
+  - { type: supersedes, ref: "spec/rate-lock" }
+acceptance_criteria:
+  - { id: ac-1, text: "a borrower can lock a quoted rate for a configurable window", evidence: [static, attestation], anchor: "#ac-1" }
+constraints:
+  - { id: co-1, text: "must not lock a rate the pricing service has already retired", anchor: "#co-1" }
+supersession:
+  carried: [co-1]
+  amended: [ { id: ac-1, note: "the fixed 30-day window becomes a window configurable per loan program, after a first-time-buyer program's 45-day underwriting cycle routinely outran the fixed lock" } ]
+  amended_advisory: []
+  removed: [ { id: ac-2, note: "the session-restart guarantee is subsumed by v2's own persistence layer and no longer earns its place as a feature-level AC" } ]
+  added: []
+---
+# Rate lock v2 (fixture, supersedes rate-lock)
+
+## Problem
+
+Borrowers lose a good quoted rate the moment they pause the application.
+
+## Outcome
+
+Borrowers can lock a quoted rate for a configurable window and finish
+later.
+
+## AC-1
+
+A borrower can lock a quoted rate for a configurable window.
+
+## CO-1
+
+Must not lock a rate the pricing service has already retired.
+`
+
 // TestV2SupersessionRepo_MatchesGoldenSHAs rebuilds the supersession pair's
 // dedicated fixturegit history from the layer content above and proves it
 // still reproduces goldenShaA/goldenShaB — the SHAs
@@ -196,6 +336,31 @@ func TestV2SupersessionRepo_MatchesGoldenSHAs(t *testing.T) {
 	repo2 := fixturegit.Build(t, []fixturegit.Layer{layer1, layer2})
 	if repo2.Head != goldenShaB {
 		t.Fatalf("layer 2 head = %s, want golden %s (SHA_B)", repo2.Head, goldenShaB)
+	}
+
+	// Layers 3-4: the rate-lock/rate-lock-v2 pair, chained after layers 1-2
+	// so it shares this same dedicated history rather than opening a third
+	// independent one (public-rollout-plan Task 1.5).
+	layer3 := fixturegit.Layer{
+		Files:   map[string]string{".verdi/specs/active/rate-lock/spec.md": v2RateLockV1Draft},
+		Message: "v2 layer 3: rate-lock v1 draft",
+	}
+	repo3 := fixturegit.Build(t, []fixturegit.Layer{layer1, layer2, layer3})
+	if repo3.Head != goldenShaC {
+		t.Fatalf("layer 3 head = %s, want golden %s (SHA_C)", repo3.Head, goldenShaC)
+	}
+
+	rateLockFrozen := strings.Replace(v2RateLockV1FrozenTemplate, "SHA_C_PLACEHOLDER", goldenShaC, 1)
+	layer4 := fixturegit.Layer{
+		Files: map[string]string{
+			".verdi/specs/active/rate-lock/spec.md":    rateLockFrozen,
+			".verdi/specs/active/rate-lock-v2/spec.md": v2RateLockV2Draft,
+		},
+		Message: "v2 layer 4: rate-lock v1 frozen + rate-lock-v2 draft",
+	}
+	repo4 := fixturegit.Build(t, []fixturegit.Layer{layer1, layer2, layer3, layer4})
+	if repo4.Head != goldenShaD {
+		t.Fatalf("layer 4 head = %s, want golden %s (SHA_D)", repo4.Head, goldenShaD)
 	}
 }
 
@@ -226,6 +391,8 @@ func TestV2Corpus_SpecsDecode(t *testing.T) {
 		{".verdi/specs/active/borrower-update-mobile-spike/spec.md", ClassStory, true},
 		{".verdi/specs/active/loan-workflow/spec.md", ClassFeature, false},
 		{".verdi/specs/active/loan-workflow-v2/spec.md", ClassFeature, false},
+		{".verdi/specs/active/rate-lock/spec.md", ClassFeature, false},
+		{".verdi/specs/active/rate-lock-v2/spec.md", ClassFeature, false},
 	}
 	for _, sp := range specs {
 		t.Run(sp.rel, func(t *testing.T) {

@@ -358,19 +358,21 @@ export const DOC_EDGE_TARGET = "adr/0002-outbox-events";
 export const OQ_ID = "oq-1";
 
 // FEATURE_SPEC (escrow-autopay, on main → sealed wall) declares
-// three stubs; its wall renders them as stub cards with Instantiate.
-// STUB_SLUGS mirrors the fixture's stubs: frontmatter verbatim.
-export const STUB_SLUGS = [
-  "borrower-update-api",
-  "borrower-update-ui",
-  "borrower-update-audit-log",
-] as const;
+// two stubs (public-rollout-plan Task 1.5 renamed them from the former
+// borrower-update-* trio once those stories were rewired onto
+// spec/stale-decline instead); its wall renders them as stub cards with
+// Instantiate. STUB_SLUGS mirrors the fixture's stubs: frontmatter
+// verbatim.
+export const STUB_SLUGS = ["autopay-mandate-api", "autopay-retry-policy"] as const;
 
 // The stub the instantiate journey cuts a branch for: it must have NO
-// realized story spec in the corpus (borrower-update-api is realized;
-// the audit log story does not exist yet), so design/<slug> carries a
-// genuinely new scaffold.
-export const INSTANTIATE_SLUG = "borrower-update-audit-log";
+// realized story spec in the corpus — neither stub is realized any more
+// (Task 1.5: escrow-autopay's own implementing stories moved to
+// spec/stale-decline; the one residual borrower-update-mobile edge into
+// this feature only touches ac-2, whose AC-set does not equal either
+// stub's declared set), so design/<slug> carries a genuinely new
+// scaffold either way.
+export const INSTANTIATE_SLUG = "autopay-retry-policy";
 
 // The live corpus's other committed stub fixture: disclosure-legibility
 // (in this repo's own .verdi store) — asserted only through the Go

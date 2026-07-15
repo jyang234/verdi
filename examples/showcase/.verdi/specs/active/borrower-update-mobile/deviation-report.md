@@ -1,6 +1,6 @@
 ---
 schema: verdi.deviation/v1
-covers: 791108c9fbc210e4ca2a23ba5625c9071883118b
+covers: faf8d8c412c9df35b5a445146a5fe0e8309caa71
 findings:
   - { id: ac-1, kind: judged, text: "the mobile PUT route retries a failed update up to 3 times with client-side exponential backoff before surfacing an error to the borrower; ac-1's own wording ('returns 200 with the new state') describes a single request/response contract and never mentions a client-driven retry loop", disposition: accepted-deviation, note: "accepted by platform-team, 2026-07-12: the retry loop measurably reduces borrower-visible failures on flaky mobile networks and does not touch loansvc's server-side outbox retry budget (adr/0002), so it is orthogonal to the outbox path rather than a substitute for it; recorded against the AC's own text, so spec-stale counter-pressure applies (03 §The amendment ladder)" }
   - { id: f-2, kind: computed, text: "declared implements edges resolve at build head", disposition: fixed }

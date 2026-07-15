@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   FEATURE_SPEC,
-  STORY_STUB_MATCHED,
+  STUB_SLUGS,
   STORY_WITH_SPEC_STALE,
   STORY_WITH_PENDING_SUPERSESSION,
   ADR_NAME,
@@ -32,18 +32,24 @@ test.describe("V1-P8: dex feature page — stubs paired with the live mapping", 
     await expect(banner).toContainText("acceptance-time plan");
     await expect(banner).toContainText("current mapping computed below");
 
-    // The frozen stubs (the fixture feature carries three — PLAN-V1 §4)...
+    // The frozen stubs (the fixture feature carries two — public-rollout-
+    // plan Task 1.5 renamed them from the former three-stub set)...
     const stubPlan = page.getByTestId("stub-plan");
     await expect(stubPlan).toBeVisible();
-    await expect(stubPlan.locator('[data-testid^="stub-"]')).toHaveCount(3);
-    await expect(stubPlan).toContainText(STORY_STUB_MATCHED);
+    await expect(stubPlan.locator('[data-testid^="stub-"]')).toHaveCount(2);
+    await expect(stubPlan).toContainText(STUB_SLUGS[0]);
 
     // ...are PAIRED with the computed live mapping (the inverse of the
     // stories' implements edges — the feature is downward-blind, 02 §Link
-    // taxonomy), never rendered alone.
+    // taxonomy), never rendered alone. public-rollout-plan Task 1.5 rewired
+    // STORY_STUB_MATCHED's (borrower-update-api) implements edges onto
+    // spec/stale-decline instead — STORY_WITH_PENDING_SUPERSESSION
+    // (borrower-update-mobile) is this feature's sole remaining
+    // implementer now (a residual edge into its ac-2, preserving the
+    // pending-supersession fixture below).
     const liveMapping = page.getByTestId("live-mapping");
     await expect(liveMapping).toBeVisible();
-    await expect(liveMapping).toContainText(STORY_STUB_MATCHED);
+    await expect(liveMapping).toContainText(STORY_WITH_PENDING_SUPERSESSION);
   });
 });
 

@@ -550,7 +550,7 @@ func TestScopingCanvas_CommittedFixturesRenderStubCards(t *testing.T) {
 			name: "escrow-autopay (examples/showcase)",
 			path: "../../examples/showcase/.verdi/specs/active/escrow-autopay/spec.md",
 			slugs: []string{
-				"borrower-update-api", "borrower-update-ui", "borrower-update-audit-log",
+				"autopay-mandate-api", "autopay-retry-policy",
 			},
 		},
 		{

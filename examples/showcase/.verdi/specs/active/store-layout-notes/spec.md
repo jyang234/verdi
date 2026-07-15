@@ -10,5 +10,9 @@ links:
 ---
 # Store layout notes
 
-Fixture component spec, status active. Exercises the `supersedes` link
-type against the sibling `legacy-cache-policy` fixture spec.
+Documents how escrow-svc's read-side cache is invalidated: every outbox
+event that changes an escrow account's state also carries an
+invalidation key for that account's cached snapshot, so a cache read
+issued after a mandate edit or a retried charge is never older than the
+event that produced it — the gap `spec/legacy-cache-policy`'s
+time-boxed fifteen-minute cache left open.

@@ -156,20 +156,42 @@ func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 // featurelens.go uses in internal/dex. jira:LOAN-1482 now resolves through
 // the feature fold below.
 //
-// The feature fold does not resolve stale-decline's own v0-era, story-ref-
-// slug-keyed attestation (attestations/jira-loan-1482/ac-2.md verifies the
-// whole spec, not a per-AC fragment under the feature's own slug) or its
-// waiver, and it has no `implements` edges of its own to populate an
-// IMPLEMENTING STORIES column (stale-decline's three stories implement
-// spec/escrow-autopay's ACs, not stale-decline's own — a pre-existing
-// corpus wiring choice outside this task's file scope) — so this golden is
-// now honest but sparser than the retired story-fold rendering. The richer
-// evidenced/pending/waived resolution this test used to prove is still
-// exercised by TestCmdMatrix_RoundFourStory_RendersStoryFold's sibling
-// spec/borrower-update-api (a class: story spec, always story-folded) and
-// by TestCmdMatrix_ObligationColumn's synthetic fixture.
+// public-rollout-plan Task 1.5 rewires the three borrower-update stories'
+// `implements` edges (previously pointing at spec/escrow-autopay, a
+// pre-existing corpus wiring choice) onto spec/stale-decline's own ACs —
+// borrower-update-api -> ac-2 (the charge-API AC), borrower-update-mobile
+// -> ac-1 and ac-3 — and adds matching `stubs:` declarations, so this
+// golden now shows the rich fold the round-four feature fold is meant to
+// prove: an IMPLEMENTING STORIES column genuinely populated (once the
+// non-layered stories are copied in below, mirroring
+// TestCmdMatrix_FeatureRef_Golden's own copyV2FeatureFixture pattern) and
+// a real stub table. ac-1/ac-2/ac-3 stay no-signal/pending here rather
+// than evidenced — see this test's own doc comment history: neither story
+// is closed or eligible, so foldFeatureAC's "closed or eligible" bar is
+// never crossed. ac-4 (runtime, no possible story implementer — waivers
+// and attestations only ever bind at the story rung's own v0-era slug) now
+// also picks up two accidental-but-honest implementers:
+// escrow-notify/escrow-notify-v2 both carry a structurally-required
+// `implements` edge that Task 1.5 retargeted onto stale-decline#ac-4 after
+// their original target (spec/rate-lock, spec/rate-lock-v2) moved to its
+// own dedicated fixturegit history (see spec/escrow-notify's own note) —
+// a real, disclosed side effect of that retargeting, not a fabricated
+// implementer.
+//
+// The feature fold still does not resolve stale-decline's own v0-era,
+// story-ref-slug-keyed attestation (attestations/jira-loan-1482/ac-2.md
+// verifies the whole spec, not a per-AC fragment under the feature's own
+// slug) or its waivers — that richer evidenced/pending/waived resolution
+// is still exercised by TestCmdMatrix_RoundFourStory_RendersStoryFold's
+// sibling spec/borrower-update-api (a class: story spec, always
+// story-folded) and by TestCmdMatrix_ObligationColumn's synthetic fixture.
 func TestCmdMatrix_Golden(t *testing.T) {
 	repo := buildCorpusRepo(t)
+	copyV2FeatureFixture(t, repo.Dir,
+		"specs/active/borrower-update-api",
+		"specs/active/borrower-update-mobile",
+		"specs/active/borrower-update-mobile-spike",
+	)
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
@@ -181,18 +203,19 @@ func TestCmdMatrix_Golden(t *testing.T) {
 	want := `feature: spec/stale-decline
 status: accepted-pending-build
 
-AC    STATUS     EVIDENCE                             IMPLEMENTING STORIES  TEXT
-ac-1  no-signal  attestation:absent; static:pass      -                     static obligation holds for the retry path
-ac-2  no-signal  attestation:absent; behavioral:pass  -                     static and behavioral: charge API retried on stale decline
-ac-3  no-signal  attestation:absent                   -                     behavioral: golden flow for partial refunds
-ac-4  no-signal  attestation:absent                   -                     runtime: post-deploy decline-rate check
+AC    STATUS   EVIDENCE                             IMPLEMENTING STORIES                                    TEXT
+ac-1  pending  attestation:absent; static:pass      spec/borrower-update-mobile                             every branch that classifies a decline as stale routes its consequence through the outbox — no direct call to notification-svc or payments-gw
+ac-2  pending  attestation:absent; behavioral:pass  spec/borrower-update-api                                loansvc retries the charge through the outbox exactly once per stale decline
+ac-3  pending  attestation:absent                   spec/borrower-update-mobile                             a partial refund against a stale-declined loan still reconciles correctly before any retried charge is issued
+ac-4  pending  attestation:absent                   spec/escrow-notify-v2, spec/escrow-notify [superseded]  the stale-decline rate for the affected cohort is checked against the pre-change baseline seven days post-deploy
 
 stubs: acceptance-time plan; current mapping computed below
-(none declared)
-STUB  DECLARED ACS  LIVE STORIES  RECONCILIATION
+STUB                    DECLARED ACS  LIVE STORIES                 RECONCILIATION
+borrower-update-api     ac-2          spec/borrower-update-api     unreconciled
+borrower-update-mobile  ac-1, ac-3    spec/borrower-update-mobile  unreconciled
 
 feature.violated: false
-stub_reconciliation.blocked: false
+stub_reconciliation.blocked: true
 `
 	if stdout.String() != want {
 		t.Fatalf("matrix output mismatch:\n--- got ---\n%s\n--- want ---\n%s", stdout.String(), want)
@@ -245,6 +268,11 @@ story.eligible: false
 // nothing else about the table changes.
 func TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords(t *testing.T) {
 	repo := buildCorpusRepo(t)
+	copyV2FeatureFixture(t, repo.Dir,
+		"specs/active/borrower-update-api",
+		"specs/active/borrower-update-mobile",
+		"specs/active/borrower-update-mobile-spike",
+	)
 	t.Chdir(repo.Dir)
 
 	var authoritative, preview bytes.Buffer
@@ -265,18 +293,19 @@ func TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords(t *testing.T) {
 status: accepted-pending-build
 PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)
 
-AC    STATUS     EVIDENCE                                IMPLEMENTING STORIES  TEXT
-ac-1  no-signal  attestation:absent; static:pass         -                     static obligation holds for the retry path
-ac-2  no-signal  attestation:absent; behavioral:pass     -                     static and behavioral: charge API retried on stale decline
-ac-3  no-signal  attestation:absent; behavioral:abstain  -                     behavioral: golden flow for partial refunds
-ac-4  no-signal  attestation:absent                      -                     runtime: post-deploy decline-rate check
+AC    STATUS   EVIDENCE                                IMPLEMENTING STORIES                                    TEXT
+ac-1  pending  attestation:absent; static:pass         spec/borrower-update-mobile                             every branch that classifies a decline as stale routes its consequence through the outbox — no direct call to notification-svc or payments-gw
+ac-2  pending  attestation:absent; behavioral:pass     spec/borrower-update-api                                loansvc retries the charge through the outbox exactly once per stale decline
+ac-3  pending  attestation:absent; behavioral:abstain  spec/borrower-update-mobile                             a partial refund against a stale-declined loan still reconciles correctly before any retried charge is issued
+ac-4  pending  attestation:absent                      spec/escrow-notify-v2, spec/escrow-notify [superseded]  the stale-decline rate for the affected cohort is checked against the pre-change baseline seven days post-deploy
 
 stubs: acceptance-time plan; current mapping computed below
-(none declared)
-STUB  DECLARED ACS  LIVE STORIES  RECONCILIATION
+STUB                    DECLARED ACS  LIVE STORIES                 RECONCILIATION
+borrower-update-api     ac-2          spec/borrower-update-api     unreconciled
+borrower-update-mobile  ac-1, ac-3    spec/borrower-update-mobile  unreconciled
 
 feature.violated: false
-stub_reconciliation.blocked: false
+stub_reconciliation.blocked: true
 `
 	if preview.String() != wantPreview {
 		t.Fatalf("preview output mismatch:\n--- got ---\n%s\n--- want ---\n%s", preview.String(), wantPreview)

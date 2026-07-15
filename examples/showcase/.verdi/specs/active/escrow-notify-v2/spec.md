@@ -11,9 +11,9 @@ outcome: { text: "a borrower is notified within an hour of an escrow shortfall",
 acceptance_criteria:
   - { id: ac-1, text: "an escrow shortfall notifies the borrower within one hour", evidence: [behavioral], anchor: "#ac-1" }
 links:
-  - { type: implements, ref: "spec/rate-lock-v2#ac-1" }
+  - { type: implements, ref: "spec/stale-decline#ac-4" }
   - { type: supersedes, ref: "spec/escrow-notify" }
-frozen: { at: 2026-07-12, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
+frozen: { at: 2026-07-12, commit: faf8d8c412c9df35b5a445146a5fe0e8309caa71 }
 ---
 # Escrow notify v2 (fixture, supersedes escrow-notify)
 
@@ -21,7 +21,14 @@ frozen: { at: 2026-07-12, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
 dc-4). Supersedes `spec/escrow-notify`; its acceptance is what flips the
 predecessor story's `status` to `superseded` (the rung-3 flip D-12 shipped).
 It is the source of the predecessor's computed `superseded-by` backlink on
-dex, exactly as the feature-rung `rate-lock-v2` pair is.
+dex, exactly as the feature-rung `rate-lock-v2` pair is. Unlike that
+feature-rung pair, this story-rung one carries no `supersession:` block —
+`02 §Object model`'s `supersession:` field is feature-only
+(`artifact.SpecFrontmatter.Validate`: "story spec must not carry
+feature-only fields"), so VL-015's carried/amended/removed manifest and
+fidelity check apply only at rung 4; a story-rung supersession is fully
+expressed by the `supersedes` link plus the terminal `status: superseded`
+flip on the predecessor (03 §rung 3).
 
 ## Problem
 
@@ -33,4 +40,5 @@ A borrower is notified within an hour of an escrow shortfall.
 
 ## AC-1
 
-An escrow shortfall notifies the borrower within one hour.
+An escrow shortfall notifies the borrower within one hour, down from the
+predecessor's 24-hour window.
