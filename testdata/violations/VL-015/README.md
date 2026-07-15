@@ -7,7 +7,7 @@ VL-015's fixtures live inline in `internal/lint/vl015_test.go`
 (`TestVL015_TableDriven`) rather than as overlay directories here: the
 rule needs the predecessor spec's own object manifest at its
 *frozen.commit*, read from real git history (`gitx.Show`) — the shared
-`testdata/corpus` fixturegit history (`layers.txt`) and
+`examples/showcase` fixturegit history (`layers.txt`) and
 `internal/artifact/v2fixture_test.go`'s own dedicated loan-workflow /
 loan-workflow-v2 history each bake in *their own* golden SHAs, neither of
 which is reproducible inside `internal/lint`'s separate fixturegit-built

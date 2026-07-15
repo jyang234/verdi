@@ -1,7 +1,7 @@
 # testdata/corpus-invalid
 
 Decode-failure twins (PLAN.md phase 2 deliverable 4): each file is a small
-variant of a real `testdata/corpus/` fixture with exactly one injected
+variant of a real `examples/showcase/` fixture with exactly one injected
 defect, proven in `internal/corpus/invalid_test.go` to fail loudly with an
 error naming the offense.
 

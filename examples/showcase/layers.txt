@@ -10,7 +10,7 @@
 # Only committed-zone files (.verdi/, minus data/) appear here. Files
 # under mutable/ and derived/ model the store's mutable and derived zones,
 # which VL-013 forbids git-tracking in the real store — corpus_test.go
-# decodes them directly from testdata/corpus/ on disk instead of routing
+# decodes them directly from examples/showcase/ on disk instead of routing
 # them through fixturegit.
 #
 # Layer 1: never-frozen content only (nothing here can pin a commit,

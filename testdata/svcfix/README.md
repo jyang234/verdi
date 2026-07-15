@@ -17,7 +17,7 @@ Contents at this phase:
   service field renamed.
 - `verdi.bindings.yaml` — the I-2 sidecar, binding `audit-before-publish`
   (static) and the golden flow `refund-flow` (behavioral, not yet
-  materialized) to `testdata/corpus`'s `spec/stale-decline` ac-1/ac-2/ac-3.
+  materialized) to `examples/showcase`'s `spec/stale-decline` ac-1/ac-2/ac-3.
 - `api/openapi.yaml` — a tiny valid stub; presence-only in phase 3, content
   unread until dex's OpenAPI renderer (05 §Verdi-dex).
 

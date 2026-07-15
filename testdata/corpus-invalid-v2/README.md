@@ -3,7 +3,7 @@
 Decode-failure twins for the v1-P1 round-four contract surface (object
 model, story class, edges, reaffirmation, board layout), mirroring
 `testdata/corpus-invalid/`'s v0 convention: each file is a small variant of
-a real `testdata/corpus/` v2 fixture with exactly one injected defect,
+a real `examples/showcase/` v2 fixture with exactly one injected defect,
 proven in `internal/artifact/v2fixture_test.go` to fail loudly.
 
 | File | Base fixture | Defect | Expected failure |
