@@ -10,7 +10,7 @@ problem: { text: "a borrower who wants their escrow payment collected automatica
 outcome: { text: "a borrower can enroll an escrow account in autopay, edit the mandate themselves, and trust that a failed scheduled charge is retried instead of silently dropped", anchor: "#outcome" }
 impacts: [loansvc, notification-svc, payments-gw]
 context:
-  - adr/0002-outbox-events@9f5621543d6e5158ad3230a7febc83754f2be3dd
+  - adr/0002-outbox-events@78e3161594fb31fdad17f2ea8a96b52f33dbf0f3
 declares:
   boundaries:
     - { from: loansvc, to: notification-svc, via: events }
@@ -34,7 +34,7 @@ open_questions:
 stubs:
   - { slug: autopay-mandate-api, acceptance_criteria: [ac-1, ac-2] }
   - { slug: autopay-retry-policy, acceptance_criteria: [ac-2, ac-3] }
-frozen: { at: 2026-06-30, commit: 74c957aed504671bd4fc4ceb30907d2f4813e9b7 }
+frozen: { at: 2026-06-30, commit: 16219044c9d6d41de9a0de9464ed24d49283b40c }
 ---
 # Escrow autopay enrollment
 
@@ -143,8 +143,8 @@ loansvc's own write path — it predates the rule it cannot yet meet.
 product-lead signed off this exemption on 2026-03-12, the same day
 ADR-0004 was accepted, on the condition that the bridge job's own
 remediation lands within Q3 2026; the exemption is audited per
-`adr/0004`'s exemption-count mechanism (`verdi audit`), not left as a
-standing carve-out.
+`adr/0004`'s exemption-count mechanism (`verdi audit`, counted against the
+audit exemption threshold, default 3), not left as a standing carve-out.
 
 ## DC-4
 

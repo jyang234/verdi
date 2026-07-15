@@ -5,7 +5,7 @@ title: "VL-010 overlay: frozen ADR (before stamp strip)"
 status: accepted
 owners: [platform-team]
 decided: 2026-04-01
-frozen: { at: 2026-04-01, commit: 9f5621543d6e5158ad3230a7febc83754f2be3dd }
+frozen: { at: 2026-04-01, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # VL-010 overlay: frozen ADR (before stamp strip)
 

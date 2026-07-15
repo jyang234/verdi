@@ -14,7 +14,7 @@ links:
   - { type: impacts, ref: svc/loansvc/boundary-contract }
 impacts: [loansvc, notification-svc, payments-gw]
 context:
-  - adr/0002-outbox-events@9f5621543d6e5158ad3230a7febc83754f2be3dd
+  - adr/0002-outbox-events@78e3161594fb31fdad17f2ea8a96b52f33dbf0f3
 declares:
   boundaries:
     - { from: loansvc, to: notification-svc, via: events }
@@ -33,7 +33,7 @@ dispositions:
 stubs:
   - { slug: borrower-update-api, acceptance_criteria: [ac-2] }
   - { slug: borrower-update-mobile, acceptance_criteria: [ac-1, ac-3] }
-frozen: { at: 2026-05-14, commit: 9f5621543d6e5158ad3230a7febc83754f2be3dd }
+frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # Stale decline handling
 
@@ -69,9 +69,8 @@ published the notification event as two independent operations with no
 shared transaction — the failover replayed the write without any guarantee
 about whether the event had actually gone out. adr/0002 (which supersedes
 adr/0001) closed that gap for every publisher, not just this one; this
-feature is the second consumer of the pattern after loan-refi-2023, and its
-own golden path (ac-2) is exactly the charge retry that pattern exists to
-make safe.
+feature was one of the pattern's earliest adopters, and its own golden
+path (ac-2) is exactly the charge retry that pattern exists to make safe.
 
 ## Boundaries
 

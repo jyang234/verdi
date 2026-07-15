@@ -12,11 +12,11 @@ links:
   - { type: implements, ref: "spec/loan-refi-2023#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "a rate change is verified against the published table before rollout", evidence: [static, behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-01, commit: 74c957aed504671bd4fc4ceb30907d2f4813e9b7 }
+frozen: { at: 2026-07-01, commit: 16219044c9d6d41de9a0de9464ed24d49283b40c }
 ---
 # Refinance rate check 2024
 
-A year after `spec/loan-refi-2023` shipped the first automated rate check,
+Days after `spec/loan-refi-2023` shipped the first automated rate check,
 the published-table format changed underneath it — a new column for
 promotional-rate expirations broke the parser's column-position
 assumptions and let two stale promotional rates through before anyone

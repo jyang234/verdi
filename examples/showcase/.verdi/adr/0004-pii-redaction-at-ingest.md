@@ -7,7 +7,7 @@ owners: [platform-team]
 decided: 2026-03-12
 links:
   - { type: depends-on, ref: adr/0002-outbox-events }
-frozen: { at: 2026-03-12, commit: 09ed3760a09cc1ec9b0c5ccf78cebc3b1ca93fa5 }
+frozen: { at: 2026-03-12, commit: 38cc28c9f7bdf4098bccc724caddd0acdc2d17f6 }
 ---
 # Redact PII fields at outbox ingest
 
@@ -50,5 +50,5 @@ creation reads through (`spec/escrow-autopay#co-1`: "must not touch the
 legacy schema" directly) still stages raw SSN and date-of-birth fields
 ahead of its own Q3 remediation. `spec/escrow-autopay#dc-3` and `#dc-4`
 record that exemption and its sign-off, audited per the exemption-count
-mechanism (`verdi audit`, `verdi.yaml`'s
-`audit.exempts_conflict_threshold`) rather than left to convention.
+mechanism (`verdi audit`, counted against the audit exemption threshold,
+default 3) rather than left to convention.

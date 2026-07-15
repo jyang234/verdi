@@ -6,7 +6,7 @@ owners: [platform-team]
 for_kind: static
 links:
   - { type: verifies, ref: "spec/refi-rate-check-2024" }
-frozen: { at: 2026-07-01, commit: 74c957aed504671bd4fc4ceb30907d2f4813e9b7 }
+frozen: { at: 2026-07-01, commit: 16219044c9d6d41de9a0de9464ed24d49283b40c }
 ---
 # The rate-check path reads every field it prices off the published table, never a cached or hardcoded value
 

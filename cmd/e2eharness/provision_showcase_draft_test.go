@@ -11,7 +11,7 @@ import (
 
 // A syntactically valid 40-hex the pinned refs in the fixtures can carry in
 // unit tests — the decoders check ref/digest FORMAT, not git reality.
-const testCommit40 = "9f5621543d6e5158ad3230a7febc83754f2be3dd"
+const testCommit40 = "78e3161594fb31fdad17f2ea8a96b52f33dbf0f3"
 
 // TestShowcaseDraftSpecDecodes proves the draft feature spec strict-decodes
 // and carries the shape the showcase bar requires: a feature draft with a

@@ -166,15 +166,22 @@ above).
 ## Trace these threads
 
 - **An AC, all the way to proof.** `spec/stale-decline#ac-2` ("loansvc
-  retries the charge API through the outbox... exactly once per decline")
-  is implemented by `spec/borrower-update-api` (its own `ac-1` carries the `implements` edge), which carries two
-  obligations — `obligations/borrower-update-api/ac-1--static.md` and
+  retries the charge through the outbox exactly once per stale decline")
+  declares `evidence: [static, behavioral]` — no `attestation` kind, so it
+  owes no outcome-attestation floor (and the fold keys any outcome
+  attestation by feature slug, `attestations/stale-decline/`, which this
+  store does not carry). It is implemented by `spec/borrower-update-api`,
+  whose own `ac-1` carries the `implements` edge into it; that story
+  discharges the AC through two obligations —
+  `obligations/borrower-update-api/ac-1--static.md` and
   `ac-1--behavioral.md` — each a concrete, checkable claim rather than a
-  restated AC. The feature-level outcome floor for the same AC is
-  `attestations/jira-loan-1482/ac-2.md`, the QA lead's direct sign-off.
-  Follow the `verified-by`/`implemented-by` backlinks from
-  `spec/stale-decline`'s own dex page to walk the whole chain in the
-  other direction.
+  restated AC. The CI run's verdicts for the feature land in the derived
+  zone (`derived/spec--stale-decline/<ci-head>/verdicts.json`, provenance
+  `source: ci`), and `verdi matrix spec/stale-decline` renders `ac-2` as
+  `pending` — evidenced by that obligation, `attestation:absent` because
+  none is owed — since the feature stays open until every AC across it
+  clears. Follow the `implemented-by` backlink from `spec/stale-decline`'s
+  own dex page to walk the chain the other way.
 - **A decision, superseded with a named reason.**
   `adr/0001-outbox-events` (accepted 2025-08-20, synchronous dual-write)
   is superseded by `adr/0002-outbox-events` (accepted 2025-11-05), and

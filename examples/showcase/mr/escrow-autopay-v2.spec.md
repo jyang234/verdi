@@ -16,7 +16,7 @@ acceptance_criteria:
 constraints:
   - { id: co-1, text: "must not touch the legacy schema", anchor: "#co-1" }
 supersession:
-  carried: [ac-1, ac-3, co-1, dc-1, dc-2, oq-1]
+  carried: [ac-1, ac-3, co-1, dc-1, dc-2, dc-3, dc-4, oq-1]
   amended: [ { id: ac-2, note: "tightened reflection from within-the-session to immediate" } ]
   amended_advisory: []
   removed: []

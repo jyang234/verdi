@@ -6,7 +6,7 @@ status: superseded
 owners: [platform-team]
 links:
   - { type: challenges, ref: adr/0002-outbox-events }
-frozen: { at: 2026-03-12, commit: 9f5621543d6e5158ad3230a7febc83754f2be3dd }
+frozen: { at: 2026-03-12, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # Conflict: unredacted PII in the outbox event log
 

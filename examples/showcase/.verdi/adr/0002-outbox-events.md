@@ -7,7 +7,7 @@ owners: [platform-team]
 decided: 2025-11-05
 links:
   - { type: supersedes, ref: adr/0001-outbox-events }
-frozen: { at: 2025-11-05, commit: 9f5621543d6e5158ad3230a7febc83754f2be3dd }
+frozen: { at: 2025-11-05, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # Transactional outbox for domain events
 

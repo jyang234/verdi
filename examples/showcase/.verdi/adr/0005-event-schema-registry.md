@@ -7,7 +7,7 @@ owners: [platform-team]
 decided: 2026-04-02
 links:
   - { type: depends-on, ref: adr/0002-outbox-events }
-frozen: { at: 2026-04-02, commit: 09ed3760a09cc1ec9b0c5ccf78cebc3b1ca93fa5 }
+frozen: { at: 2026-04-02, commit: 38cc28c9f7bdf4098bccc724caddd0acdc2d17f6 }
 ---
 # Central schema registry for outbox event payloads
 

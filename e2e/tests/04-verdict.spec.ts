@@ -4,8 +4,8 @@ import { test, expect } from "@playwright/test";
 // derived verdicts.json snapshots for spec/stale-decline (PLAN.md Phase 10
 // exit criteria: "verdict viewer diffs the fixture's two canned
 // snapshots").
-const snapshotA = "2350631724b1e69ccdd84da40686a8f079955dc4";
-const snapshotB = "74c957aed504671bd4fc4ceb30907d2f4813e9b7";
+const snapshotA = "f6dd4c4df724c0b16cae435e96f7e34ac94026c9";
+const snapshotB = "16219044c9d6d41de9a0de9464ed24d49283b40c";
 
 test("verdict viewer shows the cross-commit diff", async ({ page }) => {
   await page.goto(`/verdict/jira:LOAN-1482?a=${snapshotA}&b=${snapshotB}`);

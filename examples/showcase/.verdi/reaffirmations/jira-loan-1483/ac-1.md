@@ -3,7 +3,7 @@ id: reaffirmation/jira-loan-1483--ac-1
 kind: reaffirmation
 title: "re-affirm ac-1 as amended for jira:LOAN-1483"
 schema: verdi.reaffirmation/v1
-owners: [loansvc-team]
+owners: [platform-team]
 frozen: { at: 2026-07-12, commit: 06a3f4cabb226fe9344e1645e27c344493b6b62b }
 object: spec/loan-workflow-v2@06a3f4cabb226fe9344e1645e27c344493b6b62b#ac-1
 hash: { old: sha256:20bb0d914cc85a12dbb4c5e85f099b69cae126b0a395780d10b98327da844bfc, new: sha256:ca80c24cd423a030096c07d690b96bfd7dcc801219a5815e0679269a6d699c97 }

@@ -23,7 +23,7 @@ sequenceDiagram
   Note over loansvc,payments-gw: on the mandate's schedule
   loansvc->>payments-gw: event: charge-retry (scheduled charge)
   payments-gw--xloansvc: charge fails (expired card)
-  loansvc->>payments-gw: event: charge-retry (retry, per adr/0003 budget)
+  loansvc->>payments-gw: event: charge-retry (retry, within adr/0002's shared budget)
   payments-gw-->>loansvc: charge succeeds
   loansvc->>escrow-svc: event: escrow-state-changed (charge settled)
   escrow-svc-->>escrow-svc: invalidate cached account snapshot
