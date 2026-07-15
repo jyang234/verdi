@@ -19,29 +19,31 @@ import (
 const corpusDir = "../../examples/showcase"
 const violationsDir = "../../testdata/violations"
 
-// setupManifestYAML is the store manifest every lint test's repo carries —
+// setupManifestYAML is a store manifest for the STANDALONE lint fixtures
+// that build their own repo from scratch instead of chaining the committed
+// examples/showcase tree (buildVL015Repo) — it is byte-identical to
+// examples/showcase's own committed .verdi/verdi.yaml (layers.txt layer 1):
 // forge: gitlab (so VL-012 expects gitlab-generated), a configured jira
-// story-provider scheme (VL-005), and an empty gated_generated allowlist
-// (VL-008). Kept separate from examples/showcase itself (which carries no
-// verdi.yaml of its own) so this package never touches phase 2/3's golden
-// corpus fixture or its pinned SHAs.
+// story-provider scheme (VL-005), and services.discovery: flowmap. The
+// corpus-chaining harnesses (buildLintRepo, buildV2FixtureCorpusRepo) do
+// NOT use this — they lint the committed manifest layers.txt already carries
+// as layer 1, unmodified, so those gates prove the real store's own manifest
+// rather than a synthetic variant.
 const setupManifestYAML = `schema: verdi.layout/v1
 forge: gitlab
 providers:
   jira:
     base_url: https://example.atlassian.net
     rollup_field: customfield_00000
-lint:
-  gated_generated: []
-derived:
-  retention_days: 14
 services:
   discovery: flowmap
 `
 
 // setupGitAttributes is the repository-root .gitattributes VL-012
 // requires (02 §Repository plumbing's literal example, gitlab-generated
-// token to match setupManifestYAML's forge: gitlab).
+// token to match forge: gitlab) — byte-identical to examples/showcase's
+// own committed .gitattributes, which layers.txt does not track (it lists
+// .verdi/ content only), so the setup layer supplies it to the built repo.
 const setupGitAttributes = `.verdi/specs/*/*/board.json          gitlab-generated
 .verdi/specs/*/*/rollup.json         gitlab-generated
 .verdi/specs/*/*/deviation-report.md gitlab-generated
@@ -124,15 +126,20 @@ func parseCorpusLayers(t testing.TB) []fixturegit.Layer {
 	return layers
 }
 
-// setupLayer is the fixed fourth layer every lint test repo gets: the
-// store manifest and root .gitattributes.
+// setupLayer is the fixed layer buildLintRepo/buildV2FixtureCorpusRepo add
+// on top of the committed corpus: it carries ONLY the root .gitattributes
+// (byte-identical to examples/showcase's committed .gitattributes), which
+// VL-012 requires but which layers.txt does not track (layers.txt lists
+// .verdi/ content only). The store manifest is deliberately NOT re-added
+// here — the committed .verdi/verdi.yaml that layers.txt already carries as
+// layer 1 stands unmodified, so the lint-clean gates prove the real store's
+// own manifest, not a synthetic overwrite.
 func setupLayer() fixturegit.Layer {
 	return fixturegit.Layer{
 		Files: map[string]string{
-			".verdi/verdi.yaml": setupManifestYAML,
-			".gitattributes":    setupGitAttributes,
+			".gitattributes": setupGitAttributes,
 		},
-		Message: "phase 4 lint test setup: manifest + gitattributes",
+		Message: "lint test setup: root .gitattributes",
 	}
 }
 
@@ -216,10 +223,24 @@ func writeTestFile(t *testing.T, path, content string) {
 	}
 }
 
-// buildLintRepo builds the corpus (3 golden layers) + the fixed setup
-// layer + one additional layer per overlayDir (each layered as its own
-// commit, in order), then overlays the loansvc discovery fixture
-// untracked. Returns the built repo.
+// buildLintRepo builds the committed corpus (every layers.txt layer,
+// including its committed .verdi/verdi.yaml) + the fixed setup layer (root
+// .gitattributes only) + one additional layer per overlayDir (each layered
+// as its own commit, in order), then overlays the loansvc discovery fixture
+// untracked and provisions a present-but-empty mutable zone. Returns the
+// built repo.
+//
+// The mutable zone is materialized present-but-empty rather than populated
+// with examples/showcase's committed mutable/derived fixtures: the harness
+// thus lints the committed tree with an empty mutable zone, which is sound
+// because VL-017 — the only rule that reads the mutable zone (no rule reads
+// the derived zone) — keys off zone PRESENCE, so a present-empty zone makes
+// it run and disclose nothing rather than pass vacuously, and the committed
+// annotations are all agent-task / board-only / grandfathered-target and so
+// inert to VL-017 regardless. Populating the shared zone here would also
+// collide with the per-test annotations vl017_test writes into it. VL-017's
+// mutable-absent disclosure path is proven separately by
+// TestV2FixtureCorpus_BareClone_OnlyVL017Disclosures.
 func buildLintRepo(t *testing.T, overlayDirs ...string) *fixturegit.Repo {
 	t.Helper()
 	layers := parseCorpusLayers(t)
