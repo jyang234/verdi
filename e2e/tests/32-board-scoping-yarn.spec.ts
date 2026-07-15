@@ -1,13 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  FEATURE_SPEC,
-  AC_IDS,
-  OQ_ID,
-  boardPath,
-  stubCardTestId,
-  coverageChipTestId,
-} from "./fixtures";
+import { SHOWCASE, boardPath, stubCardTestId, coverageChipTestId } from "./fixtures";
 import { expectAutosaved, dragToTrash, grabPoint } from "./helpers";
 
 // The scoping yarn (owner directive, verbatim: "the yarn should be used
@@ -15,7 +7,7 @@ import { expectAutosaved, dragToTrash, grabPoint } from "./helpers";
 // with acceptance criteria and spikes are associated with open
 // questions") and stub-card drag (round 5.5 dc-6: a stub's position home
 // is layout.json under "stub:<slug>"). This suite runs after 30/31 in
-// the shared store, so DESIGN_SPEC already carries the stubs suite 30
+// the shared store, so SHOWCASE.DESIGN_SPEC already carries the stubs suite 30
 // graduated: audit-decline-notice-log (covers ac-3) and the two probe
 // spikes (both resolve oq-1).
 //
@@ -50,7 +42,7 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
   test("the committed fixture's story stubs hang covers yarn to their acceptance criteria", async ({
     page,
   }) => {
-    await page.goto(boardPath(FEATURE_SPEC));
+    await page.goto(boardPath(SHOWCASE.FEATURE_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
@@ -97,7 +89,7 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
     // The sealed record and the live wall alike: a scoping chip carries
     // no button — there is no spec edge behind it to edit (the Go render
     // test pins this per-mode; here the real DOM confirms it).
-    for (const spec of [FEATURE_SPEC, DESIGN_SPEC]) {
+    for (const spec of [SHOWCASE.FEATURE_SPEC, SHOWCASE.DESIGN_SPEC]) {
       await page.goto(boardPath(spec));
       const chips = page.locator(".yarn-chip--scoping");
       expect(await chips.count()).toBeGreaterThan(0);
@@ -108,19 +100,19 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
   test("the authoring wall's spike stubs hang resolves yarn, and the key lists both planning rows", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
     );
 
-    await expect(scopingChip(page, "covers", STORY_STUB, AC_IDS[2])).toHaveCount(1);
+    await expect(scopingChip(page, "covers", STORY_STUB, SHOWCASE.AC_IDS[2])).toHaveCount(1);
     for (const slug of SPIKE_STUBS) {
-      await expect(scopingChip(page, "resolves", slug, OQ_ID)).toHaveCount(1);
+      await expect(scopingChip(page, "resolves", slug, SHOWCASE.OQ_ID)).toHaveCount(1);
     }
     // The OQ's multi-spike smell badge stays — the yarn shows the ties,
     // the badge makes the count an observation (ac-5).
-    await expect(page.getByTestId(`oq-claims-${OQ_ID}`)).toHaveText(
+    await expect(page.getByTestId(`oq-claims-${SHOWCASE.OQ_ID}`)).toHaveText(
       "claimed by 2 spikes",
     );
 
@@ -136,7 +128,7 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
   test("a stub card drags like any card: threads re-anchor live, the drop persists reload-deterministically", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const stub = page.getByTestId(stubCardTestId(STORY_STUB));
     await expect(stub).toBeVisible();
     const before = await position(stub);
@@ -160,7 +152,7 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
     const moved = page.getByTestId(stubCardTestId(STORY_STUB));
     const after = await position(moved);
     expect(after).not.toEqual(before);
-    await expect(scopingChip(page, "covers", STORY_STUB, AC_IDS[2])).toHaveCount(1);
+    await expect(scopingChip(page, "covers", STORY_STUB, SHOWCASE.AC_IDS[2])).toHaveCount(1);
     const shapesAfter = await threadShapes(page);
     expect(shapesAfter).not.toEqual(shapesBefore);
 
@@ -176,7 +168,7 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
   test("the trash refuses a declared stub in plain language — cancel writes nothing", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const stub = page.getByTestId(stubCardTestId(STORY_STUB));
     await expect(stub).toBeVisible();
     const before = await position(stub);
@@ -205,13 +197,13 @@ test.describe("scoping yarn: stub attributions hang as basting threads", () => {
     expect(await position(page.getByTestId(stubCardTestId(STORY_STUB)))).toEqual(
       before,
     );
-    await expect(scopingChip(page, "covers", STORY_STUB, AC_IDS[2])).toHaveCount(1);
+    await expect(scopingChip(page, "covers", STORY_STUB, SHOWCASE.AC_IDS[2])).toHaveCount(1);
   });
 
   test("a read-only wall refuses a stub drag with the sealed record's own words", async ({
     page,
   }) => {
-    await page.goto(boardPath(FEATURE_SPEC));
+    await page.goto(boardPath(SHOWCASE.FEATURE_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { DESIGN_SPEC, boardPath } from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 import { addSticky, expectAutosaved } from "./helpers";
 
 // EXECUTABLE ACCEPTANCE CRITERIA — PLAN-V1.md §5 Phase V1-P6, exit
@@ -27,7 +27,7 @@ test.describe("V1-P6: layout stability at the UI layer", () => {
   };
 
   test("adding an object never moves an existing card", async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",

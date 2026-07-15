@@ -1,15 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  NO_CASEFILE_SPEC,
-  READONLY_SPEC,
-  REVIEW_SPEC,
-  EMPTY_SPEC,
-  EMPTY_SPEC_STORY_REF,
-  FEATURE_SPEC,
-  STORY_STUB_MATCHED,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 import { addSticky } from "./helpers";
 
 // The legibility contract (owner UAT: the board must read, at a glance,
@@ -23,8 +13,8 @@ import { addSticky } from "./helpers";
 
 // AMENDED with the scoping canvas: the stubs band (spec/scoping-canvas
 // dc-6) sits between open questions and references. It is CLASS-GATED:
-// a feature wall wears it (DESIGN_SPEC below); a story wall never files
-// stubs and never shows the band — asserted separately for EMPTY_SPEC.
+// a feature wall wears it (SHOWCASE.DESIGN_SPEC below); a story wall never files
+// stubs and never shows the band — asserted separately for SHOWCASE.EMPTY_SPEC.
 const ZONE_KINDS = [
   "acceptance-criterion",
   "constraint",
@@ -39,7 +29,7 @@ test.describe("board legibility: the wall reads at a glance", () => {
   test("authoring labels every zone band; empty bands read as invitations", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -83,13 +73,13 @@ test.describe("board legibility: the wall reads at a glance", () => {
   test("a sealed record labels only the zones it occupies", async ({
     page,
   }) => {
-    await page.goto(boardPath(READONLY_SPEC));
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
     );
 
-    // READONLY_SPEC declares ACs and one document-level edge to an ADR
+    // SHOWCASE.READONLY_SPEC declares ACs and one document-level edge to an ADR
     // (a reference card) — nothing else, so nothing else is labeled.
     await expect(
       page.getByTestId("zone-label-acceptance-criterion"),
@@ -103,7 +93,7 @@ test.describe("board legibility: the wall reads at a glance", () => {
   test("the four-move guide: collapsed in authoring, absent from mirror and record", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const guide = page.getByTestId("board-guide");
     await expect(guide).toBeVisible();
     // Never front-loaded: closed until asked.
@@ -115,7 +105,7 @@ test.describe("board legibility: the wall reads at a glance", () => {
     await expect(guide).toContainText("acceptance criteria");
     await expect(guide).toContainText("yarn");
     await expect(guide).toContainText("Commit & push");
-    // DESIGN_SPEC is class: feature — its guide teaches the split (owner
+    // SHOWCASE.DESIGN_SPEC is class: feature — its guide teaches the split (owner
     // directive: a PM must see, on first read, that a feature wall holds
     // outcome ACs + stubs while stories are their own specs pointing up).
     const note = guide.getByTestId("guide-class-note");
@@ -124,9 +114,9 @@ test.describe("board legibility: the wall reads at a glance", () => {
     await expect(note).toContainText("implements");
     await expect(note).toContainText("a feature never lists its stories");
 
-    // EMPTY_SPEC is class: story — the four-move copy stands unadorned
+    // SHOWCASE.EMPTY_SPEC is class: story — the four-move copy stands unadorned
     // (story spec + ACs + implements + commit IS the minimum path).
-    await page.goto(boardPath(EMPTY_SPEC));
+    await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
     const storyGuide = page.getByTestId("board-guide");
     await expect(storyGuide).toBeVisible();
     await expect(storyGuide).not.toHaveAttribute("open", "");
@@ -137,7 +127,7 @@ test.describe("board legibility: the wall reads at a glance", () => {
     await expect(storyGuide).toContainText("Commit & push");
     await expect(storyGuide.getByTestId("guide-class-note")).toHaveCount(0);
 
-    for (const spec of [REVIEW_SPEC, READONLY_SPEC]) {
+    for (const spec of [SHOWCASE.REVIEW_SPEC, SHOWCASE.READONLY_SPEC]) {
       await page.goto(boardPath(spec));
       await expect(page.getByTestId("board-guide")).toHaveCount(0);
     }
@@ -145,38 +135,38 @@ test.describe("board legibility: the wall reads at a glance", () => {
 
   test("the case file wears its class in every room", async ({ page }) => {
     // Authoring, feature wall: the stamp says so.
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const tag = page.getByTestId("case-class-tag");
     await expect(tag).toHaveText("feature");
     await expect(tag).toHaveClass(/case-class-tag--feature/);
 
     // Authoring, story wall: the stamp carries the tracker ref from the
     // spec's story: field.
-    await page.goto(boardPath(EMPTY_SPEC));
+    await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
     const storyTag = page.getByTestId("case-class-tag");
-    await expect(storyTag).toHaveText(`story · ${EMPTY_SPEC_STORY_REF}`);
+    await expect(storyTag).toHaveText(`story · ${SHOWCASE.EMPTY_SPEC_STORY_REF}`);
     await expect(storyTag).toHaveClass(/case-class-tag--story/);
 
     // The review mirror and the sealed record wear it too — the class
-    // question does not expire with the draft. FEATURE_SPEC and
-    // STORY_STUB_MATCHED live on main (accepted-pending-build), so their
+    // question does not expire with the draft. SHOWCASE.FEATURE_SPEC and
+    // SHOWCASE.STORY_STUB_MATCHED live on main (accepted-pending-build), so their
     // walls are sealed records.
-    await page.goto(boardPath(REVIEW_SPEC));
+    await page.goto(boardPath(SHOWCASE.REVIEW_SPEC));
     await expect(page.getByTestId("case-class-tag")).toHaveText("feature");
-    await page.goto(boardPath(FEATURE_SPEC));
+    await page.goto(boardPath(SHOWCASE.FEATURE_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
     );
     await expect(page.getByTestId("case-class-tag")).toHaveText("feature");
-    await page.goto(boardPath(STORY_STUB_MATCHED));
+    await page.goto(boardPath(SHOWCASE.STORY_STUB_MATCHED));
     await expect(page.getByTestId("case-class-tag")).toContainText("story ·");
 
-    // READONLY_SPEC (stale-decline) gained problem/outcome + class:
+    // SHOWCASE.READONLY_SPEC (stale-decline) gained problem/outcome + class:
     // feature in its showcase renovation (public-rollout-plan Task 1.4),
     // so its sealed wall now renders the case-file lockup and wears the
     // feature stamp like every other room.
-    await page.goto(boardPath(READONLY_SPEC));
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
@@ -186,7 +176,7 @@ test.describe("board legibility: the wall reads at a glance", () => {
     // A spec with neither problem nor outcome has no case-file lockup
     // to wear the stamp — and never wears an orphaned one, even though
     // the spec declares a class (component) the stamp could have named.
-    await page.goto(boardPath(NO_CASEFILE_SPEC));
+    await page.goto(boardPath(SHOWCASE.NO_CASEFILE_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
@@ -234,7 +224,7 @@ test.describe("board legibility: the wall reads at a glance", () => {
       expect(keyPairs).toEqual(chipPairs);
     };
 
-    await page.goto(boardPath(READONLY_SPEC));
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     const key = page.getByTestId("yarn-key");
     await expect(key).toBeVisible();
     // The sealed fixture's own document-level implements edge is always
@@ -248,12 +238,12 @@ test.describe("board legibility: the wall reads at a glance", () => {
       page.locator('.yarn-chip--doc[data-edge-type="implements"]'),
     ).toContainText("this spec");
 
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await keyMatchesChips();
   });
 
   test("an empty wall invites instead of voiding", async ({ page }) => {
-    await page.goto(boardPath(EMPTY_SPEC));
+    await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -271,7 +261,7 @@ test.describe("board legibility: the wall reads at a glance", () => {
     for (const kind of ZONE_KINDS) {
       const label = page.getByTestId(`zone-label-${kind}`);
       if (kind === "stub") {
-        // EMPTY_SPEC is class: story — a story wall never files stubs,
+        // SHOWCASE.EMPTY_SPEC is class: story — a story wall never files stubs,
         // so it never wears the band's label, not even the invitation
         // (the same class gate the server puts on proto-stickies).
         await expect(label).toHaveCount(0);
@@ -293,7 +283,7 @@ test.describe("board legibility: the wall reads at a glance", () => {
   test("a new sticky lands at the bottom of its type's lane", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -357,13 +347,13 @@ test.describe("board legibility: the wall reads at a glance", () => {
   test("mode identity is page chrome: three rooms, three stamps", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.locator(".board-mode-tag")).toHaveText(
       /authoring · live wall/,
     );
     await expect(page.locator("body")).toHaveClass(/mode-authoring/);
 
-    await page.goto(boardPath(REVIEW_SPEC));
+    await page.goto(boardPath(SHOWCASE.REVIEW_SPEC));
     await expect(page.locator(".board-mode-tag")).toHaveText(
       /review · mirror of the MR/,
     );
@@ -373,7 +363,7 @@ test.describe("board legibility: the wall reads at a glance", () => {
       "mirrors the merge request",
     );
 
-    await page.goto(boardPath(READONLY_SPEC));
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     await expect(page.locator(".board-mode-tag")).toHaveText(
       /read-only · sealed record/,
     );

@@ -1,12 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  REVIEW_SPEC,
-  REVIEW_COMMENT_ANCHORED,
-  REVIEW_COMMENT_TOKEN_FREE,
-  REVIEW_COMMENT_UNRESOLVABLE,
-  REVIEW_FEED_TOTAL,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 
 // EXECUTABLE ACCEPTANCE CRITERIA — PLAN-V1.md §5 Phase V1-P6 (Goal: "the
 // review-mode mirror") and Phase V1-P7 (Delivers: "review-sticky forge
@@ -23,7 +16,7 @@ import {
 // adapter double (PLAN-V1 §5 V1-P6 "Stubs") — no network, per CLAUDE.md.
 test.describe("V1-P6/V1-P7: review mode mirrors the MR", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(REVIEW_SPEC));
+    await page.goto(boardPath(SHOWCASE.REVIEW_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "review",
@@ -36,16 +29,16 @@ test.describe("V1-P6/V1-P7: review mode mirrors the MR", () => {
     page,
   }) => {
     const anchored = page.locator(
-      `[data-annotation-type="review"][data-anchor="${REVIEW_COMMENT_ANCHORED.objectId}"]`,
+      `[data-annotation-type="review"][data-anchor="${SHOWCASE.REVIEW_COMMENT_ANCHORED.objectId}"]`,
     );
     await expect(anchored).toHaveCount(1);
-    await expect(anchored).toContainText(REVIEW_COMMENT_ANCHORED.body);
+    await expect(anchored).toContainText(SHOWCASE.REVIEW_COMMENT_ANCHORED.body);
 
     // Anchored means anchored: it does not also sit in the inbox tray.
     await expect(
       page
         .getByRole("region", { name: "Inbox tray" })
-        .filter({ hasText: REVIEW_COMMENT_ANCHORED.body }),
+        .filter({ hasText: SHOWCASE.REVIEW_COMMENT_ANCHORED.body }),
     ).toHaveCount(0);
   });
 
@@ -61,12 +54,12 @@ test.describe("V1-P6/V1-P7: review mode mirrors the MR", () => {
 
     await expect(
       tray.locator('[data-annotation-type="review"]').filter({
-        hasText: REVIEW_COMMENT_TOKEN_FREE.body,
+        hasText: SHOWCASE.REVIEW_COMMENT_TOKEN_FREE.body,
       }),
     ).toHaveCount(1);
     await expect(
       tray.locator('[data-annotation-type="review"]').filter({
-        hasText: REVIEW_COMMENT_UNRESOLVABLE.body,
+        hasText: SHOWCASE.REVIEW_COMMENT_UNRESOLVABLE.body,
       }),
     ).toHaveCount(1);
 
@@ -74,7 +67,7 @@ test.describe("V1-P6/V1-P7: review mode mirrors the MR", () => {
     // or trayed — the count proves none was dropped.
     await expect(
       page.locator('[data-annotation-type="review"]'),
-    ).toHaveCount(REVIEW_FEED_TOTAL);
+    ).toHaveCount(SHOWCASE.REVIEW_FEED_TOTAL);
   });
 
   // "the board becomes a mirror of the MR rather than an editing surface"

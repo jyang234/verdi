@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { DESIGN_SPEC, AC_IDS, boardPath } from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 import { addSticky, expectAutosaved } from "./helpers";
 
 // Position persistence for the v1 board's drag surfaces — the two
@@ -31,7 +31,7 @@ const position = (el: Locator) =>
 
 test.describe("V1-P6: dragged positions persist", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -41,7 +41,7 @@ test.describe("V1-P6: dragged positions persist", () => {
   test("a dragged card's position lands in layout.json and survives reload", async ({
     page,
   }) => {
-    const card = page.getByTestId(`card-${AC_IDS[2]}`);
+    const card = page.getByTestId(`card-${SHOWCASE.AC_IDS[2]}`);
     const before = await position(card);
 
     await dragBy(page, card, 70, 320);
@@ -51,7 +51,7 @@ test.describe("V1-P6: dragged positions persist", () => {
 
     // A fresh projection reads the stored coordinate back verbatim.
     await page.reload();
-    expect(await position(page.getByTestId(`card-${AC_IDS[2]}`))).toEqual(after);
+    expect(await position(page.getByTestId(`card-${SHOWCASE.AC_IDS[2]}`))).toEqual(after);
   });
 
   test("a dragged sticky's position lands in its annotation record and survives reload", async ({

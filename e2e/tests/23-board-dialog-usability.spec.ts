@@ -1,12 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  AC_IDS,
-  DECISION_PLAIN,
-  ADR_REF,
-  boardPath,
-  refCardTestId,
-} from "./fixtures";
+import { SHOWCASE, boardPath, refCardTestId } from "./fixtures";
 import { addSticky, drawYarn, edgeTypePicker } from "./helpers";
 
 // Owner UAT (round 6, item 1): "difficult to understand what it's even
@@ -16,7 +9,7 @@ import { addSticky, drawYarn, edgeTypePicker } from "./helpers";
 // SAY so in plain language instead of presenting a menu of nothing.
 test.describe("board dialogs: always escapable, always legible", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -28,7 +21,7 @@ test.describe("board dialogs: always escapable, always legible", () => {
   }) => {
     const picker = edgeTypePicker(page);
     const open = async () => {
-      await drawYarn(page, DECISION_PLAIN, page.getByTestId(refCardTestId(ADR_REF)));
+      await drawYarn(page, SHOWCASE.DECISION_PLAIN, page.getByTestId(refCardTestId(SHOWCASE.ADR_REF)));
       await expect(picker).toBeVisible();
     };
 
@@ -50,7 +43,7 @@ test.describe("board dialogs: always escapable, always legible", () => {
     // Cancelling committed nothing.
     await page.reload();
     await expect(
-      page.locator(`[data-edge-type="supersedes"][data-from="${DECISION_PLAIN}"][data-to="${ADR_REF}"]`),
+      page.locator(`[data-edge-type="supersedes"][data-from="${SHOWCASE.DECISION_PLAIN}"][data-to="${SHOWCASE.ADR_REF}"]`),
     ).toHaveCount(0);
   });
 
@@ -92,7 +85,7 @@ test.describe("board dialogs: always escapable, always legible", () => {
     // doubles as the buried-pin regression proof: in the full suite a
     // wide chip legitimately parks over ac-2's pushpin, and the grab
     // must resolve geometrically through it.)
-    await drawYarn(page, AC_IDS[1], page.getByTestId(`card-${AC_IDS[2]}`));
+    await drawYarn(page, SHOWCASE.AC_IDS[1], page.getByTestId(`card-${SHOWCASE.AC_IDS[2]}`));
     const picker = edgeTypePicker(page);
     await expect(picker).toBeVisible();
     const note = picker.getByTestId("picker-no-typed-edge");
@@ -107,7 +100,7 @@ test.describe("board dialogs: always escapable, always legible", () => {
     // nothing — the same explanation, and a way out.
     await picker.getByRole("menuitem", { name: /relates \(scratch\)/ }).click();
     const thread = page.locator(
-      `[data-edge-type="relates"][data-from="${AC_IDS[1]}"][data-to="${AC_IDS[2]}"]`,
+      `[data-edge-type="relates"][data-from="${SHOWCASE.AC_IDS[1]}"][data-to="${SHOWCASE.AC_IDS[2]}"]`,
     );
     await expect(thread).toHaveCount(1);
 

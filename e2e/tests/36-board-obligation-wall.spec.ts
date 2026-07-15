@@ -1,12 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  OBLIGATION_WALL_SPEC,
-  OBLIGATION_WALL_AC,
-  OBLIGATION_WALL_PRESENT_KIND,
-  OBLIGATION_WALL_MISSING_KIND,
-  OBLIGATION_WALL_DEMAND,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 
 // spec/obligation-wall ac-2: the board AC card renders its obligations on the
 // wall itself — for each declared evidence kind, that kind's obligation
@@ -24,37 +17,37 @@ test.describe("obligation wall: a story AC card reads out its obligations", () =
   test("the card shows an authored obligation's demand and discloses a kind with none", async ({
     page,
   }) => {
-    await page.goto(boardPath(OBLIGATION_WALL_SPEC));
+    await page.goto(boardPath(SHOWCASE.OBLIGATION_WALL_SPEC));
 
-    const card = page.getByTestId(`card-${OBLIGATION_WALL_AC}`);
+    const card = page.getByTestId(`card-${SHOWCASE.OBLIGATION_WALL_AC}`);
     await expect(card).toBeVisible();
 
-    const obligations = page.getByTestId(`obligations-${OBLIGATION_WALL_AC}`);
+    const obligations = page.getByTestId(`obligations-${SHOWCASE.OBLIGATION_WALL_AC}`);
     await expect(obligations).toBeVisible();
 
     // The authored (behavioral) obligation: its kind tag, and its title as the
     // visible demand read on the wall — the specific thing this AC requires,
     // legible without opening the obligation file or verdi.bindings.yaml.
     const present = obligations.locator(
-      `.obligation[data-obligation-kind="${OBLIGATION_WALL_PRESENT_KIND}"]`,
+      `.obligation[data-obligation-kind="${SHOWCASE.OBLIGATION_WALL_PRESENT_KIND}"]`,
     );
     await expect(present).toHaveAttribute("data-obligation-present", "true");
-    await expect(present).toContainText(OBLIGATION_WALL_PRESENT_KIND);
+    await expect(present).toContainText(SHOWCASE.OBLIGATION_WALL_PRESENT_KIND);
     await expect(present.locator(".obligation-title")).toContainText(
-      OBLIGATION_WALL_DEMAND,
+      SHOWCASE.OBLIGATION_WALL_DEMAND,
     );
 
     // The declared-but-un-obligated (static) kind: the disclosed badge, never
     // an error, never silently omitted (dc-2 discloses; the activation gate is
     // what refuses at accept).
     const missing = page.getByTestId(
-      `obligation-none-${OBLIGATION_WALL_AC}-${OBLIGATION_WALL_MISSING_KIND}`,
+      `obligation-none-${SHOWCASE.OBLIGATION_WALL_AC}-${SHOWCASE.OBLIGATION_WALL_MISSING_KIND}`,
     );
     await expect(missing).toBeVisible();
     await expect(missing).toHaveText("no obligation");
     await expect(
       obligations.locator(
-        `.obligation[data-obligation-kind="${OBLIGATION_WALL_MISSING_KIND}"]`,
+        `.obligation[data-obligation-kind="${SHOWCASE.OBLIGATION_WALL_MISSING_KIND}"]`,
       ),
     ).toHaveAttribute("data-obligation-present", "false");
   });

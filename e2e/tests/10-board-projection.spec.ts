@@ -1,16 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  AC_IDS,
-  CONSTRAINT_ID,
-  DECISION_WITH_EXEMPTS,
-  DECISION_PLAIN,
-  PROBLEM_SNIPPET,
-  OUTCOME_SNIPPET,
-  ADR_REF,
-  boardPath,
-  refCardTestId,
-} from "./fixtures";
+import { SHOWCASE, boardPath, refCardTestId } from "./fixtures";
 
 // EXECUTABLE ACCEPTANCE CRITERIA — PLAN-V1.md §5 Phase V1-P6 (Goal:
 // "internal/workbench becomes a pure projection renderer"); 05 §Workbench
@@ -21,7 +10,7 @@ import {
 // position.
 test.describe("V1-P6: board renders the spec's object model (projection fidelity)", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -35,10 +24,10 @@ test.describe("V1-P6: board renders the spec's object model (projection fidelity
     page,
   }) => {
     await expect(page.getByTestId("placard-problem")).toContainText(
-      PROBLEM_SNIPPET,
+      SHOWCASE.PROBLEM_SNIPPET,
     );
     await expect(page.getByTestId("placard-outcome")).toContainText(
-      OUTCOME_SNIPPET,
+      SHOWCASE.OUTCOME_SNIPPET,
     );
   });
 
@@ -48,7 +37,7 @@ test.describe("V1-P6: board renders the spec's object model (projection fidelity
   test("one object card per declared object, typed by kind", async ({
     page,
   }) => {
-    for (const acId of AC_IDS) {
+    for (const acId of SHOWCASE.AC_IDS) {
       const card = page.getByTestId(`card-${acId}`);
       await expect(card).toBeVisible();
       await expect(card).toHaveAttribute(
@@ -57,11 +46,11 @@ test.describe("V1-P6: board renders the spec's object model (projection fidelity
       );
     }
 
-    const constraint = page.getByTestId(`card-${CONSTRAINT_ID}`);
+    const constraint = page.getByTestId(`card-${SHOWCASE.CONSTRAINT_ID}`);
     await expect(constraint).toBeVisible();
     await expect(constraint).toHaveAttribute("data-object-kind", "constraint");
 
-    for (const dcId of [DECISION_WITH_EXEMPTS, DECISION_PLAIN]) {
+    for (const dcId of [SHOWCASE.DECISION_WITH_EXEMPTS, SHOWCASE.DECISION_PLAIN]) {
       const decision = page.getByTestId(`card-${dcId}`);
       await expect(decision).toBeVisible();
       await expect(decision).toHaveAttribute("data-object-kind", "decision");
@@ -76,14 +65,14 @@ test.describe("V1-P6: board renders the spec's object model (projection fidelity
   test("declared edges project as typed spec-layer yarn with a visible target", async ({
     page,
   }) => {
-    await expect(page.getByTestId(refCardTestId(ADR_REF))).toBeVisible();
+    await expect(page.getByTestId(refCardTestId(SHOWCASE.ADR_REF))).toBeVisible();
 
     const exemptsYarn = page.locator(
-      `[data-edge-type="exempts"][data-from="${DECISION_WITH_EXEMPTS}"]`,
+      `[data-edge-type="exempts"][data-from="${SHOWCASE.DECISION_WITH_EXEMPTS}"]`,
     );
     await expect(exemptsYarn).toHaveCount(1);
     await expect(exemptsYarn).toHaveAttribute("data-layer", "spec");
-    await expect(exemptsYarn).toHaveAttribute("data-to", ADR_REF);
+    await expect(exemptsYarn).toHaveAttribute("data-to", SHOWCASE.ADR_REF);
   });
 
   // 05 §Workbench "Board as projection": "Generation is a pure function of

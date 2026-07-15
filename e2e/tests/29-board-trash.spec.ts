@@ -1,13 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  READONLY_SPEC,
-  AC_IDS,
-  CONSTRAINT_ID,
-  ADR_REF,
-  PIN_TRASH_ADR,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 import {
   addSticky,
   dragToTrash,
@@ -29,12 +21,12 @@ import {
 // The pure-pin fixture and the wall's edge-holding ADR (the fixture's
 // exempts edge, or an earlier suite file's re-drawn one — either way a
 // spec-layer edge).
-const PURE_PIN = PIN_TRASH_ADR;
-const EDGED_REF = ADR_REF;
+const PURE_PIN = SHOWCASE.PIN_TRASH_ADR;
+const EDGED_REF = SHOWCASE.ADR_REF;
 
 test.describe("board: the trash removes per tier", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -102,14 +94,14 @@ test.describe("board: the trash removes per tier", () => {
   });
 
   test("an untyped relates thread dies in the bin", async ({ page }) => {
-    await drawYarn(page, AC_IDS[0], page.getByTestId(`card-${AC_IDS[2]}`));
+    await drawYarn(page, SHOWCASE.AC_IDS[0], page.getByTestId(`card-${SHOWCASE.AC_IDS[2]}`));
     const picker = edgeTypePicker(page);
     await expect(picker).toBeVisible();
     await picker.getByRole("menuitem", { name: /relates \(scratch\)/ }).click();
     await expectAutosaved(page);
 
     const thread = page.locator(
-      `.yarn-chip[data-edge-type="relates"][data-from="${AC_IDS[0]}"][data-to="${AC_IDS[2]}"]`,
+      `.yarn-chip[data-edge-type="relates"][data-from="${SHOWCASE.AC_IDS[0]}"][data-to="${SHOWCASE.AC_IDS[2]}"]`,
     );
     await expect(thread).toHaveCount(1);
 
@@ -125,7 +117,7 @@ test.describe("board: the trash removes per tier", () => {
     page,
   }) => {
     const card = await pinArtifact(page, PURE_PIN, "retry policy");
-    await drawYarn(page, AC_IDS[0], card);
+    await drawYarn(page, SHOWCASE.AC_IDS[0], card);
     const picker = edgeTypePicker(page);
     await expect(picker).toBeVisible();
     await picker.getByRole("menuitem", { name: /relates \(scratch\)/ }).click();
@@ -195,47 +187,47 @@ test.describe("board: the trash removes per tier", () => {
   test("an object card confirms — Escape removes nothing; confirm removes the declaration, never the prose", async ({
     page,
   }) => {
-    const card = page.getByTestId(`card-${CONSTRAINT_ID}`);
+    const card = page.getByTestId(`card-${SHOWCASE.CONSTRAINT_ID}`);
     await expect(card).toBeVisible();
 
     // ESCAPE mid-confirm: nothing is removed.
     await dragToTrash(page, card);
     const confirm = page.getByRole("alertdialog", {
-      name: new RegExp(`remove ${CONSTRAINT_ID} from the spec`, "i"),
+      name: new RegExp(`remove ${SHOWCASE.CONSTRAINT_ID} from the spec`, "i"),
     });
     await expect(confirm).toBeVisible();
     await expect(confirm.locator("#edge-confirm-consequence")).toContainText(
-      `Removes ${CONSTRAINT_ID} from the spec document`,
+      `Removes ${SHOWCASE.CONSTRAINT_ID} from the spec document`,
     );
     await expect(confirm.locator("#edge-confirm-consequence")).toContainText(
       "prose stays in the document",
     );
     await page.keyboard.press("Escape");
     await expect(confirm).toBeHidden();
-    await expect(page.getByTestId(`card-${CONSTRAINT_ID}`)).toHaveCount(1);
+    await expect(page.getByTestId(`card-${SHOWCASE.CONSTRAINT_ID}`)).toHaveCount(1);
     await page.reload();
-    await expect(page.getByTestId(`card-${CONSTRAINT_ID}`)).toHaveCount(1);
+    await expect(page.getByTestId(`card-${SHOWCASE.CONSTRAINT_ID}`)).toHaveCount(1);
 
     // CONFIRM: the declaration goes; the document's prose section stays.
-    await dragToTrash(page, page.getByTestId(`card-${CONSTRAINT_ID}`));
+    await dragToTrash(page, page.getByTestId(`card-${SHOWCASE.CONSTRAINT_ID}`));
     await expect(confirm).toBeVisible();
     await confirm.getByRole("button", { name: "Confirm" }).click();
     await expectAutosaved(page);
-    await expect(page.getByTestId(`card-${CONSTRAINT_ID}`)).toHaveCount(0);
+    await expect(page.getByTestId(`card-${SHOWCASE.CONSTRAINT_ID}`)).toHaveCount(0);
     await expect(uncommittedIndicator(page)).toBeVisible();
     await page.reload();
-    await expect(page.getByTestId(`card-${CONSTRAINT_ID}`)).toHaveCount(0);
+    await expect(page.getByTestId(`card-${SHOWCASE.CONSTRAINT_ID}`)).toHaveCount(0);
 
     // Prose is never silently destroyed: the artifact page still renders
     // the removed object's body section.
-    await page.goto(`/a/spec/${DESIGN_SPEC}`);
+    await page.goto(`/a/spec/${SHOWCASE.DESIGN_SPEC}`);
     await expect(
-      page.getByRole("heading", { name: CONSTRAINT_ID, exact: true }),
+      page.getByRole("heading", { name: SHOWCASE.CONSTRAINT_ID, exact: true }),
     ).toBeVisible();
   });
 
   test("no trash target exists outside authoring", async ({ page }) => {
-    await page.goto(boardPath(READONLY_SPEC));
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",

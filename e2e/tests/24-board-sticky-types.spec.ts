@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { DESIGN_SPEC, boardPath } from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 import { addSticky } from "./helpers";
 
 // Owner UAT (round 6, item 2): "it starts a purple question sticky…
@@ -11,7 +11,7 @@ import { addSticky } from "./helpers";
 // invention and the binding addSticky gesture in helpers.ts.)
 test.describe("board sticky creation: the author picks the type", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",

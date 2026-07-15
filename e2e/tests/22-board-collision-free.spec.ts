@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { FEATURE_SPEC, boardPath } from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 
 // Owner directive (R4-I-35): cards must never render stacked, in any
 // mode. The regression fixture is examples/showcase's escrow-autopay
@@ -32,7 +32,7 @@ const allCardRects = (page: Page) =>
 
 test.describe("board: stored collisions render resolved (never stacked)", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(FEATURE_SPEC));
+    await page.goto(boardPath(SHOWCASE.FEATURE_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",

@@ -469,6 +469,20 @@ bindings:
       # stand (VL-010), and its behavioral evidence is this construction. This
       # binding cites that ratification rather than substituting silently.
       - "spec/showcase-corpus-renovation#ac-1"
+      # spec/showcase-drift-gate ac-1's behavioral leg: internal/showcasealign's
+      # TestShowcaseCoverage (coverage_test.go), run standalone and via `make
+      # showcase-coverage`, fails naming the exact offending capability key
+      # (cli:<verb>, mcp:<tool>, or wb:<surface>) in both directions — an
+      # enumerated capability with no showcaseCoverage entry, and a mapped
+      # entry whose evidence file is missing or no longer matches its marker
+      # regexp — proven by TestCLIShowcaseCoverage, TestMCPShowcaseCoverage,
+      # and TestCLIShowcaseGC (cli_showcase_test.go, mcp_showcase_test.go)
+      # deleting/mutating a real mapping and asserting the named-gap message,
+      # then restoring a clean mapping and asserting a zero-gap pass. The
+      # same result is also reached through `make verify` end to end (the
+      # `lint-showcase`/`showcase-coverage` targets in verify:'s chain), not
+      # only the standalone test binary.
+      - "spec/showcase-drift-gate#ac-1"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -818,3 +832,21 @@ bindings:
       # examples/showcase plus every provisioned showcase artifact,
       # zero unrecorded (file-list diff proof in task-1.8-report.md).
       - "spec/showcase-corpus-renovation#ac-1"
+      # spec/showcase-drift-gate ac-1's static leg: internal/showcasealign
+      # (coverage_test.go) builds its three-axis inventory from source, not
+      # hand-guessed — cliVerbs parses cmd/verdi/dispatch.go's verbPhase
+      # composite literal with go/parser (every phase > 0 entry, plus
+      # `lint`), mcpTools drives a live tools/list call against
+      # internal/mcpserve.NewServer exactly as
+      # internal/specalign/mcptools_test.go already does (loopback pipes,
+      # no network — co-1), and workbenchSurfaces is the one committed,
+      # hand-maintained list (dc-1's named mitigation for the one axis with
+      # no mechanical source). The committed showcaseCoverage map
+      # (coverageEvidence: repo-relative path + marker regexp — SHOWCASE\.
+      # for e2e/tests/ Playwright specs, examples/showcase for Go e2e
+      # tests, ledger L-B) keys every enumerated capability, and the
+      # Makefile's verify: target list includes lint-showcase and
+      # showcase-coverage as separately named gates (dc-3) after
+      # spec-align and before e2e. All compile, vet, lint, and lint-store
+      # clean under make verify.
+      - "spec/showcase-drift-gate#ac-1"

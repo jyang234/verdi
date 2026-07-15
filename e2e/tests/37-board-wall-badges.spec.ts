@@ -1,14 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { addSticky } from "./helpers";
-import {
-  BADGE_WALL_SPEC,
-  BADGE_REVIEW_SPEC,
-  BADGE_SEALED_SPEC,
-  BADGE_DECISION,
-  BADGE_STUB_SLUG,
-  boardPath,
-  stubCardTestId,
-} from "./fixtures";
+import { EDGE, boardPath, stubCardTestId } from "./fixtures";
 
 // spec/badge-computes ac-5 (the ac-5--behavioral obligation): badges render
 // as chips on their cards and stamps on the case file in EVERY board mode —
@@ -33,14 +25,14 @@ import {
 async function assertBadgedWall(page: Page): Promise<void> {
   // The stub card wears its VL-006 chip (a dangling stub ref anchors to
   // the STUB's own card, never the case file).
-  const stubCard = page.getByTestId(stubCardTestId(BADGE_STUB_SLUG));
+  const stubCard = page.getByTestId(stubCardTestId(EDGE.BADGE_STUB_SLUG));
   await expect(stubCard).toBeVisible();
   const stubChip = stubCard.locator('.badge-chip[data-badge-source="lint:VL-006"]');
   await expect(stubChip).toBeVisible();
 
   // The decision card wears its VL-003 chip (a decision's own dangling
   // link badges exactly that card).
-  const decisionCard = page.getByTestId(`card-${BADGE_DECISION}`);
+  const decisionCard = page.getByTestId(`card-${EDGE.BADGE_DECISION}`);
   await expect(decisionCard).toBeVisible();
   const decisionChip = decisionCard.locator('.badge-chip[data-badge-source="lint:VL-003"]');
   await expect(decisionChip).toBeVisible();
@@ -75,7 +67,7 @@ test.describe("wall badges render in every board mode and never block", () => {
   test("authoring: chips + stamp render, and a write path succeeds on the badged wall", async ({
     page,
   }) => {
-    await page.goto(boardPath(BADGE_WALL_SPEC));
+    await page.goto(boardPath(EDGE.BADGE_WALL_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -96,7 +88,7 @@ test.describe("wall badges render in every board mode and never block", () => {
   test("review: the badged wall renders chips + stamp in the MR mirror", async ({
     page,
   }) => {
-    await page.goto(boardPath(BADGE_REVIEW_SPEC));
+    await page.goto(boardPath(EDGE.BADGE_REVIEW_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "review",
@@ -107,7 +99,7 @@ test.describe("wall badges render in every board mode and never block", () => {
   test("read-only: the sealed badged wall renders chips + stamp, and badge presence disables nothing", async ({
     page,
   }) => {
-    await page.goto(boardPath(BADGE_SEALED_SPEC));
+    await page.goto(boardPath(EDGE.BADGE_SEALED_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
@@ -119,7 +111,7 @@ test.describe("wall badges render in every board mode and never block", () => {
     // that wears the VL-006 chip — and stays enabled: a badge never
     // disables an action (co-2's disclosure-not-refusal, on the exact
     // card where receipt and affordance meet).
-    const instantiate = page.getByTestId(`instantiate-${BADGE_STUB_SLUG}`);
+    const instantiate = page.getByTestId(`instantiate-${EDGE.BADGE_STUB_SLUG}`);
     await expect(instantiate).toBeVisible();
     await expect(instantiate).toBeEnabled();
   });

@@ -1,16 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
-import {
-  FEATURE_SPEC,
-  STUB_SLUGS,
-  INSTANTIATE_SLUG,
-  OQ_ID,
-  boardPath,
-  stubCardTestId,
-  coverageChipTestId,
-} from "./fixtures";
+import { SHOWCASE, boardPath, stubCardTestId, coverageChipTestId } from "./fixtures";
 
 // Instantiate-story-from-stub (spec/scoping-canvas ac-6) on the sealed
-// wall: FEATURE_SPEC is escrow-autopay on main (the harness
+// wall: SHOWCASE.FEATURE_SPEC is escrow-autopay on main (the harness
 // store is a real git repository), so its board is READ-ONLY — and the
 // one live affordance a sealed record permits is Instantiate. The action
 // cuts design/<slug> via no-checkout plumbing: the serving checkout
@@ -22,7 +14,7 @@ const confirmCancel = (page: Page) => page.locator("#edge-confirm-cancel");
 
 test.describe("scoping canvas: the sealed wall instantiates its stubs", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(FEATURE_SPEC));
+    await page.goto(boardPath(SHOWCASE.FEATURE_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
@@ -35,7 +27,7 @@ test.describe("scoping canvas: the sealed wall instantiates its stubs", () => {
     // The fixture's stubs: frontmatter, verbatim as first-class cards
     // (ac-3) — this is one of the two committed corpus fixtures with
     // stubs, so the cards come for free and are asserted for free.
-    for (const slug of STUB_SLUGS) {
+    for (const slug of SHOWCASE.STUB_SLUGS) {
       const stub = page.getByTestId(stubCardTestId(slug));
       await expect(stub).toBeVisible();
       await expect(stub.locator(".stub-tab")).toHaveText(slug);
@@ -54,13 +46,13 @@ test.describe("scoping canvas: the sealed wall instantiates its stubs", () => {
       "covered by 1 stub",
     );
     // No spike stub claims oq-1 — no smell, and no badge at all.
-    await expect(page.getByTestId(`oq-claims-${OQ_ID}`)).toHaveCount(0);
+    await expect(page.getByTestId(`oq-claims-${SHOWCASE.OQ_ID}`)).toHaveCount(0);
   });
 
   test("instantiate: consequence first, then the branch — and the serving wall never moves", async ({
     page,
   }) => {
-    const button = page.getByTestId(`instantiate-${INSTANTIATE_SLUG}`);
+    const button = page.getByTestId(`instantiate-${SHOWCASE.INSTANTIATE_SLUG}`);
     await expect(button).toBeVisible();
 
     // Consequence-labeled before firing: the dialog names the branch
@@ -68,7 +60,7 @@ test.describe("scoping canvas: the sealed wall instantiates its stubs", () => {
     await button.click();
     await expect(confirmDialog(page)).toBeVisible();
     await expect(confirmDialog(page)).toContainText(
-      `design/${INSTANTIATE_SLUG}`,
+      `design/${SHOWCASE.INSTANTIATE_SLUG}`,
     );
     await expect(confirmDialog(page)).toContainText(/serving checkout never moves/i);
 
@@ -82,7 +74,7 @@ test.describe("scoping canvas: the sealed wall instantiates its stubs", () => {
     await confirmOk(page).click();
     await expect(confirmDialog(page)).toContainText("Story instantiated");
     await expect(confirmDialog(page)).toContainText(
-      `design/${INSTANTIATE_SLUG}`,
+      `design/${SHOWCASE.INSTANTIATE_SLUG}`,
     );
     await expect(confirmDialog(page)).toContainText("todo:REPLACE-ME");
     await confirmCancel(page).click();
@@ -96,20 +88,20 @@ test.describe("scoping canvas: the sealed wall instantiates its stubs", () => {
       "readonly",
     );
     await expect(
-      page.getByTestId(stubCardTestId(INSTANTIATE_SLUG)),
+      page.getByTestId(stubCardTestId(SHOWCASE.INSTANTIATE_SLUG)),
     ).toBeVisible();
-    const resp = await page.request.get(boardPath(INSTANTIATE_SLUG));
+    const resp = await page.request.get(boardPath(SHOWCASE.INSTANTIATE_SLUG));
     expect(resp.status()).toBe(404);
   });
 
   test("a second instantiate is refused plainly: the branch already exists", async ({
     page,
   }) => {
-    await page.getByTestId(`instantiate-${INSTANTIATE_SLUG}`).click();
+    await page.getByTestId(`instantiate-${SHOWCASE.INSTANTIATE_SLUG}`).click();
     await confirmOk(page).click();
     await expect(confirmDialog(page)).toContainText("Could not instantiate");
     await expect(confirmDialog(page)).toContainText(
-      `design/${INSTANTIATE_SLUG} already exists`,
+      `design/${SHOWCASE.INSTANTIATE_SLUG} already exists`,
     );
     await expect(confirmOk(page)).toBeHidden();
     await confirmCancel(page).click();

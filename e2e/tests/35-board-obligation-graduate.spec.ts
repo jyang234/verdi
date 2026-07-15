@@ -1,10 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import {
-  OBLIGATION_STORY_SPEC,
-  OBLIGATION_STORY_AC,
-  OBLIGATION_STORY_NON_AC,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, EDGE, boardPath } from "./fixtures";
 import { addSticky, drawYarn, expectAutosaved } from "./helpers";
 
 // Obligation authoring (spec/obligation-artifact ac-3): a sticky graduates
@@ -40,7 +35,7 @@ test.describe("obligation authoring: a sticky graduates on a story AC", () => {
   test("dropping a sticky's yarn on a story AC authors its evidence obligation", async ({
     page,
   }) => {
-    await page.goto(boardPath(OBLIGATION_STORY_SPEC));
+    await page.goto(boardPath(SHOWCASE.OBLIGATION_STORY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -56,11 +51,11 @@ test.describe("obligation authoring: a sticky graduates on a story AC", () => {
     await drawYarn(
       page,
       stickyId,
-      page.getByTestId(`card-${OBLIGATION_STORY_AC}`),
+      page.getByTestId(`card-${SHOWCASE.OBLIGATION_STORY_AC}`),
     );
     await expect(forKindPicker(page)).toBeVisible();
     await expect(pickerPair(page)).toHaveText(
-      `obligation → ${OBLIGATION_STORY_AC}`,
+      `obligation → ${SHOWCASE.OBLIGATION_STORY_AC}`,
     );
     for (const kind of ["static", "behavioral", "runtime", "attestation"]) {
       await expect(
@@ -86,7 +81,7 @@ test.describe("obligation authoring: a sticky graduates on a story AC", () => {
     await drawYarn(
       page,
       secondId,
-      page.getByTestId(`card-${OBLIGATION_STORY_AC}`),
+      page.getByTestId(`card-${SHOWCASE.OBLIGATION_STORY_AC}`),
     );
     await forKindPicker(page).locator('[data-forkind="behavioral"]').click();
 
@@ -113,7 +108,7 @@ test.describe("obligation authoring: a sticky graduates on a story AC", () => {
   test("a sticky dropped on a non-AC target is refused legibly and nothing is authored", async ({
     page,
   }) => {
-    await page.goto(boardPath(OBLIGATION_STORY_SPEC));
+    await page.goto(boardPath(SHOWCASE.OBLIGATION_STORY_SPEC));
     const stickyId = await newObligationSticky(page, "misaimed obligation");
 
     // The drop lands on a decision card, not an acceptance criterion: the
@@ -121,12 +116,12 @@ test.describe("obligation authoring: a sticky graduates on a story AC", () => {
     await drawYarn(
       page,
       stickyId,
-      page.getByTestId(`card-${OBLIGATION_STORY_NON_AC}`),
+      page.getByTestId(`card-${EDGE.OBLIGATION_STORY_NON_AC}`),
     );
     const refusal = page.getByTestId("proto-yarn-refusal");
     await expect(refusal).toBeVisible();
     await expect(refusal).toContainText("story acceptance criterion");
-    await expect(refusal).toContainText(OBLIGATION_STORY_NON_AC);
+    await expect(refusal).toContainText(EDGE.OBLIGATION_STORY_NON_AC);
 
     // No evidence-kind picker, so nothing could be authored; the sticky is
     // still parked, its handwriting intact.

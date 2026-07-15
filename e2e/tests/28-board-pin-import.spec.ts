@@ -1,14 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  READONLY_SPEC,
-  REVIEW_SPEC,
-  DECISION_PLAIN,
-  PIN_ADR,
-  PIN_DIAGRAM,
-  boardPath,
-  refCardTestId,
-} from "./fixtures";
+import { SHOWCASE, boardPath, refCardTestId } from "./fixtures";
 import {
   drawYarn,
   edgeTypePicker,
@@ -26,7 +17,7 @@ import {
 
 test.describe("board: the supply toolbox pins planning material", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -72,7 +63,7 @@ test.describe("board: the supply toolbox pins planning material", () => {
     const tray = await openPinToolbox(page);
     await expect(tray.locator(".pin-result").first()).toBeVisible();
     await expect(
-      tray.locator(`.pin-result[data-ref="spec/${DESIGN_SPEC}"]`),
+      tray.locator(`.pin-result[data-ref="spec/${SHOWCASE.DESIGN_SPEC}"]`),
     ).toHaveCount(0);
     // adr/0001-outbox-events has a card (the fixture's exempts edge — or
     // an earlier suite file's), so it is not offered again.
@@ -87,20 +78,20 @@ test.describe("board: the supply toolbox pins planning material", () => {
 
   test("import → pin → peek → relate → graduate", async ({ page }) => {
     // IMPORT: search narrows the picker; choosing pins the ADR.
-    const card = await pinArtifact(page, PIN_ADR, "outbox");
+    const card = await pinArtifact(page, SHOWCASE.PIN_ADR, "outbox");
 
     // PIN: the same reference-card paper, wearing the pin marking, one
     // card only, and it survives a fresh projection.
     await expect(card).toHaveClass(/refcard--pinned/);
-    await expect(page.locator(`.refcard[data-ref="${PIN_ADR}"]`)).toHaveCount(1);
+    await expect(page.locator(`.refcard[data-ref="${SHOWCASE.PIN_ADR}"]`)).toHaveCount(1);
     await page.reload();
-    await expect(page.locator(`.refcard[data-ref="${PIN_ADR}"]`)).toHaveCount(1);
+    await expect(page.locator(`.refcard[data-ref="${SHOWCASE.PIN_ADR}"]`)).toHaveCount(1);
     await expect(
-      page.locator(`.refcard[data-ref="${PIN_ADR}"]`),
+      page.locator(`.refcard[data-ref="${SHOWCASE.PIN_ADR}"]`),
     ).toHaveAttribute("data-pin-id", /a-/);
 
     // PEEK: a pinned card peeks like any reference card.
-    await page.locator(`.refcard[data-ref="${PIN_ADR}"]`).click();
+    await page.locator(`.refcard[data-ref="${SHOWCASE.PIN_ADR}"]`).click();
     const peek = page.getByTestId("ref-peek");
     await expect(peek).toBeVisible();
     await expect(peek.getByTestId("ref-peek-open")).toBeVisible();
@@ -108,7 +99,7 @@ test.describe("board: the supply toolbox pins planning material", () => {
     await expect(peek).toBeHidden();
 
     // DRAG: pins drag like stickies — the position survives reload.
-    const pinned = page.locator(`.refcard[data-ref="${PIN_ADR}"]`);
+    const pinned = page.locator(`.refcard[data-ref="${SHOWCASE.PIN_ADR}"]`);
     const grip = await grabPoint(page, pinned);
     await page.mouse.move(grip.x, grip.y);
     await page.mouse.down();
@@ -122,7 +113,7 @@ test.describe("board: the supply toolbox pins planning material", () => {
     await page.reload();
     expect(
       await page
-        .locator(`.refcard[data-ref="${PIN_ADR}"]`)
+        .locator(`.refcard[data-ref="${SHOWCASE.PIN_ADR}"]`)
         .evaluate((node) => ({
           left: (node as HTMLElement).style.left,
           top: (node as HTMLElement).style.top,
@@ -133,8 +124,8 @@ test.describe("board: the supply toolbox pins planning material", () => {
     // pin's graduation (02) — the card stays, the edge holds it now.
     await drawYarn(
       page,
-      DECISION_PLAIN,
-      page.locator(`.refcard[data-ref="${PIN_ADR}"]`),
+      SHOWCASE.DECISION_PLAIN,
+      page.locator(`.refcard[data-ref="${SHOWCASE.PIN_ADR}"]`),
     );
     const picker = edgeTypePicker(page);
     await expect(picker).toBeVisible();
@@ -145,18 +136,18 @@ test.describe("board: the supply toolbox pins planning material", () => {
     await expectAutosaved(page);
 
     const typed = page.locator(
-      `.yarn-chip[data-edge-type="exempts"][data-from="${DECISION_PLAIN}"][data-to="${PIN_ADR}"]`,
+      `.yarn-chip[data-edge-type="exempts"][data-from="${SHOWCASE.DECISION_PLAIN}"][data-to="${SHOWCASE.PIN_ADR}"]`,
     );
     await expect(typed).toHaveCount(1);
-    const survivor = page.locator(`.refcard[data-ref="${PIN_ADR}"]`);
+    const survivor = page.locator(`.refcard[data-ref="${SHOWCASE.PIN_ADR}"]`);
     await expect(survivor).toHaveCount(1);
     // Graduated: the pin marking is gone; the record's edge projects it.
     await expect(survivor).not.toHaveAttribute("data-pin-id", /.+/);
     await page.reload();
-    await expect(page.locator(`.refcard[data-ref="${PIN_ADR}"]`)).toHaveCount(1);
+    await expect(page.locator(`.refcard[data-ref="${SHOWCASE.PIN_ADR}"]`)).toHaveCount(1);
     await expect(
       page.locator(
-        `.yarn-chip[data-edge-type="exempts"][data-from="${DECISION_PLAIN}"][data-to="${PIN_ADR}"]`,
+        `.yarn-chip[data-edge-type="exempts"][data-from="${SHOWCASE.DECISION_PLAIN}"][data-to="${SHOWCASE.PIN_ADR}"]`,
       ),
     ).toHaveCount(1);
   });
@@ -164,23 +155,23 @@ test.describe("board: the supply toolbox pins planning material", () => {
   test("a diagram pins beside the ADR — planning material of every kind", async ({
     page,
   }) => {
-    const card = await pinArtifact(page, PIN_DIAGRAM, "topology");
+    const card = await pinArtifact(page, SHOWCASE.PIN_DIAGRAM, "topology");
     await expect(card).toHaveAttribute("data-ref-kind", "diagram");
     await page.reload();
     await expect(
-      page.locator(`.refcard[data-ref="${PIN_DIAGRAM}"]`),
+      page.locator(`.refcard[data-ref="${SHOWCASE.PIN_DIAGRAM}"]`),
     ).toHaveCount(1);
   });
 
   test("no toolbox exists outside authoring", async ({ page }) => {
-    await page.goto(boardPath(READONLY_SPEC));
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
     );
     await expect(page.getByTestId("pin-toolbox")).toHaveCount(0);
 
-    await page.goto(boardPath(REVIEW_SPEC));
+    await page.goto(boardPath(SHOWCASE.REVIEW_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "review",

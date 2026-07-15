@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { DEX_BASE } from "./fixtures";
+import { DEX_BASE, SHOWCASE } from "./fixtures";
 
 // spec/disclosures-panel (spec/disclosure-legibility ac-1/ac-2): the
 // operator's "what is verdi not proving right now" surface — one view,
@@ -9,11 +9,14 @@ import { DEX_BASE } from "./fixtures";
 //
 // The two editions deliberately show DIFFERENT checkout states here, and
 // both are the truth of their own moment of compute:
-//   - the workbench serves live: the harness store names `forge: gitlab`
-//     in verdi.yaml and exports no credentials, so the serving process's
-//     one real disclosed state is the review-feed-unavailable disclosure
-//     (the same mcp:review-feed value list_annotations discloses) — the
-//     seeded disclosure this suite asserts.
+//   - the workbench serves live: the harness store names its `forge:`
+//     (SHOWCASE.FORGE_KIND) in examples/showcase's own committed
+//     verdi.yaml and exports no credentials, so the serving process's one
+//     real disclosed state is the review-feed-unavailable disclosure (the
+//     same mcp:review-feed value list_annotations discloses) — the seeded
+//     disclosure this suite asserts, sourced from the real showcase
+//     manifest rather than an arbitrary literal (showcase-coverage
+//     Task 3.4; SHOWCASE.FORGE_KIND's own doc comment in fixtures.ts).
 //   - the dex baked main at build time: the mutable zone was present and
 //     no process context applies, so its enumeration is honestly empty —
 //     which is exactly the empty-state path (a positive claim, never a
@@ -40,7 +43,7 @@ test.describe("workbench /disclosures: the live edition", () => {
       "mcp:review-feed",
     );
     await expect(item.locator(".disclosure-text")).toHaveText(
-      'forge "gitlab" is configured (verdi.yaml) but no credentials are available to reach it; review state cannot be shown',
+      `forge "${SHOWCASE.FORGE_KIND}" is configured (verdi.yaml) but no credentials are available to reach it; review state cannot be shown`,
     );
     await expect(item).toHaveAttribute(
       "data-disclosure-id",

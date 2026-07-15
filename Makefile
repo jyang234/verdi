@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e
+.PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage
 
 # Pin for the lint target. Both CI workflows install golangci-lint at this
 # exact version before `make verify` (see .github/workflows/), so in CI the
@@ -100,6 +100,103 @@ lint-store:
 spec-align:
 	go test ./internal/specalign/...
 
+# lint-showcase and showcase-coverage are named gates over
+# internal/showcasealign (same rationale as spec-align: `test` already runs
+# this package, but a named target makes CI failure output name the gate
+# instead of burying it in the full `go test -race ./...` output).
+#
+# lint-showcase runs TestShowcaseLintClean: the showcase corpus's own
+# internal consistency check (`verdi lint` exits 0 against a freshly
+# provisioned showcase store).
+#
+# GUARD (story CO-2/DC-2 — the gate must BITE): same mechanism as
+# showcase-coverage below, for the same reason. `go test -run <pat>` exits 0
+# even when <pat> matches NOTHING ("no tests to run"), so if lintclean_test.go
+# were deleted or TestShowcaseLintClean renamed, a bare `go test -run` would
+# pass VACUOUSLY and this lint-clean gate would silently vanish with `make
+# verify` still green — the exact drift this story exists to prevent. We
+# capture `-v` output and require TestShowcaseLintClean to have emitted a
+# `--- PASS:` line; its absence (deletion, rename, or skip) is a hard failure
+# here regardless of whether the package still compiles. Makefile-level on
+# purpose: a Go meta-test asserting "TestShowcaseLintClean ran" would itself
+# be deletable the very same way.
+lint-showcase:
+	@out="$$(go test ./internal/showcasealign/ -run TestShowcaseLintClean -v 2>&1)"; \
+	status=$$?; \
+	printf '%s\n' "$$out"; \
+	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
+	if ! printf '%s\n' "$$out" | grep -qF -- "--- PASS: TestShowcaseLintClean ("; then \
+		echo "ERROR: lint-showcase guard: required test TestShowcaseLintClean did NOT run+pass (deleted, renamed, or skipped?)." >&2; \
+		echo "       'go test -run' matching nothing exits 0 vacuously; this guard makes that silent drift a hard failure (story CO-2/DC-2)." >&2; \
+		exit 1; \
+	fi
+
+# showcase-coverage runs TestShowcaseCoverage (the capability-coverage gate).
+#
+# GUARD (story CO-2/DC-2 — the gate must BITE): `go test -run <pat>` exits 0
+# even when <pat> matches NOTHING ("no tests to run"). So if coverage_test.go
+# were deleted or TestShowcaseCoverage renamed, a bare `go test -run` would
+# pass VACUOUSLY and this whole capability-coverage gate would silently vanish
+# with `make verify` still green — the exact drift this story exists to
+# prevent. We therefore capture `-v` output and require each NAMED test in the
+# `required` list below to have emitted a `--- PASS:` line:
+#   - TestShowcaseCoverage is a hard FLOOR: it MUST run+pass. Its absence is
+#     the deletion/rename attack, and is a hard failure here regardless of
+#     whether the package still compiles (siblings only mention its helpers in
+#     comments, so removing it does NOT break the build — the vacuous pass is
+#     real, not hypothetical).
+#   - TestShowcaseCoverage_DetectsGaps is the gate's own failure-path proof
+#     (it feeds computeCoverageGaps deliberately-broken inventories and asserts
+#     the RIGHT gap class names the RIGHT capability). It is equally a hard
+#     FLOOR: without it the gate's RED direction is unexercised — itself a
+#     silent pass. It is subject to the exact same vacuous-`-run` deletion/
+#     rename/skip attack (nothing else references it, so removing it does NOT
+#     break the build), so it too MUST emit its own `--- PASS:` line. The `-run`
+#     pattern above already selects it (an unanchored TestShowcaseCoverage
+#     match); this makes its presence a demanded invariant, not incidental.
+#
+# TASK 4.2 WIRE-UP (README freshness, DC-3): the sibling public-readme story
+# adds a README-freshness gate. Folding it into this target is a DELIBERATE,
+# TWO-STEP change — NOT a silent auto-detect:
+#   (a) add TestReadmeExamplesFresh to internal/showcasealign/readme_test.go
+#       (the plan pins that test to THIS package, which is why the `-run`
+#       pattern below already names it — a test placed there is selected and
+#       run with no further change to the pattern); AND
+#   (b) append TestReadmeExamplesFresh to the `required` list below, so this
+#       guard then hard-demands its `--- PASS:` line.
+# Both steps are mandatory. (a) alone already enforces the test's VERDICT: the
+# `-run` pattern below already names TestReadmeExamplesFresh, so once it exists
+# in this package it is selected and run, and a FAILING run makes `go test` exit
+# non-zero — which the status check below turns into a hard target failure with
+# no `required`-list edit at all. What step (b) adds is narrower and worth
+# stating precisely: it guards against the readme test being DELETED, RENAMED,
+# or SKIPPED — the same vacuous-`-run` class the rest of this guard addresses (a
+# `-run` that matches nothing still exits 0) — NOT verdict enforcement, which
+# (a) already provides. (b) without (a) fails this guard LOUDLY (the named test
+# never ran) instead of passing vacuously. An earlier revision auto-
+# promoted the readme test the instant a `=== RUN TestReadmeExamplesFresh`
+# line appeared in THIS package's own `-v` output — that silently assumed 4.2
+# would place the test here, and would never fire (a permanent, silent gap)
+# if 4.2 landed it in another package. Requiring the explicit `required`-list
+# edit removes that package assumption: the gate is wired on by hand, where
+# the next author is looking, not by a fragile pattern match.
+#
+# This guard lives at the Makefile level on purpose: a Go meta-test asserting
+# "TestShowcaseCoverage ran" would itself be deletable the very same way.
+showcase-coverage:
+	@out="$$(go test ./internal/showcasealign/ -run 'TestShowcaseCoverage|TestReadmeExamplesFresh' -v 2>&1)"; \
+	status=$$?; \
+	printf '%s\n' "$$out"; \
+	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
+	required='TestShowcaseCoverage TestShowcaseCoverage_DetectsGaps'; \
+	for tc in $$required; do \
+		if ! printf '%s\n' "$$out" | grep -qF -- "--- PASS: $$tc ("; then \
+			echo "ERROR: showcase-coverage guard: required test $$tc did NOT run+pass (deleted, renamed, or skipped?)." >&2; \
+			echo "       'go test -run' matching nothing exits 0 vacuously; this guard makes that silent drift a hard failure (story CO-2/DC-2)." >&2; \
+			exit 1; \
+		fi; \
+	done
+
 # e2e-check-node is verify's Node/Playwright preflight: CLAUDE.md made
 # e2e a merge blocker ("every browser-facing behavioral path ... a
 # Playwright e2e test"), so a missing Node toolchain must FAIL verify
@@ -147,7 +244,7 @@ e2e: e2e-check-node
 # server round-trip) and every faster gate should fail first when
 # something's broken, so a run that fails early doesn't pay e2e's cost
 # for nothing.
-verify: build fmt-check vet lint test fixture lint-store spec-align e2e
+verify: build fmt-check vet lint test fixture lint-store spec-align lint-showcase showcase-coverage e2e
 	@echo "verify OK"
 
 tidy:

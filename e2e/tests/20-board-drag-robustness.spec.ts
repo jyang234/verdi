@@ -1,12 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  READONLY_SPEC,
-  REVIEW_SPEC,
-  AC_IDS,
-  DECISION_PLAIN,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, boardPath } from "./fixtures";
 import { expectAutosaved } from "./helpers";
 
 // Drag robustness under REAL input conditions — the regression suite for
@@ -44,13 +37,13 @@ test.describe("board drag robustness (real-input regression)", () => {
   test("a touch drag moves a card and persists (pointer events, not mouse-only)", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
     );
 
-    const card = page.getByTestId(`card-${AC_IDS[1]}`);
+    const card = page.getByTestId(`card-${SHOWCASE.AC_IDS[1]}`);
     const before = await position(card);
     const box = await card.boundingBox();
     expect(box).not.toBeNull();
@@ -73,30 +66,30 @@ test.describe("board drag robustness (real-input regression)", () => {
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await expectAutosaved(page);
 
-    const after = await position(page.getByTestId(`card-${AC_IDS[1]}`));
+    const after = await position(page.getByTestId(`card-${SHOWCASE.AC_IDS[1]}`));
     expect(after).not.toEqual(before);
 
     await page.reload();
-    expect(await position(page.getByTestId(`card-${AC_IDS[1]}`))).toEqual(after);
+    expect(await position(page.getByTestId(`card-${SHOWCASE.AC_IDS[1]}`))).toEqual(after);
   });
 
   test("a release the page never sees lands the drop instead of stranding the drag", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
     );
 
-    const card = page.getByTestId(`card-${DECISION_PLAIN}`);
+    const card = page.getByTestId(`card-${SHOWCASE.DECISION_PLAIN}`);
     const box = await card.boundingBox();
     expect(box).not.toBeNull();
     const sx = box!.x + box!.width / 2;
     const sy = box!.y + box!.height / 2;
 
     // Drag a little, to a mid-spot chosen KNOWINGLY free of every other
-    // card's footprint. AMENDED with the scoping canvas: DESIGN_SPEC
+    // card's footprint. AMENDED with the scoping canvas: SHOWCASE.DESIGN_SPEC
     // gained oq-1, so the cards the scratch suite graduates each file
     // one row lower and the old fixed (+40,+40) offset now clips a
     // graduated card's footprint; the drop resolver would legitimately
@@ -141,7 +134,7 @@ test.describe("board drag robustness (real-input regression)", () => {
           if (!hit) return { dx, dy };
         }
         return null;
-      }, DECISION_PLAIN);
+      }, SHOWCASE.DECISION_PLAIN);
     expect(offset, "no free mid-spot near the card").not.toBeNull();
     await page.mouse.move(sx, sy);
     await page.mouse.down();
@@ -169,18 +162,18 @@ test.describe("board drag robustness (real-input regression)", () => {
     // The card must NOT chase the button-up cursor; the drop lands where
     // the drag actually was, and autosaves.
     await expectAutosaved(page);
-    const after = await position(page.getByTestId(`card-${DECISION_PLAIN}`));
+    const after = await position(page.getByTestId(`card-${SHOWCASE.DECISION_PLAIN}`));
     expect(after).toEqual(mid);
 
     // No half-open gesture remains: further button-up movement is inert.
     await page.mouse.move(sx + 200, sy + 200);
-    expect(await position(page.getByTestId(`card-${DECISION_PLAIN}`))).toEqual(after);
+    expect(await position(page.getByTestId(`card-${SHOWCASE.DECISION_PLAIN}`))).toEqual(after);
   });
 
   test("a read-only board refuses a drag visibly, never silently", async ({
     page,
   }) => {
-    await page.goto(boardPath(READONLY_SPEC));
+    await page.goto(boardPath(SHOWCASE.READONLY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
@@ -212,7 +205,7 @@ test.describe("board drag robustness (real-input regression)", () => {
   test("a review-mode board refuses a drag with the mirror-specific wording", async ({
     page,
   }) => {
-    await page.goto(boardPath(REVIEW_SPEC));
+    await page.goto(boardPath(SHOWCASE.REVIEW_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "review",
@@ -240,13 +233,13 @@ test.describe("board drag robustness (real-input regression)", () => {
   test("a drop onto an occupied spot resolves collision-free and moves only the dragged card", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
     );
 
-    const dragged = `card-${AC_IDS[1]}`;
+    const dragged = `card-${SHOWCASE.AC_IDS[1]}`;
     const others = new Map(
       (await cardRects(page))
         .filter((r) => r.id !== dragged)
@@ -254,7 +247,7 @@ test.describe("board drag robustness (real-input regression)", () => {
     );
 
     // Drop AC-2 squarely onto AC-1's footprint.
-    const target = await page.getByTestId(`card-${AC_IDS[0]}`).boundingBox();
+    const target = await page.getByTestId(`card-${SHOWCASE.AC_IDS[0]}`).boundingBox();
     const source = await page.getByTestId(dragged).boundingBox();
     expect(target).not.toBeNull();
     expect(source).not.toBeNull();

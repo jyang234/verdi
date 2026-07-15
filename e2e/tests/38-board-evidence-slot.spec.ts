@@ -1,19 +1,6 @@
 import { test, expect, type Locator } from "@playwright/test";
 import { addSticky } from "./helpers";
-import {
-  OBLIGATION_WALL_SPEC,
-  OBLIGATION_WALL_AC,
-  OBLIGATION_WALL_PRESENT_KIND,
-  OBLIGATION_WALL_MISSING_KIND,
-  OBLIGATION_WALL_DEMAND,
-  SLOT_WALL_SPEC,
-  SLOT_WALL_AC,
-  SLOT_HELD_KIND,
-  SLOT_EMPTY_KIND,
-  SLOT_ATTESTED_KIND,
-  slotChipTestId,
-  boardPath,
-} from "./fixtures";
+import { SHOWCASE, slotChipTestId, boardPath } from "./fixtures";
 
 // spec/evidence-slot: a story AC card renders, per DECLARED evidence
 // kind, what that kind HOLDS — the fold's own record state — on the SAME
@@ -23,11 +10,11 @@ import {
 // derivation record (ac-2/dc-3) and blocks nothing (co-2).
 //
 // Two fixture walls:
-//  - OBLIGATION_WALL_SPEC (refi-decline-replay) has NO derived tree at
+//  - SHOWCASE.OBLIGATION_WALL_SPEC (refi-decline-replay) has NO derived tree at
 //    all — dc-1's ordinary design-branch authoring state. Every declared
 //    kind wears a CALM empty chip, the receipt discloses the location
 //    probed as absent, and a real write path still succeeds.
-//  - SLOT_WALL_SPEC (decline-slot-wall) has REAL fold-visible state: a
+//  - SHOWCASE.SLOT_WALL_SPEC (decline-slot-wall) has REAL fold-visible state: a
 //    derived-tree CI static record (held), an attestation file on disk
 //    (held), and nothing behavioral (empty) — ac-1's filled-versus-empty
 //    proof on one card.
@@ -63,31 +50,31 @@ test.describe("evidence slot: a story AC card reads out what each kind holds", (
   test("a never-synced wall wears calm empty slots, its badge discloses the probe, and writing still works", async ({
     page,
   }) => {
-    await page.goto(boardPath(OBLIGATION_WALL_SPEC));
+    await page.goto(boardPath(SHOWCASE.OBLIGATION_WALL_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
     );
 
-    const card = page.getByTestId(`card-${OBLIGATION_WALL_AC}`);
+    const card = page.getByTestId(`card-${SHOWCASE.OBLIGATION_WALL_AC}`);
     await expect(card).toBeVisible();
 
     // ac-3: one row per declared kind, each carrying demand AND holdings.
-    await assertOneRowPerKind(card, OBLIGATION_WALL_AC, [
-      OBLIGATION_WALL_PRESENT_KIND,
-      OBLIGATION_WALL_MISSING_KIND,
+    await assertOneRowPerKind(card, SHOWCASE.OBLIGATION_WALL_AC, [
+      SHOWCASE.OBLIGATION_WALL_PRESENT_KIND,
+      SHOWCASE.OBLIGATION_WALL_MISSING_KIND,
     ]);
 
     // The obligated kind's row: the authored demand on the left half,
     // the empty-slot chip on the right — one line, both truths.
     const presentRow = card.locator(
-      `.obligation[data-obligation-kind="${OBLIGATION_WALL_PRESENT_KIND}"]`,
+      `.obligation[data-obligation-kind="${SHOWCASE.OBLIGATION_WALL_PRESENT_KIND}"]`,
     );
     await expect(presentRow.locator(".obligation-title")).toContainText(
-      OBLIGATION_WALL_DEMAND,
+      SHOWCASE.OBLIGATION_WALL_DEMAND,
     );
     const presentChip = presentRow.getByTestId(
-      slotChipTestId(OBLIGATION_WALL_AC, OBLIGATION_WALL_PRESENT_KIND),
+      slotChipTestId(SHOWCASE.OBLIGATION_WALL_AC, SHOWCASE.OBLIGATION_WALL_PRESENT_KIND),
     );
     await expect(presentChip).toHaveAttribute("data-slot-state", "empty");
     await expect(presentChip).toHaveText("no record");
@@ -96,14 +83,14 @@ test.describe("evidence slot: a story AC card reads out what each kind holds", (
     // pending register — "no obligation" (demand) and "no record"
     // (holdings) — a calm authoring fact, not an alarm (dc-1).
     const missingRow = card.locator(
-      `.obligation[data-obligation-kind="${OBLIGATION_WALL_MISSING_KIND}"]`,
+      `.obligation[data-obligation-kind="${SHOWCASE.OBLIGATION_WALL_MISSING_KIND}"]`,
     );
     await expect(missingRow.locator(".obligation-badge")).toHaveText(
       "no obligation",
     );
     await expect(
       missingRow.getByTestId(
-        slotChipTestId(OBLIGATION_WALL_AC, OBLIGATION_WALL_MISSING_KIND),
+        slotChipTestId(SHOWCASE.OBLIGATION_WALL_AC, SHOWCASE.OBLIGATION_WALL_MISSING_KIND),
       ),
     ).toHaveText("no record");
 
@@ -130,16 +117,16 @@ test.describe("evidence slot: a story AC card reads out what each kind holds", (
       }
       if (input.name === "derived-tree") {
         expect(input.path).toContain(
-          `derived/spec--${OBLIGATION_WALL_SPEC}`,
+          `derived/spec--${SHOWCASE.OBLIGATION_WALL_SPEC}`,
         );
         expect(input.revision).toBe("absent");
       }
     }
     expect(record.records).toContain(
-      `${OBLIGATION_WALL_PRESENT_KIND}: no current record`,
+      `${SHOWCASE.OBLIGATION_WALL_PRESENT_KIND}: no current record`,
     );
     expect(record.records).toContain(
-      `${OBLIGATION_WALL_MISSING_KIND}: no current record`,
+      `${SHOWCASE.OBLIGATION_WALL_MISSING_KIND}: no current record`,
     );
     // co-1: digests, never wall-clock — nothing date-shaped in the record.
     expect(raw!).not.toMatch(/\d{4}-\d{2}-\d{2}/);
@@ -150,9 +137,9 @@ test.describe("evidence slot: a story AC card reads out what each kind holds", (
 
     // ...and after the post-mutation fragment swap (one renderer for page
     // and fragment) the slots and badge are still worn.
-    await assertOneRowPerKind(card, OBLIGATION_WALL_AC, [
-      OBLIGATION_WALL_PRESENT_KIND,
-      OBLIGATION_WALL_MISSING_KIND,
+    await assertOneRowPerKind(card, SHOWCASE.OBLIGATION_WALL_AC, [
+      SHOWCASE.OBLIGATION_WALL_PRESENT_KIND,
+      SHOWCASE.OBLIGATION_WALL_MISSING_KIND,
     ]);
     await expect(
       card.locator('.badge-chip[data-badge-source="fold:empty-slot"]'),
@@ -162,33 +149,33 @@ test.describe("evidence slot: a story AC card reads out what each kind holds", (
   test("a folded record fills exactly its kind's slot; an attestation fills its own; siblings stay empty", async ({
     page,
   }) => {
-    await page.goto(boardPath(SLOT_WALL_SPEC));
+    await page.goto(boardPath(SHOWCASE.SLOT_WALL_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
     );
 
-    const card = page.getByTestId(`card-${SLOT_WALL_AC}`);
+    const card = page.getByTestId(`card-${SHOWCASE.SLOT_WALL_AC}`);
     await expect(card).toBeVisible();
 
     // ac-1: every declared kind appears as a slot entry — and only the
     // declared kinds (assertOneRowPerKind counts exactly three rows).
-    await assertOneRowPerKind(card, SLOT_WALL_AC, [
-      SLOT_HELD_KIND,
-      SLOT_EMPTY_KIND,
-      SLOT_ATTESTED_KIND,
+    await assertOneRowPerKind(card, SHOWCASE.SLOT_WALL_AC, [
+      SHOWCASE.SLOT_HELD_KIND,
+      SHOWCASE.SLOT_EMPTY_KIND,
+      SHOWCASE.SLOT_ATTESTED_KIND,
     ]);
 
     // The derived-tree static record fills the static slot...
     const heldChip = card.getByTestId(
-      slotChipTestId(SLOT_WALL_AC, SLOT_HELD_KIND),
+      slotChipTestId(SHOWCASE.SLOT_WALL_AC, SHOWCASE.SLOT_HELD_KIND),
     );
     await expect(heldChip).toHaveAttribute("data-slot-state", "held");
     await expect(heldChip).toHaveText("1 record");
 
     // ...the attestation file fills the attestation slot...
     const attestedChip = card.getByTestId(
-      slotChipTestId(SLOT_WALL_AC, SLOT_ATTESTED_KIND),
+      slotChipTestId(SHOWCASE.SLOT_WALL_AC, SHOWCASE.SLOT_ATTESTED_KIND),
     );
     await expect(attestedChip).toHaveAttribute("data-slot-state", "held");
     await expect(attestedChip).toHaveText("attested");
@@ -196,7 +183,7 @@ test.describe("evidence slot: a story AC card reads out what each kind holds", (
     // ...and the record-less behavioral kind stays empty: the record
     // flipped exactly ITS kind, never a sibling.
     const emptyChip = card.getByTestId(
-      slotChipTestId(SLOT_WALL_AC, SLOT_EMPTY_KIND),
+      slotChipTestId(SHOWCASE.SLOT_WALL_AC, SHOWCASE.SLOT_EMPTY_KIND),
     );
     await expect(emptyChip).toHaveAttribute("data-slot-state", "empty");
     await expect(emptyChip).toHaveText("no record");
@@ -217,7 +204,7 @@ test.describe("evidence slot: a story AC card reads out what each kind holds", (
     );
     await expect(badge).toBeVisible();
     const record = JSON.parse((await badge.getAttribute("data-badge-record"))!);
-    expect(record.target).toBe(SLOT_WALL_AC);
+    expect(record.target).toBe(SHOWCASE.SLOT_WALL_AC);
     expect(record.label).toBe("empty slot");
     const recordFileInputs = record.inputs.filter((i: { name: string }) =>
       i.name.startsWith("record:"),
@@ -225,18 +212,18 @@ test.describe("evidence slot: a story AC card reads out what each kind holds", (
     expect(recordFileInputs.length).toBe(1);
     expect(recordFileInputs[0].revision).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(recordFileInputs[0].path).toContain(
-      `derived/spec--${SLOT_WALL_SPEC}`,
+      `derived/spec--${SHOWCASE.SLOT_WALL_SPEC}`,
     );
     const tree = record.inputs.find(
       (i: { name: string }) => i.name === "derived-tree",
     );
     expect(tree.revision).toMatch(/^[0-9a-f]{7,40}$/);
-    expect(record.records).toContain(`${SLOT_HELD_KIND}: 1 current record`);
+    expect(record.records).toContain(`${SHOWCASE.SLOT_HELD_KIND}: 1 current record`);
     expect(record.records).toContain(
-      `${SLOT_EMPTY_KIND}: no current record`,
+      `${SHOWCASE.SLOT_EMPTY_KIND}: no current record`,
     );
     expect(record.records).toContain(
-      `${SLOT_ATTESTED_KIND}: attestation file present`,
+      `${SHOWCASE.SLOT_ATTESTED_KIND}: attestation file present`,
     );
   });
 });

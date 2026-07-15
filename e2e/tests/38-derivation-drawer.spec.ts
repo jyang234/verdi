@@ -1,14 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import {
-  BADGE_WALL_SPEC,
-  BADGE_SEALED_SPEC,
-  BADGE_DECISION,
-  SWEEP_FRESH_SPEC,
-  SWEEP_STALE_SPEC,
-  SWEEP_PARTIAL_SPEC,
-  SWEEP_MISSING_DECISION,
-  boardPath,
-} from "./fixtures";
+import { EDGE, boardPath } from "./fixtures";
 
 // spec/derivation-drawer — the wall's receipts, opened:
 //   ac-1: every wall badge is an opener (pointer AND keyboard) whose
@@ -88,11 +79,11 @@ async function openInspectClose(page: Page, badge: Locator, source: string): Pro
 
 test.describe("ac-1: every wall badge opens its derivation drawer", () => {
   test("card chip and case-file stamp both open, read, and close clean", async ({ page }) => {
-    await page.goto(boardPath(BADGE_WALL_SPEC));
+    await page.goto(boardPath(EDGE.BADGE_WALL_SPEC));
 
     // A card badge's drawer (the decision card's VL-003 chip)…
     const chip = page
-      .getByTestId(`card-${BADGE_DECISION}`)
+      .getByTestId(`card-${EDGE.BADGE_DECISION}`)
       .locator('.badge-chip[data-badge-source="lint:VL-003"]');
     await openInspectClose(page, chip, "lint:VL-003");
 
@@ -106,10 +97,10 @@ test.describe("ac-1: every wall badge opens its derivation drawer", () => {
   test("drawers open on a sealed read-only wall too (dc-4: reading a receipt is never a write)", async ({
     page,
   }) => {
-    await page.goto(boardPath(BADGE_SEALED_SPEC));
+    await page.goto(boardPath(EDGE.BADGE_SEALED_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "readonly");
     const chip = page
-      .getByTestId(`card-${BADGE_DECISION}`)
+      .getByTestId(`card-${EDGE.BADGE_DECISION}`)
       .locator('.badge-chip[data-badge-source="lint:VL-003"]');
     await openInspectClose(page, chip, "lint:VL-003");
   });
@@ -123,10 +114,10 @@ test.describe("ac-2: the drawer is a pure function of the attached record", () =
     // at rest (server-rendered, before any interaction).
     const chipDrawer = (p: Page) =>
       p
-        .getByTestId(`card-${BADGE_DECISION}`)
+        .getByTestId(`card-${EDGE.BADGE_DECISION}`)
         .locator('.badge-chip[data-badge-source="lint:VL-003"] + .badge-drawer');
 
-    await page.goto(boardPath(BADGE_WALL_SPEC));
+    await page.goto(boardPath(EDGE.BADGE_WALL_SPEC));
     const first = await chipDrawer(page).evaluate((el) => el.outerHTML);
     await page.reload();
     const second = await chipDrawer(page).evaluate((el) => el.outerHTML);
@@ -137,7 +128,7 @@ test.describe("ac-2: the drawer is a pure function of the attached record", () =
     // disclosure/provenance entry appears, and the drawer holds EXACTLY as
     // many entries as the record — nothing without a record source.
     const chip = page
-      .getByTestId(`card-${BADGE_DECISION}`)
+      .getByTestId(`card-${EDGE.BADGE_DECISION}`)
       .locator('.badge-chip[data-badge-source="lint:VL-003"]');
     const record = JSON.parse((await chip.getAttribute("data-badge-record"))!);
     const drawer = chipDrawer(page);
@@ -190,7 +181,7 @@ test.describe("ac-3: judged findings wear their sweep provenance; stale looks st
   }
 
   test("fresh, complete sweep: provenance stamped, no mismatch line", async ({ page }) => {
-    const drawer = await openJudgedDrawer(page, SWEEP_FRESH_SPEC);
+    const drawer = await openJudgedDrawer(page, EDGE.SWEEP_FRESH_SPEC);
 
     const provenance = drawer.locator(".drawer-provenance-line");
     await expect(provenance).toHaveCount(3);
@@ -199,7 +190,7 @@ test.describe("ac-3: judged findings wear their sweep provenance; stale looks st
       /^adr_corpus_digest sha256:[0-9a-f]{64}$/,
     );
     expect((await provenance.nth(2).textContent())!).toBe(
-      `decisions_scanned: spec/${SWEEP_FRESH_SPEC}#dc-1, spec/${SWEEP_FRESH_SPEC}#dc-2`,
+      `decisions_scanned: spec/${EDGE.SWEEP_FRESH_SPEC}#dc-1, spec/${EDGE.SWEEP_FRESH_SPEC}#dc-2`,
     );
 
     // Fresh and complete: NO mismatch/disclosure line at all.
@@ -208,7 +199,7 @@ test.describe("ac-3: judged findings wear their sweep provenance; stale looks st
   });
 
   test("stale sweep: the covers contrast is disclosed visibly", async ({ page }) => {
-    const drawer = await openJudgedDrawer(page, SWEEP_STALE_SPEC);
+    const drawer = await openJudgedDrawer(page, EDGE.SWEEP_STALE_SPEC);
     const disclosures = drawer.locator(".drawer-disclosure");
     await expect(disclosures).toHaveCount(1);
     expect((await disclosures.first().textContent())!).toMatch(
@@ -218,11 +209,11 @@ test.describe("ac-3: judged findings wear their sweep provenance; stale looks st
   });
 
   test("partial sweep: the missing declared decision id is named", async ({ page }) => {
-    const drawer = await openJudgedDrawer(page, SWEEP_PARTIAL_SPEC);
+    const drawer = await openJudgedDrawer(page, EDGE.SWEEP_PARTIAL_SPEC);
     const disclosures = drawer.locator(".drawer-disclosure");
     await expect(disclosures).toHaveCount(1);
     await expect(disclosures.first()).toHaveText(
-      `${SWEEP_MISSING_DECISION} is not in decisions_scanned`,
+      `${EDGE.SWEEP_MISSING_DECISION} is not in decisions_scanned`,
     );
     await assertDispositionStates(drawer);
   });

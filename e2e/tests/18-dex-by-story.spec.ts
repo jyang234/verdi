@@ -1,12 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  DEX_BASE,
-  ADR_NAME,
-  ARCHIVED_STORY_ROUND4,
-  ARCHIVED_STORY_GRANDFATHERED,
-  dexByStoryPath,
-  dexAdrExemptionsPath,
-} from "./fixtures";
+import { SHOWCASE, DEX_BASE, dexByStoryPath, dexAdrExemptionsPath } from "./fixtures";
 
 // V1-P8's dex behavior beyond the 16-dex-v2 contract (CLAUDE.md: every
 // browser-facing behavioral path gets a Playwright spec): the by-story
@@ -19,17 +12,17 @@ test.describe("V1-P8: dex by-story axis", () => {
   test("the hub lists both archived story records", async ({ page }) => {
     await page.goto(`${DEX_BASE}/by-story/`);
     await expect(
-      page.locator(`a[href="/by-story/${ARCHIVED_STORY_ROUND4}/"]`),
+      page.locator(`a[href="/by-story/${SHOWCASE.ARCHIVED_STORY_ROUND4}/"]`),
     ).toBeVisible();
     await expect(
-      page.locator(`a[href="/by-story/${ARCHIVED_STORY_GRANDFATHERED}/"]`),
+      page.locator(`a[href="/by-story/${SHOWCASE.ARCHIVED_STORY_GRANDFATHERED}/"]`),
     ).toBeVisible();
   });
 
   test("a round-four quartet renders layout.json in the board slot", async ({
     page,
   }) => {
-    await page.goto(dexByStoryPath(ARCHIVED_STORY_ROUND4));
+    await page.goto(dexByStoryPath(SHOWCASE.ARCHIVED_STORY_ROUND4));
     const body = page.locator("main.content");
     // The coordinate sidecar, labeled as what it is...
     await expect(body).toContainText("layout.json");
@@ -42,14 +35,14 @@ test.describe("V1-P8: dex by-story axis", () => {
       page.getByRole("heading", { name: "Deviation report" }),
     ).toBeVisible();
     await expect(
-      page.locator(`a[href="/a/spec/${ARCHIVED_STORY_ROUND4}/"]`),
+      page.locator(`a[href="/a/spec/${SHOWCASE.ARCHIVED_STORY_ROUND4}/"]`),
     ).toBeVisible();
   });
 
   test("a grandfathered v0 quartet keeps its frozen board.json, labeled", async ({
     page,
   }) => {
-    await page.goto(dexByStoryPath(ARCHIVED_STORY_GRANDFATHERED));
+    await page.goto(dexByStoryPath(SHOWCASE.ARCHIVED_STORY_GRANDFATHERED));
     const body = page.locator("main.content");
     await expect(body).toContainText("board.json");
     await expect(body).toContainText("verdi.board/v1");
@@ -61,15 +54,15 @@ test.describe("V1-P8: ADR page links its exemption audit face", () => {
   test("the ADR permalink page links to the per-ADR exemption page", async ({
     page,
   }) => {
-    await page.goto(`${DEX_BASE}/a/adr/${ADR_NAME}/`);
+    await page.goto(`${DEX_BASE}/a/adr/${SHOWCASE.ADR_NAME}/`);
     const link = page.locator(
-      `a[href="/a/adr/${ADR_NAME}/exemptions/"]`,
+      `a[href="/a/adr/${SHOWCASE.ADR_NAME}/exemptions/"]`,
     );
     await expect(link).toBeVisible();
     await link.click();
     await expect(
       page.getByRole("heading", { name: /active exemption/i }),
     ).toBeVisible();
-    expect(page.url()).toBe(dexAdrExemptionsPath(ADR_NAME));
+    expect(page.url()).toBe(dexAdrExemptionsPath(SHOWCASE.ADR_NAME));
   });
 });

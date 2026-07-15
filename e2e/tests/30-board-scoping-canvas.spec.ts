@@ -1,15 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import {
-  DESIGN_SPEC,
-  EMPTY_SPEC,
-  FEATURE_SPEC,
-  OQ_ID,
-  AC_IDS,
-  DECISION_PLAIN,
-  boardPath,
-  stubCardTestId,
-  coverageChipTestId,
-} from "./fixtures";
+import { SHOWCASE, boardPath, stubCardTestId, coverageChipTestId } from "./fixtures";
 import { addSticky, drawYarn, expectAutosaved } from "./helpers";
 
 // The scoping canvas (spec/scoping-canvas ac-2/ac-3/ac-4/ac-5, dc-1/
@@ -17,7 +7,7 @@ import { addSticky, drawYarn, expectAutosaved } from "./helpers";
 // surface — they park handwritten in the stubs band, their yarn to
 // acceptance criteria / open questions is the coverage / resolution
 // claim, and graduation typesets them in place as declared stub cards.
-// Every journey here runs on the harness's feature fixture (DESIGN_SPEC,
+// Every journey here runs on the harness's feature fixture (SHOWCASE.DESIGN_SPEC,
 // authoring mode on its design branch); the shared store carries each
 // test's graduated stubs forward, so the specs run strictly in order.
 
@@ -66,7 +56,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     page,
   }) => {
     // The feature wall's draft control offers all six types.
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await page.getByRole("button", { name: "Add sticky" }).click();
     const draft = page.locator(".sticky-draft");
     await expect(draft).toBeVisible();
@@ -78,7 +68,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
 
     // A story-class wall never offers the proto types (the same gate
     // the server enforces — the menu mirrors the refusal).
-    await page.goto(boardPath(EMPTY_SPEC));
+    await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
     await page.getByRole("button", { name: "Add sticky" }).click();
     const storyDraft = page.locator(".sticky-draft");
     await expect(storyDraft).toBeVisible();
@@ -89,7 +79,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
 
     // Non-authoring modes have no sticky control at all — the sealed
     // record's one live affordance is instantiate, nothing else writes.
-    await page.goto(boardPath(FEATURE_SPEC));
+    await page.goto(boardPath(SHOWCASE.FEATURE_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
@@ -98,21 +88,21 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
 
     // And a draft wall offers no instantiate: only an accepted record
     // cuts story branches.
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.locator("[data-instantiate]")).toHaveCount(0);
   });
 
   test("story sticky → coverage yarn → graduation typesets the stub in place", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
     );
 
     // Before any stub, every AC wears the quietly-insistent chip.
-    const ac3Chip = page.getByTestId(coverageChipTestId(AC_IDS[2]));
+    const ac3Chip = page.getByTestId(coverageChipTestId(SHOWCASE.AC_IDS[2]));
     await expect(ac3Chip).toHaveText("no stub");
     await expect(ac3Chip).toHaveAttribute("data-coverage", "0");
 
@@ -127,7 +117,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
 
     // Yarn to ac-3: one reading, no picker — a calm confirmation of the
     // coverage claim, minted as an untyped relates thread.
-    await drawAttribution(page, sticky, AC_IDS[2], /coverage claim/i);
+    await drawAttribution(page, sticky, SHOWCASE.AC_IDS[2], /coverage claim/i);
 
     // Graduate: the sticky typesets into its stub card in the same band.
     const stickyId = await sticky.getAttribute("data-id");
@@ -143,7 +133,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     await expect(
       page.locator(
         `.yarn-chip--scoping[data-edge-type="covers"]` +
-          `[data-from="stub:audit-decline-notice-log"][data-to="${AC_IDS[2]}"]`,
+          `[data-from="stub:audit-decline-notice-log"][data-to="${SHOWCASE.AC_IDS[2]}"]`,
       ),
     ).toHaveCount(1);
     // The handwriting is gone — the record took its place — and so is
@@ -162,7 +152,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     await expect(
       page.getByTestId(stubCardTestId("audit-decline-notice-log")),
     ).toBeVisible();
-    await expect(page.getByTestId(coverageChipTestId(AC_IDS[2]))).toHaveText(
+    await expect(page.getByTestId(coverageChipTestId(SHOWCASE.AC_IDS[2]))).toHaveText(
       "covered by 1 stub",
     );
   });
@@ -170,7 +160,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
   test("zero-yarn graduation is refused legibly and the sticky survives", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const sticky = await addSticky(page, "orphan claim", "story");
     await sticky.locator('[data-graduate="stub"]').click();
     await confirmOk(page).click();
@@ -197,13 +187,13 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
   test("spike stickies → resolution yarn → spike stubs; two claims raise the smell", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
 
     // First spike: no smell at one claim (one spike answering questions
     // is the norm).
     const first = await addSticky(page, "probe legal wording", "spike");
     await expect(first).toHaveAttribute("data-annotation-type", "spike");
-    await drawAttribution(page, first, OQ_ID, /attribution/i);
+    await drawAttribution(page, first, SHOWCASE.OQ_ID, /attribution/i);
     await graduateProto(page, first);
     const firstStub = page.getByTestId(stubCardTestId("probe-legal-wording"));
     await expect(firstStub).toBeVisible();
@@ -214,20 +204,20 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     await expect(
       page.locator(
         `.yarn-chip--scoping[data-edge-type="resolves"]` +
-          `[data-from="stub:probe-legal-wording"][data-to="${OQ_ID}"]`,
+          `[data-from="stub:probe-legal-wording"][data-to="${SHOWCASE.OQ_ID}"]`,
       ),
     ).toHaveCount(1);
-    await expect(page.getByTestId(`oq-claims-${OQ_ID}`)).toHaveCount(0);
+    await expect(page.getByTestId(`oq-claims-${SHOWCASE.OQ_ID}`)).toHaveCount(0);
 
     // Second spike claiming the SAME question: the multi-claim smell
     // appears — a norm-shaped observation, never an error (ac-5).
     const second = await addSticky(page, "probe policy precedent", "spike");
-    await drawAttribution(page, second, OQ_ID, /attribution/i);
+    await drawAttribution(page, second, SHOWCASE.OQ_ID, /attribution/i);
     await graduateProto(page, second);
     await expect(
       page.getByTestId(stubCardTestId("probe-policy-precedent")),
     ).toBeVisible();
-    const smell = page.getByTestId(`oq-claims-${OQ_ID}`);
+    const smell = page.getByTestId(`oq-claims-${SHOWCASE.OQ_ID}`);
     await expect(smell).toHaveText("claimed by 2 spikes");
     await expect(smell).toHaveAttribute("data-claims", "2");
   });
@@ -235,13 +225,13 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
   test("illegal pairs get the picker's plain-language refusal", async ({
     page,
   }) => {
-    await page.goto(boardPath(DESIGN_SPEC));
+    await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
 
     // A story sticky's thread has one meaning: coverage. An open
     // question is the spike's target, and the refusal says so.
     const story = await addSticky(page, "misaimed story", "story");
     const storyId = await story.getAttribute("data-id");
-    await drawYarn(page, storyId!, page.getByTestId(`card-${OQ_ID}`));
+    await drawYarn(page, storyId!, page.getByTestId(`card-${SHOWCASE.OQ_ID}`));
     const refusal = page.getByTestId("proto-yarn-refusal");
     await expect(refusal).toBeVisible();
     await expect(refusal).toContainText(/spike sticky instead/);
@@ -250,7 +240,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     // Neither proto type ties to anything else — a decision card here
     // (co-1 was legitimately trashed off the wall by the earlier trash
     // suite; dc-2 is the wall's stable bystander).
-    await drawYarn(page, storyId!, page.getByTestId(`card-${DECISION_PLAIN}`));
+    await drawYarn(page, storyId!, page.getByTestId(`card-${SHOWCASE.DECISION_PLAIN}`));
     await expect(refusal).toBeVisible();
     await expect(refusal).toContainText(/one meaning/);
     await page.keyboard.press("Escape");
@@ -258,7 +248,7 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     // A spike sticky refuses acceptance criteria symmetrically.
     const spike = await addSticky(page, "misaimed spike", "spike");
     const spikeId = await spike.getAttribute("data-id");
-    await drawYarn(page, spikeId!, page.getByTestId(`card-${AC_IDS[0]}`));
+    await drawYarn(page, spikeId!, page.getByTestId(`card-${SHOWCASE.AC_IDS[0]}`));
     await expect(refusal).toBeVisible();
     await expect(refusal).toContainText(/story sticky instead/);
     await page.keyboard.press("Escape");
