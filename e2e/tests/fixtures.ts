@@ -89,20 +89,30 @@
 // |   SHOWCASE_DRAFT_ACS, SHOWCASE_DRAFT_OQ_ID,                        |          | |
 // |   SHOWCASE_DRAFT_OQ_CARRIED, SHOWCASE_DRAFT_OQ_RESOLVED,           |          | |
 // |   SHOWCASE_DRAFT_DIAGRAM                                          |          | |
+// | FORGE_KIND                                                         | SHOWCASE | examples/showcase's own committed verdi.yaml forge: value (disclosures happy path) |
 //
 // Top-level (never zoned — not fixtures, per this task's brief): boardPath
 // and every other route/data-testid helper function, plus the port-derived
 // bases DEX_BASE, CONTROL_URL, INSPECT_URL.
 //
-// NOTE (rudimentary provisioner prose — flagged, not fixed here; see
-// task-2.2-report.md): several SHOWCASE-classified provisioned fixtures
-// (income-verification, refi-decline-audit, refi-decline-replay,
-// decline-slot-wall, stale-decline-notices, and the draft-boards family in
-// cmd/e2eharness/provision_board.go / provision_draftboards.go) carry empty
-// `## Problem`/`## Outcome` body sections and one-line AC stubs — well below
-// the payoff-quote-portal bar (provision_showcase_draft.go, Task 2.1).
-// Follow-up: bring them to the same prose bar if/when they become
-// showcase-coverage evidence (Task 3.2/3.4).
+// NOTE (rudimentary provisioner prose — task-2.2-report.md flagged it,
+// Task 3.4 upgraded three of the six once they became showcase-coverage
+// evidence): refi-decline-replay, decline-slot-wall, and
+// stale-decline-notices (cmd/e2eharness/provision_board.go's replaySpec/
+// slotWallSpec/reviewSpec) were brought to the payoff-quote-portal prose
+// bar (real `## Outcome`/`## ac-N` body prose, canon-consistent) when they
+// became coverage evidence for wb:obligation-wall/wb:evidence-slot/
+// wb:wall-receipts/wb:board-review-mode (showcase-coverage Task 3.4).
+// stale-decline-notices' `## Problem` body stays DELIBERATELY empty —
+// 33-board-expand.spec.ts's "affordance works in a non-authoring (review)
+// room too" test asserts exactly that absence (the no-body →
+// headline-fallback path), so upgrading it would break a passing test.
+// income-verification, refi-decline-audit, and the draft-boards family
+// (cmd/e2eharness/provision_board.go / provision_draftboards.go) remain
+// rudimentary — still flagged, not fixed, since none is this task's
+// showcase-coverage evidence (EMPTY_SPEC/OBLIGATION_STORY_SPEC/DB_* back no
+// wb: gap Task 3.2 named). Follow-up: bring them to the same bar if/when
+// they become showcase-coverage evidence themselves.
 //
 // ---------------------------------------------------------------------------
 //
@@ -528,6 +538,17 @@ export const SHOWCASE = {
   // The proposal-tier diagram authored on the branch (VL-021: derived_from a
   // real corpus diagram + a well-formed sha256 digest).
   SHOWCASE_DRAFT_DIAGRAM: "payoff-quote-flow",
+
+  // -------------------------------------------------------------------------
+  // Disclosures (spec/disclosures-panel) — the checkout-wide seam
+  // -------------------------------------------------------------------------
+
+  // examples/showcase/.verdi/verdi.yaml's own committed `forge:` value — no
+  // credentials are ever exported for it in this hermetic harness, so it is
+  // the real, committed source of the workbench's one seeded
+  // review-feed-unavailable disclosure (19-disclosures.spec.ts). A fact
+  // about the corpus itself, not a process artifact.
+  FORGE_KIND: "gitlab",
 } as const;
 
 // ===========================================================================

@@ -277,15 +277,33 @@ links:
 
 ## Problem
 
+Once a decline notice reaches a borrower, its exact wording is gone from
+any operator's view the moment the underlying account state moves on.
+When a borrower disputes what they were told, or a QA review needs to
+confirm a specific decline read the way the spec intended, support has no
+way to reconstruct it — only whatever the current, possibly-already-
+retracted state happens to be.
+
 ## Outcome
+
+Every decline notice loansvc has ever shown is reconstructable on
+demand, byte-for-byte, from the same event stream the outbox pattern
+already durably records (adr/0002) — no separate notice-archival system,
+no best-effort log line that might have rotated out.
 
 ## ac-1
 
-Replayable decline notices.
+Support can replay every decline notice shown to an applicant: given a
+loan id and a rough time window, the replay view reconstructs the exact
+notice text, channel, and timestamp from the outbox's own delivered
+events — the same events the transactional outbox already commits
+durably, read back rather than re-derived.
 
 ## ac-2
 
-Tamper-evident replay.
+The replay is tamper-evident: each replayed notice carries a content
+hash computed at delivery time, so a replay that no longer matches its
+original hash is visibly flagged rather than silently trusted.
 `
 
 // replayObligation is the committed evidence-obligation artifact for
@@ -338,11 +356,25 @@ links:
 
 ## Problem
 
+While a story is still being authored, nobody can tell from the wall
+alone which of its declared evidence kinds already have something behind
+them and which are still open — the fold's own state lives only in the
+derived tree and the obligation sidecar, invisible without opening both.
+
 ## Outcome
+
+Each declared evidence kind reads its own current holding directly on the
+AC card: a kind with a real derived record shows it, a kind with an
+attestation on file shows that, and a kind with neither shows a calm,
+literal "no record" — the same three-way read a "verdi matrix" run would
+report, without ever leaving the wall.
 
 ## ac-1
 
-Holdings read on the row.
+Each declared kind on ac-1 shows what it currently holds: the static kind
+reads the derived tree's own CI record, the attestation kind reads the
+attestation file's mere presence, and the behavioral kind — genuinely
+un-evidenced so far — reads as empty rather than silently omitted.
 `
 
 // slotWallAttestation fills decline-slot-wall ac-1's attestation slot:
@@ -574,17 +606,34 @@ acceptance_criteria:
 
 ## Outcome
 
+A decline notice is a claim about the applicant's account state at the
+moment it was generated. Once that state moves on — a retried charge
+clears, an escrow adjustment lands, a same-day payoff closes the loan —
+the notice is no longer true, and continuing to let it stand misleads
+whoever reads it next. This feature retracts each decline notice at the
+moment the state that produced it changes, across every channel it
+reached, and keeps that retraction visible to audit indefinitely.
+
 ## ac-1
 
-Retraction on staleness.
+A stale decline retracts its own notice: the moment loansvc reclassifies
+a decline as stale (the same detection stale-decline's own outcome
+depends on), any notice already dispatched for it is marked retracted at
+its origin — never silently left standing as if it were still current.
 
 ## ac-2
 
-Channel completeness.
+The retraction reaches every channel the original notice did: web,
+mobile, and the servicing console alike read the retracted state on
+their next fetch, so a borrower or an agent never sees the stale notice
+on one surface and its retraction on another.
 
 ## ac-3
 
-Audit visibility.
+A retracted notice stays audit-visible: the retraction is itself a
+recorded fact, not a deletion — an auditor can see both that the notice
+fired and that it was later retracted, with the state change that caused
+it.
 `
 
 // cannedReviewFeed is REVIEW_SPEC's MR comment feed — the three routing
