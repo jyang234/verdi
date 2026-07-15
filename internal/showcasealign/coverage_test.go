@@ -87,6 +87,18 @@ type coverageEvidence struct {
 var playwright = func(f string) coverageEvidence { return coverageEvidence{"e2e/tests/" + f, `SHOWCASE\.`} }
 var goE2E = func(f string) coverageEvidence { return coverageEvidence{f, `examples/showcase`} }
 
+// needsPlaywrightDir reports whether this evidence is a Playwright spec under
+// e2e/tests/ (as produced by the playwright(...) constructor). Such evidence
+// is verifiable only when e2e/tests is present; Go-backed evidence (goE2E:
+// repo-relative *.go files marked examples/showcase) needs no Playwright
+// specs and is always checkable. TestShowcaseCoverage uses this to scope its
+// disclosure PRECISELY: an absent e2e/tests disables ONLY the Playwright-
+// dependent marker checks (and the wb axis), never the Go-backed CLI and MCP
+// axes — the exact over-broad-skip defect this method exists to fix.
+func (e coverageEvidence) needsPlaywrightDir() bool {
+	return strings.HasPrefix(e.file, "e2e/tests/")
+}
+
 // showcaseCoverage is the committed inventory (spec §5). Keys for the CLI
 // axis are "cli:<verb>", MCP axis "mcp:<tool>", workbench axis
 // "wb:<surface>". Every enumerated capability MUST have an entry; entries
@@ -400,13 +412,28 @@ func mcpTools(t *testing.T) []string {
 }
 
 // TestShowcaseCoverage is the showcase-coverage gate itself: see this
-// file's package-level doc comment for the full rationale. It is expected
-// to be RED right now (30 of 43 capabilities unmapped) — Task 3.4's punch
-// list, not a defect in this test.
+// file's package-level doc comment for the full rationale. It is GREEN as of
+// Task 3.4 (every enumerated capability mapped and every mapped file matching
+// its marker); a regression here means a real capability lost its showcase
+// backing, not a defect in this test. When e2e/tests is absent it still
+// fully enforces the Go-backed CLI and MCP axes and only discloses the
+// Playwright-dependent workbench axis as unproven (never a silent pass).
 func TestShowcaseCoverage(t *testing.T) {
+	// The CLI and MCP axes are backed entirely by Go test files in this repo
+	// (marker examples/showcase); only the workbench axis and the handful of
+	// cross-axis playwright(...) evidence files live under e2e/tests/. So a
+	// checkout missing e2e/tests can — and MUST — still fully enforce the two
+	// Go-backed axes; only the Playwright-dependent checks are disclosed-as-
+	// unproven. Three-valued honesty: a loud t.Log, never a silent pass, and
+	// never suppressing a real gap in the Go axes. The pre-fix behavior — a
+	// blanket t.Skip on a missing e2e/tests, taken BEFORE the CLI/MCP axes
+	// were even computed — disabled ALL THREE axes, far wider than the
+	// disclosure text claimed. That over-broad skip was the defect.
 	e2eDir := filepath.Join(verdiRepoRoot, "e2e", "tests")
+	e2ePresent := true
 	if _, err := os.Stat(e2eDir); err != nil {
-		t.Skipf("DISCLOSURE: e2e/tests is entirely absent (%v); cannot verify Playwright-backed showcase coverage from this checkout", err)
+		e2ePresent = false
+		t.Logf("DISCLOSURE: e2e/tests is absent (%v); the workbench axis and every Playwright-backed evidence marker are DISCLOSED-AS-UNPROVEN from this checkout. The CLI and MCP axes (Go-backed) are still FULLY enforced below.", err)
 	}
 
 	capabilities := map[string]bool{}
@@ -416,10 +443,21 @@ func TestShowcaseCoverage(t *testing.T) {
 	for _, tool := range mcpTools(t) {
 		capabilities["mcp:"+tool] = true
 	}
-	for _, s := range workbenchSurfaces {
-		capabilities["wb:"+s] = true
+	// The workbench axis is Playwright-only: enumerate it only when its specs
+	// are present. Otherwise its map entries would be spuriously flagged as
+	// stale "extra" entries below, and its gaps could not be proven either
+	// way — so when e2e/tests is absent it is disclosed-unproven (above) and
+	// deliberately left OUT of the enumerated set, never silently treated as
+	// covered.
+	if e2ePresent {
+		for _, s := range workbenchSurfaces {
+			capabilities["wb:"+s] = true
+		}
 	}
 
+	// Gap direction: every enumerated capability must be mapped. This runs
+	// for cli:/mcp: unconditionally (and wb: too when e2e/tests is present),
+	// so a genuine gap in the Go axes is never suppressed by an absent dir.
 	var missing []string
 	for cap := range capabilities {
 		if _, ok := showcaseCoverage[cap]; !ok {
@@ -431,11 +469,21 @@ func TestShowcaseCoverage(t *testing.T) {
 		t.Errorf("showcase-coverage gap: %s has no showcase-backed e2e evidence", cap)
 	}
 
+	// Stale direction: every map entry must name an enumerated capability. A
+	// wb: entry when e2e/tests is absent is disclosed-unproven (the axis was
+	// deliberately not enumerated above), NOT stale — so exempt it. Any
+	// non-wb entry (cli:/mcp:) that names no enumerated capability is still a
+	// hard error, so a stale or renamed Go-axis mapping cannot hide behind
+	// the absent dir.
 	var extra []string
 	for cap := range showcaseCoverage {
-		if !capabilities[cap] {
-			extra = append(extra, cap)
+		if capabilities[cap] {
+			continue
 		}
+		if !e2ePresent && strings.HasPrefix(cap, "wb:") {
+			continue
+		}
+		extra = append(extra, cap)
 	}
 	sort.Strings(extra)
 	for _, cap := range extra {
@@ -445,12 +493,19 @@ func TestShowcaseCoverage(t *testing.T) {
 	// Every mapping present is checked for real: the file must exist under
 	// the repo root and its bytes must match its own marker regexp. A
 	// mapping that fails this is worse than an honest gap — it is a false
-	// claim of coverage — so it fails loudly here too.
+	// claim of coverage — so it fails loudly here too. Playwright evidence
+	// (file under e2e/tests/) is verifiable only when that dir is present;
+	// when it is absent those specific markers are collected and disclosed
+	// loudly below, never silently passed. Go-backed evidence (examples/
+	// showcase marker, a repo .go file) is ALWAYS checked — so a
+	// deliberately-broken cli:/mcp: mapping still fails here even from an
+	// e2e-less checkout.
 	var mappedCaps []string
 	for cap := range showcaseCoverage {
 		mappedCaps = append(mappedCaps, cap)
 	}
 	sort.Strings(mappedCaps)
+	var disclosedPlaywright []string
 	for _, cap := range mappedCaps {
 		evidences := showcaseCoverage[cap]
 		if len(evidences) == 0 {
@@ -458,6 +513,10 @@ func TestShowcaseCoverage(t *testing.T) {
 			continue
 		}
 		for _, ev := range evidences {
+			if !e2ePresent && ev.needsPlaywrightDir() {
+				disclosedPlaywright = append(disclosedPlaywright, cap+" -> "+ev.file)
+				continue
+			}
 			path := filepath.Join(verdiRepoRoot, ev.file)
 			data, err := os.ReadFile(path)
 			if err != nil {
@@ -472,5 +531,10 @@ func TestShowcaseCoverage(t *testing.T) {
 				t.Errorf("%s: evidence file %s does not match its marker %q", cap, ev.file, ev.marker)
 			}
 		}
+	}
+	if len(disclosedPlaywright) > 0 {
+		sort.Strings(disclosedPlaywright)
+		t.Logf("DISCLOSURE: e2e/tests absent — %d Playwright-backed evidence marker(s) UNPROVEN from this checkout (NOT a pass): %s",
+			len(disclosedPlaywright), strings.Join(disclosedPlaywright, ", "))
 	}
 }
