@@ -159,20 +159,20 @@ func (vl020) Check(in *RunInput) []Finding {
 // no entry: it is a spike with zero declared acceptance_criteria, so the
 // per-AC loop above never visits it regardless.)
 //
-// The last two entries (borrower-update-api, borrower-update-mobile) are a
-// SEPARATE provenance: not this repository's own real store, but
-// examples/showcase's round-four "v2 fixture corpus" (internal/lint's
-// v2clean_test.go, internal/artifact's own v2fixture_test.go) — golden
-// fixture files several packages chain into git-real repos and cite by
-// exact, precomputed commit SHA (goldenShaA/B, goldenHeads[2], etc., per
-// v2clean_test.go's own doc comment). Editing those files in place — even
-// just adding a sibling obligation file to the same fixturegit layer —
-// changes that layer's tree and therefore its commit SHA, invalidating
-// every hardcoded pin across those packages; that ripple is far larger than
-// this story's own scope. Exempting the two story specs by name here, the
-// same as the real corpus above, is the smaller, fully self-contained fix:
-// both predate evidence-obligations by multiple rounds and carry the exact
-// same "authored before the concept existed" justification.
+// borrower-update-api and borrower-update-mobile (examples/showcase's
+// round-four "v2 fixture corpus" story pair, internal/lint's
+// v2clean_test.go, internal/artifact's own v2fixture_test.go) WERE
+// exempted here under the same "predates evidence-obligations" reasoning —
+// see public-rollout-plan Task 1.4's report. Both now carry real,
+// individually-authored obligation files
+// (.verdi/obligations/borrower-update-api/ac-1--{static,behavioral}.md;
+// .verdi/obligations/borrower-update-mobile/ac-1--{static,behavioral}.md,
+// ac-2--behavioral.md), so their entries are retired from this map — the
+// intended shrink-then-delete follow-up this comment always described.
+// v2clean_test.go's buildV2FixtureCorpusRepo layerC was grown to include
+// the five new obligation files (same commit family as the story specs
+// they verify) so TestV2FixtureCorpus_LintsClean now proves VL-020 is
+// genuinely satisfied for this pair, not merely silenced.
 var obligationGateBaseline = map[string]bool{
 	"disclosure-seam-v2":         true, // 2 (ac,kind) pairs, accepted-pending-build
 	"disclosure-seam":            true, // 1 pair, superseded
@@ -181,7 +181,4 @@ var obligationGateBaseline = map[string]bool{
 	"feature-supersession-state": true, // 3 pairs, closed (archive)
 	"remote-and-ci":              true, // 6 pairs, closed (archive)
 	"runtime-evidence":           true, // 4 pairs, closed (archive)
-
-	"borrower-update-api":    true, // 2 pairs; examples/showcase v2 fixture corpus (SHA-pinned, see above)
-	"borrower-update-mobile": true, // 3 pairs; examples/showcase v2 fixture corpus (SHA-pinned, see above)
 }

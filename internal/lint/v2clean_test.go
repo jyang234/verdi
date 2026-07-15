@@ -31,7 +31,7 @@ import (
 //     lives in), and substitutes the freshly-computed SHAs for the golden
 //     literals wherever they're cited.
 //   - escrow-autopay / borrower-update-* / the outcome attestation
-//     cite "7248a3f6d1322f7df24a65b774ac334fd01e4274" — goldenHeads[2],
+//     cite "791108c9fbc210e4ca2a23ba5625c9071883118b" — goldenHeads[2],
 //     the v0 corpus's OWN layer-3 head (reused deliberately, per
 //     corpus_test.go's goldenHeads comment) — which IS already real,
 //     unchanged, once chained after the same v0 corpus layers.txt content
@@ -117,8 +117,22 @@ func buildV2FixtureCorpusRepo(t *testing.T) *fixturegit.Repo {
 			".verdi/specs/active/borrower-update-mobile-spike/spec.md": sub(".verdi/specs/active/borrower-update-mobile-spike/spec.md"),
 			".verdi/attestations/escrow-autopay/ac-1.md":               sub(".verdi/attestations/escrow-autopay/ac-1.md"),
 			".verdi/reaffirmations/jira-loan-1483/ac-1.md":             sub(".verdi/reaffirmations/jira-loan-1483/ac-1.md"),
+			// public-rollout-plan Task 1.4: real obligations for the two
+			// stub/deviating stories, replacing their former
+			// obligationGateBaseline exemption (vl020.go) — added here,
+			// alongside their sibling spec.md files, rather than
+			// layers.txt (which only this package's + internal/corpus's
+			// own v0-layer builds read; see layers.txt's own
+			// borrower-update-mobile/deviation-report.md precedent for why
+			// a file that verifies a non-layered spec must not be
+			// layers.txt-tracked on its own).
+			".verdi/obligations/borrower-update-api/ac-1--static.md":        sub(".verdi/obligations/borrower-update-api/ac-1--static.md"),
+			".verdi/obligations/borrower-update-api/ac-1--behavioral.md":    sub(".verdi/obligations/borrower-update-api/ac-1--behavioral.md"),
+			".verdi/obligations/borrower-update-mobile/ac-1--static.md":     sub(".verdi/obligations/borrower-update-mobile/ac-1--static.md"),
+			".verdi/obligations/borrower-update-mobile/ac-1--behavioral.md": sub(".verdi/obligations/borrower-update-mobile/ac-1--behavioral.md"),
+			".verdi/obligations/borrower-update-mobile/ac-2--behavioral.md": sub(".verdi/obligations/borrower-update-mobile/ac-2--behavioral.md"),
 		},
-		Message: "v2 corpus: loan-workflow-v2 frozen + escrow-autopay cluster + reaffirmation",
+		Message: "v2 corpus: loan-workflow-v2 frozen + escrow-autopay cluster + reaffirmation + obligations",
 	}
 
 	layers := append(append([]fixturegit.Layer{}, base...), layerA, layerB, layerC)

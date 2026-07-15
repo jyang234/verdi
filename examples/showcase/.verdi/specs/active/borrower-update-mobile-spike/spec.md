@@ -11,7 +11,7 @@ spike: true
 story: jira:LOAN-1484
 links:
   - { type: resolves, ref: "spec/escrow-autopay#oq-1" }
-frozen: { at: 2026-07-12, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
+frozen: { at: 2026-07-12, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
 ---
 # Borrower update, mobile app: PUT vs PATCH spike
 
@@ -24,8 +24,41 @@ Exempt from the evidence model and path-fenced from product source
 
 ## Problem
 
-We don't know whether the mobile update route should be PUT or PATCH.
+We don't know whether the mobile update route should be PUT (replace the
+whole application resource) or PATCH (send only the changed fields). The
+mobile client's offline-write model (`spec/borrower-update-mobile` ac-1)
+means a stale local copy is a real risk on a flaky connection, and PUT and
+PATCH fail differently when the client's copy is out of date — the choice
+isn't cosmetic.
 
 ## Outcome
 
 A recommendation with tradeoffs recorded.
+
+## Method
+
+Compared the two shapes against the mobile client's actual failure mode
+(a queued offline write racing a server-side change made from the desktop
+portal in the meantime), not against REST convention alone:
+
+- Built the request/response contract both ways against the same
+  application-update payload the desktop portal already sends.
+- Traced what happens when the client's local copy is stale at submit
+  time under each verb, since that's the scenario `borrower-update-mobile`
+  actually has to survive offline.
+- Checked how each verb interacts with the direct-write exemption
+  (`spec/escrow-autopay#dc-2`) the mobile story already carries — PUT and
+  PATCH both bypass the outbox equally, so the outbox question was not a
+  deciding factor.
+
+## Findings
+
+PUT loses under this workload: it requires the client to send the entire
+application state, so a stale local copy silently overwrites fields the
+borrower never touched if a desktop edit landed first. PATCH sends only
+the changed fields and lets the server merge them against its own current
+state, which is exactly the failure mode that matters for an
+intermittently-offline mobile client. Recommendation: PATCH for the mobile
+route, keeping the desktop portal's existing PUT contract unchanged (it
+does not have the same offline-staleness exposure) — resolved as
+`spec/escrow-autopay#oq-1`.

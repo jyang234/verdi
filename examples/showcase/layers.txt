@@ -63,6 +63,24 @@
 # plain, non-layered file (like its spec.md sibling) mirrors the existing
 # discipline instead of inventing a new one, and is still fully covered by
 # corpus_test.go's whole-tree pin-name walk.
+#
+# public-rollout-plan Task 1.4 extends the same exception to the five
+# obligation files authored for borrower-update-api and
+# borrower-update-mobile (.verdi/obligations/borrower-update-api/
+# ac-1--{static,behavioral}.md; .verdi/obligations/borrower-update-mobile/
+# ac-1--{static,behavioral}.md, ac-2--behavioral.md): each carries a single
+# `verifies` edge to its story's spec.md, and VL-019 refuses any obligation
+# whose verifies target does not resolve to a real story spec in the same
+# built tree (internal/lint/vl019.go, badVerifiesTarget). Since neither
+# story's spec.md is layers.txt-tracked, layers.txt-tracking only the
+# obligation would orphan it exactly as a layered deviation-report.md would
+# have been orphaned above — same root cause, same fix. These five files
+# are instead wired into internal/lint/v2clean_test.go's
+# buildV2FixtureCorpusRepo layerC, alongside the two story spec.md files
+# they verify, so TestV2FixtureCorpus_LintsClean proves them genuinely
+# lint-clean (not merely present) in a real git history that also contains
+# their verifies targets. They remain fully covered by corpus_test.go's
+# whole-tree pin-name walk, same as the deviation report above.
 4 .verdi/specs/active/escrow-notify/spec.md
 4 .verdi/specs/active/escrow-notify-v2/spec.md
 4 .verdi/specs/active/rate-lock/spec.md

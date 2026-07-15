@@ -12,7 +12,7 @@ acceptance_criteria:
   - { id: ac-2, text: "a locked rate survives a session restart", evidence: [static], anchor: "#ac-2" }
 constraints:
   - { id: co-1, text: "must not lock a rate the pricing service has already retired", anchor: "#co-1" }
-frozen: { at: 2026-07-11, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
+frozen: { at: 2026-07-11, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
 ---
 # Rate lock (fixture, superseded feature)
 

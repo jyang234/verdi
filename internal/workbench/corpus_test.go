@@ -28,7 +28,7 @@ func TestCorpusHandler_Happy(t *testing.T) {
 	if !strings.Contains(body, "jira:LOAN-1482") {
 		t.Errorf("missing story in frontmatter card, got: %s", body)
 	}
-	if !strings.Contains(body, "Charge API calls are retried") {
+	if !strings.Contains(body, "routed through the outbox pattern") {
 		t.Errorf("missing rendered body, got: %s", body)
 	}
 	if !strings.Contains(body, `class="dispositions-table"`) {

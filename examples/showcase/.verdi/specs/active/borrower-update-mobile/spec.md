@@ -5,8 +5,8 @@ class: story
 title: "Borrower update, mobile app"
 status: accepted-pending-build
 owners: [platform-team]
-problem: { text: "the mobile app has no update flow for a submitted application", anchor: "#problem" }
-outcome: { text: "a borrower can update their application from the mobile app and see it reflected", anchor: "#outcome" }
+problem: { text: "a borrower who starts an application on the mobile app has no way to correct it once submitted — they either call servicing or wait for the desktop portal, both of which lose the mobile session they were already in", anchor: "#problem" }
+outcome: { text: "a borrower can update a submitted application from the mobile app, offline if needed, and sees the change reflected before they leave the session", anchor: "#outcome" }
 story: jira:LOAN-1483
 links:
   - { type: implements, ref: "spec/escrow-autopay#ac-1" }
@@ -16,7 +16,7 @@ links:
 acceptance_criteria:
   - { id: ac-1, text: "mobile PUT /applications/:id/update returns 200 with the new state", evidence: [static, behavioral], anchor: "#ac-1" }
   - { id: ac-2, text: "mobile app reflects the change within the session", evidence: [behavioral], anchor: "#ac-2" }
-frozen: { at: 2026-07-12, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
+frozen: { at: 2026-07-12, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
 ---
 # Borrower update, mobile app
 
@@ -34,17 +34,37 @@ rung-4 supersession-pair fixture and this story's re-affirmation record,
 
 ## Problem
 
-The mobile app has no update flow for a submitted application.
+A borrower who starts a loan application on the mobile app has no way to
+correct it once submitted. Today they either call servicing — which means
+re-explaining the change to someone who has to look it up manually — or
+wait until they're back at a desktop to use the portal, which loses the
+mobile session they were already in and, for a borrower on a spotty
+connection, is often the whole reason they were on mobile in the first
+place.
 
 ## Outcome
 
-A borrower can update their application from the mobile app and see it
-reflected.
+A borrower can update a submitted application from the mobile app,
+including while offline, and sees the change reflected in the app before
+they leave the session — no separate confirmation step, no waiting for a
+desktop.
 
 ## AC-1
 
-Mobile `PUT /applications/:id/update` returns 200 with the new state.
+Mobile `PUT /applications/:id/update` returns 200 with the new state. The
+mobile client writes directly to the application record rather than going
+through loansvc's outbox (see the `exempts` edge against
+`spec/escrow-autopay#dc-2` above): a borrower on a train with one bar of
+signal needs the update to land the moment connectivity returns, and the
+outbox's eventual-consistency window — fine for a background retry — reads
+as a broken save button on a phone. The direct write is scoped to this one
+mutation; every downstream consequence (staff notification, escrow
+recalculation) still enters through the outbox exactly as it would from
+the desktop path.
 
 ## AC-2
 
-Mobile app reflects the change within the session.
+The mobile app reflects the change within the session: the local view
+updates optimistically on submit and reconciles against the server's
+response, so the borrower never sees their own edit "disappear" only to
+reappear after a refresh.

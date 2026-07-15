@@ -26,9 +26,9 @@ const (
 // files' own frozen stamps and pinned refs already bake in.
 var corpusGoldenHeads = []string{
 	"f80b677cac43645416a4a1441a258234e2ef763d", // layer 1
-	"c8f37f04d6364e70daf41595aafd202e33debd13", // layer 2
-	"7248a3f6d1322f7df24a65b774ac334fd01e4274", // layer 3
-	"af8ef2fe4d269057a2ddd19efa82ff6203d29f41", // layer 4
+	"8b6d22c4d82a3ca75becda551c39c122634d8f4f", // layer 2
+	"791108c9fbc210e4ca2a23ba5625c9071883118b", // layer 3
+	"c22d2113cf60dc62f75fad4416fabcc1f757d427", // layer 4
 }
 
 // parseCorpusLayers reads examples/showcase/layers.txt (the same format

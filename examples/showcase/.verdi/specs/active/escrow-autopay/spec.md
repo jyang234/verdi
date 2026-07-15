@@ -30,7 +30,7 @@ stubs:
   - { slug: borrower-update-api, acceptance_criteria: [ac-1] }
   - { slug: borrower-update-ui, acceptance_criteria: [ac-1, ac-2] }
   - { slug: borrower-update-audit-log, acceptance_criteria: [ac-3] }
-frozen: { at: 2026-07-11, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
+frozen: { at: 2026-07-11, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
 ---
 # Accepted pending build (v2 fixture)
 

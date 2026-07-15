@@ -5,7 +5,7 @@ title: "AC-1 outcome attested: borrower can update their application (fixture)"
 owners: [product-lead]
 links:
   - { type: verifies, ref: spec/escrow-autopay }
-frozen: { at: 2026-07-13, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
+frozen: { at: 2026-07-13, commit: 791108c9fbc210e4ca2a23ba5625c9071883118b }
 ---
 # AC-1 outcome attestation
 

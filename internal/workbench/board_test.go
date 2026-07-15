@@ -36,19 +36,19 @@ func TestBoardHandler_Happy(t *testing.T) {
 		t.Fatalf("missing board canvas, got: %s", body)
 	}
 	// The pin (spec/stale-decline@...).
-	if !strings.Contains(body, "spec/stale-decline@c8f37f04d6364e70daf41595aafd202e33debd13") {
+	if !strings.Contains(body, "spec/stale-decline@8b6d22c4d82a3ca75becda551c39c122634d8f4f") {
 		t.Fatalf("missing pinned card, got: %s", body)
 	}
 	// The targeted sticky's resolved body text.
-	if !strings.Contains(body, "charge API needs a retry note") {
+	if !strings.Contains(body, "write up a retry note for the charge API path") {
 		t.Fatalf("missing targeted sticky's resolved content, got: %s", body)
 	}
 	// The two board-only stickies (I-34) — no `target`, only `board`.
 	if !strings.Contains(body, "what about partial refunds?") {
 		t.Fatalf("missing board-only sticky (question), got: %s", body)
 	}
-	if !strings.Contains(body, "wire up the retry worker for stale declines") {
-		t.Fatalf("missing board-only sticky (agent-task), got: %s", body)
+	if !strings.Contains(body, "should partial refunds share the stale-decline retry budget?") {
+		t.Fatalf("missing board-only sticky (formal open question), got: %s", body)
 	}
 	// Yarn.
 	if !strings.Contains(body, "relates") {
@@ -106,7 +106,7 @@ func TestBoardAutosave_Happy_RoundTripsAndPersistsAcrossReload(t *testing.T) {
 
 	payload := map[string]any{
 		"pins": []map[string]any{
-			{"ref": "spec/stale-decline@c8f37f04d6364e70daf41595aafd202e33debd13", "x": 999, "y": 888},
+			{"ref": "spec/stale-decline@8b6d22c4d82a3ca75becda551c39c122634d8f4f", "x": 999, "y": 888},
 		},
 		"stickies": []map[string]any{
 			{"id": "a-01J8Z0K3AAAAAAAAAAAAAAAAAA", "x": 111, "y": 222},
@@ -159,7 +159,7 @@ func TestBoardAutosave_Atomicity(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		payload := map[string]any{
-			"pins":     []map[string]any{{"ref": "spec/stale-decline@c8f37f04d6364e70daf41595aafd202e33debd13", "x": float64(i), "y": float64(i)}},
+			"pins":     []map[string]any{{"ref": "spec/stale-decline@8b6d22c4d82a3ca75becda551c39c122634d8f4f", "x": float64(i), "y": float64(i)}},
 			"stickies": []map[string]any{},
 			"yarn":     []map[string]any{},
 		}

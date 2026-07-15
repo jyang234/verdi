@@ -137,29 +137,37 @@ func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 	return order, files
 }
 
-// TestCmdMatrix_Golden runs `verdi matrix jira:LOAN-1482` (I-30: a
-// scheme-prefixed story ref, matched against the feature spec's story:
-// field) against the real fixturegit-built corpus and checks the result
-// byte-for-byte: ac-1 (static, one ci pass record) is evidenced; ac-2
-// (static+behavioral, only a behavioral ci pass record — no static record
-// at all) is pending; ac-3 (behavioral, only a source:local abstain
-// record, excluded from the authoritative fold) is no-signal; ac-4
-// (runtime) is waived by an active waiver.
+// TestCmdMatrix_Golden runs `verdi matrix jira:LOAN-1482` against the real
+// fixturegit-built corpus.
 //
-// Note on ac-4: the fold consults waivers/<slug>/ keyed by the story's own
-// ref slug — store.RefSlug("jira:LOAN-1482") = "jira-loan-1482" (I-31's
-// canonical <story> path segment). The corpus carries an active waiver at
-// waivers/jira-loan-1482/ac-4.md under exactly that segment, so the waiver
-// is reachable and ac-4 folds to waived. Story: not violated, but not
-// eligible either — ac-2 (pending) and ac-3 (no-signal) keep it short of
-// the all-evidenced-or-waived bar.
+// Historical note (public-rollout-plan Task 1.4): before stale-decline's
+// showcase renovation, this golden proved jira:LOAN-1482 resolved to
+// spec/stale-decline through the STORY fold (foldStoryEvidence), with a
+// rich evidenced/pending/no-signal/waived breakdown — ac-1 (static, one ci
+// pass record) evidenced; ac-2 (static+behavioral, behavioral-only)
+// pending; ac-3 (behavioral, source:local abstain only) no-signal; ac-4
+// (runtime) waived by waivers/jira-loan-1482/ac-4.md. Task 1.4 gave
+// stale-decline problem/outcome and open_questions frontmatter (VL-017 +
+// the vetting bar require the open question carried as a declared object),
+// which flips cmdMatrix's own fold discriminator
+// (`spec.Class == ClassFeature && spec.Problem != nil`, matrix.go) from
+// "grandfathered v0 feature, fold at the story level" to "real round-four
+// feature, fold through cmdMatrixFeature" — the same discriminator
+// featurelens.go uses in internal/dex. jira:LOAN-1482 now resolves through
+// the feature fold below.
 //
-// Note on OBLIGATION (spec/obligation-wall ac-1): examples/showcase carries
-// no .verdi/obligations/ tree at all, so every declared kind reads as the
-// disclosed "(no obligation)" marker (dc-2) — this golden is also the
-// proof that a wholly un-obligated story still renders fully and exits 0
-// (disclosure never blocks). TestCmdMatrix_ObligationColumn below is the
-// dedicated proof that a PRESENT obligation's title actually renders.
+// The feature fold does not resolve stale-decline's own v0-era, story-ref-
+// slug-keyed attestation (attestations/jira-loan-1482/ac-2.md verifies the
+// whole spec, not a per-AC fragment under the feature's own slug) or its
+// waiver, and it has no `implements` edges of its own to populate an
+// IMPLEMENTING STORIES column (stale-decline's three stories implement
+// spec/escrow-autopay's ACs, not stale-decline's own — a pre-existing
+// corpus wiring choice outside this task's file scope) — so this golden is
+// now honest but sparser than the retired story-fold rendering. The richer
+// evidenced/pending/waived resolution this test used to prove is still
+// exercised by TestCmdMatrix_RoundFourStory_RendersStoryFold's sibling
+// spec/borrower-update-api (a class: story spec, always story-folded) and
+// by TestCmdMatrix_ObligationColumn's synthetic fixture.
 func TestCmdMatrix_Golden(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	t.Chdir(repo.Dir)
@@ -170,18 +178,21 @@ func TestCmdMatrix_Golden(t *testing.T) {
 		t.Fatalf("cmdMatrix exit = %d, want 0 (matrix reports, never gates); stderr=%q", got, stderr.String())
 	}
 
-	want := `story: jira:LOAN-1482
-spec:  spec/stale-decline
+	want := `feature: spec/stale-decline
 status: accepted-pending-build
 
-AC    STATUS     EVIDENCE                      TEXT                                                        OBLIGATION
-ac-1  evidenced  static:pass                   static obligation holds for the retry path                  static: (no obligation)
-ac-2  pending    static:none; behavioral:pass  static and behavioral: charge API retried on stale decline  static: (no obligation); behavioral: (no obligation)
-ac-3  no-signal  behavioral:none               behavioral: golden flow for partial refunds                 behavioral: (no obligation)
-ac-4  waived     runtime:awaited               runtime: post-deploy decline-rate check                     runtime: (no obligation)
+AC    STATUS     EVIDENCE                             IMPLEMENTING STORIES  TEXT
+ac-1  no-signal  attestation:absent; static:pass      -                     static obligation holds for the retry path
+ac-2  no-signal  attestation:absent; behavioral:pass  -                     static and behavioral: charge API retried on stale decline
+ac-3  no-signal  attestation:absent                   -                     behavioral: golden flow for partial refunds
+ac-4  no-signal  attestation:absent                   -                     runtime: post-deploy decline-rate check
 
-story.violated: false
-story.eligible: false
+stubs: acceptance-time plan; current mapping computed below
+(none declared)
+STUB  DECLARED ACS  LIVE STORIES  RECONCILIATION
+
+feature.violated: false
+stub_reconciliation.blocked: false
 `
 	if stdout.String() != want {
 		t.Fatalf("matrix output mismatch:\n--- got ---\n%s\n--- want ---\n%s", stdout.String(), want)
@@ -244,27 +255,43 @@ func TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords(t *testing.T) {
 		t.Fatalf("preview run exit = %d, want 0", got)
 	}
 
-	wantPreview := `story: jira:LOAN-1482
-spec:  spec/stale-decline
+	// Public-rollout-plan Task 1.4 flips jira:LOAN-1482 (spec/stale-decline)
+	// from the story fold to the feature fold — see TestCmdMatrix_Golden's
+	// doc comment for why. The preview/authoritative diff this test proves
+	// (exactly ac-3's row differs, plus the PREVIEW banner) still holds
+	// under the feature fold; only the column shape and ac-3's specific
+	// before/after values changed.
+	wantPreview := `feature: spec/stale-decline
 status: accepted-pending-build
 PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)
 
-AC    STATUS     EVIDENCE                      TEXT                                                        OBLIGATION
-ac-1  evidenced  static:pass                   static obligation holds for the retry path                  static: (no obligation)
-ac-2  pending    static:none; behavioral:pass  static and behavioral: charge API retried on stale decline  static: (no obligation); behavioral: (no obligation)
-ac-3  pending    behavioral:abstain            behavioral: golden flow for partial refunds                 behavioral: (no obligation)
-ac-4  waived     runtime:awaited               runtime: post-deploy decline-rate check                     runtime: (no obligation)
+AC    STATUS     EVIDENCE                                IMPLEMENTING STORIES  TEXT
+ac-1  no-signal  attestation:absent; static:pass         -                     static obligation holds for the retry path
+ac-2  no-signal  attestation:absent; behavioral:pass     -                     static and behavioral: charge API retried on stale decline
+ac-3  no-signal  attestation:absent; behavioral:abstain  -                     behavioral: golden flow for partial refunds
+ac-4  no-signal  attestation:absent                      -                     runtime: post-deploy decline-rate check
 
-story.violated: false
-story.eligible: false
+stubs: acceptance-time plan; current mapping computed below
+(none declared)
+STUB  DECLARED ACS  LIVE STORIES  RECONCILIATION
+
+feature.violated: false
+stub_reconciliation.blocked: false
 `
 	if preview.String() != wantPreview {
 		t.Fatalf("preview output mismatch:\n--- got ---\n%s\n--- want ---\n%s", preview.String(), wantPreview)
 	}
 
 	// The only content difference between the two runs is the PREVIEW
-	// banner line and ac-3's row (no-signal -> pending, evidence
-	// none -> abstain) — every other line is byte-identical.
+	// banner line and ac-3's row (no-signal -> pending under the old
+	// story fold; attestation:absent -> attestation:absent;
+	// behavioral:abstain under the feature fold Task 1.4 moved
+	// spec/stale-decline to — see TestCmdMatrix_Golden's doc comment).
+	// The EVIDENCE column's width is computed from the widest value in
+	// each run, so ac-3's longer preview text also widens the header row
+	// and every other row's trailing padding — a formatting consequence,
+	// not a content difference. Content equality is checked per field
+	// (TrimRight of trailing spaces) rather than the raw padded line.
 	authLines := strings.Split(strings.TrimRight(authoritative.String(), "\n"), "\n")
 	previewLines := strings.Split(strings.TrimRight(preview.String(), "\n"), "\n")
 	previewLinesNoBanner := make([]string, 0, len(previewLines))
@@ -277,17 +304,27 @@ story.eligible: false
 	if len(authLines) != len(previewLinesNoBanner) {
 		t.Fatalf("line count differs beyond the PREVIEW banner: authoritative=%d preview=%d", len(authLines), len(previewLinesNoBanner))
 	}
-	diffCount := 0
+	sawAC3Diff := false
 	for i := range authLines {
-		if authLines[i] != previewLinesNoBanner[i] {
-			diffCount++
-			if !strings.HasPrefix(authLines[i], "ac-3") {
-				t.Fatalf("unexpected diff outside ac-3's row: authoritative=%q preview=%q", authLines[i], previewLinesNoBanner[i])
-			}
+		if authLines[i] == previewLinesNoBanner[i] {
+			continue
 		}
+		// The EVIDENCE column's width is computed from the widest value in
+		// each run, so ac-3's longer preview text re-pads every row's
+		// inter-column gaps, not just its own — a formatting consequence,
+		// not an independent content difference. Compare content
+		// (whitespace-run-collapsed fields) rather than the raw padded
+		// line so only a genuine field-value change counts.
+		if strings.Join(strings.Fields(authLines[i]), " ") == strings.Join(strings.Fields(previewLinesNoBanner[i]), " ") {
+			continue
+		}
+		if !strings.HasPrefix(authLines[i], "ac-3") {
+			t.Fatalf("unexpected diff outside ac-3's row: authoritative=%q preview=%q", authLines[i], previewLinesNoBanner[i])
+		}
+		sawAC3Diff = true
 	}
-	if diffCount != 1 {
-		t.Fatalf("expected exactly 1 differing row (ac-3), got %d", diffCount)
+	if !sawAC3Diff {
+		t.Fatal("expected ac-3's row to differ between authoritative and preview, it did not")
 	}
 }
 
@@ -592,7 +629,10 @@ func TestCmdMatrix_RefForms(t *testing.T) {
 		if got != 0 {
 			t.Fatalf("cmdMatrix(spec/stale-decline) = %d, want 0; stderr=%q", got, stderr.String())
 		}
-		if !strings.HasPrefix(stdout.String(), "story: jira:LOAN-1482\nspec:  spec/stale-decline\n") {
+		// Public-rollout-plan Task 1.4: spec/stale-decline now folds
+		// through the feature path (see TestCmdMatrix_Golden's doc
+		// comment), so its header is the feature-fold's own form.
+		if !strings.HasPrefix(stdout.String(), "feature: spec/stale-decline\nstatus: accepted-pending-build\n") {
 			t.Fatalf("spec-ref output header mismatch:\n%s", stdout.String())
 		}
 	})

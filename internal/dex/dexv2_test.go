@@ -122,12 +122,31 @@ func TestBuildV2_FeatureLens(t *testing.T) {
 		}
 	})
 
-	t.Run("grandfathered v0 feature and story pages carry no lens section", func(t *testing.T) {
-		for _, rel := range []string{"a/spec/stale-decline/index.html", "a/spec/borrower-update-api/index.html"} {
-			p := readFile(t, outDir, rel)
-			if strings.Contains(p, `data-testid="stub-plan"`) || strings.Contains(p, `data-testid="acceptance-plan-banner"`) {
-				t.Fatalf("%s must not render the feature lens section", rel)
-			}
+	t.Run("story pages carry no lens section", func(t *testing.T) {
+		// The feature lens only ever applies to spec pages (never story
+		// pages), so borrower-update-api (class: story) never renders it
+		// regardless of any frontmatter it carries.
+		p := readFile(t, outDir, "a/spec/borrower-update-api/index.html")
+		if strings.Contains(p, `data-testid="stub-plan"`) || strings.Contains(p, `data-testid="acceptance-plan-banner"`) {
+			t.Fatal("a/spec/borrower-update-api/index.html must not render the feature lens section")
+		}
+	})
+
+	t.Run("stale-decline carries the lens section once it declares problem/outcome", func(t *testing.T) {
+		// public-rollout-plan Task 1.4: stale-decline grew problem/outcome
+		// (and open_questions) frontmatter as part of its showcase
+		// renovation, which flips the SAME class==feature && Problem!=nil
+		// discriminator featurelens.go and cmdMatrix (cmd/verdi/matrix.go)
+		// both key off — it is no longer "grandfathered" by this test's own
+		// definition. Like loan-workflow (a round-four feature with no
+		// stubs), it renders the paired lens section with an empty stub
+		// plan and a live mapping computed from whatever implements edges
+		// exist — stale-decline's own three stories implement
+		// spec/escrow-autopay's ACs, not stale-decline's own, so its live
+		// mapping is legitimately empty too.
+		page := readFile(t, outDir, "a/spec/stale-decline/index.html")
+		if !strings.Contains(page, `data-testid="acceptance-plan-banner"`) || !strings.Contains(page, `data-testid="stub-plan"`) {
+			t.Fatalf("a/spec/stale-decline/index.html must render the feature lens section now that it carries problem/outcome; got:\n%s", page)
 		}
 	})
 }
