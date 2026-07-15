@@ -145,6 +145,15 @@ lint-showcase:
 #     whether the package still compiles (siblings only mention its helpers in
 #     comments, so removing it does NOT break the build — the vacuous pass is
 #     real, not hypothetical).
+#   - TestShowcaseCoverage_DetectsGaps is the gate's own failure-path proof
+#     (it feeds computeCoverageGaps deliberately-broken inventories and asserts
+#     the RIGHT gap class names the RIGHT capability). It is equally a hard
+#     FLOOR: without it the gate's RED direction is unexercised — itself a
+#     silent pass. It is subject to the exact same vacuous-`-run` deletion/
+#     rename/skip attack (nothing else references it, so removing it does NOT
+#     break the build), so it too MUST emit its own `--- PASS:` line. The `-run`
+#     pattern above already selects it (an unanchored TestShowcaseCoverage
+#     match); this makes its presence a demanded invariant, not incidental.
 #
 # TASK 4.2 WIRE-UP (README freshness, DC-3): the sibling public-readme story
 # adds a README-freshness gate. Folding it into this target is a DELIBERATE,
@@ -179,7 +188,7 @@ showcase-coverage:
 	status=$$?; \
 	printf '%s\n' "$$out"; \
 	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
-	required='TestShowcaseCoverage'; \
+	required='TestShowcaseCoverage TestShowcaseCoverage_DetectsGaps'; \
 	for tc in $$required; do \
 		if ! printf '%s\n' "$$out" | grep -qF -- "--- PASS: $$tc ("; then \
 			echo "ERROR: showcase-coverage guard: required test $$tc did NOT run+pass (deleted, renamed, or skipped?)." >&2; \

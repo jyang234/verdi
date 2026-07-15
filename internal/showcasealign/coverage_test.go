@@ -670,6 +670,26 @@ func TestShowcaseCoverage_DetectsGaps(t *testing.T) {
 			wantDisclose: []string{"wb:board"},
 		},
 		{
+			// The ENFORCEMENT half of the e2e-absent disclosure contract (the
+			// two cases above prove only its DISCLOSURE half — that Playwright
+			// evidence is disclosed, not checked, when e2e/tests is gone). A
+			// BROKEN Go-backed (goE2E) mapping — here a nonexistent .go file —
+			// is STILL reported as a markerMismatch with e2ePresent:false, NEVER
+			// routed into disclosedPlaywright: Go-backed evidence is ALWAYS
+			// checked, so a broken cli:/mcp: mapping bites even from an e2e-less
+			// checkout (computeCoverageGaps' own contract, and 3ffb6f8's whole
+			// purpose). This is what makes the discriminating condition
+			// `if !e2ePresent && ev.needsPlaywrightDir()` load-bearing: mutate it
+			// to a bare `if !e2ePresent` (3ffb6f8's over-broad skip) and this
+			// case FAILS — the broken Go file would be silently disclosed instead
+			// of enforced, exactly the honesty gap the mutation reintroduces.
+			name:         "e2e-absent: BROKEN Go-backed mapping is STILL enforced, not disclosed",
+			caps:         map[string]bool{"cli:real": true},
+			inv:          map[string][]coverageEvidence{"cli:real": {goE2E("internal/showcasealign/does-not-exist.go")}},
+			e2ePresent:   false,
+			wantMismatch: [][]string{{"cli:real", "does-not-exist.go"}},
+		},
+		{
 			name:       "clean: a valid inventory yields no gaps at all",
 			caps:       map[string]bool{"cli:real": true, "mcp:real": true},
 			inv:        map[string][]coverageEvidence{"cli:real": {good}, "mcp:real": {good}},
