@@ -462,6 +462,12 @@ bindings:
       # disclosures when the mutable zone is removed). All re-verified this
       # task against the real built binary, not just the go test assertion
       # (task-1.8-report.md).
+      # Naming the two-history rebuild here (not the frozen obligation's
+      # literal single-commit wording) is the owner-ratified evidence
+      # definition, recorded in 08-revision-notes "Public rollout — showcase
+      # ac-1 evidence" (ADJ-16 class, 2026-07-15): the frozen obligation bytes
+      # stand (VL-010), and its behavioral evidence is this construction. This
+      # binding cites that ratification rather than substituting silently.
       - "spec/showcase-corpus-renovation#ac-1"
   - producer: verdi-verify-static
     kind: static
