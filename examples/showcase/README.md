@@ -37,7 +37,7 @@ supersession chain, an audited exemption, a live design draft.
 
 **The committed tree** — everything under this directory — is the public,
 permanent half of the store: specs, ADRs, decisions, evidence, and the two
-diagrams, all lint-clean and individually vetted (`verdi/docs/showcase-vetting.md`
+diagrams, all lint-clean and individually vetted (`docs/showcase-vetting.md`
 records the three-column bar — lint-clean, editorially exemplary,
 narrative-coherent — for every file here). This is what you clone and
 browse; it never changes shape at runtime.
@@ -135,7 +135,7 @@ above).
 
 - **An AC, all the way to proof.** `spec/stale-decline#ac-2` ("loansvc
   retries the charge API through the outbox... exactly once per decline")
-  is implemented by `spec/borrower-update-api#ac-1`, which carries two
+  is implemented by `spec/borrower-update-api` (its own `ac-1` carries the `implements` edge), which carries two
   obligations — `obligations/borrower-update-api/ac-1--static.md` and
   `ac-1--behavioral.md` — each a concrete, checkable claim rather than a
   restated AC. The feature-level outcome floor for the same AC is
@@ -169,5 +169,5 @@ above).
 
 Every artifact in this tree earned its place against a three-column bar —
 lint-clean, editorially exemplary, narrative-coherent — recorded per file
-in `verdi/docs/showcase-vetting.md`. Nothing here is a stub kept around
+in `docs/showcase-vetting.md`. Nothing here is a stub kept around
 because deleting it was more work than writing real content.
