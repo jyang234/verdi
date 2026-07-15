@@ -25,9 +25,15 @@ apply to this artifact kind.
 - **exemplary** — the artifact's prose (or, for a structured/JSON
   artifact, its shape) reads as something a team would actually ship: no
   dead links, no test-shaped filler ("bogus_extra_field", "TODO"), no
-  placeholder detail. `n/a` for artifact kinds with no prose to judge
-  (derived-zone JSON, mutable-zone JSONL, frozen archived records this
-  task's own scope excludes).
+  placeholder detail. `n/a` only for artifact kinds with no prose to
+  judge (derived-zone JSON, mutable-zone JSONL, position-only board
+  layouts). Frozen-ness is never an `n/a` category: a frozen artifact's
+  prose is judged like any other's — frozen-ness changes only the
+  mechanism of any needed fix (co-2 layer replacement + full re-pin),
+  never whether the column gets recorded. (Story-close correction — the
+  earlier "frozen archived records this task's own scope excludes"
+  category was an align-judged under-recording; the affirmative
+  judgments now live in the Task 1.8 story-close addendum below.)
 - **coherent+justified** — the artifact agrees with the fixed LoanServ
   canon (dates, service names, jira keys, the one story roster) and earns
   its place in a public showcase rather than existing only because a test
@@ -67,7 +73,7 @@ harness itself is code, not a store artifact) and to this repository's own
 | `derived/spec--stale-decline/<layer-2-head>/verdicts.json` | n/a (derived zone) | n/a | Y | Directory renamed to the new layer-2 head (`git mv`); `provenance.commit` field inside updated to match. Content (verdicts) unchanged. |
 | `derived/spec--stale-decline/<layer-3-head>/verdicts.json` | n/a (derived zone) | n/a | Y | Directory renamed to the new layer-3 head (`git mv`); content unchanged. |
 | `layers.txt` | n/a (manifest) | Y | Y | Comment-only change: documents why the five new obligation files are deliberately NOT `layers.txt`-tracked (would orphan them in the narrower `layers.txt`-only builds, since neither story's `spec.md` is itself tracked — same root cause and same fix as the pre-existing `borrower-update-mobile/deviation-report.md` exception this comment sits beside). |
-| `.verdi/specs/archive/loan-refi-2023/{spec.md,board.json,rollup.json,deviation-report.md}` | Y | n/a (frozen, out of this task's content scope) | Y* | **Mechanical re-pin only** — these frozen, archived files cite the layer-2 head as their own `frozen`/`covers` pin (layer 3 is frozen at layer 2's commit); editing `stale-decline/spec.md` changed that commit, cascading here exactly as it cascaded through Tasks 1.2/1.3's own re-pins. No prose or structural content touched. Full vetting of this quartet's own prose is Task 1.5's job (its file list owns `.verdi/specs/archive/loan-refi-2023/*`). |
+| `.verdi/specs/archive/loan-refi-2023/{spec.md,board.json,rollup.json,deviation-report.md}` | Y | → Task 1.5 rows + Task 1.8 story-close addendum (affirmatively recorded there; scope-based `n/a` retired at story close) | Y* | **Mechanical re-pin only** — these frozen, archived files cite the layer-2 head as their own `frozen`/`covers` pin (layer 3 is frozen at layer 2's commit); editing `stale-decline/spec.md` changed that commit, cascading here exactly as it cascaded through Tasks 1.2/1.3's own re-pins. No prose or structural content touched. Full vetting of this quartet's own prose is Task 1.5's job (its file list owns `.verdi/specs/archive/loan-refi-2023/*`). |
 
 ## Task 1.4 — mechanical re-pin fallout (not this task's content scope)
 
@@ -127,9 +133,13 @@ adjudication writeup: `.superpowers/sdd/task-1.5-report.md`.
 | `.verdi/specs/active/legacy-cache-policy/spec.md` (layer 1) | Y | Y | Y | Thin one-line filler replaced with a real narrative (a 15-minute uncached-invalidation cache staleness gap escrow-autopay's `ac-2` guarantee can't tolerate), cross-referencing escrow-autopay. Still `class: component`, `status: superseded`, no frontmatter object fields — unchanged. |
 | `.verdi/specs/active/store-layout-notes/spec.md` (layer 1) | Y | Y | Y | Same treatment: real narrative for the cache-invalidation design that supersedes `legacy-cache-policy`. |
 | `.verdi/specs/archive/loan-refi-2023/spec.md` | Y | Y | Y | Body prose rewritten (real rollout narrative: manual rate-table re-keying was slow and error-prone; cross-references `refi-rate-check-2024` as its round-four successor). Frontmatter/AC-1 identity fields (id/text/evidence) byte-unchanged — no `implements` edge back into it depends on prose, but `refi-rate-check-2024#implements` depends on `ac-1`'s id existing, preserved. |
-| `.verdi/specs/archive/loan-refi-2023/{board.json,rollup.json,deviation-report.md}` | Y | n/a (frozen, untouched structurally) | Y | Untouched except the mechanical SHA re-pin cascading from `stale-decline`'s Step 0(c) edit (layer 2 → layer 3). No structural or content change — respects Step 3's frozen-file boundary. |
+| `.verdi/specs/archive/loan-refi-2023/board.json` | Y | n/a (frozen board snapshot: pins only, `stickies`/`yarn` both empty — no prose to judge) | Y | Untouched except the mechanical SHA re-pin cascading from `stale-decline`'s Step 0(c) edit (layer 2 → layer 3). No structural or content change — respects Step 3's frozen-file boundary. Exemplary cell re-recorded kind-based at story close (Task 1.8 addendum) — was scope-based `n/a`. |
+| `.verdi/specs/archive/loan-refi-2023/rollup.json` | Y | Y* | Y | Untouched except the mechanical SHA re-pin (same cascade). Exemplary judged affirmatively at story close (Task 1.8 addendum): embedded prose — criterion "refinance rate applied correctly", summary "3/3 obligations pass; golden flow matches" — is production-shaped and canon-consistent. `*`: the `digest` field is a fixture-stable placeholder (`sha256:bbbb…`), a disclosed frozen-shape scar; fix only via co-2 layer replacement + full re-pin. |
+| `.verdi/specs/archive/loan-refi-2023/deviation-report.md` | Y | Y | Y | Untouched except the mechanical SHA re-pin (same cascade). Exemplary judged affirmatively at story close (Task 1.8 addendum): body prose reads as a real closure report ("Refinance rate rounding matches the spec's intent; the exact rounding mode differs from the draft note and is documented in the implementation MR"), findings carry real dispositions (`f-2` `accepted-deviation` with a substantive note). No dead links, no filler. |
 | `.verdi/specs/archive/refi-rate-check-2024/spec.md` | Y | Y | Y | Body prose rewritten (real narrative: a published-table format change broke column-position parsing a year after `loan-refi-2023` shipped, letting two stale promotional rates through) — also fixes a stale `testdata/corpus` path reference left over from before the Task 1.1 relocation. AC-1 id/text/evidence byte-unchanged. |
-| `.verdi/specs/archive/refi-rate-check-2024/{layout.json,rollup.json,deviation-report.md}` | Y | n/a (frozen, untouched structurally) | Y | Untouched except the mechanical SHA re-pin. |
+| `.verdi/specs/archive/refi-rate-check-2024/layout.json` | Y | n/a (board layout, no prose: a `verdi.boardlayout/v1` position map with a single `ac-1` entry — same kind-based cell as `escrow-autopay/layout.json`'s Task 1.8 row) | Y | Untouched except the mechanical SHA re-pin. Exemplary cell re-recorded kind-based at story close (Task 1.8 addendum) — was scope-based `n/a`. |
+| `.verdi/specs/archive/refi-rate-check-2024/rollup.json` | Y | Y* | Y | Untouched except the mechanical SHA re-pin. Exemplary judged affirmatively at story close (Task 1.8 addendum): embedded prose — criterion "a rate change is verified against the published table before rollout", summary "static:pass; behavioral:pass" — is production-shaped and canon-consistent with the story's published-table narrative. `*`: the `digest` field is a fixture-stable placeholder (`sha256:cccc…`), same disclosed frozen-shape scar class as `loan-refi-2023/rollup.json`'s. |
+| `.verdi/specs/archive/refi-rate-check-2024/deviation-report.md` | Y | Y* | Y | Untouched except the mechanical SHA re-pin. Exemplary judged affirmatively at story close (Task 1.8 addendum): the computed section reads clean ("The implements edge into `spec/loan-refi-2023#ac-1` resolves at the closure head"), finding `f-1` carries a real `fixed` disposition. `*`: the opening paragraph is deliberately curator-voiced (names the quartet's fixture role and why it must NOT carry an `accepted-deviation` — the `spec-stale` scar belongs to `borrower-update-mobile`), consistent with this quartet's self-labeled voice already vetted `Y` in this task (`spec.md`'s "(fixture, closed round-four story)" title); its one stale word "overlay" (pre-relocation vocabulary) is a carried minor of the same class as the dangling `OVERLAY-NOTES` comments — fix only via co-2 layer replacement + full re-pin. |
 | `.verdi/obligations/escrow-notify/ac-1--behavioral.md` | Y | Y | Y | New (Step 0(d)). Behavioral claim: a real injected escrow-shortfall event produces an actual borrower notification inside the 24h window. |
 | `.verdi/obligations/escrow-notify-v2/ac-1--behavioral.md` | Y | Y | Y | New (Step 0(d)). Behavioral claim, tightened to the 1h window specifically (not merely "faster than 24h"). |
 | `.verdi/obligations/refi-rate-check-2024/ac-1--static.md` | Y | Y | Y | New (Step 0(d)). Adjudicated: `internal/lint/vl020.go`'s `GrandfatherArchive` option is never set `true` by the real `verdi lint` CLI (`cmd/verdi/lint.go`) or by `internal/lint/harness_test.go`'s `buildLintRepo`, so archived-zone specs are NOT grandfathered for VL-020 — it genuinely fires on this closed archived story. Static claim: every priced field is resolved by column name against the current published-table schema, never a cached/hardcoded value. |
@@ -410,3 +420,29 @@ Task 2.1's section above) already carried its own rows.
 
 See `examples/showcase/README.md`'s new "Linting this store" note for the
 public-facing summary of the two-construction gate above.
+
+### Story-close addendum — frozen-archive exemplary judgments
+
+The story-close align run (deviation report covering `5f8c2bd`, finding
+`judged-exemplary-column-scope-carveout`) caught an under-recording: the
+exemplary column's header carried a scope-based `n/a` category ("frozen
+archived records this task's own scope excludes"), and the archived
+quartets' prose-bearing sidecars were `n/a`'d under it instead of judged.
+Frozen-ness constrains the fix mechanism (co-2 layer replacement + full
+re-pin), never whether the column is judged — the header is corrected
+above and the affirmative per-file judgments (each file actually read at
+story close, against design doc §4.2 column 2) are now recorded in the
+Task 1.4/1.5 rows in place of the retired scope-based cells:
+
+| artifact | exemplary | basis (quoted evidence in the row's note) |
+|---|---|---|
+| `loan-refi-2023/board.json` | n/a (kind) | Pins only; `stickies`/`yarn` empty — nothing prose-judgeable. |
+| `loan-refi-2023/rollup.json` | Y* | Criterion + summary prose production-shaped; placeholder `digest` (`bbbb…`) disclosed. |
+| `loan-refi-2023/deviation-report.md` | Y | Real closure prose; findings carry substantive dispositions. |
+| `refi-rate-check-2024/layout.json` | n/a (kind) | Position-only `verdi.boardlayout/v1` map — nothing prose-judgeable. |
+| `refi-rate-check-2024/rollup.json` | Y* | Criterion + summary prose production-shaped; placeholder `digest` (`cccc…`) disclosed. |
+| `refi-rate-check-2024/deviation-report.md` | Y* | Computed prose clean; curator-voiced opening paragraph and one stale "overlay" word disclosed as carried minors. |
+
+No content was edited — all six files are frozen and byte-unchanged; this
+addendum records judgments, not fixes. The two `Y*` scars (placeholder
+digests, curator voice) are disclosed carried minors for owner review.
