@@ -25,15 +25,20 @@ import (
 // corpusDir is examples/showcase relative to this package.
 const corpusDir = "../../examples/showcase"
 
-// goldenHeads are the fixturegit commit SHAs for layers 1, 2, and 3,
+// goldenHeads are the fixturegit commit SHAs for layers 1 through 5,
 // baked in once per PLAN.md §4 ("Pins inside corpus files must be the
 // literal deterministic SHAs (build once, bake in, test forever)") and
 // reproduced by every corpus file's frozen stamps and pinned refs.
+// Layer 5 (public-rollout-plan Task 1.6: adr/0004, adr/0005) is nothing's
+// own predecessor citation, so nothing in the corpus cites its own head —
+// it appears here only to satisfy TestFixtureRepo_MatchesGoldenSHAs' final
+// Head check.
 var goldenHeads = []string{
-	"66588948af8b36c02c8fb8f423645afa0a58dbe4", // layer 1
-	"d70cb19fa17ced67d27b8f9a63b47b3bf280b7d1", // layer 2
-	"faf8d8c412c9df35b5a445146a5fe0e8309caa71", // layer 3
-	"a02dd7dd74cf087aa5ce91a2b49447147dc2132e", // layer 4
+	"89f9926e9739b97e23eb52efb16206d0ff10ff4f", // layer 1
+	"4e5ef0b6b00f23c9faf7a9e4857255b7be5bea03", // layer 2
+	"30c5ff945413930879823be6db0ccc07d5abd6b9", // layer 3
+	"024b516641e9e229b0a156c636af59cda7c297d9", // layer 4
+	"82d1e540854dbafe0322fc3a4ea61de53ff54c83", // layer 5
 }
 
 // goldenHeadsV2 are the v1-P1 rung-4 supersession pair's own, separate
@@ -390,8 +395,8 @@ func TestFixtureCorpus_MutableAndDerivedFilesDecode(t *testing.T) {
 		dir        string
 		wantSource artifact.ProvenanceSource
 	}{
-		{"derived/spec--stale-decline/d70cb19fa17ced67d27b8f9a63b47b3bf280b7d1", artifact.SourceCI},
-		{"derived/spec--stale-decline/faf8d8c412c9df35b5a445146a5fe0e8309caa71", artifact.SourceLocal},
+		{"derived/spec--stale-decline/4e5ef0b6b00f23c9faf7a9e4857255b7be5bea03", artifact.SourceCI},
+		{"derived/spec--stale-decline/30c5ff945413930879823be6db0ccc07d5abd6b9", artifact.SourceLocal},
 	}
 	for _, dd := range derivedDirs {
 		dd := dd

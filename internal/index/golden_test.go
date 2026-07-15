@@ -126,11 +126,15 @@ var wantCommittedRefs = []string{
 	"adr/0001-outbox-events",
 	"adr/0002-outbox-events",
 	"adr/0003-retry-policy",
+	// public-rollout-plan Task 1.6: adr/0004 and adr/0005, both new,
+	// accepted ADRs (layers.txt layer 5).
+	"adr/0004-pii-redaction-at-ingest",
+	"adr/0005-event-schema-registry",
 	"attestation/jira-loan-1482--ac-2",
 	"waiver/jira-loan-1482--ac-3",
 	"waiver/jira-loan-1482--ac-4",
 	"conflict/stale-decline-incident",
-	"conflict/legacy-cache-dispute",
+	"conflict/pii-outbox-leak",
 	"conflict/false-alarm",
 	"spec/escrow-notify",
 	"spec/escrow-notify-v2",
@@ -228,7 +232,7 @@ func TestGolden_BacklinksCoverEveryExercisedInverseType(t *testing.T) {
 		// not itself an indexed entry (lint, not the index, owns
 		// resolution — VL-003).
 		{"impacted-by", "svc/loansvc/boundary-contract", "spec/stale-decline"},
-		{"challenged-by", "spec/legacy-cache-policy", "conflict/legacy-cache-dispute"},
+		{"challenged-by", "adr/0002-outbox-events", "conflict/pii-outbox-leak"},
 		{"challenged-by", "spec/stale-decline", "conflict/false-alarm"},
 		{"challenged-by", "spec/stale-decline", "conflict/stale-decline-incident"},
 	}

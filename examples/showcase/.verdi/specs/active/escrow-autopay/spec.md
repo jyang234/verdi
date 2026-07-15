@@ -10,7 +10,7 @@ problem: { text: "a borrower who wants their escrow payment collected automatica
 outcome: { text: "a borrower can enroll an escrow account in autopay, edit the mandate themselves, and trust that a failed scheduled charge is retried instead of silently dropped", anchor: "#outcome" }
 impacts: [loansvc, notification-svc, payments-gw]
 context:
-  - adr/0002-outbox-events@66588948af8b36c02c8fb8f423645afa0a58dbe4
+  - adr/0002-outbox-events@89f9926e9739b97e23eb52efb16206d0ff10ff4f
 declares:
   boundaries:
     - { from: loansvc, to: notification-svc, via: events }
@@ -25,12 +25,16 @@ decisions:
   - { id: dc-1, text: "excuse this feature from ADR-0001's synchronous-write rule", anchor: "#dc-1",
       links: [ { type: exempts, ref: adr/0001-outbox-events, note: "outbox pattern already async by design" } ] }
   - { id: dc-2, text: "use the outbox pattern for mandate and retry events", anchor: "#dc-2" }
+  - { id: dc-3, text: "excuse the legacy loan-import bridge job's PII fields from ADR-0004's redact-at-ingest rule", anchor: "#dc-3",
+      links: [ { type: exempts, ref: adr/0004-pii-redaction-at-ingest, note: "legacy loan-import bridge job still stages raw SSN/DOB ahead of its own redaction rollout; product-lead sign-off 2026-03-12, remediation tracked against the importer's own backlog, targeted Q3 2026" } ] }
+  - { id: dc-4, text: "excuse the escrow-account backfill reconciliation job from the same rule, for the same importer dependency", anchor: "#dc-4",
+      links: [ { type: exempts, ref: adr/0004-pii-redaction-at-ingest, note: "reconciliation job reads the bridge job's staging table directly, so it inherits the same unredacted fields; same product-lead sign-off 2026-03-12, same Q3 2026 remediation timeline" } ] }
 open_questions:
   - { id: oq-1, text: "should the mobile app use PUT or PATCH for the mandate update route?", anchor: "#oq-1" }
 stubs:
   - { slug: autopay-mandate-api, acceptance_criteria: [ac-1, ac-2] }
   - { slug: autopay-retry-policy, acceptance_criteria: [ac-2, ac-3] }
-frozen: { at: 2026-06-30, commit: faf8d8c412c9df35b5a445146a5fe0e8309caa71 }
+frozen: { at: 2026-06-30, commit: 30c5ff945413930879823be6db0ccc07d5abd6b9 }
 ---
 # Escrow autopay enrollment
 
@@ -113,7 +117,12 @@ in-session guarantee ac-2 already promises for a manual mandate edit.
 
 ## CO-1
 
-Must not touch the legacy schema.
+Must not touch the legacy schema. Historical escrow balances predating
+the 2024 servicing-system migration still live in loansvc's legacy
+schema; autopay's mandate creation reads that history through a
+read-only bridge job rather than querying the legacy tables directly, so
+a mandate can be backdated against a balance history this feature never
+has to understand the shape of.
 
 ## DC-1
 
@@ -123,6 +132,29 @@ pattern is already asynchronous by design, so the rule does not bind here.
 ## DC-2
 
 Use the outbox pattern for mandate and retry events.
+
+## DC-3
+
+Excuse the legacy loan-import bridge job's PII fields from
+`adr/0004-pii-redaction-at-ingest`'s redact-at-ingest rule. The bridge
+job CO-1 references was written years before ADR-0004 existed and still
+stages raw SSN and date-of-birth fields into its staging table ahead of
+loansvc's own write path — it predates the rule it cannot yet meet.
+product-lead signed off this exemption on 2026-03-12, the same day
+ADR-0004 was accepted, on the condition that the bridge job's own
+remediation lands within Q3 2026; the exemption is audited per
+`adr/0004`'s exemption-count mechanism (`verdi audit`), not left as a
+standing carve-out.
+
+## DC-4
+
+Excuse the escrow-account backfill reconciliation job from the same
+rule, for the same reason: it reads the bridge job's staging table
+directly rather than loansvc's redacted write path, so it inherits
+exactly the same unredacted fields DC-3 excuses. Same product-lead
+sign-off date, same Q3 2026 remediation timeline — the two jobs share
+one root cause and will clear together once the bridge job redacts at
+its own point of write.
 
 ## OQ-1
 

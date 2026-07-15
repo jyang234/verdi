@@ -69,7 +69,10 @@ func copyTree(t *testing.T, src, dst string) {
 //
 // Fixture: spec/escrow-autopay (examples/showcase). public-rollout-plan
 // Task 1.5 renamed its stubs to autopay-mandate-api ({ac-1, ac-2}) and
-// autopay-retry-policy ({ac-3}), and rewired its former implementing
+// autopay-retry-policy ({ac-2, ac-3} — AC-3's own body prose: "plans
+// against ac-2" too, a retry's own success/exhaustion is itself a
+// mandate-adjacent state change ac-2's in-session guarantee also covers),
+// and rewired its former implementing
 // stories (borrower-update-api, borrower-update-mobile) away to
 // spec/stale-decline — the feature genuinely built breadth around
 // (03 §The feature fold: escrow-autopay is the "accepted-pending-build,
@@ -114,7 +117,7 @@ ac-3  no-signal  attestation:absent   -                            a scheduled a
 stubs: acceptance-time plan; current mapping computed below
 STUB                  DECLARED ACS  LIVE STORIES  RECONCILIATION
 autopay-mandate-api   ac-1, ac-2    -             unreconciled
-autopay-retry-policy  ac-3          -             unreconciled
+autopay-retry-policy  ac-2, ac-3    -             unreconciled
 
 feature.violated: false
 stub_reconciliation.blocked: true
@@ -292,7 +295,7 @@ ac-3  no-signal  attestation:absent   -                                         
 stubs: acceptance-time plan; current mapping computed below
 STUB                  DECLARED ACS  LIVE STORIES  RECONCILIATION
 autopay-mandate-api   ac-1, ac-2    -             unreconciled
-autopay-retry-policy  ac-3          -             unreconciled
+autopay-retry-policy  ac-2, ac-3    -             unreconciled
 
 feature.violated: false
 stub_reconciliation.blocked: true

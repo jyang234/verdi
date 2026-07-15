@@ -1,14 +1,25 @@
 ---
 id: waiver/jira-loan-1482--ac-3
 kind: waiver
-title: "Temporary golden gap (fixture, expired)"
+title: "ac-3 golden-flow evidence gap (expired)"
 status: expired
 owners: [platform-team]
 reason: "golden flow pending test-data fixture"
 expiry: 2026-06-01
-frozen: { at: 2026-05-01, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
+frozen: { at: 2026-05-01, commit: 89f9926e9739b97e23eb52efb16206d0ff10ff4f }
 ---
-# Waiver: ac-3 golden gap (expired)
+# Waiver: ac-3 golden-flow evidence gap (expired)
 
-Expired waiver: `expiry` is set and in the past relative to this fixture's
-narrative date.
+`spec/stale-decline#ac-3` (a partial refund against a stale-declined
+loan reconciles correctly) is behavioral-only — its only credible
+evidence is running the golden flow and observing the refund apply
+correctly. At freeze time (2026-05-01) the partial-refunds test-data
+fixture that flow depends on did not exist yet, so ac-3 waived its
+evidence requirement for a bounded window rather than block the story's
+freeze on unrelated fixture work.
+
+Expired 2026-06-01, matching the date the fixture landed and ac-3's
+behavioral evidence started flowing for real (`spec/stale-decline`'s own
+AC-rationale section names this waiver by id). product-lead signed off
+the waiver at grant time; no extension was requested or needed once the
+fixture shipped on schedule.

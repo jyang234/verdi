@@ -72,7 +72,7 @@ Prose.
 // id equals the story's own ac-1 — ScanSpecStale's own-text trigger.
 const caseFlagsDeviationReport = `---
 schema: verdi.deviation/v1
-covers: 66588948af8b36c02c8fb8f423645afa0a58dbe4
+covers: 89f9926e9739b97e23eb52efb16206d0ff10ff4f
 findings:
   - { id: ac-1, kind: computed, text: "own-text drift", disposition: accepted-deviation, note: "known, deferred" }
 ---

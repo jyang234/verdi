@@ -1,9 +1,9 @@
 ---
 schema: verdi.deviation/v1
-covers: faf8d8c412c9df35b5a445146a5fe0e8309caa71
+covers: 30c5ff945413930879823be6db0ccc07d5abd6b9
 findings:
   - { id: f-1, kind: computed, text: "declared implements edge resolves at the closure head", disposition: fixed }
-frozen: { at: 2026-07-01, commit: faf8d8c412c9df35b5a445146a5fe0e8309caa71 }
+frozen: { at: 2026-07-01, commit: 30c5ff945413930879823be6db0ccc07d5abd6b9 }
 ---
 # Alignment report: refi-rate-check-2024 (final edition)
 

@@ -28,7 +28,7 @@
 2 .verdi/waivers/jira-loan-1482/ac-4.md
 2 .verdi/waivers/jira-loan-1482/ac-3.md
 2 .verdi/conflicts/stale-decline-incident.md
-2 .verdi/conflicts/legacy-cache-dispute.md
+2 .verdi/conflicts/pii-outbox-leak.md
 2 .verdi/conflicts/false-alarm.md
 2 .verdi/specs/active/stale-decline/spec.md
 #
@@ -119,3 +119,13 @@
 4 .verdi/obligations/escrow-notify-v2/ac-1--behavioral.md
 4 .verdi/obligations/refi-rate-check-2024/ac-1--static.md
 4 .verdi/obligations/refi-rate-check-2024/ac-1--behavioral.md
+#
+# public-rollout-plan Task 1.6 adds layer 5: adr/0004 and adr/0005, both
+# accepted (frozen) ADRs new to this task. Frozen artifacts cite the
+# PRECEDING layer's resulting head as their `frozen.commit` (the same
+# convention every earlier layer already follows — a file cannot cite its
+# own about-to-be-built commit, since that hash depends on this file's own
+# content), so both cite layer 4's head, not a self-referential layer 5
+# head.
+5 .verdi/adr/0004-pii-redaction-at-ingest.md
+5 .verdi/adr/0005-event-schema-registry.md

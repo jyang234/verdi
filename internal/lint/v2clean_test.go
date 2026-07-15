@@ -31,7 +31,7 @@ import (
 //     lives in), and substitutes the freshly-computed SHAs for the golden
 //     literals wherever they're cited.
 //   - escrow-autopay / borrower-update-* / the outcome attestation
-//     cite "faf8d8c412c9df35b5a445146a5fe0e8309caa71" — goldenHeads[2],
+//     cite "30c5ff945413930879823be6db0ccc07d5abd6b9" — goldenHeads[2],
 //     the v0 corpus's OWN layer-3 head (reused deliberately, per
 //     corpus_test.go's goldenHeads comment) — which IS already real,
 //     unchanged, once chained after the same v0 corpus layers.txt content

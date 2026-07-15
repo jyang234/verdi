@@ -44,9 +44,9 @@ func TestBuild_Happy(t *testing.T) {
 	})
 
 	t.Run("frozen temporal banner", func(t *testing.T) {
-		// spec/stale-decline is frozen at layer-1's commit (6658894...).
+		// spec/stale-decline is frozen at layer-1's commit (89f9926...).
 		page := readFile(t, outDir, "a/spec/stale-decline/index.html")
-		want := "point-in-time record · frozen 2026-05-14 @ 6658894"
+		want := "point-in-time record · frozen 2026-05-14 @ 89f9926"
 		if !strings.Contains(page, want) {
 			t.Fatalf("spec/stale-decline page missing frozen banner %q; got:\n%s", want, page)
 		}
@@ -254,7 +254,7 @@ func TestBuild_Happy(t *testing.T) {
 
 	t.Run("copy-reference button carries the pinned form", func(t *testing.T) {
 		page := readFile(t, outDir, "a/spec/stale-decline/index.html")
-		if !strings.Contains(page, `data-copy-ref="spec/stale-decline@66588948af8b36c02c8fb8f423645afa0a58dbe4"`) {
+		if !strings.Contains(page, `data-copy-ref="spec/stale-decline@89f9926e9739b97e23eb52efb16206d0ff10ff4f"`) {
 			t.Fatalf("copy-reference button missing the expected pinned form; got:\n%s", page)
 		}
 	})

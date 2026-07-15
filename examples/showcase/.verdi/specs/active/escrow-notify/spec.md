@@ -12,7 +12,7 @@ acceptance_criteria:
   - { id: ac-1, text: "an escrow shortfall notifies the borrower within 24 hours", evidence: [behavioral], anchor: "#ac-1" }
 links:
   - { type: implements, ref: "spec/stale-decline#ac-4" }
-frozen: { at: 2026-07-11, commit: faf8d8c412c9df35b5a445146a5fe0e8309caa71 }
+frozen: { at: 2026-07-11, commit: 30c5ff945413930879823be6db0ccc07d5abd6b9 }
 ---
 # Escrow notify (fixture, superseded story)
 

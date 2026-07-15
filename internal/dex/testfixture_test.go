@@ -25,10 +25,10 @@ const (
 // layers, so they reproduce the exact same commit SHAs the corpus fixture
 // files' own frozen stamps and pinned refs already bake in.
 var corpusGoldenHeads = []string{
-	"66588948af8b36c02c8fb8f423645afa0a58dbe4", // layer 1
-	"d70cb19fa17ced67d27b8f9a63b47b3bf280b7d1", // layer 2
-	"faf8d8c412c9df35b5a445146a5fe0e8309caa71", // layer 3
-	"a02dd7dd74cf087aa5ce91a2b49447147dc2132e", // layer 4
+	"89f9926e9739b97e23eb52efb16206d0ff10ff4f", // layer 1
+	"4e5ef0b6b00f23c9faf7a9e4857255b7be5bea03", // layer 2
+	"30c5ff945413930879823be6db0ccc07d5abd6b9", // layer 3
+	"024b516641e9e229b0a156c636af59cda7c297d9", // layer 4
 }
 
 // parseCorpusLayers reads examples/showcase/layers.txt (the same format

@@ -12,7 +12,7 @@ links:
   - { type: implements, ref: "spec/loan-refi-2023#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "a rate change is verified against the published table before rollout", evidence: [static, behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-01, commit: faf8d8c412c9df35b5a445146a5fe0e8309caa71 }
+frozen: { at: 2026-07-01, commit: 30c5ff945413930879823be6db0ccc07d5abd6b9 }
 ---
 # Refinance rate check 2024
 

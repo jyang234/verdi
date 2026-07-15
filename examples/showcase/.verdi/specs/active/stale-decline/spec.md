@@ -14,7 +14,7 @@ links:
   - { type: impacts, ref: svc/loansvc/boundary-contract }
 impacts: [loansvc, notification-svc, payments-gw]
 context:
-  - adr/0002-outbox-events@66588948af8b36c02c8fb8f423645afa0a58dbe4
+  - adr/0002-outbox-events@89f9926e9739b97e23eb52efb16206d0ff10ff4f
 declares:
   boundaries:
     - { from: loansvc, to: notification-svc, via: events }
@@ -33,7 +33,7 @@ dispositions:
 stubs:
   - { slug: borrower-update-api, acceptance_criteria: [ac-2] }
   - { slug: borrower-update-mobile, acceptance_criteria: [ac-1, ac-3] }
-frozen: { at: 2026-05-14, commit: 66588948af8b36c02c8fb8f423645afa0a58dbe4 }
+frozen: { at: 2026-05-14, commit: 89f9926e9739b97e23eb52efb16206d0ff10ff4f }
 ---
 # Stale decline handling
 
