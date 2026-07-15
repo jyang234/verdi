@@ -446,3 +446,45 @@ Task 1.4/1.5 rows in place of the retired scope-based cells:
 No content was edited — all six files are frozen and byte-unchanged; this
 addendum records judgments, not fixes. The two `Y*` scars (placeholder
 digests, curator voice) are disclosed carried minors for owner review.
+
+## Coherence-fix pass — whole-story cross-artifact audit remediation
+
+A whole-story audit traced the showcase's own advertised threads and hit
+cross-artifact contradictions per-file lint cannot see (the corpus lints
+clean and `make verify` is green throughout). This pass fixes them in one
+re-pin cycle and re-traces both flagship threads clean (proofs in
+`.superpowers/sdd/coherence-fix-report.md`). The three `coherent+justified`
+rows the brief named (the reaffirmation, `loan-refi-2023`, the
+`escrow-autopay-v2` MR) stay `Y` — now honestly so, each with the
+reconciliation that earned it noted below.
+
+| artifact | lint-clean | exemplary | coherent+justified | notes |
+|---|---|---|---|---|
+| `.verdi/reaffirmations/jira-loan-1483/ac-1.md` | Y | Y | Y* | **I2 reconciliation.** `owners` `loansvc-team` → `platform-team` — `loansvc-team` is off the canon roster (`platform-team` is the backend team that owns `loansvc`). `object`/`hash`/`frozen` untouched; not `layers.txt`-tracked → no re-pin for this file. |
+| `.verdi/specs/archive/loan-refi-2023/spec.md` (+ `rollup.json`) | Y | Y | Y* | **I3 reconciliation — canon reconciled to the fixture, not the reverse.** The frozen quartet carries `story: jira:LOAN-2023`, `frozen.at 2026-06-20`; the plan-doc LoanServ-canon timeline still said `jira:LOAN-0901`, closed `2026-01-15`. The quartet is frozen (expensive to rebuild) and is authoritative for its own identity, so the canon timeline + roster were updated to `jira:LOAN-2023` / `2026-06-20` (and `refi-rate-check-2024` to `jira:LOAN-2024` / `2026-07-01`), preserving chronological order (adr/0001 2025-08-20 precedes it). No fixture bytes changed here beyond the mechanical layer-2→new-head re-pin. |
+| `mr/escrow-autopay-v2.spec.md` (`spec/escrow-autopay-v2`) | n/a (forge seed, never linted) | Y | Y* | **I1 reconciliation — VL-015 completeness.** `supersession.carried` was `[ac-1, ac-3, co-1, dc-1, dc-2, oq-1]`, written before Task 1.6 added `dc-3`/`dc-4` to `escrow-autopay`; two predecessor objects were left unclassified. Now `[ac-1, ac-3, co-1, dc-1, dc-2, dc-3, dc-4, oq-1]` — `dc-3`/`dc-4` carried unchanged (exemptions the candidate does not touch), so every predecessor object is classified exactly once. Forge seed, not `layers.txt`-tracked → no re-pin. |
+| `.verdi/specs/active/stale-decline/spec.md` | Y | Y | Y | **C1.** Design-notes dropped the false precedent "the second consumer of the pattern after loan-refi-2023" (loan-refi-2023 has no outbox surface: `impacts:[loansvc]` only, no adr/0002 link, its one AC is a rate check) → "one of the pattern's earliest adopters", claiming nothing about loan-refi-2023. Layered (layer 2) → re-pinned. |
+| `examples/showcase/README.md` | n/a (outside `.verdi/`) | Y | Y | **C2.** "Trace these threads" AC thread rewritten: it claimed `attestations/jira-loan-1482/ac-2.md` was `stale-decline#ac-2`'s "feature-level outcome floor" — false (the fold keys outcome attestations by feature slug `attestations/stale-decline/`, absent, and `ac-2` declares `evidence:[static,behavioral]`, no attestation kind). Now traces `ac-2` → `borrower-update-api` (implements) → its two obligations → the CI verdict in the derived zone → `verdi matrix` rendering `ac-2` `pending / attestation:absent / behavioral:pass` — matching the real binary (report Thread A). |
+| `.verdi/diagrams/borrower-journey.mermaid` | Y | Y | Y | **M2.** "per adr/0003 budget" cited a `status: proposed` ADR (live debate) as governing → "within adr/0002's shared budget" (adr/0002's Consequences establishes the in-effect fixed, shared retry budget; adr/0003 is the proposed change to it). Layered (layer 1) → cascaded the full re-pin. |
+| `.verdi/adr/0004-pii-redaction-at-ingest.md` | Y | Y | Y | **M4.** Prose named `verdi.yaml`'s `audit.exempts_conflict_threshold`, a key the showcase `verdi.yaml` does not carry → "the audit exemption threshold, default 3" (no config key named; no config/behavior added — the default matches `DefaultExemptsConflictThreshold = 3`). Layered (layer 5) → re-pinned. |
+| `.verdi/specs/active/escrow-autopay/spec.md` (dc-3 body only) | Y | Y | Y | **M4.** Same threshold-prose alignment in the DC-3 body ("counted against the audit exemption threshold, default 3"). Not `layers.txt`-tracked, but carries golden-SHA pins (context/frozen) → re-pinned by cascade. |
+| `.verdi/specs/archive/refi-rate-check-2024/spec.md` | Y | Y | Y | **I3 prose.** "A year after `spec/loan-refi-2023` shipped" → "Days after …": the frozen stamps are 11 days apart (`2026-06-20` → `2026-07-01`), not a year. Supersedes the Task 1.5 row's "a year after" description above (line for this file). Layered (layer 4) → re-pinned. |
+
+### Disclosed residuals — carried, not fixed (owner review)
+
+- **M1** — `escrow-notify` / `escrow-notify-v2` carry `story: jira:ESCROW-1` / `jira:ESCROW-2`, off the canon `jira:LOAN-<n>` scheme, and both `implements` `spec/stale-decline#ac-4` (a story-must-implement structural edge, not a narrative claim). Already disclosed in-body (`escrow-notify/spec.md`); carried as-is.
+- **M3** — `attestations/jira-loan-1482/ac-2.md` and `waivers/jira-loan-1482/ac-{3,4}.md` are `frozen.at 2026-05-01`, which predates the `stale-decline` feature freeze `2026-05-14`; `waivers/…/ac-3.md` prose calls `2026-05-01` "freeze time". Frozen quartet, expensive to rebuild; disclosed and carried.
+
+### Re-pin — old → new heads (coherence-fix pass)
+
+Editing layer 1 (`borrower-journey.mermaid`, M2) cascaded all five layers; the layer-2/3/4/5 content edits (C1, I3-prose, M4) fold into the same single cascade. `derived/spec--stale-decline/<sha>/` directories `git mv`'d to the new layer-2/layer-3 heads.
+
+| layer | old head (Task 1.7 final) | new head (coherence-fix) |
+|---|---|---|
+| 1 | `9f5621543d6e5158ad3230a7febc83754f2be3dd` | `78e3161594fb31fdad17f2ea8a96b52f33dbf0f3` |
+| 2 | `2350631724b1e69ccdd84da40686a8f079955dc4` | `f6dd4c4df724c0b16cae435e96f7e34ac94026c9` |
+| 3 | `74c957aed504671bd4fc4ceb30907d2f4813e9b7` | `16219044c9d6d41de9a0de9464ed24d49283b40c` |
+| 4 | `09ed3760a09cc1ec9b0c5ccf78cebc3b1ca93fa5` | `38cc28c9f7bdf4098bccc724caddd0acdc2d17f6` |
+| 5 | `fd98ad21bfd79ccc2566f5b1f1cd2e48a77eca5e` | `2fa709f0136849286c834a7de4777c47a752d731` |
+
+`goldenHeadsV2` (the `loan-workflow`/`rate-lock` dedicated history and the reaffirmation's `06a3f4…` object pin) is unchanged — none of its content was touched.
