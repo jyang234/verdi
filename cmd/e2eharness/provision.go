@@ -35,6 +35,18 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return fmt.Errorf("copying committed zone: %w", err)
 	}
 
+	// examples/showcase's own "loansvc" service root: stale-decline/spec.md
+	// declares `impacts: { ref: svc/loansvc/boundary-contract }`, which
+	// needs a real, discoverable service root to resolve (VL-003) — carried
+	// alongside the committed zone (not layers.txt-tracked: service
+	// discovery reads the filesystem directly, never git, 01 §notes) so a
+	// provisioned checkout of this store is lint-clean on this link, not
+	// only the Go test suite's own synthetic fixture
+	// (internal/lint/harness_test.go's writeLoansvcFixture).
+	if err := copyTree(filepath.Join(corpusDir, "loansvc"), filepath.Join(storeRoot, "loansvc")); err != nil {
+		return fmt.Errorf("copying loansvc service: %w", err)
+	}
+
 	// Fold in testdata/svcfix as a real service root (it carries a
 	// .flowmap.yaml plus a .flowmap/boundary-contract.json), so the built
 	// dex site gains a by-service axis and a boundary-contract permalink
@@ -100,9 +112,14 @@ func provisionStore(moduleRoot, storeRoot string) error {
 	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", ".gitignore"), []byte("data/\n"), 0o644); err != nil {
 		return err
 	}
-	gitattrs := ".verdi/specs/*/*/board.json          gitlab-generated\n.verdi/specs/*/*/rollup.json         gitlab-generated\n.verdi/specs/*/*/deviation-report.md gitlab-generated\n"
-	if err := os.WriteFile(filepath.Join(storeRoot, ".gitattributes"), []byte(gitattrs), 0o644); err != nil {
-		return err
+	// .gitattributes is likewise no longer synthesized here — it is a real,
+	// committed file at examples/showcase/.gitattributes (task-1.8's own
+	// lint-clean sweep: VL-012 found the repo-root plumbing file this
+	// harness had always synthesized was never actually present in the
+	// showcase tree itself, so a from-disk-only construction — no harness
+	// step to paper over the gap — could never lint clean on VL-012).
+	if err := copyFile(filepath.Join(corpusDir, ".gitattributes"), filepath.Join(storeRoot, ".gitattributes")); err != nil {
+		return fmt.Errorf("copying .gitattributes: %w", err)
 	}
 
 	if err := gitInitAndCommit(storeRoot); err != nil {
