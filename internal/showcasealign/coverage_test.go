@@ -237,15 +237,15 @@ var workbenchSurfaces = []string{
 // featureVerbExcluded is "feature", REMOVED from the enumerated CLI
 // capability set (Task 3.4, PLAN-V1.md ledger R4-I-54): dispatch.go's own
 // comment marks it "R4-I-6: deprecation alias for build", and its
-// dispatch entry (`if verb == "feature" { return runFeatureVerb(...) }`)
-// resolves to runBuildVerb — the exact same function `verb == "build"`
-// calls (cmd/verdi/feature.go). There is no second code path for this
-// verb to showcase-back: cli:build's mapping (cli_showcase_test.go)
-// already exercises the one dispatch target both names share. Mapping
-// "cli:feature" to the same evidence file as "cli:build" would be a
-// technically-satisfiable but hollow entry (the marker regexp would
-// match, but the file proves nothing "feature"-specific that "build"
-// doesn't already prove byte-for-byte) — smallest reversible choice per
+// dispatch entry routes through runFeatureStart, which shares runBuildStart
+// with `build` — every precondition and side effect — differing only by a
+// printed R4-I-6 deprecation notice on stderr (cmd/verdi/feature.go). There
+// is no second code path for this verb to showcase-back: cli:build's mapping
+// (cli_showcase_test.go) already exercises the one build target both names
+// share. Mapping "cli:feature" to the same evidence file as "cli:build"
+// would be a technically-satisfiable but hollow entry (the marker regexp
+// would match, but the file proves nothing "feature"-specific beyond the
+// shared build path) — smallest reversible choice per
 // CLAUDE.md's provenance discipline: exclude the alias from the
 // enumerated set instead of faking a distinct mapping. Reversible the
 // moment `feature` stops being a pure alias (its own removal from

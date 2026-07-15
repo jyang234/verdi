@@ -67,11 +67,11 @@
 //
 // cli:feature is DELIBERATELY EXCLUDED from the enumerated capability set
 // below (cliVerbs, coverage_test.go) — see that function's own comment and
-// PLAN-V1.md ledger entry R4-I-36: `feature` is a pure deprecation alias
-// dispatching to the exact same runBuildStart `build` already calls
-// (dispatch.go: `if verb == "feature" { return runBuildVerb(...) }` reuses
-// runBuildVerb verbatim), so `cli:build`'s coverage below already proves
-// the one code path both verb names share.
+// PLAN-V1.md ledger entry R4-I-54: `feature` is a pure deprecation alias.
+// runFeatureStart shares runBuildStart with `build` (every precondition and
+// side effect), differing only by a printed R4-I-6 deprecation notice on
+// stderr — so `cli:build`'s coverage below already proves the one build
+// code path both verb names share.
 //
 // cli:serve is exercised by the WHOLE Playwright suite (cmd/e2eharness/
 // main.go launches the real `verdi serve --http <addr>` subprocess every
