@@ -99,10 +99,14 @@ above, and a second, dedicated, unchained history for the
 golden SHAs) — because merging both into one chained repo would force
 re-deriving every SHA in whichever one is chained second, contradicting
 the "build once, bake in, test forever" pins both already carry. So the
-gate rebuilds each history separately and lints each independently:
-`internal/corpus/corpus_test.go`'s fixturegit rebuild for the `layers.txt`
-family, `internal/lint/v2clean_test.go`'s for the second — both exit 0
-with the mutable zone present, and with it removed (simulating a bare
+gate rebuilds each history separately and lints each independently. For the
+`layers.txt` family, `internal/corpus/corpus_test.go`'s
+`TestFixtureRepo_MatchesGoldenSHAs` proves the fixturegit rebuild is
+golden-SHA-stable (it asserts SHAs, the pin-resolution precondition — not
+lint) and `internal/lint`'s `TestClean_CorpusLintsGreen` is the lint-clean
+proof over that rebuilt tree; for the second,
+`internal/lint/v2clean_test.go`'s `TestV2FixtureCorpus_LintsClean`. Both
+exit 0 with the mutable zone present, and with it removed (simulating a bare
 clone) report only `SeverityDisclosure` (VL-017) notices on this store's
 new-class specs, never a verdict failure. A single-commit checkout (the
 shape `cmd/e2eharness` provisions for the Playwright/e2e suite, since those

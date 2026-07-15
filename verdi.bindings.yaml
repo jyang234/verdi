@@ -451,13 +451,17 @@ bindings:
       # spec/showcase-corpus-renovation (public-rollout-plan Task 1.8)
       # ac-1's behavioral leg: `verdi lint` run against a real, git-real
       # rebuild of each of examples/showcase's two independent fixturegit
-      # histories — internal/corpus/corpus_test.go's TestFixtureRepo_
-      # MatchesGoldenSHAs (the layers.txt family) and internal/lint's
-      # TestV2FixtureCorpus_LintsClean / _BareClone_OnlyVL017Disclosures
-      # (the rung-4/escrow-autopay family) — both exit 0 with zero
-      # findings (mutable zone present) or VL-017-only disclosures
-      # (bare-clone simulation), re-verified this task against the real
-      # built binary, not just the go test assertion (task-1.8-report.md).
+      # histories. layers.txt family: internal/corpus/corpus_test.go's
+      # TestFixtureRepo_MatchesGoldenSHAs proves the fixturegit rebuild is
+      # golden-SHA-stable (the pin-resolution precondition — it asserts SHAs,
+      # not lint), and internal/lint's TestClean_CorpusLintsGreen is the
+      # lint-clean proof itself: every rule over that rebuilt tree, zero
+      # findings, mutable zone present. rung-4/escrow-autopay family:
+      # internal/lint's TestV2FixtureCorpus_LintsClean (zero findings, mutable
+      # zone present) and _BareClone_OnlyVL017Disclosures (VL-017-only
+      # disclosures when the mutable zone is removed). All re-verified this
+      # task against the real built binary, not just the go test assertion
+      # (task-1.8-report.md).
       - "spec/showcase-corpus-renovation#ac-1"
   - producer: verdi-verify-static
     kind: static
