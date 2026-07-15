@@ -411,29 +411,144 @@ func mcpTools(t *testing.T) []string {
 	return names
 }
 
+// coverageResult is what computeCoverageGaps found. The first three slices are
+// the gate's three failure classes (the caller turns each into a t.Errorf);
+// disclosedPlaywright is the Playwright-backed evidence that could not be
+// checked because e2e/tests is absent — disclosed-as-unproven, never a silent
+// pass. All four are deterministic (sorted).
+type coverageResult struct {
+	missing             []string // enumerated capabilities with no inventory entry
+	extra               []string // inventory keys naming no enumerated capability (stale/renamed)
+	markerMismatches    []string // mapped evidence that is absent, empty, or whose bytes miss its marker
+	disclosedPlaywright []string // "<cap> -> <file>" for Playwright evidence not checkable (e2e/tests absent)
+}
+
+// computeCoverageGaps is the pure heart of the showcase-coverage gate,
+// extracted from TestShowcaseCoverage so its FAILURE modes are directly
+// unit-testable (TestShowcaseCoverage_DetectsGaps). A gate whose own failure
+// path is never exercised is exactly the silent pass this whole story exists
+// to rule out, so the check that names missing/stale/mismatched capabilities
+// must itself carry a negative-path test (CLAUDE.md: every function needs
+// happy AND negative paths). This function takes no *testing.T and never fails
+// a test itself: it reports, and the caller decides which slices are errors
+// (all three of missing/extra/markerMismatches) and which is a disclosure.
+//
+// e2ePresent scopes the disclosure PRECISELY. Go-backed evidence (a repo .go
+// file marked examples/showcase) is ALWAYS checked, so a broken cli:/mcp:
+// mapping is caught even from an e2e-less checkout. Playwright evidence (a spec
+// under e2e/tests/) is checkable only when that dir is present; when it is
+// absent such evidence is routed into disclosedPlaywright, and wb: inventory
+// keys are exempt from `extra` (the workbench axis is deliberately not
+// enumerated in that path). Note this means Playwright-backed evidence is
+// disclosed regardless of which axis names it: the workbench axis, and the one
+// cross-axis exception cli:serve, are BOTH disclosed-unproven when e2e/tests is
+// absent — the CLI axis is therefore not "fully" enforced in that path, only
+// its Go-backed verbs are.
+func computeCoverageGaps(capabilities map[string]bool, inventory map[string][]coverageEvidence, repoRoot string, e2ePresent bool) coverageResult {
+	var res coverageResult
+
+	// Gap direction: every enumerated capability must be mapped.
+	for cap := range capabilities {
+		if _, ok := inventory[cap]; !ok {
+			res.missing = append(res.missing, cap)
+		}
+	}
+	sort.Strings(res.missing)
+
+	// Stale direction: every mapped key must name an enumerated capability. A
+	// wb: entry when e2e/tests is absent is disclosed-unproven (its axis was
+	// deliberately not enumerated), NOT stale — so exempt it; any cli:/mcp: key
+	// that names no enumerated capability is still a hard gap, so a stale or
+	// renamed Go-axis mapping cannot hide behind an absent dir.
+	for cap := range inventory {
+		if capabilities[cap] {
+			continue
+		}
+		if !e2ePresent && strings.HasPrefix(cap, "wb:") {
+			continue
+		}
+		res.extra = append(res.extra, cap)
+	}
+	sort.Strings(res.extra)
+
+	// Marker direction: every mapping is checked for real — the file must exist
+	// under the repo root and its bytes must match its own marker regexp. A
+	// mapping that fails this is worse than an honest gap (it is a false claim
+	// of coverage), so it is reported too. Go-backed evidence is ALWAYS checked;
+	// Playwright evidence (under e2e/tests/) is checked only when that dir is
+	// present and otherwise disclosed. cli:serve is the lone cli: mapping backed
+	// by a Playwright spec, so it is the single CLI verb disclosed (not checked)
+	// in the e2e-absent path — every other CLI verb, and every MCP tool, is
+	// Go-backed and still checked here.
+	var mapped []string
+	for cap := range inventory {
+		mapped = append(mapped, cap)
+	}
+	sort.Strings(mapped)
+	for _, cap := range mapped {
+		evidences := inventory[cap]
+		if len(evidences) == 0 {
+			res.markerMismatches = append(res.markerMismatches, cap+": maps to zero evidence entries")
+			continue
+		}
+		for _, ev := range evidences {
+			if !e2ePresent && ev.needsPlaywrightDir() {
+				res.disclosedPlaywright = append(res.disclosedPlaywright, cap+" -> "+ev.file)
+				continue
+			}
+			path := filepath.Join(repoRoot, ev.file)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				res.markerMismatches = append(res.markerMismatches, cap+": evidence file "+ev.file+" does not exist under the repo root")
+				continue
+			}
+			re, err := regexp.Compile(ev.marker)
+			if err != nil {
+				res.markerMismatches = append(res.markerMismatches, cap+": evidence marker "+ev.marker+" does not compile as a regexp")
+				continue
+			}
+			if !re.Match(data) {
+				res.markerMismatches = append(res.markerMismatches, cap+": evidence file "+ev.file+" does not match its marker "+ev.marker)
+			}
+		}
+	}
+	sort.Strings(res.disclosedPlaywright)
+
+	return res
+}
+
 // TestShowcaseCoverage is the showcase-coverage gate itself: see this
 // file's package-level doc comment for the full rationale. It is GREEN as of
 // Task 3.4 (every enumerated capability mapped and every mapped file matching
 // its marker); a regression here means a real capability lost its showcase
-// backing, not a defect in this test. When e2e/tests is absent it still
-// fully enforces the Go-backed CLI and MCP axes and only discloses the
-// Playwright-dependent workbench axis as unproven (never a silent pass).
+// backing, not a defect in this test. When e2e/tests is absent it still fully
+// enforces every Go-backed (examples/showcase) CLI and MCP evidence file —
+// every MCP tool and every CLI verb except cli:serve — and discloses as
+// unproven only what genuinely depends on Playwright: the workbench axis plus
+// the lone cross-axis Playwright-backed CLI evidence, cli:serve (never a silent
+// pass). It deliberately does NOT claim the CLI axis is fully enforced in that
+// path: cli:serve's sole evidence is a Playwright spec, so that one verb is
+// disclosed-unproven exactly like the workbench axis.
 func TestShowcaseCoverage(t *testing.T) {
-	// The CLI and MCP axes are backed entirely by Go test files in this repo
-	// (marker examples/showcase); only the workbench axis and the handful of
-	// cross-axis playwright(...) evidence files live under e2e/tests/. So a
-	// checkout missing e2e/tests can — and MUST — still fully enforce the two
-	// Go-backed axes; only the Playwright-dependent checks are disclosed-as-
-	// unproven. Three-valued honesty: a loud t.Log, never a silent pass, and
-	// never suppressing a real gap in the Go axes. The pre-fix behavior — a
-	// blanket t.Skip on a missing e2e/tests, taken BEFORE the CLI/MCP axes
-	// were even computed — disabled ALL THREE axes, far wider than the
-	// disclosure text claimed. That over-broad skip was the defect.
+	// The MCP axis and all-but-one of the CLI axis are backed by Go test files
+	// in this repo (marker examples/showcase); the workbench axis and the lone
+	// cross-axis exception cli:serve (a Playwright spec — the HTTP server every
+	// spec runs against) live under e2e/tests/. So a checkout missing e2e/tests
+	// can — and MUST — still fully enforce every Go-backed evidence file (every
+	// MCP tool, and every CLI verb except cli:serve); only the genuinely
+	// Playwright-dependent checks — the workbench axis and cli:serve — are
+	// disclosed-as-unproven, never claimed enforced. Three-valued honesty: a
+	// loud t.Log, never a silent pass, and never suppressing a real gap in the
+	// Go-backed evidence. The pre-fix behavior — a blanket t.Skip on a missing
+	// e2e/tests, taken BEFORE the CLI/MCP axes were even computed — disabled ALL
+	// THREE axes, far wider than the disclosure text claimed; that over-broad
+	// skip was the defect. The residual precision fix is to stop calling the CLI
+	// axis "fully" enforced in this path when cli:serve is disclosed, not checked.
 	e2eDir := filepath.Join(verdiRepoRoot, "e2e", "tests")
 	e2ePresent := true
 	if _, err := os.Stat(e2eDir); err != nil {
 		e2ePresent = false
-		t.Logf("DISCLOSURE: e2e/tests is absent (%v); the workbench axis and every Playwright-backed evidence marker are DISCLOSED-AS-UNPROVEN from this checkout. The CLI and MCP axes (Go-backed) are still FULLY enforced below.", err)
+		t.Logf("DISCLOSURE: e2e/tests is absent (%v); the workbench axis and every Playwright-backed evidence marker — including cli:serve, whose sole evidence is a Playwright spec — are DISCLOSED-AS-UNPROVEN from this checkout. Every Go-backed (examples/showcase) CLI and MCP evidence file is still fully enforced below: that is every MCP tool and every CLI verb except cli:serve, NOT the CLI axis in full.", err)
 	}
 
 	capabilities := map[string]bool{}
@@ -455,86 +570,168 @@ func TestShowcaseCoverage(t *testing.T) {
 		}
 	}
 
-	// Gap direction: every enumerated capability must be mapped. This runs
-	// for cli:/mcp: unconditionally (and wb: too when e2e/tests is present),
-	// so a genuine gap in the Go axes is never suppressed by an absent dir.
-	var missing []string
-	for cap := range capabilities {
-		if _, ok := showcaseCoverage[cap]; !ok {
-			missing = append(missing, cap)
-		}
-	}
-	sort.Strings(missing)
-	for _, cap := range missing {
+	// The pure check does all three directions (gap, stale, marker) and the
+	// disclosure scoping; this test only enumerates the real capabilities,
+	// turns each returned gap into a t.Errorf, and discloses loudly. Its own
+	// failure path is proven separately by TestShowcaseCoverage_DetectsGaps.
+	res := computeCoverageGaps(capabilities, showcaseCoverage, verdiRepoRoot, e2ePresent)
+	for _, cap := range res.missing {
 		t.Errorf("showcase-coverage gap: %s has no showcase-backed e2e evidence", cap)
 	}
-
-	// Stale direction: every map entry must name an enumerated capability. A
-	// wb: entry when e2e/tests is absent is disclosed-unproven (the axis was
-	// deliberately not enumerated above), NOT stale — so exempt it. Any
-	// non-wb entry (cli:/mcp:) that names no enumerated capability is still a
-	// hard error, so a stale or renamed Go-axis mapping cannot hide behind
-	// the absent dir.
-	var extra []string
-	for cap := range showcaseCoverage {
-		if capabilities[cap] {
-			continue
-		}
-		if !e2ePresent && strings.HasPrefix(cap, "wb:") {
-			continue
-		}
-		extra = append(extra, cap)
-	}
-	sort.Strings(extra)
-	for _, cap := range extra {
+	for _, cap := range res.extra {
 		t.Errorf("showcase-coverage gap: %s is mapped in showcaseCoverage but names no enumerated capability (stale or renamed entry)", cap)
 	}
-
-	// Every mapping present is checked for real: the file must exist under
-	// the repo root and its bytes must match its own marker regexp. A
-	// mapping that fails this is worse than an honest gap — it is a false
-	// claim of coverage — so it fails loudly here too. Playwright evidence
-	// (file under e2e/tests/) is verifiable only when that dir is present;
-	// when it is absent those specific markers are collected and disclosed
-	// loudly below, never silently passed. Go-backed evidence (examples/
-	// showcase marker, a repo .go file) is ALWAYS checked — so a
-	// deliberately-broken cli:/mcp: mapping still fails here even from an
-	// e2e-less checkout.
-	var mappedCaps []string
-	for cap := range showcaseCoverage {
-		mappedCaps = append(mappedCaps, cap)
+	for _, mm := range res.markerMismatches {
+		t.Errorf("showcase-coverage marker mismatch: %s", mm)
 	}
-	sort.Strings(mappedCaps)
-	var disclosedPlaywright []string
-	for _, cap := range mappedCaps {
-		evidences := showcaseCoverage[cap]
-		if len(evidences) == 0 {
-			t.Errorf("showcase-coverage gap: %s maps to zero evidence entries", cap)
-			continue
-		}
-		for _, ev := range evidences {
-			if !e2ePresent && ev.needsPlaywrightDir() {
-				disclosedPlaywright = append(disclosedPlaywright, cap+" -> "+ev.file)
-				continue
-			}
-			path := filepath.Join(verdiRepoRoot, ev.file)
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Errorf("%s: evidence file %s does not exist under the repo root: %v", cap, ev.file, err)
-				continue
-			}
-			re, err := regexp.Compile(ev.marker)
-			if err != nil {
-				t.Fatalf("%s: evidence marker %q does not compile as a regexp: %v", cap, ev.marker, err)
-			}
-			if !re.Match(data) {
-				t.Errorf("%s: evidence file %s does not match its marker %q", cap, ev.file, ev.marker)
-			}
-		}
-	}
-	if len(disclosedPlaywright) > 0 {
-		sort.Strings(disclosedPlaywright)
+	if len(res.disclosedPlaywright) > 0 {
 		t.Logf("DISCLOSURE: e2e/tests absent — %d Playwright-backed evidence marker(s) UNPROVEN from this checkout (NOT a pass): %s",
-			len(disclosedPlaywright), strings.Join(disclosedPlaywright, ", "))
+			len(res.disclosedPlaywright), strings.Join(res.disclosedPlaywright, ", "))
 	}
+}
+
+// TestShowcaseCoverage_DetectsGaps is the gate's own negative-path proof: it
+// feeds computeCoverageGaps deliberately-broken inventories and asserts it
+// reports the RIGHT gap class naming the RIGHT capability. AC-1's behavioral
+// claim is that the gate fails naming the exact missing capability when a
+// mapping is removed or a capability is added unmapped; TestShowcaseCoverage
+// above proves the GREEN direction on the real inventory, and this proves the
+// RED direction is real and precise — without it the gate's failure mode would
+// be unexercised, itself a silent pass (CLAUDE.md: every function needs a
+// negative-path test). Each case isolates one deliberate break so exactly one
+// slice fires; the others are asserted empty, proving the signal is precise.
+func TestShowcaseCoverage_DetectsGaps(t *testing.T) {
+	// A stable known-good Go-backed evidence: this very file always contains
+	// the examples/showcase marker (goE2E's regexp literal is defined here), so
+	// it is a valid mapping to pair with each deliberate break without itself
+	// contributing a mismatch.
+	good := goE2E("internal/showcasealign/coverage_test.go")
+
+	tests := []struct {
+		name         string
+		caps         map[string]bool
+		inv          map[string][]coverageEvidence
+		e2ePresent   bool
+		wantMissing  []string   // exact sorted res.missing
+		wantExtra    []string   // exact sorted res.extra
+		wantMismatch [][]string // one inner slice per expected mismatch entry (index-aligned, sorted); each substring must appear in that entry
+		wantDisclose []string   // each substring must appear in some res.disclosedPlaywright entry
+	}{
+		{
+			name:        "gap: enumerated capability with no inventory entry is named in missing",
+			caps:        map[string]bool{"cli:phantom": true, "mcp:real": true},
+			inv:         map[string][]coverageEvidence{"mcp:real": {good}},
+			e2ePresent:  true,
+			wantMissing: []string{"cli:phantom"},
+		},
+		{
+			name:       "stale: inventory key naming no enumerated capability is named in extra",
+			caps:       map[string]bool{"mcp:real": true},
+			inv:        map[string][]coverageEvidence{"mcp:real": {good}, "cli:ghostkey": {good}},
+			e2ePresent: true,
+			wantExtra:  []string{"cli:ghostkey"},
+		},
+		{
+			name:         "marker mismatch: mapped file whose bytes miss the marker is named",
+			caps:         map[string]bool{"cli:badmarker": true},
+			inv:          map[string][]coverageEvidence{"cli:badmarker": {{file: "go.mod", marker: "no-such-marker-string-in-go-mod"}}},
+			e2ePresent:   true,
+			wantMismatch: [][]string{{"cli:badmarker", "go.mod"}},
+		},
+		{
+			name:         "marker mismatch: mapped evidence file that does not exist is named",
+			caps:         map[string]bool{"cli:nofile": true},
+			inv:          map[string][]coverageEvidence{"cli:nofile": {{file: "internal/showcasealign/does-not-exist.go", marker: "examples/showcase"}}},
+			e2ePresent:   true,
+			wantMismatch: [][]string{{"cli:nofile", "does-not-exist.go"}},
+		},
+		{
+			name:         "marker mismatch: capability mapped to zero evidence entries is named",
+			caps:         map[string]bool{"cli:noevidence": true},
+			inv:          map[string][]coverageEvidence{"cli:noevidence": {}},
+			e2ePresent:   true,
+			wantMismatch: [][]string{{"cli:noevidence", "zero evidence"}},
+		},
+		{
+			// The A2 claim made executable: a CLI verb backed only by a
+			// Playwright spec is disclosed-unproven (NOT enforced) when
+			// e2e/tests is absent — exactly like the workbench axis.
+			name:         "e2e-absent: cli:serve (Playwright-backed) is DISCLOSED, not enforced",
+			caps:         map[string]bool{"cli:serve": true, "cli:real": true},
+			inv:          map[string][]coverageEvidence{"cli:serve": {playwright("10-board-projection.spec.ts")}, "cli:real": {good}},
+			e2ePresent:   false,
+			wantDisclose: []string{"cli:serve"},
+		},
+		{
+			name:         "e2e-absent: wb: key is exempt from stale and its Playwright evidence disclosed",
+			caps:         map[string]bool{"cli:real": true},
+			inv:          map[string][]coverageEvidence{"cli:real": {good}, "wb:board": {playwright("10-board-projection.spec.ts")}},
+			e2ePresent:   false,
+			wantDisclose: []string{"wb:board"},
+		},
+		{
+			name:       "clean: a valid inventory yields no gaps at all",
+			caps:       map[string]bool{"cli:real": true, "mcp:real": true},
+			inv:        map[string][]coverageEvidence{"cli:real": {good}, "mcp:real": {good}},
+			e2ePresent: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res := computeCoverageGaps(tc.caps, tc.inv, verdiRepoRoot, tc.e2ePresent)
+
+			if !equalStrings(res.missing, tc.wantMissing) {
+				t.Errorf("missing = %v, want %v", res.missing, tc.wantMissing)
+			}
+			if !equalStrings(res.extra, tc.wantExtra) {
+				t.Errorf("extra = %v, want %v", res.extra, tc.wantExtra)
+			}
+			if len(res.markerMismatches) != len(tc.wantMismatch) {
+				t.Fatalf("markerMismatches = %v, want %d entr(y|ies) %v", res.markerMismatches, len(tc.wantMismatch), tc.wantMismatch)
+			}
+			for i, subs := range tc.wantMismatch {
+				for _, sub := range subs {
+					if !strings.Contains(res.markerMismatches[i], sub) {
+						t.Errorf("markerMismatches[%d] = %q, want it to contain %q", i, res.markerMismatches[i], sub)
+					}
+				}
+			}
+			if len(tc.wantDisclose) == 0 {
+				if len(res.disclosedPlaywright) != 0 {
+					t.Errorf("disclosedPlaywright = %v, want none", res.disclosedPlaywright)
+				}
+			} else {
+				for _, sub := range tc.wantDisclose {
+					if !anyContains(res.disclosedPlaywright, sub) {
+						t.Errorf("disclosedPlaywright = %v, want an entry containing %q", res.disclosedPlaywright, sub)
+					}
+				}
+			}
+		})
+	}
+}
+
+// equalStrings reports whether two string slices are element-wise equal,
+// treating nil and empty as equal (a gap-free result yields a nil slice).
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// anyContains reports whether any element of ss contains sub.
+func anyContains(ss []string, sub string) bool {
+	for _, s := range ss {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }

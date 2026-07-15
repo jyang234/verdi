@@ -155,9 +155,16 @@ lint-showcase:
 #       run with no further change to the pattern); AND
 #   (b) append TestReadmeExamplesFresh to the `required` list below, so this
 #       guard then hard-demands its `--- PASS:` line.
-# Both steps are mandatory and self-checking: (a) without (b) runs the test
-# but never enforces it; (b) without (a) fails this guard LOUDLY (the named
-# test never ran) instead of passing vacuously. An earlier revision auto-
+# Both steps are mandatory. (a) alone already enforces the test's VERDICT: the
+# `-run` pattern below already names TestReadmeExamplesFresh, so once it exists
+# in this package it is selected and run, and a FAILING run makes `go test` exit
+# non-zero — which the status check below turns into a hard target failure with
+# no `required`-list edit at all. What step (b) adds is narrower and worth
+# stating precisely: it guards against the readme test being DELETED, RENAMED,
+# or SKIPPED — the same vacuous-`-run` class the rest of this guard addresses (a
+# `-run` that matches nothing still exits 0) — NOT verdict enforcement, which
+# (a) already provides. (b) without (a) fails this guard LOUDLY (the named test
+# never ran) instead of passing vacuously. An earlier revision auto-
 # promoted the readme test the instant a `=== RUN TestReadmeExamplesFresh`
 # line appeared in THIS package's own `-v` output — that silently assumed 4.2
 # would place the test here, and would never fire (a permanent, silent gap)
