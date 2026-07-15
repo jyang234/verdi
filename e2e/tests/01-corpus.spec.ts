@@ -18,8 +18,8 @@ test("corpus page renders title, frontmatter, and the dispositions table", async
   await expect(meta).toContainText("jira:LOAN-1482");
   await expect(meta).toContainText("feature");
 
-  // Rendered markdown body.
-  await expect(page.locator(".content")).toContainText("Charge API calls are retried");
+  // Rendered markdown body (a phrase from the renovated Design notes).
+  await expect(page.locator(".content")).toContainText("routed through the outbox pattern");
 
   // I-5 dispositions table: every disposition value present.
   const table = page.locator("table.dispositions-table");

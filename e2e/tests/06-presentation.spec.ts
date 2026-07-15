@@ -29,8 +29,11 @@ test("board stickies are absolutely positioned at their coordinates", async ({ p
   expect(top).toMatch(/^\d+(\.\d+)?px$/);
 
   // Per-type treatment: each sticky carries its annotation type as both a
-  // data attribute and a type-specific class (paper color).
-  await expect(page.locator('.sticky[data-type="question"].sticky--question')).toHaveCount(1);
+  // data attribute and a type-specific class (paper color). The fixture
+  // (mutable/annotations/spec--stale-decline.jsonl) carries two questions
+  // (the informal "what about partial refunds?" and the formalized oq-1
+  // text) and one agent-task.
+  await expect(page.locator('.sticky[data-type="question"].sticky--question')).toHaveCount(2);
   await expect(page.locator('.sticky[data-type="agent-task"].sticky--agent-task')).toHaveCount(1);
 });
 
@@ -43,11 +46,16 @@ test("yarn renders as an SVG thread and follows a dragged sticky", async ({ page
   const dBefore = await thread.getAttribute("d");
   expect(dBefore).toBeTruthy();
 
-  // Drag the thread's sticky endpoint; the path must be redrawn.
+  // Drag the thread's sticky endpoint; the path must be redrawn. Grab it
+  // near its top-left corner, not its center (same rationale as 02-board):
+  // real paper-sized stickies at the fixture's coordinates overlap, and a
+  // center-point grab lands on whichever LATER sticky is stacked on top —
+  // which would move the wrong sticky and leave this thread's path
+  // untouched.
   const sticky = page.locator('.sticky[data-key="a-01J8Z0K3AAAAAAAAAAAAAAAAAA"]');
   const box = await sticky.boundingBox();
   expect(box).not.toBeNull();
-  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.move(box!.x + 8, box!.y + 8);
   await page.mouse.down();
   await page.mouse.move(box!.x + 320, box!.y + 240, { steps: 10 });
   await page.mouse.up();

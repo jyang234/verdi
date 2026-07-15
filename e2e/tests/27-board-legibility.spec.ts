@@ -171,14 +171,20 @@ test.describe("board legibility: the wall reads at a glance", () => {
     await page.goto(boardPath(STORY_STUB_MATCHED));
     await expect(page.getByTestId("case-class-tag")).toContainText("story ·");
 
-    // A grandfathered v0 spec (no problem/outcome) has no case-file
-    // lockup to wear the stamp — and never wears an orphaned one.
+    // READONLY_SPEC (stale-decline) gained problem/outcome in its
+    // showcase renovation (public-rollout-plan Task 1.4), so its
+    // read-only wall now renders the case-file lockup and wears the
+    // feature stamp like every other room. The "a projection with no
+    // case file wears no orphaned stamp" semantic is pinned at the Go
+    // render level (internal/workbench/boardlegibility_test.go's bare-
+    // projection case) — no committed-corpus board fixture without
+    // problem/outcome remains to prove it end-to-end.
     await page.goto(boardPath(READONLY_SPEC));
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "readonly",
     );
-    await expect(page.getByTestId("case-class-tag")).toHaveCount(0);
+    await expect(page.getByTestId("case-class-tag")).toHaveText("feature");
   });
 
   test("the yarn key names exactly the threads on the wall", async ({
