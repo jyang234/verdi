@@ -106,29 +106,65 @@ spec-align:
 # instead of burying it in the full `go test -race ./...` output).
 #
 # lint-showcase runs TestShowcaseLintClean: the showcase corpus's own
-# internal consistency check.
+# internal consistency check (`verdi lint` exits 0 against a freshly
+# provisioned showcase store).
+#
+# GUARD (story CO-2/DC-2 — the gate must BITE): same mechanism as
+# showcase-coverage below, for the same reason. `go test -run <pat>` exits 0
+# even when <pat> matches NOTHING ("no tests to run"), so if lintclean_test.go
+# were deleted or TestShowcaseLintClean renamed, a bare `go test -run` would
+# pass VACUOUSLY and this lint-clean gate would silently vanish with `make
+# verify` still green — the exact drift this story exists to prevent. We
+# capture `-v` output and require TestShowcaseLintClean to have emitted a
+# `--- PASS:` line; its absence (deletion, rename, or skip) is a hard failure
+# here regardless of whether the package still compiles. Makefile-level on
+# purpose: a Go meta-test asserting "TestShowcaseLintClean ran" would itself
+# be deletable the very same way.
 lint-showcase:
-	go test ./internal/showcasealign/ -run TestShowcaseLintClean
+	@out="$$(go test ./internal/showcasealign/ -run TestShowcaseLintClean -v 2>&1)"; \
+	status=$$?; \
+	printf '%s\n' "$$out"; \
+	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
+	if ! printf '%s\n' "$$out" | grep -qF -- "--- PASS: TestShowcaseLintClean ("; then \
+		echo "ERROR: lint-showcase guard: required test TestShowcaseLintClean did NOT run+pass (deleted, renamed, or skipped?)." >&2; \
+		echo "       'go test -run' matching nothing exits 0 vacuously; this guard makes that silent drift a hard failure (story CO-2/DC-2)." >&2; \
+		exit 1; \
+	fi
 
-# showcase-coverage runs TestShowcaseCoverage (the capability-coverage gate)
-# plus TestReadmeExamplesFresh (Task 4.2, same feature; absent until then).
+# showcase-coverage runs TestShowcaseCoverage (the capability-coverage gate).
 #
 # GUARD (story CO-2/DC-2 — the gate must BITE): `go test -run <pat>` exits 0
 # even when <pat> matches NOTHING ("no tests to run"). So if coverage_test.go
 # were deleted or TestShowcaseCoverage renamed, a bare `go test -run` would
 # pass VACUOUSLY and this whole capability-coverage gate would silently vanish
 # with `make verify` still green — the exact drift this story exists to
-# prevent. We therefore capture `-v` output and require each named test THAT
-# EXISTS to have emitted a `--- PASS:` line:
+# prevent. We therefore capture `-v` output and require each NAMED test in the
+# `required` list below to have emitted a `--- PASS:` line:
 #   - TestShowcaseCoverage is a hard FLOOR: it MUST run+pass. Its absence is
-#     the deletion/rename attack, and is now a hard failure here regardless of
+#     the deletion/rename attack, and is a hard failure here regardless of
 #     whether the package still compiles (siblings only mention its helpers in
 #     comments, so removing it does NOT break the build — the vacuous pass is
 #     real, not hypothetical).
-#   - TestReadmeExamplesFresh is required the moment it exists (detected from
-#     its `=== RUN` line): Task 4.2 lands it with NO Makefile change and this
-#     gate immediately demands its PASS too. Until then it is a disclosed gap,
-#     not a silent one.
+#
+# TASK 4.2 WIRE-UP (README freshness, DC-3): the sibling public-readme story
+# adds a README-freshness gate. Folding it into this target is a DELIBERATE,
+# TWO-STEP change — NOT a silent auto-detect:
+#   (a) add TestReadmeExamplesFresh to internal/showcasealign/readme_test.go
+#       (the plan pins that test to THIS package, which is why the `-run`
+#       pattern below already names it — a test placed there is selected and
+#       run with no further change to the pattern); AND
+#   (b) append TestReadmeExamplesFresh to the `required` list below, so this
+#       guard then hard-demands its `--- PASS:` line.
+# Both steps are mandatory and self-checking: (a) without (b) runs the test
+# but never enforces it; (b) without (a) fails this guard LOUDLY (the named
+# test never ran) instead of passing vacuously. An earlier revision auto-
+# promoted the readme test the instant a `=== RUN TestReadmeExamplesFresh`
+# line appeared in THIS package's own `-v` output — that silently assumed 4.2
+# would place the test here, and would never fire (a permanent, silent gap)
+# if 4.2 landed it in another package. Requiring the explicit `required`-list
+# edit removes that package assumption: the gate is wired on by hand, where
+# the next author is looking, not by a fragile pattern match.
+#
 # This guard lives at the Makefile level on purpose: a Go meta-test asserting
 # "TestShowcaseCoverage ran" would itself be deletable the very same way.
 showcase-coverage:
@@ -137,9 +173,6 @@ showcase-coverage:
 	printf '%s\n' "$$out"; \
 	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
 	required='TestShowcaseCoverage'; \
-	if printf '%s\n' "$$out" | grep -qE '^=== RUN[[:space:]]+TestReadmeExamplesFresh$$'; then \
-		required="$$required TestReadmeExamplesFresh"; \
-	fi; \
 	for tc in $$required; do \
 		if ! printf '%s\n' "$$out" | grep -qF -- "--- PASS: $$tc ("; then \
 			echo "ERROR: showcase-coverage guard: required test $$tc did NOT run+pass (deleted, renamed, or skipped?)." >&2; \
