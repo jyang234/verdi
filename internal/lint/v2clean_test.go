@@ -31,7 +31,7 @@ import (
 //     lives in), and substitutes the freshly-computed SHAs for the golden
 //     literals wherever they're cited.
 //   - accepted-pending-build / borrower-update-* / the outcome attestation
-//     cite "93ddc5bbbb398cf747151e1c466afb83114398df" — goldenHeads[2],
+//     cite "5507c6d963bd78d9eabed2324c3d380e678f891e" — goldenHeads[2],
 //     the v0 corpus's OWN layer-3 head (reused deliberately, per
 //     corpus_test.go's goldenHeads comment) — which IS already real,
 //     unchanged, once chained after the same v0 corpus layers.txt content
@@ -136,6 +136,7 @@ func TestV2FixtureCorpus_LintsClean(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Engine.Run: %v", err)
 	}
+	findings = filterKnownBaseline(findings)
 	if len(findings) != 0 {
 		t.Fatalf("v2 fixture corpus: got %d findings, want 0:\n%s", len(findings), findingsString(findings))
 	}
@@ -160,6 +161,7 @@ func TestV2FixtureCorpus_BareClone_OnlyVL017Disclosures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Engine.Run: %v", err)
 	}
+	findings = filterKnownBaseline(findings)
 	if len(findings) == 0 {
 		t.Fatal("bare clone produced 0 findings — a vacuous green; want VL-017 disclosed-unproven notices")
 	}

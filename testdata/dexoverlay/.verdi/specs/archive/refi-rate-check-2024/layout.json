@@ -1,6 +1,0 @@
-{
-  "schema": "verdi.boardlayout/v1",
-  "positions": {
-    "ac-1": { "x": 40, "y": 40 }
-  }
-}

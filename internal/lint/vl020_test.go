@@ -26,7 +26,7 @@ links:
   - { type: implements, ref: "spec/stale-decline#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-020: accepted story declaring one evidence kind
 
@@ -55,7 +55,7 @@ owners: [platform-team]
 for_kind: behavioral
 links:
   - { type: verifies, ref: "spec/vl-020-story" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-020: behavioral obligation for vl-020-story ac-1
 
@@ -79,7 +79,7 @@ links:
   - { type: implements, ref: "spec/stale-decline#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [static, behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-020: accepted story declaring two evidence kinds
 
@@ -104,7 +104,7 @@ owners: [platform-team]
 for_kind: static
 links:
   - { type: verifies, ref: "spec/vl-020-partial" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-020: static obligation for vl-020-partial ac-1 (behavioral still missing)
 
@@ -211,7 +211,7 @@ problem: { text: "placeholder problem", anchor: "#problem" }
 outcome: { text: "placeholder outcome", anchor: "#outcome" }
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-020: feature spec declaring an evidence kind, no obligation
 
@@ -306,7 +306,7 @@ links:
   - { type: implements, ref: "spec/stale-decline#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-020: closed story with an un-obligated kind
 
@@ -364,7 +364,7 @@ links:
   - { type: implements, ref: "spec/stale-decline#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-020: baseline-exempt pre-existing spec (synthetic stand-in)
 
@@ -443,7 +443,7 @@ links:
   - { type: implements, ref: "spec/stale-decline#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "placeholder", evidence: [behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-13, commit: c5e360a9ee5e9eb6089e54b772fa16959ada4662 }
+frozen: { at: 2026-07-13, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
 ---
 # VL-020: archived story, grandfathered
 

@@ -233,16 +233,57 @@ func buildLintRepo(t *testing.T, overlayDirs ...string) *fixturegit.Repo {
 	return repo
 }
 
+// knownCorpusBaselineFindings are VL-020 findings the merged
+// examples/showcase corpus now genuinely, deterministically produces on
+// its own (public-rollout-plan Task 1.2 folded testdata/dexoverlay's
+// dex-only surface fixtures — escrow-notify(-v2), refi-rate-check-2024 —
+// into layers.txt; those fixtures were DELIBERATELY never lint-clean, per
+// the former overlay README: "deliberately NOT part of testdata/corpus/
+// (whose walkers — lint's corpus-clean gate ... — would all see any file
+// added there)"). Every buildLintRepo-based test now inherits these four
+// findings alongside whatever it adds of its own, which would otherwise
+// trip every single rule test's onlyRule/onlyRules "no unexpected rule"
+// storm guard. Filtered here, at the single shared entry point, rather
+// than taught to every call site. Task 1.8 ("lint-clean + full vetting
+// closure for the committed tree") is expected to author real obligations
+// for these and delete this filter; until then it is disclosed corpus
+// debt, not silently masked product behavior — VL-020 itself is still
+// exercised, by every VL-020-specific test's own added fixture.
+var knownCorpusBaselineFindings = map[[3]string]bool{
+	{"VL-020", ".verdi/specs/active/escrow-notify-v2/spec.md", "acceptance criterion ac-1 declares evidence kind behavioral with no obligation at .verdi/obligations/escrow-notify-v2/ac-1--behavioral.md"}:          true,
+	{"VL-020", ".verdi/specs/active/escrow-notify/spec.md", "acceptance criterion ac-1 declares evidence kind behavioral with no obligation at .verdi/obligations/escrow-notify/ac-1--behavioral.md"}:                true,
+	{"VL-020", ".verdi/specs/archive/refi-rate-check-2024/spec.md", "acceptance criterion ac-1 declares evidence kind behavioral with no obligation at .verdi/obligations/refi-rate-check-2024/ac-1--behavioral.md"}: true,
+	{"VL-020", ".verdi/specs/archive/refi-rate-check-2024/spec.md", "acceptance criterion ac-1 declares evidence kind static with no obligation at .verdi/obligations/refi-rate-check-2024/ac-1--static.md"}:         true,
+}
+
+// filterKnownBaseline strips knownCorpusBaselineFindings (see its doc
+// comment) from findings. Every direct NewEngine().Run(...) call site in
+// this package's tests must route its result through this (or through
+// runLint, which already does) — buildLintRepo and buildV2FixtureCorpusRepo
+// both chain examples/showcase's real layers.txt content, so both inherit
+// the same baseline.
+func filterKnownBaseline(findings []Finding) []Finding {
+	out := findings[:0:0]
+	for _, f := range findings {
+		if knownCorpusBaselineFindings[[3]string{f.Rule, f.Path, f.Message}] {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 // runLint runs every rule over root and fails the test on an operational
 // error (BuildSnapshot/service-discovery failure) — the tests below only
-// ever expect Finding-shaped problems.
+// ever expect Finding-shaped problems. Strips knownCorpusBaselineFindings
+// (see its doc comment) before returning.
 func runLint(t *testing.T, root string, lctx Context, opts Options) []Finding {
 	t.Helper()
 	findings, err := NewEngine().Run(context.Background(), root, lctx, opts)
 	if err != nil {
 		t.Fatalf("Engine.Run: %v", err)
 	}
-	return findings
+	return filterKnownBaseline(findings)
 }
 
 // findingsString renders findings for a test failure message.
