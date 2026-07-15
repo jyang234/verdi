@@ -62,6 +62,14 @@ func TestDiscoverServices_Happy(t *testing.T) {
 	// this repo's own store does not discover testdata/svcfix and
 	// examples/showcase's fixture .flowmap.yaml files as real services.
 	writeFileT(t, filepath.Join(root, "testdata", "fixturesvc", flowmapFile), "service: ghost\n")
+	// examples/ is this module's other fixture directory: examples/showcase's
+	// loansvc service root is a corpus fixture (it satisfies the corpus's own
+	// svc/loansvc/boundary-contract VL-003 link), not a live service of this
+	// repo. skipDirNames excludes it so self-hosting this repo's own store
+	// (sync --produce) does not discover an examples/-nested service root and
+	// try to flowmap-graph it. Skipping keys on the dir NAME "examples", so a
+	// showcase store linted from inside examples/showcase still finds loansvc.
+	writeFileT(t, filepath.Join(root, "examples", "showcase", "ghostsvc", flowmapFile), "service: ghost\n")
 
 	got, err := DiscoverServices(root)
 	if err != nil {
