@@ -132,6 +132,15 @@ func run() error {
 		return fmt.Errorf("provisioning draft-boards fixtures: %w", err)
 	}
 
+	// The showcase live-draft feature (payoff-quote-portal) on its own
+	// design branch — the "one live draft on a design branch" lifecycle
+	// stage (see provision_showcase_draft.go). Runs last among the branch
+	// provisioners; it pre-cuts and seeds its worktree and restores the
+	// serving checkout to designBranch when done.
+	if err := provisionShowcaseDraft(storeRoot); err != nil {
+		return fmt.Errorf("provisioning showcase draft fixtures: %w", err)
+	}
+
 	dexSrv := &http.Server{Addr: dexAddr, Handler: http.FileServer(http.Dir(dexOut))}
 	dexLn, err := net.Listen("tcp", dexAddr)
 	if err != nil {

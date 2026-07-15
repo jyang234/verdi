@@ -237,3 +237,33 @@ Procedure: identical to Tasks 1.5/1.6's iterative `TestFixtureRepo_MatchesGolden
 - `go build ./...`, `go vet ./...`, `go test ./...` (whole module), `make spec-align`, `make fixture`, `make lint-store` all re-run clean after the cascade; full `make verify` output is in `.superpowers/sdd/task-1.7-report.md`.
 
 `examples/showcase` now has a vetting row for every file Tasks 1.4-1.7 touched or created. Task 1.8 (out of this task's scope) remains responsible for the final whole-tree sweep confirming every remaining untouched file (mostly `mutable/`/`derived/` fixtures and the two v2-supersession-chain pairs already vetted incidentally by Task 1.5) also has a row.
+
+## Task 2.1 — `payoff-quote-portal` live-draft branch (provisioned, not committed)
+
+Per design §4.1, the showcase design branches are "named, documented, and
+vetted as part of the showcase." These artifacts are authored by
+`cmd/e2eharness/provision_showcase_draft.go` onto `design/payoff-quote-portal`
+(a draft never lands on main, VL-004), so they live in the harness's scratch
+store, not the committed tree — but they render publicly on the workbench's
+`/b/` draft-boards surface and carry the same three-column bar. Lint-clean is
+proven by running `verdi lint` from the provisioned managed worktree: zero
+findings whose path is a `payoff-quote-portal` artifact (the only findings on
+that single-commit scratch store are the pre-existing corpus-wide VL-009/
+VL-003/VL-015 pin-resolution noise the golden fixturegit history resolves —
+the Task 3.1 single-commit caveat, unrelated to this content).
+
+| artifact | lint-clean | exemplary | coherent+justified | notes |
+|---|---|---|---|---|
+| `spec/payoff-quote-portal` (draft feature spec) | Y | Y | Y | Class feature, status draft, `story: jira:LOAN-1533`, owner `servicing-experience`; 2 ACs across behavioral/attestation/static (VL-006/VL-020); `impacts`/`declares.boundaries` over canon services borrower-portal/loansvc/doc-vault; `open_questions: [oq-1]` carries the rate-lock policy question — VL-017's carried path, byte-identical to the open question sticky. Production-length problem/outcome + body sections. |
+| `diagram/payoff-quote-flow` (proposal tier) | Y | Y | Y | `class: proposal`, `derived_from` pins the real corpus base `diagram/loansvc-topology@<commit>` (VL-021 resolves it); `source_digest` is the REAL `diagrambase.CanonicalGraphDigest` of that base, `digest` the base body's content sha256 — both well-formed sha256 (VL-021 format check). Flowchart of the borrower-portal→loansvc→doc-vault payoff-quote flow. |
+| `data/mutable/annotations/spec--payoff-quote-portal.jsonl` (3 stickies) | Y | Y | Y | Seeded into the branch's pre-cut managed worktree so the authoring board renders its stickies. One `question`/`resolved` (VL-017's resolved-in-place path), one `question`/`open` whose body is oq-1's carried text (VL-017's carried path — the twin the spec object formalizes), one `agent-task` working note. Target refs pinned to the fixture commit; author handles follow the corpus's first-name convention. |
+
+### VL-017 both-paths proof
+
+VL-017 is exemplary on the payoff draft precisely because both legal
+dispositions appear on one wall: the **resolved** annotation
+(`status: resolved`) is settled in place and skipped by the rule; the
+**carried** annotation (`status: open`, body byte-identical to the declared
+`open_questions` entry oq-1) is matched by `carriedAsOpenQuestion` and passes
+clean. Neither fires a finding — the two ways a new-class spec may honestly
+leave a question is what the fixture shows.

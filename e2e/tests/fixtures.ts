@@ -526,3 +526,47 @@ export function branchBoardPath(branch: string, spec: string): string {
 export function worktreeSpecPath(name: string, spec: string): string {
   return `.verdi/data/worktrees/${name}/.verdi/specs/active/${spec}/spec.md`;
 }
+
+// ---------------------------------------------------------------------------
+// Showcase live-draft feature (cmd/e2eharness/provision_showcase_draft.go)
+// ---------------------------------------------------------------------------
+
+// The canonical "one live draft on a design branch" lifecycle stage (public
+// rollout design §4.3): the payoff-quote-portal feature is authored on
+// design/payoff-quote-portal (jira:LOAN-1533) and never committed to main
+// (VL-004). The harness pre-cuts and seeds its managed worktree, so its
+// authoring board renders under /b/ with its object model AND its
+// open-question stickies. BINDING: every name/text below mirrors
+// provision_showcase_draft.go verbatim — change them together.
+export const SHOWCASE_DRAFT_SPEC = "payoff-quote-portal";
+export const SHOWCASE_DRAFT_BRANCH = `design/${SHOWCASE_DRAFT_SPEC}`;
+
+// Substrings of the draft's problem/outcome placards.
+export const SHOWCASE_DRAFT_PROBLEM_SNIPPET = "payoff quote";
+export const SHOWCASE_DRAFT_OUTCOME_SNIPPET = "good through a stated date";
+
+// The draft's two declared acceptance criteria (each declares evidence
+// kinds), rendered as object cards on the wall.
+export const SHOWCASE_DRAFT_ACS = ["ac-1", "ac-2"] as const;
+
+// The declared open question (rendered as an oq card) — VL-017's "carried"
+// path: the same text a still-open question sticky carries, formalized as a
+// real open_questions object on the spec.
+export const SHOWCASE_DRAFT_OQ_ID = "oq-1";
+export const SHOWCASE_DRAFT_OQ_CARRIED =
+  "does a payoff quote's good-through date have to honor a rate lock that expires inside the quote window?";
+
+// VL-017's "resolved" path: a question sticky settled in place (status
+// resolved) rather than carried onto the spec.
+export const SHOWCASE_DRAFT_OQ_RESOLVED =
+  "should the payoff quote require identity re-verification before it is shown?";
+
+// The proposal-tier diagram authored on the branch (VL-021: derived_from a
+// real corpus diagram + a well-formed sha256 digest).
+export const SHOWCASE_DRAFT_DIAGRAM = "payoff-quote-flow";
+
+// The managed worktree's deterministic store-relative home for a diagram —
+// where the inspection server reads the branch's committed proposal.
+export function worktreeDiagramPath(name: string, diagram: string): string {
+  return `.verdi/data/worktrees/${name}/.verdi/diagrams/${diagram}.mermaid`;
+}
