@@ -1,3 +1,3 @@
 [
-  { "schema": "verdi.evidence/v1", "evidence_for": ["ac-3"], "kind": "behavioral", "verdict": "abstain", "witness": "", "producer": "partial_refund_golden", "provenance": { "source": "local", "pipeline": "", "commit": "30c5ff945413930879823be6db0ccc07d5abd6b9" }, "digest": "sha256:3162edc6697952c1d8735e1fa658f661230b0679c5da98b665cfd49a504d49d8" }
+  { "schema": "verdi.evidence/v1", "evidence_for": ["ac-3"], "kind": "behavioral", "verdict": "abstain", "witness": "", "producer": "partial_refund_golden", "provenance": { "source": "local", "pipeline": "", "commit": "74c957aed504671bd4fc4ceb30907d2f4813e9b7" }, "digest": "sha256:3162edc6697952c1d8735e1fa658f661230b0679c5da98b665cfd49a504d49d8" }
 ]
