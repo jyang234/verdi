@@ -128,8 +128,10 @@ your first feature and open its board:
 
 ```console
 $ verdi design start --kind feature --name my-first-feature
+design start: no toolchain configured (verdi.yaml toolchain: block, I-4); skipping baseline regeneration
 design start: created branch design/my-first-feature
 design start: scaffolded spec/my-first-feature (kind: feature, status: draft)
+design start: board: http://127.0.0.1:4173/board/spec/my-first-feature (run `verdi serve` from this checkout)
 $ verdi serve      # edit the draft spec and its board at http://127.0.0.1:4173
 ```
 
