@@ -60,7 +60,7 @@ func TestDiscoverServices_Happy(t *testing.T) {
 	// testdata/ is this module's own fixture directory (PLAN.md §2: "the
 	// hermetic fixture"); phase 4 added it to skipDirNames so self-hosting
 	// this repo's own store does not discover testdata/svcfix and
-	// testdata/corpus's fixture .flowmap.yaml files as real services.
+	// examples/showcase's fixture .flowmap.yaml files as real services.
 	writeFileT(t, filepath.Join(root, "testdata", "fixturesvc", flowmapFile), "service: ghost\n")
 
 	got, err := DiscoverServices(root)

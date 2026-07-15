@@ -20,14 +20,14 @@ import (
 
 const svcfixSrcDir = "../../testdata/svcfix"
 const cannedSrcDir = "../../testdata/svcfix-canned"
-const corpusSrcDir = "../../testdata/corpus"
+const corpusSrcDir = "../../examples/showcase"
 const bundleGoldenDir = "../../testdata/svcfix-canned/bundle-golden"
 
 const testCommit = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 const testRef = "spec/stale-decline"
 
 // buildTestStore assembles a minimal store root in a temp dir: a
-// verdi.yaml, the stale-decline spec (copied from testdata/corpus, whose
+// verdi.yaml, the stale-decline spec (copied from examples/showcase, whose
 // AC ids testdata/svcfix's verdi.bindings.yaml binds to), and a copy of
 // testdata/svcfix as the one discovered service.
 func buildTestStore(t *testing.T) string {

@@ -62,7 +62,7 @@ func TestGrandfatherArchive_OQ3(t *testing.T) {
 // open-question) — every entry individually valid AND bidirectionally
 // reconciled against its board.json sibling below.
 //
-// This is deliberately NOT testdata/corpus's own archived quartet
+// This is deliberately NOT examples/showcase's own archived quartet
 // (loan-refi-2023): that fixture's board.json carries an empty
 // stickies: [] and its spec.md carries no dispositions: block at all, so
 // TestClean_CorpusLintsGreen alone never actually exercises VL-014's
@@ -269,7 +269,7 @@ const archivedRoundFourLayoutJSON = `{
 
 // archivedRoundFourRollupJSON and archivedRoundFourDeviationReport
 // complete the archived quartet (03: "spec, board.json [here: layout.json],
-// rollup.json, deviation-report.md"), mirroring testdata/corpus's own
+// rollup.json, deviation-report.md"), mirroring examples/showcase's own
 // loan-refi-2023 quartet's shape. Neither file is read by any VL-xxx
 // rule (only spec.md and layout.json/board.json are lint-relevant), so
 // their presence here is about proving the FULL quartet — not just the

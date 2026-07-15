@@ -65,7 +65,7 @@ func Resolve(root, arg string) (*artifact.SpecFrontmatter, error) {
 // shared seam, consumed by every ref/story-argument-taking verb
 // (matrix, rollup, the verdict viewer, MCP tools, and more), all of which
 // already depend on its feature-only resolution semantics against the
-// real corpus (testdata/corpus/'s stale-decline, class: feature, and
+// real corpus (examples/showcase/'s stale-decline, class: feature, and
 // borrower-update-api, class: story, both legitimately carry
 // story: jira:LOAN-1482 — a feature's OPTIONAL epic/objective story: field
 // and a story's REQUIRED own story: field are different tracker refs that

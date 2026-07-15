@@ -5,7 +5,7 @@ import "testing"
 // syntheticReaffirmation is a valid `kind: reaffirmation` frontmatter
 // fixture (02 §Kind registry: "(none — existence is the record)"; 03 §The
 // amendment ladder rung 4, R4-I-4), modeled on
-// testdata/corpus/.verdi/reaffirmations/jira-loan-1483/ac-1.md.
+// examples/showcase/.verdi/reaffirmations/jira-loan-1483/ac-1.md.
 const syntheticReaffirmation = `---
 id: reaffirmation/witness--ac-1
 kind: reaffirmation

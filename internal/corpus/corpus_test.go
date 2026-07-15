@@ -1,4 +1,4 @@
-// Package corpus builds the testdata/corpus fixture into a deterministic
+// Package corpus builds the examples/showcase fixture into a deterministic
 // git repository via internal/fixturegit and decodes every file in it
 // through internal/artifact, proving the whole fixture corpus is both
 // git-real (stable, golden SHAs) and contract-valid (every file decodes
@@ -21,8 +21,8 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
-// corpusDir is testdata/corpus relative to this package.
-const corpusDir = "../../testdata/corpus"
+// corpusDir is examples/showcase relative to this package.
+const corpusDir = "../../examples/showcase"
 
 // goldenHeads are the fixturegit commit SHAs for layers 1, 2, and 3,
 // baked in once per PLAN.md §4 ("Pins inside corpus files must be the
@@ -39,7 +39,7 @@ var goldenHeads = []string{
 // TestV2SupersessionRepo_MatchesGoldenSHAs builds and re-verifies this same
 // history) — a second, independent repo rather than a fourth layer on the
 // v0 corpus's history, since nothing about the v2 overlay needs to
-// interleave with v0's existing golden commits. testdata/corpus/'s v2
+// interleave with v0's existing golden commits. examples/showcase/'s v2
 // fixtures (loan-workflow, loan-workflow-v2, and the reaffirmation that
 // pins loan-workflow-v2's commit) cite these SHAs, so this walk test's
 // accepted-token set grows to include them.

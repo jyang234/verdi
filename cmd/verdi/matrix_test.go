@@ -14,16 +14,16 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
-// corpusTestdataDir is testdata/corpus relative to this package, the same
+// corpusTestdataDir is examples/showcase relative to this package, the same
 // fixture internal/corpus's own tests build (the shared "committed zone
 // gets fixturegit-built, mutable/derived gets copied onto disk verbatim"
 // pattern).
-const corpusTestdataDir = "../../testdata/corpus"
+const corpusTestdataDir = "../../examples/showcase"
 
-// buildCorpusRepo builds testdata/corpus's committed zone into a real
+// buildCorpusRepo builds examples/showcase's committed zone into a real
 // fixturegit repo (layers.txt-driven, same as internal/corpus's own
 // buildFixtureRepo), writes a minimal verdi.yaml so store.FindRoot can
-// find it, and copies testdata/corpus/derived/ onto disk under
+// find it, and copies examples/showcase/derived/ onto disk under
 // .verdi/data/derived/ — mirroring the real store's derived tree, using
 // the corpus's own commit dir names, which are themselves real
 // fixturegit-built commit SHAs (layers 2 and 3), so gitx.IsAncestor
@@ -47,7 +47,7 @@ func buildCorpusRepo(t *testing.T) *fixturegit.Repo {
 	repo := fixturegit.Build(t, layers)
 
 	// verdi.yaml is not part of the corpus's own committed-zone fixture
-	// (testdata/corpus predates it needing one); write a minimal one
+	// (examples/showcase predates it needing one); write a minimal one
 	// directly to disk — store.FindRoot only requires the file to exist,
 	// not be git-tracked.
 	if err := os.MkdirAll(filepath.Join(repo.Dir, ".verdi"), 0o755); err != nil {
@@ -58,7 +58,7 @@ func buildCorpusRepo(t *testing.T) *fixturegit.Repo {
 	}
 
 	// Derived data lives in data/ (gitignored, never fixturegit-tracked);
-	// copy testdata/corpus/derived/ verbatim onto the built repo's own
+	// copy examples/showcase/derived/ verbatim onto the built repo's own
 	// data/derived/ tree, preserving the corpus's commit-named
 	// subdirectories.
 	copyDerivedTree(t, filepath.Join(corpusTestdataDir, "derived"), filepath.Join(repo.Dir, ".verdi", "data", "derived"))
@@ -96,7 +96,7 @@ func copyDerivedTree(t *testing.T, src, dst string) {
 	}
 }
 
-// parseCorpusLayers reads testdata/corpus/layers.txt, the same format
+// parseCorpusLayers reads examples/showcase/layers.txt, the same format
 // internal/corpus/corpus_test.go's own parseLayers reads (duplicated here
 // rather than exported cross-package, since it is test-only plumbing).
 func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
@@ -154,7 +154,7 @@ func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 // eligible either — ac-2 (pending) and ac-3 (no-signal) keep it short of
 // the all-evidenced-or-waived bar.
 //
-// Note on OBLIGATION (spec/obligation-wall ac-1): testdata/corpus carries
+// Note on OBLIGATION (spec/obligation-wall ac-1): examples/showcase carries
 // no .verdi/obligations/ tree at all, so every declared kind reads as the
 // disclosed "(no obligation)" marker (dc-2) — this golden is also the
 // proof that a wholly un-obligated story still renders fully and exits 0
@@ -194,7 +194,7 @@ story.eligible: false
 // discriminator misrouted every such story into FoldFeature, which fails
 // closed ("not a feature spec") — exit 2 with empty stdout. Routing on
 // spec.Class == artifact.ClassFeature keeps the round-four story on the
-// story-level fold path. Fixture: testdata/corpus's borrower-update-api
+// story-level fold path. Fixture: examples/showcase's borrower-update-api
 // (class: story, problem/outcome present, story jira:LOAN-1482, one AC).
 func TestCmdMatrix_RoundFourStory_RendersStoryFold(t *testing.T) {
 	repo := buildCorpusRepo(t)

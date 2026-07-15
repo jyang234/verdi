@@ -5,12 +5,12 @@ import (
 	"testing"
 )
 
-// corpusStoreRoot is testdata/corpus relative to this package — the same
+// corpusStoreRoot is examples/showcase relative to this package — the same
 // committed fixture internal/corpus, internal/index, and internal/dex build
 // on. Its committed zone carries the story's real attestation and waivers
 // under I-31's canonical <story> path segment,
 // RefSlug("jira:LOAN-1482") = "jira-loan-1482".
-const corpusStoreRoot = "../../testdata/corpus"
+const corpusStoreRoot = "../../examples/showcase"
 
 // canonicalStorySlug is what cmd/verdi/matrix.go passes as StorySlug for the
 // corpus's feature story: store.RefSlug("jira:LOAN-1482"). Spelled literally

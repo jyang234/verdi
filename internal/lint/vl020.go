@@ -161,7 +161,7 @@ func (vl020) Check(in *RunInput) []Finding {
 //
 // The last two entries (borrower-update-api, borrower-update-mobile) are a
 // SEPARATE provenance: not this repository's own real store, but
-// testdata/corpus's round-four "v2 fixture corpus" (internal/lint's
+// examples/showcase's round-four "v2 fixture corpus" (internal/lint's
 // v2clean_test.go, internal/artifact's own v2fixture_test.go) — golden
 // fixture files several packages chain into git-real repos and cite by
 // exact, precomputed commit SHA (goldenShaA/B, goldenHeads[2], etc., per
@@ -182,6 +182,6 @@ var obligationGateBaseline = map[string]bool{
 	"remote-and-ci":              true, // 6 pairs, closed (archive)
 	"runtime-evidence":           true, // 4 pairs, closed (archive)
 
-	"borrower-update-api":    true, // 2 pairs; testdata/corpus v2 fixture corpus (SHA-pinned, see above)
-	"borrower-update-mobile": true, // 3 pairs; testdata/corpus v2 fixture corpus (SHA-pinned, see above)
+	"borrower-update-api":    true, // 2 pairs; examples/showcase v2 fixture corpus (SHA-pinned, see above)
+	"borrower-update-mobile": true, // 3 pairs; examples/showcase v2 fixture corpus (SHA-pinned, see above)
 }

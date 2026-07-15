@@ -6,7 +6,7 @@
 // "build + provision + start" third of that: builds the real verdi binary
 // (build-then-exec, not `go run`, so the suite exercises the exact binary
 // CI would ship — mirroring the Makefile's own lint-store target),
-// provisions a scratch store from testdata/corpus (the same fixture
+// provisions a scratch store from examples/showcase (the same fixture
 // internal/workbench's own Go tests build on — provision.go seeds it as
 // one throwaway real git commit, not fixturegit's golden-SHA-pinned
 // build, since nothing here asserts a specific commit hash), builds a

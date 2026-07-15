@@ -115,7 +115,7 @@ func TestIndexHandler_Home(t *testing.T) {
 	provisionHomeRefs(t, repo.Dir)
 
 	// Add a discoverable service so the Services section has real data
-	// (testdata/corpus carries no .flowmap.yaml of its own).
+	// (examples/showcase carries no .flowmap.yaml of its own).
 	svcDir := filepath.Join(repo.Dir, "home-service")
 	if err := os.MkdirAll(svcDir, 0o755); err != nil {
 		t.Fatalf("creating service dir: %v", err)

@@ -8,10 +8,10 @@
 // BINDING NOTE (V1-P6, amended V1-P8): the workbench constants below are
 // FINAL — they are provisioned verbatim by cmd/e2eharness/provisionv2.go
 // (a draft spec on a design branch cannot live in the committed
-// testdata/corpus tree, VL-004, so the harness authors the board fixtures
+// examples/showcase tree, VL-004, so the harness authors the board fixtures
 // onto a scratch design branch at startup; see tests-v1/README.md
 // "Harness obligations"). The dex constants were finalized by V1-P8 to
-// the v2 fixture overlay's real refs (testdata/corpus +
+// the v2 fixture overlay's real refs (examples/showcase +
 // testdata/dexoverlay). One V1-P6 constant moved with them: ADR_NAME —
 // shared by the board's ref-card tests and the dex exemption-page test —
 // now names the ADR the v2 fixture feature's dc-1 actually exempts
@@ -101,7 +101,7 @@ export const REVIEW_FEED_TOTAL = 3;
 export const DEX_BASE = `http://127.0.0.1:${resolvePorts().dex}`;
 
 // The v2 fixture feature spec (three outcome ACs, three stubs, dc-1
-// exempting ADR_NAME — PLAN-V1 §4's overlay, testdata/corpus). Finalized
+// exempting ADR_NAME — PLAN-V1 §4's overlay, examples/showcase). Finalized
 // by V1-P8.
 export const FEATURE_SPEC = "accepted-pending-build";
 
@@ -125,7 +125,7 @@ export const STORY_WITH_PENDING_SUPERSESSION = "borrower-update-mobile";
 // The by-story axis's two archived quartets (05 §Verdi-dex IA): the
 // round-four form archives layout.json in the board slot
 // (testdata/dexoverlay); the grandfathered v0 form keeps its frozen
-// board.json (testdata/corpus).
+// board.json (examples/showcase).
 export const ARCHIVED_STORY_ROUND4 = "refi-rate-check-2024";
 export const ARCHIVED_STORY_GRANDFATHERED = "loan-refi-2023";
 
@@ -315,7 +315,7 @@ export const PIN_TRASH_ADR = "adr/0003-retry-policy";
 export const MERMAID_SPEC = "mermaid-demo";
 export const MERMAID_SPEC_REF = `spec/${MERMAID_SPEC}`;
 
-// The incumbent diagram-kind artifact (testdata/corpus, no class:
+// The incumbent diagram-kind artifact (examples/showcase, no class:
 // discriminator): illustrative BY CLASS (dc-2). Same artifact PIN_DIAGRAM
 // names — aliased so the tier tests read in tier vocabulary.
 export const ILLUSTRATIVE_DIAGRAM = PIN_DIAGRAM;

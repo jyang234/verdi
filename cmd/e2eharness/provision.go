@@ -9,13 +9,13 @@ import (
 	"path/filepath"
 )
 
-// provisionStore builds a scratch store at storeRoot: testdata/corpus's
+// provisionStore builds a scratch store at storeRoot: examples/showcase's
 // committed zone (.verdi/{specs,adr,diagrams,attestations,waivers,
 // conflicts}) as one real git commit (a fresh, throwaway repo — not
 // fixturegit's golden-SHA-pinned build, since nothing here asserts a
 // specific commit hash; it only needs REAL git history for gitx's
 // RevParse/CommitDate/AddAll/CreateCommit, which `verdi serve`'s backend
-// and commit-to-design both exercise), plus testdata/corpus's mutable/ and
+// and commit-to-design both exercise), plus examples/showcase's mutable/ and
 // derived/ trees copied in UNTRACKED (VL-013: never git-add those).
 //
 // A minimal verdi.yaml is written too (not load-bearing for anything this
@@ -28,7 +28,7 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return err
 	}
 
-	corpusDir := filepath.Join(moduleRoot, "testdata", "corpus")
+	corpusDir := filepath.Join(moduleRoot, "examples", "showcase")
 	if err := copyTree(filepath.Join(corpusDir, ".verdi"), filepath.Join(storeRoot, ".verdi")); err != nil {
 		return fmt.Errorf("copying committed zone: %w", err)
 	}
@@ -54,11 +54,11 @@ func provisionStore(moduleRoot, storeRoot string) error {
 	}
 
 	// A component spec whose markdown body carries a fenced ```mermaid block.
-	// testdata/corpus already provisions a diagram-KIND artifact
+	// examples/showcase already provisions a diagram-KIND artifact
 	// (diagrams/loansvc-topology.mermaid, copied whole above), so the e2e
 	// store exercises both mermaid surfaces: the diagram kind and an inline
 	// fence inside ordinary markdown. This one lives only in the throwaway
-	// scratch store (not testdata/corpus) so it perturbs no golden-SHA fixture
+	// scratch store (not examples/showcase) so it perturbs no golden-SHA fixture
 	// the Go tests pin.
 	mermaidDemoDir := filepath.Join(storeRoot, ".verdi", "specs", "active", "mermaid-demo")
 	if err := os.MkdirAll(mermaidDemoDir, 0o755); err != nil {
@@ -84,7 +84,7 @@ func provisionStore(moduleRoot, storeRoot string) error {
 	// here — before the corpus commit — so it is on main and on every
 	// branch cut from main, including the serving checkout's. Scratch-only
 	// like mermaid-demo (a name reused across main and a design branch
-	// cannot live in testdata/corpus without perturbing other suites).
+	// cannot live in examples/showcase without perturbing other suites).
 	ledgerDir := filepath.Join(storeRoot, ".verdi", "specs", "active", dbSameSpecName)
 	if err := os.MkdirAll(ledgerDir, 0o755); err != nil {
 		return fmt.Errorf("creating %s spec dir: %w", dbSameSpecName, err)
@@ -165,7 +165,7 @@ func gitInitAndCommit(dir string) error {
 	if err := runGit(dir, nil, "add", "-A"); err != nil {
 		return err
 	}
-	return runGit(dir, nil, "commit", "--quiet", "--no-verify", "-m", "e2e scratch store: seeded from testdata/corpus")
+	return runGit(dir, nil, "commit", "--quiet", "--no-verify", "-m", "e2e scratch store: seeded from examples/showcase")
 }
 
 // copyTree recursively copies every regular file under src to dst. A

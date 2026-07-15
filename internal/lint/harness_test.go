@@ -16,13 +16,13 @@ import (
 
 // corpusDir and violationsDir mirror internal/corpus and internal/index's
 // own testdata references (../../testdata/... from this package).
-const corpusDir = "../../testdata/corpus"
+const corpusDir = "../../examples/showcase"
 const violationsDir = "../../testdata/violations"
 
 // setupManifestYAML is the store manifest every lint test's repo carries —
 // forge: gitlab (so VL-012 expects gitlab-generated), a configured jira
 // story-provider scheme (VL-005), and an empty gated_generated allowlist
-// (VL-008). Kept separate from testdata/corpus itself (which carries no
+// (VL-008). Kept separate from examples/showcase itself (which carries no
 // verdi.yaml of its own) so this package never touches phase 2/3's golden
 // corpus fixture or its pinned SHAs.
 const setupManifestYAML = `schema: verdi.layout/v1
@@ -48,7 +48,7 @@ const setupGitAttributes = `.verdi/specs/*/*/board.json          gitlab-generate
 `
 
 // loansvcFlowmapYAML and loansvcBoundaryContractJSON satisfy
-// testdata/corpus's own `impacts: { ref: svc/loansvc/boundary-contract }`
+// examples/showcase's own `impacts: { ref: svc/loansvc/boundary-contract }`
 // link (stale-decline/spec.md) — the corpus fixture names a "loansvc"
 // service that phase 3's own svcfix fixture (named "svcfix") does not
 // provide. Written directly to the built repo's working tree, untracked:
@@ -67,7 +67,7 @@ const loansvcBoundaryContractJSON = `{
 }
 `
 
-// parseCorpusLayers reads testdata/corpus/layers.txt (the same manifest
+// parseCorpusLayers reads examples/showcase/layers.txt (the same manifest
 // internal/corpus and internal/index's own tests use) and returns, in
 // ascending layer order, each layer's corpus-relative file paths as
 // fixturegit Layers.

@@ -16,9 +16,9 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// rollupFixtureSpec is a scratch (not testdata/corpus) feature spec
+// rollupFixtureSpec is a scratch (not examples/showcase) feature spec
 // authored directly for this test file: PLAN.md Phase 11 explicitly warns
-// against hard-coding testdata/corpus golden SHAs here since another agent
+// against hard-coding examples/showcase golden SHAs here since another agent
 // is rebaking that fixture's content, so rollup's end-to-end coverage gets
 // its own small, self-contained fixturegit repo instead.
 const rollupFixtureSpec = `---

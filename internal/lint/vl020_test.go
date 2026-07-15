@@ -344,7 +344,7 @@ func TestVL020_ClosedStoryMissingObligation_StillRefuses(t *testing.T) {
 // vl020BaselineStandInMD is a synthetic spec using the literal id/directory
 // name "disclosures-panel" — one of obligationGateBaseline's real entries —
 // to pin the disclosed pre-existing-corpus exemption's actual mechanism
-// under this package's hermetic test harness (testdata/corpus does not
+// under this package's hermetic test harness (examples/showcase does not
 // carry the real spec/disclosures-panel content at all, so this is a
 // deliberate stand-in exercising the exemption map). obligation-artifact/
 // -gate/-wall were removed from the baseline once they carried their own

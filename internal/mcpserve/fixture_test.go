@@ -37,7 +37,7 @@ Some component notes.
 
 // buildFixture builds a small, self-contained fixturegit repo exercising
 // enough of the store to exhaust every mcpserve tool — deliberately NOT
-// testdata/corpus (PLAN.md Phase 9: "do NOT hard-code testdata/corpus
+// examples/showcase (PLAN.md Phase 9: "do NOT hard-code examples/showcase
 // golden SHAs, another agent is rebaking them"). Every commit SHA used
 // below is learned from a real (deterministic, per fixturegit's fixed
 // author/committer/date) git build, never hardcoded: a throwaway

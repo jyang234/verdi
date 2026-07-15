@@ -12,15 +12,15 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
-// corpusDir is testdata/corpus relative to this package — the same
+// corpusDir is examples/showcase relative to this package — the same
 // committed, deterministic fixture internal/dex, internal/index, and
 // internal/lint's own tests build on (PLAN.md §4), and this phase's own
-// assignment names explicitly: "testdata/corpus (derived records at two
+// assignment names explicitly: "examples/showcase (derived records at two
 // commits — the verdict viewer's fixture)".
-const corpusDir = "../../testdata/corpus"
+const corpusDir = "../../examples/showcase"
 
 // corpusGoldenHeads mirrors internal/dex's own golden SHA constants:
-// layers 1-3 reproduce testdata/corpus's own three layers byte-identically,
+// layers 1-3 reproduce examples/showcase's own three layers byte-identically,
 // so every frozen stamp and pinned ref those files carry stays honest, and
 // the derived/spec--stale-decline/<commit>/verdicts.json directories (keyed
 // by these exact SHAs) line up with the built repo's real history.
@@ -69,7 +69,7 @@ func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 }
 
 // buildWorkbenchFixtureRepo builds a git repo whose first three commits
-// are byte-identical to testdata/corpus's own three layers (reproducing
+// are byte-identical to examples/showcase's own three layers (reproducing
 // corpusGoldenHeads exactly), then overlays the corpus's mutable/ and
 // derived/ trees UNTRACKED (VL-013: nothing under data/ is ever
 // git-tracked — the real store's mutable/derived zones are filesystem
@@ -96,7 +96,7 @@ func buildWorkbenchFixtureRepo(t *testing.T) *fixturegit.Repo {
 
 	for i, want := range corpusGoldenHeads {
 		if repo.Heads[i] != want {
-			t.Fatalf("layer %d SHA = %s, want golden %s (corpus layers 1-3 must stay byte-identical to testdata/corpus's own fixture)", i+1, repo.Heads[i], want)
+			t.Fatalf("layer %d SHA = %s, want golden %s (corpus layers 1-3 must stay byte-identical to examples/showcase's own fixture)", i+1, repo.Heads[i], want)
 		}
 	}
 

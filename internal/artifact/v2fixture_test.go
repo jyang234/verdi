@@ -10,13 +10,13 @@ import (
 )
 
 // This file is V1-P1's "table-driven decode goldens over the extended
-// testdata/corpus/, mirroring PLAN.md §5 Phase 2's pattern" (brief §Test
+// examples/showcase/, mirroring PLAN.md §5 Phase 2's pattern" (brief §Test
 // strategy): the v2 fixture overlay authored by this phase's §4 appendix.
 
-// v2CorpusDir is testdata/corpus relative to this package — the same tree
+// v2CorpusDir is examples/showcase relative to this package — the same tree
 // internal/corpus's v0 goldens read, extended additively (nothing v0
 // removed, A8).
-const v2CorpusDir = "../../testdata/corpus"
+const v2CorpusDir = "../../examples/showcase"
 
 // v2InvalidDir holds this phase's decode-failure twins, mirroring
 // testdata/corpus-invalid/'s v0 convention (see its README).
@@ -24,7 +24,7 @@ const v2InvalidDir = "../../testdata/corpus-invalid-v2"
 
 // --- The rung-4 supersession pair's dedicated fixturegit history ---
 //
-// Unlike v0's testdata/corpus (one shared fixturegit repo driven by
+// Unlike v0's examples/showcase (one shared fixturegit repo driven by
 // layers.txt), this pair gets its own small, independent history: nothing
 // here needs to interleave with the v0 corpus's existing golden SHAs, and
 // keeping it separate means the v0 corpus's own SHA-locked tests
@@ -35,7 +35,7 @@ const v2InvalidDir = "../../testdata/corpus-invalid-v2"
 // Layer 1: spec/loan-workflow, DRAFT (nothing frozen yet — no prior commit
 // exists to pin). Layer 2: spec/loan-workflow FROZEN (frozen.commit = layer
 // 1's head) plus spec/loan-workflow-v2, DRAFT. The resulting head (layer
-// 2's SHA) is what testdata/corpus's committed loan-workflow-v2/spec.md
+// 2's SHA) is what examples/showcase's committed loan-workflow-v2/spec.md
 // cites as its own frozen.commit, and what the reaffirmation fixture pins
 // as "v2's commit" — both baked in below as goldenShaA/goldenShaB, per the
 // same "build once, bake in, test forever" contract v0's corpus_test.go
@@ -173,8 +173,8 @@ Must not add new synchronous cross-service calls.
 // TestV2SupersessionRepo_MatchesGoldenSHAs rebuilds the supersession pair's
 // dedicated fixturegit history from the layer content above and proves it
 // still reproduces goldenShaA/goldenShaB — the SHAs
-// testdata/corpus/.verdi/specs/active/loan-workflow-v2/spec.md and
-// testdata/corpus/.verdi/reaffirmations/jira-loan-1483/ac-1.md cite.
+// examples/showcase/.verdi/specs/active/loan-workflow-v2/spec.md and
+// examples/showcase/.verdi/reaffirmations/jira-loan-1483/ac-1.md cite.
 func TestV2SupersessionRepo_MatchesGoldenSHAs(t *testing.T) {
 	layer1 := fixturegit.Layer{
 		Files:   map[string]string{".verdi/specs/active/loan-workflow/spec.md": v2LoanWorkflowV1Draft},

@@ -62,7 +62,7 @@ lint:
 # fixture runs the fixturegit determinism test package (PLAN.md Phase 1 test
 # strategy: "fixturegit determinism test (build twice, assert identical
 # SHAs)") plus, as of phase 2, the corpus package: it builds the full
-# testdata/corpus fixture via fixturegit, asserts the resulting SHAs equal
+# examples/showcase fixture via fixturegit, asserts the resulting SHAs equal
 # the committed golden constants, and decodes every corpus file (committed
 # and mutable/derived) through internal/artifact. As of phase 5, also
 # internal/svcfixcanned: verifies testdata/svcfix-canned/digests.json's

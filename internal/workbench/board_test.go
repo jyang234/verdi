@@ -15,7 +15,7 @@ import (
 )
 
 // TestBoardHandler_Happy proves the board page loads the fixture's real
-// board (testdata/corpus/mutable/boards/STORY-1482.json): its pin, all
+// board (examples/showcase/mutable/boards/STORY-1482.json): its pin, all
 // three stickies with their RESOLVED annotation bodies (including the two
 // board-only ones per I-34 — 05 §Workbench's own "sticky ... including
 // board-only ones"), and the yarn strand.

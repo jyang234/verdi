@@ -13,10 +13,10 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
-const corpusDir = "../../testdata/corpus"
+const corpusDir = "../../examples/showcase"
 const svcfixDir = "../../testdata/svcfix"
 
-// parseCorpusLayers reads testdata/corpus/layers.txt (the same manifest
+// parseCorpusLayers reads examples/showcase/layers.txt (the same manifest
 // internal/corpus's own tests use) and returns, in ascending layer order,
 // each layer's corpus-relative file paths.
 func parseCorpusLayers(t testing.TB) []fixturegit.Layer {
@@ -104,7 +104,7 @@ func copyTree(t testing.TB, src, dst string) {
 	}
 }
 
-// buildGoldenRepo builds testdata/corpus via fixturegit (stable, golden
+// buildGoldenRepo builds examples/showcase via fixturegit (stable, golden
 // SHAs) and overlays testdata/svcfix as a real service root at
 // <repo>/svcfix/, matching PLAN.md phase 3's golden test: "the
 // fixturegit-built corpus + svcfix".
@@ -115,7 +115,7 @@ func buildGoldenRepo(t testing.TB) string {
 	return repo.Dir
 }
 
-// wantCommittedRefs is every ref testdata/corpus's committed zone must
+// wantCommittedRefs is every ref examples/showcase's committed zone must
 // produce (every kind and status the corpus exercises, per PLAN.md §4).
 var wantCommittedRefs = []string{
 	"spec/store-layout-notes",
@@ -185,7 +185,7 @@ func TestGolden_ExternalRefsMinted(t *testing.T) {
 
 // TestGolden_BacklinksCoverEveryExercisedInverseType asserts at least one
 // backlink of every 02 §Link taxonomy inverse type the corpus exercises
-// (every forward link type in testdata/corpus except `story`, which has no
+// (every forward link type in examples/showcase except `story`, which has no
 // inverse — verified against a full grep of the corpus in code review).
 func TestGolden_BacklinksCoverEveryExercisedInverseType(t *testing.T) {
 	root := buildGoldenRepo(t)

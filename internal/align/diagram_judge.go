@@ -30,7 +30,7 @@ const DiagramAbsenceFindingID = "judged-diagram-sweep-coverage-absent"
 // resolveDiagramSpec finds a diagram's owning spec by scanning its own
 // links for a derived-from edge targeting a spec ref — the same
 // spec-tying convention this codebase's own diagram fixtures already use
-// (e.g. testdata/corpus/.verdi/diagrams/loansvc-topology.mermaid's
+// (e.g. examples/showcase/.verdi/diagrams/loansvc-topology.mermaid's
 // `links: [{ type: derived-from, ref: spec/store-layout-notes }]`),
 // mirroring decision_judge.go's resolveFeatureSpec exactly but walking a
 // diagram's links instead of a story spec's implements link. Returns

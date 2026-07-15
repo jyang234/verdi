@@ -12,7 +12,7 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
-// v2FixtureRoot is testdata/corpus's own directory, relative to this
+// v2FixtureRoot is examples/showcase's own directory, relative to this
 // package — the source for the round-four feature-fold fixture files
 // (spec/accepted-pending-build and its stories) that V1-P1 committed
 // without wiring into layers.txt's shared fixturegit history (their
@@ -23,10 +23,10 @@ import (
 // on the built repo's working tree verbatim, uncommitted, exactly like
 // derived/ already is — storyresolve.LoadActiveSpec and index.Build both
 // read straight off disk and neither cares whether a path is git-tracked.
-const v2FixtureRoot = "../../testdata/corpus/.verdi"
+const v2FixtureRoot = "../../examples/showcase/.verdi"
 
 // copyV2FeatureFixture copies the named .verdi-relative directories from
-// testdata/corpus onto repoDir's own .verdi tree.
+// examples/showcase onto repoDir's own .verdi tree.
 func copyV2FeatureFixture(t *testing.T, repoDir string, relDirs ...string) {
 	t.Helper()
 	for _, rel := range relDirs {
@@ -67,7 +67,7 @@ func copyTree(t *testing.T, src, dst string) {
 // with the computed live mapping under the 'acceptance-time plan; current
 // mapping computed below' banner (05 §Lenses)".
 //
-// Fixture: spec/accepted-pending-build (testdata/corpus, V1-P1's round-
+// Fixture: spec/accepted-pending-build (examples/showcase, V1-P1's round-
 // four feature-fold fixture) declares three stubs (borrower-update-api,
 // borrower-update-ui, borrower-update-audit-log) and three outcome ACs.
 // Two real story specs (borrower-update-api, borrower-update-mobile)

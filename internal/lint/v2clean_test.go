@@ -12,7 +12,7 @@ import (
 )
 
 // This file is the "go run ./cmd/verdi lint exits 0 on the v2 fixture
-// corpus" exit criterion: it builds the real testdata/corpus v2 fixture
+// corpus" exit criterion: it builds the real examples/showcase v2 fixture
 // files (the rung-4 supersession pair, the round-four object-model
 // feature, its three stories/spike, the outcome attestation, and the
 // reaffirmation) into ONE git-real, fully-linted repo.
@@ -53,8 +53,8 @@ func draftVariant(content string) string {
 	return strings.Replace(content, "status: accepted-pending-build\n", "status: draft\n", 1)
 }
 
-// readV2CorpusFile reads a testdata/corpus file (relative to this
-// package's own testdata/corpus, mirroring corpusDir).
+// readV2CorpusFile reads a examples/showcase file (relative to this
+// package's own examples/showcase, mirroring corpusDir).
 func readV2CorpusFile(t *testing.T, rel string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(corpusDir, rel))

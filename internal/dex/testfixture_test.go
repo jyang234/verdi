@@ -12,16 +12,16 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
-// corpusDir and svcfixDir are testdata/corpus and testdata/svcfix relative
+// corpusDir and svcfixDir are examples/showcase and testdata/svcfix relative
 // to this package — the same committed, deterministic fixtures
 // internal/corpus and internal/index already build on (PLAN.md §4).
 const (
-	corpusDir = "../../testdata/corpus"
+	corpusDir = "../../examples/showcase"
 	svcfixDir = "../../testdata/svcfix"
 )
 
 // corpusGoldenHeads mirrors internal/corpus's own golden SHA constants:
-// layers 1-3 here are byte-identical to testdata/corpus/layers.txt's own
+// layers 1-3 here are byte-identical to examples/showcase/layers.txt's own
 // layers, so they reproduce the exact same commit SHAs the corpus fixture
 // files' own frozen stamps and pinned refs already bake in.
 var corpusGoldenHeads = []string{
@@ -30,7 +30,7 @@ var corpusGoldenHeads = []string{
 	"93ddc5bbbb398cf747151e1c466afb83114398df", // layer 3
 }
 
-// parseCorpusLayers reads testdata/corpus/layers.txt (the same format
+// parseCorpusLayers reads examples/showcase/layers.txt (the same format
 // internal/corpus's own parseLayers reads).
 func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 	t.Helper()
@@ -106,7 +106,7 @@ func readTreeFiles(t *testing.T, dir, destPrefix string) map[string]string {
 const dexOverlayDir = "../../testdata/dexoverlay"
 
 // buildDexFixtureRepo builds a git repo whose first three commits are
-// byte-identical to testdata/corpus's own three layers (reproducing
+// byte-identical to examples/showcase's own three layers (reproducing
 // corpusGoldenHeads exactly — every frozen stamp and pinned ref inside
 // those corpus files stays honest), plus a fourth commit that folds in
 // testdata/svcfix wholesale at repo path "svcfix/" — giving dex's by-service
@@ -117,7 +117,7 @@ const dexOverlayDir = "../../testdata/dexoverlay"
 // untouched: the v2 fixture-overlay corpus files layers.txt never listed
 // (the accepted-pending-build cluster, the loan-workflow supersession
 // pair, the outcome attestation, the reaffirmation — everything on disk
-// under testdata/corpus/.verdi/ beyond the v0 layers), then
+// under examples/showcase/.verdi/ beyond the v0 layers), then
 // testdata/dexoverlay/'s dex-only files — so the built store matches what
 // cmd/e2eharness provisions and the feature-lens/ladder/by-story pages
 // have their fixtures.
@@ -158,7 +158,7 @@ func buildDexFixtureRepo(t *testing.T) *fixturegit.Repo {
 
 	for i, want := range corpusGoldenHeads {
 		if repo.Heads[i] != want {
-			t.Fatalf("layer %d SHA = %s, want golden %s (corpus layers 1-3 must stay byte-identical to testdata/corpus's own fixture)", i+1, repo.Heads[i], want)
+			t.Fatalf("layer %d SHA = %s, want golden %s (corpus layers 1-3 must stay byte-identical to examples/showcase's own fixture)", i+1, repo.Heads[i], want)
 		}
 	}
 	return repo

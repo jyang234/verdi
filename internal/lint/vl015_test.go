@@ -11,7 +11,7 @@ import (
 // internal/artifact/v2fixture_test.go's own dedicated rung-4 supersession
 // pair fixture content (loan-workflow / loan-workflow-v2): a small,
 // independent fixturegit history built fresh per test (SHA_A computed
-// dynamically, not the literal golden SHAs baked into testdata/corpus's
+// dynamically, not the literal golden SHAs baked into examples/showcase's
 // v2 fixtures — this package's own fixturegit corpus is a separate git
 // history, so those literal SHAs would not be real history here; VL-015
 // needs the predecessor's frozen commit to be real in *this* repo).

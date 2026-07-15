@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-// The verdict viewer: cross-commit per-AC diff of testdata/corpus's two
+// The verdict viewer: cross-commit per-AC diff of examples/showcase's two
 // derived verdicts.json snapshots for spec/stale-decline (PLAN.md Phase 10
 // exit criteria: "verdict viewer diffs the fixture's two canned
 // snapshots").

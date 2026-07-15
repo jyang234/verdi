@@ -33,7 +33,7 @@ var openAPICandidates = []string{"openapi.yaml", "openapi.yml", "openapi.json"}
 // beyond the .verdi/data special case handled separately (01 §Store
 // manifest service-discovery row: "skip .git, .verdi/data, node_modules-ish
 // noise"). "testdata" joined this set in phase 4: this module's own
-// testdata/svcfix and testdata/corpus fixtures are real, flowmap-shaped
+// testdata/svcfix and examples/showcase fixtures are real, flowmap-shaped
 // service roots (needed to exercise discovery itself), and without this
 // exclusion self-hosting verdi's own store (PLAN.md Phase 4) discovers
 // them as if they were live services of this repo — PLAN.md §2 already

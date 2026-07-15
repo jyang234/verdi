@@ -547,8 +547,8 @@ func TestScopingCanvas_CommittedFixturesRenderStubCards(t *testing.T) {
 		slugs      []string
 	}{
 		{
-			name: "accepted-pending-build (testdata/corpus)",
-			path: "../../testdata/corpus/.verdi/specs/active/accepted-pending-build/spec.md",
+			name: "accepted-pending-build (examples/showcase)",
+			path: "../../examples/showcase/.verdi/specs/active/accepted-pending-build/spec.md",
 			slugs: []string{
 				"borrower-update-api", "borrower-update-ui", "borrower-update-audit-log",
 			},
