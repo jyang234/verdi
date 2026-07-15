@@ -85,6 +85,34 @@ dex and workbench test harnesses, the lint self-check — builds it fresh
 from `layers.txt` every run; nothing about the deterministic history is
 itself committed here.
 
+## Linting this store
+
+`make verify`'s `lint-store` step self-lints *this repository's own*
+`.verdi/`, not this fixture — proving `examples/showcase` itself lint-clean
+needs a real, git-real checkout, for the same reason the previous section
+just gave: frozen stamps and pinned refs only resolve against actual git
+history. This store's committed content is split, by design, across two
+independent `internal/fixturegit` histories — the `layers.txt` history
+above, and a second, dedicated, unchained history for the
+`loan-workflow`/`loan-workflow-v2`/`rate-lock`/`rate-lock-v2` pairs and the
+`escrow-autopay` cluster (`internal/artifact/v2fixture_test.go`'s own
+golden SHAs) — because merging both into one chained repo would force
+re-deriving every SHA in whichever one is chained second, contradicting
+the "build once, bake in, test forever" pins both already carry. So the
+gate rebuilds each history separately and lints each independently:
+`internal/corpus/corpus_test.go`'s fixturegit rebuild for the `layers.txt`
+family, `internal/lint/v2clean_test.go`'s for the second — both exit 0
+with the mutable zone present, and with it removed (simulating a bare
+clone) report only `SeverityDisclosure` (VL-017) notices on this store's
+new-class specs, never a verdict failure. A single-commit checkout (the
+shape `cmd/e2eharness` provisions for the Playwright/e2e suite, since those
+tests need real git history for other reasons — `gitx`'s commit/diff
+primitives — not a `verdi lint` proof) collapses both histories' pins into
+one new commit and cannot resolve them; the resulting VL-009/VL-003/VL-015
+noise on that construction is a structural property of collapsing history,
+not a defect in any file it reports on (`docs/showcase-vetting.md`'s Task
+1.8 section has the full accounting).
+
 ## The link-type map
 
 02 §Link taxonomy's closed vocabulary carries **eleven** typed edges (not

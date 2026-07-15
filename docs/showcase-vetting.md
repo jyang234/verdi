@@ -5,13 +5,47 @@ artifact under `examples/showcase/` earns a row recording the three-column
 vetting bar — **lint-clean** (`verdi lint` finds nothing on it),
 **exemplary** (no dead prose links, no filler, production-quality writing),
 **coherent+justified** (consistent with the LoanServ canon, earns its
-place or is cut) — or an explicit, reasoned cut. This file grows across
-the renovation tasks (Task 1.4 onward); it does not yet cover every file
-in the tree — later tasks (1.5–1.8) add their own families' rows and close
-out the full sweep at Task 1.8.
+place or is cut) — or an explicit, reasoned cut. This file grew across the
+renovation tasks (Task 1.4 onward); Task 1.8 closes out the full sweep —
+every file under `examples/showcase/` (committed) and every provisioned
+showcase artifact now has a row.
 
 Legend: `Y` = holds; `Y*` = holds, with a note; `n/a` = column does not
 apply to this artifact kind.
+
+**The three columns, precisely:**
+
+- **lint-clean** — `verdi lint`, run against a real, git-real provisioned
+  checkout of the store (never the bare working tree, since frozen stamps
+  and pins require actual git history to resolve against), reports no
+  finding whose `Path` is this artifact. A `SeverityDisclosure` (VL-017)
+  notice is not a lint-clean failure (it is a disclosed, non-verdict
+  notice, adjudicated at W2 wave close) and does not cost this column a
+  `Y`.
+- **exemplary** — the artifact's prose (or, for a structured/JSON
+  artifact, its shape) reads as something a team would actually ship: no
+  dead links, no test-shaped filler ("bogus_extra_field", "TODO"), no
+  placeholder detail. `n/a` for artifact kinds with no prose to judge
+  (derived-zone JSON, mutable-zone JSONL, frozen archived records this
+  task's own scope excludes).
+- **coherent+justified** — the artifact agrees with the fixed LoanServ
+  canon (dates, service names, jira keys, the one story roster) and earns
+  its place in a public showcase rather than existing only because a test
+  once needed it.
+
+**The e2e-file boundary (policy, Task 1.4 review minor, closed here):**
+Files under `e2e/tests/` (Playwright specs, `fixtures.ts`) are **not**
+showcase store artifacts, even when they assert against showcase content
+or carry a pinned SHA literal that must track the corpus's own re-pins.
+They earn no three-column row in this ledger; test correctness is proven
+by the suite passing under `make verify`, not by this bar. Where an e2e
+file needed a re-pin as fallout from a showcase content edit, that fallout
+is recorded in each task's own "coverage note" / "fallout adjudicated"
+section (e.g. Task 1.4's `e2e/tests/04-verdict.spec.ts` line, Task 1.7's
+`e2e/tests/05-dex.spec.ts` line) — informational, not a vetting-bar row.
+The same boundary applies to `cmd/e2eharness/*.go` (the provisioning
+harness itself is code, not a store artifact) and to this repository's own
+`internal/*/*_test.go` fixture-building helpers.
 
 ## Task 1.4 — `stale-decline` family (breadth feature)
 
@@ -267,3 +301,112 @@ dispositions appear on one wall: the **resolved** annotation
 `open_questions` entry oq-1) is matched by `carriedAsOpenQuestion` and passes
 clean. Neither fires a finding — the two ways a new-class spec may honestly
 leave a question is what the fixture shows.
+
+## Task 1.8 — lint-clean proof, vetting closure, debt sweep
+
+Full mapping, both lint constructions' raw output, the finding-attribution
+table, the file-list diff proof, and the debt-sweep greps:
+`.superpowers/sdd/task-1.8-report.md`. Summary here.
+
+### Two content defects found and fixed
+
+Building the store honestly (a real, git-real provisioned checkout — see
+below) surfaced two genuine content gaps neither prior task's narrower
+per-family sweep would have caught, since both are cross-cutting /
+repo-root concerns rather than any one artifact's own prose:
+
+| artifact | lint-clean | exemplary | coherent+justified | notes |
+|---|---|---|---|---|
+| `.gitattributes` | Y | Y | Y | **New.** The store's manifest declares `forge: gitlab`, and 02 §Repository plumbing requires a root `.gitattributes` marking every gitlab-generated path — this file never existed in the committed tree; `cmd/e2eharness`'s harness had silently synthesized it at provision time every run, masking the gap (VL-012 fired on a from-disk-only, no-harness-step construction). Now a real, committed 3-line file (board.json/rollup.json/deviation-report.md, `gitlab-generated`); `cmd/e2eharness/provision.go` copies it instead of writing it. |
+| `.verdi/verdi.yaml` | Y | Y | Y | No prior task recorded a row for this file (Task 1.1's relocation moved it; layer 1 has carried it since). No content change this task; row added to close the coverage gap the file-list diff below found. |
+| `.verdi/specs/active/escrow-autopay/layout.json` | Y | n/a (board layout, no prose) | Y | No prior task recorded a row (Task 1.5 renovated the sibling `spec.md` but the board layout, a plain `verdi.boardlayout/v1` position map for 3 objects, was never separately listed). No content change; row added to close the coverage gap. |
+| `loansvc/.flowmap.yaml` | Y | Y | Y | **New.** `spec/stale-decline`'s own `impacts: { ref: svc/loansvc/boundary-contract }` link (present since Task 1.1) named a service the corpus never actually provisioned — `testdata/svcfix` is named `svcfix`, not `loansvc` — so the link dangled (VL-003) on any construction that doesn't paper over it with a test-only fixture (`internal/lint/harness_test.go`'s own `writeLoansvcFixture`, used only inside that package's tests). This is that missing service root, committed for real: minimal, shaped like `testdata/svcfix`'s own convention (`service`, one `obligations[]` entry), named to match the link. |
+| `loansvc/.flowmap/boundary-contract.json` | Y | Y | Y | **New.** The companion boundary contract: entrypoints and a `published[]` list of the six outbox event classes `.verdi/diagrams/loansvc-topology.mermaid` and `adr/0005-event-schema-registry` already name (`decline-notice`, `charge-retry`, `escrow-state-changed`, `rate-lock-status`, `document-generated`, `account-view-updated`) — written to agree with those two pre-existing artifacts, not invented independently. `cmd/e2eharness/provision.go` now copies both `loansvc/` files into every provisioned scratch store alongside `mutable/`/`derived/` (they are service-discovery input, read from disk per 01 §notes, never git-tracked as store content — same zoning as `testdata/svcfix`). |
+
+### The lint-clean construction the gate uses
+
+`examples/showcase`'s committed content is, by design, split across **two
+independent fixturegit histories** (documented in `layers.txt`'s own
+comments and `internal/lint/v2clean_test.go`'s doc comment): the
+`layers.txt`-tracked main corpus (5 layers, `internal/corpus/corpus_test.go`'s
+`goldenHeads`) and a second, dedicated, unchained history for the
+`loan-workflow`/`loan-workflow-v2`/`rate-lock`/`rate-lock-v2` rung-4
+supersession pairs plus the `escrow-autopay` cluster
+(`internal/artifact/v2fixture_test.go`'s `goldenHeadsV2` family). Each
+frozen artifact's `frozen.commit`/`context[]`/predecessor pin cites a real
+commit SHA in exactly one of these two histories — never both — because
+merging them into one chained repo would force re-deriving every SHA
+(fixturegit's determinism guarantee: same content + same parent chain +
+same fixed identity/date -> same SHA; a different parent chain always
+yields a different SHA), which contradicts the "build once, bake in, test
+forever" discipline (PLAN.md §4) those pins depend on.
+
+**The gate is therefore two separate, git-real fixturegit rebuilds, never
+one merged checkout:**
+
+1. `internal/corpus/corpus_test.go`'s `buildFixtureRepo` (`layers.txt`,
+   5 layers) plus `mutable/`/`derived/`/`loansvc/`/`.gitattributes`
+   materialized from disk. Proven (this task, real `verdi lint` binary
+   against an exported working tree, not just the Go assertion): **exit 0,
+   zero findings** with the mutable zone present; **exit 0, exactly 4
+   VL-017 disclosures** (the new-class specs: `stale-decline`,
+   `escrow-notify`, `escrow-notify-v2`, `refi-rate-check-2024`) with it
+   absent (bare-clone simulation) — matching `internal/lint`'s own
+   `TestClean_CorpusLintsGreen` family.
+2. The rung-4/escrow-autopay cluster's own dedicated history, chained
+   after the same layers.txt content with only the (non-golden, freshly-
+   derived-when-chained) commit-SHA literals substituted for the family's
+   own separate golden SHAs — exactly `internal/lint/v2clean_test.go`'s
+   `buildV2FixtureCorpusRepo` mechanism, unchanged by this task. Proven
+   (real binary, not just `go test`): **exit 0, zero findings** with the
+   mutable zone present (`TestV2FixtureCorpus_LintsClean`); **exit 0,
+   only VL-017 disclosures** without it
+   (`TestV2FixtureCorpus_BareClone_OnlyVL017Disclosures`).
+
+Both already run under `make test`/`make verify`'s existing suite — this
+task adds no new test, only the real-binary re-verification and the
+two content fixes above (both of which needed a from-disk, no-test-harness
+construction to even surface).
+
+**What does NOT achieve this:** a single git-real checkout holding both
+histories at once (the e2e harness's own single-commit scratch store, or a
+naive `layers.txt`-only fixturegit rebuild with the second history's files
+copied in unchained) cannot resolve every pin, structurally, by the two-
+history design above — see the report's finding-attribution table for the
+complete enumeration (38 findings on the single-commit construction, all
+either `VL-009`/`VL-015`/`VL-003` pin-resolution noise, zero content
+defects once the two fixes above landed). `.verdi/obligations/showcase-corpus-renovation/ac-1--behavioral.md`'s
+literal text (frozen, not editable here) describes the single-commit
+construction as the intended behavioral-evidence source and expects it to
+show only VL-017 disclosures; this task's own real-binary evidence shows
+that construction still reports the 38 structural pin findings above even
+after every content defect it could expose was fixed — a disclosed tension
+between that frozen obligation's wording and the corpus's own by-design
+two-history split, flagged here rather than silently reconciled (CLAUDE.md
+provenance discipline) for the story's own owner review at PR time.
+
+### Vetting-ledger closure — file-list diff proof
+
+A full `examples/showcase/` file walk (58 files, post the two additions
+above) against every backtick-quoted path in this ledger's table rows
+(brace-expansion and the `mr/`-vs-conceptual-label parenthetical forms
+both expanded) leaves **zero** real files uncovered: the five gaps found
+(`.gitattributes`, `.verdi/verdi.yaml`,
+`.verdi/specs/active/escrow-autopay/layout.json`, `loansvc/.flowmap.yaml`,
+`loansvc/.flowmap/boundary-contract.json`) are closed by the table above.
+The diff's remaining "stale" side (rows naming a path absent from disk)
+is exactly the two already-disclosed, intentional cases: `OVERLAY-NOTES.md`
+(Task 1.7's row documents its deletion) and the `derived/spec--stale-decline/<layer-N-head>/`
+placeholder convention (the literal SHA changes on every re-pin; the
+table rows use the placeholder deliberately rather than a SHA this ledger
+would need to edit on every future re-pin). Full script and raw diff
+output: the report.
+
+Every committed artifact under `examples/showcase/` now has a row. The one
+provisioned-not-committed showcase artifact family (`payoff-quote-portal`,
+Task 2.1's section above) already carried its own rows.
+
+### Linting this store
+
+See `examples/showcase/README.md`'s new "Linting this store" note for the
+public-facing summary of the two-construction gate above.
