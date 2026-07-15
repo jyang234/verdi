@@ -1,14 +1,14 @@
 ---
-id: spec/accepted-pending-build-v2
+id: spec/escrow-autopay-v2
 kind: spec
 class: feature
-title: "Accepted pending build v2 (open supersession MR fixture)"
+title: "Escrow autopay v2 (open supersession MR fixture)"
 status: draft
 owners: [platform-team]
 problem: { text: "borrowers cannot self-serve an update to a submitted application", anchor: "#problem" }
 outcome: { text: "a borrower updates their application and sees the change reflected immediately", anchor: "#outcome" }
 links:
-  - { type: supersedes, ref: spec/accepted-pending-build }
+  - { type: supersedes, ref: spec/escrow-autopay }
 acceptance_criteria:
   - { id: ac-1, text: "a borrower can update their application", evidence: [attestation], anchor: "#ac-1" }
   - { id: ac-2, text: "a borrower sees the change reflected immediately, not merely within the session", evidence: [behavioral, attestation], anchor: "#ac-2" }
@@ -22,12 +22,12 @@ supersession:
   removed: []
   added: []
 ---
-# Accepted pending build v2 (open supersession MR fixture)
+# Escrow autopay v2 (open supersession MR fixture)
 
 The V1-P8 dex-overlay fixture: the candidate v2 spec a still-OPEN
 supersession MR carries (03 §The amendment ladder: "the fold's input set
 includes open supersession MRs"). Served only through the fake forge's
-`FetchFileAtRef` at `.verdi/specs/active/accepted-pending-build-v2/spec.md`
+`FetchFileAtRef` at `.verdi/specs/active/escrow-autopay-v2/spec.md`
 — never written into a store. Its manifest amends `ac-2` only, so the
 `pending-supersession` flag lands exactly on the story whose edges touch
 `ac-2` (`spec/borrower-update-mobile`) and not on the stub-matched

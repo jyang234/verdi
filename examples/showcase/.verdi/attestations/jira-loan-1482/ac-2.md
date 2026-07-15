@@ -5,7 +5,7 @@ title: "AC-2 attested by QA lead (fixture)"
 owners: [qa-lead]
 links:
   - { type: verifies, ref: spec/stale-decline }
-frozen: { at: 2026-05-01, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
+frozen: { at: 2026-05-01, commit: f80b677cac43645416a4a1441a258234e2ef763d }
 ---
 # AC-2 attestation
 

@@ -9,10 +9,10 @@ problem: { text: "the update API has no PUT route for a submitted application", 
 outcome: { text: "PUT /applications/:id/update returns 200 with the new state", anchor: "#outcome" }
 story: jira:LOAN-1482
 links:
-  - { type: implements, ref: "spec/accepted-pending-build#ac-1" }
+  - { type: implements, ref: "spec/escrow-autopay#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "PUT /applications/:id/update returns 200 with the new state", evidence: [static, behavioral], anchor: "#ac-1" }
-frozen: { at: 2026-07-12, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
+frozen: { at: 2026-07-12, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
 ---
 # Borrower update API
 

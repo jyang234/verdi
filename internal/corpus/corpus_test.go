@@ -30,10 +30,10 @@ const corpusDir = "../../examples/showcase"
 // literal deterministic SHAs (build once, bake in, test forever)") and
 // reproduced by every corpus file's frozen stamps and pinned refs.
 var goldenHeads = []string{
-	"2f230011b192c5ac1c0ed5442be76fc401c4cbca", // layer 1
-	"6a0c563e4f688acdb225fcbc5e6942a7431b05bf", // layer 2
-	"5507c6d963bd78d9eabed2324c3d380e678f891e", // layer 3
-	"7b2ae03f6d5ec8a23cccca4521d7f20553d4df0a", // layer 4
+	"f80b677cac43645416a4a1441a258234e2ef763d", // layer 1
+	"c8f37f04d6364e70daf41595aafd202e33debd13", // layer 2
+	"7248a3f6d1322f7df24a65b774ac334fd01e4274", // layer 3
+	"af8ef2fe4d269057a2ddd19efa82ff6203d29f41", // layer 4
 }
 
 // goldenHeadsV2 are the v1-P1 rung-4 supersession pair's own, separate
@@ -369,8 +369,8 @@ func TestFixtureCorpus_MutableAndDerivedFilesDecode(t *testing.T) {
 		dir        string
 		wantSource artifact.ProvenanceSource
 	}{
-		{"derived/spec--stale-decline/6a0c563e4f688acdb225fcbc5e6942a7431b05bf", artifact.SourceCI},
-		{"derived/spec--stale-decline/5507c6d963bd78d9eabed2324c3d380e678f891e", artifact.SourceLocal},
+		{"derived/spec--stale-decline/c8f37f04d6364e70daf41595aafd202e33debd13", artifact.SourceCI},
+		{"derived/spec--stale-decline/7248a3f6d1322f7df24a65b774ac334fd01e4274", artifact.SourceLocal},
 	}
 	for _, dd := range derivedDirs {
 		dd := dd

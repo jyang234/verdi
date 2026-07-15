@@ -8,7 +8,7 @@ owners: [platform-team]
 provenance:
   generator: some-generator
   version: v0
-  inputs: [spec/store-layout-notes@2f230011b192c5ac1c0ed5442be76fc401c4cbca]
+  inputs: [spec/store-layout-notes@f80b677cac43645416a4a1441a258234e2ef763d]
   digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
 ---
 # VL-008 overlay: ungated generated provenance

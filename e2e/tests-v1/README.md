@@ -8,7 +8,7 @@
 > **Flip-in status (V1-P8, 2026-07-11):** `16-dex-v2.spec.ts` passes and
 > moved into `tests/` in the commit that made it pass. The dex fixture
 > constants in `fixtures.ts` were finalized to the v2 overlay's real refs
-> (FEATURE_SPEC `accepted-pending-build`, stories `borrower-update-*`;
+> (FEATURE_SPEC `escrow-autopay`, stories `borrower-update-*`;
 > ADR_NAME → `0001-outbox-events`, a ledgered deviation — the ADR the
 > fixture feature actually exempts, shared with the board's ref-card
 > tests via provisionv2.go). V1-P8's added dex behavior beyond the

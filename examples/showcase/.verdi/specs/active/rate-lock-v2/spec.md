@@ -13,7 +13,7 @@ acceptance_criteria:
   - { id: ac-1, text: "a borrower can lock a quoted rate for a configurable window", evidence: [static, attestation], anchor: "#ac-1" }
 constraints:
   - { id: co-1, text: "must not lock a rate the pricing service has already retired", anchor: "#co-1" }
-frozen: { at: 2026-07-12, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
+frozen: { at: 2026-07-12, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
 ---
 # Rate lock v2 (fixture, supersedes rate-lock)
 

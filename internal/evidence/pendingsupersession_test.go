@@ -234,19 +234,19 @@ func TestImplementsByFeature(t *testing.T) {
 		{
 			name: "groups fragment implements edges by feature name",
 			links: []artifact.Link{
-				{Type: artifact.LinkImplements, Ref: "spec/accepted-pending-build#ac-1"},
-				{Type: artifact.LinkImplements, Ref: "spec/accepted-pending-build#ac-2"},
+				{Type: artifact.LinkImplements, Ref: "spec/escrow-autopay#ac-1"},
+				{Type: artifact.LinkImplements, Ref: "spec/escrow-autopay#ac-2"},
 				{Type: artifact.LinkImplements, Ref: "spec/loan-workflow#ac-1"},
 			},
 			want: map[string][]string{
-				"accepted-pending-build": {"ac-1", "ac-2"},
-				"loan-workflow":          {"ac-1"},
+				"escrow-autopay": {"ac-1", "ac-2"},
+				"loan-workflow":  {"ac-1"},
 			},
 		},
 		{
 			name: "non-implements and non-fragment links contribute nothing",
 			links: []artifact.Link{
-				{Type: artifact.LinkExempts, Ref: "spec/accepted-pending-build#dc-2"},
+				{Type: artifact.LinkExempts, Ref: "spec/escrow-autopay#dc-2"},
 				{Type: artifact.LinkImplements, Ref: "spec/loan-workflow"}, // document-level: no object id
 				{Type: artifact.LinkSupersedes, Ref: "spec/old-story"},
 				{Type: artifact.LinkImplements, Ref: "::not a ref::"},

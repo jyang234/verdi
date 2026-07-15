@@ -1,3 +1,0 @@
-[
-  { "schema": "verdi.evidence/v1", "evidence_for": ["ac-3"], "kind": "behavioral", "verdict": "abstain", "witness": "", "producer": "partial_refund_golden", "provenance": { "source": "local", "pipeline": "", "commit": "5507c6d963bd78d9eabed2324c3d380e678f891e" }, "digest": "sha256:3162edc6697952c1d8735e1fa658f661230b0679c5da98b665cfd49a504d49d8" }
-]

@@ -1,6 +1,6 @@
 ---
 schema: verdi.deviation/v1
-covers: 5507c6d963bd78d9eabed2324c3d380e678f891e
+covers: 7248a3f6d1322f7df24a65b774ac334fd01e4274
 findings:
   - { id: ac-1, kind: judged, text: "mobile PUT route commits direct writes for offline support — the story's own ac-1 wording assumes the outbox path", disposition: accepted-deviation, note: "accepted for offline support; recorded against the AC's own text, so spec-stale counter-pressure applies (03 §The amendment ladder)" }
   - { id: f-2, kind: computed, text: "declared implements edges resolve at build head", disposition: fixed }

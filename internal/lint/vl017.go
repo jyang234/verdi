@@ -37,8 +37,8 @@ import (
 // new specs" — VL-014 fires only on dispositions:-carrying, i.e.
 // grandfathered, specs; VL-017 is the other side of that same split). It
 // reuses isNewClassSpec (vl006.go), the discriminator this phase settled
-// for R4-I-15: a v0 grandfathered spec (e.g. this corpus's stale-decline,
-// new-feature-x) is never subject to it, and a store with only component
+// for R4-I-15: a v0 grandfathered spec (e.g. this corpus's stale-decline)
+// is never subject to it, and a store with only component
 // specs (e.g. this repo's own self-hosted .verdi/, which also has no
 // object model at all) never has anything for VL-017 to check,
 // disclosed-unproven or otherwise.

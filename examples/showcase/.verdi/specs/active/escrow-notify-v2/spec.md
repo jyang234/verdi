@@ -13,7 +13,7 @@ acceptance_criteria:
 links:
   - { type: implements, ref: "spec/rate-lock-v2#ac-1" }
   - { type: supersedes, ref: "spec/escrow-notify" }
-frozen: { at: 2026-07-12, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
+frozen: { at: 2026-07-12, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
 ---
 # Escrow notify v2 (fixture, supersedes escrow-notify)
 

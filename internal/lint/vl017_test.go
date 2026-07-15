@@ -67,10 +67,10 @@ Retry behavior is documented and configurable if needed.
 Should the retry window be configurable per tenant?
 `
 
-const openQuestionAnnotationJSONL = `{"id":"a-01J8Z0K9DDDDDDDDDDDDDDDDDD","ts":"2026-07-11T18:00:00Z","author":"jyang","target":{"ref":"spec/open-question-story@5507c6d963bd78d9eabed2324c3d380e678f891e","selector":{"heading":"open-questions","quote":"should the retry window be configurable per tenant?","line":null}},"type":"question","body":"should the retry window be configurable per tenant?","status":"open"}
+const openQuestionAnnotationJSONL = `{"id":"a-01J8Z0K9DDDDDDDDDDDDDDDDDD","ts":"2026-07-11T18:00:00Z","author":"jyang","target":{"ref":"spec/open-question-story@7248a3f6d1322f7df24a65b774ac334fd01e4274","selector":{"heading":"open-questions","quote":"should the retry window be configurable per tenant?","line":null}},"type":"question","body":"should the retry window be configurable per tenant?","status":"open"}
 `
 
-const resolvedOpenQuestionAnnotationJSONL = `{"id":"a-01J8Z0K9DDDDDDDDDDDDDDDDDD","ts":"2026-07-11T18:00:00Z","author":"jyang","target":{"ref":"spec/open-question-story@5507c6d963bd78d9eabed2324c3d380e678f891e","selector":{"heading":"open-questions","quote":"should the retry window be configurable per tenant?","line":null}},"type":"question","body":"should the retry window be configurable per tenant?","status":"resolved"}
+const resolvedOpenQuestionAnnotationJSONL = `{"id":"a-01J8Z0K9DDDDDDDDDDDDDDDDDD","ts":"2026-07-11T18:00:00Z","author":"jyang","target":{"ref":"spec/open-question-story@7248a3f6d1322f7df24a65b774ac334fd01e4274","selector":{"heading":"open-questions","quote":"should the retry window be configurable per tenant?","line":null}},"type":"question","body":"should the retry window be configurable per tenant?","status":"resolved"}
 `
 
 // writeMutableAnnotation writes content into root's untracked

@@ -220,7 +220,7 @@ func TestV2Corpus_SpecsDecode(t *testing.T) {
 		wantClass SpecClass
 		wantSpike bool
 	}{
-		{".verdi/specs/active/accepted-pending-build/spec.md", ClassFeature, false},
+		{".verdi/specs/active/escrow-autopay/spec.md", ClassFeature, false},
 		{".verdi/specs/active/borrower-update-api/spec.md", ClassStory, false},
 		{".verdi/specs/active/borrower-update-mobile/spec.md", ClassStory, false},
 		{".verdi/specs/active/borrower-update-mobile-spike/spec.md", ClassStory, true},
@@ -257,7 +257,7 @@ func TestV2Corpus_SpecsDecode(t *testing.T) {
 // no stored position — 01 §notes: "an absent layout.json ... falls back to
 // the zoned-incremental layout algorithm for that object").
 func TestV2Corpus_BoardLayoutDecodes(t *testing.T) {
-	data := readCorpusFile(t, ".verdi/specs/active/accepted-pending-build/layout.json")
+	data := readCorpusFile(t, ".verdi/specs/active/escrow-autopay/layout.json")
 	bl, err := DecodeBoardLayout(data)
 	if err != nil {
 		t.Fatalf("DecodeBoardLayout: %v", err)
@@ -265,7 +265,7 @@ func TestV2Corpus_BoardLayoutDecodes(t *testing.T) {
 	if len(bl.Positions) != 3 {
 		t.Fatalf("Positions = %+v, want 3 entries (present-and-valid subset)", bl.Positions)
 	}
-	specData := readCorpusFile(t, ".verdi/specs/active/accepted-pending-build/spec.md")
+	specData := readCorpusFile(t, ".verdi/specs/active/escrow-autopay/spec.md")
 	fm, _, err := SplitFrontmatter(specData)
 	if err != nil {
 		t.Fatalf("SplitFrontmatter: %v", err)
@@ -307,7 +307,7 @@ func TestV2Corpus_BoardLayoutDecodes(t *testing.T) {
 // reaffirmation's object fragment ref is pinned at the golden v2 SHA.
 func TestV2Corpus_OutcomeAttestationAndReaffirmationDecode(t *testing.T) {
 	t.Run("outcome attestation", func(t *testing.T) {
-		data := readCorpusFile(t, ".verdi/attestations/accepted-pending-build/ac-1.md")
+		data := readCorpusFile(t, ".verdi/attestations/escrow-autopay/ac-1.md")
 		fm, _, err := SplitFrontmatter(data)
 		if err != nil {
 			t.Fatalf("SplitFrontmatter: %v", err)
@@ -316,7 +316,7 @@ func TestV2Corpus_OutcomeAttestationAndReaffirmationDecode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("DecodeAttestation: %v", err)
 		}
-		if att.ID != "attestation/accepted-pending-build--ac-1" {
+		if att.ID != "attestation/escrow-autopay--ac-1" {
 			t.Fatalf("ID = %q", att.ID)
 		}
 	})
@@ -420,11 +420,11 @@ func findAC(t *testing.T, acs []AcceptanceCriterion, id string) AcceptanceCriter
 // fixtures round-trips through ParseRef -> String().
 func TestV2Corpus_FragmentRefsParseAndReserialize(t *testing.T) {
 	fragmentRefs := []string{
-		"spec/accepted-pending-build#ac-1",
-		"spec/accepted-pending-build#ac-2",
-		"spec/accepted-pending-build#dc-2",
+		"spec/escrow-autopay#ac-1",
+		"spec/escrow-autopay#ac-2",
+		"spec/escrow-autopay#dc-2",
 		"spec/loan-workflow#ac-1",
-		"spec/accepted-pending-build#oq-1",
+		"spec/escrow-autopay#oq-1",
 		"spec/loan-workflow-v2@06a3f4cabb226fe9344e1645e27c344493b6b62b#ac-1",
 	}
 	for _, s := range fragmentRefs {
@@ -514,7 +514,7 @@ func TestV2CorpusInvalid_UnknownFieldTwinsFailLoudly(t *testing.T) {
 
 // TestV2CorpusInvalid_MismatchedAnchorTwinFails is the "a mismatched-anchor
 // twin fails naming the anchor rule" exit criterion, run against the real
-// accepted-pending-build fixture's body (not a synthetic minimal example).
+// escrow-autopay fixture's body (not a synthetic minimal example).
 func TestV2CorpusInvalid_MismatchedAnchorTwinFails(t *testing.T) {
 	data := readInvalidFile(t, "feature-mismatched-anchor.md")
 	fm, body, err := SplitFrontmatter(data)

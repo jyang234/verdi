@@ -1,19 +1,19 @@
 ---
-id: attestation/accepted-pending-build--ac-1
+id: attestation/escrow-autopay--ac-1
 kind: attestation
 title: "AC-1 outcome attested: borrower can update their application (fixture)"
 owners: [product-lead]
 links:
-  - { type: verifies, ref: spec/accepted-pending-build }
-frozen: { at: 2026-07-13, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
+  - { type: verifies, ref: spec/escrow-autopay }
+frozen: { at: 2026-07-13, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
 ---
 # AC-1 outcome attestation
 
 **Outcome attestation fixture** (02 §Identity and references, 03 §Attestations
 and waivers): reuses the attestation kind unchanged, compound name
-`<feature-slug>--<ac-id>` = `accepted-pending-build--ac-1`, path
-`attestations/accepted-pending-build/ac-1.md` — `<feature-slug>` is
-`RefSlug` of the feature spec's own id (`spec/accepted-pending-build`),
+`<feature-slug>--<ac-id>` = `escrow-autopay--ac-1`, path
+`attestations/escrow-autopay/ac-1.md` — `<feature-slug>` is
+`RefSlug` of the feature spec's own id (`spec/escrow-autopay`),
 never tracker-derived (the feature carries only an optional `story:` epic
 ref).
 

@@ -165,8 +165,8 @@ func (vl006) checkRequiredness(d *Document) []Finding {
 // story-grained feature class"); a feature spec is new iff it carries ANY
 // round-four surface field — problem, outcome, stubs, supersession, or a
 // constraints/decisions/open_questions object block. A v0 grandfathered
-// feature spec (e.g. examples/showcase's stale-decline, new-feature-x,
-// loan-refi-2023) carries none of these.
+// feature spec (e.g. examples/showcase's stale-decline, loan-refi-2023)
+// carries none of these.
 //
 // acceptance_criteria is deliberately excluded from "any object block"
 // despite 02 §Object model naming it as one of the object-model blocks

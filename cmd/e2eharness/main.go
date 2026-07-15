@@ -89,7 +89,7 @@ func run() error {
 
 	// The pending-supersession fixture (e2e/tests/16-dex-v2.spec.ts): one
 	// open MR against main carrying examples/showcase/mr/'s candidate v2
-	// spec for accepted-pending-build, served through internal/forge's
+	// spec for escrow-autopay, served through internal/forge's
 	// hermetic fake — no network (CLAUDE.md), same seam the Go tests use.
 	supersessionForge, err := seedSupersessionForge(moduleRoot)
 	if err != nil {
@@ -210,13 +210,13 @@ func run() error {
 // examples/showcase/mr/ — see examples/showcase/OVERLAY-NOTES.md) — the
 // exact seeding internal/dex's own tests use.
 func seedSupersessionForge(moduleRoot string) (*fake.Forge, error) {
-	candidate, err := os.ReadFile(filepath.Join(moduleRoot, "examples", "showcase", "mr", "accepted-pending-build-v2.spec.md"))
+	candidate, err := os.ReadFile(filepath.Join(moduleRoot, "examples", "showcase", "mr", "escrow-autopay-v2.spec.md"))
 	if err != nil {
 		return nil, fmt.Errorf("reading MR candidate fixture: %w", err)
 	}
 	f := fake.New()
-	f.SeedOpenMR("main", forge.OpenMR{ID: "mr-7", SourceBranch: "design/accepted-pending-build-v2"})
-	f.SeedFile("design/accepted-pending-build-v2", ".verdi/specs/active/accepted-pending-build-v2/spec.md", candidate)
+	f.SeedOpenMR("main", forge.OpenMR{ID: "mr-7", SourceBranch: "design/escrow-autopay-v2"})
+	f.SeedFile("design/escrow-autopay-v2", ".verdi/specs/active/escrow-autopay-v2/spec.md", candidate)
 	return f, nil
 }
 

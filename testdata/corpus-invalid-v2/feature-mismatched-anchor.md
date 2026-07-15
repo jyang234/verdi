@@ -1,5 +1,5 @@
 ---
-id: spec/accepted-pending-build
+id: spec/escrow-autopay
 kind: spec
 class: feature
 title: "Accepted pending build (v2 fixture)"
@@ -50,7 +50,7 @@ their own view within the same session.
 
 A borrower can update their application. Outcome-level, implementation-blind
 — the outcome floor is an attestation, satisfied by a bound outcome
-attestation artifact (`attestations/accepted-pending-build/ac-1.md`).
+attestation artifact (`attestations/escrow-autopay/ac-1.md`).
 
 ## AC-2
 

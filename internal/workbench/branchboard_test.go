@@ -77,7 +77,7 @@ problem: { text: "landed problem text", anchor: "#problem" }
 outcome: { text: "landed outcome text", anchor: "#outcome" }
 acceptance_criteria:
   - { id: ac-1, text: "landed criterion", evidence: [attestation], anchor: "#ac-1" }
-frozen: { at: 2026-03-02, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
+frozen: { at: 2026-03-02, commit: f80b677cac43645416a4a1441a258234e2ef763d }
 ---
 # Landed spec
 

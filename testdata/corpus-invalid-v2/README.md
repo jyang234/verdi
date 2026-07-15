@@ -8,8 +8,8 @@ proven in `internal/artifact/v2fixture_test.go` to fail loudly.
 
 | File | Base fixture | Defect | Expected failure |
 |---|---|---|---|
-| `feature-unknown-field.md` | `accepted-pending-build/spec.md` | unknown top-level field `bogus_extra_field` | KnownFields(true) rejection naming the field |
+| `feature-unknown-field.md` | `escrow-autopay/spec.md` | unknown top-level field `bogus_extra_field` | KnownFields(true) rejection naming the field |
 | `story-unknown-field.md` | `borrower-update-api/spec.md` | unknown top-level field `bogus_extra_field` | KnownFields(true) rejection naming the field |
-| `layout-unknown-field.json` | `accepted-pending-build/layout.json` | unknown field `bogus_extra_field` | `encoding/json` `DisallowUnknownFields` rejection |
+| `layout-unknown-field.json` | `escrow-autopay/layout.json` | unknown field `bogus_extra_field` | `encoding/json` `DisallowUnknownFields` rejection |
 | `reaffirmation-unknown-field.md` | `reaffirmations/jira-loan-1483/ac-1.md` | unknown top-level field `bogus_extra_field` | KnownFields(true) rejection naming the field |
-| `feature-mismatched-anchor.md` | `accepted-pending-build/spec.md` | `ac-2`'s `anchor:` renamed to `#nonexistent-heading` | `ResolveObjectAnchors` fails naming the anchor rule |
+| `feature-mismatched-anchor.md` | `escrow-autopay/spec.md` | `ac-2`'s `anchor:` renamed to `#nonexistent-heading` | `ResolveObjectAnchors` fails naming the anchor rule |

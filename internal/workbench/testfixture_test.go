@@ -25,10 +25,10 @@ const corpusDir = "../../examples/showcase"
 // the derived/spec--stale-decline/<commit>/verdicts.json directories (keyed
 // by these exact SHAs) line up with the built repo's real history.
 var corpusGoldenHeads = []string{
-	"2f230011b192c5ac1c0ed5442be76fc401c4cbca", // layer 1
-	"6a0c563e4f688acdb225fcbc5e6942a7431b05bf", // layer 2
-	"5507c6d963bd78d9eabed2324c3d380e678f891e", // layer 3
-	"7b2ae03f6d5ec8a23cccca4521d7f20553d4df0a", // layer 4
+	"f80b677cac43645416a4a1441a258234e2ef763d", // layer 1
+	"c8f37f04d6364e70daf41595aafd202e33debd13", // layer 2
+	"7248a3f6d1322f7df24a65b774ac334fd01e4274", // layer 3
+	"af8ef2fe4d269057a2ddd19efa82ff6203d29f41", // layer 4
 }
 
 func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {

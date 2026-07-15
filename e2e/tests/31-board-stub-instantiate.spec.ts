@@ -10,7 +10,7 @@ import {
 } from "./fixtures";
 
 // Instantiate-story-from-stub (spec/scoping-canvas ac-6) on the sealed
-// wall: FEATURE_SPEC is accepted-pending-build on main (the harness
+// wall: FEATURE_SPEC is escrow-autopay on main (the harness
 // store is a real git repository), so its board is READ-ONLY — and the
 // one live affordance a sealed record permits is Instantiate. The action
 // cuts design/<slug> via no-checkout plumbing: the serving checkout

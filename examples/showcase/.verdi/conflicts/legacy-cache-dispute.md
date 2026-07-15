@@ -6,7 +6,7 @@ status: superseded
 owners: [platform-team]
 links:
   - { type: challenges, ref: spec/legacy-cache-policy }
-frozen: { at: 2026-05-10, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
+frozen: { at: 2026-05-10, commit: f80b677cac43645416a4a1441a258234e2ef763d }
 ---
 # Conflict: legacy cache dispute
 

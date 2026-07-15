@@ -18,7 +18,6 @@ Coverage:
 
 - component spec active (`store-layout-notes`) + superseded
   (`legacy-cache-policy`, stays in `specs/active/` per 02's Q9 note)
-- feature spec draft (`new-feature-x`)
 - feature spec accepted-pending-build (`stale-decline`) with `story:`,
   `context:`, `impacts:`, `declares:`, four ACs spanning all four evidence
   kinds, and a `dispositions:` block covering all three disposition values

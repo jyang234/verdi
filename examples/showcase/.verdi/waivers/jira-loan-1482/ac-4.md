@@ -5,7 +5,7 @@ title: "Runtime check deferred (fixture)"
 status: active
 owners: [platform-team]
 reason: "runtime probe mechanism not yet built (OQ-2)"
-frozen: { at: 2026-05-01, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
+frozen: { at: 2026-05-01, commit: f80b677cac43645416a4a1441a258234e2ef763d }
 ---
 # Waiver: ac-4 runtime check deferred
 

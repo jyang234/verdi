@@ -120,7 +120,6 @@ func buildGoldenRepo(t testing.TB) string {
 var wantCommittedRefs = []string{
 	"spec/store-layout-notes",
 	"spec/legacy-cache-policy",
-	"spec/new-feature-x",
 	"spec/stale-decline",
 	"spec/loan-refi-2023",
 	"diagram/loansvc-topology",

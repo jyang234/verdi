@@ -19,7 +19,6 @@
 1 .verdi/specs/active/legacy-cache-policy/spec.md
 1 .verdi/diagrams/loansvc-topology.mermaid
 1 .verdi/adr/0003-retry-policy.md
-1 .verdi/specs/active/new-feature-x/spec.md
 1 .verdi/verdi.yaml
 #
 # Layer 2: frozen content pinned at layer 1's commit (fixturegit Heads[0]).

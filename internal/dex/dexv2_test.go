@@ -16,17 +16,17 @@ import (
 // seededSupersessionForge builds the hermetic forge double the
 // pending-supersession fold reads open MRs through: one MR open against
 // "main" whose source branch carries examples/showcase/mr/'s candidate v2
-// spec for spec/accepted-pending-build (its manifest amends ac-2 only —
+// spec for spec/escrow-autopay (its manifest amends ac-2 only —
 // see examples/showcase/OVERLAY-NOTES.md, formerly the overlay README).
 func seededSupersessionForge(t *testing.T) *fake.Forge {
 	t.Helper()
-	candidate, err := os.ReadFile(filepath.Join(corpusDir, "mr", "accepted-pending-build-v2.spec.md"))
+	candidate, err := os.ReadFile(filepath.Join(corpusDir, "mr", "escrow-autopay-v2.spec.md"))
 	if err != nil {
 		t.Fatalf("reading MR candidate fixture: %v", err)
 	}
 	f := fake.New()
-	f.SeedOpenMR("main", forge.OpenMR{ID: "mr-7", SourceBranch: "design/accepted-pending-build-v2"})
-	f.SeedFile("design/accepted-pending-build-v2", ".verdi/specs/active/accepted-pending-build-v2/spec.md", candidate)
+	f.SeedOpenMR("main", forge.OpenMR{ID: "mr-7", SourceBranch: "design/escrow-autopay-v2"})
+	f.SeedFile("design/escrow-autopay-v2", ".verdi/specs/active/escrow-autopay-v2/spec.md", candidate)
 	return f
 }
 
@@ -52,7 +52,7 @@ func buildV2Site(t *testing.T) string {
 // frozen stubs alone" (05 §Lenses, feature lens).
 func TestBuildV2_FeatureLens(t *testing.T) {
 	outDir := buildV2Site(t)
-	page := readFile(t, outDir, "a/spec/accepted-pending-build/index.html")
+	page := readFile(t, outDir, "a/spec/escrow-autopay/index.html")
 
 	t.Run("banner carries the exact honesty text", func(t *testing.T) {
 		if !strings.Contains(page, `data-testid="acceptance-plan-banner"`) {
@@ -158,7 +158,7 @@ func TestBuildV2_ExemptionPages(t *testing.T) {
 		if stated == 0 {
 			t.Fatal("fixture ADR must have at least one active exemption")
 		}
-		if !strings.Contains(page, "spec/accepted-pending-build") {
+		if !strings.Contains(page, "spec/escrow-autopay") {
 			t.Fatal("exemption item must name the exempting spec")
 		}
 		if !strings.Contains(page, "dc-1") {

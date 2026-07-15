@@ -29,7 +29,7 @@ R4-I-4): `supersedes` v1, and the `supersession:` block above classifies
 every one of v1's three objects (ac-1, ac-2, co-1) exactly once — `co-1`
 carried (byte-identical text to v1's `co-1`, required by VL-015),
 `ac-1` amended (tightened wording), `ac-2` removed, plus `ac-3` newly
-added. `spec/borrower-update-mobile` (a story on `spec/accepted-pending-build`)
+added. `spec/borrower-update-mobile` (a story on `spec/escrow-autopay`)
 also carries an `implements` edge into `spec/loan-workflow#ac-1` — the
 amended object — and files a re-affirmation
 (`reaffirmations/jira-loan-1483/ac-1.md`) recording the old→new content

@@ -9,14 +9,14 @@ problem: { text: "the mobile app has no update flow for a submitted application"
 outcome: { text: "a borrower can update their application from the mobile app and see it reflected", anchor: "#outcome" }
 story: jira:LOAN-1483
 links:
-  - { type: implements, ref: "spec/accepted-pending-build#ac-1" }
-  - { type: implements, ref: "spec/accepted-pending-build#ac-2" }
-  - { type: exempts, ref: "spec/accepted-pending-build#dc-2", note: "mobile app uses direct writes for offline support, not the outbox pattern" }
+  - { type: implements, ref: "spec/escrow-autopay#ac-1" }
+  - { type: implements, ref: "spec/escrow-autopay#ac-2" }
+  - { type: exempts, ref: "spec/escrow-autopay#dc-2", note: "mobile app uses direct writes for offline support, not the outbox pattern" }
   - { type: implements, ref: "spec/loan-workflow#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "mobile PUT /applications/:id/update returns 200 with the new state", evidence: [static, behavioral], anchor: "#ac-1" }
   - { id: ac-2, text: "mobile app reflects the change within the session", evidence: [behavioral], anchor: "#ac-2" }
-frozen: { at: 2026-07-12, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
+frozen: { at: 2026-07-12, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
 ---
 # Borrower update, mobile app
 

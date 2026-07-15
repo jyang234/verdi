@@ -38,7 +38,7 @@ acceptance_criteria:
 decisions:
   - { id: dc-1, text: "reuse the outbox stream as the audit source", anchor: "#dc-1" }
 links:
-  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+  - { type: implements, ref: spec/escrow-autopay#ac-1 }
 ---
 # Refinancing decline audit
 

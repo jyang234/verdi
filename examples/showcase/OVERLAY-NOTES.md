@@ -37,7 +37,7 @@ Layout (paths now relative to `examples/showcase/`):
   deviation report) so the dex by-story axis renders the round-four form
   (00 §Glossary "the quartet"; 03 §Alignment report round-four note);
   `loan-refi-2023` stays the grandfathered `board.json` form.
-- `mr/accepted-pending-build-v2.spec.md` — the candidate v2 spec an OPEN
+- `mr/escrow-autopay-v2.spec.md` — the candidate v2 spec an OPEN
   supersession MR carries (served by `internal/forge/fake`'s
   `SeedFile`, never written into any store): its `supersession:` block
   amends `ac-2`, so `spec/borrower-update-mobile` (implements ac-1+ac-2)

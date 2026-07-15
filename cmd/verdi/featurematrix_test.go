@@ -14,10 +14,10 @@ import (
 
 // v2FixtureRoot is examples/showcase's own directory, relative to this
 // package — the source for the round-four feature-fold fixture files
-// (spec/accepted-pending-build and its stories) that V1-P1 committed
+// (spec/escrow-autopay and its stories) that V1-P1 committed
 // without wiring into layers.txt's shared fixturegit history (their
 // frozen.commit stamps intentionally cite that shared history's existing
-// HEAD — 5507c6d9..., proven by buildCorpusRepo(t).Head today — rather
+// HEAD — 7248a3f6..., proven by buildCorpusRepo(t).Head today — rather
 // than pinning a new layer of their own). copyV2FeatureFixture mirrors
 // buildCorpusRepo's own copyDerivedTree technique: these files are placed
 // on the built repo's working tree verbatim, uncommitted, exactly like
@@ -67,7 +67,7 @@ func copyTree(t *testing.T, src, dst string) {
 // with the computed live mapping under the 'acceptance-time plan; current
 // mapping computed below' banner (05 §Lenses)".
 //
-// Fixture: spec/accepted-pending-build (examples/showcase, V1-P1's round-
+// Fixture: spec/escrow-autopay (examples/showcase, V1-P1's round-
 // four feature-fold fixture) declares three stubs (borrower-update-api,
 // borrower-update-ui, borrower-update-audit-log) and three outcome ACs.
 // Two real story specs (borrower-update-api, borrower-update-mobile)
@@ -76,28 +76,28 @@ func copyTree(t *testing.T, src, dst string) {
 // exercising exactly the "left unreconciled" case PLAN-V1.md's fixture
 // design names for this phase's negative stub-reconciliation case).
 // ac-1 has a real bound outcome attestation
-// (attestations/accepted-pending-build/ac-1.md); ac-2 and ac-3 have none.
+// (attestations/escrow-autopay/ac-1.md); ac-2 and ac-3 have none.
 // No story in the fixture is closed, so every stub reads unreconciled and
 // every AC needing story bookkeeping reads pending — an honest, real-data
 // snapshot of an in-flight feature, not a cherry-picked all-green case.
 func TestCmdMatrix_FeatureRef_Golden(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,
-		"specs/active/accepted-pending-build",
+		"specs/active/escrow-autopay",
 		"specs/active/borrower-update-api",
 		"specs/active/borrower-update-mobile",
 		"specs/active/borrower-update-mobile-spike",
-		"attestations/accepted-pending-build",
+		"attestations/escrow-autopay",
 	)
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runMatrixForTest(t, []string{"spec/accepted-pending-build"}, &stdout, &stderr)
+	got := runMatrixForTest(t, []string{"spec/escrow-autopay"}, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("cmdMatrix exit = %d, want 0; stderr=%q", got, stderr.String())
 	}
 
-	want := `feature: spec/accepted-pending-build
+	want := `feature: spec/escrow-autopay
 status: accepted-pending-build
 
 AC    STATUS     EVIDENCE             IMPLEMENTING STORIES                                   TEXT
@@ -127,14 +127,14 @@ stub_reconciliation.blocked: true
 func TestCmdMatrix_FeatureRef_Negative_DanglingBinding(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,
-		"specs/active/accepted-pending-build",
+		"specs/active/escrow-autopay",
 		"specs/active/borrower-update-api",
 		"specs/active/borrower-update-mobile",
 		"specs/active/borrower-update-mobile-spike",
-		"attestations/accepted-pending-build",
+		"attestations/escrow-autopay",
 	)
 
-	derivedDir := filepath.Join(repo.Dir, ".verdi", "data", "derived", "spec--accepted-pending-build", repo.Head)
+	derivedDir := filepath.Join(repo.Dir, ".verdi", "data", "derived", "spec--escrow-autopay", repo.Head)
 	if err := os.MkdirAll(derivedDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", derivedDir, err)
 	}
@@ -146,7 +146,7 @@ func TestCmdMatrix_FeatureRef_Negative_DanglingBinding(t *testing.T) {
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runMatrixForTest(t, []string{"spec/accepted-pending-build"}, &stdout, &stderr)
+	got := runMatrixForTest(t, []string{"spec/escrow-autopay"}, &stdout, &stderr)
 	if got != 2 {
 		t.Fatalf("cmdMatrix exit = %d, want 2 (operational error); stderr=%q", got, stderr.String())
 	}
@@ -247,11 +247,11 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 func TestCmdMatrix_FeatureRef_SupersededStoryRendersTerminalMarker(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,
-		"specs/active/accepted-pending-build",
+		"specs/active/escrow-autopay",
 		"specs/active/borrower-update-api",
 		"specs/active/borrower-update-mobile",
 		"specs/active/borrower-update-mobile-spike",
-		"attestations/accepted-pending-build",
+		"attestations/escrow-autopay",
 	)
 
 	// Flip the on-disk (disposable) copy of borrower-update-mobile to
@@ -271,12 +271,12 @@ func TestCmdMatrix_FeatureRef_SupersededStoryRendersTerminalMarker(t *testing.T)
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runMatrixForTest(t, []string{"spec/accepted-pending-build"}, &stdout, &stderr)
+	got := runMatrixForTest(t, []string{"spec/escrow-autopay"}, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("cmdMatrix exit = %d, want 0; stderr=%q", got, stderr.String())
 	}
 
-	want := `feature: spec/accepted-pending-build
+	want := `feature: spec/escrow-autopay
 status: accepted-pending-build
 
 AC    STATUS     EVIDENCE             IMPLEMENTING STORIES                                                TEXT

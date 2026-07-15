@@ -1,15 +1,16 @@
 ---
-id: spec/accepted-pending-build
+id: spec/escrow-autopay
 kind: spec
 class: feature
-title: "Accepted pending build (v2 fixture)"
+title: "Escrow autopay enrollment"
 status: accepted-pending-build
 owners: [platform-team]
+story: jira:LOAN-1519
 problem: { text: "borrowers cannot self-serve an update to a submitted application", anchor: "#problem" }
 outcome: { text: "a borrower can update their application and see the change reflected", anchor: "#outcome" }
 impacts: [loansvc, notification-svc]
 context:
-  - adr/0002-outbox-events@2f230011b192c5ac1c0ed5442be76fc401c4cbca
+  - adr/0002-outbox-events@f80b677cac43645416a4a1441a258234e2ef763d
 declares:
   boundaries:
     - { from: loansvc, to: notification-svc, via: events }
@@ -29,7 +30,7 @@ stubs:
   - { slug: borrower-update-api, acceptance_criteria: [ac-1] }
   - { slug: borrower-update-ui, acceptance_criteria: [ac-1, ac-2] }
   - { slug: borrower-update-audit-log, acceptance_criteria: [ac-3] }
-frozen: { at: 2026-07-11, commit: 5507c6d963bd78d9eabed2324c3d380e678f891e }
+frozen: { at: 2026-07-11, commit: 7248a3f6d1322f7df24a65b774ac334fd01e4274 }
 ---
 # Accepted pending build (v2 fixture)
 
@@ -51,7 +52,7 @@ their own view within the same session.
 
 A borrower can update their application. Outcome-level, implementation-blind
 — the outcome floor is an attestation, satisfied by a bound outcome
-attestation artifact (`attestations/accepted-pending-build/ac-1.md`).
+attestation artifact (`attestations/escrow-autopay/ac-1.md`).
 
 ## AC-2
 

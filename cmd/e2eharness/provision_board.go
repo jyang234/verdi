@@ -196,7 +196,7 @@ story: jira:LOAN-2201
 problem: { text: "income documents are verified by hand and applicants wait days", anchor: "#problem" }
 outcome: { text: "verification completes the day the documents arrive", anchor: "#outcome" }
 links:
-  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+  - { type: implements, ref: spec/escrow-autopay#ac-1 }
 ---
 # Income verification
 
@@ -210,7 +210,7 @@ links:
 // evidence obligation (spec/obligation-artifact ac-3). It declares two
 // acceptance criteria (ac-1/ac-2, the obligation targets) and one decision
 // (dc-1, a non-AC card the invalid-drop refusal lands on). Like every story
-// it points up at a feature AC (accepted-pending-build#ac-1, real on main).
+// it points up at a feature AC (escrow-autopay#ac-1, real on main).
 const obligationSpec = `---
 id: spec/refi-decline-audit
 kind: spec
@@ -227,7 +227,7 @@ acceptance_criteria:
 decisions:
   - { id: dc-1, text: "reuse the outbox stream as the audit source", anchor: "#dc-1" }
 links:
-  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+  - { type: implements, ref: spec/escrow-autopay#ac-1 }
 ---
 # Refinancing decline audit
 
@@ -271,7 +271,7 @@ acceptance_criteria:
   - { id: ac-1, text: "support can replay every decline notice shown to an applicant", evidence: [behavioral, static], anchor: "#ac-1" }
   - { id: ac-2, text: "the replay is tamper-evident", evidence: [static], anchor: "#ac-2" }
 links:
-  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+  - { type: implements, ref: spec/escrow-autopay#ac-1 }
 ---
 # Refinancing decline replay
 
@@ -332,7 +332,7 @@ outcome: { text: "each declared kind's record state reads on its own obligation 
 acceptance_criteria:
   - { id: ac-1, text: "each declared kind shows what it holds", evidence: [static, behavioral, attestation], anchor: "#ac-1" }
 links:
-  - { type: implements, ref: spec/accepted-pending-build#ac-1 }
+  - { type: implements, ref: spec/escrow-autopay#ac-1 }
 ---
 # Decline slot wall
 

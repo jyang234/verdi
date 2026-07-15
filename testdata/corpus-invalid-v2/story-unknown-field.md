@@ -10,7 +10,7 @@ outcome: { text: "PUT /applications/:id/update returns 200 with the new state", 
 story: jira:LOAN-1482
 bogus_extra_field: surprise
 links:
-  - { type: implements, ref: "spec/accepted-pending-build#ac-1" }
+  - { type: implements, ref: "spec/escrow-autopay#ac-1" }
 acceptance_criteria:
   - { id: ac-1, text: "PUT /applications/:id/update returns 200 with the new state", evidence: [static, behavioral], anchor: "#ac-1" }
 frozen: { at: 2026-07-12, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }

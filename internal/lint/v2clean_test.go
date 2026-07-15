@@ -30,15 +30,15 @@ import (
 //     the v0 corpus (so it participates in the SAME repo everything else
 //     lives in), and substitutes the freshly-computed SHAs for the golden
 //     literals wherever they're cited.
-//   - accepted-pending-build / borrower-update-* / the outcome attestation
-//     cite "5507c6d963bd78d9eabed2324c3d380e678f891e" — goldenHeads[2],
+//   - escrow-autopay / borrower-update-* / the outcome attestation
+//     cite "7248a3f6d1322f7df24a65b774ac334fd01e4274" — goldenHeads[2],
 //     the v0 corpus's OWN layer-3 head (reused deliberately, per
 //     corpus_test.go's goldenHeads comment) — which IS already real,
 //     unchanged, once chained after the same v0 corpus layers.txt content
 //     this package's buildLintRepo already reproduces. No substitution
 //     needed for that family.
 //
-// accepted-pending-build's context: pin (adr/0002-outbox-events@<v0 layer
+// escrow-autopay's context: pin (adr/0002-outbox-events@<v0 layer
 // 1 head>) is likewise already real for the same reason.
 
 var (
@@ -110,15 +110,15 @@ func buildV2FixtureCorpusRepo(t *testing.T) *fixturegit.Repo {
 	layerC := fixturegit.Layer{
 		Files: map[string]string{
 			".verdi/specs/active/loan-workflow-v2/spec.md":             sub(".verdi/specs/active/loan-workflow-v2/spec.md"),
-			".verdi/specs/active/accepted-pending-build/spec.md":       sub(".verdi/specs/active/accepted-pending-build/spec.md"),
-			".verdi/specs/active/accepted-pending-build/layout.json":   sub(".verdi/specs/active/accepted-pending-build/layout.json"),
+			".verdi/specs/active/escrow-autopay/spec.md":               sub(".verdi/specs/active/escrow-autopay/spec.md"),
+			".verdi/specs/active/escrow-autopay/layout.json":           sub(".verdi/specs/active/escrow-autopay/layout.json"),
 			".verdi/specs/active/borrower-update-api/spec.md":          sub(".verdi/specs/active/borrower-update-api/spec.md"),
 			".verdi/specs/active/borrower-update-mobile/spec.md":       sub(".verdi/specs/active/borrower-update-mobile/spec.md"),
 			".verdi/specs/active/borrower-update-mobile-spike/spec.md": sub(".verdi/specs/active/borrower-update-mobile-spike/spec.md"),
-			".verdi/attestations/accepted-pending-build/ac-1.md":       sub(".verdi/attestations/accepted-pending-build/ac-1.md"),
+			".verdi/attestations/escrow-autopay/ac-1.md":               sub(".verdi/attestations/escrow-autopay/ac-1.md"),
 			".verdi/reaffirmations/jira-loan-1483/ac-1.md":             sub(".verdi/reaffirmations/jira-loan-1483/ac-1.md"),
 		},
-		Message: "v2 corpus: loan-workflow-v2 frozen + accepted-pending-build cluster + reaffirmation",
+		Message: "v2 corpus: loan-workflow-v2 frozen + escrow-autopay cluster + reaffirmation",
 	}
 
 	layers := append(append([]fixturegit.Layer{}, base...), layerA, layerB, layerC)

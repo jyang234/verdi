@@ -3,7 +3,7 @@ id: attestation/jira-loan-1482--ac-3
 kind: attestation
 title: "VL-011 overlay: path/id mismatch"
 owners: [qa-lead]
-frozen: { at: 2026-05-01, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }
+frozen: { at: 2026-05-01, commit: f80b677cac43645416a4a1441a258234e2ef763d }
 ---
 # VL-011 overlay: path/id mismatch
 

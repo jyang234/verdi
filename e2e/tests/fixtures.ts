@@ -103,7 +103,7 @@ export const DEX_BASE = `http://127.0.0.1:${resolvePorts().dex}`;
 // The v2 fixture feature spec (three outcome ACs, three stubs, dc-1
 // exempting ADR_NAME — PLAN-V1 §4's overlay, examples/showcase). Finalized
 // by V1-P8.
-export const FEATURE_SPEC = "accepted-pending-build";
+export const FEATURE_SPEC = "escrow-autopay";
 
 // The v2 fixture's two story specs (PLAN-V1 §4: one stub-matched, one
 // deviating). STORY_STUB_MATCHED doubles as the realized stub's slug
@@ -117,7 +117,7 @@ export const STORY_DEVIATING = "borrower-update-mobile";
 // assert: spec-stale comes from testdata/dexoverlay's living deviation
 // report (accepted-deviation on the story's own ac-1, R4-I-18);
 // pending-supersession from the fake forge's open MR whose candidate
-// manifest amends accepted-pending-build's ac-2 (which this story's
+// manifest amends escrow-autopay's ac-2 (which this story's
 // implements edges touch and STORY_STUB_MATCHED's do not).
 export const STORY_WITH_SPEC_STALE = "borrower-update-mobile";
 export const STORY_WITH_PENDING_SUPERSESSION = "borrower-update-mobile";
@@ -349,7 +349,7 @@ export const DOC_EDGE_TARGET = "adr/0002-outbox-events";
 // spike proto-sticky's resolution-yarn target.
 export const OQ_ID = "oq-1";
 
-// FEATURE_SPEC (accepted-pending-build, on main → sealed wall) declares
+// FEATURE_SPEC (escrow-autopay, on main → sealed wall) declares
 // three stubs; its wall renders them as stub cards with Instantiate.
 // STUB_SLUGS mirrors the fixture's stubs: frontmatter verbatim.
 export const STUB_SLUGS = [

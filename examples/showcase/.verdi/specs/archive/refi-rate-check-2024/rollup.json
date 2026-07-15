@@ -2,7 +2,7 @@
   "schema": "verdi.rollup/v1",
   "story": "jira:LOAN-2024",
   "ref": "spec/refi-rate-check-2024",
-  "commit": "5507c6d963bd78d9eabed2324c3d380e678f891e",
+  "commit": "7248a3f6d1322f7df24a65b774ac334fd01e4274",
   "criteria": [
     { "id": "ac-1", "text": "a rate change is verified against the published table before rollout", "status": "evidenced", "summary": "static:pass; behavioral:pass" }
   ],

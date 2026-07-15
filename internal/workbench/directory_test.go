@@ -90,7 +90,7 @@ func writeActiveSpec(t *testing.T, root, name, class, status, story string) {
 	if class == "feature" {
 		spec += "acceptance_criteria:\n  - { id: ac-1, text: \"holds\", evidence: [static] }\n"
 		if status != "draft" {
-			spec += "frozen: { at: 2026-07-14, commit: 2f230011b192c5ac1c0ed5442be76fc401c4cbca }\n"
+			spec += "frozen: { at: 2026-07-14, commit: f80b677cac43645416a4a1441a258234e2ef763d }\n"
 		}
 	}
 	spec += "---\n# " + name + "\n"
