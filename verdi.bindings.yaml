@@ -448,6 +448,17 @@ bindings:
       - "spec/workbench-directory#ac-4"
       - "spec/workbench-directory#ac-5"
       - "spec/workbench-directory#ac-6"
+      # spec/showcase-corpus-renovation (public-rollout-plan Task 1.8)
+      # ac-1's behavioral leg: `verdi lint` run against a real, git-real
+      # rebuild of each of examples/showcase's two independent fixturegit
+      # histories — internal/corpus/corpus_test.go's TestFixtureRepo_
+      # MatchesGoldenSHAs (the layers.txt family) and internal/lint's
+      # TestV2FixtureCorpus_LintsClean / _BareClone_OnlyVL017Disclosures
+      # (the rung-4/escrow-autopay family) — both exit 0 with zero
+      # findings (mutable zone present) or VL-017-only disclosures
+      # (bare-clone simulation), re-verified this task against the real
+      # built binary, not just the go test assertion (task-1.8-report.md).
+      - "spec/showcase-corpus-renovation#ac-1"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -789,3 +800,11 @@ bindings:
       # write-path inventory statics).
       - "spec/diagram-proposals#ac-1"
       - "spec/diagram-proposals#ac-2"
+      # spec/showcase-corpus-renovation ac-1's static leg: examples/showcase
+      # exists as the single committed store (testdata/corpus and
+      # testdata/dexoverlay no longer present, grep-verified repo-wide),
+      # its layers.txt reflects the merged one-construction-path layering,
+      # and docs/showcase-vetting.md has a row for every file under
+      # examples/showcase plus every provisioned showcase artifact,
+      # zero unrecorded (file-list diff proof in task-1.8-report.md).
+      - "spec/showcase-corpus-renovation#ac-1"
