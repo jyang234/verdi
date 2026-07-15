@@ -2,7 +2,7 @@
 id: spec/escrow-autopay
 kind: spec
 class: feature
-title: "Accepted pending build (v2 fixture)"
+title: "Escrow autopay enrollment (v2 fixture)"
 status: accepted-pending-build
 owners: [platform-team]
 story: okr:LOAN-Q3
@@ -31,7 +31,7 @@ stubs:
   - { slug: borrower-update-audit-log, acceptance_criteria: [ac-3] }
 frozen: { at: 2026-07-11, commit: 93ddc5bbbb398cf747151e1c466afb83114398df }
 ---
-# Accepted pending build (v2 fixture)
+# Escrow autopay enrollment (v2 fixture)
 
 The v2 contract-surface fixture: a feature spec exercising the round-four
 object model end to end (V1-P1). Text below exists only to give every
