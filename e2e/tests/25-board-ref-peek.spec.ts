@@ -31,7 +31,7 @@ test.describe("board: reference cards peek their artifact", () => {
     await page.getByTestId(refCardTestId(DOC_EDGE_TARGET)).click();
     await expect(peek(page)).toBeVisible();
     await expect(peek(page)).toContainText(
-      "Outbox pattern for domain events, v2 (fixture)",
+      "Transactional outbox for domain events",
     );
     await expect(peek(page).locator(".peek-kind")).toHaveText("adr");
     await expect(peek(page).locator(".peek-status")).toHaveText("accepted");
