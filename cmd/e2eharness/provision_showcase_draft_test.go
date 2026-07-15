@@ -222,3 +222,33 @@ func TestProvisionShowcaseDraft_Negative_NoRepo(t *testing.T) {
 		t.Fatal("provisionShowcaseDraft over a non-repo: got nil error")
 	}
 }
+
+// TestGitShowBytes proves the pinned-commit read is byte-exact — trailing
+// newline included, the byte gitOutput's TrimSpace would eat and thereby
+// corrupt a content digest — and that a path absent from the commit errors.
+func TestGitShowBytes(t *testing.T) {
+	dir := t.TempDir()
+	const content = "graph TD\n  a --> b\n"
+	if err := os.WriteFile(filepath.Join(dir, "d.mermaid"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitInitAndCommit(dir); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := gitOutput(dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := gitShowBytes(dir, sha, "d.mermaid")
+	if err != nil {
+		t.Fatalf("gitShowBytes: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("gitShowBytes = %q, want byte-exact %q (trailing newline preserved)", got, content)
+	}
+
+	if _, err := gitShowBytes(dir, sha, "no-such-file"); err == nil {
+		t.Fatal("gitShowBytes on an absent path: got nil error")
+	}
+}

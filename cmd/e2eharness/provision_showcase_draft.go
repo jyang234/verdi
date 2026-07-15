@@ -36,6 +36,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -165,14 +166,19 @@ func showcaseDraftAnnotations(specCommit string) string {
 // so its authoring board renders under /b/ with its open-question stickies.
 func provisionShowcaseDraft(storeRoot string) error {
 	// The pin commit and the base diagram bytes come from main, where the
-	// corpus base lives — resolved before the branch is cut.
+	// corpus base lives — resolved before the branch is cut. The bytes are
+	// read from the PINNED commit itself (git show <mainSHA>:<path>), never
+	// the working tree, because that is exactly how the real consumer
+	// (diagrambase.Recover, via gitx.Show) will read them back: the digests
+	// are pinned-commit-derived by construction, not by the accident of an
+	// untouched checkout.
 	mainSHA, err := gitOutput(storeRoot, "rev-parse", "main")
 	if err != nil {
 		return fmt.Errorf("resolving main HEAD for the proposal's base pin: %w", err)
 	}
-	baseRaw, err := os.ReadFile(filepath.Join(storeRoot, ".verdi", "diagrams", showcaseDraftBaseDiagram+".mermaid"))
+	baseRaw, err := gitShowBytes(storeRoot, mainSHA, ".verdi/diagrams/"+showcaseDraftBaseDiagram+".mermaid")
 	if err != nil {
-		return fmt.Errorf("reading base diagram %s: %w", showcaseDraftBaseDiagram, err)
+		return fmt.Errorf("reading base diagram %s at %s: %w", showcaseDraftBaseDiagram, mainSHA, err)
 	}
 	baseBody := diagramBodyBytes(baseRaw)
 	sourceDigest, err := diagrambase.CanonicalGraphDigest(baseBody)
@@ -236,6 +242,25 @@ func provisionShowcaseDraft(storeRoot string) error {
 		return fmt.Errorf("writing showcase-draft annotations: %w", err)
 	}
 	return nil
+}
+
+// gitShowBytes returns the RAW bytes of path at commit (`git show
+// <commit>:<path>`) — the byte-exact sibling of gitOutput, which trims
+// trailing whitespace and so would corrupt a content digest over file
+// bytes ending in a newline. This is the same read the digest's real
+// consumer performs (diagrambase.Recover via gitx.Show at the pinned
+// commit), so what is digested here is what will be verified there.
+func gitShowBytes(dir, commit, path string) ([]byte, error) {
+	cmd := exec.Command("git", "show", commit+":"+path)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), deterministicGitEnv...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git show %s:%s: %w\n%s", commit, path, err, stderr.String())
+	}
+	return out, nil
 }
 
 // diagramBodyBytes returns a diagram file's mermaid body — everything after
