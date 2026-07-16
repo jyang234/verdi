@@ -3047,6 +3047,24 @@ button.yarn-chip-type {
 /* the diagram status badge shares the board head's stamp row */
 .diagram-status-badge { text-transform: uppercase; }
 
+/* the diagram designer's exit affordance (spec/tool-view-exit ac-1): a
+   labeled "back" doorway leading the board head, distinct in place and
+   style from the site head's index/artifact nav links */
+.diagram-exit-link {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--muted-solid);
+  text-decoration: none;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.28rem 0.8rem;
+  margin-right: 0.9rem;
+  white-space: nowrap;
+}
+.diagram-exit-link:hover { color: var(--accent); border-color: var(--accent); }
+
 /* a proposal-diagram reference card's editor doorway (board wall) */
 .refcard-editor-link {
   display: inline-block;

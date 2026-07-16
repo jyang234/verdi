@@ -236,7 +236,11 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if err := attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession); err != nil {
 		return nil, nil, "", err
 	}
-	attachDiagramEditorHrefs(proj, s.root)
+	// s.fixedBranch distinguishes the two board modes the one call site
+	// serves: "" for the serving checkout's unprefixed board, the design
+	// branch for a per-branch draft board instance — so the editor link
+	// carries the operator's OWN board path (spec/tool-view-exit dc-2 / ADJ-38).
+	attachDiagramEditorHrefs(proj, s.root, name, s.fixedBranch)
 	if reviewNotice != "" {
 		proj.Notices = append(proj.Notices, reviewNotice)
 	}
