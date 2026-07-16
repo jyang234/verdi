@@ -84,7 +84,7 @@ func writeGlanceSection(buf *bytes.Buffer, root string, entries []refindex.Entry
 
 	eligible := glanceEligibleEntries(entries)
 
-	buf.WriteString(`<section class="home-glance" data-testid="home-glance"><h2>At a glance</h2>`)
+	buf.WriteString(`<section class="home-glance" data-testid="home-glance"><h2>At a glance</h2><div class="glance-buckets">`)
 	for _, b := range glanceBuckets {
 		var members []refindex.Entry
 		for _, e := range eligible {
@@ -94,7 +94,7 @@ func writeGlanceSection(buf *bytes.Buffer, root string, entries []refindex.Entry
 		}
 		writeGlanceBucket(buf, root, b, members)
 	}
-	buf.WriteString(`</section>`)
+	buf.WriteString(`</div></section>`)
 }
 
 // glanceEligibleEntries is dc-1/dc-2's population rule: every entry the

@@ -3085,6 +3085,41 @@ button.yarn-chip-type {
   .placard-more::after { transition: opacity 120ms ease; }
 }
 
+/* ---------- the home status glance (spec/home-status-glance) ----------
+   The leading, actionable-first section above the exhaustive Directory
+   below: three fixed buckets (on-the-desk / in-flight / settling) laid
+   out as calm side-by-side columns on a wide viewport, stacking on a
+   narrow one. Deliberately leaner than a dir-entry card — no source
+   chip, no in-review chip — so it reuses the SAME badge vocabulary
+   without inventing a second design system. */
+.home-glance { margin: 0.4rem 0 1.4rem; }
+.glance-buckets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+@media (max-width: 860px) {
+  .glance-buckets { grid-template-columns: 1fr; }
+}
+.glance-group {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 0.6rem 0.75rem 0.8rem;
+}
+.glance-group h3 { margin: 0 0 0.4rem; font-size: 0.98rem; }
+.glance-group ul { list-style: none; margin: 0; padding: 0; }
+.glance-entry {
+  padding: 0.35rem 0.1rem;
+  border-top: 1px dashed var(--rule);
+  font-size: 0.92rem;
+  background: var(--card);
+}
+.glance-group li:last-child { border-bottom: 1px dashed var(--rule); }
+.glance-entry a { text-decoration: none; }
+.glance-entry a:hover { text-decoration: underline; }
+.glance-board { color: var(--muted-solid); }
+
 /* ---------- the directory home (spec/directory-home) ----------
    The whole-store directory: four status groups (workbench-directory
    dc-2) as the page's organizing structure, each entry chipped by status

@@ -106,6 +106,22 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return fmt.Errorf("writing %s spec: %w", dbSameSpecName, err)
 	}
 
+	// The home-status-glance "closed awaiting archive" fixture (spec/
+	// home-status-glance ac-1): a feature spec whose status is closed
+	// while it is STILL physically in .verdi/specs/active/ — no committed
+	// examples/showcase fixture carries this exact shape (loan-refi-2023
+	// is the archive-zone twin, already moved). Landed here, before the
+	// corpus commit, for the same reason as mermaidDemoSpec/dbSameSpecLanded
+	// above: present on main and on every branch cut from it, including
+	// the serving checkout's, so its board link genuinely serves.
+	closedAwaitingArchiveDir := filepath.Join(storeRoot, ".verdi", "specs", "active", closedAwaitingArchiveName)
+	if err := os.MkdirAll(closedAwaitingArchiveDir, 0o755); err != nil {
+		return fmt.Errorf("creating %s spec dir: %w", closedAwaitingArchiveName, err)
+	}
+	if err := os.WriteFile(filepath.Join(closedAwaitingArchiveDir, "spec.md"), []byte(closedAwaitingArchiveSpec), 0o644); err != nil {
+		return fmt.Errorf("writing %s spec: %w", closedAwaitingArchiveName, err)
+	}
+
 	// verdi.yaml is no longer written here — it is now committed at
 	// examples/showcase/.verdi/verdi.yaml (layers.txt layer 1) and arrives
 	// via the copyTree call above.
@@ -155,6 +171,36 @@ const mermaidDemoSpec = "---\n" +
 	"  a --> b\n" +
 	"  b --> c\n" +
 	"```\n"
+
+// closedAwaitingArchiveName/closedAwaitingArchiveSpec are spec/home-
+// status-glance's own minimal fixture (e2e/tests/fixtures.ts:
+// EDGE.DIR_CLOSED_AWAITING_ARCHIVE): a feature whose status is closed
+// while it is still sitting in specs/active/, distinct from the archive-
+// zone loan-refi-2023 (ARCHIVED_SPEC) — parent workbench-legibility dc-4's
+// own "closed awaiting archive" example, and the one shape today's
+// committed showcase corpus does not carry. class: feature, not
+// component, because a component's legal status enum has no "closed"
+// (internal/artifact/status.go's specComponentStatuses) — closed requires
+// a frozen stamp (requireFrozen), fabricated here with a well-formed but
+// non-real commit sha, exactly as a scratch-only fixture may.
+const closedAwaitingArchiveName = "rate-table-sunset"
+
+const closedAwaitingArchiveSpec = "---\n" +
+	"id: spec/" + closedAwaitingArchiveName + "\n" +
+	"kind: spec\n" +
+	"class: feature\n" +
+	"title: \"Rate table sunset (e2e fixture, closed awaiting archive)\"\n" +
+	"status: closed\n" +
+	"owners: [platform-team]\n" +
+	"story: jira:LOAN-1901\n" +
+	"acceptance_criteria:\n" +
+	"  - { id: ac-1, text: \"the retired rate table no longer serves any live quote\", evidence: [static] }\n" +
+	"frozen: { at: 2026-05-01, commit: 1111111111111111111111111111111111111111 }\n" +
+	"---\n" +
+	"# Rate table sunset\n\n" +
+	"Closed, still sitting in `specs/active/` awaiting its archive move — the\n" +
+	"two-different-next-actions case spec/home-status-glance's problem\n" +
+	"statement names, distinct from loan-refi-2023's already-archived shape.\n"
 
 // proposalDiagram is a class: proposal diagram fixture
 // (spec/illustrative-class ac-3): a from-scratch proposal whose mermaid

@@ -14,6 +14,11 @@ package main
 //     branch from the scratch store — the deleted-mid-session shape whose
 //     stale directory link must resolve to the disclosed 404 (ac-3).
 //     Design-namespace branches only; anything else is refused.
+//   - GET  /empty-glance-fixture returns the URL of a separate, hermetic,
+//     in-process workbench instance carrying a genuinely empty in-flight/
+//     settling glance bucket (spec/home-status-glance ac-3/dc-4) — see
+//     emptyglance.go's own doc comment for why this is isolated rather
+//     than mutating the shared store above.
 
 import (
 	"log"
@@ -31,25 +36,29 @@ import (
 // branch carries the one open MR.
 const openMRFeedJSON = `[{"id":"mr-9","source_branch":"design/refi-decline-flow","title":"Refinancing decline flow"}]` + "\n"
 
-// controlServer holds the toggleable feed state and the store the
-// delete-branch endpoint mutates.
+// controlServer holds the toggleable feed state, the store the
+// delete-branch endpoint mutates, and the lazily-started empty-glance
+// fixture (emptyglance.go).
 type controlServer struct {
 	storeRoot string
 
 	mu     sync.Mutex
 	outage bool
+
+	emptyGlance *emptyGlanceFixture
 }
 
 func newControlServer(storeRoot string) *controlServer {
-	return &controlServer{storeRoot: storeRoot}
+	return &controlServer{storeRoot: storeRoot, emptyGlance: newEmptyGlanceFixture()}
 }
 
-// handler wires the three endpoints onto a fresh mux.
+// handler wires the four endpoints onto a fresh mux.
 func (c *controlServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/openmrs", c.openMRs)
 	mux.HandleFunc("/outage", c.triggerOutage)
 	mux.HandleFunc("/delete-branch", c.deleteBranch)
+	mux.HandleFunc("/empty-glance-fixture", c.emptyGlance.handler)
 	return mux
 }
 
