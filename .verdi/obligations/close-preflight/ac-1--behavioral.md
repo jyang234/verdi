@@ -6,7 +6,7 @@ owners: [platform-team]
 for_kind: behavioral
 links:
   - { type: verifies, ref: "spec/close-preflight" }
-frozen: { at: 2026-07-16, commit: 796a2b9447959162cff33dee48a1b5edf05c0eab }
+frozen: { at: 2026-07-16, commit: ba9347d6ff69b3a9654008e66e389dfa515c7ffc }
 ---
 # A Go test proves --preflight names the exact condition, evidence kind, and path close would refuse on, for both story and feature scope
 
@@ -47,4 +47,11 @@ a ready fixture run with no CI environment variables set and no
 text alongside its ready verdict; the same ready fixture run with a CI
 environment simulated (or with `--force-local`) does NOT print that line —
 proving the disclosure is conditional on the real guard's own inputs, not
-unconditionally appended.
+unconditionally appended. Per dc-1's follow-on fix (closing this story's
+own second, re-swept judge finding), the test must also prove the
+disclosure's condition is read from the same `lint.ReadCIEnv().InCI`/
+`--force-local` inputs the guard itself reads — e.g. by driving both the
+guard's own refusal (a real, non-`--preflight` close outside CI without
+`--force-local`) and the preflight's disclosure from the identical
+environment/flag setup in one test and asserting they agree — not by two
+independently-hand-asserted expectations that could drift apart.
