@@ -102,6 +102,13 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		return 2
 	}
 
+	// D6-23: refuse to freeze a quartet the store's own linter rejects,
+	// before any part of the ritual below runs — no stub-match/blast-radius
+	// disclosure printed, no status flip, no frozen stamp (acceptlint.go).
+	if rc := lintQuartetOrRefuse(ctx, root, ref, spec, stderr); rc != 0 {
+		return rc
+	}
+
 	preFlipHead, err := gitx.RevParse(ctx, root, "HEAD")
 	if err != nil {
 		fmt.Fprintln(stderr, "accept:", err)

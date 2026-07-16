@@ -131,7 +131,12 @@ frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
 `
 
 // succStorySupersedesMD is the rung-3 story-to-story chain edge D-12
-// shipped: a whole-spec supersedes edge to a STORY-class predecessor.
+// shipped: a whole-spec supersedes edge to a STORY-class predecessor. The
+// story class is always "new-class" (vl006.go's isNewClassSpec), so — now
+// that accept.go's D6-23 gate lints the spec it is about to freeze — its
+// problem/outcome/ac-1 anchors must actually resolve against the body
+// below, not just decode; the ## Problem/## Outcome/## AC-1 headings exist
+// for exactly that.
 const succStorySupersedesMD = `---
 id: spec/succ-story
 kind: spec
@@ -143,25 +148,59 @@ story: jira:LOAN-4001
 problem: { text: "borrowers see stale data", anchor: problem }
 outcome: { text: "borrowers see current data", anchor: outcome }
 acceptance_criteria:
-  - { id: ac-1, text: "v2 obligation, corrected", evidence: [static] }
+  - { id: ac-1, text: "v2 obligation, corrected", evidence: [static], anchor: ac-1 }
 links:
   - { type: implements, ref: "spec/some-feature#ac-1" }
   - { type: supersedes, ref: "spec/pred-story" }
 ---
 # Successor story
+
+## Problem
+
+Borrowers see stale data.
+
+## Outcome
+
+Borrowers see current data.
+
+## AC-1
+
+v2 obligation, corrected.
+`
+
+// someFeatureMD is the implements-edge target both predStoryAcceptedMD and
+// succStorySupersedesMD name (spec/some-feature#ac-1) — a plain v0-shaped
+// feature spec (no problem/outcome/stubs, so isNewClassSpec is false and no
+// anchor is required of its own ac-1) whose only job is to exist and
+// declare ac-1, so that link actually resolves (VL-003) rather than
+// dangling. buildPredecessorFlipRepo below always includes it: harmless for
+// the feature-predecessor tests (which never reference it), required for
+// the story-predecessor ones (which do).
+const someFeatureMD = `---
+id: spec/some-feature
+kind: spec
+title: "Some feature"
+owners: [platform-team]
+class: feature
+status: draft
+acceptance_criteria:
+  - { id: ac-1, text: "some feature ac", evidence: [static] }
+---
+# Some feature
 `
 
 // buildPredecessorFlipRepo builds a minimal one-layer fixturegit repo
-// carrying exactly the two named spec.md bodies under specs/active/ — no
-// design-start scaffold, since these tests drive runAccept directly against
-// hand-written frontmatter (mirroring accept_test.go's own
-// buildAcceptNegativeRepo).
+// carrying exactly the two named spec.md bodies under specs/active/, plus
+// the shared someFeatureMD implements-edge target — no design-start
+// scaffold, since these tests drive runAccept directly against hand-written
+// frontmatter (mirroring accept_test.go's own buildAcceptNegativeRepo).
 func buildPredecessorFlipRepo(t *testing.T, predName, predMD, succName, succMD string) *fixturegit.Repo {
 	t.Helper()
 	return fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
 				".verdi/verdi.yaml":                            phase7ManifestYAML,
+				".verdi/specs/active/some-feature/spec.md":     someFeatureMD,
 				".verdi/specs/active/" + predName + "/spec.md": predMD,
 				".verdi/specs/active/" + succName + "/spec.md": succMD,
 			},
