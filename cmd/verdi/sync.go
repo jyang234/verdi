@@ -198,8 +198,12 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 
 	// The CI bundle is authoritative and always preferred when available,
 	// with or without --or-regen (05 §CLI: "--or-regen regenerates
-	// locally when no bundle exists").
-	tree, err := deps.Forge.FetchEvidenceBundle(ctx, ref, commit)
+	// locally when no bundle exists"). The fetch walks the current
+	// commit's ancestry, nearest first, applying the fold's own ancestor
+	// rule verbatim (spec/sync-local-flow ac-2/dc-1, sync_ancestor.go) —
+	// a bundle at commit itself still wins first, never a stricter,
+	// HEAD-exact-only demand the fold itself would not require.
+	tree, acceptedCommit, distance, err := fetchAncestorBundle(ctx, root, deps.Forge, ref, commit)
 	switch {
 	case err == nil:
 		// The I-4 secondary defense (spec/forge-transport ac-4/dc-4):
@@ -217,7 +221,8 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 			fmt.Fprintln(deps.Stderr, "sync:", writeErr)
 			return 2
 		}
-		fmt.Fprintf(deps.Stdout, "sync: pulled CI evidence bundle (%d files) into %s\n", len(tree), derivedRoot)
+		fmt.Fprintf(deps.Stdout, "sync: pulled CI evidence bundle (%d files) — accepted at commit %s, %d commit(s) back from %s, into %s\n",
+			len(tree), acceptedCommit, distance, commit, derivedRoot)
 		return evaluateTree(deps, tree)
 
 	case errors.Is(err, forge.ErrNoBundle) && orRegen:
@@ -234,7 +239,7 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 		return evaluateBundle(deps, derivedDir)
 
 	case errors.Is(err, forge.ErrNoBundle):
-		fmt.Fprintln(deps.Stderr, "sync: no CI evidence bundle for this ref/commit yet; pass --or-regen to regenerate locally")
+		fmt.Fprintf(deps.Stderr, "sync: %v; pass --or-regen to regenerate locally\n", err)
 		return 2
 
 	default:
