@@ -196,6 +196,27 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	"wb:presentation": {playwright("06-presentation.spec.ts")},
 	"wb:ref-peek":     {playwright("25-board-ref-peek.spec.ts")},
 
+	// The three registered corpus/verdict/matrix pages that complete the
+	// workbench axis (handler.go's RegisterRoutesWithHome mounts them at
+	// /a/{kind}/{name}:86, /verdict/{story...}:96, /matrix/{story...}:100).
+	// Each GENUINELY exercises its page against the SHOWCASE.READONLY_SPEC
+	// feature (stale-decline, the corpus's richest committed feature) — a real
+	// render+assert, not a marker-only pass (Task 3.4 bar):
+	//   - wb:corpus  — 01-corpus.spec.ts opens /a/spec/stale-decline
+	//     (SHOWCASE.READONLY_SPEC) and asserts its title, frontmatter card, the
+	//     I-5 dispositions table, and the links panel.
+	//   - wb:verdict — 04-verdict.spec.ts drives the /verdict viewer's
+	//     cross-commit per-AC diff of stale-decline's two committed
+	//     verdicts.json snapshots (examples/showcase/derived/spec--stale-
+	//     decline/), and its picker at /verdict/spec/SHOWCASE.READONLY_SPEC.
+	//   - wb:matrix  — 42-matrix-preview.spec.ts renders the advisory preview
+	//     matrix at /matrix/spec/SHOWCASE.READONLY_SPEC: the mandatory
+	//     PREVIEW-ADVISORY banner (03 §Evidence records) and the folded per-AC
+	//     table for stale-decline's acceptance criteria.
+	"wb:corpus":  {playwright("01-corpus.spec.ts")},
+	"wb:verdict": {playwright("04-verdict.spec.ts")},
+	"wb:matrix":  {playwright("42-matrix-preview.spec.ts")},
+
 	// Task 3.4's seven workbench closures. Per-surface disposition (full
 	// reasoning: task-3.4-report.md):
 	//
@@ -239,11 +260,27 @@ var showcaseCoverage = map[string][]coverageEvidence{
 }
 
 // workbenchSurfaces is the one hand-maintained axis (spec §10 mitigation).
+//
+// The first 17 entries are AC-1's committed hand-list. The last three — corpus,
+// verdict, matrix — are the three registered, server-rendered, user-facing
+// pages RegisterRoutesWithHome mounts (internal/workbench/handler.go: the
+// corpus artifact page /a/{kind}/{name}:86, the verdict viewer
+// /verdict/{story...}:96, the advisory matrix preview /matrix/{story...}:100)
+// that AC-1's original list omitted. A page a reader can touch with no
+// showcase-backed e2e coverage is exactly the property AC-1 says must turn
+// `make verify` red, so completing the hand-list — enumerating AND
+// showcase-backing all three below — is the honest close of the drift-gate's
+// workbench-axis-under-enumerated finding rather than leaving them off the
+// axis to keep the gate vacuously green. This list is test code (DC-1 sanctions
+// it as the ONE hand-maintained axis), so extending it needs no spec amendment.
+// Each of the three is exercised against real examples/showcase content
+// (stale-decline, SHOWCASE.READONLY_SPEC) by its mapped Playwright spec above.
 var workbenchSurfaces = []string{
 	"board", "board-review-mode", "board-scoping-canvas", "obligation-wall",
 	"wall-badges", "wall-receipts", "evidence-slot", "diagram-editor",
 	"diagram-tier", "derivation-drawer", "directory-home", "draft-boards",
 	"dex", "dex-by-story", "disclosures", "presentation", "ref-peek",
+	"corpus", "verdict", "matrix",
 }
 
 // featureVerbExcluded is "feature", REMOVED from the enumerated CLI
