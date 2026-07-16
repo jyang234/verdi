@@ -16,9 +16,8 @@ decisions:
   - { id: dc-1, text: "closure-gate semantics are UNCHANGED — this feature removes accidental toil only. Every closure condition (all-ACs-evidenced over authoritative records, no unresolved spec-stale, no pending-supersession, and for features the five-condition AND) stands byte-for-byte; no verb here introduces a new way to pass, waive, or skip a condition. The round-6 verdict was that the gate is the load-bearing control and the heaviness around it is accidental (D6-14/16/18/25/32) — the answer to 'the loop feels unnecessary' is better tooling, never a laxer gate", anchor: "#dc-1" }
   - { id: dc-2, text: "helpers scaffold, never fabricate: verdi writes structure — paths, slugs, frontmatter, edges — and the human writes every word of the claim. An attestation body is never generated, defaulted, or templated with claim-shaped prose; the scaffold is not foldable until the operator has authored the claim. This carries the three-valued-honesty discipline (a machine must not manufacture a human oracle's record) into the tooling that makes human records cheap to author", anchor: "#dc-2" }
   - { id: dc-3, text: "sync's local flow adds NO new resolution semantics: origin-derivation is a fallback ordered strictly after the explicit CI env (existing CI behavior is untouched), and the ancestor rule for bundle acceptance is the fold's existing rule applied verbatim at fetch time — closing the D6-32 asymmetry where sync demanded more than the fold it feeds. Where the two surfaces would disagree, the fold's rule is authoritative and sync conforms to it", anchor: "#dc-3" }
-open_questions:
-  - { id: oq-1, text: "where does a disposition record live, given deviation reports freeze? Options: (a) in-place edit of the report entry performed by the verb before freeze — matches the current de-facto artifact shape, but a re-run that regenerates the report can destroy it (the D6-24 failure class); (b) an append-only disposition sidecar that `align --freeze` folds into the frozen report — survives regeneration, at the cost of a second artifact until freeze. The verb's storage choice must be settled at accept because it determines whether dispositions survive align re-runs", anchor: "#oq-1" }
-  - { id: oq-2, text: "what surface carries the preflight: a mode of `verdi close` (one verb owns the ritual and its rehearsal) or an extension of `verdi gate` (which is already the read-only check verb, but is commit-scoped rather than closure-scoped)? The AC binds the behavior, not the spelling; the surface should be settled at accept so the story contract freezes one", anchor: "#oq-2" }
+  - { id: dc-4, text: "dispositions are recorded IN PLACE in the living deviation report's disposition layer — the layer deliberately outside the integrity digest. Freeze preserves the adjudicated report verbatim (align.FreezeInPlace, ratified via PR #99): a fully-dispositioned living report covering the freeze commit is stamped byte-for-byte, never re-judged. The remaining destruction vector — an ordinary align re-run regenerating over a genuine judged exchange — is closed by the D6-24 keep-best fix sequenced before any build of this feature. A sidecar artifact was rejected: it would add a second artifact kind and fight the freeze-in-place architecture. Settles oq-1 (ADJ-22)", anchor: "#dc-4" }
+  - { id: dc-5, text: "the preflight is a mode of `verdi close` — one verb owns the ritual and its rehearsal, so the preflight report and close's refusal are one code path and their required agreement (co-3) is structural. `verdi gate` stays commit-scoped. No new verb is added for ac-1; the story contract settles the exact flag spelling. Settles oq-2 (ADJ-23)", anchor: "#dc-5" }
 constraints:
   - { id: co-1, text: "no network in any test: forge interactions (origin-derivation, bundle fetch, ancestor resolution) against hermetic fakes (httptest, fixturegit with stable SHAs); attest/disposition/preflight exercised entirely on fixture stores", anchor: "#co-1" }
   - { id: co-2, text: "every verb keeps the exit discipline — 0 clean, 1 verdict, 2 operational. Preflight's unmet conditions are a VERDICT (exit 1), not an error; only genuinely operational failures (unreadable store, unreachable fake forge) exit 2. Preflight and the attest scaffold mutate nothing beyond the files they exist to write", anchor: "#co-2" }
@@ -100,7 +99,8 @@ not a hand-edit. The disposition names the finding, the decision, and the
 rationale; it is preserved verbatim across `align --freeze`; and the
 previously de-facto flow of editing report files by hand (D6-25 — every
 round-6 disposition was recorded this way) is retired from the documented
-lifecycle. The storage question is oq-1 and must be resolved at accept.
+lifecycle. The storage question is settled by dc-4: dispositions live in
+place, in the living report's disposition layer.
 Evidence: behavioral (disposition recorded by verb, then surviving a freeze,
 proven on fixtures) + attestation.
 
@@ -147,24 +147,25 @@ rule applied verbatim at fetch time — closing the D6-32 asymmetry where sync
 demanded more (HEAD-exact) than the fold it feeds. Where the two surfaces
 would disagree, the fold's rule is authoritative and sync conforms to it.
 
-## OQ-1
+## DC-4
 
-Where does a disposition record live, given deviation reports freeze? Options:
-(a) an in-place edit of the report entry performed by the verb before freeze —
-matches the current de-facto artifact shape, but a re-run that regenerates the
-report can destroy it (the D6-24 failure class); (b) an append-only
-disposition sidecar that `align --freeze` folds into the frozen report —
-survives regeneration, at the cost of a second artifact until freeze. The
-verb's storage choice must be settled at accept, because it determines whether
-dispositions survive align re-runs.
+Dispositions are recorded **in place** in the living deviation report's
+disposition layer — the layer deliberately outside the integrity digest.
+Freeze preserves the adjudicated report verbatim (`align.FreezeInPlace`,
+ratified via PR #99): a fully-dispositioned living report covering the freeze
+commit is stamped byte-for-byte, never re-judged. The remaining destruction
+vector — an ordinary align re-run regenerating over a genuine judged exchange
+— is closed by the D6-24 keep-best fix, sequenced before any build of this
+feature. A sidecar artifact was rejected: it would add a second artifact kind
+and fight the freeze-in-place architecture. This settles oq-1 (ADJ-22).
 
-## OQ-2
+## DC-5
 
-What surface carries the preflight: a mode of `verdi close` (one verb owns the
-ritual and its rehearsal) or an extension of `verdi gate` (already the
-read-only check verb, but commit-scoped rather than closure-scoped)? The AC
-binds the behavior, not the spelling; the surface should be settled at accept
-so the story contract freezes one.
+The preflight is a mode of `verdi close` — one verb owns the ritual and its
+rehearsal, so the preflight report and close's refusal are one code path and
+their required agreement (co-3) is structural. `verdi gate` stays
+commit-scoped. No new verb is added for ac-1; the story contract settles the
+exact flag spelling. This settles oq-2 (ADJ-23).
 
 ## CO-1
 
