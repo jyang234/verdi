@@ -39,6 +39,18 @@ func worktreePath(root, branch string) string {
 	return filepath.Join(worktreesRoot(root), worktreeName(branch))
 }
 
+// WorktreePath is worktreePath exported read-only: the deterministic
+// filesystem location EnsureWorktree cuts and reuses for branch under root
+// (dc-1's one branch<->path mapping), for callers that must ADDRESS a
+// managed worktree's tree without cutting one. Pure — it computes the path
+// and touches nothing; the worktree may or may not exist on disk. Single-
+// sourcing this mapping keeps a consumer (e.g. the workbench's diagram
+// editor, resolving a per-branch board's exit target against the store that
+// board addresses) from copy-pasting the naming contract.
+func WorktreePath(root, branch string) string {
+	return worktreePath(root, branch)
+}
+
 // lockPath returns branch's managed worktree's own lockfile path — a
 // sibling of its worktree directory, never inside it (dc-2).
 func lockPath(root, branch string) string {

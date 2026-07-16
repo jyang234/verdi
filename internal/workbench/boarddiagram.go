@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -30,6 +32,7 @@ import (
 	"github.com/jyang234/verdi/internal/diagrambase"
 	"github.com/jyang234/verdi/internal/diagramedit"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
 // boardDiagramServer holds the editor's dependencies for one store root.
@@ -83,6 +86,14 @@ type diagramEditorView struct {
 
 	Git       *boardGitState
 	GitNotice string
+
+	// Exit is the tool view's resolved return-target state (spec/tool-view-
+	// exit ac-1/dc-2/dc-3): page-chrome-only state the page handler
+	// resolves once, server-side, from the incoming board= query parameter
+	// (resolveDiagramExit) and sets on the view before rendering. Never
+	// populated by loadDiagram itself (loadDiagram has no request in
+	// scope) and never read by the fragment or API routes.
+	Exit diagramExitTarget
 }
 
 // diagramPath is the proposal's file in the working tree (01 §Directory
@@ -246,6 +257,7 @@ func (s *boardDiagramServer) boardDiagramPageHandler() http.HandlerFunc {
 			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
+		v.Exit = resolveDiagramExit(s.root, r.URL.Query().Get("board"))
 		out, err := renderDiagramEditorPage(v)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
@@ -456,7 +468,21 @@ func (s *boardDiagramServer) actionDiagramPeek(ctx context.Context, w http.Respo
 // already discloses what it references; a proposal-only surface simply
 // is not offered for a non-proposal). Store-derived enrichment in the
 // I/O layer, mirroring attachObligations' posture.
-func attachDiagramEditorHrefs(proj *BoardProjection, root string) {
+//
+// boardName is the rendering spec board's own name and fixedBranch its own
+// branch address — both already in scope at the call site (the board-load
+// path knows which spec it is loading and, for a per-branch board instance,
+// on which branch). The link rides a request-scoped board=<origin-path>
+// query parameter (spec/tool-view-exit dc-2, controller adjudication
+// ADJ-38): the value is the ORIGINATING BOARD PATH the operator was on —
+// the serving checkout's unprefixed /board/spec/<name>, or a per-branch
+// board's /b/<branch>/board/spec/<name> — so the editor's exit affordance
+// returns to that EXACT board rather than the serving checkout's same-named
+// board (the mislabeling ADJ-38 removes). The path is query-escaped; nothing
+// is persisted — the parameter exists only for the length of the one request
+// the link is followed on.
+func attachDiagramEditorHrefs(proj *BoardProjection, root, boardName, fixedBranch string) {
+	origin := boardOriginPath(fixedBranch, boardName)
 	for i := range proj.RefCards {
 		ref, err := artifact.ParseRef(proj.RefCards[i].Ref)
 		if err != nil || ref.Kind != artifact.KindDiagram {
@@ -474,8 +500,132 @@ func attachDiagramEditorHrefs(proj *BoardProjection, root string) {
 		if err != nil || fm.Class != artifact.DiagramClassProposal {
 			continue
 		}
-		proj.RefCards[i].EditorHref = "/board/diagram/" + ref.Name
+		proj.RefCards[i].EditorHref = "/board/diagram/" + ref.Name + "?board=" + url.QueryEscape(origin)
 	}
+}
+
+// boardOriginPath is the board route the rendering session is on — the value
+// the diagram editor's board= parameter carries so its exit affordance can
+// return there (spec/tool-view-exit dc-2, ADJ-38). fixedBranch is the
+// rendering board instance's own branch: "" for the serving checkout's
+// unprefixed board, the design branch for a per-branch draft board. The path
+// mirrors the exact route grammar the operator followed — the branch rides
+// one percent-encoded path segment, as handler.go's /b/{branch} mount and
+// resolveDiagramExit's parser both expect.
+func boardOriginPath(fixedBranch, boardName string) string {
+	if fixedBranch == "" {
+		return "/board/spec/" + boardName
+	}
+	return "/b/" + url.PathEscape(fixedBranch) + "/board/spec/" + boardName
+}
+
+// diagramExitTarget is the diagram designer's resolved return-target
+// state (spec/tool-view-exit dc-2/dc-3): where its exit affordance and its
+// Escape binding navigate, computed once per page render.
+type diagramExitTarget struct {
+	// Href is where the exit affordance and Escape both navigate.
+	Href string
+	// Label is the affordance's visible text. Per dc-3 it always names
+	// which case produced it — the real originating board, an unresolved
+	// name, or no name at all — rather than collapsing them into one
+	// unexplained state.
+	Label string
+	// Known is true iff Href resolves to the real originating spec board
+	// (as opposed to the index fallback).
+	Known bool
+}
+
+// resolveDiagramExit resolves origin — the incoming board= query parameter,
+// the ORIGINATING BOARD PATH the operator was on (spec/tool-view-exit dc-2,
+// controller adjudication ADJ-38) — against the actual board-route grammars
+// and the store each addresses (dc-3: never derived or guessed, only
+// carried; a path that does not check out is never trusted as a link). Two
+// grammars are recognized, each resolved against its own store:
+//
+//   - /board/spec/<name>              the serving checkout's own tree (root);
+//   - /b/<branch>/board/spec/<name>   the branch's managed worktree tree
+//     (wtmanager.WorktreePath(root, branch)) — the exact store that produced
+//     the link, since a branch-prefixed origin is emitted only by a
+//     per-branch board instance whose root IS that path.
+//
+// A name that resolves to a real active spec in the store its grammar
+// addresses (boards serve only specs/active/, boardspec.go's specDir doc
+// comment) is the one case this renders a live board link for, echoing the
+// validated origin path so the operator returns to the EXACT board they came
+// from — never the serving checkout's same-named board (the branch-board
+// mislabeling ADJ-38 removes). Anything else falls back to the index (dc-3),
+// honestly labeled with which honest-degradation case produced it: no origin
+// supplied at all (a direct URL, or the corpus page's editor link — neither
+// carries board=), a well-formed board path whose spec does not resolve in
+// the addressed store (stale, mistyped, or foreign to that tree), or a path
+// that is not one of the two recognized board routes at all (only these two
+// grammars are ever honored — never an open redirect). Every path component
+// is validated (specNameRe for the name, validBranchSegment for the branch)
+// before it reaches the filesystem, exactly like loadDiagram's own name
+// parameter — a malformed value is treated as merely unresolvable, never a
+// path to stat.
+func resolveDiagramExit(root, origin string) diagramExitTarget {
+	if origin == "" {
+		return diagramExitTarget{
+			Href:  "/",
+			Label: "no originating board is known — back to index",
+		}
+	}
+	if store, name, ok := diagramExitStore(root, origin); ok {
+		if _, err := os.Stat(filepath.Join(store, ".verdi", "specs", "active", name, "spec.md")); err == nil {
+			return diagramExitTarget{
+				Href:  origin,
+				Label: "back to board: " + name,
+				Known: true,
+			}
+		}
+		// A recognized board route whose spec does not resolve in the store
+		// it addresses: named by the spec it failed to find (dc-3: the label
+		// names which case it is, never one unexplained state).
+		return diagramExitTarget{
+			Href:  "/",
+			Label: fmt.Sprintf("board %q is not known — back to index", name),
+		}
+	}
+	// Not a recognized board route at all (a foreign or malformed path,
+	// never followed as a link): disclosed by the raw value it carried.
+	return diagramExitTarget{
+		Href:  "/",
+		Label: fmt.Sprintf("board %q is not known — back to index", origin),
+	}
+}
+
+// diagramExitStore parses origin against the two board-route grammars and
+// returns the filesystem store root that grammar addresses plus the spec
+// name it targets. ok is false for anything that is not one of the two
+// recognized board routes with valid components — the strict gate that keeps
+// resolveDiagramExit from ever honoring a foreign path (no open redirect)
+// and from letting a hostile branch or name segment reach the filesystem.
+func diagramExitStore(root, origin string) (store, name string, ok bool) {
+	// Unprefixed: /board/spec/<name> — the serving checkout's own tree.
+	if rest, found := strings.CutPrefix(origin, "/board/spec/"); found {
+		if specNameRe.MatchString(rest) {
+			return root, rest, true
+		}
+		return "", "", false
+	}
+	// Branch-prefixed: /b/<branch>/board/spec/<name>. The branch is one path
+	// segment with its slashes percent-encoded (handler.go's /b/{branch}
+	// mount), exactly as the operator's URL carried it — so splitting on the
+	// first literal "/board/spec/" is unambiguous (an encoded branch can
+	// contain no such literal, and a spec name can contain no slash).
+	if rest, found := strings.CutPrefix(origin, "/b/"); found {
+		seg, tail, cut := strings.Cut(rest, "/board/spec/")
+		if !cut || seg == "" || !specNameRe.MatchString(tail) {
+			return "", "", false
+		}
+		branch, err := url.PathUnescape(seg)
+		if err != nil || !validBranchSegment(branch) {
+			return "", "", false
+		}
+		return wtmanager.WorktreePath(root, branch), tail, true
+	}
+	return "", "", false
 }
 
 // actionDiagramReset replaces the working source with the digest-verified
