@@ -336,6 +336,96 @@ func TestRunSync_Ancestor_NoBundleAnywhere_ShallowClone_DisclosesTruncation(t *t
 	}
 }
 
+// gitInitTestStore turns a buildTestStore root into a REAL git repository
+// with a few commits, so the ancestor walk actually RUNS and reaches the
+// exhausted-walk refusal (vs. the enumeration-failure path a non-git root
+// takes). Returns HEAD's sha. Hermetic — local git plumbing only (co-1).
+func gitInitTestStore(t *testing.T, root string) string {
+	t.Helper()
+	runGitCmd(t, root, "init", "--quiet")
+	runGitCmd(t, root, "config", "user.email", "t@t.t")
+	runGitCmd(t, root, "config", "user.name", "t")
+	runGitCmd(t, root, "add", "-A")
+	runGitCmd(t, root, "commit", "--quiet", "-m", "store")
+	for i := 0; i < 2; i++ {
+		if err := os.WriteFile(filepath.Join(root, "svcfix", fmt.Sprintf("nudge%d.txt", i)), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGitCmd(t, root, "add", "-A")
+		runGitCmd(t, root, "commit", "--quiet", "-m", fmt.Sprintf("nudge %d", i))
+	}
+	return strings.TrimSpace(gitOutput(t, root, "rev-parse", "HEAD"))
+}
+
+// TestRunSync_OrRegen_ShallowExhaustedWalk_DisclosesTruncation proves fix 3
+// (ADJ-41): the shallow-truncation disclosure must reach the --or-regen
+// REGENERATE path, not only the exhausted-walk refusal. In a shallow clone,
+// `git log` stops at the boundary, so a `verdi sync --or-regen` walk that
+// exhausts the truncated graph is NOT genuine absence-evidence — a bundle
+// may sit at a deeper true ancestor the clone never contained. sync must
+// disclose that truncation BEFORE regenerating locally.
+func TestRunSync_OrRegen_ShallowExhaustedWalk_DisclosesTruncation(t *testing.T) {
+	root := buildTestStore(t)
+	head := gitInitTestStore(t, root) // a real git repo → the walk runs and exhausts
+	// Mark it shallow the way a --depth fetch would (empty marker, tolerated
+	// by git log); its existence is what the disclosure keys on.
+	if err := os.WriteFile(filepath.Join(root, ".git", "shallow"), nil, 0o644); err != nil {
+		t.Fatalf("placing shallow marker: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{
+		Runner: seedRunner(t, root),
+		Forge:  fake.New(), // unseeded → no bundle anywhere on the walked (truncated) graph
+		GoTest: fakeGoTest{output: []byte(svcfixGoTestJSON)},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+	code := runSync(context.Background(), root, testRef, head, true /*orRegen*/, false, false, deps)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (regeneration proceeds after the disclosure); stderr=%s", code, stderr.String())
+	}
+	got := stderr.String()
+	for _, want := range []string{"shallow clone", "truncated"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stderr = %q, want the --or-regen shallow-truncation disclosure to contain %q (ADJ-41 fix 3)", got, want)
+		}
+	}
+	if !strings.Contains(stdout.String(), "regenerated evidence bundle locally") {
+		t.Errorf("stdout = %q, want regeneration to still proceed after the disclosure", stdout.String())
+	}
+}
+
+// TestRunSync_OrRegen_NonShallowExhaustedWalk_StaysQuiet regression-pins
+// fix 3's other half: on a full (non-shallow) clone, a --or-regen walk that
+// exhausts and regenerates stays byte-quiet about shallowness/truncation
+// exactly as today — the disclosure fires ONLY for the shallow sub-case,
+// never for a plain absence.
+func TestRunSync_OrRegen_NonShallowExhaustedWalk_StaysQuiet(t *testing.T) {
+	root := buildTestStore(t)
+	head := gitInitTestStore(t, root) // a real git repo, NO shallow marker
+
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{
+		Runner: seedRunner(t, root),
+		Forge:  fake.New(), // unseeded → exhausted walk over the full local graph
+		GoTest: fakeGoTest{output: []byte(svcfixGoTestJSON)},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+	code := runSync(context.Background(), root, testRef, head, true /*orRegen*/, false, false, deps)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	got := stderr.String()
+	if strings.Contains(got, "shallow clone") || strings.Contains(got, "truncated") {
+		t.Errorf("stderr = %q, must stay quiet about shallow/truncation on a non-shallow --or-regen exhausted walk", got)
+	}
+	if !strings.Contains(stdout.String(), "regenerated evidence bundle locally") {
+		t.Errorf("stdout = %q, want regeneration to proceed quietly", stdout.String())
+	}
+}
+
 // TestRunSync_OrRegen_UnwalkableHistory_DisclosesWalkNeverRan proves fix 1
 // (ADJ-37): when the commit itself carries no bundle AND its further
 // ancestry cannot even be enumerated (here buildTestStore's root is not a

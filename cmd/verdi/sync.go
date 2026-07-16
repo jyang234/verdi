@@ -241,6 +241,13 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 		// --or-regen silently treat an unwalkable history as a genuine miss.
 		if errors.Is(err, errAncestryUnwalkable) {
 			fmt.Fprintf(deps.Stderr, "sync: %v — the nearest-ancestor bundle walk never ran, so --or-regen is regenerating locally without having consulted any ancestor's bundle (one may exist at a real ancestor this run never reached)\n", err)
+		} else if errors.Is(err, errShallowTruncatedExhaustion) {
+			// ADJ-41 fix 3: the walk ran but exhausted only a shallow clone's
+			// truncated graph — not genuine absence. Disclose the truncation
+			// before regenerating; a bundle may exist at a deeper true
+			// ancestor this clone never contained. A full clone's plain
+			// absence takes neither branch and stays byte-quiet as today.
+			fmt.Fprintf(deps.Stderr, "sync: %v — the walk exhausted only this shallow clone's truncated history, so --or-regen is regenerating locally without having consulted any bundle that may exist at a deeper true ancestor absent from this clone\n", err)
 		}
 		if err := os.MkdirAll(derivedDir, 0o755); err != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", err)

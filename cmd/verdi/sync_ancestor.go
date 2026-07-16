@@ -120,6 +120,13 @@ func fetchAncestorBundle(ctx context.Context, root string, f forge.Forge, ref, c
 	msg := fmt.Sprintf("no evidence bundle found for ref %q anywhere in the %d commit(s) walked in this clone (%s..%s)", ref, len(rest), oldest, commit)
 	if shallow, shErr := gitx.IsShallow(ctx, root); shErr == nil && shallow {
 		msg += " — note: this is a shallow clone (git's shallow-boundary marker is present), so the history above is truncated at the clone's shallow boundary and a bundle may exist at a deeper true ancestor not present in this clone"
+		// The walk RAN but saw only this shallow clone's truncated graph —
+		// NOT genuine absence-evidence. Mark it distinguishably (ADJ-41 fix
+		// 3, mirroring fix 1's errAncestryUnwalkable seam) so runSync's
+		// --or-regen branch discloses the truncation before regenerating;
+		// Error() text and the ErrNoBundle wrap are unchanged, so the
+		// no---or-regen refusal stays byte-identical.
+		return nil, "", 0, &shallowTruncatedExhaustionError{msg: msg, noBundle: lastErr}
 	}
 	return nil, "", 0, fmt.Errorf("%s: %w", msg, lastErr)
 }
@@ -162,3 +169,37 @@ func (e *unwalkableAncestryError) Unwrap() []error { return []error{e.noBundle, 
 // Is reports the distinguishing sentinel; forge.ErrNoBundle is matched
 // through Unwrap, not here.
 func (e *unwalkableAncestryError) Is(target error) bool { return target == errAncestryUnwalkable }
+
+// errShallowTruncatedExhaustion marks the no-bundle-shaped failure where the
+// ancestor walk RAN but over a shallow clone's truncated graph — `git log`
+// stopped at the shallow boundary, so exhausting it is not the genuine
+// no-bundle-anywhere result ac-2's unbounded walk promises. It is the
+// distinguishable signal (mirroring errAncestryUnwalkable — the seam between
+// fixes it closes) that runSync's --or-regen branch matches to disclose the
+// truncation before regenerating: a bundle may sit at a deeper true ancestor
+// this clone never contained, so --or-regen must not treat the truncated
+// exhaustion as clean absence (ADJ-41 fix 3). A full (non-shallow) clone's
+// plain exhaustion carries no such marker and stays byte-quiet.
+var errShallowTruncatedExhaustion = errors.New("sync: history walk exhausted only a shallow clone's truncated graph")
+
+// shallowTruncatedExhaustionError is fetchAncestorBundle's return for that
+// case. Error() is byte-identical to the plain shallow-refusal wrapped form
+// (the no---or-regen refusal is unchanged), Unwrap() keeps forge.ErrNoBundle
+// in the chain (no-bundle routing identical), and Is() reports
+// errShallowTruncatedExhaustion so the --or-regen branch alone singles it out
+// for the truncation disclosure.
+type shallowTruncatedExhaustionError struct {
+	msg      string
+	noBundle error // the last ErrNoBundle-wrapping miss on the walked (truncated) graph
+}
+
+func (e *shallowTruncatedExhaustionError) Error() string { return e.msg + ": " + e.noBundle.Error() }
+
+// Unwrap keeps forge.ErrNoBundle reachable through the last walked miss.
+func (e *shallowTruncatedExhaustionError) Unwrap() error { return e.noBundle }
+
+// Is reports the distinguishing sentinel; forge.ErrNoBundle is matched
+// through Unwrap, not here.
+func (e *shallowTruncatedExhaustionError) Is(target error) bool {
+	return target == errShallowTruncatedExhaustion
+}
