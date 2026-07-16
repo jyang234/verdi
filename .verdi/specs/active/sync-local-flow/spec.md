@@ -4,7 +4,7 @@ kind: spec
 title: "Sync Local Flow"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-31
 problem: { text: "verdi sync in a plain local checkout is only partially fixed and still fights the fold it feeds. A prior hot-fix (D6-14) taught the GitHub adapter to fall back to the git origin remote for the repository identifier when the CI env is absent, but when neither source resolves one, githubOwnerRepo (cmd/verdi/forgeboot.go) silently returns two empty strings and buildForge builds a live adapter around them anyway — a confusing network failure, not the legible refusal the rest of the toolchain gives. And once addressed, sync still only asks the forge for a bundle at HEAD's own exact commit, while the fold it feeds already accepts any record whose commit is an ancestor of HEAD (03 §The fold) — a routine, legitimately path-filtered commit makes sync refuse a bundle the fold would gladly accept (D6-32), the exact asymmetry round 6 worked around by cutting closure branches from the verified ancestor commit itself (ADJ-19)", anchor: problem }
 outcome: { text: "verdi sync, run locally with no CI environment, resolves the GitHub repository from the git origin remote exactly as it already does when the CI env is absent, and now refuses legibly (operational, exit 2, naming every source tried) when neither resolves one — instead of quietly building a doomed adapter. Its bundle fetch walks the current commit's ancestry, nearest first, applying the same ancestor rule the fold's own reader already uses, so the nearest ancestor commit that actually carries a bundle — including the commit itself — is accepted and disclosed by name and distance, never demanding a HEAD-exact bundle the fold itself would not require. No new environment variable, config key, or flag is introduced; the explicit CI env, present, still wins byte-identically to today", anchor: outcome }
@@ -21,6 +21,7 @@ constraints:
   - { id: co-1, text: "No network in any test: forge interactions run against httptest doubles (internal/forge/forgetest's shared adapter-conformance suite, internal/forge/fake) and fixturegit's real, deterministic local git plumbing for every ancestor topology — never a live dial to api.github.com or a real GitLab instance", anchor: co-1 }
   - { id: co-2, text: "Exit discipline is unchanged in shape: 0 clean (a bundle accepted), 1 verdict (evaluateTree/evaluateBundle's existing fail-verdict mapping, untouched by this story), 2 operational. This story adds exactly one new operational reason (the identifier unresolvable from either source) and re-words one existing operational message (no bundle found — now naming the ancestor range walked) without inventing a new exit code or a new verdict path", anchor: co-2 }
   - { id: co-3, text: "Every sync path this story does not target is byte-identical before and after: --produce, --produce-runtime, --force-local, and the CI-env-present identifier short-circuit are unchanged, proven by every pre-existing sync test (cmd/verdi/sync_test.go, sync_helpers_test.go, sync_regen.go's own tests) continuing to pass unmodified alongside this story's new negative-path coverage — a regression obligation, not a hope", anchor: co-3 }
+frozen: { at: 2026-07-16, commit: a56f64ccd508c9744e7f99e9416d51cf171a3460, stub_matched: true }
 ---
 # Sync Local Flow
 
