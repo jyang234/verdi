@@ -4,7 +4,7 @@ kind: spec
 title: "Workbench Legibility"
 owners: [platform-team]
 class: feature
-status: draft
+status: accepted-pending-build
 problem: { text: "real usage surfaced three navigation-and-state legibility gaps in the workbench. First, a board tool view (the diagram designer) has no exit affordance — the only escape anywhere in the workbench is the top-left wordmark link to the index, and nothing inside a tool view marks how to leave it. Second, the family structure the store already knows is invisible at the board surface: an instantiated story carries `implements` edges to its feature's AC fragments, yet a story board renders no way to jump to its parent feature board, and a feature board's stub cards do not link to the story boards they gave rise to — the operator navigates by URL surgery or via the index. Third, the home directory (workbench-directory's real, functional index) renders every section at equal weight, so nothing communicates state — 'the Home Screen feels a little plain with just a listing of files' — though status, gate-bearing links, and family structure are all already in the store.", anchor: "#problem" }
 outcome: { text: "the workbench is navigable and state-legible from the surface the operator is already on. Every board tool view has an explicit exit affordance returning to the board. Family navigation exists in both directions, derived entirely from existing typed edges — a story board links to its parent feature board, a feature board's stub cards link to their instantiated story boards — with unresolvable links disclosed, never broken. And the home page leads with status-at-a-glance: active specs grouped by lifecycle state with their working links foregrounded, exhaustive listings intact below. No new persisted artifact, field, or model change — this feature is pure projection over what the store already knows.", anchor: "#outcome" }
 acceptance_criteria:
@@ -25,6 +25,7 @@ stubs:
   - { slug: tool-view-exit, acceptance_criteria: [ac-1] }
   - { slug: family-board-links, acceptance_criteria: [ac-2] }
   - { slug: home-status-glance, acceptance_criteria: [ac-3] }
+frozen: { at: 2026-07-16, commit: 5680959c551a55eb6b0d2e04e79b21b865f5056f }
 ---
 # Workbench Legibility
 
