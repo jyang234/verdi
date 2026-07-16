@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -121,6 +123,87 @@ func TestRunAccept_PassesLintEngineInProcess(t *testing.T) {
 	}
 	if len(violations) != 0 {
 		t.Fatalf("accepted spec has %d lint violations, want 0: %+v", len(violations), violations)
+	}
+}
+
+// TestRunAccept_StagesOnlyItsOwnPaths is D6-33's regression test: an
+// unrelated untracked scratch file AND an unrelated modified TRACKED file
+// sitting in the same checkout when accept runs must both stay out of the
+// accept commit entirely — accept.go's own gitx.AddAll (`git add -A`) swept
+// exactly this shape of unrelated content into two independent acceptance
+// agents' commits in the same round-6 wave (round6-divergences.md D6-33).
+func TestRunAccept_StagesOnlyItsOwnPaths(t *testing.T) {
+	repo, _ := scaffoldAndDesign(t)
+	ctx := context.Background()
+
+	// An unrelated untracked scratch file (mirrors the real witness: a
+	// leftover `./verdi-bin` build artifact never `git add`ed).
+	scratchPath := filepath.Join(repo.Dir, "verdi-bin")
+	if err := os.WriteFile(scratchPath, []byte("not a real binary\n"), 0o644); err != nil {
+		t.Fatalf("writing scratch file: %v", err)
+	}
+
+	// An unrelated MODIFIED tracked file, left unstaged (never `git add`ed
+	// either) — a second, independent shape of "something else in the
+	// checkout accept must not sweep up".
+	manifestPath := filepath.Join(repo.Dir, ".verdi", "verdi.yaml")
+	modifiedManifest := phase7ManifestYAML + "# an in-progress, unrelated local edit\n"
+	if err := os.WriteFile(manifestPath, []byte(modifiedManifest), 0o644); err != nil {
+		t.Fatalf("writing modified manifest: %v", err)
+	}
+
+	beforeHead, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if got := runAccept(ctx, repo.Dir, "spec/stale-decline", &stdout, &stderr); got != 0 {
+		t.Fatalf("runAccept = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	afterHead, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterHead == beforeHead {
+		t.Fatal("accept did not create a new commit")
+	}
+
+	// The accept commit's tree contains ONLY the accepted spec.md — never
+	// the scratch file, never the manifest's local edit.
+	entries, err := gitx.DiffNameStatus(ctx, repo.Dir, beforeHead, afterHead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Path != ".verdi/specs/active/stale-decline/spec.md" {
+		t.Fatalf("accept commit's diff = %+v, want exactly one entry for the accepted spec.md", entries)
+	}
+	for _, e := range entries {
+		if e.Path == "verdi-bin" || e.Path == ".verdi/verdi.yaml" {
+			t.Fatalf("accept commit's diff = %+v, must not contain the unrelated scratch file or manifest edit", entries)
+		}
+	}
+
+	// Belt and suspenders: the manifest's committed blob at the new HEAD is
+	// still the ORIGINAL content — the local edit truly never entered the
+	// tree, not merely "not listed as changed" by some diff quirk.
+	committedManifest, err := gitx.Show(ctx, repo.Dir, afterHead, ".verdi/verdi.yaml")
+	if err != nil {
+		t.Fatalf("Show(afterHead, verdi.yaml): %v", err)
+	}
+	if string(committedManifest) != phase7ManifestYAML {
+		t.Fatalf("committed .verdi/verdi.yaml diverged from the original — the local edit leaked into the commit:\n%s", committedManifest)
+	}
+
+	// The scratch file and the manifest's local edit are both still exactly
+	// as this test left them: accept truly left them alone, rather than
+	// e.g. staging-but-not-committing them.
+	if got, err := os.ReadFile(scratchPath); err != nil || string(got) != "not a real binary\n" {
+		t.Fatalf("scratch file after accept = %q, err=%v; want untouched", got, err)
+	}
+	if got, err := os.ReadFile(manifestPath); err != nil || string(got) != modifiedManifest {
+		t.Fatalf("working-tree manifest after accept = %q, err=%v; want untouched (still carrying the local edit)", got, err)
 	}
 }
 

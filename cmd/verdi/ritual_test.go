@@ -307,7 +307,7 @@ story: jira:LOAN-1482
 problem: { text: "borrowers see stale decline data", anchor: problem }
 outcome: { text: "borrowers see current decline data", anchor: outcome }
 acceptance_criteria:
-  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+  - { id: ac-1, text: "static obligation holds", evidence: [static], anchor: ac-1 }
 links:
   - { type: implements, ref: "spec/loan-mgmt#ac-1" }
   - { type: supersedes, ref: "spec/stale-decline-story" }
@@ -317,6 +317,8 @@ links:
 ## Problem
 x
 ## Outcome
+x
+## AC-1
 x
 `
 	writeDraftSpec(t, ctx, repo.Dir, "stale-decline-story-v2", storyV2)
@@ -384,7 +386,7 @@ story: jira:LOAN-1483
 problem: { text: "borrowers cannot see their loan status accurately", anchor: problem }
 outcome: { text: "borrowers see accurate, current loan status", anchor: outcome }
 acceptance_criteria:
-  - { id: ac-1, text: "static obligation holds, corrected", evidence: [static, attestation] }
+  - { id: ac-1, text: "static obligation holds, corrected", evidence: [static, attestation], anchor: ac-1 }
 links:
   - { type: supersedes, ref: "spec/loan-mgmt" }
 supersession:
@@ -396,6 +398,8 @@ supersession:
 ## Problem
 x
 ## Outcome
+x
+## AC-1
 x
 `
 	writeDraftSpec(t, ctx, repo.Dir, "loan-mgmt-v2", featureV2)
