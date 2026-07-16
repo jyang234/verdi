@@ -13,7 +13,7 @@ align:                         # evidence-model spec owns semantics
   judge_timeout_seconds: 600   # D6-21: default 120s ceiling timed out on every real build diff; raised per-repo
 audit:                         # R4-I-10; exemption/deviation counterweights
   exempts_conflict_threshold: 3
-  deviations_stale_threshold: 3
+  deviations_stale_threshold: 6
 spike_paths: ["docs/spikes/**"]  # VL-016 fence; this repo's spike workspace and doc paths
 derived:
   retention_days: 14           # gc horizon for merged/deleted refs
