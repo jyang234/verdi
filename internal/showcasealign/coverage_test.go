@@ -817,8 +817,11 @@ func anyContains(ss []string, sub string) bool {
 // `make verify` green while that guarantee silently reverts to prose. This test
 // re-drives computeCoverageGaps over the SAME committed table (detectsGapsCases)
 // and buckets each case by the gap class it actually PRODUCES — observed output,
-// not a declared tag — then requires every class to be observed at least once,
-// plus a case-count floor. Deleting any class-critical row makes it FAIL. It is
+// not a declared tag — at PRODUCER granularity for markerMismatch (each of
+// computeCoverageGaps' FOUR distinct mismatch producers — zero-evidence,
+// absent-file, non-compiling-regexp, non-matching-bytes — not merely "some
+// mismatch"), then requires every class to be observed at least once, plus a
+// case-count floor. Deleting any class-critical row makes it FAIL. It is
 // a genuine second driver of the red direction (it runs the real check), so it
 // is not a tautology; it is added to the Makefile `required` list so it cannot
 // itself be vacuously deleted. It asserts a DIFFERENT property than the driver
@@ -844,12 +847,15 @@ func TestShowcaseCoverage_DetectsGapsCoversAllClasses(t *testing.T) {
 	}
 
 	var (
-		sawMissing            bool // enumerated capability with no mapping
-		sawExtra              bool // stale inventory key
-		sawMismatchE2EPresent bool // markerMismatch with e2e/tests present
-		sawMismatchE2EAbsent  bool // markerMismatch with e2e/tests ABSENT (Go-backed still enforced — the load-bearing row)
-		sawDiscloseE2EAbsent  bool // Playwright disclosure with e2e/tests absent
-		sawClean              bool // no gaps at all
+		sawMissing           bool // enumerated capability with no mapping
+		sawExtra             bool // stale inventory key
+		sawMMZeroEvidence    bool // markerMismatch producer: capability maps to zero evidence
+		sawMMAbsentFile      bool // markerMismatch producer: evidence file absent
+		sawMMBadRegexp       bool // markerMismatch producer: marker is not a valid regexp
+		sawMMNoMatch         bool // markerMismatch producer: file present but its bytes miss the marker
+		sawMismatchE2EAbsent bool // ANY markerMismatch with e2e/tests ABSENT (Go-backed still enforced — the load-bearing row)
+		sawDiscloseE2EAbsent bool // Playwright disclosure with e2e/tests absent
+		sawClean             bool // no gaps at all
 	)
 	for _, tc := range cases {
 		res := computeCoverageGaps(tc.caps, tc.inv, verdiRepoRoot, tc.e2ePresent)
@@ -863,9 +869,6 @@ func TestShowcaseCoverage_DetectsGapsCoversAllClasses(t *testing.T) {
 		if hasExtra {
 			sawExtra = true
 		}
-		if hasMismatch && tc.e2ePresent {
-			sawMismatchE2EPresent = true
-		}
 		if hasMismatch && !tc.e2ePresent {
 			sawMismatchE2EAbsent = true
 		}
@@ -875,21 +878,48 @@ func TestShowcaseCoverage_DetectsGapsCoversAllClasses(t *testing.T) {
 		if !hasMissing && !hasExtra && !hasMismatch && !hasDisclose {
 			sawClean = true
 		}
+		// Bucket each markerMismatch by its PRODUCER — the four distinct message
+		// shapes computeCoverageGaps emits. Requiring EACH producer (not merely
+		// "some markerMismatch") means every one of those four branches is
+		// exercised by a committed row; without it three of the four collapse
+		// into one bucket, defended only by the case-count floor, so deleting
+		// the regexp-compile row and decrementing the floor in one diff would
+		// silently restore that unexercised branch (the exact hole this test
+		// exists to rule out). The default arm makes the taxonomy self-
+		// maintaining: a newly-added producer whose message matches none of the
+		// four fails here until this switch is taught about it.
+		for _, mm := range res.markerMismatches {
+			switch {
+			case strings.Contains(mm, "maps to zero evidence entries"):
+				sawMMZeroEvidence = true
+			case strings.Contains(mm, "does not exist under the repo root"):
+				sawMMAbsentFile = true
+			case strings.Contains(mm, "does not compile as a regexp"):
+				sawMMBadRegexp = true
+			case strings.Contains(mm, "does not match its marker"):
+				sawMMNoMatch = true
+			default:
+				t.Errorf("unclassified markerMismatch message %q — computeCoverageGaps grew a producer this taxonomy does not name; teach it so the new branch is required, not merely floor-protected", mm)
+			}
+		}
 	}
 
 	for _, req := range []struct {
 		ok   bool
 		what string
 	}{
-		{sawMissing, "a case producing a MISSING gap (enumerated capability with no mapping)"},
-		{sawExtra, "a case producing an EXTRA gap (stale/renamed inventory key)"},
-		{sawMismatchE2EPresent, "a case producing a markerMismatch with e2e/tests present"},
-		{sawMismatchE2EAbsent, "a case producing a markerMismatch with e2e/tests ABSENT (Go-backed evidence still enforced — the load-bearing row)"},
-		{sawDiscloseE2EAbsent, "a case producing a Playwright DISCLOSURE with e2e/tests absent"},
+		{sawMissing, "a MISSING gap (enumerated capability with no mapping)"},
+		{sawExtra, "an EXTRA gap (stale/renamed inventory key)"},
+		{sawMMZeroEvidence, "a markerMismatch from the zero-evidence producer"},
+		{sawMMAbsentFile, "a markerMismatch from the absent-file producer"},
+		{sawMMBadRegexp, "a markerMismatch from the non-compiling-regexp producer (the regexp-compile branch)"},
+		{sawMMNoMatch, "a markerMismatch from the non-matching-bytes producer"},
+		{sawMismatchE2EAbsent, "a markerMismatch with e2e/tests ABSENT (Go-backed evidence still enforced — the load-bearing row)"},
+		{sawDiscloseE2EAbsent, "a Playwright DISCLOSURE with e2e/tests absent"},
 		{sawClean, "a fully-clean case (no gaps at all)"},
 	} {
 		if !req.ok {
-			t.Errorf("detectsGapsCases no longer includes %s — a class-critical row was deleted; the RED proof is incomplete", req.what)
+			t.Errorf("detectsGapsCases no longer includes a case producing %s — a class-critical row was deleted; the RED proof is incomplete", req.what)
 		}
 	}
 }
