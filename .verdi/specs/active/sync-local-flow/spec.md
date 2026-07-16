@@ -10,11 +10,11 @@ problem: { text: "verdi sync in a plain local checkout is only partially fixed a
 outcome: { text: "verdi sync, run locally with no CI environment, resolves the GitHub repository from the git origin remote exactly as it already does when the CI env is absent, and now refuses legibly (operational, exit 2, naming every source tried) when neither resolves one — instead of quietly building a doomed adapter. Its bundle fetch walks the current commit's ancestry, nearest first, applying the same ancestor rule the fold's own reader already uses, so the nearest ancestor commit that actually carries a bundle — including the commit itself — is accepted and disclosed by name and distance, never demanding a HEAD-exact bundle the fold itself would not require. No new environment variable, config key, or flag is introduced; the explicit CI env, present, still wins byte-identically to today", anchor: outcome }
 acceptance_criteria:
   - { id: ac-1, text: "verdi sync's GitHub forge identification derives the repository owner/repo from the git origin remote when the explicit CI env (GITHUB_REPOSITORY_OWNER / GITHUB_REPOSITORY) is absent, parsing every shape git writes for a github.com remote (https, ssh://, and scp-like git@github.com:owner/repo, each with or without a trailing .git) — the explicit CI env, when present, still wins byte-identically to today. When neither the env nor a resolvable origin identifies a repository, sync refuses operationally (exit 2), naming every source it tried, instead of silently addressing the forge with an empty owner or repo", evidence: [static, behavioral], anchor: ac-1 }
-  - { id: ac-2, text: "verdi sync's bundle fetch accepts the nearest-ancestor evidence bundle on the current commit's history — the commit itself first, then its ancestors, nearest first — applying the same ancestor rule the fold already uses to accept records (03 §The fold: current is the latest record whose commit is an ancestor of C), rather than a second, parallel definition of ancestor. A bundle at the commit itself still wins, since a commit is its own ancestor under this rule; sync discloses which commit's bundle it accepted and how far back it walked, and a bounded walk that finds no bundle anywhere on the path refuses exactly as today, naming the range walked", evidence: [static, behavioral], anchor: ac-2 }
+  - { id: ac-2, text: "verdi sync's bundle fetch accepts the nearest-ancestor evidence bundle on the current commit's history — the commit itself first, then its ancestors, nearest first, unbounded — applying the same ancestor rule the fold already uses to accept records (03 §The fold: current is the latest record whose commit is an ancestor of C) verbatim, never a stricter, parallel definition of ancestor (parent dc-3: where the two surfaces would disagree, the fold's rule is authoritative and sync conforms). A bundle at the commit itself still wins, since a commit is its own ancestor under this rule; sync discloses which commit's bundle it accepted and how far back it walked, and exhausting the ref's entire history with no bundle found anywhere refuses exactly as today, naming the range walked", evidence: [static, behavioral], anchor: ac-2 }
 links:
   - { type: implements, ref: "spec/closure-ergonomics#ac-4" }
 decisions:
-  - { id: dc-1, text: "The ancestor rule sync's fetch conforms to is the fold's own, not a restatement: internal/evidence.LoadRecordsWithSources (internal/evidence/records.go's gitx.IsAncestor check) keeps a derived-tree commit directory only when it is commit itself or a real ancestor of commit, over gitx.IsAncestor's git merge-base --is-ancestor (internal/gitx/ancestry.go) — the same primitive, not a lookalike. Sync's fetch walk enumerates candidate ancestor commits via gitx's existing commit-history primitive (internal/gitx/log.go's Log, already most-recent-first) rather than a hand-rolled parent walk, so there is no second, possibly-disagreeing notion of ancestor anywhere in the tree. The walk is bounded — a live per-candidate forge call is not the free disk-directory filter LoadRecords performs, so an unbounded probe risks pathological API cost on a long-lived ref; the exact bound is a build-time judgment this story does not fix a number for, disclosed rather than silently chosen", anchor: dc-1 }
+  - { id: dc-1, text: "The ancestor rule sync's fetch conforms to is the fold's own, not a restatement, and is applied verbatim per parent dc-3: internal/evidence.LoadRecordsWithSources (internal/evidence/records.go's gitx.IsAncestor check) keeps a derived-tree commit directory only when it is commit itself or a real ancestor of commit, with no depth limit, over gitx.IsAncestor's git merge-base --is-ancestor (internal/gitx/ancestry.go) — the same primitive, not a lookalike. Sync's fetch walk enumerates candidate ancestor commits via gitx's existing commit-history primitive (internal/gitx/log.go's Log, already most-recent-first) rather than a hand-rolled parent walk, so there is no second, possibly-disagreeing notion of ancestor anywhere in the tree, and no depth bound narrows it below what the fold itself would accept — the walk continues to the ref's root if that is what finding (or exhausting) a bundle requires. A transport failure encountered mid-walk (a rate limit, a network error) surfaces through the existing generic operational-error path every forge call already has today (unchanged by this story) — cost safety is an operational concern for the build to observe, never a designed narrower cutoff the contract authorizes", anchor: dc-1 }
   - { id: dc-2, text: "The identifier refusal lands at the one shared construction seam, not a sync-local copy: buildForge/githubOwnerRepo (cmd/verdi/forgeboot.go) already serves eight verb files, but sync.go is the only one calling it directly and unconditionally — the other seven reach it through forgeBestEffort (cmd/verdi/gate_threads.go), which already declines gracefully (a nil forge, no error) via forgeCredentialsPresent whenever the identifier cannot be resolved, so none of those seven ever reaches a doomed buildForge call today and none is affected by tightening it. TestBuildForge_Happy's existing github case, which asserts an empty remote URL still builds a forge with no error (cmd/verdi/sync_helpers_test.go), encodes exactly the silent-empty-identifier gap this ac fixes and is a known, deliberate test update, not a regression guard to preserve", anchor: dc-2 }
   - { id: dc-3, text: "This story adds no new resolution semantics anywhere, reaffirming the feature's own dc-3: no new environment variable (only GITHUB_REPOSITORY_OWNER, GITHUB_REPOSITORY, and the existing git origin remote read are ever consulted), no new verdi.yaml key, and no new verdi sync flag. The explicit CI env is checked first and short-circuits identically to today whenever it resolves both fields — a regression obligation on every existing CI-env-present test, not a hope. Scope is GitHub-only, mirroring D6-14 itself: GitLab's numeric CI_PROJECT_ID has no URL-derived form (the D6-14 fix commit's own disclosed exclusion), so gitlab.go is untouched by this story", anchor: dc-3 }
 constraints:
@@ -131,16 +131,19 @@ integration register, never by letting the built binary dial out for real.
 
 Nearest-ancestor bundle resolution. `verdi sync`'s bundle fetch accepts the
 nearest-ancestor evidence bundle on the current commit's history — the
-commit itself first, then its ancestors, nearest first — applying the same
-ancestor rule the fold already uses to accept records (dc-1), rather than a
-second, parallel definition of "ancestor." A bundle at the commit itself
-still wins when one exists, since a commit is its own ancestor under this
-rule (`gitx.IsAncestor`'s own documented self-inclusive semantics) — the
-walk starts there, so "nearest-ancestor" strictly includes HEAD, not just
-its predecessors. `verdi sync` discloses which commit's bundle it accepted
-and how many commits back it walked. Exhausting a bounded walk with no
-bundle anywhere on the path refuses exactly as today's HEAD-exact refusal
-does — naming the ref and the commit range walked — never silently
+commit itself first, then its ancestors, nearest first, unbounded — applying
+the same ancestor rule the fold already uses to accept records (dc-1)
+**verbatim**, never a stricter, parallel definition of "ancestor" (parent
+dc-3: where the two surfaces would disagree, the fold's rule is
+authoritative and sync conforms — so this story's walk carries no depth
+limit the fold's own rule does not itself carry). A bundle at the commit
+itself still wins when one exists, since a commit is its own ancestor under
+this rule (`gitx.IsAncestor`'s own documented self-inclusive semantics) —
+the walk starts there, so "nearest-ancestor" strictly includes HEAD, not
+just its predecessors. `verdi sync` discloses which commit's bundle it
+accepted and how many commits back it walked. Exhausting the ref's entire
+history with no bundle found anywhere refuses exactly as today's HEAD-exact
+refusal does — naming the ref and the commit range walked — never silently
 regenerating unless `--or-regen` is passed, and never succeeding at some
 arbitrarily deep, undisclosed ancestor.
 
@@ -159,24 +162,32 @@ was accepted and the disclosed distance walked.
 
 ## DC-1
 
-One ancestor rule, shared, not restated. The rule sync's fetch conforms to
-is the fold's own: `internal/evidence.LoadRecordsWithSources`
+One ancestor rule, shared, not restated, applied **verbatim** (parent dc-3
+is explicit: "applied verbatim at fetch time," and where sync and the fold
+would disagree, the fold is authoritative). The rule sync's fetch conforms
+to is the fold's own: `internal/evidence.LoadRecordsWithSources`
 (`internal/evidence/records.go`, its `gitx.IsAncestor` check) keeps a
 derived-tree commit directory only when it is the evaluated commit itself or
-a real ancestor of it — over `gitx.IsAncestor`'s `git merge-base
---is-ancestor` (`internal/gitx/ancestry.go`), the same primitive, not a
-lookalike. Sync's fetch walk enumerates candidate ancestor commits via
-`gitx`'s existing commit-history primitive (`internal/gitx/log.go`'s `Log`,
-already most-recent-first over a single rev with no path filter — exactly
-rev's ancestor closure, nearest first) rather than a hand-rolled parent
-walk, so there is structurally no second, possibly-disagreeing notion of
-"ancestor" anywhere in the tree: git's own reachability concept is singular,
-and both primitives are thin wrappers over it. The walk is bounded — a live
-per-candidate forge call is not the free, already-on-disk directory filter
-`LoadRecords` performs, so an unbounded probe risks pathological API cost or
-rate-limiting on a long-lived ref. The exact bound is a build-time judgment
-this story deliberately does not fix a number for; it is disclosed as an
-open implementation choice rather than silently decided here.
+a real ancestor of it, with **no depth limit** — over `gitx.IsAncestor`'s
+`git merge-base --is-ancestor` (`internal/gitx/ancestry.go`), the same
+primitive, not a lookalike. Sync's fetch walk enumerates candidate ancestor
+commits via `gitx`'s existing commit-history primitive
+(`internal/gitx/log.go`'s `Log`, already most-recent-first over a single rev
+with no path filter — exactly rev's ancestor closure, nearest first) rather
+than a hand-rolled parent walk, so there is structurally no second,
+possibly-disagreeing notion of "ancestor" anywhere in the tree: git's own
+reachability concept is singular, and both primitives are thin wrappers over
+it. The walk carries no depth bound that could refuse a bundle the fold
+itself would accept — it continues to the ref's root if that is what finding
+(or exhausting) a bundle requires, closing the D6-32 asymmetry in full rather
+than narrowing it back open in the opposite direction (the judged finding
+this decision resolves; see the sweep's `decision-conflict-report.md`). A
+transport failure mid-walk (a rate limit, a network error) surfaces through
+the existing generic operational-error path every forge call already has
+today, unchanged by this story: cost safety against a pathological walk is
+an operational property for the build to observe under real conditions, not
+a designed narrower cutoff this contract authorizes or that any test may
+treat as a passing "no bundle" verdict.
 
 ## DC-2
 
