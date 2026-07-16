@@ -109,7 +109,8 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 // (V1-P7: promoted there so internal/mcpserve's review population can
 // share the exact same "which branch is the default" resolution —
 // CI_DEFAULT_BRANCH, else the configured remote's HEAD symbolic ref, else
-// "" — unknown, never guessed — instead of a third copy in a different
+// (D6-6) the hermetic local origin/main-or-master fallback, else "" —
+// unknown, never guessed — instead of a third copy in a different
 // package; CLAUDE.md: don't invent a second one).
 func resolveDefaultBranch(ctx context.Context, root string) string {
 	return lint.ResolveDefaultBranch(ctx, root)
@@ -213,7 +214,15 @@ func reportGateConditions(stdout io.Writer, conds []gateCondition) int {
 func checkAcceptedOnDefaultBranch(ctx context.Context, root, specName, defaultBranchRef string) gateCondition {
 	name := "1. spec accepted-pending-build on the default branch"
 	if defaultBranchRef == "" {
-		return gateCondition{Name: name, Reason: "cannot determine the default branch (no CI_DEFAULT_BRANCH and no configured git remote HEAD) — failing closed"}
+		// D6-6: name every source resolveDefaultBranch tries — not just
+		// the two GitLab-CI-centric ones — plus the remedy, since this is
+		// exactly the message a fresh GitHub checkout hits (GitHub Actions
+		// sets no CI_DEFAULT_BRANCH, and actions/checkout never runs `git
+		// remote set-head`, so origin/HEAD is unconfigured too; a repo
+		// whose default branch is named something other than main/master,
+		// or one that ambiguously carries both, still fails closed here —
+		// a legible refusal, never a silent guess).
+		return gateCondition{Name: name, Reason: "cannot determine the default branch (no CI_DEFAULT_BRANCH, no configured git remote HEAD, and no single unambiguous local origin/main or origin/master ref) — failing closed; run `git remote set-head origin <branch>` to configure it"}
 	}
 
 	tip, err := gitx.RevParse(ctx, root, defaultBranchRef)

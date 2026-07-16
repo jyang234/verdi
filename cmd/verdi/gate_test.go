@@ -254,7 +254,13 @@ func TestGate_AllHold(t *testing.T) {
 
 // TestGate_UnknownDefaultBranch_FailsClosed proves condition 1 fails
 // closed (never silently passes) when the default branch cannot be
-// determined at all — I-14's "otherwise, can't prove it".
+// determined at all — I-14's "otherwise, can't prove it". D6-6: the
+// failure message must also be a LEGIBLE refusal — naming every source
+// resolveDefaultBranch tries (including the D6-6 local-fallback step, not
+// just the two GitLab-CI-centric ones) and the `git remote set-head`
+// remedy — since this is exactly the message a fresh GitHub checkout hits
+// today, and the original wording only mentioned CI_DEFAULT_BRANCH and
+// origin/HEAD.
 func TestGate_UnknownDefaultBranch_FailsClosed(t *testing.T) {
 	repo := buildGateRepo(t, "accepted-pending-build")
 	spec := mustResolveBuildSpec(t, repo.Dir)
@@ -266,6 +272,13 @@ func TestGate_UnknownDefaultBranch_FailsClosed(t *testing.T) {
 		t.Fatalf("runGate(unknown default branch) = %d, want 1", got)
 	}
 	assertConditionFails(t, stdout.String(), 1)
+
+	out := stdout.String()
+	for _, want := range []string{"CI_DEFAULT_BRANCH", "git remote HEAD", "origin/main", "origin/master", "git remote set-head origin"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout = %q, want it to mention %q (D6-6: name every source tried plus the remedy)", out, want)
+		}
+	}
 }
 
 // TestCmdGate_EntryPoint drives the real verdi gate entry point
