@@ -4,7 +4,7 @@ kind: spec
 title: "Home Status Glance"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-27
 problem: { text: "today's home directory (spec/directory-home) already groups every default-branch spec and design-branch draft into four status buckets — drafts in progress, accepted-pending-build, active components, terminal — but gives all four equal visual weight and equal position: an operator lands on GET / and must scan the whole exhaustive listing (plus the artifacts-by-kind, services, and boards sections beneath it) to find the handful of specs that actually need THEIR attention right now. Nothing on the page leads with what is actionable, and the one bucket that most needs a second look — terminal — even commingles a spec that is done and physically archived with one that is merely closed and still sitting in the active zone awaiting the archive move: two different next-actions, rendered identically (feature problem; feature dc-4's own 'closed awaiting archive' distinction)", anchor: "#problem" }
 outcome: { text: "GET / leads with a new status-at-a-glance section, above the existing exhaustive Directory section (which keeps rendering exactly as it does today, in place, unchanged). Every active spec — default-branch and design-branch alike — regroups into three actionable-first buckets in fixed order: draft ('on the desk'), accepted-pending-build ('in flight'), then every other active status trailing as a settling group. Each entry carries only its status badge and its working links — a board link universally, matrix and verdict additionally for a feature — with no evidence-bearing state (feature dc-4). The glance is purely additive: every section and link the directory renders today is still there, byte-for-byte, further down the page", anchor: "#outcome" }
@@ -23,6 +23,7 @@ decisions:
 constraints:
   - { id: co-1, text: "every behavioral path is Playwright-proven under e2e/ (parent co-1): the grouping/order/badges/links claim, the no-loss claim, and the empty-bucket claim are each driven against a fixture store, never live data; no network in any test", anchor: "#co-1" }
   - { id: co-2, text: "honest degradation, inherited from the parent (co-2) and from directory-home's own dc-5: an index-computation failure disclosed inline by the existing renderHome/writeDirectorySection (the SAME indexErr this story's glance section also receives from the one shared home.Index(ctx) call) degrades both the glance and the exhaustive section identically — the glance never renders a second, contradictory notice, and never renders partial or fabricated groups when the index itself failed", anchor: "#co-2" }
+frozen: { at: 2026-07-16, commit: 28024ab6c2631d07f449df8178b6c26b70c14787, stub_matched: true }
 ---
 # Home Status Glance
 
