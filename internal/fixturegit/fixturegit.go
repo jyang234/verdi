@@ -70,6 +70,13 @@ func Build(t testing.TB, layers []Layer) *Repo {
 	// Deterministic fixtures never need signing, and a machine with commit
 	// signing configured globally would otherwise hang or fail here.
 	runGit(t, dir, nil, "config", "commit.gpgsign", "false")
+	// D6-31: never let this repo spawn a detached background gc/maintenance
+	// child. A detached writer can still be touching .git after Build
+	// returns, racing the test's t.TempDir() cleanup and failing teardown
+	// with "TempDir RemoveAll cleanup: ...: directory not empty" even
+	// though every assertion in the test itself passed.
+	runGit(t, dir, nil, "config", "gc.autoDetach", "false")
+	runGit(t, dir, nil, "config", "maintenance.auto", "false")
 
 	commitEnv := commitEnvironment()
 	heads := make([]string, 0, len(layers))
