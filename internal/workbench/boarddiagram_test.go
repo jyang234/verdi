@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -610,8 +611,10 @@ func TestBoardDiagram_PeekAndReset(t *testing.T) {
 
 // TestBoardDiagram_RefCardEditorLink: dc-1's reachability from a spec
 // board's diagram reference card — a proposal target gains the editor
-// link, carrying the rendering board's own name as the tool-view-exit
-// dc-2 board= query parameter; an incumbent diagram gains no link at all.
+// link, carrying the rendering board's own ROUTE PATH as the tool-view-exit
+// dc-2 board= query parameter (controller adjudication ADJ-38: the originating
+// board PATH, query-escaped — the serving checkout's unprefixed /board/spec/
+// route here); an incumbent diagram gains no link at all.
 func TestBoardDiagram_RefCardEditorLink(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
@@ -633,8 +636,10 @@ func TestBoardDiagram_RefCardEditorLink(t *testing.T) {
 		t.Fatalf("GET board = %d: %s", rec.Code, rec.Body.String())
 	}
 	html := rec.Body.String()
-	if !strings.Contains(html, `data-testid="refcard-editor-link" href="/board/diagram/target-topology?board=refi-test"`) {
-		t.Errorf("proposal diagram ref card carries no editor link naming its own board (tool-view-exit dc-2):\n%s", html)
+	wantHref := `data-testid="refcard-editor-link" href="/board/diagram/target-topology?board=` +
+		url.QueryEscape("/board/spec/refi-test") + `"`
+	if !strings.Contains(html, wantHref) {
+		t.Errorf("proposal diagram ref card carries no editor link naming its own board PATH (tool-view-exit dc-2 / ADJ-38): want %q in\n%s", wantHref, html)
 	}
 	if strings.Contains(html, `href="/board/diagram/incumbent"`) {
 		t.Errorf("incumbent diagram ref card carries an editor link; the editor serves proposals only")
@@ -642,13 +647,36 @@ func TestBoardDiagram_RefCardEditorLink(t *testing.T) {
 }
 
 // TestResolveDiagramExit is spec/tool-view-exit dc-2/dc-3's pure
-// resolution function, table-driven: a name that resolves to a real
-// active spec renders a known, live board link; anything else — no name
-// at all, an unresolvable name, or a shape that would never reach the
-// filesystem as a spec name — falls back to the index, honestly labeled
-// with which case produced it (dc-3: never one unexplained state).
+// resolution function under controller adjudication ADJ-38 (2026-07-16):
+// the board= parameter now carries the originating board PATH, validated
+// against the two real board-route grammars — the unprefixed
+// /board/spec/<name> (the serving checkout's own tree) and the
+// branch-prefixed /b/<branch>/board/spec/<name> (the branch's managed
+// worktree) — each resolved against the store it addresses. A path whose
+// spec resolves in its own store renders a known, live board link that
+// echoes that exact path (so a per-branch origin returns to its branch
+// board, never the serving checkout's same-named board); anything else —
+// no origin, an unresolvable spec, a foreign or malformed path (only these
+// two grammars are ever honored — never an open redirect) — falls back to
+// the index, honestly labeled with which case produced it (dc-3).
 func TestResolveDiagramExit(t *testing.T) {
-	root := newBoardFixture(t) // carries .verdi/specs/active/refi-test/spec.md
+	root := newBoardFixture(t) // carries .verdi/specs/active/refi-test/spec.md (serving tree)
+
+	// serving-only is a spec present ONLY in the serving checkout's tree —
+	// it proves the branch grammar resolves against the branch's own store,
+	// never falling through to the serving tree.
+	writeExitStoreSpec(t, root, "serving-only")
+
+	// A managed worktree for design/two-a, carrying refi-test (the SAME name
+	// the serving tree also has — the same-name-two-modes shape) and its own
+	// branch-only spec. wtmanager.WorktreePath maps design/two-a to
+	// root/.verdi/data/worktrees/two-a (asserted concretely here, mirroring
+	// e2e/tests/fixtures.ts's worktreeSpecPath).
+	branchStore := filepath.Join(root, ".verdi", "data", "worktrees", "two-a")
+	writeExitStoreSpec(t, branchStore, boardFixtureName) // refi-test, also on the serving tree
+	writeExitStoreSpec(t, branchStore, "branch-only")
+
+	const escBranch = "design%2Ftwo-a" // the /b/{branch} segment, slashes percent-encoded
 
 	cases := []struct {
 		name          string
@@ -659,11 +687,35 @@ func TestResolveDiagramExit(t *testing.T) {
 		wantLabelLack []string
 	}{
 		{
-			name:         "resolves to a real active spec",
-			origin:       boardFixtureName,
+			name:         "unprefixed path resolves against the serving tree",
+			origin:       "/board/spec/" + boardFixtureName,
 			wantHref:     "/board/spec/" + boardFixtureName,
 			wantKnown:    true,
 			wantLabelHas: []string{boardFixtureName},
+		},
+		{
+			name:         "branch-prefixed path resolves against the managed worktree store",
+			origin:       "/b/" + escBranch + "/board/spec/branch-only",
+			wantHref:     "/b/" + escBranch + "/board/spec/branch-only",
+			wantKnown:    true,
+			wantLabelHas: []string{"branch-only"},
+		},
+		{
+			// The two grammars carrying the SAME spec name resolve to DIFFERENT
+			// boards — each its own — never collapsing onto the serving one.
+			name:         "same-name-two-modes: the branch origin returns to its branch board, not the serving board",
+			origin:       "/b/" + escBranch + "/board/spec/" + boardFixtureName,
+			wantHref:     "/b/" + escBranch + "/board/spec/" + boardFixtureName,
+			wantKnown:    true,
+			wantLabelHas: []string{boardFixtureName},
+		},
+		{
+			name:          "branch grammar does not fall through to the serving tree",
+			origin:        "/b/" + escBranch + "/board/spec/serving-only",
+			wantHref:      "/",
+			wantKnown:     false,
+			wantLabelHas:  []string{"serving-only", "is not known"},
+			wantLabelLack: []string{"no originating board is known"},
 		},
 		{
 			name:         "no origin at all: honest no-origin-known disclosure",
@@ -673,19 +725,50 @@ func TestResolveDiagramExit(t *testing.T) {
 			wantLabelHas: []string{"no originating board is known"},
 		},
 		{
-			name:          "origin given but unresolvable: a distinct disclosure from the no-origin case",
-			origin:        "no-such-spec",
+			name:          "unprefixed path, unresolvable spec: a distinct disclosure from the no-origin case",
+			origin:        "/board/spec/no-such-spec",
 			wantHref:      "/",
 			wantKnown:     false,
 			wantLabelHas:  []string{"no-such-spec", "is not known"},
 			wantLabelLack: []string{"no originating board is known"},
 		},
 		{
-			name:         "a shape that is never a valid spec name never touches the filesystem",
-			origin:       "../../etc/passwd",
-			wantHref:     "/",
-			wantKnown:    false,
-			wantLabelHas: []string{"is not known"},
+			name:          "a bare spec name (the pre-ADJ-38 form) is no longer a board path: fallback",
+			origin:        boardFixtureName,
+			wantHref:      "/",
+			wantKnown:     false,
+			wantLabelHas:  []string{"is not known"},
+			wantLabelLack: []string{"no originating board is known"},
+		},
+		{
+			name:      "a foreign route is never honored as a board (no open redirect)",
+			origin:    "/board/diagram/" + boardFixtureName,
+			wantHref:  "/",
+			wantKnown: false,
+		},
+		{
+			name:      "an absolute foreign URL is never honored",
+			origin:    "http://evil.example/board/spec/" + boardFixtureName,
+			wantHref:  "/",
+			wantKnown: false,
+		},
+		{
+			name:      "an empty branch segment fails closed",
+			origin:    "/b//board/spec/" + boardFixtureName,
+			wantHref:  "/",
+			wantKnown: false,
+		},
+		{
+			name:      "a traversal branch segment never reaches the filesystem",
+			origin:    "/b/design%2F..%2F..%2Fetc/board/spec/" + boardFixtureName,
+			wantHref:  "/",
+			wantKnown: false,
+		},
+		{
+			name:      "a traversal spec name never reaches the filesystem",
+			origin:    "/board/spec/..%2F..%2Fetc%2Fpasswd",
+			wantHref:  "/",
+			wantKnown: false,
 		},
 	}
 	for _, tc := range cases {
@@ -711,6 +794,21 @@ func TestResolveDiagramExit(t *testing.T) {
 	}
 }
 
+// writeActiveSpec drops a minimal spec.md at
+// <store>/.verdi/specs/active/<name>/spec.md so resolveDiagramExit's store
+// probe (which only stats the file's existence) has something to find. The
+// content is never decoded by the exit resolver, so a marker line suffices.
+func writeExitStoreSpec(t *testing.T, store, name string) {
+	t.Helper()
+	dir := filepath.Join(store, ".verdi", "specs", "active", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte("id: spec/"+name+"\n"), 0o644); err != nil {
+		t.Fatalf("write spec %s: %v", name, err)
+	}
+}
+
 // TestBoardDiagramPage_ExitAffordance: ac-1's page-chrome affordance and
 // its window.__DIAGRAM__ state (dc-2) across the three exit cases —
 // resolves to a real board, no origin known, and an origin that does not
@@ -729,7 +827,7 @@ func TestBoardDiagramPage_ExitAffordance(t *testing.T) {
 	h := NewHandler(root)
 
 	t.Run("resolves to a real active spec board", func(t *testing.T) {
-		rec := getDiagram(t, h, diagramFixtureName, "?board="+boardFixtureName)
+		rec := getDiagram(t, h, diagramFixtureName, "?board="+url.QueryEscape("/board/spec/"+boardFixtureName))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("GET = %d: %s", rec.Code, rec.Body.String())
 		}
@@ -761,7 +859,7 @@ func TestBoardDiagramPage_ExitAffordance(t *testing.T) {
 	})
 
 	t.Run("unresolvable board param: discloses the stale name distinctly, falls back to index", func(t *testing.T) {
-		rec := getDiagram(t, h, diagramFixtureName, "?board=no-such-spec")
+		rec := getDiagram(t, h, diagramFixtureName, "?board="+url.QueryEscape("/board/spec/no-such-spec"))
 		html := rec.Body.String()
 		if !strings.Contains(html, `data-testid="diagram-exit" href="/"`) {
 			t.Errorf("stale-name fallback does not link to the index:\n%s", html)
@@ -798,6 +896,118 @@ func TestCorpusPage_ProposalEditorLink(t *testing.T) {
 	if strings.Contains(rec.Body.String(), `data-testid="open-editor-link"`) {
 		t.Errorf("incumbent corpus page carries an editor link; the editor serves proposals only")
 	}
+}
+
+// branchExitSpec is a draft feature spec pinning a proposal diagram via a
+// depends-on link (so its board renders a diagram reference card with an
+// editor link). It lands on main, so a design branch cut from main carries
+// it — and its managed worktree is the store its /b/ board addresses.
+const branchExitSpec = `---
+id: spec/spec-x
+kind: spec
+class: feature
+title: "Spec X"
+status: draft
+owners: [platform-team]
+problem: { text: "branch-exit fixture problem", anchor: "#problem" }
+outcome: { text: "branch-exit fixture outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "spec-x criterion", evidence: [attestation], anchor: "#ac-1" }
+links:
+  - { type: depends-on, ref: diagram/diag-x }
+---
+# Spec X
+
+## Problem
+
+## Outcome
+
+## ac-1
+
+Prose.
+`
+
+const branchExitDiagram = `---
+id: diagram/diag-x
+kind: diagram
+class: proposal
+title: "Diag X"
+status: proposed
+owners: [platform-team]
+---
+flowchart TD
+  a["A"]
+  b["B"]
+  a --> b
+`
+
+// TestBoardDiagram_BranchBoardExitRoundTrip is controller adjudication
+// ADJ-38's per-branch-board fix, proven end-to-end at the HTTP layer
+// (fixturegit + a real managed-worktree cut, hermetic, no network): a
+// branch board's diagram reference card carries the branch's OWN board PATH
+// (not a bare spec name), and entering the editor with that path resolves
+// the exit affordance back to the EXACT branch board — validated against the
+// branch's managed worktree store — never the serving checkout's same-named
+// /board/spec/spec-x (the mislabeling the finding names). spec-x exists on
+// BOTH trees, so the pre-fix behavior would have mis-resolved to the serving
+// board; this test witnesses it does not.
+func TestBoardDiagram_BranchBoardExitRoundTrip(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/active/spec-x/spec.md": branchExitSpec,
+			".verdi/diagrams/diag-x.mermaid":     branchExitDiagram,
+			".verdi/.gitignore":                  "data/\n",
+		},
+		Message: "seed branch-exit fixture on main",
+	}})
+	root := repo.Dir
+
+	// A local design branch at main's content (carries spec-x + diag-x); the
+	// serving checkout returns to main, untouched.
+	ctx := context.Background()
+	if err := gitx.CheckoutNewBranch(ctx, root, "design/branch-x"); err != nil {
+		t.Fatalf("cut design/branch-x: %v", err)
+	}
+	if err := gitx.Checkout(ctx, root, "main"); err != nil {
+		t.Fatalf("return to main: %v", err)
+	}
+
+	h := NewHandler(root)
+	originPath := "/b/design%2Fbranch-x/board/spec/spec-x"
+
+	// (a) The branch board renders the editor link carrying the branch board
+	// PATH, query-escaped — cutting the managed worktree as a side effect.
+	rec := bGet(t, h, originPath)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET branch board = %d\n%s", rec.Code, rec.Body.String())
+	}
+	wantParam := "board=" + url.QueryEscape(originPath)
+	if !strings.Contains(rec.Body.String(), wantParam) {
+		t.Errorf("branch board's editor link does not carry the branch board PATH (ADJ-38): want %q", wantParam)
+	}
+
+	// (b) Entering the editor (served from the serving root, where diag-x is a
+	// proposal) with that param resolves the exit back to the branch board.
+	editor := getDiagram(t, h, "diag-x", "?board="+url.QueryEscape(originPath))
+	if editor.Code != http.StatusOK {
+		t.Fatalf("GET editor = %d\n%s", editor.Code, editor.Body.String())
+	}
+	html := editor.Body.String()
+	wantExit := `data-testid="diagram-exit" href="` + originPath + `"`
+	if !strings.Contains(html, wantExit) {
+		t.Errorf("exit affordance does not return to the branch board (ADJ-38): want %q in\n%s", wantExit, html)
+	}
+	if strings.Contains(html, `data-testid="diagram-exit" href="/board/spec/spec-x"`) {
+		t.Error("exit affordance returns to the serving checkout's same-named board — the ADJ-38 mislabeling this fix removes")
+	}
+	if !strings.Contains(html, `"exitHref":"`+originPath+`"`) {
+		t.Errorf("window.__DIAGRAM__ exitHref is not the branch board path:\n%s", html)
+	}
+	if !strings.Contains(html, "back to board: spec-x") {
+		t.Errorf("branch board exit is not labeled as a known origin:\n%s", html)
+	}
+
+	assertServingCheckoutClean(t, root)
 }
 
 // TestBoardDiagram_MethodDiscipline: wrong methods 405 on every route.
