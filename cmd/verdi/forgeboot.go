@@ -78,8 +78,35 @@ func resolveRefCommit(ctx context.Context, root string) (ref, commit string, err
 // github identifier cannot be resolved from either source,
 // githubOwnerRepo's own error propagates here and out to the caller as an
 // operational refusal — never a live adapter built around two empty
-// strings.
+// strings, for any caller that will DIAL the forge by (owner, repo).
 func buildForge(kind, remoteURL string) (forge.Forge, error) {
+	return buildForgeWithIdentifier(kind, remoteURL, true)
+}
+
+// buildForgeForCI builds the forge for invocations that never DIAL the forge
+// API — they only read the CI environment (CIContext, a pure env read that
+// addresses no repository by owner/repo): `verdi sync --produce` /
+// `--produce-runtime`. Unlike buildForge it does NOT apply the ac-1
+// identifier refusal, because an unresolved github owner/repo is harmless
+// where nothing dials — CIContext never touches those fields (ADJ-43: a
+// refusal is only honest where the identifier was needed; --produce with
+// --force-local in an env-less, origin-less checkout needs no forge
+// identifier and must run exactly as it did before ac-1, restoring co-3
+// byte-identity). The adapter is built with whatever origin/env resolve,
+// empty owner/repo included; a live FetchEvidenceBundle on such an adapter
+// would still fail, but these paths never make one.
+func buildForgeForCI(kind, remoteURL string) (forge.Forge, error) {
+	return buildForgeWithIdentifier(kind, remoteURL, false)
+}
+
+// buildForgeWithIdentifier is the shared constructor. requireIdentifier
+// gates only the github identifier refusal: true propagates
+// githubOwnerRepo's unresolved-identifier error (the dialing seam); false
+// tolerates it, building the adapter with the empty owner/repo the
+// CIContext-only paths never use. gitlab takes its identifier from
+// CI_PROJECT_ID (env, never URL-derived — dc-3) and has no such refusal
+// under either flag.
+func buildForgeWithIdentifier(kind, remoteURL string, requireIdentifier bool) (forge.Forge, error) {
 	switch kind {
 	case "gitlab":
 		return forgegitlab.New(forgegitlab.Config{
@@ -89,7 +116,7 @@ func buildForge(kind, remoteURL string) (forge.Forge, error) {
 		}), nil
 	case "github":
 		owner, repo, err := githubOwnerRepo(remoteURL)
-		if err != nil {
+		if err != nil && requireIdentifier {
 			return nil, err
 		}
 		return forgegithub.New(forgegithub.Config{

@@ -1006,3 +1006,65 @@ func TestCmdSync_LocalCheckout_RefusesNamingSources(t *testing.T) {
 		}
 	}
 }
+
+// cmdSyncProduceStore builds an env-less, origin-less GitHub store as a real
+// git repo (fixturegit) with a toolchain block but NO services, so a
+// --produce/--produce-runtime run completes hermetically (an empty bundle,
+// no upstream exec). It is the cmdSync register the below-the-seam
+// fake-forge tests are blind to: cmdSync builds the REAL forge, so this is
+// where ADJ-43's fix (no identifier refusal on paths that never dial) is
+// observable.
+func cmdSyncProduceStore(t *testing.T) {
+	t.Helper()
+	for _, v := range []string{
+		"GITHUB_REPOSITORY_OWNER", "GITHUB_REPOSITORY", "GITHUB_TOKEN",
+		"CI_COMMIT_REF_NAME", "GITHUB_HEAD_REF", "GITHUB_REF_NAME",
+	} {
+		t.Setenv(v, "")
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: github\ntoolchain:\n  module: github.com/jyang234/golang-code-graph\n  commit: cd38b1a56bb782177a207d741a39807821cf2c1c\n",
+		},
+		Message: "store init",
+	}})
+	t.Chdir(repo.Dir)
+}
+
+// TestCmdSync_ProduceForceLocal_CompletesWithoutIdentifierRefusal proves
+// ADJ-43's fix at the cmdSync register: `verdi sync --produce --force-local`
+// in an env-less, origin-less GitHub checkout never dials the forge (it only
+// reads the CI environment via CIContext, a pure env read), so it must NOT
+// hit the ac-1 identifier refusal — it completes exactly as it did before
+// ac-1 (co-3 byte-identity). The pre-existing --produce tests inject a fake
+// forge below the buildForge seam and so never observed this narrowing.
+func TestCmdSync_ProduceForceLocal_CompletesWithoutIdentifierRefusal(t *testing.T) {
+	cmdSyncProduceStore(t)
+
+	var stdout, stderr bytes.Buffer
+	code := cmdSync([]string{"--produce", "--force-local"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cmdSync(--produce --force-local) in an env-less/origin-less checkout: exit = %d, want 0 (completes as pre-ac-1); stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "cannot identify the GitHub repository") {
+		t.Errorf("stderr = %q, must NOT hit the ac-1 identifier refusal — --produce never dials the forge (ADJ-43)", stderr.String())
+	}
+}
+
+// TestCmdSync_ProduceRuntimeForceLocal_CompletesWithoutIdentifierRefusal is
+// the --produce-runtime variant: run with no --story/--ac it is the
+// scheduled no-op ("nothing to report", exit 0), but it must still get PAST
+// forge construction without the ac-1 identifier refusal — --produce-runtime
+// only reads CIContext (nil-guarded), it never dials (ADJ-43).
+func TestCmdSync_ProduceRuntimeForceLocal_CompletesWithoutIdentifierRefusal(t *testing.T) {
+	cmdSyncProduceStore(t)
+
+	var stdout, stderr bytes.Buffer
+	code := cmdSync([]string{"--produce-runtime", "--force-local"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cmdSync(--produce-runtime --force-local) in an env-less/origin-less checkout: exit = %d, want 0 (scheduled no-op completes); stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "cannot identify the GitHub repository") {
+		t.Errorf("stderr = %q, must NOT hit the ac-1 identifier refusal — --produce-runtime never dials the forge (ADJ-43)", stderr.String())
+	}
+}

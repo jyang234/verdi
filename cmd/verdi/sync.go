@@ -149,7 +149,22 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "sync:", err)
 		return 2
 	}
-	fg, err := buildForge(forgeKind, remoteURL)
+	// ADJ-43: the ac-1 identifier refusal belongs ONLY to invocations that
+	// actually DIAL the forge by (owner, repo) — the fetch and --or-regen
+	// paths (fetchAncestorBundle → FetchEvidenceBundle). --produce and
+	// --produce-runtime never dial; they only read the CI environment
+	// (CIContext, a pure env read that uses no repo identifier), so they
+	// build an identifier-tolerant forge and run in an env-less, origin-less
+	// checkout exactly as they did before ac-1 (co-3 byte-identity restored).
+	// Dispatching the construction here — rather than after the toolchain
+	// check below — keeps the identifier refusal ahead of that check for the
+	// dialing path, unchanged (TestCmdSync_LocalCheckout_RefusesNamingSources).
+	var fg forge.Forge
+	if produce || produceRuntime {
+		fg, err = buildForgeForCI(forgeKind, remoteURL)
+	} else {
+		fg, err = buildForge(forgeKind, remoteURL)
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "sync:", err)
 		return 2
