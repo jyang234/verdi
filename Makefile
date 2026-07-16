@@ -100,6 +100,16 @@ lint-store:
 spec-align:
 	go test ./internal/specalign/...
 
+# SHOWCASE_REQUIRED_TESTS is the set of tests showcase-coverage's guard demands
+# actually ran+passed (scripts/require-pass.sh enforces it). Kept in ONE named
+# variable, not inline, so a single source of truth exists that the sync check
+# (TestShowcaseCoverage_RequiredListInSync) reads and cross-checks against the
+# package's own TestShowcaseCoverage* functions — so a newly-added coverage test
+# missing from this list fails LOUDLY (its deletion would otherwise be silent,
+# the under-inclusion gap the earlier inline list allowed). Any edit here must
+# keep that test green.
+SHOWCASE_REQUIRED_TESTS := TestShowcaseCoverage TestShowcaseCoverage_DetectsGaps TestShowcaseCoverage_DetectsGapsCoversAllClasses TestShowcaseCoverage_RealEnumerationDetectsGaps TestShowcaseCoverage_EnumerationIsComplete TestShowcaseCoverage_RequiredListInSync TestShowcaseCoverage_GuardScriptBites TestReadmeExamplesFresh
+
 # lint-showcase and showcase-coverage are named gates over
 # internal/showcasealign (same rationale as spec-align: `test` already runs
 # this package, but a named target makes CI failure output name the gate
@@ -117,19 +127,16 @@ spec-align:
 # verify` still green — the exact drift this story exists to prevent. We
 # capture `-v` output and require TestShowcaseLintClean to have emitted a
 # `--- PASS:` line; its absence (deletion, rename, or skip) is a hard failure
-# here regardless of whether the package still compiles. Makefile-level on
-# purpose: a Go meta-test asserting "TestShowcaseLintClean ran" would itself
-# be deletable the very same way.
+# here regardless of whether the package still compiles. The PASS-line predicate
+# lives in scripts/require-pass.sh (whose own red direction is committed-tested
+# by TestShowcaseCoverage_GuardScriptBites), so the guard is a tested unit, not
+# merely a hand-run inline snippet.
 lint-showcase:
 	@out="$$(go test ./internal/showcasealign/ -run TestShowcaseLintClean -v 2>&1)"; \
 	status=$$?; \
 	printf '%s\n' "$$out"; \
 	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
-	if ! printf '%s\n' "$$out" | grep -qF -- "--- PASS: TestShowcaseLintClean ("; then \
-		echo "ERROR: lint-showcase guard: required test TestShowcaseLintClean did NOT run+pass (deleted, renamed, or skipped?)." >&2; \
-		echo "       'go test -run' matching nothing exits 0 vacuously; this guard makes that silent drift a hard failure (story CO-2/DC-2)." >&2; \
-		exit 1; \
-	fi
+	printf '%s\n' "$$out" | scripts/require-pass.sh 'TestShowcaseLintClean'
 
 # showcase-coverage runs TestShowcaseCoverage (the capability-coverage gate).
 #
@@ -154,48 +161,52 @@ lint-showcase:
 #     break the build), so it too MUST emit its own `--- PASS:` line. The `-run`
 #     pattern above already selects it (an unanchored TestShowcaseCoverage
 #     match); this makes its presence a demanded invariant, not incidental.
+#   - TestShowcaseCoverage_DetectsGapsCoversAllClasses guards the DetectsGaps
+#     table at ROW granularity, the layer this name-only guard cannot reach: it
+#     re-drives computeCoverageGaps over the same committed cases and fails if
+#     the table stops exercising any gap class (deleting the load-bearing row
+#     would otherwise keep DetectsGaps green). A hard FLOOR for the same
+#     vacuous-`-run` reason.
+#   - TestShowcaseCoverage_RealEnumerationDetectsGaps is the RED-direction proof
+#     on the REAL enumeration (dispatch.go's verbPhase walk + live tools/list),
+#     not a synthetic caps map: a real capability whose mapping is removed, and
+#     a newly-added capability, both surface as named gaps. A hard FLOOR too.
+#   - TestShowcaseCoverage_EnumerationIsComplete proves the CLI axis enumeration
+#     is COMPLETE: run()'s pre-phase special-cases are exactly {lint}, so no verb
+#     can ship dispatched-but-unenumerated behind a second pre-phase arm.
+#   - TestShowcaseCoverage_RequiredListInSync fails if a TestShowcaseCoverage*
+#     function exists in the package but is absent from SHOWCASE_REQUIRED_TESTS —
+#     closing the silent under-inclusion an inline list allowed.
+#   - TestShowcaseCoverage_GuardScriptBites is the committed red-direction proof
+#     of scripts/require-pass.sh itself (feeds it a transcript missing a required
+#     PASS line, asserts exit 1) — the guard's own outermost layer, tested.
 #
-# TASK 4.2 WIRE-UP (README freshness, DC-3): the sibling public-readme story
-# adds a README-freshness gate. Folding it into this target is a DELIBERATE,
-# TWO-STEP change — NOT a silent auto-detect:
-#   (a) add TestReadmeExamplesFresh to internal/showcasealign/readme_test.go
-#       (the plan pins that test to THIS package, which is why the `-run`
-#       pattern below already names it — a test placed there is selected and
-#       run with no further change to the pattern); AND
-#   (b) append TestReadmeExamplesFresh to the `required` list below, so this
-#       guard then hard-demands its `--- PASS:` line.
-# Both steps are mandatory. (a) alone already enforces the test's VERDICT: the
-# `-run` pattern below already names TestReadmeExamplesFresh, so once it exists
-# in this package it is selected and run, and a FAILING run makes `go test` exit
-# non-zero — which the status check below turns into a hard target failure with
-# no `required`-list edit at all. What step (b) adds is narrower and worth
-# stating precisely: it guards against the readme test being DELETED, RENAMED,
-# or SKIPPED — the same vacuous-`-run` class the rest of this guard addresses (a
-# `-run` that matches nothing still exits 0) — NOT verdict enforcement, which
-# (a) already provides. (b) without (a) fails this guard LOUDLY (the named test
-# never ran) instead of passing vacuously. An earlier revision auto-
-# promoted the readme test the instant a `=== RUN TestReadmeExamplesFresh`
-# line appeared in THIS package's own `-v` output — that silently assumed 4.2
-# would place the test here, and would never fire (a permanent, silent gap)
-# if 4.2 landed it in another package. Requiring the explicit `required`-list
-# edit removes that package assumption: the gate is wired on by hand, where
-# the next author is looking, not by a fragile pattern match.
+# README freshness (DC-3) — WIRED, both steps landed: TestReadmeExamplesFresh
+# exists in internal/showcasealign/readme_test.go (sibling public-readme story,
+# 059915a) and is named in SHOWCASE_REQUIRED_TESTS above, so `make
+# showcase-coverage` both selects it (the `-run` pattern names it) and
+# hard-demands its `--- PASS:` line. DC-3's disclosed "passes vacuously until
+# that sibling lands it" is therefore resolved. The wiring was DELIBERATELY
+# two-step, not a silent auto-detect, and that discipline still governs the next
+# such gate: (a) the `-run` pattern selecting a test only enforces its VERDICT (a
+# failing run exits non-zero); (b) naming it in SHOWCASE_REQUIRED_TESTS is what
+# guards against the test being DELETED, RENAMED, or SKIPPED (the vacuous-`-run`
+# class, a `-run` matching nothing still exits 0) — so a new gate earns BOTH, by
+# hand, where the next author is looking, never a fragile output pattern match.
 #
-# This guard lives at the Makefile level on purpose: a Go meta-test asserting
-# "TestShowcaseCoverage ran" would itself be deletable the very same way.
+# The PASS-line predicate now lives in scripts/require-pass.sh so it is a tested
+# unit (TestShowcaseCoverage_GuardScriptBites), not an un-exercised inline
+# snippet; the required set is the SHOWCASE_REQUIRED_TESTS variable above so the
+# sync check (TestShowcaseCoverage_RequiredListInSync) can bind it to the
+# package's actual TestShowcaseCoverage* functions. The Makefile is still the
+# right home for the wiring: the vacuous-`-run` risk it defends is a build-gate
+# fact, and a Go-only guard would itself be deletable the same way.
 showcase-coverage:
 	@out="$$(go test ./internal/showcasealign/ -run 'TestShowcaseCoverage|TestReadmeExamplesFresh' -v 2>&1)"; \
 	status=$$?; \
 	printf '%s\n' "$$out"; \
 	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
-	required='TestShowcaseCoverage TestShowcaseCoverage_DetectsGaps TestReadmeExamplesFresh'; \
-	for tc in $$required; do \
-		if ! printf '%s\n' "$$out" | grep -qF -- "--- PASS: $$tc ("; then \
-			echo "ERROR: showcase-coverage guard: required test $$tc did NOT run+pass (deleted, renamed, or skipped?)." >&2; \
-			echo "       'go test -run' matching nothing exits 0 vacuously; this guard makes that silent drift a hard failure (story CO-2/DC-2)." >&2; \
-			exit 1; \
-		fi; \
-	done
+	printf '%s\n' "$$out" | scripts/require-pass.sh '$(SHOWCASE_REQUIRED_TESTS)'
 
 # e2e-check-node is verify's Node/Playwright preflight: CLAUDE.md made
 # e2e a merge blocker ("every browser-facing behavioral path ... a
