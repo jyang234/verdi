@@ -79,6 +79,31 @@ func HasLocalBranch(ctx context.Context, dir, name string) (bool, error) {
 	return true, nil
 }
 
+// HasRemoteTrackingBranch reports whether dir has a LOCAL remote-tracking
+// ref named refs/remotes/<remote>/<branch> (`git show-ref --verify --quiet
+// refs/remotes/<remote>/<branch>`, exit 0 = present, exit 1 = absent) —
+// D6-6's hermetic building block: a freshly checked-out GitHub repository
+// (actions/checkout's shallow, specific-ref fetch) populates the remote-
+// tracking ref for the branch it fetched WITHOUT ever setting
+// refs/remotes/origin/HEAD, so probing the two conventional default-branch
+// names as remote-tracking refs directly, entirely from local git
+// plumbing, tells the caller what a `git ls-remote` round-trip would have
+// — with no network call at all (never `ls-remote`, unlike gitx.DefaultBranch's
+// doc comment's "cloning normally from a forge" path). Any exit code other
+// than 0 or 1 (e.g. dir is not a repository) is a real error, not a false
+// answer — same contract as HasLocalBranch.
+func HasRemoteTrackingBranch(ctx context.Context, dir, remote, branch string) (bool, error) {
+	ref := "refs/remotes/" + remote + "/" + branch
+	if _, err := run(ctx, dir, "show-ref", "--verify", "--quiet", ref); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, fmt.Errorf("gitx: HasRemoteTrackingBranch(%q, %q): %w", remote, branch, err)
+	}
+	return true, nil
+}
+
 // CheckoutNewBranch creates a new branch named name at dir's current HEAD
 // and checks it out — `git checkout -b <name>` (PLAN.md Phase 7's branch-
 // cutting ritual for `design start`'s design/<name> and `feature start`'s

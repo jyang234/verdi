@@ -148,6 +148,62 @@ func TestHasLocalBranch_Negative(t *testing.T) {
 	})
 }
 
+// TestHasRemoteTrackingBranch_Happy proves D6-6's hermetic building block
+// finds a fabricated refs/remotes/origin/<branch> ref (no clone/fetch, no
+// network — the ref is seeded directly via UpdateRef, same idiom
+// TestHasLocalBranch_Negative's remote-tracking subtest uses).
+func TestHasRemoteTrackingBranch_Happy(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := UpdateRef(ctx, repo.Dir, "refs/remotes/origin/main", repo.Head); err != nil {
+		t.Fatalf("seeding refs/remotes/origin/main: %v", err)
+	}
+
+	has, err := HasRemoteTrackingBranch(ctx, repo.Dir, "origin", "main")
+	if err != nil {
+		t.Fatalf("HasRemoteTrackingBranch(origin, main): %v", err)
+	}
+	if !has {
+		t.Fatal("HasRemoteTrackingBranch(origin, main) = false, want true")
+	}
+}
+
+func TestHasRemoteTrackingBranch_Negative(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	t.Run("no such remote-tracking ref", func(t *testing.T) {
+		has, err := HasRemoteTrackingBranch(ctx, repo.Dir, "origin", "main")
+		if err != nil {
+			t.Fatalf("HasRemoteTrackingBranch(origin, main): unexpected error: %v", err)
+		}
+		if has {
+			t.Fatal("HasRemoteTrackingBranch(origin, main) = true, want false (no origin remote configured at all)")
+		}
+	})
+
+	t.Run("a local branch of the same name does not count", func(t *testing.T) {
+		// fixturegit's own "main" is a refs/heads/ branch, never a
+		// refs/remotes/origin/ one — the two namespaces must not be
+		// conflated (mirrors HasLocalBranch's inverse check).
+		has, err := HasRemoteTrackingBranch(ctx, repo.Dir, "origin", "main")
+		if err != nil {
+			t.Fatalf("HasRemoteTrackingBranch(origin, main): unexpected error: %v", err)
+		}
+		if has {
+			t.Fatal("HasRemoteTrackingBranch(origin, main) = true, want false (refs/heads/main must not satisfy a refs/remotes/origin/main query)")
+		}
+	})
+
+	t.Run("not a repository at all", func(t *testing.T) {
+		notARepo := t.TempDir()
+		if _, err := HasRemoteTrackingBranch(ctx, notARepo, "origin", "main"); err == nil {
+			t.Fatal("HasRemoteTrackingBranch outside a repo: want error, got nil")
+		}
+	})
+}
+
 func TestMergeBase_Happy(t *testing.T) {
 	repo := buildRepo(t)
 	ctx := context.Background()

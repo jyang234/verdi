@@ -13,8 +13,10 @@ import (
 // construct it directly.
 type Context struct {
 	// DefaultBranch is the store's default branch short name (e.g. "main"),
-	// or "" when it cannot be established (no configured git remote HEAD
-	// and no CI default-branch variable) — I-14's "otherwise" case.
+	// or "" when it cannot be established (no CI default-branch variable,
+	// no configured git remote HEAD, and — D6-6's hermetic fallback — no
+	// single unambiguous local origin/main or origin/master ref either) —
+	// I-14's "otherwise" case.
 	DefaultBranch string
 	// CurrentBranch is the currently checked-out branch's short name, or ""
 	// on a detached HEAD.
