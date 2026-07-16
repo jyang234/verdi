@@ -282,9 +282,56 @@ func TestRunSync_Ancestor_NoBundleAnywhere_RefusesNamingRange(t *testing.T) {
 		t.Fatalf("exit = %d, want 2; stdout=%s", code, stdout.String())
 	}
 	got := stderr.String()
-	for _, want := range []string{ref, repo.Heads[0], repo.Head, "3 commit(s) walked"} {
+	// The refusal names the ref and the range walked, and — fix 2 (ADJ-37)
+	// — scopes the claim to THIS clone rather than overclaiming the ref's
+	// entire history. A non-shallow fixturegit repo carries no shallow
+	// marker, so no truncation disclosure is appended.
+	for _, want := range []string{ref, repo.Heads[0], repo.Head, "3 commit(s) walked", "in this clone"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("stderr = %q, want it to name %q", got, want)
+		}
+	}
+	if strings.Contains(got, "shallow clone") {
+		t.Errorf("stderr = %q, must NOT claim a shallow clone when no shallow marker is present", got)
+	}
+}
+
+// TestRunSync_Ancestor_NoBundleAnywhere_ShallowClone_DisclosesTruncation
+// proves fix 2 (ADJ-37, disclosure only — no walk-semantics change): in a
+// shallow clone, `git log` silently stops at the shallow boundary, so the
+// walk saw only a truncated local graph. The exhausted-walk refusal must
+// then disclose that the history was truncated and a bundle may sit at a
+// deeper true ancestor absent from this clone — detected cheaply via git's
+// own shallow-boundary marker. The marker is placed directly in the
+// fixture's git dir (an empty shallow file, which `git log` tolerates), so
+// the test is fully hermetic (co-1: no network).
+func TestRunSync_Ancestor_NoBundleAnywhere_ShallowClone_DisclosesTruncation(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"a.txt": "1"}, Message: "layer 1"},
+		{Files: map[string]string{"a.txt": "2"}, Message: "layer 2"},
+		{Files: map[string]string{"a.txt": "3"}, Message: "layer 3"},
+	})
+	const ref = "main"
+
+	// Mark the clone shallow the way a `--depth` fetch would: git's own
+	// shallow-boundary marker file in the git dir. An empty marker is
+	// tolerated by `git log` (the walk still runs over the local graph),
+	// and its mere existence is what sync's cheap detection keys on.
+	if err := os.WriteFile(filepath.Join(repo.Dir, ".git", "shallow"), nil, 0o644); err != nil {
+		t.Fatalf("placing shallow marker: %v", err)
+	}
+
+	f := fake.New() // unseeded: no bundle anywhere in the walked history
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{Runner: upstream.NewFakeRunner(), Forge: f, GoTest: fakeGoTest{}, Stdout: &stdout, Stderr: &stderr}
+	code := runSync(context.Background(), repo.Dir, ref, repo.Head, false, false, false, deps)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	got := stderr.String()
+	for _, want := range []string{"shallow clone", "truncated"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stderr = %q, want the shallow-truncation disclosure to contain %q", got, want)
 		}
 	}
 }
