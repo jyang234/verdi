@@ -90,8 +90,9 @@
 // |   SHOWCASE_DRAFT_OQ_CARRIED, SHOWCASE_DRAFT_OQ_RESOLVED,           |          | |
 // |   SHOWCASE_DRAFT_DIAGRAM                                          |          | |
 // | FORGE_KIND                                                         | SHOWCASE | examples/showcase's own committed verdi.yaml forge: value (disclosures happy path) |
-// | FL_PARENT, FL_ARCHIVED_CHILD, FL_INSTANTIATED_CHILD,               | EDGE     | family-board-links (spec/family-board-links) — archived-match, in-between, and dangling-target rigs; the AC-1/AC-2 active-match happy path reuses READONLY_SPEC/STORY_STUB_MATCHED directly |
-// |   FL_UNSTARTED_CHILD, FL_DANGLING_STORY, FL_DANGLING_TARGET        |          | |
+// | FL_PARENT, FL_ARCHIVED_CHILD, FL_INSTANTIATED_CHILD,               | EDGE     | family-board-links (spec/family-board-links) — archived-match, in-between, dangling-target, and archived-parent (ADJ-39) rigs; the AC-1/AC-2 active-match happy path reuses READONLY_SPEC/STORY_STUB_MATCHED directly |
+// |   FL_UNSTARTED_CHILD, FL_DANGLING_STORY, FL_DANGLING_TARGET,       |          | |
+// |   FL_ORPHAN_STORY, FL_ARCHIVED_PARENT, FL_ARCHIVED_PARENT_TARGET   |          | |
 //
 // Top-level (never zoned — not fixtures, per this task's brief): boardPath
 // and every other route/data-testid helper function, plus the port-derived
@@ -678,6 +679,16 @@ export const EDGE = {
   // store entirely — AC-4's disclosed-notice fixture.
   FL_DANGLING_STORY: "family-links-dangling-story",
   FL_DANGLING_TARGET: "spec/family-links-no-such-feature#ac-1",
+
+  // AC-1's archived-parent direction (ADJ-39, 2026-07-16): an ACTIVE story
+  // whose document-level implements edge targets a FEATURE resolving only
+  // under specs/archive/. The board route 404s on the archived parent, so
+  // the story board's parent-feature affordance links to its SERVABLE
+  // corpus page with the archived state disclosed — never the dead board
+  // href. FL_ARCHIVED_PARENT_TARGET is the fragment ref the ref card keys.
+  FL_ORPHAN_STORY: "family-links-orphan-story",
+  FL_ARCHIVED_PARENT: "family-links-archived-parent",
+  FL_ARCHIVED_PARENT_TARGET: "spec/family-links-archived-parent#ac-1",
 } as const;
 
 // ===========================================================================

@@ -41,11 +41,16 @@ func attachFamilyLinks(ctx context.Context, proj *BoardProjection, root string) 
 }
 
 // attachParentFeatureLink enriches every document-level implements-edge
-// reference card with a working affordance to its target's own board
-// (ac-1: "/board/spec/<feature-name>", not only the corpus page), or,
-// when the target does not resolve anywhere in ix, a disclosed inline
-// notice naming it in place of the affordance (ac-4, co-3) — never a
-// silently inert card, never an href that would 404.
+// reference card with a working affordance to its target feature's own
+// SERVABLE surface (ac-1), or, when the target does not resolve anywhere
+// in ix, a disclosed inline notice naming it in place of the affordance
+// (ac-4, co-3) — never a silently inert card, never an href that would
+// 404. An ACTIVE feature links to its board ("/board/spec/<feature>");
+// an ARCHIVED feature — which the board route 404s on (servableSurface's
+// doc comment) — links to its corpus page with its archived state
+// disclosed, per ADJ-39's constraint-over-mandate ruling (dc-1's
+// zone-agnostic target resolution "from either zone" met the co-3/ac-4
+// no-404 constraint; the constraint governs).
 //
 // Scoped to Type=="implements" DOCUMENT-level (From=="spec") edges only,
 // mirroring AC-1's own text exactly: a decision-level implements edge is
@@ -75,18 +80,55 @@ func attachParentFeatureLink(proj *BoardProjection, ix *index.Index) {
 			continue
 		}
 		// The base feature ref, fragment (and any pin) dropped — the
-		// board this card links to is the FEATURE's, not one AC's
+		// surface this card links to is the FEATURE's, not one AC's
 		// (dc-1: "AC-1's forward direction resolves its own declared
 		// target with a plain index lookup", the same existence check
 		// dex's resolvableLinkURL already performs before minting a
 		// permalink).
 		featureRef := "spec/" + ref.Name
-		if _, ok := ix.Get(featureRef); ok {
-			rc.BoardHref = "/board/" + featureRef
+		if entry, ok := ix.Get(featureRef); ok {
+			rc.FeatureHref, rc.Archived = servableSurface(featureRef, entry)
 			continue
 		}
 		rc.UnresolvedNotice = fmt.Sprintf("%s does not resolve in this checkout's store — no board to link to", rc.Ref)
 	}
+}
+
+// servableSurface resolves the one workbench surface that serves a
+// RESOLVED family target, honoring ADJ-39's (2026-07-16) constraint-over-
+// mandate ruling for both navigation directions this story renders. It
+// returns the servable href and whether the target lives in the archive
+// zone (so the card can disclose that state).
+//
+// The board route (/board/spec/<name>) serves the ACTIVE zone ONLY —
+// boardSpecServer.specDir (boardspec.go) reads .verdi/specs/active/<name>
+// alone, so an archived spec 404s there (directory.go's boardServable
+// posture names this exactly). The corpus page (/a/spec/<name>) is
+// zone-agnostic: index.Build's walk indexes specs/archive/ alike
+// (artifact.ClassifyPath), and corpusHandler serves any indexed
+// non-external entry — so it is the surface that serves an archived spec.
+// An active match therefore keeps parent ac-2's plain board link; an
+// archived match links to the servable corpus page instead of the dead
+// board href co-3/ac-4 forbid.
+//
+// This never assumes servability: it keys off the resolved entry's own
+// directory zone (isArchivedStorePath, the "directory truth" dc-1/dc-3
+// already treat as authoritative — the same signal boardServable
+// computes). A resolved spec entry always HAS a servable surface (the
+// corpus page serves every indexed spec — TestArchivedSpec_ServableSurfaces
+// proves the archive case, and TestCorpusHandler_ServesArchivedSpec guards
+// it), so no resolved match is ever linkless. ADJ-39's disclosure-only
+// fallback ("if no workbench surface serves it, disclosure-only, naming
+// where the archive lives") is therefore unreachable HERE — its precondition
+// (a resolved target that no surface serves) does not arise given today's
+// routes; the genuinely-unresolvable case is the caller's own ac-4 seam
+// (attachParentFeatureLink's UnresolvedNotice; attachStubStoryLinks's
+// deferral to lint), not this resolver's.
+func servableSurface(ref string, entry *index.Entry) (href string, archived bool) {
+	if isArchivedStorePath(entry.Path) {
+		return "/a/" + ref, true
+	}
+	return "/board/" + ref, false
 }
 
 // attachStubStoryLinks enriches every declared stub card with AC-2's
@@ -107,10 +149,15 @@ func attachStubStoryLinks(ctx context.Context, proj *BoardProjection, ix *index.
 				// job to resolve or explain.
 				continue
 			}
+			// An active match links to its board (parent ac-2 verbatim); an
+			// archived match links to its SERVABLE corpus page rather than
+			// the board route that 404s on the archive zone, its archived
+			// state disclosed (ADJ-39, servableSurface's doc comment).
+			href, archived := servableSurface(storyRef, entry)
 			sv.StoryLinks = append(sv.StoryLinks, stubStoryLinkView{
 				Ref:      storyRef,
-				Href:     "/board/" + storyRef,
-				Archived: isArchivedStorePath(entry.Path),
+				Href:     href,
+				Archived: archived,
 			})
 		}
 		if len(sv.StoryLinks) > 0 {

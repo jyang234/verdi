@@ -16,7 +16,12 @@ package main
 //     exists locally (AC-3's ref-present in-between branch) —
 //     flParentName's ac-2 / flInstantiatedChildName;
 //   - a story whose implements edge targets a feature ref absent from the
-//     store (AC-4) — flDanglingStoryName.
+//     store (AC-4) — flDanglingStoryName;
+//   - an ACTIVE story whose implements edge targets a FEATURE resolving
+//     only under specs/archive/ (AC-1's archived-parent direction, ADJ-39):
+//     the story board's parent-feature affordance links to the archived
+//     parent's SERVABLE corpus page, never its 404 board route —
+//     flOrphanStoryName / flArchivedParentName.
 //
 // AC-3's ref-ABSENT branch (the no-match-no-ref stub) needs no branch and
 // no story at all — flParentName's own ac-3/flUnstartedChildName stub
@@ -24,8 +29,9 @@ package main
 // absence IS the fixture.
 //
 // Runs AFTER provisionBoard and provisionDiagrams (the checkout sits on
-// designBranch): the always-visible fixtures (the feature, the archived
-// child, the dangling story) commit directly onto it. flInstantiatedChildName
+// designBranch): the always-visible fixtures (the parent feature, the
+// archived child, the dangling story, and the archived-parent/orphan-story
+// AC-1-direction pair) commit directly onto it. flInstantiatedChildName
 // gets its OWN design/<slug> branch, cut from main exactly like
 // provisionDraftBoards' own fixture branches — a genuinely scaffolded
 // story, committed there, never merged into designBranch, so the served
@@ -48,6 +54,13 @@ const (
 	flUnstartedChildName    = "family-links-unstarted-child"
 	flDanglingStoryName     = "family-links-dangling-story"
 	flDanglingTargetFeature = "family-links-no-such-feature"
+	// The AC-1-direction archived-parent rig (ADJ-39, 2026-07-16): an
+	// ACTIVE story whose document-level implements edge names a FEATURE
+	// resolving only under specs/archive/. The board route 404s on the
+	// archived parent, so the story board's parent-feature affordance must
+	// link to the servable corpus page with its archived state disclosed.
+	flOrphanStoryName    = "family-links-orphan-story"
+	flArchivedParentName = "family-links-archived-parent"
 )
 
 // flParentSpec declares three stubs, one per attachStubStoryLinks scenario
@@ -157,6 +170,69 @@ acceptance_criteria:
 The parent this story implements was never real in this store.
 `
 
+// flArchivedParentSpec is a FEATURE written DIRECTLY under specs/archive/
+// (never specs/active/) — a closed, frozen feature whose board route 404s
+// (boardspec.go serves the active zone only), so a story implementing it
+// must link to its SERVABLE corpus page instead (ADJ-39 direction d).
+func flArchivedParentSpec(commit string) string {
+	return `---
+id: spec/` + flArchivedParentName + `
+kind: spec
+class: feature
+title: "Family links archived parent (e2e fixture)"
+status: closed
+owners: [platform-team]
+problem: { text: "an archived feature can still be a story's implements target", anchor: "#problem" }
+outcome: { text: "the story board links to the archived feature's servable corpus page, never its 404 board route", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "the archived parent's ac the orphan story implements", evidence: [static], anchor: "#ac-1" }
+frozen: { at: 2026-07-01, commit: ` + commit + ` }
+---
+# Family links archived parent
+
+## Problem
+
+## Outcome
+
+## ac-1
+
+Archived; a story still points up at it, and the board must reach it without a 404.
+`
+}
+
+// flOrphanStorySpec is an ACTIVE story whose document-level implements edge
+// names flArchivedParentName#ac-1 — a feature resolving only in the archive
+// zone. Its board's parent-feature affordance is the AC-1-direction
+// archived case (ADJ-39 d): a link to the servable corpus page, archived
+// disclosed, never the board href that 404s.
+func flOrphanStorySpec() string {
+	return `---
+id: spec/` + flOrphanStoryName + `
+kind: spec
+class: story
+title: "Family links orphan story (e2e fixture)"
+status: draft
+owners: [platform-team]
+story: jira:VERDI-904
+problem: { text: "this active story's parent feature resolves only in the archive zone", anchor: "#problem" }
+outcome: { text: "the board reaches the archived parent via its corpus page, disclosing the archived state", anchor: "#outcome" }
+links:
+  - { type: implements, ref: "spec/` + flArchivedParentName + `#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "the story validates with one acceptance criterion", evidence: [static], anchor: "#ac-1" }
+---
+# Family links orphan story
+
+## Problem
+
+## Outcome
+
+## ac-1
+
+Its parent feature is archived, not gone.
+`
+}
+
 // flInstantiatedChildSpec is committed ONLY onto its own design/<slug>
 // branch (never onto designBranch) — a genuinely scaffolded story
 // mirroring stub-instantiate's own output, implementing flParentName's
@@ -199,9 +275,11 @@ func provisionFamilyBoardLinks(storeRoot string) error {
 	}
 
 	files := map[string]string{
-		filepath.Join(".verdi", "specs", "active", flParentName, "spec.md"):         flParentSpec(commit),
-		filepath.Join(".verdi", "specs", "archive", flArchivedChildName, "spec.md"): flArchivedChildSpec(commit),
-		filepath.Join(".verdi", "specs", "active", flDanglingStoryName, "spec.md"):  flDanglingStorySpec,
+		filepath.Join(".verdi", "specs", "active", flParentName, "spec.md"):          flParentSpec(commit),
+		filepath.Join(".verdi", "specs", "archive", flArchivedChildName, "spec.md"):  flArchivedChildSpec(commit),
+		filepath.Join(".verdi", "specs", "active", flDanglingStoryName, "spec.md"):   flDanglingStorySpec,
+		filepath.Join(".verdi", "specs", "archive", flArchivedParentName, "spec.md"): flArchivedParentSpec(commit),
+		filepath.Join(".verdi", "specs", "active", flOrphanStoryName, "spec.md"):     flOrphanStorySpec(),
 	}
 	for rel, content := range files {
 		path := filepath.Join(storeRoot, rel)
@@ -215,7 +293,7 @@ func provisionFamilyBoardLinks(storeRoot string) error {
 	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
 		return err
 	}
-	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: family-board-links fixtures (archived-match + dangling implements target)"); err != nil {
+	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: family-board-links fixtures (archived-match, archived-parent, dangling implements target)"); err != nil {
 		return err
 	}
 

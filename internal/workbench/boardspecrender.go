@@ -314,8 +314,18 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			b.WriteString(`<a class="refcard-editor-link" data-testid="refcard-editor-link" href="` + esc(rc.EditorHref) + `">open in editor</a>`)
 		}
 		switch {
-		case rc.BoardHref != "":
-			b.WriteString(`<a class="refcard-board-link" data-testid="refcard-board-link" href="` + esc(rc.BoardHref) + `">open feature board</a>`)
+		case rc.FeatureHref != "":
+			// AC-1's parent-feature affordance to the target's SERVABLE
+			// surface. An active feature opens its board; an archived
+			// feature — which the board route 404s on — opens its corpus
+			// page with its archived state disclosed on the link (ADJ-39,
+			// never a dead href). data-archived mirrors the stub-story
+			// link's own disclosure attribute.
+			if rc.Archived {
+				b.WriteString(`<a class="refcard-board-link refcard-board-link--archived" data-testid="refcard-board-link" data-archived="true" href="` + esc(rc.FeatureHref) + `">open feature <span class="badge badge-archived" data-testid="refcard-feature-archived">archived</span></a>`)
+			} else {
+				b.WriteString(`<a class="refcard-board-link" data-testid="refcard-board-link" data-archived="false" href="` + esc(rc.FeatureHref) + `">open feature board</a>`)
+			}
 		case rc.UnresolvedNotice != "":
 			b.WriteString(`<p class="refcard-unresolved-notice" data-testid="refcard-unresolved-notice">` + esc(rc.UnresolvedNotice) + `</p>`)
 		}

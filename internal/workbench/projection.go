@@ -148,15 +148,27 @@ type refCardView struct {
 	// Store-derived enrichment attached in the I/O layer
 	// (attachDiagramEditorHrefs), never computed by the pure projector.
 	EditorHref string `json:"editorHref,omitempty"`
-	// BoardHref links a document-level implements-edge reference card to
-	// its target feature's own board (spec/family-board-links ac-1,
-	// dc-1/dc-2): set when this card is the target of a document-level
+	// FeatureHref links a document-level implements-edge reference card to
+	// its target feature's own SERVABLE surface (spec/family-board-links
+	// ac-1, dc-1/dc-2): set when this card is the target of a document-level
 	// implements edge AND that target's base spec ref (fragment dropped)
-	// resolves in the current index — "/board/spec/<feature-name>".
+	// resolves in the current index. An ACTIVE feature links to its board
+	// ("/board/spec/<feature-name>", parent ac-2 verbatim); an ARCHIVED
+	// feature — which the board route 404s on — links to its corpus page
+	// ("/a/spec/<feature-name>") with Archived set, per ADJ-39's
+	// constraint-over-mandate ruling (servableSurface). Store-derived
+	// enrichment attached by attachFamilyLinks, mirroring EditorHref's exact
+	// posture. Never set alongside UnresolvedNotice.
+	FeatureHref string `json:"featureHref,omitempty"`
+	// Archived discloses, beside FeatureHref, that the target feature
+	// resolves in the archive zone (spec/family-board-links ac-1, dc-1's
+	// ADJ-28/ADJ-39 completion reading): the affordance links to the
+	// servable corpus page, and the card says so rather than pretending the
+	// archived feature has a live board. Empty for an active target.
 	// Store-derived enrichment attached by attachFamilyLinks, mirroring
-	// EditorHref's exact posture. Never set alongside UnresolvedNotice.
-	BoardHref string `json:"boardHref,omitempty"`
-	// UnresolvedNotice discloses, on the SAME card, why no BoardHref was
+	// stubStoryLinkView.Archived's exact posture.
+	Archived bool `json:"archived,omitempty"`
+	// UnresolvedNotice discloses, on the SAME card, why no FeatureHref was
 	// offered (spec/family-board-links ac-4, co-3): set only when this
 	// card is a document-level implements edge's target and that target
 	// does not resolve anywhere in the current index — naming the
@@ -239,10 +251,14 @@ type StubView struct {
 
 // stubStoryLinkView is one AC-2 matched-story affordance on a feature
 // stub card (spec/family-board-links ac-2): the matched story's own ref,
-// its board href, and whether the match resolved under specs/archive/
-// (dc-1's ADJ-28 completion reading) — an archived match renders the
-// SAME link with Archived disclosed on the card, and the card never
-// falls through to AC-3's in-between notice.
+// the href of the workbench surface that SERVES it, and whether the match
+// resolved under specs/archive/ (dc-1's ADJ-28 completion reading). An
+// ACTIVE match's Href is its board ("/board/spec/<name>", parent ac-2
+// verbatim); an ARCHIVED match's Href is its corpus page
+// ("/a/spec/<name>") — the board route 404s on the archive zone, so the
+// card links to the servable surface instead (ADJ-39, servableSurface) —
+// with Archived disclosed on the card. Either way the card never falls
+// through to AC-3's in-between notice once a match resolves.
 type stubStoryLinkView struct {
 	Ref      string `json:"ref"`
 	Href     string `json:"href"`

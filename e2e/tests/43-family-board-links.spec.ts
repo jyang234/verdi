@@ -10,12 +10,20 @@ import { SHOWCASE, EDGE, boardPath, stubCardTestId, refCardTestId } from "./fixt
 // all (ac-3, dc-3/dc-5), and a disclosed notice in place of a dead link
 // wherever an implements target cannot resolve (ac-4, co-3).
 //
-// AC-1's story-to-feature direction and AC-2's ACTIVE-match direction
+// Per ADJ-39 (2026-07-16, constraint-over-mandate): the board route serves
+// the active zone only, so an ARCHIVED match/target links to the servable
+// corpus page (/a/spec/<name>) — the one surface that empirically serves an
+// archived spec — with its archived state disclosed, never the board href
+// that 404s (co-3/ac-4). Both the AC-2 archived-match and the AC-1
+// archived-parent tests below FOLLOW their link to prove it lands on a live
+// 200 corpus page, never a dead link.
+//
+// AC-1's ACTIVE story-to-feature direction and AC-2's ACTIVE-match direction
 // drive the real, already-committed showcase pair
 // (SHOWCASE.READONLY_SPEC "stale-decline" / SHOWCASE.STORY_STUB_MATCHED
 // "borrower-update-api", dc-5) — no new fixture data. The archived-match,
-// in-between, and dangling-target branches drive cmd/e2eharness/
-// provision_familyboardlinks.go's EDGE fixtures.
+// archived-parent, in-between, and dangling-target branches drive
+// cmd/e2eharness/provision_familyboardlinks.go's EDGE fixtures.
 
 test.describe("family board links: story board -> parent feature board (ac-1)", () => {
   test("the document-level implements edge resolves to the feature's own board, not only the corpus page, and follows there", async ({
@@ -69,19 +77,25 @@ test.describe("family board links: feature stub -> story board, active vs archiv
     );
   });
 
-  test("a matching ARCHIVED story renders the SAME board link with its archived state disclosed, never the in-between notice", async ({
+  test("a matching ARCHIVED story links to its SERVABLE corpus page (never the 404 board route), archived disclosed, and follows there — never the in-between notice", async ({
     page,
   }) => {
     await page.goto(boardPath(EDGE.FL_PARENT));
     const stub = page.getByTestId(stubCardTestId(EDGE.FL_ARCHIVED_CHILD));
     const link = stub.locator('[data-testid^="stub-story-link-"]');
     await expect(link).toHaveCount(1);
-    await expect(link).toHaveAttribute(
-      "href",
-      `/board/spec/${EDGE.FL_ARCHIVED_CHILD}`,
-    );
+    // ADJ-39 (2026-07-16): the board route serves the active zone only, so
+    // the archived spec's /board/spec/<name> 404s (co-3/ac-4 forbid a dead
+    // href). The card links to the zone-agnostic corpus page instead — the
+    // one surface that empirically serves an archived spec — with its
+    // archived state disclosed.
+    await expect(link).toHaveAttribute("href", `/a/spec/${EDGE.FL_ARCHIVED_CHILD}`);
     await expect(link).toHaveAttribute("data-archived", "true");
     await expect(link.locator(".badge-archived")).toHaveText("archived");
+    // Never the dead board href the finding caught.
+    await expect(
+      stub.locator(`a[href="/board/spec/${EDGE.FL_ARCHIVED_CHILD}"]`),
+    ).toHaveCount(0);
 
     // Per ADJ-28: the in-between notice must NOT render for an archived
     // match, even though this fixture's design/<slug> branch genuinely
@@ -93,11 +107,53 @@ test.describe("family board links: feature stub -> story board, active vs archiv
     ).toHaveCount(0);
     await expect(stub).not.toContainText("not yet in this checkout");
 
-    // Not followed through to a live board here: board-serving remains
-    // active-zone only (co-1/dc-1, presentation only — this story does
-    // not extend it), so an archived spec's own board route 404s. The
-    // frozen contract's ask is the rendered card state above, "the SAME
-    // board link" as the active case — not a serving-surface change.
+    // The link is LIVE: following it lands on the archived spec's corpus
+    // page (HTTP 200), never a 404 — the whole point of the servability
+    // fix (ADJ-39 constraint-over-mandate).
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`/a/spec/${EDGE.FL_ARCHIVED_CHILD}$`));
+    await expect(
+      page.getByRole("heading", {
+        name: "Family links archived child (e2e fixture)",
+      }),
+    ).toBeVisible();
+  });
+});
+
+test.describe("family board links: story board -> ARCHIVED parent feature (ac-1, ADJ-39 direction d)", () => {
+  test("a story whose parent feature resolves only in the archive zone links to the servable corpus page, archived disclosed, never a 404 board href", async ({
+    page,
+  }) => {
+    await page.goto(boardPath(EDGE.FL_ORPHAN_STORY));
+    await expect(page.getByTestId("board")).toHaveAttribute(
+      "data-spec",
+      EDGE.FL_ORPHAN_STORY,
+    );
+
+    const card = page.getByTestId(refCardTestId(EDGE.FL_ARCHIVED_PARENT_TARGET));
+    await expect(card).toBeVisible();
+
+    const link = card.getByTestId("refcard-board-link");
+    await expect(link).toHaveAttribute("href", `/a/spec/${EDGE.FL_ARCHIVED_PARENT}`);
+    await expect(link).toHaveAttribute("data-archived", "true");
+    await expect(link.getByTestId("refcard-feature-archived")).toHaveText("archived");
+    // Never the dead board href, and no unresolved notice (the parent DOES
+    // resolve — just in the archive zone).
+    await expect(
+      card.locator(`a[href="/board/spec/${EDGE.FL_ARCHIVED_PARENT}"]`),
+    ).toHaveCount(0);
+    await expect(card.getByTestId("refcard-unresolved-notice")).toHaveCount(0);
+
+    // Live: following it lands on the archived feature's corpus page (200).
+    await link.click();
+    await expect(page).toHaveURL(
+      new RegExp(`/a/spec/${EDGE.FL_ARCHIVED_PARENT}$`),
+    );
+    await expect(
+      page.getByRole("heading", {
+        name: "Family links archived parent (e2e fixture)",
+      }),
+    ).toBeVisible();
   });
 });
 

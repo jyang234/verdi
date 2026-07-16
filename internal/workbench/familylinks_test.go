@@ -14,6 +14,7 @@ package workbench
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -223,6 +224,39 @@ func newFamilyLinksFixture(t *testing.T) (dir string, ix *index.Index) {
 	return repo.Dir, built
 }
 
+// TestArchivedSpec_ServableSurfaces is the EMPIRICAL ground truth ADJ-39
+// (2026-07-16) turns on: which workbench surface, if any, serves an
+// archived spec. It drives the two real routes against the shared fixture,
+// whose flx-archived-story resolves ONLY under specs/archive/. The board
+// route 404s (boardspec.go's specDir reads specs/active/ alone); the corpus
+// page 200s (corpus.go over index.Build's zone-agnostic walk — the surface
+// the archived-match card links to). This is both the proof the fix rests
+// on and the regression guard against the corpus route silently ceasing to
+// serve the archive zone (which would re-strand every archived match).
+func TestArchivedSpec_ServableSurfaces(t *testing.T) {
+	dir, _ := newFamilyLinksFixture(t)
+	h := NewHandler(dir)
+
+	t.Run("the board route does NOT serve an archived spec (404)", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/board/spec/flx-archived-story", nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("GET /board/spec/flx-archived-story = %d, want 404 (board serves active zone only)", rec.Code)
+		}
+	})
+
+	t.Run("the corpus page DOES serve an archived spec (200)", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/a/spec/flx-archived-story", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /a/spec/flx-archived-story = %d, want 200 (corpus page is zone-agnostic)\n%s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "Flx archived story") {
+			t.Errorf("corpus page did not render the archived spec's title:\n%s", rec.Body.String())
+		}
+	})
+}
+
 func TestMatchingStoryRefs(t *testing.T) {
 	_, ix := newFamilyLinksFixture(t)
 
@@ -266,6 +300,42 @@ func TestIsArchivedStorePath(t *testing.T) {
 	}
 }
 
+// TestServableSurface pins the shared resolver both navigation directions
+// use (ADJ-39): an active entry resolves to its board link; an archived
+// entry — whose board route 404s — resolves to its servable corpus page,
+// archived disclosed.
+func TestServableSurface(t *testing.T) {
+	tests := []struct {
+		name         string
+		ref          string
+		path         string
+		wantHref     string
+		wantArchived bool
+	}{
+		{
+			name:     "active zone yields the board link (parent ac-2 verbatim)",
+			ref:      "spec/flx-active-story",
+			path:     "/repo/.verdi/specs/active/flx-active-story/spec.md",
+			wantHref: "/board/spec/flx-active-story",
+		},
+		{
+			name:         "archive zone yields the servable corpus page, never the 404 board route",
+			ref:          "spec/flx-archived-story",
+			path:         "/repo/.verdi/specs/archive/flx-archived-story/spec.md",
+			wantHref:     "/a/spec/flx-archived-story",
+			wantArchived: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			href, archived := servableSurface(tc.ref, &index.Entry{Path: tc.path})
+			if href != tc.wantHref || archived != tc.wantArchived {
+				t.Errorf("servableSurface(%q, %q) = (%q, %v), want (%q, %v)", tc.ref, tc.path, href, archived, tc.wantHref, tc.wantArchived)
+			}
+		})
+	}
+}
+
 func TestAttachStubStoryLinks(t *testing.T) {
 	dir, ix := newFamilyLinksFixture(t)
 	ctx := context.Background()
@@ -300,9 +370,14 @@ func TestAttachStubStoryLinks(t *testing.T) {
 		}
 	})
 
-	t.Run("archived match renders the link WITH archived disclosed, never the in-between notice", func(t *testing.T) {
+	t.Run("archived match links to the SERVABLE corpus page (never the 404 board route) WITH archived disclosed, never the in-between notice", func(t *testing.T) {
 		sv := byslug["flx-archived-stub"]
-		want := []stubStoryLinkView{{Ref: "spec/flx-archived-story", Href: "/board/spec/flx-archived-story", Archived: true}}
+		// ADJ-39 (2026-07-16): the board route serves the active zone only
+		// (boardspec.go's specDir), so an archived spec's /board/spec/<name>
+		// 404s (co-3/ac-4 forbid a dead href). The corpus page /a/spec/<name>
+		// is zone-agnostic (corpus.go over index.Build) and is the surface
+		// that serves an archived spec — so the archived match links THERE.
+		want := []stubStoryLinkView{{Ref: "spec/flx-archived-story", Href: "/a/spec/flx-archived-story", Archived: true}}
 		if !reflect.DeepEqual(sv.StoryLinks, want) {
 			t.Errorf("StoryLinks = %#v, want %#v", sv.StoryLinks, want)
 		}
@@ -373,13 +448,43 @@ acceptance_criteria:
 Prose.
 `
 
+// flxArchivedFeatureSpec is a FEATURE resolving only under specs/archive/
+// — the ac-1-direction counterpart to flxArchivedStorySpec: a story whose
+// document-level implements edge names it must link to its SERVABLE corpus
+// surface, never the board route that 404s on the archive zone (ADJ-39
+// direction d).
+const flxArchivedFeatureSpec = `---
+id: spec/flx-archived-feature
+kind: spec
+class: feature
+title: "Flx archived feature"
+status: closed
+owners: [platform-team]
+problem: { text: "an archived feature can still be an implements target", anchor: "#problem" }
+outcome: { text: "its board 404s but its corpus page serves", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "the archived target ac", evidence: [static], anchor: "#ac-1" }
+frozen: { at: 2024-01-01, commit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb }
+---
+# Flx archived feature
+
+## Problem
+
+## Outcome
+
+## ac-1
+
+Prose.
+`
+
 func TestAttachParentFeatureLink(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
-			".verdi/specs/active/flx-target-feature/spec.md": flxTargetFeatureSpec,
+			".verdi/specs/active/flx-target-feature/spec.md":    flxTargetFeatureSpec,
+			".verdi/specs/archive/flx-archived-feature/spec.md": flxArchivedFeatureSpec,
 			".verdi/.gitignore": "data/\n",
 		},
-		Message: "seed target feature",
+		Message: "seed target features (active + archived)",
 	}})
 	ix, err := index.Build(repo.Dir)
 	if err != nil {
@@ -387,17 +492,28 @@ func TestAttachParentFeatureLink(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		edges          []edgeView
-		ref            string
-		wantBoardHref  string
-		wantUnresolved string
+		name            string
+		edges           []edgeView
+		ref             string
+		wantFeatureHref string
+		wantArchived    bool
+		wantUnresolved  string
 	}{
 		{
-			name:          "a resolving document-level implements target yields the feature board href",
-			edges:         []edgeView{{Type: "implements", From: "spec", To: "spec/flx-target-feature#ac-1"}},
-			ref:           "spec/flx-target-feature#ac-1",
-			wantBoardHref: "/board/spec/flx-target-feature",
+			name:            "a resolving ACTIVE document-level implements target yields the feature board href",
+			edges:           []edgeView{{Type: "implements", From: "spec", To: "spec/flx-target-feature#ac-1"}},
+			ref:             "spec/flx-target-feature#ac-1",
+			wantFeatureHref: "/board/spec/flx-target-feature",
+		},
+		{
+			// ADJ-39 direction (d): an archived parent feature 404s on the
+			// board route, so the card links to its SERVABLE corpus page with
+			// its archived state disclosed — never a dead board href.
+			name:            "a resolving ARCHIVED document-level implements target yields the servable corpus href with archived disclosed",
+			edges:           []edgeView{{Type: "implements", From: "spec", To: "spec/flx-archived-feature#ac-1"}},
+			ref:             "spec/flx-archived-feature#ac-1",
+			wantFeatureHref: "/a/spec/flx-archived-feature",
+			wantArchived:    true,
 		},
 		{
 			name:           "a non-resolving document-level implements target yields the disclosed notice and no href",
@@ -427,8 +543,11 @@ func TestAttachParentFeatureLink(t *testing.T) {
 			proj := &BoardProjection{Edges: tc.edges, RefCards: []refCardView{{Ref: tc.ref}}}
 			attachParentFeatureLink(proj, ix)
 			got := proj.RefCards[0]
-			if got.BoardHref != tc.wantBoardHref {
-				t.Errorf("BoardHref = %q, want %q", got.BoardHref, tc.wantBoardHref)
+			if got.FeatureHref != tc.wantFeatureHref {
+				t.Errorf("FeatureHref = %q, want %q", got.FeatureHref, tc.wantFeatureHref)
+			}
+			if got.Archived != tc.wantArchived {
+				t.Errorf("Archived = %v, want %v", got.Archived, tc.wantArchived)
 			}
 			if got.UnresolvedNotice != tc.wantUnresolved {
 				t.Errorf("UnresolvedNotice = %q, want %q", got.UnresolvedNotice, tc.wantUnresolved)
@@ -439,8 +558,9 @@ func TestAttachParentFeatureLink(t *testing.T) {
 
 // TestAttachFamilyLinks_WiredIntoBoard proves loadBoard actually attaches
 // these facts (not just that the standalone functions work): a story
-// board's implements ref card carries BoardHref, and a feature board's
-// stub card carries the matched story's StoryLinks, from one real GET.
+// board's implements ref card carries FeatureHref, and a feature board's
+// stub card carries the matched story's StoryLinks (the archived one
+// linking to its servable corpus page, ADJ-39), from one real GET.
 func TestAttachFamilyLinks_WiredIntoBoard(t *testing.T) {
 	dir, _ := newFamilyLinksFixture(t)
 	h := NewHandler(dir)
@@ -451,7 +571,9 @@ func TestAttachFamilyLinks_WiredIntoBoard(t *testing.T) {
 			t.Fatalf("GET board = %d: %s", rec.Code, rec.Body.String())
 		}
 		html := rec.Body.String()
-		if !strings.Contains(html, `data-testid="refcard-board-link" href="/board/spec/flx-parent"`) {
+		// flx-parent is ACTIVE, so the parent-feature affordance is its plain
+		// board link (data-archived="false").
+		if !strings.Contains(html, `data-testid="refcard-board-link" data-archived="false" href="/board/spec/flx-parent"`) {
 			t.Errorf("story board carries no parent-feature board link:\n%s", html)
 		}
 	})
@@ -464,6 +586,18 @@ func TestAttachFamilyLinks_WiredIntoBoard(t *testing.T) {
 		html := rec.Body.String()
 		if !strings.Contains(html, `href="/board/spec/flx-active-story"`) {
 			t.Errorf("feature board's stub card carries no matched-story link:\n%s", html)
+		}
+		// ADJ-39: the archived match links to the SERVABLE corpus page, not
+		// the board route that 404s on the archive zone, with its archived
+		// state disclosed — and never the dead board href.
+		if !strings.Contains(html, `href="/a/spec/flx-archived-story"`) {
+			t.Errorf("archived stub card carries no servable corpus link:\n%s", html)
+		}
+		if strings.Contains(html, `href="/board/spec/flx-archived-story"`) {
+			t.Errorf("archived stub card still mints the 404 board href:\n%s", html)
+		}
+		if !strings.Contains(html, `data-testid="stub-story-archived-flx-archived-stub-spec-flx-archived-story"`) {
+			t.Errorf("archived stub card carries no archived disclosure badge:\n%s", html)
 		}
 		// html/template's escaper renders the apostrophe as &#39; — the
 		// same verbatim disclosure text TestAttachStubStoryLinks asserts

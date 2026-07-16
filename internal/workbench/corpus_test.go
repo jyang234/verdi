@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 func TestCorpusHandler_Happy(t *testing.T) {
@@ -64,6 +66,67 @@ func TestCorpusHandler_Backlink(t *testing.T) {
 	}
 	if !strings.Contains(body, "spec/stale-decline") {
 		t.Errorf("backlink does not name the source spec, got: %s", body)
+	}
+}
+
+// TestCorpusHandler_ServesArchivedSpec pins the corpus route's zone-agnostic
+// contract: GET /a/spec/<name> serves a spec resolving under specs/archive/
+// exactly as it serves an active one, because index.Build's walk indexes
+// both zones (artifact.ClassifyPath) and this handler reads the indexed
+// entry's own path. This is the servable-surface guarantee ADJ-39
+// (2026-07-16) relies on — the archived-match family card links here rather
+// than to the board route, which serves the active zone alone and 404s. A
+// regression that stranded the archive zone from the corpus route would
+// silently re-break every archived family link; this test fails first.
+func TestCorpusHandler_ServesArchivedSpec(t *testing.T) {
+	const archivedSpec = `---
+id: spec/corpus-archived-fixture
+kind: spec
+class: story
+title: "Corpus archived fixture"
+status: closed
+owners: [platform-team]
+story: jira:CORP-1
+problem: { text: "an archived spec still needs a legible read surface", anchor: "#problem" }
+outcome: { text: "the corpus page serves it from the archive zone", anchor: "#outcome" }
+links:
+  - { type: implements, ref: "spec/corpus-archived-parent#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "served from archive", evidence: [static], anchor: "#ac-1" }
+frozen: { at: 2024-01-01, commit: cccccccccccccccccccccccccccccccccccccccc }
+---
+# Corpus archived fixture
+
+## Problem
+
+## Outcome
+
+## ac-1
+
+Archived, yet readable on the corpus page.
+`
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/archive/corpus-archived-fixture/spec.md": archivedSpec,
+			".verdi/.gitignore": "data/\n",
+		},
+		Message: "seed an archived spec",
+	}})
+	h := NewHandler(repo.Dir)
+
+	req := httptest.NewRequest(http.MethodGet, "/a/spec/corpus-archived-fixture", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /a/spec/corpus-archived-fixture = %d, want 200 (corpus route is zone-agnostic)\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Corpus archived fixture") {
+		t.Errorf("archived spec title not rendered, got: %s", body)
+	}
+	if !strings.Contains(body, "closed") {
+		t.Errorf("archived spec status not rendered, got: %s", body)
 	}
 }
 
