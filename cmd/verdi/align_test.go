@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -86,6 +87,25 @@ func alignFakeJudgeOK(t *testing.T) []string {
 	return []string{path}
 }
 
+// alignFakeJudgeDrift writes a fake judge returning a DIFFERENT judged finding
+// (id AND text) than alignFakeJudgeOK — the hermetic stand-in for the real,
+// non-reproducible judge (03 §Alignment report) emitting fresh wording when
+// re-run at freeze time. This is the D6-21-exposed condition: once
+// judge_timeout_seconds rose past the judge's runtime, freeze stopped timing
+// out into a stable synthetic finding and began re-judging, whose fresh
+// content-hash identities PreserveDispositions cannot match. A faithful freeze
+// must never let this drift reach the archived report.
+func alignFakeJudgeDrift(t *testing.T) []string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fakejudge.sh")
+	script := "#!/bin/sh\ncat <<'EOF'\n{\"is_error\":false,\"subtype\":\"success\",\"result\":\"{\\\"findings\\\":[{\\\"id\\\":\\\"j-drift\\\",\\\"text\\\":\\\"a fresh, differently-worded semantic reading\\\",\\\"confidence\\\":0.4}]}\"}\nEOF\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake judge: %v", err)
+	}
+	return []string{path}
+}
+
 func alignFakeJudgeFailing(t *testing.T) []string {
 	t.Helper()
 	dir := t.TempDir()
@@ -146,6 +166,34 @@ func readReport(t *testing.T, root string) []byte {
 		t.Fatalf("reading deviation-report.md: %v", err)
 	}
 	return data
+}
+
+// decodeReportFile reads, splits, and strict-decodes the deviation report at
+// path — the read-back half of the freeze round trip.
+func decodeReportFile(t *testing.T, path string) *artifact.DeviationFrontmatter {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	fm, _, err := artifact.SplitFrontmatter(data)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter(%s): %v", path, err)
+	}
+	decoded, err := artifact.DecodeDeviation(fm)
+	if err != nil {
+		t.Fatalf("DecodeDeviation(%s): %v", path, err)
+	}
+	return decoded
+}
+
+func findingByID(fs []artifact.Finding, id string) (artifact.Finding, bool) {
+	for _, f := range fs {
+		if f.ID == id {
+			return f, true
+		}
+	}
+	return artifact.Finding{}, false
 }
 
 // TestRunAlign_WritesReport proves the full wiring: cmdAlign's testable
@@ -299,6 +347,80 @@ func TestRunAlign_Freeze(t *testing.T) {
 	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout2, &stderr2)
 	if got != 1 {
 		t.Fatalf("runAlign after freeze = %d, want 1 (frozen reports are immutable); stderr=%s", got, stderr2.String())
+	}
+}
+
+// TestRunAlign_FreezePreservesDispositions is the freeze-preservation
+// regression proof (close-freeze fix): freezing a spec whose LIVING
+// deviation-report is fresh and fully dispositioned must archive those exact
+// findings + dispositions verbatim and NEVER re-run the judge. The judge is
+// non-reproducible (03 §Alignment report), so a freeze-time re-run emits fresh
+// content-hash finding identities that PreserveDispositions cannot match,
+// silently erasing every human disposition (e.g. corpus-renovation's
+// owner-ratified accepted-deviation). runClose freezes through this exact
+// runAlignForSpec path, so proving it here covers `verdi close`'s freeze step.
+func TestRunAlign_FreezePreservesDispositions(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+
+	// A living align: the judge reads one judged finding (j-1, "looks aligned").
+	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	var out, errb bytes.Buffer
+	if got := runAlign(context.Background(), repo.Dir, false, living, &out, &errb); got != 0 {
+		t.Fatalf("runAlign (living) = %d, want 0; stderr=%s", got, errb.String())
+	}
+
+	// The human dispositions EVERY finding: the judged one as an owner-ratified
+	// accepted-deviation (the ADJ-16 shape), the computed one(s) as fixed.
+	// Decode → set → re-render keeps this robust to the fixture's exact finding
+	// count while leaving covers == HEAD unchanged.
+	fm := decodeReportFile(t, reportPath)
+	var judgedID, judgedText string
+	for i := range fm.Findings {
+		if fm.Findings[i].Kind == artifact.FindingJudged {
+			fm.Findings[i].Disposition = artifact.FindingAcceptedDeviation
+			fm.Findings[i].Note = "owner-ratified: intentional, tracked separately"
+			judgedID = fm.Findings[i].ID
+			judgedText = fm.Findings[i].Text
+		} else {
+			fm.Findings[i].Disposition = artifact.FindingFixed
+		}
+	}
+	if judgedID == "" {
+		t.Fatal("test setup: living report carries no judged finding to disposition")
+	}
+	_, body, err := artifact.SplitFrontmatter(readReport(t, repo.Dir))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	if err := os.WriteFile(reportPath, align.RenderMarkdown(fm, string(body)), 0o644); err != nil {
+		t.Fatalf("writing dispositioned living report: %v", err)
+	}
+
+	// Freeze — with a judge that now DRIFTS (different id + text). A faithful
+	// freeze must ignore it and stamp the adjudicated living report as-is.
+	frozenDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeDrift(t)}
+	var out2, errb2 bytes.Buffer
+	if got := runAlign(context.Background(), repo.Dir, true, frozenDeps, &out2, &errb2); got != 0 {
+		t.Fatalf("runAlign (freeze) = %d, want 0; stderr=%s", got, errb2.String())
+	}
+
+	frozen := decodeReportFile(t, reportPath)
+	if frozen.Frozen == nil {
+		t.Fatal("frozen report carries no Frozen stamp")
+	}
+	for _, f := range frozen.Findings {
+		if !f.Dispositioned() {
+			t.Fatalf("finding %s (%q) lost its disposition across freeze — freeze re-judged instead of preserving the adjudicated report: %+v", f.ID, f.Text, f)
+		}
+	}
+	j, ok := findingByID(frozen.Findings, judgedID)
+	if !ok {
+		t.Fatalf("judged finding %s vanished from the frozen report (judge drift leaked through): %+v", judgedID, frozen.Findings)
+	}
+	if j.Text != judgedText || j.Disposition != artifact.FindingAcceptedDeviation {
+		t.Fatalf("judged finding = {text:%q disposition:%q}, want the living {text:%q disposition:%q}", j.Text, j.Disposition, judgedText, artifact.FindingAcceptedDeviation)
 	}
 }
 

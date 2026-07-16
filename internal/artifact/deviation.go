@@ -77,6 +77,21 @@ func (f Finding) Validate() error {
 // the "undispositioned" state Validate legally permits.
 func (f Finding) Dispositioned() bool { return f.Disposition != "" }
 
+// AllDispositioned reports whether every finding in fs carries a disposition —
+// the merge/closure gate's condition 3 ("every finding ... carries a
+// disposition", 03 §Gates) in bool form. An empty slice is trivially all-
+// dispositioned. Callers that need to name the offenders (the merge gate's
+// user-facing message) iterate Dispositioned themselves; callers that only
+// need the yes/no verdict (freeze-in-place eligibility) use this.
+func AllDispositioned(fs []Finding) bool {
+	for _, f := range fs {
+		if !f.Dispositioned() {
+			return false
+		}
+	}
+	return true
+}
+
 // JudgeIntegrity is the persisted judge exchange a deviation report's
 // Integrity hash needs to be self-verifiable (PLAN.md Phase 8, spike S5:
 // "Integrity hash = hash of the exact stdin bytes + the raw result
