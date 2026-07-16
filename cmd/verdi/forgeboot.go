@@ -70,6 +70,15 @@ func resolveRefCommit(ctx context.Context, root string) (ref, commit string, err
 // absent (D6-14; githubOwnerRepo) — so a local `verdi sync`/`close`/`gate`
 // no longer needs GITHUB_REPOSITORY[_OWNER] exported by hand. remoteURL is
 // the `origin` remote (best-effort; "" when none) both callers already read.
+//
+// spec/sync-local-flow ac-1/dc-2: this is the ONE shared construction seam
+// every buildForge caller reaches (eight verb files; sync.go is the only
+// direct, ungated one — the other seven pre-gate through
+// forgeCredentialsPresent/forgeBestEffort, gate_threads.go). When the
+// github identifier cannot be resolved from either source,
+// githubOwnerRepo's own error propagates here and out to the caller as an
+// operational refusal — never a live adapter built around two empty
+// strings.
 func buildForge(kind, remoteURL string) (forge.Forge, error) {
 	switch kind {
 	case "gitlab":
@@ -79,7 +88,10 @@ func buildForge(kind, remoteURL string) (forge.Forge, error) {
 			Token:     os.Getenv("CI_JOB_TOKEN"),
 		}), nil
 	case "github":
-		owner, repo := githubOwnerRepo(remoteURL)
+		owner, repo, err := githubOwnerRepo(remoteURL)
+		if err != nil {
+			return nil, err
+		}
 		return forgegithub.New(forgegithub.Config{
 			Owner: owner,
 			Repo:  repo,
@@ -96,11 +108,20 @@ func buildForge(kind, remoteURL string) (forge.Forge, error) {
 // the origin remote URL (D6-14) for a local run where those vars are unset.
 // The env wins where it is set, so a partial CI environment is never
 // overridden.
-func githubOwnerRepo(remoteURL string) (owner, repo string) {
-	owner = os.Getenv("GITHUB_REPOSITORY_OWNER")
-	repo = githubRepoName()
+//
+// spec/sync-local-flow ac-1/dc-2: when NEITHER source identifies both
+// fields, this is the one shared construction seam where the refusal
+// lands — never a silently-returned empty pair. err names every source
+// tried (both env vars and the origin remote URL, or its absence) so the
+// caller's operational refusal (buildForge, then cmdSync) is legible
+// rather than a confusing downstream network failure against an empty
+// owner/repo.
+func githubOwnerRepo(remoteURL string) (owner, repo string, err error) {
+	envOwner := os.Getenv("GITHUB_REPOSITORY_OWNER")
+	envRepository := os.Getenv("GITHUB_REPOSITORY")
+	owner, repo = envOwner, githubRepoName()
 	if owner != "" && repo != "" {
-		return owner, repo
+		return owner, repo, nil
 	}
 	if o, r, ok := forgegithub.OwnerRepoFromURL(remoteURL); ok {
 		if owner == "" {
@@ -110,7 +131,13 @@ func githubOwnerRepo(remoteURL string) (owner, repo string) {
 			repo = r
 		}
 	}
-	return owner, repo
+	if owner != "" && repo != "" {
+		return owner, repo, nil
+	}
+	return "", "", fmt.Errorf(
+		"cannot identify the GitHub repository: GITHUB_REPOSITORY_OWNER=%q, GITHUB_REPOSITORY=%q, and the git origin remote (%q) does not resolve one either — set both env vars (inside CI) or configure a github.com origin remote (for a local checkout)",
+		envOwner, envRepository, remoteURL,
+	)
 }
 
 // githubRepoName extracts the repo name from GITHUB_REPOSITORY
