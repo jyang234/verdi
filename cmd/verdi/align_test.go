@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -473,6 +474,173 @@ func TestRunAlign_DispositionPreservation(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the hand-added disposition did not survive regeneration: %+v", decoded.Findings)
+	}
+}
+
+// TestRunAlign_RegeneratePreservesGenuineReportOnJudgeFailure is D6-24's
+// regression proof for the ordinary (non-freeze) regenerate path: witnessed
+// in round 6, a re-run whose judge timed out overwrote a living report
+// carrying a genuine judge exchange (2 real findings + dispositions) with a
+// synthetic judged-coverage-absent finding, destroying both. An align
+// regeneration must never do that: when a genuine prior exchange
+// (judge_integrity present) exists on disk and this run's judge fails to
+// produce one, keep the prior report byte-for-byte and exit 2 (an
+// operational failure — the judge failing to run is not a verdict), rather
+// than silently destroying the last genuine exchange. PR #99's
+// align.FreezeInPlace already covers the --freeze path; this is its
+// ordinary-regenerate analogue (cmd/verdi's runAlignForSpec).
+func TestRunAlign_RegeneratePreservesGenuineReportOnJudgeFailure(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+
+	// A living align: the judge succeeds genuinely (judge_integrity recorded).
+	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	var out, errb bytes.Buffer
+	if got := runAlign(context.Background(), repo.Dir, false, living, &out, &errb); got != 0 {
+		t.Fatalf("runAlign (living) = %d, want 0; stderr=%s", got, errb.String())
+	}
+
+	// The human dispositions every finding — the judged one as an
+	// owner-ratified accepted-deviation, the computed one(s) as fixed — the
+	// witness's "2 real findings + dispositions" shape.
+	fm := decodeReportFile(t, reportPath)
+	for i := range fm.Findings {
+		if fm.Findings[i].Kind == artifact.FindingJudged {
+			fm.Findings[i].Disposition = artifact.FindingAcceptedDeviation
+			fm.Findings[i].Note = "owner-ratified: intentional deviation"
+		} else {
+			fm.Findings[i].Disposition = artifact.FindingFixed
+		}
+	}
+	_, body, err := artifact.SplitFrontmatter(readReport(t, repo.Dir))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	if err := os.WriteFile(reportPath, align.RenderMarkdown(fm, string(body)), 0o644); err != nil {
+		t.Fatalf("writing dispositioned living report: %v", err)
+	}
+	genuineBefore, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading dispositioned living report: %v", err)
+	}
+
+	// Re-run align (NOT --freeze) with a judge that now fails outright — the
+	// witness's "timed out at the 2m ceiling" stand-in; any judge failure
+	// takes the same absent-result path (judged.go's RunJudged).
+	failingDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t)}
+	var out2, errb2 bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, failingDeps, &out2, &errb2)
+
+	if got != 2 {
+		t.Fatalf("runAlign (regenerate, judge failing, genuine prior) = %d, want 2 (operational failure); stdout=%s stderr=%s", got, out2.String(), errb2.String())
+	}
+	after, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading report after failed regenerate: %v", err)
+	}
+	if !bytes.Equal(genuineBefore, after) {
+		t.Fatalf("genuine living report was NOT preserved byte-for-byte across a failed-judge regeneration:\n--- before ---\n%s\n--- after ---\n%s", genuineBefore, after)
+	}
+	if !strings.Contains(errb2.String(), "D6-24") {
+		t.Fatalf("stderr = %q, want a loud disclosure naming why the report was preserved (D6-24)", errb2.String())
+	}
+}
+
+// TestRunAlign_NoPriorReport_JudgeFailure_WritesSynthetic is D6-24's fix
+// negative-path proof: with no prior report on disk, there is nothing
+// genuine to lose, so a failing (non-required) judge on a first-ever run
+// must still degrade to the synthetic absence finding and succeed (exit 0),
+// exactly as before this fix.
+func TestRunAlign_NoPriorReport_JudgeFailure_WritesSynthetic(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t)}
+	var out, errb bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, deps, &out, &errb)
+	if got != 0 {
+		t.Fatalf("runAlign (first run, no prior report, failing judge) = %d, want 0 (nothing genuine to lose); stderr=%s", got, errb.String())
+	}
+
+	fm := decodeReportFile(t, reportPath)
+	if _, ok := findingByID(fm.Findings, align.AbsenceFindingID); !ok {
+		t.Fatalf("expected the synthetic absence finding %s, got %+v", align.AbsenceFindingID, fm.Findings)
+	}
+	if fm.JudgeIntegrity != nil {
+		t.Fatalf("synthetic report unexpectedly carries judge_integrity: %+v", fm.JudgeIntegrity)
+	}
+}
+
+// TestRunAlign_PriorSynthetic_JudgeStillFailing_RegeneratesNormally is D6-24's
+// fix negative-path proof for the OTHER "nothing genuine to lose" case: a
+// prior report that is itself synthetic (no judge_integrity) has nothing
+// genuine on disk either, so a still-failing judge must regenerate and
+// overwrite it normally, exactly as before this fix.
+func TestRunAlign_PriorSynthetic_JudgeStillFailing_RegeneratesNormally(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+
+	// First run: no judge configured at all -> synthetic, no judge_integrity.
+	firstDeps := alignDeps{Runner: alignRunner(svcDir)}
+	var out, errb bytes.Buffer
+	if got := runAlign(context.Background(), repo.Dir, false, firstDeps, &out, &errb); got != 0 {
+		t.Fatalf("runAlign (first, no judge configured) = %d, want 0; stderr=%s", got, errb.String())
+	}
+	firstReport := decodeReportFile(t, reportPath)
+	if firstReport.JudgeIntegrity != nil {
+		t.Fatalf("test setup: first report unexpectedly genuine: %+v", firstReport.JudgeIntegrity)
+	}
+
+	// Second run: judge now configured but fails outright -> still synthetic;
+	// since the prior report was ITSELF synthetic (nothing genuine on disk),
+	// today's plain-overwrite behavior must stand.
+	secondDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t)}
+	var out2, errb2 bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, secondDeps, &out2, &errb2)
+	if got != 0 {
+		t.Fatalf("runAlign (second, prior synthetic, judge failing) = %d, want 0 (regenerate as today); stderr=%s", got, errb2.String())
+	}
+	secondReport := decodeReportFile(t, reportPath)
+	if _, ok := findingByID(secondReport.Findings, align.AbsenceFindingID); !ok {
+		t.Fatalf("expected the regenerated report to still carry the synthetic absence finding: %+v", secondReport.Findings)
+	}
+}
+
+// TestRunAlign_RegenerateWithGenuineJudgeCompletion_RegeneratesNormally is
+// D6-24's fix boundary proof: a genuine prior report followed by a SECOND
+// genuine judge completion (even a drifted one — a different id/text,
+// mirroring the judge's own non-reproducibility) is ordinary regeneration,
+// entirely unaffected by this fix. Genuine-to-genuine replacement —
+// including the finding-identity drift this exposes — is explicitly out of
+// scope for D6-24 (its own second half); PreserveDispositions' existing
+// behavior must stand untouched.
+func TestRunAlign_RegenerateWithGenuineJudgeCompletion_RegeneratesNormally(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+
+	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	var out, errb bytes.Buffer
+	if got := runAlign(context.Background(), repo.Dir, false, living, &out, &errb); got != 0 {
+		t.Fatalf("runAlign (living) = %d, want 0; stderr=%s", got, errb.String())
+	}
+
+	driftDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeDrift(t)}
+	var out2, errb2 bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, driftDeps, &out2, &errb2)
+	if got != 0 {
+		t.Fatalf("runAlign (regenerate, genuine drifted judge) = %d, want 0 (unaffected by D6-24's fix); stderr=%s", got, errb2.String())
+	}
+
+	fm := decodeReportFile(t, reportPath)
+	if fm.JudgeIntegrity == nil {
+		t.Fatal("regenerated report lost its genuine judge_integrity — the fix must not block a genuine judge completion")
+	}
+	if _, ok := findingByID(fm.Findings, "judged-j-drift"); !ok {
+		t.Fatalf("regenerated report does not carry the new judge's drifted finding: %+v", fm.Findings)
 	}
 }
 

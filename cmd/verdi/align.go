@@ -235,6 +235,19 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 
+	// D6-24: never let a regeneration whose judge failed to produce a
+	// genuine result replace a report that already carries one on disk. See
+	// keepGenuineOnJudgeFailure's doc comment for the full rule.
+	var existingJudgeIntegrity *artifact.JudgeIntegrity
+	if existingReport != nil {
+		existingJudgeIntegrity = existingReport.JudgeIntegrity
+	}
+	if keepGenuineOnJudgeFailure(existingJudgeIntegrity, report.Frontmatter.JudgeIntegrity) {
+		fmt.Fprintf(stderr, "align: %s\n", absenceFindingText(report.Frontmatter.Findings, align.AbsenceFindingID))
+		fmt.Fprintf(stderr, "align: %s already carries a genuine judged exchange from a completed judge run; PRESERVED byte-for-byte rather than overwritten with this run's synthetic judge-failure edition (D6-24)\n", reportPath)
+		return 2
+	}
+
 	if err := os.WriteFile(reportPath, report.Markdown, 0o644); err != nil {
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
@@ -245,6 +258,57 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		fmt.Fprintf(stdout, "align: frozen at %s\n", report.Frontmatter.Frozen.At)
 	}
 	return 0
+}
+
+// keepGenuineOnJudgeFailure implements D6-24's fix: an align regeneration
+// must never replace a living report that carries a genuine judged
+// exchange (judge_integrity present, from a completed judge run) with a
+// synthetic judge-failure edition. Witnessed in round 6: a re-run whose
+// judge timed out overwrote a living report carrying a genuine judge
+// exchange (2 real findings + dispositions) with a synthetic
+// judged-coverage-absent finding, destroying both.
+//
+// existingJudgeIntegrity is the prior on-disk report's JudgeIntegrity — nil
+// for "no prior report" or a prior report whose own judged section was
+// ALREADY synthetic; both cases have nothing genuine to lose, so today's
+// plain regenerate-and-overwrite behavior is correct and deliberately left
+// unprotected. newJudgeIntegrity is THIS run's freshly regenerated
+// JudgeIntegrity — nil exactly when this run's judge failed, timed out, or
+// was never configured (RunJudged's — judged.go — and RunDecisionSweep's —
+// decision_judge.go — shared absent-result contract: every non-required
+// failure degrades to exactly one synthetic absence finding and no
+// JudgeIntegrity). A judge run that completes genuinely (both non-nil) is
+// ordinary regeneration and is unaffected by this rule — genuine-to-genuine
+// replacement, including its own known finding-identity drift, is
+// explicitly out of scope for D6-24's fix (its own second half);
+// PreserveDispositions/PreserveConflictDispositions (identity.go) are
+// untouched.
+//
+// Shared by align.go's build-branch runAlignForSpec and align_design.go's
+// design-branch runDesignAlign — the two callers write different report
+// schemas (DeviationFrontmatter/DecisionConflictFrontmatter) but apply
+// exactly this one yes/no rule, so it lives once here rather than being
+// duplicated per mode (CLAUDE.md: no copy-paste across call sites).
+func keepGenuineOnJudgeFailure(existingJudgeIntegrity, newJudgeIntegrity *artifact.JudgeIntegrity) bool {
+	return existingJudgeIntegrity != nil && newJudgeIntegrity == nil
+}
+
+// absenceFindingText returns the synthetic absence finding's own disclosed
+// text (the judge failure's stage/exit/stderr detail — judged.go's
+// absenceFinding) so the keep-genuine disclosure (D6-24) can show the
+// operator exactly what the judge reported, without internal/align needing
+// to expose a second, parallel failure-detail API alongside Report. Every
+// call site only reaches here when newJudgeIntegrity is nil, which
+// RunJudged's absent-result contract guarantees means exactly one finding
+// with this id is present in findings; the fallback string only guards
+// against that contract changing out from under this call site unnoticed.
+func absenceFindingText(findings []artifact.Finding, id string) string {
+	for _, f := range findings {
+		if f.ID == id {
+			return f.Text
+		}
+	}
+	return "align: internal warning: expected a synthetic judge-absence finding but found none"
 }
 
 // loadExistingReport reads and strict-decodes a prior deviation-report.md, if
