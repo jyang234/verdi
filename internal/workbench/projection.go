@@ -148,6 +148,22 @@ type refCardView struct {
 	// Store-derived enrichment attached in the I/O layer
 	// (attachDiagramEditorHrefs), never computed by the pure projector.
 	EditorHref string `json:"editorHref,omitempty"`
+	// BoardHref links a document-level implements-edge reference card to
+	// its target feature's own board (spec/family-board-links ac-1,
+	// dc-1/dc-2): set when this card is the target of a document-level
+	// implements edge AND that target's base spec ref (fragment dropped)
+	// resolves in the current index — "/board/spec/<feature-name>".
+	// Store-derived enrichment attached by attachFamilyLinks, mirroring
+	// EditorHref's exact posture. Never set alongside UnresolvedNotice.
+	BoardHref string `json:"boardHref,omitempty"`
+	// UnresolvedNotice discloses, on the SAME card, why no BoardHref was
+	// offered (spec/family-board-links ac-4, co-3): set only when this
+	// card is a document-level implements edge's target and that target
+	// does not resolve anywhere in the current index — naming the
+	// unresolved ref rather than rendering a silently inert card or a
+	// link that would 404. Store-derived enrichment attached by
+	// attachFamilyLinks.
+	UnresolvedNotice string `json:"unresolvedNotice,omitempty"`
 }
 
 // edgeView is one yarn element: a declared spec edge or an
@@ -201,6 +217,36 @@ type StubView struct {
 	// stub reference (VL-006's checkStubACs/checkStubResolves) anchors to
 	// the stub's own card, not the case file.
 	Badges []badgeView `json:"badges,omitempty"`
+	// StoryLinks are AC-2's matched-story board affordances
+	// (spec/family-board-links ac-2, dc-1/dc-4): one entry per DISTINCT
+	// story spec whose implements edges name one of this stub's declared
+	// acceptance criteria, anywhere in this checkout's store (active or
+	// archived zone alike) — computed via the same backlink inversion the
+	// feature fold already uses, never a second graph walk or heuristic
+	// title/slug match. Empty until a match resolves. Store-derived
+	// enrichment attached by attachFamilyLinks.
+	StoryLinks []stubStoryLinkView `json:"storyLinks,omitempty"`
+	// InstantiatedNotice is AC-3's live ref-check disclosure (dc-3, dc-5):
+	// set only when StoryLinks is empty (no matching story resolves
+	// anywhere) AND refs/heads/design/<slug> exists in the SERVING
+	// checkout. Fixed verbatim text (parent dc-5) with the branch name
+	// filled in; empty otherwise, leaving the card's existing Instantiate
+	// affordance as the only rendered state (today's plain
+	// un-instantiated card, unchanged). Store-derived enrichment attached
+	// by attachFamilyLinks.
+	InstantiatedNotice string `json:"instantiatedNotice,omitempty"`
+}
+
+// stubStoryLinkView is one AC-2 matched-story affordance on a feature
+// stub card (spec/family-board-links ac-2): the matched story's own ref,
+// its board href, and whether the match resolved under specs/archive/
+// (dc-1's ADJ-28 completion reading) — an archived match renders the
+// SAME link with Archived disclosed on the card, and the card never
+// falls through to AC-3's in-between notice.
+type stubStoryLinkView struct {
+	Ref      string `json:"ref"`
+	Href     string `json:"href"`
+	Archived bool   `json:"archived,omitempty"`
 }
 
 // BoardProjection is the full render model for one spec's board — the

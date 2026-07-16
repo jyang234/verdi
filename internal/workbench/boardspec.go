@@ -237,6 +237,15 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 		return nil, nil, "", err
 	}
 	attachDiagramEditorHrefs(proj, s.root)
+	// Family navigation (spec/family-board-links): the story-to-feature
+	// affordance, the feature-stub-to-story link(s), and the live
+	// in-between disclosure — the SAME I/O-enrichment posture as every
+	// attach* call above, run last only because it is the newest of the
+	// four; order among them is otherwise immaterial (each touches its
+	// own disjoint fields).
+	if err := attachFamilyLinks(ctx, proj, s.root); err != nil {
+		return nil, nil, "", err
+	}
 	if reviewNotice != "" {
 		proj.Notices = append(proj.Notices, reviewNotice)
 	}
