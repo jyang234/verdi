@@ -162,7 +162,10 @@ func runAcceptDiagram(ctx context.Context, root string, ref artifact.Ref, stdout
 		return 2
 	}
 
-	if err := gitx.AddAll(ctx, root); err != nil {
+	// D6-33 (folded in alongside the spec ritual's identical fix, accept.go):
+	// stage exactly diagPath, the one file this ritual modified — never
+	// gitx.AddAll's `git add -A` sweep of the rest of the working tree.
+	if err := gitx.AddPaths(ctx, root, diagPath); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}

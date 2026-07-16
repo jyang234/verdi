@@ -198,13 +198,22 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	// legal writer of VL-004's accepted-pending-build→superseded transition,
 	// a status-only edit VL-010 admits on an otherwise-frozen spec. The
 	// predecessor keeps its frozen stamp and stays in specs/active/. Written
-	// to disk here so the caller's own AddAll/CreateCommit lands it in the
-	// same commit as the accept flip.
-	if rc := supersedePredecessors(root, spec, stdout, stderr); rc != 0 {
+	// to disk here so the caller's own scoped AddPaths/CreateCommit below
+	// lands it in the same commit as the accept flip.
+	predecessorPaths, rc := supersedePredecessors(root, spec, stdout, stderr)
+	if rc != 0 {
 		return rc
 	}
 
-	if err := gitx.AddAll(ctx, root); err != nil {
+	// D6-33: stage exactly the paths this ritual modified — specPath's own
+	// flip plus any predecessor(s) supersedePredecessors just flipped above
+	// — never the rest of the working tree. gitx.AddAll's `git add -A` twice
+	// swept an unrelated untracked scratch build binary into an acceptance
+	// commit (round-6 witness, both acceptance agents hit it independently
+	// in the same wave); a ritual that writes a frozen stamp must not also
+	// silently commit whatever else happens to be sitting in the checkout.
+	addPaths := append([]string{specPath}, predecessorPaths...)
+	if err := gitx.AddPaths(ctx, root, addPaths...); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}

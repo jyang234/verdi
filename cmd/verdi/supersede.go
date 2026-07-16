@@ -46,15 +46,23 @@ var acceptedStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?accepted-pending
 // governs a superseded FEATURE's downstream *stories* (blastradius.go,
 // cascadecheck.go) — the flip is a statement about the predecessor's own
 // terminal lifecycle, orthogonal to its stories' verdicts (invention
-// ledger: smallest reversible option). Returns 0 on success (including
-// every no-op case), 2 on an operational failure.
-func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, stdout, stderr io.Writer) int {
+// ledger: smallest reversible option). Returns every predecessor spec.md
+// path actually flipped (D6-33: accept.go's caller needs these to stage
+// exactly what it modified, never the rest of the working tree) plus 0 on
+// success (including every no-op case, which contributes no path), 2 on an
+// operational failure.
+func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, stdout, stderr io.Writer) ([]string, int) {
+	var paths []string
 	for _, l := range spec.Links {
 		if l.Type != artifact.LinkSupersedes || !supersedesTargetsStory(root, l.Ref) {
 			continue
 		}
-		if rc := flipPredecessorToSuperseded(root, l.Ref, spec.ID, stdout, stderr); rc != 0 {
-			return rc
+		path, rc := flipPredecessorToSuperseded(root, l.Ref, spec.ID, stdout, stderr)
+		if rc != 0 {
+			return paths, rc
+		}
+		if path != "" {
+			paths = append(paths, path)
 		}
 	}
 
@@ -64,11 +72,15 @@ func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, stdout, 
 	// fails closed (false) on a fragment ref, so an object-fragment
 	// `supersedes` edge (a decision-level override) never reaches here.
 	if wholeRef := wholeSpecSupersedesTarget(spec); wholeRef != "" && supersedesTargetsFeature(root, wholeRef) {
-		if rc := flipPredecessorToSuperseded(root, wholeRef, spec.ID, stdout, stderr); rc != 0 {
-			return rc
+		path, rc := flipPredecessorToSuperseded(root, wholeRef, spec.ID, stdout, stderr)
+		if rc != 0 {
+			return paths, rc
+		}
+		if path != "" {
+			paths = append(paths, path)
 		}
 	}
-	return 0
+	return paths, 0
 }
 
 // flipPredecessorToSuperseded performs the single-predecessor half of the
@@ -87,43 +99,48 @@ func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, stdout, 
 // (archived/closed), already superseded (idempotent), or in any status
 // other than accepted-pending-build — including `closed`: dc-2's
 // deliberately deferred closed->superseded case, invention ledger — is left
-// alone (the last case disclosed, never forced). Returns 0 on success
-// (including every no-op case), 2 on an operational failure.
-func flipPredecessorToSuperseded(root, predecessorRef, successorID string, stdout, stderr io.Writer) int {
+// alone (the last case disclosed, never forced). Returns the predecessor's
+// spec.md path when (and only when) it actually wrote a flip — D6-33: the
+// caller (supersedePredecessors) collects these so accept.go's own scoped
+// AddPaths call stages exactly what this ritual modified, nothing else —
+// and "" for every no-op case (malformed ref, absent, idempotent, or wrong
+// status). rc is 0 on success (including every no-op case), 2 on an
+// operational failure.
+func flipPredecessorToSuperseded(root, predecessorRef, successorID string, stdout, stderr io.Writer) (path string, rc int) {
 	ref, err := artifact.ParseRef(predecessorRef)
 	if err != nil {
-		return 0 // malformed edges are lint's concern, not accept's
+		return "", 0 // malformed edges are lint's concern, not accept's
 	}
 	predPath := filepath.Join(root, ".verdi", "specs", "active", ref.Name, "spec.md")
 	raw, err := os.ReadFile(predPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0 // not in active/ (archived/closed) — nothing to flip here
+			return "", 0 // not in active/ (archived/closed) — nothing to flip here
 		}
 		fmt.Fprintf(stderr, "accept: reading predecessor %s: %v\n", predPath, err)
-		return 2
+		return "", 2
 	}
 	predFm, _, err := artifact.SplitFrontmatter(raw)
 	if err != nil {
 		fmt.Fprintf(stderr, "accept: %s: %v\n", predPath, err)
-		return 2
+		return "", 2
 	}
 	predSpec, err := artifact.DecodeSpec(predFm)
 	if err != nil {
 		fmt.Fprintf(stderr, "accept: %s: %v\n", predPath, err)
-		return 2
+		return "", 2
 	}
 	if predSpec.Status == "superseded" {
-		return 0 // already superseded — idempotent
+		return "", 0 // already superseded — idempotent
 	}
 	if predSpec.Status != "accepted-pending-build" {
 		fmt.Fprintln(stdout, disclosure.Render(disclosure.New("accept:supersede-predecessor", predecessorRef,
 			fmt.Sprintf("predecessor status is %q, not accepted-pending-build; left unflipped (only accepted-pending-build->superseded is a legal ritual transition, VL-004)", predSpec.Status))))
-		return 0
+		return "", 0
 	}
 	if n := len(acceptedStatusLineRe.FindAll(raw, -1)); n != 1 {
 		fmt.Fprintf(stderr, "accept: %s: expected exactly one status: accepted-pending-build line to flip, found %d\n", predPath, n)
-		return 2
+		return "", 2
 	}
 	newRaw := acceptedStatusLineRe.ReplaceAll(raw, []byte("status: superseded"))
 	// Self-validate the flipped predecessor before writing (CLAUDE.md:
@@ -132,23 +149,23 @@ func flipPredecessorToSuperseded(root, predecessorRef, successorID string, stdou
 	flippedFm, _, err := artifact.SplitFrontmatter(newRaw)
 	if err != nil {
 		fmt.Fprintf(stderr, "accept: internal error: flipped predecessor %s failed self-validation: %v\n", ref.String(), err)
-		return 2
+		return "", 2
 	}
 	flipped, err := artifact.DecodeSpec(flippedFm)
 	if err != nil {
 		fmt.Fprintf(stderr, "accept: internal error: flipped predecessor %s failed self-validation: %v\n", ref.String(), err)
-		return 2
+		return "", 2
 	}
 	if flipped.Status != "superseded" || flipped.Frozen == nil {
 		fmt.Fprintf(stderr, "accept: internal error: flipped predecessor %s does not carry status: superseded with its frozen stamp\n", ref.String())
-		return 2
+		return "", 2
 	}
 	if err := os.WriteFile(predPath, newRaw, 0o644); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
-		return 2
+		return "", 2
 	}
 	fmt.Fprintf(stdout, "accept: %s: superseded by %s (status: accepted-pending-build -> superseded; status-only edit, frozen stamp preserved, stays in specs/active/)\n", ref.String(), successorID)
-	return 0
+	return predPath, 0
 }
 
 // supersedesTargetsFeature reports whether ref is a WHOLE-SPEC supersedes
