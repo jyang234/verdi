@@ -360,8 +360,20 @@
       clearSelection();
     }
     input.addEventListener("keydown", function (ev) {
-      if (ev.key === "Enter") commit();
-      if (ev.key === "Escape") abandon();
+      // Enter and Escape are this input's OWN gestures — commit and abandon.
+      // stopPropagation keeps either key from reaching the page-level exit
+      // handler below, so one Escape cancels the rename WITHOUT also exiting
+      // the tool view. This is order-independent: it does not rely on this
+      // target-phase handler running before, or leaving the input in place
+      // for, the document-level guard (the defect ADJ-38 fixes was exactly
+      // that ordering dependency).
+      if (ev.key === "Enter") {
+        ev.stopPropagation();
+        commit();
+      } else if (ev.key === "Escape") {
+        ev.stopPropagation();
+        abandon();
+      }
     });
     input.addEventListener("blur", commit);
   }
@@ -591,10 +603,16 @@
   //
   // The return target is resolved once, server-side, at render (dc-2): the
   // state blob carries the exact href, honest fallback included (dc-3) —
-  // this script only navigates, it never derives or guesses a target. A
-  // modal dialog (the shared backdrop visible) or the inline rename editor
-  // already owns Escape while either is open, so the page-level exit stands
-  // down rather than discarding an in-progress gesture.
+  // this script only navigates, it never derives or guesses a target. An
+  // in-editor overlay owns Escape while it is open, so the page-level exit
+  // stands down rather than discarding an in-progress gesture (dc-1: overlays
+  // close in place without navigating away). The inline rename input guards
+  // itself at the source — it calls stopPropagation on Escape, so its Escape
+  // never reaches this handler at all (order-independent, the primary guard).
+  // The checks below are the remaining, self-contained overlay guards: the
+  // shared modal backdrop (add-node/reset dialogs), and a defensive sweep for
+  // any rename input still open should an Escape ever arrive here without
+  // having been stopped.
   document.addEventListener("keydown", function (ev) {
     if (ev.key !== "Escape" || !state.exitHref) return;
     var modalBackdrop = document.getElementById("modal-backdrop");

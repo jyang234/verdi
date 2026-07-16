@@ -94,6 +94,44 @@ test.describe("tool view exit: the diagram designer's exit affordance and Escape
     await unpinScaffolding(page);
   });
 
+  // Controller adjudication ADJ-38 (2026-07-16), finding
+  // escape-during-inline-rename-also-exits: an in-editor overlay owns Escape
+  // while it is open (dc-1's framing — overlays close in place without
+  // navigating away). One Escape used to cancel the inline rename AND exit
+  // the tool view, because the page-level exit handler fired after the
+  // rename input had already detached itself; the fix stops the rename's own
+  // Escape from bubbling to the page. One Escape cancels the rename only; a
+  // second Escape then exits.
+  test("Escape during an active inline rename cancels only the rename and stays in the editor; a second Escape then exits", async ({
+    page,
+  }) => {
+    await enterEditorFromBoard(page);
+
+    // Open the inline rename over a node (an authoring gesture): select the
+    // node, then Rename in its toolbox.
+    await page
+      .locator('#diagram-preview g.node[data-node-id="loansvc"]')
+      .click();
+    await page.getByTestId("rename-node-btn").click();
+    const renameInput = page.getByTestId("rename-input");
+    await expect(renameInput).toBeVisible();
+
+    // First Escape: the rename's own handler cancels it and MUST NOT bubble
+    // to the page-level exit. The input is gone; the editor is still here —
+    // it did not navigate away to the board.
+    await page.keyboard.press("Escape");
+    await expect(renameInput).toHaveCount(0);
+    await expect(page.getByTestId("diagram-editor")).toBeVisible();
+    await expect(page.getByTestId("board")).toHaveCount(0);
+
+    // Second Escape: no rename open now — the page-level exit fires and
+    // returns to the originating board, fully rendered.
+    await page.keyboard.press("Escape");
+    await expectDesignSpecBoardRestored(page);
+
+    await unpinScaffolding(page);
+  });
+
   test("with no originating board known, the affordance and Escape both disclose that honestly and fall back to the index — never a broken link", async ({
     page,
   }) => {
