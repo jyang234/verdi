@@ -220,9 +220,15 @@ func TestWriteGlanceSection_BucketsOrderMembershipBadgesLinks(t *testing.T) {
 		t.Fatalf("an archive-zone entry must be excluded from the glance (dc-2); got: %s", body)
 	}
 	// ...yet ac-2's no-loss bar holds: it is STILL present, unchanged, in
-	// the exhaustive Directory section — the regression proof that
-	// directory.go (untouched by this story) renders byte-identically
-	// regardless of the new Zone field.
+	// the exhaustive Directory section — dc-2's byte-identity regression
+	// obligation. That obligation is met NOT because directory.go is
+	// untouched (this story DID refactor writeDefaultEntry/writeDesignEntry
+	// to route through the extracted href helpers glance.go shares —
+	// defaultCorpusHref & co.) but because that refactor is
+	// behavior-preserving: stdhtml.EscapeString is per-rune context-free, so
+	// escaping a joined string equals escaping the parts and concatenating,
+	// and the pre-existing literal-href directory assertions still pin the
+	// exact rendered bytes (Controller adjudication ADJ-47, 2026-07-16).
 	if !strings.Contains(body, `data-testid="dir-entry-glance-archived"`) {
 		t.Fatalf("archive-zone entry must still render in the exhaustive Directory section (ac-2 no-loss); got: %s", body)
 	}
