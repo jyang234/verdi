@@ -98,6 +98,21 @@ func runDesignAlign(ctx context.Context, root string, freeze bool, deps alignDep
 		return 2
 	}
 
+	// D6-24: never let a regeneration whose judge failed to produce a
+	// genuine result replace a report that already carries one on disk —
+	// the exact scenario witnessed in round 6's board-editor design sweep.
+	// See align.go's keepGenuineOnJudgeFailure for the full rule (shared by
+	// both this design-branch mode and the build-branch mode).
+	var existingJudgeIntegrity *artifact.JudgeIntegrity
+	if existingReport != nil {
+		existingJudgeIntegrity = existingReport.JudgeIntegrity
+	}
+	if keepGenuineOnJudgeFailure(existingJudgeIntegrity, report.Frontmatter.JudgeIntegrity) {
+		fmt.Fprintf(stderr, "align: %s\n", absenceConflictFindingText(report.Frontmatter.Findings, align.DecisionAbsenceFindingID))
+		fmt.Fprintf(stderr, "align: %s already carries a genuine judged exchange from a completed judge run; PRESERVED byte-for-byte rather than overwritten with this run's synthetic judge-failure edition (D6-24)\n", reportPath)
+		return 2
+	}
+
 	if err := os.WriteFile(reportPath, report.Markdown, 0o644); err != nil {
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
@@ -144,4 +159,15 @@ func loadExistingDecisionReport(path string) (*artifact.DecisionConflictFrontmat
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return decoded, nil
+}
+
+// absenceConflictFindingText is align.go's absenceFindingText for
+// ConflictFinding — see its doc comment for the full rationale.
+func absenceConflictFindingText(findings []artifact.ConflictFinding, id string) string {
+	for _, f := range findings {
+		if f.ID == id {
+			return f.Text
+		}
+	}
+	return "align: internal warning: expected a synthetic judge-absence finding but found none"
 }
