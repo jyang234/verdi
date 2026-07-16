@@ -1,6 +1,6 @@
 package main
 
-// emptyGlanceFixture (spec/home-status-glance ac-3/dc-4) answers the one
+// emptyGlanceFixture (spec/home-status-glance ac-3/co-1) answers the one
 // behavioral case the shared harness corpus provably cannot: a render
 // where a glance bucket has NO matching entries at all. Every bucket in
 // the main provisioned store is populated by real, committed showcase
@@ -14,20 +14,24 @@ package main
 //
 // Rather than widen the shared corpus's risk surface, this spawns a
 // SEPARATE, fully hermetic workbench instance, in-process, backed by a
-// canned HomeDeps.Index (the exact seam internal/workbench's own Go tests
-// already drive — see internal/workbench/glance_test.go's cannedIndex) —
-// no git, no store on disk, no shared state with the main harness store.
-// It answers on its own loopback port, discovered via the control
-// server's /empty-glance-fixture endpoint (control.go), started lazily on
-// first request and reused thereafter.
+// REAL minimal store on disk — git init + the one .verdi/verdi.yaml a
+// valid store needs, with ZERO specs — served through the SAME production
+// wiring the real workbench uses (workbench.NewHandler → home.Index →
+// refindex.ComputeIndex). This is Controller adjudication ADJ-40
+// (2026-07-16), sustaining co-1's letter: the empty-bucket claim must flow
+// a REAL store through index computation, never a canned HomeDeps.Index
+// standing in for the pipeline. An empty store carries no entries, so all
+// three glance buckets render empty at once — the strongest, cheapest
+// witness of ac-3 through the true pipe. It answers on its own loopback
+// port, discovered via the control server's /empty-glance-fixture endpoint
+// (control.go), started lazily on first request and reused thereafter.
 import (
-	"context"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 
-	"github.com/jyang234/verdi/internal/refindex"
 	"github.com/jyang234/verdi/internal/workbench"
 )
 
@@ -57,8 +61,11 @@ func (f *emptyGlanceFixture) handler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(url))
 }
 
-// ensureStarted starts the isolated workbench instance on first call and
-// returns its URL on every call thereafter, unchanged.
+// ensureStarted provisions the real minimal store and starts the isolated
+// workbench instance over it on first call, returning its URL on every
+// call thereafter, unchanged. The handler is the production
+// workbench.NewHandler (HomeDeps' zero value), so GET / drives the REAL
+// refindex.ComputeIndex over the store — no canned index (co-1; ADJ-40).
 func (f *emptyGlanceFixture) ensureStarted() (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -66,41 +73,85 @@ func (f *emptyGlanceFixture) ensureStarted() (string, error) {
 		return f.url, nil
 	}
 
-	// No git, no .verdi tree: HomeDeps.Index below is canned (bypassing
-	// refindex.ComputeIndex entirely), and every other renderHome section
-	// degrades to its own honest "nothing here"/"could not read" notice
-	// against an empty directory — exactly like a half-initialised store,
-	// which the home page is already required to serve (dc-5's own
-	// "never itself a dead end" bar). This test only asserts the glance.
-	root, err := os.MkdirTemp("", "verdi-e2e-empty-glance-*")
+	root, err := provisionEmptyStore()
 	if err != nil {
 		return "", err
-	}
-
-	// One on-the-desk draft, and deliberately NOTHING for in-flight or
-	// settling — the "at least one glance bucket has no matching entries"
-	// shape ac-3's obligation demands, proven for TWO of the three buckets
-	// at once rather than exactly the minimum one.
-	entries := []refindex.Entry{
-		{
-			Ref:         "spec/lone-draft",
-			Source:      refindex.SourceLocal,
-			StatusGroup: refindex.StatusGroupDraftsInProgress,
-			SpecStatus:  "draft",
-			Zone:        refindex.ZoneActive,
-		},
-	}
-	home := workbench.HomeDeps{
-		Index: func(context.Context) ([]refindex.Entry, error) { return entries, nil },
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", err
 	}
-	srv := &http.Server{Handler: workbench.NewHandlerWithHome(root, workbench.Deps{}, home)}
+	srv := &http.Server{Handler: workbench.NewHandler(root)}
 	go func() { _ = srv.Serve(ln) }()
 
 	f.url = "http://" + ln.Addr().String() + "/"
 	return f.url, nil
+}
+
+// emptyStoreManifest is the minimal valid verdi.yaml a store needs
+// (internal/store.Manifest.Validate: the schema literal alone — forge
+// omitted, so it auto-detects; every other block optional). Enough for the
+// directory to be a recognizable store root and for refindex.ComputeIndex
+// to run its real default-branch walk over it.
+const emptyStoreManifest = "schema: verdi.layout/v1\n"
+
+// provisionEmptyStore builds a REAL, minimal, hermetic store on disk and
+// returns its root: git init on main, one commit of .verdi/verdi.yaml, and
+// a bare local origin whose HEAD names main. There are ZERO specs, so
+// refindex.ComputeIndex's real default-branch walk (over .verdi/specs/
+// active and .verdi/specs/archive, both absent at this ref) returns an
+// empty index and all three glance buckets render empty through the true
+// pipeline (co-1; ADJ-40).
+//
+// The bare origin + `remote set-head` is load-bearing: gitx.DefaultBranch
+// keys off refs/remotes/origin/HEAD (internal/gitx/branch.go), so without
+// it the walk would short-circuit on the no-default-branch path and the
+// empty result would prove only the no-remote degradation — not an empty
+// store genuinely walked to zero entries. This mirrors the main harness
+// store's own origin setup (provision_board.go).
+func provisionEmptyStore() (string, error) {
+	tmp, err := os.MkdirTemp("", "verdi-e2e-empty-glance-*")
+	if err != nil {
+		return "", err
+	}
+	root := filepath.Join(tmp, "store")
+	originDir := filepath.Join(tmp, "origin.git")
+
+	if err := os.MkdirAll(filepath.Join(root, ".verdi"), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(root, ".verdi", "verdi.yaml"), []byte(emptyStoreManifest), 0o644); err != nil {
+		return "", err
+	}
+
+	// git init on main + the single manifest commit — the same
+	// deterministic-env, no-verify posture every other scratch store here
+	// uses (git.go).
+	if err := runGit(root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+		return "", err
+	}
+	if err := runGit(root, nil, "add", "-A"); err != nil {
+		return "", err
+	}
+	if err := runGit(root, nil, "commit", "--quiet", "--no-verify", "-m", "empty store: verdi.yaml only, zero specs"); err != nil {
+		return "", err
+	}
+
+	// A bare local origin whose HEAD names main, so gitx.DefaultBranch
+	// resolves "main" and refindex's default-branch walk runs for real.
+	if err := runGit("", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+		return "", err
+	}
+	if err := runGit(root, nil, "remote", "add", "origin", originDir); err != nil {
+		return "", err
+	}
+	if err := runGit(root, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
+		return "", err
+	}
+	if err := runGit(root, nil, "remote", "set-head", "origin", "main"); err != nil {
+		return "", err
+	}
+
+	return root, nil
 }

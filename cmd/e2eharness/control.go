@@ -15,10 +15,12 @@ package main
 //     stale directory link must resolve to the disclosed 404 (ac-3).
 //     Design-namespace branches only; anything else is refused.
 //   - GET  /empty-glance-fixture returns the URL of a separate, hermetic,
-//     in-process workbench instance carrying a genuinely empty in-flight/
-//     settling glance bucket (spec/home-status-glance ac-3/dc-4) — see
-//     emptyglance.go's own doc comment for why this is isolated rather
-//     than mutating the shared store above.
+//     in-process workbench instance backed by a REAL minimal store (git
+//     init + .verdi/verdi.yaml, zero specs) whose three glance buckets are
+//     all empty through the real refindex.ComputeIndex pipeline
+//     (spec/home-status-glance ac-3/co-1; ADJ-40) — see emptyglance.go's
+//     own doc comment for why this is isolated rather than mutating the
+//     shared store above.
 
 import (
 	"log"

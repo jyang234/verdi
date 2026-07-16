@@ -8,11 +8,14 @@ import (
 	"testing"
 )
 
-// TestEmptyGlanceFixture_Handler_Happy is spec/home-status-glance ac-3's
-// isolation mechanism proven directly: the handler starts a genuinely
-// separate, hermetic workbench instance whose in-flight AND settling
-// buckets are empty (while on-the-desk carries the one seeded draft),
-// without touching the shared harness store.
+// TestEmptyGlanceFixture_Handler_Happy is spec/home-status-glance ac-3/co-1
+// proven directly through the REAL pipeline (Controller adjudication
+// ADJ-40, 2026-07-16): the handler starts a genuinely separate, hermetic
+// workbench instance backed by a REAL minimal store on disk — git init +
+// .verdi/verdi.yaml, ZERO specs — computed by the real
+// refindex.ComputeIndex, not a canned index. An empty store carries no
+// entries, so all THREE glance buckets render empty at once (heading, zero
+// count, None.), the strongest witness of ac-3 through the true pipe.
 func TestEmptyGlanceFixture_Handler_Happy(t *testing.T) {
 	f := newEmptyGlanceFixture()
 
@@ -44,10 +47,16 @@ func TestEmptyGlanceFixture_Handler_Happy(t *testing.T) {
 	if !strings.Contains(page, `data-testid="home-glance"`) {
 		t.Fatalf("isolated render missing the glance section entirely; got: %s", page)
 	}
-	if !strings.Contains(page, `data-testid="glance-entry-lone-draft"`) {
-		t.Fatalf("isolated render missing the seeded on-the-desk draft; got: %s", page)
+	// The real empty store has zero specs, so nothing is ever badged or
+	// linked: not a single glance entry may render (the populated-bucket
+	// contrast dc-4 also wants is proven by the shared-store e2e, not here).
+	if strings.Contains(page, `data-testid="glance-entry-`) {
+		t.Fatalf("empty store rendered a glance entry, want none through the real pipeline; got: %s", page)
 	}
-	for _, slug := range []string{"in-flight", "settling"} {
+	// All three fixed buckets render their heading, zero count, and
+	// None. empty-state — proven through refindex.ComputeIndex's real
+	// default-branch walk, not a canned index (co-1; ADJ-40).
+	for _, slug := range []string{"on-the-desk", "in-flight", "settling"} {
 		start := strings.Index(page, `data-testid="glance-group-`+slug+`"`)
 		if start < 0 {
 			t.Fatalf("isolated render missing the %s bucket heading; got: %s", slug, page)

@@ -36,8 +36,11 @@ import {
 // manufacturing an empty bucket would mean deleting fixtures other tests
 // need. Instead it drives a SEPARATE, hermetic, isolated workbench
 // instance the control server spawns on demand (CONTROL_URL's
-// /empty-glance-fixture — cmd/e2eharness/emptyglance.go), never touching
-// the shared store.
+// /empty-glance-fixture — cmd/e2eharness/emptyglance.go), backed by a REAL
+// minimal store (git init + .verdi/verdi.yaml, zero specs) computed
+// through the real refindex.ComputeIndex pipeline (co-1; Controller
+// adjudication ADJ-40) — never touching the shared store, and never a
+// canned index standing in for the pipeline.
 
 const ACCEPTED_SPEC = "stale-decline"; // default-branch accepted-pending-build feature
 const ACCEPTED_STORY = "jira:LOAN-1482";
@@ -211,11 +214,15 @@ test("every pre-existing directory section and link survives unchanged alongside
   await expect(page.locator(".home-disclosures")).toBeVisible();
 });
 
-// AC-3/DC-4: a glance bucket with zero matching entries still renders its
-// heading, its zero count, and an explicit empty-state notice — never a
-// silently omitted bucket. Driven against a separate, isolated store (see
-// this file's header comment for why the shared corpus cannot prove this).
-test("an isolated store with an empty glance bucket renders its heading, zero count, and empty-state notice", async ({
+// AC-3/DC-4/CO-1: a glance bucket with zero matching entries still renders
+// its heading, its zero count, and an explicit empty-state notice — never a
+// silently omitted bucket. Driven against a separate, isolated REAL store
+// (git init + .verdi/verdi.yaml, zero specs) computed through the real
+// refindex.ComputeIndex pipeline (Controller adjudication ADJ-40) — an empty
+// store proves all three empty buckets at once through the true pipe. See
+// this file's header comment for why this is isolated rather than mutating
+// the shared corpus.
+test("an isolated real store with zero specs renders every glance bucket's heading, zero count, and empty-state notice", async ({
   page,
 }) => {
   const res = await page.request.get(`${CONTROL_URL}/empty-glance-fixture`);
@@ -226,15 +233,18 @@ test("an isolated store with an empty glance bucket renders its heading, zero co
   await page.goto(isolatedURL);
   await expect(page.getByTestId("home-glance")).toBeVisible();
 
-  // The one seeded on-the-desk draft — the contrast dc-4 cares about: an
-  // operator reads a populated bucket right alongside the empty ones, so
-  // absence-of-work is legible as a deliberate fact, not a broken render.
-  await expect(glanceGroup(page, "on-the-desk").getByTestId(glanceEntryTestId("lone-draft"))).toBeVisible();
-
-  for (const slug of ["in-flight", "settling"]) {
+  // Zero specs in the store, so all three fixed buckets are empty at once —
+  // the strongest proof of dc-4: an operator reads absence-of-work as an
+  // explicit, deliberate fact in every bucket, not a broken render. (The
+  // populated-bucket contrast dc-4 also values is proven by this file's
+  // first test, over the shared store.)
+  for (const slug of ["on-the-desk", "in-flight", "settling"]) {
     const group = glanceGroup(page, slug);
     await expect(group).toBeVisible();
     await expect(group).toContainText("(0)");
     await expect(group.locator(".empty")).toHaveText("None.");
   }
+  // Nothing to badge or link: not a single glance entry renders through the
+  // real pipeline over an empty store.
+  await expect(page.getByTestId("home-glance").locator(".glance-entry")).toHaveCount(0);
 });
