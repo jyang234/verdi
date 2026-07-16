@@ -174,8 +174,8 @@ func TestRunSync_Ancestor_LinearHistory_AcceptsNamedAncestor(t *testing.T) {
 	if !strings.Contains(stdout.String(), target) {
 		t.Errorf("stdout = %q, want the accepted ancestor commit %q named", stdout.String(), target)
 	}
-	if !strings.Contains(stdout.String(), "2 commit(s) back") {
-		t.Errorf("stdout = %q, want the disclosed distance (2 commits back)", stdout.String())
+	if !strings.Contains(stdout.String(), "2 commit(s) back in log order") {
+		t.Errorf("stdout = %q, want the disclosed distance as a log-order index (2 commit(s) back in log order — ADJ-41 fix)", stdout.String())
 	}
 
 	got, err := os.ReadFile(filepath.Join(repo.Dir, ".verdi", "data", "derived", "spec--x", target, "verdicts.json"))
@@ -226,8 +226,8 @@ func TestRunSync_Ancestor_BranchedHistory_ReachesMergedAncestor(t *testing.T) {
 	if wantDistance < 0 {
 		t.Fatalf("test bug: commit %s (B) not found in gitx.Log(%s)'s own output %v", b, d, commits)
 	}
-	if !strings.Contains(stdout.String(), fmt.Sprintf("%d commit(s) back", wantDistance)) {
-		t.Errorf("stdout = %q, want the disclosed distance %d (matching gitx.Log's own order)", stdout.String(), wantDistance)
+	if !strings.Contains(stdout.String(), fmt.Sprintf("%d commit(s) back in log order", wantDistance)) {
+		t.Errorf("stdout = %q, want the disclosed distance %d as a log-order index (matching gitx.Log's own order — ADJ-41 fix)", stdout.String(), wantDistance)
 	}
 }
 
@@ -255,8 +255,8 @@ func TestRunSync_Ancestor_BundleAtHead_WinsWithNoWalk(t *testing.T) {
 	if cf.calls != 1 {
 		t.Errorf("forge FetchEvidenceBundle calls = %d, want exactly 1 (a bundle at HEAD must win with no walk performed)", cf.calls)
 	}
-	if !strings.Contains(stdout.String(), "0 commit(s) back") {
-		t.Errorf("stdout = %q, want distance 0 disclosed", stdout.String())
+	if !strings.Contains(stdout.String(), "0 commit(s) back in log order") {
+		t.Errorf("stdout = %q, want distance 0 disclosed as a log-order index (ADJ-41 fix)", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), repo.Head) {
 		t.Errorf("stdout = %q, want the accepted commit %q named", stdout.String(), repo.Head)

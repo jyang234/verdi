@@ -221,7 +221,14 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 			fmt.Fprintln(deps.Stderr, "sync:", writeErr)
 			return 2
 		}
-		fmt.Fprintf(deps.Stdout, "sync: pulled CI evidence bundle (%d files) — accepted at commit %s, %d commit(s) back from %s, into %s\n",
+		// distance is the accepted commit's index in gitx.Log's own walk
+		// order (ADJ-41 fix 2, disclosure only): dc-1 blesses gitx.Log as
+		// the enumeration primitive, and across parallel branches of a
+		// merged history that order is committer-date order, not graph
+		// distance — so name it "in log order" rather than let the count
+		// read as a graph-distance a user would verify against first-parent
+		// intuition. No walk-semantics change.
+		fmt.Fprintf(deps.Stdout, "sync: pulled CI evidence bundle (%d files) — accepted at commit %s, %d commit(s) back in log order from %s, into %s\n",
 			len(tree), acceptedCommit, distance, commit, derivedRoot)
 		return evaluateTree(deps, tree)
 
