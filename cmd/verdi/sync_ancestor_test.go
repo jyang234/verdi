@@ -288,3 +288,75 @@ func TestRunSync_Ancestor_NoBundleAnywhere_RefusesNamingRange(t *testing.T) {
 		}
 	}
 }
+
+// TestRunSync_OrRegen_UnwalkableHistory_DisclosesWalkNeverRan proves fix 1
+// (ADJ-37): when the commit itself carries no bundle AND its further
+// ancestry cannot even be enumerated (here buildTestStore's root is not a
+// git repository, so gitx.Log fails), the ancestor walk never ran — that
+// is NOT the same evidence as a genuine no-bundle miss. Under --or-regen,
+// sync must DISCLOSE that the walk never ran (and why) BEFORE regenerating
+// locally, never silently treating an unwalkable history as absence-
+// evidence. Regeneration still proceeds afterward (disclose, then fall
+// back).
+func TestRunSync_OrRegen_UnwalkableHistory_DisclosesWalkNeverRan(t *testing.T) {
+	root := buildTestStore(t) // a store, but NOT a git repo → gitx.Log fails
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{
+		Runner: seedRunner(t, root),
+		Forge:  fake.New(), // unseeded → ErrNoBundle at the commit itself
+		GoTest: fakeGoTest{output: []byte(svcfixGoTestJSON)},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	code := runSync(context.Background(), root, testRef, testCommit, true /*orRegen*/, false, false, deps)
+	if code != 0 {
+		t.Fatalf("runSync(--or-regen, unwalkable history) exit = %d, want 0 (regeneration still proceeds after disclosure); stderr=%s", code, stderr.String())
+	}
+
+	gotErr := stderr.String()
+	if !strings.Contains(gotErr, "the nearest-ancestor bundle walk never ran") {
+		t.Errorf("stderr = %q, want an explicit disclosure that the nearest-ancestor bundle walk never ran (ADJ-37 fix 1)", gotErr)
+	}
+	// The disclosure must also carry WHY — the enumeration failure the walk
+	// hit (the wrapped cause), not a bare, contextless caveat.
+	if !strings.Contains(gotErr, "could not be walked") {
+		t.Errorf("stderr = %q, want the disclosure to name the enumeration failure (the why)", gotErr)
+	}
+	if !strings.Contains(stdout.String(), "regenerated evidence bundle locally") {
+		t.Errorf("stdout = %q, want regeneration to still proceed after the disclosure", stdout.String())
+	}
+}
+
+// TestRunSync_NoOrRegen_UnwalkableHistory_StaysByteIdentical regression-
+// pins fix 1's other half: the fix touches ONLY the --or-regen branch. The
+// no---or-regen path over the very same unwalkable history stays exactly as
+// today — an exit-2 operational refusal that discloses the enumeration
+// failure and points at --or-regen — and must NOT gain the new
+// walk-never-ran disclosure line the --or-regen branch prints (that line
+// belongs only where sync is about to fall back regardless).
+func TestRunSync_NoOrRegen_UnwalkableHistory_StaysByteIdentical(t *testing.T) {
+	root := buildTestStore(t) // not a git repo → gitx.Log fails, same as above
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{
+		Runner: seedRunner(t, root),
+		Forge:  fake.New(), // unseeded → ErrNoBundle at the commit itself
+		GoTest: fakeGoTest{output: []byte(svcfixGoTestJSON)},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	code := runSync(context.Background(), root, testRef, testCommit, false /*orRegen*/, false, false, deps)
+	if code != 2 {
+		t.Fatalf("runSync(no --or-regen, unwalkable history) exit = %d, want 2; stderr=%s", code, stderr.String())
+	}
+	gotErr := stderr.String()
+	for _, want := range []string{"could not be walked", "pass --or-regen"} {
+		if !strings.Contains(gotErr, want) {
+			t.Errorf("stderr = %q, want the unchanged no---or-regen refusal to contain %q", gotErr, want)
+		}
+	}
+	if strings.Contains(gotErr, "walk never ran") {
+		t.Errorf("stderr = %q, must NOT carry the --or-regen-only walk-never-ran disclosure on the no---or-regen path", gotErr)
+	}
+}

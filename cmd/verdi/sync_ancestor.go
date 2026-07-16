@@ -66,10 +66,13 @@ func candidateAncestorCommits(ctx context.Context, root, commit string) ([]strin
 // If commit's further ancestry cannot even be enumerated (root's git
 // history for commit cannot be read — e.g. a non-git root, or a commit
 // unresolvable in it), that is disclosed alongside the commit-itself miss
-// in the returned error, wrapping the SAME forge.ErrNoBundle the
-// commit-itself attempt already produced: never a different error class
-// invented, and never a claim that a deeper walk happened when it
-// structurally could not.
+// in the returned error, which wraps the SAME forge.ErrNoBundle the
+// commit-itself attempt already produced (so every no-bundle route stays
+// byte-identical to a genuine miss) AND carries errAncestryUnwalkable so a
+// caller can tell "the walk never ran" apart from "the walk ran and found
+// nothing" — never a different error class that would derail the no-bundle
+// routing, and never a claim that a deeper walk happened when it
+// structurally could not (ADJ-37 fix 1).
 func fetchAncestorBundle(ctx context.Context, root string, f forge.Forge, ref, commit string) (tree forge.DerivedTree, acceptedCommit string, distance int, err error) {
 	tree, headErr := f.FetchEvidenceBundle(ctx, ref, commit)
 	if headErr == nil {
@@ -81,7 +84,7 @@ func fetchAncestorBundle(ctx context.Context, root string, f forge.Forge, ref, c
 
 	rest, logErr := candidateAncestorCommits(ctx, root, commit)
 	if logErr != nil {
-		return nil, "", 0, fmt.Errorf("no evidence bundle for commit %s, and its further ancestor history could not be walked (%v): %w", commit, logErr, headErr)
+		return nil, "", 0, &unwalkableAncestryError{commit: commit, cause: logErr, noBundle: headErr}
 	}
 
 	// rest[0] is commit itself (candidateAncestorCommits/gitx.Log's own
@@ -108,3 +111,42 @@ func fetchAncestorBundle(ctx context.Context, root string, f forge.Forge, ref, c
 	}
 	return nil, "", 0, fmt.Errorf("no evidence bundle found for ref %q anywhere in %d commit(s) walked (%s..%s): %w", ref, len(rest), oldest, commit, lastErr)
 }
+
+// errAncestryUnwalkable marks the one no-bundle-shaped failure where commit
+// itself carried no bundle AND its further ancestry could not even be
+// enumerated (gitx.Log failed), so the nearest-ancestor walk never ran past
+// the commit itself. It is the distinguishable signal runSync's --or-regen
+// branch matches (via errors.Is) to disclose that the walk never ran — and
+// why — before falling back to local regeneration: an unwalkable history is
+// not the same evidence as a walked-and-exhausted miss, and must not
+// silently masquerade as one (dc-1's posture: only a genuine no-bundle
+// result is a clean fallback signal; ADJ-37 fix 1).
+var errAncestryUnwalkable = errors.New("sync: ancestor history could not be enumerated, so the walk never ran")
+
+// unwalkableAncestryError is fetchAncestorBundle's return for that case. Its
+// Error() text is byte-for-byte the plain wrapped form the no-bundle refusal
+// already printed, so the no---or-regen path is unchanged; its Unwrap()
+// keeps forge.ErrNoBundle in the chain (so errors.Is(err, forge.ErrNoBundle)
+// still routes every no-bundle branch identically) and exposes the
+// enumeration cause; its Is() additionally reports errAncestryUnwalkable so
+// the --or-regen branch alone can single this case out for disclosure. This
+// custom type (rather than a second fmt.Errorf shape) is what lets the fix
+// add a distinguishable marker WITHOUT changing the message any existing
+// path already prints.
+type unwalkableAncestryError struct {
+	commit   string
+	cause    error // the gitx.Log enumeration failure (the "why")
+	noBundle error // the commit-itself miss, wrapping forge.ErrNoBundle
+}
+
+func (e *unwalkableAncestryError) Error() string {
+	return fmt.Sprintf("no evidence bundle for commit %s, and its further ancestor history could not be walked (%v): %v", e.commit, e.cause, e.noBundle)
+}
+
+// Unwrap returns both wrapped errors so errors.Is reaches forge.ErrNoBundle
+// (through noBundle) and the enumeration cause alike.
+func (e *unwalkableAncestryError) Unwrap() []error { return []error{e.noBundle, e.cause} }
+
+// Is reports the distinguishing sentinel; forge.ErrNoBundle is matched
+// through Unwrap, not here.
+func (e *unwalkableAncestryError) Is(target error) bool { return target == errAncestryUnwalkable }

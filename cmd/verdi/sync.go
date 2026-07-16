@@ -226,6 +226,15 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 		return evaluateTree(deps, tree)
 
 	case errors.Is(err, forge.ErrNoBundle) && orRegen:
+		// ADJ-37 fix 1: an ancestry-enumeration failure reaches here
+		// wrapped as no-bundle-shaped (so the routing is unchanged), but it
+		// is NOT absence-evidence — the nearest-ancestor walk never ran, so
+		// a bundle at a real ancestor may exist and was never consulted.
+		// Disclose that (and why) before regenerating, rather than letting
+		// --or-regen silently treat an unwalkable history as a genuine miss.
+		if errors.Is(err, errAncestryUnwalkable) {
+			fmt.Fprintf(deps.Stderr, "sync: %v — the nearest-ancestor bundle walk never ran, so --or-regen is regenerating locally without having consulted any ancestor's bundle (one may exist at a real ancestor this run never reached)\n", err)
+		}
 		if err := os.MkdirAll(derivedDir, 0o755); err != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", err)
 			return 2
