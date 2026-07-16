@@ -4,7 +4,7 @@ kind: spec
 title: "Attest Helper"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-29
 problem: { text: "attest-helper is the mechanical half of spec/closure-ergonomics ac-2: today an operator authors an attestation entirely by hand — inventing the path, inventing the slug, inventing the frontmatter — and one wrong slug (the story-ref RefSlug, not the spec name; D6-16/D6-18's own witness, corrected once already in 08-revision-notes.md's round-6 entry) silently folds as `absent`, indistinguishable from never having attested at all. There is also no tooling boundary today preventing a future helper from fabricating the claim itself, which dc-2 of the parent feature forbids outright: verdi may write structure, never the human's word.", anchor: problem }
 outcome: { text: "a new top-level verb, `verdi attest <story-ref> <ac-id>`, scaffolds a correctly-slugged, correctly-placed attestation skeleton — frontmatter, a `verifies` edge, and an explicit, machine-checkable unauthored marker in place of a claim — and refuses outright rather than overwrite an existing human record or scaffold a nonexistent (story, AC) pair. A companion lint rule (VL-022, the next free rule number this story's own research found) makes a misfiled attestation a named, witness-carrying refusal instead of a silent fold-time `absent`. The scaffold is provably not-yet-evidence: the fold treats an unauthored scaffold exactly as it treats a missing file, until the operator replaces the marker with their own claim.", anchor: outcome }
@@ -25,6 +25,7 @@ constraints:
   - { id: co-1, text: "no network in any test: every test this story adds is hermetic — fixturegit-backed for the verb, in-package Snapshot fixtures for the lint rule — mirroring the existing test harnesses these packages already use", anchor: co-1 }
   - { id: co-2, text: "exit discipline (0 clean / 1 verdict / 2 operational, dc-5's exact mapping) and mutation scope: the verb writes exactly one file to the working tree and commits nothing; it never touches any other file, git ref, or index entry", anchor: co-2 }
   - { id: co-3, text: "cross-story seam boundary, disclosed rather than assumed away: this story's deliverable is the SIGNAL (the three-way attestation state), not any disclosure wording. The sibling close-preflight story is the surface that renders 'scaffolded but unauthored' to an operator; this story guarantees only that the signal exists, is correct, and is exported for that story to consume", anchor: co-3 }
+frozen: { at: 2026-07-16, commit: e606a109dbc28ea08cc86265c4fa2dd026f8373a, stub_matched: true }
 ---
 # Attest Helper
 
