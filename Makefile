@@ -181,31 +181,18 @@ lint-showcase:
 #     of scripts/require-pass.sh itself (feeds it a transcript missing a required
 #     PASS line, asserts exit 1) — the guard's own outermost layer, tested.
 #
-# TASK 4.2 WIRE-UP (README freshness, DC-3): the sibling public-readme story
-# adds a README-freshness gate. Folding it into this target is a DELIBERATE,
-# TWO-STEP change — NOT a silent auto-detect:
-#   (a) add TestReadmeExamplesFresh to internal/showcasealign/readme_test.go
-#       (the plan pins that test to THIS package, which is why the `-run`
-#       pattern below already names it — a test placed there is selected and
-#       run with no further change to the pattern); AND
-#   (b) append TestReadmeExamplesFresh to the `required` list below, so this
-#       guard then hard-demands its `--- PASS:` line.
-# Both steps are mandatory. (a) alone already enforces the test's VERDICT: the
-# `-run` pattern below already names TestReadmeExamplesFresh, so once it exists
-# in this package it is selected and run, and a FAILING run makes `go test` exit
-# non-zero — which the status check below turns into a hard target failure with
-# no `required`-list edit at all. What step (b) adds is narrower and worth
-# stating precisely: it guards against the readme test being DELETED, RENAMED,
-# or SKIPPED — the same vacuous-`-run` class the rest of this guard addresses (a
-# `-run` that matches nothing still exits 0) — NOT verdict enforcement, which
-# (a) already provides. (b) without (a) fails this guard LOUDLY (the named test
-# never ran) instead of passing vacuously. An earlier revision auto-
-# promoted the readme test the instant a `=== RUN TestReadmeExamplesFresh`
-# line appeared in THIS package's own `-v` output — that silently assumed 4.2
-# would place the test here, and would never fire (a permanent, silent gap)
-# if 4.2 landed it in another package. Requiring the explicit `required`-list
-# edit removes that package assumption: the gate is wired on by hand, where
-# the next author is looking, not by a fragile pattern match.
+# README freshness (DC-3) — WIRED, both steps landed: TestReadmeExamplesFresh
+# exists in internal/showcasealign/readme_test.go (sibling public-readme story,
+# 059915a) and is named in SHOWCASE_REQUIRED_TESTS above, so `make
+# showcase-coverage` both selects it (the `-run` pattern names it) and
+# hard-demands its `--- PASS:` line. DC-3's disclosed "passes vacuously until
+# that sibling lands it" is therefore resolved. The wiring was DELIBERATELY
+# two-step, not a silent auto-detect, and that discipline still governs the next
+# such gate: (a) the `-run` pattern selecting a test only enforces its VERDICT (a
+# failing run exits non-zero); (b) naming it in SHOWCASE_REQUIRED_TESTS is what
+# guards against the test being DELETED, RENAMED, or SKIPPED (the vacuous-`-run`
+# class, a `-run` matching nothing still exits 0) — so a new gate earns BOTH, by
+# hand, where the next author is looking, never a fragile output pattern match.
 #
 # The PASS-line predicate now lives in scripts/require-pass.sh so it is a tested
 # unit (TestShowcaseCoverage_GuardScriptBites), not an un-exercised inline
