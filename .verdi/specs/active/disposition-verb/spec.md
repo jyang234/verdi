@@ -4,7 +4,7 @@ kind: spec
 title: "Disposition Verb"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-30
 problem: { text: "recording a reviewer's decision on a deviation-report finding has no verb: every round-6 disposition (D6-25) was a hand-edit of deviation-report.md's frontmatter, typing a disposition and note into the findings: block directly, with no validation before the write, no refusal for an unknown or already-dispositioned finding, no protection against editing an already-frozen report, and no guarantee the finding's rendered line in the report's own markdown body stays in agreement with what the frontmatter now says. The disposition layer this story binds to (spec/closure-ergonomics dc-4) is deliberately kept outside the report's integrity digest so that recording a decision can never invalidate it — but nothing today makes that property, or any of the others a verb would give for free, true by construction rather than by care.", anchor: problem }
 outcome: { text: "a new verdi disposition verb records a reviewer's decision (the finding, the decision, and the rationale) into a deviation report's living disposition layer, in place, leaving its digest and integrity untouched and independently reverifiable; keeps the report's human-legible body in agreement with what it just wrote; refuses, as named verdicts, every unsafe request (an unknown finding, a re-disposition without an explicit --amend, any write to an already-frozen report); and survives verdi align --freeze byte-for-byte through the already-landed FreezeInPlace path (PR #99) and its D6-24 keep-genuine guard (PR #101). The previously de-facto hand-edit flow is retired from architecture-and-journeys.md's closure-ritual narrative: after this story, that document names verdi disposition as the only sanctioned way to record one.", anchor: outcome }
@@ -25,6 +25,7 @@ constraints:
   - { id: co-1, text: "No network in any test (feature co-1): the verb is exercised entirely on fixture deviation-report.md files and fixturegit repos; no real judge, no real forge, no real upstream toolchain exec.", anchor: co-1 }
   - { id: co-2, text: "The verb never recomputes or rewrites digest:, integrity:, or judge_integrity:; it is not a producer of computed or judged content, align.ComputeDigest and the judge integrity hash are never invoked by this verb, it only ever narrows a write to the fields ac-1 names. This is the mechanical reason ac-1's digest-validity property holds, and it is the same discipline align.FreezeInPlace already applies to the same struct for the same reason.", anchor: co-2 }
   - { id: co-3, text: "A frozen deviation-report.md is immutable to every verb converging on it, this one included. No flag, including --amend, ever overrides ac-2's frozen-report refusal; the only way to change a frozen report is the one that already exists, there is none, freezing is terminal, per align.FreezeInPlace's own doc comment: a frozen report is immutable.", anchor: co-3 }
+frozen: { at: 2026-07-16, commit: d2ecf50f0e6f8a3163692abce22fe55de7adf3c2, stub_matched: true }
 ---
 # Disposition Verb
 
