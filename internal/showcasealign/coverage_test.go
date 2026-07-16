@@ -433,17 +433,17 @@ type coverageResult struct {
 // a test itself: it reports, and the caller decides which slices are errors
 // (all three of missing/extra/markerMismatches) and which is a disclosure.
 //
-// e2ePresent scopes the disclosure PRECISELY. Go-backed evidence (a repo .go
-// file marked examples/showcase) is ALWAYS checked, so a broken cli:/mcp:
-// mapping is caught even from an e2e-less checkout. Playwright evidence (a spec
-// under e2e/tests/) is checkable only when that dir is present; when it is
-// absent such evidence is routed into disclosedPlaywright, and wb: inventory
-// keys are exempt from `extra` (the workbench axis is deliberately not
-// enumerated in that path). Note this means Playwright-backed evidence is
-// disclosed regardless of which axis names it: the workbench axis, and the one
-// cross-axis exception cli:serve, are BOTH disclosed-unproven when e2e/tests is
-// absent — the CLI axis is therefore not "fully" enforced in that path, only
-// its Go-backed verbs are.
+// e2ePresent scopes only the EVIDENCE disclosure, never the enumeration or the
+// stale check. The missing and stale directions run unconditionally on every
+// axis (the caller always enumerates all three), so an unmapped capability and a
+// stale mapping are named even from an e2e-less checkout. Go-backed evidence (a
+// repo .go file marked examples/showcase) is ALWAYS checked, so a broken
+// cli:/mcp: mapping is caught there too. Only Playwright evidence (a spec under
+// e2e/tests/) is checkable solely when that dir is present; when it is absent
+// that evidence is routed into disclosedPlaywright — the workbench axis and the
+// one cross-axis exception cli:serve are BOTH disclosed-unproven for their
+// MARKERS while remaining enumerated and mapping-checked, so no capability is
+// silently dropped.
 func computeCoverageGaps(capabilities map[string]bool, inventory map[string][]coverageEvidence, repoRoot string, e2ePresent bool) coverageResult {
 	var res coverageResult
 
@@ -455,16 +455,16 @@ func computeCoverageGaps(capabilities map[string]bool, inventory map[string][]co
 	}
 	sort.Strings(res.missing)
 
-	// Stale direction: every mapped key must name an enumerated capability. A
-	// wb: entry when e2e/tests is absent is disclosed-unproven (its axis was
-	// deliberately not enumerated), NOT stale — so exempt it; any cli:/mcp: key
-	// that names no enumerated capability is still a hard gap, so a stale or
-	// renamed Go-axis mapping cannot hide behind an absent dir.
+	// Stale direction: every mapped key must name an enumerated capability —
+	// unconditionally, on every axis. All three axes are always enumerated
+	// (realCapabilities), so a mapped key naming no enumerated capability is a
+	// stale/renamed entry regardless of checkout shape: a wb: (or cli:/mcp:) key
+	// that names nothing real is a hard gap even from an e2e-less checkout. The
+	// evidence CHECK for a Playwright-backed key is disclosed below when e2e/tests
+	// is absent, but its STALENESS is not — a stale mapping cannot hide behind an
+	// absent dir.
 	for cap := range inventory {
 		if capabilities[cap] {
-			continue
-		}
-		if !e2ePresent && strings.HasPrefix(cap, "wb:") {
 			continue
 		}
 		res.extra = append(res.extra, cap)
@@ -529,14 +529,19 @@ func e2eTestsPresent() bool {
 // realCapabilities enumerates every shipped capability along all three axes
 // from their REAL sources — cliVerbs' go/parser walk of dispatch.go's verbPhase
 // literal, mcpTools' live tools/list against internal/mcpserve, and the
-// hand-listed workbenchSurfaces — exactly as the green gate consumes them. The
-// workbench axis is Playwright-only, so it is enumerated only when e2e/tests is
-// present; otherwise its keys would be spuriously flagged stale and its gaps
-// could not be proven either way, so it is disclosed-unproven and left OUT of
-// the set rather than silently treated as covered. Shared by TestShowcaseCoverage
-// (the green gate) and TestShowcaseCoverage_RealEnumerationDetectsGaps (the red
-// proof), so both bind to one enumeration, not two divergent copies.
-func realCapabilities(t *testing.T, e2ePresent bool) map[string]bool {
+// hand-listed workbenchSurfaces — exactly as the green gate consumes them. All
+// three axes are ALWAYS enumerated, independent of checkout shape: workbench
+// keys are a committed literal, not derived from e2e/tests, so enumerating them
+// needs no Playwright specs. What depends on e2e/tests is only the EVIDENCE
+// check for Playwright-backed capabilities (the workbench axis and cli:serve),
+// which computeCoverageGaps discloses as unproven when e2e/tests is absent — the
+// capabilities stay enumerated and their showcaseCoverage mappings verified, so
+// an unmapped workbench surface is a NAMED gap even from an e2e-less checkout,
+// never silently dropped (the exact narrowing this always-enumerate shape rules
+// out). Shared by TestShowcaseCoverage (the green gate) and
+// TestShowcaseCoverage_RealEnumerationDetectsGaps (the red proof), so both bind
+// to one enumeration, not two divergent copies.
+func realCapabilities(t *testing.T) map[string]bool {
 	t.Helper()
 	capabilities := map[string]bool{}
 	for _, v := range cliVerbs(t) {
@@ -545,10 +550,8 @@ func realCapabilities(t *testing.T, e2ePresent bool) map[string]bool {
 	for _, tool := range mcpTools(t) {
 		capabilities["mcp:"+tool] = true
 	}
-	if e2ePresent {
-		for _, s := range workbenchSurfaces {
-			capabilities["wb:"+s] = true
-		}
+	for _, s := range workbenchSurfaces {
+		capabilities["wb:"+s] = true
 	}
 	return capabilities
 }
@@ -557,38 +560,36 @@ func realCapabilities(t *testing.T, e2ePresent bool) map[string]bool {
 // file's package-level doc comment for the full rationale. It is GREEN as of
 // Task 3.4 (every enumerated capability mapped and every mapped file matching
 // its marker); a regression here means a real capability lost its showcase
-// backing, not a defect in this test. When e2e/tests is absent it still fully
-// enforces every Go-backed (examples/showcase) CLI and MCP evidence file —
-// every MCP tool and every CLI verb except cli:serve — and discloses as
-// unproven only what genuinely depends on Playwright: the workbench axis plus
-// the lone cross-axis Playwright-backed CLI evidence, cli:serve (never a silent
-// pass). It deliberately does NOT claim the CLI axis is fully enforced in that
-// path: cli:serve's sole evidence is a Playwright spec, so that one verb is
-// disclosed-unproven exactly like the workbench axis.
+// backing, not a defect in this test. All three axes are ALWAYS enumerated and
+// their showcaseCoverage mappings verified; when e2e/tests is absent it still
+// fully enforces every Go-backed (examples/showcase) CLI and MCP evidence file
+// and discloses as unproven only the Playwright-backed evidence MARKERS it
+// cannot read — the workbench specs and cli:serve's — never omitting those
+// capabilities from the enumerated set, so an unmapped surface is still a named
+// gap from an e2e-less checkout. Three-valued honesty: the capabilities are
+// checked, only their Playwright evidence files are disclosed, never a silent
+// pass.
 func TestShowcaseCoverage(t *testing.T) {
 	// The MCP axis and all-but-one of the CLI axis are backed by Go test files
-	// in this repo (marker examples/showcase); the workbench axis and the lone
-	// cross-axis exception cli:serve (a Playwright spec — the HTTP server every
-	// spec runs against) live under e2e/tests/. So a checkout missing e2e/tests
-	// can — and MUST — still fully enforce every Go-backed evidence file (every
-	// MCP tool, and every CLI verb except cli:serve); only the genuinely
-	// Playwright-dependent checks — the workbench axis and cli:serve — are
-	// disclosed-as-unproven, never claimed enforced. Three-valued honesty: a
-	// loud t.Log, never a silent pass, and never suppressing a real gap in the
-	// Go-backed evidence. The pre-fix behavior — a blanket t.Skip on a missing
-	// e2e/tests, taken BEFORE the CLI/MCP axes were even computed — disabled ALL
-	// THREE axes, far wider than the disclosure text claimed; that over-broad
-	// skip was the defect. The residual precision fix is to stop calling the CLI
-	// axis "fully" enforced in this path when cli:serve is disclosed, not checked.
+	// (marker examples/showcase); the workbench axis and the lone cross-axis
+	// exception cli:serve (a Playwright spec — the HTTP server every spec runs
+	// against) are backed by specs under e2e/tests/. All three axes are
+	// enumerated here UNCONDITIONALLY: a checkout missing e2e/tests still
+	// enumerates and mapping-checks every capability and fully enforces every
+	// Go-backed evidence file — only the Playwright-backed evidence MARKERS (the
+	// workbench specs and cli:serve) are disclosed-as-unproven, never a silent
+	// pass and never a dropped capability. A prior shape dropped the entire
+	// workbench axis from enumeration when e2e/tests was absent, silently
+	// narrowing the checked set to ~half the capabilities on a green run; that
+	// narrowing is the defect this always-enumerate shape fixes.
 	e2ePresent := e2eTestsPresent()
 	if !e2ePresent {
-		t.Logf("DISCLOSURE: e2e/tests is absent; the workbench axis and every Playwright-backed evidence marker — including cli:serve, whose sole evidence is a Playwright spec — are DISCLOSED-AS-UNPROVEN from this checkout. Every Go-backed (examples/showcase) CLI and MCP evidence file is still fully enforced below: that is every MCP tool and every CLI verb except cli:serve, NOT the CLI axis in full.")
+		t.Logf("DISCLOSURE: e2e/tests is absent; the workbench axis and cli:serve are STILL enumerated and their showcaseCoverage mappings verified, but their Playwright-backed evidence MARKERS cannot be read from this checkout and are DISCLOSED-AS-UNPROVEN (never a silent pass). Every Go-backed (examples/showcase) CLI and MCP evidence file is fully enforced below.")
 	}
 
-	// realCapabilities runs the same three-axis enumeration the red-direction
-	// proof (TestShowcaseCoverage_RealEnumerationDetectsGaps) drives, so the
-	// green gate and the red proof bind to ONE enumeration, not two.
-	capabilities := realCapabilities(t, e2ePresent)
+	// realCapabilities enumerates all three axes (the same set the red-direction
+	// proof drives), independent of checkout shape — one enumeration, not two.
+	capabilities := realCapabilities(t)
 
 	// The pure check does all three directions (gap, stale, marker) and the
 	// disclosure scoping; this test only enumerates the real capabilities,
@@ -704,11 +705,30 @@ func detectsGapsCases() []detectsGapsCase {
 			wantDisclose: []string{"cli:serve"},
 		},
 		{
-			name:         "e2e-absent: wb: key is exempt from stale and its Playwright evidence disclosed",
+			// With all axes always enumerated, a wb: inventory key naming no
+			// enumerated surface is STALE even from an e2e-less checkout (no
+			// exemption): its staleness is a hard gap, while its Playwright
+			// evidence marker — unreadable without e2e/tests — is separately
+			// disclosed. Proves the two directions are independent.
+			name:         "e2e-absent: an unenumerated wb: key is flagged stale AND its Playwright evidence disclosed",
 			caps:         map[string]bool{"cli:real": true},
 			inv:          map[string][]coverageEvidence{"cli:real": {good}, "wb:board": {playwright("10-board-projection.spec.ts")}},
 			e2ePresent:   false,
+			wantExtra:    []string{"wb:board"},
 			wantDisclose: []string{"wb:board"},
+		},
+		{
+			// The improvement made executable: with the workbench axis always
+			// enumerated, a wb capability with NO showcaseCoverage mapping is a
+			// NAMED missing gap even from an e2e-less checkout — the ~half-the-
+			// capabilities-unchecked narrowing the old drop-when-absent shape
+			// allowed is gone (the enumeration is complete regardless of checkout
+			// shape; only Playwright evidence markers are disclosed).
+			name:        "e2e-absent: an unmapped wb capability is STILL named missing (axis not dropped)",
+			caps:        map[string]bool{"wb:board": true, "cli:real": true},
+			inv:         map[string][]coverageEvidence{"cli:real": {good}},
+			e2ePresent:  false,
+			wantMissing: []string{"wb:board"},
 		},
 		{
 			// The ENFORCEMENT half of the e2e-absent disclosure contract (the
@@ -841,7 +861,7 @@ func TestShowcaseCoverage_DetectsGapsCoversAllClasses(t *testing.T) {
 	// Floor: any single row deletion drops below this, a backstop against bulk
 	// trimming that happens to preserve one-of-each-class. Raise it deliberately
 	// when adding cases; a drop is a conscious edit, never a silent one.
-	const floor = 10
+	const floor = 11
 	if len(cases) < floor {
 		t.Fatalf("detectsGapsCases has %d case(s), want >= %d — rows were deleted; the RED proof must exercise every gap class", len(cases), floor)
 	}
@@ -970,7 +990,7 @@ func assertExactlyMissing(t *testing.T, res coverageResult, want string) {
 // capability's mapping is removed OR a new capability is added without one").
 func TestShowcaseCoverage_RealEnumerationDetectsGaps(t *testing.T) {
 	e2ePresent := e2eTestsPresent()
-	caps := realCapabilities(t, e2ePresent)
+	caps := realCapabilities(t)
 
 	// Key the proof on real, Go-backed capabilities (checked in every checkout,
 	// e2e/tests present or not). The guard makes a rename fail this proof LOUDLY
