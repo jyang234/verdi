@@ -6,7 +6,7 @@ owners: [platform-team]
 for_kind: behavioral
 links:
   - { type: verifies, ref: "spec/close-preflight" }
-frozen: { at: 2026-07-16, commit: 20b0525430727bbeb168bb1a0cb5d0593f40a70d }
+frozen: { at: 2026-07-16, commit: 796a2b9447959162cff33dee48a1b5edf05c0eab }
 ---
 # A Go test proves --preflight names the exact condition, evidence kind, and path close would refuse on, for both story and feature scope
 
@@ -39,3 +39,12 @@ not evidenced (including an unmet outcome-floor attestation at the
 FeatureSlug path, dc-6, not the story-slug path), an unreconciled stub, and
 an implementing story still open — each asserting the same exact-path/
 exact-condition disclosure discipline as the story-scope file.
+
+`cmd/verdi/closepreflight_test.go` must also cover ac-1's added
+CI-guard-disclosure clause (dc-1, closing this story's own judged-dcj-2):
+a ready fixture run with no CI environment variables set and no
+`--force-local` prints the CI-only/`--force-local` guard's own condition
+text alongside its ready verdict; the same ready fixture run with a CI
+environment simulated (or with `--force-local`) does NOT print that line —
+proving the disclosure is conditional on the real guard's own inputs, not
+unconditionally appended.
