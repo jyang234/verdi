@@ -124,6 +124,18 @@ test("the glance groups every fixture entry into its correct bucket, badged and 
       `/board/spec/${name}`,
     );
   }
+  // ...and each default-branch entry's TITLE anchor (the first link in the
+  // card, writeGlanceDefaultEntry) carries its /a/spec/<name> corpus href —
+  // ac-1's "title, linked exactly as its source already links it today"
+  // register, proven in the browser per ac-1's declared Playwright evidence
+  // shape ("asserts ... link targets"), not only by the Go unit test
+  // TestGlanceLinks_MirrorDirectoryExactly (Controller adjudication ADJ-44,
+  // 2026-07-16). The .first() locator pins the title specifically: a card
+  // that stopped emitting the corpus link would fail this href assertion,
+  // never fall through to the board anchor (/board/spec/<name>).
+  for (const name of [ACCEPTED_SPEC, ACTIVE_SPEC, TERMINAL_SPEC, EDGE.DIR_CLOSED_AWAITING_ARCHIVE]) {
+    await expect(glanceEntry(page, name).locator("a").first()).toHaveAttribute("href", `/a/spec/${name}`);
+  }
   // ...and the /b/<branch-escaped>/ grammar for design-branch drafts — the
   // entry's title IS its one link (dc-3), no separate board anchor.
   for (const name of [SHOWCASE.DESIGN_SPEC, SHOWCASE.DIR_LOCAL_DRAFT, SHOWCASE.DIR_REMOTE_DRAFT]) {
