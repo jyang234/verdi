@@ -4,7 +4,7 @@ kind: spec
 title: "Closure Ergonomics"
 owners: [platform-team]
 class: feature
-status: draft
+status: accepted-pending-build
 problem: { text: "closing a story is the most manual, error-prone stretch of the lifecycle, and every unit of that weight is accidental, not essential. The operator hand-edits `verdi.bindings.yaml`, hand-authors attestation markdown at exact slugged paths where one wrong slug silently folds as `absent` (D6-16/D6-18), exports CI-only env vars to make `verdi sync` resolve the forge repo in a local checkout (D6-14), fights sync's HEAD-exact bundle demand though the fold's own rule is ancestor-based (D6-32), and records review dispositions by hand-editing deviation reports because no verb exists (D6-25). Round 6 closed seventeen specs this way; real usage reports the loop 'really heavy and feels unnecessary.' The closure GATE is sound — the round proved it load-bearing — but a failed close is routinely the FIRST disclosure of what was missing, and the artifacts the gate demands are the least tool-assisted in the system.", anchor: "#problem" }
 outcome: { text: "an operator takes a built story from merged to closed through guided, honest tooling: a non-mutating preflight disclosing every unmet closure condition with the exact artifact and path needed, so close's refusal is never the first disclosure; an attestation helper that scaffolds the correctly-slugged, correctly-placed skeleton while the human authors every word of the claim; a disposition verb so recording a reviewer's decision is a command, not a hand-edit of a report; and a `verdi sync` that works in a plain local checkout — forge repo derived from the git origin, bundle resolution honoring the fold's own ancestor rule. Closure-gate semantics are byte-for-byte unchanged: no condition weakened, no new pass path — the weight removed is only the accidental kind.", anchor: "#outcome" }
 acceptance_criteria:
@@ -27,6 +27,7 @@ stubs:
   - { slug: attest-helper, acceptance_criteria: [ac-2] }
   - { slug: disposition-verb, acceptance_criteria: [ac-3] }
   - { slug: sync-local-flow, acceptance_criteria: [ac-4] }
+frozen: { at: 2026-07-16, commit: 865c51ac0163198d98c4690caaff0b85dd5e0cf1 }
 ---
 # Closure Ergonomics
 
