@@ -158,7 +158,7 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 	}
 	reportPath := filepath.Join(root, ".verdi", "specs", "active", specRef.Name, "deviation-report.md")
 
-	existingReport, err := loadExistingReport(reportPath)
+	existingReport, existingBody, err := loadExistingReport(reportPath)
 	if err != nil {
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
@@ -192,8 +192,36 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 			fmt.Fprintln(stderr, "align: internal error: commit date too short to derive frozen.at")
 			return 2
 		}
+		frozenAt := at[:10]
+
+		// Freeze-in-place — the faithful freeze `verdi close` needs. When a
+		// living report already covers this exact freeze commit and every
+		// finding is dispositioned (the fresh, fully-dispositioned state the
+		// merge gate required before merge, 03 §Gates condition 3), stamp it
+		// VERBATIM (align.FreezeInPlace) rather than regenerating. Regenerating
+		// re-runs the non-reproducible judge (03 §Alignment report), whose fresh
+		// content-hash finding identities PreserveDispositions cannot match —
+		// silently erasing every human disposition (the D6-21-exposed bug).
+		// Any other state — no living report, stale covers, or an
+		// undispositioned finding — falls through to the regenerate path below,
+		// unchanged.
+		if existingReport != nil && existingReport.Covers == covers && artifact.AllDispositioned(existingReport.Findings) {
+			report, err := align.FreezeInPlace(existingReport, string(existingBody), frozenAt)
+			if err != nil {
+				fmt.Fprintln(stderr, "align:", err)
+				return 2
+			}
+			if err := os.WriteFile(reportPath, report.Markdown, 0o644); err != nil {
+				fmt.Fprintln(stderr, "align:", err)
+				return 2
+			}
+			fmt.Fprintf(stdout, "align: froze %s in place (covers %s, %d findings, dispositions preserved)\n", reportPath, report.Frontmatter.Covers, len(report.Frontmatter.Findings))
+			fmt.Fprintf(stdout, "align: frozen at %s\n", report.Frontmatter.Frozen.At)
+			return 0
+		}
+
 		in.Freeze = true
-		in.FrozenAt = at[:10]
+		in.FrozenAt = frozenAt
 	}
 
 	report, err := align.Generate(ctx, in)
@@ -219,26 +247,28 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 	return 0
 }
 
-// loadExistingReport reads and strict-decodes a prior deviation-report.md,
-// if one exists — (nil, nil) for a first run (no file yet). A file that
-// exists but fails to decode is a real, surfaced error (CLAUDE.md: "silence
-// is never a pass" — a broken report on disk must never be treated as "no
-// report").
-func loadExistingReport(path string) (*artifact.DeviationFrontmatter, error) {
+// loadExistingReport reads and strict-decodes a prior deviation-report.md, if
+// one exists — (nil, nil, nil) for a first run (no file yet). It returns the
+// decoded frontmatter AND the raw body bytes: the freeze-in-place path
+// (align.FreezeInPlace) reattaches the body verbatim, so a faithful freeze must
+// keep it byte-for-byte rather than re-render it. A file that exists but fails
+// to decode is a real, surfaced error (CLAUDE.md: "silence is never a pass" — a
+// broken report on disk must never be treated as "no report").
+func loadExistingReport(path string) (*artifact.DeviationFrontmatter, []byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, fmt.Errorf("reading existing %s: %w", path, err)
+		return nil, nil, fmt.Errorf("reading existing %s: %w", path, err)
 	}
-	fm, _, err := artifact.SplitFrontmatter(data)
+	fm, body, err := artifact.SplitFrontmatter(data)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
 	decoded, err := artifact.DecodeDeviation(fm)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return decoded, nil
+	return decoded, body, nil
 }
