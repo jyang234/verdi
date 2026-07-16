@@ -235,6 +235,61 @@ func TestComputeIndex_DisclosedNoDraftSpec(t *testing.T) {
 	}
 }
 
+// TestComputeIndex_Zone is spec/home-status-glance dc-2's zone-signal
+// obligation (ADJ-32's computed, in-memory zone distinction): a
+// default-branch entry read from .verdi/specs/active/ carries ZoneActive,
+// one read from .verdi/specs/archive/ carries ZoneArchive, and every
+// design-branch entry — ordinary or disclosed (ac-4's no-draft-spec case,
+// the negative/edge row: the zone must not depend on there being any
+// content to read at all) — is unconditionally ZoneActive, mirroring
+// ac-3's own "never derived from that branch's content" StatusGroup
+// override extended to this new field. Table-driven over all four rows.
+func TestComputeIndex_Zone(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/specs/active/still-active/spec.md": componentSpecMD("still-active", "active"),
+				".verdi/specs/archive/long-closed/spec.md": featureSpecClosedMD("long-closed"),
+			},
+			Message: "seed both zones",
+		},
+	})
+	setDefaultBranchSymref(t, repo.Dir, "main")
+
+	checkoutNewBranch(t, repo.Dir, "design/fresh-draft")
+	writeAndCommit(t, repo.Dir, map[string]string{".verdi/specs/active/fresh-draft/spec.md": componentSpecMD("fresh-draft", "draft")}, "fresh draft")
+	checkoutExisting(t, repo.Dir, "main")
+
+	// A design branch cut but never given a spec.md commit at all (ac-4's
+	// disclosed case) — the negative-content row: no bytes were ever read,
+	// yet the zone must still resolve, unconditionally, to ZoneActive.
+	runGit(t, repo.Dir, "branch", "design/no-spec-yet")
+
+	got, err := ComputeIndex(context.Background(), repo.Dir, NewGitRunner())
+	if err != nil {
+		t.Fatalf("ComputeIndex: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		ref  string
+		want Zone
+	}{
+		{"default-branch active zone", "spec/still-active", ZoneActive},
+		{"default-branch archive zone", "spec/long-closed", ZoneArchive},
+		{"ordinary design-branch draft", "spec/fresh-draft", ZoneActive},
+		{"disclosed design-branch draft (no content read)", "spec/no-spec-yet", ZoneActive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := entryByRef(t, got, tc.ref)
+			if e.Zone != tc.want {
+				t.Fatalf("%s Zone = %q, want %q", tc.ref, e.Zone, tc.want)
+			}
+		})
+	}
+}
+
 // TestComputeIndex_NeverMovesHEAD is ac-5's behavioral obligation: the
 // serving checkout's HEAD and working tree are byte-identical before and
 // after a ComputeIndex run against a repo carrying multiple design

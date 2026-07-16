@@ -99,6 +99,12 @@ func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunne
 				Source:      SourceDefault,
 				StatusGroup: group,
 				SpecStatus:  string(spec.Status),
+				// Zone is WHERE this iteration of the two-zone loop above
+				// found the entry (spec/home-status-glance dc-2) — zone and
+				// specsActiveZone/specsArchiveZone share the exact "active"/
+				// "archive" string values by construction, so this is a
+				// direct cast, never a second vocabulary.
+				Zone: Zone(zone),
 			})
 		}
 	}
@@ -201,6 +207,11 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 				Source:      src,
 				StatusGroup: StatusGroupDraftsInProgress,
 				Disclosed:   &d,
+				// Unconditional, exactly like StatusGroup above: a design
+				// branch's spec (had it existed) is only ever read from the
+				// active zone (specPath, above) — never derived from
+				// content that was never there to read.
+				Zone: ZoneActive,
 			})
 			continue
 		}
@@ -271,5 +282,9 @@ func computeOrdinaryDesignEntry(ctx context.Context, root string, deps GitRunner
 		// never derived from its own content, readable or not.
 		StatusGroup: StatusGroupDraftsInProgress,
 		SpecStatus:  string(spec.Status),
+		// Unconditional per the Zone type's own doc comment: specPath
+		// (the caller's existence probe, above) is always under the
+		// active zone for a design-branch entry.
+		Zone: ZoneActive,
 	}, nil
 }
