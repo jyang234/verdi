@@ -2,6 +2,8 @@ package fixturegit
 
 import (
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -114,5 +116,28 @@ func TestBuild_ProducesWorkingTree(t *testing.T) {
 	}
 	if string(got) != "hello\n" {
 		t.Fatalf("a.txt = %q, want %q", got, "hello\n")
+	}
+}
+
+// TestBuild_DisablesDetachedGitMaintenance proves the D6-31 fix: every
+// fixture repo Build creates must have gc.autoDetach and maintenance.auto
+// both forced to false, so a `git commit`/`git add` invocation never forks
+// a detached background gc/maintenance child. Without this, the observed
+// CI flake class is a detached writer still touching .git when the test's
+// t.TempDir() cleanup runs concurrently: "TempDir RemoveAll cleanup:
+// unlinkat .../.git: directory not empty".
+func TestBuild_DisablesDetachedGitMaintenance(t *testing.T) {
+	r := Build(t, []Layer{
+		{Files: map[string]string{"a.txt": "hello\n"}, Message: "add a"},
+	})
+
+	for _, key := range []string{"gc.autoDetach", "maintenance.auto"} {
+		out, err := exec.Command("git", "-C", r.Dir, "config", "--get", key).Output()
+		if err != nil {
+			t.Fatalf("git config --get %s: %v (fixture repo never sets this key)", key, err)
+		}
+		if got := strings.TrimSpace(string(out)); got != "false" {
+			t.Fatalf("git config --get %s = %q, want %q", key, got, "false")
+		}
 	}
 }
