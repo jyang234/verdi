@@ -350,32 +350,32 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		// chip row rides the card in every mode, before the sealed wall's
 		// Instantiate affordance so the receipt never displaces the action.
 		writeBadgeChips(&b, "stub-"+sv.Slug, sv.Badges)
-		// Family navigation (spec/family-board-links ac-2/ac-3): a stub with
-		// at least one matching story anywhere in this checkout's store links
-		// straight to it instead of offering Instantiate (every distinct
-		// match, dc-4's plain fan-out; an archived match's link carries its
-		// archived state disclosed, ADJ-28's completion reading); short of any
-		// match, a live-checked in-between disclosure takes the button's place
-		// when the story's design branch already exists (ac-3, dc-3); absent
-		// both, the sealed wall's Instantiate affordance renders exactly as it
-		// always has.
-		switch {
-		case len(sv.StoryLinks) > 0:
-			for _, sl := range sv.StoryLinks {
-				linkCls := "stub-story-link"
-				if sl.Archived {
-					linkCls += " stub-story-link--archived"
-				}
-				storySlug := strings.ReplaceAll(sl.Ref, "/", "-")
-				b.WriteString(`<a class="` + linkCls + `" data-testid="stub-story-link-` + esc(sv.Slug) + `-` + esc(storySlug) + `" data-archived="` + esc(strconv.FormatBool(sl.Archived)) + `" href="` + esc(sl.Href) + `">` + esc(sl.Ref))
-				if sl.Archived {
-					b.WriteString(` <span class="badge badge-archived" data-testid="stub-story-archived-` + esc(sv.Slug) + `-` + esc(storySlug) + `">archived</span>`)
-				}
-				b.WriteString(`</a>`)
+		// Family navigation (spec/family-board-links ac-2/ac-3): every
+		// matching story anywhere in this checkout's store links straight to
+		// it (every distinct match, dc-4's plain fan-out; an archived match's
+		// link carries its archived state disclosed, ADJ-28's completion
+		// reading), and, short of any match, a live-checked in-between
+		// disclosure renders when the story's design branch already exists
+		// (ac-3, dc-3) -- ADDITIVE, alongside whatever this card already
+		// offers, never replacing it: dc-4 explicitly takes "no position on
+		// whether coverage is complete", so a match must never read as if the
+		// sealed wall's own Instantiate affordance had become unavailable.
+		for _, sl := range sv.StoryLinks {
+			linkCls := "stub-story-link"
+			if sl.Archived {
+				linkCls += " stub-story-link--archived"
 			}
-		case sv.InstantiatedNotice != "":
+			storySlug := strings.ReplaceAll(sl.Ref, "/", "-")
+			b.WriteString(`<a class="` + linkCls + `" data-testid="stub-story-link-` + esc(sv.Slug) + `-` + esc(storySlug) + `" data-archived="` + esc(strconv.FormatBool(sl.Archived)) + `" href="` + esc(sl.Href) + `">` + esc(sl.Ref))
+			if sl.Archived {
+				b.WriteString(` <span class="badge badge-archived" data-testid="stub-story-archived-` + esc(sv.Slug) + `-` + esc(storySlug) + `">archived</span>`)
+			}
+			b.WriteString(`</a>`)
+		}
+		if sv.InstantiatedNotice != "" {
 			b.WriteString(`<p class="stub-instantiated-notice" data-testid="stub-instantiated-notice-` + esc(sv.Slug) + `">` + esc(sv.InstantiatedNotice) + `</p>`)
-		case instantiable:
+		}
+		if instantiable {
 			verbLabel := "Instantiate story"
 			if sv.Spike {
 				verbLabel = "Instantiate spike"
