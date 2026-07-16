@@ -150,7 +150,12 @@ export async function pinArtifact(
 // Find a grip on a wall element that a real hand could take: a point
 // that elementFromPoint resolves INSIDE the element and not on any
 // button (a yarn chip can park over a sticky's center — chips avoid
-// cards, not stickies — and a chip's own center is its Graduate button).
+// cards, not stickies — and a chip's own center is its Graduate button)
+// or other interactive child the board's own pointerdown handler treats
+// as "stays a link/control, not a drag start" (boardspec.js: `if
+// (e.target.closest("a, button, textarea, input, .review-sticky"))
+// return;` — spec/family-board-links's stub-story-link anchors are one
+// more member of that same family, e.g. on a matched feature stub).
 export async function grabPoint(
   page: Page,
   el: Locator,
@@ -168,7 +173,11 @@ export async function grabPoint(
       const x = r.left + r.width * fx;
       const y = r.top + r.height * fy;
       const hit = document.elementFromPoint(x, y);
-      if (hit && node.contains(hit) && !hit.closest("button, textarea, input")) {
+      if (
+        hit &&
+        node.contains(hit) &&
+        !hit.closest("a, button, textarea, input, .review-sticky")
+      ) {
         return { x, y };
       }
     }
