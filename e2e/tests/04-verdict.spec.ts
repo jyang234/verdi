@@ -1,8 +1,10 @@
 import { test, expect } from "@playwright/test";
+import { SHOWCASE } from "./fixtures";
 
 // The verdict viewer: cross-commit per-AC diff of examples/showcase's two
-// derived verdicts.json snapshots for spec/stale-decline (PLAN.md Phase 10
-// exit criteria: "verdict viewer diffs the fixture's two canned
+// derived verdicts.json snapshots for spec/stale-decline — the
+// SHOWCASE.READONLY_SPEC feature, whose story is jira:LOAN-1482 (PLAN.md
+// Phase 10 exit criteria: "verdict viewer diffs the fixture's two canned
 // snapshots").
 const snapshotA = "f6dd4c4df724c0b16cae435e96f7e34ac94026c9";
 const snapshotB = "16219044c9d6d41de9a0de9464ed24d49283b40c";
@@ -28,7 +30,7 @@ test("verdict viewer shows the cross-commit diff", async ({ page }) => {
 });
 
 test("verdict viewer without a/b shows a snapshot picker", async ({ page }) => {
-  await page.goto("/verdict/spec/stale-decline");
+  await page.goto(`/verdict/spec/${SHOWCASE.READONLY_SPEC}`);
   await expect(page.locator("body")).toContainText(snapshotA);
   await expect(page.locator("body")).toContainText(snapshotB);
 });
