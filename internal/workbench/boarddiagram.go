@@ -83,6 +83,14 @@ type diagramEditorView struct {
 
 	Git       *boardGitState
 	GitNotice string
+
+	// Exit is the tool view's resolved return-target state (spec/tool-view-
+	// exit ac-1/dc-2/dc-3): page-chrome-only state the page handler
+	// resolves once, server-side, from the incoming board= query parameter
+	// (resolveDiagramExit) and sets on the view before rendering. Never
+	// populated by loadDiagram itself (loadDiagram has no request in
+	// scope) and never read by the fragment or API routes.
+	Exit diagramExitTarget
 }
 
 // diagramPath is the proposal's file in the working tree (01 §Directory
@@ -246,6 +254,7 @@ func (s *boardDiagramServer) boardDiagramPageHandler() http.HandlerFunc {
 			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
+		v.Exit = resolveDiagramExit(s.root, r.URL.Query().Get("board"))
 		out, err := renderDiagramEditorPage(v)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
@@ -456,7 +465,15 @@ func (s *boardDiagramServer) actionDiagramPeek(ctx context.Context, w http.Respo
 // already discloses what it references; a proposal-only surface simply
 // is not offered for a non-proposal). Store-derived enrichment in the
 // I/O layer, mirroring attachObligations' posture.
-func attachDiagramEditorHrefs(proj *BoardProjection, root string) {
+//
+// boardName is the rendering spec board's own name — already in scope at
+// every call site (the board-load path knows which spec it is loading).
+// It rides the link as a request-scoped board=<boardName> query parameter
+// (spec/tool-view-exit dc-2): the editor reads it back at render to
+// resolve the tool view's own exit affordance to this exact board.
+// Nothing is persisted — the parameter exists only for the length of the
+// one request the link is followed on.
+func attachDiagramEditorHrefs(proj *BoardProjection, root, boardName string) {
 	for i := range proj.RefCards {
 		ref, err := artifact.ParseRef(proj.RefCards[i].Ref)
 		if err != nil || ref.Kind != artifact.KindDiagram {
@@ -474,7 +491,58 @@ func attachDiagramEditorHrefs(proj *BoardProjection, root string) {
 		if err != nil || fm.Class != artifact.DiagramClassProposal {
 			continue
 		}
-		proj.RefCards[i].EditorHref = "/board/diagram/" + ref.Name
+		proj.RefCards[i].EditorHref = "/board/diagram/" + ref.Name + "?board=" + boardName
+	}
+}
+
+// diagramExitTarget is the diagram designer's resolved return-target
+// state (spec/tool-view-exit dc-2/dc-3): where its exit affordance and its
+// Escape binding navigate, computed once per page render.
+type diagramExitTarget struct {
+	// Href is where the exit affordance and Escape both navigate.
+	Href string
+	// Label is the affordance's visible text. Per dc-3 it always names
+	// which case produced it — the real originating board, an unresolved
+	// name, or no name at all — rather than collapsing them into one
+	// unexplained state.
+	Label string
+	// Known is true iff Href resolves to the real originating spec board
+	// (as opposed to the index fallback).
+	Known bool
+}
+
+// resolveDiagramExit resolves origin — the incoming board= query
+// parameter — against the store (dc-2: never derived or guessed, only
+// carried; a value that does not check out is never trusted as a link).
+// A name that resolves to a real active spec (boards serve only
+// specs/active/, boardspec.go's specDir doc comment) is the one case this
+// renders a live board link for. Anything else falls back to the index
+// (dc-3), honestly labeled with which honest-degradation case produced
+// it: an unresolvable name (stale or mistyped) versus no name supplied at
+// all (a direct URL, or the corpus page's editor link — neither carries
+// board=). origin is validated against specNameRe before it ever reaches
+// the filesystem, exactly like loadDiagram's own name parameter — a
+// malformed value is treated as merely unresolvable, never a path to
+// stat.
+func resolveDiagramExit(root, origin string) diagramExitTarget {
+	if origin != "" && specNameRe.MatchString(origin) {
+		if _, err := os.Stat(filepath.Join(root, ".verdi", "specs", "active", origin, "spec.md")); err == nil {
+			return diagramExitTarget{
+				Href:  "/board/spec/" + origin,
+				Label: "back to board: " + origin,
+				Known: true,
+			}
+		}
+	}
+	if origin == "" {
+		return diagramExitTarget{
+			Href:  "/",
+			Label: "no originating board is known — back to index",
+		}
+	}
+	return diagramExitTarget{
+		Href:  "/",
+		Label: fmt.Sprintf("board %q is not known — back to index", origin),
 	}
 }
 

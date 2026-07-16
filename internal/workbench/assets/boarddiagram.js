@@ -587,6 +587,22 @@
     });
   }
 
+  // -- exit affordance + Escape (spec/tool-view-exit ac-1) -------------------
+  //
+  // The return target is resolved once, server-side, at render (dc-2): the
+  // state blob carries the exact href, honest fallback included (dc-3) —
+  // this script only navigates, it never derives or guesses a target. A
+  // modal dialog (the shared backdrop visible) or the inline rename editor
+  // already owns Escape while either is open, so the page-level exit stands
+  // down rather than discarding an in-progress gesture.
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Escape" || !state.exitHref) return;
+    var modalBackdrop = document.getElementById("modal-backdrop");
+    if (modalBackdrop && !modalBackdrop.hidden) return;
+    if (document.querySelector(".diagram-rename-input")) return;
+    window.location.href = state.exitHref;
+  });
+
   // first paint
   renderPreview();
 })();

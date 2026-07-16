@@ -236,7 +236,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if err := attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession); err != nil {
 		return nil, nil, "", err
 	}
-	attachDiagramEditorHrefs(proj, s.root)
+	attachDiagramEditorHrefs(proj, s.root, name)
 	if reviewNotice != "" {
 		proj.Notices = append(proj.Notices, reviewNotice)
 	}

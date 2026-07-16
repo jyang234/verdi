@@ -610,7 +610,8 @@ func TestBoardDiagram_PeekAndReset(t *testing.T) {
 
 // TestBoardDiagram_RefCardEditorLink: dc-1's reachability from a spec
 // board's diagram reference card — a proposal target gains the editor
-// link; an incumbent diagram does not.
+// link, carrying the rendering board's own name as the tool-view-exit
+// dc-2 board= query parameter; an incumbent diagram gains no link at all.
 func TestBoardDiagram_RefCardEditorLink(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
@@ -632,12 +633,146 @@ func TestBoardDiagram_RefCardEditorLink(t *testing.T) {
 		t.Fatalf("GET board = %d: %s", rec.Code, rec.Body.String())
 	}
 	html := rec.Body.String()
-	if !strings.Contains(html, `data-testid="refcard-editor-link" href="/board/diagram/target-topology"`) {
-		t.Errorf("proposal diagram ref card carries no editor link")
+	if !strings.Contains(html, `data-testid="refcard-editor-link" href="/board/diagram/target-topology?board=refi-test"`) {
+		t.Errorf("proposal diagram ref card carries no editor link naming its own board (tool-view-exit dc-2):\n%s", html)
 	}
 	if strings.Contains(html, `href="/board/diagram/incumbent"`) {
 		t.Errorf("incumbent diagram ref card carries an editor link; the editor serves proposals only")
 	}
+}
+
+// TestResolveDiagramExit is spec/tool-view-exit dc-2/dc-3's pure
+// resolution function, table-driven: a name that resolves to a real
+// active spec renders a known, live board link; anything else — no name
+// at all, an unresolvable name, or a shape that would never reach the
+// filesystem as a spec name — falls back to the index, honestly labeled
+// with which case produced it (dc-3: never one unexplained state).
+func TestResolveDiagramExit(t *testing.T) {
+	root := newBoardFixture(t) // carries .verdi/specs/active/refi-test/spec.md
+
+	cases := []struct {
+		name          string
+		origin        string
+		wantHref      string
+		wantKnown     bool
+		wantLabelHas  []string
+		wantLabelLack []string
+	}{
+		{
+			name:         "resolves to a real active spec",
+			origin:       boardFixtureName,
+			wantHref:     "/board/spec/" + boardFixtureName,
+			wantKnown:    true,
+			wantLabelHas: []string{boardFixtureName},
+		},
+		{
+			name:         "no origin at all: honest no-origin-known disclosure",
+			origin:       "",
+			wantHref:     "/",
+			wantKnown:    false,
+			wantLabelHas: []string{"no originating board is known"},
+		},
+		{
+			name:          "origin given but unresolvable: a distinct disclosure from the no-origin case",
+			origin:        "no-such-spec",
+			wantHref:      "/",
+			wantKnown:     false,
+			wantLabelHas:  []string{"no-such-spec", "is not known"},
+			wantLabelLack: []string{"no originating board is known"},
+		},
+		{
+			name:         "a shape that is never a valid spec name never touches the filesystem",
+			origin:       "../../etc/passwd",
+			wantHref:     "/",
+			wantKnown:    false,
+			wantLabelHas: []string{"is not known"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveDiagramExit(root, tc.origin)
+			if got.Href != tc.wantHref {
+				t.Errorf("Href = %q, want %q", got.Href, tc.wantHref)
+			}
+			if got.Known != tc.wantKnown {
+				t.Errorf("Known = %v, want %v", got.Known, tc.wantKnown)
+			}
+			for _, want := range tc.wantLabelHas {
+				if !strings.Contains(got.Label, want) {
+					t.Errorf("Label = %q, missing %q", got.Label, want)
+				}
+			}
+			for _, lack := range tc.wantLabelLack {
+				if strings.Contains(got.Label, lack) {
+					t.Errorf("Label = %q, wrongly contains %q", got.Label, lack)
+				}
+			}
+		})
+	}
+}
+
+// TestBoardDiagramPage_ExitAffordance: ac-1's page-chrome affordance and
+// its window.__DIAGRAM__ state (dc-2) across the three exit cases —
+// resolves to a real board, no origin known, and an origin that does not
+// resolve. The browser proof (the affordance, Escape, and the restored
+// board) lives in e2e/tests/43-tool-view-exit.spec.ts; this is the
+// server's half.
+func TestBoardDiagramPage_ExitAffordance(t *testing.T) {
+	root, _ := newDiagramFixture(t)
+	specDir := filepath.Join(root, ".verdi", "specs", "active", boardFixtureName)
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatalf("mkdir spec dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(boardFixtureSpec), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	h := NewHandler(root)
+
+	t.Run("resolves to a real active spec board", func(t *testing.T) {
+		rec := getDiagram(t, h, diagramFixtureName, "?board="+boardFixtureName)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET = %d: %s", rec.Code, rec.Body.String())
+		}
+		html := rec.Body.String()
+		wantLink := `data-testid="diagram-exit" href="/board/spec/` + boardFixtureName + `"`
+		if !strings.Contains(html, wantLink) {
+			t.Errorf("page missing the resolved exit affordance %q:\n%s", wantLink, html)
+		}
+		if !strings.Contains(html, boardFixtureName) {
+			t.Error("exit affordance label does not name the resolved board")
+		}
+		if !strings.Contains(html, `"exitHref":"/board/spec/`+boardFixtureName+`"`) {
+			t.Errorf("window.__DIAGRAM__ state does not carry the resolved exitHref:\n%s", html)
+		}
+	})
+
+	t.Run("no board param: honestly discloses no known origin, falls back to index", func(t *testing.T) {
+		rec := getDiagram(t, h, diagramFixtureName, "")
+		html := rec.Body.String()
+		if !strings.Contains(html, `data-testid="diagram-exit" href="/"`) {
+			t.Errorf("no-origin fallback does not link to the index:\n%s", html)
+		}
+		if !strings.Contains(html, "no originating board is known") {
+			t.Error("no-origin fallback does not disclose the reason")
+		}
+		if !strings.Contains(html, `"exitHref":"/"`) {
+			t.Error("window.__DIAGRAM__ state does not carry the index fallback")
+		}
+	})
+
+	t.Run("unresolvable board param: discloses the stale name distinctly, falls back to index", func(t *testing.T) {
+		rec := getDiagram(t, h, diagramFixtureName, "?board=no-such-spec")
+		html := rec.Body.String()
+		if !strings.Contains(html, `data-testid="diagram-exit" href="/"`) {
+			t.Errorf("stale-name fallback does not link to the index:\n%s", html)
+		}
+		if !strings.Contains(html, "no-such-spec") || !strings.Contains(html, "is not known") {
+			t.Error("stale-name fallback does not name the unresolved board")
+		}
+		if strings.Contains(html, "no originating board is known") {
+			t.Error("stale-name fallback collapses into the no-origin case's wording (dc-3: must name which case it is)")
+		}
+	})
 }
 
 // TestCorpusPage_ProposalEditorLink: dc-1's reachability from the corpus
