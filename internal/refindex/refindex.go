@@ -8,6 +8,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // specsActiveZone and specsArchiveZone are the two default-branch zones
@@ -172,7 +173,7 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 
 		slug := strings.TrimPrefix(name, designPrefix)
 		ref := "spec/" + slug
-		specPath := ".verdi/specs/" + specsActiveZone + "/" + slug + "/spec.md"
+		specPath := store.ActiveSpecRelPath(slug)
 
 		// The existence probe (ListTree, not Show) comes BEFORE dc-5's
 		// merged-branch check, deliberately: dc-5's exclusion exists solely

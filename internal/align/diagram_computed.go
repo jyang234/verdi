@@ -25,6 +25,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/diagramverify"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
 )
 
@@ -188,7 +189,7 @@ func readCurrentSpecBody(root string, spec *artifact.SpecFrontmatter) (string, e
 	if err != nil {
 		return "", fmt.Errorf("align: resolved spec has an invalid id %q: %w", spec.ID, err)
 	}
-	path := filepath.Join(root, ".verdi", "specs", "active", ref.Name, "spec.md")
+	path := store.ActiveSpecPath(root, ref.Name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

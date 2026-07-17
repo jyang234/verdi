@@ -207,7 +207,7 @@ func resolveDecisionTarget(root string, ref artifact.Ref) (decisionTarget, bool,
 // targets), returning (nil, "", nil) when neither exists (dangling).
 func readSpecByName(root, name string) (*artifact.SpecFrontmatter, string, error) {
 	for _, statusDir := range []string{"active", "archive"} {
-		path := filepath.Join(root, ".verdi", "specs", statusDir, name, "spec.md")
+		path := store.SpecPath(root, statusDir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {

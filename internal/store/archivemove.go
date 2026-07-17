@@ -31,10 +31,10 @@ import (
 // specs/archive/ must not already exist (no clobbering a prior archive —
 // closure is a one-way, one-time move per spec).
 func ArchiveMove(root, name string) error {
-	activeDir := filepath.Join(root, ".verdi", "specs", "active", name)
-	archiveDir := filepath.Join(root, ".verdi", "specs", "archive", name)
+	activeDir := ActiveSpecDir(root, name)
+	archiveDir := ArchiveSpecDir(root, name)
 
-	specPath := filepath.Join(activeDir, "spec.md")
+	specPath := ActiveSpecPath(root, name)
 	if info, err := os.Stat(specPath); err != nil || info.IsDir() {
 		if err == nil {
 			err = fmt.Errorf("is a directory")
