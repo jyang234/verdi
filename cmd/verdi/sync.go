@@ -143,16 +143,18 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// ADJ-64: a genuinely-absent origin (ErrNoSuchRemote) is the benign local
-	// case — remoteURL stays "" and ac-1's refusal names its absence. But a
-	// REAL failure reading the origin remote (a broken git config, an
-	// unreadable repo) must NOT be swallowed into that same empty string and
-	// presented as absence: surface it as operational (exit 2), the exact
-	// distinction ac-1's "name every source it tried" legibility depends on.
-	remoteURL, err := gitx.RemoteURL(ctx, root, "origin")
-	if err != nil && !errors.Is(err, gitx.ErrNoSuchRemote) {
-		fmt.Fprintln(stderr, "sync:", err)
-		return 2
+	// ADJ-64: distinguish a genuinely-absent origin (ErrNoSuchRemote — the
+	// benign local case; remoteURL stays "" and the dialing refusal names its
+	// absence) from a REAL failure READING the origin remote (a broken git
+	// config, an unreadable repo). The read failure is deferred, not raised
+	// here: it is surfaced as operational only on the DIALING path below,
+	// where the origin is actually consumed to identify the forge and ac-1
+	// promises to name it. --produce/--produce-runtime never dial and stay
+	// byte-identical to pre-story even on an unreadable origin (co-3, ADJ-43),
+	// exactly as when this error was discarded outright.
+	remoteURL, remoteErr := gitx.RemoteURL(ctx, root, "origin")
+	if remoteErr != nil && errors.Is(remoteErr, gitx.ErrNoSuchRemote) {
+		remoteErr = nil
 	}
 	forgeKind, err := forge.DetectKind(manifest.Forge, remoteURL)
 	if err != nil {
@@ -173,6 +175,14 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 	if produce || produceRuntime {
 		fg, err = buildForgeForCI(forgeKind, remoteURL)
 	} else {
+		// The dialing path consumes the origin to identify the forge, so a
+		// genuine read failure here is operational (exit 2) — never silently
+		// folded into an empty "absent" URL that githubOwnerRepo would then
+		// mis-name as absence (ADJ-64).
+		if remoteErr != nil {
+			fmt.Fprintln(stderr, "sync:", remoteErr)
+			return 2
+		}
 		fg, err = buildForge(forgeKind, remoteURL)
 	}
 	if err != nil {

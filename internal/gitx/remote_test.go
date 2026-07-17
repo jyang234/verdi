@@ -40,6 +40,23 @@ func TestRemoteURL_Negative_NoSuchRemote(t *testing.T) {
 	}
 }
 
+func TestRemoteURL_Negative_NoSuchRemote_LocaleIndependent(t *testing.T) {
+	// git localizes its "No such remote" stderr (e.g. "No existe el remoto",
+	// "Pas de serveur remote"), so absence must be detected from the
+	// locale-independent `git remote` name list, never that message. Under a
+	// localizing locale a benign absent remote must still be ErrNoSuchRemote,
+	// not a misclassified operational read failure (ADJ-64).
+	t.Setenv("LC_ALL", "fr_FR.UTF-8")
+	repo := buildRepo(t)
+	_, err := RemoteURL(context.Background(), repo.Dir, "does-not-exist")
+	if err == nil {
+		t.Fatal("RemoteURL(nonexistent remote, localized locale): want error, got nil")
+	}
+	if !errors.Is(err, ErrNoSuchRemote) {
+		t.Errorf("RemoteURL(nonexistent remote, localized locale) err = %v, want errors.Is(err, ErrNoSuchRemote)", err)
+	}
+}
+
 func TestRemoteURL_Negative_NotARepo(t *testing.T) {
 	_, err := RemoteURL(context.Background(), t.TempDir(), "origin")
 	if err == nil {
