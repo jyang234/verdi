@@ -95,3 +95,30 @@ func TestCanonicalModel_SelfValidates(t *testing.T) {
 		t.Fatalf("canonicalModel.checkFrontier(): %v", err)
 	}
 }
+
+// TestCheckFrontier_DisplayChangeTrips substantiates a disclosed design
+// choice (model.go's Class doc comment, canonical.go's own header): a
+// class's Display is treated as STRUCTURAL, unlike its Template filename
+// — changing it alone (with nothing else different) must still trip the
+// frontier, since the frontier's only two named exceptions are vocabulary
+// and per-class template filenames.
+func TestCheckFrontier_DisplayChangeTrips(t *testing.T) {
+	m := canonicalModel
+	feature := m.Classes["feature"]
+	feature.Display = "Initiative" // structural field changed, nothing else
+	m.Classes = map[string]Class{
+		"feature": feature,
+		"story":   m.Classes["story"],
+	}
+
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate(): %v (test setup should stay kernel-well-formed)", err)
+	}
+	err := m.checkFrontier()
+	if err == nil {
+		t.Fatal("checkFrontier(): want an error for a changed Class.Display, got nil")
+	}
+	if err != ErrFrontier {
+		t.Fatalf("checkFrontier() error = %v, want ErrFrontier", err)
+	}
+}

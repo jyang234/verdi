@@ -16,8 +16,11 @@ package model
 // describe today's ACTUAL hardcoded model exactly (Task 6's parity
 // tests check the states/verbs halves against internal/artifact/
 // status.go and cmd/verdi/dispatch.go's own exported facts), and it
-// must itself satisfy every kernel validation rule (it round-trips
-// through DecodeModel via canonical.yaml in canonical_test.go).
+// must itself satisfy every kernel validation rule (its own
+// self-validation is TestCanonicalModel_SelfValidates, validate_test.go;
+// its YAML twin's round-trip through DecodeModel is
+// TestCanonicalYAMLMatchesGoLiteral and TestDecodeModel_Happy,
+// embed_test.go/decode_test.go).
 //
 // classes: feature and story only. `component` (internal/artifact's
 // third real SpecClass) is a DISCLOSED, deliberate omission, not an

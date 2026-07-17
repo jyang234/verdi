@@ -121,7 +121,6 @@ type Vocabulary struct {
 // on and to leave room for a future per-class override, but v1's own
 // vocabulary is flat: only id is consulted this phase.
 func (m *Model) DisplayState(class, id string) string {
-	_ = class
 	if v, ok := m.Vocabulary.States[id]; ok && v != "" {
 		return v
 	}
