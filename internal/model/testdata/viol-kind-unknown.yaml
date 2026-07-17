@@ -1,0 +1,17 @@
+# Violates: obligation kind outside the closed 6-value catalog
+# (kindCatalog, validate.go).
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build]
+    terminal: [accepted-pending-build]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: bogus-kind }

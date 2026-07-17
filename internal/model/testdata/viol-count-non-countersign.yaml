@@ -1,0 +1,17 @@
+# Violates: count is legal only on kind "countersign" (Obligation.validate,
+# validate.go) — this obligation sets count on kind "author-vouch".
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build]
+    terminal: [accepted-pending-build]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch, count: 1 }

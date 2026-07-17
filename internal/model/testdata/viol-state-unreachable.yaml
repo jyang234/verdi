@@ -1,0 +1,18 @@
+# Violates: every state must be reachable (Lifecycle.validate, validate.go)
+# — "orphan" is declared in states but is neither terminal nor mentioned as
+# any transition's from/to.
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build, orphan]
+    terminal: [accepted-pending-build]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }

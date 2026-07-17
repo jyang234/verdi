@@ -1,0 +1,9 @@
+# Violates: the restricted frontmatter dialect (internal/artifact's shared
+# seam, PLAN.md I-1) — `&feature` is a YAML anchor, rejected regardless of
+# whether anything aliases it.
+schema: verdi.model/v1
+classes:
+  feature: &feature
+    display: Feature
+    template: feature.md
+lifecycle: {}

@@ -1,0 +1,7 @@
+# Violates: strict decode's KnownFields(true) wall (internal/artifact's
+# shared seam, exercised via DecodeModel) — `bogus` is not a field Model
+# declares.
+schema: verdi.model/v1
+classes: {}
+lifecycle: {}
+bogus: true
