@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // schemeCatalog is Obligation.Scheme's closed, kernel-fixed catalog
@@ -84,6 +86,21 @@ func (m Model) Validate() error {
 		c := m.Classes[name]
 		if c.Template == "" {
 			return fmt.Errorf("model: class %q: template must not be empty", name)
+		}
+		// A class's template resolves under .verdi/templates/<class>.md
+		// (spec/scaffold-templates outcome / ac-3): a bare filename inside the
+		// store's sanctioned override directory. Template is deliberately
+		// frontier-EXEMPT (a store may rename it freely, checkFrontier), but
+		// that exemption is over the FILENAME, never a license to escape the
+		// directory — a separator-carrying, absolute, or . / .. value would
+		// resolve a file outside .verdi/templates/ and the store's
+		// committed-zone trust boundary, which no frontier admits (the
+		// canonical model's own template values are bare filenames). Fail
+		// closed here, the house posture (judged-template-filename-escapes-
+		// templates-dir); LoadTemplate re-checks the same invariant as
+		// defense-in-depth.
+		if !artifact.IsBareFilename(c.Template) {
+			return fmt.Errorf("model: class %q: template %q must be a bare filename under .verdi/templates/ (no path separator, absolute path, or . / ..)", name, c.Template)
 		}
 		if c.Parent != "" {
 			if _, ok := m.Classes[c.Parent]; !ok {

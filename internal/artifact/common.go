@@ -2,7 +2,9 @@ package artifact
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // LinkType is a typed edge per 02 §Link taxonomy. Backlinks are computed by
@@ -124,6 +126,31 @@ var (
 // regex (CLAUDE.md: shared code lives in a shared internal/ package).
 func ValidDigest(s string) bool {
 	return sha256Re.MatchString(s)
+}
+
+// IsBareFilename reports whether s is a single, contained path component
+// safe to join under a fixed directory: non-empty, not "." or ".." (which
+// resolve to the join directory itself or its parent), not absolute, and
+// carrying no path separator — checked for BOTH "/" and "\\" so the
+// judgment is identical on every OS a store is shared across, never left to
+// the host filepath dialect. It is the containment predicate spec/scaffold-
+// templates pins on a class's template filename: a store override lives at
+// ".verdi/templates/<class>.md", and a separator-carrying or absolute value
+// would escape that sanctioned directory and the store's committed-zone
+// trust boundary (judged-template-filename-escapes-templates-dir). Exported
+// so the kernel rule (internal/model's Model.Validate) and the
+// filesystem-boundary guard (internal/designscaffold's LoadTemplate) both
+// enforce this ONE definition rather than each duplicating it (CLAUDE.md:
+// shared code lives in a shared internal/ package), exactly as ValidDigest
+// above is shared.
+func IsBareFilename(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	if filepath.IsAbs(s) {
+		return false
+	}
+	return !strings.ContainsAny(s, `/\`)
 }
 
 // Frozen is the point-in-time stamp carried by frozen artifacts

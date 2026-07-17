@@ -264,6 +264,31 @@ outcome: { text: "{{.Outcome}}", anchor: outcome }
 	}
 }
 
+// TestModelCheck_TemplatePathEscape_Exit2_NamesRule proves the kernel's
+// bare-filename rule reaches the built binary (judged-template-filename-
+// escapes-templates-dir): a hand-written model.yaml whose class template
+// escapes .verdi/templates/ (here "../../evil.md") fails model check closed
+// at exit 2 — a kernel VALIDATION violation, grouped with every other
+// "undecodable manifest" condition, never the frontier's exit 1 (a bad
+// template value is not a structural model deviation) — with the error
+// naming the offending class and the bare-filename rule, never a bare
+// "model.yaml invalid" message.
+func TestModelCheck_TemplatePathEscape_Exit2_NamesRule(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-template-path-escape.yaml"))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (template path escape) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "bare filename") {
+		t.Fatalf("stderr = %q, want it to name the bare-filename rule", stderr)
+	}
+	if !strings.Contains(stderr, `class "feature"`) {
+		t.Fatalf("stderr = %q, want it to name the offending class", stderr)
+	}
+}
+
 // TestModelCheck_FrontierViolation_Exit1_PinnedText is ac-3's
 // structurally-deviant case: exit 1, with the ONE pinned frontier error
 // text printed VERBATIM — never a paraphrase.

@@ -23,6 +23,7 @@ func TestDecodeModel_KernelViolations(t *testing.T) {
 		{"viol-transition-endpoint-undeclared.yaml", `from "nonexistent-state" is not a declared state`},
 		{"viol-parent-unknown.yaml", `parent "nonexistent-class" is not a declared class`},
 		{"viol-template-empty.yaml", `class "feature": template must not be empty`},
+		{"viol-template-path-escape.yaml", `class "feature": template "../../evil.md" must be a bare filename`},
 		{"viol-hook-empty-name.yaml", `kind "hook" requires a non-empty hook name`},
 		{"viol-count-non-countersign.yaml", `count is legal only on kind "countersign"`},
 	}

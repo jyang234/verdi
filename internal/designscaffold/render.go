@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"text/template"
+
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // embeddedTemplates carries the canonical scaffold templates (spec/
@@ -72,6 +74,18 @@ func Render(tmpl []byte, data ScaffoldData) (string, error) {
 // kernel-required non-empty) — callers resolve it from the store's
 // already-open model, never hardcode a class-to-filename mapping here.
 func LoadTemplate(root, filename string) ([]byte, error) {
+	// Defense-in-depth on the containment invariant internal/model's
+	// Model.Validate kernel rule already enforces (judged-template-filename-
+	// escapes-templates-dir): filename must be a BARE filename, so the join
+	// below cannot escape .verdi/templates/. Rejecting a separator-carrying,
+	// absolute, or . / .. value HERE keeps the invariant even for a caller
+	// that reaches LoadTemplate without a Validate-clean model — a specific,
+	// fail-closed refusal naming the rule rather than an incidental
+	// file-not-found on a resolved-elsewhere path. One shared definition
+	// (artifact.IsBareFilename) backs both layers.
+	if !artifact.IsBareFilename(filename) {
+		return nil, fmt.Errorf("designscaffold: template filename %q must be a bare filename under .verdi/templates/ (no path separator, absolute path, or . / ..)", filename)
+	}
 	override := filepath.Join(root, ".verdi", "templates", filename)
 	data, err := os.ReadFile(override)
 	if err == nil {

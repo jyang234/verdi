@@ -3,6 +3,7 @@ package designscaffold
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -117,5 +118,28 @@ func TestLoadTemplate_Negative_UnknownName(t *testing.T) {
 	root := t.TempDir()
 	if _, err := LoadTemplate(root, "no-such-class.md"); err == nil {
 		t.Fatal("LoadTemplate(unknown filename) = nil error, want a not-found failure")
+	}
+}
+
+// TestLoadTemplate_Negative_PathEscape proves LoadTemplate is a
+// defense-in-depth containment guard on the template filename
+// (judged-template-filename-escapes-templates-dir): a separator-carrying,
+// absolute, or . / .. value — which internal/model's Model.Validate kernel
+// rule already rejects — is refused HERE too, with a SPECIFIC bare-filename
+// error (never an incidental "not found"/"is a directory" read error), so
+// the ".verdi/templates/<class>.md" containment invariant holds even for a
+// caller that reaches LoadTemplate without going through Validate. Both
+// layers enforce the one shared artifact.IsBareFilename definition.
+func TestLoadTemplate_Negative_PathEscape(t *testing.T) {
+	root := t.TempDir()
+	for _, bad := range []string{"../../evil.md", "sub/dir.md", "/abs/evil.md", ".", ".."} {
+		_, err := LoadTemplate(root, bad)
+		if err == nil {
+			t.Errorf("LoadTemplate(%q) = nil error, want a bare-filename refusal", bad)
+			continue
+		}
+		if !strings.Contains(err.Error(), "bare filename") {
+			t.Errorf("LoadTemplate(%q) error = %q, want it to name the bare-filename rule (a specific refusal, not an incidental read/embed error)", bad, err.Error())
+		}
 	}
 }
