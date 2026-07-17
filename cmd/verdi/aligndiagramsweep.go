@@ -93,6 +93,7 @@ func runDiagramSweepAlign(ctx context.Context, root, diagramRef string, deps ali
 		JudgeCmd:         deps.JudgeCmd,
 		JudgeRequired:    deps.JudgeRequired,
 		ExistingFindings: existingFindings,
+		ModelDigest:      deps.ModelDigest,
 	})
 	if err != nil {
 		var reqAbsent *align.ErrDiagramJudgeRequiredAbsent

@@ -45,6 +45,15 @@ type Input struct {
 	// ExistingFindings are a prior report's findings (nil/empty for a first
 	// run), the disposition-preservation source (identity.go).
 	ExistingFindings []artifact.Finding
+	// ModelDigest is the resolved operating model's canonical-JSON sha256
+	// digest (model.Model.Digest(), spec/model-digest ledger L-M5) — the
+	// caller (cmd/verdi/align.go) resolves it once via
+	// store.Open(Root).Model.Digest() ahead of calling Generate, since this
+	// package never imports internal/model itself (that package already
+	// imports internal/artifact, so the reverse import would cycle).
+	// Threaded straight to artifact.StampProvenance; empty reaches
+	// StampProvenance's own panic.
+	ModelDigest string
 }
 
 // Report is Generate's output: the decoded, self-validated frontmatter, the
@@ -107,6 +116,15 @@ func Generate(ctx context.Context, in Input) (*Report, error) {
 	allFindings = append(allFindings, judged.Findings...)
 	preserved := PreserveDispositions(allFindings, in.ExistingFindings)
 
+	prov := &artifact.Provenance{
+		Generator: generatorName,
+		Version:   generatorVersion,
+		Inputs:    buildProvenanceInputs(in.Spec, in.Covers),
+		Digest:    digest,
+		Integrity: judged.Integrity,
+	}
+	artifact.StampProvenance(prov, in.ModelDigest)
+
 	fm := &artifact.DeviationFrontmatter{
 		Schema:         "verdi.deviation/v1",
 		Covers:         in.Covers,
@@ -114,13 +132,7 @@ func Generate(ctx context.Context, in Input) (*Report, error) {
 		Digest:         digest,
 		Integrity:      judged.Integrity,
 		JudgeIntegrity: judged.JudgeIntegrity,
-		Provenance: &artifact.Provenance{
-			Generator: generatorName,
-			Version:   generatorVersion,
-			Inputs:    buildProvenanceInputs(in.Spec, in.Covers),
-			Digest:    digest,
-			Integrity: judged.Integrity,
-		},
+		Provenance:     prov,
 	}
 	if in.Freeze {
 		frozen := artifact.NewFrozen(in.FrozenAt, in.Covers)

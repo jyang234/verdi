@@ -50,9 +50,14 @@ func cmdBoardCommit(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "board commit:", err)
 		return 2
 	}
+	modelDigest, err := resolveModelDigest(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "board commit:", err)
+		return 2
+	}
 
 	res, err := commitdesign.Run(context.Background(), commitdesign.Input{
-		Root: root, BoardKey: boardKey, SpecName: name, StoryRef: storyRef,
+		Root: root, BoardKey: boardKey, SpecName: name, StoryRef: storyRef, ModelDigest: modelDigest,
 	})
 	if err != nil {
 		fmt.Fprintln(stderr, "board commit:", err)

@@ -1,0 +1,61 @@
+package align
+
+// spec/model-digest ac-3's decode-compatibility evidence: a pre-existing
+// COMMITTED generated artifact, frozen before this story's Model field
+// existed, must still decode cleanly (Provenance.Model reading back as the
+// empty string, never a decode error) and — since
+// align.RenderDecisionMarkdown is this type's existing hand-render
+// counterpart, "hand-rendered, never yaml.Marshal'd" — re-rendering the
+// decoded value must reproduce the exact original bytes: no model: line
+// introduced into an artifact whose source never had one.
+
+import (
+	"os"
+	"testing"
+
+	"github.com/jyang234/verdi/internal/artifact"
+)
+
+// preModelDigestDecisionConflictReport is this repo's own committed
+// .verdi/specs/active/scoping-canvas/decision-conflict-report.md (the
+// frozen spec's own design grounding names this exact file): a real,
+// pre-existing generated artifact whose provenance: block carries no
+// model: key. internal/align's test binary runs with its package
+// directory as cwd, so "../../..." reaches the module root from
+// internal/align/ exactly like this file's own sibling tests reach
+// testdata two levels up elsewhere in this module.
+const preModelDigestDecisionConflictReport = "../../.verdi/specs/active/scoping-canvas/decision-conflict-report.md"
+
+// TestDecodeDecisionConflict_PreexistingArtifactWithNoModelField_DecodesUnchanged
+// is ac-3's headline case: this pre-existing committed artifact decodes
+// cleanly through its type's existing decoder, Provenance.Model reads back
+// empty (never a decode error — KnownFields(true) was never violated by a
+// document simply lacking an optional field), and re-rendering the decoded
+// value through RenderDecisionMarkdown (the hand-render counterpart this
+// type already has) reproduces the exact original bytes.
+func TestDecodeDecisionConflict_PreexistingArtifactWithNoModelField_DecodesUnchanged(t *testing.T) {
+	original, err := os.ReadFile(preModelDigestDecisionConflictReport)
+	if err != nil {
+		t.Fatalf("reading %s: %v (spec/model-digest ac-3's own named fixture)", preModelDigestDecisionConflictReport, err)
+	}
+
+	fmBytes, body, err := artifact.SplitFrontmatter(original)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	decoded, err := artifact.DecodeDecisionConflict(fmBytes)
+	if err != nil {
+		t.Fatalf("DecodeDecisionConflict(%s): %v — a pre-existing artifact lacking the model: field must still decode cleanly (ac-3)", preModelDigestDecisionConflictReport, err)
+	}
+	if decoded.Provenance == nil {
+		t.Fatal("decoded.Provenance is nil, want a populated Provenance with Model == \"\"")
+	}
+	if decoded.Provenance.Model != "" {
+		t.Fatalf("decoded.Provenance.Model = %q, want empty (the source has no model: key)", decoded.Provenance.Model)
+	}
+
+	rerendered := RenderDecisionMarkdown(decoded, string(body))
+	if string(rerendered) != string(original) {
+		t.Fatalf("re-rendering the decoded pre-existing artifact did not reproduce the exact original bytes (a model: line must never appear where the source had none):\n--- original ---\n%s\n--- re-rendered ---\n%s", original, rerendered)
+	}
+}

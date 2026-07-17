@@ -46,11 +46,8 @@ func TestNewFrozen_RejectsEmptyArgs(t *testing.T) {
 	}
 }
 
-// TestStampProvenance_Happy documents today's contract (L-M5 has not landed
-// yet): Provenance carries no Model field, so modelDigest is unused and
-// StampProvenance must leave every existing field exactly as it found it —
-// a real assertion, not a placeholder, so a future accidental mutation
-// fails this test rather than silently changing behavior.
+// TestStampProvenance_Happy proves StampProvenance (L-M5, spec/model-digest)
+// writes exactly Model and leaves every other field untouched.
 func TestStampProvenance_Happy(t *testing.T) {
 	p := &Provenance{
 		Generator: "verdi-align",
@@ -60,24 +57,68 @@ func TestStampProvenance_Happy(t *testing.T) {
 		Integrity: "sha256:" + hex64,
 	}
 	before := *p
-	StampProvenance(p, "")
-	if !reflect.DeepEqual(*p, before) {
-		t.Fatalf("StampProvenance(p, \"\") mutated p: before %+v, after %+v (modelDigest is unused until L-M5)", before, *p)
-	}
+	modelDigest := "sha256:" + strings.Repeat("cd", 32)
 
-	// A non-empty modelDigest is equally inert today — the field it would
-	// write to (Provenance.Model) does not exist until L-M5.
-	StampProvenance(p, "sha256:"+hex64)
-	if !reflect.DeepEqual(*p, before) {
-		t.Fatalf("StampProvenance(p, sha256:...) mutated p: before %+v, after %+v (modelDigest is unused until L-M5)", before, *p)
+	StampProvenance(p, modelDigest)
+
+	if p.Model != modelDigest {
+		t.Fatalf("StampProvenance: p.Model = %q, want %q", p.Model, modelDigest)
+	}
+	// Every other field is untouched.
+	after := *p
+	after.Model = "" // isolate the one field this seam is allowed to change
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("StampProvenance mutated a field other than Model: before %+v, after (Model cleared) %+v", before, after)
+	}
+}
+
+// TestStampProvenance_Deterministic proves two stamps of identical p/digest
+// values produce byte-identical results (ac-1's "identical across repeated
+// runs" extended to this seam directly).
+func TestStampProvenance_Deterministic(t *testing.T) {
+	modelDigest := "sha256:" + strings.Repeat("ef", 32)
+	build := func() Provenance {
+		p := &Provenance{
+			Generator: "verdi-align",
+			Version:   "v0",
+			Inputs:    []string{"spec/foo@" + hex64[:7]},
+			Digest:    "sha256:" + hex64,
+		}
+		StampProvenance(p, modelDigest)
+		return *p
+	}
+	first, second := build(), build()
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("StampProvenance not deterministic: first %+v, second %+v", first, second)
 	}
 }
 
 func TestStampProvenance_NilPanics(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Fatal("StampProvenance(nil, \"\"): want panic, got none")
+			t.Fatal("StampProvenance(nil, \"sha256:...\"): want panic, got none")
 		}
 	}()
-	StampProvenance(nil, "")
+	StampProvenance(nil, "sha256:"+hex64)
+}
+
+// TestStampProvenance_EmptyDigestPanics is the seam's other fail-closed
+// edge (Outcome: "panics on an empty modelDigest rather than silently
+// minting an artifact with an absent model claim from a call site that
+// should always have a real one") — mirrors NewFrozen's own empty-argument
+// panic convention above.
+func TestStampProvenance_EmptyDigestPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("StampProvenance(p, \"\"): want panic, got none")
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, "modelDigest must not be empty") {
+			t.Fatalf("StampProvenance(p, \"\"): panic = %v, want substring %q", r, "modelDigest must not be empty")
+		}
+	}()
+	StampProvenance(&Provenance{
+		Generator: "verdi-align", Version: "v0", Inputs: []string{"spec/foo@" + hex64[:7]}, Digest: "sha256:" + hex64,
+	}, "")
 }

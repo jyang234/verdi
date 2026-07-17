@@ -57,6 +57,21 @@ frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }
 // feature spec and its impacted service, then checks out
 // feature/stale-decline — `verdi feature start`'s branch convention
 // (internal/storyresolve.ResolveBuildSpec's inference target).
+// testResolveModelDigest is cmd/verdi's test-support call of the same
+// resolveModelDigest (forgeboot.go) production verbs use to populate
+// alignDeps.ModelDigest — every fixture built by this file has a real
+// .verdi/verdi.yaml and no .verdi/model.yaml, so this resolves to
+// model.Canonical()'s own digest, exactly what cmdAlign would compute for
+// the same store.
+func testResolveModelDigest(t *testing.T, root string) string {
+	t.Helper()
+	digest, err := resolveModelDigest(root)
+	if err != nil {
+		t.Fatalf("resolveModelDigest(%s): %v", root, err)
+	}
+	return digest
+}
+
 func buildAlignRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
@@ -222,7 +237,7 @@ func findingByID(fs []artifact.Finding, id string) (artifact.Finding, bool) {
 func TestRunAlign_WritesReport(t *testing.T) {
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
-	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 
 	var stdout, stderr bytes.Buffer
 	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
@@ -254,7 +269,7 @@ func TestRunAlign_ByteIdenticalAcrossRuns(t *testing.T) {
 	judgeCmd := alignFakeJudgeOK(t)
 
 	run := func() []byte {
-		deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: judgeCmd}
+		deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: judgeCmd, ModelDigest: testResolveModelDigest(t, repo.Dir)}
 		var stdout, stderr bytes.Buffer
 		if got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr); got != 0 {
 			t.Fatalf("runAlign = %d, want 0; stderr=%s", got, stderr.String())
@@ -276,7 +291,7 @@ func TestRunAlign_ByteIdenticalAcrossRuns(t *testing.T) {
 func TestRunAlign_JudgeRequiredAndFailing_ExitsOne(t *testing.T) {
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
-	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t), JudgeRequired: true}
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t), JudgeRequired: true, ModelDigest: testResolveModelDigest(t, repo.Dir)}
 
 	var stdout, stderr bytes.Buffer
 	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
@@ -293,7 +308,7 @@ func TestRunAlign_JudgeRequiredAndFailing_ExitsOne(t *testing.T) {
 func TestRunAlign_JudgeRequiredAndNotConfigured_ExitsOne(t *testing.T) {
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
-	deps := alignDeps{Runner: alignRunner(svcDir), JudgeRequired: true}
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeRequired: true, ModelDigest: testResolveModelDigest(t, repo.Dir)}
 
 	var stdout, stderr bytes.Buffer
 	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
@@ -323,6 +338,7 @@ func TestRunAlign_ConfiguredJudgeTimeoutReachesInvocation(t *testing.T) {
 		JudgeCmd:      alignFakeJudgeSleepy(t),
 		JudgeRequired: true,
 		JudgeTimeout:  100 * time.Millisecond,
+		ModelDigest:   testResolveModelDigest(t, repo.Dir),
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -344,7 +360,7 @@ func TestRunAlign_ConfiguredJudgeTimeoutReachesInvocation(t *testing.T) {
 func TestRunAlign_Freeze(t *testing.T) {
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
-	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 
 	var stdout, stderr bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, true, deps, &stdout, &stderr); got != 0 {
@@ -384,7 +400,7 @@ func TestRunAlign_FreezePreservesDispositions(t *testing.T) {
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
 
 	// A living align: the judge reads one judged finding (j-1, "looks aligned").
-	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out, errb bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, false, living, &out, &errb); got != 0 {
 		t.Fatalf("runAlign (living) = %d, want 0; stderr=%s", got, errb.String())
@@ -419,7 +435,7 @@ func TestRunAlign_FreezePreservesDispositions(t *testing.T) {
 
 	// Freeze — with a judge that now DRIFTS (different id + text). A faithful
 	// freeze must ignore it and stamp the adjudicated living report as-is.
-	frozenDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeDrift(t)}
+	frozenDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeDrift(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out2, errb2 bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, true, frozenDeps, &out2, &errb2); got != 0 {
 		t.Fatalf("runAlign (freeze) = %d, want 0; stderr=%s", got, errb2.String())
@@ -449,7 +465,7 @@ func TestRunAlign_FreezePreservesDispositions(t *testing.T) {
 func TestRunAlign_DispositionPreservation(t *testing.T) {
 	repo := buildAlignRepo(t)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
-	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 
 	var stdout, stderr bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr); got != 0 {
@@ -513,7 +529,7 @@ func TestRunAlign_RegeneratePreservesGenuineReportOnJudgeFailure(t *testing.T) {
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
 
 	// A living align: the judge succeeds genuinely (judge_integrity recorded).
-	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out, errb bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, false, living, &out, &errb); got != 0 {
 		t.Fatalf("runAlign (living) = %d, want 0; stderr=%s", got, errb.String())
@@ -546,7 +562,7 @@ func TestRunAlign_RegeneratePreservesGenuineReportOnJudgeFailure(t *testing.T) {
 	// Re-run align (NOT --freeze) with a judge that now fails outright — the
 	// witness's "timed out at the 2m ceiling" stand-in; any judge failure
 	// takes the same absent-result path (judged.go's RunJudged).
-	failingDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t)}
+	failingDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out2, errb2 bytes.Buffer
 	got := runAlign(context.Background(), repo.Dir, false, failingDeps, &out2, &errb2)
 
@@ -575,7 +591,7 @@ func TestRunAlign_NoPriorReport_JudgeFailure_WritesSynthetic(t *testing.T) {
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
 
-	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t)}
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out, errb bytes.Buffer
 	got := runAlign(context.Background(), repo.Dir, false, deps, &out, &errb)
 	if got != 0 {
@@ -602,7 +618,7 @@ func TestRunAlign_PriorSynthetic_JudgeStillFailing_RegeneratesNormally(t *testin
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
 
 	// First run: no judge configured at all -> synthetic, no judge_integrity.
-	firstDeps := alignDeps{Runner: alignRunner(svcDir)}
+	firstDeps := alignDeps{Runner: alignRunner(svcDir), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out, errb bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, false, firstDeps, &out, &errb); got != 0 {
 		t.Fatalf("runAlign (first, no judge configured) = %d, want 0; stderr=%s", got, errb.String())
@@ -615,7 +631,7 @@ func TestRunAlign_PriorSynthetic_JudgeStillFailing_RegeneratesNormally(t *testin
 	// Second run: judge now configured but fails outright -> still synthetic;
 	// since the prior report was ITSELF synthetic (nothing genuine on disk),
 	// today's plain-overwrite behavior must stand.
-	secondDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t)}
+	secondDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeFailing(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out2, errb2 bytes.Buffer
 	got := runAlign(context.Background(), repo.Dir, false, secondDeps, &out2, &errb2)
 	if got != 0 {
@@ -640,13 +656,13 @@ func TestRunAlign_RegenerateWithGenuineJudgeCompletion_RegeneratesNormally(t *te
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
 
-	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out, errb bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, false, living, &out, &errb); got != 0 {
 		t.Fatalf("runAlign (living) = %d, want 0; stderr=%s", got, errb.String())
 	}
 
-	driftDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeDrift(t)}
+	driftDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeDrift(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out2, errb2 bytes.Buffer
 	got := runAlign(context.Background(), repo.Dir, false, driftDeps, &out2, &errb2)
 	if got != 0 {

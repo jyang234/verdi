@@ -196,11 +196,22 @@ type Provenance struct {
 	Inputs    []string `yaml:"inputs" json:"inputs"`
 	Digest    string   `yaml:"digest,omitempty" json:"digest,omitempty"`
 	Integrity string   `yaml:"integrity,omitempty" json:"integrity,omitempty"`
+	// Model is the resolved operating model's canonical-JSON sha256 digest
+	// (model.Model.Digest(), spec/model-digest ledger L-M5) — which
+	// verdi.model/v1 model governed this artifact's production. Optional
+	// and additive (omitempty): an artifact minted before this field
+	// existed decodes with Model == "", never a decode error
+	// (KnownFields(true) has never rejected a document merely for lacking
+	// an optional field). Written exactly once, by StampProvenance
+	// (stamp.go) — never set inline in a Provenance{...} literal the way
+	// Digest/Integrity are (spec/model-digest ac-2: StampProvenance is the
+	// only seam).
+	Model string `yaml:"model,omitempty" json:"model,omitempty"`
 }
 
 // Validate checks Generator/Version/Inputs are present, at least one of
-// Digest/Integrity is present, and every present hash and input has the
-// right shape.
+// Digest/Integrity is present, and every present hash (including the
+// optional Model digest) and input has the right shape.
 func (p Provenance) Validate() error {
 	if p.Generator == "" {
 		return fmt.Errorf("artifact: provenance.generator is required")
@@ -219,6 +230,9 @@ func (p Provenance) Validate() error {
 	}
 	if p.Integrity != "" && !sha256Re.MatchString(p.Integrity) {
 		return fmt.Errorf("artifact: provenance.integrity %q is not sha256:<64 hex> form", p.Integrity)
+	}
+	if p.Model != "" && !sha256Re.MatchString(p.Model) {
+		return fmt.Errorf("artifact: provenance.model %q is not sha256:<64 hex> form", p.Model)
 	}
 	for _, in := range p.Inputs {
 		if err := validateProvenanceInput(in); err != nil {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 func baseGenerateInput(t *testing.T, repoDir, svcDir, covers string, spec *artifact.SpecFrontmatter) Input {
@@ -20,7 +21,105 @@ func baseGenerateInput(t *testing.T, repoDir, svcDir, covers string, spec *artif
 		Covers:       covers,
 		JudgeCmd:     []string{writeFakeJudge(t, fakeJudgeOKScript)},
 		JudgeTimeout: time.Second,
+		ModelDigest:  testModelDigest(t),
 	}
+}
+
+// testModelDigest is this package's test-fixture stand-in for
+// store.Open(root).Model.Digest() (cmd/verdi/align.go's real source of
+// Input.ModelDigest): none of this package's own test fixtures
+// (buildComputeRepo, t.TempDir() roots in decision_report_test.go/
+// diagram_report_test.go) ever write a .verdi/verdi.yaml, so there is no
+// real store for store.Open to resolve here — but none of them ever write
+// a .verdi/model.yaml either, so the resolved model IS model.Canonical()
+// in every case, which is exactly the digest store.Open would produce for
+// them. Shared across this package's *_test.go files (same package,
+// internal tests). See fixtureModelDigest (decision_report_test.go) for
+// the deliberately-distinct-model case ac-1 also requires.
+func testModelDigest(t *testing.T) string {
+	t.Helper()
+	digest, err := model.Canonical().Digest()
+	if err != nil {
+		t.Fatalf("model.Canonical().Digest(): %v", err)
+	}
+	return digest
+}
+
+// fixtureModelYAML is internal/model/testdata/vocab-rename.yaml's own
+// content verbatim (already proven frontier-legal by that package's own
+// tests): structurally identical to the embedded canonical model, but with
+// vocabulary renames and different per-class template filenames — the
+// frontier's two named exceptions — so its Digest() differs from
+// model.Canonical().Digest(). Used across this package's ac-1
+// "tracks a distinct model" tests.
+const fixtureModelYAML = `schema: verdi.model/v1
+
+classes:
+  feature:
+    display: Feature
+    decomposes: stubs
+    template: custom-feature.md
+  story:
+    display: Story
+    parent: feature
+    template: custom-story.md
+
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }
+  story:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }
+
+vocabulary:
+  verbs:
+    accept: "Sign off"
+  states:
+    accepted-pending-build: "Ready to build"
+  classes:
+    feature: "Initiative"
+`
+
+// fixtureModelDigest decodes fixtureModelYAML and returns its Digest() —
+// this package's shared stand-in for "a store.Open resolution against a
+// distinct .verdi/model.yaml", used by every mint site's "tracks a
+// distinct model" test.
+func fixtureModelDigest(t *testing.T) string {
+	t.Helper()
+	m, err := model.DecodeModel([]byte(fixtureModelYAML))
+	if err != nil {
+		t.Fatalf("model.DecodeModel(fixtureModelYAML): %v", err)
+	}
+	digest, err := m.Digest()
+	if err != nil {
+		t.Fatalf("fixture model Digest(): %v", err)
+	}
+	return digest
 }
 
 // TestGenerate_RoundTripsThroughDecodeDeviation proves the rendered
@@ -70,6 +169,7 @@ func TestGenerate_ByteIdenticalAcrossRuns(t *testing.T) {
 		report, err := Generate(context.Background(), Input{
 			Root: repo.Dir, Runner: seedComputeRunner(svcDir), Spec: spec, Covers: repo.Head,
 			JudgeCmd: []string{judgeScript}, JudgeTimeout: time.Second,
+			ModelDigest: testModelDigest(t),
 		})
 		if err != nil {
 			t.Fatalf("Generate: %v", err)
@@ -140,6 +240,7 @@ func TestGenerate_NoJudgeConfigured_AbsenceFinding(t *testing.T) {
 
 	report, err := Generate(context.Background(), Input{
 		Root: repo.Dir, Runner: seedComputeRunner(svcDir), Spec: spec, Covers: repo.Head,
+		ModelDigest: testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -209,6 +310,7 @@ func TestGenerate_PreservesDispositionsAcrossRegeneration(t *testing.T) {
 		Root: repo.Dir, Runner: seedComputeRunner(svcDir), Spec: spec, Covers: repo.Head,
 		JudgeCmd: []string{writeFakeJudge(t, fakeJudgeOKScript)}, JudgeTimeout: time.Second,
 		ExistingFindings: dispositioned,
+		ModelDigest:      testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("Generate (second): %v", err)
@@ -240,6 +342,7 @@ func TestGenerate_PreservesDispositionsAcrossRegeneration(t *testing.T) {
 		Root: repo.Dir, Runner: seedComputeRunner(svcDir), Spec: changedSpec, Covers: repo.Head,
 		JudgeCmd: []string{writeFakeJudge(t, fakeJudgeOKScript)}, JudgeTimeout: time.Second,
 		ExistingFindings: dispositioned,
+		ModelDigest:      testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("Generate (third): %v", err)
@@ -289,4 +392,68 @@ func TestGenerate_Freeze(t *testing.T) {
 			t.Fatal("Generate(Freeze, no FrozenAt): want error, got nil")
 		}
 	})
+}
+
+// TestGenerate_ModelDigestStamped is spec/model-digest ac-1's headline
+// case: a deviation-report.md Generate produces carries provenance.model
+// equal to the resolved model's own Digest() (canonical here — no
+// model.yaml in this fixture), both on the in-memory Frontmatter and,
+// crucially, in the actually-RENDERED and re-decoded markdown (render.go's
+// renderFrontmatter hand-renders provenance: field by field, so this also
+// proves the new model: clause was wired into that hand-renderer, not just
+// computed and silently dropped).
+func TestGenerate_ModelDigestStamped(t *testing.T) {
+	repo := buildComputeRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	spec := testSpec(repo.Head)
+
+	report, err := Generate(context.Background(), baseGenerateInput(t, repo.Dir, svcDir, repo.Head, spec))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	wantDigest := testModelDigest(t)
+	if report.Frontmatter.Provenance == nil || report.Frontmatter.Provenance.Model != wantDigest {
+		t.Fatalf("Frontmatter.Provenance.Model = %+v, want %q", report.Frontmatter.Provenance, wantDigest)
+	}
+
+	fmBytes, _, err := artifact.SplitFrontmatter(report.Markdown)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	decoded, err := artifact.DecodeDeviation(fmBytes)
+	if err != nil {
+		t.Fatalf("DecodeDeviation(rendered markdown): %v\n---\n%s", err, report.Markdown)
+	}
+	if decoded.Provenance == nil || decoded.Provenance.Model != wantDigest {
+		t.Fatalf("decoded rendered markdown's Provenance.Model = %+v, want %q — render.go's renderFrontmatter must render the model: clause, not just compute it in memory:\n%s", decoded.Provenance, wantDigest, report.Markdown)
+	}
+}
+
+// TestGenerate_ModelDigestTracksFixtureModel is ac-1's distinguishing case:
+// a DIFFERENT resolved model (never the embedded canonical) produces a
+// provenance.model equal to THAT model's own digest, proving the stamped
+// value tracks the actual resolved model rather than a constant that
+// happens to match the one model every other test fixture uses.
+func TestGenerate_ModelDigestTracksFixtureModel(t *testing.T) {
+	repo := buildComputeRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	spec := testSpec(repo.Head)
+
+	fixtureDigest := fixtureModelDigest(t)
+	canonicalDigest := testModelDigest(t)
+	if fixtureDigest == canonicalDigest {
+		t.Fatalf("fixture model digest %q equals the canonical digest — the fixture is not actually distinct", fixtureDigest)
+	}
+
+	in := baseGenerateInput(t, repo.Dir, svcDir, repo.Head, spec)
+	in.ModelDigest = fixtureDigest
+
+	report, err := Generate(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if report.Frontmatter.Provenance == nil || report.Frontmatter.Provenance.Model != fixtureDigest {
+		t.Fatalf("Provenance.Model = %+v, want %q (the fixture model's own digest)", report.Frontmatter.Provenance, fixtureDigest)
+	}
 }

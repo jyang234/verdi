@@ -20,7 +20,7 @@ func TestRun_OutputPassesVL014(t *testing.T) {
 	seedBoard(t, repo)
 	ctx := context.Background()
 
-	if _, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "vl014-happy", StoryRef: "jira:LOAN-1482"}); err != nil {
+	if _, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "vl014-happy", StoryRef: "jira:LOAN-1482", ModelDigest: testModelDigest(t, repo.Dir)}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -41,7 +41,7 @@ func TestRun_RemovingAStickyFromTheDispositionsBlock_FailsVL014Exactly(t *testin
 	seedBoard(t, repo)
 	ctx := context.Background()
 
-	res, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "vl014-missing", StoryRef: "jira:LOAN-1482"})
+	res, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "vl014-missing", StoryRef: "jira:LOAN-1482", ModelDigest: testModelDigest(t, repo.Dir)})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestRun_DanglingDisposition_FailsVL014Exactly(t *testing.T) {
 	seedBoard(t, repo)
 	ctx := context.Background()
 
-	res, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "vl014-dangling", StoryRef: "jira:LOAN-1482"})
+	res, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "vl014-dangling", StoryRef: "jira:LOAN-1482", ModelDigest: testModelDigest(t, repo.Dir)})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

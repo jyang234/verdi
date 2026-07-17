@@ -23,6 +23,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/commitdesign"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 const boardStateSchema = "verdi.board/v1"
@@ -358,8 +359,19 @@ func boardCommitHandler(root string) http.HandlerFunc {
 			return
 		}
 
+		cfg, err := store.Open(root)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "resolving store config: "+err.Error())
+			return
+		}
+		modelDigest, err := cfg.Model.Digest()
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "computing model digest: "+err.Error())
+			return
+		}
+
 		res, err := commitdesign.Run(context.Background(), commitdesign.Input{
-			Root: root, BoardKey: key, SpecName: req.Name, StoryRef: req.StoryRef,
+			Root: root, BoardKey: key, SpecName: req.Name, StoryRef: req.StoryRef, ModelDigest: modelDigest,
 		})
 		if err != nil {
 			writeJSONError(w, http.StatusBadRequest, err.Error())

@@ -39,20 +39,31 @@ func NewFrozen(at, commit string) Frozen {
 }
 
 // StampProvenance stamps p with the resolved operating model's digest
-// (L-M5, extensibility-phase1 plan Task 10): once Provenance gains a Model
-// field, every Provenance-minting call site is meant to write it through
-// this one seam, so that later task changes only the value each caller
-// passes — never a call site's structure.
+// (L-M5, spec/model-digest): the ONE seam every production
+// Provenance-minting call site routes through to set Model — never inline
+// in the struct literal the way Digest/Integrity are set (ac-2's "one
+// seam, no surviving copies" static convention). Callers resolve
+// modelDigest once, at their own cmd/verdi (or workbench HTTP handler)
+// entry point via store.Open(...).Model.Digest(), and thread it down as a
+// plain string — never re-derived deep inside internal/align or
+// internal/commitdesign, and never by importing internal/model there
+// (internal/model already imports internal/artifact, so the reverse
+// import would cycle).
 //
-// Provenance carries no Model field yet, so modelDigest is unused and
-// StampProvenance is a documented no-op today: it exists so the signature
-// is fixed once, ahead of Task 10 wiring it into the Provenance-minting
-// call sites and passing store.Config.Model.Digest() (until then, any
-// caller that does adopt this seam passes ""). p must be non-nil —
-// StampProvenance panics otherwise, the same fail-closed posture NewFrozen
-// takes on an empty stamp.
+// Both p and modelDigest must be non-empty — StampProvenance panics
+// otherwise, mirroring NewFrozen's own "a structurally empty stamp is
+// always a caller bug, never a runtime condition" posture (this file's own
+// doc comment above): every production call site already has a real,
+// non-nil *store.Config (store.Open's guarantee — Config.Model is never
+// nil, model-schema), so an empty modelDigest reaching here can only be a
+// caller wiring bug, never a legitimate runtime condition to tolerate
+// silently.
 func StampProvenance(p *Provenance, modelDigest string) {
 	if p == nil {
 		panic("artifact: StampProvenance: p must not be nil")
 	}
+	if modelDigest == "" {
+		panic("artifact: StampProvenance: modelDigest must not be empty")
+	}
+	p.Model = modelDigest
 }

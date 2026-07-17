@@ -250,8 +250,16 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 
 	// Freeze the alignment report in place, still under specs/active/ (the
 	// same generate-freeze-write logic `verdi align --freeze` uses,
-	// align.go's runAlignForSpec).
-	alignD := alignDeps{Runner: deps.Runner, JudgeCmd: deps.JudgeCmd, JudgeRequired: deps.JudgeRequired, JudgeTimeout: deps.JudgeTimeout}
+	// align.go's runAlignForSpec) — which, on the regenerate fallback path
+	// (no living report / stale covers / an undispositioned finding),
+	// mints a fresh Provenance and needs a resolved model digest exactly
+	// like `verdi align` itself does (spec/model-digest ledger L-M5).
+	modelDigest, err := resolveModelDigest(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	alignD := alignDeps{Runner: deps.Runner, JudgeCmd: deps.JudgeCmd, JudgeRequired: deps.JudgeRequired, JudgeTimeout: deps.JudgeTimeout, ModelDigest: modelDigest}
 	if rc := runAlignForSpec(ctx, root, spec, head, true, alignD, stdout, stderr); rc != 0 {
 		fmt.Fprintln(stderr, "close: freezing the alignment report failed (see above)")
 		return rc

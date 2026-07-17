@@ -16,7 +16,7 @@ func TestGenerateDecisionConflict_MarkdownRoundTrips(t *testing.T) {
 			{Type: artifact.LinkExempts, Ref: "adr/retry-policy", Note: "reason"},
 		}}},
 	}
-	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{Root: root, Spec: spec, Covers: "abc1234"})
+	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{Root: root, Spec: spec, Covers: "abc1234", ModelDigest: testModelDigest(t)})
 	if err != nil {
 		t.Fatalf("GenerateDecisionConflict: %v", err)
 	}
