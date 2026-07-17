@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
 	"github.com/jyang234/verdi/internal/lint"
@@ -659,5 +661,89 @@ func TestRunCloseFeature_ClosedStoryDiscovered_NoOperationalError(t *testing.T) 
 	}
 	if !strings.Contains(stdout.String(), fmt.Sprintf("[PASS] closure(feature): %s", "3. every implementing story closed")) {
 		t.Fatalf("stdout should show condition 3 (every implementing story closed) passing: %s", stdout.String())
+	}
+}
+
+// TestRunCloseFeature_UnreadableAttestation_OperationalFailure pins ADJ-67 /
+// D6-38 on the FEATURE closure path. closeFeatureSpecMD declares
+// evidence: [behavioral, attestation] on every AC, so evidence.FoldFeature
+// (via cmd/verdi's foldFeature) calls LoadAttestationState at the feature
+// slug's own attestation path. An attestation file that exists but cannot be
+// read (mode 000) must fail closed — never the old stat-only swallow that
+// counted an unreadable file as a satisfied outcome attestation.
+//
+// Two seams are pinned:
+//   - fold seam (TEETH): foldFeature() called directly propagates the
+//     os.ReadFile error out of evidence.FoldFeature (featurefold.go's
+//     LoadAttestationState call) through its "folding feature evidence:"
+//     wrap. This assertion FAILS if the swallow is restored.
+//   - cmd taxonomy: `verdi close <feature>` exits 2 (operational). NOTE: in
+//     the full ritual, runCloseFeature's index.Build walk of .verdi/ is the
+//     FIRST reader to fail closed on the same unreadable file (walkDocuments
+//     opens every artifact), so the cmd-level exit 2 is real either way — but
+//     the fold-seam teeth live in the direct foldFeature call above, not in
+//     the exit code (which index.Build would produce even under a restored
+//     swallow). Recorded rather than left implicit.
+func TestRunCloseFeature_UnreadableAttestation_OperationalFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-attestation path under this user")
+	}
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	ctx := context.Background()
+
+	// Plant an outcome attestation for the feature's own ac-1 (FoldFeature
+	// folds ac-1 first), then make it unreadable. Its content never matters —
+	// the fold fails on the os.ReadFile EACCES before ever parsing it.
+	attDir := filepath.Join(repo.Dir, ".verdi", "attestations", "close-feature-fixture")
+	if err := os.MkdirAll(attDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	attPath := filepath.Join(attDir, "ac-1.md")
+	content := "---\nid: attestation/close-feature-fixture--ac-1\nkind: attestation\ntitle: \"ac-1 (deliberately unreadable)\"\nowners: [platform-team]\n---\nPlanted then chmod 000 — the fold must fail closed on it, never read it.\n"
+	if err := os.WriteFile(attPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(attPath, 0o000); err != nil {
+		t.Fatalf("os.Chmod(%s, 0o000): %v", attPath, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(attPath, 0o644) // restore so t.TempDir()'s own cleanup can remove it
+	})
+
+	// Fold seam (TEETH): foldFeature bypasses index.Build and reaches
+	// evidence.FoldFeature → LoadAttestationState directly. This is the
+	// assertion that catches a restored stat-only swallow.
+	spec, _ := readSpec(t, repo.Dir, "close-feature-fixture")
+	specRef, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		t.Fatalf("ParseRef(%q): %v", spec.ID, err)
+	}
+	_, ferr := foldFeature(ctx, repo.Dir, spec, specRef, repo.Head, map[string][]evidence.ImplementingStory{})
+	if ferr == nil {
+		t.Fatal("foldFeature(unreadable attestation) err = nil — the fold must fail closed on an unreadable outcome attestation, never swallow it to satisfied (ADJ-67/D6-38)")
+	}
+	if !errors.Is(ferr, os.ErrPermission) {
+		t.Fatalf("foldFeature err = %v, want it to wrap os.ErrPermission (the propagated os.ReadFile EACCES)", ferr)
+	}
+	if !strings.Contains(ferr.Error(), "loading attestation state") {
+		t.Fatalf("foldFeature err = %q, want it to name the propagated attestation read (folding feature evidence → loading attestation state)", ferr.Error())
+	}
+
+	// Cmd taxonomy: `verdi close <feature>` exits 2 (operational) on the same
+	// input (see the doc comment re index.Build shadowing the fold).
+	deps := closeFeatureDeps(fake.New())
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(feature, unreadable attestation) = %d, want 2 (operational failure, not a swallowed attested=true); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "permission denied") {
+		t.Fatalf("stderr = %q, want it to name the propagated permission error", stderr.String())
+	}
+	// No side effects on an operational failure: nothing archived.
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "close-feature-fixture")); !os.IsNotExist(err) {
+		t.Fatal("specs/archive/close-feature-fixture should not exist after an operational-failure close")
 	}
 }
