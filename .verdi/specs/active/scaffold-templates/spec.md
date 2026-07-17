@@ -4,7 +4,7 @@ kind: spec
 title: "Scaffold Templates"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-31
 problem: { text: "spec scaffolds are Go string builders (seam S9, internal/designscaffold): changing what a new spec looks like is a Go change and recompile; teams cannot add sections or fields, and strict decode rejects any team-specific frontmatter outright, so there is no sanctioned extension surface for spec content at all", anchor: problem }
 outcome: { text: "designscaffold renders from template files — a store's .verdi/templates/<class>.md overriding an embedded canonical set that reproduces today's scaffolds exactly — selected via the resolved model's Class.Template for both call sites (design start and the board's stub-instantiate); a custom: opaque frontmatter namespace decodes, survives re-emit, and renders, with the YAML dialect wall still enforced inside it (operating-model dc-2); and verdi model check round-trips every template through instantiate-then-strict-decode so a broken template fails at check time naming the template, never at first use", anchor: outcome }
@@ -14,6 +14,7 @@ acceptance_criteria:
   - { id: ac-3, text: "verdi model check instantiates and strict-decodes every resolved template (store overrides and embedded), failing closed naming the offending template, proven by driving the built binary", evidence: [behavioral], anchor: ac-3 }
 links:
   - { type: implements, ref: "spec/operating-model#ac-3" }
+frozen: { at: 2026-07-17, commit: 5e7677b5bd7ddd0c6a7c9adc94733c37c49fc6a9, stub_matched: true }
 ---
 # Scaffold Templates
 
