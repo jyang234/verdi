@@ -501,6 +501,75 @@ bindings:
       # freshness test is a named make verify failure, not silent
       # staleness.
       - "spec/public-readme#ac-1"
+      # spec/closure-ergonomics family (closure-groundwork task, this
+      # family's own self-hosted evidence): the four closure-ergonomics
+      # stories' behavioral legs, all under make verify.
+      # spec/close-preflight (ac-1..3 all declare [behavioral,
+      # attestation]): cmd/verdi/closepreflight_test.go's
+      # TestRunPreflight_StoryScope_DefectClasses (ac-1's per-defect-class
+      # disclosure, one fixture per condition), TestRunPreflight_
+      # StoryScope_ReadyThenClose (ac-3's ready-fixture pair proven end to
+      # end through a real close), TestRunPreflight_
+      # ExitCodeMatrixAndNonMutation + TestRunPreflight_CIGuardDisclosure +
+      # TestPreflightGuardDisclosure_AgreesWithRealGuard (ac-2's exit-code/
+      # non-mutation/guard-disclosure proofs), and TestCmdClose_
+      # Preflight_Dispatch (dispatch wiring) — plus the feature-scope
+      # companion suite, closepreflightfeature_test.go's
+      # TestRunPreflight_FeatureScope_DefectClasses/_ReadyThenClose/
+      # _OutcomeFloorAttestation_UsesFeatureSlug (dc-3's widening to
+      # feature scope, part of this story's own ac-1/ac-3).
+      - "spec/close-preflight#ac-1"
+      - "spec/close-preflight#ac-2"
+      - "spec/close-preflight#ac-3"
+      # spec/attest-helper behavioral legs (ac-3 declares [static,
+      # attestation] only and has no entry here): cmd/verdi/attest_test.go's
+      # TestRunAttest_Happy (ac-1's scaffold shape), TestRunAttest_
+      # RefusesUnknownStoryRef/_RefusesWrongClass/_RefusesUndeclaredAC/
+      # _RefusesAlreadyExists (ac-2's two refusal cases), and
+      # TestRunAttest_ScaffoldRoundTrips (ac-4's decode/validate round
+      # trip) — all driving the built verb's testable core against a
+      # fixturegit-backed store.
+      - "spec/attest-helper#ac-1"
+      - "spec/attest-helper#ac-2"
+      - "spec/attest-helper#ac-4"
+      # spec/disposition-verb behavioral legs (ac-4 declares [static] only
+      # and has no entry here): cmd/verdi/disposition_test.go's
+      # TestRunDisposition_RecordsInPlace_DigestAndIntegrityPreserved
+      # (ac-1's in-place write + digest/integrity invariance),
+      # TestRunDisposition_Refusals + TestRunDisposition_
+      # RationaleValidation (ac-2's named-verdict refusals), and
+      # TestRunDisposition_SurvivesFreeze (ac-3's freeze-survival proof
+      # against the D6-24 keep-genuine harness).
+      - "spec/disposition-verb#ac-1"
+      - "spec/disposition-verb#ac-2"
+      - "spec/disposition-verb#ac-3"
+      # spec/sync-local-flow behavioral legs (both ACs declare [static,
+      # behavioral]): cmd/verdi/sync_helpers_test.go's TestGithubOwnerRepo/
+      # _Negative_RefusesNamingEverySource + cmd/verdi/sync_test.go's
+      # TestCmdSync_LocalCheckout_RefusesNamingSources +
+      # TestGithubIdentifier_CIEnvWinsOverResolvableOrigin (ac-1's
+      # origin-derivation and named-sources refusal), and
+      # cmd/verdi/sync_ancestor_test.go's TestRunSync_Ancestor_
+      # LinearHistory_AcceptsNamedAncestor/_BranchedHistory_
+      # ReachesMergedAncestor/_BundleAtHead_WinsWithNoWalk/
+      # _NoBundleAnywhere_RefusesNamingRange (ac-2's nearest-ancestor
+      # walk).
+      - "spec/sync-local-flow#ac-1"
+      - "spec/sync-local-flow#ac-2"
+      # spec/closure-ergonomics FEATURE outcome ACs (closure-groundwork
+      # task, mirroring the ROUND-6 FEATURE ACs convention above): the four
+      # feature ACs, each [behavioral, attestation], evidenced by their
+      # implementing story's own merged behavioral suite under make verify
+      # (feature fold floor = attestation OR pass-record, evidence.
+      # FloorResult's OR semantics; the attestation legs are scaffolded,
+      # unauthored, at .verdi/attestations/closure-ergonomics/ac-<n>.md,
+      # authored separately at closure). ac-1 <- spec/close-preflight's
+      # suite above; ac-2 <- spec/attest-helper's; ac-3 <- spec/
+      # disposition-verb's; ac-4 <- spec/sync-local-flow's.
+      - "spec/closure-ergonomics#ac-1"
+      - "spec/closure-ergonomics#ac-2"
+      - "spec/closure-ergonomics#ac-3"
+      - "spec/closure-ergonomics#ac-4"
       # spec/tool-view-exit ac-1's sole evidence leg (declared [behavioral]
       # only): e2e/tests/43-tool-view-exit.spec.ts's four Playwright cases
       # (the exit affordance from a board's pinned reference card; Escape
@@ -942,6 +1011,45 @@ bindings:
       # spec-align and before e2e. All compile, vet, lint, and lint-store
       # clean under make verify.
       - "spec/showcase-drift-gate#ac-1"
+      # spec/closure-ergonomics family static legs (closure-groundwork
+      # task): spec/attest-helper is the only story of the four declaring
+      # the static kind on every AC.
+      # spec/attest-helper (all four ACs declare [static, ...]):
+      # internal/evidence/attestations_test.go's TestRenderAttestation
+      # Scaffold_FrontmatterShape/_SelfValidates (ac-1/ac-4's
+      # scaffold-rendering + self-validation statics) and TestLoad
+      # AttestationState/TestUnauthoredAttestationMarker_IsFixedSentinel
+      # (dc-3's three-way state, consumed by ac-2's exists-check and
+      # ac-3's lint rule alike), plus internal/lint/vl022_test.go's
+      # table-driven fixture corpus (TestVL022_CleanFixture/
+      # _MisslugFixture/_NoVerifiesFixture/_UndeclaredAC/
+      # _FeatureOutcomeSkipped/_MultipleVerifiesEdges/
+      # _UnresolvableTarget_FailsClosed/_FragmentForm_FailsClosed — ac-3's
+      # declared-verifies-only scope, dc-4). All compile, vet, lint, and
+      # lint-store clean under make verify.
+      - "spec/attest-helper#ac-1"
+      - "spec/attest-helper#ac-2"
+      - "spec/attest-helper#ac-3"
+      - "spec/attest-helper#ac-4"
+      # spec/disposition-verb ac-4 static leg (its sole declared [static]
+      # AC — the doc-refresh obligation): verdi/docs/architecture-and-
+      # journeys.md's closure-ritual narrative (§D.5) names `verdi
+      # disposition <spec-ref> <finding-id> <fixed|accepted-deviation>
+      # --rationale <text> [--amend]` as "the only sanctioned way to
+      # record one," no hand-edit language remaining.
+      - "spec/disposition-verb#ac-4"
+      # spec/sync-local-flow static legs (both ACs declare [static,
+      # behavioral]): internal/forge/github/remoteurl_test.go's
+      # TestOwnerRepoFromURL (every github.com remote URL shape,
+      # with/without .git, case-insensitive host) and cmd/verdi/
+      # sync_helpers_test.go's TestGithubOwnerRepo table — ac-1's
+      # URL-shape parsing statics — plus cmd/verdi/sync_ancestor_test.go's
+      # TestCandidateAncestorCommits_CommitItselfIsFirst/_MatchesGitxLog_
+      # NoDepthLimit/_Negative — ac-2's candidate-ancestor enumeration/
+      # ordering statics. All compile, vet, lint, and lint-store clean
+      # under make verify.
+      - "spec/sync-local-flow#ac-1"
+      - "spec/sync-local-flow#ac-2"
       # spec/family-board-links static legs (ac-1..4 all declare [static,
       # behavioral]): internal/workbench/familylinks_test.go's table-driven
       # unit tests over the enrichment functions — TestAttachParentFeatureLink

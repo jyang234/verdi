@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-27--ac-1
 kind: attestation
-title: "unauthored attestation scaffold: spec/home-status-glance ac-1"
+title: "outcome attestation: the glance partitions every entry into its bucket, badged and linked like the directory"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:
