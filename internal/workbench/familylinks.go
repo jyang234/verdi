@@ -79,14 +79,20 @@ func attachParentFeatureLink(proj *BoardProjection, ix *index.Index) {
 		if err != nil || ref.Kind != artifact.KindSpec {
 			continue
 		}
-		// The base feature ref, fragment (and any pin) dropped — the
-		// surface this card links to is the FEATURE's, not one AC's
-		// (dc-1: "AC-1's forward direction resolves its own declared
-		// target with a plain index lookup", the same existence check
-		// dex's resolvableLinkURL already performs before minting a
-		// permalink).
+		// The board this card links to is the FEATURE's, not one AC's, so
+		// the surface resolves off the base feature ref with its fragment
+		// dropped (dc-1: "AC-1's forward direction resolves its own declared
+		// target with a plain index lookup"). But a fragment-bearing edge
+		// (spec/<feature>#<ac>) still requires the NAMED AC to resolve too:
+		// a since-renamed or -removed AC leaves the feature resolving while
+		// the family join's AC-level half dangles, so it takes ac-4's
+		// disclosed notice rather than a live affordance vouching for a join
+		// that no longer holds (fbl-r3-6, ADJ-64). ObjectIDs is the same
+		// artifact.DeclaredObjectIDs set lint's VL-003 resolves fragments
+		// against; a whole-feature edge (no fragment) resolves on the
+		// feature alone, exactly as before.
 		featureRef := "spec/" + ref.Name
-		if entry, ok := ix.Get(featureRef); ok {
+		if entry, ok := ix.Get(featureRef); ok && (!ref.Fragment() || entry.ObjectIDs[ref.Object]) {
 			rc.FeatureHref, rc.Archived = servableSurface(featureRef, entry)
 			continue
 		}

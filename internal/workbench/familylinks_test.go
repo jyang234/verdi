@@ -522,6 +522,16 @@ func TestAttachParentFeatureLink(t *testing.T) {
 			wantUnresolved: "spec/flx-no-such-feature#ac-1 does not resolve in this checkout's store — no board to link to",
 		},
 		{
+			// fbl-r3-6 (ADJ-64): the base feature resolves but the named AC
+			// fragment does not — a renamed/removed AC leaves the family
+			// join's AC-level half dangling. Disclose per ac-4 (co-3), never
+			// mint a live affordance vouching for a join that no longer holds.
+			name:           "a resolving feature with a DANGLING AC fragment yields the disclosed notice and no href",
+			edges:          []edgeView{{Type: "implements", From: "spec", To: "spec/flx-target-feature#ac-99"}},
+			ref:            "spec/flx-target-feature#ac-99",
+			wantUnresolved: "spec/flx-target-feature#ac-99 does not resolve in this checkout's store — no board to link to",
+		},
+		{
 			name:  "a non-spec implements target (e.g. a feature implementing an ADR) is left untouched",
 			edges: []edgeView{{Type: "implements", From: "spec", To: "adr/0001-outbox-events"}},
 			ref:   "adr/0001-outbox-events",

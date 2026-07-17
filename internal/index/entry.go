@@ -41,4 +41,13 @@ type Entry struct {
 	// dispatch the diagram tier badge at internal/render's shared seam
 	// (spec/illustrative-class ac-2) without re-reading frontmatter.
 	DiagramClass string
+	// ObjectIDs is the set of frontmatter-declared object ids a SPEC entry
+	// carries (its acceptance criteria, constraints, decisions, and open
+	// questions — artifact.DeclaredObjectIDs), computed once during the walk
+	// where the frontmatter is already decoded. nil for every non-spec kind
+	// and for external refs. Carried so a fragment-bearing ref
+	// (spec/<name>#<object-id>) can be resolved to the AC/object level
+	// without re-reading the target's file — the same DeclaredObjectIDs set
+	// lint's VL-003 uses to resolve fragments.
+	ObjectIDs map[string]bool
 }
