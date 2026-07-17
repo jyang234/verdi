@@ -76,15 +76,58 @@ func TestModelCheck_NoModelYAML_OK(t *testing.T) {
 	}
 }
 
+// vocabRenameFeatureTemplate and vocabRenameStoryTemplate back vocab-
+// rename.yaml's renamed Class.Template filenames (custom-feature.md /
+// custom-story.md) — minimal but real templates, standing in for a store
+// that actually shipped the override its renamed filename promises
+// (spec/scaffold-templates ac-3: model check now instantiates and
+// strict-decodes every resolved template, so a renamed-but-unbacked
+// filename is correctly a failure, not a documentation-only field —
+// TestModelCheck_BrokenTemplate_NamesFile below pins that failure case).
+const vocabRenameFeatureTemplate = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: feature
+status: draft
+problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+---
+# {{.Title}}
+`
+
+const vocabRenameStoryTemplate = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: story
+status: draft
+story: {{.StoryRef}}
+problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+links:
+{{range .Links}}  - { type: {{.Type}}, ref: {{printf "%q" .Ref}} }
+{{end}}---
+# {{.Title}}
+`
+
 // TestModelCheck_ValidVocabRename_OK is ac-3's valid-hand-written-
 // model.yaml case: a manifest varying only vocabulary and per-class
 // template filenames (dc-1's frontier) still exits 0, over ITS OWN
 // counts and digest (not canonical's — proving the store's file, not
-// the embedded default, was actually read).
+// the embedded default, was actually read) — AND over its own renamed
+// templates, backed here by a real .verdi/templates/ override for each
+// (ac-3's template round trip requires the file to actually exist).
 func TestModelCheck_ValidVocabRename_OK(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	vocabRenameYAML := readModelTestdata(t, "vocab-rename.yaml")
 	root := writeModelCheckStoreRoot(t, vocabRenameYAML)
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "custom-feature.md"), []byte(vocabRenameFeatureTemplate))
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "custom-story.md"), []byte(vocabRenameStoryTemplate))
 
 	stdout, stderr, code := runModelCheckBinary(t, bin, root)
 	if code != 0 {
@@ -104,6 +147,63 @@ func TestModelCheck_ValidVocabRename_OK(t *testing.T) {
 	}
 	if !strings.Contains(stdout, wantDigest) {
 		t.Fatalf("stdout = %q, want it to contain vocab-rename.yaml's OWN digest %q (proving the store's file was read, not the embedded default)", stdout, wantDigest)
+	}
+}
+
+// TestModelCheck_BrokenTemplateSyntax_Exit2_NamesFile is spec/scaffold-
+// templates ac-3's broken-template case (malformed syntax half): a store
+// override under .verdi/templates/ with unparseable text/template syntax
+// fails model check closed at exit 2 (a broken template is not a
+// structural model deviation — Class.Template is frontier-exempt, so this
+// is never the frontier's exit 1), naming the specific offending template
+// file rather than a bare "model.yaml invalid" message.
+func TestModelCheck_BrokenTemplateSyntax_Exit2_NamesFile(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, "")
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "feature.md"), []byte("title: {{.Title\n"))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (malformed template syntax) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "feature.md") {
+		t.Fatalf("stderr = %q, want it to name the offending template file feature.md, never a bare \"model.yaml invalid\"", stderr)
+	}
+}
+
+// TestModelCheck_BrokenTemplateDecode_Exit2_NamesFile is spec/scaffold-
+// templates ac-3's broken-template case (failed-strict-decode half): a
+// store override whose rendered OUTPUT is syntactically valid template
+// source but decodes to a spec that fails strict decode (here, an unknown
+// frontmatter field, KnownFields) also fails model check closed at exit
+// 2, naming the offending template file.
+func TestModelCheck_BrokenTemplateDecode_Exit2_NamesFile(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, "")
+	const brokenDecodeTemplate = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: story
+status: draft
+story: {{.StoryRef}}
+bogus_unknown_field: 1
+problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+links:
+{{range .Links}}  - { type: {{.Type}}, ref: {{printf "%q" .Ref}} }
+{{end}}---
+# {{.Title}}
+`
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "story.md"), []byte(brokenDecodeTemplate))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (template renders undecodable content) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "story.md") {
+		t.Fatalf("stderr = %q, want it to name the offending template file story.md, never a bare \"model.yaml invalid\"", stderr)
 	}
 }
 
