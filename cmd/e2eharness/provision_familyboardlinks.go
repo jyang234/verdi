@@ -61,6 +61,15 @@ const (
 	// link to the servable corpus page with its archived state disclosed.
 	flOrphanStoryName    = "family-links-orphan-story"
 	flArchivedParentName = "family-links-archived-parent"
+	// The ADJ-70 branch-pair rig: a feature and its implementing story
+	// committed ONLY onto design/family-links-pair (cut from main, never
+	// merged), so NEITHER resolves on the serving checkout — the exact
+	// branch-only family the Phase-5 review's ux-1 finding proved 404ed
+	// when family hrefs were root-relative. The e2e drives both directions
+	// of the family journey entirely inside /b/<branch>/.
+	flPairFeatureName = "family-links-pair-feature"
+	flPairStoryName   = "family-links-pair-story"
+	flPairBranch      = "design/family-links-pair"
 )
 
 // flParentSpec declares three stubs, one per attachStubStoryLinks scenario
@@ -263,6 +272,68 @@ acceptance_criteria:
 Scaffolded, but not yet in this checkout's active store.
 `
 
+// flPairFeatureSpec declares the one stub its branch-sibling story
+// realizes — the ADJ-70 active-match-on-a-branch fixture. Its
+// accepted-pending-build status requires a frozen stamp (artifact's
+// validateFeature), exactly like flParentSpec above.
+func flPairFeatureSpec(commit string) string {
+	return `---
+id: spec/` + flPairFeatureName + `
+kind: spec
+class: feature
+title: "Family links pair feature (e2e fixture)"
+status: accepted-pending-build
+owners: [platform-team]
+problem: { text: "a branch-only family had no way to navigate between its own boards without being ejected to the serving checkout", anchor: "#problem" }
+outcome: { text: "both family directions stay inside the branch the family resolves on", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "the pair story realizes this ac on the same branch", evidence: [static], anchor: "#ac-1" }
+stubs:
+  - { slug: ` + flPairStoryName + `, acceptance_criteria: [ac-1] }
+frozen: { at: 2026-07-01, commit: ` + commit + ` }
+---
+# Family links pair feature
+
+## Problem
+
+## Outcome
+
+## ac-1
+
+Realized by the branch-sibling story.
+`
+}
+
+// flPairStorySpec implements the pair feature's ac-1 — on the same
+// branch-only tree.
+func flPairStorySpec() string {
+	return `---
+id: spec/` + flPairStoryName + `
+kind: spec
+class: story
+title: "Family links pair story (e2e fixture)"
+status: draft
+owners: [platform-team]
+story: jira:VERDI-905
+problem: { text: "the pair feature's ac-1 needs a branch-resident implementing story", anchor: "#problem" }
+outcome: { text: "this story exists only on the pair branch, beside its parent feature", anchor: "#outcome" }
+links:
+  - { type: implements, ref: "spec/` + flPairFeatureName + `#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "the story validates with one acceptance criterion", evidence: [static], anchor: "#ac-1" }
+---
+# Family links pair story
+
+## Problem
+
+## Outcome
+
+## ac-1
+
+Branch-only, beside its parent.
+`
+}
+
 // provisionFamilyBoardLinks writes the always-visible fixtures (the
 // parent feature, the archived child, the dangling story) onto designBranch
 // (already checked out at this point), then cuts flInstantiatedChildName's
@@ -315,6 +386,37 @@ func provisionFamilyBoardLinks(storeRoot string) error {
 		return err
 	}
 	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: "+branch+" family-board-links fixture (instantiated, not yet landed)"); err != nil {
+		return err
+	}
+
+	// The ADJ-70 branch-pair rig: BOTH halves of a family committed only
+	// onto flPairBranch (cut from main, exactly like the branch above), so
+	// the serving checkout's tree carries neither — the branch-only family
+	// whose boards must link to each other under /b/, never root-relative.
+	if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", flPairBranch, "main"); err != nil {
+		return fmt.Errorf("cutting %s: %w", flPairBranch, err)
+	}
+	pairCommit, err := gitOutput(storeRoot, "rev-parse", "main")
+	if err != nil {
+		return fmt.Errorf("resolving main for the pair-branch fixture: %w", err)
+	}
+	pairFiles := map[string]string{
+		filepath.Join(".verdi", "specs", "active", flPairFeatureName, "spec.md"): flPairFeatureSpec(pairCommit),
+		filepath.Join(".verdi", "specs", "active", flPairStoryName, "spec.md"):   flPairStorySpec(),
+	}
+	for rel, content := range pairFiles {
+		path := filepath.Join(storeRoot, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("creating %s: %w", filepath.Dir(rel), err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", rel, err)
+		}
+	}
+	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+		return err
+	}
+	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: "+flPairBranch+" family pair fixture (branch-only feature + implementing story, ADJ-70)"); err != nil {
 		return err
 	}
 

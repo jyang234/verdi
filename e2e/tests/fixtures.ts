@@ -706,6 +706,15 @@ export const EDGE = {
   FL_ORPHAN_STORY: "family-links-orphan-story",
   FL_ARCHIVED_PARENT: "family-links-archived-parent",
   FL_ARCHIVED_PARENT_TARGET: "spec/family-links-archived-parent#ac-1",
+
+  // The ADJ-70 branch-pair rig (44-branch-family-links.spec.ts): a feature
+  // and its implementing story committed ONLY onto FL_PAIR_BRANCH (cut
+  // from main, never merged), so neither resolves on the serving checkout
+  // — the branch-only family whose boards must link to each other UNDER
+  // /b/, never via a root-relative href that ejects or 404s.
+  FL_PAIR_FEATURE: "family-links-pair-feature",
+  FL_PAIR_STORY: "family-links-pair-story",
+  FL_PAIR_BRANCH: "design/family-links-pair",
 } as const;
 
 // ===========================================================================

@@ -371,11 +371,21 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		// whether coverage is complete", so a match must never read as if the
 		// sealed wall's own Instantiate affordance had become unavailable.
 		for _, sl := range sv.StoryLinks {
+			storySlug := strings.ReplaceAll(sl.Ref, "/", "-")
+			if sl.UnservableNotice != "" {
+				// ADJ-70's disclosed no-link card: a branch-resolved archived
+				// match no surface serves renders as a SPAN — the ref, its
+				// archived badge, and the disclosure — never an anchor whose
+				// href could 404 or eject the operator off the branch.
+				b.WriteString(`<span class="stub-story-link stub-story-link--archived stub-story-link--unservable" data-testid="stub-story-unservable-` + esc(sv.Slug) + `-` + esc(storySlug) + `" data-archived="true">` + esc(sl.Ref))
+				b.WriteString(` <span class="badge badge-archived" data-testid="stub-story-archived-` + esc(sv.Slug) + `-` + esc(storySlug) + `">archived</span>`)
+				b.WriteString(` — ` + esc(sl.UnservableNotice) + `</span>`)
+				continue
+			}
 			linkCls := "stub-story-link"
 			if sl.Archived {
 				linkCls += " stub-story-link--archived"
 			}
-			storySlug := strings.ReplaceAll(sl.Ref, "/", "-")
 			b.WriteString(`<a class="` + linkCls + `" data-testid="stub-story-link-` + esc(sv.Slug) + `-` + esc(storySlug) + `" data-archived="` + esc(strconv.FormatBool(sl.Archived)) + `" href="` + esc(sl.Href) + `">` + esc(sl.Ref))
 			if sl.Archived {
 				b.WriteString(` <span class="badge badge-archived" data-testid="stub-story-archived-` + esc(sv.Slug) + `-` + esc(storySlug) + `">archived</span>`)
