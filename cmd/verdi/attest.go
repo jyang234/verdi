@@ -92,7 +92,13 @@ func runAttest(ctx context.Context, root, storyRefArg, acID string, stdout, stde
 		StoryRefArg: storyRefArg,
 		VerifiesRef: spec.ID,
 		Owners:      spec.Owners,
-		Frozen:      artifact.Frozen{At: time.Now().UTC().Format("2006-01-02"), Commit: head},
+		// Wall-clock "now" is unchanged here (L-M4 fixed obligationauthor's
+		// determinism violation only): AttestationScaffold.Frozen documents
+		// this as a deliberate, legally-mutable-until-first-commit
+		// convenience (dc-2/ADJ-30), not the frozen-forever stamp the
+		// determinism rule targets. Routed through the shared constructor
+		// for structural consistency with every other Frozen mint.
+		Frozen: artifact.NewFrozen(time.Now().UTC().Format("2006-01-02"), head),
 	})
 
 	// Self-validate the exact bytes before ever touching disk (AC-4;

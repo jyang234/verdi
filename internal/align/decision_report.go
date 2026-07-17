@@ -157,7 +157,8 @@ func GenerateDecisionConflict(ctx context.Context, in DecisionConflictInput) (*D
 		},
 	}
 	if in.Freeze {
-		fm.Frozen = &artifact.Frozen{At: in.FrozenAt, Commit: in.Covers}
+		frozen := artifact.NewFrozen(in.FrozenAt, in.Covers)
+		fm.Frozen = &frozen
 	}
 
 	if err := fm.Validate(); err != nil {

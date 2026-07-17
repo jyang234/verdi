@@ -74,17 +74,13 @@ func runDesignAlign(ctx context.Context, root string, freeze bool, deps alignDep
 		ExistingFindings: existingFindings,
 	}
 	if freeze {
-		at, err := gitx.CommitDate(ctx, root, covers)
+		at, err := gitx.CommitDateOnly(ctx, root, covers)
 		if err != nil {
 			fmt.Fprintln(stderr, "align:", err)
 			return 2
 		}
-		if len(at) < 10 {
-			fmt.Fprintln(stderr, "align: internal error: commit date too short to derive frozen.at")
-			return 2
-		}
 		in.Freeze = true
-		in.FrozenAt = at[:10]
+		in.FrozenAt = at
 	}
 
 	report, err := align.GenerateDecisionConflict(ctx, in)

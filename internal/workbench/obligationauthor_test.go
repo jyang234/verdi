@@ -162,6 +162,62 @@ func TestBoardSpec_ObligationGraduate(t *testing.T) {
 	}
 }
 
+// TestBoardSpec_ObligationGraduate_StampIsCommitDerived proves L-M4's
+// determinism fix: an obligation's frozen.at is HEAD's own committer date
+// (gitx.CommitDate), never wall clock. fixturegit pins every fixture commit
+// to a fixed historical date (internal/fixturegit.fixedDate, 2024-01-01),
+// so comparing against wall-clock time.Now() would only coincidentally pass
+// on one day a year — this instead computes the "want" independently via
+// gitx against the fixture's own HEAD, so it fails the same way on every
+// day the wall-clock bug is present and passes on every day once fixed
+// (CLAUDE.md: "no wall-clock ... in generated artifacts except declared
+// stamps").
+func TestBoardSpec_ObligationGraduate_StampIsCommitDerived(t *testing.T) {
+	root := newObligationBoardFixture(t)
+	h := NewHandler(root)
+	stickyID := stickyIDOnBoard(t, h, root, obligationBoardName, "commit-derived stamp check")
+
+	ctx := context.Background()
+	head, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("RevParse HEAD: %v", err)
+	}
+	wantDate, err := gitx.CommitDate(ctx, root, head)
+	if err != nil {
+		t.Fatalf("CommitDate(HEAD): %v", err)
+	}
+	wantAt := wantDate[:10]
+
+	rec := postBoardAPI(t, h, obligationBoardName, "sticky-graduate",
+		`{"id":"`+stickyID+`","ref":"ac-1","kind":"obligation:behavioral"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("obligation graduate = %d\n%s", rec.Code, rec.Body.String())
+	}
+
+	path := filepath.Join(root, ".verdi", "obligations", obligationBoardName, "ac-1--behavioral.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("obligation file not written at %s: %v", path, err)
+	}
+	fm, _, err := artifact.SplitFrontmatter(data)
+	if err != nil {
+		t.Fatalf("split obligation frontmatter: %v", err)
+	}
+	ob, err := artifact.DecodeObligation(fm)
+	if err != nil {
+		t.Fatalf("DecodeObligation: %v\n%s", err, data)
+	}
+	if ob.Frozen == nil {
+		t.Fatal("obligation carries no frozen stamp (obligations are frozen unconditionally)")
+	}
+	if ob.Frozen.At != wantAt {
+		t.Errorf("frozen.at = %q, want %q (HEAD %s's own committer date, not wall clock) — L-M4", ob.Frozen.At, wantAt, head)
+	}
+	if ob.Frozen.Commit != head {
+		t.Errorf("frozen.commit = %q, want HEAD %q", ob.Frozen.Commit, head)
+	}
+}
+
 // TestBoardSpec_ObligationGraduate_Negative pins every refusal path: none
 // writes a malformed obligation, and each names the offending input.
 func TestBoardSpec_ObligationGraduate_Negative(t *testing.T) {

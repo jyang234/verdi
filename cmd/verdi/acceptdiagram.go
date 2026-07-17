@@ -125,16 +125,11 @@ func runAcceptDiagram(ctx context.Context, root string, ref artifact.Ref, stdout
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}
-	commitDate, err := gitx.CommitDate(ctx, root, preFlipHead)
+	at, err := gitx.CommitDateOnly(ctx, root, preFlipHead)
 	if err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}
-	if len(commitDate) < 10 {
-		fmt.Fprintf(stderr, "accept: internal error: commit date %q too short to derive a YYYY-MM-DD frozen.at\n", commitDate)
-		return 2
-	}
-	at := commitDate[:10]
 
 	frozenLine := fmt.Sprintf("frozen: { at: %s, commit: %s }", at, preFlipHead)
 	newFm := proposedStatusLineRe.ReplaceAll(fm, []byte("status: accepted"))
