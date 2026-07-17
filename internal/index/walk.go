@@ -83,7 +83,7 @@ func decodeEntry(kind string, data []byte, path string) (*Entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Entry{Ref: s.ID, Kind: kind, Title: s.Title, Status: string(s.Status), Path: path, Body: string(body), Links: s.Links}, nil
+		return &Entry{Ref: s.ID, Kind: kind, Title: s.Title, Status: string(s.Status), Path: path, Body: string(body), Links: s.Links, ObjectIDs: artifact.DeclaredObjectIDs(s)}, nil
 
 	case "adr":
 		a, err := artifact.DecodeADR(fm)
