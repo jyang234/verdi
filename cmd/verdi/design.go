@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/provider"
@@ -286,7 +287,11 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
 	}
-	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(content), 0o644); err != nil {
+	// internal/atomicfile.Write (MkdirAll + CreateTemp + fsync +
+	// Rename-into-place), never a plain os.WriteFile (truncate-then-write,
+	// no fsync) — the same crash-durability primitive every other corpus
+	// write in this repo now shares (CLEANUP-BEFORE #1).
+	if err := atomicfile.Write(filepath.Join(specDir, "spec.md"), []byte(content), 0o644); err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
 	}
