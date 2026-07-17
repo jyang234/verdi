@@ -412,3 +412,69 @@ func TestCLIShowcaseGC(t *testing.T) {
 		t.Fatalf("kept worktree %s no longer exists on disk: %v", activePath, err)
 	}
 }
+
+// TestCLIShowcaseAttest (cli:attest, spec/attest-helper) drives `verdi
+// attest` against a real (story, AC) pair from examples/showcase:
+// spec/borrower-update-api (class: story, story: jira:LOAN-1482, its one
+// declared ac-1) carries no attestation file at its fold path today — the
+// showcase corpus's only committed attestation under that same story-ref
+// slug, jira-loan-1482/ac-2.md, is for ac-2 (which borrower-update-api does
+// not declare at all; it verifies spec/stale-decline instead, the
+// class: feature spec sharing the same story ref — VL-022's own disclosed
+// baseline finding, internal/lint/harness_test.go's knownCorpusBaseline-
+// Findings). The spec-ref form is used deliberately, never the
+// scheme-prefixed jira:LOAN-1482 form: that scheme-prefixed ref resolves to
+// spec/stale-decline instead (storyresolve.Resolve's own matchStoryRef is
+// permanently feature-class-only), exactly the two-form-contract nuance
+// spec/attest-helper's classifyPair (cmd/verdi/attest.go) documents and
+// resolveBuildTarget (cmd/verdi/buildstart.go) already solves.
+func TestCLIShowcaseAttest(t *testing.T) {
+	root := provisionShowcaseStore(t)
+
+	stdout, stderr, code := runBinary(t, root, "attest", "spec/borrower-update-api", "ac-1")
+	if code != 0 {
+		t.Fatalf("verdi attest: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	path := filepath.Join(root, ".verdi", "attestations", "jira-loan-1482", "ac-1.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading scaffolded attestation at the real fold path %s: %v", path, err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "id: attestation/jira-loan-1482--ac-1") {
+		t.Fatalf("scaffold id wrong:\n%s", content)
+	}
+	if !strings.Contains(content, `ref: "spec/borrower-update-api"`) {
+		t.Fatalf("scaffold verifies edge wrong:\n%s", content)
+	}
+	if !strings.Contains(content, `owners: ["platform-team"]`) {
+		t.Fatalf("scaffold owners not copied verbatim from the real, committed story spec:\n%s", content)
+	}
+	if !strings.Contains(content, "<!-- verdi:attestation-unauthored -->") {
+		t.Fatalf("scaffold missing the unauthored marker (parent spec/closure-ergonomics dc-2):\n%s", content)
+	}
+	if !strings.Contains(stdout, path) {
+		t.Fatalf("verdi attest stdout missing the scaffolded path:\n%s", stdout)
+	}
+
+	// The already-exists refusal, against the SAME real showcase path this
+	// story's own AC-2 targets: a second attest call for the exact same
+	// (story, AC) refuses (exit 1, verdict) rather than overwriting the
+	// scaffold just written.
+	stdout2, stderr2, code2 := runBinary(t, root, "attest", "spec/borrower-update-api", "ac-1")
+	if code2 != 1 {
+		t.Fatalf("verdi attest (already exists): exit %d, want 1\nstdout:\n%s\nstderr:\n%s", code2, stdout2, stderr2)
+	}
+	if !strings.Contains(stderr2, path) {
+		t.Fatalf("verdi attest (already exists) stderr missing the offending path:\n%s", stderr2)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s after the refused second call: %v", path, err)
+	}
+	if string(after) != content {
+		t.Fatalf("the scaffolded attestation's bytes changed after a refused second call — dc-2 forbids overwriting a human-ownable record")
+	}
+}
