@@ -102,9 +102,15 @@ fixture-regen:
 # this repo's own self-hosted store (PLAN.md Phase 4: "eat the dog food" —
 # .verdi/specs/active/ holds the six component specs). Build-then-exec, not
 # `go run`, so the gate exercises the exact binary CI would ship.
+#
+# `verdi model check` (extensibility phase 1, spec/model-schema ac-3,
+# Task 7) runs in the same step: this repo carries no .verdi/model.yaml
+# of its own, so this exercises the embedded-canonical-default path on
+# every gate run (the gate grows, never shrinks — PLAN.md §2/§5).
 lint-store:
 	go build -o $(LINT_STORE_BIN) ./cmd/verdi
 	$(LINT_STORE_BIN) lint
+	$(LINT_STORE_BIN) model check
 
 # spec-align (wave 7, PLAN.md §2/§5: "make verify grows ... to include
 # ... spec-align by the end of the build") is internal/specalign's Go

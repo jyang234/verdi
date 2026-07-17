@@ -42,6 +42,22 @@ var kindCatalog = map[string]bool{
 // canonicalModel.
 const frontierErrorText = "structural model configuration is behind the frontier (verdi.model/v1 accepts the canonical model with vocabulary/template changes only)"
 
+// ErrFrontier is the sentinel checkFrontier returns. spec/model-schema
+// ac-3 (frozen, verbatim in both the story spec and its own obligation
+// doc) keys `verdi model check`'s 0/1/2 exit discipline on EXACTLY this
+// one condition being distinct from every other DecodeModel failure:
+// "exit 1 with the pinned frontier error text ... on a structurally
+// deviant manifest; and exit 2 on operational trouble (a missing store,
+// an unreadable OR UNDECODABLE manifest)" — a kernel validation rule
+// violation (validate.go's Validate) is grouped with "undecodable" and
+// so is exit 2, NOT exit 1, despite this plan's own Task 7 prose
+// saying "exit 1 on validation/frontier failure" (a plan/spec conflict;
+// spec+obligation win per this build's own precedence rule — reported
+// in the phase report). cmd/verdi/model.go uses errors.Is against this
+// exact value — which survives store.Open's %w wrapping — to tell the
+// two apart.
+var ErrFrontier = errors.New(frontierErrorText)
+
 // Validate checks the kernel rules that make m well-formed regardless of
 // which concrete lifecycle it describes (spec/model-schema ac-1, the
 // Outcome section's own rule list): the schema literal; every class
@@ -165,10 +181,10 @@ func (ob Obligation) validate(lifecycleName, verb string) error {
 // other named exception) — every other Class/Lifecycle field is.
 func (m Model) checkFrontier() error {
 	if !classesMatchFrontier(m.Classes, canonicalModel.Classes) {
-		return errors.New(frontierErrorText)
+		return ErrFrontier
 	}
 	if !lifecyclesMatchFrontier(m.Lifecycle, canonicalModel.Lifecycle) {
-		return errors.New(frontierErrorText)
+		return ErrFrontier
 	}
 	return nil
 }

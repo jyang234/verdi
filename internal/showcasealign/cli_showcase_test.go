@@ -102,6 +102,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wtmanager"
 )
@@ -543,5 +544,42 @@ func TestCLIShowcaseDisposition(t *testing.T) {
 	}
 	if string(after) != reportData {
 		t.Fatalf("the real committed report was written to despite a refusal (no partial write allowed):\n--- before ---\n%s\n--- after ---\n%s", reportData, after)
+	}
+}
+
+// TestCLIShowcaseModel drives `verdi model check` (cli:model,
+// extensibility phase 1, spec/model-schema ac-3) against the real
+// provisioned examples/showcase store. examples/showcase carries no
+// .verdi/model.yaml of its own (grep-verified: this corpus predates
+// verdi.model/v1 entirely) — a genuine, disclosed fact about the showcase
+// store as committed, exactly like the align/close/rollup notes in this
+// file's own package doc comment above — so this exercises the real
+// absent-model.yaml path (store.Open resolving to model.Canonical()) end
+// to end, over real showcase-sourced store content, never a synthetic
+// fixture: exit 0, with an OK line naming the schema and canonical's own
+// class/transition counts and digest.
+func TestCLIShowcaseModel(t *testing.T) {
+	root := provisionShowcaseStore(t)
+
+	if _, err := os.Stat(filepath.Join(root, ".verdi", "model.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("test setup: provisioned showcase store unexpectedly carries a .verdi/model.yaml (stat err=%v) — this test's whole premise is the absent-file path", err)
+	}
+
+	stdout, stderr, code := runBinary(t, root, "model", "check")
+	if code != 0 {
+		t.Fatalf("verdi model check: exit %d, want 0 (examples/showcase carries no model.yaml, so this resolves to the embedded canonical default)\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.HasPrefix(stdout, "model: OK — verdi.model/v1, ") {
+		t.Fatalf("stdout = %q, want it to start with the OK line", stdout)
+	}
+	wantDigest, err := model.Canonical().Digest()
+	if err != nil {
+		t.Fatalf("model.Canonical().Digest(): %v", err)
+	}
+	if !strings.Contains(stdout, wantDigest) {
+		t.Fatalf("stdout = %q, want it to contain the canonical model's own digest %q", stdout, wantDigest)
+	}
+	if !strings.Contains(stdout, "2 classes") || !strings.Contains(stdout, "4 transitions") {
+		t.Fatalf("stdout = %q, want it to name canonical's 2 classes / 4 transitions", stdout)
 	}
 }
