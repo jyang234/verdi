@@ -102,44 +102,93 @@ func TestVL022_UndeclaredAC(t *testing.T) {
 	}
 }
 
-// vl022WrongClassMD verifies the golden corpus's own spec/stale-decline —
-// class: feature, not story — the exact non-story-class refusal shape.
-const vl022WrongClassMD = `---
-id: attestation/wrong-class-attempt--ac-1
+// vl022FeatureOutcomeMD is a legitimate R4-I-11 feature-outcome attestation:
+// its verifies edge targets the golden corpus's own spec/stale-decline, a
+// class: feature spec. Per Controller adjudication ADJ-51 (2026-07-16),
+// VL-022's subject is STORY-targeting attestations only (the D6-18 misfiling
+// class the story exists to kill); a feature-outcome attestation is OUTSIDE
+// that subject and must be SKIPPED, never refused. The 11 real, frozen
+// feature-outcome attestations across this repo's own store
+// (diagram-proposals, evidence-obligations, true-closure) and
+// examples/showcase (jira-loan-1482, escrow-autopay) are exactly this shape —
+// firing on them is what broke `make verify` and is precisely the defect the
+// rescope removes.
+const vl022FeatureOutcomeMD = `---
+id: attestation/stale-decline--ac-1
 kind: attestation
-title: "VL-022: attestation verifies a whole FEATURE spec"
+title: "AC-1 outcome attested: a feature-outcome attestation (R4-I-11)"
 owners: [platform-team]
 links:
   - { type: verifies, ref: "spec/stale-decline" }
 frozen: { at: 2026-07-16, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
-# VL-022: attestation verifies a whole FEATURE spec
+# AC-1 outcome attestation
 
-spec/stale-decline is class: feature in the golden corpus, not a STORY —
-verdi attest scaffolds STORY attestations only (dc-5); VL-022 must refuse
-this attestation's verifies edge the same way, naming the offending class.
+A feature-outcome attestation verifying a class: feature spec — outside
+VL-022's story-scoped subject (ADJ-51). VL-022 must SKIP it, never refuse.
 `
 
-// TestVL022_WrongClass proves the "resolved target's class is not story"
-// refusal shape, against the golden corpus's own real class: feature spec.
-func TestVL022_WrongClass(t *testing.T) {
-	dir := adHocOverlayDir(t, ".verdi/attestations/wrong-class-attempt/ac-1.md", vl022WrongClassMD)
+// TestVL022_FeatureOutcomeSkipped is FIX 1's own witness (ADJ-51): a verifies
+// edge to a class: feature spec is a feature-outcome attestation, OUTSIDE
+// VL-022's story-scoped subject — SKIPPED, never refused, no baseline map.
+// This replaces the pre-rescope TestVL022_WrongClass, whose assertion (a
+// feature target REFUSED as "wrong class") is exactly the behavior the
+// controller ruled out: the store's own real data (11 legitimate feature-
+// outcome attestations) refutes the frozen dc-4 premise, so the rule's
+// subject narrows to what it actually kills.
+func TestVL022_FeatureOutcomeSkipped(t *testing.T) {
+	dir := adHocOverlayDir(t, ".verdi/attestations/stale-decline/ac-1.md", vl022FeatureOutcomeMD)
 	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-022" {
+			t.Fatalf("VL-022 fired on a feature-outcome attestation (ADJ-51: story-scoped subject, feature targets out of scope): %s", f.String())
+		}
+	}
+}
+
+// vl022MultiEdgeMD carries TWO verifies edges: the first (spec/vl-022-story)
+// is clean — a class: story spec declaring ac-1 whose own story-ref slug
+// (jira-vl022-1) matches this attestation's directory — and the second
+// (spec/no-such-spec-at-all) is unresolvable. A hand-annotated attestation
+// can carry more than one verifies edge (AttestationFrontmatter.Validate
+// places no cardinality constraint), so VL-022 must validate EVERY edge, not
+// break at the first (ADJ-51 finding 4).
+const vl022MultiEdgeMD = `---
+id: attestation/jira-vl022-1--ac-1
+kind: attestation
+title: "VL-022: two verifies edges, second one misfiled"
+owners: [platform-team]
+links:
+  - { type: verifies, ref: "spec/vl-022-story" }
+  - { type: verifies, ref: "spec/no-such-spec-at-all" }
+frozen: { at: 2026-07-16, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
+---
+# VL-022: multiple verifies edges
+
+The first verifies edge is clean; the SECOND (spec/no-such-spec-at-all) is
+unresolvable. VL-022 must fire on the second, proving it checks every edge.
+`
+
+// TestVL022_MultipleVerifiesEdges proves ADJ-51 finding 4: VL-022 validates
+// every verifies edge, not only the first. Against the pre-fix rule (which
+// broke at the first, clean edge) this fixture produced NO finding — its
+// misfiled second edge folded silently; the fix makes it a named refusal.
+func TestVL022_MultipleVerifiesEdges(t *testing.T) {
+	dir := adHocOverlayDir(t, ".verdi/attestations/jira-vl022-1/ac-1.md", vl022MultiEdgeMD)
+	repo := buildLintRepo(t, filepath.Join(violationsDir, "VL-022", "story-only"), dir)
 	findings := runLint(t, repo.Dir, Context{}, Options{})
 	found := false
 	for _, f := range findings {
 		if f.Rule == "VL-022" {
 			found = true
-			if !strings.Contains(f.Message, "spec/stale-decline") {
-				t.Errorf("finding does not name the offending target: %s", f.Message)
-			}
-			if !strings.Contains(f.Message, "feature") {
-				t.Errorf("finding does not name the offending class: %s", f.Message)
+			if !strings.Contains(f.Message, "spec/no-such-spec-at-all") {
+				t.Errorf("finding does not name the second (misfiled) verifies edge: %s", f.Message)
 			}
 		}
 	}
 	if !found {
-		t.Fatalf("VL-022 did not fire on an attestation verifying a FEATURE-class spec:\n%s", findingsString(findings))
+		t.Fatalf("VL-022 did not fire on the SECOND verifies edge (checks only the first?):\n%s", findingsString(findings))
 	}
 }
 
