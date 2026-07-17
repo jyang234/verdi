@@ -44,13 +44,14 @@ type Model struct {
 // validate.go enforces; the FILE itself is only required to exist from
 // Task 8 onward, out of this phase's scope).
 //
-// Display is the class's own declared label — distinct from
-// Vocabulary.Classes, which is the presentation-layer override sitting
-// on top of it. This is a disclosed judgment call (spec+plan do not
-// spell out the relationship): Display is treated as STRUCTURAL — part
-// of the shape checkFrontier compares — while Vocabulary.Classes is the
-// frontier-exempt rename layer, mirroring how Template's own FILENAME is
-// frontier-exempt but a class's PRESENCE/hierarchy position is not.
+// Display is the class's own declared label — presentation, and so
+// frontier-EXEMPT, exactly like Vocabulary.Classes (the rename layer
+// sitting on top of it) and a class's own Template FILENAME. dc-1 draws
+// the frontier over the state/transition/class/obligation SETS; a
+// display-label change alters none of them, so checkFrontier does not
+// compare Display (judged-frontier-display-structural — the controller's
+// adjudication of the align finding). Only a class's PRESENCE and its
+// hierarchy position (Parent/Decomposes) are structural.
 type Class struct {
 	Display    string `yaml:"display,omitempty" json:"display,omitempty"`
 	Parent     string `yaml:"parent,omitempty" json:"parent,omitempty"`

@@ -1,0 +1,48 @@
+# judged-frontier-display-structural: canonical in every structural respect
+# (same classes, hierarchy, states, transitions, obligations, templates) but
+# for feature's display LABEL — "Initiative" instead of "Feature". Display is
+# presentation, frontier-exempt exactly like a class's template filename and
+# Vocabulary.Classes; this manifest must decode and validate clean.
+schema: verdi.model/v1
+
+classes:
+  feature:
+    display: Initiative
+    decomposes: stubs
+    template: feature.md
+  story:
+    display: Story
+    parent: feature
+    template: story.md
+
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }
+  story:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }

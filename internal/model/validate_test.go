@@ -83,6 +83,21 @@ func TestDecodeModel_VocabRenamePassesFrontier(t *testing.T) {
 	}
 }
 
+// TestDecodeModel_DisplayRenamePassesFrontier proves the frontier exempts a
+// class's Display label (judged-frontier-display-structural): a manifest
+// canonical in every structural respect but for a changed classes.*.display
+// decodes clean — Display is presentation, not part of the class set dc-1's
+// frontier is drawn over.
+func TestDecodeModel_DisplayRenamePassesFrontier(t *testing.T) {
+	m, err := DecodeModel(readTestdata(t, "display-rename.yaml"))
+	if err != nil {
+		t.Fatalf("DecodeModel(display-rename.yaml): %v", err)
+	}
+	if got := m.Classes["feature"].Display; got != "Initiative" {
+		t.Fatalf("Classes[feature].Display = %q, want Initiative", got)
+	}
+}
+
 // TestCanonicalModel_SelfValidates proves the Go-literal canonicalModel
 // (canonical.go) is itself kernel-well-formed and trivially matches its
 // own frontier — a sanity check on checkFrontier's comparison logic
@@ -96,16 +111,17 @@ func TestCanonicalModel_SelfValidates(t *testing.T) {
 	}
 }
 
-// TestCheckFrontier_DisplayChangeTrips substantiates a disclosed design
-// choice (model.go's Class doc comment, canonical.go's own header): a
-// class's Display is treated as STRUCTURAL, unlike its Template filename
-// — changing it alone (with nothing else different) must still trip the
-// frontier, since the frontier's only two named exceptions are vocabulary
-// and per-class template filenames.
-func TestCheckFrontier_DisplayChangeTrips(t *testing.T) {
+// TestCheckFrontier_DisplayChangeExempt substantiates the adjudicated
+// design choice (model.go's Class doc comment, judged-frontier-display-
+// structural): a class's Display is presentation, frontier-EXEMPT exactly
+// like its Template filename and Vocabulary.Classes — changing it alone
+// (with nothing else different) must NOT trip the frontier, since dc-1
+// draws the frontier over the state/transition/class/obligation sets and
+// a display-label change alters none of them.
+func TestCheckFrontier_DisplayChangeExempt(t *testing.T) {
 	m := canonicalModel
 	feature := m.Classes["feature"]
-	feature.Display = "Initiative" // structural field changed, nothing else
+	feature.Display = "Initiative" // presentation-only change, nothing else
 	m.Classes = map[string]Class{
 		"feature": feature,
 		"story":   m.Classes["story"],
@@ -114,11 +130,7 @@ func TestCheckFrontier_DisplayChangeTrips(t *testing.T) {
 	if err := m.Validate(); err != nil {
 		t.Fatalf("Validate(): %v (test setup should stay kernel-well-formed)", err)
 	}
-	err := m.checkFrontier()
-	if err == nil {
-		t.Fatal("checkFrontier(): want an error for a changed Class.Display, got nil")
-	}
-	if err != ErrFrontier {
-		t.Fatalf("checkFrontier() error = %v, want ErrFrontier", err)
+	if err := m.checkFrontier(); err != nil {
+		t.Fatalf("checkFrontier(): want nil for a display-label-only change (frontier-exempt), got %v", err)
 	}
 }

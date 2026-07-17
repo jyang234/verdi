@@ -177,8 +177,9 @@ func (ob Obligation) validate(lifecycleName, verb string) error {
 // than canonicalModel — stage 1's frontier (dc-1): v1 DESCRIBES the
 // model; it does not yet let the shape move. Vocabulary is never
 // compared (display-only, guide §5.2: "renames are safe at any time");
-// a Class's Template filename is never compared either (the frontier's
-// other named exception) — every other Class/Lifecycle field is.
+// a Class's Template filename and its Display label are likewise never
+// compared (both presentation, judged-frontier-display-structural) —
+// every other Class/Lifecycle field is.
 func (m Model) checkFrontier() error {
 	if !classesMatchFrontier(m.Classes, canonicalModel.Classes) {
 		return ErrFrontier
@@ -190,9 +191,15 @@ func (m Model) checkFrontier() error {
 }
 
 // classesMatchFrontier reports whether got and want declare the same
-// class ids with the same Display/Parent/Decomposes — Template is
-// deliberately excluded (the frontier's named template-filename
-// exception).
+// class ids with the same Parent/Decomposes. Two Class fields are
+// deliberately excluded from the frontier: Template (the named
+// template-filename exception) and Display. Display is presentation — a
+// class's human label, exactly like Vocabulary.Classes is the rename
+// layer sitting above it — and dc-1 draws the frontier over the "state
+// set, transition set, class set, obligation set", none of which a
+// display-label change alters (judged-frontier-display-structural: a
+// changed label is not a different class set). Only a class's PRESENCE
+// and its hierarchy position (Parent/Decomposes) are structural.
 func classesMatchFrontier(got, want map[string]Class) bool {
 	if len(got) != len(want) {
 		return false
@@ -202,7 +209,7 @@ func classesMatchFrontier(got, want map[string]Class) bool {
 		if !ok {
 			return false
 		}
-		if gc.Display != wc.Display || gc.Parent != wc.Parent || gc.Decomposes != wc.Decomposes {
+		if gc.Parent != wc.Parent || gc.Decomposes != wc.Decomposes {
 			return false
 		}
 	}
