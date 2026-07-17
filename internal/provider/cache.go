@@ -40,6 +40,15 @@ func (SystemClock) Now() time.Time { return time.Now() }
 // through to the inner provider.
 //
 // CachingProvider is safe for concurrent use.
+//
+// Disclosure (spec/code-health dc-5): CachingProvider is constructed
+// only by its own tests. It is deliberately unwired — no production
+// caller exists — with single-flight (collapsing concurrent Resolve
+// calls for the same ref into one inner fetch) and eviction (bounding
+// cache growth) recorded here as prerequisites for whenever a caller
+// (e.g. serve) wires it in. An exported capability nothing calls is a
+// disclosure problem: without this note, the reader would believe a
+// live defense exists.
 type CachingProvider struct {
 	inner StoryProvider
 	ttl   time.Duration

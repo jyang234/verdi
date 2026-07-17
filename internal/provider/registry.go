@@ -16,8 +16,7 @@ var ErrUnknownScheme = errors.New("provider: unknown scheme")
 // scheme: "the scheme selects the adapter at runtime from verdi.yaml's
 // providers: map"). Registry itself implements StoryProvider, dispatching
 // each call to the adapter registered for the ref's scheme, so it can be
-// used anywhere a single StoryProvider is expected (including wrapped in
-// a CachingProvider).
+// used anywhere a single StoryProvider is expected.
 //
 // Registry is built from a plain map so this package never imports the
 // store/config package that decodes verdi.yaml; callers translate the
