@@ -89,6 +89,55 @@ rollout_plan: "not inside custom, so still unknown"
 	}
 }
 
+// nonSpecCustomAttestationYAML is a minimal, otherwise-valid attestation
+// (modeled on attestation_test.go's own valid literal) carrying a custom:
+// block. The custom: namespace is SPEC-only (spec/scaffold-templates ac-2
+// sanctions it for spec content; "no sanctioned extension surface for spec
+// content at all" is what it opens, nothing wider): every other kind that
+// embeds Base keeps its fully-strict posture, so this attestation must fail
+// strict decode. Fixture for judged-custom-namespace-widened-to-all-base-
+// kinds — the exemption belongs on SpecFrontmatter, not on Base.
+const nonSpecCustomAttestationYAML = `id: attestation/story-1482--ac-2
+kind: attestation
+title: "AC-2 attested by QA lead"
+owners: [qa-lead]
+frozen: { at: 2026-05-01, commit: 3e91ab2 }
+custom:
+  rollout_plan: "canary then full rollout"
+`
+
+// TestAttestation_CustomKeyFailsStrictDecode proves custom: is not a free
+// pass on non-spec kinds: an attestation carrying custom: fails strict
+// decode, naming the unknown field (KnownFields) — the exemption is
+// SpecFrontmatter-scoped, never a Base-wide carve-out that would loosen
+// attestations/waivers/obligations/ADRs whose strict shape is load-bearing
+// for the evidence model.
+func TestAttestation_CustomKeyFailsStrictDecode(t *testing.T) {
+	_, err := DecodeAttestation([]byte(nonSpecCustomAttestationYAML))
+	if err == nil {
+		t.Fatal("DecodeAttestation(attestation with custom:) = nil error, want a strict-decode failure (custom: is spec-only)")
+	}
+	if !strings.Contains(err.Error(), "custom") {
+		t.Fatalf("error = %q, want it to name the unknown custom field", err.Error())
+	}
+}
+
+// TestAttestation_NoCustomStillDecodes is the baseline the test above
+// contrasts against: the identical attestation with the custom: block
+// removed decodes cleanly, proving custom: is the SOLE reason the decode
+// above fails — not some other invalid field.
+func TestAttestation_NoCustomStillDecodes(t *testing.T) {
+	const y = `id: attestation/story-1482--ac-2
+kind: attestation
+title: "AC-2 attested by QA lead"
+owners: [qa-lead]
+frozen: { at: 2026-05-01, commit: 3e91ab2 }
+`
+	if _, err := DecodeAttestation([]byte(y)); err != nil {
+		t.Fatalf("DecodeAttestation(attestation without custom:) = %v, want it to decode cleanly", err)
+	}
+}
+
 // TestBase_Custom_DialectViolationInsideFailsClosed drives the committed
 // violation fixture (testdata/viol-custom-dialect-anchor.md, mirroring
 // internal/model/testdata's one-fixture-per-rule convention): a YAML
