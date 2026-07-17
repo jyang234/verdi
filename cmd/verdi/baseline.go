@@ -68,7 +68,7 @@ func regenerateBaseline(ctx context.Context, root, commit string, spec *artifact
 	// advisory local baseline included — look under the spec-ref key, never
 	// the branch-ref key. A per-branch key here left every baseline
 	// unreachable by the very preview it exists to feed.
-	derivedDir := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID), commit)
+	derivedDir := filepath.Join(store.DerivedSpecDir(root, store.RefSlug(spec.ID)), commit)
 	if err := os.MkdirAll(derivedDir, 0o755); err != nil {
 		fmt.Fprintf(stderr, "%s: skipping baseline regeneration: %v\n", verb, err)
 		return

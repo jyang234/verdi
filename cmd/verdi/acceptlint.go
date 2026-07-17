@@ -89,9 +89,9 @@ func lintQuartetOrRefuse(ctx context.Context, root string, ref artifact.Ref, spe
 // at all, rather than one that would wrongly match every attestation in the
 // store.
 func quartetPathPrefixes(ref artifact.Ref, spec *artifact.SpecFrontmatter) []string {
-	prefixes := []string{".verdi/specs/active/" + ref.Name}
+	prefixes := []string{store.SpecDirRelPath(store.ZoneActive, ref.Name)}
 	if spec.Story != "" {
-		prefixes = append(prefixes, ".verdi/attestations/"+store.RefSlug(spec.Story))
+		prefixes = append(prefixes, store.AttestationDirRelPath(store.RefSlug(spec.Story)))
 	}
 	return prefixes
 }

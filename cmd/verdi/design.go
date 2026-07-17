@@ -235,7 +235,7 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		}
 	}
 
-	specDir := filepath.Join(root, ".verdi", "specs", "active", name)
+	specDir := store.ActiveSpecDir(root, name)
 	if _, statErr := os.Stat(specDir); statErr == nil {
 		fmt.Fprintf(stderr, "design start: %s already exists\n", specDir)
 		return 2

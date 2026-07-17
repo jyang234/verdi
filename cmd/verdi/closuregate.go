@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -106,7 +105,7 @@ func checkSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manife
 	if err != nil {
 		return gateCondition{}, fmt.Errorf("closure gate: internal error: resolved spec has an invalid id: %w", err)
 	}
-	path := filepath.Join(root, ".verdi", "specs", "active", specRef.Name, "deviation-report.md")
+	path := store.DeviationReportPath(root, store.ZoneActive, specRef.Name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -176,7 +175,7 @@ func checkPendingSupersessionCondition(ctx context.Context, f forge.Forge, defau
 
 	var touched, mrIDs []string
 	for _, featureName := range featureNames {
-		candidatePath := filepath.ToSlash(filepath.Join(".verdi", "specs", "active", featureName+"-v2", "spec.md"))
+		candidatePath := store.ActiveSpecRelPath(featureName + "-v2")
 		candidates, err := evidence.LoadPendingSupersessionCandidates(ctx, f, defaultBranchRef, "spec/"+featureName, candidatePath)
 		if err != nil {
 			return gateCondition{}, fmt.Errorf("closure gate: loading pending-supersession candidates for %s: %w", featureName, err)

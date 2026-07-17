@@ -137,6 +137,13 @@ func DerivedSpecDir(root, refSlug string) string {
 
 // --- store-relative (slash-canonical, .verdi-rooted) ---
 
+// SpecDirRelPath is SpecDir's store-relative, slash-canonical form:
+// ".verdi/specs/<zone>/<name>" — the directory prefix a quartet-file path
+// match scopes to (acceptlint's quartetPathPrefixes).
+func SpecDirRelPath(zone, name string) string {
+	return path.Join(verdiDir, specsDir, zone, name)
+}
+
 // SpecRelPath is SpecPath's store-relative, slash-canonical form:
 // ".verdi/specs/<zone>/<name>/spec.md". Used where the path is an identifier
 // (git tree paths, derivation-record inputs, lint keys, disclosures), never a

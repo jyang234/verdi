@@ -201,7 +201,7 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 // runSync is the testable core: given an already-resolved root/ref/commit
 // and injected deps, materialize the bundle and return the exit code.
 func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, forceLocal bool, deps syncDeps) int {
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived")
+	derivedRoot := store.DerivedRoot(root)
 	// --produce and --or-regen's local regeneration both assemble ONE
 	// whole-branch per-service bundle keyed by the git ref (the transport
 	// and gc unit, 01 §gc); the per-spec fold records CI ultimately serves

@@ -198,7 +198,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 // together with the already-discovered, already-story-folded implementing
 // stories via evidence.FoldFeature. Mirrors close.go's foldStory shape.
 func foldFeature(ctx context.Context, root string, spec *artifact.SpecFrontmatter, specRef artifact.Ref, head string, storiesByAC map[string][]evidence.ImplementingStory) (evidence.FeatureResult, error) {
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
+	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, head)
 	if err != nil {
 		return evidence.FeatureResult{}, fmt.Errorf("loading feature evidence records: %w", err)

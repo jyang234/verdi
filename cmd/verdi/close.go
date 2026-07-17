@@ -339,7 +339,7 @@ var closeAcceptedStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?accepted-pe
 // (already closed, or malformed) is a loud internal error, never a silent
 // no-op or a double flip.
 func flipSpecStatusToClosed(root, name string) error {
-	specPath := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")
+	specPath := store.ActiveSpecPath(root, name)
 	raw, err := os.ReadFile(specPath)
 	if err != nil {
 		return fmt.Errorf("close: reading %s to flip status to closed: %w", specPath, err)

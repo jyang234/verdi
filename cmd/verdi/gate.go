@@ -46,7 +46,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -230,7 +229,7 @@ func checkAcceptedOnDefaultBranch(ctx context.Context, root, specName, defaultBr
 		return gateCondition{Name: name, Reason: fmt.Sprintf("resolving default branch %q: %v", defaultBranchRef, err)}
 	}
 
-	relPath := filepath.ToSlash(filepath.Join(".verdi", "specs", "active", specName, "spec.md"))
+	relPath := store.ActiveSpecRelPath(specName)
 	raw, err := gitx.Show(ctx, root, tip, relPath)
 	if err != nil {
 		return gateCondition{Name: name, Reason: fmt.Sprintf("spec/%s not found on default branch %s at %s: %v", specName, defaultBranchRef, tip, err)}
@@ -313,7 +312,7 @@ func checkCascadeCondition(root string, spec *artifact.SpecFrontmatter) (gateCon
 // carries a disposition (I-9's ratified reading of 03 §Gates).
 func checkFreshFullyDispositioned(root, specName, head string) (gateCondition, error) {
 	name := "3. fresh, fully-dispositioned alignment report"
-	path := filepath.Join(root, ".verdi", "specs", "active", specName, "deviation-report.md")
+	path := store.DeviationReportPath(root, store.ZoneActive, specName)
 
 	data, err := os.ReadFile(path)
 	if err != nil {

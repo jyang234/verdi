@@ -53,6 +53,8 @@ func TestRelativePaths(t *testing.T) {
 		got  string
 		want string
 	}{
+		{"SpecDirRelPath/active", SpecDirRelPath(ZoneActive, "widget"), ".verdi/specs/active/widget"},
+		{"SpecDirRelPath/archive", SpecDirRelPath(ZoneArchive, "widget"), ".verdi/specs/archive/widget"},
 		{"SpecRelPath/active", SpecRelPath(ZoneActive, "widget"), ".verdi/specs/active/widget/spec.md"},
 		{"SpecRelPath/archive", SpecRelPath(ZoneArchive, "widget"), ".verdi/specs/archive/widget/spec.md"},
 		{"ActiveSpecRelPath", ActiveSpecRelPath("widget"), ".verdi/specs/active/widget/spec.md"},
@@ -112,6 +114,7 @@ func TestRelIsSlashOfAbsBelowRoot(t *testing.T) {
 		abs  string
 		rel  string
 	}{
+		{"specdir/active", SpecDir(root, ZoneActive, name), SpecDirRelPath(ZoneActive, name)},
 		{"spec/active", SpecPath(root, ZoneActive, name), SpecRelPath(ZoneActive, name)},
 		{"spec/archive", SpecPath(root, ZoneArchive, name), SpecRelPath(ZoneArchive, name)},
 		{"deviation", DeviationReportPath(root, ZoneActive, name), DeviationReportRelPath(ZoneActive, name)},

@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"sort"
 	"text/tabwriter"
 
@@ -53,7 +52,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 		return err
 	}
 
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
+	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 	if err != nil {
 		return fmt.Errorf("matrix: loading feature-level evidence: %w", err)
@@ -233,7 +232,7 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 // consulting waivers/attestations keyed by its own story-slug — the exact
 // same mechanism cmdMatrix already uses for a directly-resolved story spec.
 func foldImplementingStory(ctx context.Context, root, commit string, storySpec *artifact.SpecFrontmatter) (evidence.StoryResult, error) {
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(storySpec.ID))
+	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(storySpec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 	if err != nil {
 		return evidence.StoryResult{}, fmt.Errorf("matrix: loading evidence for implementing story %s: %w", storySpec.ID, err)

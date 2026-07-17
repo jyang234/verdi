@@ -157,7 +157,7 @@ func findSupersedingSpec(root, targetRef string) (*artifact.SpecFrontmatter, err
 // cascade lookup, and lint-store already backstops malformed specs
 // elsewhere.
 func loadActiveSpecTolerant(root, name string) (*artifact.SpecFrontmatter, error) {
-	path := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")
+	path := store.ActiveSpecPath(root, name)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

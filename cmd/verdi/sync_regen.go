@@ -237,7 +237,7 @@ func loadSpecACs(root, specRef string) (map[string]bool, error) {
 	}
 
 	for _, zone := range []string{"active", "archive"} {
-		path := filepath.Join(root, ".verdi", "specs", zone, ref.Name, "spec.md")
+		path := store.SpecPath(root, zone, ref.Name)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue

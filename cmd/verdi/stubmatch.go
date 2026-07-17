@@ -10,7 +10,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -187,7 +186,7 @@ func judgedFindingsClear(root string, story *artifact.SpecFrontmatter) (bool, st
 	if err != nil {
 		return true, "" // unreachable: story.ID already decoded successfully
 	}
-	path := filepath.Join(root, ".verdi", "specs", "active", specRef.Name, "decision-conflict-report.md")
+	path := store.DecisionConflictReportPath(root, store.ZoneActive, specRef.Name)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

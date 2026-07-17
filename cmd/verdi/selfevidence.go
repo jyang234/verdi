@@ -254,7 +254,7 @@ func writeSelfHostedEvidence(root, commit string, bySpec map[string][]artifact.E
 	sort.Strings(specRefs)
 
 	for _, specRef := range specRefs {
-		dir := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(specRef), commit)
+		dir := filepath.Join(store.DerivedSpecDir(root, store.RefSlug(specRef)), commit)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("self-hosted evidence: mkdir %s: %w", dir, err)
 		}
