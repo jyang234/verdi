@@ -247,7 +247,11 @@ attributes the load-bearing ones to the component that embodies them.
    until the probe fires.
 5. **`verdi align`** regenerates the alignment report: computed boundaries,
    the diagram-alignment subsection, and the judged section; every finding gets
-   dispositioned — deviation is measured and owned, never synced into the spec.
+   dispositioned by **`verdi disposition <spec-ref> <finding-id>
+   <fixed|accepted-deviation> --rationale <text> [--amend]`** (spec/disposition-verb) —
+   the only sanctioned way to record one, writing the decision and rationale
+   into the report's living disposition layer in place, digest/integrity
+   untouched — deviation is measured and owned, never synced into the spec.
 6. **`verdi gate`** holds all four conditions: accepted spec on the default
    branch ∧ no violated AC on authoritative evidence ∧ fresh fully-dispositioned
    report ∧ no unresolved rung-4 cascade block. A red cell never ships; an
