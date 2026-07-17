@@ -511,12 +511,13 @@ func attachDiagramEditorHrefs(proj *BoardProjection, root, boardName, fixedBranc
 // unprefixed board, the design branch for a per-branch draft board. The path
 // mirrors the exact route grammar the operator followed — the branch rides
 // one percent-encoded path segment, as handler.go's /b/{branch} mount and
-// resolveDiagramExit's parser both expect.
+// resolveDiagramExit's parser both expect — and is built through the shared
+// constructors (directory.go), never a second grammar.
 func boardOriginPath(fixedBranch, boardName string) string {
 	if fixedBranch == "" {
-		return "/board/spec/" + boardName
+		return boardSpecPrefix + boardName
 	}
-	return "/b/" + url.PathEscape(fixedBranch) + "/board/spec/" + boardName
+	return branchBoardHref(fixedBranch, boardName)
 }
 
 // diagramExitTarget is the diagram designer's resolved return-target
@@ -603,7 +604,7 @@ func resolveDiagramExit(root, origin string) diagramExitTarget {
 // and from letting a hostile branch or name segment reach the filesystem.
 func diagramExitStore(root, origin string) (store, name string, ok bool) {
 	// Unprefixed: /board/spec/<name> — the serving checkout's own tree.
-	if rest, found := strings.CutPrefix(origin, "/board/spec/"); found {
+	if rest, found := strings.CutPrefix(origin, boardSpecPrefix); found {
 		if specNameRe.MatchString(rest) {
 			return root, rest, true
 		}
@@ -612,10 +613,11 @@ func diagramExitStore(root, origin string) (store, name string, ok bool) {
 	// Branch-prefixed: /b/<branch>/board/spec/<name>. The branch is one path
 	// segment with its slashes percent-encoded (handler.go's /b/{branch}
 	// mount), exactly as the operator's URL carried it — so splitting on the
-	// first literal "/board/spec/" is unambiguous (an encoded branch can
-	// contain no such literal, and a spec name can contain no slash).
-	if rest, found := strings.CutPrefix(origin, "/b/"); found {
-		seg, tail, cut := strings.Cut(rest, "/board/spec/")
+	// first boardSpecPrefix segment is unambiguous (an encoded branch can
+	// contain no such literal, and a spec name can contain no slash). These
+	// are the same two prefixes branchBoardHref (directory.go) builds with.
+	if rest, found := strings.CutPrefix(origin, branchBoardPrefix); found {
+		seg, tail, cut := strings.Cut(rest, boardSpecPrefix)
 		if !cut || seg == "" || !specNameRe.MatchString(tail) {
 			return "", "", false
 		}
