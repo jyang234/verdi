@@ -64,11 +64,12 @@ var ErrFrontier = errors.New(frontierErrorText)
 // carries a non-empty template; every class's parent (if any) names a
 // declared class; every transition's obligations list is PRESENT (nil
 // means the `obligations:` key itself was absent — distinct from a
-// present, empty `[]`); terminal states are drawn from states; every
-// transition's from/to names a declared state; every state is
-// reachable; every obligation's scheme and kind are drawn from their
-// closed catalogs; count is legal only on kind "countersign"; and hook
-// is legal only with kind "hook" carrying a non-empty Hook.
+// present, empty `[]`); terminal states are drawn from states and admit
+// no outgoing transition (terminal ⇒ freeze); every transition's from/to
+// names a declared state; every state is reachable; every obligation's
+// scheme and kind are drawn from their closed catalogs; count is legal
+// only on kind "countersign"; and hook is legal only with kind "hook"
+// carrying a non-empty Hook.
 //
 // Fails on the first violation found (mirroring store.Manifest.Validate's
 // own fail-fast posture), walking classes and lifecycles in sorted key
@@ -100,9 +101,11 @@ func (m Model) Validate() error {
 }
 
 // validate checks one lifecycle.<name> block: terminal ⊆ states, every
-// transition's obligations-list presence / from / to / obligations, and
-// (last, since it depends on the from/to mentions gathered while
-// walking transitions) that every state is reachable.
+// transition's obligations-list presence / from / to / obligations, that
+// no transition departs a terminal state (terminal ⇒ freeze — guide C-2,
+// judged-terminal-freeze-not-kernel: a frozen state admits no exit), and
+// (last, since it depends on the from/to mentions gathered while walking
+// transitions) that every state is reachable.
 func (lc Lifecycle) validate(name string) error {
 	states := make(map[string]bool, len(lc.States))
 	for _, s := range lc.States {
@@ -126,6 +129,9 @@ func (lc Lifecycle) validate(name string) error {
 		}
 		if !states[tr.To] {
 			return fmt.Errorf("model: lifecycle %q: transition %q: to %q is not a declared state", name, tr.Verb, tr.To)
+		}
+		if terminal[tr.From] {
+			return fmt.Errorf("model: lifecycle %q: transition %q: from %q is a terminal state and admits no outgoing transition (guide C-2: terminal states freeze)", name, tr.Verb, tr.From)
 		}
 		mentioned[tr.From] = true
 		mentioned[tr.To] = true
