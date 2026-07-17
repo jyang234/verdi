@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,6 +173,43 @@ func TestLoadAttestationState(t *testing.T) {
 		}
 		if _, err := LoadAttestationState(root, "story-1", "ac-2"); err == nil {
 			t.Fatal("LoadAttestationState(path is a directory): want error, got nil")
+		}
+	})
+
+	// A file that EXISTS but cannot be read (mode 000) must fail closed —
+	// the os.ReadFile error propagates as an operational error, never a
+	// swallowed AttestationAuthored. This is the exact input ADJ-67 / D6-38
+	// turned on: the round's stat-only-swallow predecessor (AttestationExists)
+	// returned (true, nil) here, silently counting an unreadable file as a
+	// satisfied HUMAN attestation (the unproven-silent-pass three-valued
+	// honesty forbids); LoadAttestationState reads content, so it fails
+	// closed. This subtest must FAIL if anyone restores the swallow.
+	t.Run("present but unreadable is an operational error, never a swallowed attested=true", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-attestation path under this user")
+		}
+		root := t.TempDir()
+		writeAttestation(t, root, "story-1", "ac-2", testAttestation)
+		path := AttestationPath(root, "story-1", "ac-2")
+		if err := os.Chmod(path, 0o000); err != nil {
+			t.Fatalf("os.Chmod(%s, 0o000): %v", path, err)
+		}
+		t.Cleanup(func() {
+			_ = os.Chmod(path, 0o644) // restore so t.TempDir()'s own cleanup can remove it
+		})
+
+		state, err := LoadAttestationState(root, "story-1", "ac-2")
+		if err == nil {
+			t.Fatalf("LoadAttestationState(present-but-unreadable) err = nil (state=%v), want a propagated read error — a present attestation that cannot be read must fail closed, never swallow to a satisfied attestation (ADJ-67/D6-38)", state)
+		}
+		if !errors.Is(err, os.ErrPermission) {
+			t.Fatalf("err = %v, want it to wrap os.ErrPermission (the os.ReadFile EACCES, preserved through %%w)", err)
+		}
+		if !strings.Contains(err.Error(), "loading attestation state") {
+			t.Fatalf("err = %q, want it to name LoadAttestationState's own read wrapping", err.Error())
+		}
+		if state != AttestationAbsent {
+			t.Fatalf("state = %v, want AttestationAbsent alongside the error — crucially NOT AttestationAuthored", state)
 		}
 	})
 }

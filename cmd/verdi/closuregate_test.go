@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,8 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/forge"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 const closureGateStorySpecMD = `---
@@ -242,4 +245,63 @@ func freshClosureGateRepoForBuildStart(t *testing.T) *fixturegit.Repo {
 		},
 		Message: "closure gate fixture, no build branch yet",
 	}})
+}
+
+// TestRunClosureGate_UnreadableAttestation_OperationalFailure pins ADJ-67 /
+// D6-38 on the STORY closure gate. The round replaced the fold's stat-only
+// AttestationExists with content-reading LoadAttestationState. On an
+// attestation file that exists but cannot be read (mode 000), the old
+// stat-only swallow returned (true, nil) — silently counting an unreadable
+// file as a satisfied HUMAN attestation, so the gate computed a verdict (exit
+// 0/1). The kept behavior propagates the os.ReadFile error out of Fold,
+// through foldStoryEvidence's "folding evidence:" wrap and
+// checkClosureEligible's "closure gate:" wrap, as an operational failure —
+// exit 2 at the cmd level. This test asserts BOTH taxonomy views (the
+// gate-function error path, matching this file's other runClosureGate tests,
+// AND the cmd-level exit-2) and must FAIL if anyone restores the swallow.
+func TestRunClosureGate_UnreadableAttestation_OperationalFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-attestation path under this user")
+	}
+	repo := buildClosureGateRepo(t)
+	seedAttestation(t, repo.Dir) // authored attestation at attestations/jira-loan-1482/ac-1.md
+	spec, _ := readSpec(t, repo.Dir, "stale-decline")
+	ctx := context.Background()
+
+	attPath := filepath.Join(repo.Dir, ".verdi", "attestations", "jira-loan-1482", "ac-1.md")
+	if err := os.Chmod(attPath, 0o000); err != nil {
+		t.Fatalf("os.Chmod(%s, 0o000): %v", attPath, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(attPath, 0o644) // restore so t.TempDir()'s own cleanup can remove it
+	})
+
+	// Gate-function taxonomy: a non-nil "closure gate:"-wrapped error, ok
+	// false — never a swallowed (true, nil) eligible verdict.
+	var stdout bytes.Buffer
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, repo.Head, &stdout)
+	if err == nil {
+		t.Fatalf("runClosureGate(unreadable attestation) err = nil (ok=%v) — an unreadable attestation must fail closed, never swallow to a satisfied attestation (ADJ-67/D6-38); stdout=%s", ok, stdout.String())
+	}
+	if ok {
+		t.Fatalf("runClosureGate(unreadable attestation) ok = true, want false on an operational failure")
+	}
+	if !contains(err.Error(), "closure gate:") {
+		t.Fatalf("err = %q, want the closure-gate-wrapped error path (closuregate.go's checkClosureEligible)", err.Error())
+	}
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("err = %v, want it to wrap os.ErrPermission (the propagated os.ReadFile EACCES)", err)
+	}
+
+	// Cmd-level taxonomy: the same input drives `verdi close` to exit 2
+	// (operational) — never 0 (clean) or 1 (a business-precondition refusal).
+	deps := closeDeps{Forge: forgefake.New(), Registry: fake.New()}
+	var cstdout, cstderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/stale-decline", &store.Manifest{}, deps, &cstdout, &cstderr)
+	if got != 2 {
+		t.Fatalf("runClose(story, unreadable attestation) = %d, want 2 (operational); stdout=%s stderr=%s", got, cstdout.String(), cstderr.String())
+	}
+	if !contains(cstderr.String(), "loading attestation state") {
+		t.Fatalf("stderr = %q, want it to name the propagated attestation read error", cstderr.String())
+	}
 }
