@@ -34,6 +34,17 @@ func newDraftBoardsTestStore(t *testing.T) string {
 	if err := runGit(storeRoot, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
 		t.Fatal(err)
 	}
+	// D6-31 (fixturegit.go's own discipline): never let this repo spawn a
+	// detached background gc/maintenance child — it can still be writing
+	// .git/objects when t.TempDir cleanup walks the tree, failing the test
+	// with "TempDir RemoveAll cleanup: ... directory not empty" on slower
+	// disks (observed in CI on the many-commit family-links provisioner).
+	if err := runGit(storeRoot, nil, "config", "gc.autoDetach", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(storeRoot, nil, "config", "maintenance.auto", "false"); err != nil {
+		t.Fatal(err)
+	}
 	origin := filepath.Join(scratch, "origin.git")
 	if err := runGit("", nil, "init", "--bare", "--quiet", "--initial-branch=main", origin); err != nil {
 		t.Fatal(err)
