@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-27--ac-3
 kind: attestation
-title: "unauthored attestation scaffold: spec/home-status-glance ac-3"
+title: "outcome attestation: every bucket renders its heading, count, and empty-state notice even with zero specs"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:

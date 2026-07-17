@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-29--ac-3
 kind: attestation
-title: "unauthored attestation scaffold: spec/attest-helper ac-3"
+title: "outcome attestation: VL-022 catches story misfiling as a named violation, never a silent absent"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:

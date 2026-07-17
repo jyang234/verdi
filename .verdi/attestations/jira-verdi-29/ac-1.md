@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-29--ac-1
 kind: attestation
-title: "unauthored attestation scaffold: spec/attest-helper ac-1"
+title: "outcome attestation: verdi attest scaffolds the exact slugged skeleton, never a claim"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:

@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-29--ac-2
 kind: attestation
-title: "unauthored attestation scaffold: spec/attest-helper ac-2"
+title: "outcome attestation: verdi attest refuses unsafe writes as named verdicts, atomically"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:

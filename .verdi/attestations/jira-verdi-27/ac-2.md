@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-27--ac-2
 kind: attestation
-title: "unauthored attestation scaffold: spec/home-status-glance ac-2"
+title: "outcome attestation: every pre-existing directory section and link survives unchanged alongside the glance"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:

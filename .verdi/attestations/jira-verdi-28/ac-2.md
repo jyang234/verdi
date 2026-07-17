@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-28--ac-2
 kind: attestation
-title: "unauthored attestation scaffold: spec/close-preflight ac-2"
+title: "outcome attestation: preflight keeps the exit/mutation discipline and shares the publish guard's own predicate"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:

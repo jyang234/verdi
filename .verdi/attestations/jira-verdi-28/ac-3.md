@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-28--ac-3
 kind: attestation
-title: "unauthored attestation scaffold: spec/close-preflight ac-3"
+title: "outcome attestation: preflight's disclosure and a real close agree on the same refusal, story and feature alike"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:

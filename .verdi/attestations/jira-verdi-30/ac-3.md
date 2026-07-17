@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-30--ac-3
 kind: attestation
-title: "unauthored attestation scaffold: spec/disposition-verb ac-3"
+title: "outcome attestation: a verb-recorded disposition survives align --freeze byte-for-byte"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:

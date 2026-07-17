@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-29--ac-4
 kind: attestation
-title: "unauthored attestation scaffold: spec/attest-helper ac-4"
+title: "outcome attestation: the scaffold self-validates before writing, never leaving a malformed file"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:

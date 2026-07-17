@@ -1,7 +1,7 @@
 ---
 id: attestation/jira-verdi-28--ac-1
 kind: attestation
-title: "unauthored attestation scaffold: spec/close-preflight ac-1"
+title: "outcome attestation: the preflight discloses every closure condition with per-kind detail from the fold's own evaluation"
 owners: ["platform-team"]
 schema: verdi.attestation/v1
 links:
