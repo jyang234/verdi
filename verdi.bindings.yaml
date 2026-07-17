@@ -644,6 +644,28 @@ bindings:
       - "spec/workbench-legibility#ac-1"
       - "spec/workbench-legibility#ac-2"
       - "spec/workbench-legibility#ac-3"
+      # spec/model-schema behavioral legs (extensibility phase 1, all three
+      # ACs declare [behavioral] only): ac-1 = internal/model's table-driven
+      # TestDecodeModel_KernelViolations (one committed testdata/viol-*.yaml
+      # fixture per kernel rule, asserting the exact error substring) plus
+      # TestDecodeModel_KernelErrorNamesCatalog (an out-of-catalog kind
+      # names the legal catalog itself); ac-2 = TestCanonicalYAMLMatchesGoLiteral
+      # (the embedded canonical.yaml decodes to exactly canonical.go's
+      # canonicalModel literal), TestCanonicalMatchesCode_States
+      # (internal/model/embed_test.go, against artifact.SpecFeatureStatuses())
+      # and TestCanonicalModel_VerbsMatchDispatch (cmd/verdi/modelparity_
+      # test.go, against dispatch.go's own SpecTransitionVerbs() — package
+      # main, since dispatch.go's verbPhase cannot be reached from an
+      # importable package); ac-3 = cmd/verdi/model_test.go's real
+      # built-binary end-to-end suite (TestModelCheck_NoModelYAML_OK,
+      # _ValidVocabRename_OK, _FrontierViolation_Exit1_PinnedText,
+      # _KernelViolation_Exit2, _StoreLessCwd_Exit2, _UnknownSubcommand_
+      # Exit2Usage, _BareVerb_Exit2Usage) plus internal/showcasealign's
+      # TestCLIShowcaseModel against the real provisioned examples/showcase
+      # store — all under make verify.
+      - "spec/model-schema#ac-1"
+      - "spec/model-schema#ac-2"
+      - "spec/model-schema#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
