@@ -296,6 +296,40 @@ func TestRunSync_Ancestor_NoBundleAnywhere_RefusesNamingRange(t *testing.T) {
 	}
 }
 
+// TestRunSync_Ancestor_NoBundleAnywhere_RangeNotationNamesEveryWalkedCommit
+// pins the ac-2 exhaustion disclosure's range notation to name EXACTLY the
+// commits actually walked (ADJ-64). The walk fetches the oldest commit too
+// (rest[len-1]), so the disclosed range must be inclusive of it; git's own
+// `oldest..commit` two-dot notation is EXCLUSIVE of oldest, naming one fewer
+// commit than the stated walked count — the off-by-one this guards against.
+func TestRunSync_Ancestor_NoBundleAnywhere_RangeNotationNamesEveryWalkedCommit(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"a.txt": "1"}, Message: "layer 1"},
+		{Files: map[string]string{"a.txt": "2"}, Message: "layer 2"},
+		{Files: map[string]string{"a.txt": "3"}, Message: "layer 3"},
+	})
+	const ref = "main"
+	f := fake.New() // unseeded: no bundle anywhere in history
+
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{Runner: upstream.NewFakeRunner(), Forge: f, GoTest: fakeGoTest{}, Stdout: &stdout, Stderr: &stderr}
+	if code := runSync(context.Background(), repo.Dir, ref, repo.Head, false, false, false, deps); code != 2 {
+		t.Fatalf("exit = %d, want 2; stdout=%s", code, stdout.String())
+	}
+	got := stderr.String()
+	// All three commits (HEAD, its parent, the root) were walked, so the
+	// disclosure must mark itself inclusive of the oldest walked commit.
+	if !strings.Contains(got, "inclusive") {
+		t.Errorf("stderr = %q, want the range disclosure to mark itself inclusive of the oldest walked commit", got)
+	}
+	// It must NOT use git's exclusive `oldest..commit` two-dot range, which
+	// excludes the oldest walked commit and would contradict the stated
+	// "3 commit(s) walked" count (the ADJ-64 off-by-one).
+	if exclusive := repo.Heads[0] + ".." + repo.Head; strings.Contains(got, exclusive) {
+		t.Errorf("stderr = %q, must NOT disclose the exclusive git range %q (it excludes the walked oldest commit)", got, exclusive)
+	}
+}
+
 // TestRunSync_Ancestor_NoBundleAnywhere_ShallowClone_DisclosesTruncation
 // proves fix 2 (ADJ-37, disclosure only — no walk-semantics change): in a
 // shallow clone, `git log` silently stops at the shallow boundary, so the

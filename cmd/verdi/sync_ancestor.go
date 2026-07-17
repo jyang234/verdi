@@ -117,7 +117,14 @@ func fetchAncestorBundle(ctx context.Context, root string, f forge.Forge, ref, c
 	// sit at a deeper true ancestor absent locally. The detection is
 	// best-effort: an undetectable shallow state leaves the base message —
 	// already scoped to "this clone", no longer overclaiming — to stand.
-	msg := fmt.Sprintf("no evidence bundle found for ref %q anywhere in the %d commit(s) walked in this clone (%s..%s)", ref, len(rest), oldest, commit)
+	// ADJ-64 (disclosure only): name EXACTLY the commits walked. The walk
+	// fetches oldest (rest[len-1]) too, so the disclosed span is INCLUSIVE of
+	// it — git's own `oldest..commit` two-dot range is exclusive of oldest and
+	// would name one fewer commit than the len(rest) count stated here, an
+	// off-by-one against a git-literate reader. Spell the span inclusively
+	// ("<commit> back through <oldest>, inclusive") rather than as a two-dot
+	// range (an `oldest^..commit` form would break on a root commit anyway).
+	msg := fmt.Sprintf("no evidence bundle found for ref %q anywhere in the %d commit(s) walked in this clone (%s back through %s, inclusive)", ref, len(rest), commit, oldest)
 	if shallow, shErr := gitx.IsShallow(ctx, root); shErr == nil && shallow {
 		msg += " — note: this is a shallow clone (git's shallow-boundary marker is present), so the history above is truncated at the clone's shallow boundary and a bundle may exist at a deeper true ancestor not present in this clone"
 		// The walk RAN but saw only this shallow clone's truncated graph —

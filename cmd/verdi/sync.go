@@ -143,7 +143,19 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	remoteURL, _ := gitx.RemoteURL(ctx, root, "origin") // best-effort: only used for auto-detect
+	// ADJ-64: distinguish a genuinely-absent origin (ErrNoSuchRemote — the
+	// benign local case; remoteURL stays "") from a REAL failure READING the
+	// origin remote (a broken git config, an unreadable repo). Absence is
+	// cleared to nil here; a genuine read failure is carried into buildForge
+	// and surfaced by githubOwnerRepo ONLY where it actually falls back to the
+	// origin to identify the repo — never when the CI env already identifies
+	// it, and never for gitlab (whose identity is env-only). This keeps an
+	// unreadable origin from masquerading as an absent one in the one refusal
+	// that names it, without regressing any path the origin is irrelevant to.
+	remoteURL, remoteErr := gitx.RemoteURL(ctx, root, "origin")
+	if remoteErr != nil && errors.Is(remoteErr, gitx.ErrNoSuchRemote) {
+		remoteErr = nil
+	}
 	forgeKind, err := forge.DetectKind(manifest.Forge, remoteURL)
 	if err != nil {
 		fmt.Fprintln(stderr, "sync:", err)
@@ -154,16 +166,17 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 	// paths (fetchAncestorBundle → FetchEvidenceBundle). --produce and
 	// --produce-runtime never dial; they only read the CI environment
 	// (CIContext, a pure env read that uses no repo identifier), so they
-	// build an identifier-tolerant forge and run in an env-less, origin-less
-	// checkout exactly as they did before ac-1 (co-3 byte-identity restored).
-	// Dispatching the construction here — rather than after the toolchain
-	// check below — keeps the identifier refusal ahead of that check for the
-	// dialing path, unchanged (TestCmdSync_LocalCheckout_RefusesNamingSources).
+	// build an identifier-tolerant forge (and ignore any origin read failure)
+	// and run in an env-less, origin-less checkout exactly as they did before
+	// ac-1 (co-3 byte-identity restored). Dispatching the construction here —
+	// rather than after the toolchain check below — keeps the identifier
+	// refusal ahead of that check for the dialing path, unchanged
+	// (TestCmdSync_LocalCheckout_RefusesNamingSources).
 	var fg forge.Forge
 	if produce || produceRuntime {
 		fg, err = buildForgeForCI(forgeKind, remoteURL)
 	} else {
-		fg, err = buildForge(forgeKind, remoteURL)
+		fg, err = buildForge(forgeKind, remoteURL, remoteErr)
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, "sync:", err)
