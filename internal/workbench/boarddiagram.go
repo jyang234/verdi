@@ -32,6 +32,7 @@ import (
 	"github.com/jyang234/verdi/internal/diagrambase"
 	"github.com/jyang234/verdi/internal/diagramedit"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
@@ -572,8 +573,8 @@ func resolveDiagramExit(root, origin string) diagramExitTarget {
 			Label: "no originating board is known — back to index",
 		}
 	}
-	if store, name, ok := diagramExitStore(root, origin); ok {
-		if _, err := os.Stat(filepath.Join(store, ".verdi", "specs", "active", name, "spec.md")); err == nil {
+	if storeRoot, name, ok := diagramExitStore(root, origin); ok {
+		if _, err := os.Stat(store.ActiveSpecPath(storeRoot, name)); err == nil {
 			return diagramExitTarget{
 				Href:  origin,
 				Label: "back to board: " + name,

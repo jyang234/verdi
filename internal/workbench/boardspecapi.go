@@ -696,7 +696,7 @@ func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string
 	if err != nil {
 		return err
 	}
-	path := ".verdi/specs/active/" + slug + "/spec.md"
+	path := store.ActiveSpecRelPath(slug)
 	tree, err := gitx.BuildTreeWithFile(ctx, s.root, baseCommit+"^{tree}", path, blobSHA)
 	if err != nil {
 		return err

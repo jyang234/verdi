@@ -18,7 +18,6 @@ import (
 	stdhtml "html"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifactview"
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/refindex"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // OpenMRLister is the directory's in-review consultation port (dc-4): the
@@ -392,12 +392,12 @@ func writeSourceChip(buf *bytes.Buffer, src refindex.Source) {
 // itself never depends on the working tree (dc-2 — the index is computed
 // from refs; this is trim, not truth).
 func specWorkingTreeMeta(root, name string) (title string, class artifact.SpecClass, story string, boardServable bool) {
-	path := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")
+	path := store.ActiveSpecPath(root, name)
 	data, err := os.ReadFile(path)
 	if err == nil {
 		boardServable = true
 	} else {
-		path = filepath.Join(root, ".verdi", "specs", "archive", name, "spec.md")
+		path = store.ArchiveSpecPath(root, name)
 		if data, err = os.ReadFile(path); err != nil {
 			return "", "", "", false
 		}
