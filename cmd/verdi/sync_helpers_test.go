@@ -214,11 +214,31 @@ func TestGithubOwnerRepo(t *testing.T) {
 		t.Errorf("origin fallback: githubOwnerRepo = (%q, %q, %v), want (urlowner, urlrepo, nil)", o, r, err)
 	}
 
+	// A bare GITHUB_REPOSITORY (owner/repo) fully identifies the repo on its
+	// own: its owner half is authoritative CI env, so no separate
+	// GITHUB_REPOSITORY_OWNER and no origin remote are required (ADJ-64 —
+	// refusing here was a false "cannot identify" disclosure).
+	t.Setenv("GITHUB_REPOSITORY_OWNER", "")
+	t.Setenv("GITHUB_REPOSITORY", "octo/hello")
+	if o, r, err := githubOwnerRepo(""); o != "octo" || r != "hello" || err != nil {
+		t.Errorf("bare GITHUB_REPOSITORY: githubOwnerRepo = (%q, %q, %v), want (octo, hello, nil)", o, r, err)
+	}
+
+	// CI-env-wins precedence is unchanged: an explicit GITHUB_REPOSITORY_OWNER
+	// still overrides the owner half GITHUB_REPOSITORY carries.
+	t.Setenv("GITHUB_REPOSITORY_OWNER", "explicit")
+	t.Setenv("GITHUB_REPOSITORY", "other/repo")
+	if o, r, err := githubOwnerRepo(""); o != "explicit" || r != "repo" || err != nil {
+		t.Errorf("owner env wins: githubOwnerRepo = (%q, %q, %v), want (explicit, repo, nil)", o, r, err)
+	}
+
 	// Neither env nor a resolvable URL → the legible refusal (spec/
 	// sync-local-flow ac-1), never the silently-returned empty pair the
 	// prior "honest can't-identify case" comment named — that assumption
 	// (some caller declines to build a doomed forge) is false for sync.go,
 	// the one direct, ungated buildForge caller (dc-2).
+	t.Setenv("GITHUB_REPOSITORY_OWNER", "")
+	t.Setenv("GITHUB_REPOSITORY", "")
 	if o, r, err := githubOwnerRepo(""); o != "" || r != "" || err == nil {
 		t.Errorf("no identifier: githubOwnerRepo = (%q, %q, %v), want (\"\", \"\", a non-nil error)", o, r, err)
 	}

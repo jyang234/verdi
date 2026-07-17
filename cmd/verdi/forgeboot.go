@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/forge"
 	forgegithub "github.com/jyang234/verdi/internal/forge/github"
@@ -147,6 +148,16 @@ func githubOwnerRepo(remoteURL string) (owner, repo string, err error) {
 	envOwner := os.Getenv("GITHUB_REPOSITORY_OWNER")
 	envRepository := os.Getenv("GITHUB_REPOSITORY")
 	owner, repo = envOwner, githubRepoName()
+	if owner == "" {
+		// A bare GITHUB_REPOSITORY (owner/repo) carries its own owner half —
+		// authoritative CI env that fully identifies the repository without a
+		// separate GITHUB_REPOSITORY_OWNER (ADJ-64: refusing here was a false
+		// "cannot identify" disclosure of information the value already
+		// carried). Ranked below an explicit GITHUB_REPOSITORY_OWNER
+		// (consulted just above) and above the origin URL (below), so the
+		// CI-env-wins precedence is unchanged.
+		owner = githubRepoOwner()
+	}
 	if owner != "" && repo != "" {
 		return owner, repo, nil
 	}
@@ -161,9 +172,16 @@ func githubOwnerRepo(remoteURL string) (owner, repo string, err error) {
 	if owner != "" && repo != "" {
 		return owner, repo, nil
 	}
+	// Name the origin's ABSENCE explicitly rather than as an empty quoted
+	// string (ADJ-64): ac-1 promises to name every source it tried, "the
+	// origin remote URL or its absence".
+	originDesc := fmt.Sprintf("%q", remoteURL)
+	if remoteURL == "" {
+		originDesc = "absent (no origin remote configured)"
+	}
 	return "", "", fmt.Errorf(
-		"cannot identify the GitHub repository: GITHUB_REPOSITORY_OWNER=%q, GITHUB_REPOSITORY=%q, and the git origin remote (%q) does not resolve one either — set both env vars (inside CI) or configure a github.com origin remote (for a local checkout)",
-		envOwner, envRepository, remoteURL,
+		"cannot identify the GitHub repository: GITHUB_REPOSITORY_OWNER=%q, GITHUB_REPOSITORY=%q, and the git origin remote (%s) does not resolve one either — set GITHUB_REPOSITORY=owner/repo (inside CI; GITHUB_REPOSITORY_OWNER, if set, overrides the owner half) or configure a github.com origin remote (for a local checkout)",
+		envOwner, envRepository, originDesc,
 	)
 }
 
@@ -178,4 +196,18 @@ func githubRepoName() string {
 		}
 	}
 	return full
+}
+
+// githubRepoOwner extracts the owner from GITHUB_REPOSITORY ("owner/repo"),
+// GitHub Actions' own combined env var — the owner half GITHUB_REPOSITORY
+// alone fully identifies (a bare GITHUB_REPOSITORY needs no separate
+// GITHUB_REPOSITORY_OWNER, ADJ-64). "" when GITHUB_REPOSITORY is unset or
+// carries no "/" owner segment. githubOwnerRepo consults GITHUB_REPOSITORY_OWNER
+// first, so an explicit owner env still wins and CI-env precedence is unchanged.
+func githubRepoOwner() string {
+	full := os.Getenv("GITHUB_REPOSITORY")
+	if i := strings.IndexByte(full, '/'); i >= 0 {
+		return full[:i]
+	}
+	return ""
 }
