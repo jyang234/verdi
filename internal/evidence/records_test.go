@@ -202,6 +202,94 @@ func TestLoadRecordsWithSources_Happy(t *testing.T) {
 	}
 }
 
+// TestExcludedCommitDirs_Happy proves a non-ancestor sibling commit
+// directory is named (spec/close-preflight dc-4's "found but excluded"
+// disclosure) while an ancestor-or-self commit directory — the ordinary,
+// nothing-to-disclose case — is not.
+func TestExcludedCommitDirs_Happy(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+	sibling := branchSiblingCommit(t, repo.Dir, repo.Heads[0])
+
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], recordJSON(repo.Heads[0], "ci"))
+	writeDerivedVerdicts(t, derivedRoot, sibling, recordJSON(sibling, "ci"))
+
+	got, err := ExcludedCommitDirs(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("ExcludedCommitDirs: %v", err)
+	}
+	if len(got) != 1 || got[0] != sibling {
+		t.Fatalf("ExcludedCommitDirs = %v, want exactly [%s] (the ancestor commit dir must not be named)", got, sibling)
+	}
+}
+
+// TestExcludedCommitDirs_NoExclusions proves an all-ancestor derived tree
+// (the ordinary case) reports no exclusions at all — nil, not an empty-but-
+// non-nil slice a caller might render as an empty bracketed list.
+func TestExcludedCommitDirs_NoExclusions(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], recordJSON(repo.Heads[0], "ci"))
+
+	got, err := ExcludedCommitDirs(context.Background(), repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("ExcludedCommitDirs: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ExcludedCommitDirs = %v, want none excluded", got)
+	}
+}
+
+// TestExcludedCommitDirs_MissingDerivedRoot proves a never-synced story
+// (no derived tree on disk at all) reads as "nothing excluded", not an
+// error — mirroring LoadRecordsWithSources's own never-synced posture.
+func TestExcludedCommitDirs_MissingDerivedRoot(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	got, err := ExcludedCommitDirs(context.Background(), repo.Dir, filepath.Join(repo.Dir, "derived", "never-synced"), repo.Head)
+	if err != nil {
+		t.Fatalf("ExcludedCommitDirs(missing derivedRoot): %v", err)
+	}
+	if got != nil {
+		t.Fatalf("ExcludedCommitDirs(missing derivedRoot) = %v, want nil", got)
+	}
+}
+
+// TestExcludedCommitDirs_SkipsNonCommitShapedEntries proves a stray
+// non-commit-shaped directory (an editor/OS artifact) is silently skipped,
+// mirroring LoadRecords' own tolerance.
+func TestExcludedCommitDirs_SkipsNonCommitShapedEntries(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	if err := os.MkdirAll(filepath.Join(derivedRoot, "views"), 0o755); err != nil {
+		t.Fatalf("mkdir views: %v", err)
+	}
+
+	got, err := ExcludedCommitDirs(context.Background(), repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("ExcludedCommitDirs: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ExcludedCommitDirs = %v, want none (a non-commit-shaped dir must be skipped, not misread as excluded)", got)
+	}
+}
+
+// TestExcludedCommitDirs_Negative proves a genuine ancestry-check failure
+// (a commit-shaped directory name that resolves to no real commit at all —
+// distinct from a real, merely-non-ancestor sibling) is a surfaced
+// operational error, not a silent "excluded".
+func TestExcludedCommitDirs_Negative(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	// Commit-shaped (matches commitDirRe) but not a real object in this
+	// repo's history at all.
+	writeDerivedVerdicts(t, derivedRoot, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", recordJSON("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "ci"))
+
+	if _, err := ExcludedCommitDirs(context.Background(), repo.Dir, derivedRoot, repo.Head); err == nil {
+		t.Fatal("ExcludedCommitDirs(unresolvable commit dir name): want error, got nil")
+	}
+}
+
 // TestLoadRecordsWithSources_Negative proves the manifest never cites
 // what the walk did not read: a non-ancestor sibling commit's file is
 // excluded, and a missing derivedRoot yields a nil manifest and nil

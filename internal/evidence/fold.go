@@ -73,7 +73,7 @@ func Fold(in Input) (StoryResult, error) {
 			return StoryResult{}, err
 		}
 
-		attested := false
+		attState := AttestationAbsent
 		if declaresKind(ac, artifact.EvidenceAttestation) {
 			// spec/attest-helper dc-3: only the AUTHORED state satisfies —
 			// an unauthored `verdi attest` scaffold collapses to exactly
@@ -84,15 +84,16 @@ func Fold(in Input) (StoryResult, error) {
 			if stateErr != nil {
 				return StoryResult{}, stateErr
 			}
-			attested = state == AttestationAuthored
+			attState = state
 		}
 
-		status := foldAC(ac, current, waived, attested)
+		status, kinds := foldAC(ac, current, waived, attState)
 		result.ACs = append(result.ACs, ACResult{
 			ID:      ac.ID,
 			Text:    ac.Text,
 			Status:  status,
-			Summary: summarize(ac, current, attested),
+			Summary: summarize(ac, current, attState == AttestationAuthored),
+			Kinds:   kinds,
 		})
 		if status == StatusViolated {
 			result.Violated = true
@@ -110,21 +111,34 @@ func Fold(in Input) (StoryResult, error) {
 }
 
 // foldAC applies 03 §The fold's per-AC precedence to one AC's already-
-// reduced current record set.
-func foldAC(ac artifact.AcceptanceCriterion, current []artifact.Evidence, waived, attested bool) Status {
-	if waived {
-		return StatusWaived
-	}
-	for _, r := range current {
-		if r.Verdict == artifact.VerdictFail {
-			return StatusViolated
-		}
-	}
+// reduced current record set, and returns the per-declared-kind evaluation
+// (KindResult) it computes along the way so a disclosure consumer renders
+// the SAME per-kind outcome the verdict folded, never a re-derived one
+// (spec/close-preflight dc-2; ADJ-56). attState is the AC's attestation
+// state (AttestationAbsent when the AC declares no attestation kind).
+//
+// The status reduction below is byte-for-byte the pre-breakdown fold: the
+// per-kind breakdown is captured additively (kindStatus is called exactly
+// once per kind, as before), the "any current record failed" violated rule
+// still scans ALL current records — not just declared kinds — and the
+// waived short-circuit still wins. No verdict changes; only the KindResult
+// projection is new.
+func foldAC(ac artifact.AcceptanceCriterion, current []artifact.Evidence, waived bool, attState AttestationState) (Status, []KindResult) {
+	attested := attState == AttestationAuthored
 
+	kinds := make([]KindResult, 0, len(ac.Evidence))
 	allSatisfied := true
 	anySignal := false
 	for _, kind := range ac.Evidence {
 		satisfied, hasRecords := kindStatus(kind, current, attested)
+		kr := KindResult{Kind: kind, Satisfied: satisfied}
+		if kind == artifact.EvidenceAttestation {
+			kr.Attestation = attState
+		} else {
+			kr.Violating = firstFailingOfKind(current, kind)
+		}
+		kinds = append(kinds, kr)
+
 		if hasRecords {
 			anySignal = true
 		}
@@ -142,14 +156,52 @@ func foldAC(ac artifact.AcceptanceCriterion, current []artifact.Evidence, waived
 		}
 	}
 
+	if waived {
+		return StatusWaived, kinds
+	}
+	for _, r := range current {
+		if r.Verdict == artifact.VerdictFail {
+			return StatusViolated, kinds
+		}
+	}
+
 	switch {
 	case allSatisfied:
-		return StatusEvidenced
+		return StatusEvidenced, kinds
 	case anySignal:
-		return StatusPending
+		return StatusPending, kinds
 	default:
-		return StatusNoSignal
+		return StatusNoSignal, kinds
 	}
+}
+
+// firstFailingOfKind returns a copy of the first current record of kind
+// whose verdict is fail (deterministic — current is already in the fold's
+// stable group order), or nil when none failed. It is the fold's own
+// per-kind violation witness, so a disclosure names the failing record
+// (ADJ-56 finding 3) instead of misdescribing it as missing evidence.
+func firstFailingOfKind(current []artifact.Evidence, kind artifact.EvidenceKind) *artifact.Evidence {
+	for i := range current {
+		if current[i].Kind == kind && current[i].Verdict == artifact.VerdictFail {
+			r := current[i]
+			return &r
+		}
+	}
+	return nil
+}
+
+// firstFailing returns a copy of the first current record of ANY kind whose
+// verdict is fail, or nil when none failed — the feature outcome floor's
+// violation witness (foldFeatureAC scans all current records alike, since
+// the floor is over outcome-level records regardless of kind).
+func firstFailing(current []artifact.Evidence) *artifact.Evidence {
+	for i := range current {
+		if current[i].Verdict == artifact.VerdictFail {
+			r := current[i]
+			return &r
+		}
+	}
+	return nil
 }
 
 // kindStatus reports, for one expected evidence kind, whether it is

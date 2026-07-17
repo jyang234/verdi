@@ -85,6 +85,34 @@ func TestAttestationExists_Negative(t *testing.T) {
 	}
 }
 
+// TestAttestationPath proves the one shared path-construction convention
+// (spec/close-preflight dc-4/ac-1's attestation obligation: "every path a
+// --preflight disclosure names ... is produced by calling the real
+// path-construction helpers ... never a hand-typed string literal that
+// could drift"): AttestationExists and LoadAttestationState both resolve
+// the exact path AttestationPath returns, and passing an empty storeRoot
+// yields the store-relative display form a disclosure prints (filepath.Join
+// drops an empty leading element).
+func TestAttestationPath(t *testing.T) {
+	root := t.TempDir()
+	got := AttestationPath(root, "story-1", "ac-2")
+	want := filepath.Join(root, ".verdi", "attestations", "story-1", "ac-2.md")
+	if got != want {
+		t.Fatalf("AttestationPath(root, ...) = %q, want %q", got, want)
+	}
+
+	writeAttestation(t, root, "story-1", "ac-2", testAttestation)
+	if _, err := os.Stat(AttestationPath(root, "story-1", "ac-2")); err != nil {
+		t.Fatalf("AttestationPath does not resolve to the same file AttestationExists/LoadAttestationState check: %v", err)
+	}
+
+	rel := AttestationPath("", "story-1", "ac-2")
+	wantRel := filepath.Join(".verdi", "attestations", "story-1", "ac-2.md")
+	if rel != wantRel {
+		t.Fatalf("AttestationPath(\"\", ...) = %q, want %q (the store-relative display form)", rel, wantRel)
+	}
+}
+
 // TestUnauthoredAttestationMarker_IsFixedSentinel pins the exact byte-for-
 // byte sentinel (spec/attest-helper dc-3) so the scaffold writer and every
 // fold reader are provably sharing the one literal this test locks in.
