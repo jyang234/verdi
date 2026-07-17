@@ -442,6 +442,8 @@ func TestRunDisposition_Refusals(t *testing.T) {
 			{"missing --rationale", []string{"spec/demo", "computed-a", "fixed"}},
 			{"unknown decision", []string{"spec/demo", "computed-a", "close-enough", "--rationale", "z"}},
 			{"too many positionals", []string{"spec/demo", "computed-a", "fixed", "extra"}},
+			{"rationale contains a newline", []string{"spec/demo", "computed-a", "fixed", "--rationale", "line one\nline two"}},
+			{"rationale contains a control character", []string{"spec/demo", "computed-a", "fixed", "--rationale", "text\twith\ttab"}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -457,4 +459,116 @@ func TestRunDisposition_Refusals(t *testing.T) {
 			})
 		}
 	})
+}
+
+// TestRunDisposition_RationaleValidation is ADJ-52's j-3 fix proof: a
+// --rationale carrying a newline or other control character refuses as a
+// malformed invocation (exit 2), naming the single-line-bullet constraint
+// (align.RenderFindingLine renders a disposition's rationale as one line of
+// a markdown bullet; a newline would silently break that invariant with no
+// prior argument-shape check catching it — the exact gap the judge found).
+// A plain, punctuation-bearing, multi-word rationale must still work
+// (exit 0) — the fix must not become an over-broad rejection.
+func TestRunDisposition_RationaleValidation(t *testing.T) {
+	bin := buildVerdiBinary(t)
+
+	livingFindings := []artifact.Finding{
+		{ID: "computed-a", Kind: artifact.FindingComputed, Text: "declared boundary holds"},
+	}
+
+	t.Run("newline refuses and names the single-line constraint", func(t *testing.T) {
+		root := writeDispositionStoreRoot(t, "demo", buildDispositionFixture(t, livingFindings, nil))
+		path := reportPathFor(root, "demo")
+		before := readFile(t, path)
+
+		_, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "computed-a", "fixed", "--rationale", "first line\nsecond line")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2 (operational usage error); stderr=%s", code, stderr)
+		}
+		if !strings.Contains(stderr, "control character") || !strings.Contains(stderr, "single-line") {
+			t.Fatalf("stderr = %q, want it to name the control-character/single-line-bullet constraint", stderr)
+		}
+		assertUnchanged(t, path, before)
+	})
+
+	t.Run("a non-newline control character (tab) refuses the same way", func(t *testing.T) {
+		root := writeDispositionStoreRoot(t, "demo", buildDispositionFixture(t, livingFindings, nil))
+		path := reportPathFor(root, "demo")
+		before := readFile(t, path)
+
+		_, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "computed-a", "fixed", "--rationale", "has\ta\ttab")
+		if code != 2 {
+			t.Fatalf("exit = %d, want 2 (operational usage error); stderr=%s", code, stderr)
+		}
+		if !strings.Contains(stderr, "control character") {
+			t.Fatalf("stderr = %q, want it to name the control-character constraint", stderr)
+		}
+		assertUnchanged(t, path, before)
+	})
+
+	t.Run("plain multi-word rationale with punctuation still works", func(t *testing.T) {
+		root := writeDispositionStoreRoot(t, "demo", buildDispositionFixture(t, livingFindings, nil))
+		path := reportPathFor(root, "demo")
+
+		const rationale = "owner-ratified: intentional, tracked separately (see ADR-12) — no server-side change."
+		_, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "computed-a", "fixed", "--rationale", rationale)
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (plain rationale must still work); stderr=%s", code, stderr)
+		}
+		after := decodeReportFile(t, path)
+		f, ok := findingByID(after.Findings, "computed-a")
+		if !ok || f.Disposition != artifact.FindingFixed || f.Note != rationale {
+			t.Fatalf("computed-a = %+v, want disposition fixed with the given plain rationale", f)
+		}
+	})
+}
+
+// TestRunDisposition_QuotingRationaleDoesNotBrickAnotherFinding is ADJ-52's
+// j-2 fix proof: a rationale that quotes another finding's full rendered
+// bullet verbatim must never make that OTHER finding's later disposition
+// attempt refuse with a false "found N" internal error. Before the fix (a
+// raw strings.Count substring lookup over the whole body), the quoted
+// finding's line occurred twice in the body text — once as its own real,
+// standalone line, once embedded inside the quoting finding's own line —
+// permanently bricking the quoted finding's disposition with no sanctioned
+// escape hatch, reachable purely through the verb's own documented inputs.
+func TestRunDisposition_QuotingRationaleDoesNotBrickAnotherFinding(t *testing.T) {
+	bin := buildVerdiBinary(t)
+
+	findings := []artifact.Finding{
+		{ID: "finding-a", Kind: artifact.FindingComputed, Text: "a's own claim"},
+		{ID: "finding-b", Kind: artifact.FindingJudged, Text: "b's own claim"},
+	}
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixture(t, findings, nil))
+	path := reportPathFor(root, "demo")
+
+	// finding-b's CURRENT (undispositioned) rendered line — the exact text
+	// a rationale would need to quote verbatim to trigger the brick.
+	quotedLine := align.RenderFindingLine(findings[1])
+
+	// Disposition finding-a first, with a rationale that quotes finding-b's
+	// full rendered bullet verbatim (embedded inside finding-a's own,
+	// longer line — never finding-b's own standalone line).
+	_, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "finding-a", "fixed", "--rationale", "see also: "+quotedLine)
+	if code != 0 {
+		t.Fatalf("verdi disposition (quoting rationale) exit = %d, want 0; stderr=%s", code, stderr)
+	}
+
+	// finding-b's own, still-undispositioned line must STILL be locatable
+	// and dispositionable — the fix's whole proof (this would have exited 2
+	// with "found 2" against the pre-fix substring-count lookup).
+	_, stderr2, code2 := runDispositionBinary(t, bin, root, "spec/demo", "finding-b", "accepted-deviation", "--rationale", "unrelated rationale for b")
+	if code2 != 0 {
+		t.Fatalf("verdi disposition (finding-b, post-quoting) exit = %d, want 0 (must not brick on the embedded quote); stderr=%s", code2, stderr2)
+	}
+
+	after := decodeReportFile(t, path)
+	fb, ok := findingByID(after.Findings, "finding-b")
+	if !ok || fb.Disposition != artifact.FindingAcceptedDeviation || fb.Note != "unrelated rationale for b" {
+		t.Fatalf("finding-b = %+v, want disposition accepted-deviation with the given rationale", fb)
+	}
+	fa, ok := findingByID(after.Findings, "finding-a")
+	if !ok || fa.Disposition != artifact.FindingFixed {
+		t.Fatalf("finding-a = %+v, want disposition fixed (unaffected by finding-b's later write)", fa)
+	}
 }

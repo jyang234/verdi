@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
@@ -95,6 +96,16 @@ func parseDispositionArgs(args []string, stderr io.Writer) (positional []string,
 		fmt.Fprintln(stderr, "disposition: --rationale <text> is required and must not be empty")
 		return nil, "", "", false, 2
 	}
+	// ADJ-52 (j-3): a rationale renders as one line of a markdown bullet
+	// (align.RenderFindingLine's raw " — <note>" interpolation, never
+	// escaped the way the frontmatter note: field is); a newline or other
+	// control character would silently break that single-line invariant
+	// with no prior check catching it. Refused here, at argument-shape time
+	// (exit 2), before the report is ever touched.
+	if r, bad := firstControlRune(rationale); bad {
+		fmt.Fprintf(stderr, "disposition: --rationale must not contain control characters (found %U); a disposition renders as a single-line body bullet by design\n", r)
+		return nil, "", "", false, 2
+	}
 
 	decision = artifact.FindingDisposition(positional[2])
 	if decision != artifact.FindingFixed && decision != artifact.FindingAcceptedDeviation {
@@ -103,6 +114,20 @@ func parseDispositionArgs(args []string, stderr io.Writer) (positional []string,
 	}
 
 	return positional[:2], decision, rationale, amend, 0
+}
+
+// firstControlRune returns the first Unicode control-character rune in s
+// (if any) and whether one was found — ADJ-52's j-3 check backing
+// --rationale's single-line-bullet constraint: newlines (\n, \r), tabs, and
+// other C0/C1 control characters would each, if embedded raw, corrupt the
+// one-line body bullet a disposition's rationale renders as.
+func firstControlRune(s string) (r rune, found bool) {
+	for _, c := range s {
+		if unicode.IsControl(c) {
+			return c, true
+		}
+	}
+	return 0, false
 }
 
 // runDisposition is the testable core: given an already-resolved root,
@@ -183,14 +208,22 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	// the SAME formatting rule renderFindings itself uses — leaving every
 	// other line (including the Boundary-diff/Diagram-alignment subsections
 	// this verb has no data to regenerate) byte-for-byte untouched.
+	//
+	// ADJ-52 (j-2): matched as a WHOLE LINE (replaceWholeLine, anchored to
+	// line boundaries), never as a raw substring — a prior rationale that
+	// happens to quote another finding's full rendered bullet verbatim
+	// embeds that quoted text INSIDE its own, longer line, which is never
+	// itself equal to the quoted finding's own, shorter, standalone line.
+	// A substring count over the whole body (the pre-fix approach) could
+	// not tell the two apart, permanently bricking the quoted finding's own
+	// later disposition with a false "found 2".
 	oldLine := align.RenderFindingLine(oldFinding)
 	newLine := align.RenderFindingLine(updated.Findings[idx])
-	bodyStr := string(body)
-	if n := strings.Count(bodyStr, oldLine); n != 1 {
+	newBody, n := replaceWholeLine(string(body), oldLine, newLine)
+	if n != 1 {
 		fmt.Fprintf(stderr, "disposition: internal error: expected exactly one occurrence of finding %q's rendered line in %s, found %d\n", findingID, reportPath, n)
 		return 2
 	}
-	newBody := strings.Replace(bodyStr, oldLine, newLine, 1)
 
 	markdown := align.RenderMarkdown(&updated, newBody)
 	if err := os.WriteFile(reportPath, markdown, 0o644); err != nil {
@@ -204,4 +237,30 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	}
 	fmt.Fprintf(stdout, "disposition: %s %s %s: %s -> %s\n", verb, ref.String(), findingID, decision, rationale)
 	return 0
+}
+
+// replaceWholeLine replaces the exactly-one line in body that equals
+// oldLine with newLine, matched as a COMPLETE LINE — anchored to line
+// boundaries via a split on "\n" — never as an arbitrary substring
+// (ADJ-52's j-2 fix). Returns body unmodified alongside the match count
+// when that count is not exactly 1, so the caller can fail closed rather
+// than fake success (CLAUDE.md); every finding's rendered line begins with
+// its own unique "- **<id>**" prefix (Finding IDs are unique, enforced at
+// decode), so two DIFFERENT findings' whole lines can never collide —
+// only a raw substring search could confuse an embedded quotation for the
+// line it quotes.
+func replaceWholeLine(body, oldLine, newLine string) (newBody string, matches int) {
+	lines := strings.Split(body, "\n")
+	found := -1
+	for i, l := range lines {
+		if l == oldLine {
+			matches++
+			found = i
+		}
+	}
+	if matches != 1 {
+		return body, matches
+	}
+	lines[found] = newLine
+	return strings.Join(lines, "\n"), matches
 }
