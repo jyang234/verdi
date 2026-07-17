@@ -15,11 +15,29 @@ LINT_STORE_BIN := .build/verdi
 build:
 	go build ./...
 
+# CROSS_BINARY_PKGS — the cache-blind cluster list (ADJ-68). These packages'
+# tests build the cmd/verdi binary in a subprocess (TestMain: `go build
+# ./cmd/verdi`) and exec it; that subprocess build is invisible to the test
+# binary's own buildID, so `go test` serves a STALE cached PASS after a
+# cmd/verdi behavior change (empirically reproduced: `ok (cached)` over a
+# genuine red; -race does NOT defeat result caching). We force -count=1 (the
+# documented cache bypass) for EXACTLY these, keeping honest caching for the
+# provably-not-blind majority. In-package cmd/verdi exec tests are NOT blind
+# (their buildID covers cmd/verdi's own sources) and are deliberately absent.
+# TestGateCacheHonesty_CrossBinaryPkgsListInSync (internal/specalign) fails if a
+# package that builds+execs cmd/verdi from outside cmd/verdi is missing here.
+CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/...
+
 # -race mirrors CI's `go test -race` exactly: a data race that would fail CI
 # must fail `make test`/`make verify` locally first (CLAUDE.md: "go test
-# -race ./... — must always be clean").
+# -race ./... — must always be clean"). The second line force-reruns the
+# cache-blind cross-binary clusters (ADJ-68): `go test -race ./...` above may
+# serve them a stale cached PASS, so -count=1 re-executes exactly those
+# packages against the freshly built binary. `./...` semantics are otherwise
+# unchanged — honest caching stands for every provably-not-blind package.
 test:
 	go test -race ./...
+	go test -race -count=1 $(CROSS_BINARY_PKGS)
 
 vet:
 	go vet ./...
@@ -97,8 +115,14 @@ lint-store:
 # used here (unlike `test`/`fixture`): this package execs the built verdi
 # binary as a subprocess per PLAN.md's build-then-exec discipline, which
 # the race detector has nothing to instrument.
+#
+# -count=1 (ADJ-68): this package builds+execs the cmd/verdi binary, whose
+# sources never enter this test binary's cache key, so a bare `go test` here can
+# serve a stale PASS after a cmd/verdi behavior change. Forcing a fresh run
+# keeps `make spec-align` honest in isolation (the `test` target already
+# re-runs it fresh via CROSS_BINARY_PKGS for `make test`/`make verify`).
 spec-align:
-	go test ./internal/specalign/...
+	go test -count=1 ./internal/specalign/...
 
 # SHOWCASE_REQUIRED_TESTS is the set of tests showcase-coverage's guard demands
 # actually ran+passed (scripts/require-pass.sh enforces it). Kept in ONE named
@@ -131,8 +155,12 @@ SHOWCASE_REQUIRED_TESTS := TestShowcaseCoverage TestShowcaseCoverage_DetectsGaps
 # lives in scripts/require-pass.sh (whose own red direction is committed-tested
 # by TestShowcaseCoverage_GuardScriptBites), so the guard is a tested unit, not
 # merely a hand-run inline snippet.
+# -count=1 (ADJ-68): showcasealign builds+execs cmd/verdi, invisible to its
+# test cache key, so a bare `go test` here can serve a stale PASS after a
+# cmd/verdi change — forcing a fresh run keeps this named gate honest in
+# isolation (see CROSS_BINARY_PKGS).
 lint-showcase:
-	@out="$$(go test ./internal/showcasealign/ -run TestShowcaseLintClean -v 2>&1)"; \
+	@out="$$(go test -count=1 ./internal/showcasealign/ -run TestShowcaseLintClean -v 2>&1)"; \
 	status=$$?; \
 	printf '%s\n' "$$out"; \
 	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
@@ -201,8 +229,10 @@ lint-showcase:
 # package's actual TestShowcaseCoverage* functions. The Makefile is still the
 # right home for the wiring: the vacuous-`-run` risk it defends is a build-gate
 # fact, and a Go-only guard would itself be deletable the same way.
+# -count=1 (ADJ-68): as with lint-showcase — force a fresh run of the
+# cache-blind showcasealign cluster so this named gate is honest in isolation.
 showcase-coverage:
-	@out="$$(go test ./internal/showcasealign/ -run 'TestShowcaseCoverage|TestReadmeExamplesFresh' -v 2>&1)"; \
+	@out="$$(go test -count=1 ./internal/showcasealign/ -run 'TestShowcaseCoverage|TestReadmeExamplesFresh' -v 2>&1)"; \
 	status=$$?; \
 	printf '%s\n' "$$out"; \
 	if [ "$$status" -ne 0 ]; then exit "$$status"; fi; \
