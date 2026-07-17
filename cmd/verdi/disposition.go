@@ -26,10 +26,24 @@
 // so an argument-shape/vocabulary error — bad decision enum, missing
 // --rationale, wrong positional count — is operational, exactly like every
 // other verb's usage check in this package, and never touches the report
-// at all).
+// at all) and — ADJ-54's durable-writer checklist — a genuine concurrent
+// modification detected by the pre-write staleness re-read.
+//
+// Durable-writer guarantees (ADJ-54, completing the checklist input
+// hygiene/j-4, identity matching/j-2, validation, exit taxonomy/j-5 began):
+// the final write goes through internal/atomicfile.Write (fsync +
+// temp-then-rename), never a plain os.WriteFile, so a crash/kill/disk-full
+// mid-write can never truncate this store file's one genuine, never-
+// reproducible judged exchange; and an optimistic staleness check
+// (re-read immediately before that write, refuse on any byte difference
+// from the initial read) closes the unlocked read-modify-write's lost-
+// update race, since internal/filelock's existing primitive is a
+// per-checkout/per-worktree PID-liveness writer-role lock — the wrong
+// granularity for this verb's brief, per-report race window.
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -39,10 +53,20 @@ import (
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/store"
 )
 
 const dispositionUsage = "disposition: usage: verdi disposition <spec-ref> <finding-id> <fixed|accepted-deviation> --rationale <text> [--amend]"
+
+// dispositionTestInterleave, when non-nil, is invoked by runDisposition
+// immediately before its final write — a test-only seam (ADJ-54's j-7 TDD
+// ask: "simulate the interleaving... via a test seam or by driving the
+// internals") letting a test deterministically inject a concurrent
+// modification into the exact race window a real two-PROCESS interleaving
+// would otherwise need flaky OS-level timing to hit reliably. Always nil
+// in a real invocation; read and set only by this package's own tests.
+var dispositionTestInterleave func(reportPath string)
 
 // cmdDisposition is `verdi disposition`'s entry point, invoked by dispatch.go.
 func cmdDisposition(args []string, stdout, stderr io.Writer) int {
@@ -239,7 +263,46 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	}
 
 	markdown := align.RenderMarkdown(&updated, newBody)
-	if err := os.WriteFile(reportPath, markdown, 0o644); err != nil {
+
+	if dispositionTestInterleave != nil {
+		dispositionTestInterleave(reportPath)
+	}
+
+	// ADJ-54 (j-7): optimistic staleness verification — re-read the report
+	// IMMEDIATELY before the atomic write and refuse if its bytes have
+	// changed since the initial read at the top of this function. This
+	// verb's read-decode-mutate-write has no lock, and internal/filelock's
+	// existing primitive is the wrong granularity here: a per-checkout/
+	// per-worktree PID-liveness writer-role lock built for long-lived
+	// daemons (verdi serve) and managed-worktree reservations, not a
+	// per-report, single-shot CLI operation's brief race window — using it
+	// would mean inventing a new per-report lock-path convention rather
+	// than using the primitive "per its own conventions". A genuine
+	// concurrent modification is an operational condition (exit 2) — an
+	// environment fact, not a verdict about the target finding's own
+	// state — and the honest remedy is simply to re-run the command
+	// against the now-current file rather than silently clobber whatever
+	// changed.
+	current, err := os.ReadFile(reportPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "disposition: re-reading %s before write: %v\n", reportPath, err)
+		return 2
+	}
+	if !bytes.Equal(current, raw) {
+		fmt.Fprintf(stderr, "disposition: %s was modified concurrently (its bytes changed since it was read); refusing to write and risk losing that change — re-run the command against the current file\n", reportPath)
+		return 2
+	}
+
+	// ADJ-54 (j-6): atomicfile.Write (MkdirAll + CreateTemp + fsync +
+	// Rename-into-place) — this repo's own existing crash-durability
+	// primitive — never a plain os.WriteFile (truncate-then-write), so an
+	// operational failure mid-write (disk full, kill, crash) can never
+	// leave a truncated deviation-report.md: the one store file whose
+	// judged exchange is declared never reproducible (03 §Alignment
+	// report), so content not yet committed to git (a just-recorded
+	// disposition, or the one genuine judge_integrity exchange) would
+	// otherwise be unrecoverable.
+	if err := atomicfile.Write(reportPath, markdown, 0o644); err != nil {
 		fmt.Fprintln(stderr, "disposition:", err)
 		return 2
 	}

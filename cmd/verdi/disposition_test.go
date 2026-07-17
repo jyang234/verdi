@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -669,5 +670,103 @@ func TestRunDisposition_QuotingRationaleDoesNotBrickAnotherFinding(t *testing.T)
 	fa, ok := findingByID(after.Findings, "finding-a")
 	if !ok || fa.Disposition != artifact.FindingFixed {
 		t.Fatalf("finding-a = %+v, want disposition fixed (unaffected by finding-b's later write)", fa)
+	}
+}
+
+// TestRunDisposition_UsesAtomicWrite is ADJ-54's j-6 fix proof, structural:
+// the write path must replace the report via rename-into-place (a NEW
+// underlying file — os.SameFile false against the pre-write file), never a
+// plain in-place truncate+write (which keeps the SAME underlying file,
+// os.SameFile true) — the portable, observable signature of
+// internal/atomicfile.Write's temp-then-rename convention, distinguishing
+// it from the pre-fix os.WriteFile. atomicfile.Write's own fsync/crash-
+// durability guarantees are already proven by internal/atomicfile's own
+// test suite (TestWrite_Happy and neighbors); this proves THIS verb's
+// write path actually calls it, closing the truncation risk judged-j-6
+// named (a crash/kill/disk-full mid-write leaving a truncated, permanent
+// record unrecoverable for content never committed to git).
+func TestRunDisposition_UsesAtomicWrite(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixture(t, []artifact.Finding{
+		{ID: "computed-a", Kind: artifact.FindingComputed, Text: "declared boundary holds"},
+	}, nil))
+	path := reportPathFor(root, "demo")
+
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat before: %v", err)
+	}
+
+	_, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "computed-a", "fixed", "--rationale", "z")
+	if code != 0 {
+		t.Fatalf("verdi disposition: exit %d, want 0; stderr=%s", code, stderr)
+	}
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	if os.SameFile(before, after) {
+		t.Fatal("report file identity unchanged across the write — want a NEW underlying file (rename-into-place, internal/atomicfile.Write), not an in-place truncate+rewrite")
+	}
+}
+
+// TestRunDisposition_ConcurrentModificationRefusesInsteadOfLosingUpdate is
+// ADJ-54's j-7 fix proof: a concurrent modification landing between
+// runDisposition's initial read and its final write must refuse (exit 2,
+// naming the concurrent modification) rather than silently clobber it —
+// the exact lost-update scenario judged-j-7 named (two invocations
+// targeting DIFFERENT findings of the same report, the second silently
+// re-materializing the first's pre-race state while claiming success).
+//
+// Simulated via dispositionTestInterleave (ADJ-54's own sanctioned
+// exception to this file's usual built-binary-only discipline for exactly
+// this scenario: "simulate the interleaving... via a test seam or by
+// driving the internals" — a real two-PROCESS race would need flaky
+// OS-level timing to hit reliably; driving runDisposition directly,
+// in-process, makes the race deterministic).
+func TestRunDisposition_ConcurrentModificationRefusesInsteadOfLosingUpdate(t *testing.T) {
+	findings := []artifact.Finding{
+		{ID: "finding-a", Kind: artifact.FindingComputed, Text: "a's own claim"},
+		{ID: "finding-b", Kind: artifact.FindingJudged, Text: "b's own claim"},
+	}
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixture(t, findings, nil))
+	path := reportPathFor(root, "demo")
+
+	t.Cleanup(func() { dispositionTestInterleave = nil })
+	dispositionTestInterleave = func(reportPath string) {
+		// Clear the hook FIRST so the inner (concurrent) call below does
+		// not recursively retrigger it — the hook must fire exactly once,
+		// for the outer call only.
+		dispositionTestInterleave = nil
+		// The "concurrent" second invocation, landing first — on a
+		// DIFFERENT finding than the outer call below, exactly j-7's
+		// named scenario.
+		if rc := runDisposition(root, "spec/demo", "finding-b", artifact.FindingFixed, "b's concurrent disposition", false, io.Discard, io.Discard); rc != 0 {
+			t.Fatalf("test setup: concurrent finding-b disposition failed with rc=%d", rc)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	rc := runDisposition(root, "spec/demo", "finding-a", artifact.FindingAcceptedDeviation, "a's disposition", false, &stdout, &stderr)
+	if rc != 2 {
+		t.Fatalf("runDisposition (racing finding-a) = %d, want 2 (operational — concurrent modification detected); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "concurrent") {
+		t.Fatalf("stderr = %q, want it to name the concurrent modification", stderr.String())
+	}
+
+	// finding-b's concurrent disposition (the "winner", landed first) must
+	// survive; finding-a's losing, refused write must not have clobbered
+	// it, and finding-a itself must remain undispositioned (the refused
+	// write never landed).
+	after := decodeReportFile(t, path)
+	fb, ok := findingByID(after.Findings, "finding-b")
+	if !ok || fb.Disposition != artifact.FindingFixed || fb.Note != "b's concurrent disposition" {
+		t.Fatalf("finding-b = %+v, want the concurrent disposition to have survived untouched", fb)
+	}
+	fa, ok := findingByID(after.Findings, "finding-a")
+	if !ok || fa.Dispositioned() {
+		t.Fatalf("finding-a = %+v, want it to remain undispositioned (the losing write was refused, never landed)", fa)
 	}
 }
