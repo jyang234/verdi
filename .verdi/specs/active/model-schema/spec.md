@@ -2,7 +2,7 @@
 id: spec/model-schema
 kind: spec
 title: "Model Schema"
-owners: [unassigned]
+owners: [platform-team]
 class: story
 status: draft
 story: jira:VERDI-30
