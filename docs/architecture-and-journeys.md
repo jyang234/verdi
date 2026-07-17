@@ -1,7 +1,7 @@
 # Verdi — Architecture & Journeys *(round-6 edition)*
 
 *Round-6 edition, 2026-07-14 · module `github.com/jyang234/verdi` (private GitHub remote) ·
-CI gate `verify OK (0)` · 50 packages · e2e 182/182 · lint VL-001…VL-022 ·
+CI gate `verify OK (0)` · 51 packages · e2e 205/205 · lint VL-001…VL-022 ·
 ledger I-1…I-39 + R4-I-1…41 + per-spec `dc-*` records + `ADJ-*` adjudications*
 
 A knowledge corpus and design workbench where the filesystem is the database, git is
