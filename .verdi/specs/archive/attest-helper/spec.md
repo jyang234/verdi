@@ -4,7 +4,7 @@ kind: spec
 title: "Attest Helper"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-29
 problem: { text: "attest-helper is the mechanical half of spec/closure-ergonomics ac-2: today an operator authors an attestation entirely by hand — inventing the path, inventing the slug, inventing the frontmatter — and one wrong slug (the story-ref RefSlug, not the spec name; D6-16/D6-18's own witness, corrected once already in 08-revision-notes.md's round-6 entry) silently folds as `absent`, indistinguishable from never having attested at all. There is also no tooling boundary today preventing a future helper from fabricating the claim itself, which dc-2 of the parent feature forbids outright: verdi may write structure, never the human's word.", anchor: problem }
 outcome: { text: "a new top-level verb, `verdi attest <story-ref> <ac-id>`, scaffolds a correctly-slugged, correctly-placed attestation skeleton — frontmatter, a `verifies` edge, and an explicit, machine-checkable unauthored marker in place of a claim — and refuses outright rather than overwrite an existing human record or scaffold a nonexistent (story, AC) pair. A companion lint rule (VL-022, the next free rule number this story's own research found) makes a misfiled attestation a named, witness-carrying refusal instead of a silent fold-time `absent`. The scaffold is provably not-yet-evidence: the fold treats an unauthored scaffold exactly as it treats a missing file, until the operator replaces the marker with their own claim.", anchor: outcome }
