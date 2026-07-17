@@ -7,6 +7,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
 )
@@ -75,6 +76,17 @@ func phase7Manifest(t *testing.T) *store.Manifest {
 		t.Fatalf("decoding phase7ManifestYAML: %v", err)
 	}
 	return m
+}
+
+// phase7Model is the resolved operating model every Phase 7 test's
+// runDesignStart call now also needs (spec/scaffold-templates ac-1
+// cont.): Phase 7's fixture stores carry no .verdi/model.yaml of their
+// own, so the embedded canonical default (model.Canonical()) is the
+// correct resolution — exactly what store.Open would itself resolve to
+// against buildPhase7Repo's fixture.
+func phase7Model(t *testing.T) *model.Model {
+	t.Helper()
+	return model.Canonical()
 }
 
 // readSpec strict-decodes the spec.md at .verdi/specs/active/<name>/spec.md

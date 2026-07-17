@@ -76,15 +76,68 @@ func TestModelCheck_NoModelYAML_OK(t *testing.T) {
 	}
 }
 
+// vocabRenameFeatureTemplate and vocabRenameStoryTemplate back vocab-
+// rename.yaml's renamed Class.Template filenames (custom-feature.md /
+// custom-story.md) — minimal but real templates, standing in for a store
+// that actually shipped the override its renamed filename promises
+// (spec/scaffold-templates ac-3: model check now instantiates and
+// strict-decodes every resolved template, so a renamed-but-unbacked
+// filename is correctly a failure, not a documentation-only field —
+// TestModelCheck_BrokenTemplate_NamesFile below pins that failure case).
+//
+// The story template carries the same {{if .Spike}} branch the canonical
+// story.md does, so it renders a VALID spike variant as well as the
+// non-spike one: model check now round-trips both variants of every story
+// template (judged-spike-variant-unchecked-by-model-check), and a story
+// template that could not render a valid spike — one that emits resolves
+// edges without spike: true, say — is correctly a failure, not a valid
+// rename (TestModelCheck_BrokenTemplateInSpikeBranch_Exit2_NamesFile pins
+// that case). A complete story template is one that handles both.
+const vocabRenameFeatureTemplate = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: feature
+status: draft
+problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+---
+# {{.Title}}
+`
+
+const vocabRenameStoryTemplate = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: story
+status: draft
+story: {{.StoryRef}}
+{{if .Spike}}spike: true
+{{end}}problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+links:
+{{range .Links}}  - { type: {{.Type}}, ref: {{printf "%q" .Ref}} }
+{{end}}---
+# {{.Title}}
+`
+
 // TestModelCheck_ValidVocabRename_OK is ac-3's valid-hand-written-
 // model.yaml case: a manifest varying only vocabulary and per-class
 // template filenames (dc-1's frontier) still exits 0, over ITS OWN
 // counts and digest (not canonical's — proving the store's file, not
-// the embedded default, was actually read).
+// the embedded default, was actually read) — AND over its own renamed
+// templates, backed here by a real .verdi/templates/ override for each
+// (ac-3's template round trip requires the file to actually exist).
 func TestModelCheck_ValidVocabRename_OK(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	vocabRenameYAML := readModelTestdata(t, "vocab-rename.yaml")
 	root := writeModelCheckStoreRoot(t, vocabRenameYAML)
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "custom-feature.md"), []byte(vocabRenameFeatureTemplate))
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "custom-story.md"), []byte(vocabRenameStoryTemplate))
 
 	stdout, stderr, code := runModelCheckBinary(t, bin, root)
 	if code != 0 {
@@ -104,6 +157,180 @@ func TestModelCheck_ValidVocabRename_OK(t *testing.T) {
 	}
 	if !strings.Contains(stdout, wantDigest) {
 		t.Fatalf("stdout = %q, want it to contain vocab-rename.yaml's OWN digest %q (proving the store's file was read, not the embedded default)", stdout, wantDigest)
+	}
+}
+
+// TestModelCheck_BrokenTemplateSyntax_Exit2_NamesFile is spec/scaffold-
+// templates ac-3's broken-template case (malformed syntax half): a store
+// override under .verdi/templates/ with unparseable text/template syntax
+// fails model check closed at exit 2 (a broken template is not a
+// structural model deviation — Class.Template is frontier-exempt, so this
+// is never the frontier's exit 1), naming the specific offending template
+// file rather than a bare "model.yaml invalid" message.
+func TestModelCheck_BrokenTemplateSyntax_Exit2_NamesFile(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, "")
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "feature.md"), []byte("title: {{.Title\n"))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (malformed template syntax) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "feature.md") {
+		t.Fatalf("stderr = %q, want it to name the offending template file feature.md, never a bare \"model.yaml invalid\"", stderr)
+	}
+}
+
+// TestModelCheck_BrokenTemplateDecode_Exit2_NamesFile is spec/scaffold-
+// templates ac-3's broken-template case (failed-strict-decode half): a
+// store override whose rendered OUTPUT is syntactically valid template
+// source but decodes to a spec that fails strict decode (here, an unknown
+// frontmatter field, KnownFields) also fails model check closed at exit
+// 2, naming the offending template file.
+func TestModelCheck_BrokenTemplateDecode_Exit2_NamesFile(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, "")
+	const brokenDecodeTemplate = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: story
+status: draft
+story: {{.StoryRef}}
+bogus_unknown_field: 1
+problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+links:
+{{range .Links}}  - { type: {{.Type}}, ref: {{printf "%q" .Ref}} }
+{{end}}---
+# {{.Title}}
+`
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "story.md"), []byte(brokenDecodeTemplate))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (template renders undecodable content) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "story.md") {
+		t.Fatalf("stderr = %q, want it to name the offending template file story.md, never a bare \"model.yaml invalid\"", stderr)
+	}
+}
+
+// TestModelCheck_BrokenTemplateInSpikeBranch_Exit2_NamesFile is judged-
+// spike-variant-unchecked-by-model-check's regression: a story.md override
+// that decodes cleanly for the NON-spike variant but is broken only inside
+// its {{if .Spike}} branch (here, an unknown frontmatter field the spike
+// render emits). checkTemplates round-trips every variant a real scaffold
+// consumer can render — design start renders the non-spike story, but
+// stub-instantiate renders the spike story from a spike stub — so the
+// breakage is caught at check time, not at some future spike scaffold's
+// first use. The failure names the offending template file AND the spike
+// variant (before this fix, model check rendered only the non-spike
+// variant and this store passed clean).
+func TestModelCheck_BrokenTemplateInSpikeBranch_Exit2_NamesFile(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, "")
+	const brokenSpikeBranchTemplate = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: story
+status: draft
+story: {{.StoryRef}}
+{{if .Spike}}spike: true
+bogus_spike_only_field: 1
+{{end}}problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+{{if not .Spike}}acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: ac-1 }
+{{end}}links:
+{{range .Links}}  - { type: {{.Type}}, ref: {{printf "%q" .Ref}} }
+{{end}}---
+# {{.Title}}
+`
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "story.md"), []byte(brokenSpikeBranchTemplate))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (story template broken only in its spike branch) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "story.md") {
+		t.Fatalf("stderr = %q, want it to name the offending template file story.md", stderr)
+	}
+	if !strings.Contains(stderr, "spike") {
+		t.Fatalf("stderr = %q, want it to name the spike variant (the check must say WHICH variant failed)", stderr)
+	}
+}
+
+// TestModelCheck_BrokenTemplateInFeatureNoStoryRefBranch_Exit2_NamesFile is
+// judged-model-check-feature-no-storyref-variant-unchecked's regression: a
+// feature.md override that decodes cleanly WITH a story ref but is broken
+// only inside its {{if .StoryRef}} empty branch (here, an unknown frontmatter
+// field the no-story-ref render emits). checkTemplates round-trips every
+// variant a real scaffold consumer can produce — design start --kind feature
+// WITH a tracker ref renders the with-story-ref variant, a ref-less design
+// start renders the no-story-ref variant (05 §CLI) — so the breakage is
+// caught at check time, not at someone's first ref-less design start. The
+// failure names the offending template file AND the no-story-ref variant
+// (before this fix, model check rendered only the with-story-ref feature
+// variant and this store passed clean).
+func TestModelCheck_BrokenTemplateInFeatureNoStoryRefBranch_Exit2_NamesFile(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, "")
+	const brokenNoStoryRefTemplate = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: feature{{if .StoryRef}}
+story: {{.StoryRef}}{{else}}
+bogus_no_storyref_field: 1{{end}}
+status: draft
+problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: ac-1 }
+---
+# {{.Title}}
+`
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "feature.md"), []byte(brokenNoStoryRefTemplate))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (feature template broken only in its no-story-ref branch) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "feature.md") {
+		t.Fatalf("stderr = %q, want it to name the offending template file feature.md", stderr)
+	}
+	if !strings.Contains(stderr, "no-story-ref") {
+		t.Fatalf("stderr = %q, want it to name the no-story-ref variant (the check must say WHICH variant failed)", stderr)
+	}
+}
+
+// TestModelCheck_TemplatePathEscape_Exit2_NamesRule proves the kernel's
+// bare-filename rule reaches the built binary (judged-template-filename-
+// escapes-templates-dir): a hand-written model.yaml whose class template
+// escapes .verdi/templates/ (here "../../evil.md") fails model check closed
+// at exit 2 — a kernel VALIDATION violation, grouped with every other
+// "undecodable manifest" condition, never the frontier's exit 1 (a bad
+// template value is not a structural model deviation) — with the error
+// naming the offending class and the bare-filename rule, never a bare
+// "model.yaml invalid" message.
+func TestModelCheck_TemplatePathEscape_Exit2_NamesRule(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-template-path-escape.yaml"))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (template path escape) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "bare filename") {
+		t.Fatalf("stderr = %q, want it to name the bare-filename rule", stderr)
+	}
+	if !strings.Contains(stderr, `class "feature"`) {
+		t.Fatalf("stderr = %q, want it to name the offending class", stderr)
 	}
 }
 

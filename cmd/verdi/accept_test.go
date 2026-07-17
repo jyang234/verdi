@@ -25,7 +25,7 @@ func scaffoldAndDesign(t *testing.T) (repo *fixturegit.Repo, preFlipHead string)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr); got != 0 {
+	if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, phase7Model(t), deps, &stdout, &stderr); got != 0 {
 		t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
 	}
 	head, err := gitx.RevParse(ctx, repo.Dir, "HEAD")

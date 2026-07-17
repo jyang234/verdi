@@ -207,6 +207,26 @@ type SpecFrontmatter struct {
 	Stubs              []Stub                `yaml:"stubs,omitempty"`
 	Supersession       *Supersession         `yaml:"supersession,omitempty"`
 	Dispositions       []Disposition         `yaml:"dispositions,omitempty"`
+
+	// Custom is a team's sanctioned extension namespace, and the SPEC kind
+	// is the only kind that has one (spec/scaffold-templates ac-2, operating-
+	// model dc-2's `custom:` precedent for model.yaml): a free-form map
+	// decodes without tripping KnownFields(true) on its OWN nested keys,
+	// since map[string]any accepts any nested structure — only the top-level
+	// `custom:` key itself needs to be a KNOWN field for the outer
+	// KnownFields check to accept it, which declaring it here achieves. It
+	// lives on SpecFrontmatter, deliberately NOT on Base: every other kind
+	// that embeds Base (attestation, waiver, obligation, adr, ...) keeps its
+	// fully-strict posture, so a `custom:` key in a non-spec artifact still
+	// fails decode. Every key OUTSIDE custom: is rejected exactly as before:
+	// this is a single named namespace, not a general KnownFields carve-out.
+	//
+	// The restricted YAML dialect (anchors/aliases/custom tags, checkDialect)
+	// is untouched by this field's existence: checkDialect walks the raw
+	// yaml.Node tree before any struct decode happens, so a dialect violation
+	// anywhere inside a custom: block still fails closed exactly like
+	// everywhere else in frontmatter — no carve-out, verbatim per dc-2.
+	Custom map[string]any `yaml:"custom,omitempty"`
 }
 
 // DeclaredObjectIDs is the set of every frontmatter-declared object id a

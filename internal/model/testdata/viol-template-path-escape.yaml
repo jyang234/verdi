@@ -1,0 +1,11 @@
+# Violates: a class's template must be a BARE filename under
+# .verdi/templates/ (Model.Validate, validate.go) — `feature` declares a
+# path-escaping template value ("../../evil.md") that would resolve OUTSIDE
+# the sanctioned templates directory and the store's committed-zone trust
+# boundary (judged-template-filename-escapes-templates-dir).
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: "../../evil.md"
+lifecycle: {}

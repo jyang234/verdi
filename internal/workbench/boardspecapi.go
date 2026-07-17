@@ -676,7 +676,28 @@ func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string
 		return fmt.Errorf("branch design/%s already exists — this stub was already instantiated (or the name is taken); check that branch out instead", slug)
 	}
 
-	content := designscaffold.Story("spec/"+slug, stubInstantiatePlaceholderStoryRef, designscaffold.HumanizeName(slug), stub.Spike, links)
+	// The story class's own template — the store's own resolved model
+	// (spec/scaffold-templates ac-1 cont.: this call site reads
+	// Class.Template off store.Open's resolved model exactly like
+	// design.go's class switch does, never a hardcoded filename), with a
+	// store override at .verdi/templates/<name>.md winning over the
+	// embedded canonical default when present.
+	cfg, err := store.Open(s.root)
+	if err != nil {
+		return fmt.Errorf("workbench: resolving store config: %w", err)
+	}
+	class, ok := cfg.Model.Classes[string(artifact.ClassStory)]
+	if !ok {
+		return fmt.Errorf("workbench: internal error: resolved model has no %q class", artifact.ClassStory)
+	}
+	tmpl, err := designscaffold.LoadTemplate(s.root, class.Template)
+	if err != nil {
+		return fmt.Errorf("workbench: %w", err)
+	}
+	content, err := designscaffold.Story(tmpl, "spec/"+slug, stubInstantiatePlaceholderStoryRef, designscaffold.HumanizeName(slug), stub.Spike, links)
+	if err != nil {
+		return fmt.Errorf("workbench: rendering template %s for class %s: %w", class.Template, artifact.ClassStory, err)
+	}
 
 	// Self-validate before ever touching the object database (CLAUDE.md:
 	// "never fake success" — mirrors design start's own pre-write check).

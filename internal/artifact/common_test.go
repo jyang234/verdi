@@ -171,3 +171,36 @@ func mustFrontmatter(t *testing.T, doc string) []byte {
 	}
 	return fm
 }
+
+// TestIsBareFilename tables the containment predicate both the model kernel
+// rule and designscaffold's LoadTemplate guard share (judged-template-
+// filename-escapes-templates-dir): a bare filename is accepted; anything
+// that could escape a fixed join directory — empty, . / .., a "/" or "\\"
+// separator, or an absolute path — is rejected, the same judgment on every
+// OS.
+func TestIsBareFilename(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"story.md", true},
+		{"custom-feature.md", true},
+		{"feature", true},
+		{".hidden.md", true}, // a leading-dot filename is still bare (not "." / "..")
+		{"", false},
+		{".", false},
+		{"..", false},
+		{"sub/story.md", false},
+		{"../story.md", false},
+		{"../../evil.md", false},
+		{"a/b", false},
+		{`sub\story.md`, false}, // backslash rejected too, so a shared store is portable
+		{"/abs/story.md", false},
+		{"/etc/passwd", false},
+	}
+	for _, tc := range cases {
+		if got := IsBareFilename(tc.in); got != tc.want {
+			t.Errorf("IsBareFilename(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
