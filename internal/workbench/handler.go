@@ -1,6 +1,10 @@
 package workbench
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/jyang234/verdi/internal/store"
+)
 
 // The v1 board's route suffixes — the one route table's row names, shared
 // by the unprefixed mount and the /b/{branch} prefix mount (and by the
@@ -73,6 +77,20 @@ func RegisterRoutesWith(mux *http.ServeMux, root string, deps Deps) {
 // RegisterRoutesWithHome wires every workbench route onto mux. The single
 // place a phase adds a page.
 func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home HomeDeps) {
+	// Resolve the store's operating model ONCE at registration
+	// (spec/vocabulary-surfaces: surfaces receive the resolved model from
+	// their entrypoint — store.Open here, never re-opened per render) and
+	// hand it to both the board instances and the home page. A store whose
+	// config cannot be opened serves bare ids (nil model), the exact
+	// posture a model with no renames has.
+	if deps.Model == nil {
+		if cfg, err := store.Open(root); err == nil {
+			deps.Model = cfg.Model
+		}
+	}
+	if home.Model == nil {
+		home.Model = deps.Model
+	}
 	mux.HandleFunc("/healthz", healthHandler())
 	mux.HandleFunc("/", indexHandler(root, home))
 
@@ -110,7 +128,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// design branch's managed worktree (spec/draft-boards ac-1/dc-1: the
 	// existing board server rooted at the branch's tree, never a second
 	// board implementation).
-	bs := &boardSpecServer{root: root, feed: deps.CommentFeed, reviewUnavailable: deps.ReviewUnavailable, supersession: deps.SupersessionCandidates}
+	bs := &boardSpecServer{root: root, feed: deps.CommentFeed, reviewUnavailable: deps.ReviewUnavailable, supersession: deps.SupersessionCandidates, model: deps.Model}
 	for _, rt := range boardSpecRoutes() {
 		mux.HandleFunc(rt.suffix, rt.handler(bs))
 	}

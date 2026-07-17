@@ -16,7 +16,34 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/model"
 )
+
+// applyModelVocabulary resolves p's display labels through the store's
+// resolved operating model (spec/vocabulary-surfaces ac-2): ClassLabel
+// through model.DisplayClass over the same effective name the class tag
+// renders (Class, or "spike" for a spike story — not a model class, so it
+// falls back to itself), StatusLabel through model.DisplayState — the
+// identical lookups the CLI surfaces use, never a board-private rename
+// table. A label is set ONLY when the resolved word differs from the bare
+// id, so a no-rename model (the embedded canonical included) leaves the
+// projection — and therefore both its rendered HTML and get_board's JSON
+// marshaling of this struct — byte-identical. Nil-safe on both receivers.
+func (p *BoardProjection) applyModelVocabulary(m *model.Model) {
+	if p == nil || m == nil {
+		return
+	}
+	name := p.Class
+	if p.Spike {
+		name = "spike"
+	}
+	if label := m.DisplayClass(name); label != name {
+		p.ClassLabel = label
+	}
+	if label := m.DisplayState(p.Class, p.Status); label != p.Status {
+		p.StatusLabel = label
+	}
+}
 
 // boardModeKind is the board's mode, keyed by branch state (05
 // §Workbench "Two modes"). Accepted specs on main render read-only.
@@ -298,8 +325,18 @@ type BoardProjection struct {
 	Class    string `json:"class"`
 	StoryRef string `json:"story_ref,omitempty"`
 	Spike    bool   `json:"spike,omitempty"`
-	Problem  string `json:"problem,omitempty"`
-	Outcome  string `json:"outcome,omitempty"`
+	// ClassLabel and StatusLabel are the resolved model's display words
+	// for Class (or "spike") and Status (spec/vocabulary-surfaces ac-2),
+	// set by applyModelVocabulary ONLY when a rename actually differs from
+	// the bare id — so a store with no renames (or no model at all)
+	// serializes and renders byte-identically to a pre-vocabulary build
+	// (the parity floor; get_board marshals this struct directly). The
+	// renderers fall back to the id when these are empty; the id itself
+	// stays in every CSS class, testid, and data attribute regardless.
+	ClassLabel  string `json:"class_label,omitempty"`
+	StatusLabel string `json:"status_label,omitempty"`
+	Problem     string `json:"problem,omitempty"`
+	Outcome     string `json:"outcome,omitempty"`
 	// ProblemBodyHTML and OutcomeBodyHTML are the fuller authored argument
 	// under the spec body's "## Problem"/"## Outcome" heading the
 	// attribute's own anchor resolves to (02 §Object model) — the body

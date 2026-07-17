@@ -23,6 +23,7 @@ import (
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/wallbadge"
 )
 
@@ -57,6 +58,14 @@ type Deps struct {
 	// serve.go) can supply them.
 	Disclosures []disclosure.Disclosure
 
+	// Model is the store's resolved operating model
+	// (spec/vocabulary-surfaces ac-2): board renders resolve their class
+	// and state display words through it. nil means route registration
+	// fills it from the store root once (store.Open at construction —
+	// never per render); a store whose model cannot be resolved renders
+	// bare ids, exactly like a model with no renames.
+	Model *model.Model
+
 	// SupersessionCandidates is the pending-supersession wall badge's
 	// forge access (spec/badge-computes ac-3) — a consumer-defined port
 	// (wallbadge.SupersessionCandidateLoader, 04 §port pattern) so this
@@ -86,6 +95,12 @@ type boardSpecServer struct {
 	// (Deps.SupersessionCandidates, see that field's doc comment). nil is
 	// a fully valid zero value, mirroring feed above.
 	supersession wallbadge.SupersessionCandidateLoader
+
+	// model is the store's resolved operating model (Deps.Model — set at
+	// construction, the manifest-derived-config pattern this struct's
+	// other fields already follow; never re-opened per render). nil
+	// renders bare ids everywhere (spec/vocabulary-surfaces' fallback).
+	model *model.Model
 
 	// reviewUnavailable, when non-empty, is a disclosed reason the review
 	// feed is CONFIGURED (a forge is named in verdi.yaml) but cannot be
@@ -222,6 +237,10 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if err != nil {
 		return nil, nil, "", err
 	}
+	// Display vocabulary (spec/vocabulary-surfaces ac-2): resolved-model
+	// enrichment on the I/O layer, exactly like attachObligations below —
+	// the pure projector stays model-free.
+	proj.applyModelVocabulary(s.model)
 	// Obligations are a store-derived enrichment, loaded and attached HERE
 	// (the I/O layer) rather than inside the pure projector — the same
 	// posture proj.Notices takes below (spec/obligation-wall ac-2/dc-3).

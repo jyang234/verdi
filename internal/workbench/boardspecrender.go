@@ -85,7 +85,7 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doc
 <header class="page-header board-head">
 <h1>{{.Title}}</h1>
 <span class="board-mode-tag board-mode-tag--{{.Mode}}">{{.ModeLabel}}</span>
-{{if .StatusBadge}}<span class="badge badge-{{.StatusBadge}} board-status-badge" data-testid="board-status-badge">{{.StatusBadge}}</span>{{end}}
+{{if .StatusBadge}}<span class="badge badge-{{.StatusBadge}} board-status-badge" data-testid="board-status-badge">{{.StatusBadgeLabel}}</span>{{end}}
 <div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>
 </header>
 <div id="boardv2-region">
@@ -117,24 +117,35 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 		return nil, fmt.Errorf("workbench: board state: %w", err)
 	}
 
+	// StatusBadge stays the bare state id (it addresses the badge's CSS
+	// class and testid); StatusBadgeLabel is the model's display word for
+	// it (spec/vocabulary-surfaces ac-2), falling back to the id when the
+	// projection carries no rename.
+	badge := terminalStatusBadge(p.Status)
+	badgeLabel := badge
+	if badge != "" && p.StatusLabel != "" {
+		badgeLabel = p.StatusLabel
+	}
 	data := struct {
-		Name        string
-		Title       string
-		Mode        string
-		ModeLabel   string
-		StatusBadge string
-		Region      template.HTML
-		Dialogs     template.HTML
-		StateJSON   template.JS
+		Name             string
+		Title            string
+		Mode             string
+		ModeLabel        string
+		StatusBadge      string
+		StatusBadgeLabel string
+		Region           template.HTML
+		Dialogs          template.HTML
+		StateJSON        template.JS
 	}{
-		Name:        p.Spec,
-		Title:       p.Title,
-		Mode:        string(p.Mode),
-		ModeLabel:   modeStampLabels[p.Mode],
-		StatusBadge: terminalStatusBadge(p.Status),
-		Region:      template.HTML(renderBoardRegion(p, git)),
-		Dialogs:     template.HTML(renderBoardDialogs(p)),
-		StateJSON:   template.JS(stateJSON),
+		Name:             p.Spec,
+		Title:            p.Title,
+		Mode:             string(p.Mode),
+		ModeLabel:        modeStampLabels[p.Mode],
+		StatusBadge:      badge,
+		StatusBadgeLabel: badgeLabel,
+		Region:           template.HTML(renderBoardRegion(p, git)),
+		Dialogs:          template.HTML(renderBoardDialogs(p)),
+		StateJSON:        template.JS(stateJSON),
 	}
 	var buf bytes.Buffer
 	if err := boardSpecPageTemplate.Execute(&buf, data); err != nil {
@@ -541,7 +552,15 @@ func writeCaseClassTag(b *strings.Builder, p *BoardProjection) {
 	if p.Spike {
 		name = "spike"
 	}
-	b.WriteString(`<span class="case-class-tag case-class-tag--` + esc(name) + `" data-testid="case-class-tag">` + esc(name))
+	// The visible word is the model's class display resolution
+	// (applyModelVocabulary, spec/vocabulary-surfaces ac-2) with the bare
+	// name as fallback; the CSS class and testid keep the id — a rename
+	// never moves an addressing surface.
+	label := p.ClassLabel
+	if label == "" {
+		label = name
+	}
+	b.WriteString(`<span class="case-class-tag case-class-tag--` + esc(name) + `" data-testid="case-class-tag">` + esc(label))
 	if p.Class == "story" && p.StoryRef != "" {
 		b.WriteString(` · <span class="case-class-ref">` + esc(p.StoryRef) + `</span>`)
 	}
