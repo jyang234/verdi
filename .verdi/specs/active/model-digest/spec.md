@@ -2,10 +2,10 @@
 id: spec/model-digest
 kind: spec
 title: "Model Digest"
-owners: [unassigned]
+owners: [platform-team]
 class: story
 status: draft
-story: todo:REPLACE-ME
+story: jira:VERDI-33
 problem: { text: "TODO: replace with the real problem statement before accept", anchor: problem }
 outcome: { text: "TODO: replace with the real outcome statement before accept", anchor: outcome }
 acceptance_criteria:
