@@ -260,8 +260,8 @@ func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name st
 		title = e.Ref
 	}
 
-	buf.WriteString(`<a href="/a/spec/`)
-	buf.WriteString(stdhtml.EscapeString(name))
+	buf.WriteString(`<a href="`)
+	buf.WriteString(stdhtml.EscapeString(defaultCorpusHref(name)))
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(title))
 	buf.WriteString(`</a> `)
@@ -274,18 +274,34 @@ func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name st
 		// archive-zone (or working-tree-absent) spec gets no board link —
 		// dc-3: the directory emits only addresses the routing serves, so
 		// a link on this page is live by construction.
-		buf.WriteString(` &middot; <a class="dir-board" href="/board/spec/`)
-		buf.WriteString(stdhtml.EscapeString(name))
+		buf.WriteString(` &middot; <a class="dir-board" href="`)
+		buf.WriteString(stdhtml.EscapeString(defaultBoardHref(name)))
 		buf.WriteString(`">board</a>`)
 		if class == artifact.ClassFeature && story != "" {
-			buf.WriteString(` <a href="/matrix/`)
-			buf.WriteString(stdhtml.EscapeString(story))
-			buf.WriteString(`">matrix</a> <a href="/verdict/`)
-			buf.WriteString(stdhtml.EscapeString(story))
+			buf.WriteString(` <a href="`)
+			buf.WriteString(stdhtml.EscapeString(matrixHref(story)))
+			buf.WriteString(`">matrix</a> <a href="`)
+			buf.WriteString(stdhtml.EscapeString(verdictHref(story)))
 			buf.WriteString(`">verdict</a>`)
 		}
 	}
 }
+
+// defaultCorpusHref, defaultBoardHref, matrixHref, verdictHref (here) and
+// designBoardHref (below writeDesignEntry) are the directory's address
+// grammar, each computed in exactly one place and shared verbatim with the
+// home-status-glance leading section (glance.go) — the "mirrors exactly,
+// never a third grammar" bar spec/home-status-glance dc-3 sets. Extracting
+// them changes no rendered byte here (each is a pure string join of the
+// same literals/escapes writeDefaultEntry/writeDesignEntry always wrote
+// inline; stdhtml.EscapeString is a per-rune, context-free replacement, so
+// escaping the whole joined string equals escaping its parts and
+// concatenating — proven by TestRenderHome_DirectoryGroupsChipsAndLinks
+// and friends continuing to assert the identical literal hrefs unchanged).
+func defaultCorpusHref(name string) string { return "/a/spec/" + name }
+func defaultBoardHref(name string) string  { return "/board/spec/" + name }
+func matrixHref(story string) string       { return "/matrix/" + story }
+func verdictHref(story string) string      { return "/verdict/" + story }
 
 // writeDesignEntry renders a design-branch draft: the entry links to its
 // per-branch board address under the sibling draft-boards story's ratified
@@ -297,10 +313,8 @@ func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name st
 func writeDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, inReview map[string]bool) {
 	branch := designPrefix + name
 
-	buf.WriteString(`<a class="dir-board" href="/b/`)
-	buf.WriteString(stdhtml.EscapeString(url.PathEscape(branch)))
-	buf.WriteString(`/board/spec/`)
-	buf.WriteString(stdhtml.EscapeString(name))
+	buf.WriteString(`<a class="dir-board" href="`)
+	buf.WriteString(stdhtml.EscapeString(designBoardHref(name)))
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(e.Ref))
 	buf.WriteString(`</a> `)
@@ -313,6 +327,14 @@ func writeDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, inReview
 		// disclosed second source, never part of the index computation.
 		buf.WriteString(` <span class="badge badge-open dir-inreview">in review</span>`)
 	}
+}
+
+// designBoardHref is the per-branch board address grammar (draft-boards
+// dc-1): the branch rides one path segment with its slashes percent-
+// encoded; the name segment beneath it is emitted verbatim (always a
+// valid slug, never containing a character url.PathEscape would touch).
+func designBoardHref(name string) string {
+	return "/b/" + url.PathEscape(designPrefix+name) + "/board/spec/" + name
 }
 
 // writeStatusChip renders the entry's raw spec status in the same

@@ -75,6 +75,15 @@ func renderHome(ctx context.Context, root string, home HomeDeps) ([]byte, error)
 	// The whole-store directory (spec/directory-home ac-1): the ref-index
 	// seam consumed once, then the per-render forge consultation.
 	entries, indexErr := home.Index(ctx)
+
+	// The leading status glance (spec/home-status-glance dc-1): a second,
+	// additive rendering pass over the SAME entries/indexErr above — no
+	// second index computation. Rendered BEFORE the exhaustive Directory
+	// section below (dc-5's fixed placement); it needs neither inReview
+	// nor mrNotice, since a glance card never carries an in-review chip or
+	// any other evidence-bearing state (dc-3).
+	writeGlanceSection(&body, root, entries, indexErr)
+
 	inReview, mrNotice := consultOpenMRs(ctx, home.OpenMRs)
 	writeDirectorySection(&body, root, entries, indexErr, inReview, mrNotice, home.OpenMRs != nil)
 

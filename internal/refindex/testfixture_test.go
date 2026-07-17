@@ -106,6 +106,28 @@ owners: [platform-team]
 `, name, name, status, name)
 }
 
+// featureSpecClosedMD is a minimal, validly-frozen closed feature spec —
+// the archive-zone shape (spec/home-status-glance's Zone signal test):
+// closed requires a frozen stamp (internal/artifact/spec.go's
+// requireFrozen), so this fixture carries a well-formed one rather than
+// the accepted-pending-build shape storySpecAcceptedMD below already
+// covers.
+func featureSpecClosedMD(name string) string {
+	return fmt.Sprintf(`---
+id: spec/%s
+kind: spec
+class: feature
+title: "%s"
+status: closed
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "closed", evidence: [static] }
+frozen: { at: 2026-01-01, commit: 1234567 }
+---
+# %s
+`, name, name, name)
+}
+
 func storySpecAcceptedMD(name string) string {
 	return fmt.Sprintf(`---
 id: spec/%s

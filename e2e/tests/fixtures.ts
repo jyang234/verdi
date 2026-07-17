@@ -77,6 +77,7 @@
 // | DIR_LOCAL_DRAFT, DIR_REMOTE_DRAFT, DIR_INREVIEW_SPEC               | SHOWCASE | directory-home happy path: grouped listing, source disclosure, in-review chip |
 // | DIR_EMPTY_BRANCH                                                   | EDGE     | degenerate branch: no draft spec at all |
 // | DIR_DOOMED_DRAFT                                                   | EDGE     | mid-session branch deletion (stress/race path) |
+// | DIR_CLOSED_AWAITING_ARCHIVE                                        | EDGE     | home-status-glance mid-lifecycle shape: closed, still in specs/active/ |
 // | DIAGRAM_PROPOSAL, DIAGRAM_PROPOSAL_BODY, DIAGRAM_BASE_BODY,        | SHOWCASE | diagram-editor happy path: drafting, structural ops, byte preservation, verification rail, peek/reset |
 // |   DIAGRAM_DERIVED, DIAGRAM_DERIVED_BODY, DIAGRAM_RAIL_TIER,        |          | |
 // |   DIAGRAM_RAIL_FINDINGS                                            |          | |
@@ -633,6 +634,22 @@ export const EDGE = {
   DIR_DOOMED_DRAFT: "doomed-draft", // deleted mid-session via CONTROL_URL
 
   // -------------------------------------------------------------------------
+  // Home status glance (spec/home-status-glance) — the "closed awaiting
+  // archive" mid-lifecycle shape (43-home-status-glance)
+  // -------------------------------------------------------------------------
+
+  // A feature spec whose status is closed while it is STILL physically in
+  // .verdi/specs/active/ (cmd/e2eharness/provision.go's
+  // closedAwaitingArchiveName/closedAwaitingArchiveSpec, landed on main
+  // before the initial commit — scratch-store-only, never the committed
+  // examples/showcase corpus): parent workbench-legibility dc-4's own
+  // "closed awaiting archive" example, distinct from the archive-zone
+  // ARCHIVED_SPEC (loan-refi-2023) the directory-home suite already
+  // covers. The glance shows this one in settling; the archive-zone twin
+  // is excluded entirely (dc-2/ADJ-32 f1).
+  DIR_CLOSED_AWAITING_ARCHIVE: "rate-table-sunset",
+
+  // -------------------------------------------------------------------------
   // Diagram editor (spec/board-editor) — the disclosed-unavailable and
   // corrupt-digest error cases (37-board-diagram-editor)
   // -------------------------------------------------------------------------
@@ -767,6 +784,17 @@ export function dirEntryTestId(name: string): string {
 }
 export function dirGroupTestId(group: string): string {
   return `dir-group-${group}`;
+}
+
+// data-testid helpers for the home status glance (spec/home-status-glance
+// dc-5's binding selector contract, mirroring dirEntryTestId/dirGroupTestId
+// above verbatim): NEW, additional testids that never replace or repurpose
+// dir-entry-*/dir-group-*.
+export function glanceEntryTestId(name: string): string {
+  return `glance-entry-${name}`;
+}
+export function glanceGroupTestId(slug: string): string {
+  return `glance-group-${slug}`;
 }
 
 // Provisioned by cmd/e2eharness/provision_diagram.go on the design branch

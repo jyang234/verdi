@@ -43,6 +43,35 @@ const (
 	StatusGroupTerminal             StatusGroup = "terminal"
 )
 
+// Zone names which of the default branch's two spec zones an Entry's
+// content was read from (spec/home-status-glance dc-2, ADJ-32's computed,
+// in-memory zone distinction): ZoneActive for .verdi/specs/active/*,
+// ZoneArchive for .verdi/specs/archive/*. Every design-branch entry —
+// ordinary or disclosed alike — is unconditionally ZoneActive: a design
+// branch's draft spec is read only from .verdi/specs/active/ (dc-4's own
+// computeDesignBranchEntries specPath), never from an archive zone of its
+// own, so this field is never derived from that branch's content any more
+// than StatusGroup is (ac-3's identical override).
+//
+// This is a purely additive, in-memory computed signal — never persisted,
+// never a frontmatter field (home-status-glance dc-1 upheld) — and it is
+// consumed today ONLY by the home page's status-glance section. Every
+// other refindex consumer (internal/workbench/directory.go's exhaustive
+// render; this package's own tests) reads none of it and is unaffected by
+// its presence; ComputeIndex's production code paths set it explicitly on
+// every Entry they construct, so the zero value below never appears on a
+// real entry. A test fixture built elsewhere that leaves Zone unset gets
+// the zero value, which the glance's own fail-closed reading (CLAUDE.md:
+// "unknown enum values fail closed") treats as "not active" — excluded
+// from the glance rather than assumed servable, the same conservative
+// posture ADJ-32 already chose for a genuine archive-zone entry.
+type Zone string
+
+const (
+	ZoneActive  Zone = "active"
+	ZoneArchive Zone = "archive"
+)
+
 // Entry is one row of the computed directory index (dc-3): a default-branch
 // spec, or a design branch's draft (ordinary or degraded).
 type Entry struct {
@@ -70,4 +99,8 @@ type Entry struct {
 	// ordinary remote-only or default-branch entry, whose content is
 	// present, just sourced from a particular place (dc-3).
 	Disclosed *disclosure.Disclosure
+	// Zone names which default-branch zone this entry's content was read
+	// from — see the Zone type's own doc comment. Always populated by
+	// ComputeIndex's production code paths, for every Entry kind alike.
+	Zone Zone
 }
