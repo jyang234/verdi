@@ -689,6 +689,28 @@ bindings:
       - "spec/scaffold-templates#ac-1"
       - "spec/scaffold-templates#ac-2"
       - "spec/scaffold-templates#ac-3"
+      # spec/vocabulary-surfaces behavioral legs (extensibility phase 1,
+      # all three ACs declare [behavioral] only). Story authored via
+      # stub-instantiate + this design PR, with its three obligations
+      # authored in the same PR (.verdi/obligations/vocabulary-surfaces/
+      # ac-{1,2,3}--behavioral.md, this round's X-9 standing rule) —
+      # bound here at design time, ahead of the build, so the producer
+      # that will supply each AC's behavioral leg is on record before any
+      # implementation lands. Not yet built: the obligations name the
+      # expected shape precisely — ac-1 = cmd/verdi's built-binary
+      # substring/golden convention proving CLI verdicts resolve
+      # DisplayState/DisplayVerb over the vocab-rename fixture, plus the
+      # entire pre-existing golden/substring suite proving byte-identical
+      # output with no model.yaml present; ac-2 = per-surface Go render
+      # tests over boardspecrender/dex/wallbadge label functions plus a
+      # Playwright spec (e2e/vocabulary.spec.ts) driving a served board
+      # over the vocab-rename fixture; ac-3 = an end-to-end ServeConn-
+      # style test proving the MCP tool catalog's description text speaks
+      # the model's class display names over the wire. All under make
+      # verify once built.
+      - "spec/vocabulary-surfaces#ac-1"
+      - "spec/vocabulary-surfaces#ac-2"
+      - "spec/vocabulary-surfaces#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
