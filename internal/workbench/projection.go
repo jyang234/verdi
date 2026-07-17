@@ -263,6 +263,14 @@ type stubStoryLinkView struct {
 	Ref      string `json:"ref"`
 	Href     string `json:"href"`
 	Archived bool   `json:"archived,omitempty"`
+	// UnservableNotice is ADJ-70's disclosed no-link state: set (with Href
+	// empty) only for an ARCHIVED match resolved on a PER-BRANCH board,
+	// where no workbench surface provably serves the archive (the /a/
+	// corpus is root-only and reads the serving checkout). The card renders
+	// the ref, its archived badge, and this text — never an href that can
+	// 404, never a silent omission (co-2). Never set alongside a non-empty
+	// Href.
+	UnservableNotice string `json:"unservableNotice,omitempty"`
 }
 
 // BoardProjection is the full render model for one spec's board — the

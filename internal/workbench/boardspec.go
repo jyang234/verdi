@@ -246,8 +246,10 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// in-between disclosure — the SAME I/O-enrichment posture as every
 	// attach* call above, run last only because it is the newest of the
 	// four; order among them is otherwise immaterial (each touches its
-	// own disjoint fields).
-	if err := attachFamilyLinks(ctx, proj, s.root); err != nil {
+	// own disjoint fields). s.fixedBranch threads through exactly as it
+	// does into attachDiagramEditorHrefs above (ADJ-70): a per-branch
+	// board's family links stay inside the branch they resolved from.
+	if err := attachFamilyLinks(ctx, proj, s.root, s.fixedBranch); err != nil {
 		return nil, nil, "", err
 	}
 	if reviewNotice != "" {

@@ -30,14 +30,20 @@ import (
 // story adds, building its own fresh index.Index (dc-2: the same
 // per-request posture corpus.go/boardpin.go/boardpeek.go already take in
 // this exact package — a fresh walk every render, never cached) over
-// root's current working tree.
-func attachFamilyLinks(ctx context.Context, proj *BoardProjection, root string) error {
+// root's current working tree. fixedBranch mirrors
+// attachDiagramEditorHrefs' own parameter exactly (ADJ-70, closing
+// judged-fbl-r4-5): "" for the serving checkout's unprefixed board, the
+// design branch for a per-branch board — so every family href stays
+// inside the store it was resolved from, never a root-relative address
+// that ejects the operator to the serving checkout or 404s on a
+// branch-only target.
+func attachFamilyLinks(ctx context.Context, proj *BoardProjection, root, fixedBranch string) error {
 	ix, err := index.Build(root)
 	if err != nil {
 		return fmt.Errorf("workbench: family links: building index: %w", err)
 	}
-	attachParentFeatureLink(proj, ix)
-	return attachStubStoryLinks(ctx, proj, ix, root)
+	attachParentFeatureLink(proj, ix, fixedBranch)
+	return attachStubStoryLinks(ctx, proj, ix, root, fixedBranch)
 }
 
 // attachParentFeatureLink enriches every document-level implements-edge
@@ -60,7 +66,7 @@ func attachFamilyLinks(ctx context.Context, proj *BoardProjection, root string) 
 // pattern stale-decline's own document edge already uses) is likewise
 // left exactly as it rendered before this story — this mechanism is
 // about the feature-AC family join alone.
-func attachParentFeatureLink(proj *BoardProjection, ix *index.Index) {
+func attachParentFeatureLink(proj *BoardProjection, ix *index.Index, fixedBranch string) {
 	implementsTargets := make(map[string]bool, len(proj.Edges))
 	for _, e := range proj.Edges {
 		if e.Type == "implements" && e.From == "spec" {
@@ -93,7 +99,17 @@ func attachParentFeatureLink(proj *BoardProjection, ix *index.Index) {
 		// feature alone, exactly as before.
 		featureRef := "spec/" + ref.Name
 		if entry, ok := ix.Get(featureRef); ok && (!ref.Fragment() || entry.ObjectIDs[ref.Object]) {
-			rc.FeatureHref, rc.Archived = servableSurface(featureRef, entry)
+			href, archived := servableSurface(featureRef, entry, fixedBranch)
+			if href == "" {
+				// ADJ-70: a branch-resolved ARCHIVED target has no surface
+				// that provably serves it (servableSurface's doc comment), so
+				// the card takes ac-4's disclosed-notice posture — named
+				// state, no href — rather than a root-relative link that
+				// ejects the operator or 404s.
+				rc.UnresolvedNotice = fmt.Sprintf("%s is archived in this branch's store — no per-branch surface serves the archive", rc.Ref)
+				continue
+			}
+			rc.FeatureHref, rc.Archived = href, archived
 			continue
 		}
 		rc.UnresolvedNotice = fmt.Sprintf("%s does not resolve in this checkout's store — no board to link to", rc.Ref)
@@ -120,19 +136,34 @@ func attachParentFeatureLink(proj *BoardProjection, ix *index.Index) {
 // This never assumes servability: it keys off the resolved entry's own
 // directory zone (isArchivedStorePath, the "directory truth" dc-1/dc-3
 // already treat as authoritative — the same signal boardServable
-// computes). A resolved spec entry always HAS a servable surface (the
-// corpus page serves every indexed spec — TestArchivedSpec_ServableSurfaces
-// proves the archive case, and TestCorpusHandler_ServesArchivedSpec guards
-// it), so no resolved match is ever linkless. ADJ-39's disclosure-only
-// fallback ("if no workbench surface serves it, disclosure-only, naming
-// where the archive lives") is therefore unreachable HERE — its precondition
-// (a resolved target that no surface serves) does not arise given today's
-// routes; the genuinely-unresolvable case is the caller's own ac-4 seam
-// (attachParentFeatureLink's UnresolvedNotice; attachStubStoryLinks's
-// deferral to lint), not this resolver's.
-func servableSurface(ref string, entry *index.Entry) (href string, archived bool) {
+// computes). On the SERVING checkout (fixedBranch == "") a resolved spec
+// entry always HAS a servable surface (the corpus page serves every
+// indexed spec — TestArchivedSpec_ServableSurfaces proves the archive
+// case, and TestCorpusHandler_ServesArchivedSpec guards it), so no
+// resolved match is ever linkless there.
+//
+// On a PER-BRANCH board (fixedBranch != "", ADJ-70 — the branch-prefixed-
+// addressing sweep judged-fbl-r4-5 was filed for): an ACTIVE match is
+// servable BY CONSTRUCTION at its branch's own board — the index this
+// resolver's callers built walks the branch worktree, and /b/{branch}
+// serves that same worktree — so the href is the shared branchBoardHref
+// address, never the root-relative one that ejected the operator to the
+// serving checkout and 404ed on a branch-only target. An ARCHIVED match
+// has NO surface that provably serves it (the /a/ corpus is root-only,
+// handler.go mounts no /b/ corpus, and it reads the SERVING checkout's
+// tree — a branch-only archived spec 404s there too), so this returns no
+// href at all and the caller renders its disclosed no-link state: ADJ-39's
+// disclosure-only fallback, previously unreachable, is exactly this
+// branch-archived case.
+func servableSurface(ref string, entry *index.Entry, fixedBranch string) (href string, archived bool) {
 	if isArchivedStorePath(entry.Path) {
+		if fixedBranch != "" {
+			return "", true
+		}
 		return "/a/" + ref, true
+	}
+	if fixedBranch != "" {
+		return branchBoardHref(fixedBranch, strings.TrimPrefix(ref, "spec/")), false
 	}
 	return "/board/" + ref, false
 }
@@ -143,7 +174,7 @@ func servableSurface(ref string, entry *index.Entry) (href string, archived bool
 // spec ever carries stubs (artifact's own validateStory/validateComponent
 // both forbid the field), so this is a harmless no-op loop for any other
 // wall — no class check needed here.
-func attachStubStoryLinks(ctx context.Context, proj *BoardProjection, ix *index.Index, root string) error {
+func attachStubStoryLinks(ctx context.Context, proj *BoardProjection, ix *index.Index, root, fixedBranch string) error {
 	featureRef := "spec/" + proj.Spec
 	for i := range proj.StubViews {
 		sv := &proj.StubViews[i]
@@ -155,16 +186,24 @@ func attachStubStoryLinks(ctx context.Context, proj *BoardProjection, ix *index.
 				// job to resolve or explain.
 				continue
 			}
-			// An active match links to its board (parent ac-2 verbatim); an
+			// An active match links to its board (parent ac-2 verbatim; on a
+			// per-branch board, that branch's own board — ADJ-70); an
 			// archived match links to its SERVABLE corpus page rather than
 			// the board route that 404s on the archive zone, its archived
-			// state disclosed (ADJ-39, servableSurface's doc comment).
-			href, archived := servableSurface(storyRef, entry)
-			sv.StoryLinks = append(sv.StoryLinks, stubStoryLinkView{
+			// state disclosed (ADJ-39, servableSurface's doc comment) — and
+			// on a per-branch board, where no surface provably serves the
+			// archive, it takes the disclosed no-href card instead (ADJ-70:
+			// never an href that can 404, never a silent omission).
+			href, archived := servableSurface(storyRef, entry, fixedBranch)
+			link := stubStoryLinkView{
 				Ref:      storyRef,
 				Href:     href,
 				Archived: archived,
-			})
+			}
+			if href == "" {
+				link.UnservableNotice = "archived in this branch's store — no per-branch surface serves the archive"
+			}
+			sv.StoryLinks = append(sv.StoryLinks, link)
 		}
 		if len(sv.StoryLinks) > 0 {
 			// ADJ-28: a match anywhere — active or archived — takes AC-2's

@@ -309,6 +309,7 @@ func TestServableSurface(t *testing.T) {
 		name         string
 		ref          string
 		path         string
+		fixedBranch  string
 		wantHref     string
 		wantArchived bool
 	}{
@@ -325,12 +326,36 @@ func TestServableSurface(t *testing.T) {
 			wantHref:     "/a/spec/flx-archived-story",
 			wantArchived: true,
 		},
+		{
+			// ADJ-70: on a per-branch board an ACTIVE target resolves in the
+			// branch worktree's own index, so the servable surface is that
+			// branch's own board — through the shared branchBoardHref
+			// constructor, slash-bearing branch escaped exactly like every
+			// sibling /b/ address.
+			name:        "active zone on a branch board yields the branch-prefixed board link (ADJ-70)",
+			ref:         "spec/flx-active-story",
+			path:        "/wt/.verdi/specs/active/flx-active-story/spec.md",
+			fixedBranch: "design/flx-pair",
+			wantHref:    "/b/design%2Fflx-pair/board/spec/flx-active-story",
+		},
+		{
+			// ADJ-70: the /a/ corpus is root-only and serves the SERVING
+			// checkout; a branch-resolved archived target has no surface that
+			// provably serves it, so NO href is minted — the caller renders
+			// its disclosed no-link state instead (never an href that can 404).
+			name:         "archive zone on a branch board yields NO href — no per-branch surface serves the archive (ADJ-70)",
+			ref:          "spec/flx-archived-story",
+			path:         "/wt/.verdi/specs/archive/flx-archived-story/spec.md",
+			fixedBranch:  "design/flx-pair",
+			wantHref:     "",
+			wantArchived: true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			href, archived := servableSurface(tc.ref, &index.Entry{Path: tc.path})
+			href, archived := servableSurface(tc.ref, &index.Entry{Path: tc.path}, tc.fixedBranch)
 			if href != tc.wantHref || archived != tc.wantArchived {
-				t.Errorf("servableSurface(%q, %q) = (%q, %v), want (%q, %v)", tc.ref, tc.path, href, archived, tc.wantHref, tc.wantArchived)
+				t.Errorf("servableSurface(%q, %q, %q) = (%q, %v), want (%q, %v)", tc.ref, tc.path, tc.fixedBranch, href, archived, tc.wantHref, tc.wantArchived)
 			}
 		})
 	}
@@ -350,7 +375,7 @@ func TestAttachStubStoryLinks(t *testing.T) {
 			{Slug: "flx-plain-stub", AcceptanceCriteria: []string{"ac-5"}},
 		},
 	}
-	if err := attachStubStoryLinks(ctx, proj, ix, dir); err != nil {
+	if err := attachStubStoryLinks(ctx, proj, ix, dir, ""); err != nil {
 		t.Fatalf("attachStubStoryLinks: %v", err)
 	}
 
@@ -421,6 +446,85 @@ func TestAttachStubStoryLinks(t *testing.T) {
 			t.Errorf("InstantiatedNotice = %q, want empty", sv.InstantiatedNotice)
 		}
 	})
+}
+
+// TestAttachStubStoryLinks_BranchBoard is ADJ-70's stub direction: on a
+// per-branch board an ACTIVE match's affordance stays inside the branch
+// (the shared branchBoardHref address), and an ARCHIVED match — which no
+// per-branch surface serves (the /a/ corpus is root-only, reading the
+// SERVING checkout) — takes a disclosed no-href card in place of a link
+// that could 404 or silently eject the operator to the serving checkout.
+func TestAttachStubStoryLinks_BranchBoard(t *testing.T) {
+	dir, ix := newFamilyLinksFixture(t)
+	ctx := context.Background()
+
+	proj := &BoardProjection{
+		Spec: "flx-parent",
+		StubViews: []StubView{
+			{Slug: "flx-active-stub", AcceptanceCriteria: []string{"ac-1"}},
+			{Slug: "flx-archived-stub", AcceptanceCriteria: []string{"ac-2"}},
+		},
+	}
+	if err := attachStubStoryLinks(ctx, proj, ix, dir, "design/flx-pair"); err != nil {
+		t.Fatalf("attachStubStoryLinks: %v", err)
+	}
+	byslug := make(map[string]StubView, len(proj.StubViews))
+	for _, sv := range proj.StubViews {
+		byslug[sv.Slug] = sv
+	}
+
+	t.Run("active match links to the BRANCH-PREFIXED story board (ADJ-70)", func(t *testing.T) {
+		sv := byslug["flx-active-stub"]
+		want := []stubStoryLinkView{{Ref: "spec/flx-active-story", Href: "/b/design%2Fflx-pair/board/spec/flx-active-story"}}
+		if !reflect.DeepEqual(sv.StoryLinks, want) {
+			t.Errorf("StoryLinks = %#v, want %#v", sv.StoryLinks, want)
+		}
+	})
+
+	t.Run("archived match takes the disclosed no-href card — never a root-relative href that ejects or 404s (ADJ-70)", func(t *testing.T) {
+		sv := byslug["flx-archived-stub"]
+		want := []stubStoryLinkView{{
+			Ref:              "spec/flx-archived-story",
+			Archived:         true,
+			UnservableNotice: "archived in this branch's store — no per-branch surface serves the archive",
+		}}
+		if !reflect.DeepEqual(sv.StoryLinks, want) {
+			t.Errorf("StoryLinks = %#v, want %#v", sv.StoryLinks, want)
+		}
+	})
+}
+
+// TestRenderBoardRegion_UnservableStoryLink proves the disclosed no-href
+// card renders as a SPAN (no anchor, no href to follow) carrying the
+// archived badge and the disclosure text — co-2's "never a silent
+// omission" at the markup layer.
+func TestRenderBoardRegion_UnservableStoryLink(t *testing.T) {
+	p := &BoardProjection{
+		Spec: "flx-parent",
+		StubViews: []StubView{{
+			Slug: "flx-archived-stub",
+			StoryLinks: []stubStoryLinkView{{
+				Ref:              "spec/flx-archived-story",
+				Archived:         true,
+				UnservableNotice: "archived in this branch's store — no per-branch surface serves the archive",
+			}},
+		}},
+	}
+	html := renderBoardRegion(p, &boardGitState{})
+	if !strings.Contains(html, `data-testid="stub-story-unservable-flx-archived-stub-spec-flx-archived-story"`) {
+		t.Fatalf("unservable card testid missing from rendered board:\n%s", html)
+	}
+	// The apostrophe in "branch's" renders HTML-escaped (&#39;), so the
+	// assertion pins the apostrophe-free halves of the disclosure.
+	if !strings.Contains(html, "no per-branch surface serves the archive") || !strings.Contains(html, "archived in this branch") {
+		t.Errorf("disclosure text missing from rendered board")
+	}
+	if strings.Contains(html, `data-testid="stub-story-link-flx-archived-stub-spec-flx-archived-story"`) {
+		t.Errorf("an anchor stub-story-link rendered for an unservable match — must be the no-href span")
+	}
+	if strings.Contains(html, `href=""`) {
+		t.Errorf("an empty-href anchor rendered — the unservable card must carry no href at all")
+	}
 }
 
 // flxTargetFeatureSpec is attachParentFeatureLink's one resolvable target:
@@ -495,6 +599,7 @@ func TestAttachParentFeatureLink(t *testing.T) {
 		name            string
 		edges           []edgeView
 		ref             string
+		fixedBranch     string
 		wantFeatureHref string
 		wantArchived    bool
 		wantUnresolved  string
@@ -504,6 +609,38 @@ func TestAttachParentFeatureLink(t *testing.T) {
 			edges:           []edgeView{{Type: "implements", From: "spec", To: "spec/flx-target-feature#ac-1"}},
 			ref:             "spec/flx-target-feature#ac-1",
 			wantFeatureHref: "/board/spec/flx-target-feature",
+		},
+		{
+			// ADJ-70: on a per-branch board the resolving ACTIVE target's
+			// affordance stays inside the branch — the exact 404/ejection
+			// ux-1 proved when this href was root-relative.
+			name:            "on a branch board a resolving ACTIVE target yields the BRANCH-PREFIXED feature board href (ADJ-70)",
+			edges:           []edgeView{{Type: "implements", From: "spec", To: "spec/flx-target-feature#ac-1"}},
+			ref:             "spec/flx-target-feature#ac-1",
+			fixedBranch:     "design/flx-pair",
+			wantFeatureHref: "/b/design%2Fflx-pair/board/spec/flx-target-feature",
+		},
+		{
+			// ADJ-70: an ARCHIVED target on a branch board has no surface
+			// that provably serves it (the /a/ corpus is root-only and reads
+			// the SERVING checkout), so the card takes the disclosed notice —
+			// never an href that can 404.
+			name:           "on a branch board a resolving ARCHIVED target yields the disclosed archived-on-branch notice and no href (ADJ-70)",
+			edges:          []edgeView{{Type: "implements", From: "spec", To: "spec/flx-archived-feature#ac-1"}},
+			ref:            "spec/flx-archived-feature#ac-1",
+			fixedBranch:    "design/flx-pair",
+			wantUnresolved: "spec/flx-archived-feature#ac-1 is archived in this branch's store — no per-branch surface serves the archive",
+		},
+		{
+			// The inverse case pinned in the branch context: an unresolvable
+			// target on a branch board renders the SAME ac-4 notice the
+			// unprefixed board does (the branch-rooted index simply does not
+			// resolve it) — no href, no ejection, no 404.
+			name:           "on a branch board a non-resolving target yields the same disclosed notice (inverse case, ADJ-70)",
+			edges:          []edgeView{{Type: "implements", From: "spec", To: "spec/flx-no-such-feature#ac-1"}},
+			ref:            "spec/flx-no-such-feature#ac-1",
+			fixedBranch:    "design/flx-pair",
+			wantUnresolved: "spec/flx-no-such-feature#ac-1 does not resolve in this checkout's store — no board to link to",
 		},
 		{
 			// ADJ-39 direction (d): an archived parent feature 404s on the
@@ -551,7 +688,7 @@ func TestAttachParentFeatureLink(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			proj := &BoardProjection{Edges: tc.edges, RefCards: []refCardView{{Ref: tc.ref}}}
-			attachParentFeatureLink(proj, ix)
+			attachParentFeatureLink(proj, ix, tc.fixedBranch)
 			got := proj.RefCards[0]
 			if got.FeatureHref != tc.wantFeatureHref {
 				t.Errorf("FeatureHref = %q, want %q", got.FeatureHref, tc.wantFeatureHref)
