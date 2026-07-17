@@ -6,7 +6,7 @@ owners: [platform-team]
 for_kind: behavioral
 links:
   - { type: verifies, ref: "spec/model-digest" }
-frozen: { at: 2026-07-17, commit: 3df63783da22879a112e1e4fb80a47ca436a08d7 }
+frozen: { at: 2026-07-17, commit: b7a0cf9801ea852fcc1f4801da11ee115f6ffc41 }
 ---
 # Fixture-gate and decode-compatibility tests prove artifacts stamped before the model field existed decode unchanged and no committed fixture regenerates
 
