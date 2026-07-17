@@ -96,6 +96,26 @@ func CommitDate(ctx context.Context, dir, rev string) (string, error) {
 	return t.Format("2006-01-02T15:04:05-07:00"), nil
 }
 
+// CommitDateOnly returns rev's own committer date as a YYYY-MM-DD string —
+// CommitDate's first 10 characters — the frozen.at derivation every
+// commit-derived stamp uses (L-M4: never wall clock). Shared by every
+// caller that stamps a Frozen record from a commit (cmd/verdi's align and
+// accept verbs inline this same two-step derivation today; internal/
+// workbench's obligation author is the first non-cmd/verdi caller), so the
+// "derive a date from a commit, fail closed if git's own output is somehow
+// too short" logic exists in one shared home rather than copy-pasted at
+// each new call site (CLAUDE.md shared-homes rule).
+func CommitDateOnly(ctx context.Context, dir, rev string) (string, error) {
+	full, err := CommitDate(ctx, dir, rev)
+	if err != nil {
+		return "", err
+	}
+	if len(full) < 10 {
+		return "", fmt.Errorf("gitx: CommitDateOnly(%s): commit date %q too short to derive a YYYY-MM-DD date", rev, full)
+	}
+	return full[:10], nil
+}
+
 // PickaxeCommit runs `git log -S<identity> -1 --format=%H -- <paths...>`
 // (or the whole tree, if paths is empty) — spec/verification-extractor
 // dc-4's witness-commit discovery mechanism, the smallest honest tool

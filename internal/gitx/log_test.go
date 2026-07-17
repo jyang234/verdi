@@ -203,3 +203,30 @@ func TestCommitDate_UnknownRev_Errors(t *testing.T) {
 		t.Fatal("CommitDate: expected error for an unknown rev, got nil")
 	}
 }
+
+func TestCommitDateOnly_HappyPath(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"a.txt": "hello\n"}, Message: "add a"},
+	})
+
+	at, err := gitx.CommitDateOnly(context.Background(), repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatalf("CommitDateOnly: %v", err)
+	}
+	// fixturegit pins every commit to 2024-01-01T00:00:00Z (+0000);
+	// CommitDateOnly is CommitDate's first 10 characters.
+	const want = "2024-01-01"
+	if at != want {
+		t.Errorf("CommitDateOnly = %q, want %q", at, want)
+	}
+}
+
+func TestCommitDateOnly_UnknownRev_Errors(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"a.txt": "hello\n"}, Message: "add a"},
+	})
+
+	if _, err := gitx.CommitDateOnly(context.Background(), repo.Dir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"); err == nil {
+		t.Fatal("CommitDateOnly: expected error for an unknown rev, got nil")
+	}
+}

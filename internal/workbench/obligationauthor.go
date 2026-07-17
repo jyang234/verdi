@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/atomicfile"
@@ -101,7 +100,15 @@ func (s *boardSpecServer) actionObligationGraduate(ctx context.Context, name str
 	if err != nil {
 		return err
 	}
-	frozen := artifact.Frozen{At: time.Now().UTC().Format("2006-01-02"), Commit: head}
+	// L-M4: at is HEAD's own committer date, never wall clock — the same
+	// commit-derived stamp align/freeze.go's callers use (cmd/verdi's
+	// align.go/accept.go), shared here via gitx.CommitDateOnly rather than
+	// re-deriving wall-clock "now" as this file used to.
+	at, err := gitx.CommitDateOnly(ctx, s.root, head)
+	if err != nil {
+		return err
+	}
+	frozen := artifact.NewFrozen(at, head)
 
 	content := renderObligation(obID, title, string(forKind), verifiesRef, sticky.Body, []string{annotationAuthor()}, frozen)
 

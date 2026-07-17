@@ -54,7 +54,8 @@ func FreezeInPlace(existing *artifact.DeviationFrontmatter, existingBody, frozen
 	// existing, but FreezeInPlace never writes through them — it only sets Frozen
 	// on the copy — so the freeze is genuinely verbatim.
 	frozen := *existing
-	frozen.Frozen = &artifact.Frozen{At: frozenAt, Commit: existing.Covers}
+	stamp := artifact.NewFrozen(frozenAt, existing.Covers)
+	frozen.Frozen = &stamp
 
 	// Self-validate the stamped frontmatter before handing it back as a valid
 	// frozen report (CLAUDE.md: "never fake success").

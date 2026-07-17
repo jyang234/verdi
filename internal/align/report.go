@@ -123,7 +123,8 @@ func Generate(ctx context.Context, in Input) (*Report, error) {
 		},
 	}
 	if in.Freeze {
-		fm.Frozen = &artifact.Frozen{At: in.FrozenAt, Commit: in.Covers}
+		frozen := artifact.NewFrozen(in.FrozenAt, in.Covers)
+		fm.Frozen = &frozen
 	}
 
 	// Never fake success (CLAUDE.md): self-validate what Generate is about

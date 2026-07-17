@@ -244,12 +244,13 @@ func freezeBoard(board *artifact.Board, boardPath, commit, at string) (*artifact
 	sort.Strings(pinRefs)
 	inputs = append(inputs, pinRefs...)
 
+	frozen := artifact.NewFrozen(at, commit)
 	return &artifact.Board{
 		Schema:   "verdi.board/v1",
 		Pins:     board.Pins,
 		Stickies: board.Stickies,
 		Yarn:     board.Yarn,
-		Frozen:   &artifact.Frozen{At: at, Commit: commit},
+		Frozen:   &frozen,
 		Provenance: &artifact.Provenance{
 			Generator: "commit-to-design",
 			Version:   "v0",
