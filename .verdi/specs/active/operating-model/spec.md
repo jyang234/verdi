@@ -4,7 +4,7 @@ kind: spec
 title: "Operating Model"
 owners: [platform-team]
 class: feature
-status: draft
+status: accepted-pending-build
 problem: { text: "the operating model — lifecycle states, transitions and their obligations, class hierarchy, display vocabulary, and scaffold content — is hard-coded in Go across ~45 files (extensibility audit @ 24214fd): teams cannot see or reshape it, every rename or template change is a code change, and the same process facts are re-encoded independently in up to seven subsystems with no shared seam", anchor: problem }
 outcome: { text: "the canonical operating model is declared in a strict-decoded .verdi/model.yaml (verdi.model/v1) with an embedded canonical default so absent config changes nothing; verdi model check validates it fail-closed with pinned frontier errors; scaffolds render from editable templates with a custom: opaque namespace; display vocabulary is configurable and reaches CLI, workbench, dex, and MCP surfaces; and every produced artifact's provenance carries the model digest — with the entire pre-existing fixture and e2e suite green against the canonical default", anchor: outcome }
 acceptance_criteria:
@@ -21,6 +21,7 @@ stubs:
 decisions:
   - { id: dc-1, text: "v1 frontier: verdi.model/v1 accepts only the canonical model modulo vocabulary and templates; structural deviation is rejected with a pinned error naming the frontier — smallest reversible slice of the strangler", anchor: dc-1 }
   - { id: dc-2, text: "custom: is KnownFields-exempt but the YAML dialect wall (anchors/aliases/tags rejection) still applies inside it — loosening later is additive, tightening would break stores", anchor: dc-2 }
+frozen: { at: 2026-07-17, commit: 98f8c4208f7308356be67c80aecbe7cb73f97424 }
 ---
 # Operating Model
 
