@@ -111,12 +111,13 @@ func runModelCheck(root string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// modelCheckVariant is one (Spike, links) shape a class's resolved template
-// can render into. checkTemplates round-trips every variant a real scaffold
-// consumer can produce, not just one (judged-spike-variant-unchecked-by-
-// model-check): a template broken only inside its {{if .Spike}} branch must
-// fail model check, not surface at a spike scaffold's first use. name labels
-// the variant so a failure names it alongside the template file.
+// modelCheckVariant is one (StoryRef, Spike, links) shape a class's resolved
+// template can render into. checkTemplates round-trips every variant a real
+// scaffold consumer can produce, not just one (judged-spike-variant-
+// unchecked-by-model-check, judged-model-check-feature-no-storyref-variant-
+// unchecked): a template broken only inside a {{if .Spike}} or {{if .StoryRef}}
+// branch must fail model check, not surface at that variant's first scaffold.
+// name labels the variant so a failure names it alongside the template file.
 type modelCheckVariant struct {
 	name string
 	data designscaffold.ScaffoldData
@@ -154,20 +155,66 @@ func modelCheckSpikeData() designscaffold.ScaffoldData {
 	return d
 }
 
+// modelCheckFeatureNoStoryRefData is the no-story-ref feature ScaffoldData
+// the feature template's {{if .StoryRef}} EMPTY branch is round-tripped with:
+// StoryRef "" (the story: line is optional for the feature class, 05 §CLI),
+// so the render decodes exactly as a real ref-less `design start --kind
+// feature` would. The (feature-ignored) implements link stays as-is;
+// feature.md references neither .Links nor .Spike, so only StoryRef distinguishes
+// this variant from the with-story-ref one.
+func modelCheckFeatureNoStoryRefData() designscaffold.ScaffoldData {
+	d := modelCheckDefaultData()
+	d.StoryRef = ""
+	return d
+}
+
 // modelCheckVariantsFor returns the template variants checkTemplates must
-// round-trip for the class named className: always the default (non-spike)
-// variant, plus — for the story class, whose canonical/embedded template
-// carries a {{if .Spike}} branch and whose spike variant a real
-// stub-instantiate renders — the spike variant. Keyed on artifact.ClassStory:
-// the class map key stays canonical across vocabulary renames (only Display
-// names rename, internal/model/model.go), matching stub-instantiate's own
-// Classes[string(artifact.ClassStory)] lookup (internal/workbench).
+// round-trip for the class named className. The consumer-producible variant
+// matrix is FINITE and enumerated here in full — a variant exists exactly
+// when a real scaffold consumer (design start, stub-instantiate) can request
+// a shape AND a template branches on it:
+//
+//	feature × {with-story-ref, no-story-ref}
+//	    feature.md branches on {{if .StoryRef}} (the story: line is optional
+//	    for the feature class); `design start --kind feature` renders BOTH — a
+//	    tracker ref passes a non-empty storyRef, a ref-less start passes ""
+//	    (05 §CLI, runDesignStart).
+//	story × {plain, spike}
+//	    story.md branches on {{if .Spike}} / {{if not .Spike}}; design start
+//	    renders the plain story, stub-instantiate renders the spike variant
+//	    from a spike stub (spike: true, a resolves edge, no implements edge —
+//	    validateStory).
+//
+// This is the COMPLETE matrix: {{if .StoryRef}} and {{if .Spike}} are the
+// only conditional branches the two embedded templates carry, and
+// with/without-ref and plain/spike are the only shapes the two consumers can
+// request — so every variant a broken store override could hide a defect in
+// is round-tripped here, never surfacing first at a scaffold consumer's use
+// (spec/scaffold-templates ac-3). Adding a new conditional branch to a
+// template, or a new consumer-selectable shape, OBLIGATES a new entry here:
+// this switch is the single place that obligation is discharged, so a
+// silently-widened gap shows up as a missing case rather than as an
+// unchecked branch. Keyed on the canonical class names (artifact.ClassFeature/
+// ClassStory — the map key stays canonical across vocabulary renames, only
+// Display renames, internal/model/model.go), matching stub-instantiate's own
+// Classes[string(artifact.ClassStory)] lookup (internal/workbench); any other
+// class the frontier might one day admit round-trips at least the default
+// shape until its own spec round extends this matrix.
 func modelCheckVariantsFor(className string) []modelCheckVariant {
-	variants := []modelCheckVariant{{name: "default", data: modelCheckDefaultData()}}
-	if className == string(artifact.ClassStory) {
-		variants = append(variants, modelCheckVariant{name: "spike", data: modelCheckSpikeData()})
+	switch className {
+	case string(artifact.ClassFeature):
+		return []modelCheckVariant{
+			{name: "with-story-ref", data: modelCheckDefaultData()},
+			{name: "no-story-ref", data: modelCheckFeatureNoStoryRefData()},
+		}
+	case string(artifact.ClassStory):
+		return []modelCheckVariant{
+			{name: "plain", data: modelCheckDefaultData()},
+			{name: "spike", data: modelCheckSpikeData()},
+		}
+	default:
+		return []modelCheckVariant{{name: "default", data: modelCheckDefaultData()}}
 	}
-	return variants
 }
 
 // checkTemplates instantiates and strict-decodes every class's resolved

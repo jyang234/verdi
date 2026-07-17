@@ -264,6 +264,51 @@ outcome: { text: "{{.Outcome}}", anchor: outcome }
 	}
 }
 
+// TestModelCheck_BrokenTemplateInFeatureNoStoryRefBranch_Exit2_NamesFile is
+// judged-model-check-feature-no-storyref-variant-unchecked's regression: a
+// feature.md override that decodes cleanly WITH a story ref but is broken
+// only inside its {{if .StoryRef}} empty branch (here, an unknown frontmatter
+// field the no-story-ref render emits). checkTemplates round-trips every
+// variant a real scaffold consumer can produce — design start --kind feature
+// WITH a tracker ref renders the with-story-ref variant, a ref-less design
+// start renders the no-story-ref variant (05 §CLI) — so the breakage is
+// caught at check time, not at someone's first ref-less design start. The
+// failure names the offending template file AND the no-story-ref variant
+// (before this fix, model check rendered only the with-story-ref feature
+// variant and this store passed clean).
+func TestModelCheck_BrokenTemplateInFeatureNoStoryRefBranch_Exit2_NamesFile(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, "")
+	const brokenNoStoryRefTemplate = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: feature{{if .StoryRef}}
+story: {{.StoryRef}}{{else}}
+bogus_no_storyref_field: 1{{end}}
+status: draft
+problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: ac-1 }
+---
+# {{.Title}}
+`
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "feature.md"), []byte(brokenNoStoryRefTemplate))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (feature template broken only in its no-story-ref branch) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "feature.md") {
+		t.Fatalf("stderr = %q, want it to name the offending template file feature.md", stderr)
+	}
+	if !strings.Contains(stderr, "no-story-ref") {
+		t.Fatalf("stderr = %q, want it to name the no-story-ref variant (the check must say WHICH variant failed)", stderr)
+	}
+}
+
 // TestModelCheck_TemplatePathEscape_Exit2_NamesRule proves the kernel's
 // bare-filename rule reaches the built binary (judged-template-filename-
 // escapes-templates-dir): a hand-written model.yaml whose class template
