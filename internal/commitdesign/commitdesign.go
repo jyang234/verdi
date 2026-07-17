@@ -15,6 +15,7 @@ import (
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // storyRefShapeRe mirrors internal/artifact's own (unexported) story-ref
@@ -83,7 +84,7 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 		return nil, fmt.Errorf("commitdesign: story ref %q must be scheme:key form (e.g. jira:LOAN-1482)", storyRef)
 	}
 
-	specDir := filepath.Join(in.Root, ".verdi", "specs", "active", in.SpecName)
+	specDir := store.ActiveSpecDir(in.Root, in.SpecName)
 	if _, statErr := os.Stat(specDir); statErr == nil {
 		return nil, fmt.Errorf("commitdesign: %s already exists", specDir)
 	}
