@@ -30,7 +30,7 @@ func TestBadgeAttachment_StaticEvidence(t *testing.T) {
 	}
 	buildIdx := strings.Index(src, "buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode)")
 	obligIdx := strings.Index(src, "attachObligations(proj, s.root, name, fm)")
-	badgeIdx := strings.Index(src, "attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession)")
+	badgeIdx := strings.Index(src, "attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession, s.model)")
 	if buildIdx < 0 || obligIdx < 0 || badgeIdx < 0 {
 		t.Fatalf("could not locate all three call sites in boardspec.go (buildProjection=%d, attachObligations=%d, attachBadges=%d)", buildIdx, obligIdx, badgeIdx)
 	}

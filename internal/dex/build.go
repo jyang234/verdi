@@ -12,6 +12,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -89,21 +90,33 @@ func Build(ctx context.Context, opts Options) error {
 		return err
 	}
 
+	// The store's resolved operating model (spec/vocabulary-surfaces
+	// ac-2): opened ONCE per build — Build is dex's entrypoint, so this is
+	// the "resolve at the entrypoint, pass down" seam — and consumed only
+	// for display words (status badges, listing chips, the Class row,
+	// ladder badges). A store whose config cannot be opened builds with
+	// bare ids (nil model), exactly like a model with no renames; the
+	// build's determinism is unchanged (model.yaml is tree content).
+	var mdl *model.Model
+	if cfg, err := store.Open(opts.Root); err == nil {
+		mdl = cfg.Model
+	}
+
 	for _, p := range pages {
-		if err := writeArtifactPage(ctx, opts.OutDir, opts.Root, stamp.SHA, stamp, ix, known, lens, p); err != nil {
+		if err := writeArtifactPage(ctx, opts.OutDir, opts.Root, stamp.SHA, stamp, ix, known, lens, mdl, p); err != nil {
 			return err
 		}
 	}
 	if err := writeExemptionPages(opts.OutDir, stamp, pages, lens.exemptions, known); err != nil {
 		return err
 	}
-	if err := writeStoryAxis(opts.OutDir, stamp, pages); err != nil {
+	if err := writeStoryAxis(opts.OutDir, stamp, pages, mdl); err != nil {
 		return err
 	}
 	if err := writeExternalPages(opts.OutDir, stamp, ix, known, services); err != nil {
 		return err
 	}
-	if err := writeKindAxis(opts.OutDir, stamp, pages); err != nil {
+	if err := writeKindAxis(opts.OutDir, stamp, pages, mdl); err != nil {
 		return err
 	}
 	if err := writeContractsAxis(opts.OutDir, stamp, services); err != nil {

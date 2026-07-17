@@ -15,6 +15,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -51,13 +52,13 @@ var acceptedStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?accepted-pending
 // exactly what it modified, never the rest of the working tree) plus 0 on
 // success (including every no-op case, which contributes no path), 2 on an
 // operational failure.
-func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, stdout, stderr io.Writer) ([]string, int) {
+func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, mdl *model.Model, stdout, stderr io.Writer) ([]string, int) {
 	var paths []string
 	for _, l := range spec.Links {
 		if l.Type != artifact.LinkSupersedes || !supersedesTargetsStory(root, l.Ref) {
 			continue
 		}
-		path, rc := flipPredecessorToSuperseded(root, l.Ref, spec.ID, stdout, stderr)
+		path, rc := flipPredecessorToSuperseded(root, l.Ref, spec.ID, mdl, stdout, stderr)
 		if rc != 0 {
 			return paths, rc
 		}
@@ -72,7 +73,7 @@ func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, stdout, 
 	// fails closed (false) on a fragment ref, so an object-fragment
 	// `supersedes` edge (a decision-level override) never reaches here.
 	if wholeRef := wholeSpecSupersedesTarget(spec); wholeRef != "" && supersedesTargetsFeature(root, wholeRef) {
-		path, rc := flipPredecessorToSuperseded(root, wholeRef, spec.ID, stdout, stderr)
+		path, rc := flipPredecessorToSuperseded(root, wholeRef, spec.ID, mdl, stdout, stderr)
 		if rc != 0 {
 			return paths, rc
 		}
@@ -106,7 +107,7 @@ func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, stdout, 
 // and "" for every no-op case (malformed ref, absent, idempotent, or wrong
 // status). rc is 0 on success (including every no-op case), 2 on an
 // operational failure.
-func flipPredecessorToSuperseded(root, predecessorRef, successorID string, stdout, stderr io.Writer) (path string, rc int) {
+func flipPredecessorToSuperseded(root, predecessorRef, successorID string, mdl *model.Model, stdout, stderr io.Writer) (path string, rc int) {
 	ref, err := artifact.ParseRef(predecessorRef)
 	if err != nil {
 		return "", 0 // malformed edges are lint's concern, not accept's
@@ -134,8 +135,17 @@ func flipPredecessorToSuperseded(root, predecessorRef, successorID string, stdou
 		return "", 0 // already superseded — idempotent
 	}
 	if predSpec.Status != "accepted-pending-build" {
+		// Display resolution only (spec/vocabulary-surfaces ac-1): the
+		// state WORDS this disclosure prints resolve through the model;
+		// the status COMPARISON above, the frontmatter regex below, and
+		// the commit history all stay on bare ids — a rename is cosmetic.
+		predClass := string(predSpec.Class)
 		fmt.Fprintln(stdout, disclosure.Render(disclosure.New("accept:supersede-predecessor", predecessorRef,
-			fmt.Sprintf("predecessor status is %q, not accepted-pending-build; left unflipped (only accepted-pending-build->superseded is a legal ritual transition, VL-004)", predSpec.Status))))
+			fmt.Sprintf("predecessor status is %q, not %s; left unflipped (only %s->%s is a legal ritual transition, VL-004)",
+				mdl.DisplayState(predClass, string(predSpec.Status)),
+				mdl.DisplayState(predClass, "accepted-pending-build"),
+				mdl.DisplayState(predClass, "accepted-pending-build"),
+				mdl.DisplayState(predClass, "superseded")))))
 		return "", 0
 	}
 	if n := len(acceptedStatusLineRe.FindAll(raw, -1)); n != 1 {
@@ -164,7 +174,10 @@ func flipPredecessorToSuperseded(root, predecessorRef, successorID string, stdou
 		fmt.Fprintln(stderr, "accept:", err)
 		return "", 2
 	}
-	fmt.Fprintf(stdout, "accept: %s: superseded by %s (status: accepted-pending-build -> superseded; status-only edit, frozen stamp preserved, stays in specs/active/)\n", ref.String(), successorID)
+	fmt.Fprintf(stdout, "accept: %s: superseded by %s (status: %s -> %s; status-only edit, frozen stamp preserved, stays in specs/active/)\n",
+		ref.String(), successorID,
+		mdl.DisplayState(string(predSpec.Class), "accepted-pending-build"),
+		mdl.DisplayState(string(predSpec.Class), "superseded"))
 	return predPath, 0
 }
 

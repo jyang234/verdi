@@ -162,7 +162,7 @@ func run() error {
 	// The control server (control.go): the hermetic open-MR feed the
 	// directory home consults per render, plus the outage and
 	// delete-branch toggles the directory e2e drives — loopback only.
-	ctrl := newControlServer(storeRoot)
+	ctrl := newControlServer(storeRoot, moduleRoot)
 	ctrlSrv := &http.Server{Addr: controlAddr, Handler: ctrl.handler()}
 	ctrlLn, err := net.Listen("tcp", controlAddr)
 	if err != nil {

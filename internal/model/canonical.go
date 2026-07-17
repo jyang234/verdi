@@ -22,6 +22,16 @@ package model
 // TestCanonicalYAMLMatchesGoLiteral and TestDecodeModel_Happy,
 // embed_test.go/decode_test.go).
 //
+// The canonical display layer is deliberately EMPTY — no vocabulary
+// block and no per-class Display labels (spec/vocabulary-surfaces'
+// parity floor: "a store with no model.yaml resolves to the embedded
+// canonical model ... so every lookup falls back to the bare id and
+// every surface prints byte-identical output to today"). A Display value
+// here would leak into every class-word surface (board class tag, dex
+// Class row, MCP tool descriptions — all of which print the bare
+// lowercase id today) the moment DisplayClass consults it, breaking that
+// byte-identity. Pinned by TestCanonicalDisplayLayerEmpty (model_test.go).
+//
 // classes: feature and story only. `component` (internal/artifact's
 // third real SpecClass) is a DISCLOSED, deliberate omission, not an
 // oversight: component specs carry no problem/outcome/acceptance_
@@ -41,12 +51,10 @@ var canonicalModel = Model{
 	Schema: modelSchema,
 	Classes: map[string]Class{
 		"feature": {
-			Display:    "Feature",
 			Decomposes: "stubs",
 			Template:   "feature.md",
 		},
 		"story": {
-			Display:  "Story",
 			Parent:   "feature",
 			Template: "story.md",
 		},

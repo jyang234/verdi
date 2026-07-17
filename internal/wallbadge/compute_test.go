@@ -53,7 +53,7 @@ func TestComputeBadges_EndToEnd(t *testing.T) {
 		}},
 	}
 
-	got, err := ComputeBadges(context.Background(), root, specRelPathFor(name), specRevision, fm, loader)
+	got, err := ComputeBadges(context.Background(), root, specRelPathFor(name), specRevision, fm, loader, nil)
 	if err != nil {
 		t.Fatalf("ComputeBadges: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestComputeBadges_CrossSpecExclusion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading spec.md back: %v", err)
 	}
-	got, err := ComputeBadges(context.Background(), root, specRelPathFor("widget-retry"), digestOf(raw), fm, nil)
+	got, err := ComputeBadges(context.Background(), root, specRelPathFor("widget-retry"), digestOf(raw), fm, nil, nil)
 	if err != nil {
 		t.Fatalf("ComputeBadges: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestComputeBadges_NonStorySkipsLadder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read spec.md: %v", err)
 	}
-	got, err := ComputeBadges(context.Background(), root, specRelPathFor("widget-feature"), digestOf(raw), fm, nil)
+	got, err := ComputeBadges(context.Background(), root, specRelPathFor("widget-feature"), digestOf(raw), fm, nil, nil)
 	if err != nil {
 		t.Fatalf("ComputeBadges: %v", err)
 	}
@@ -248,11 +248,11 @@ func TestComputeBadges_Deterministic(t *testing.T) {
 		}},
 	}
 
-	first, err := ComputeBadges(context.Background(), root, specRelPathFor("widget-retry"), specRevision, fm, loader)
+	first, err := ComputeBadges(context.Background(), root, specRelPathFor("widget-retry"), specRevision, fm, loader, nil)
 	if err != nil {
 		t.Fatalf("ComputeBadges (first): %v", err)
 	}
-	second, err := ComputeBadges(context.Background(), root, specRelPathFor("widget-retry"), specRevision, fm, loader)
+	second, err := ComputeBadges(context.Background(), root, specRelPathFor("widget-retry"), specRevision, fm, loader, nil)
 	if err != nil {
 		t.Fatalf("ComputeBadges (second): %v", err)
 	}
@@ -325,7 +325,7 @@ func TestComputeBadges_SizeSmellOnAnyACDeclaringWall(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read spec.md: %v", err)
 			}
-			got, err := ComputeBadges(context.Background(), root, specRelPathFor(specName), digestOf(raw), fm, nil)
+			got, err := ComputeBadges(context.Background(), root, specRelPathFor(specName), digestOf(raw), fm, nil, nil)
 			if err != nil {
 				t.Fatalf("ComputeBadges: %v", err)
 			}
@@ -347,7 +347,7 @@ func TestComputeBadges_SizeSmellOnAnyACDeclaringWall(t *testing.T) {
 // silently empty result.
 func TestComputeBadges_BadRoot(t *testing.T) {
 	fm := &artifact.SpecFrontmatter{Class: artifact.ClassStory}
-	_, err := ComputeBadges(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"), specRelPathFor("x"), "sha256:aaaa", fm, nil)
+	_, err := ComputeBadges(context.Background(), filepath.Join(t.TempDir(), "does-not-exist"), specRelPathFor("x"), "sha256:aaaa", fm, nil, nil)
 	if err == nil {
 		t.Fatal("got nil error for an unreadable root, want one")
 	}

@@ -98,6 +98,7 @@ func (b *branchBoards) server(ctx context.Context, branch string) (*boardSpecSer
 		feed:              b.deps.CommentFeed,
 		reviewUnavailable: b.deps.ReviewUnavailable,
 		supersession:      b.deps.SupersessionCandidates,
+		model:             b.deps.Model,
 		fixedBranch:       branch,
 	}
 	b.servers[branch] = s
@@ -254,6 +255,10 @@ func (b *branchBoards) loadSealed(ctx context.Context, branch, ref, name string)
 	if err != nil {
 		return nil, nil, err
 	}
+	// Display vocabulary (spec/vocabulary-surfaces ac-2): the sealed
+	// remote-ref render resolves the same store model the served
+	// instances carry.
+	proj.applyModelVocabulary(b.deps.Model)
 	proj.Notices = append(proj.Notices, fmt.Sprintf(
 		"branch %s exists only as remote-tracking ref %s: this board is rendered sealed (read-only) from that ref's committed content — no worktree was cut and no local branch was created; fetch the branch as a local branch to author. The scratch annotation tier and obligation enrichment are working-tree state and are not read from a remote ref.",
 		branch, ref))

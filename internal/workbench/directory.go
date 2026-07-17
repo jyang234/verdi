@@ -24,6 +24,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifactview"
 	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/refindex"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -65,6 +66,15 @@ type HomeDeps struct {
 	// to the disclosed "MR status unavailable" notice, never a blocked or
 	// partial directory.
 	OpenMRs OpenMRLister
+
+	// Model is the store's resolved operating model
+	// (spec/vocabulary-surfaces ac-2): the status chips this page renders
+	// resolve their visible words through its display vocabulary. nil
+	// means resolve() fills it from the store root once at handler
+	// construction (store.Open — never per render); a store whose model
+	// cannot be resolved renders bare ids, exactly like a model with no
+	// renames.
+	Model *model.Model
 }
 
 // resolve fills production defaults for any nil field, rooted at root.
@@ -76,6 +86,11 @@ func (h HomeDeps) resolve(root string) HomeDeps {
 		git := h.Git
 		h.Index = func(ctx context.Context) ([]refindex.Entry, error) {
 			return refindex.ComputeIndex(ctx, root, git)
+		}
+	}
+	if h.Model == nil {
+		if cfg, err := store.Open(root); err == nil {
+			h.Model = cfg.Model
 		}
 	}
 	return h
@@ -144,7 +159,7 @@ const designPrefix = "design/"
 // inline notice in a still-served page, never a dead-end); inReview and
 // mrNotice come from consultOpenMRs; mrConfigured gates the second-source
 // provenance line.
-func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.Entry, indexErr error, inReview map[string]bool, mrNotice string, mrConfigured bool) {
+func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.Entry, indexErr error, inReview map[string]bool, mrNotice string, mrConfigured bool, mdl *model.Model) {
 	buf.WriteString(`<section class="home-directory"><h2>Directory</h2>`)
 	buf.WriteString(`<p class="dir-provenance">Computed from git refs: every spec on the default branch and every draft on a design branch, grouped by status.`)
 	if mrConfigured {
@@ -190,7 +205,7 @@ func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.En
 		}
 		buf.WriteString(`<ul>`)
 		for _, e := range group {
-			writeDirectoryEntry(buf, root, e, inReview)
+			writeDirectoryEntry(buf, root, e, inReview, mdl)
 		}
 		buf.WriteString(`</ul></section>`)
 	}
@@ -211,7 +226,7 @@ var sourceChipLabels = map[refindex.Source]string{
 // board existed), a default-branch spec (today's unprefixed addresses,
 // dc-3), or a design-branch draft (the draft-boards story's per-branch
 // address grammar, dc-3 — emitted, never invented).
-func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inReview map[string]bool) {
+func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inReview map[string]bool, mdl *model.Model) {
 	name := strings.TrimPrefix(e.Ref, "spec/")
 
 	buf.WriteString(`<li class="dir-entry`)
@@ -237,10 +252,10 @@ func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inRev
 		buf.WriteString(`</span>`)
 
 	case e.Source == refindex.SourceDefault:
-		writeDefaultEntry(buf, root, e, name)
+		writeDefaultEntry(buf, root, e, name, mdl)
 
 	default:
-		writeDesignEntry(buf, e, name, inReview)
+		writeDesignEntry(buf, e, name, inReview, mdl)
 	}
 	buf.WriteString(`</li>`)
 }
@@ -253,7 +268,7 @@ func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inRev
 // artifactview seam the old home used); the entry's existence, grouping,
 // and status all come from the computed index alone, so a missing or
 // undecodable working-tree file degrades the trimmings, never the entry.
-func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name string) {
+func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name string, mdl *model.Model) {
 	title, class, story, boardServable := specWorkingTreeMeta(root, name)
 	if title == "" {
 		title = e.Ref
@@ -264,7 +279,7 @@ func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name st
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(title))
 	buf.WriteString(`</a> `)
-	writeStatusChip(buf, e.SpecStatus)
+	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, e.SpecStatus))
 	buf.WriteString(` `)
 	writeSourceChip(buf, e.Source)
 
@@ -332,7 +347,7 @@ func branchBoardHref(branch, name string) string {
 // grammar for local and remote-tracking entries alike; the routing story
 // behind it enforces feature dc-5's authoring/sealed split, never this
 // page's link shapes (dc-3).
-func writeDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, inReview map[string]bool) {
+func writeDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, inReview map[string]bool, mdl *model.Model) {
 	branch := designPrefix + name
 
 	buf.WriteString(`<a class="dir-board" href="`)
@@ -340,7 +355,7 @@ func writeDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, inReview
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(e.Ref))
 	buf.WriteString(`</a> `)
-	writeStatusChip(buf, e.SpecStatus)
+	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, e.SpecStatus))
 	buf.WriteString(` `)
 	writeSourceChip(buf, e.Source)
 
@@ -360,19 +375,38 @@ func designBoardHref(name string) string {
 	return branchBoardHref(designPrefix+name, name)
 }
 
-// writeStatusChip renders the entry's raw spec status in the same
+// writeStatusChip renders the entry's spec status in the same
 // badge-<status> vocabulary the board head, the old home listing, and the
 // dex's listing pages share, so a draft reads ochre and an accepted spec
-// green on every surface.
-func writeStatusChip(buf *bytes.Buffer, status string) {
+// green on every surface. label is the model's display word for the
+// status (spec/vocabulary-surfaces ac-2; statusChipLabel below) — the
+// chip's VISIBLE text only; "" falls back to the raw status, and the
+// badge-<status> CSS class keeps the bare id either way (addressing,
+// never display).
+func writeStatusChip(buf *bytes.Buffer, status, label string) {
 	if status == "" {
 		return
+	}
+	if label == "" {
+		label = status
 	}
 	buf.WriteString(`<span class="badge badge-`)
 	buf.WriteString(stdhtml.EscapeString(status))
 	buf.WriteString(`">`)
-	buf.WriteString(stdhtml.EscapeString(status))
+	buf.WriteString(stdhtml.EscapeString(label))
 	buf.WriteString(`</span>`)
+}
+
+// statusChipLabel resolves status through the model's display vocabulary
+// (the identical DisplayState lookup every other surface uses), returning
+// "" when no rename differs — so callers hand writeStatusChip a label
+// only when the model actually renames, keeping the no-model/no-rename
+// render byte-identical. Nil-safe (model.Model's nil-receiver contract).
+func statusChipLabel(m *model.Model, status string) string {
+	if label := m.DisplayState("", status); label != status {
+		return label
+	}
+	return ""
 }
 
 // writeSourceChip renders the entry's ref source disclosure (feature dc-5).

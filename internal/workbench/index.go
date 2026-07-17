@@ -83,10 +83,10 @@ func renderHome(ctx context.Context, root string, home HomeDeps) ([]byte, error)
 	// section below (dc-5's fixed placement); it needs neither inReview
 	// nor mrNotice, since a glance card never carries an in-review chip or
 	// any other evidence-bearing state (dc-3).
-	writeGlanceSection(&body, root, entries, indexErr)
+	writeGlanceSection(&body, root, entries, indexErr, home.Model)
 
 	inReview, mrNotice := consultOpenMRs(ctx, home.OpenMRs)
-	writeDirectorySection(&body, root, entries, indexErr, inReview, mrNotice, home.OpenMRs != nil)
+	writeDirectorySection(&body, root, entries, indexErr, inReview, mrNotice, home.OpenMRs != nil, home.Model)
 
 	// The non-spec corpus kinds (adr, diagram, attestation, waiver,
 	// conflict) — a surviving affordance of the old home page, still read

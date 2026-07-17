@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/refindex"
 )
 
@@ -77,7 +78,7 @@ var glanceBuckets = []glanceBucket{
 // discloses it inline — rendering a second notice here would be exactly
 // the "second, contradictory notice" CO-2 forbids, and there is no
 // refs-computed population to bucket in the first place.
-func writeGlanceSection(buf *bytes.Buffer, root string, entries []refindex.Entry, indexErr error) {
+func writeGlanceSection(buf *bytes.Buffer, root string, entries []refindex.Entry, indexErr error, mdl *model.Model) {
 	if indexErr != nil {
 		return
 	}
@@ -92,7 +93,7 @@ func writeGlanceSection(buf *bytes.Buffer, root string, entries []refindex.Entry
 				members = append(members, e)
 			}
 		}
-		writeGlanceBucket(buf, root, b, members)
+		writeGlanceBucket(buf, root, b, members, mdl)
 	}
 	buf.WriteString(`</div></section>`)
 }
@@ -132,7 +133,7 @@ func glanceEligibleEntries(entries []refindex.Entry) []refindex.Entry {
 // inventing a second "nothing here" vocabulary. The bucket's own heading,
 // count, and data-testid always render, regardless of population (dc-4,
 // ac-3): never a silently omitted bucket.
-func writeGlanceBucket(buf *bytes.Buffer, root string, b glanceBucket, members []refindex.Entry) {
+func writeGlanceBucket(buf *bytes.Buffer, root string, b glanceBucket, members []refindex.Entry, mdl *model.Model) {
 	buf.WriteString(`<section class="glance-group" data-testid="glance-group-`)
 	buf.WriteString(b.slug)
 	buf.WriteString(`"><h3>`)
@@ -146,7 +147,7 @@ func writeGlanceBucket(buf *bytes.Buffer, root string, b glanceBucket, members [
 	}
 	buf.WriteString(`<ul>`)
 	for _, e := range members {
-		writeGlanceEntry(buf, root, e)
+		writeGlanceEntry(buf, root, e, mdl)
 	}
 	buf.WriteString(`</ul></section>`)
 }
@@ -156,7 +157,7 @@ func writeGlanceBucket(buf *bytes.Buffer, root string, b glanceBucket, members [
 // writeStatusChip vocabulary), and its working links only — never a
 // source chip, an in-review chip, or receipts/gate state (dc-3's
 // leaner-than-the-exhaustive-section bar).
-func writeGlanceEntry(buf *bytes.Buffer, root string, e refindex.Entry) {
+func writeGlanceEntry(buf *bytes.Buffer, root string, e refindex.Entry, mdl *model.Model) {
 	name := strings.TrimPrefix(e.Ref, "spec/")
 
 	buf.WriteString(`<li class="glance-entry" data-testid="glance-entry-`)
@@ -164,9 +165,9 @@ func writeGlanceEntry(buf *bytes.Buffer, root string, e refindex.Entry) {
 	buf.WriteString(`">`)
 
 	if e.Source == refindex.SourceDefault {
-		writeGlanceDefaultEntry(buf, root, e, name)
+		writeGlanceDefaultEntry(buf, root, e, name, mdl)
 	} else {
-		writeGlanceDesignEntry(buf, e, name)
+		writeGlanceDesignEntry(buf, e, name, mdl)
 	}
 	buf.WriteString(`</li>`)
 }
@@ -186,7 +187,7 @@ func writeGlanceEntry(buf *bytes.Buffer, root string, e refindex.Entry) {
 // inside the same boardServable gate) is honestly withheld, exactly as
 // the exhaustive section already degrades: a link that cannot work does
 // not exist to give, never a broken link.
-func writeGlanceDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name string) {
+func writeGlanceDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name string, mdl *model.Model) {
 	title, class, story, boardServable := specWorkingTreeMeta(root, name)
 	if title == "" {
 		title = e.Ref
@@ -197,7 +198,7 @@ func writeGlanceDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, n
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(title))
 	buf.WriteString(`</a> `)
-	writeStatusChip(buf, e.SpecStatus)
+	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, e.SpecStatus))
 
 	if boardServable {
 		buf.WriteString(` &middot; <a class="glance-board" href="`)
@@ -220,11 +221,11 @@ func writeGlanceDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, n
 // Never matrix/verdict (a still-drafting feature carries no built evidence
 // for either to show — dc-3, ADJ-32 f3 rejected); never an in-review chip
 // (dc-3's evidence-bearing-state bar).
-func writeGlanceDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string) {
+func writeGlanceDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, mdl *model.Model) {
 	buf.WriteString(`<a href="`)
 	buf.WriteString(stdhtml.EscapeString(designBoardHref(name)))
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(e.Ref))
 	buf.WriteString(`</a> `)
-	writeStatusChip(buf, e.SpecStatus)
+	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, e.SpecStatus))
 }

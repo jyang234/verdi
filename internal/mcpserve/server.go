@@ -8,6 +8,9 @@ import (
 	"io"
 	"net"
 	"sync"
+
+	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // ServerVersion is the version string reported in initialize's
@@ -31,12 +34,28 @@ type Server struct {
 	// inspects its own ServeConn error and stays untouched by this field.
 	// `verdi serve` wires os.Stderr; tests inject a bytes.Buffer.
 	ErrLog io.Writer
+
+	// model is the store's resolved operating model (set by NewServer,
+	// once, from store.Open): toolDefs interpolates its class display
+	// words into the tool catalog's description text
+	// (spec/vocabulary-surfaces ac-3). nil serves bare ids.
+	model *model.Model
 }
 
 // NewServer constructs a Server over root (a resolved store root —
-// internal/store.FindRoot's result).
+// internal/store.FindRoot's result). It resolves the store's operating
+// model ONCE here (store.Open — spec/vocabulary-surfaces ac-3: the tool
+// catalog's assembly step reads Config.Model for class display words;
+// construction is the entrypoint, never a per-request open). A root
+// whose config cannot be opened serves bare ids (nil model) — the exact
+// posture a model with no renames has, and the same fail-soft NewServer
+// has always had (per-call store problems surface as tool errors).
 func NewServer(root string) *Server {
-	return &Server{Backend: &Backend{Root: root}}
+	var mdl *model.Model
+	if cfg, err := store.Open(root); err == nil {
+		mdl = cfg.Model
+	}
+	return &Server{Backend: &Backend{Root: root}, model: mdl}
 }
 
 // dispatch answers one JSON-RPC request. Protocol-level failures (unknown
@@ -55,7 +74,7 @@ func (s *Server) dispatch(ctx context.Context, req rpcRequest) rpcResponse {
 	case "ping":
 		resp.Result = map[string]any{}
 	case "tools/list":
-		resp.Result = map[string]any{"tools": toolDefs()}
+		resp.Result = map[string]any{"tools": toolDefs(s.model)}
 	case "tools/call":
 		resp.Result = s.callTool(ctx, req.Params)
 	default:
