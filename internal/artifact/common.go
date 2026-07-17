@@ -245,15 +245,31 @@ func cutLastAt(s string) (before, after string, ok bool) {
 // reject 02's own documents; flagged in the phase 4 report as an
 // invention-ledger candidate for 02 §Common frontmatter to document
 // formally. No format is enforced on the value beyond being a string.
+// Custom is a team's sanctioned extension point (spec/scaffold-templates
+// ac-2, operating-model dc-2's `custom:` precedent for model.yaml,
+// extended verbatim to every kind that embeds Base): a free-form
+// map decodes without tripping KnownFields(true) on ITS OWN nested keys,
+// since map[string]any accepts any nested structure — only the top-level
+// `custom:` key itself needs to be a KNOWN field of Base for the outer
+// KnownFields check to accept it, which declaring this field achieves.
+// Every key OUTSIDE custom: is still rejected exactly as before: this is
+// not a general KnownFields carve-out, only a single named namespace.
+//
+// The restricted YAML dialect (anchors/aliases/custom tags, checkDialect)
+// is untouched by this field's existence: checkDialect walks the raw
+// yaml.Node tree before any struct decode happens, so a dialect violation
+// anywhere inside a custom: block still fails closed exactly like
+// everywhere else in frontmatter — no carve-out, verbatim per dc-2.
 type Base struct {
-	ID         string      `yaml:"id"`
-	Kind       Kind        `yaml:"kind"`
-	Title      string      `yaml:"title"`
-	Owners     []string    `yaml:"owners"`
-	Schema     string      `yaml:"schema,omitempty"`
-	Links      []Link      `yaml:"links,omitempty"`
-	Frozen     *Frozen     `yaml:"frozen,omitempty"`
-	Provenance *Provenance `yaml:"provenance,omitempty"`
+	ID         string         `yaml:"id"`
+	Kind       Kind           `yaml:"kind"`
+	Title      string         `yaml:"title"`
+	Owners     []string       `yaml:"owners"`
+	Schema     string         `yaml:"schema,omitempty"`
+	Links      []Link         `yaml:"links,omitempty"`
+	Frozen     *Frozen        `yaml:"frozen,omitempty"`
+	Provenance *Provenance    `yaml:"provenance,omitempty"`
+	Custom     map[string]any `yaml:"custom,omitempty"`
 }
 
 // validateBase checks the fields common to every kind: id parses as a ref
