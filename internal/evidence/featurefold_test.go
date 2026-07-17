@@ -163,6 +163,36 @@ func TestFoldFeature_PerStatus(t *testing.T) {
 	}
 }
 
+// TestFoldFeature_UnauthoredOutcomeAttestation_StaysPending proves spec/
+// attest-helper dc-3 at this package's own feature-fold call site
+// (featurefold.go): an unauthored `verdi attest` scaffold does not satisfy
+// the outcome floor (parent spec/closure-ergonomics dc-2 — "not foldable
+// until authored"), so an otherwise-closed implementing story with only an
+// unauthored outcome attestation and no other floor signal stays PENDING,
+// never evidenced.
+func TestFoldFeature_UnauthoredOutcomeAttestation_StaysPending(t *testing.T) {
+	root := t.TempDir()
+	featureSlug := "loan-update"
+	writeAttestation(t, root, featureSlug, "ac-1", unauthoredScaffoldFixture)
+
+	spec := featureSpec(t, "ac-1", artifact.EvidenceAttestation)
+	result, err := FoldFeature(FeatureInput{
+		Spec:        spec,
+		Stories:     map[string][]ImplementingStory{"ac-1": {{SpecRef: "spec/story-a", Closed: true}}},
+		StoreRoot:   root,
+		FeatureSlug: featureSlug,
+	})
+	if err != nil {
+		t.Fatalf("FoldFeature: %v", err)
+	}
+	if got := result.ACs[0].Status; got != StatusPending {
+		t.Fatalf("status = %s, want pending (an unauthored scaffold does not satisfy the outcome floor, dc-3); summary=%q", got, result.ACs[0].Summary)
+	}
+	if !strings.Contains(result.ACs[0].Summary, "attestation:absent") {
+		t.Fatalf("Summary = %q, want it to mention attestation:absent (dc-3: unauthored renders identically to absent)", result.ACs[0].Summary)
+	}
+}
+
 // TestFoldFeature_Precedence proves violated beats every other status even
 // when the floor is otherwise fully satisfied and every story is closed —
 // 03's total precedence, violated > evidenced > pending > no-signal.
