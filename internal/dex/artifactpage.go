@@ -9,11 +9,12 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // writeArtifactPage renders and writes one committed-zone permalink page
 // (05 §Verdi-dex mechanics: "/a/<kind>/<name>").
-func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, stamp buildStamp, ix *index.Index, known map[string]bool, lens *lensData, p *artifactPage) error {
+func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, stamp buildStamp, ix *index.Index, known map[string]bool, lens *lensData, mdl *model.Model, p *artifactPage) error {
 	bodyHTML, err := renderBody(p.Entry.Kind, p.Entry.DiagramClass, p.Entry.Body)
 	if err != nil {
 		return fmt.Errorf("dex: rendering %s: %w", p.Entry.Ref, err)
@@ -57,11 +58,12 @@ func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, st
 	data := pageData{
 		Title:            p.Entry.Title,
 		Status:           p.Entry.Status,
-		LadderBadges:     ladder.Badges,
+		StatusLabel:      mdl.DisplayState("", p.Entry.Status),
+		LadderBadges:     ladderBadgeViews(mdl, ladder.Badges),
 		Breadcrumb:       pageBreadcrumb(p.Entry.Kind, p.Entry.Title, isArchivedSpec(p.RelPath)),
 		Banner:           banner,
 		BannerClass:      bannerClass(class),
-		MetaRows:         append(artifactMetaRows(p), ladder.Rows...),
+		MetaRows:         append(artifactMetaRows(p, mdl), ladder.Rows...),
 		BodyHTML:         template.HTML(bodyHTML),
 		DispositionsHTML: renderDispositionsTable(p.Meta.Dispositions),
 		FeatureLensHTML:  featureLensHTML(ix, known, p),
@@ -78,13 +80,15 @@ func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, st
 
 // artifactMetaRows builds the metadata card (05 §Verdi-dex page anatomy:
 // "owners, decided/frozen, supersession links, provenance path").
-func artifactMetaRows(p *artifactPage) []metaRow {
+func artifactMetaRows(p *artifactPage, mdl *model.Model) []metaRow {
 	var rows []metaRow
 	if len(p.Meta.Base.Owners) > 0 {
 		rows = append(rows, metaRow{Label: "Owners", Value: strings.Join(p.Meta.Base.Owners, ", ")})
 	}
 	if p.Meta.Class != "" {
-		rows = append(rows, metaRow{Label: "Class", Value: string(p.Meta.Class)})
+		// The class WORD resolves through the model's class-display chain
+		// (spec/vocabulary-surfaces ac-2); the ref/id layer never does.
+		rows = append(rows, metaRow{Label: "Class", Value: mdl.DisplayClass(string(p.Meta.Class))})
 	}
 	if p.Meta.Story != "" {
 		rows = append(rows, metaRow{Label: "Story", Value: p.Meta.Story})

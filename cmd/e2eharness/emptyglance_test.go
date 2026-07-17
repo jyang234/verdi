@@ -113,7 +113,7 @@ func TestEmptyGlanceFixture_Handler_Negative_WrongMethod(t *testing.T) {
 // actually mounted on the control server's own mux, not merely present as
 // an unwired method.
 func TestControlServer_WiresEmptyGlanceFixture(t *testing.T) {
-	c := newControlServer(t.TempDir())
+	c := newControlServer(t.TempDir(), t.TempDir())
 	req := httptest.NewRequest(http.MethodGet, "/empty-glance-fixture", nil)
 	rec := httptest.NewRecorder()
 	c.handler().ServeHTTP(rec, req)

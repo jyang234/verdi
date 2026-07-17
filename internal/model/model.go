@@ -121,7 +121,15 @@ type Vocabulary struct {
 // exists. class is accepted to match the fixed signature Task 6 depends
 // on and to leave room for a future per-class override, but v1's own
 // vocabulary is flat: only id is consulted this phase.
+//
+// A nil receiver resolves id to itself (spec/vocabulary-surfaces): every
+// consuming surface — CLI verdicts, board, dex, MCP — falls back to bare
+// ids when no model was resolved, never panics and never invents a
+// second fallback table of its own.
 func (m *Model) DisplayState(class, id string) string {
+	if m == nil {
+		return id
+	}
 	if v, ok := m.Vocabulary.States[id]; ok && v != "" {
 		return v
 	}
@@ -129,10 +137,35 @@ func (m *Model) DisplayState(class, id string) string {
 }
 
 // DisplayVerb returns the display label for verb id (Vocabulary.Verbs),
-// or id unchanged when no rename exists.
+// or id unchanged when no rename exists. Nil-receiver-safe exactly like
+// DisplayState.
 func (m *Model) DisplayVerb(id string) string {
+	if m == nil {
+		return id
+	}
 	if v, ok := m.Vocabulary.Verbs[id]; ok && v != "" {
 		return v
+	}
+	return id
+}
+
+// DisplayClass returns the display label for class id
+// (spec/vocabulary-surfaces' one class-word chain, used verbatim by every
+// surface that renders a class word): Vocabulary.Classes[id] when the
+// model declares a rename there, else the class's own declared
+// Class.Display, else id itself — the same fallback-to-id shape
+// DisplayState/DisplayVerb established, one level deeper because a class
+// carries two independent sources of a display word instead of one.
+// Nil-receiver-safe exactly like both of them.
+func (m *Model) DisplayClass(id string) string {
+	if m == nil {
+		return id
+	}
+	if v, ok := m.Vocabulary.Classes[id]; ok && v != "" {
+		return v
+	}
+	if c, ok := m.Classes[id]; ok && c.Display != "" {
+		return c.Display
 	}
 	return id
 }

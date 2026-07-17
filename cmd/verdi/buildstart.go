@@ -55,17 +55,22 @@ func cmdBuildStart(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "build start:", err)
 		return 2
 	}
-	manifest, err := loadManifest(root)
+	// store.Open (not the bare loadManifest delegate): build start's
+	// verdict lines resolve display vocabulary through Config.Model
+	// (spec/vocabulary-surfaces ac-1) — the same single open that already
+	// loads the manifest, threaded down via deps.
+	cfg, err := store.Open(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "build start:", err)
 		return 2
 	}
+	manifest := cfg.Manifest
 
 	var runner upstream.Runner
 	if manifest.Toolchain != nil {
 		runner = upstream.RealRunner{Module: manifest.Toolchain.Module, Commit: manifest.Toolchain.Commit, Dir: root}
 	}
-	deps := syncDeps{Runner: runner, GoTest: realGoTestRunner{}, Stdout: stdout, Stderr: stderr}
+	deps := syncDeps{Runner: runner, GoTest: realGoTestRunner{}, Stdout: stdout, Stderr: stderr, Model: cfg.Model}
 
 	return runBuildStart(ctx, root, storyArg, deps, stdout, stderr)
 }
@@ -104,7 +109,11 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 		return 1
 	}
 	if spec.Status != "accepted-pending-build" {
-		fmt.Fprintf(stderr, "build start: %s status is %q, not accepted-pending-build; a build may only reference an accepted spec (03 §Gates)\n", spec.ID, spec.Status)
+		// Display resolution only (spec/vocabulary-surfaces ac-1): the
+		// comparison above and the branch name below stay on bare ids.
+		fmt.Fprintf(stderr, "build start: %s status is %q, not %s; a build may only reference an accepted spec (03 §Gates)\n", spec.ID,
+			deps.Model.DisplayState(string(spec.Class), string(spec.Status)),
+			deps.Model.DisplayState(string(spec.Class), "accepted-pending-build"))
 		return 1
 	}
 
@@ -135,7 +144,8 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 
 	regenerateBaseline(ctx, root, commit, spec, deps, "build start", stderr)
 
-	fmt.Fprintf(stdout, "build start: created branch %s from %s (status: accepted-pending-build)\n", branch, spec.ID)
+	fmt.Fprintf(stdout, "build start: created branch %s from %s (status: %s)\n", branch, spec.ID,
+		deps.Model.DisplayState(string(spec.Class), "accepted-pending-build"))
 	return 0
 }
 

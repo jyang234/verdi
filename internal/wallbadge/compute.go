@@ -6,6 +6,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // BoardBadges is ComputeBadges' full result for one spec's board.
@@ -45,7 +46,7 @@ type BoardBadges struct {
 // itself. superseLoader may be nil (no forge configured; every ladder
 // pending-supersession outcome then disclosed-unproven rather than
 // silently "not flagged").
-func ComputeBadges(ctx context.Context, root, specRelPath, specRevision string, fm *artifact.SpecFrontmatter, superseLoader SupersessionCandidateLoader) (*BoardBadges, error) {
+func ComputeBadges(ctx context.Context, root, specRelPath, specRevision string, fm *artifact.SpecFrontmatter, superseLoader SupersessionCandidateLoader, mdl *model.Model) (*BoardBadges, error) {
 	findings, err := lint.NewEngine().Run(ctx, root, lint.BuildContext(ctx, root), lint.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("wallbadge: running lint: %w", err)
@@ -85,7 +86,7 @@ func ComputeBadges(ctx context.Context, root, specRelPath, specRevision string, 
 		threshold = snap.Manifest.Audit.DeviationsStaleThreshold
 	}
 
-	stale, err := SpecStaleBadge(root, snap, fm.ID, threshold)
+	stale, err := SpecStaleBadge(root, snap, fm.ID, threshold, mdl)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +94,7 @@ func ComputeBadges(ctx context.Context, root, specRelPath, specRevision string, 
 		out.CaseFile = append(out.CaseFile, *stale)
 	}
 
-	pending, disclosure, err := PendingSupersessionBadge(ctx, superseLoader, fm.Links)
+	pending, disclosure, err := PendingSupersessionBadge(ctx, superseLoader, fm.Links, mdl)
 	if err != nil {
 		return nil, err
 	}

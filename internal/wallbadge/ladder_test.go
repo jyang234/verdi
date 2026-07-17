@@ -117,7 +117,7 @@ func TestSpecStaleBadge_FlaggedWithWitness(t *testing.T) {
 	writeDeviationReport(t, root, "widget-retry", flaggedDeviationReportMD(ladderCoversSHA))
 	snap := buildSnapshotFor(t, root)
 
-	got, err := SpecStaleBadge(root, snap, fm.ID, 3)
+	got, err := SpecStaleBadge(root, snap, fm.ID, 3, nil)
 	if err != nil {
 		t.Fatalf("SpecStaleBadge: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestSpecStaleBadge_NoReport(t *testing.T) {
 	root, fm := writeStoreSpec(t, "widget-retry", ladderStorySpec)
 	snap := buildSnapshotFor(t, root)
 
-	got, err := SpecStaleBadge(root, snap, fm.ID, 3)
+	got, err := SpecStaleBadge(root, snap, fm.ID, 3, nil)
 	if err != nil {
 		t.Fatalf("SpecStaleBadge: %v", err)
 	}
@@ -176,7 +176,7 @@ findings:
 `)
 	snap := buildSnapshotFor(t, root)
 
-	got, err := SpecStaleBadge(root, snap, fm.ID, 3)
+	got, err := SpecStaleBadge(root, snap, fm.ID, 3, nil)
 	if err != nil {
 		t.Fatalf("SpecStaleBadge: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestSpecStaleBadge_UnknownRef(t *testing.T) {
 	root, _ := writeStoreSpec(t, "widget-retry", ladderStorySpec)
 	snap := buildSnapshotFor(t, root)
 
-	got, err := SpecStaleBadge(root, snap, "spec/does-not-exist", 3)
+	got, err := SpecStaleBadge(root, snap, "spec/does-not-exist", 3, nil)
 	if err != nil {
 		t.Fatalf("SpecStaleBadge: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestPendingSupersessionBadge_FlaggedWithWitness(t *testing.T) {
 			Spec:   &artifact.SpecFrontmatter{Supersession: &artifact.Supersession{Amended: []artifact.SupersessionNote{{ID: "ac-1", Note: "tightened"}}}},
 		}},
 	}
-	got, disclosure, err := PendingSupersessionBadge(context.Background(), loader, implementsLink("spec/parent-feature#ac-1"))
+	got, disclosure, err := PendingSupersessionBadge(context.Background(), loader, implementsLink("spec/parent-feature#ac-1"), nil)
 	if err != nil {
 		t.Fatalf("PendingSupersessionBadge: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestPendingSupersessionBadge_FlaggedWithWitness(t *testing.T) {
 // implements edge at all has nothing to prove — nil record, no
 // disclosure, regardless of the loader (never consulted).
 func TestPendingSupersessionBadge_ImplementsNoFeature(t *testing.T) {
-	got, disclosure, err := PendingSupersessionBadge(context.Background(), fakeSupersessionLoader{}, nil)
+	got, disclosure, err := PendingSupersessionBadge(context.Background(), fakeSupersessionLoader{}, nil, nil)
 	if err != nil {
 		t.Fatalf("PendingSupersessionBadge: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestPendingSupersessionBadge_ImplementsNoFeature(t *testing.T) {
 // that DOES implement a feature renders a disclosure — never a badge,
 // never silence.
 func TestPendingSupersessionBadge_NilLoaderDisclosesUnproven(t *testing.T) {
-	got, disclosure, err := PendingSupersessionBadge(context.Background(), nil, implementsLink("spec/parent-feature#ac-1"))
+	got, disclosure, err := PendingSupersessionBadge(context.Background(), nil, implementsLink("spec/parent-feature#ac-1"), nil)
 	if err != nil {
 		t.Fatalf("PendingSupersessionBadge: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestPendingSupersessionBadge_NilLoaderDisclosesUnproven(t *testing.T) {
 // nil-loader case for a configured-but-unable-to-enumerate loader (e.g.
 // no default branch resolved) — same disclosed-unproven contract.
 func TestPendingSupersessionBadge_LoaderNotOkDisclosesUnproven(t *testing.T) {
-	got, disclosure, err := PendingSupersessionBadge(context.Background(), fakeSupersessionLoader{ok: false}, implementsLink("spec/parent-feature#ac-1"))
+	got, disclosure, err := PendingSupersessionBadge(context.Background(), fakeSupersessionLoader{ok: false}, implementsLink("spec/parent-feature#ac-1"), nil)
 	if err != nil {
 		t.Fatalf("PendingSupersessionBadge: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestPendingSupersessionBadge_ProvenUnflagged(t *testing.T) {
 			Spec:   &artifact.SpecFrontmatter{Supersession: &artifact.Supersession{Amended: []artifact.SupersessionNote{{ID: "co-1", Note: "unrelated"}}}},
 		}},
 	}
-	got, disclosure, err := PendingSupersessionBadge(context.Background(), loader, implementsLink("spec/parent-feature#ac-1"))
+	got, disclosure, err := PendingSupersessionBadge(context.Background(), loader, implementsLink("spec/parent-feature#ac-1"), nil)
 	if err != nil {
 		t.Fatalf("PendingSupersessionBadge: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestPendingSupersessionBadge_ProvenUnflagged(t *testing.T) {
 func TestPendingSupersessionBadge_LoaderErrorPropagates(t *testing.T) {
 	wantErr := errors.New("simulated transport failure")
 	loader := fakeSupersessionLoader{err: wantErr}
-	_, _, err := PendingSupersessionBadge(context.Background(), loader, implementsLink("spec/parent-feature#ac-1"))
+	_, _, err := PendingSupersessionBadge(context.Background(), loader, implementsLink("spec/parent-feature#ac-1"), nil)
 	if err == nil {
 		t.Fatal("got nil error, want the loader's transport failure to propagate")
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/jyang234/verdi/internal/decisionsweep"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -38,7 +39,10 @@ func readStoreFile(root, relPath string) ([]byte, error) {
 // when the ladder flags it. root is needed only to read the deviation
 // report's own `covers` field back out for the derivation record's input
 // revision (dc-5) — ScanSpecStale's fold itself is never re-derived here.
-func SpecStaleBadge(root string, snap *lint.Snapshot, specRef string, threshold int) (*DerivationRecord, error) {
+// mdl is accepted for symmetry with the model-aware badge pipeline but is
+// NOT consulted for the flag's display — the label is a fixed case-file id
+// (see the Label site below; finding judged-ladder-flags-share-state-namespace).
+func SpecStaleBadge(root string, snap *lint.Snapshot, specRef string, threshold int, mdl *model.Model) (*DerivationRecord, error) {
 	entries, err := decisionsweep.ScanSpecStale(root, snap, threshold)
 	if err != nil {
 		return nil, fmt.Errorf("wallbadge: spec-stale: %w", err)
@@ -70,7 +74,17 @@ func SpecStaleBadge(root string, snap *lint.Snapshot, specRef string, threshold 
 	records := append(ids, fmt.Sprintf("%d accepted-deviation disposition(s) accumulated (threshold exceeded: %v)", result.AcceptedDeviationCount, result.TriggeredByThreshold))
 
 	return &DerivationRecord{
-		Source:  "ladder:spec-stale",
+		Source: "ladder:spec-stale",
+		// FIXED label — NOT vocabulary-resolved. `spec-stale` is a case-
+		// file FLAG (03 §The amendment ladder), not a lifecycle state, so
+		// its display is NOT vocabulary-addressable in v1: flags are case-
+		// file taxonomy, a namespace disjoint from vocabulary.states, and
+		// mdl is deliberately not consulted for the flag label here.
+		// Finding judged-ladder-flags-share-state-namespace: routing this
+		// id through mdl.DisplayState let a states entry keyed `spec-stale`
+		// silently rename the flag. Genuine lifecycle-state badges (e.g.
+		// dex terminal-status badges) stay DisplayState-resolved; flags do
+		// not. Source, inputs, and records stay bare ids too — receipts.
 		Label:   "spec-stale",
 		Inputs:  []InputRecord{{Name: "deviation-report", Path: reportRelPath, Revision: covers}},
 		Records: records,
@@ -115,8 +129,11 @@ func readDeviationCovers(root, reportRelPath string) (string, error) {
 // flags it; a non-empty disclosure — never a record, never silence, per
 // ac-3's three-valued outcome — when loader is nil (no forge configured)
 // or a candidate load reports ok=false (open MRs could not be
-// enumerated, e.g. no default branch resolved).
-func PendingSupersessionBadge(ctx context.Context, loader SupersessionCandidateLoader, links []artifact.Link) (*DerivationRecord, string, error) {
+// enumerated, e.g. no default branch resolved). mdl is accepted for
+// symmetry with the model-aware badge pipeline but is NOT consulted for
+// the flag's display — the label is fixed (finding
+// judged-ladder-flags-share-state-namespace; see the Label site below).
+func PendingSupersessionBadge(ctx context.Context, loader SupersessionCandidateLoader, links []artifact.Link, mdl *model.Model) (*DerivationRecord, string, error) {
 	byFeature := evidence.ImplementsByFeature(links)
 	if len(byFeature) == 0 {
 		return nil, "", nil
@@ -175,10 +192,15 @@ func PendingSupersessionBadge(ctx context.Context, loader SupersessionCandidateL
 
 	return &DerivationRecord{
 		Source: "ladder:pending-supersession",
-		// The dex story-lens's own flag name, verbatim (spec/case-file-
-		// flags dc-4: the same computation must wear the same name on
-		// every surface that renders it — internal/dex/ladder.go's badge
-		// is the string "pending-supersession").
+		// FIXED label — NOT vocabulary-resolved, for the identical reason
+		// as spec-stale above (finding judged-ladder-flags-share-state-
+		// namespace): `pending-supersession` is a case-file FLAG, not a
+		// lifecycle state, so its display is not vocabulary-addressable in
+		// v1. spec/case-file-flags dc-4 still holds — the same computation
+		// wears the same FIXED name on every surface (dex's
+		// internal/dex/ladder.go renders the identical fixed id); mdl is
+		// deliberately not consulted here. Source/inputs/records stay bare
+		// ids — receipts.
 		Label:   "pending-supersession",
 		Inputs:  inputs,
 		Records: records,

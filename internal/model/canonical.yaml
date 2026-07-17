@@ -13,13 +13,16 @@
 # deviation is rejected by `verdi model check` (cmd/verdi/model.go).
 schema: verdi.model/v1
 
+# The display layer is deliberately empty — no vocabulary block and no
+# per-class display labels (spec/vocabulary-surfaces' parity floor: with
+# no model.yaml every display lookup falls back to the bare id, so every
+# surface prints byte-identical output). A store's own model.yaml may
+# declare display/vocabulary freely — both are frontier-exempt.
 classes:
   feature:
-    display: Feature
     decomposes: stubs
     template: feature.md
   story:
-    display: Story
     parent: feature
     template: story.md
 
