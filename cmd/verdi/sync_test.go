@@ -1044,24 +1044,25 @@ func TestCmdSync_GitlabLocalCheckout_RefusesNamingProjectID(t *testing.T) {
 	}
 }
 
-// cmdSyncProduceStore builds an env-less, origin-less GitHub store as a real
-// git repo (fixturegit) with a toolchain block but NO services, so a
-// --produce/--produce-runtime run completes hermetically (an empty bundle,
-// no upstream exec). It is the cmdSync register the below-the-seam
-// fake-forge tests are blind to: cmdSync builds the REAL forge, so this is
-// where ADJ-43's fix (no identifier refusal on paths that never dial) is
-// observable.
-func cmdSyncProduceStore(t *testing.T) {
+// cmdSyncProduceStore builds an env-less, origin-less store for forgeKind
+// ("github" or "gitlab") as a real git repo (fixturegit) with a toolchain
+// block but NO services, so a --produce/--produce-runtime run completes
+// hermetically (an empty bundle, no upstream exec). It is the cmdSync
+// register the below-the-seam fake-forge tests are blind to: cmdSync builds
+// the REAL forge, so this is where the "no identifier refusal on paths that
+// never dial" fixes — ADJ-43 (github) and ADJ-69 (gitlab) — are observable.
+func cmdSyncProduceStore(t *testing.T, forgeKind string) {
 	t.Helper()
 	for _, v := range []string{
 		"GITHUB_REPOSITORY_OWNER", "GITHUB_REPOSITORY", "GITHUB_TOKEN",
+		"CI_PROJECT_ID", "CI_API_V4_URL", "CI_JOB_TOKEN",
 		"CI_COMMIT_REF_NAME", "GITHUB_HEAD_REF", "GITHUB_REF_NAME",
 	} {
 		t.Setenv(v, "")
 	}
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
-			".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: github\ntoolchain:\n  module: github.com/jyang234/golang-code-graph\n  commit: cd38b1a56bb782177a207d741a39807821cf2c1c\n",
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: " + forgeKind + "\ntoolchain:\n  module: github.com/jyang234/golang-code-graph\n  commit: cd38b1a56bb782177a207d741a39807821cf2c1c\n",
 		},
 		Message: "store init",
 	}})
@@ -1076,7 +1077,7 @@ func cmdSyncProduceStore(t *testing.T) {
 // ac-1 (co-3 byte-identity). The pre-existing --produce tests inject a fake
 // forge below the buildForge seam and so never observed this narrowing.
 func TestCmdSync_ProduceForceLocal_CompletesWithoutIdentifierRefusal(t *testing.T) {
-	cmdSyncProduceStore(t)
+	cmdSyncProduceStore(t, "github")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdSync([]string{"--produce", "--force-local"}, &stdout, &stderr)
@@ -1094,7 +1095,7 @@ func TestCmdSync_ProduceForceLocal_CompletesWithoutIdentifierRefusal(t *testing.
 // forge construction without the ac-1 identifier refusal — --produce-runtime
 // only reads CIContext (nil-guarded), it never dials (ADJ-43).
 func TestCmdSync_ProduceRuntimeForceLocal_CompletesWithoutIdentifierRefusal(t *testing.T) {
-	cmdSyncProduceStore(t)
+	cmdSyncProduceStore(t, "github")
 
 	var stdout, stderr bytes.Buffer
 	code := cmdSync([]string{"--produce-runtime", "--force-local"}, &stdout, &stderr)
@@ -1103,5 +1104,26 @@ func TestCmdSync_ProduceRuntimeForceLocal_CompletesWithoutIdentifierRefusal(t *t
 	}
 	if strings.Contains(stderr.String(), "cannot identify the GitHub repository") {
 		t.Errorf("stderr = %q, must NOT hit the ac-1 identifier refusal — --produce-runtime never dials the forge (ADJ-43)", stderr.String())
+	}
+}
+
+// TestCmdSync_GitlabProduceForceLocal_CompletesWithoutIdentifierRefusal is
+// the gitlab counterpart proving ADJ-69's refusal does NOT leak onto the
+// non-dialing --produce path: `verdi sync --produce --force-local` over a
+// gitlab store with CI_PROJECT_ID unset builds an identifier-tolerant forge
+// (buildForgeForCI, requireIdentifier=false) and completes exactly as it did
+// before ADJ-69 — the empty project id is harmless where nothing dials
+// (ADJ-43). It must reach exit 0 without hitting the gitlab identifier
+// refusal, proving the requireIdentifier=false path stayed byte-identical.
+func TestCmdSync_GitlabProduceForceLocal_CompletesWithoutIdentifierRefusal(t *testing.T) {
+	cmdSyncProduceStore(t, "gitlab")
+
+	var stdout, stderr bytes.Buffer
+	code := cmdSync([]string{"--produce", "--force-local"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cmdSync(--produce --force-local) in an env-less/origin-less gitlab checkout: exit = %d, want 0 (completes as pre-ADJ-69); stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "cannot identify the GitLab project") {
+		t.Errorf("stderr = %q, must NOT hit the ADJ-69 identifier refusal — --produce never dials the forge (ADJ-43)", stderr.String())
 	}
 }
