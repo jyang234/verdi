@@ -44,9 +44,9 @@ type Rollup struct {
 // implement it per tracker; the registry selects one by StoryRef scheme.
 //
 // Resolve is read-mostly and safe to cache (04 §Semantics: 15m default
-// TTL via NewCachingProvider). PublishRollup runs in CI only and must be
-// idempotent on the key (Story, Commit): republishing an unchanged rollup
-// is an update, never a duplicate.
+// TTL). PublishRollup runs in CI only and must be idempotent on the key
+// (Story, Commit): republishing an unchanged rollup is an update, never
+// a duplicate.
 //
 // Adapters report failures using the sentinel errors in this package
 // (ErrNotFound, ErrUnauthorized, ErrUnavailable) so callers can implement
