@@ -507,7 +507,7 @@ func TestCLIShowcaseAttest(t *testing.T) {
 // mechanical per-finding bullet form dc-2 requires the verb to locate and
 // replace so the frontmatter write and the human-legible body stay in
 // agreement. The real, disclosed, and CORRECT outcome driving the verb
-// against it is therefore a fail-closed operational refusal naming the
+// against it is therefore a fail-closed verdict refusal naming the
 // finding it could not safely reconcile — never a silent, structurally
 // unsound body edit — exactly the same "real, disclosed fact about the
 // showcase store" pattern this file's own doc comment already uses for
@@ -516,6 +516,12 @@ func TestCLIShowcaseAttest(t *testing.T) {
 // frontmatter) against genuine content, not a synthetic fixture built to
 // make it succeed; disposition-verb's ac-1/ac-2/ac-3 obligations are proven
 // in full, on real align-generated reports, by cmd/verdi/disposition_test.go.
+//
+// Exit code: body/frontmatter desync is a VERDICT (exit 1), not an
+// operational error — ADJ-53 j-5 (shipped behavior, cmd/verdi/disposition.go)
+// reclassified it, and this assertion is aligned to that shipped behavior
+// under ADJ-55 (a cross-story correction: PR #115 landed the reclassification
+// without updating this showcase test, leaving origin/main red).
 func TestCLIShowcaseDisposition(t *testing.T) {
 	root := provisionShowcaseStore(t)
 
@@ -524,8 +530,8 @@ func TestCLIShowcaseDisposition(t *testing.T) {
 	writeTestFile(t, reportPath, reportData)
 
 	stdout, stderr, code := runBinary(t, root, "disposition", "spec/borrower-update-mobile", "f-2", "accepted-deviation", "--rationale", "confirmed by the showcase coverage check", "--amend")
-	if code != 2 {
-		t.Fatalf("verdi disposition: exit %d, want 2 (operational — the real committed report's body is hand-authored prose, not align.RenderBody's mechanical bullet form)\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	if code != 1 {
+		t.Fatalf("verdi disposition: exit %d, want 1 (verdict — body/frontmatter desync is a verdict per ADJ-53 j-5; the real committed report's body is hand-authored prose, not align.RenderBody's mechanical bullet form)\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 	}
 	if !strings.Contains(stderr, "f-2") {
 		t.Fatalf("stderr = %q, want it to name the finding (f-2) it could not safely reconcile", stderr)
