@@ -36,13 +36,14 @@ var verbPhase = map[string]int{
 	"audit":           13, // R4-I-10, V1-P5 — beyond v0's numbered phases; a real, implemented verb, never "out of scope" (phase 0)
 	"attest":          16, // legibility-ergonomics round, spec/attest-helper dc-1 — ratified new verb (task 3.R); scaffolds an attestation skeleton for a (story, AC) pair
 	"disposition":     16, // round 6, spec/disposition-verb (spec/closure-ergonomics ac-3) — new verb, ratified into 05 §CLI in the same change
+	"model":           17, // extensibility phase 1, spec/model-schema ac-3 (ledger L-M1) — new verb, ratified into 05 §CLI in the same change; `verdi model check` validates .verdi/model.yaml (or the embedded canonical default) fail-closed
 }
 
 const usage = `usage: verdi <verb> [args...]
 
 verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
        rollup, close, disposition, waivers, verify-artifact, dex, gc, gate,
-       board, audit, attest`
+       board, audit, attest, model`
 
 // run parses args and returns the exit code per the CLAUDE.md contract:
 // 0 clean / 1 verdict failure / 2 operational error. Phase 1 has no verdicts
@@ -118,6 +119,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if verb == "disposition" {
 		return cmdDisposition(args[1:], os.Stdout, stderr)
+	}
+	if verb == "model" {
+		return runModelVerb(args[1:], os.Stdout, stderr)
 	}
 
 	if phase == 0 {

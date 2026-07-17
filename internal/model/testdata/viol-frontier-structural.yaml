@@ -1,0 +1,58 @@
+# dc-1's frontier fixture: a WELL-FORMED model (every kernel rule in
+# validate.go's Validate holds, INCLUDING the terminal-freeze rule — no
+# transition departs a terminal state) that still describes a DIFFERENT
+# lifecycle than today's canonical one: an extra "reject" transition on the
+# feature class (accepted-pending-build -> draft), not present in
+# canonicalModel (canonical.go). Both endpoints are NON-terminal, so this
+# stays Validate-clean and trips ONLY checkFrontier with the pinned text.
+# (The earlier edition used a closed -> accepted-pending-build "reopen"
+# transition; the terminal-freeze kernel rule now forbids departing a
+# terminal state, so the deviation moved to a non-terminal transition to keep
+# this fixture a frontier-only — not kernel — violation.)
+schema: verdi.model/v1
+
+classes:
+  feature:
+    display: Feature
+    decomposes: stubs
+    template: feature.md
+  story:
+    display: Story
+    parent: feature
+    template: story.md
+
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }
+      - verb: reject
+        from: accepted-pending-build
+        to: draft
+        obligations: []
+  story:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }

@@ -1,0 +1,17 @@
+# Violates: transition missing the `obligations:` key entirely (nil slice
+# after decode) — distinct from a present, empty `obligations: []`
+# (Transition.Obligations, model.go; the rule this fixture trips lives in
+# Lifecycle.validate, validate.go).
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build]
+    terminal: [accepted-pending-build]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build

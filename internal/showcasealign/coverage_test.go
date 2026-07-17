@@ -159,6 +159,14 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// spec/borrower-update-api story from examples/showcase.
 	"cli:attest": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:model (extensibility phase 1, spec/model-schema, ledger L-M1):
+	// added alongside the new verb itself — TestCLIShowcaseModel
+	// (cli_showcase_test.go) drives `verdi model check` against the real
+	// provisioned examples/showcase store, whose own committed .verdi/
+	// carries no model.yaml (a genuine, disclosed fact, not a workaround),
+	// proving the real embedded-canonical-default resolution path.
+	"cli:model": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec

@@ -1,0 +1,19 @@
+# Violates: obligation scheme outside the closed 3-value catalog
+# (schemeCatalog, validate.go). "vibes" is the guide's own example of a
+# non-kernel scheme (integration-startup-guide.md: `scheme "vibes" is not a
+# kernel scheme (static | attestation | behavioral)`).
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build]
+    terminal: [accepted-pending-build]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: vibes, kind: author-vouch }

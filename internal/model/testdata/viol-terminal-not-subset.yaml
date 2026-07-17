@@ -1,0 +1,17 @@
+# Violates: terminal states must be drawn from states (Lifecycle.validate,
+# validate.go) — "bogus-state" is not declared in states.
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build]
+    terminal: [accepted-pending-build, bogus-state]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }

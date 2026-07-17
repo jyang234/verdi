@@ -1,0 +1,9 @@
+# Violates: a class's parent must name a declared class (Model.Validate,
+# validate.go) — "nonexistent-class" is not declared under classes:.
+schema: verdi.model/v1
+classes:
+  story:
+    display: Story
+    parent: nonexistent-class
+    template: story.md
+lifecycle: {}

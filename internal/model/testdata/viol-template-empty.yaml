@@ -1,0 +1,7 @@
+# Violates: every class must carry a non-empty template (Model.Validate,
+# validate.go) — `feature` declares no template: key at all.
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+lifecycle: {}

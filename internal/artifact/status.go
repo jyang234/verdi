@@ -1,5 +1,7 @@
 package artifact
 
+import "sort"
+
 // Status is a per-kind lifecycle status string (02 §Kind registry). Each
 // kind (and, for specs, each class) has its own closed enum; unknown
 // values fail closed.
@@ -58,3 +60,17 @@ var (
 		"dismissed":  true,
 	}
 )
+
+// SpecFeatureStatuses returns the feature- and story-class status enum's
+// members, sorted (internal/model's spec/model-schema ac-2 parity proof:
+// the embedded canonical model's lifecycle states must equal this set
+// exactly — via this exported accessor, never reflection on the private
+// specFeatureStatuses map above, so the two can never silently drift).
+func SpecFeatureStatuses() []string {
+	out := make([]string, 0, len(specFeatureStatuses))
+	for s := range specFeatureStatuses {
+		out = append(out, string(s))
+	}
+	sort.Strings(out)
+	return out
+}

@@ -218,6 +218,25 @@ func TestRun_DispositionDispatchesToRealVerb(t *testing.T) {
 	}
 }
 
+// TestRun_ModelDispatchesToRealVerb proves `run` routes "model" to the
+// real implementation (model.go, extensibility phase 1/spec/model-schema)
+// rather than the generic phase-stub path: a bare "model" (no "check"
+// subcommand) must produce model's own usage message, never the generic
+// "not implemented (phase 17)" other still-stubbed verbs would produce.
+func TestRun_ModelDispatchesToRealVerb(t *testing.T) {
+	var stderr bytes.Buffer
+	got := run([]string{"model"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([model]) = %d, want 2 (usage error, no subcommand given)", got)
+	}
+	if strings.Contains(stderr.String(), "not implemented") {
+		t.Fatalf("stderr = %q, want model's own usage message, not the generic stub message", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "usage: verdi model check") {
+		t.Fatalf("stderr = %q, want it to mention 'usage: verdi model check'", stderr.String())
+	}
+}
+
 // TestRun_NegativePaths covers the unknown-verb and no-args cases: both
 // exit 2 with usage, never silently succeeding (constitution 2).
 func TestRun_NegativePaths(t *testing.T) {

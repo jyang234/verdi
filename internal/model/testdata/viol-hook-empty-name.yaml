@@ -1,0 +1,17 @@
+# Violates: kind "hook" requires a non-empty hook name (Obligation.validate,
+# validate.go) — this obligation carries no `hook:` key.
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build]
+    terminal: [accepted-pending-build]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: behavioral, kind: hook }
