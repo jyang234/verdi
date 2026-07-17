@@ -18,9 +18,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -177,15 +182,86 @@ digest: sha256:%s
 }
 
 // snapshotRepo captures the working tree's full observable state — HEAD,
-// current branch, every local branch, and the porcelain status — so a
-// before/after comparison proves byte-for-byte non-mutation (ac-2): no
-// branch created, no file written, no commit made, no ref moved.
+// current branch, every local branch, the porcelain status, and a content
+// digest of the derived tree — so a before/after comparison proves
+// byte-for-byte non-mutation (ac-2): no branch created, no file written, no
+// commit made, no ref moved, and no in-place rewrite of an existing derived
+// record.
+//
+// The derived-tree digest closes a blind spot the porcelain status alone
+// leaves open (ADJ-72 th-3): `git status --porcelain` names an untracked
+// file by path but never reports its content, so an in-place rewrite of an
+// already-untracked derived record — the very tree the closure fold reads —
+// would leave the porcelain output byte-identical and slip past a
+// porcelain-only comparison. The preflight path is proven read-only, so this
+// guards a latent regression, not a live defect;
+// TestSnapshotRepo_CatchesUntrackedDerivedRewrite proves the digest actually
+// catches such a rewrite where porcelain does not.
 func snapshotRepo(t *testing.T, dir string) string {
 	t.Helper()
 	return "HEAD=" + gitOutput(t, dir, "rev-parse", "HEAD") +
 		"branch=" + gitOutput(t, dir, "symbolic-ref", "--short", "HEAD") +
 		"branches=" + gitOutput(t, dir, "branch", "--list") +
-		"status=" + gitOutput(t, dir, "status", "--porcelain")
+		"status=" + gitOutput(t, dir, "status", "--porcelain") +
+		"derived=" + hashDerivedTree(t, dir)
+}
+
+// hashDerivedTree returns a deterministic, path-sorted digest of every
+// file's content under dir's .verdi/data/derived tree — the untracked
+// records the closure fold reads. A missing tree (a fixture with no derived
+// data yet) hashes to the empty string, never an error, mirroring the fold's
+// own never-synced tolerance.
+func hashDerivedTree(t *testing.T, dir string) string {
+	t.Helper()
+	root := filepath.Join(dir, ".verdi", "data", "derived")
+	var entries []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(content)
+		entries = append(entries, filepath.ToSlash(rel)+"="+hex.EncodeToString(sum[:]))
+		return nil
+	})
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("hashing derived tree under %s: %v", root, err)
+	}
+	sort.Strings(entries)
+	return strings.Join(entries, ",")
+}
+
+// preflightSiblingCommit checks out a throwaway branch at parentCommit,
+// commits one new file there, returns that commit's sha, and restores the
+// original branch — a real commit in dir's object database that is NOT an
+// ancestor of repo.Head (whether a divergent fork, when parentCommit is an
+// earlier layer, or a child of head, when parentCommit is head itself).
+// Mirrors internal/evidence/records_test.go's branchSiblingCommit, which is
+// package-private to internal/evidence and so cannot be imported into
+// package main. Only the one new file is staged (never `git add -A`), so any
+// already-seeded untracked derived records are left untouched on disk.
+func preflightSiblingCommit(t *testing.T, dir, parentCommit string) string {
+	t.Helper()
+	orig := strings.TrimSpace(gitOutput(t, dir, "symbolic-ref", "--short", "HEAD"))
+	gitOutput(t, dir, "checkout", "--quiet", "-b", "preflight-sibling", parentCommit)
+	if err := os.WriteFile(filepath.Join(dir, "sibling-only.txt"), []byte("sibling\n"), 0o644); err != nil {
+		t.Fatalf("writing sibling-only.txt: %v", err)
+	}
+	gitOutput(t, dir, "add", "sibling-only.txt")
+	gitOutput(t, dir, "-c", "user.name=t", "-c", "user.email=t@t.invalid", "commit", "--quiet", "--no-verify", "-m", "sibling commit")
+	sha := strings.TrimSpace(gitOutput(t, dir, "rev-parse", "HEAD"))
+	gitOutput(t, dir, "checkout", "--quiet", orig)
+	return sha
 }
 
 // erroringOpenMRsForge wraps a *forgefake.Forge, overriding ListOpenMRs to
@@ -462,6 +538,52 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		if gotClose != 1 {
 			t.Fatalf("runClose = %d, want 1 (unauthored scaffold must not satisfy the fold); stdout=%s stderr=%s", gotClose, cstdout.String(), cstderr.String())
 		}
+		// ac-3 agreement: an unauthored attestation leaves the AC's attestation
+		// kind unsatisfied, so the story is ineligible and the real close refuses
+		// on the SAME shared eligibility line preflight rehearsed — the stronger,
+		// assertable proof over a bare exit==1 (ADJ-72 th-2).
+		if !strings.Contains(cstdout.String(), "[FAIL] closure: 1. story eligible") {
+			t.Fatalf("close stdout missing the SAME eligibility FAIL line preflight showed: %s", cstdout.String())
+		}
+	})
+
+	// dc-4's "found but excluded as non-ancestor" stale rendering: a derived
+	// record present only at a commit head does not descend from is excluded by
+	// the authoritative fold, but --preflight discloses that it was
+	// found-and-excluded (naming the sha) rather than merely absent. This is
+	// the only test that drives renderStoryKindGap's excluded-commit branch
+	// (closepreflight.go:256-258), which fired in NO test before ADJ-72 (th-4).
+	t.Run("evidence only on a non-ancestor sibling commit reads as found-but-excluded", func(t *testing.T) {
+		repo := buildPreflightFixtureRepo(t)
+		// A behavioral record exists, but only on a sibling branch's own CI run
+		// at a commit head never descended from. The fold excludes it as a
+		// non-ancestor, so behavioral stays genuinely unmet — and the disclosure
+		// names the excluded sha so the author learns their green run was on the
+		// wrong commit, not simply missing.
+		sibling := preflightSiblingCommit(t, repo.Dir, repo.Head)
+		writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, sibling,
+			featureFixtureEvidenceJSON("ac-1", "behavioral", "pass", sibling))
+		before := snapshotRepo(t, repo.Dir)
+
+		var pstdout, pstderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		if rc != 1 {
+			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
+		}
+		// The exact line, INCLUDING the excluded-sha suffix: asserting only the
+		// "no current passing record" prefix would still pass against a deleted
+		// excluded-commit branch, so the full-line assertion is what makes this a
+		// genuine witness for that branch rather than a vacuous one (th-4).
+		wantExcluded := "ac-1 behavioral: no current passing record; derived-tree root probed: " +
+			preflightDerivedRoot() + " (found but excluded as non-ancestor: [" + sibling + "])"
+		if !strings.Contains(pstdout.String(), wantExcluded) {
+			t.Fatalf("preflight stdout missing the found-but-excluded disclosure %q:\n%s", wantExcluded, pstdout.String())
+		}
+
+		after := snapshotRepo(t, repo.Dir)
+		if before != after {
+			t.Fatalf("--preflight mutated the repo:\nbefore: %s\nafter:  %s", before, after)
+		}
 	})
 
 	// ADJ-56 finding 1 (0.80): a source:local passing record must NEVER read
@@ -545,6 +667,35 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 			t.Fatalf("close stdout missing the SAME eligibility FAIL line preflight showed: %s", cstdout.String())
 		}
 	})
+}
+
+// TestSnapshotRepo_CatchesUntrackedDerivedRewrite proves snapshotRepo's
+// ADJ-72 th-3 strengthening genuinely closes the blind spot it documents: an
+// in-place rewrite of an already-untracked derived record changes
+// snapshotRepo's output (so any future preflight regression that rewrote a
+// derived file in place would be caught by the ac-2 non-mutation
+// before/after), even though `git status --porcelain` — snapshotRepo's
+// pre-th-3 sole proxy for the working tree — stays byte-identical across that
+// same rewrite and would have missed it entirely.
+func TestSnapshotRepo_CatchesUntrackedDerivedRewrite(t *testing.T) {
+	repo := buildPreflightFixtureRepo(t)
+	writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, repo.Head,
+		featureFixtureEvidenceJSON("ac-1", "static", "pass", repo.Head))
+
+	porcelainBefore := gitOutput(t, repo.Dir, "status", "--porcelain")
+	snapBefore := snapshotRepo(t, repo.Dir)
+
+	// Rewrite the SAME untracked derived file with different content (pass ->
+	// fail): the path is unchanged, so porcelain cannot perceive it.
+	writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, repo.Head,
+		featureFixtureEvidenceJSON("ac-1", "static", "fail", repo.Head))
+
+	if porcelainAfter := gitOutput(t, repo.Dir, "status", "--porcelain"); porcelainAfter != porcelainBefore {
+		t.Fatalf("precondition: git status --porcelain was expected to be blind to an in-place untracked rewrite, but it changed:\nbefore=%q\nafter =%q", porcelainBefore, porcelainAfter)
+	}
+	if snapAfter := snapshotRepo(t, repo.Dir); snapAfter == snapBefore {
+		t.Fatalf("snapshotRepo did not catch an in-place untracked derived rewrite — th-3 blind spot still open:\n%s", snapAfter)
+	}
 }
 
 // TestRunPreflight_StoryScope_ReadyThenClose is ac-3--behavioral's second
