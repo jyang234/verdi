@@ -25,6 +25,16 @@
 // inV0 below, with its own hermeticity note (gc can REMOVE a managed
 // worktree, a real mutation this inventory check must never risk against
 // the shared self-hosted checkout).
+//
+// Legibility-ergonomics round (spec/attest-helper): `attest` is an
+// entirely NEW top-level verb (dc-1), not a graduated stub — added
+// straight to inV0 below. Its own argument-count check runs before any
+// store root is resolved (cmd/verdi/attest.go's cmdAttest), so a bare
+// `verdi attest` (no args) against the shared self-hosted checkout fails
+// on usage alone, deterministically, before touching anything — the same
+// safety property `matrix`/`rollup`/`design`/`accept`/`board` already rely
+// on in the default case below, needing no special-cased hermeticity
+// branch of its own.
 package specalign
 
 import "testing"
@@ -34,11 +44,12 @@ func TestV0CLIVerbInventory(t *testing.T) {
 
 	// 05-surfaces.md §CLI's table (minus dex's own "build" subcommand,
 	// handled specially below) plus I-7's `gate`, I-20's `board`, R4-I-6's
-	// `build`, R4-I-10's `audit`, and round-6's `close`.
+	// `build`, R4-I-10's `audit`, round-6's `close`, and the
+	// legibility-ergonomics round's `attest` (spec/attest-helper dc-1).
 	inV0 := []string{
 		"lint", "design", "accept", "feature", "build", "align", "sync",
 		"serve", "mcp", "matrix", "rollup", "dex", "gate", "board", "audit",
-		"close", "gc",
+		"close", "gc", "attest",
 	}
 	// PLAN.md §5 scope discipline, verbatim (as amended: `close`/`gc`
 	// graduated to real, round 6): "Explicitly out of v0 (not stubbed —
