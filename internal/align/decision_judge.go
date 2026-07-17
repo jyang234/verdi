@@ -282,7 +282,7 @@ func RunDecisionSweep(ctx context.Context, runner JudgeRunner, in DecisionJudged
 		findings = append(findings, artifact.ConflictFinding{
 			ID:        "judged-" + store.RefSlug(jf.ID),
 			Kind:      artifact.FindingJudged,
-			Text:      fmt.Sprintf("%s (confidence %.2f)", jf.Text, jf.Confidence),
+			Text:      fmt.Sprintf("%s (confidence %.2f)", normalizeJudgeText(jf.Text), jf.Confidence),
 			TargetRef: jf.Target,
 		})
 	}
