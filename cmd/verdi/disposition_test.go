@@ -309,6 +309,72 @@ func TestRunDisposition_SurvivesFreeze(t *testing.T) {
 	}
 }
 
+// TestRunDisposition_JudgeNewlineTextRendersSingleLineAndDispositionsCleanly
+// is ADJ-53's j-4 fix proof, end to end: a real (non-freeze) `verdi align`
+// run against a judge whose finding text carries an embedded newline
+// (alignFakeJudgeNewlineText, the same fixture shape as
+// TestRunJudgeOnce_NewlineInTextIsNormalized's unit-level proof) must
+// produce a report whose body renders that finding as exactly ONE line,
+// and the finding must then disposition cleanly through the BUILT binary —
+// the exact permanent-brick scenario judged-j-4 named, now closed at the
+// source (internal/align/judge.go's normalizeJudgeText) rather than taught
+// to the verb (ADJ-53's own chosen option).
+func TestRunDisposition_JudgeNewlineTextRendersSingleLineAndDispositionsCleanly(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeNewlineText(t)}
+	var out, errb bytes.Buffer
+	if got := runAlign(context.Background(), repo.Dir, false, deps, &out, &errb); got != 0 {
+		t.Fatalf("runAlign (newline-text judge) = %d, want 0; stderr=%s", got, errb.String())
+	}
+
+	before := decodeReportFile(t, reportPath)
+	jf, ok := findingByID(before.Findings, "judged-j-newline")
+	if !ok {
+		t.Fatalf("test setup: no judged-j-newline finding among %+v", before.Findings)
+	}
+	if strings.ContainsAny(jf.Text, "\n\r") {
+		t.Fatalf("finding text = %q, contains a raw newline/CR — normalizeJudgeText should have stripped it at the align/judge seam", jf.Text)
+	}
+	if !strings.Contains(jf.Text, "line one") || !strings.Contains(jf.Text, "line two") {
+		t.Fatalf("finding text = %q, want it to still carry both halves of the judge's text", jf.Text)
+	}
+
+	// The report's BODY must render this finding as exactly ONE whole
+	// line — not merely "somewhere as a substring" (strings.Split on "\n"
+	// is the same line-boundary-anchored check the verb's own
+	// replaceWholeLine uses, ADJ-52's j-2 fix).
+	wantLine := align.RenderFindingLine(jf)
+	bodyLines := strings.Split(string(readFile(t, reportPath)), "\n")
+	matches := 0
+	for _, l := range bodyLines {
+		if l == wantLine {
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("expected exactly one whole-line match for the finding's rendered line, found %d; body:\n%s", matches, readFile(t, reportPath))
+	}
+
+	// Disposition it — must succeed cleanly. Before ADJ-53's source fix,
+	// this exact scenario permanently bricked (judged-j-4): the verb's
+	// whole-line matcher could never match a multi-line "line" against any
+	// single split-line element.
+	_, stderr, code := runDispositionBinary(t, bin, repo.Dir, "spec/stale-decline", "judged-j-newline", "accepted-deviation", "--rationale", "confirmed normalized to a single line; dispositions cleanly")
+	if code != 0 {
+		t.Fatalf("verdi disposition (newline-text finding) exit = %d, want 0 (must disposition cleanly); stderr=%s", code, stderr)
+	}
+
+	after := decodeReportFile(t, reportPath)
+	f, ok := findingByID(after.Findings, "judged-j-newline")
+	if !ok || f.Disposition != artifact.FindingAcceptedDeviation || f.Note != "confirmed normalized to a single line; dispositions cleanly" {
+		t.Fatalf("judged-j-newline = %+v, want disposition accepted-deviation with the given rationale", f)
+	}
+}
+
 // TestRunDisposition_Refusals is obligation/disposition-verb--ac-2--behavioral:
 // table-driven, driving the built binary against fixture stores, proving
 // every named refusal is a verdict (exit 1) or operational error (exit 2) as
@@ -410,6 +476,39 @@ func TestRunDisposition_Refusals(t *testing.T) {
 		}
 		if !strings.Contains(stderr2, "frozen") {
 			t.Fatalf("--amend stderr = %q, want it to name the report frozen", stderr2)
+		}
+		assertUnchanged(t, path, before)
+	})
+
+	t.Run("body/frontmatter desync for a finding refuses as a verdict, never an internal error (ADJ-53 j-5)", func(t *testing.T) {
+		findings := livingFindings()
+		reportMD := buildDispositionFixture(t, findings, nil)
+
+		// Corrupt the body: replace computed-a's genuine rendered line with
+		// hand-drifted text bearing no relation to its frontmatter entry —
+		// the exact "body hand-drifted from its frontmatter" scenario j-5
+		// named. This is a condition of the REPORT'S OWN STATE (dc-3's
+		// verdict class), never an operational failure; ADJ-53 reclassifies
+		// it from exit 2 "internal error" to exit 1.
+		oldLine := align.RenderFindingLine(findings[0])
+		corrupted := bytes.Replace(reportMD, []byte(oldLine), []byte("- **computed-a** [UNDISPOSITIONED]: a hand-drifted line bearing no relation to the frontmatter"), 1)
+		if bytes.Equal(corrupted, reportMD) {
+			t.Fatal("test setup: expected computed-a's rendered line to be present and replaceable")
+		}
+
+		root := writeDispositionStoreRoot(t, "demo", corrupted)
+		path := reportPathFor(root, "demo")
+		before := readFile(t, path)
+
+		_, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "computed-a", "fixed", "--rationale", "z")
+		if code != 1 {
+			t.Fatalf("exit = %d, want 1 (verdict — a body/frontmatter desync, ADJ-53's j-5 reclassification); stderr=%s", code, stderr)
+		}
+		if strings.Contains(stderr, "internal error") {
+			t.Fatalf("stderr = %q, must NOT say 'internal error' — this misattributes an externally-authored report condition to a tool bug (ADJ-53)", stderr)
+		}
+		if !strings.Contains(stderr, "computed-a") || !strings.Contains(stderr, "drifted") {
+			t.Fatalf("stderr = %q, want it to honestly name the finding and the drift", stderr)
 		}
 		assertUnchanged(t, path, before)
 	})

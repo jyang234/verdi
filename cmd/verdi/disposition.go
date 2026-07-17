@@ -19,12 +19,14 @@
 //
 // Exit contract (CLAUDE.md 0/1/2; dc-3): 0 written; 1 a verdict about the
 // report's own state (unknown finding, disposition collision, nothing to
-// amend, frozen report); 2 every other operational failure, including a
-// malformed invocation (dc-3 scopes the three named verdicts to report-state
-// problems, so an argument-shape/vocabulary error — bad decision enum,
-// missing --rationale, wrong positional count — is operational, exactly like
-// every other verb's usage check in this package, and never touches the
-// report at all).
+// amend, frozen report, or — ADJ-53's j-5 reclassification — the report's
+// body and frontmatter having drifted out of agreement for the target
+// finding); 2 every other operational failure, including a malformed
+// invocation (dc-3 scopes verdicts to conditions of the report's own state,
+// so an argument-shape/vocabulary error — bad decision enum, missing
+// --rationale, wrong positional count — is operational, exactly like every
+// other verb's usage check in this package, and never touches the report
+// at all).
 package main
 
 import (
@@ -221,8 +223,19 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	newLine := align.RenderFindingLine(updated.Findings[idx])
 	newBody, n := replaceWholeLine(string(body), oldLine, newLine)
 	if n != 1 {
-		fmt.Fprintf(stderr, "disposition: internal error: expected exactly one occurrence of finding %q's rendered line in %s, found %d\n", findingID, reportPath, n)
-		return 2
+		// ADJ-53 (j-5 reclassification): a body/frontmatter desync for this
+		// finding is a condition of the REPORT'S OWN STATE (dc-3's verdict
+		// class), not an operational failure — nothing in the environment
+		// has failed; the report itself no longer agrees with itself for
+		// this finding (a hand-drifted body, or one rendered by an older
+		// format). Exit 1, naming the inconsistency honestly, never
+		// "internal error" (which misattributes an externally-authored
+		// report condition to a bug in the tool). With j-4's source fix
+		// (align.judge.go's normalizeJudgeText), the reachable cases here
+		// collapse to genuinely corrupted/hand-drifted reports — still
+		// honestly a verdict about that report, never this verb's fault.
+		fmt.Fprintf(stderr, "disposition: finding %q's rendered line does not appear exactly once in %s's body (found %d) — the report's body and frontmatter have drifted out of agreement for this finding\n", findingID, reportPath, n)
+		return 1
 	}
 
 	markdown := align.RenderMarkdown(&updated, newBody)
