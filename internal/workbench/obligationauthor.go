@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -129,7 +130,7 @@ func (s *boardSpecServer) actionObligationGraduate(ctx context.Context, name str
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("workbench: checking obligation path %s: %w", path, err)
 	}
-	if err := writeObligationFile(dir, path, []byte(content)); err != nil {
+	if err := writeObligationFile(path, []byte(content)); err != nil {
 		return err
 	}
 
@@ -168,31 +169,16 @@ func renderObligation(id, title, forKind, verifiesRef, body string, owners []str
 	return b.String()
 }
 
-// writeObligationFile writes the obligation atomically (temp-then-rename in
-// the destination directory), mirroring spliceSpec's and GraduateStickies'
-// own write discipline so a crash mid-write never leaves a half-written
-// artifact in the committed zone.
-func writeObligationFile(dir, path string, data []byte) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("workbench: creating %s: %w", dir, err)
-	}
-	tmp, err := os.CreateTemp(dir, ".obligation-*.md")
-	if err != nil {
-		return fmt.Errorf("workbench: temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("workbench: writing %s: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("workbench: closing %s: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("workbench: replacing %s: %w", path, err)
+// writeObligationFile writes the obligation atomically via the shared
+// internal/atomicfile.Write primitive (MkdirAll + CreateTemp + fsync +
+// Rename-into-place), mirroring spliceSpec's and GraduateStickies' own
+// write discipline so a crash mid-write never leaves a half-written
+// artifact in the committed zone. Previously a private
+// CreateTemp->Write->Close->Rename copy that, unlike atomicfile.Write,
+// never fsynced before the rename (CLEANUP-BEFORE #1).
+func writeObligationFile(path string, data []byte) error {
+	if err := atomicfile.Write(path, data, 0o644); err != nil {
+		return fmt.Errorf("workbench: %w", err)
 	}
 	return nil
 }

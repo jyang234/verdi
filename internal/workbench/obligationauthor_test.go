@@ -225,3 +225,71 @@ func TestBoardSpec_ObligationGraduate_FeatureWallRefused(t *testing.T) {
 		t.Errorf("refusal did not name the story-only rule: %s", rec.Body.String())
 	}
 }
+
+// TestWriteObligationFileUsesAtomicWrite is Task 1 of the
+// extensibility-phase1 plan (audit CLEANUP-BEFORE #1): the sticky-graduate
+// write path (writeObligationFile) had its own hand-rolled
+// CreateTemp->Write->Close->Rename sequence with no fsync before the
+// rename. This proves the fixed write leaves no temp sibling behind under
+// .verdi/obligations/ and lands the exact prose requested, across more than
+// one target AC/kind combination.
+func TestWriteObligationFileUsesAtomicWrite(t *testing.T) {
+	tests := []struct {
+		name  string
+		ref   string
+		kind  string
+		prose string
+	}{
+		{"behavioral evidence on ac-1", "ac-1", "obligation:behavioral", "the stale-decline retry is proven end to end [atomic-write-check]"},
+		{"static evidence on ac-2", "ac-2", "obligation:static", "the audit log tamper check runs on every write [atomic-write-check]"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newObligationBoardFixture(t)
+			h := NewHandler(root)
+			stickyID := stickyIDOnBoard(t, h, root, obligationBoardName, tc.prose)
+
+			rec := postBoardAPI(t, h, obligationBoardName, "sticky-graduate",
+				`{"id":"`+stickyID+`","ref":"`+tc.ref+`","kind":"`+tc.kind+`"}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("obligation graduate(%s,%s) = %d\n%s", tc.ref, tc.kind, rec.Code, rec.Body.String())
+			}
+
+			dir := filepath.Join(root, ".verdi", "obligations", obligationBoardName)
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatalf("ReadDir(%s): %v", dir, err)
+			}
+			for _, e := range entries {
+				if strings.Contains(e.Name(), ".tmp") {
+					t.Fatalf("leftover temp file %s", e.Name())
+				}
+			}
+
+			evidenceSuffix := strings.TrimPrefix(tc.kind, "obligation:")
+			path := filepath.Join(dir, tc.ref+"--"+evidenceSuffix+".md")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("obligation file not written at %s: %v", path, err)
+			}
+			if !strings.Contains(string(data), tc.prose) {
+				t.Fatalf("obligation file does not contain the sticky's prose %q:\n%s", tc.prose, data)
+			}
+		})
+	}
+}
+
+// TestObligationAuthor_AtomicWrite_NoDirectCreateTemp is a source-text
+// witness: obligationauthor.go must route writeObligationFile through
+// atomicfile.Write, not its own private CreateTemp->Rename copy (the
+// audit's CLEANUP-BEFORE #1 — this file's copy also lacked the fsync
+// atomicfile.Write already fixed for boardio/boardlayout/boarddiagram).
+func TestObligationAuthor_AtomicWrite_NoDirectCreateTemp(t *testing.T) {
+	data, err := os.ReadFile("obligationauthor.go")
+	if err != nil {
+		t.Fatalf("reading obligationauthor.go: %v", err)
+	}
+	if strings.Contains(string(data), "os.CreateTemp") {
+		t.Error("obligationauthor.go calls os.CreateTemp directly — writeObligationFile must route through internal/atomicfile.Write instead (CLEANUP-BEFORE #1)")
+	}
+}

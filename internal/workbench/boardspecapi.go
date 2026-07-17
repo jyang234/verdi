@@ -22,6 +22,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifact/splice"
+	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/designscaffold"
@@ -199,23 +200,13 @@ func (s *boardSpecServer) spliceSpec(name string, mutate func(d *splice.Doc) ([]
 	if err := splice.Validate(out); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(s.specDir(name), ".spec-*.md")
-	if err != nil {
-		return fmt.Errorf("workbench: temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(out); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("workbench: writing %s: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("workbench: closing %s: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("workbench: replacing %s: %w", path, err)
+	// atomicfile.Write (MkdirAll + CreateTemp + fsync + Rename-into-place)
+	// — this repo's one shared crash-durability primitive — never a private
+	// CreateTemp->Write->Close->Rename copy, so a crash mid-write can never
+	// leave a torn spec.md nor lose the fsync that copy lacked
+	// (CLEANUP-BEFORE #1).
+	if err := atomicfile.Write(path, out, 0o644); err != nil {
+		return fmt.Errorf("workbench: %w", err)
 	}
 	return nil
 }

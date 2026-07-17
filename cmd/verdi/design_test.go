@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -393,5 +396,71 @@ func TestRun_DesignDispatchesToRealVerb(t *testing.T) {
 	}
 	if contains(stderr.String(), "usage") || contains(stderr.String(), "not implemented") {
 		t.Fatalf("stderr = %q, want a real store-root error, not the generic stub message", stderr.String())
+	}
+}
+
+// TestRunDesignStart_ScaffoldUsesAtomicWrite is Task 1 of the
+// extensibility-phase1 plan (audit CLEANUP-BEFORE #1): the scaffold's
+// spec.md write was a plain os.WriteFile — truncate-then-write, no
+// crash-durability guarantee and no fsync. This proves the fixed write
+// leaves no temp sibling in the spec directory, across both spec classes.
+func TestRunDesignStart_ScaffoldUsesAtomicWrite(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     artifact.SpecClass
+		specName string
+	}{
+		{"feature scaffold", artifact.ClassFeature, "atomic-feature"},
+		{"story scaffold", artifact.ClassStory, "atomic-story"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildPhase7Repo(t)
+			ctx := context.Background()
+			manifest := phase7Manifest(t)
+			deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+
+			var stdout, stderr bytes.Buffer
+			got := runDesignStart(ctx, repo.Dir, tc.kind, "jira:LOAN-1482", tc.specName, manifest, deps, &stdout, &stderr)
+			if got != 0 {
+				t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
+			}
+
+			specDir := filepath.Join(repo.Dir, ".verdi", "specs", "active", tc.specName)
+			entries, err := os.ReadDir(specDir)
+			if err != nil {
+				t.Fatalf("ReadDir(%s): %v", specDir, err)
+			}
+			for _, e := range entries {
+				if strings.Contains(e.Name(), ".tmp") {
+					t.Fatalf("leftover temp file %s", e.Name())
+				}
+			}
+			if len(entries) != 1 || entries[0].Name() != "spec.md" {
+				names := make([]string, len(entries))
+				for i, e := range entries {
+					names[i] = e.Name()
+				}
+				t.Fatalf("specDir entries = %v, want exactly [spec.md]", names)
+			}
+		})
+	}
+}
+
+// TestDesignGo_AtomicWrite_NoDirectWriteFile is a source-text witness:
+// design.go's scaffold write must route through atomicfile.Write, never a
+// plain os.WriteFile CALL (CLEANUP-BEFORE #1 — the same crash-durability
+// gap atomicfile.Write already closed for boardio/boardlayout/
+// disposition.go). Matches the call form "os.WriteFile(" rather than the
+// bare identifier so a doc comment merely naming the old API in prose
+// (as this very fix's own comment does, contrasting the two) can never
+// false-positive the check.
+func TestDesignGo_AtomicWrite_NoDirectWriteFile(t *testing.T) {
+	data, err := os.ReadFile("design.go")
+	if err != nil {
+		t.Fatalf("reading design.go: %v", err)
+	}
+	if strings.Contains(string(data), "os.WriteFile(") {
+		t.Error("design.go calls os.WriteFile directly — the scaffold write must route through internal/atomicfile.Write instead (CLEANUP-BEFORE #1)")
 	}
 }
