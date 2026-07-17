@@ -960,7 +960,7 @@ func TestGithubIdentifier_CIEnvWinsOverResolvableOrigin(t *testing.T) {
 	t.Setenv("GITHUB_REPOSITORY_OWNER", "envowner")
 	t.Setenv("GITHUB_REPOSITORY", "envowner/envrepo")
 
-	owner, repoName, err := githubOwnerRepo(remoteURL)
+	owner, repoName, err := githubOwnerRepo(remoteURL, nil)
 	if err != nil {
 		t.Fatalf("githubOwnerRepo(%q): %v", remoteURL, err)
 	}

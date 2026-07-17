@@ -152,7 +152,11 @@ func forgeBestEffort(ctx context.Context, root string) (f forge.Forge, configure
 	if !forgeCredentialsPresent(kind, remoteURL) {
 		return nil, kind
 	}
-	built, err := buildForge(kind, remoteURL)
+	// nil remoteErr: gate keeps its pre-existing best-effort posture (the
+	// origin read error above is discarded, out of scope for ADJ-64's
+	// sync-only origin-read-failure ruling); an unreadable origin here behaves
+	// exactly as before.
+	built, err := buildForge(kind, remoteURL, nil)
 	if err != nil {
 		return nil, kind
 	}

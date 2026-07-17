@@ -80,8 +80,13 @@ func resolveRefCommit(ctx context.Context, root string) (ref, commit string, err
 // githubOwnerRepo's own error propagates here and out to the caller as an
 // operational refusal — never a live adapter built around two empty
 // strings, for any caller that will DIAL the forge by (owner, repo).
-func buildForge(kind, remoteURL string) (forge.Forge, error) {
-	return buildForgeWithIdentifier(kind, remoteURL, true)
+// remoteErr carries a genuine origin-remote READ failure (nil when the origin
+// resolved or was merely absent — the caller clears gitx.ErrNoSuchRemote to
+// nil); githubOwnerRepo surfaces it operationally ONLY when it actually falls
+// back to the origin to identify the repo (ADJ-64), never when the CI env
+// already identifies it and never for gitlab.
+func buildForge(kind, remoteURL string, remoteErr error) (forge.Forge, error) {
+	return buildForgeWithIdentifier(kind, remoteURL, remoteErr, true)
 }
 
 // buildForgeForCI builds the forge for invocations that never DIAL the forge
@@ -97,7 +102,10 @@ func buildForge(kind, remoteURL string) (forge.Forge, error) {
 // empty owner/repo included; a live FetchEvidenceBundle on such an adapter
 // would still fail, but these paths never make one.
 func buildForgeForCI(kind, remoteURL string) (forge.Forge, error) {
-	return buildForgeWithIdentifier(kind, remoteURL, false)
+	// nil remoteErr: --produce never dials, never consults the origin for
+	// identification, so an unreadable origin is irrelevant here (co-3
+	// byte-identity, ADJ-43).
+	return buildForgeWithIdentifier(kind, remoteURL, nil, false)
 }
 
 // buildForgeWithIdentifier is the shared constructor. requireIdentifier
@@ -107,16 +115,18 @@ func buildForgeForCI(kind, remoteURL string) (forge.Forge, error) {
 // CIContext-only paths never use. gitlab takes its identifier from
 // CI_PROJECT_ID (env, never URL-derived — dc-3) and has no such refusal
 // under either flag.
-func buildForgeWithIdentifier(kind, remoteURL string, requireIdentifier bool) (forge.Forge, error) {
+func buildForgeWithIdentifier(kind, remoteURL string, remoteErr error, requireIdentifier bool) (forge.Forge, error) {
 	switch kind {
 	case "gitlab":
+		// gitlab identification is CI_PROJECT_ID (env-only, never URL-derived
+		// — dc-3), so an unreadable origin (remoteErr) never affects it.
 		return forgegitlab.New(forgegitlab.Config{
 			BaseURL:   os.Getenv("CI_API_V4_URL"),
 			ProjectID: os.Getenv("CI_PROJECT_ID"),
 			Token:     os.Getenv("CI_JOB_TOKEN"),
 		}), nil
 	case "github":
-		owner, repo, err := githubOwnerRepo(remoteURL)
+		owner, repo, err := githubOwnerRepo(remoteURL, remoteErr)
 		if err != nil && requireIdentifier {
 			return nil, err
 		}
@@ -144,7 +154,7 @@ func buildForgeWithIdentifier(kind, remoteURL string, requireIdentifier bool) (f
 // caller's operational refusal (buildForge, then cmdSync) is legible
 // rather than a confusing downstream network failure against an empty
 // owner/repo.
-func githubOwnerRepo(remoteURL string) (owner, repo string, err error) {
+func githubOwnerRepo(remoteURL string, remoteErr error) (owner, repo string, err error) {
 	envOwner := os.Getenv("GITHUB_REPOSITORY_OWNER")
 	envRepository := os.Getenv("GITHUB_REPOSITORY")
 	owner, repo = envOwner, githubRepoName()
@@ -159,7 +169,23 @@ func githubOwnerRepo(remoteURL string) (owner, repo string, err error) {
 		owner = githubRepoOwner()
 	}
 	if owner != "" && repo != "" {
+		// The CI env fully identifies the repo — the origin is never consulted,
+		// so an unreadable origin (remoteErr) is irrelevant and the env still
+		// wins byte-identically to today (ac-1, dc-3), even for a broken origin.
 		return owner, repo, nil
+	}
+	// Env insufficient → the origin URL is the fallback identification source
+	// (D6-14), so a genuine failure READING it is material ONLY here, where the
+	// origin is actually needed (absence was cleared to nil by the caller).
+	// Surface it operationally, naming the read failure rather than
+	// mis-reporting the resulting empty URL as an absent origin (ADJ-64) — the
+	// original honesty defect was that githubOwnerRepo saw an unreadable origin
+	// as the same empty string an absent one produces.
+	if remoteErr != nil {
+		return "", "", fmt.Errorf(
+			"cannot identify the GitHub repository: GITHUB_REPOSITORY_OWNER=%q, GITHUB_REPOSITORY=%q, and the git origin remote could not be read (%v) — set GITHUB_REPOSITORY=owner/repo (inside CI) or fix the github.com origin remote (for a local checkout)",
+			envOwner, envRepository, remoteErr,
+		)
 	}
 	if o, r, ok := forgegithub.OwnerRepoFromURL(remoteURL); ok {
 		if owner == "" {
