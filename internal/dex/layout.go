@@ -32,13 +32,19 @@ type connection struct {
 type pageData struct {
 	Title  string
 	Status string // "" suppresses the badge (listing/utility pages)
+	// StatusLabel is the model's display word for Status
+	// (spec/vocabulary-surfaces ac-2) — the badge's visible text only;
+	// empty falls back to Status, and badge-<Status> keeps the bare id
+	// (a rename never moves an addressing surface).
+	StatusLabel string
 	// LadderBadges are a story page's computed ladder-state flags
 	// ("spec-stale", "pending-supersession" — 05 §Lenses story lens),
 	// rendered as badges beside the status badge; empty everywhere else.
 	// A badge renders iff the flag is COMPUTED to stand — an unprovable
 	// flag (no forge) is disclosed in the metadata card instead, never
-	// silently dropped and never rendered as if proven.
-	LadderBadges []string
+	// silently dropped and never rendered as if proven. Each view carries
+	// the flag id (CSS/testid addressing) beside its display label.
+	LadderBadges []ladderBadgeView
 	Breadcrumb   []breadcrumbEntry
 	Banner       string
 	// BannerClass is the temporal stamp's class-specific styling hook
@@ -105,8 +111,8 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 </nav>
 <header class="page-header">
 <h1>{{.Title}}</h1>
-{{if .Status}}<span class="badge badge-{{.Status}}">{{.Status}}</span>{{end}}
-{{range .LadderBadges}}<span class="badge badge-{{.}}" data-testid="badge-{{.}}">{{.}}</span>{{end}}
+{{if .Status}}<span class="badge badge-{{.Status}}">{{if .StatusLabel}}{{.StatusLabel}}{{else}}{{.Status}}{{end}}</span>{{end}}
+{{range .LadderBadges}}<span class="badge badge-{{.ID}}" data-testid="badge-{{.ID}}">{{if .Label}}{{.Label}}{{else}}{{.ID}}{{end}}</span>{{end}}
 </header>
 <div class="temporal-banner {{.BannerClass}}"><span class="temporal-dot" aria-hidden="true"></span>{{.Banner}}</div>
 {{if .CopyRef}}<div><button type="button" class="copy-ref" data-copy-ref="{{.CopyRef}}" title="{{.CopyRef}}" aria-label="Copy full reference {{.CopyRef}}">Copy reference <code>{{.CopyRefDisplay}}</code></button></div>{{end}}

@@ -5,6 +5,8 @@ import (
 	"html/template"
 	"sort"
 	"strings"
+
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // listItem is one row of a by-kind/by-service listing page's entry list.
@@ -12,7 +14,11 @@ type listItem struct {
 	Title  string
 	URL    string
 	Status string
-	Sub    string // small secondary text (e.g. a service name, a ref)
+	// StatusLabel is the model's display word for Status
+	// (spec/vocabulary-surfaces ac-2) — the chip's visible text only;
+	// empty falls back to Status, and badge-<Status> keeps the bare id.
+	StatusLabel string
+	Sub         string // small secondary text (e.g. a service name, a ref)
 }
 
 // renderEntryList renders items as dex's standard <ul class="entry-list">.
@@ -26,7 +32,11 @@ func renderEntryList(items []listItem) template.HTML {
 		b.WriteString("<li>")
 		b.WriteString(`<a href="` + template.HTMLEscapeString(it.URL) + `">` + template.HTMLEscapeString(it.Title) + `</a>`)
 		if it.Status != "" {
-			b.WriteString(` <span class="badge badge-` + template.HTMLEscapeString(it.Status) + `">` + template.HTMLEscapeString(it.Status) + `</span>`)
+			label := it.StatusLabel
+			if label == "" {
+				label = it.Status
+			}
+			b.WriteString(` <span class="badge badge-` + template.HTMLEscapeString(it.Status) + `">` + template.HTMLEscapeString(label) + `</span>`)
 		}
 		if it.Sub != "" {
 			b.WriteString(` <span class="sub">` + template.HTMLEscapeString(it.Sub) + `</span>`)
@@ -48,11 +58,11 @@ func isArchivedSpec(relPath string) bool {
 // diagrams, contracts and APIs" — contracts-and-APIs is written by
 // writeContractsAxis in serviceaxis.go, since it draws on discovered
 // services rather than committed-zone pages).
-func writeKindAxis(outDir string, stamp buildStamp, pages []*artifactPage) error {
+func writeKindAxis(outDir string, stamp buildStamp, pages []*artifactPage, mdl *model.Model) error {
 	var specsActive, specsArchive, adrs, diagrams, attestations, waivers, conflicts []listItem
 
 	for _, p := range pages {
-		item := listItem{Title: p.Entry.Title, URL: permalinkURL(p.Entry.Ref), Status: p.Entry.Status}
+		item := listItem{Title: p.Entry.Title, URL: permalinkURL(p.Entry.Ref), Status: p.Entry.Status, StatusLabel: mdl.DisplayState("", p.Entry.Status)}
 		switch p.Entry.Kind {
 		case "spec":
 			if isArchivedSpec(p.RelPath) {

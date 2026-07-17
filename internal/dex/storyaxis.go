@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // storyAxisURL is an archived story record's by-story page URL, keyed by
@@ -29,15 +30,15 @@ func storyAxisURL(name string) string {
 // writeStoryAxis emits the by-story hub plus one quartet page per
 // archived spec. pages is loadArtifactPages' sorted slice, so iteration
 // — and the built bytes — are deterministic.
-func writeStoryAxis(outDir string, stamp buildStamp, pages []*artifactPage) error {
+func writeStoryAxis(outDir string, stamp buildStamp, pages []*artifactPage, mdl *model.Model) error {
 	var hub []listItem
 	for _, p := range pages {
 		if p.Entry.Kind != "spec" || !isArchivedSpec(p.RelPath) {
 			continue
 		}
 		name := strings.TrimPrefix(p.Entry.Ref, "spec/")
-		hub = append(hub, listItem{Title: p.Entry.Title, URL: storyAxisURL(name), Status: p.Entry.Status, Sub: p.Meta.Story})
-		if err := writeQuartetPage(outDir, stamp, p, name); err != nil {
+		hub = append(hub, listItem{Title: p.Entry.Title, URL: storyAxisURL(name), Status: p.Entry.Status, StatusLabel: mdl.DisplayState("", p.Entry.Status), Sub: p.Meta.Story})
+		if err := writeQuartetPage(outDir, stamp, p, name, mdl); err != nil {
 			return err
 		}
 	}
@@ -46,7 +47,7 @@ func writeStoryAxis(outDir string, stamp buildStamp, pages []*artifactPage) erro
 }
 
 // writeQuartetPage renders one archived story record's quartet.
-func writeQuartetPage(outDir string, stamp buildStamp, p *artifactPage, name string) error {
+func writeQuartetPage(outDir string, stamp buildStamp, p *artifactPage, name string, mdl *model.Model) error {
 	dir := filepath.Dir(p.Entry.Path)
 
 	var b strings.Builder
@@ -56,7 +57,7 @@ func writeQuartetPage(outDir string, stamp buildStamp, p *artifactPage, name str
 	b.WriteString("<h2>Spec</h2>\n")
 	fmt.Fprintf(&b, `<p><a href="%s">%s</a> <span class="badge badge-%s">%s</span></p>`+"\n",
 		template.HTMLEscapeString(permalinkURL(p.Entry.Ref)), template.HTMLEscapeString(p.Entry.Ref),
-		template.HTMLEscapeString(p.Entry.Status), template.HTMLEscapeString(p.Entry.Status))
+		template.HTMLEscapeString(p.Entry.Status), template.HTMLEscapeString(mdl.DisplayState("", p.Entry.Status)))
 
 	// 2. The board slot: layout.json (round four) or board.json
 	// (grandfathered v0) — labeled as what it is, never guessed.
@@ -84,8 +85,9 @@ func writeQuartetPage(outDir string, stamp buildStamp, p *artifactPage, name str
 	b.WriteString(devHTML)
 
 	data := pageData{
-		Title:  p.Entry.Title,
-		Status: p.Entry.Status,
+		Title:       p.Entry.Title,
+		Status:      p.Entry.Status,
+		StatusLabel: mdl.DisplayState("", p.Entry.Status),
 		Breadcrumb: []breadcrumbEntry{
 			{Label: "Home", URL: "/"},
 			{Label: "By story", URL: "/by-story/"},

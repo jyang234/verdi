@@ -21,6 +21,7 @@ import (
 	"github.com/jyang234/verdi/internal/decisionsweep"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -38,7 +39,7 @@ func readStoreFile(root, relPath string) ([]byte, error) {
 // when the ladder flags it. root is needed only to read the deviation
 // report's own `covers` field back out for the derivation record's input
 // revision (dc-5) — ScanSpecStale's fold itself is never re-derived here.
-func SpecStaleBadge(root string, snap *lint.Snapshot, specRef string, threshold int) (*DerivationRecord, error) {
+func SpecStaleBadge(root string, snap *lint.Snapshot, specRef string, threshold int, mdl *model.Model) (*DerivationRecord, error) {
 	entries, err := decisionsweep.ScanSpecStale(root, snap, threshold)
 	if err != nil {
 		return nil, fmt.Errorf("wallbadge: spec-stale: %w", err)
@@ -70,8 +71,11 @@ func SpecStaleBadge(root string, snap *lint.Snapshot, specRef string, threshold 
 	records := append(ids, fmt.Sprintf("%d accepted-deviation disposition(s) accumulated (threshold exceeded: %v)", result.AcceptedDeviationCount, result.TriggeredByThreshold))
 
 	return &DerivationRecord{
-		Source:  "ladder:spec-stale",
-		Label:   "spec-stale",
+		Source: "ladder:spec-stale",
+		// The visible LABEL resolves through the model's state-display
+		// lookup (spec/vocabulary-surfaces ac-2, id fallback); Source,
+		// inputs, and records are receipts — bare ids, never renamed.
+		Label:   mdl.DisplayState("", "spec-stale"),
 		Inputs:  []InputRecord{{Name: "deviation-report", Path: reportRelPath, Revision: covers}},
 		Records: records,
 	}, nil
@@ -116,7 +120,7 @@ func readDeviationCovers(root, reportRelPath string) (string, error) {
 // ac-3's three-valued outcome — when loader is nil (no forge configured)
 // or a candidate load reports ok=false (open MRs could not be
 // enumerated, e.g. no default branch resolved).
-func PendingSupersessionBadge(ctx context.Context, loader SupersessionCandidateLoader, links []artifact.Link) (*DerivationRecord, string, error) {
+func PendingSupersessionBadge(ctx context.Context, loader SupersessionCandidateLoader, links []artifact.Link, mdl *model.Model) (*DerivationRecord, string, error) {
 	byFeature := evidence.ImplementsByFeature(links)
 	if len(byFeature) == 0 {
 		return nil, "", nil
@@ -175,11 +179,14 @@ func PendingSupersessionBadge(ctx context.Context, loader SupersessionCandidateL
 
 	return &DerivationRecord{
 		Source: "ladder:pending-supersession",
-		// The dex story-lens's own flag name, verbatim (spec/case-file-
-		// flags dc-4: the same computation must wear the same name on
-		// every surface that renders it — internal/dex/ladder.go's badge
-		// is the string "pending-supersession").
-		Label:   "pending-supersession",
+		// The dex story-lens's own flag name (spec/case-file-flags dc-4:
+		// the same computation wears the same name on every surface that
+		// renders it — internal/dex/ladder.go resolves the identical
+		// "pending-supersession" id through the identical DisplayState
+		// lookup), display-resolved with id fallback
+		// (spec/vocabulary-surfaces ac-2). Source/inputs/records are
+		// receipts — bare ids, never renamed.
+		Label:   mdl.DisplayState("", "pending-supersession"),
 		Inputs:  inputs,
 		Records: records,
 	}, "", nil

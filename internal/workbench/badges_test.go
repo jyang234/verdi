@@ -328,7 +328,7 @@ func TestAttachBadges_ErrorPropagates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeSpec: %v", err)
 	}
-	if err := attachBadges(context.Background(), &BoardProjection{}, badRoot, badgeStoryFixtureName, []byte(badgeStoryFixtureSpec), fm, nil); err == nil {
+	if err := attachBadges(context.Background(), &BoardProjection{}, badRoot, badgeStoryFixtureName, []byte(badgeStoryFixtureSpec), fm, nil, nil); err == nil {
 		t.Fatal("attachBadges over an unwalkable root: got nil error, want one")
 	}
 }

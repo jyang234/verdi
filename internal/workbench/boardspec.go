@@ -252,7 +252,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// buildProjection, never inside it — so the full page, the post-
 	// mutation fragment, and get_board's LoadProjection all see the same
 	// badges (ac-1).
-	if err := attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession); err != nil {
+	if err := attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession, s.model); err != nil {
 		return nil, nil, "", err
 	}
 	// s.fixedBranch distinguishes the two board modes the one call site

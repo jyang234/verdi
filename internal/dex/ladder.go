@@ -11,6 +11,8 @@ package dex
 import (
 	"fmt"
 	"strings"
+
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // ladderState is what a story page renders: header badges plus the
@@ -18,6 +20,26 @@ import (
 type ladderState struct {
 	Badges []string // subset of {"spec-stale", "pending-supersession"}, in ladder order
 	Rows   []metaRow
+}
+
+// ladderBadgeView is one rendered ladder badge: the flag id (kept in the
+// badge's CSS class and testid — addressing, never renamed) beside its
+// display label (spec/vocabulary-surfaces ac-2).
+type ladderBadgeView struct {
+	ID    string
+	Label string
+}
+
+// ladderBadgeViews resolves each ladder flag id's visible word through
+// the model's state-display lookup — the identical model.DisplayState
+// fallback-to-id resolution every other surface uses, never a dex-private
+// rename table. Nil-model-safe (bare ids).
+func ladderBadgeViews(m *model.Model, ids []string) []ladderBadgeView {
+	views := make([]ladderBadgeView, len(ids))
+	for i, id := range ids {
+		views[i] = ladderBadgeView{ID: id, Label: m.DisplayState("", id)}
+	}
+	return views
 }
 
 // storyLadder computes p's ladder state from the build-wide lens data.

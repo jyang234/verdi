@@ -8,6 +8,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wallbadge"
 )
@@ -27,11 +28,11 @@ import (
 // This is the ONE attachment point for every wall badge (dc-1): a sibling
 // wall-receipts story (evidence-slot, case-file-flags) adds its own
 // compute here, never a second call site.
-func attachBadges(ctx context.Context, proj *BoardProjection, root, specName string, raw []byte, fm *artifact.SpecFrontmatter, superseLoader wallbadge.SupersessionCandidateLoader) error {
+func attachBadges(ctx context.Context, proj *BoardProjection, root, specName string, raw []byte, fm *artifact.SpecFrontmatter, superseLoader wallbadge.SupersessionCandidateLoader, mdl *model.Model) error {
 	specRelPath := specRelPathFor(specName)
 	specRevision := contentDigest(raw)
 
-	badges, err := wallbadge.ComputeBadges(ctx, root, specRelPath, specRevision, fm, superseLoader)
+	badges, err := wallbadge.ComputeBadges(ctx, root, specRelPath, specRevision, fm, superseLoader, mdl)
 	if err != nil {
 		return fmt.Errorf("workbench: computing wall badges for %s: %w", specName, err)
 	}
