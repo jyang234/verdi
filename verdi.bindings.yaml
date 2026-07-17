@@ -666,6 +666,29 @@ bindings:
       - "spec/model-schema#ac-1"
       - "spec/model-schema#ac-2"
       - "spec/model-schema#ac-3"
+      # spec/scaffold-templates behavioral legs (extensibility phase 1,
+      # all three ACs declare [behavioral] only). Story authored via
+      # stub-instantiate + this design PR, with its three obligations
+      # authored in the same PR (.verdi/obligations/scaffold-templates/
+      # ac-{1,2,3}--behavioral.md, this round's X-9 standing rule) —
+      # bound here at design time, ahead of the build, so the producer
+      # that will supply each AC's behavioral leg is on record before
+      # any implementation lands. Not yet built: the obligations name the
+      # expected shape precisely — ac-1 = internal/designscaffold
+      # equivalence tests (embedded canonical template vs the retired
+      # Feature/Story string builders, decoded SpecFrontmatter fields,
+      # one case per class plus the spike variant); ac-2 = a store
+      # .verdi/templates override + custom: round-trip test
+      # (strict-decode-then-canonical-re-emit) plus one committed
+      # violation fixture for an anchor/alias/tag inside custom:
+      # (operating-model dc-2's dialect wall); ac-3 =
+      # cmd/verdi/model_test.go's existing built-binary end-to-end
+      # convention extended to every resolved template's
+      # instantiate-then-strict-decode round trip, pinned-error text
+      # naming the offending file. All under make verify once built.
+      - "spec/scaffold-templates#ac-1"
+      - "spec/scaffold-templates#ac-2"
+      - "spec/scaffold-templates#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
