@@ -7,9 +7,12 @@
 // tree, filter through the fold's own per-AC candidate filter
 // (evidence.RecordsForAC), reduce through evidence.Current, and a kind
 // is empty exactly when that current set holds no record of the kind —
-// attestation-kind emptiness is evidence.AttestationExists' answer.
-// Never a wall-side reimplementation: if the fold's definition of
-// "current" changes, this compute changes with it.
+// attestation-kind emptiness is evidence.LoadAttestationState's answer,
+// with only the Authored state counting as held (spec/attest-helper dc-3:
+// an unauthored `verdi attest` scaffold is not yet evidence, so it renders
+// exactly as if no file existed at all). Never a wall-side
+// reimplementation: if the fold's definition of "current" changes, this
+// compute changes with it.
 //
 // A story wall with NO derived tree at all is the ordinary authoring
 // state (derived records land at build time): every declared kind is a
@@ -36,7 +39,9 @@ import (
 // for one acceptance criterion (spec/evidence-slot ac-1). Records counts
 // the CURRENT records of the kind (after the fold's own per-AC filter
 // and Current reduction; attestation: 1 exactly when the attestation
-// file exists on disk). Empty is true exactly when Records is 0 — the
+// file exists on disk AND has been authored — spec/attest-helper dc-3, an
+// unauthored scaffold counts as 0, same as no file at all). Empty is true
+// exactly when Records is 0 — the
 // fold's per-kind no-record state, carried explicitly so consumers never
 // re-derive it. This is presence disclosure only, never the fold's
 // evidenced/violated/pending verdicts (dc-4): no verdict field exists
@@ -129,11 +134,15 @@ func EmptySlotBadges(ctx context.Context, root, specRelPath, specRevision string
 		for _, kind := range ac.Evidence {
 			st := SlotState{Kind: string(kind)}
 			if kind == artifact.EvidenceAttestation {
-				attested, err := evidence.AttestationExists(root, storySlug, ac.ID)
+				// spec/attest-helper dc-3: only the AUTHORED state fills
+				// the slot — an unauthored `verdi attest` scaffold is not
+				// yet evidence (parent spec/closure-ergonomics dc-2), so it
+				// renders exactly as if no file existed at all.
+				state, err := evidence.LoadAttestationState(root, storySlug, ac.ID)
 				if err != nil {
 					return nil, nil, fmt.Errorf("wallbadge: empty-slot: %w", err)
 				}
-				if attested {
+				if state == evidence.AttestationAuthored {
 					st.Records = 1
 				}
 			} else {

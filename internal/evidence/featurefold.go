@@ -131,11 +131,16 @@ func FoldFeature(in FeatureInput) (FeatureResult, error) {
 
 		attested := false
 		if declaresKind(ac, artifact.EvidenceAttestation) {
-			var err error
-			attested, err = AttestationExists(in.StoreRoot, in.FeatureSlug, ac.ID)
+			// spec/attest-helper dc-3: only the AUTHORED state satisfies
+			// the outcome floor — an unauthored `verdi attest` scaffold
+			// collapses to exactly the same not-satisfied outcome absence
+			// already produces (parent spec/closure-ergonomics dc-2: "not
+			// foldable until authored").
+			state, err := LoadAttestationState(in.StoreRoot, in.FeatureSlug, ac.ID)
 			if err != nil {
 				return FeatureResult{}, err
 			}
+			attested = state == AttestationAuthored
 		}
 
 		status := foldFeatureAC(stories, current, attested)

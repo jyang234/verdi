@@ -225,6 +225,26 @@ func TestFold_AttestationByExistence(t *testing.T) {
 	})
 }
 
+// TestFold_AttestationUnauthored_CollapsesToNoSignal proves spec/
+// attest-helper dc-3 at this package's own story-fold call site
+// (fold.go): an unauthored `verdi attest` scaffold is NOT foldable
+// (parent spec/closure-ergonomics dc-2) — it folds exactly as absence
+// would, same status, same "attestation:absent" summary wording (dc-3:
+// "this story does not itself change what any of those three callers
+// RENDER") — until the operator removes the marker and authors their
+// claim.
+func TestFold_AttestationUnauthored_CollapsesToNoSignal(t *testing.T) {
+	root := t.TempDir()
+	writeAttestation(t, root, "test-1", "ac-1", unauthoredScaffoldFixture)
+	got := foldOneAC(t, root, ac("ac-1", artifact.EvidenceAttestation), nil)
+	if got.Status != StatusNoSignal {
+		t.Fatalf("status = %q, want no-signal (an unauthored scaffold is not yet evidence, dc-3)", got.Status)
+	}
+	if !strings.Contains(got.Summary, "attestation:absent") {
+		t.Fatalf("Summary = %q, want it to mention attestation:absent (dc-3: unauthored renders identically to absent)", got.Summary)
+	}
+}
+
 // TestFold_ExpiredWaiverDoesNotWaive is the fold-level complement to
 // TestWaiverActive_Expired: an expired waiver's AC is folded as if no
 // waiver existed at all.

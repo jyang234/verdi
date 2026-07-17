@@ -7,6 +7,7 @@
 package storyresolve
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,34 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 )
+
+// OperationalError marks a resolution failure that is an OPERATIONAL
+// (machinery) problem — a spec file present but unreadable or failing strict
+// decode, or a directory listing that fails — as distinct from a "does not
+// resolve" outcome (an absent spec, an unmatched or malformed argument, a
+// component spec), which the caller is free to treat as a verdict. verdi
+// attest keys its 0/1/2 exit discipline on this split (spec/attest-helper
+// dc-5, co-2; Controller adjudication ADJ-51, 2026-07-16): a nonexistent
+// (story, AC) pair is a verdict (exit 1), but an unreadable or malformed spec
+// encountered WHILE resolving is operational (exit 2). Callers that treat
+// every resolution failure alike (matrix, rollup, build start) are
+// unaffected — the wrapped Error() text is unchanged, only its type is richer.
+type OperationalError struct{ Err error }
+
+func (e *OperationalError) Error() string { return e.Err.Error() }
+func (e *OperationalError) Unwrap() error { return e.Err }
+
+// ComponentSpecError marks a spec-ref that resolves to a class: component
+// spec — which carries no story and no acceptance criteria, so the fold has
+// nothing to work with. Callers that only report the failure keep the exact
+// same Error() text; a caller that must distinguish it (verdi attest re-words
+// it in its own terms rather than leaking this message's matrix framing —
+// ADJ-51 finding 3) matches it with errors.As.
+type ComponentSpecError struct{ Ref string }
+
+func (e *ComponentSpecError) Error() string {
+	return fmt.Sprintf("spec %q is a component spec (no story, no acceptance criteria); matrix folds only feature and story specs", e.Ref)
+}
 
 // Resolve resolves arg to a foldable spec under specs/active/ — 03 §The
 // fold's "Scope: the fold is evaluated only for specs under
@@ -38,7 +67,7 @@ func Resolve(root, arg string) (*artifact.SpecFrontmatter, error) {
 			return nil, loadErr
 		}
 		if spec.Class == artifact.ClassComponent {
-			return nil, fmt.Errorf("spec %q is a component spec (no story, no acceptance criteria); matrix folds only feature and story specs", arg)
+			return nil, &ComponentSpecError{Ref: arg}
 		}
 		return spec, nil
 	}
@@ -79,7 +108,7 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 	dir := filepath.Join(root, ".verdi", "specs", "active")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("listing %s: %w", dir, err)
+		return nil, &OperationalError{Err: fmt.Errorf("listing %s: %w", dir, err)}
 	}
 
 	var matches []*artifact.SpecFrontmatter
@@ -89,7 +118,13 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 		}
 		spec, err := LoadActiveSpec(root, e.Name())
 		if err != nil {
-			return nil, err
+			// A directory under active/ that cannot be loaded (a stray dir
+			// with no spec.md, an unreadable or malformed one) is store
+			// corruption walked into mid-scan, not a "does not resolve"
+			// verdict — surface it operationally (ADJ-51 finding 1) so a
+			// caller keying exit discipline on the type does not read a
+			// corrupt store as a missing ref and mask a reachable match.
+			return nil, &OperationalError{Err: err}
 		}
 		if spec.Class != artifact.ClassFeature {
 			continue
@@ -179,20 +214,29 @@ func ResolveDesignSpec(root, branch string) (*artifact.SpecFrontmatter, error) {
 	return spec, nil
 }
 
-// LoadActiveSpec reads and strict-decodes specs/active/<name>/spec.md.
+// LoadActiveSpec reads and strict-decodes specs/active/<name>/spec.md. An
+// ABSENT spec is a plain (unwrapped) error the caller may treat as a "does
+// not resolve" verdict; a spec that is PRESENT but unreadable (a non-NotExist
+// IO error, e.g. permissions) or fails strict decode (malformed frontmatter)
+// is an OperationalError — a machinery failure, not a missing artifact
+// (spec/attest-helper dc-5/co-2, ADJ-51 finding 1). The Error() text is
+// unchanged in every case; only the type distinguishes the two.
 func LoadActiveSpec(root, name string) (*artifact.SpecFrontmatter, error) {
 	path := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("reading %s: %w", path, err)
+		}
+		return nil, &OperationalError{Err: fmt.Errorf("reading %s: %w", path, err)}
 	}
 	fm, _, err := artifact.SplitFrontmatter(data)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, &OperationalError{Err: fmt.Errorf("%s: %w", path, err)}
 	}
 	spec, err := artifact.DecodeSpec(fm)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, &OperationalError{Err: fmt.Errorf("%s: %w", path, err)}
 	}
 	return spec, nil
 }

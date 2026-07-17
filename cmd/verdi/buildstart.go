@@ -175,7 +175,11 @@ func resolveBuildTarget(root, storyArg string) (*artifact.SpecFrontmatter, error
 	dir := filepath.Join(root, ".verdi", "specs", "active")
 	entries, rerr := os.ReadDir(dir)
 	if rerr != nil {
-		return nil, err // the original storyresolve error is the more informative one
+		// A listing failure here is operational, not the not-found verdict
+		// the outer err carries (ADJ-51 finding 1): surface it as such so a
+		// caller keying exit discipline on the type (verdi attest) does not
+		// mistake a broken store for a missing (story, AC) pair.
+		return nil, &storyresolve.OperationalError{Err: fmt.Errorf("listing %s: %w", dir, rerr)}
 	}
 
 	var matches []*artifact.SpecFrontmatter
@@ -185,7 +189,11 @@ func resolveBuildTarget(root, storyArg string) (*artifact.SpecFrontmatter, error
 		}
 		candidate, lerr := storyresolve.LoadActiveSpec(root, e.Name())
 		if lerr != nil {
-			return nil, lerr
+			// Same posture as matchStoryRef's own scan (ADJ-51 finding 1): a
+			// dir under active/ that cannot be loaded mid-scan is store
+			// corruption, operational — never a "(story, AC) does not exist"
+			// verdict, and never a stray dir masking a reachable pair.
+			return nil, &storyresolve.OperationalError{Err: lerr}
 		}
 		if candidate.Class == artifact.ClassStory && candidate.Story == storyArg {
 			matches = append(matches, candidate)

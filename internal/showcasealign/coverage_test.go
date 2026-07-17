@@ -153,6 +153,12 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	"cli:gc":          {goE2E("internal/showcasealign/cli_showcase_test.go")},
 	"cli:disposition": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:attest (legibility-ergonomics round, spec/attest-helper): added
+	// alongside the new verb itself — TestCLIShowcaseAttest
+	// (cli_showcase_test.go) drives it against the real
+	// spec/borrower-update-api story from examples/showcase.
+	"cli:attest": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec

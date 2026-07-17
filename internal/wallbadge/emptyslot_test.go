@@ -3,7 +3,8 @@ package wallbadge
 // Tests for the empty-evidence-slot compute (spec/evidence-slot ac-1/
 // ac-2): "empty" is the real fold's per-kind no-record state (records
 // through the fold's loader, the fold's per-AC filter, and the fold's
-// Current reduction; attestation through AttestationExists), the
+// Current reduction; attestation through LoadAttestationState, only the
+// Authored state counting as held — spec/attest-helper dc-3), the
 // no-derived-tree wall is the CALM ordinary authoring state, and every
 // badge is a complete fold:empty-slot derivation record whose inputs pin
 // the spec, the location probed, and the record files actually read —
@@ -207,6 +208,63 @@ func TestEmptySlotBadges_FilledVersusEmpty(t *testing.T) {
 	}
 }
 
+// writeSlotUnauthoredAttestation writes a `verdi attest`-shaped scaffold —
+// the marker still present — at the same fold path writeSlotAttestation
+// uses, so a test can directly compare the two.
+func writeSlotUnauthoredAttestation(t *testing.T, root, acID string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "attestations", "jira-slot-1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir attestations: %v", err)
+	}
+	body := "<!-- verdi:attestation-unauthored -->\nThis attestation was scaffolded and has not been authored.\n"
+	if err := os.WriteFile(filepath.Join(dir, acID+".md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("writing unauthored attestation: %v", err)
+	}
+}
+
+// TestEmptySlotBadges_UnauthoredAttestationStaysEmpty proves spec/
+// attest-helper dc-3 at this package's own call site
+// (internal/wallbadge/emptyslot.go): an unauthored `verdi attest` scaffold
+// is not yet evidence, so its slot stays EMPTY — exactly as if no file
+// existed at all — until the operator removes the marker and authors their
+// claim. Contrast with TestEmptySlotBadges_FilledVersusEmpty's "present" =
+// held case above, which uses an authored (marker-free) fixture.
+func TestEmptySlotBadges_UnauthoredAttestationStaysEmpty(t *testing.T) {
+	repo := newSlotRepo(t)
+	writeSlotUnauthoredAttestation(t, repo.Dir, "ac-1")
+	fm := slotSpecFM(t)
+
+	slots, badges, err := EmptySlotBadges(context.Background(), repo.Dir, ".verdi/specs/active/slot-story/spec.md", "sha256:fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe", fm)
+	if err != nil {
+		t.Fatalf("EmptySlotBadges: %v", err)
+	}
+
+	ac1 := slots["ac-1"]
+	st := slotByKind(t, ac1, "attestation")
+	if !st.Empty || st.Records != 0 {
+		t.Errorf("attestation slot = %+v, want EMPTY (an unauthored scaffold is not yet evidence, dc-3)", st)
+	}
+
+	// The unauthored scaffold's AC still badges (its attestation slot is
+	// empty, same as if the file never existed) — dc-3: "this story does
+	// not itself change what any of those three callers RENDER."
+	found := false
+	for _, b := range badges {
+		if b.Target == "ac-1" {
+			found = true
+			for _, line := range b.Records {
+				if line == "attestation: attestation file present" {
+					t.Errorf("badge records = %+v, must not report the unauthored scaffold as present", b.Records)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("badges = %+v, want an ac-1 badge (the attestation slot is empty)", badges)
+	}
+}
+
 // TestEmptySlotBadges_NoDerivedTreeIsCalm is dc-1: a story wall with no
 // derived tree at all — the ordinary design-branch authoring state —
 // renders every declared kind as an empty slot with NO error and no git
@@ -330,7 +388,8 @@ func TestEmptySlotBadges_Negative(t *testing.T) {
 // (co-3, dc-1): the slot's emptiness is computed from the evidence
 // package's own seams — the fold's loader (LoadRecordsWithSources), the
 // fold's per-AC filter (RecordsForAC), the fold's Current reduction, and
-// AttestationExists — with no wall-local record parsing, no private
+// (spec/attest-helper dc-3) LoadAttestationState, treating only the
+// Authored state as held — with no wall-local record parsing, no private
 // latest-per-identity reduction, and no derived-tree walking of this
 // package's own. The same deliberately-minimal source-text witness
 // TestLadderStaticCallSites already established for this package.
@@ -345,7 +404,7 @@ func TestEmptySlotStaticCallSites(t *testing.T) {
 		"evidence.LoadRecordsWithSources(",
 		"evidence.RecordsForAC(",
 		"evidence.Current(",
-		"evidence.AttestationExists(",
+		"evidence.LoadAttestationState(",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("emptyslot.go does not call %s — evidence-slot co-3 requires the fold's own seam, not a lookalike", want)

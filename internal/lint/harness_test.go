@@ -273,6 +273,16 @@ func buildLintRepo(t *testing.T, overlayDirs ...string) *fixturegit.Repo {
 // routes through, and remains available, empty, for any future genuinely
 // pre-existing corpus debt — an empty map is a no-op filter, not a
 // silently reintroduced tolerance.
+//
+// (Reverted per Controller adjudication ADJ-51, 2026-07-16: the
+// spec/attest-helper build briefly routed two committed showcase
+// feature-outcome attestations — jira-loan-1482/ac-2.md, escrow-autopay/
+// ac-1.md — through this map, because the first-cut VL-022 refused them as
+// "wrong class." The rescope to STORY-targeting attestations only removes
+// that refusal at the root: a feature-outcome attestation is out of VL-022's
+// subject by construction, so it is not a finding at all and needs no
+// baseline entry. This map returns to EMPTY, as its own doc comment above
+// always anticipated.)
 var knownCorpusBaselineFindings = map[[3]string]bool{}
 
 // filterKnownBaseline strips knownCorpusBaselineFindings (see its doc

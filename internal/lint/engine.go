@@ -23,11 +23,12 @@ type Rule interface {
 	Check(in *RunInput) []Finding
 }
 
-// allRules is every VL-001..VL-021 rule, in id order.
+// allRules is every VL-001..VL-022 rule, in id order.
 var allRules = []Rule{
 	vl001{}, vl002{}, vl003{}, vl004{}, vl005{}, vl006{}, vl007{},
 	vl008{}, vl009{}, vl010{}, vl011{}, vl012{}, vl013{}, vl014{},
 	vl015{}, vl016{}, vl017{}, vl018{}, vl019{}, vl020{}, vl021{},
+	vl022{},
 }
 
 // Engine runs every rule over a store root and reports every finding.
@@ -35,7 +36,7 @@ type Engine struct {
 	rules []Rule
 }
 
-// NewEngine returns an Engine configured with all twenty rules.
+// NewEngine returns an Engine configured with all twenty-two rules.
 func NewEngine() *Engine {
 	return &Engine{rules: allRules}
 }
