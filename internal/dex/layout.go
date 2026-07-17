@@ -43,7 +43,10 @@ type pageData struct {
 	// A badge renders iff the flag is COMPUTED to stand — an unprovable
 	// flag (no forge) is disclosed in the metadata card instead, never
 	// silently dropped and never rendered as if proven. Each view carries
-	// the flag id (CSS/testid addressing) beside its display label.
+	// the flag id (CSS/testid addressing) beside its FIXED label — a flag's
+	// display is case-file taxonomy, not vocabulary-addressable
+	// (internal/dex/ladder.go; finding
+	// judged-ladder-flags-share-state-namespace).
 	LadderBadges []ladderBadgeView
 	Breadcrumb   []breadcrumbEntry
 	Banner       string

@@ -1,10 +1,15 @@
 // spec/vocabulary-surfaces ac-2, the dex surface: built pages render the
-// resolved model's display names — the page status badge, the listing
-// chips, the Class metadata row, and the story-page ladder badges — with
-// the bare id kept in every badge-<id> CSS class and testid, and
-// byte-identical output when the store carries no model.yaml (proven by
-// this package's whole pre-existing suite, which builds exactly such
-// stores and stays untouched).
+// resolved model's display names on the LIFECYCLE-STATE surfaces — the
+// page status badge, the listing chips, and the Class metadata row — with
+// the bare id kept in every badge-<id> CSS class and testid, and byte-
+// identical output when the store carries no model.yaml (proven by this
+// package's whole pre-existing suite, which builds exactly such stores and
+// stays untouched). The story-page ladder badges are the ONE exception:
+// they are case-file FLAGS (spec-stale, pending-supersession), not
+// lifecycle states, so their labels are FIXED and never vocabulary-
+// resolved (finding judged-ladder-flags-share-state-namespace — see
+// TestLadderBadgeViews_FlagLabelsNotVocabularyAddressable and
+// internal/dex/ladder.go).
 package dex
 
 import (
@@ -115,11 +120,15 @@ func TestBuildV2_VocabularyRenames(t *testing.T) {
 	}
 }
 
-// TestLadderBadgeViews_ModelVocabulary is the ladder-chip unit case (one
-// case per surface, failing independently): the story-page ladder badges
-// resolve their visible words through the model's state-display lookup
-// with id fallback, while the badge id stays for CSS/testid addressing.
-func TestLadderBadgeViews_ModelVocabulary(t *testing.T) {
+// TestLadderBadgeViews_FlagLabelsNotVocabularyAddressable is the ladder-
+// chip unit negative case (one per surface, failing independently): the
+// story-page ladder flags are case-file taxonomy, not lifecycle states, so
+// their visible labels are FIXED — a vocabulary entry keyed `spec-stale`
+// under `states:` does NOT rename the flag (finding
+// judged-ladder-flags-share-state-namespace). The bare id stays for
+// CSS/testid addressing.
+func TestLadderBadgeViews_FlagLabelsNotVocabularyAddressable(t *testing.T) {
+	// Adversarial model: it TRIES to rename spec-stale via states:.
 	m := &model.Model{
 		Schema:     "verdi.model/v1",
 		Vocabulary: model.Vocabulary{States: map[string]string{"spec-stale": "Drifted"}},
@@ -128,16 +137,17 @@ func TestLadderBadgeViews_ModelVocabulary(t *testing.T) {
 	if len(views) != 2 {
 		t.Fatalf("ladderBadgeViews returned %d views, want 2", len(views))
 	}
-	if views[0].ID != "spec-stale" || views[0].Label != "Drifted" {
-		t.Fatalf("views[0] = %+v, want ID spec-stale with renamed label Drifted", views[0])
+	if views[0].ID != "spec-stale" || views[0].Label != "spec-stale" {
+		t.Fatalf("views[0] = %+v, want ID+Label both the FIXED id spec-stale — a states entry keyed spec-stale must not rename the flag (judged-ladder-flags-share-state-namespace)", views[0])
 	}
 	if views[1].ID != "pending-supersession" || views[1].Label != "pending-supersession" {
-		t.Fatalf("views[1] = %+v, want the id fallback", views[1])
+		t.Fatalf("views[1] = %+v, want ID+Label both the fixed id pending-supersession", views[1])
 	}
 
+	// Nil model: identical fixed labels — the flag path never consults a model.
 	var nilModel *model.Model
 	views = ladderBadgeViews(nilModel, []string{"spec-stale"})
 	if views[0].Label != "spec-stale" {
-		t.Fatalf("nil-model label = %q, want the bare id", views[0].Label)
+		t.Fatalf("nil-model label = %q, want the fixed id", views[0].Label)
 	}
 }

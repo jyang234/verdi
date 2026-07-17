@@ -23,21 +23,31 @@ type ladderState struct {
 }
 
 // ladderBadgeView is one rendered ladder badge: the flag id (kept in the
-// badge's CSS class and testid — addressing, never renamed) beside its
-// display label (spec/vocabulary-surfaces ac-2).
+// badge's CSS class and testid — addressing) beside its FIXED display
+// label. For a case-file flag the two are the same word (see
+// ladderBadgeViews) — a flag's display is never vocabulary-resolved.
 type ladderBadgeView struct {
 	ID    string
 	Label string
 }
 
-// ladderBadgeViews resolves each ladder flag id's visible word through
-// the model's state-display lookup — the identical model.DisplayState
-// fallback-to-id resolution every other surface uses, never a dex-private
-// rename table. Nil-model-safe (bare ids).
+// ladderBadgeViews builds one view per ladder flag id. The visible Label
+// is the FIXED flag id — NOT vocabulary-resolved. Ladder flags (spec-
+// stale, pending-supersession — 03 §The amendment ladder) are case-file
+// TAXONOMY, not lifecycle states: their display is not vocabulary-
+// addressable in v1, a namespace disjoint from vocabulary.states. m is
+// accepted for signature symmetry with the model-aware page surfaces (and
+// so the flag-immunity invariant is assertable at this seam — see
+// vocabulary_test.go) but is deliberately NOT consulted for flag display.
+// Finding judged-ladder-flags-share-state-namespace: routing these ids
+// through m.DisplayState let a states entry keyed `spec-stale` silently
+// rename the flag. Genuine lifecycle-state badges — the page status badge,
+// the listing chips — stay DisplayState-resolved (artifactpage.go); flags
+// do not.
 func ladderBadgeViews(m *model.Model, ids []string) []ladderBadgeView {
 	views := make([]ladderBadgeView, len(ids))
 	for i, id := range ids {
-		views[i] = ladderBadgeView{ID: id, Label: m.DisplayState("", id)}
+		views[i] = ladderBadgeView{ID: id, Label: id}
 	}
 	return views
 }
