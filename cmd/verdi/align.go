@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -156,7 +155,7 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		fmt.Fprintln(stderr, "align: internal error: resolved spec has an invalid id:", err)
 		return 2
 	}
-	reportPath := filepath.Join(root, ".verdi", "specs", "active", specRef.Name, "deviation-report.md")
+	reportPath := store.DeviationReportPath(root, store.ZoneActive, specRef.Name)
 
 	existingReport, existingBody, err := loadExistingReport(reportPath)
 	if err != nil {

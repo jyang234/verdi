@@ -21,6 +21,7 @@ import (
 	"github.com/jyang234/verdi/internal/decisionsweep"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // readStoreFile reads a store-root-relative, slash-separated path.
@@ -58,7 +59,7 @@ func SpecStaleBadge(root string, snap *lint.Snapshot, specRef string, threshold 
 	if err != nil {
 		return nil, fmt.Errorf("wallbadge: spec-stale: %s: %w", specRef, err)
 	}
-	reportRelPath := filepath.ToSlash(filepath.Join(".verdi", "specs", "active", ref.Name, "deviation-report.md"))
+	reportRelPath := store.DeviationReportRelPath(store.ZoneActive, ref.Name)
 	covers, err := readDeviationCovers(root, reportRelPath)
 	if err != nil {
 		return nil, fmt.Errorf("wallbadge: spec-stale: reading %s: %w", reportRelPath, err)
@@ -133,7 +134,7 @@ func PendingSupersessionBadge(ctx context.Context, loader SupersessionCandidateL
 	var merged evidence.PendingSupersessionResult
 	var inputs []InputRecord
 	for _, featureName := range featureNames {
-		candidatePath := filepath.ToSlash(filepath.Join(".verdi", "specs", "active", featureName+"-v2", "spec.md"))
+		candidatePath := store.ActiveSpecRelPath(featureName + "-v2")
 		candidates, ok, err := loader.LoadCandidates(ctx, "spec/"+featureName, candidatePath)
 		if err != nil {
 			return nil, "", fmt.Errorf("wallbadge: pending-supersession: loading candidates for %s: %w", featureName, err)

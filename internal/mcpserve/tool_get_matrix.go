@@ -3,7 +3,6 @@ package mcpserve
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -56,7 +55,7 @@ func (b *Backend) GetMatrix(ctx context.Context, argsRaw json.RawMessage) map[st
 		return toolError("get_matrix: resolving HEAD: " + err.Error())
 	}
 
-	derivedRoot := filepath.Join(b.Root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
+	derivedRoot := store.DerivedSpecDir(b.Root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, b.Root, derivedRoot, commit)
 	if err != nil {
 		return toolError("get_matrix: " + err.Error())

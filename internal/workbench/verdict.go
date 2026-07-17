@@ -44,7 +44,7 @@ func verdictHandler(root string) http.HandlerFunc {
 			return
 		}
 
-		derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
+		derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 		commits, err := listSnapshotCommits(derivedRoot)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)

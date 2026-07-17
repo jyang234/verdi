@@ -211,7 +211,7 @@ func classifyPair(root, storyRefArg, acID string) (spec *artifact.SpecFrontmatte
 // (storySlug, acID) — attestations/<storySlug>/<acID>.md (I-6/I-31) — the
 // single source both the already-exists check and the final write share.
 func attestationPath(root, storySlug, acID string) string {
-	return filepath.Join(root, ".verdi", "attestations", storySlug, acID+".md")
+	return store.AttestationPath(root, storySlug, acID)
 }
 
 // attestationAlreadyExists is AC-2's other refusal predicate, checked at

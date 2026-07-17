@@ -172,7 +172,7 @@ func printSpecStalePathIfFailing(stdout io.Writer, root string, spec *artifact.S
 	if err != nil {
 		return fmt.Errorf("internal error: resolved spec has an invalid id: %w", err)
 	}
-	path := filepath.ToSlash(filepath.Join(".verdi", "specs", "active", specRef.Name, "deviation-report.md"))
+	path := store.DeviationReportRelPath(store.ZoneActive, specRef.Name)
 	fmt.Fprintf(stdout, "close: --preflight: deviation-report.md: %s\n", path)
 	return nil
 }
@@ -187,12 +187,12 @@ func printSpecStalePathIfFailing(stdout io.Writer, root string, spec *artifact.S
 // are diagnostics the fold already computed and the coarse gate line
 // discards.
 func preflightDerivedContext(ctx context.Context, root, specID, head string) (derivedRel string, excluded []string, err error) {
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(specID))
+	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(specID))
 	excluded, err = evidence.ExcludedCommitDirs(ctx, root, derivedRoot, head)
 	if err != nil {
 		return "", nil, err
 	}
-	derivedRel = filepath.ToSlash(filepath.Join(".verdi", "data", "derived", store.RefSlug(specID))) + "/"
+	derivedRel = store.DerivedSpecRelDir(store.RefSlug(specID)) + "/"
 	return derivedRel, excluded, nil
 }
 

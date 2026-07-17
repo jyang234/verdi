@@ -4,24 +4,25 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // AttestationPath returns the on-disk path an attestation for
 // (storySlug, acID) lives at under storeRoot's attestations/ directory
-// (attestations/<storySlug>/<acID>.md, I-6) — the ONE path-construction
-// convention AttestationExists and LoadAttestationState both resolve
-// through, so an external disclosure that must NAME this path (spec/
-// close-preflight ac-1/dc-4) never hand-derives a second, possibly-drifting
-// copy of it. Passing an empty storeRoot yields the store-relative display
-// form ("`.verdi/attestations/<storySlug>/<acID>.md`", filepath.Join drops
-// an empty leading element) a disclosure prints instead of a temp-dir- or
+// (attestations/<storySlug>/<acID>.md, I-6). It resolves through
+// store.AttestationPath — the single .verdi-layout assembler (ADJ-71) — which
+// AttestationExists, LoadAttestationState, and any external disclosure that
+// must NAME this path (spec/close-preflight ac-1/dc-4) all share, so none
+// hand-derives a second, possibly-drifting copy of it. Passing an empty
+// storeRoot yields the store-relative display form
+// ("`.verdi/attestations/<storySlug>/<acID>.md`", filepath.Join drops an empty
+// leading element) a disclosure prints instead of a temp-dir- or
 // checkout-rooted absolute path.
 func AttestationPath(storeRoot, storySlug, acID string) string {
-	return filepath.Join(storeRoot, ".verdi", "attestations", storySlug, acID+".md")
+	return store.AttestationPath(storeRoot, storySlug, acID)
 }
 
 // AttestationExists reports whether an attestation file exists for

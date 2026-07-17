@@ -14,11 +14,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
@@ -48,7 +48,7 @@ func runDesignAlign(ctx context.Context, root string, freeze bool, deps alignDep
 		fmt.Fprintln(stderr, "align: internal error: resolved spec has an invalid id:", err)
 		return 2
 	}
-	reportPath := filepath.Join(root, ".verdi", "specs", "active", specRef.Name, "decision-conflict-report.md")
+	reportPath := store.DecisionConflictReportPath(root, store.ZoneActive, specRef.Name)
 
 	existingReport, err := loadExistingDecisionReport(reportPath)
 	if err != nil {

@@ -36,7 +36,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/lint"
@@ -127,7 +126,7 @@ func runRollup(ctx context.Context, root, storyArg string, deps rollupDeps) int 
 		return 2
 	}
 
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
+	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 	if err != nil {
 		fmt.Fprintln(deps.Stderr, "rollup:", err)

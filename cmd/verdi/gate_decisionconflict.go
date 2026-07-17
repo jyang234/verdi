@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
@@ -108,7 +108,7 @@ func numberSpecMRConditions(conds []gateCondition) {
 // checkFreshFullyDispositioned's own "no report at all" case exactly.
 func checkDeclaredDecisionConflicts(root, specName, head string) (gateCondition, error) {
 	name := "spec-MR: declared decision conflicts resolved and judged findings dispositioned"
-	path := filepath.Join(root, ".verdi", "specs", "active", specName, "decision-conflict-report.md")
+	path := store.DecisionConflictReportPath(root, store.ZoneActive, specName)
 
 	data, err := os.ReadFile(path)
 	if err != nil {

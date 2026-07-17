@@ -11,11 +11,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
@@ -111,7 +111,7 @@ func flipPredecessorToSuperseded(root, predecessorRef, successorID string, stdou
 	if err != nil {
 		return "", 0 // malformed edges are lint's concern, not accept's
 	}
-	predPath := filepath.Join(root, ".verdi", "specs", "active", ref.Name, "spec.md")
+	predPath := store.ActiveSpecPath(root, ref.Name)
 	raw, err := os.ReadFile(predPath)
 	if err != nil {
 		if os.IsNotExist(err) {

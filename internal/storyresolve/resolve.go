@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // OperationalError marks a resolution failure that is an OPERATIONAL
@@ -222,7 +223,7 @@ func ResolveDesignSpec(root, branch string) (*artifact.SpecFrontmatter, error) {
 // (spec/attest-helper dc-5/co-2, ADJ-51 finding 1). The Error() text is
 // unchanged in every case; only the type distinguishes the two.
 func LoadActiveSpec(root, name string) (*artifact.SpecFrontmatter, error) {
-	path := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")
+	path := store.ActiveSpecPath(root, name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -249,7 +250,7 @@ func LoadActiveSpec(root, name string) (*artifact.SpecFrontmatter, error) {
 // both zones, mirroring internal/align's own readSpecByName.
 func LoadSpec(root, name string) (*artifact.SpecFrontmatter, error) {
 	for _, statusDir := range []string{"active", "archive"} {
-		path := filepath.Join(root, ".verdi", "specs", statusDir, name, "spec.md")
+		path := store.SpecPath(root, statusDir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {

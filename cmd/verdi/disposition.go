@@ -47,7 +47,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -166,7 +165,7 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 		return 2
 	}
 
-	reportPath := filepath.Join(root, ".verdi", "specs", "active", ref.Name, "deviation-report.md")
+	reportPath := store.DeviationReportPath(root, store.ZoneActive, ref.Name)
 	raw, err := os.ReadFile(reportPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "disposition: reading %s: %v\n", reportPath, err)

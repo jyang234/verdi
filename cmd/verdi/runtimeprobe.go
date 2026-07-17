@@ -150,7 +150,7 @@ func specDeclaresAC(spec *artifact.SpecFrontmatter, acID string) bool {
 // copy: both are already fully generic over the target path/records, so one
 // producer's helper serves both without duplication.
 func writeRuntimeRecord(root, commit, specRef string, rec artifact.Evidence) error {
-	dir := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(specRef), commit)
+	dir := filepath.Join(store.DerivedSpecDir(root, store.RefSlug(specRef)), commit)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("runtime probe: mkdir %s: %w", dir, err)
 	}

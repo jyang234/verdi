@@ -21,7 +21,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
@@ -33,7 +32,7 @@ import (
 // waivers/attestations. preview mirrors evidence.Input.Preview — false
 // folds source:ci only, true also folds source:local (advisory) records.
 func foldStoryEvidence(ctx context.Context, root string, spec *artifact.SpecFrontmatter, commit string, preview bool) (evidence.StoryResult, error) {
-	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
+	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 	if err != nil {
 		return evidence.StoryResult{}, fmt.Errorf("loading evidence records: %w", err)

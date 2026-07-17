@@ -9,7 +9,6 @@ package dex
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -17,6 +16,7 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // pendingState is one story ref's pending-supersession outcome — a proper
@@ -115,7 +115,7 @@ func computePendingStates(ctx context.Context, f forge.Forge, defaultBranch stri
 		for _, featureName := range featureNames {
 			candidates, ok := candidatesByFeature[featureName]
 			if !ok {
-				candidatePath := filepath.ToSlash(filepath.Join(".verdi", "specs", "active", featureName+"-v2", "spec.md"))
+				candidatePath := store.ActiveSpecRelPath(featureName + "-v2")
 				var err error
 				candidates, err = evidence.LoadPendingSupersessionCandidates(ctx, f, defaultBranch, "spec/"+featureName, candidatePath)
 				if err != nil {

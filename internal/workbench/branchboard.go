@@ -39,6 +39,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
@@ -220,7 +221,7 @@ func (b *branchBoards) loadSealed(ctx context.Context, branch, ref, name string)
 	if !specNameRe.MatchString(name) {
 		return nil, nil, ErrBoardNotFound
 	}
-	specPath := ".verdi/specs/active/" + name + "/spec.md"
+	specPath := store.ActiveSpecRelPath(name)
 	raw, err := gitx.Show(ctx, b.root, ref, specPath)
 	if err != nil {
 		// `git show` cannot distinguish "no such path at this ref" from

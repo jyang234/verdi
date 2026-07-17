@@ -8,6 +8,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wallbadge"
 )
 
@@ -169,7 +170,7 @@ func badgeViewsFrom(recs []wallbadge.DerivationRecord) []badgeView {
 // document — the exact Path every locus-declaring lint.Finding on that
 // spec carries (loadBoard only ever serves specs/active/).
 func specRelPathFor(specName string) string {
-	return ".verdi/specs/active/" + specName + "/spec.md"
+	return store.ActiveSpecRelPath(specName)
 }
 
 // contentDigest is "sha256:<hex>" over b — the honest, recomputable

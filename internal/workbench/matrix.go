@@ -12,7 +12,6 @@ import (
 	stdhtml "html"
 	"html/template"
 	"net/http"
-	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -44,7 +43,7 @@ func matrixHandler(root string) http.HandlerFunc {
 			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
-		derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(spec.ID))
+		derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 		records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)

@@ -85,7 +85,7 @@ func EmptySlotBadges(ctx context.Context, root, specRelPath, specRevision string
 		return nil, nil, nil
 	}
 
-	derivedRel := ".verdi/data/derived/" + store.RefSlug(fm.ID)
+	derivedRel := store.DerivedSpecRelDir(store.RefSlug(fm.ID))
 	derivedRoot := filepath.Join(root, filepath.FromSlash(derivedRel))
 	storySlug := store.RefSlug(fm.Story)
 

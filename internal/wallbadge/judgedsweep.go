@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // JudgedSweepSource is the judged-findings chip's namespaced rule id
@@ -70,8 +71,8 @@ type CoversResolver interface {
 // strict-decoded (three-valued honesty: an unreadable receipt is
 // disclosed, not skipped).
 func JudgedSweepBadge(ctx context.Context, root, specName, specRevision string, fm *artifact.SpecFrontmatter, resolver CoversResolver) (*DerivationRecord, string, error) {
-	reportRelPath := ".verdi/specs/active/" + specName + "/decision-conflict-report.md"
-	specRelPath := ".verdi/specs/active/" + specName + "/spec.md"
+	reportRelPath := store.DecisionConflictReportRelPath(store.ZoneActive, specName)
+	specRelPath := store.ActiveSpecRelPath(specName)
 
 	data, err := readStoreFile(root, reportRelPath)
 	if err != nil {

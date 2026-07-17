@@ -6,12 +6,12 @@ package decisionsweep
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // SpecStaleEntry is one story spec's spec-stale computation.
@@ -124,7 +124,7 @@ func storyOwnACIDs(story *artifact.SpecFrontmatter) map[string]bool {
 // when neither exists.
 func readDeviationFindings(root, name string) ([]artifact.Finding, bool, error) {
 	for _, statusDir := range []string{"active", "archive"} {
-		path := filepath.Join(root, ".verdi", "specs", statusDir, name, "deviation-report.md")
+		path := store.DeviationReportPath(root, statusDir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {

@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -66,7 +65,7 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		return runAcceptDiagram(ctx, root, ref, stdout, stderr)
 	}
 
-	specPath := filepath.Join(root, ".verdi", "specs", "active", ref.Name, "spec.md")
+	specPath := store.ActiveSpecPath(root, ref.Name)
 	raw, err := os.ReadFile(specPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "accept: reading %s: %v\n", specPath, err)
