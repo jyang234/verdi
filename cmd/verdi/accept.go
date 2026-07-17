@@ -113,16 +113,11 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}
-	commitDate, err := gitx.CommitDate(ctx, root, preFlipHead)
+	at, err := gitx.CommitDateOnly(ctx, root, preFlipHead)
 	if err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}
-	if len(commitDate) < 10 {
-		fmt.Fprintf(stderr, "accept: internal error: commit date %q too short to derive a YYYY-MM-DD frozen.at\n", commitDate)
-		return 2
-	}
-	at := commitDate[:10]
 
 	stubMatched := false
 	if spec.Class == artifact.ClassStory {

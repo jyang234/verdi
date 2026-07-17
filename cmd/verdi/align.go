@@ -182,16 +182,11 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		ExistingFindings: existingFindings,
 	}
 	if freeze {
-		at, err := gitx.CommitDate(ctx, root, covers)
+		frozenAt, err := gitx.CommitDateOnly(ctx, root, covers)
 		if err != nil {
 			fmt.Fprintln(stderr, "align:", err)
 			return 2
 		}
-		if len(at) < 10 {
-			fmt.Fprintln(stderr, "align: internal error: commit date too short to derive frozen.at")
-			return 2
-		}
-		frozenAt := at[:10]
 
 		// Freeze-in-place — the faithful freeze `verdi close` needs. When a
 		// living report already covers this exact freeze commit and every
