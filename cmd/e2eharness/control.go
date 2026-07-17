@@ -48,10 +48,11 @@ type controlServer struct {
 	outage bool
 
 	emptyGlance *emptyGlanceFixture
+	vocab       *vocabFixture
 }
 
-func newControlServer(storeRoot string) *controlServer {
-	return &controlServer{storeRoot: storeRoot, emptyGlance: newEmptyGlanceFixture()}
+func newControlServer(storeRoot, moduleRoot string) *controlServer {
+	return &controlServer{storeRoot: storeRoot, emptyGlance: newEmptyGlanceFixture(), vocab: newVocabFixture(moduleRoot)}
 }
 
 // handler wires the four endpoints onto a fresh mux.
@@ -61,6 +62,7 @@ func (c *controlServer) handler() http.Handler {
 	mux.HandleFunc("/outage", c.triggerOutage)
 	mux.HandleFunc("/delete-branch", c.deleteBranch)
 	mux.HandleFunc("/empty-glance-fixture", c.emptyGlance.handler)
+	mux.HandleFunc("/vocab-fixture", c.vocab.handler)
 	return mux
 }
 
