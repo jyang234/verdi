@@ -313,6 +313,22 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			// draft is a read; the editor page gates its own writes.
 			b.WriteString(`<a class="refcard-editor-link" data-testid="refcard-editor-link" href="` + esc(rc.EditorHref) + `">open in editor</a>`)
 		}
+		switch {
+		case rc.FeatureHref != "":
+			// AC-1's parent-feature affordance to the target's SERVABLE
+			// surface. An active feature opens its board; an archived
+			// feature — which the board route 404s on — opens its corpus
+			// page with its archived state disclosed on the link (ADJ-39,
+			// never a dead href). data-archived mirrors the stub-story
+			// link's own disclosure attribute.
+			if rc.Archived {
+				b.WriteString(`<a class="refcard-board-link refcard-board-link--archived" data-testid="refcard-board-link" data-archived="true" href="` + esc(rc.FeatureHref) + `">open feature <span class="badge badge-archived" data-testid="refcard-feature-archived">archived</span></a>`)
+			} else {
+				b.WriteString(`<a class="refcard-board-link" data-testid="refcard-board-link" data-archived="false" href="` + esc(rc.FeatureHref) + `">open feature board</a>`)
+			}
+		case rc.UnresolvedNotice != "":
+			b.WriteString(`<p class="refcard-unresolved-notice" data-testid="refcard-unresolved-notice">` + esc(rc.UnresolvedNotice) + `</p>`)
+		}
 		b.WriteString(`</div>`)
 	}
 
@@ -344,6 +360,31 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		// chip row rides the card in every mode, before the sealed wall's
 		// Instantiate affordance so the receipt never displaces the action.
 		writeBadgeChips(&b, "stub-"+sv.Slug, sv.Badges)
+		// Family navigation (spec/family-board-links ac-2/ac-3): every
+		// matching story anywhere in this checkout's store links straight to
+		// it (every distinct match, dc-4's plain fan-out; an archived match's
+		// link carries its archived state disclosed, ADJ-28's completion
+		// reading), and, short of any match, a live-checked in-between
+		// disclosure renders when the story's design branch already exists
+		// (ac-3, dc-3) -- ADDITIVE, alongside whatever this card already
+		// offers, never replacing it: dc-4 explicitly takes "no position on
+		// whether coverage is complete", so a match must never read as if the
+		// sealed wall's own Instantiate affordance had become unavailable.
+		for _, sl := range sv.StoryLinks {
+			linkCls := "stub-story-link"
+			if sl.Archived {
+				linkCls += " stub-story-link--archived"
+			}
+			storySlug := strings.ReplaceAll(sl.Ref, "/", "-")
+			b.WriteString(`<a class="` + linkCls + `" data-testid="stub-story-link-` + esc(sv.Slug) + `-` + esc(storySlug) + `" data-archived="` + esc(strconv.FormatBool(sl.Archived)) + `" href="` + esc(sl.Href) + `">` + esc(sl.Ref))
+			if sl.Archived {
+				b.WriteString(` <span class="badge badge-archived" data-testid="stub-story-archived-` + esc(sv.Slug) + `-` + esc(storySlug) + `">archived</span>`)
+			}
+			b.WriteString(`</a>`)
+		}
+		if sv.InstantiatedNotice != "" {
+			b.WriteString(`<p class="stub-instantiated-notice" data-testid="stub-instantiated-notice-` + esc(sv.Slug) + `">` + esc(sv.InstantiatedNotice) + `</p>`)
+		}
 		if instantiable {
 			verbLabel := "Instantiate story"
 			if sv.Spike {
