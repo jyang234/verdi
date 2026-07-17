@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/store"
@@ -175,10 +176,44 @@ func runJudgeOnce(ctx context.Context, runner JudgeRunner, argv []string, timeou
 		findings = append(findings, artifact.Finding{
 			ID:   "judged-" + store.RefSlug(jf.ID),
 			Kind: artifact.FindingJudged,
-			Text: fmt.Sprintf("%s (confidence %.2f)", jf.Text, jf.Confidence),
+			Text: fmt.Sprintf("%s (confidence %.2f)", normalizeJudgeText(jf.Text), jf.Confidence),
 		})
 	}
 	return &JudgeSuccess{Findings: findings, Stdin: prompt, RawResult: rawResult}, nil
+}
+
+// normalizeJudgeText replaces every maximal run of Unicode control
+// characters (newlines, carriage returns, tabs, and other C0/C1 controls)
+// in judge-emitted text with a single space, then trims the result — input
+// hygiene at the ONE seam every judge-emitted Finding/ConflictFinding Text
+// passes through (this function backs both this file's build-branch
+// ingestion and decision_judge.go's design-branch sweep, which shares the
+// identical Text-construction shape). ADJ-53's j-4 fix: a judge is
+// free-text and nothing in S5's own contract constrains it to a single
+// line, but every downstream consumer assumes one —
+// align.RenderFindingLine's single rendered bullet, the disposition verb's
+// whole-line matcher (cmd/verdi/disposition.go), and Identity's
+// content-hash finding equality (identity.go, hashing Text as part of a
+// finding's stable identity). Establishing the invariant here, once, for
+// every finding this package ever produces, is the fix; teaching each of
+// those consumers to tolerate a multi-line "line" would be accommodating
+// corrupt-shaped input rather than preventing it.
+func normalizeJudgeText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	pendingSpace := false
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			pendingSpace = true
+			continue
+		}
+		if pendingSpace {
+			b.WriteByte(' ')
+			pendingSpace = false
+		}
+		b.WriteRune(r)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // execJudgeEnvelope execs argv once with prompt on stdin and runs S5's

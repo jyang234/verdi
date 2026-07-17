@@ -197,6 +197,27 @@ func TestRun_McpDispatchesToRealVerb(t *testing.T) {
 	}
 }
 
+// TestRun_DispositionDispatchesToRealVerb proves `run` routes "disposition"
+// to the real implementation (disposition.go, spec/disposition-verb) rather
+// than the generic phase-stub path: a bare "disposition" (no arguments at
+// all) must produce disposition's own usage message, never the generic
+// "not implemented" stub message — mirroring TestRun_CloseDispatchesToRealVerb,
+// since both are mutating verbs whose bare invocation fails on argument
+// parsing before touching any file.
+func TestRun_DispositionDispatchesToRealVerb(t *testing.T) {
+	var stderr bytes.Buffer
+	got := run([]string{"disposition"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([disposition]) = %d, want 2 (usage error, no arguments given)", got)
+	}
+	if strings.Contains(stderr.String(), "not implemented") {
+		t.Fatalf("stderr = %q, want disposition's own usage message, not the generic stub message", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "usage: verdi disposition") {
+		t.Fatalf("stderr = %q, want it to mention 'usage: verdi disposition'", stderr.String())
+	}
+}
+
 // TestRun_NegativePaths covers the unknown-verb and no-args cases: both
 // exit 2 with usage, never silently succeeding (constitution 2).
 func TestRun_NegativePaths(t *testing.T) {

@@ -107,6 +107,24 @@ func alignFakeJudgeDrift(t *testing.T) []string {
 	return []string{path}
 }
 
+// alignFakeJudgeNewlineText writes a fake judge whose finding text carries
+// an embedded newline (ADJ-53's j-4 fixture) — a legitimate, if rare, judge
+// response shape (a judge is free-text; S5's own contract never constrains
+// it to a single line) that internal/align's ingestion must normalize
+// (internal/align/judge.go's normalizeJudgeText) rather than pass through
+// raw, since align.RenderFindingLine's single-line bullet and the
+// disposition verb's whole-line matcher both assume one line per finding.
+func alignFakeJudgeNewlineText(t *testing.T) []string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fakejudge.sh")
+	script := "#!/bin/sh\ncat <<'EOF'\n{\"is_error\":false,\"subtype\":\"success\",\"result\":\"{\\\"findings\\\":[{\\\"id\\\":\\\"j-newline\\\",\\\"text\\\":\\\"line one\\\\nline two\\\",\\\"confidence\\\":0.4}]}\"}\nEOF\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake judge: %v", err)
+	}
+	return []string{path}
+}
+
 func alignFakeJudgeFailing(t *testing.T) []string {
 	t.Helper()
 	dir := t.TempDir()
