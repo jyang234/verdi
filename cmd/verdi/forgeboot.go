@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/forge"
@@ -21,17 +20,18 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// loadManifest reads and strict-decodes root's verdi.yaml.
+// loadManifest reads and strict-decodes root's verdi.yaml. A thin
+// delegate to store.Open (L-M3's config bottleneck): the read+decode body
+// that used to live here now lives there verbatim, so this function's
+// error text is unchanged. Kept as its own function since the ~10 verb
+// call sites still want the bare *store.Manifest return shape; widening
+// them to consume *store.Config directly is a separate, later task.
 func loadManifest(root string) (*store.Manifest, error) {
-	data, err := os.ReadFile(filepath.Join(root, ".verdi", "verdi.yaml"))
+	st, err := store.Open(root)
 	if err != nil {
-		return nil, fmt.Errorf("reading verdi.yaml: %w", err)
+		return nil, err
 	}
-	m, err := store.DecodeManifest(data)
-	if err != nil {
-		return nil, fmt.Errorf("decoding verdi.yaml: %w", err)
-	}
-	return m, nil
+	return st.Manifest, nil
 }
 
 // resolveRefCommit determines the current ref and commit sync operates
