@@ -401,3 +401,87 @@ func TestRank_Negative(t *testing.T) {
 		t.Fatalf("Rank(bogus) = %d, want -1", got)
 	}
 }
+
+// TestFold_KindsBreakdown proves ACResult.Kinds projects the fold's OWN
+// per-declared-kind evaluation over the AUTHORITATIVE candidate set — the
+// single source spec/close-preflight's disclosure renders from (ADJ-56). It
+// is a projection of the same fold that produced Status, so a source:local
+// pass discounted by the verdict reads as unsatisfied here too, a violated
+// kind carries its failing witness, and a violated AC still exposes its full
+// breakdown (the pre-fix foldAC early-returned before computing any of it).
+func TestFold_KindsBreakdown(t *testing.T) {
+	root := t.TempDir()
+
+	t.Run("source:local pass does not satisfy the authoritative fold (finding 1)", func(t *testing.T) {
+		res := foldOneAC(t, root, ac("ac-1", artifact.EvidenceBehavioral), []artifact.Evidence{
+			testEvidence(artifact.EvidenceBehavioral, artifact.VerdictPass, "ac-1", withSource(artifact.SourceLocal)),
+		})
+		if len(res.Kinds) != 1 || res.Kinds[0].Kind != artifact.EvidenceBehavioral {
+			t.Fatalf("Kinds = %+v, want one behavioral entry", res.Kinds)
+		}
+		if res.Kinds[0].Satisfied {
+			t.Fatal("behavioral Satisfied = true over a source:local-only pass; the authoritative fold must discount it")
+		}
+		if res.Kinds[0].Violating != nil {
+			t.Fatalf("Violating = %+v, want nil (a discounted pass is not a violation)", res.Kinds[0].Violating)
+		}
+	})
+
+	t.Run("source:ci pass satisfies", func(t *testing.T) {
+		res := foldOneAC(t, root, ac("ac-1", artifact.EvidenceBehavioral), []artifact.Evidence{
+			testEvidence(artifact.EvidenceBehavioral, artifact.VerdictPass, "ac-1"),
+		})
+		if !res.Kinds[0].Satisfied || res.Kinds[0].Violating != nil {
+			t.Fatalf("behavioral KindResult = %+v, want satisfied, no violation", res.Kinds[0])
+		}
+	})
+
+	t.Run("violated AC still exposes Kinds with the violating witness (finding 3)", func(t *testing.T) {
+		res := foldOneAC(t, root, ac("ac-1", artifact.EvidenceStatic, artifact.EvidenceBehavioral), []artifact.Evidence{
+			testEvidence(artifact.EvidenceStatic, artifact.VerdictFail, "ac-1", withWitness("bad-static"), withProducer("linter")),
+			testEvidence(artifact.EvidenceBehavioral, artifact.VerdictPass, "ac-1", withProducer("e2e")),
+		})
+		if res.Status != StatusViolated {
+			t.Fatalf("Status = %q, want violated", res.Status)
+		}
+		if len(res.Kinds) != 2 {
+			t.Fatalf("Kinds = %+v, want 2 (a violated AC must still expose its per-kind breakdown)", res.Kinds)
+		}
+		if s := res.Kinds[0]; s.Kind != artifact.EvidenceStatic || s.Violating == nil || s.Violating.Witness != "bad-static" {
+			t.Fatalf("static KindResult = %+v, want Violating witness \"bad-static\"", s)
+		}
+		if b := res.Kinds[1]; !b.Satisfied || b.Violating != nil {
+			t.Fatalf("behavioral KindResult = %+v, want satisfied, no violation", b)
+		}
+	})
+
+	t.Run("coexisting pass+fail of the same kind still names the violation (finding 3)", func(t *testing.T) {
+		res := foldOneAC(t, root, ac("ac-1", artifact.EvidenceStatic), []artifact.Evidence{
+			testEvidence(artifact.EvidenceStatic, artifact.VerdictFail, "ac-1", withProducer("linter-a"), withWitness("failing")),
+			testEvidence(artifact.EvidenceStatic, artifact.VerdictPass, "ac-1", withProducer("linter-b")),
+		})
+		if res.Status != StatusViolated {
+			t.Fatalf("Status = %q, want violated (a coexisting pass never clears a fail)", res.Status)
+		}
+		if res.Kinds[0].Violating == nil || res.Kinds[0].Violating.Witness != "failing" {
+			t.Fatalf("static KindResult = %+v, want the failing record named even though a pass coexists", res.Kinds[0])
+		}
+	})
+
+	t.Run("attestation states absent/unauthored/authored", func(t *testing.T) {
+		absent := foldOneAC(t, root, ac("ac-absent", artifact.EvidenceAttestation), nil)
+		if absent.Kinds[0].Attestation != AttestationAbsent || absent.Kinds[0].Satisfied {
+			t.Fatalf("absent KindResult = %+v, want Attestation=absent, Satisfied=false", absent.Kinds[0])
+		}
+		writeAttestation(t, root, "test-1", "ac-unauth", "body\n"+UnauthoredAttestationMarker+"\nmore\n")
+		unauth := foldOneAC(t, root, ac("ac-unauth", artifact.EvidenceAttestation), nil)
+		if unauth.Kinds[0].Attestation != AttestationUnauthored || unauth.Kinds[0].Satisfied {
+			t.Fatalf("unauthored KindResult = %+v, want Attestation=unauthored, Satisfied=false", unauth.Kinds[0])
+		}
+		writeAttestation(t, root, "test-1", "ac-auth", "an authored claim, no marker\n")
+		auth := foldOneAC(t, root, ac("ac-auth", artifact.EvidenceAttestation), nil)
+		if auth.Kinds[0].Attestation != AttestationAuthored || !auth.Kinds[0].Satisfied {
+			t.Fatalf("authored KindResult = %+v, want Attestation=authored, Satisfied=true", auth.Kinds[0])
+		}
+	})
+}

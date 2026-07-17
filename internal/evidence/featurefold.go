@@ -74,6 +74,34 @@ type FeatureInput struct {
 	FeatureSlug string
 }
 
+// FloorResult is one feature AC's mandatory outcome-floor evaluation (03
+// §The feature fold) — foldFeatureAC's OWN floor computation, captured so a
+// disclosure consumer (spec/close-preflight) renders the floor's OR
+// semantics, never the story fold's AND-across-declared-kinds
+// (spec/close-preflight dc-2; ADJ-56 finding 2). It is a projection of the
+// same fold that produced the AC's Status.
+type FloorResult struct {
+	// Satisfied is the floor's disjunction: an authored outcome attestation
+	// OR at least one current passing outcome record bound to this AC. When
+	// true the floor is cleared and NO floor remedy applies — a disclosure
+	// must print none, even for an AC still unmet for another reason (ADJ-56
+	// finding 2).
+	Satisfied bool
+	// DeclaresAttestation reports whether this AC declares the attestation
+	// kind, so a disclosure knows whether an authored outcome attestation is
+	// one of the ways to clear the floor.
+	DeclaresAttestation bool
+	// Attestation is the three-way attestation state at the FeatureSlug path
+	// (spec/close-preflight dc-6), meaningful only when DeclaresAttestation is
+	// true — it tells an absent attestation apart from a scaffolded-but-
+	// unauthored one (dc-7).
+	Attestation AttestationState
+	// Violating names a current FAILING outcome record bound to this AC, when
+	// one exists — so a disclosure names a violated floor as a violation
+	// (ADJ-56 finding 3); nil when no current outcome record failed.
+	Violating *artifact.Evidence
+}
+
 // FeatureACResult is one feature acceptance criterion's folded outcome.
 type FeatureACResult struct {
 	ID                  string
@@ -81,6 +109,11 @@ type FeatureACResult struct {
 	Status              Status
 	ImplementingStories []string // implementing stories' spec refs, sorted as given by the caller
 	Summary             string   // one-line outcome-evidence summary, e.g. "attestation:present" or "behavioral:pass"
+	// Floor is this AC's outcome-floor evaluation (the OR-across-signals
+	// semantics). A disclosure consumer renders floor detail from THIS, never
+	// a re-derived per-kind status (dc-2; ADJ-56 finding 2). Projection of the
+	// same fold that produced Status.
+	Floor FloorResult
 }
 
 // FeatureResult is a whole feature's folded outcome.
@@ -129,7 +162,7 @@ func FoldFeature(in FeatureInput) (FeatureResult, error) {
 		stories := in.Stories[ac.ID]
 		current := Current(RecordsForAC(candidates, ac.ID))
 
-		attested := false
+		attState := AttestationAbsent
 		if declaresKind(ac, artifact.EvidenceAttestation) {
 			// spec/attest-helper dc-3: only the AUTHORED state satisfies
 			// the outcome floor — an unauthored `verdi attest` scaffold
@@ -140,16 +173,17 @@ func FoldFeature(in FeatureInput) (FeatureResult, error) {
 			if err != nil {
 				return FeatureResult{}, err
 			}
-			attested = state == AttestationAuthored
+			attState = state
 		}
 
-		status := foldFeatureAC(stories, current, attested)
+		status, floor := foldFeatureAC(ac, stories, current, attState)
 		result.ACs = append(result.ACs, FeatureACResult{
 			ID:                  ac.ID,
 			Text:                ac.Text,
 			Status:              status,
 			ImplementingStories: implementingSpecRefs(stories),
-			Summary:             summarizeFeatureAC(current, attested),
+			Summary:             summarizeFeatureAC(current, attState == AttestationAuthored),
+			Floor:               floor,
 		})
 		if status == StatusViolated {
 			result.Violated = true
@@ -169,29 +203,15 @@ func FoldFeature(in FeatureInput) (FeatureResult, error) {
 //	evidenced — every implementing story closed or eligible AND >=1 direct
 //	            authoritative record or outcome attestation bound to this AC
 //	pending   — otherwise, once implementing stories exist
-func foldFeatureAC(stories []ImplementingStory, current []artifact.Evidence, attested bool) Status {
-	for _, s := range stories {
-		if s.Violated {
-			return StatusViolated
-		}
-	}
-	for _, r := range current {
-		if r.Verdict == artifact.VerdictFail {
-			return StatusViolated
-		}
-	}
-
-	if len(stories) == 0 {
-		return StatusNoSignal
-	}
-
-	allClosedOrEligible := true
-	for _, s := range stories {
-		if !s.Closed && !s.Eligible {
-			allClosedOrEligible = false
-			break
-		}
-	}
+//
+// foldFeatureAC also returns the AC's outcome-floor evaluation (FloorResult)
+// so a disclosure consumer renders the floor's OR semantics, never a
+// re-derived per-kind AND (spec/close-preflight dc-2; ADJ-56 finding 2). The
+// status reduction is byte-for-byte the pre-breakdown fold; the FloorResult
+// reuses the very floorSatisfied value the verdict already computed, so the
+// two can never disagree.
+func foldFeatureAC(ac artifact.AcceptanceCriterion, stories []ImplementingStory, current []artifact.Evidence, attState AttestationState) (Status, FloorResult) {
+	attested := attState == AttestationAuthored
 
 	floorSatisfied := attested
 	if !floorSatisfied {
@@ -202,11 +222,40 @@ func foldFeatureAC(stories []ImplementingStory, current []artifact.Evidence, att
 			}
 		}
 	}
+	floor := FloorResult{
+		Satisfied:           floorSatisfied,
+		DeclaresAttestation: declaresKind(ac, artifact.EvidenceAttestation),
+		Attestation:         attState,
+		Violating:           firstFailing(current),
+	}
+
+	for _, s := range stories {
+		if s.Violated {
+			return StatusViolated, floor
+		}
+	}
+	for _, r := range current {
+		if r.Verdict == artifact.VerdictFail {
+			return StatusViolated, floor
+		}
+	}
+
+	if len(stories) == 0 {
+		return StatusNoSignal, floor
+	}
+
+	allClosedOrEligible := true
+	for _, s := range stories {
+		if !s.Closed && !s.Eligible {
+			allClosedOrEligible = false
+			break
+		}
+	}
 
 	if allClosedOrEligible && floorSatisfied {
-		return StatusEvidenced
+		return StatusEvidenced, floor
 	}
-	return StatusPending
+	return StatusPending, floor
 }
 
 func implementingSpecRefs(stories []ImplementingStory) []string {

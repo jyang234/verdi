@@ -133,23 +133,19 @@ func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.Spec
 	// side-effect-free — the identical pattern close.go's own runClose
 	// already uses for its rollup payload) to get the full per-AC
 	// evidence.StoryResult the gate's own coarse condition-1 line does not
-	// expose to its caller.
+	// expose to its caller. The per-kind missing/violated/unauthored detail
+	// is read STRAIGHT from that result's own per-kind evaluation
+	// (evidence.ACResult.Kinds), never re-derived over a differently-filtered
+	// record set (ADJ-56).
 	result, err := foldStoryEvidence(ctx, root, spec, head, false)
 	if err != nil {
 		return false, fmt.Errorf("close: --preflight: %w", err)
 	}
-	unmet := make(map[string]bool, len(result.ACs))
-	for _, ac := range result.ACs {
-		if ac.Status != evidence.StatusEvidenced && ac.Status != evidence.StatusWaived {
-			unmet[ac.ID] = true
-		}
-	}
-	storySlug := store.RefSlug(spec.Story)
-	lines, err := unmetACDetail(ctx, root, spec.ID, spec.AcceptanceCriteria, unmet, storySlug, head)
+	derivedRel, excluded, err := preflightDerivedContext(ctx, root, spec.ID, head)
 	if err != nil {
 		return false, fmt.Errorf("close: --preflight: %w", err)
 	}
-	printACDetail(stdout, lines)
+	printACDetail(stdout, unmetStoryACDetail(result.ACs, store.RefSlug(spec.Story), derivedRel, excluded))
 
 	if err := printSpecStalePathIfFailing(stdout, root, spec, manifest); err != nil {
 		return false, fmt.Errorf("close: --preflight: %w", err)
@@ -181,89 +177,86 @@ func printSpecStalePathIfFailing(stdout io.Writer, root string, spec *artifact.S
 	return nil
 }
 
-// unmetACDetail renders dc-4's exact missing-evidence-kind/path detail for
-// every AC in declared whose id is in unmet — the per-declared-kind
-// breakdown neither runClosureGate's nor runFeatureClosureGate's own coarse
-// Reason string carries today (dc-2). slug is the attestation-directory
-// slug the caller resolves per dc-6: store.RefSlug(spec.Story) for a
-// story-scope AC, or the feature spec's own Name (FeatureSlug) for a
-// feature outcome-floor AC — this function takes it as given, the same
-// "caller resolves, fold reduces" idiom evidence.FeatureInput.FeatureSlug's
-// own doc comment already establishes.
-//
-// Which AC is unmet is never decided here (dc-2: unmet is the caller's
-// already-computed evidence.StoryResult/evidence.FeatureResult) — only
-// which of an already-known-unmet AC's OWN declared evidence kinds lacks a
-// satisfying record is new rendering detail, computed from the same
-// already-exported fold primitives (evidence.Current, evidence.RecordsForAC,
-// evidence.LoadAttestationState, evidence.ExcludedCommitDirs)
-// internal/wallbadge's own empty-slot compute already uses for exactly
-// this purpose — never a copy-pasted reimplementation of the fold's own
-// unexported kindStatus.
-func unmetACDetail(ctx context.Context, root, specID string, declared []artifact.AcceptanceCriterion, unmet map[string]bool, slug, head string) ([]string, error) {
-	if len(unmet) == 0 {
-		return nil, nil
-	}
-
+// preflightDerivedContext resolves the two pure-presentation facts a
+// missing-evidence disclosure names alongside the fold's OWN evaluation: the
+// store-relative derived-tree root the fold reads records from
+// (.verdi/data/derived/<ref-slug>/, foldload.go's own join) and any commit
+// directory found on disk but excluded as a non-ancestor (dc-4's "for free"
+// stale rendering — the identical ancestry check LoadRecords already performs
+// per entry, evidence.ExcludedCommitDirs). Neither changes any verdict; both
+// are diagnostics the fold already computed and the coarse gate line
+// discards.
+func preflightDerivedContext(ctx context.Context, root, specID, head string) (derivedRel string, excluded []string, err error) {
 	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug(specID))
-	records, err := evidence.LoadRecords(ctx, root, derivedRoot, head)
+	excluded, err = evidence.ExcludedCommitDirs(ctx, root, derivedRoot, head)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	// dc-4: named "for free" alongside the derived-tree root — any commit
-	// directory found on disk but excluded (non-ancestor) from the fold's
-	// own current-record computation, computed via the identical ancestry
-	// check LoadRecords itself already performs per entry.
-	excluded, err := evidence.ExcludedCommitDirs(ctx, root, derivedRoot, head)
-	if err != nil {
-		return nil, err
-	}
-	derivedRel := filepath.ToSlash(filepath.Join(".verdi", "data", "derived", store.RefSlug(specID))) + "/"
+	derivedRel = filepath.ToSlash(filepath.Join(".verdi", "data", "derived", store.RefSlug(specID))) + "/"
+	return derivedRel, excluded, nil
+}
 
+// unmetStoryACDetail renders dc-4's per-declared-kind missing/violated/
+// unauthored detail for every unmet story AC, consuming the fold's OWN
+// per-kind evaluation (evidence.ACResult.Kinds) rather than re-deriving a
+// second, differently-filtered per-kind status (ADJ-56: the detail layer
+// obeys dc-2's one-enumeration principle exactly as the verdict layer does).
+// Which AC is unmet, whether each declared kind is satisfied under the
+// authoritative-source fold, and which kind carries a failing witness are all
+// READ from the caller's already-computed StoryResult — this function only
+// maps those evaluated slots to paths and human sentences. slug is the
+// story-scope attestation slug (store.RefSlug(spec.Story), dc-6);
+// derivedRel/excluded are the caller's already-resolved presentation facts.
+func unmetStoryACDetail(acs []evidence.ACResult, slug, derivedRel string, excluded []string) []string {
 	var lines []string
-	for _, ac := range declared {
-		if !unmet[ac.ID] {
-			continue
+	for _, ac := range acs {
+		if ac.Status == evidence.StatusEvidenced || ac.Status == evidence.StatusWaived {
+			continue // a met AC (evidenced or waived) has nothing to disclose.
 		}
-		current := evidence.Current(evidence.RecordsForAC(records, ac.ID))
-		for _, kind := range ac.Evidence {
-			if kind == artifact.EvidenceAttestation {
-				state, err := evidence.LoadAttestationState(root, slug, ac.ID)
-				if err != nil {
-					return nil, err
-				}
-				if state == evidence.AttestationAuthored {
-					continue
-				}
-				path := filepath.ToSlash(evidence.AttestationPath("", slug, ac.ID))
-				switch state {
-				case evidence.AttestationAbsent:
-					lines = append(lines, fmt.Sprintf("%s attestation: no file at %s; scaffold it with `verdi attest`", ac.ID, path))
-				case evidence.AttestationUnauthored:
-					lines = append(lines, fmt.Sprintf("%s attestation: a scaffold is present at %s but the claim is unauthored (sentinel present); author it", ac.ID, path))
-				}
-				continue
+		for _, k := range ac.Kinds {
+			if line := renderStoryKindGap(ac.ID, k, slug, derivedRel, excluded); line != "" {
+				lines = append(lines, line)
 			}
-
-			satisfied := false
-			for _, r := range current {
-				if r.Kind == kind && r.Verdict == artifact.VerdictPass {
-					satisfied = true
-					break
-				}
-			}
-			if satisfied {
-				continue
-			}
-
-			line := fmt.Sprintf("%s %s: no current passing record; derived-tree root probed: %s", ac.ID, kind, derivedRel)
-			if len(excluded) > 0 {
-				line += fmt.Sprintf(" (found but excluded as non-ancestor: %v)", excluded)
-			}
-			lines = append(lines, line)
 		}
 	}
-	return lines, nil
+	return lines
+}
+
+// renderStoryKindGap maps one evaluated per-kind slot to its disclosure line
+// (or "" when the kind is satisfied and needs none). It reads only the fold's
+// own KindResult — Satisfied, the attestation state, and any failing witness
+// — so a source:local pass the authoritative fold discounts reads here as
+// unsatisfied too (ADJ-56 finding 1), and a violated kind is named as a
+// violation, never as merely-absent (finding 3).
+func renderStoryKindGap(acID string, k evidence.KindResult, slug, derivedRel string, excluded []string) string {
+	if k.Kind == artifact.EvidenceAttestation {
+		if k.Satisfied {
+			return ""
+		}
+		path := filepath.ToSlash(evidence.AttestationPath("", slug, acID))
+		if k.Attestation == evidence.AttestationUnauthored {
+			return fmt.Sprintf("%s attestation: a scaffold is present at %s but the claim is unauthored (sentinel present); author it", acID, path)
+		}
+		return fmt.Sprintf("%s attestation: no file at %s; scaffold it with `verdi attest`", acID, path)
+	}
+
+	// A violated kind (a current FAILING record) is named as a violation with
+	// its witness — never flattened into the coarse "no current passing
+	// record" line, which misdescribes a failing witness as an absent one
+	// (ADJ-56 finding 3). This wins even when a passing record of the same
+	// kind coexists (a distinct producer), so the disclosure never goes silent
+	// on a violated AC.
+	if k.Violating != nil {
+		return fmt.Sprintf("%s %s: current record FAILED (witness %q); fix or supersede it — derived-tree root probed: %s", acID, k.Kind, k.Violating.Witness, derivedRel)
+	}
+	if k.Satisfied {
+		return ""
+	}
+	line := fmt.Sprintf("%s %s: no current passing record; derived-tree root probed: %s", acID, k.Kind, derivedRel)
+	if len(excluded) > 0 {
+		line += fmt.Sprintf(" (found but excluded as non-ancestor: %v)", excluded)
+	}
+	return line
 }
 
 // printACDetail prints unmetACDetail's lines under one grep-friendly

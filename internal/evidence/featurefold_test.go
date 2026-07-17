@@ -286,3 +286,98 @@ func TestFoldFeature_Negative(t *testing.T) {
 		}
 	})
 }
+
+// TestFoldFeature_FloorBreakdown proves FeatureACResult.Floor projects the
+// fold's OWN outcome-floor evaluation — the OR-across-signals semantics a
+// disclosure consumer (spec/close-preflight) must render, never the story
+// fold's AND-across-declared-kinds (ADJ-56 finding 2). It is a projection of
+// the same fold that produced Status, so a floor cleared by one signal reads
+// Satisfied even while the AC stays pending for another reason, and a
+// violated floor carries its failing witness (finding 3).
+func TestFoldFeature_FloorBreakdown(t *testing.T) {
+	const slug = "loan-update"
+
+	foldAC1 := func(t *testing.T, root string, kinds []artifact.EvidenceKind, stories []ImplementingStory, records []artifact.Evidence) FeatureACResult {
+		t.Helper()
+		res, err := FoldFeature(FeatureInput{
+			Spec:        featureSpec(t, "ac-1", kinds...),
+			Stories:     map[string][]ImplementingStory{"ac-1": stories},
+			Records:     records,
+			StoreRoot:   root,
+			FeatureSlug: slug,
+		})
+		if err != nil {
+			t.Fatalf("FoldFeature: %v", err)
+		}
+		return res.ACs[0]
+	}
+
+	t.Run("floor satisfied via one disjunct while the AC stays pending (finding 2)", func(t *testing.T) {
+		got := foldAC1(t, t.TempDir(),
+			[]artifact.EvidenceKind{artifact.EvidenceBehavioral, artifact.EvidenceAttestation},
+			[]ImplementingStory{{SpecRef: "spec/story-a", Closed: false, Eligible: false}}, // open + ineligible -> pending
+			[]artifact.Evidence{ciRecord(artifact.EvidenceBehavioral, artifact.VerdictPass, "ac-1")},
+		)
+		if got.Status != StatusPending {
+			t.Fatalf("Status = %q, want pending (open ineligible story)", got.Status)
+		}
+		if !got.Floor.Satisfied {
+			t.Fatal("Floor.Satisfied = false, want true (a passing behavioral outcome record clears the OR floor even with no attestation)")
+		}
+		if !got.Floor.DeclaresAttestation || got.Floor.Attestation != AttestationAbsent || got.Floor.Violating != nil {
+			t.Fatalf("Floor = %+v, want DeclaresAttestation=true, Attestation=absent, no violation", got.Floor)
+		}
+	})
+
+	t.Run("floor satisfied via authored outcome attestation", func(t *testing.T) {
+		root := t.TempDir()
+		writeOutcomeAttestation(t, root, slug, "ac-1")
+		got := foldAC1(t, root,
+			[]artifact.EvidenceKind{artifact.EvidenceBehavioral, artifact.EvidenceAttestation},
+			[]ImplementingStory{{SpecRef: "spec/story-a", Closed: true}},
+			nil,
+		)
+		if !got.Floor.Satisfied || got.Floor.Attestation != AttestationAuthored {
+			t.Fatalf("Floor = %+v, want Satisfied=true, Attestation=authored", got.Floor)
+		}
+	})
+
+	t.Run("floor unsatisfied names both disjuncts' state", func(t *testing.T) {
+		got := foldAC1(t, t.TempDir(),
+			[]artifact.EvidenceKind{artifact.EvidenceBehavioral, artifact.EvidenceAttestation},
+			[]ImplementingStory{{SpecRef: "spec/story-a", Closed: true}},
+			nil,
+		)
+		if got.Status != StatusPending {
+			t.Fatalf("Status = %q, want pending (floor unmet)", got.Status)
+		}
+		if got.Floor.Satisfied || !got.Floor.DeclaresAttestation || got.Floor.Attestation != AttestationAbsent {
+			t.Fatalf("Floor = %+v, want Satisfied=false, DeclaresAttestation=true, Attestation=absent", got.Floor)
+		}
+	})
+
+	t.Run("floor violated names its failing witness (finding 3)", func(t *testing.T) {
+		got := foldAC1(t, t.TempDir(),
+			[]artifact.EvidenceKind{artifact.EvidenceBehavioral},
+			[]ImplementingStory{{SpecRef: "spec/story-a", Closed: true}},
+			[]artifact.Evidence{ciRecord(artifact.EvidenceBehavioral, artifact.VerdictFail, "ac-1")},
+		)
+		if got.Status != StatusViolated {
+			t.Fatalf("Status = %q, want violated", got.Status)
+		}
+		if got.Floor.Violating == nil || got.Floor.Violating.Witness != "w" {
+			t.Fatalf("Floor.Violating = %+v, want the failing outcome record named", got.Floor.Violating)
+		}
+	})
+
+	t.Run("AC declaring no attestation kind reports DeclaresAttestation=false", func(t *testing.T) {
+		got := foldAC1(t, t.TempDir(),
+			[]artifact.EvidenceKind{artifact.EvidenceBehavioral},
+			[]ImplementingStory{{SpecRef: "spec/story-a", Closed: true}},
+			nil,
+		)
+		if got.Floor.DeclaresAttestation {
+			t.Fatalf("Floor.DeclaresAttestation = true for an AC declaring only [behavioral]: %+v", got.Floor)
+		}
+	})
+}

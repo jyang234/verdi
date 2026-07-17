@@ -53,17 +53,23 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 			t.Fatalf("preflight stdout missing the per-AC status the gate already itemizes:\n%s", pstdout.String())
 		}
 
+		// ADJ-56 finding 2: the feature outcome floor is an OR across an AC's
+		// signals (attested OR any passing outcome record — 03 §The feature
+		// fold), NOT the story fold's AND-across-declared-kinds. An unsatisfied
+		// floor renders ONE disjunctive remedy naming both ways to clear it
+		// (the FeatureSlug-keyed attestation path, dc-6, OR a passing outcome
+		// record), never a separate per-kind attestation/behavioral remedy.
 		derivedRoot := filepath.ToSlash(filepath.Join(".verdi", "data", "derived", store.RefSlug("spec/close-feature-fixture"))) + "/"
-		wantBehavioral := "ac-2 behavioral: no current passing record; derived-tree root probed: " + derivedRoot
-		if !strings.Contains(pstdout.String(), wantBehavioral) {
-			t.Fatalf("preflight stdout missing the behavioral kind detail %q:\n%s", wantBehavioral, pstdout.String())
+		featureSlugPath := filepath.ToSlash(filepath.Join(".verdi", "attestations", "close-feature-fixture", "ac-2.md"))
+		wantFloor := "ac-2 outcome floor unsatisfied: needs an authored outcome attestation at " + featureSlugPath + ", or any passing outcome record under " + derivedRoot
+		if !strings.Contains(pstdout.String(), wantFloor) {
+			t.Fatalf("preflight stdout missing the OR-floor outcome-floor disclosure %q:\n%s", wantFloor, pstdout.String())
 		}
-		wantAttestation := "ac-2 attestation: no file at " + filepath.ToSlash(filepath.Join(".verdi", "attestations", "close-feature-fixture", "ac-2.md")) + "; scaffold it with `verdi attest`"
-		if !strings.Contains(pstdout.String(), wantAttestation) {
-			t.Fatalf("preflight stdout missing the FeatureSlug-keyed attestation detail %q:\n%s", wantAttestation, pstdout.String())
+		if strings.Contains(pstdout.String(), "ac-2 attestation: no file") || strings.Contains(pstdout.String(), "ac-2 behavioral: no current passing record") {
+			t.Fatalf("preflight stdout must not render the feature floor as story-style AND-across-kinds remedies (finding 2):\n%s", pstdout.String())
 		}
-		if strings.Contains(pstdout.String(), "ac-1 behavioral:") || strings.Contains(pstdout.String(), "ac-1 attestation:") {
-			t.Fatalf("preflight stdout should not name ac-1's kinds as missing (only ac-2 is unmet):\n%s", pstdout.String())
+		if strings.Contains(pstdout.String(), "ac-1 behavioral:") || strings.Contains(pstdout.String(), "ac-1 outcome floor") {
+			t.Fatalf("preflight stdout should not name ac-1 (only ac-2 is unmet):\n%s", pstdout.String())
 		}
 
 		after := snapshotRepo(t, repo.Dir)
@@ -123,6 +129,57 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 			t.Fatalf("close stdout missing the SAME still-open story ref preflight showed: %s", cstdout.String())
 		}
 	})
+
+	// ADJ-56 finding 2 (0.55): a feature AC whose outcome floor is SATISFIED
+	// via one disjunct (a passing behavioral outcome record) but which is
+	// still unmet only because an implementing story is open+ineligible
+	// (pending) must NOT print an attestation remedy — the feature gate does
+	// not require an attestation once the floor is cleared, so instructing the
+	// operator to author one is a false remedy from re-derived (story-AND)
+	// requirement semantics.
+	t.Run("floor satisfied via one disjunct prints no false remedy (finding 2)", func(t *testing.T) {
+		opts := defaultCloseFeatureFixtureOpts()
+		opts.Story2Status = "accepted-pending-build" // story-two open
+		opts.Story2OwnVerdict = "abstain"            // ...and NOT self-eligible, so ac-2 folds pending, not evidenced
+		opts.FeatureAC2FloorSatisfied = true         // floor cleared by a passing behavioral outcome record
+		repo := buildCloseFeatureRepo(t, opts)
+		seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+		before := snapshotRepo(t, repo.Dir)
+
+		var pstdout, pstderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		if rc != 1 {
+			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
+		}
+		// ac-2 IS unmet (pending — its open implementing story), and the gate
+		// itemizes that; but its outcome floor is already satisfied.
+		if !strings.Contains(pstdout.String(), "ac-2=pending") {
+			t.Fatalf("preflight stdout should still itemize ac-2 as pending:\n%s", pstdout.String())
+		}
+		if strings.Contains(pstdout.String(), "close-feature-fixture/ac-2.md") {
+			t.Fatalf("finding 2: preflight printed a FALSE attestation remedy for an already-satisfied outcome floor:\n%s", pstdout.String())
+		}
+		if strings.Contains(pstdout.String(), "ac-2 attestation:") || strings.Contains(pstdout.String(), "ac-2 outcome floor") {
+			t.Fatalf("finding 2: preflight printed a floor remedy for a satisfied floor:\n%s", pstdout.String())
+		}
+
+		after := snapshotRepo(t, repo.Dir)
+		if before != after {
+			t.Fatalf("--preflight mutated the repo:\nbefore: %s\nafter:  %s", before, after)
+		}
+
+		// Agreement (ac-3): a real close on the byte-identical fixture refuses
+		// for exactly the reasons the preflight named (ac-2 pending + the open
+		// implementing story), never on the fabricated attestation.
+		var cstdout, cstderr bytes.Buffer
+		gotClose := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &cstdout, &cstderr)
+		if gotClose != 1 {
+			t.Fatalf("runClose = %d, want 1; stdout=%s stderr=%s", gotClose, cstdout.String(), cstderr.String())
+		}
+		if !strings.Contains(cstdout.String(), "ac-2=pending") {
+			t.Fatalf("close stdout missing the SAME per-AC status preflight showed: %s", cstdout.String())
+		}
+	})
 }
 
 // TestRunPreflight_FeatureScope_OutcomeFloorAttestation_UsesFeatureSlug is
@@ -136,11 +193,12 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 // — a maximally visible witness if the build ever used the wrong helper.
 //
 // The floor stays unmet by withholding BOTH signals (no behavioral record,
-// no attestation) rather than satisfying one — 03 §The feature fold's
-// floorSatisfied is an OR across an AC's outcome-level signals (foldFeatureAC:
-// "attested, or ANY current record passed" — unlike the story-level fold's
-// AND-across-declared-kinds), so a single passing behavioral record alone
-// already clears ac-2's whole floor and would defeat this proof's premise.
+// no attestation), so the OR-floor disclosure (ADJ-56 finding 2) names both
+// ways to clear it — including the FeatureSlug-keyed attestation path this
+// test polices. That the floor is a disjunction (a single passing behavioral
+// record alone clears it) is now proven separately by
+// TestRunPreflight_FeatureScope_DefectClasses' finding-2 subtest; here the
+// floor is genuinely unsatisfied so the attestation path is legitimately named.
 func TestRunPreflight_FeatureScope_OutcomeFloorAttestation_UsesFeatureSlug(t *testing.T) {
 	opts := defaultCloseFeatureFixtureOpts()
 	opts.FeatureAC2FloorSatisfied = false // neither a behavioral record nor an attestation exists for ac-2
@@ -154,14 +212,15 @@ func TestRunPreflight_FeatureScope_OutcomeFloorAttestation_UsesFeatureSlug(t *te
 		t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 	}
 
+	derivedRoot := filepath.ToSlash(filepath.Join(".verdi", "data", "derived", store.RefSlug("spec/close-feature-fixture"))) + "/"
 	featureSlugPath := filepath.ToSlash(filepath.Join(".verdi", "attestations", "close-feature-fixture", "ac-2.md"))
-	want := "ac-2 attestation: no file at " + featureSlugPath + "; scaffold it with `verdi attest`"
+	want := "ac-2 outcome floor unsatisfied: needs an authored outcome attestation at " + featureSlugPath + ", or any passing outcome record under " + derivedRoot
 	if !strings.Contains(stdout.String(), want) {
-		t.Fatalf("stdout missing the FeatureSlug-keyed attestation disclosure %q:\n%s", want, stdout.String())
+		t.Fatalf("stdout missing the FeatureSlug-keyed OR-floor disclosure %q:\n%s", want, stdout.String())
 	}
 
 	wrongStorySlugPath := filepath.ToSlash(filepath.Join(".verdi", "attestations", "ac-2.md")) // store.RefSlug("") collapses away entirely
-	if strings.Contains(stdout.String(), "no file at "+wrongStorySlugPath) {
+	if strings.Contains(stdout.String(), "attestation at "+wrongStorySlugPath) {
 		t.Fatalf("stdout must never use the story-slug helper (store.RefSlug(spec.Story)) for the feature outcome floor: %s", stdout.String())
 	}
 

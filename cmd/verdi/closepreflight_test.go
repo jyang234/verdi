@@ -98,6 +98,21 @@ func preflightDerivedRoot() string {
 	return filepath.ToSlash(filepath.Join(".verdi", "data", "derived", store.RefSlug(preflightStoryRef))) + "/"
 }
 
+// preflightEvidenceJSON renders one verdi.evidence/v1 record with an
+// explicit provenance source and producer — the finding-1 fixture needs a
+// source:local record (which the authoritative fold must NOT read as
+// satisfying), and the finding-3 coexisting-record fixture needs two
+// same-kind records under distinct producers (so evidence.Current keeps
+// BOTH a fail and a pass), neither of which featureFixtureEvidenceJSON
+// (source:ci, no producer) can express. The witness is derived from the
+// producer so a violated-kind disclosure's named witness is assertable.
+func preflightEvidenceJSON(ac, kind, verdict, source, producer, commit string) string {
+	return `{"schema":"verdi.evidence/v1","evidence_for":["` + ac + `"],"kind":"` + kind +
+		`","verdict":"` + verdict + `","witness":"` + producer + ` witness","producer":"` + producer +
+		`","provenance":{"source":"` + source + `","pipeline":"1","job":"1","commit":"` + commit +
+		`"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}`
+}
+
 func writePreflightAttestation(t *testing.T, root, content string) {
 	t.Helper()
 	dir := filepath.Join(root, ".verdi", "attestations", preflightStorySlug())
@@ -290,8 +305,15 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		if !strings.Contains(pstdout.String(), "[FAIL] closure: 1. story eligible") {
 			t.Fatalf("preflight stdout missing eligibility FAIL:\n%s", pstdout.String())
 		}
-		if !strings.Contains(pstdout.String(), "ac-1 static: no current passing record; derived-tree root probed: "+preflightDerivedRoot()) {
-			t.Fatalf("preflight stdout should name static as the unsatisfied (failing) kind:\n%s", pstdout.String())
+		// ADJ-56 finding 3: a violated kind is NAMED as a violation (kind +
+		// violating witness + path), never rendered as merely "no current
+		// passing record" (the coarse missing-evidence line, which misdescribes
+		// a failing witness as an absent one).
+		if !strings.Contains(pstdout.String(), `ac-1 static: current record FAILED (witness "fixture witness"); fix or supersede it — derived-tree root probed: `+preflightDerivedRoot()) {
+			t.Fatalf("preflight stdout should name static's violation distinctly (finding 3), not the coarse missing line:\n%s", pstdout.String())
+		}
+		if strings.Contains(pstdout.String(), "ac-1 static: no current passing record") {
+			t.Fatalf("preflight stdout must NOT flatten a violated kind into the coarse missing-evidence line (finding 3):\n%s", pstdout.String())
 		}
 		if strings.Contains(pstdout.String(), "ac-1 behavioral:") || strings.Contains(pstdout.String(), "ac-1 attestation:") {
 			t.Fatalf("preflight stdout should NOT name behavioral/attestation as missing when both are satisfied:\n%s", pstdout.String())
@@ -439,6 +461,88 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		gotClose := runClose(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, closeDeps{Forge: forgefake.New(), Registry: fake.New()}, &cstdout, &cstderr)
 		if gotClose != 1 {
 			t.Fatalf("runClose = %d, want 1 (unauthored scaffold must not satisfy the fold); stdout=%s stderr=%s", gotClose, cstdout.String(), cstderr.String())
+		}
+	})
+
+	// ADJ-56 finding 1 (0.80): a source:local passing record must NEVER read
+	// as satisfying the missing-evidence detail — the closure gate folds
+	// authoritative (source:ci) evidence only, so a local-only pass leaves the
+	// kind genuinely unmet AND the real close refuses on it. The disclosure
+	// must name the refused authoritative artifact + fold path, never go
+	// silent because an advisory record happens to pass.
+	t.Run("source:local passing record never reads as satisfied (finding 1)", func(t *testing.T) {
+		repo := buildPreflightFixtureRepo(t)
+		// behavioral's ONLY passing record is source:local; static + attestation
+		// absent. The authoritative fold drops the local record, so behavioral
+		// is unmet at the gate — the detail must NAME it.
+		writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, repo.Head,
+			preflightEvidenceJSON("ac-1", "behavioral", "pass", "local", "localrunner", repo.Head),
+		)
+		before := snapshotRepo(t, repo.Dir)
+
+		var pstdout, pstderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		if rc != 1 {
+			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
+		}
+		wantBehavioral := "ac-1 behavioral: no current passing record; derived-tree root probed: " + preflightDerivedRoot()
+		if !strings.Contains(pstdout.String(), wantBehavioral) {
+			t.Fatalf("finding 1: preflight went SILENT on the CI-refused behavioral kind — a source:local pass must not read as satisfied:\n%s", pstdout.String())
+		}
+
+		after := snapshotRepo(t, repo.Dir)
+		if before != after {
+			t.Fatalf("--preflight mutated the repo:\nbefore: %s\nafter:  %s", before, after)
+		}
+
+		// Agreement (ac-3): a real close on the byte-identical fixture refuses
+		// for exactly the same reason — eligibility unmet over authoritative
+		// evidence, the local pass discounted identically.
+		var cstdout, cstderr bytes.Buffer
+		gotClose := runClose(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, closeDeps{Forge: forgefake.New(), Registry: fake.New()}, &cstdout, &cstderr)
+		if gotClose != 1 {
+			t.Fatalf("runClose = %d, want 1; stdout=%s stderr=%s", gotClose, cstdout.String(), cstderr.String())
+		}
+		if !strings.Contains(cstdout.String(), "[FAIL] closure: 1. story eligible") {
+			t.Fatalf("close stdout missing the SAME eligibility FAIL line preflight showed: %s", cstdout.String())
+		}
+	})
+
+	// ADJ-56 finding 3 (0.30), sharpest witness: a violated kind that ALSO
+	// carries a coexisting passing record (a distinct producer) must still be
+	// named as a violation — the pre-fix renderer sees the passing record and
+	// goes SILENT, leaving a violated AC with no detail at all.
+	t.Run("violated kind with a coexisting passing record is never silent (finding 3)", func(t *testing.T) {
+		repo := buildPreflightFixtureRepo(t)
+		writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, repo.Head,
+			preflightEvidenceJSON("ac-1", "static", "fail", "ci", "linter-a", repo.Head),
+			preflightEvidenceJSON("ac-1", "static", "pass", "ci", "linter-b", repo.Head),
+			featureFixtureEvidenceJSON("ac-1", "behavioral", "pass", repo.Head),
+		)
+		writePreflightAttestation(t, repo.Dir, preflightAuthoredAttestationMD)
+		before := snapshotRepo(t, repo.Dir)
+
+		var pstdout, pstderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		if rc != 1 {
+			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
+		}
+		if !strings.Contains(pstdout.String(), `ac-1 static: current record FAILED (witness "linter-a witness"); fix or supersede it — derived-tree root probed: `+preflightDerivedRoot()) {
+			t.Fatalf("finding 3: a violated kind with a coexisting passing record must still be named as a violation, never silently skipped:\n%s", pstdout.String())
+		}
+
+		after := snapshotRepo(t, repo.Dir)
+		if before != after {
+			t.Fatalf("--preflight mutated the repo:\nbefore: %s\nafter:  %s", before, after)
+		}
+
+		var cstdout, cstderr bytes.Buffer
+		gotClose := runClose(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, closeDeps{Forge: forgefake.New(), Registry: fake.New()}, &cstdout, &cstderr)
+		if gotClose != 1 {
+			t.Fatalf("runClose = %d, want 1; stdout=%s stderr=%s", gotClose, cstdout.String(), cstderr.String())
+		}
+		if !strings.Contains(cstdout.String(), "[FAIL] closure: 1. story eligible") {
+			t.Fatalf("close stdout missing the SAME eligibility FAIL line preflight showed: %s", cstdout.String())
 		}
 	})
 }
