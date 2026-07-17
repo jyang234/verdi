@@ -4,7 +4,7 @@ kind: spec
 title: "Tool View Exit"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-25
 problem: { text: "the workbench's one board tool view today, the diagram designer at `/board/diagram/{name}` (internal/workbench/boarddiagram.go, boarddiagramrender.go), has no way back: its page chrome renders only `index` and `artifact` links and nothing binds the Escape key at the page level; an operator who follows a spec board's pinned diagram reference card (`attachDiagramEditorHrefs`, boardspec.go) or the corpus page's 'Open in the board editor' link into the editor can leave only via the top-left wordmark to the index, losing the board they were just on — the first gap spec/workbench-legibility#problem names", anchor: "#problem" }
 outcome: { text: "the diagram designer renders an explicit, visible affordance back to the board that opened it, and the Escape key does the same; opened from a spec board's pinned reference card, both return to that exact board, rendered fully; opened with no board known (a direct URL, or the corpus page's link, neither of which is a board), the affordance and Escape disclose that honestly and fall back to the index rather than guessing or breaking. Any board tool view registered after this one carries the same obligation as a condition of its own route (dc-1). Entering and leaving is proven end-to-end in the browser", anchor: "#outcome" }
