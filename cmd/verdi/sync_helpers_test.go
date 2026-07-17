@@ -197,6 +197,19 @@ func TestBuildForge_Github_Negative_UnresolvableIdentifier(t *testing.T) {
 	}
 }
 
+// TestBuildForge_Gitlab_Negative_UnresolvableIdentifier is the gitlab
+// counterpart to TestBuildForge_Github_Negative_UnresolvableIdentifier
+// (ADJ-69): buildForge refuses — rather than building an adapter that would
+// DIAL gitlab.com/api/v4/projects//... with an empty :id — when CI_PROJECT_ID
+// is unset. gitlab's identity is env-only (never URL-derived, dc-3), so the
+// remoteURL argument is irrelevant to this refusal.
+func TestBuildForge_Gitlab_Negative_UnresolvableIdentifier(t *testing.T) {
+	t.Setenv("CI_PROJECT_ID", "")
+	if _, err := buildForge("gitlab", "", nil); err == nil {
+		t.Fatal("buildForge(gitlab, no CI_PROJECT_ID): want error, got nil")
+	}
+}
+
 // TestGithubOwnerRepo covers D6-14: the github owner/repo resolves from
 // GitHub Actions' env when set, and otherwise falls back to the origin
 // remote URL for a local run.

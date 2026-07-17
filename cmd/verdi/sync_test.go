@@ -1007,6 +1007,43 @@ func TestCmdSync_LocalCheckout_RefusesNamingSources(t *testing.T) {
 	}
 }
 
+// TestCmdSync_GitlabLocalCheckout_RefusesNamingProjectID is the gitlab
+// counterpart to TestCmdSync_LocalCheckout_RefusesNamingSources (ADJ-69):
+// it drives cmdSync over a scratch fixturegit repo whose manifest names
+// `forge: gitlab` (DetectKind reaches gitlab with no CI env at all — the
+// manifest wins) and with CI_PROJECT_ID unset, proving that a non-produce
+// sync refuses with exit 2, naming CI_PROJECT_ID, BEFORE any network dial.
+// The refusal lands at the buildForge construction seam, upstream of
+// fetchAncestorBundle's FetchEvidenceBundle, so there is no
+// gitlab.com/api/v4/projects//... egress with an empty :id — deb0dd3's own
+// "only-refusing on branches that dial" rule, previously pinned for github
+// alone.
+func TestCmdSync_GitlabLocalCheckout_RefusesNamingProjectID(t *testing.T) {
+	for _, v := range []string{
+		"CI_PROJECT_ID", "CI_API_V4_URL", "CI_JOB_TOKEN",
+		"GITHUB_REPOSITORY_OWNER", "GITHUB_REPOSITORY", "GITHUB_TOKEN",
+		"CI_COMMIT_REF_NAME", "GITHUB_HEAD_REF", "GITHUB_REF_NAME",
+	} {
+		t.Setenv(v, "")
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: gitlab\n",
+		},
+		Message: "store init",
+	}})
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	code := cmdSync(nil, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("cmdSync in a gitlab local checkout with no CI_PROJECT_ID: exit = %d, want 2; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "CI_PROJECT_ID") {
+		t.Errorf("stderr = %q, want it to name %q as the missing identity source", stderr.String(), "CI_PROJECT_ID")
+	}
+}
+
 // cmdSyncProduceStore builds an env-less, origin-less GitHub store as a real
 // git repo (fixturegit) with a toolchain block but NO services, so a
 // --produce/--produce-runtime run completes hermetically (an empty bundle,
