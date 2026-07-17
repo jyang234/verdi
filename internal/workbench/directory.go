@@ -52,11 +52,10 @@ type HomeDeps struct {
 	// below. Tests inject canned entries here to drive the renderer alone.
 	Index func(ctx context.Context) ([]refindex.Entry, error)
 
-	// Git is the read-only ref plumbing behind the production Index above
-	// and the stale-entry 404 surface's branch-existence probe
-	// (notfound.go). nil means the production refindex adapter. Its method
-	// set contains nothing capable of mutating a checkout, so a directory
-	// read mutates nothing by construction (co-1).
+	// Git is the read-only ref plumbing behind the production Index above.
+	// nil means the production refindex adapter. Its method set contains
+	// nothing capable of mutating a checkout, so a directory read mutates
+	// nothing by construction (co-1).
 	Git refindex.GitRunner
 
 	// OpenMRs is the in-review chip's forge consultation (dc-4). nil means
@@ -287,7 +286,8 @@ func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name st
 	}
 }
 
-// defaultCorpusHref, defaultBoardHref, matrixHref, verdictHref (here) and
+// defaultCorpusHref, defaultBoardHref, matrixHref, verdictHref (here),
+// branchBoardHref (the shared per-branch constructor below) and
 // designBoardHref (below writeDesignEntry) are the directory's address
 // grammar, each computed in exactly one place and shared verbatim with the
 // home-status-glance leading section (glance.go) — the "mirrors exactly,
@@ -299,9 +299,31 @@ func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name st
 // concatenating — proven by TestRenderHome_DirectoryGroupsChipsAndLinks
 // and friends continuing to assert the identical literal hrefs unchanged).
 func defaultCorpusHref(name string) string { return "/a/spec/" + name }
-func defaultBoardHref(name string) string  { return "/board/spec/" + name }
+func defaultBoardHref(name string) string  { return boardSpecPrefix + name }
 func matrixHref(story string) string       { return "/matrix/" + story }
 func verdictHref(story string) string      { return "/verdict/" + story }
+
+// branchBoardPrefix and boardSpecPrefix are the two literals of the board
+// address grammar: the per-branch mount prefix (draft-boards dc-1) and the
+// board-spec route segment the unprefixed mount and the /b/{branch} mount
+// serve alike (draft-boards ac-1 — "the SAME route table beneath the
+// prefix"). Every href constructor here and diagramExitStore's parser
+// reference these, so the grammar lives in exactly one place (dc-3).
+const (
+	branchBoardPrefix = "/b/"
+	boardSpecPrefix   = "/board/spec/"
+)
+
+// branchBoardHref is THE single constructor of the per-branch board address
+// (draft-boards dc-1): the branch rides one path segment with its slashes
+// percent-encoded, the spec name beneath it emitted verbatim (always a
+// valid slug). The directory's design entries (designBoardHref) and the
+// diagram editor's origin path (boardOriginPath, boarddiagram.go) both build
+// the address through here; diagramExitStore parses the same two prefixes
+// back out.
+func branchBoardHref(branch, name string) string {
+	return branchBoardPrefix + url.PathEscape(branch) + boardSpecPrefix + name
+}
 
 // writeDesignEntry renders a design-branch draft: the entry links to its
 // per-branch board address under the sibling draft-boards story's ratified
@@ -329,12 +351,13 @@ func writeDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, inReview
 	}
 }
 
-// designBoardHref is the per-branch board address grammar (draft-boards
-// dc-1): the branch rides one path segment with its slashes percent-
-// encoded; the name segment beneath it is emitted verbatim (always a
-// valid slug, never containing a character url.PathEscape would touch).
+// designBoardHref is the directory's per-branch board address for a design
+// branch: the branch is always designPrefix+name (feature dc-1), and the
+// address is built through the shared branchBoardHref constructor — the
+// name segment is a valid slug emitted verbatim, never containing a
+// character url.PathEscape would touch.
 func designBoardHref(name string) string {
-	return "/b/" + url.PathEscape(designPrefix+name) + "/board/spec/" + name
+	return branchBoardHref(designPrefix+name, name)
 }
 
 // writeStatusChip renders the entry's raw spec status in the same
