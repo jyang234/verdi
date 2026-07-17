@@ -91,6 +91,9 @@
 // |   SHOWCASE_DRAFT_OQ_CARRIED, SHOWCASE_DRAFT_OQ_RESOLVED,           |          | |
 // |   SHOWCASE_DRAFT_DIAGRAM                                          |          | |
 // | FORGE_KIND                                                         | SHOWCASE | examples/showcase's own committed verdi.yaml forge: value (disclosures happy path) |
+// | FL_PARENT, FL_ARCHIVED_CHILD, FL_INSTANTIATED_CHILD,               | EDGE     | family-board-links (spec/family-board-links) — archived-match, in-between, dangling-target, and archived-parent (ADJ-39) rigs; the AC-1/AC-2 active-match happy path reuses READONLY_SPEC/STORY_STUB_MATCHED directly |
+// |   FL_UNSTARTED_CHILD, FL_DANGLING_STORY, FL_DANGLING_TARGET,       |          | |
+// |   FL_ORPHAN_STORY, FL_ARCHIVED_PARENT, FL_ARCHIVED_PARENT_TARGET   |          | |
 //
 // Top-level (never zoned — not fixtures, per this task's brief): boardPath
 // and every other route/data-testid helper function, plus the port-derived
@@ -659,6 +662,50 @@ export const EDGE = {
   // Pins sha256:000…0 against DIAGRAM_BASE_BODY's real derivation base and
   // must fail visible with no write (ac-4's negative case).
   DIAGRAM_DERIVED_CORRUPT: "editor-derived-corrupt",
+
+  // -------------------------------------------------------------------------
+  // Family board links (spec/family-board-links) — archived-match,
+  // in-between, and dangling-target rigs (cmd/e2eharness/
+  // provision_familyboardlinks.go). AC-1's story-to-feature direction and
+  // AC-2's ACTIVE-match direction need no EDGE fixture at all — they drive
+  // SHOWCASE.READONLY_SPEC (stale-decline) and SHOWCASE.STORY_STUB_MATCHED
+  // (borrower-update-api) directly, so they are not repeated here.
+  // -------------------------------------------------------------------------
+
+  // The feature carrying all three synthetic stub-realization scenarios
+  // below, one stub per AC.
+  FL_PARENT: "family-links-parent",
+
+  // ac-1's stub: realized ONLY by a story that resolves in specs/archive/
+  // (ADJ-28's archived-match completion reading, dc-1). Its own
+  // design/<slug> branch still exists locally too — proving the card
+  // renders the archived-match link, never the in-between notice, even
+  // though the ref-check's precondition (the branch) is genuinely met.
+  FL_ARCHIVED_CHILD: "family-links-archived-child",
+
+  // ac-2's stub: no matching story anywhere, but its design/<slug> branch
+  // exists locally (cut from main, never merged into the served
+  // checkout) — the in-between disclosure's positive case (ac-3, dc-3).
+  FL_INSTANTIATED_CHILD: "family-links-instantiated-child",
+
+  // ac-3's stub: no matching story anywhere AND no design/<slug> branch —
+  // the plain, unchanged un-instantiated state (ac-3's negative case).
+  FL_UNSTARTED_CHILD: "family-links-unstarted-child",
+
+  // A story whose implements edge targets a feature ref absent from the
+  // store entirely — AC-4's disclosed-notice fixture.
+  FL_DANGLING_STORY: "family-links-dangling-story",
+  FL_DANGLING_TARGET: "spec/family-links-no-such-feature#ac-1",
+
+  // AC-1's archived-parent direction (ADJ-39, 2026-07-16): an ACTIVE story
+  // whose document-level implements edge targets a FEATURE resolving only
+  // under specs/archive/. The board route 404s on the archived parent, so
+  // the story board's parent-feature affordance links to its SERVABLE
+  // corpus page with the archived state disclosed — never the dead board
+  // href. FL_ARCHIVED_PARENT_TARGET is the fragment ref the ref card keys.
+  FL_ORPHAN_STORY: "family-links-orphan-story",
+  FL_ARCHIVED_PARENT: "family-links-archived-parent",
+  FL_ARCHIVED_PARENT_TARGET: "spec/family-links-archived-parent#ac-1",
 } as const;
 
 // ===========================================================================

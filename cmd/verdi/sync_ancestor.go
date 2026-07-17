@@ -1,0 +1,205 @@
+// Nearest-ancestor bundle resolution (spec/sync-local-flow ac-2). The
+// fold's own ancestor rule (internal/evidence.LoadRecordsWithSources,
+// gitx.IsAncestor — 03 §The fold: "current ... whose commit is an
+// ancestor of C") already accepts any record whose commit is an ancestor
+// of the one being evaluated. This file makes sync's forge FETCH honor
+// the identical rule, verbatim, rather than demanding a HEAD-exact bundle
+// the fold itself would not require (dc-1; the D6-32 asymmetry closed in
+// full). Split out of sync.go as its own topic — ancestor enumeration and
+// the fetch walk built over it — distinct from bundle materialization/
+// evaluation (CLAUDE.md: one file ~= one topic).
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/gitx"
+)
+
+// candidateAncestorCommits returns commit itself followed by its
+// ancestors, nearest first, unbounded (dc-1) — the exact set and order
+// gitx.Log(ctx, root, commit) already produces: `git log <rev>` lists rev
+// itself first (a commit is its own ancestor — gitx.IsAncestor's own
+// documented self-inclusive semantics), then its reachable history,
+// most-recent-first, with no depth limit and no path filter. This is the
+// SAME primitive internal/evidence's own fold-reader ancestry check
+// (gitx.IsAncestor, wrapping `git merge-base --is-ancestor`) is a thin
+// wrapper over — both are built on git's single reachability concept, so
+// there is no second, possibly-disagreeing notion of "ancestor" anywhere
+// in the tree. No hand-rolled parent walk.
+func candidateAncestorCommits(ctx context.Context, root, commit string) ([]string, error) {
+	commits, err := gitx.Log(ctx, root, commit)
+	if err != nil {
+		return nil, err
+	}
+	shas := make([]string, len(commits))
+	for i, c := range commits {
+		shas[i] = c.SHA
+	}
+	return shas, nil
+}
+
+// fetchAncestorBundle applies ac-2/dc-1's ancestor rule to sync's bundle
+// fetch. It tries commit itself first — dc-1: "a commit is its own
+// ancestor ... the walk starts there" — without requiring root to resolve
+// any git history at all, so the common case (a bundle already sits at
+// exactly the evaluated commit) never pays an ancestry-enumeration cost
+// it doesn't need. Only when commit itself has no bundle (ErrNoBundle)
+// does it enumerate and walk commit's further ancestors via
+// candidateAncestorCommits, nearest first, with no depth bound short of
+// exhausting the walked ref's entire reachable history.
+//
+// acceptedCommit/distance disclose which commit's bundle was accepted and
+// how many commits back it sits from commit (0 = commit itself) — ac-2's
+// legibility requirement.
+//
+// A transport failure at any candidate (an error NOT wrapping
+// forge.ErrNoBundle) is returned immediately, unwalked further — dc-1: a
+// rate limit or network error is an existing, generic operational
+// failure, never a signal to try the next ancestor (cost safety against a
+// pathological walk is an operational property to observe, never a
+// designed narrower cutoff this contract authorizes).
+//
+// If commit's further ancestry cannot even be enumerated (root's git
+// history for commit cannot be read — e.g. a non-git root, or a commit
+// unresolvable in it), that is disclosed alongside the commit-itself miss
+// in the returned error, which wraps the SAME forge.ErrNoBundle the
+// commit-itself attempt already produced (so every no-bundle route stays
+// byte-identical to a genuine miss) AND carries errAncestryUnwalkable so a
+// caller can tell "the walk never ran" apart from "the walk ran and found
+// nothing" — never a different error class that would derail the no-bundle
+// routing, and never a claim that a deeper walk happened when it
+// structurally could not (ADJ-37 fix 1).
+func fetchAncestorBundle(ctx context.Context, root string, f forge.Forge, ref, commit string) (tree forge.DerivedTree, acceptedCommit string, distance int, err error) {
+	tree, headErr := f.FetchEvidenceBundle(ctx, ref, commit)
+	if headErr == nil {
+		return tree, commit, 0, nil
+	}
+	if !errors.Is(headErr, forge.ErrNoBundle) {
+		return nil, "", 0, headErr
+	}
+
+	rest, logErr := candidateAncestorCommits(ctx, root, commit)
+	if logErr != nil {
+		return nil, "", 0, &unwalkableAncestryError{commit: commit, cause: logErr, noBundle: headErr}
+	}
+
+	// rest[0] is commit itself (candidateAncestorCommits/gitx.Log's own
+	// documented ordering) — already tried above, so start from index 1;
+	// index i directly IS the disclosed "commits back" distance.
+	lastErr := headErr
+	for i := 1; i < len(rest); i++ {
+		candidate := rest[i]
+		t, err := f.FetchEvidenceBundle(ctx, ref, candidate)
+		switch {
+		case err == nil:
+			return t, candidate, i, nil
+		case errors.Is(err, forge.ErrNoBundle):
+			lastErr = err
+			continue
+		default:
+			return nil, "", 0, err
+		}
+	}
+
+	oldest := commit
+	if len(rest) > 0 {
+		oldest = rest[len(rest)-1]
+	}
+	// Fix 2 (ADJ-37, disclosure only — no walk-semantics change): claim
+	// exactly what THIS clone let us walk, never the ref's entire history.
+	// `git log` stops silently at a shallow clone's boundary (fetch-depth:1
+	// is the common CI checkout), so when git's own shallow marker is
+	// present, disclose that the walked graph is truncated and a bundle may
+	// sit at a deeper true ancestor absent locally. The detection is
+	// best-effort: an undetectable shallow state leaves the base message —
+	// already scoped to "this clone", no longer overclaiming — to stand.
+	msg := fmt.Sprintf("no evidence bundle found for ref %q anywhere in the %d commit(s) walked in this clone (%s..%s)", ref, len(rest), oldest, commit)
+	if shallow, shErr := gitx.IsShallow(ctx, root); shErr == nil && shallow {
+		msg += " — note: this is a shallow clone (git's shallow-boundary marker is present), so the history above is truncated at the clone's shallow boundary and a bundle may exist at a deeper true ancestor not present in this clone"
+		// The walk RAN but saw only this shallow clone's truncated graph —
+		// NOT genuine absence-evidence. Mark it distinguishably (ADJ-41 fix
+		// 3, mirroring fix 1's errAncestryUnwalkable seam) so runSync's
+		// --or-regen branch discloses the truncation before regenerating;
+		// Error() text and the ErrNoBundle wrap are unchanged, so the
+		// no---or-regen refusal stays byte-identical.
+		return nil, "", 0, &shallowTruncatedExhaustionError{msg: msg, noBundle: lastErr}
+	}
+	return nil, "", 0, fmt.Errorf("%s: %w", msg, lastErr)
+}
+
+// errAncestryUnwalkable marks the one no-bundle-shaped failure where commit
+// itself carried no bundle AND its further ancestry could not even be
+// enumerated (gitx.Log failed), so the nearest-ancestor walk never ran past
+// the commit itself. It is the distinguishable signal runSync's --or-regen
+// branch matches (via errors.Is) to disclose that the walk never ran — and
+// why — before falling back to local regeneration: an unwalkable history is
+// not the same evidence as a walked-and-exhausted miss, and must not
+// silently masquerade as one (dc-1's posture: only a genuine no-bundle
+// result is a clean fallback signal; ADJ-37 fix 1).
+var errAncestryUnwalkable = errors.New("sync: ancestor history could not be enumerated, so the walk never ran")
+
+// unwalkableAncestryError is fetchAncestorBundle's return for that case. Its
+// Error() text is byte-for-byte the plain wrapped form the no-bundle refusal
+// already printed, so the no---or-regen path is unchanged; its Unwrap()
+// keeps forge.ErrNoBundle in the chain (so errors.Is(err, forge.ErrNoBundle)
+// still routes every no-bundle branch identically) and exposes the
+// enumeration cause; its Is() additionally reports errAncestryUnwalkable so
+// the --or-regen branch alone can single this case out for disclosure. This
+// custom type (rather than a second fmt.Errorf shape) is what lets the fix
+// add a distinguishable marker WITHOUT changing the message any existing
+// path already prints.
+type unwalkableAncestryError struct {
+	commit   string
+	cause    error // the gitx.Log enumeration failure (the "why")
+	noBundle error // the commit-itself miss, wrapping forge.ErrNoBundle
+}
+
+func (e *unwalkableAncestryError) Error() string {
+	return fmt.Sprintf("no evidence bundle for commit %s, and its further ancestor history could not be walked (%v): %v", e.commit, e.cause, e.noBundle)
+}
+
+// Unwrap returns both wrapped errors so errors.Is reaches forge.ErrNoBundle
+// (through noBundle) and the enumeration cause alike.
+func (e *unwalkableAncestryError) Unwrap() []error { return []error{e.noBundle, e.cause} }
+
+// Is reports the distinguishing sentinel; forge.ErrNoBundle is matched
+// through Unwrap, not here.
+func (e *unwalkableAncestryError) Is(target error) bool { return target == errAncestryUnwalkable }
+
+// errShallowTruncatedExhaustion marks the no-bundle-shaped failure where the
+// ancestor walk RAN but over a shallow clone's truncated graph — `git log`
+// stopped at the shallow boundary, so exhausting it is not the genuine
+// no-bundle-anywhere result ac-2's unbounded walk promises. It is the
+// distinguishable signal (mirroring errAncestryUnwalkable — the seam between
+// fixes it closes) that runSync's --or-regen branch matches to disclose the
+// truncation before regenerating: a bundle may sit at a deeper true ancestor
+// this clone never contained, so --or-regen must not treat the truncated
+// exhaustion as clean absence (ADJ-41 fix 3). A full (non-shallow) clone's
+// plain exhaustion carries no such marker and stays byte-quiet.
+var errShallowTruncatedExhaustion = errors.New("sync: history walk exhausted only a shallow clone's truncated graph")
+
+// shallowTruncatedExhaustionError is fetchAncestorBundle's return for that
+// case. Error() is byte-identical to the plain shallow-refusal wrapped form
+// (the no---or-regen refusal is unchanged), Unwrap() keeps forge.ErrNoBundle
+// in the chain (no-bundle routing identical), and Is() reports
+// errShallowTruncatedExhaustion so the --or-regen branch alone singles it out
+// for the truncation disclosure.
+type shallowTruncatedExhaustionError struct {
+	msg      string
+	noBundle error // the last ErrNoBundle-wrapping miss on the walked (truncated) graph
+}
+
+func (e *shallowTruncatedExhaustionError) Error() string { return e.msg + ": " + e.noBundle.Error() }
+
+// Unwrap keeps forge.ErrNoBundle reachable through the last walked miss.
+func (e *shallowTruncatedExhaustionError) Unwrap() error { return e.noBundle }
+
+// Is reports the distinguishing sentinel; forge.ErrNoBundle is matched
+// through Unwrap, not here.
+func (e *shallowTruncatedExhaustionError) Is(target error) bool {
+	return target == errShallowTruncatedExhaustion
+}

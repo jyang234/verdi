@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/upstream"
@@ -160,11 +161,38 @@ func TestBuildForge_Negative_UnknownKind(t *testing.T) {
 	}
 }
 
+// TestBuildForge_Happy proves both forge kinds still build successfully
+// given a resolvable identifier. The env vars are explicitly cleared so
+// this test is hermetic even when `go test` itself runs inside real GitHub
+// Actions (where GITHUB_REPOSITORY/GITHUB_REPOSITORY_OWNER are genuinely
+// set) — the point is proving buildForge succeeds from the ORIGIN URL
+// fallback, not incidentally from the runner's own environment.
 func TestBuildForge_Happy(t *testing.T) {
-	for _, kind := range []string{"gitlab", "github"} {
-		if _, err := buildForge(kind, ""); err != nil {
-			t.Errorf("buildForge(%q): %v", kind, err)
-		}
+	t.Setenv("GITHUB_REPOSITORY_OWNER", "")
+	t.Setenv("GITHUB_REPOSITORY", "")
+	if _, err := buildForge("gitlab", ""); err != nil {
+		t.Errorf("buildForge(gitlab): %v", err)
+	}
+	// github now REQUIRES a resolvable identifier (spec/sync-local-flow
+	// dc-2): the prior "empty remote URL still builds a forge" case
+	// encoded exactly the silent-empty-identifier gap this story fixes,
+	// and is deliberately replaced — see
+	// TestBuildForge_Github_Negative_UnresolvableIdentifier below.
+	if _, err := buildForge("github", "https://github.com/acme/svcfix.git"); err != nil {
+		t.Errorf("buildForge(github, resolvable origin): %v", err)
+	}
+}
+
+// TestBuildForge_Github_Negative_UnresolvableIdentifier proves buildForge
+// itself refuses (rather than silently building a doomed adapter around
+// two empty strings) when neither the CI env nor the origin URL identifies
+// a GitHub repository — dc-2's fix, encoded directly at the construction
+// seam sync.go's cmdSync calls unconditionally.
+func TestBuildForge_Github_Negative_UnresolvableIdentifier(t *testing.T) {
+	t.Setenv("GITHUB_REPOSITORY_OWNER", "")
+	t.Setenv("GITHUB_REPOSITORY", "")
+	if _, err := buildForge("github", ""); err == nil {
+		t.Fatal("buildForge(github, no identifier anywhere): want error, got nil")
 	}
 }
 
@@ -175,22 +203,59 @@ func TestGithubOwnerRepo(t *testing.T) {
 	// Env is authoritative when set — the origin URL is not consulted.
 	t.Setenv("GITHUB_REPOSITORY_OWNER", "envowner")
 	t.Setenv("GITHUB_REPOSITORY", "envowner/envrepo")
-	if o, r := githubOwnerRepo("https://github.com/urlowner/urlrepo.git"); o != "envowner" || r != "envrepo" {
-		t.Errorf("env should win: githubOwnerRepo = (%q, %q), want (envowner, envrepo)", o, r)
+	if o, r, err := githubOwnerRepo("https://github.com/urlowner/urlrepo.git"); o != "envowner" || r != "envrepo" || err != nil {
+		t.Errorf("env should win: githubOwnerRepo = (%q, %q, %v), want (envowner, envrepo, nil)", o, r, err)
 	}
 
 	// Env unset → origin remote URL fallback (D6-14).
 	t.Setenv("GITHUB_REPOSITORY_OWNER", "")
 	t.Setenv("GITHUB_REPOSITORY", "")
-	if o, r := githubOwnerRepo("git@github.com:urlowner/urlrepo.git"); o != "urlowner" || r != "urlrepo" {
-		t.Errorf("origin fallback: githubOwnerRepo = (%q, %q), want (urlowner, urlrepo)", o, r)
+	if o, r, err := githubOwnerRepo("git@github.com:urlowner/urlrepo.git"); o != "urlowner" || r != "urlrepo" || err != nil {
+		t.Errorf("origin fallback: githubOwnerRepo = (%q, %q, %v), want (urlowner, urlrepo, nil)", o, r, err)
 	}
 
-	// Neither env nor a resolvable URL → empty, the honest can't-identify
-	// case (forgeCredentialsPresent then declines to build a doomed forge).
-	if o, r := githubOwnerRepo(""); o != "" || r != "" {
-		t.Errorf("no identifier: githubOwnerRepo = (%q, %q), want empty", o, r)
+	// Neither env nor a resolvable URL → the legible refusal (spec/
+	// sync-local-flow ac-1), never the silently-returned empty pair the
+	// prior "honest can't-identify case" comment named — that assumption
+	// (some caller declines to build a doomed forge) is false for sync.go,
+	// the one direct, ungated buildForge caller (dc-2).
+	if o, r, err := githubOwnerRepo(""); o != "" || r != "" || err == nil {
+		t.Errorf("no identifier: githubOwnerRepo = (%q, %q, %v), want (\"\", \"\", a non-nil error)", o, r, err)
 	}
+}
+
+// TestGithubOwnerRepo_Negative_RefusesNamingEverySource proves the ac-1
+// refusal names every source it tried — both env vars and the origin
+// remote URL (or its documented absence) — not merely that some error
+// occurred.
+func TestGithubOwnerRepo_Negative_RefusesNamingEverySource(t *testing.T) {
+	t.Setenv("GITHUB_REPOSITORY_OWNER", "")
+	t.Setenv("GITHUB_REPOSITORY", "")
+
+	t.Run("no origin remote at all", func(t *testing.T) {
+		_, _, err := githubOwnerRepo("")
+		if err == nil {
+			t.Fatal("githubOwnerRepo(no env, no origin): want error, got nil")
+		}
+		for _, want := range []string{"GITHUB_REPOSITORY_OWNER", "GITHUB_REPOSITORY", "origin"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %q, want it to name %q", err.Error(), want)
+			}
+		}
+	})
+
+	t.Run("origin remote present but not github.com", func(t *testing.T) {
+		const nonGithubRemote = "https://gitlab.com/urlowner/urlrepo.git"
+		_, _, err := githubOwnerRepo(nonGithubRemote)
+		if err == nil {
+			t.Fatal("githubOwnerRepo(non-github origin): want error, got nil")
+		}
+		for _, want := range []string{"GITHUB_REPOSITORY_OWNER", "GITHUB_REPOSITORY", nonGithubRemote} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %q, want it to name %q", err.Error(), want)
+			}
+		}
+	})
 }
 
 func TestResolveRefCommit_Negative_NotAGitRepo(t *testing.T) {

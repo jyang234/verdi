@@ -37,6 +37,11 @@ type diagramClientPayload struct {
 	Nodes        []diagramedit.Node `json:"nodes"`
 	Edges        []diagramedit.Edge `json:"edges"`
 	Derived      bool               `json:"derived"`
+	// ExitHref is the tool view's resolved return target (spec/tool-view-
+	// exit dc-2): where Escape navigates. Resolved once, server-side, at
+	// render (boarddiagram.go's resolveDiagramExit) — the client never
+	// derives or guesses it, only navigates.
+	ExitHref string `json:"exitHref"`
 }
 
 // diagramModeStampLabels: the editor room's state in words, mirroring the
@@ -60,6 +65,7 @@ var diagramEditorPageTemplate = template.Must(template.New("boarddiagram").Parse
 <nav class="site-nav workbench-nav"><a href="/">index</a> <a href="/a/diagram/{{.Name}}">artifact</a></nav>
 </header>
 <header class="page-header board-head">
+<a class="diagram-exit-link" data-testid="diagram-exit" href="{{.ExitHref}}">&larr; {{.ExitLabel}}</a>
 <h1>{{.Title}}</h1>
 <span class="board-mode-tag board-mode-tag--{{.Mode}}">{{.ModeLabel}}</span>
 <span class="badge badge-{{.Status}} diagram-status-badge" data-testid="diagram-status-badge">proposal · {{.Status}}</span>
@@ -88,6 +94,7 @@ func renderDiagramEditorPage(v *diagramEditorView) ([]byte, error) {
 		Nodes:        nodes,
 		Edges:        edges,
 		Derived:      v.DerivedFrom != nil,
+		ExitHref:     v.Exit.Href,
 	}
 	stateJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -104,6 +111,8 @@ func renderDiagramEditorPage(v *diagramEditorView) ([]byte, error) {
 		Status    string
 		Mode      string
 		ModeLabel string
+		ExitHref  string
+		ExitLabel string
 		Region    template.HTML
 		Dialogs   template.HTML
 		StateJSON template.JS
@@ -113,6 +122,8 @@ func renderDiagramEditorPage(v *diagramEditorView) ([]byte, error) {
 		Status:    v.Status,
 		Mode:      string(v.Mode),
 		ModeLabel: diagramModeStampLabels[v.Mode],
+		ExitHref:  v.Exit.Href,
+		ExitLabel: v.Exit.Label,
 		Region:    template.HTML(renderDiagramEditorRegion(v)),
 		Dialogs:   template.HTML(renderDiagramEditorDialogs(v)),
 		StateJSON: template.JS(stateJSON),

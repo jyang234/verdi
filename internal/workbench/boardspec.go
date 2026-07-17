@@ -236,7 +236,20 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if err := attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession); err != nil {
 		return nil, nil, "", err
 	}
-	attachDiagramEditorHrefs(proj, s.root)
+	// s.fixedBranch distinguishes the two board modes the one call site
+	// serves: "" for the serving checkout's unprefixed board, the design
+	// branch for a per-branch draft board instance — so the editor link
+	// carries the operator's OWN board path (spec/tool-view-exit dc-2 / ADJ-38).
+	attachDiagramEditorHrefs(proj, s.root, name, s.fixedBranch)
+	// Family navigation (spec/family-board-links): the story-to-feature
+	// affordance, the feature-stub-to-story link(s), and the live
+	// in-between disclosure — the SAME I/O-enrichment posture as every
+	// attach* call above, run last only because it is the newest of the
+	// four; order among them is otherwise immaterial (each touches its
+	// own disjoint fields).
+	if err := attachFamilyLinks(ctx, proj, s.root); err != nil {
+		return nil, nil, "", err
+	}
 	if reviewNotice != "" {
 		proj.Notices = append(proj.Notices, reviewNotice)
 	}

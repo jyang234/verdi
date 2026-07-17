@@ -118,6 +118,16 @@ func run() error {
 		return fmt.Errorf("provisioning diagram editor fixtures: %w", err)
 	}
 
+	// The family-board-links fixtures (spec/family-board-links; see
+	// provision_familyboardlinks.go) — the archived-match feature/story
+	// pair, the instantiated-but-unlanded stub's own design branch, and
+	// the dangling-implements-target story. Lands on the same design
+	// branch provisionBoard/provisionDiagrams just used, restoring it
+	// when done.
+	if err := provisionFamilyBoardLinks(storeRoot); err != nil {
+		return fmt.Errorf("provisioning family-board-links fixtures: %w", err)
+	}
+
 	// The directory-home ref fixtures (local-only / remote-only / empty /
 	// doomed design branches) — after the board fixtures, restoring the
 	// board suite's serving checkout when done.
