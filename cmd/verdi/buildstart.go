@@ -189,7 +189,11 @@ func resolveBuildTarget(root, storyArg string) (*artifact.SpecFrontmatter, error
 		}
 		candidate, lerr := storyresolve.LoadActiveSpec(root, e.Name())
 		if lerr != nil {
-			return nil, lerr
+			// Same posture as matchStoryRef's own scan (ADJ-51 finding 1): a
+			// dir under active/ that cannot be loaded mid-scan is store
+			// corruption, operational — never a "(story, AC) does not exist"
+			// verdict, and never a stray dir masking a reachable pair.
+			return nil, &storyresolve.OperationalError{Err: lerr}
 		}
 		if candidate.Class == artifact.ClassStory && candidate.Story == storyArg {
 			matches = append(matches, candidate)

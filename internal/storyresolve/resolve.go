@@ -118,7 +118,13 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 		}
 		spec, err := LoadActiveSpec(root, e.Name())
 		if err != nil {
-			return nil, err
+			// A directory under active/ that cannot be loaded (a stray dir
+			// with no spec.md, an unreadable or malformed one) is store
+			// corruption walked into mid-scan, not a "does not resolve"
+			// verdict — surface it operationally (ADJ-51 finding 1) so a
+			// caller keying exit discipline on the type does not read a
+			// corrupt store as a missing ref and mask a reachable match.
+			return nil, &OperationalError{Err: err}
 		}
 		if spec.Class != artifact.ClassFeature {
 			continue

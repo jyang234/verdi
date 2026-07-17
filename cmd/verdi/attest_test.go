@@ -142,6 +142,21 @@ func buildAttestComponentRepo(t *testing.T) *fixturegit.Repo {
 	}})
 }
 
+// buildAttestStrayDirRepo carries the normal story fixture alongside a
+// directory under specs/active/ that has no spec.md — store corruption a
+// bare story-ref's resolution scan walks into.
+func buildAttestStrayDirRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	return fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/attest-fixture-story/spec.md": attestFixtureStorySpecMD,
+			".verdi/specs/active/stray-no-specmd/README.md":    "a directory under specs/active/ with no spec.md — store corruption\n",
+		},
+		Message: "attest fixture: story + a stray active dir missing spec.md",
+	}})
+}
+
 // readAttestationFile reads back the attestation file at the exact fold
 // path (evidence's own attestations/<storySlug>/<acID>.md convention),
 // failing the test if it is missing.
@@ -427,6 +442,24 @@ func TestRunAttest_OperationalOnFallbackScanMalformedSpec(t *testing.T) {
 	got := runAttest(ctx, repo.Dir, "jira:NO-MATCH-ANYWHERE", "ac-1", &stdout, &stderr)
 	if got != 2 {
 		t.Fatalf("runAttest(fallback scan hits malformed spec) = %d, want 2 (operational)", got)
+	}
+	assertTreeUnchanged(t, repo.Dir, before)
+}
+
+// TestRunAttest_OperationalOnScanStrayDir completes ADJ-51 finding 1 (the
+// af00605 re-sweep's scan refinement): a directory under specs/active/
+// lacking spec.md is store corruption walked into mid-scan while resolving a
+// bare story-ref — operational (exit 2), never dressed as a "(story, AC) does
+// not exist" verdict (exit 1) that would also mask a reachable pair.
+func TestRunAttest_OperationalOnScanStrayDir(t *testing.T) {
+	repo := buildAttestStrayDirRepo(t)
+	ctx := context.Background()
+	before := snapshotTree(t, repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runAttest(ctx, repo.Dir, "jira:NO-MATCH-ANYWHERE", "ac-1", &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runAttest(scan hits stray active dir) = %d, want 2 (operational store corruption)", got)
 	}
 	assertTreeUnchanged(t, repo.Dir, before)
 }
