@@ -180,6 +180,54 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 			t.Fatalf("close stdout missing the SAME per-AC status preflight showed: %s", cstdout.String())
 		}
 	})
+
+	// dc-4's "found but excluded as non-ancestor" stale rendering on the
+	// FEATURE side: an outcome record present only at a commit head does not
+	// descend from is excluded by the feature fold, but --preflight discloses
+	// it was found-and-excluded (naming the sha) on the outcome-floor line. This
+	// is the only test that drives renderFeatureFloorGap's excluded-commit
+	// branch (closepreflightfeature.go:118-120), doubly unfired before ADJ-72
+	// (th-4's feature-side extension).
+	t.Run("outcome record only on a non-ancestor sibling commit reads as found-but-excluded", func(t *testing.T) {
+		opts := defaultCloseFeatureFixtureOpts()
+		opts.FeatureAC2FloorSatisfied = false
+		repo := buildCloseFeatureRepo(t, opts)
+		// A real fork off the scaffold parent (repo.Heads[0]) — a genuine
+		// non-ancestor of head, exactly as internal/evidence's own
+		// ExcludedCommitDirs fixtures build it. Created before any derived
+		// records are seeded, and staging only its own file, so the head/sibling
+		// derived trees below are left untouched.
+		sibling := preflightSiblingCommit(t, repo.Dir, repo.Heads[0])
+		seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+		// ac-2's ONLY outcome record lives on the excluded sibling; the fold
+		// discounts it, so the floor stays unsatisfied AND the disclosure names
+		// the excluded sha rather than reporting the record simply absent.
+		writeFixtureVerdicts(t, repo.Dir, "spec/close-feature-fixture", sibling,
+			featureFixtureEvidenceJSON("ac-2", "behavioral", "pass", sibling))
+		before := snapshotRepo(t, repo.Dir)
+
+		var pstdout, pstderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		if rc != 1 {
+			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
+		}
+		derivedRoot := filepath.ToSlash(filepath.Join(".verdi", "data", "derived", store.RefSlug("spec/close-feature-fixture"))) + "/"
+		featureSlugPath := filepath.ToSlash(filepath.Join(".verdi", "attestations", "close-feature-fixture", "ac-2.md"))
+		// The exact line, INCLUDING the excluded-sha suffix: the prefix alone
+		// would pass against a deleted excluded-commit branch, so the full-line
+		// assertion is what makes this a genuine witness for that branch (th-4).
+		wantExcluded := "ac-2 outcome floor unsatisfied: needs an authored outcome attestation at " + featureSlugPath +
+			", or any passing outcome record under " + derivedRoot +
+			" (found but excluded as non-ancestor: [" + sibling + "])"
+		if !strings.Contains(pstdout.String(), wantExcluded) {
+			t.Fatalf("preflight stdout missing the feature found-but-excluded disclosure %q:\n%s", wantExcluded, pstdout.String())
+		}
+
+		after := snapshotRepo(t, repo.Dir)
+		if before != after {
+			t.Fatalf("--preflight mutated the repo:\nbefore: %s\nafter:  %s", before, after)
+		}
+	})
 }
 
 // TestRunPreflight_FeatureScope_OutcomeFloorAttestation_UsesFeatureSlug is
