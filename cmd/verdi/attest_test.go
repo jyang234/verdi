@@ -78,6 +78,70 @@ func buildAttestFixtureRepo(t *testing.T) *fixturegit.Repo {
 	}})
 }
 
+// attestMalformedSpecMD reads fine but fails STRICT decode (an unknown
+// top-level field) — the "present but malformed" resolution failure dc-5/co-2
+// classify as OPERATIONAL (exit 2), distinct from a (story, AC) that simply
+// does not exist (a verdict, exit 1). ADJ-51 finding 1's own witness.
+const attestMalformedSpecMD = `---
+id: spec/attest-malformed
+kind: spec
+class: story
+title: "Malformed story spec"
+status: accepted-pending-build
+owners: [platform-team]
+story: jira:MALFORMED-1
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "t", evidence: [attestation] }
+this_top_level_field_is_unknown: boom
+---
+# Malformed story spec
+`
+
+// attestComponentSpecMD is a class: component spec (no story, no ACs) — the
+// storyresolve.Resolve rejection whose verbatim "matrix folds only feature
+// and story specs" wording attest must NOT leak (ADJ-51 finding 3).
+const attestComponentSpecMD = `---
+id: spec/attest-component
+kind: spec
+class: component
+title: "Attest component"
+status: active
+owners: [platform-team]
+---
+# Attest component
+`
+
+// buildAttestMalformedRepo carries the normal story fixture alongside a spec
+// that fails strict decode — so a spec-ref straight at it (the target-decode
+// path) and a bare story-ref that matches no feature (the fallback-scan path)
+// both hit an operational failure while resolving.
+func buildAttestMalformedRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	return fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/attest-fixture-story/spec.md": attestFixtureStorySpecMD,
+			".verdi/specs/active/attest-malformed/spec.md":     attestMalformedSpecMD,
+		},
+		Message: "attest fixture: story + malformed spec",
+	}})
+}
+
+// buildAttestComponentRepo carries a class: component spec for the
+// component-refusal wording test.
+func buildAttestComponentRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	return fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                            "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/attest-component/spec.md": attestComponentSpecMD,
+		},
+		Message: "attest fixture: component spec",
+	}})
+}
+
 // readAttestationFile reads back the attestation file at the exact fold
 // path (evidence's own attestations/<storySlug>/<acID>.md convention),
 // failing the test if it is missing.
@@ -330,38 +394,129 @@ func TestRunAttest_ScaffoldRoundTrips(t *testing.T) {
 	}
 }
 
+// TestRunAttest_OperationalOnMalformedTargetSpec is ADJ-51 finding 1's
+// primary witness: a story-ref that resolves (spec-ref form) to a spec.md
+// that EXISTS but fails strict decode is an OPERATIONAL failure (exit 2), not
+// a "(story, AC) pair does not exist" verdict (exit 1). The pair may well
+// exist — the machinery to read it failed. co-2's exit discipline is
+// constitutional.
+func TestRunAttest_OperationalOnMalformedTargetSpec(t *testing.T) {
+	repo := buildAttestMalformedRepo(t)
+	ctx := context.Background()
+	before := snapshotTree(t, repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runAttest(ctx, repo.Dir, "spec/attest-malformed", "ac-1", &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runAttest(malformed target spec) = %d, want 2 (operational, not a verdict)", got)
+	}
+	assertTreeUnchanged(t, repo.Dir, before)
+}
+
+// TestRunAttest_OperationalOnFallbackScanMalformedSpec is finding 1's "worst"
+// case: a bare story-ref matching no feature triggers the class: story
+// fallback scan, which hits a malformed UNRELATED active spec. That is an
+// operational failure (exit 2), never dressed as a "(story, AC) does not
+// exist" verdict for the unrelated file's malformation.
+func TestRunAttest_OperationalOnFallbackScanMalformedSpec(t *testing.T) {
+	repo := buildAttestMalformedRepo(t)
+	ctx := context.Background()
+	before := snapshotTree(t, repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runAttest(ctx, repo.Dir, "jira:NO-MATCH-ANYWHERE", "ac-1", &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runAttest(fallback scan hits malformed spec) = %d, want 2 (operational)", got)
+	}
+	assertTreeUnchanged(t, repo.Dir, before)
+}
+
+// TestRunAttest_RefusesComponentInOwnTerms is ADJ-51 finding 3: a class:
+// component spec-ref is refused as a verdict (exit 1) whose message speaks in
+// attest's OWN terms — never leaking storyresolve/matrix's "matrix folds only
+// feature and story specs" contract wording, which names the wrong verb.
+func TestRunAttest_RefusesComponentInOwnTerms(t *testing.T) {
+	repo := buildAttestComponentRepo(t)
+	ctx := context.Background()
+	before := snapshotTree(t, repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runAttest(ctx, repo.Dir, "spec/attest-component", "ac-1", &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("runAttest(component target) = %d, want 1 (verdict)", got)
+	}
+	if contains(stderr.String(), "matrix folds only") {
+		t.Errorf("refusal leaks matrix's own contract wording (names the wrong verb): %s", stderr.String())
+	}
+	if !contains(stderr.String(), "STORY") {
+		t.Errorf("refusal does not speak in attest's own terms (no STORY to attest against): %s", stderr.String())
+	}
+	assertTreeUnchanged(t, repo.Dir, before)
+}
+
+// TestRunAttest_OperationalOnDirectoryAtFoldPath is ADJ-51 finding 5: a
+// DIRECTORY sitting at the exact fold path is a store-corruption operational
+// error (exit 2) — the same way evidence.AttestationExists/LoadAttestationState
+// read it — not an "an attestation already exists" verdict (exit 1) claiming
+// to protect a human record that isn't there.
+func TestRunAttest_OperationalOnDirectoryAtFoldPath(t *testing.T) {
+	repo := buildAttestFixtureRepo(t)
+	ctx := context.Background()
+
+	// A directory where the attestation file would go.
+	badPath := filepath.Join(repo.Dir, ".verdi", "attestations", "jira-attest-1", "ac-1.md")
+	if err := os.MkdirAll(badPath, 0o755); err != nil {
+		t.Fatalf("seeding a directory at the fold path: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-1", &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runAttest(directory at fold path) = %d, want 2 (operational store corruption)", got)
+	}
+	if contains(stderr.String(), "already exists") {
+		t.Errorf("stderr claims a human record 'already exists' for a directory: %s", stderr.String())
+	}
+}
+
 // TestClassifyPair is AC-2's static register: table-driven unit tests over
-// the pair-existence predicate, exercised DIRECTLY (not only end to end),
-// covering its three failure shapes plus the clean case — each row proving
-// the 0/1/2 split at the predicate level (dc-5: every failure here is the
-// SAME verdict outcome, never operational).
+// the pair-existence predicate, exercised DIRECTLY (not only end to end).
+// dc-5's three "(story, AC) pair does not exist" shapes are verdicts (a
+// non-empty refusal, opErr nil); a spec present-but-unreadable is operational
+// (opErr non-nil, refusal empty) — ADJ-51 finding 1's exit-discipline split.
 func TestClassifyPair(t *testing.T) {
 	repo := buildAttestFixtureRepo(t)
 
 	t.Run("clean pair resolves", func(t *testing.T) {
-		spec, refusal := classifyPair(repo.Dir, "jira:ATTEST-1", "ac-1")
-		if refusal != "" {
-			t.Fatalf("refusal = %q, want none", refusal)
+		spec, refusal, opErr := classifyPair(repo.Dir, "jira:ATTEST-1", "ac-1")
+		if refusal != "" || opErr != nil {
+			t.Fatalf("refusal = %q, opErr = %v, want neither", refusal, opErr)
 		}
 		if spec == nil || spec.ID != "spec/attest-fixture-story" {
 			t.Fatalf("spec = %+v, want spec/attest-fixture-story", spec)
 		}
 	})
 
-	t.Run("story-ref does not resolve", func(t *testing.T) {
-		spec, refusal := classifyPair(repo.Dir, "jira:NO-SUCH-STORY", "ac-1")
+	t.Run("story-ref does not resolve (verdict)", func(t *testing.T) {
+		spec, refusal, opErr := classifyPair(repo.Dir, "jira:NO-SUCH-STORY", "ac-1")
 		if refusal == "" {
-			t.Fatal("want a non-empty refusal reason")
+			t.Fatal("want a non-empty refusal reason (verdict)")
+		}
+		if opErr != nil {
+			t.Fatalf("opErr = %v, want nil (a missing pair is a verdict, not operational)", opErr)
 		}
 		if spec != nil {
 			t.Fatalf("spec = %+v, want nil on refusal", spec)
 		}
 	})
 
-	t.Run("resolved spec is not class story", func(t *testing.T) {
-		spec, refusal := classifyPair(repo.Dir, "spec/attest-fixture-feature", "ac-1")
+	t.Run("resolved spec is not class story (verdict)", func(t *testing.T) {
+		spec, refusal, opErr := classifyPair(repo.Dir, "spec/attest-fixture-feature", "ac-1")
 		if refusal == "" {
 			t.Fatal("want a non-empty refusal reason")
+		}
+		if opErr != nil {
+			t.Fatalf("opErr = %v, want nil", opErr)
 		}
 		if spec != nil {
 			t.Fatalf("spec = %+v, want nil on refusal", spec)
@@ -371,16 +526,33 @@ func TestClassifyPair(t *testing.T) {
 		}
 	})
 
-	t.Run("ac-id not declared", func(t *testing.T) {
-		spec, refusal := classifyPair(repo.Dir, "jira:ATTEST-1", "ac-99")
+	t.Run("ac-id not declared (verdict)", func(t *testing.T) {
+		spec, refusal, opErr := classifyPair(repo.Dir, "jira:ATTEST-1", "ac-99")
 		if refusal == "" {
 			t.Fatal("want a non-empty refusal reason")
+		}
+		if opErr != nil {
+			t.Fatalf("opErr = %v, want nil", opErr)
 		}
 		if spec != nil {
 			t.Fatalf("spec = %+v, want nil on refusal", spec)
 		}
 		if !contains(refusal, "ac-99") {
 			t.Errorf("refusal = %q, want it to name the undeclared ac-id", refusal)
+		}
+	})
+
+	t.Run("target spec present but malformed (operational)", func(t *testing.T) {
+		mrepo := buildAttestMalformedRepo(t)
+		spec, refusal, opErr := classifyPair(mrepo.Dir, "spec/attest-malformed", "ac-1")
+		if opErr == nil {
+			t.Fatal("want a non-nil operational error for a present-but-undecodable target")
+		}
+		if refusal != "" {
+			t.Fatalf("refusal = %q, want empty (operational, not a verdict)", refusal)
+		}
+		if spec != nil {
+			t.Fatalf("spec = %+v, want nil on operational failure", spec)
 		}
 	})
 }
@@ -411,6 +583,21 @@ func TestAttestationAlreadyExists(t *testing.T) {
 	}
 	if !exists {
 		t.Fatal("attestationAlreadyExists(file present) = false, want true")
+	}
+
+	// ADJ-51 finding 5: a DIRECTORY at the fold path is store corruption,
+	// classified operationally (an error) exactly as evidence's own readers
+	// do — never reported as an existing attestation (which would exit 1).
+	root2 := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root2, ".verdi", "attestations", "jira-attest-1", "ac-1.md"), 0o755); err != nil {
+		t.Fatalf("mkdir dir-at-path: %v", err)
+	}
+	exists, err = attestationAlreadyExists(root2, "jira-attest-1", "ac-1")
+	if err == nil {
+		t.Fatal("attestationAlreadyExists(directory at path) = nil error, want an operational error")
+	}
+	if exists {
+		t.Fatal("attestationAlreadyExists(directory at path) = true, want false (not an existing attestation)")
 	}
 }
 

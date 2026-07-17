@@ -27,6 +27,7 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
 // cmdAttest is `verdi attest`'s entry point, invoked by dispatch.go. Its
@@ -53,7 +54,11 @@ func cmdAttest(args []string, stdout, stderr io.Writer) int {
 // run the whole scaffold ritual and return the exit code (co-2: 0 clean /
 // 1 verdict / 2 operational, dc-5's exact mapping).
 func runAttest(ctx context.Context, root, storyRefArg, acID string, stdout, stderr io.Writer) int {
-	spec, refusal := classifyPair(root, storyRefArg, acID)
+	spec, refusal, opErr := classifyPair(root, storyRefArg, acID)
+	if opErr != nil {
+		fmt.Fprintln(stderr, "attest:", opErr)
+		return 2
+	}
 	if refusal != "" {
 		fmt.Fprintln(stderr, "attest:", refusal)
 		return 1
@@ -140,17 +145,19 @@ func runAttest(ctx context.Context, root, storyRefArg, acID string, stdout, stde
 }
 
 // classifyPair resolves storyRefArg and acID against root's active store,
-// returning the resolved story spec on success or a non-empty, human-
-// readable refusal reason on any of AC-2's three "(story, AC) pair does
-// not exist" shapes: the story-ref does not resolve, the resolved spec is
-// not class: story (dc-5's scope boundary — a feature is reachable via the
-// same argument form but names no STORY to attest an AC against), or the
-// resolved story does not declare acID. Every one of these is the SAME
-// verdict outcome (dc-5: even an unresolvable ref is grouped under exit 1
-// here, a disclosed divergence from matrix's own exit-2 posture for the
-// identical resolution failure) — never operational — so this function
-// never itself distinguishes them by exit code; the caller applies exit 1
-// uniformly to any non-empty refusal.
+// returning exactly one of three outcomes: the resolved story spec on
+// success (refusal == "", opErr == nil); a non-empty, human-readable refusal
+// reason on any of AC-2's "(story, AC) pair does not exist" VERDICT shapes
+// (the story-ref does not resolve, the resolved spec is not class: story —
+// including a component spec, re-worded in attest's own terms rather than
+// leaking storyresolve's matrix framing, ADJ-51 finding 3 — or the resolved
+// story does not declare acID); or a non-nil OPERATIONAL error (opErr) when
+// resolution itself fails on machinery — a spec present but unreadable or
+// undecodable, or a store listing that fails (ADJ-51 finding 1). The caller
+// maps opErr to exit 2 and any non-empty refusal to exit 1: dc-5 groups even
+// an unresolvable ref under the verdict (a disclosed divergence from matrix's
+// own exit-2 posture for the identical resolution failure), but co-2's exit
+// discipline forbids dressing a genuine operational failure as that verdict.
 //
 // Resolution reuses resolveBuildTarget (buildstart.go), NOT
 // storyresolve.Resolve directly: storyresolve.Resolve's own scheme-
@@ -169,20 +176,35 @@ func runAttest(ctx context.Context, root, storyRefArg, acID string, stdout, stde
 // those other verbs find). Reusing that same helper here — rather than
 // duplicating its fallback scan — is the CLAUDE.md "no copy-paste" rule
 // applied within one package.
-func classifyPair(root, storyRefArg, acID string) (spec *artifact.SpecFrontmatter, refusal string) {
+func classifyPair(root, storyRefArg, acID string) (spec *artifact.SpecFrontmatter, refusal string, opErr error) {
 	spec, err := resolveBuildTarget(root, storyRefArg)
 	if err != nil {
-		return nil, err.Error()
+		var oe *storyresolve.OperationalError
+		if errors.As(err, &oe) {
+			// A spec present-but-unreadable/undecodable, or a store listing
+			// that failed, encountered WHILE resolving: operational (exit 2),
+			// never a "(story, AC) does not exist" verdict (co-2, dc-5).
+			return nil, "", err
+		}
+		var ce *storyresolve.ComponentSpecError
+		if errors.As(err, &ce) {
+			// A component spec has no story to attest an AC against — the
+			// same verdict as any other non-story class, but re-worded in
+			// attest's own terms so the shared resolver's matrix framing does
+			// not leak (dc-5, ADJ-51 finding 3).
+			return nil, fmt.Sprintf("%s resolves to a component spec (no story, no acceptance criteria) — no STORY exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg), nil
+		}
+		return nil, err.Error(), nil
 	}
 	if spec.Class != artifact.ClassStory {
-		return nil, fmt.Sprintf("%s resolves to a %s-class spec, not a story — verdi attest scaffolds STORY attestations only (dc-5)", storyRefArg, spec.Class)
+		return nil, fmt.Sprintf("%s resolves to a %s-class spec, not a story — no STORY exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg, spec.Class), nil
 	}
 	for _, ac := range spec.AcceptanceCriteria {
 		if ac.ID == acID {
-			return spec, ""
+			return spec, "", nil
 		}
 	}
-	return nil, fmt.Sprintf("%s does not declare acceptance criterion %q", spec.ID, acID)
+	return nil, fmt.Sprintf("%s does not declare acceptance criterion %q", spec.ID, acID), nil
 }
 
 // attestationPath is the exact path internal/evidence's fold reads for
@@ -194,10 +216,19 @@ func attestationPath(root, storySlug, acID string) string {
 
 // attestationAlreadyExists is AC-2's other refusal predicate, checked at
 // the exact fold path, exercised directly by attest_test.go's static
-// register.
+// register. A regular FILE at the path is an existing (human) record —
+// AC-2's verdict case. A DIRECTORY at the path is store corruption, not an
+// attestation: classified operationally (an error → exit 2), exactly as the
+// fold's own readers (evidence.AttestationExists/LoadAttestationState) read
+// it, never as an "already exists" verdict for a human record that isn't
+// there (ADJ-51 finding 5).
 func attestationAlreadyExists(root, storySlug, acID string) (bool, error) {
-	_, err := os.Stat(attestationPath(root, storySlug, acID))
+	path := attestationPath(root, storySlug, acID)
+	info, err := os.Stat(path)
 	if err == nil {
+		if info.IsDir() {
+			return false, fmt.Errorf("attestation path %s is a directory, not a file", path)
+		}
 		return true, nil
 	}
 	if errors.Is(err, os.ErrNotExist) {
