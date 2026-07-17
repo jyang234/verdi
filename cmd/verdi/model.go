@@ -26,8 +26,9 @@
 // declares, model check also instantiates the class's own resolved
 // template — a store override under .verdi/templates/ when one exists,
 // the embedded canonical default otherwise (designscaffold.LoadTemplate)
-// — with placeholder data, then strict-decodes the result exactly like a
-// real scaffold consumer's decode would. A template that fails to render,
+// — with placeholder data for every variant it can render, then
+// strict-decodes each exactly like a real scaffold consumer's decode
+// would. A template that fails to render,
 // or that renders content failing strict decode, fails model check
 // closed — exit 2, grouped with every other "undecodable manifest"
 // condition above, never exit 1 (a broken TEMPLATE is not a structural
@@ -110,15 +111,25 @@ func runModelCheck(root string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// modelCheckPlaceholderData is the ScaffoldData every class's resolved
-// template is instantiated with during checkTemplates (spec/scaffold-
-// templates ac-3): representative enough to satisfy every kernel
-// validation rule a real scaffold consumer's own decode would also
-// enforce — notably validateStory's >=1 implements edge requirement for a
-// non-spike story, which the canonical/embedded story.md template renders
-// unconditionally — without being mistaken for a real spec (its own ref
-// and title say so).
-func modelCheckPlaceholderData() designscaffold.ScaffoldData {
+// modelCheckVariant is one (Spike, links) shape a class's resolved template
+// can render into. checkTemplates round-trips every variant a real scaffold
+// consumer can produce, not just one (judged-spike-variant-unchecked-by-
+// model-check): a template broken only inside its {{if .Spike}} branch must
+// fail model check, not surface at a spike scaffold's first use. name labels
+// the variant so a failure names it alongside the template file.
+type modelCheckVariant struct {
+	name string
+	data designscaffold.ScaffoldData
+}
+
+// modelCheckDefaultData is the non-spike ScaffoldData every class's resolved
+// template is round-tripped with (spec/scaffold-templates ac-3):
+// representative enough to satisfy every kernel validation rule a real
+// scaffold consumer's own decode would also enforce — notably validateStory's
+// >=1 implements edge requirement for a non-spike story, which the canonical/
+// embedded story.md template renders unconditionally — without being mistaken
+// for a real spec (its own ref and title say so).
+func modelCheckDefaultData() designscaffold.ScaffoldData {
 	return designscaffold.ScaffoldData{
 		Ref:      "spec/model-check-placeholder",
 		Title:    "Model Check Placeholder",
@@ -130,16 +141,47 @@ func modelCheckPlaceholderData() designscaffold.ScaffoldData {
 	}
 }
 
+// modelCheckSpikeData is the spike ScaffoldData the story template's
+// {{if .Spike}} branch is round-tripped with: Spike true, and a resolves
+// edge to an open-question fragment in place of the implements edge — a
+// spike story must carry no implements edge and >=1 resolves edge
+// (validateStory), so the spike render decodes exactly as a real
+// stub-instantiate of a spike stub would.
+func modelCheckSpikeData() designscaffold.ScaffoldData {
+	d := modelCheckDefaultData()
+	d.Spike = true
+	d.Links = []designscaffold.StoryLink{{Type: artifact.LinkResolves, Ref: "spec/model-check-placeholder#oq-1"}}
+	return d
+}
+
+// modelCheckVariantsFor returns the template variants checkTemplates must
+// round-trip for the class named className: always the default (non-spike)
+// variant, plus — for the story class, whose canonical/embedded template
+// carries a {{if .Spike}} branch and whose spike variant a real
+// stub-instantiate renders — the spike variant. Keyed on artifact.ClassStory:
+// the class map key stays canonical across vocabulary renames (only Display
+// names rename, internal/model/model.go), matching stub-instantiate's own
+// Classes[string(artifact.ClassStory)] lookup (internal/workbench).
+func modelCheckVariantsFor(className string) []modelCheckVariant {
+	variants := []modelCheckVariant{{name: "default", data: modelCheckDefaultData()}}
+	if className == string(artifact.ClassStory) {
+		variants = append(variants, modelCheckVariant{name: "spike", data: modelCheckSpikeData()})
+	}
+	return variants
+}
+
 // checkTemplates instantiates and strict-decodes every class's resolved
 // template (store override or embedded canonical, designscaffold.
-// LoadTemplate) with placeholder data, exactly like a real scaffold
-// consumer's decode would (spec/scaffold-templates ac-3) — a broken
-// template fails closed here, naming the offending file, rather than
-// surfacing for the first time as a confusing decode error at someone's
-// first design start. Classes are checked in sorted-name order so a
-// multi-class failure names a deterministic first offender across runs
-// (CLAUDE.md: deterministic outputs), though today's frontier (dc-1)
-// permits only the canonical {feature, story} class set.
+// LoadTemplate) across every variant it can render — the non-spike scaffold
+// every class produces, plus the story template's spike variant — exactly
+// like a real scaffold consumer's decode would (spec/scaffold-templates
+// ac-3). A broken template fails closed here, naming the offending file AND
+// the offending variant, rather than surfacing for the first time as a
+// confusing decode error at someone's first design start or spike
+// stub-instantiate. Classes are checked in sorted-name order, default
+// variant before spike, so a multi-failure names a deterministic first
+// offender across runs (CLAUDE.md: deterministic outputs), though today's
+// frontier (dc-1) permits only the canonical {feature, story} class set.
 func checkTemplates(cfg *store.Config) error {
 	names := make([]string, 0, len(cfg.Model.Classes))
 	for name := range cfg.Model.Classes {
@@ -147,23 +189,24 @@ func checkTemplates(cfg *store.Config) error {
 	}
 	sort.Strings(names)
 
-	data := modelCheckPlaceholderData()
 	for _, name := range names {
 		class := cfg.Model.Classes[name]
 		tmpl, err := designscaffold.LoadTemplate(cfg.Root, class.Template)
 		if err != nil {
 			return fmt.Errorf("template %s (class %s): %w", class.Template, name, err)
 		}
-		content, err := designscaffold.Render(tmpl, data)
-		if err != nil {
-			return fmt.Errorf("template %s (class %s) failed to render: %w", class.Template, name, err)
-		}
-		fm, _, err := artifact.SplitFrontmatter([]byte(content))
-		if err != nil {
-			return fmt.Errorf("template %s (class %s) rendered content failed strict decode: %w", class.Template, name, err)
-		}
-		if _, err := artifact.DecodeSpec(fm); err != nil {
-			return fmt.Errorf("template %s (class %s) rendered content failed strict decode: %w", class.Template, name, err)
+		for _, v := range modelCheckVariantsFor(name) {
+			content, err := designscaffold.Render(tmpl, v.data)
+			if err != nil {
+				return fmt.Errorf("template %s (class %s, %s variant) failed to render: %w", class.Template, name, v.name, err)
+			}
+			fm, _, err := artifact.SplitFrontmatter([]byte(content))
+			if err != nil {
+				return fmt.Errorf("template %s (class %s, %s variant) rendered content failed strict decode: %w", class.Template, name, v.name, err)
+			}
+			if _, err := artifact.DecodeSpec(fm); err != nil {
+				return fmt.Errorf("template %s (class %s, %s variant) rendered content failed strict decode: %w", class.Template, name, v.name, err)
+			}
 		}
 	}
 	return nil

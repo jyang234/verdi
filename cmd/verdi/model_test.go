@@ -84,6 +84,15 @@ func TestModelCheck_NoModelYAML_OK(t *testing.T) {
 // strict-decodes every resolved template, so a renamed-but-unbacked
 // filename is correctly a failure, not a documentation-only field —
 // TestModelCheck_BrokenTemplate_NamesFile below pins that failure case).
+//
+// The story template carries the same {{if .Spike}} branch the canonical
+// story.md does, so it renders a VALID spike variant as well as the
+// non-spike one: model check now round-trips both variants of every story
+// template (judged-spike-variant-unchecked-by-model-check), and a story
+// template that could not render a valid spike — one that emits resolves
+// edges without spike: true, say — is correctly a failure, not a valid
+// rename (TestModelCheck_BrokenTemplateInSpikeBranch_Exit2_NamesFile pins
+// that case). A complete story template is one that handles both.
 const vocabRenameFeatureTemplate = `---
 id: {{.Ref}}
 kind: spec
@@ -107,7 +116,8 @@ owners: {{.Owners}}
 class: story
 status: draft
 story: {{.StoryRef}}
-problem: { text: "{{.Problem}}", anchor: problem }
+{{if .Spike}}spike: true
+{{end}}problem: { text: "{{.Problem}}", anchor: problem }
 outcome: { text: "{{.Outcome}}", anchor: outcome }
 links:
 {{range .Links}}  - { type: {{.Type}}, ref: {{printf "%q" .Ref}} }
@@ -204,6 +214,53 @@ links:
 	}
 	if !strings.Contains(stderr, "story.md") {
 		t.Fatalf("stderr = %q, want it to name the offending template file story.md, never a bare \"model.yaml invalid\"", stderr)
+	}
+}
+
+// TestModelCheck_BrokenTemplateInSpikeBranch_Exit2_NamesFile is judged-
+// spike-variant-unchecked-by-model-check's regression: a story.md override
+// that decodes cleanly for the NON-spike variant but is broken only inside
+// its {{if .Spike}} branch (here, an unknown frontmatter field the spike
+// render emits). checkTemplates round-trips every variant a real scaffold
+// consumer can render — design start renders the non-spike story, but
+// stub-instantiate renders the spike story from a spike stub — so the
+// breakage is caught at check time, not at some future spike scaffold's
+// first use. The failure names the offending template file AND the spike
+// variant (before this fix, model check rendered only the non-spike
+// variant and this store passed clean).
+func TestModelCheck_BrokenTemplateInSpikeBranch_Exit2_NamesFile(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, "")
+	const brokenSpikeBranchTemplate = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: story
+status: draft
+story: {{.StoryRef}}
+{{if .Spike}}spike: true
+bogus_spike_only_field: 1
+{{end}}problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+{{if not .Spike}}acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: ac-1 }
+{{end}}links:
+{{range .Links}}  - { type: {{.Type}}, ref: {{printf "%q" .Ref}} }
+{{end}}---
+# {{.Title}}
+`
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "story.md"), []byte(brokenSpikeBranchTemplate))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (story template broken only in its spike branch) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "story.md") {
+		t.Fatalf("stderr = %q, want it to name the offending template file story.md", stderr)
+	}
+	if !strings.Contains(stderr, "spike") {
+		t.Fatalf("stderr = %q, want it to name the spike variant (the check must say WHICH variant failed)", stderr)
 	}
 }
 
