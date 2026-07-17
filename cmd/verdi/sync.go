@@ -28,6 +28,7 @@ import (
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
 )
@@ -56,6 +57,14 @@ type syncDeps struct {
 	GoTest goTestRunner
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// Model is the store's resolved operating model (store.Open's
+	// Config.Model), consumed by runBuildStart's verdict lines for display
+	// vocabulary (spec/vocabulary-surfaces ac-1). nil is fully valid — every
+	// display lookup falls back to the bare id (model.Model's nil-receiver
+	// contract), which is also why existing tests constructing syncDeps
+	// without it keep printing byte-identical output.
+	Model *model.Model
 }
 
 // cmdSync is `verdi sync`'s real entry point, invoked by dispatch.go. It

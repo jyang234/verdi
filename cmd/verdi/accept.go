@@ -65,6 +65,18 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		return runAcceptDiagram(ctx, root, ref, stdout, stderr)
 	}
 
+	// The resolved operating model (store.Open's config bottleneck, L-M3):
+	// spec/vocabulary-surfaces ac-1 — the state words accept's verdict
+	// lines print resolve through Config.Model's display vocabulary. A
+	// store whose verdi.yaml/model.yaml cannot be resolved is operational
+	// (exit 2), matching every other manifest-loading verb's posture.
+	cfg, err := store.Open(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "accept:", err)
+		return 2
+	}
+	mdl := cfg.Model
+
 	specPath := store.ActiveSpecPath(root, ref.Name)
 	raw, err := os.ReadFile(specPath)
 	if err != nil {
@@ -88,7 +100,9 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		return 1
 	}
 	if spec.Status != "draft" {
-		fmt.Fprintf(stderr, "accept: %s status is %q, not draft; only a draft spec can be accepted\n", ref.String(), spec.Status)
+		fmt.Fprintf(stderr, "accept: %s status is %q, not %s; only a draft spec can be accepted\n", ref.String(),
+			mdl.DisplayState(string(spec.Class), string(spec.Status)),
+			mdl.DisplayState(string(spec.Class), "draft"))
 		return 1
 	}
 
@@ -194,7 +208,7 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	// predecessor keeps its frozen stamp and stays in specs/active/. Written
 	// to disk here so the caller's own scoped AddPaths/CreateCommit below
 	// lands it in the same commit as the accept flip.
-	predecessorPaths, rc := supersedePredecessors(root, spec, stdout, stderr)
+	predecessorPaths, rc := supersedePredecessors(root, spec, mdl, stdout, stderr)
 	if rc != 0 {
 		return rc
 	}
@@ -216,7 +230,11 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		return 2
 	}
 
-	fmt.Fprintf(stdout, "accept: %s status: draft -> accepted-pending-build\n", ref.String())
+	// Display resolution only (spec/vocabulary-surfaces ac-1): the commit
+	// subject above stays on bare ids (history is identity, never display).
+	fmt.Fprintf(stdout, "accept: %s status: %s -> %s\n", ref.String(),
+		mdl.DisplayState(string(spec.Class), "draft"),
+		mdl.DisplayState(string(spec.Class), "accepted-pending-build"))
 	fmt.Fprintf(stdout, "accept: frozen: { at: %s, commit: %s, stub_matched: %t }\n", at, preFlipHead, stubMatched)
 	return 0
 }
