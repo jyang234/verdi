@@ -143,7 +143,17 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	remoteURL, _ := gitx.RemoteURL(ctx, root, "origin") // best-effort: only used for auto-detect
+	// ADJ-64: a genuinely-absent origin (ErrNoSuchRemote) is the benign local
+	// case — remoteURL stays "" and ac-1's refusal names its absence. But a
+	// REAL failure reading the origin remote (a broken git config, an
+	// unreadable repo) must NOT be swallowed into that same empty string and
+	// presented as absence: surface it as operational (exit 2), the exact
+	// distinction ac-1's "name every source it tried" legibility depends on.
+	remoteURL, err := gitx.RemoteURL(ctx, root, "origin")
+	if err != nil && !errors.Is(err, gitx.ErrNoSuchRemote) {
+		fmt.Fprintln(stderr, "sync:", err)
+		return 2
+	}
 	forgeKind, err := forge.DetectKind(manifest.Forge, remoteURL)
 	if err != nil {
 		fmt.Fprintln(stderr, "sync:", err)
