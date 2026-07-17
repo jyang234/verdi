@@ -214,11 +214,12 @@ func writeGlanceDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, n
 }
 
 // writeGlanceDesignEntry renders a design-branch glance card: the entry's
-// title IS its one link, to the per-branch board address (dc-3,
-// designBoardHref mirrored verbatim from directory.go's writeDesignEntry),
-// plus its status badge. Never matrix/verdict (a still-drafting feature
-// carries no built evidence for either to show — dc-3, ADJ-32 f3
-// rejected); never an in-review chip (dc-3's evidence-bearing-state bar).
+// title IS its one link, to the per-branch board address (dc-3, built
+// through directory.go's shared designBoardHref constructor — the same call
+// writeDesignEntry makes, never a second grammar), plus its status badge.
+// Never matrix/verdict (a still-drafting feature carries no built evidence
+// for either to show — dc-3, ADJ-32 f3 rejected); never an in-review chip
+// (dc-3's evidence-bearing-state bar).
 func writeGlanceDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string) {
 	buf.WriteString(`<a href="`)
 	buf.WriteString(stdhtml.EscapeString(designBoardHref(name)))
