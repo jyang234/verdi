@@ -83,6 +83,16 @@ func TestDecodeModel_VocabRenamePassesFrontier(t *testing.T) {
 	}
 }
 
+// TestDecodeModel_ReorderedObligationsPassesFrontier proves the frontier
+// compares a transition's obligations as a set, not positionally
+// (judged-frontier-obligations-positional): a manifest canonical but for the
+// ORDER of the close transition's two obligations decodes clean.
+func TestDecodeModel_ReorderedObligationsPassesFrontier(t *testing.T) {
+	if _, err := DecodeModel(readTestdata(t, "obligations-reordered.yaml")); err != nil {
+		t.Fatalf("DecodeModel(obligations-reordered.yaml): %v", err)
+	}
+}
+
 // TestDecodeModel_DisplayRenamePassesFrontier proves the frontier exempts a
 // class's Display label (judged-frontier-display-structural): a manifest
 // canonical in every structural respect but for a changed classes.*.display

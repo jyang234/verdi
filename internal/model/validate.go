@@ -259,20 +259,35 @@ func lifecycleEqual(a, b Lifecycle) bool {
 	return true
 }
 
-// transitionEqual compares From/To and the full Obligations list.
-// Obligations are compared POSITIONALLY (a stricter-than-required
-// posture, disclosed): canonicalModel always emits them in one fixed
-// order and every fixture this package authors follows it, so ordering
-// carries no legitimate reason to differ this phase.
+// transitionEqual compares From/To and the obligation SET. Obligations
+// are compared order-insensitively (judged-frontier-obligations-positional):
+// dc-1 draws the frontier over the "obligation set", the same set language
+// it uses for States/Terminal (which lifecycleEqual already compares as
+// sets, "never order"), so a manifest that lists a transition's obligations
+// in a different order describes the identical set and is not a structural
+// deviation. Obligation is an all-scalar comparable struct, so it keys a
+// count map directly.
 func transitionEqual(a, b Transition) bool {
 	if a.From != b.From || a.To != b.To {
 		return false
 	}
-	if len(a.Obligations) != len(b.Obligations) {
+	return obligationsEqualAsSets(a.Obligations, b.Obligations)
+}
+
+// obligationsEqualAsSets reports whether a and b hold the same obligations
+// regardless of order (multiset equality — a dropped duplicate is still a
+// real difference, so counts matter, not mere membership).
+func obligationsEqualAsSets(a, b []Obligation) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	for i := range a.Obligations {
-		if a.Obligations[i] != b.Obligations[i] {
+	counts := make(map[Obligation]int, len(a))
+	for _, ob := range a {
+		counts[ob]++
+	}
+	for _, ob := range b {
+		counts[ob]--
+		if counts[ob] < 0 {
 			return false
 		}
 	}
