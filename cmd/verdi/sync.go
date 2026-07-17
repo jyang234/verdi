@@ -149,7 +149,22 @@ func cmdSync(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "sync:", err)
 		return 2
 	}
-	fg, err := buildForge(forgeKind, remoteURL)
+	// ADJ-43: the ac-1 identifier refusal belongs ONLY to invocations that
+	// actually DIAL the forge by (owner, repo) — the fetch and --or-regen
+	// paths (fetchAncestorBundle → FetchEvidenceBundle). --produce and
+	// --produce-runtime never dial; they only read the CI environment
+	// (CIContext, a pure env read that uses no repo identifier), so they
+	// build an identifier-tolerant forge and run in an env-less, origin-less
+	// checkout exactly as they did before ac-1 (co-3 byte-identity restored).
+	// Dispatching the construction here — rather than after the toolchain
+	// check below — keeps the identifier refusal ahead of that check for the
+	// dialing path, unchanged (TestCmdSync_LocalCheckout_RefusesNamingSources).
+	var fg forge.Forge
+	if produce || produceRuntime {
+		fg, err = buildForgeForCI(forgeKind, remoteURL)
+	} else {
+		fg, err = buildForge(forgeKind, remoteURL)
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "sync:", err)
 		return 2
@@ -198,8 +213,12 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 
 	// The CI bundle is authoritative and always preferred when available,
 	// with or without --or-regen (05 §CLI: "--or-regen regenerates
-	// locally when no bundle exists").
-	tree, err := deps.Forge.FetchEvidenceBundle(ctx, ref, commit)
+	// locally when no bundle exists"). The fetch walks the current
+	// commit's ancestry, nearest first, applying the fold's own ancestor
+	// rule verbatim (spec/sync-local-flow ac-2/dc-1, sync_ancestor.go) —
+	// a bundle at commit itself still wins first, never a stricter,
+	// HEAD-exact-only demand the fold itself would not require.
+	tree, acceptedCommit, distance, err := fetchAncestorBundle(ctx, root, deps.Forge, ref, commit)
 	switch {
 	case err == nil:
 		// The I-4 secondary defense (spec/forge-transport ac-4/dc-4):
@@ -217,10 +236,34 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 			fmt.Fprintln(deps.Stderr, "sync:", writeErr)
 			return 2
 		}
-		fmt.Fprintf(deps.Stdout, "sync: pulled CI evidence bundle (%d files) into %s\n", len(tree), derivedRoot)
+		// distance is the accepted commit's index in gitx.Log's own walk
+		// order (ADJ-41 fix 2, disclosure only): dc-1 blesses gitx.Log as
+		// the enumeration primitive, and across parallel branches of a
+		// merged history that order is committer-date order, not graph
+		// distance — so name it "in log order" rather than let the count
+		// read as a graph-distance a user would verify against first-parent
+		// intuition. No walk-semantics change.
+		fmt.Fprintf(deps.Stdout, "sync: pulled CI evidence bundle (%d files) — accepted at commit %s, %d commit(s) back in log order from %s, into %s\n",
+			len(tree), acceptedCommit, distance, commit, derivedRoot)
 		return evaluateTree(deps, tree)
 
 	case errors.Is(err, forge.ErrNoBundle) && orRegen:
+		// ADJ-37 fix 1: an ancestry-enumeration failure reaches here
+		// wrapped as no-bundle-shaped (so the routing is unchanged), but it
+		// is NOT absence-evidence — the nearest-ancestor walk never ran, so
+		// a bundle at a real ancestor may exist and was never consulted.
+		// Disclose that (and why) before regenerating, rather than letting
+		// --or-regen silently treat an unwalkable history as a genuine miss.
+		if errors.Is(err, errAncestryUnwalkable) {
+			fmt.Fprintf(deps.Stderr, "sync: %v — the nearest-ancestor bundle walk never ran, so --or-regen is regenerating locally without having consulted any ancestor's bundle (one may exist at a real ancestor this run never reached)\n", err)
+		} else if errors.Is(err, errShallowTruncatedExhaustion) {
+			// ADJ-41 fix 3: the walk ran but exhausted only a shallow clone's
+			// truncated graph — not genuine absence. Disclose the truncation
+			// before regenerating; a bundle may exist at a deeper true
+			// ancestor this clone never contained. A full clone's plain
+			// absence takes neither branch and stays byte-quiet as today.
+			fmt.Fprintf(deps.Stderr, "sync: %v — the walk exhausted only this shallow clone's truncated history, so --or-regen is regenerating locally without having consulted any bundle that may exist at a deeper true ancestor absent from this clone\n", err)
+		}
 		if err := os.MkdirAll(derivedDir, 0o755); err != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", err)
 			return 2
@@ -234,7 +277,7 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 		return evaluateBundle(deps, derivedDir)
 
 	case errors.Is(err, forge.ErrNoBundle):
-		fmt.Fprintln(deps.Stderr, "sync: no CI evidence bundle for this ref/commit yet; pass --or-regen to regenerate locally")
+		fmt.Fprintf(deps.Stderr, "sync: %v; pass --or-regen to regenerate locally\n", err)
 		return 2
 
 	default:
