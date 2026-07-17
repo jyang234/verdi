@@ -711,6 +711,27 @@ bindings:
       - "spec/vocabulary-surfaces#ac-1"
       - "spec/vocabulary-surfaces#ac-2"
       - "spec/vocabulary-surfaces#ac-3"
+      # spec/model-digest behavioral legs (extensibility phase 1, ledger
+      # L-M5, Task 10): ac-1 and ac-3 declare [behavioral]; ac-2 (static)
+      # is bound below under verdi-verify-static. Story authored via
+      # stub-instantiate + this design PR, with its three obligations
+      # authored in the same PR (.verdi/obligations/model-digest/
+      # ac-{1,3}--behavioral.md, ac-2--static.md, this round's X-9
+      # standing rule) — bound here at design time, ahead of the build.
+      # Not yet built: ac-1 = behavioral tests over all four production
+      # Provenance mint sites (commitdesign's board freeze;
+      # internal/align's deviation/decision-conflict/diagram-sweep
+      # reports) proving provenance.model equals the resolved model's
+      # Digest(), plus the existing byte-identical-across-runs
+      # convention (report_test.go's TestGenerate_ByteIdenticalAcrossRuns)
+      # extended to the new field; ac-3 = fixture-gate
+      # (make fixture/lint-store, both untouched) plus a decode test over
+      # a pre-existing committed artifact predating this field (e.g.
+      # scoping-canvas's own decision-conflict-report.md) proving it
+      # still decodes with Provenance.Model reading back empty. All under
+      # make verify once built.
+      - "spec/model-digest#ac-1"
+      - "spec/model-digest#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -1132,3 +1153,15 @@ bindings:
       - "spec/family-board-links#ac-2"
       - "spec/family-board-links#ac-3"
       - "spec/family-board-links#ac-4"
+      # spec/model-digest static leg (extensibility phase 1, ledger L-M5,
+      # Task 10; ac-1/ac-3 are bound above under verdi-verify-behavioral):
+      # a source-witness check proving all four production
+      # artifact.Provenance{...} construction sites (commitdesign.go:254,
+      # align/report.go:117, align/decision_report.go:151,
+      # align/diagram_report.go:137) set Model only via
+      # artifact.StampProvenance — no inline bypass, no undiscovered
+      # fifth site — with cmd/verdi/attest.go's Frozen-only mint (no
+      # Provenance at all) correctly excluded from the enumeration.
+      # Compiles, vets, and lints clean, plus the dedicated source-witness
+      # test itself, under make verify once built.
+      - "spec/model-digest#ac-2"
