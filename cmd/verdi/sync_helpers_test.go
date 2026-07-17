@@ -163,16 +163,23 @@ func TestBuildForge_Negative_UnknownKind(t *testing.T) {
 }
 
 // TestBuildForge_Happy proves both forge kinds still build successfully
-// given a resolvable identifier. The env vars are explicitly cleared so
-// this test is hermetic even when `go test` itself runs inside real GitHub
-// Actions (where GITHUB_REPOSITORY/GITHUB_REPOSITORY_OWNER are genuinely
-// set) — the point is proving buildForge succeeds from the ORIGIN URL
-// fallback, not incidentally from the runner's own environment.
+// given a resolvable identifier. The identifier env vars are explicitly set
+// or cleared so this test is hermetic even when `go test` itself runs inside
+// real GitHub Actions or GitLab CI (where GITHUB_REPOSITORY / CI_PROJECT_ID
+// are genuinely set) — the point is proving buildForge succeeds from the
+// ORIGIN URL fallback (github) and from an explicit CI_PROJECT_ID (gitlab),
+// not incidentally from the runner's own environment.
 func TestBuildForge_Happy(t *testing.T) {
 	t.Setenv("GITHUB_REPOSITORY_OWNER", "")
 	t.Setenv("GITHUB_REPOSITORY", "")
+	// gitlab now REQUIRES a resolvable identifier too (ADJ-69, symmetric with
+	// github below): the prior "empty CI_PROJECT_ID still builds a forge" case
+	// encoded exactly the empty-identity dial ADJ-69 refuses, and is
+	// deliberately replaced — see
+	// TestBuildForge_Gitlab_Negative_UnresolvableIdentifier above.
+	t.Setenv("CI_PROJECT_ID", "12345")
 	if _, err := buildForge("gitlab", "", nil); err != nil {
-		t.Errorf("buildForge(gitlab): %v", err)
+		t.Errorf("buildForge(gitlab, resolvable CI_PROJECT_ID): %v", err)
 	}
 	// github now REQUIRES a resolvable identifier (spec/sync-local-flow
 	// dc-2): the prior "empty remote URL still builds a forge" case
@@ -194,6 +201,19 @@ func TestBuildForge_Github_Negative_UnresolvableIdentifier(t *testing.T) {
 	t.Setenv("GITHUB_REPOSITORY", "")
 	if _, err := buildForge("github", "", nil); err == nil {
 		t.Fatal("buildForge(github, no identifier anywhere): want error, got nil")
+	}
+}
+
+// TestBuildForge_Gitlab_Negative_UnresolvableIdentifier is the gitlab
+// counterpart to TestBuildForge_Github_Negative_UnresolvableIdentifier
+// (ADJ-69): buildForge refuses — rather than building an adapter that would
+// DIAL gitlab.com/api/v4/projects//... with an empty :id — when CI_PROJECT_ID
+// is unset. gitlab's identity is env-only (never URL-derived, dc-3), so the
+// remoteURL argument is irrelevant to this refusal.
+func TestBuildForge_Gitlab_Negative_UnresolvableIdentifier(t *testing.T) {
+	t.Setenv("CI_PROJECT_ID", "")
+	if _, err := buildForge("gitlab", "", nil); err == nil {
+		t.Fatal("buildForge(gitlab, no CI_PROJECT_ID): want error, got nil")
 	}
 }
 
@@ -307,6 +327,30 @@ func TestGithubOwnerRepo_Negative_RefusesNamingEverySource(t *testing.T) {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("error = %q, want it to name %q", err.Error(), want)
 			}
+		}
+	})
+}
+
+// TestGitlabProjectID covers ADJ-69: gitlab's project identity is
+// CI_PROJECT_ID alone (env-only, never URL-derived — dc-3). Set, it
+// resolves; unset, it returns the empty id plus a refusal that names that
+// single source (symmetric with githubOwnerRepo's naming discipline).
+func TestGitlabProjectID(t *testing.T) {
+	t.Run("set: resolves the id", func(t *testing.T) {
+		t.Setenv("CI_PROJECT_ID", "12345")
+		id, err := gitlabProjectID()
+		if id != "12345" || err != nil {
+			t.Errorf("gitlabProjectID() = (%q, %v), want (12345, nil)", id, err)
+		}
+	})
+	t.Run("unset: refuses, naming CI_PROJECT_ID", func(t *testing.T) {
+		t.Setenv("CI_PROJECT_ID", "")
+		id, err := gitlabProjectID()
+		if id != "" || err == nil {
+			t.Fatalf("gitlabProjectID() = (%q, %v), want (\"\", a non-nil error)", id, err)
+		}
+		if !strings.Contains(err.Error(), "CI_PROJECT_ID") {
+			t.Errorf("error = %q, want it to name CI_PROJECT_ID", err.Error())
 		}
 	})
 }

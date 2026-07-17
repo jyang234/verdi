@@ -109,20 +109,33 @@ func buildForgeForCI(kind, remoteURL string) (forge.Forge, error) {
 }
 
 // buildForgeWithIdentifier is the shared constructor. requireIdentifier
-// gates only the github identifier refusal: true propagates
-// githubOwnerRepo's unresolved-identifier error (the dialing seam); false
-// tolerates it, building the adapter with the empty owner/repo the
-// CIContext-only paths never use. gitlab takes its identifier from
-// CI_PROJECT_ID (env, never URL-derived — dc-3) and has no such refusal
-// under either flag.
+// gates the identifier refusal for BOTH forge kinds: true propagates the
+// unresolved-identifier error at the dialing seam — githubOwnerRepo's
+// (owner, repo) for github, gitlabProjectID's project id for gitlab; false
+// tolerates it, building the adapter with the empty identifier the
+// CIContext-only (--produce/--produce-runtime) paths never dial. github
+// resolves its identifier from the CI env or, failing that, the origin URL;
+// gitlab resolves its from CI_PROJECT_ID alone (env, never URL-derived —
+// dc-3). ADJ-69 made gitlab symmetric with github: it too refuses an empty
+// project id here rather than dialing gitlab.com/api/v4/projects//... with
+// an empty :id and failing downstream as a confusing "unexpected status".
 func buildForgeWithIdentifier(kind, remoteURL string, remoteErr error, requireIdentifier bool) (forge.Forge, error) {
 	switch kind {
 	case "gitlab":
 		// gitlab identification is CI_PROJECT_ID (env-only, never URL-derived
-		// — dc-3), so an unreadable origin (remoteErr) never affects it.
+		// — dc-3), so an unreadable origin (remoteErr) never affects it. When
+		// requireIdentifier and CI_PROJECT_ID is unset, refuse here rather than
+		// building an adapter that would dial with an empty :id (ADJ-69); the
+		// non-dialing --produce/--produce-runtime paths (requireIdentifier
+		// false) tolerate the empty id byte-identically, since they never dial
+		// (ADJ-43).
+		projectID, err := gitlabProjectID()
+		if err != nil && requireIdentifier {
+			return nil, err
+		}
 		return forgegitlab.New(forgegitlab.Config{
 			BaseURL:   os.Getenv("CI_API_V4_URL"),
-			ProjectID: os.Getenv("CI_PROJECT_ID"),
+			ProjectID: projectID,
 			Token:     os.Getenv("CI_JOB_TOKEN"),
 		}), nil
 	case "github":
@@ -138,6 +151,26 @@ func buildForgeWithIdentifier(kind, remoteURL string, remoteErr error, requireId
 	default:
 		return nil, fmt.Errorf("unknown forge kind %q", kind)
 	}
+}
+
+// gitlabProjectID resolves the GitLab project identifier the adapter dials
+// by. Unlike github's (owner, repo), gitlab's identity is env-only — the
+// numeric or URL-encoded CI_PROJECT_ID GitLab CI injects, never URL-derived
+// (dc-3) — so there is exactly one source to consult (this takes no
+// remoteURL). It returns the empty id alongside an error naming that source
+// when CI_PROJECT_ID is unset, so a caller that will DIAL the forge
+// (requireIdentifier) refuses legibly at the construction seam rather than
+// egressing to gitlab.com/api/v4/projects//... with an empty :id and failing
+// as a confusing downstream "unexpected status" (ADJ-69, symmetric with
+// githubOwnerRepo's ac-1 refusal).
+func gitlabProjectID() (string, error) {
+	projectID := os.Getenv("CI_PROJECT_ID")
+	if projectID == "" {
+		return "", fmt.Errorf(
+			"cannot identify the GitLab project: CI_PROJECT_ID is unset, and gitlab identifies a project only by that env var, never the origin URL (dc-3) — set CI_PROJECT_ID to the numeric project id (GitLab CI injects it automatically inside a pipeline; export it by hand for a local run)",
+		)
+	}
+	return projectID, nil
 }
 
 // githubOwnerRepo resolves the GitHub (owner, repo) the adapter needs,
