@@ -15,6 +15,15 @@ const fakeDecisionJudgeOKScript = `cat <<'EOF'
 EOF
 `
 
+// fakeDecisionJudgeNewlineTextScript is judge_test.go's
+// fakeJudgeNewlineTextScript's design-branch analogue (ADJ-53's j-4
+// fixture, decision-sweep twin) — a finding whose text carries an embedded
+// newline.
+const fakeDecisionJudgeNewlineTextScript = `cat <<'EOF'
+{"is_error":false,"subtype":"success","result":"{\"findings\":[{\"id\":\"dj-newline\",\"text\":\"line one\\nline two\",\"confidence\":0.4,\"target\":\"adr/retry-policy\"}]}"}
+EOF
+`
+
 func TestRunDecisionSweep_Success(t *testing.T) {
 	script := writeFakeJudge(t, fakeDecisionJudgeOKScript)
 	res, err := RunDecisionSweep(context.Background(), ExecJudgeRunner{}, DecisionJudgedInput{
@@ -37,6 +46,33 @@ func TestRunDecisionSweep_Success(t *testing.T) {
 	}
 	if res.Integrity == "" || res.JudgeIntegrity == nil {
 		t.Fatal("Integrity/JudgeIntegrity must be populated on a real judge exchange")
+	}
+}
+
+// TestRunDecisionSweep_NewlineInTextIsNormalized is ADJ-53's j-4 fix proof,
+// decision-sweep twin: RunDecisionSweep shares judge.go's exact
+// Text-construction shape (fmt.Sprintf("%s (confidence %.2f)", jf.Text,
+// jf.Confidence)), so it must normalize an embedded newline in judge text
+// the same way.
+func TestRunDecisionSweep_NewlineInTextIsNormalized(t *testing.T) {
+	script := writeFakeJudge(t, fakeDecisionJudgeNewlineTextScript)
+	res, err := RunDecisionSweep(context.Background(), ExecJudgeRunner{}, DecisionJudgedInput{
+		JudgeCmd: []string{script},
+		Timeout:  5 * time.Second,
+		Prompt:   []byte("prompt"),
+	})
+	if err != nil {
+		t.Fatalf("RunDecisionSweep: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %+v, want 1", res.Findings)
+	}
+	text := res.Findings[0].Text
+	if strings.ContainsAny(text, "\n\r") {
+		t.Fatalf("finding text = %q, contains a raw newline/CR — must be normalized to a single line", text)
+	}
+	if !strings.Contains(text, "line one") || !strings.Contains(text, "line two") {
+		t.Fatalf("finding text = %q, want it to still carry both halves of the judge's text", text)
 	}
 }
 

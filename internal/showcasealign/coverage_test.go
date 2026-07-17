@@ -140,17 +140,18 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// build-then-exec discipline cli:lint/cli:matrix/cli:sync already use)
 	// — see that file's own package-level doc comment for exactly which
 	// real showcase content and deterministic outcome each verb proves.
-	"cli:audit":  {goE2E("internal/showcasealign/cli_showcase_test.go")},
-	"cli:dex":    {goE2E("internal/showcasealign/cli_showcase_test.go")},
-	"cli:board":  {goE2E("internal/showcasealign/cli_showcase_test.go")},
-	"cli:rollup": {goE2E("internal/showcasealign/cli_showcase_test.go")},
-	"cli:design": {goE2E("internal/showcasealign/cli_showcase_test.go")},
-	"cli:accept": {goE2E("internal/showcasealign/cli_showcase_test.go")},
-	"cli:build":  {goE2E("internal/showcasealign/cli_showcase_test.go")},
-	"cli:align":  {goE2E("internal/showcasealign/cli_showcase_test.go")},
-	"cli:gate":   {goE2E("internal/showcasealign/cli_showcase_test.go")},
-	"cli:close":  {goE2E("internal/showcasealign/cli_showcase_test.go")},
-	"cli:gc":     {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:audit":       {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:dex":         {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:board":       {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:rollup":      {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:design":      {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:accept":      {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:build":       {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:align":       {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:gate":        {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:close":       {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:gc":          {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:disposition": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
 	// cli:attest (legibility-ergonomics round, spec/attest-helper): added
 	// alongside the new verb itself — TestCLIShowcaseAttest

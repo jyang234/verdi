@@ -52,16 +52,30 @@ func renderFindings(b *strings.Builder, findings []artifact.Finding) {
 		return
 	}
 	for _, f := range findings {
-		disposition := "UNDISPOSITIONED"
-		if f.Dispositioned() {
-			disposition = string(f.Disposition)
-		}
-		fmt.Fprintf(b, "- **%s** [%s]: %s", f.ID, disposition, f.Text)
-		if f.Note != "" {
-			fmt.Fprintf(b, " — %s", f.Note)
-		}
+		b.WriteString(RenderFindingLine(f))
 		b.WriteString("\n")
 	}
+}
+
+// RenderFindingLine renders a single finding's markdown body bullet line —
+// the exact line renderFindings emits for f, factored out and exported
+// (spec/disposition-verb dc-2) so the `verdi disposition` verb can compute
+// both a finding's OLD line (to locate, byte-for-byte, within an existing
+// report's body) and its NEW line (to substitute in place) from the SAME one
+// formatting rule renderFindings itself uses, rather than a second, drifting
+// copy of the format living in cmd/verdi. TestRenderFindingLine_MatchesRenderBody
+// pins that this is not a second copy: RenderBody's own output contains
+// exactly this line for every finding it renders.
+func RenderFindingLine(f artifact.Finding) string {
+	disposition := "UNDISPOSITIONED"
+	if f.Dispositioned() {
+		disposition = string(f.Disposition)
+	}
+	line := fmt.Sprintf("- **%s** [%s]: %s", f.ID, disposition, f.Text)
+	if f.Note != "" {
+		line += fmt.Sprintf(" — %s", f.Note)
+	}
+	return line
 }
 
 func renderBaselineDiffs(b *strings.Builder, diffs []ServiceBoundaryDiff) {

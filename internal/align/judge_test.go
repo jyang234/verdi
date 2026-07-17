@@ -58,6 +58,20 @@ const fakeJudgeTimeoutScript = `sleep 5
 echo "should never get here"
 `
 
+// fakeJudgeNewlineTextScript emits a finding whose text carries an embedded
+// newline (ADJ-53's j-4 fixture): a judge is free-text, nothing in S5's own
+// contract constrains it to a single line, so this is a legitimate — if
+// rare — judge response shape the ingestion layer must handle safely
+// rather than pass through raw. The literal `\\n` here is JSON's own
+// newline escape at the OUTER envelope's re-escaping layer (S5's two-layer
+// parse: this decodes, at the inner layer, to a `text` value containing a
+// real newline character, exactly as a real judge emitting a
+// multi-paragraph answer would produce).
+const fakeJudgeNewlineTextScript = `cat <<'EOF'
+{"is_error":false,"subtype":"success","result":"{\"findings\":[{\"id\":\"j-newline\",\"text\":\"line one\\nline two\",\"confidence\":0.4}]}"}
+EOF
+`
+
 // judgeTestBudget bounds every runJudgeOnce call in this file that is NOT
 // itself testing the timeout stage (TestRunJudgeOnce_Timeout, below, keeps
 // its own short, deliberately tight timeout — that IS the behavior under
@@ -118,6 +132,42 @@ func TestRunJudgeOnce_Success(t *testing.T) {
 	}
 	if !strings.Contains(success.RawResult, "j-1") {
 		t.Fatalf("RawResult = %q, want the raw result string preserved", success.RawResult)
+	}
+}
+
+// TestRunJudgeOnce_NewlineInTextIsNormalized is ADJ-53's j-4 fix proof: a
+// judge-emitted finding text carrying an embedded newline must never
+// survive into Finding.Text raw — every downstream consumer
+// (align.RenderFindingLine's single-line bullet, the disposition verb's
+// whole-line matcher, Identity's content-hash finding equality) assumes
+// one line, and this pre-existing latent gap is exactly what the
+// disposition verb converted into a permanent brick (judged-j-4). The
+// RawResult (the persisted judge-integrity input) must still carry the
+// judge's own raw, UNnormalized text verbatim — normalization is a
+// Finding.Text presentation concern, never a tamper with the integrity
+// hash's own input bytes.
+func TestRunJudgeOnce_NewlineInTextIsNormalized(t *testing.T) {
+	script := writeFakeJudge(t, fakeJudgeNewlineTextScript)
+	success, failure := runJudgeOnce(judgeTestContext(t), ExecJudgeRunner{}, []string{script}, 0, []byte("prompt"))
+	if failure != nil {
+		t.Fatalf("runJudgeOnce: unexpected failure %+v", failure)
+	}
+	if len(success.Findings) != 1 {
+		t.Fatalf("Findings = %+v, want 1", success.Findings)
+	}
+	text := success.Findings[0].Text
+	if strings.ContainsAny(text, "\n\r") {
+		t.Fatalf("finding text = %q, contains a raw newline/CR — must be normalized to a single line", text)
+	}
+	if !strings.Contains(text, "line one") || !strings.Contains(text, "line two") {
+		t.Fatalf("finding text = %q, want it to still carry both halves of the judge's text", text)
+	}
+	// RawResult is JSON SOURCE TEXT (one decode layer short of
+	// judgeInnerFinding.Text) — its embedded newline is still the two-byte
+	// `\n` JSON escape sequence at this layer, never an actual newline
+	// byte, so the raw (backtick) string below is deliberate, not a typo.
+	if !strings.Contains(success.RawResult, `line one\nline two`) {
+		t.Fatalf("RawResult = %q, want the judge's raw, UNnormalized text preserved verbatim (integrity hash input)", success.RawResult)
 	}
 }
 

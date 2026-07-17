@@ -64,6 +64,17 @@
 //     underneath it, exercising both verbs' real entry points for real.
 //   - `verdi dex build`: renders a real static site whose output contains
 //     spec/stale-decline's real, committed title.
+//   - `verdi disposition` (spec/disposition-verb, TestCLIShowcaseDisposition):
+//     driven against the real, LIVING borrower-update-mobile deviation
+//     report — the only non-frozen one examples/showcase carries — exits 2
+//     (operational), a genuine, disclosed fact about this specific fixture:
+//     its body is hand-authored narrative prose, never produced by a real
+//     align run (no toolchain: block in this store's verdi.yaml, same gap
+//     `verdi align` above discloses), so it carries none of
+//     align.RenderBody's mechanical per-finding bullet lines the verb must
+//     locate and replace to keep body and frontmatter in agreement (dc-2).
+//     The verb's fail-closed refusal, naming the finding it could not
+//     safely reconcile, IS the correct behavior here — not a workaround.
 //
 // cli:feature is DELIBERATELY EXCLUDED from the enumerated capability set
 // below (cliVerbs, coverage_test.go) — see that function's own comment and
@@ -420,9 +431,10 @@ func TestCLIShowcaseGC(t *testing.T) {
 // showcase corpus's only committed attestation under that same story-ref
 // slug, jira-loan-1482/ac-2.md, is for ac-2 (which borrower-update-api does
 // not declare at all; it verifies spec/stale-decline instead, the
-// class: feature spec sharing the same story ref — VL-022's own disclosed
-// baseline finding, internal/lint/harness_test.go's knownCorpusBaseline-
-// Findings). The spec-ref form is used deliberately, never the
+// class: feature spec sharing the same story ref — outside VL-022's
+// story-scoped subject (Controller adjudication ADJ-51), skipped rather
+// than refused, needing no baseline map). The spec-ref form is used
+// deliberately, never the
 // scheme-prefixed jira:LOAN-1482 form: that scheme-prefixed ref resolves to
 // spec/stale-decline instead (storyresolve.Resolve's own matchStoryRef is
 // permanently feature-class-only), exactly the two-form-contract nuance
@@ -476,5 +488,54 @@ func TestCLIShowcaseAttest(t *testing.T) {
 	}
 	if string(after) != content {
 		t.Fatalf("the scaffolded attestation's bytes changed after a refused second call — dc-2 forbids overwriting a human-ownable record")
+	}
+}
+
+// TestCLIShowcaseDisposition drives `verdi disposition` (cli:disposition,
+// spec/disposition-verb) against the REAL committed
+// borrower-update-mobile/deviation-report.md — the only LIVING (non-frozen)
+// deviation report examples/showcase carries (its two archived siblings,
+// refi-rate-check-2024 and loan-refi-2023, are both frozen, so co-3 refuses
+// them unconditionally, a weaker proof than exercising the real reconciliation
+// logic below).
+//
+// That file's body is genuinely hand-authored narrative prose (predating
+// this story — illustrative showcase content, never produced by a real
+// `verdi align` run: examples/showcase's own committed verdi.yaml carries no
+// toolchain: block, so align.Compute cannot run against this store at all,
+// per this file's own package doc comment above), not align.RenderBody's
+// mechanical per-finding bullet form dc-2 requires the verb to locate and
+// replace so the frontmatter write and the human-legible body stay in
+// agreement. The real, disclosed, and CORRECT outcome driving the verb
+// against it is therefore a fail-closed operational refusal naming the
+// finding it could not safely reconcile — never a silent, structurally
+// unsound body edit — exactly the same "real, disclosed fact about the
+// showcase store" pattern this file's own doc comment already uses for
+// `verdi align`/`verdi close` above. This proves the verb's core safety
+// property (dc-2: never write a body that falls out of agreement with the
+// frontmatter) against genuine content, not a synthetic fixture built to
+// make it succeed; disposition-verb's ac-1/ac-2/ac-3 obligations are proven
+// in full, on real align-generated reports, by cmd/verdi/disposition_test.go.
+func TestCLIShowcaseDisposition(t *testing.T) {
+	root := provisionShowcaseStore(t)
+
+	reportData := readShowcaseFile(t, ".verdi/specs/active/borrower-update-mobile/deviation-report.md")
+	reportPath := filepath.Join(root, ".verdi", "specs", "active", "borrower-update-mobile", "deviation-report.md")
+	writeTestFile(t, reportPath, reportData)
+
+	stdout, stderr, code := runBinary(t, root, "disposition", "spec/borrower-update-mobile", "f-2", "accepted-deviation", "--rationale", "confirmed by the showcase coverage check", "--amend")
+	if code != 2 {
+		t.Fatalf("verdi disposition: exit %d, want 2 (operational — the real committed report's body is hand-authored prose, not align.RenderBody's mechanical bullet form)\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "f-2") {
+		t.Fatalf("stderr = %q, want it to name the finding (f-2) it could not safely reconcile", stderr)
+	}
+
+	after, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading report after refusal: %v", err)
+	}
+	if string(after) != reportData {
+		t.Fatalf("the real committed report was written to despite a refusal (no partial write allowed):\n--- before ---\n%s\n--- after ---\n%s", reportData, after)
 	}
 }

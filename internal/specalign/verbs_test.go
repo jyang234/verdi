@@ -35,6 +35,15 @@
 // safety property `matrix`/`rollup`/`design`/`accept`/`board` already rely
 // on in the default case below, needing no special-cased hermeticity
 // branch of its own.
+//
+// Round 6 (spec/disposition-verb): `disposition` is a brand-new verb (no
+// prior phase-0 stub) — dispatch.go's verbPhase gains a `disposition` key
+// and a real dispatch call in the same change this test's own inV0 addition
+// rides (ADJ-48: a branch adding a verb without matching inventory updates
+// is a spec-align gap this addition closes). Added to inV0 below, with its
+// own hermeticity note next to close's (both are mutating verbs whose bare,
+// no-argument invocation fails on argument-shape parsing before resolving a
+// store root or touching any file — safe to run against the live checkout).
 package specalign
 
 import "testing"
@@ -49,7 +58,7 @@ func TestV0CLIVerbInventory(t *testing.T) {
 	inV0 := []string{
 		"lint", "design", "accept", "feature", "build", "align", "sync",
 		"serve", "mcp", "matrix", "rollup", "dex", "gate", "board", "audit",
-		"close", "gc", "attest",
+		"close", "gc", "attest", "disposition",
 	}
 	// PLAN.md §5 scope discipline, verbatim (as amended: `close`/`gc`
 	// graduated to real, round 6): "Explicitly out of v0 (not stubbed —
@@ -88,14 +97,16 @@ func TestV0CLIVerbInventory(t *testing.T) {
 				// honestly from a rootless tempdir instead, while still
 				// proving the verb is dispatched as real.
 				_, stderr, _ = runBinary(t, t.TempDir(), verb)
-			case "close":
-				// `close` now runs a real, mutating ritual (closure
-				// branch, quartet archive-move, commit, publish) — this
-				// inventory check must never risk that against the
-				// shared self-hosted checkout, the same hermeticity
-				// concern as serve/mcp/audit/align above. Bare `close`
-				// (no story/spec argument) fails on argument parsing
-				// BEFORE resolving a store root or touching git at all,
+			case "close", "disposition":
+				// `close` runs a real, mutating ritual (closure branch,
+				// quartet archive-move, commit, publish); `disposition`
+				// writes a reviewer's decision into a deviation report in
+				// place (spec/disposition-verb) — both mutations this
+				// inventory check must never risk against the shared
+				// self-hosted checkout, the same hermeticity concern as
+				// serve/mcp/audit/align above. Bare `close`/`disposition`
+				// (no arguments at all) each fail on argument parsing
+				// BEFORE resolving a store root or touching any file,
 				// deterministically, regardless of environment (CI or
 				// not) — the one invocation shape safe to run anywhere.
 				_, stderr, _ = runBinary(t, t.TempDir(), verb)
