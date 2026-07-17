@@ -10,6 +10,20 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 )
 
+// AttestationPath returns the on-disk path an attestation for
+// (storySlug, acID) lives at under storeRoot's attestations/ directory
+// (attestations/<storySlug>/<acID>.md, I-6) — the ONE path-construction
+// convention AttestationExists and LoadAttestationState both resolve
+// through, so an external disclosure that must NAME this path (spec/
+// close-preflight ac-1/dc-4) never hand-derives a second, possibly-drifting
+// copy of it. Passing an empty storeRoot yields the store-relative display
+// form ("`.verdi/attestations/<storySlug>/<acID>.md`", filepath.Join drops
+// an empty leading element) a disclosure prints instead of a temp-dir- or
+// checkout-rooted absolute path.
+func AttestationPath(storeRoot, storySlug, acID string) string {
+	return filepath.Join(storeRoot, ".verdi", "attestations", storySlug, acID+".md")
+}
+
 // AttestationExists reports whether an attestation file exists for
 // (storySlug, acID) under storeRoot's attestations/ directory
 // (attestations/<storySlug>/<acID>.md). 03 §Evidence kinds is explicit
@@ -20,7 +34,7 @@ import (
 // is still an attestation for the fold's purposes (VL-001 lint is where a
 // malformed one gets caught, not the fold).
 func AttestationExists(storeRoot, storySlug, acID string) (bool, error) {
-	path := filepath.Join(storeRoot, ".verdi", "attestations", storySlug, acID+".md")
+	path := AttestationPath(storeRoot, storySlug, acID)
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -98,7 +112,7 @@ func (s AttestationState) String() string {
 // not a replacement (its own doc comment already disclaims decoding
 // content — this function does not weaken that contract).
 func LoadAttestationState(storeRoot, storySlug, acID string) (AttestationState, error) {
-	path := filepath.Join(storeRoot, ".verdi", "attestations", storySlug, acID+".md")
+	path := AttestationPath(storeRoot, storySlug, acID)
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

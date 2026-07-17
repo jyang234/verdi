@@ -151,6 +151,47 @@ func loadEvidenceArray(path string) (recs []artifact.Evidence, digest string, er
 	return out, digest, nil
 }
 
+// ExcludedCommitDirs reports every commit-named subdirectory of derivedRoot
+// that exists on disk but was excluded from LoadRecordsWithSources's own
+// output because it is neither commit itself nor a real ancestor of commit
+// in gitDir's history — the exact ancestry check LoadRecordsWithSources
+// already performs per entry (this file's own loop), captured here instead
+// of silently discarded. A fold consumer's disclosure can name this "found
+// but excluded (stale)" state for free (spec/close-preflight dc-4): the
+// walk and the ancestry check are the identical ones LoadRecordsWithSources
+// runs, so this never risks disagreeing with what the fold actually
+// excluded, and it changes no verdict — it is a diagnostic listing only.
+//
+// A derivedRoot that does not exist on disk yields (nil, nil) — the same
+// never-synced authoring state LoadRecordsWithSources treats as "no
+// records", not an error. Output is sorted lexicographically (deterministic,
+// independent of os.ReadDir's own listing order).
+func ExcludedCommitDirs(ctx context.Context, gitDir, derivedRoot, commit string) ([]string, error) {
+	entries, err := os.ReadDir(derivedRoot)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("evidence: reading %s: %w", derivedRoot, err)
+	}
+
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() || !commitDirRe.MatchString(e.Name()) {
+			continue
+		}
+		isAncestor, err := gitx.IsAncestor(ctx, gitDir, e.Name(), commit)
+		if err != nil {
+			return nil, fmt.Errorf("evidence: checking ancestry of %s: %w", e.Name(), err)
+		}
+		if !isAncestor {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // recordSortKey is a deterministic composite key for LoadRecords's output
 // ordering — not used by the fold's grouping/ordering logic itself
 // (Current owns that).
