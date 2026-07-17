@@ -4,7 +4,7 @@ kind: spec
 title: "Family Board Links"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-26
 problem: { text: "a story board has no way to reach its parent feature's board except URL surgery or the corpus page's generic, undifferentiated backlinks list (which never resolves to a board at all, only to the corpus page); and once a story is instantiated from a declared stub, the feature board's stub card keeps rendering exactly as it did before instantiation — no link forward, no acknowledgement that a design branch already exists — so an operator either hand-edits the address bar to find work already in flight, or cannot tell it is in flight at all and risks re-instantiating over the same slug", anchor: "#problem" }
 outcome: { text: "family navigation renders in both directions from the implements edge alone, reusing the same computed stub-story inverse the feature fold already computes: a story board's parent-feature affordance resolves to the feature's own board; a feature board's stub card links to a matching story's board the moment one resolves anywhere in this checkout's store — an active match rendered as the plain board link, an already-archived match rendered as the same link with its archived state disclosed on the card (never the false 'not yet in this checkout's active store' text a finished story would make a lie); short of any matching story at all, the stub card discloses a live-checked in-between state when the story's design branch already exists, and renders the plain un-instantiated state otherwise; and any edge target that fails to resolve is disclosed inline, never a dead link", anchor: "#outcome" }
