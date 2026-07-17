@@ -8,19 +8,4 @@ links:
   - { type: verifies, ref: "spec/close-preflight" }
 frozen: { at: 2026-07-17, commit: b32afdb39c1474e2c8b79f0af664fa28752d7824 }
 ---
-<!-- verdi:attestation-unauthored -->
-This attestation was scaffolded by `verdi attest` for spec/close-preflight ac-3
-and has not been authored. Replace this entire paragraph, and delete the
-marker comment above, with your own first-person account of what you
-verified, how, and why this acceptance criterion is satisfied. Until the
-marker above is removed, this file folds as absent, with disclosure — it
-is not evidence of anything.
-
-The `frozen.commit` stamped above is a convenience: it was pre-filled with
-the repository HEAD when this scaffold was written. By the store's
-attestation convention that field names the tree your claim was verified
-against — not this file's own commit — so set it to the exact commit you
-actually reviewed when you author your claim. The stamp is yours to
-correct: nothing here is frozen until this file's first commit (VL-010
-binds only committed frozen artifacts), so updating it in this same
-authoring pass is always legitimate.
+I reviewed the agreement property at b32afdb: for each defect class, fixture tests pair the preflight's disclosure with a real verdi close refusing on the byte-identical store for exactly the same reason, at both story and feature scope, and a ready fixture preflights 0 then actually closes. ADJ-56 made the agreement structural at the detail layer as dc-2 made it at the verdict layer. The AC holds.

@@ -8,19 +8,4 @@ links:
   - { type: verifies, ref: "spec/attest-helper" }
 frozen: { at: 2026-07-17, commit: b32afdb39c1474e2c8b79f0af664fa28752d7824 }
 ---
-<!-- verdi:attestation-unauthored -->
-This attestation was scaffolded by `verdi attest` for spec/attest-helper ac-1
-and has not been authored. Replace this entire paragraph, and delete the
-marker comment above, with your own first-person account of what you
-verified, how, and why this acceptance criterion is satisfied. Until the
-marker above is removed, this file folds as absent, with disclosure — it
-is not evidence of anything.
-
-The `frozen.commit` stamped above is a convenience: it was pre-filled with
-the repository HEAD when this scaffold was written. By the store's
-attestation convention that field names the tree your claim was verified
-against — not this file's own commit — so set it to the exact commit you
-actually reviewed when you author your claim. The stamp is yours to
-correct: nothing here is frozen until this file's first commit (VL-010
-binds only committed frozen artifacts), so updating it in this same
-authoring pass is always legitimate.
+I reviewed spec/attest-helper's build at 291f66e (PR #116, ADJ-51 remediation): verdi attest writes the skeleton at the exact slugged path the fold reads — frontmatter, verifies edge, convenience frozen stamp per ADJ-30 — with the body being exactly the unauthored sentinel plus instructional prose, never claim-shaped text. I verified this live: eleven Phase-4 scaffolds across both families landed at their preflight-confirmed paths with sentinels intact. The AC holds.

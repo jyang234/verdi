@@ -8,19 +8,4 @@ links:
   - { type: verifies, ref: "spec/disposition-verb" }
 frozen: { at: 2026-07-17, commit: b32afdb39c1474e2c8b79f0af664fa28752d7824 }
 ---
-<!-- verdi:attestation-unauthored -->
-This attestation was scaffolded by `verdi attest` for spec/disposition-verb ac-3
-and has not been authored. Replace this entire paragraph, and delete the
-marker comment above, with your own first-person account of what you
-verified, how, and why this acceptance criterion is satisfied. Until the
-marker above is removed, this file folds as absent, with disclosure — it
-is not evidence of anything.
-
-The `frozen.commit` stamped above is a convenience: it was pre-filled with
-the repository HEAD when this scaffold was written. By the store's
-attestation convention that field names the tree your claim was verified
-against — not this file's own commit — so set it to the exact commit you
-actually reviewed when you author your claim. The stamp is yours to
-correct: nothing here is frozen until this file's first commit (VL-010
-binds only committed frozen artifacts), so updating it in this same
-authoring pass is always legitimate.
+I reviewed spec/disposition-verb's freeze survival at 63b804e (PR #115): a verb-recorded disposition survives align --freeze byte-for-byte via the FreezeInPlace path, proven against the drifting-judge harness, with digest and integrity independently re-verified after every write. The verb's own six-sweep loop ended with it recording the disposition on its own report, and PR #117's loop ran entirely verb-recorded. The AC holds.

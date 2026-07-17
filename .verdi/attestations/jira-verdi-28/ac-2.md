@@ -8,19 +8,4 @@ links:
   - { type: verifies, ref: "spec/close-preflight" }
 frozen: { at: 2026-07-17, commit: b32afdb39c1474e2c8b79f0af664fa28752d7824 }
 ---
-<!-- verdi:attestation-unauthored -->
-This attestation was scaffolded by `verdi attest` for spec/close-preflight ac-2
-and has not been authored. Replace this entire paragraph, and delete the
-marker comment above, with your own first-person account of what you
-verified, how, and why this acceptance criterion is satisfied. Until the
-marker above is removed, this file folds as absent, with disclosure — it
-is not evidence of anything.
-
-The `frozen.commit` stamped above is a convenience: it was pre-filled with
-the repository HEAD when this scaffold was written. By the store's
-attestation convention that field names the tree your claim was verified
-against — not this file's own commit — so set it to the exact commit you
-actually reviewed when you author your claim. The stamp is yours to
-correct: nothing here is frozen until this file's first commit (VL-010
-binds only committed frozen artifacts), so updating it in this same
-authoring pass is always legitimate.
+I reviewed the exit and mutation discipline at b32afdb: 0 ready / 1 unmet / 2 operational is pinned by the exit-code matrix test with git-state snapshots proving nothing on disk changes in any mode, the publish-guard disclosure shares the real guard's own predicate (proven by the test driving both from identical setup), and the nine live groundwork preflights all exited 1 with clean trees. The AC holds.
