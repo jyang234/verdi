@@ -25,14 +25,15 @@ import (
 
 // indexHandler answers GET / with the whole-store directory home. It owns
 // exactly the "/" route; any other path that falls through to this
-// catch-all renders the disclosed 404 surface (notfound.go — dc-5: never a
-// bare NotFound), including the stale-entry shape for a deleted design
-// branch's board address.
+// catch-all renders the generic disclosed 404 surface (notfound.go's
+// renderPathNotFound — dc-5: never a bare NotFound). The stale-entry shape
+// for a deleted design branch's board address is owned by the registered
+// per-branch route (branchboard.go's dispatch), not this catch-all.
 func indexHandler(root string, home HomeDeps) http.HandlerFunc {
 	home = home.resolve(root)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
-			renderCatchAllNotFound(w, r, root, home.Git)
+			renderPathNotFound(w, r.URL.Path)
 			return
 		}
 		if r.Method != http.MethodGet {

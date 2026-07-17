@@ -134,27 +134,28 @@ type probeErr struct{}
 
 func (*probeErr) Error() string { return "probe failed" }
 
-// TestDraftBoardBranch drives the grammar parser: happy and negative paths.
-func TestDraftBoardBranch(t *testing.T) {
-	tests := []struct {
-		path   string
-		branch string
-		ok     bool
-	}{
-		{"/b/design%2Ffoo/board/spec/foo", "design/foo", true},
-		{"/b/design%2Fa-b/board/spec/a-b", "design/a-b", true},
-		{"/b/plain/board/spec/plain", "plain", true},
-		{"/b/design%2Ffoo/board/spec", "", false},           // too few segments
-		{"/b/design%2Ffoo/board/spec/foo/extra", "", false}, // too many
-		{"/x/design%2Ffoo/board/spec/foo", "", false},       // wrong prefix
-		{"/b/design%2Ffoo/wall/spec/foo", "", false},        // wrong literal
-		{"/b/%zz/board/spec/foo", "", false},                // bad escape
-		{"/b//board/spec/foo", "", false},                   // empty branch
+// TestCatchAll_NamelessBranchAddress_GenericNotFound pins the retirement of
+// the vestigial draftBoardBranch parser (ADJ-71 gq-2-n1). A degenerate
+// per-branch board address with an EMPTY spec name
+// (/b/<branch>/board/spec/, trailing slash) matches no board route, so it
+// falls to this catch-all — and it is a plain unserved path: the generic
+// disclosed 404, exactly like the unprefixed /board/spec/ nameless address,
+// never a fabricated "design branch is gone" claim (which the retired parser
+// used to emit here whenever the branch happened not to resolve). The REAL
+// vanished-branch surface — a WELL-FORMED address carrying a name — is owned
+// by branchboard.go's dispatch and proven by
+// TestCatchAll_StaleBranch_DisclosedNotice above.
+func TestCatchAll_NamelessBranchAddress_GenericNotFound(t *testing.T) {
+	home := HomeDeps{Git: fakeHomeGit{}}
+	code, body := getPath(t, home, "/b/design%2Fgone/board/spec/")
+
+	if code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", code)
 	}
-	for _, tt := range tests {
-		branch, ok := draftBoardBranch(tt.path)
-		if branch != tt.branch || ok != tt.ok {
-			t.Errorf("draftBoardBranch(%q) = (%q, %v), want (%q, %v)", tt.path, branch, ok, tt.branch, tt.ok)
-		}
+	if strings.Contains(body, `data-testid="stale-entry-notice"`) {
+		t.Fatalf("a nameless address must not fabricate a vanished-branch claim; got: %s", body)
+	}
+	if !strings.Contains(body, `data-testid="path-not-found"`) {
+		t.Fatalf("nameless address is not the generic disclosed 404; got: %s", body)
 	}
 }
