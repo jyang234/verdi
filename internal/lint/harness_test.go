@@ -273,7 +273,31 @@ func buildLintRepo(t *testing.T, overlayDirs ...string) *fixturegit.Repo {
 // routes through, and remains available, empty, for any future genuinely
 // pre-existing corpus debt — an empty map is a no-op filter, not a
 // silently reintroduced tolerance.
-var knownCorpusBaselineFindings = map[[3]string]bool{}
+//
+// spec/attest-helper's VL-022 (an attestation's verifies edge must resolve
+// to the (story, AC) its own path/slug implies) is exactly that future
+// case, twice over: two committed showcase attestations carry a real
+// `verifies` edge to a class: feature spec — R4-I-11's own "feature
+// outcome attestation" convention (keyed by the FEATURE's own slug, never
+// a story-ref slug at all), which predates VL-022 and sits outside a
+// story-scoped rule's own remit (dc-5: "verdi attest scaffolds STORY
+// attestations only" — VL-022 mirrors that same story-only scope).
+// Genuine pre-existing corpus facts, not silently patched around: fixing
+// them would mean either editing committed corpus fixture content well
+// outside spec/attest-helper's brief (examples/showcase is shared by
+// internal/corpus/internal/index's own tests too) or teaching VL-022 to
+// special-case feature-class targets, which the frozen contract's own AC-3
+// text does not carve out. Disclosed here, mirroring this map's own
+// established purpose exactly as its doc comment above anticipates:
+//   - .verdi/attestations/jira-loan-1482/ac-2.md (layers.txt layer 2,
+//     reached by every buildLintRepo-based test): verifies
+//     spec/stale-decline.
+//   - .verdi/attestations/escrow-autopay/ac-1.md (buildV2FixtureCorpusRepo
+//     only, v2clean_test.go): verifies spec/escrow-autopay.
+var knownCorpusBaselineFindings = map[[3]string]bool{
+	{"VL-022", ".verdi/attestations/jira-loan-1482/ac-2.md", `attestation attestation/jira-loan-1482--ac-2 verifies spec/stale-decline, a feature-class spec, not a STORY — verdi attest scaffolds STORY attestations only (spec/attest-helper dc-5)`}:  true,
+	{"VL-022", ".verdi/attestations/escrow-autopay/ac-1.md", `attestation attestation/escrow-autopay--ac-1 verifies spec/escrow-autopay, a feature-class spec, not a STORY — verdi attest scaffolds STORY attestations only (spec/attest-helper dc-5)`}: true,
+}
 
 // filterKnownBaseline strips knownCorpusBaselineFindings (see its doc
 // comment) from findings. Every direct NewEngine().Run(...) call site in
