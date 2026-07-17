@@ -1,12 +1,23 @@
 // Package designscaffold is the shared spec-scaffolding core, promoted
 // out of cmd/verdi/design.go (CLAUDE.md: "anything used by two or more
 // packages lives in a shared internal/ package ... never copy-paste
-// across packages; ... keep cmd thin"). It now has two consumers:
-// `verdi design start` (cmd/verdi/design.go, unchanged behavior) and the
-// workbench's stub-instantiate board action (internal/workbench,
-// spec/scoping-canvas ac-6), which scaffolds a story (or spike) spec from
-// a declared stub's own real AC/open-question ids rather than design
-// start's single hardcoded placeholder edge.
+// across packages; ... keep cmd thin"). It has two consumers: `verdi
+// design start` (cmd/verdi/design.go) and the workbench's stub-instantiate
+// board action (internal/workbench, spec/scoping-canvas ac-6), which
+// scaffolds a story (or spike) spec from a declared stub's own real
+// AC/open-question ids rather than design start's single hardcoded
+// placeholder edge.
+//
+// Rendering is template-driven (spec/scaffold-templates ac-1, render.go):
+// Render instantiates a text/template source against a ScaffoldData value;
+// LoadTemplate resolves that source per class, a store's own
+// .verdi/templates/<name>.md override winning over the embedded canonical
+// default (templates/feature.md, templates/story.md) of the same name.
+// Feature and Story below are this package's own convenience delegates to
+// Render for the two classes' standard scaffold shapes — both call sites
+// resolve their class's Class.Template via LoadTemplate themselves and
+// pass the result in, rather than this package hardcoding a class-to-
+// filename mapping.
 package designscaffold
 
 import (
