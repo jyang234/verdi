@@ -47,6 +47,15 @@
 // same disclosed, non-authoritative warning — 03's "Author ... runs verdi
 // close" is satisfied either by a human running it inside a manually
 // triggered CI job, or locally with --force-local for testing only.
+//
+// --preflight (spec/close-preflight; closure-ergonomics dc-5/ADJ-23) is a
+// mode-selecting switch on this same verb, not a new one: it rehearses
+// steps 1-2 above (resolve, evaluate the closure gate) through the
+// IDENTICAL runClosureGate/runFeatureClosureGate functions and stops
+// there, dispatched in cmdClose BEFORE the CI-only/--force-local guard
+// below — that guard exists solely to protect step 5's publish call,
+// which --preflight never reaches. See closepreflight.go/
+// closepreflightfeature.go for the full implementation.
 package main
 
 import (
@@ -90,10 +99,15 @@ type closeDeps struct {
 // cmdClose is `verdi close`'s entry point, invoked by dispatch.go.
 func cmdClose(args []string, stdout, stderr io.Writer) int {
 	forceLocal := false
+	preflight := false
 	var storyArg string
 	for _, a := range args {
-		if a == "--force-local" {
+		switch a {
+		case "--force-local":
 			forceLocal = true
+			continue
+		case "--preflight":
+			preflight = true
 			continue
 		}
 		if storyArg != "" {
@@ -103,15 +117,37 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		storyArg = a
 	}
 	if storyArg == "" {
-		fmt.Fprintln(stderr, "close: usage: verdi close <jira:STORY-KEY | spec/name> [--force-local]")
+		fmt.Fprintln(stderr, "close: usage: verdi close <jira:STORY-KEY | spec/name> [--force-local] [--preflight]")
 		return 2
+	}
+
+	// --preflight is dispatched BEFORE the CI-only/--force-local publish
+	// guard below, not conditioned by it (dc-1): that guard exists solely
+	// to gate the publish step (04 §Semantics), and --preflight never
+	// reaches a publish call at all (ac-2) — subjecting it to the same
+	// refusal would make the verb's only side-effect-free, anywhere-
+	// runnable mode unusable from a plain local checkout without an
+	// unrelated escape hatch.
+	if preflight {
+		ctx := context.Background()
+		root, err := store.FindRoot(".")
+		if err != nil {
+			fmt.Fprintln(stderr, "close:", err)
+			return 2
+		}
+		manifest, err := loadManifest(root)
+		if err != nil {
+			fmt.Fprintln(stderr, "close:", err)
+			return 2
+		}
+		return runPreflight(ctx, root, storyArg, manifest, buildForgeBestEffort(ctx, root), forceLocal, stdout, stderr)
 	}
 
 	// 04 §Semantics: "PublishRollup runs in CI only" — close calls it
 	// directly (ac-2), so the same CI-only discipline `rollup --publish`
 	// already enforces (I-32) applies here, mirrored exactly.
 	inCI := lint.ReadCIEnv().InCI
-	if !inCI && !forceLocal {
+	if closePublishGuardRefuses(forceLocal) {
 		fmt.Fprintln(stderr, "close: refusing to publish outside CI (04 §Semantics: \"PublishRollup runs in CI only\"); pass --force-local to run anyway for local testing only")
 		return 2
 	}
