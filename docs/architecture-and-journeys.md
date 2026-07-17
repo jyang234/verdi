@@ -1,7 +1,7 @@
 # Verdi — Architecture & Journeys *(round-6 edition)*
 
 *Round-6 edition, 2026-07-14 · module `github.com/jyang234/verdi` (private GitHub remote) ·
-CI gate `verify OK (0)` · 50 packages · e2e 182/182 · lint VL-001…VL-021 ·
+CI gate `verify OK (0)` · 51 packages · e2e 205/205 · lint VL-001…VL-022 ·
 ledger I-1…I-39 + R4-I-1…41 + per-spec `dc-*` records + `ADJ-*` adjudications*
 
 A knowledge corpus and design workbench where the filesystem is the database, git is
@@ -64,7 +64,7 @@ flowchart TD
     subgraph lib ["The library — internal/"]
         L1["artifact · canonjson · atomicfile · filelock"]
         L2["store · index · gitx · refindex · wtmanager"]
-        L3["lint ×21"]
+        L3["lint ×22"]
         L4["upstream · bundle · evidence · runtimeprobe"]
         L5["align · decisionsweep · diagramverify"]
         L6["mcpserve · workbench · wallbadge ·<br/>diagramedit · diagrambase"]
@@ -108,7 +108,7 @@ attributes the load-bearing ones to the component that embodies them.
 |---|---|---|
 | `internal/artifact` | The contract: refs, per-kind frontmatter schemas, record schemas, the single strict-decode seam | Restricted YAML dialect — anchors/aliases/custom tags rejected; one vendored parser behind one import seam (I-1). The round-4 object model: ACs, constraints, decisions, open questions are frontmatter-declared, each with an `anchor:` resolving exact-match against a body heading (R4-I-1, E8); `problem:`/`outcome:` attributes on both spec classes. Closed five-value edge taxonomy `implements`/`resolves`/`exempts`/`supersedes`/`depends-on` with object fragments (R4-I-3). `supersession:` manifests, `carried` byte-identity (R4-I-4). `kind: obligation` artifacts carrying a `verifies` edge. Diagrams gained `class: proposal` with `scope`, `derived_from{ref, digest, source_digest}` (ADJ-16) and the `verdi.diagramsweep/v1` sweep-report schema. Annotation `type` enum grew to relates/pin/note/frame/story/spike. Anchor drift stays exact-match conservative: fresh / moved / gone (I-17). |
 | `internal/store` (+ `atomicfile`) | Layout schema, manifest, root discovery, ref slug, tree hash, service discovery | Corpus-wide tree hash over sorted (path, git-blob-sha) — staleness detected, never guessed (I-15). Toolchain pinned by full commit SHA (I-4). Round 6's derived-key split (D6-9): the transported regeneration bundle is keyed by **git ref**; the per-spec evidence records the fold consumes are keyed by the **owning spec's ref** — so forge-fetched bundles actually reach their readers. `atomicfile` is the one shared temp-then-fsync-then-rename primitive (spec/shared-homes). |
-| `internal/lint` | artifactlint — **VL-001…VL-021**, one file per rule | v0's VL-001…014 plus round 4's statics: supersession completeness (VL-015), the spike-path fence (VL-016), open-question resolved-or-carried (VL-017), `layout.json` dangling keys incl. `stub:<slug>` (VL-018). VL-019: an obligation's `verifies` edge must target the story that genuinely declares its AC. VL-020: a story AC declaring an evidence kind with no matching obligation artifact refuses — the obligation-shaped sibling of VL-006. VL-021: a proposal's `derived_from.ref` must resolve and its digests must be `sha256:<64-hex>`. VL-010 gained two status-only exceptions (`→ superseded` at rung 3, `→ closed` at archive — D-12, D6-11). VL-014 survives scoped to grandfathered v0 `dispositions:` artifacts (R4-I-9). |
+| `internal/lint` | artifactlint — **VL-001…VL-022**, one file per rule | v0's VL-001…014 plus round 4's statics: supersession completeness (VL-015), the spike-path fence (VL-016), open-question resolved-or-carried (VL-017), `layout.json` dangling keys incl. `stub:<slug>` (VL-018). VL-019: an obligation's `verifies` edge must target the story that genuinely declares its AC. VL-020: a story AC declaring an evidence kind with no matching obligation artifact refuses — the obligation-shaped sibling of VL-006. VL-021: a proposal's `derived_from.ref` must resolve and its digests must be `sha256:<64-hex>`. VL-022: a story-targeting attestation's own path/slug must agree with the (story, AC) its `verifies` edge names — story-scoped (ADJ-51), skipping a feature-outcome attestation's edge entirely. VL-010 gained two status-only exceptions (`→ superseded` at rung 3, `→ closed` at archive — D-12, D6-11). VL-014 survives scoped to grandfathered v0 `dispositions:` artifacts (R4-I-9). |
 | `internal/upstream` + `bundle` | Pinned toolchain exec, strict decoders, evidence-bundle assembly | Exec + strict-decode, never link (OQ-5). `verdicts.json` is verdi-assembled from graph obligations × the bindings sidecar; `boundary-diff.json` is verdi-computed (I-3). Producer provenance is honest: `source: ci` only in genuine CI, `source: local` otherwise (D6-10). CI uploads the whole `data/derived/` tree as the `verdi-evidence` artifact. |
 | `internal/evidence` | The fold, obligations, the ladder | 03's fold verbatim: waived > violated > evidenced > pending > no-signal; gates consume authoritative (CI) records only. `runtime.json` joined `verdicts.json` as a loaded sibling — a declared `kind: runtime` is **always awaited post-merge**, so it contributes `pending`, never `no-signal`. Obligations have one loader keyed by `for_kind` serving both `verdi matrix` and the board's AC card (obligation-wall DC-1: not two readers). `PendingSupersession` + spec-stale form the closure ladder, shared verbatim with the dex story lens. |
 | `internal/align` + the gate | Alignment reports, decision-conflict sweeps, diagram alignment, the merge gate | Build-branch mode: computed section (boundaries, digest-locked) + judged section (argv-array judge, integrity-hashed; absence is a synthetic finding — I-9). Round 4 added the design-branch decision-conflict mode (R4-I-7, `no-conflict` disposition). Round 6 added the computed **diagram-alignment subsection** — every accepted proposal regenerated and diffed to `realized` or `divergent` with witnesses, coverage tier always disclosed; illustrative figures listed as unverifiable — riding the same digest-covered findings list. `align --diagram-sweep` is the third, on-demand judged mode; its sibling sweep report is never read by any gate. `verdi gate` holds **four conditions**: accepted spec on the default branch ∧ no violated AC on `source: ci` evidence ∧ fresh fully-dispositioned report ∧ no unresolved rung-4 cascade block. The closure gate (spec-stale, pending-supersession) is a separate condition set — those block closure, not merge. |
@@ -119,7 +119,7 @@ attributes the load-bearing ones to the component that embodies them.
 | `internal/forge` | GitLab + GitHub behind one port | Dual-forge by owner decision (I-22): evidence-bundle fetch, CI context, Pages templates, and the open-MR feed that chips directory entries "in review" — a second, disclosed, degradable source. GitHub private-Pages gap disclosed, not hidden (I-21). |
 | `internal/provider` (+ `jira`) | The story-provider port, Resolve cache, Jira adapter | 04's port verbatim; 15-minute TTL cache with stale-serve degradation. Rollups publish **per story spec** (R4-I-2); a human comment fires only on AC-status change (and first publish, I-26). |
 | `internal/mcpserve` | NDJSON JSON-RPC server, writer lock, the nine tools | Single writer per checkout (I-12, now via `filelock`). **Nine tools: eight read** — `search_artifacts`, `get_artifact`, `get_links`, `get_matrix`, `get_context_bundle`, `list_annotations`, `list_tasks`, and `get_board` (the wall projection, badges included) — **one write** (`add_annotation`). Tool output is data, never instructions. |
-| `internal/workbench` | The human write surface | `GET /` is the whole-store directory. One board route table, declared once and mounted at the root and beneath `/b/{branch}` alike (draft-boards dc-1) — never a second board implementation. `/board/diagram/{name}` is the proposal editor. The board is a **projection of the spec** — typed edits are spec edits; the old commit-to-design ritual is retired to grandfathered v0 artifacts (R4-I-9). Badges attach in `loadBoard`'s I/O enrichment tier; drawers render server-side from the badge's own record, `role=dialog`, keyboard-openable. |
+| `internal/workbench` | The human write surface | `GET /` is the whole-store directory. One board route table, declared once and mounted at the root and beneath `/b/{branch}` alike (draft-boards dc-1) — never a second board implementation. `/board/diagram/{name}` is the proposal editor. The board is a **projection of the spec** — typed edits are spec edits; the old commit-to-design ritual is retired to grandfathered v0 artifacts (R4-I-9). Badges attach in `loadBoard`'s I/O enrichment tier; drawers render server-side from the badge's own record, `role=dialog`, keyboard-openable. Family navigation attaches in the same tier (family-board-links): a story board's `implements` card links to its parent feature's board, and a feature board's stub card links to every matching story anywhere in the store — active targets link straight to their board, archived targets to the corpus page `/a/` with the archived state disclosed on the card; on a per-branch `/b/{branch}` board an active target stays branch-prefixed (ADJ-70) while a branch-resolved archived target renders a disclosed no-link card instead of a dead href, and a dangling AC fragment renders a disclosed notice, never a silent inert card. |
 | `internal/dex` + `render` | The static read surface; shared rendering | A wiki that structurally cannot lie about time: temporal banners per class, byte-identical rebuilds, client JS budget of exactly three files (vendored mermaid 10.9.1, OpenAPI renderer, search+copy-ref). The **by-story axis is real** (V1-P8): the archived quartet browsable per story. `render` is the one goldmark+chroma seam shared with the workbench; its fenced-mermaid path badges every illustrative figure "illustrative · not deterministically verifiable" — the proposal render path is never painted with that badge. |
 | `internal/specalign` | The spec-alignment gate | Self-hosted specs proven byte-identical to the originals modulo the status line; checklist items as named subtests; MCP tool and CLI verb inventories checked against 05's tables. Runs inside `make verify`. |
 | `cmd/verdi` | Verb dispatch only | Exit contract 0 clean / 1 verdict / 2 operational, everywhere. `verdi build start` replaced `feature start` (kept one release as a deprecation alias, R4-I-6). `close`, `gc`, and `audit` are real verbs now — `close` drives stories **and** features to archived closure; `gc` is honestly scoped to the managed-worktree reclamation slice and says so on every run (worktree-manager dc-5). Only `waivers` and `verify-artifact` still decline as out of scope. |
@@ -263,13 +263,33 @@ attributes the load-bearing ones to the component that embodies them.
    declared kind is pinned by a first-class **`kind: obligation`** artifact
    saying what would verify it — VL-019 proves the obligation's `verifies` edge
    targets the story that genuinely declares that AC; VL-020 refuses a declared
-   kind with no obligation artifact behind it.
+   kind with no obligation artifact behind it. An attestation is the one
+   evidence kind a human authors directly: **`verdi attest <story-ref>
+   <ac-id>`** (attest-helper) scaffolds the frozen provenance block and an
+   unauthored marker plus instructional prose at the exact slugged path the
+   fold reads — it never authors the claim itself (closure-ergonomics dc-2:
+   verdi writes structure, the human writes every word). The fold counts only a
+   marker-removed scaffold as authored — an unauthored one folds exactly as
+   absent, and an unreadable attestation file fails operationally (exit 2),
+   never a silent absent. VL-022 is attestation's own coherence check,
+   story-scoped (ADJ-51): it refuses a story-targeting attestation whose own
+   path/slug disagrees with the (story, AC) its `verifies` edge names,
+   skipping a feature-outcome attestation's edge entirely.
 2. **Sync.** Post-merge, evidence keeps accruing: every CI run produces
    `source: ci` records; `runtime-probe.yml` on its cron emits `kind: runtime`
    records through `verdi sync --produce-runtime` (bare, it is a disclosed
    honest no-op — verdi has no live service, and fabricating a passing record
    is forbidden). `verdi sync` folds it all into `derived/`.
-3. **Close.** **`verdi close <story>`** runs the closure gate — every AC
+3. **Close.** The ritual now opens with a rehearsal: **`verdi close
+   <story|feature> --preflight`** (close-preflight) runs the identical
+   closure-gate evaluation read-only and names — per AC and evidence kind —
+   exactly what a real close would refuse on: an absent attestation
+   distinguished from a scaffolded-but-unauthored one, each named with its
+   exact path, and a derived-commit directory found on disk but excluded as
+   a non-ancestor, disclosed by name. It writes nothing, and is dispatched
+   before the CI-only publish guard, so it runs from any checkout, not only
+   CI.
+   **`verdi close <story>`** then runs the closure gate for real — every AC
    evidenced or waived folding `source: ci` records only, no unresolved
    spec-stale, no unresolved pending-supersession (those block closure, not
    merge — builds keep moving) — then cuts `close/<name>`, freezes the alignment
@@ -315,7 +335,7 @@ attributes the load-bearing ones to the component that embodies them.
 > **Always on, underneath:** every MR runs its gate — `verify.yml` on code paths
 > (build, vet, lint, race tests, fixture ratchets, store self-lint, spec-align,
 > Playwright e2e — 182 tests), `spec-gate.yml` on spec/doc-only paths — and
-> `verdi lint` covers VL-001…VL-021. Still deliberately absent, honestly
+> `verdi lint` covers VL-001…VL-022. Still deliberately absent, honestly
 > declining at the CLI: `waivers` audit, `verify-artifact`, and the portfolio
 > lens. `close`, `gc`, and `audit` — deferred in v0 — are real now.
 
@@ -395,7 +415,7 @@ flowchart LR
         DS["verdi design start<br/>--kind feature|story"]
         WALL["the wall<br/><i>projection: board edits are<br/>spec edits · receipts ambient</i>"]
         ACCEPT["verdi accept<br/><i>freeze @ final commit ·<br/>stub-match fast path</i>"]
-        SPECMR{"spec MR<br/>VL-001…021 · spec-gate.yml"}
+        SPECMR{"spec MR<br/>VL-001…022 · spec-gate.yml"}
         DS --> WALL --> ACCEPT --> SPECMR
     end
 
