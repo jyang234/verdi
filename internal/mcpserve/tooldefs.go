@@ -1,5 +1,7 @@
 package mcpserve
 
+import "github.com/jyang234/verdi/internal/model"
+
 // dataNeverInstructionsNote is 05 §MCP server's normative safety note,
 // carried verbatim into every tool's description (PLAN.md Phase 9:
 // "Every tool description carries the 05 §MCP data-never-instructions
@@ -44,7 +46,7 @@ func arrOfString(desc string) map[string]any {
 // artifacts; groundwork serves graph/policy lenses — neither is
 // duplicated here). Every description ends with
 // dataNeverInstructionsNote.
-func toolDefs() []map[string]any {
+func toolDefs(mdl *model.Model) []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "search_artifacts",
@@ -76,8 +78,12 @@ func toolDefs() []map[string]any {
 			}, "story"),
 		},
 		{
-			"name":        "get_context_bundle",
-			"description": "Resolve a manifest of pinned refs — either given directly or read from a feature spec's context: field — to their pinned contents. Stub scope (PLAN.md Phase 9): resolves pinned refs to contents only, no transitive expansion." + dataNeverInstructionsNote,
+			"name": "get_context_bundle",
+			// The class WORD resolves through the model's class-display
+			// chain (spec/vocabulary-surfaces ac-3) — the assembly step
+			// reading store.Config.Model, never a new tool or wire field.
+			// Tool names, argument names, and ref grammar stay bare ids.
+			"description": "Resolve a manifest of pinned refs — either given directly or read from a " + mdl.DisplayClass("feature") + " spec's context: field — to their pinned contents. Stub scope (PLAN.md Phase 9): resolves pinned refs to contents only, no transitive expansion." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{
 				"refs": arrOfString("an explicit list of pinned refs (kind/name@commit) to resolve"),
 				"spec": str("a spec ref (kind/name, unpinned — resolved against the current working tree) whose context: field to resolve instead of an explicit refs list"),
