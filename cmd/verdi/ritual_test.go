@@ -213,7 +213,7 @@ func TestRoundFourRitual_FullLoop(t *testing.T) {
 	// R4-I-23(b)'s own precedent of removing that exact literal from the
 	// v2 fixture rather than inventing an OKR provider type.)
 	var stdout, stderr bytes.Buffer
-	if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1483", "loan-mgmt", manifest, designDepsV, &stdout, &stderr); got != 0 {
+	if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1483", "loan-mgmt", manifest, phase7Model(t), designDepsV, &stdout, &stderr); got != 0 {
 		t.Fatalf("design start (feature) = %d, want 0; stderr=%s", got, stderr.String())
 	}
 	feature, _ := readSpec(t, repo.Dir, "loan-mgmt")
@@ -238,7 +238,7 @@ func TestRoundFourRitual_FullLoop(t *testing.T) {
 	// --- 4. verdi design start jira:LOAN-1482 --kind story --name stale-decline-story ---
 	stdout.Reset()
 	stderr.Reset()
-	if got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "jira:LOAN-1482", "stale-decline-story", manifest, designDepsV, &stdout, &stderr); got != 0 {
+	if got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "jira:LOAN-1482", "stale-decline-story", manifest, phase7Model(t), designDepsV, &stdout, &stderr); got != 0 {
 		t.Fatalf("design start (story) = %d, want 0; stderr=%s", got, stderr.String())
 	}
 	story, _ := readSpec(t, repo.Dir, "stale-decline-story")

@@ -32,7 +32,7 @@ func TestRunDesignStart_Happy(t *testing.T) {
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr)
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, phase7Model(t), deps, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -92,7 +92,7 @@ func TestRunDesignStart_FeatureWithNoRef(t *testing.T) {
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "loan-mgmt", manifest, deps, &stdout, &stderr)
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "loan-mgmt", manifest, phase7Model(t), deps, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStart(no ref) = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -116,7 +116,7 @@ func TestRunDesignStart_FeatureWithEpicRef(t *testing.T) {
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "loan-mgmt", manifest, deps, &stdout, &stderr)
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "loan-mgmt", manifest, phase7Model(t), deps, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStart(epic ref) = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -136,7 +136,7 @@ func TestRunDesignStart_Story(t *testing.T) {
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "jira:LOAN-1482", "stale-decline-story", manifest, deps, &stdout, &stderr)
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "jira:LOAN-1482", "stale-decline-story", manifest, phase7Model(t), deps, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStart(story) = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -163,7 +163,7 @@ func TestRunDesignStart_StoryRequiresRef(t *testing.T) {
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "", "some-story", manifest, deps, &stdout, &stderr)
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "", "some-story", manifest, phase7Model(t), deps, &stdout, &stderr)
 	if got != 2 {
 		t.Fatalf("runDesignStart(story, no ref) = %d, want 2", got)
 	}
@@ -186,7 +186,7 @@ func TestRunDesignStart_ProviderResolveFails_DegradesToRawRef(t *testing.T) {
 	deps := designDeps{Provider: p, Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-9999", "some-feature", manifest, deps, &stdout, &stderr)
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-9999", "some-feature", manifest, phase7Model(t), deps, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -229,7 +229,7 @@ func TestRunDesignStart_ConfiguredProviderUnreachable_DegradesForTrueReason(t *t
 	deps := designDeps{Provider: p, Runner: nil, GoTest: fakeGoTest{}}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-9999", "some-feature", manifest, deps, &stdout, &stderr)
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-9999", "some-feature", manifest, phase7Model(t), deps, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -251,7 +251,7 @@ func TestRunDesignStart_Negative(t *testing.T) {
 	t.Run("invalid name", func(t *testing.T) {
 		repo := buildPhase7Repo(t)
 		var stdout, stderr bytes.Buffer
-		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "Not_A_Valid_Name", manifest, deps, &stdout, &stderr)
+		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "Not_A_Valid_Name", manifest, phase7Model(t), deps, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStart(invalid name) = %d, want 2", got)
 		}
@@ -263,7 +263,7 @@ func TestRunDesignStart_Negative(t *testing.T) {
 	t.Run("malformed story ref", func(t *testing.T) {
 		repo := buildPhase7Repo(t)
 		var stdout, stderr bytes.Buffer
-		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "not-a-story-ref", "some-name", manifest, deps, &stdout, &stderr)
+		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "not-a-story-ref", "some-name", manifest, phase7Model(t), deps, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStart(malformed story ref) = %d, want 2", got)
 		}
@@ -272,7 +272,7 @@ func TestRunDesignStart_Negative(t *testing.T) {
 	t.Run("unconfigured scheme", func(t *testing.T) {
 		repo := buildPhase7Repo(t)
 		var stdout, stderr bytes.Buffer
-		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "confluence:PAGE-1", "some-name", manifest, deps, &stdout, &stderr)
+		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "confluence:PAGE-1", "some-name", manifest, phase7Model(t), deps, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStart(unconfigured scheme) = %d, want 2", got)
 		}
@@ -284,12 +284,12 @@ func TestRunDesignStart_Negative(t *testing.T) {
 	t.Run("spec already exists", func(t *testing.T) {
 		repo := buildPhase7Repo(t)
 		var stdout, stderr bytes.Buffer
-		if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr); got != 0 {
+		if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, phase7Model(t), deps, &stdout, &stderr); got != 0 {
 			t.Fatalf("first runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
 		}
 		stdout.Reset()
 		stderr.Reset()
-		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, deps, &stdout, &stderr)
+		got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, phase7Model(t), deps, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("second runDesignStart(same name) = %d, want 2", got)
 		}
@@ -421,7 +421,7 @@ func TestRunDesignStart_ScaffoldUsesAtomicWrite(t *testing.T) {
 			deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
 
 			var stdout, stderr bytes.Buffer
-			got := runDesignStart(ctx, repo.Dir, tc.kind, "jira:LOAN-1482", tc.specName, manifest, deps, &stdout, &stderr)
+			got := runDesignStart(ctx, repo.Dir, tc.kind, "jira:LOAN-1482", tc.specName, manifest, phase7Model(t), deps, &stdout, &stderr)
 			if got != 0 {
 				t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
 			}

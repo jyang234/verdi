@@ -377,6 +377,13 @@ func newScopingAcceptedFixture(t *testing.T) *fixturegit.Repo {
 		Files: map[string]string{
 			".verdi/specs/active/" + scopingAcceptedName + "/spec.md": scopingAcceptedSpec,
 			".verdi/.gitignore": "data/\n",
+			// stub-instantiate now resolves the store's operating model
+			// (spec/scaffold-templates ac-1 cont.: Class.Template selects
+			// the scaffold template) via store.Open, which requires a
+			// readable verdi.yaml — a minimal, model.yaml-less manifest
+			// resolves to the embedded canonical model exactly like every
+			// other store with no model.yaml override.
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
 		},
 		Message: "seed scoping accepted fixture",
 	}})

@@ -29,6 +29,7 @@ import (
 	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/provider"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -170,11 +171,12 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
 	}
-	manifest, err := loadManifest(root)
+	cfg, err := store.Open(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
 	}
+	manifest := cfg.Manifest
 
 	// Wire the real story-provider registry from verdi.yaml's providers:
 	// map — the same construction rollup/sync use (buildProviderRegistry,
@@ -194,7 +196,7 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 	}
 	deps := designDeps{Provider: reg, Runner: runner, GoTest: realGoTestRunner{}}
 
-	return runDesignStart(ctx, root, kind, storyRef, name, manifest, deps, stdout, stderr)
+	return runDesignStart(ctx, root, kind, storyRef, name, manifest, cfg.Model, deps, stdout, stderr)
 }
 
 // runDesignStart is the testable core: given an already-resolved root and
@@ -206,8 +208,11 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 // of this verb. storyRef is "" iff kind is ClassFeature and no ref was
 // given (05 §CLI's documented optionality) — validated by the caller
 // (cmdDesignStart), re-asserted here defensively since this function is
-// also driven directly by tests.
-func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, storyRef, name string, manifest *store.Manifest, deps designDeps, stdout, stderr io.Writer) int {
+// also driven directly by tests. mdl is the store's already-resolved
+// operating model (store.Open's Config.Model): the class switch below
+// reads its own scaffold template off mdl.Classes[kind].Template rather
+// than a hardcoded filename (spec/scaffold-templates ac-1 cont.).
+func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, storyRef, name string, manifest *store.Manifest, mdl *model.Model, deps designDeps, stdout, stderr io.Writer) int {
 	if kind != artifact.ClassFeature && kind != artifact.ClassStory {
 		fmt.Fprintf(stderr, "design start: internal error: kind %q is neither feature nor story\n", kind)
 		return 2
@@ -254,9 +259,26 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		title = designscaffold.HumanizeName(name)
 	}
 
+	// The scaffold template is no longer a Go switch on class name: both
+	// design start and the workbench's stub-instantiate action resolve it
+	// through the same seam, reading Class.Template off the store's
+	// already-resolved model (spec/scaffold-templates ac-1 cont.) — a
+	// store override at .verdi/templates/<name>.md wins over the embedded
+	// canonical default when present (LoadTemplate).
+	class, ok := mdl.Classes[string(kind)]
+	if !ok {
+		fmt.Fprintf(stderr, "design start: internal error: resolved model has no %q class\n", kind)
+		return 2
+	}
+	tmpl, err := designscaffold.LoadTemplate(root, class.Template)
+	if err != nil {
+		fmt.Fprintln(stderr, "design start:", err)
+		return 2
+	}
+
 	var content string
 	if kind == artifact.ClassFeature {
-		content = designscaffold.Feature(specRef.String(), storyRef, title)
+		content, err = designscaffold.Feature(tmpl, specRef.String(), storyRef, title)
 	} else {
 		// design start's own placeholder edge: an implements edge to a
 		// not-yet-real feature/AC pair, since 05 §CLI names no --feature
@@ -265,7 +287,11 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		// agent replaces it with a real edge into the accepted feature this
 		// story implements.
 		links := []designscaffold.StoryLink{{Type: artifact.LinkImplements, Ref: "spec/todo-replace-feature-name#ac-1"}}
-		content = designscaffold.Story(specRef.String(), storyRef, title, false, links)
+		content, err = designscaffold.Story(tmpl, specRef.String(), storyRef, title, false, links)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "design start: rendering template %s for class %s: %v\n", class.Template, kind, err)
+		return 2
 	}
 
 	// Self-validate before writing anything to disk (CLAUDE.md: "never
