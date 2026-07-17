@@ -2,6 +2,7 @@ package designscaffold
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -276,6 +277,122 @@ TODO: design notes.
 `)
 	}
 	return b.String()
+}
+
+// decodeScaffold runs a rendered scaffold through the same
+// SplitFrontmatter + DecodeSpec path a real scaffold consumer (design
+// start, stub-instantiate) uses, returning the decoded SpecFrontmatter.
+func decodeScaffold(t *testing.T, content string) *artifact.SpecFrontmatter {
+	t.Helper()
+	fm, _, err := artifact.SplitFrontmatter([]byte(content))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v", err)
+	}
+	return spec
+}
+
+// assertSpecFieldsEqual compares the decoded-field surface the ac-1
+// obligation names — Class, Status, Story, Spike, Problem, Outcome,
+// AcceptanceCriteria, Stubs, Links — accumulating every mismatch rather
+// than stopping at the first, so a field regression names itself. Pointer
+// and slice fields go through reflect.DeepEqual (which follows *Attribute
+// pointers and compares element-wise).
+func assertSpecFieldsEqual(t *testing.T, got, want *artifact.SpecFrontmatter) {
+	t.Helper()
+	if got.Class != want.Class {
+		t.Errorf("Class = %q, want %q", got.Class, want.Class)
+	}
+	if got.Status != want.Status {
+		t.Errorf("Status = %q, want %q", got.Status, want.Status)
+	}
+	if got.Story != want.Story {
+		t.Errorf("Story = %q, want %q", got.Story, want.Story)
+	}
+	if got.Spike != want.Spike {
+		t.Errorf("Spike = %v, want %v", got.Spike, want.Spike)
+	}
+	if !reflect.DeepEqual(got.Problem, want.Problem) {
+		t.Errorf("Problem = %+v, want %+v", got.Problem, want.Problem)
+	}
+	if !reflect.DeepEqual(got.Outcome, want.Outcome) {
+		t.Errorf("Outcome = %+v, want %+v", got.Outcome, want.Outcome)
+	}
+	if !reflect.DeepEqual(got.AcceptanceCriteria, want.AcceptanceCriteria) {
+		t.Errorf("AcceptanceCriteria = %+v, want %+v", got.AcceptanceCriteria, want.AcceptanceCriteria)
+	}
+	if !reflect.DeepEqual(got.Stubs, want.Stubs) {
+		t.Errorf("Stubs = %+v, want %+v", got.Stubs, want.Stubs)
+	}
+	if !reflect.DeepEqual(got.Links, want.Links) {
+		t.Errorf("Links = %+v, want %+v", got.Links, want.Links)
+	}
+}
+
+// TestDecodedFieldEquivalenceToLegacy is spec/scaffold-templates ac-1's
+// equivalence proof in the shape its obligation prescribes
+// (obligation/scaffold-templates--ac-1--behavioral, and the spec's own Ac 1
+// prose: "equivalence — not byte-identity — is what gets proven"): the
+// embedded canonical template's rendered scaffold and the retired string
+// builder's output, from IDENTICAL inputs, are decoded through the same
+// SplitFrontmatter + DecodeSpec path a real consumer uses and compared on
+// the decoded SpecFrontmatter FIELDS — "field-equal ... checked on decoded
+// fields, never a byte comparison of the rendered markdown." TestByteForByte
+// below keeps the additional, strictly stronger byte-identity pin the
+// outcome text separately promises; this test is the decode-equivalence
+// floor the obligation actually names, so the equivalence guarantee no
+// longer rests solely on a byte-identity pin against the frozen legacy
+// copies (judged-ac1-equivalence-proven-only-by-byte-pin): a future
+// template change that stays field-equivalent is still proven equivalent
+// HERE, the brittleness the spec's equivalence-not-identity choice avoids.
+// One case per class plus the spike variant, matching the obligation.
+func TestDecodedFieldEquivalenceToLegacy(t *testing.T) {
+	featureTmpl := mustCanonicalTemplate(t, "feature.md")
+	storyTmpl := mustCanonicalTemplate(t, "story.md")
+
+	t.Run("feature, no story ref", func(t *testing.T) {
+		got, err := Feature(featureTmpl, "spec/stale-decline", "", "Stale decline handling")
+		if err != nil {
+			t.Fatalf("Feature: %v", err)
+		}
+		want := legacyFeature("spec/stale-decline", "", "Stale decline handling")
+		assertSpecFieldsEqual(t, decodeScaffold(t, got), decodeScaffold(t, want))
+	})
+
+	t.Run("feature, with story ref", func(t *testing.T) {
+		got, err := Feature(featureTmpl, "spec/loan-mgmt", "jira:LOAN-1482", "Loan Mgmt")
+		if err != nil {
+			t.Fatalf("Feature: %v", err)
+		}
+		want := legacyFeature("spec/loan-mgmt", "jira:LOAN-1482", "Loan Mgmt")
+		assertSpecFieldsEqual(t, decodeScaffold(t, got), decodeScaffold(t, want))
+	})
+
+	t.Run("story, plain, one link", func(t *testing.T) {
+		links := []StoryLink{{Type: artifact.LinkImplements, Ref: "spec/loan-mgmt#ac-1"}}
+		got, err := Story(storyTmpl, "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links)
+		if err != nil {
+			t.Fatalf("Story: %v", err)
+		}
+		want := legacyStory("spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links)
+		assertSpecFieldsEqual(t, decodeScaffold(t, got), decodeScaffold(t, want))
+	})
+
+	t.Run("story, spike, two links", func(t *testing.T) {
+		links := []StoryLink{
+			{Type: artifact.LinkResolves, Ref: "spec/scoping-canvas#oq-1"},
+			{Type: artifact.LinkResolves, Ref: "spec/scoping-canvas#oq-2"},
+		}
+		got, err := Story(storyTmpl, "spec/retry-strategy-spike", "todo:REPLACE-ME", "Retry Strategy Spike", true, links)
+		if err != nil {
+			t.Fatalf("Story: %v", err)
+		}
+		want := legacyStory("spec/retry-strategy-spike", "todo:REPLACE-ME", "Retry Strategy Spike", true, links)
+		assertSpecFieldsEqual(t, decodeScaffold(t, got), decodeScaffold(t, want))
+	})
 }
 
 // TestByteForByte pins the stronger property spec/scaffold-templates'
