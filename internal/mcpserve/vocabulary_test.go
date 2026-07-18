@@ -91,14 +91,16 @@ func TestToolsList_VocabularyRenamedClassWord(t *testing.T) {
 
 	// get_matrix (vocabulary-prose closure, closure finding 1): the
 	// description's class word resolves — over this fixture "story"
-	// resolves through the SECOND rung of the chain, the class's own
-	// Class.Display "Story" — while the fold's verdict keys and the
-	// story ARGUMENT name are identity and stay bare.
+	// resolves through the FIRST rung of the chain, vocabulary.classes'
+	// "Workstream" riding on top of the class's own Class.Display "Story"
+	// (the full three-rung chain is model_test.go's
+	// TestDisplayClass_ThreeLevelChain) — while the fold's verdict keys
+	// and the story ARGUMENT name are identity and stay bare.
 	matrixDesc := toolDescription(t, resp, "get_matrix")
-	if !strings.Contains(matrixDesc, "The evidence fold for a Story (03") {
-		t.Fatalf("get_matrix description = %q, want the resolved class word (\"The evidence fold for a Story ...\")", matrixDesc)
+	if !strings.Contains(matrixDesc, "The evidence fold for a Workstream (03") {
+		t.Fatalf("get_matrix description = %q, want the resolved class word (\"The evidence fold for a Workstream ...\")", matrixDesc)
 	}
-	if !strings.Contains(matrixDesc, "a scheme-prefixed Story ref (jira:LOAN-1482)") {
+	if !strings.Contains(matrixDesc, "a scheme-prefixed Workstream ref (jira:LOAN-1482)") {
 		t.Fatalf("get_matrix description = %q, want the resolved class word in the ref-form prose", matrixDesc)
 	}
 	if strings.Contains(matrixDesc, "for a story") || strings.Contains(matrixDesc, "story ref") {
@@ -108,7 +110,7 @@ func TestToolsList_VocabularyRenamedClassWord(t *testing.T) {
 		t.Fatalf("get_matrix description = %q, must keep the fold's verdict KEYS bare (identity layer)", matrixDesc)
 	}
 	argDesc := toolArgDescription(t, resp, "get_matrix", "story")
-	if !strings.Contains(argDesc, "a scheme-prefixed Story ref (e.g. jira:LOAN-1482)") {
+	if !strings.Contains(argDesc, "a scheme-prefixed Workstream ref (e.g. jira:LOAN-1482)") {
 		t.Fatalf("get_matrix story-argument description = %q, want the resolved class word", argDesc)
 	}
 
@@ -124,7 +126,7 @@ func TestToolsList_VocabularyRenamedClassWord(t *testing.T) {
 	// add_annotation's board_story argument: description prose resolves,
 	// the argument names referencing it stay bare.
 	boardStoryDesc := toolArgDescription(t, resp, "add_annotation", "board_story")
-	if !strings.Contains(boardStoryDesc, "the Story this sticky is placed on a board for") {
+	if !strings.Contains(boardStoryDesc, "the Workstream this sticky is placed on a board for") {
 		t.Fatalf("add_annotation board_story description = %q, want the resolved class word", boardStoryDesc)
 	}
 	if got := toolArgDescription(t, resp, "add_annotation", "board_x"); !strings.Contains(got, "requires board_story") {

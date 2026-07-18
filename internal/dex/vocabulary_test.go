@@ -123,29 +123,29 @@ func TestBuildV2_VocabularyRenames(t *testing.T) {
 // TestBuildV2_ClassWordProse is the vocabulary-prose closure's dex case
 // (closure finding 2's dex half, featurelens.go's "no implementing
 // story" among the sites): over a model whose vocabulary renames story
-// to "Change Request", every class-word PROSE site in the built site
-// speaks the renamed word — the feature lens' heading, mapping column,
-// and empty marker; the chrome nav's by-story label; the home hub entry;
-// the by-story axis title; the metadata card's Story row LABEL — while
-// the identity layer (the /by-story/ URL and output paths, the tracker
-// ref VALUE) provably keeps bare ids. The rename deliberately rides
-// vocabulary.classes ON TOP of the fixture's Class.Display "Story",
-// proving the chain's first rung wins on prose sites too.
+// to "Workstream" (the committed vocab-rename.yaml's own classes block,
+// reused verbatim — never string-surgered, which would duplicate its
+// story key now that the fixture renames story itself), every
+// class-word PROSE site in the built site speaks the renamed word — the
+// feature lens' heading, mapping column, and empty marker; the chrome
+// nav's by-story label; the home hub entry; the by-story axis title;
+// the metadata card's Story row LABEL — while the identity layer (the
+// /by-story/ URL and output paths, the tracker ref VALUE) provably
+// keeps bare ids. The fixture's rename rides vocabulary.classes ON TOP
+// of its Class.Display "Story", proving the chain's first rung wins on
+// prose sites too (the full three-rung chain is model_test.go's
+// TestDisplayClass_ThreeLevelChain).
 func TestBuildV2_ClassWordProse(t *testing.T) {
 	modelYAML, err := os.ReadFile(filepath.Join("..", "model", "testdata", "vocab-rename.yaml"))
 	if err != nil {
 		t.Fatalf("reading vocab-rename.yaml: %v", err)
 	}
-	// Extend the fixture's vocabulary.classes block (its last lines) with
-	// a story rename; the frontier exempts vocabulary, so the model stays
-	// decode-clean.
-	augmented := strings.TrimRight(string(modelYAML), "\n") + "\n    story: \"Change Request\"\n"
 
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
 				".verdi/verdi.yaml":                       vocabManifestYAML,
-				".verdi/model.yaml":                       augmented,
+				".verdi/model.yaml":                       string(modelYAML),
 				".verdi/specs/active/vocab-probe/spec.md": vocabProbeSpecMD,
 			},
 			Message: "init class-word-prose store",
@@ -164,11 +164,11 @@ func TestBuildV2_ClassWordProse(t *testing.T) {
 	}
 	page := string(probe)
 	for _, want := range []string{
-		"<h2>Change Requests</h2>",
-		"<th>Implementing Change Requests</th>",
-		`<span class="empty">no implementing Change Request</span>`,
-		`<dt>Change Request</dt><dd>jira:LOAN-9001</dd>`, // the Story row: label renamed, tracker ref untouched
-		`<a href="/by-story/">by Change Request</a>`,     // chrome nav: label renamed, URL identity
+		"<h2>Workstreams</h2>",
+		"<th>Implementing Workstreams</th>",
+		`<span class="empty">no implementing Workstream</span>`,
+		`<dt>Workstream</dt><dd>jira:LOAN-9001</dd>`, // the Story row: label renamed, tracker ref untouched
+		`<a href="/by-story/">by Workstream</a>`,     // chrome nav: label renamed, URL identity
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("probe page missing renamed prose %q", want)
@@ -186,14 +186,14 @@ func TestBuildV2_ClassWordProse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading home page: %v", err)
 	}
-	if !strings.Contains(string(home), `<a href="/by-story/">By Change Request</a>`) {
+	if !strings.Contains(string(home), `<a href="/by-story/">By Workstream</a>`) {
 		t.Error("home hub entry not renamed (or its /by-story/ href moved)")
 	}
 	hub, err := os.ReadFile(filepath.Join(outDir, "by-story", "index.html"))
 	if err != nil {
 		t.Fatalf("reading by-story hub (the output PATH must stay /by-story/): %v", err)
 	}
-	if !strings.Contains(string(hub), "<h1>By Change Request</h1>") {
+	if !strings.Contains(string(hub), "<h1>By Workstream</h1>") {
 		t.Error("by-story axis title not renamed")
 	}
 }

@@ -1,0 +1,14 @@
+# Violates: every vocabulary key must name a declared referent
+# (Model.Validate, validate.go's validateVocabulary — judged-vocabulary-
+# keys-unvalidated-now-load-bearing) — "epic" is neither a declared class
+# nor the L-M13 spike pseudo-class, so the rename layer would sit
+# silently inert; it fails closed instead.
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle: {}
+vocabulary:
+  classes:
+    epic: "Epic"

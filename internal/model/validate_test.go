@@ -27,6 +27,7 @@ func TestDecodeModel_KernelViolations(t *testing.T) {
 		{"viol-hook-empty-name.yaml", `kind "hook" requires a non-empty hook name`},
 		{"viol-count-non-countersign.yaml", `count is legal only on kind "countersign"`},
 		{"viol-duplicate-verb.yaml", `transition verb "accept" is declared more than once`},
+		{"viol-vocabulary-unknown-key.yaml", `vocabulary: classes key "epic" is not a declared class or the spike pseudo-class`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {
@@ -54,6 +55,70 @@ func TestDecodeModel_KernelErrorNamesCatalog(t *testing.T) {
 		if !strings.Contains(err.Error(), kind) {
 			t.Fatalf("error = %q, want it to name catalog member %q", err.Error(), kind)
 		}
+	}
+}
+
+// TestModelValidate_VocabularyKeys is judged-vocabulary-keys-unvalidated-
+// now-load-bearing's kernel proof: vocabulary keys are load-bearing (every
+// display surface resolves through them), so a key naming nothing the
+// model declares fails closed — naming the offending key AND the legal
+// set, per section — while declared keys and the L-M13 spike pseudo-class
+// carve validate clean. Driven over the canonical model with only the
+// Vocabulary block varied, so each case isolates exactly the key rule.
+func TestModelValidate_VocabularyKeys(t *testing.T) {
+	cases := []struct {
+		name       string
+		vocab      Vocabulary
+		wantSubstr string // "" means the model must validate clean
+	}{
+		{
+			"declared keys in every section validate",
+			Vocabulary{
+				Verbs:   map[string]string{"accept": "Sign off"},
+				States:  map[string]string{"accepted-pending-build": "Ready to build"},
+				Classes: map[string]string{"feature": "Initiative", "story": "Workstream"},
+			},
+			"",
+		},
+		{
+			"spike is legal as a classes key (the L-M13 pseudo-class carve)",
+			Vocabulary{Classes: map[string]string{"spike": "Timebox"}},
+			"",
+		},
+		{
+			"unknown classes key fails closed naming key and legal set",
+			Vocabulary{Classes: map[string]string{"epic": "Epic"}},
+			`model: vocabulary: classes key "epic" is not a declared class or the spike pseudo-class (legal: feature, spike, story)`,
+		},
+		{
+			"unknown states key fails closed naming key and legal set",
+			Vocabulary{States: map[string]string{"ready": "Ready"}},
+			`model: vocabulary: states key "ready" is not a declared state in any lifecycle (declared states: accepted-pending-build, closed, draft, superseded)`,
+		},
+		{
+			"unknown verbs key fails closed naming key and legal set",
+			Vocabulary{Verbs: map[string]string{"approve": "Approve"}},
+			`model: vocabulary: verbs key "approve" is not a declared transition verb in any lifecycle (declared verbs: accept, close)`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := canonicalModel
+			m.Vocabulary = tc.vocab
+			err := m.Validate()
+			if tc.wantSubstr == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error containing %q", tc.wantSubstr)
+			}
+			if !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("Validate() error = %q, want substring %q", err.Error(), tc.wantSubstr)
+			}
+		})
 	}
 }
 

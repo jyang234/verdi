@@ -72,8 +72,10 @@ var ErrFrontier = errors.New(frontierErrorText)
 // one lifecycle (a verb is a transition's identity — the frontier compare
 // keys on it — judged-frontier-duplicate-verb-bypass); every state is
 // reachable; every obligation's scheme and kind are drawn from their
-// closed catalogs; count is legal only on kind "countersign"; and hook is
-// legal only with kind "hook" carrying a non-empty Hook.
+// closed catalogs; count is legal only on kind "countersign"; hook is
+// legal only with kind "hook" carrying a non-empty Hook; and every
+// vocabulary key names a declared referent (validateVocabulary — the
+// rename layer may only rename things the model actually declares).
 //
 // Fails on the first violation found (mirroring store.Manifest.Validate's
 // own fail-fast posture), walking classes and lifecycles in sorted key
@@ -114,6 +116,70 @@ func (m Model) Validate() error {
 	for _, name := range sortedKeys(m.Lifecycle) {
 		if err := m.Lifecycle[name].validate(name); err != nil {
 			return err
+		}
+	}
+	return m.validateVocabulary()
+}
+
+// vocabularySpikePseudoClass is the ONE non-class id legal as a
+// Vocabulary.Classes key: "spike" (ledger L-M13, rule 3 — ratified at the
+// vocabulary-surfaces closure): the variant marker is vocabulary-
+// addressable through Vocabulary.Classes exactly like a class word, "an
+// explicit, deliberate widening of the classes rename map, to be carved
+// as the sole exception when vocabulary-key validation lands". This is
+// that carve, taken deliberately while cheap.
+const vocabularySpikePseudoClass = "spike"
+
+// validateVocabulary checks that every vocabulary key names a declared
+// referent — the vocabulary keys are load-bearing now that every display
+// surface resolves through them (spec/vocabulary-surfaces), so a typo'd
+// key must fail closed at decode time, never sit silently inert:
+//
+//   - every Vocabulary.States key is a declared state in SOME lifecycle
+//     (States is a flat map, not nested per class — model.go's
+//     DisplayState — so any lifecycle's declaration legitimizes the key);
+//   - every Vocabulary.Verbs key is a declared transition verb in some
+//     lifecycle (the same flat-map reasoning);
+//   - every Vocabulary.Classes key is a declared class OR the literal
+//     "spike" (vocabularySpikePseudoClass — the L-M13-ratified
+//     pseudo-class carve).
+//
+// Each violation names the offending key AND the legal set (the same
+// operator courtesy the scheme/kind catalog errors extend: learn what IS
+// legal in the same breath as learning what is not). Maps are walked in
+// sorted key order — classes, then states, then verbs — so which
+// violation is reported first is deterministic across runs.
+func (m Model) validateVocabulary() error {
+	legalClasses := make(map[string]bool, len(m.Classes)+1)
+	for name := range m.Classes {
+		legalClasses[name] = true
+	}
+	legalClasses[vocabularySpikePseudoClass] = true
+
+	legalStates := make(map[string]bool)
+	legalVerbs := make(map[string]bool)
+	for _, lc := range m.Lifecycle {
+		for _, s := range lc.States {
+			legalStates[s] = true
+		}
+		for _, tr := range lc.Transitions {
+			legalVerbs[tr.Verb] = true
+		}
+	}
+
+	for _, key := range sortedKeys(m.Vocabulary.Classes) {
+		if !legalClasses[key] {
+			return fmt.Errorf("model: vocabulary: classes key %q is not a declared class or the spike pseudo-class (legal: %s)", key, catalogList(legalClasses))
+		}
+	}
+	for _, key := range sortedKeys(m.Vocabulary.States) {
+		if !legalStates[key] {
+			return fmt.Errorf("model: vocabulary: states key %q is not a declared state in any lifecycle (declared states: %s)", key, catalogList(legalStates))
+		}
+	}
+	for _, key := range sortedKeys(m.Vocabulary.Verbs) {
+		if !legalVerbs[key] {
+			return fmt.Errorf("model: vocabulary: verbs key %q is not a declared transition verb in any lifecycle (declared verbs: %s)", key, catalogList(legalVerbs))
 		}
 	}
 	return nil
