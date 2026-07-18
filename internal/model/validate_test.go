@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -124,12 +125,14 @@ func TestModelValidate_VocabularyKeys(t *testing.T) {
 
 // TestDecodeModel_Frontier proves dc-1's frontier: a well-formed model
 // (every kernel rule holds) that still describes a different transition
-// set than canonicalModel is rejected with the ONE pinned error, verbatim —
-// whether it ADDS a transition (viol-frontier-structural: an extra `reject`)
-// or OMITS one with no masking duplicate (viol-frontier-missing-transition:
-// `close` dropped, caught by lifecycleEqual's length arm — the companion to
-// judged-frontier-duplicate-verb-bypass's witness, proving the multiset
-// refactor kept the plain-omission path a frontier exit 1).
+// set than canonicalModel is rejected with the ONE pinned error kept
+// VERBATIM as the prefix, plus the additive axis-naming suffix
+// (judged-dc1-frontier-error-not-specific). Both fixtures deviate on the
+// FEATURE lifecycle's transition set (feature sorts before story) — one
+// ADDS a `reject` transition (viol-frontier-structural), the other OMITS
+// `close` with no masking duplicate (viol-frontier-missing-transition:
+// caught by transitionsAxis's length arm, the companion to judged-frontier-
+// duplicate-verb-bypass's witness) — so both name the same axis.
 func TestDecodeModel_Frontier(t *testing.T) {
 	for _, file := range []string{
 		"viol-frontier-structural.yaml",
@@ -140,8 +143,20 @@ func TestDecodeModel_Frontier(t *testing.T) {
 			if err == nil {
 				t.Fatalf("DecodeModel(%s): want error, got nil", file)
 			}
-			if err.Error() != frontierErrorText {
-				t.Fatalf("DecodeModel(%s) error = %q, want the pinned frontier text %q", file, err.Error(), frontierErrorText)
+			// The pinned sentence stays byte-identical as the PREFIX (dc-1's
+			// pinned-text contract), honored because the suffix only follows it.
+			if !strings.HasPrefix(err.Error(), frontierErrorText) {
+				t.Fatalf("DecodeModel(%s) error = %q, want the pinned frontier text as a verbatim prefix %q", file, err.Error(), frontierErrorText)
+			}
+			wantFull := frontierErrorText + `: lifecycle "feature" transition set diverges`
+			if err.Error() != wantFull {
+				t.Fatalf("DecodeModel(%s) error = %q, want prefix + axis suffix %q", file, err.Error(), wantFull)
+			}
+			// The suffix WRAPS the sentinel (%w), so errors.Is still identifies
+			// it — cmd/verdi/model.go's exit-1 path relies on this surviving
+			// store.Open's own wrapping.
+			if !errors.Is(err, ErrFrontier) {
+				t.Fatalf("DecodeModel(%s): errors.Is(err, ErrFrontier) = false, want true", file)
 			}
 		})
 	}
@@ -157,8 +172,9 @@ func TestDecodeModel_Frontier(t *testing.T) {
 // [accept, close]: staying length-2 while each accept matched canonical's one
 // accept, the pre-fix one-directional verb-map compare returned true and let
 // a whole missing transition slip the frontier. The verb-keyed multiset
-// (transitionsEqualAsMultiset) drives the extra accept's count negative and
-// fails closed — in either orientation, while canonical still equals itself.
+// (transitionsAxis, reached through lifecycleEqual) drives the extra accept's
+// count negative and fails closed — in either orientation, while canonical
+// still equals itself.
 func TestLifecycleEqual_DuplicateVerbCannotMaskMissing(t *testing.T) {
 	canon := canonicalSpecLifecycle()
 	accept := canon.Transitions[0] // the `accept` transition, verbatim
@@ -253,5 +269,78 @@ func TestCheckFrontier_DisplayChangeExempt(t *testing.T) {
 	}
 	if err := m.checkFrontier(); err != nil {
 		t.Fatalf("checkFrontier(): want nil for a display-label-only change (frontier-exempt), got %v", err)
+	}
+}
+
+// TestCheckFrontier_NamesDivergentAxis is judged-dc1-frontier-error-not-
+// specific's proof: checkFrontier's additive suffix names the FIRST divergent
+// structural axis — "class set", or a NAMED lifecycle's state/terminal/
+// transition/obligation set — so a rejected manifest says WHICH axis moved,
+// not merely that one did. Each case is deviant on exactly one axis and drives
+// checkFrontier's compare DIRECTLY (the pass DecodeModel runs after Validate,
+// so a case need not itself be Validate-well-formed); the pinned
+// frontierErrorText stays the verbatim prefix and errors.Is holds throughout.
+func TestCheckFrontier_NamesDivergentAxis(t *testing.T) {
+	// modelWithFeature swaps lc in as the feature lifecycle inside a FRESH
+	// Lifecycle map, so canonicalModel (a package var) is never mutated; the
+	// story lifecycle stays canonical, so feature — sorting first — is the
+	// lifecycle every case reports.
+	modelWithFeature := func(lc Lifecycle) Model {
+		m := canonicalModel
+		m.Lifecycle = map[string]Lifecycle{"feature": lc, "story": canonicalModel.Lifecycle["story"]}
+		return m
+	}
+
+	// class set: feature's Decomposes cleared — a hierarchy-position change,
+	// the structural half of a Class (Display/Template are frontier-exempt).
+	classSet := canonicalModel
+	feature := canonicalModel.Classes["feature"]
+	feature.Decomposes = ""
+	classSet.Classes = map[string]Class{"feature": feature, "story": canonicalModel.Classes["story"]}
+
+	stateSet := canonicalSpecLifecycle()
+	stateSet.States = []string{"draft", "accepted-pending-build", "closed", "superseded", "reopened"}
+
+	terminalSet := canonicalSpecLifecycle()
+	terminalSet.Terminal = []string{"closed"} // superseded dropped
+
+	transitionSet := canonicalSpecLifecycle()
+	transitionSet.Transitions = transitionSet.Transitions[:1] // close dropped
+
+	// obligation set: same verbs, same from/to, but close's obligation set
+	// swapped — the axis transitionsAxis distinguishes from a transition-set
+	// change.
+	obligationSet := canonicalSpecLifecycle()
+	obligationSet.Transitions = []Transition{
+		obligationSet.Transitions[0], // accept, unchanged
+		{Verb: "close", From: "accepted-pending-build", To: "closed",
+			Obligations: []Obligation{{Scheme: "attestation", Kind: "author-vouch"}}},
+	}
+
+	cases := []struct {
+		name     string
+		model    Model
+		wantAxis string
+	}{
+		{"class set", classSet, "class set"},
+		{"state set", modelWithFeature(stateSet), `lifecycle "feature" state set`},
+		{"terminal set", modelWithFeature(terminalSet), `lifecycle "feature" terminal set`},
+		{"transition set", modelWithFeature(transitionSet), `lifecycle "feature" transition set`},
+		{"obligation set", modelWithFeature(obligationSet), `lifecycle "feature" obligation set`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.model.checkFrontier()
+			if err == nil {
+				t.Fatalf("checkFrontier() = nil, want a frontier error naming %q", tc.wantAxis)
+			}
+			want := frontierErrorText + ": " + tc.wantAxis + " diverges"
+			if err.Error() != want {
+				t.Fatalf("checkFrontier() = %q, want %q", err.Error(), want)
+			}
+			if !errors.Is(err, ErrFrontier) {
+				t.Fatalf("errors.Is(err, ErrFrontier) = false, want true (the suffix must wrap the sentinel)")
+			}
+		})
 	}
 }

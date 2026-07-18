@@ -336,7 +336,10 @@ func TestModelCheck_TemplatePathEscape_Exit2_NamesRule(t *testing.T) {
 
 // TestModelCheck_FrontierViolation_Exit1_PinnedText is ac-3's
 // structurally-deviant case: exit 1, with the ONE pinned frontier error
-// text printed VERBATIM — never a paraphrase.
+// text printed VERBATIM — never a paraphrase — followed by the additive
+// axis-naming suffix (judged-dc1-frontier-error-not-specific), proving both
+// reach the built binary through store.Open's wrapping and its errors.Is
+// exit-1 gate.
 func TestModelCheck_FrontierViolation_Exit1_PinnedText(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-frontier-structural.yaml"))
@@ -348,6 +351,12 @@ func TestModelCheck_FrontierViolation_Exit1_PinnedText(t *testing.T) {
 	const pinned = "structural model configuration is behind the frontier (verdi.model/v1 accepts the canonical model with vocabulary/template changes only)"
 	if !strings.Contains(stderr, pinned) {
 		t.Fatalf("stderr = %q, want it to contain the pinned frontier text verbatim: %q", stderr, pinned)
+	}
+	// viol-frontier-structural deviates on the feature lifecycle's transition
+	// set (the extra `reject`); the suffix names it, additively after the
+	// pinned prefix.
+	if want := `: lifecycle "feature" transition set diverges`; !strings.Contains(stderr, want) {
+		t.Fatalf("stderr = %q, want the additive axis-naming suffix %q", stderr, want)
 	}
 }
 
