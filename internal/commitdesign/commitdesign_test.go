@@ -277,6 +277,20 @@ func TestRun_Happy(t *testing.T) {
 	if fb.Frozen == nil || fb.Provenance == nil {
 		t.Fatalf("frozen board.json missing Frozen/Provenance: %+v", fb)
 	}
+	// judged-ac5-board-freeze-wallclock: frozen.at is the covering (pre-commit)
+	// commit's own committer date — here fixturegit's fixed 2024-01-01, never
+	// today's wall clock — and pairs with Frozen.Commit (preCommit == repo.Head,
+	// since seedBoard writes only untracked mutable files, adding no commit).
+	wantAt, err := gitx.CommitDateOnly(ctx, repo.Dir, repo.Head)
+	if err != nil {
+		t.Fatalf("CommitDateOnly(%s): %v", repo.Head, err)
+	}
+	if fb.Frozen.At != wantAt {
+		t.Errorf("frozen board At = %q, want the covering commit's date %q (commit-derived, never wall clock)", fb.Frozen.At, wantAt)
+	}
+	if fb.Frozen.Commit != repo.Head {
+		t.Errorf("frozen board Commit = %q, want the covering commit %q", fb.Frozen.Commit, repo.Head)
+	}
 	if fb.Provenance.Generator != "commit-to-design" {
 		t.Errorf("Provenance.Generator = %q", fb.Provenance.Generator)
 	}

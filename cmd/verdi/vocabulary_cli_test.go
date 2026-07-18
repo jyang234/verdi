@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -104,8 +105,14 @@ func TestVocabularyCLI_RenamedStateLabels(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("accept(already accepted) = %d, want 1; stderr=%s", code, stderr)
 	}
-	if !contains(stderr, `status is "Ready to build", not draft`) {
-		t.Fatalf("accept refusal stderr = %q, want the renamed status %q", stderr, `status is "Ready to build", not draft`)
+	// The FULLY-resolved refusal sentence: the current status, the wanted
+	// state, AND the trailing "only a <draft> spec" all resolve through the
+	// model (judged-ac4-draft-prose-leak). draft carries no rename in this
+	// fixture, so it renders "draft" with the agreeing article "a" — the
+	// focused TestVocabularyCLI_AcceptRefusalResolvesDraftWord below exercises
+	// a store that DOES rename draft, witnessing the routing.
+	if want := `status is "Ready to build", not draft; only a draft spec can be accepted`; !contains(stderr, want) {
+		t.Fatalf("accept refusal stderr = %q, want the fully-resolved refusal sentence %q", stderr, want)
 	}
 
 	// 3. build start's status-mismatch refusal names the wanted state
@@ -125,6 +132,53 @@ func TestVocabularyCLI_RenamedStateLabels(t *testing.T) {
 	}
 	if !contains(stdout, "(status: Ready to build)") {
 		t.Fatalf("build start stdout = %q, want the renamed success suffix %q", stdout, "(status: Ready to build)")
+	}
+}
+
+// TestVocabularyCLI_AcceptRefusalResolvesDraftWord is judged-ac4-draft-prose-
+// leak's guard: accept's non-draft refusal routes its TRAILING state word
+// ("only a draft spec can be accepted") through the model exactly like the two
+// resolved words beside it, its article agreeing via model.Article. The shared
+// vocab-rename fixture does not rename `draft`, so the sibling test above cannot
+// witness the routing (draft renders "draft" either way); this store DOES rename
+// draft — to the vowel-initial "Idea", so the article visibly becomes "an" — and
+// so is what actually distinguishes the routed word from a re-hard-coded one.
+func TestVocabularyCLI_AcceptRefusalResolvesDraftWord(t *testing.T) {
+	bin := buildVerdiBinary(t)
+
+	// Reuse the shared vocab-rename fixture as the base — never edited here, it
+	// has a large cross-package + e2e blast radius — injecting one extra states
+	// rename in memory so DisplayState(draft) != "draft" for this store alone.
+	renamedModel := strings.Replace(vocabModelYAML(t),
+		"    accepted-pending-build: \"Ready to build\"\n",
+		"    accepted-pending-build: \"Ready to build\"\n    draft: \"Idea\"\n", 1)
+	if !contains(renamedModel, `draft: "Idea"`) {
+		t.Fatal("test setup: failed to inject the draft rename into the vocab-rename base fixture")
+	}
+
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                        phase7ManifestYAML,
+				".verdi/model.yaml":                        renamedModel,
+				".verdi/specs/active/some-feature/spec.md": someFeatureMD,
+				".verdi/specs/active/pred-story/spec.md":   predStoryAcceptedMD,
+			},
+			Message: "init store with an accepted story + a draft-renaming model",
+		},
+	})
+
+	// pred-story is accepted-pending-build, so accept refuses it (exit 1) at
+	// the status check.
+	code, _, stderr := runVerdi(t, bin, repo.Dir, "accept", "spec/pred-story")
+	if code != 1 {
+		t.Fatalf("accept (accepted-pending-build spec) = %d, want 1; stderr=%s", code, stderr)
+	}
+	// The fully-resolved refusal sentence: current status "Ready to build",
+	// wanted-state "Idea", AND the trailing "only an Idea spec" — model.Article
+	// turning "a" into "an" before the vowel-initial rename.
+	if want := `status is "Ready to build", not Idea; only an Idea spec can be accepted`; !contains(stderr, want) {
+		t.Fatalf("accept refusal stderr = %q, want the fully-resolved sentence with the routed draft word %q", stderr, want)
 	}
 }
 

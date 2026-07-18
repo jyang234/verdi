@@ -280,14 +280,45 @@ func (ob Obligation) validate(lifecycleName, verb string) error {
 // a Class's Template filename and its Display label are likewise never
 // compared (both presentation, judged-frontier-display-structural) —
 // every other Class/Lifecycle field is.
+//
+// The returned error keeps the ONE pinned frontierErrorText verbatim as
+// its PREFIX (dc-1's pinned-text contract) and WRAPS the ErrFrontier
+// sentinel with %w — so errors.Is still identifies it through store.Open's
+// own wrapping (cmd/verdi/model.go's exit-1 decision) — then names the
+// first divergent structural axis as an ADDITIVE suffix
+// (judged-dc1-frontier-error-not-specific): an operator staring at a
+// rejected manifest learns WHICH of the class/state/terminal/transition/
+// obligation sets moved, not merely that something did.
 func (m Model) checkFrontier() error {
-	if !classesMatchFrontier(m.Classes, canonicalModel.Classes) {
-		return ErrFrontier
-	}
-	if !lifecyclesMatchFrontier(m.Lifecycle, canonicalModel.Lifecycle) {
-		return ErrFrontier
+	if axis := m.frontierAxis(); axis != "" {
+		return fmt.Errorf("%w: %s diverges", ErrFrontier, axis)
 	}
 	return nil
+}
+
+// frontierAxis names the first structural axis on which m diverges from
+// canonicalModel, or "" when m sits exactly at the frontier. The axis
+// vocabulary is dc-1's own — "class set", then (per lifecycle, the
+// lifecycle named) "state set", "terminal set", "transition set",
+// "obligation set" — walked in a FIXED order so which axis a given deviant
+// manifest reports is deterministic across runs (CLAUDE.md: deterministic
+// outputs): class set first, then lifecycles in sorted key order over the
+// UNION of m's and canonical's keys (so a lifecycle present on only one
+// side still diverges against the other's zero value), each lifecycle's
+// own fields in state -> terminal -> transition -> obligation order. This
+// rejects EXACTLY the set of models classesMatchFrontier plus the former
+// lifecyclesMatchFrontier rejected — the suffix is additive, never a change
+// to WHAT counts as a frontier violation.
+func (m Model) frontierAxis() string {
+	if !classesMatchFrontier(m.Classes, canonicalModel.Classes) {
+		return "class set"
+	}
+	for _, name := range sortedKeys(unionLifecycleKeys(m.Lifecycle, canonicalModel.Lifecycle)) {
+		if axis := lifecycleAxis(m.Lifecycle[name], canonicalModel.Lifecycle[name]); axis != "" {
+			return fmt.Sprintf("lifecycle %q %s", name, axis)
+		}
+	}
+	return ""
 }
 
 // classesMatchFrontier reports whether got and want declare the same
@@ -316,90 +347,97 @@ func classesMatchFrontier(got, want map[string]Class) bool {
 	return true
 }
 
-// lifecyclesMatchFrontier reports whether got and want declare the same
-// lifecycle keys with structurally equal Lifecycle values.
-func lifecyclesMatchFrontier(got, want map[string]Lifecycle) bool {
-	if len(got) != len(want) {
-		return false
+// unionLifecycleKeys returns the set of lifecycle keys declared by either
+// a or b — the domain frontierAxis walks, so a lifecycle present on only
+// one side is compared against the other's zero Lifecycle (an empty state
+// set) and surfaces as that lifecycle's own first-divergent axis rather
+// than dropping out of an intersection-only walk.
+func unionLifecycleKeys(a, b map[string]Lifecycle) map[string]struct{} {
+	keys := make(map[string]struct{}, len(a)+len(b))
+	for k := range a {
+		keys[k] = struct{}{}
 	}
-	for name, wl := range want {
-		gl, ok := got[name]
-		if !ok || !lifecycleEqual(gl, wl) {
-			return false
-		}
+	for k := range b {
+		keys[k] = struct{}{}
 	}
-	return true
+	return keys
 }
 
-// lifecycleEqual compares two Lifecycle values structurally: States and
-// Terminal as sets (declaration order is not itself a structural
-// property — dc-1's own text names "state set ... transition set",
-// sets, never order), and Transitions as a verb-keyed MULTISET
-// (transitionsEqualAsMultiset) since a verb is a transition's identity.
+// lifecycleEqual reports whether two Lifecycle values are structurally
+// equal — the boolean the frontier compare is built on, kept as the name
+// this package's tests exercise directly. It delegates to lifecycleAxis so
+// the compare logic lives in exactly one place: equal precisely when no
+// axis diverges.
 func lifecycleEqual(a, b Lifecycle) bool {
-	if !stringsEqualAsSets(a.States, b.States) {
-		return false
-	}
-	if !stringsEqualAsSets(a.Terminal, b.Terminal) {
-		return false
-	}
-	return transitionsEqualAsMultiset(a.Transitions, b.Transitions)
+	return lifecycleAxis(a, b) == ""
 }
 
-// transitionsEqualAsMultiset reports whether a and b hold the same
-// transitions keyed by Verb — a verb is a transition's identity — with the
-// same MULTIPLICITY, mirroring obligationsEqualAsSets (counts matter, not
-// mere membership). A bare length check plus a one-directional verb-map —
-// the earlier edition — left a real gap: a manifest-side DUPLICATE verb
-// could mask a canonical verb the manifest OMITS, because [accept, accept]
-// and [accept, close] are both length 2 and each manifest accept found the
-// canonical accept to match while canonical's close went unsought
-// (judged-frontier-duplicate-verb-bypass). Counting closes it: a verb whose
-// b-count exceeds its a-count drives the running count negative and fails
-// the compare, so the missing close can no longer hide behind the extra
-// accept. Each SHARED verb's transition must also match structurally on
-// From/To and its obligation set. The kernel's own duplicate-verb rule
-// (Lifecycle.validate) already rejects a manifest-side duplicate at Validate
-// time, and the canonical side never carries one, so an equal multiset
-// against canonical means the manifest is itself duplicate-free — keying
-// each verb to a single transition below therefore loses nothing; this is
-// defense-in-depth should a duplicate ever reach the frontier compare.
-func transitionsEqualAsMultiset(a, b []Transition) bool {
-	if len(a) != len(b) {
-		return false
+// lifecycleAxis names the first structural axis on which got diverges from
+// want, or "" when they are structurally equal: States then Terminal
+// compared as SETS (declaration order is not itself structural — dc-1's own
+// text names "state set ... transition set", sets, never order), then
+// Transitions as a verb-keyed MULTISET (transitionsAxis) since a verb is a
+// transition's identity. Returns the BARE axis name ("state set" and so
+// on); the owning lifecycle is named by the caller, frontierAxis.
+func lifecycleAxis(got, want Lifecycle) string {
+	if !stringsEqualAsSets(got.States, want.States) {
+		return "state set"
 	}
-	counts := make(map[string]int, len(a))
-	byVerb := make(map[string]Transition, len(a))
-	for _, t := range a {
+	if !stringsEqualAsSets(got.Terminal, want.Terminal) {
+		return "terminal set"
+	}
+	return transitionsAxis(got.Transitions, want.Transitions)
+}
+
+// transitionsAxis names how got's transitions diverge from want's, or ""
+// when they match: "transition set" when the verb MULTISET differs or a
+// shared verb's From/To differs, "obligation set" when every verb and
+// From/To matches but some shared verb's obligation set differs. A verb is
+// a transition's identity, so transitions are keyed by Verb with
+// MULTIPLICITY (counts matter, not mere membership): a verb whose got-count
+// exceeds its want-count drives the running count negative and diverges, so
+// a manifest-side DUPLICATE verb can no longer mask a canonical verb the
+// manifest OMITS — [accept, accept] and [accept, close] both stay length 2
+// (judged-frontier-duplicate-verb-bypass). The kernel's own duplicate-verb
+// rule (Lifecycle.validate) already rejects a manifest-side duplicate at
+// Validate time and the canonical side never carries one, so the byVerb
+// lookup keying each verb to a single transition loses nothing; it is
+// defense-in-depth should a duplicate ever reach here. Obligations are
+// compared order-insensitively (obligationsEqualAsSets): dc-1 draws the
+// frontier over the "obligation set", the same set language it uses for
+// States/Terminal, so a reordered obligation list is the identical set, not
+// a deviation (judged-frontier-obligations-positional). A verb/From/To
+// difference OUTRANKS an obligation-only one — the more structural axis
+// wins regardless of slice position, so the reported axis is a function of
+// the sets, not their order.
+func transitionsAxis(got, want []Transition) string {
+	if len(got) != len(want) {
+		return "transition set"
+	}
+	counts := make(map[string]int, len(want))
+	byVerb := make(map[string]Transition, len(want))
+	for _, t := range want {
 		counts[t.Verb]++
 		byVerb[t.Verb] = t
 	}
-	for _, t := range b {
+	obligationDiverged := false
+	for _, t := range got {
 		counts[t.Verb]--
 		if counts[t.Verb] < 0 {
-			return false
+			return "transition set"
 		}
-		ta, ok := byVerb[t.Verb]
-		if !ok || !transitionEqual(ta, t) {
-			return false
+		wt, ok := byVerb[t.Verb]
+		if !ok || wt.From != t.From || wt.To != t.To {
+			return "transition set"
+		}
+		if !obligationsEqualAsSets(wt.Obligations, t.Obligations) {
+			obligationDiverged = true
 		}
 	}
-	return true
-}
-
-// transitionEqual compares From/To and the obligation SET. Obligations
-// are compared order-insensitively (judged-frontier-obligations-positional):
-// dc-1 draws the frontier over the "obligation set", the same set language
-// it uses for States/Terminal (which lifecycleEqual already compares as
-// sets, "never order"), so a manifest that lists a transition's obligations
-// in a different order describes the identical set and is not a structural
-// deviation. Obligation is an all-scalar comparable struct, so it keys a
-// count map directly.
-func transitionEqual(a, b Transition) bool {
-	if a.From != b.From || a.To != b.To {
-		return false
+	if obligationDiverged {
+		return "obligation set"
 	}
-	return obligationsEqualAsSets(a.Obligations, b.Obligations)
+	return ""
 }
 
 // obligationsEqualAsSets reports whether a and b hold the same obligations
