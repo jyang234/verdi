@@ -68,10 +68,12 @@ var ErrFrontier = errors.New(frontierErrorText)
 // means the `obligations:` key itself was absent — distinct from a
 // present, empty `[]`); terminal states are drawn from states and admit
 // no outgoing transition (terminal ⇒ freeze); every transition's from/to
-// names a declared state; every state is reachable; every obligation's
-// scheme and kind are drawn from their closed catalogs; count is legal
-// only on kind "countersign"; and hook is legal only with kind "hook"
-// carrying a non-empty Hook.
+// names a declared state; no verb is declared by two transitions within
+// one lifecycle (a verb is a transition's identity — the frontier compare
+// keys on it — judged-frontier-duplicate-verb-bypass); every state is
+// reachable; every obligation's scheme and kind are drawn from their
+// closed catalogs; count is legal only on kind "countersign"; and hook is
+// legal only with kind "hook" carrying a non-empty Hook.
 //
 // Fails on the first violation found (mirroring store.Manifest.Validate's
 // own fail-fast posture), walking classes and lifecycles in sorted key
@@ -117,12 +119,16 @@ func (m Model) Validate() error {
 	return nil
 }
 
-// validate checks one lifecycle.<name> block: terminal ⊆ states, every
-// transition's obligations-list presence / from / to / obligations, that
-// no transition departs a terminal state (terminal ⇒ freeze — guide C-2,
-// judged-terminal-freeze-not-kernel: a frozen state admits no exit), and
-// (last, since it depends on the from/to mentions gathered while walking
-// transitions) that every state is reachable.
+// validate checks one lifecycle.<name> block: terminal ⊆ states, no verb
+// is bound by two transitions within this lifecycle (a verb is a
+// transition's identity, judged-frontier-duplicate-verb-bypass — a
+// duplicate is internally contradictory AND could otherwise mask a missing
+// transition at the frontier compare), every transition's obligations-list
+// presence / from / to / obligations, that no transition departs a
+// terminal state (terminal ⇒ freeze — guide C-2, judged-terminal-freeze-
+// not-kernel: a frozen state admits no exit), and (last, since it depends
+// on the from/to mentions gathered while walking transitions) that every
+// state is reachable.
 func (lc Lifecycle) validate(name string) error {
 	states := make(map[string]bool, len(lc.States))
 	for _, s := range lc.States {
@@ -136,8 +142,13 @@ func (lc Lifecycle) validate(name string) error {
 		terminal[t] = true
 	}
 
+	seenVerbs := make(map[string]bool, len(lc.Transitions))
 	mentioned := make(map[string]bool, len(lc.States))
 	for _, tr := range lc.Transitions {
+		if seenVerbs[tr.Verb] {
+			return fmt.Errorf("model: lifecycle %q: transition verb %q is declared more than once — a verb is a transition's identity, so a lifecycle may declare each verb at most once", name, tr.Verb)
+		}
+		seenVerbs[tr.Verb] = true
 		if tr.Obligations == nil {
 			return fmt.Errorf("model: lifecycle %q: transition %q (%s -> %s): obligations list is absent — every transition must state its rigor, even as `obligations: []`", name, tr.Verb, tr.From, tr.To)
 		}
@@ -257,8 +268,8 @@ func lifecyclesMatchFrontier(got, want map[string]Lifecycle) bool {
 // lifecycleEqual compares two Lifecycle values structurally: States and
 // Terminal as sets (declaration order is not itself a structural
 // property — dc-1's own text names "state set ... transition set",
-// sets, never order), Transitions keyed by Verb since a verb is a
-// transition's identity.
+// sets, never order), and Transitions as a verb-keyed MULTISET
+// (transitionsEqualAsMultiset) since a verb is a transition's identity.
 func lifecycleEqual(a, b Lifecycle) bool {
 	if !stringsEqualAsSets(a.States, b.States) {
 		return false
@@ -266,16 +277,44 @@ func lifecycleEqual(a, b Lifecycle) bool {
 	if !stringsEqualAsSets(a.Terminal, b.Terminal) {
 		return false
 	}
-	if len(a.Transitions) != len(b.Transitions) {
+	return transitionsEqualAsMultiset(a.Transitions, b.Transitions)
+}
+
+// transitionsEqualAsMultiset reports whether a and b hold the same
+// transitions keyed by Verb — a verb is a transition's identity — with the
+// same MULTIPLICITY, mirroring obligationsEqualAsSets (counts matter, not
+// mere membership). A bare length check plus a one-directional verb-map —
+// the earlier edition — left a real gap: a manifest-side DUPLICATE verb
+// could mask a canonical verb the manifest OMITS, because [accept, accept]
+// and [accept, close] are both length 2 and each manifest accept found the
+// canonical accept to match while canonical's close went unsought
+// (judged-frontier-duplicate-verb-bypass). Counting closes it: a verb whose
+// b-count exceeds its a-count drives the running count negative and fails
+// the compare, so the missing close can no longer hide behind the extra
+// accept. Each SHARED verb's transition must also match structurally on
+// From/To and its obligation set. The kernel's own duplicate-verb rule
+// (Lifecycle.validate) already rejects a manifest-side duplicate at Validate
+// time, and the canonical side never carries one, so an equal multiset
+// against canonical means the manifest is itself duplicate-free — keying
+// each verb to a single transition below therefore loses nothing; this is
+// defense-in-depth should a duplicate ever reach the frontier compare.
+func transitionsEqualAsMultiset(a, b []Transition) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	byVerb := make(map[string]Transition, len(b.Transitions))
-	for _, t := range b.Transitions {
+	counts := make(map[string]int, len(a))
+	byVerb := make(map[string]Transition, len(a))
+	for _, t := range a {
+		counts[t.Verb]++
 		byVerb[t.Verb] = t
 	}
-	for _, ta := range a.Transitions {
-		tb, ok := byVerb[ta.Verb]
-		if !ok || !transitionEqual(ta, tb) {
+	for _, t := range b {
+		counts[t.Verb]--
+		if counts[t.Verb] < 0 {
+			return false
+		}
+		ta, ok := byVerb[t.Verb]
+		if !ok || !transitionEqual(ta, t) {
 			return false
 		}
 	}
