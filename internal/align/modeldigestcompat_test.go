@@ -11,9 +11,11 @@ package align
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // preModelDigestDecisionConflictReport is this repo's own committed
@@ -106,5 +108,113 @@ func TestDecodeDeviation_PreexistingArtifactWithNoModelField_DecodesUnchanged(t 
 	rerendered := RenderMarkdown(decoded, string(body))
 	if string(rerendered) != string(original) {
 		t.Fatalf("re-rendering the decoded pre-existing deviation report did not reproduce the exact original bytes (a model: line must never appear where the source had none):\n--- original ---\n%s\n--- re-rendered ---\n%s", original, rerendered)
+	}
+}
+
+// syntheticNoModelDiagramSweepReport is a hand-authored diagram-sweep report
+// (verdi.diagramsweep/v1) whose provenance block carries no model: key —
+// a stand-in for a pre-model-field artifact. It is SYNTHETIC, and
+// deliberately so: unlike deviation and decision-conflict reports, NO
+// diagram-sweep report is committed anywhere in this repo, because the sweep
+// verb writes a disposable, never-frozen, never-archived sibling report
+// (spec/judged-sweep dc-1) — so there is no committed pre-field instance to
+// draw on. These bytes are authored INDEPENDENTLY of RenderDiagramSweepMarkdown
+// (they are not its output fed back): a renderer that wrongly emitted a
+// model: line would differ from them and fail the byte comparison, which is
+// the whole point of the retroactive-stamp guard.
+const syntheticNoModelDiagramSweepReport = `---
+schema: verdi.diagramsweep/v1
+covers: 65d2bea679a3fb020f99c05be4ae621c7f8b8575
+findings: []
+provenance: { generator: verdi-align, version: v0, inputs: [diagram/example-flow@65d2bea679a3fb020f99c05be4ae621c7f8b8575], digest: sha256:1111111111111111111111111111111111111111111111111111111111111111 }
+---
+# Diagram sweep report for diagram/example-flow
+
+This sweep is advisory and non-exhaustive — never a completeness guarantee. A human disposes every finding; the AI never edits the diagram in response to its own finding.
+
+## Findings
+
+(none)
+`
+
+// TestDecodeDiagramSweep_SyntheticNoModelArtifact_ReRendersByteIdentical
+// closes the DecodeDiagramSweep + RenderDiagramSweepMarkdown leg of ac-3's
+// four-decoder enumeration (previously proven only structurally — the judged
+// finding ac3-diagram-sweep-and-board-legs-vacuous-no-committed-pre-model-artifact).
+// A no-model diagram-sweep report decodes cleanly (Provenance.Model reads
+// back empty), and re-rendering it reproduces the exact original bytes with
+// no model: line introduced where the source had none. Synthetic because no
+// diagram-sweep artifact is committed anywhere (see the fixture's comment).
+func TestDecodeDiagramSweep_SyntheticNoModelArtifact_ReRendersByteIdentical(t *testing.T) {
+	original := []byte(syntheticNoModelDiagramSweepReport)
+
+	fmBytes, body, err := artifact.SplitFrontmatter(original)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	decoded, err := artifact.DecodeDiagramSweep(fmBytes)
+	if err != nil {
+		t.Fatalf("DecodeDiagramSweep: %v — a no-model diagram-sweep report must decode cleanly (ac-3)", err)
+	}
+	if decoded.Provenance == nil {
+		t.Fatal("decoded.Provenance is nil, want a populated Provenance with Model == \"\"")
+	}
+	if decoded.Provenance.Model != "" {
+		t.Fatalf("decoded.Provenance.Model = %q, want empty (the source has no model: key)", decoded.Provenance.Model)
+	}
+
+	rerendered := RenderDiagramSweepMarkdown(decoded, string(body))
+	if string(rerendered) != string(original) {
+		t.Fatalf("re-rendering the decoded no-model diagram-sweep report did not reproduce the exact original bytes:\n--- original ---\n%s\n--- re-rendered ---\n%s", original, rerendered)
+	}
+	if strings.Contains(string(rerendered), "model:") {
+		t.Fatalf("re-render introduced a model: line where the source had none:\n%s", rerendered)
+	}
+}
+
+// preModelDigestFrozenBoard is examples/showcase/.verdi/specs/archive/
+// loan-refi-2023/board.json — a REAL committed frozen board.json (Frozen +
+// Provenance both present, "one frame, not a drag history") authored before
+// this story's Model field existed, so its provenance carries no model key.
+// The align judge's finding claimed "no pre-field board.json is committed";
+// that overlooked the showcase corpus, which carries exactly this one, so
+// this leg uses a genuine committed artifact rather than a fabricated one.
+const preModelDigestFrozenBoard = "../../examples/showcase/.verdi/specs/archive/loan-refi-2023/board.json"
+
+// TestDecodeBoard_PreexistingFrozenBoardWithNoModelField_ReencodesWithoutModel
+// closes the DecodeBoard leg of ac-3's four-decoder enumeration. A board has
+// no hand-renderer; its committed form is canonjson.Marshal (the serializer
+// boardio.SaveBoardState itself uses). So the round-trip proven here is
+// decode → re-encode: the pre-field frozen board decodes cleanly with
+// Provenance.Model empty, and re-encoding the decoded value through
+// canonjson introduces no model key — an old board is never retroactively
+// stamped merely because the code that reads it now knows the field exists.
+// Byte-identity to the committed file itself is NOT asserted: the showcase
+// board is not stored in canonjson's compact canonical form (it carries
+// human-oriented whitespace), so a whitespace-identical round-trip is not the
+// property under test — the absence of a re-introduced model field is.
+func TestDecodeBoard_PreexistingFrozenBoardWithNoModelField_ReencodesWithoutModel(t *testing.T) {
+	original, err := os.ReadFile(preModelDigestFrozenBoard)
+	if err != nil {
+		t.Fatalf("reading %s: %v (ac-3's committed pre-field frozen board)", preModelDigestFrozenBoard, err)
+	}
+
+	decoded, err := artifact.DecodeBoard(original)
+	if err != nil {
+		t.Fatalf("DecodeBoard(%s): %v — a pre-field frozen board lacking the model key must still decode cleanly (ac-3)", preModelDigestFrozenBoard, err)
+	}
+	if decoded.Frozen == nil || decoded.Provenance == nil {
+		t.Fatalf("want a frozen board carrying Frozen+Provenance, got %+v", decoded)
+	}
+	if decoded.Provenance.Model != "" {
+		t.Fatalf("decoded.Provenance.Model = %q, want empty (the source has no model key)", decoded.Provenance.Model)
+	}
+
+	reencoded, err := canonjson.Marshal(decoded)
+	if err != nil {
+		t.Fatalf("canonjson.Marshal(decoded board): %v", err)
+	}
+	if strings.Contains(string(reencoded), `"model"`) {
+		t.Fatalf("re-encoding the decoded pre-field board introduced a \"model\" key — an old board must never be retroactively stamped:\n%s", reencoded)
 	}
 }
