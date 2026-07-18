@@ -732,6 +732,63 @@ bindings:
       # make verify once built.
       - "spec/model-digest#ac-1"
       - "spec/model-digest#ac-3"
+      # spec/operating-model FEATURE outcome ACs (extensibility phase 1
+      # endgame; ledger L-M14): the feature closes against its five ACs AS
+      # FROZEN — [behavioral] for ac-1..4 here, [static] for ac-5 below — with
+      # no attestation leg on any of them, unlike the
+      # workbench-legibility/closure-ergonomics FEATURE ACs above. L-M14's
+      # finding: the evidence-model spec's binding text requires every feature
+      # AC to declare attestation or fail VL-006, but VL-006 never implemented
+      # that check and this feature activated lint-clean without one —
+      # adjudicated as a disclosed spec/lint deviation rather than amended
+      # (amending evidence kinds on a frozen spec needs full supersession,
+      # disproportionate at endgame), remedies queued to the final wave
+      # (VL-006's check implemented going forward, operating-model
+      # grandfathered by archive date). ac-1's parity claim rides make verify's
+      # own pass, in the exact self-hosted sense this file's own header comment
+      # already uses for spec/close-verb#ac-1: this repo's store root carries
+      # no .verdi/model.yaml, so build+test+fixture+e2e succeeding here already
+      # IS the "byte-identical against the embedded canonical model" proof the
+      # AC text demands — no separate suite to name; the whole gate is the
+      # witness. ac-2 <- cmd/verdi/model_test.go's built-binary exit-discipline
+      # suite: TestModelCheck_NoModelYAML_OK / _ValidVocabRename_OK (exit 0, an
+      # OK line naming schema, counts, and digest),
+      # TestModelCheck_FrontierViolation_Exit1_PinnedText (exit 1, the pinned
+      # frontier error text), TestModelCheck_KernelViolation_Exit2 /
+      # _StoreLessCwd_Exit2 / _UnknownSubcommand_Exit2Usage /
+      # _BareVerb_Exit2Usage (exit 2, operational trouble). ac-3 <-
+      # internal/designscaffold/customtemplate_test.go's
+      # TestRender_StoreOverrideAddsCustomAndSection (a store override adding a
+      # body section and a custom: field scaffolds a spec carrying both) and
+      # TestRender_StoreOverrideCustom_SurvivesSpliceRoundTrip (the custom
+      # field survives strict decode and re-emit), plus
+      # cmd/verdi/model_test.go's
+      # TestModelCheck_BrokenTemplateSyntax_Exit2_NamesFile /
+      # _BrokenTemplateDecode_Exit2_NamesFile /
+      # _BrokenTemplateInSpikeBranch_Exit2_NamesFile /
+      # _BrokenTemplateInFeatureNoStoryRefBranch_Exit2_NamesFile /
+      # _TemplatePathEscape_Exit2_NamesRule (model check round-trips every
+      # template fail-closed) and cmd/verdi/designscaffoldoverride_test.go's
+      # TestRunDesignStart_StoryTemplateOverride (the same override proven
+      # through the real `design start` verb, not just the render call). ac-4
+      # <- the four-surface vocabulary suite:
+      # cmd/verdi/vocabulary_cli_test.go's TestVocabularyCLI_RenamedStateLabels
+      # (CLI verdicts), internal/workbench/vocabulary_render_test.go's
+      # TestBoardRender_ClassTagModelVocabulary /
+      # _TerminalStatusBadgeModelVocabulary (board),
+      # internal/dex/vocabulary_test.go's TestBuildV2_VocabularyRenames (dex),
+      # internal/mcpserve/vocabulary_test.go's
+      # TestToolsList_VocabularyRenamedClassWord (MCP tool descriptions) — plus
+      # e2e/tests/45-vocabulary.spec.ts's three Playwright cases (a
+      # vocab-rename store's served chrome reads the model's display names,
+      # never the bare ids; the sticky-type menu's story/spike labels via the
+      # STICKY_TYPES words payload; a misaimed spike thread's refusal copy)
+      # proving the rename reaches a live served board while refs, branches,
+      # and history stay on the bare ids throughout. All under make verify.
+      - "spec/operating-model#ac-1"
+      - "spec/operating-model#ac-2"
+      - "spec/operating-model#ac-3"
+      - "spec/operating-model#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -1165,3 +1222,26 @@ bindings:
       # Compiles, vets, and lints clean, plus the dedicated source-witness
       # test itself, under make verify once built.
       - "spec/model-digest#ac-2"
+      # spec/operating-model#ac-5 (extensibility phase 1 endgame; ledger L-M14,
+      # the same FEATURE-AC / no-attestation-leg framing as the behavioral
+      # block above — see there for L-M14's own text): "every frozen/provenance
+      # mint routes through a single stamping seam ... and stamps carry the
+      # resolved model's canonical-JSON digest" <-
+      # internal/artifact/modeldigestseam_test.go's source-witness suite, the
+      # SAME evidence already bound just above for spec/model-digest#ac-2 —
+      # TestProvenanceMintSites_RouteThroughStampProvenance (each of the four
+      # enumerated mint sites — internal/commitdesign/commitdesign.go,
+      # internal/align/report.go, internal/align/decision_report.go,
+      # internal/align/diagram_report.go — calls artifact.StampProvenance and
+      # never sets Model: inline inside its own Provenance{...} literal),
+      # TestProvenanceMintSites_ExactlyFour (the enumeration is self-checked
+      # against every production artifact.Provenance{...} literal in the
+      # module, so an undiscovered fifth site cannot go unnoticed),
+      # TestNoStrayProvenanceModelAssignment (a go/types receiver-resolution
+      # scan proving no production code assigns .Model on an
+      # artifact.Provenance value anywhere outside stamp.go), and
+      # TestAttestGoMintsNoProvenance (documents cmd/verdi/attest.go's correct
+      # exclusion from the enumeration — a Frozen-only mint, no Provenance at
+      # all). Compiles, vets, and lints clean, plus these four dedicated tests,
+      # under make verify.
+      - "spec/operating-model#ac-5"
