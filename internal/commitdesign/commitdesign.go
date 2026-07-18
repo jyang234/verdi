@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
@@ -112,7 +111,16 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("commitdesign: %w", err)
 	}
-	at := time.Now().UTC().Format("2006-01-02")
+	// judged-ac5-board-freeze-wallclock: the frozen board.json stamp pairs
+	// `at` with `commit` (preCommit — the content-final sha this snapshot pins
+	// to, threaded into Frozen and the provenance inputs below), so `at` is
+	// that commit's own committer date, never wall clock — the obligationauthor
+	// precedent (L-M4, internal/artifact.NewFrozen's doc) that this seam exists
+	// to enforce everywhere a frozen artifact is minted.
+	at, err := gitx.CommitDateOnly(ctx, in.Root, preCommit)
+	if err != nil {
+		return nil, fmt.Errorf("commitdesign: %w", err)
+	}
 	relBoardPath, err := filepath.Rel(in.Root, boardPath)
 	if err != nil {
 		return nil, fmt.Errorf("commitdesign: %w", err)
