@@ -1,6 +1,7 @@
 package align
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -304,5 +305,46 @@ func TestGenerateDecisionConflict_ModelDigestTracksFixtureModel(t *testing.T) {
 	}
 	if report.Frontmatter.Provenance == nil || report.Frontmatter.Provenance.Model != fixtureDigest {
 		t.Fatalf("Provenance.Model = %+v, want %q (the fixture model's own digest)", report.Frontmatter.Provenance, fixtureDigest)
+	}
+}
+
+// TestGenerateDecisionConflict_ByteIdenticalAcrossRuns closes the
+// decision-conflict leg of ac-1's "identical across repeated runs"
+// obligation (obligation ac-1--behavioral: "two fresh generate calls against
+// unchanged inputs must produce byte-identical model: lines", extended across
+// the four minting suites). Two fresh GenerateDecisionConflict calls against
+// unchanged inputs must produce byte-identical output — including the
+// provenance model: line — not two independently-computed digests that
+// merely agree.
+//
+// With this test ac-1's across-runs enumeration is now symmetric and CLOSED
+// over all four mint suites: deviation (report_test.go's
+// TestGenerate_ByteIdenticalAcrossRuns, the named precedent), decision
+// (here), diagram-sweep (diagram_report_test.go's
+// TestGenerateDiagramSweep_ByteIdenticalAcrossRuns), and board-freeze
+// (commitdesign's TestFreezeBoard_ModelDigestDeterministic). A fifth mint
+// suite is thereby visibly obligated to add its own across-runs leg.
+func TestGenerateDecisionConflict_ByteIdenticalAcrossRuns(t *testing.T) {
+	root := t.TempDir()
+	writeADR(t, root, "retry-policy", "accepted")
+	script := writeFakeJudge(t, fakeDecisionJudgeOKScript)
+	spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/my-feature"}, Class: artifact.ClassFeature, Status: "draft"}
+
+	run := func() []byte {
+		report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
+			Root: root, Spec: spec, Covers: "abc1234",
+			JudgeCmd:    []string{script},
+			ModelDigest: testModelDigest(t),
+		})
+		if err != nil {
+			t.Fatalf("GenerateDecisionConflict: %v", err)
+		}
+		return report.Markdown
+	}
+
+	first := run()
+	second := run()
+	if !bytes.Equal(first, second) {
+		t.Fatalf("GenerateDecisionConflict not byte-identical across runs:\n--- first ---\n%s\n--- second ---\n%s", first, second)
 	}
 }

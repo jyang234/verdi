@@ -1,6 +1,7 @@
 package align
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"strings"
@@ -297,5 +298,38 @@ func TestGenerateDiagramSweep_ModelDigestTracksFixtureModel(t *testing.T) {
 	}
 	if report.Frontmatter.Provenance == nil || report.Frontmatter.Provenance.Model != fixtureDigest {
 		t.Fatalf("Provenance.Model = %+v, want %q (the fixture model's own digest)", report.Frontmatter.Provenance, fixtureDigest)
+	}
+}
+
+// TestGenerateDiagramSweep_ByteIdenticalAcrossRuns closes the diagram-sweep
+// leg of ac-1's "identical across repeated runs" obligation. Two fresh
+// GenerateDiagramSweep calls against unchanged inputs must produce
+// byte-identical output — including the provenance model: line. See
+// decision_report_test.go's TestGenerateDecisionConflict_ByteIdenticalAcrossRuns
+// for the four-suite enumeration (deviation, decision, diagram, board-freeze)
+// this test completes and closes.
+func TestGenerateDiagramSweep_ByteIdenticalAcrossRuns(t *testing.T) {
+	root := t.TempDir()
+	script := writeFakeJudge(t, fakeDiagramJudgeOKScript)
+
+	run := func() []byte {
+		report, err := GenerateDiagramSweep(context.Background(), DiagramSweepInput{
+			Root:        root,
+			DiagramRef:  "diagram/loansvc-future",
+			Body:        []byte("graph TD\n  a --> b\n"),
+			Covers:      "abc1234",
+			JudgeCmd:    []string{script},
+			ModelDigest: testModelDigest(t),
+		})
+		if err != nil {
+			t.Fatalf("GenerateDiagramSweep: %v", err)
+		}
+		return report.Markdown
+	}
+
+	first := run()
+	second := run()
+	if !bytes.Equal(first, second) {
+		t.Fatalf("GenerateDiagramSweep not byte-identical across runs:\n--- first ---\n%s\n--- second ---\n%s", first, second)
 	}
 }
