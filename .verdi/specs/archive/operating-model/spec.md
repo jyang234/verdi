@@ -4,7 +4,7 @@ kind: spec
 title: "Operating Model"
 owners: [platform-team]
 class: feature
-status: accepted-pending-build
+status: closed
 problem: { text: "the operating model — lifecycle states, transitions and their obligations, class hierarchy, display vocabulary, and scaffold content — is hard-coded in Go across ~45 files (extensibility audit @ 24214fd): teams cannot see or reshape it, every rename or template change is a code change, and the same process facts are re-encoded independently in up to seven subsystems with no shared seam", anchor: problem }
 outcome: { text: "the canonical operating model is declared in a strict-decoded .verdi/model.yaml (verdi.model/v1) with an embedded canonical default so absent config changes nothing; verdi model check validates it fail-closed with pinned frontier errors; scaffolds render from editable templates with a custom: opaque namespace; display vocabulary is configurable and reaches CLI, workbench, dex, and MCP surfaces; and every produced artifact's provenance carries the model digest — with the entire pre-existing fixture and e2e suite green against the canonical default", anchor: outcome }
 acceptance_criteria:
