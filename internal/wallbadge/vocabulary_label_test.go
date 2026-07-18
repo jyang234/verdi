@@ -22,9 +22,14 @@ import (
 )
 
 // ladderVocabModel is the ADVERSARIAL model: it keys BOTH ladder flag ids
-// under `states:` (a legal verdi.model/v1 vocabulary — kernel validation
-// constrains structure, never vocabulary keys), attempting to rename them.
-// The pins below prove the attempt has no effect on the flag labels.
+// under `states:`, attempting to rename them. Since vocabulary-key
+// validation landed (validate.go's validateVocabulary,
+// judged-vocabulary-keys-unvalidated-now-load-bearing), such a manifest
+// can no longer even DECODE — flag ids are not declared lifecycle states,
+// so the keys fail closed at the kernel — which closes the same hole one
+// layer earlier. These pins stay as defense-in-depth over the resolution
+// layer itself: a hand-built model proves the flag labels would stay
+// fixed regardless of how the value arrived.
 func ladderVocabModel() *model.Model {
 	return &model.Model{
 		Schema: "verdi.model/v1",

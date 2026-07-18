@@ -398,6 +398,34 @@ func TestModelCheck_DuplicateVerb_Exit2_NamesRule(t *testing.T) {
 	}
 }
 
+// TestModelCheck_VocabularyUnknownKey_Exit2_NamesKeyAndLegalSet proves
+// judged-vocabulary-keys-unvalidated-now-load-bearing's rule reaches the
+// built binary: a hand-written model.yaml whose vocabulary renames a key
+// the model never declares (here classes key "epic") fails model check
+// closed at exit 2 — a kernel VALIDATION violation, grouped with every
+// other "undecodable manifest" condition, never the frontier's exit 1
+// (an inert rename key is not a structural model deviation) — with the
+// error naming the offending key AND the legal set (declared classes
+// plus the L-M13 spike pseudo-class), never a bare "model.yaml invalid".
+func TestModelCheck_VocabularyUnknownKey_Exit2_NamesKeyAndLegalSet(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-vocabulary-unknown-key.yaml"))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (unknown vocabulary key) exit = %d, want 2 (a kernel validation violation is undecodable per ac-3, never the frontier's exit 1)\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, `vocabulary: classes key "epic"`) {
+		t.Fatalf("stderr = %q, want it to name the offending vocabulary key", stderr)
+	}
+	if !strings.Contains(stderr, "spike pseudo-class") {
+		t.Fatalf("stderr = %q, want it to name the L-M13 spike pseudo-class carve as part of the legal set", stderr)
+	}
+	if !strings.Contains(stderr, "legal: feature, spike") {
+		t.Fatalf("stderr = %q, want it to name the legal key set (an operator learns what IS legal in the same breath)", stderr)
+	}
+}
+
 // TestModelCheck_StoreLessCwd_Exit2 proves a missing store is
 // operational trouble (ac-3's own text names this explicitly).
 func TestModelCheck_StoreLessCwd_Exit2(t *testing.T) {
