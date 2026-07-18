@@ -174,8 +174,12 @@ func flipPredecessorToSuperseded(root, predecessorRef, successorID string, mdl *
 		fmt.Fprintln(stderr, "accept:", err)
 		return "", 2
 	}
-	fmt.Fprintf(stdout, "accept: %s: superseded by %s (status: %s -> %s; status-only edit, frozen stamp preserved, stays in specs/active/)\n",
-		ref.String(), successorID,
+	// The leading state word resolves too (L-M13(1) — the same display
+	// chain as the from/to pair in the parenthetical); refs and the
+	// specs/active/ path stay identity.
+	fmt.Fprintf(stdout, "accept: %s: %s by %s (status: %s -> %s; status-only edit, frozen stamp preserved, stays in specs/active/)\n",
+		ref.String(),
+		mdl.DisplayState(string(predSpec.Class), "superseded"), successorID,
 		mdl.DisplayState(string(predSpec.Class), "accepted-pending-build"),
 		mdl.DisplayState(string(predSpec.Class), "superseded"))
 	return predPath, 0
