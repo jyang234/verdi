@@ -235,6 +235,26 @@ func TestPluralizeDisplay(t *testing.T) {
 
 // TestCapitalize covers the label-position helper: first rune only,
 // unicode-aware, and safe on empty input.
+func TestArticle(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"story", "a"},
+		{"feature", "a"},
+		{"spike", "a"},
+		{"Initiative", "an"},
+		{"epic", "an"},
+		{"ACR", "an"},
+		{"Objective", "an"},
+		{"Umbrella", "an"}, // spelling-based: a consonant-sounding 'u' still gets "an" (disclosed limit)
+		{"", "a"},          // degenerate; display words are never empty (DisplayClass falls back to the id)
+		{"épic", "a"},      // non-ASCII initials fall to "a" (spelling heuristic covers a/e/i/o/u only)
+	}
+	for _, tt := range tests {
+		if got := Article(tt.in); got != tt.want {
+			t.Fatalf("Article(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestCapitalize(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"", ""},

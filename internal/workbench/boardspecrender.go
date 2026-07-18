@@ -17,6 +17,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/designscaffold"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // boardClientPayload is the JSON state embedded for boardspec.js: the
@@ -476,7 +477,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw attribution yarn from this ` + esc(typeLabel) + ` sticky" title="drag to ` + target + ` to claim it"></button>`)
 		}
 		if authoring && obligationYarn {
-			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto yarn-handle--obligation" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw an obligation thread from this sticky" title="drag to a ` + esc(p.words.word("story")) + ` acceptance criterion to author its evidence obligation"></button>`)
+			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto yarn-handle--obligation" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw an obligation thread from this sticky" title="drag to ` + esc(p.words.indefinite("story")) + ` acceptance criterion to author its evidence obligation"></button>`)
 		}
 		if authoring {
 			if proto {
@@ -890,10 +891,14 @@ func writeGuide(b *strings.Builder, p *BoardProjection) {
 	esc := stdhtml.EscapeString
 	featureWord := esc(p.words.word("feature"))
 	storyWord := esc(p.words.word("story"))
+	// The articles agree with the class word they precede (model.Article,
+	// judged-article-agreement-approximation-undisclosed): "a feature" but
+	// "an Initiative". Always "a"/"an" — no escaping needed.
+	featureArticle := model.Article(p.words.word("feature"))
 	b.WriteString(`<details class="board-guide" data-testid="board-guide"><summary>New to the wall? Four moves.</summary>`)
 	if feature {
-		b.WriteString(`<p class="guide-class-note" data-testid="guide-class-note">This is a <strong>` + featureWord + `</strong> wall: outcome ACs and ` + storyWord + ` stubs. ` +
-			`Each ` + storyWord + ` is its own spec that points up at these ACs with <strong>implements</strong> yarn &#8212; a ` + featureWord + ` never lists its ` + esc(p.words.plural("story")) + `.</p>`)
+		b.WriteString(`<p class="guide-class-note" data-testid="guide-class-note">This is ` + featureArticle + ` <strong>` + featureWord + `</strong> wall: outcome ACs and ` + storyWord + ` stubs. ` +
+			`Each ` + storyWord + ` is its own spec that points up at these ACs with <strong>implements</strong> yarn &#8212; ` + featureArticle + ` ` + featureWord + ` never lists its ` + esc(p.words.plural("story")) + `.</p>`)
 	}
 	b.WriteString(`<ol class="guide-moves">` +
 		`<li><strong>Read the case file</strong> &#8212; the problem and outcome placards above the wall are the spec&#8217;s own header.</li>`)

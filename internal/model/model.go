@@ -258,6 +258,27 @@ func Capitalize(word string) string {
 	return string(r)
 }
 
+// Article returns the indefinite article ("a" or "an") for display word —
+// "an" when the word's first letter is a vowel, "a" otherwise — kept
+// beside Capitalize as the one a/an rule every surface composes with a
+// display word ("a story", "an Initiative"), replacing the silently-pinned
+// "a" that disagreed with vowel-initial renames
+// (judged-article-agreement-approximation-undisclosed; cured by code per
+// ledger L-M13a(4)). Best-effort English by SPELLING, the same disclosed
+// display-approximation posture as pluralizeDisplay: sound-driven
+// exceptions — a silent 'h' ("hour"), a consonant-sounding 'u'
+// ("unicorn"-shaped renames) — get the spelling-based article. Display
+// plumbing only; the identity layer never composes articles.
+func Article(word string) string {
+	if word == "" {
+		return "a"
+	}
+	if isDisplayVowel([]rune(word)[0]) {
+		return "an"
+	}
+	return "a"
+}
+
 // Digest returns the resolved model's content-address: canonical-JSON
 // sha256 (internal/canonjson.Digest — PLAN.md I-18's one home for the
 // canonjson-then-sha256-then-"sha256:"+hex tail, spec/shared-homes

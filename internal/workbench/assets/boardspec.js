@@ -62,6 +62,19 @@
     var w = classWord(id);
     return w.charAt(0).toUpperCase() + w.slice(1);
   }
+  // classArticle mirrors internal/model's Article — the one a/an rule
+  // (judged-article-agreement-approximation-undisclosed, L-M13a(4)):
+  // vowel-INITIAL display word takes "an" ("an Initiative"), else "a" —
+  // duplicated here as a rule rather than a payload field exactly like
+  // classWordCap mirrors model.Capitalize (the smaller diff; the Go
+  // helper stays the rule's documented home, spelling-based best effort).
+  function classArticle(id) {
+    return /^[aeiou]/i.test(classWord(id)) ? "an" : "a";
+  }
+  function classArticleCap(id) {
+    var a = classArticle(id);
+    return a.charAt(0).toUpperCase() + a.slice(1);
+  }
 
   // -- client-side mermaid over injected fragments ---------------------------
   //
@@ -883,15 +896,15 @@
       var refusal;
       if (story && toKind === "open-question") {
         refusal =
-          "A " + classWord("story") + " sticky's thread claims coverage — it ties only to acceptance criteria. " +
-          "If this thought answers open questions, it wants to be a " + classWord("spike") + " sticky instead.";
+          classArticleCap("story") + " " + classWord("story") + " sticky's thread claims coverage — it ties only to acceptance criteria. " +
+          "If this thought answers open questions, it wants to be " + classArticle("spike") + " " + classWord("spike") + " sticky instead.";
       } else if (!story && toKind === "acceptance-criterion") {
         refusal =
-          "A " + classWord("spike") + " sticky's thread claims an answer — it ties only to open questions. " +
-          "If this thought delivers an acceptance criterion, it wants to be a " + classWord("story") + " sticky instead.";
+          classArticleCap("spike") + " " + classWord("spike") + " sticky's thread claims an answer — it ties only to open questions. " +
+          "If this thought delivers an acceptance criterion, it wants to be " + classArticle("story") + " " + classWord("story") + " sticky instead.";
       } else {
         refusal =
-          "A " + classWord(g.proto) + " sticky's thread has one meaning: " +
+          classArticleCap(g.proto) + " " + classWord(g.proto) + " sticky's thread has one meaning: " +
           (story
             ? "coverage of an acceptance criterion."
             : "resolution of an open question.") +
@@ -913,7 +926,7 @@
       openConfirm(
         "Claim resolution of " + to,
         "Ties this " + classWord("spike") + " sticky to " + to + ". The thread is the attribution: " +
-          "when the sticky graduates into a " + classWord("spike") + " stub, " + to + " joins the questions it resolves.",
+          "when the sticky graduates into " + classArticle("spike") + " " + classWord("spike") + " stub, " + to + " joins the questions it resolves.",
         false
       );
     }
@@ -945,7 +958,7 @@
       protoRefusal(
         "obligation",
         to,
-        "An obligation binds to a " + classWord("story") + " acceptance criterion — this thread lands on " +
+        "An obligation binds to " + classArticle("story") + " " + classWord("story") + " acceptance criterion — this thread lands on " +
           to + ", which is not one. Draw it to an AC card instead."
       );
       return;
