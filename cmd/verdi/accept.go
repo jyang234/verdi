@@ -111,9 +111,17 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		return 1
 	}
 	if spec.Status != "draft" {
-		fmt.Fprintf(stderr, "accept: %s status is %q, not %s; only a draft spec can be accepted\n", ref.String(),
+		// Display resolution (L-M13(1)), mirroring the class-refusal branch
+		// above and buildstart.go's superseded-word refusal: the trailing
+		// draft state word is display prose too, its article agreeing via
+		// model.Article. It was the one bare state word left hard-coded
+		// ("only a draft spec") beside two already-resolved ones in this one
+		// sentence (judged-ac4-draft-prose-leak).
+		draftWord := mdl.DisplayState(string(spec.Class), "draft")
+		fmt.Fprintf(stderr, "accept: %s status is %q, not %s; only %s %s spec can be accepted\n", ref.String(),
 			mdl.DisplayState(string(spec.Class), string(spec.Status)),
-			mdl.DisplayState(string(spec.Class), "draft"))
+			draftWord,
+			model.Article(draftWord), draftWord)
 		return 1
 	}
 
