@@ -4,7 +4,7 @@ kind: spec
 title: "Model Schema"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-30
 problem: { text: "the operating model has no declared artifact: lifecycle states, transitions, class structure, and verb bindings live as Go literals scattered across the codebase (seam map S1-S4, S7-S8) with no single source a reader or a tool can consult; nothing can validate a would-be model.yaml, and absence of one has no defined meaning", anchor: problem }
 outcome: { text: "a new internal/model package decodes verdi.model/v1 through the store's single strict-decode seam with kernel validation (obligations lists required per transition, terminal-states freeze, reachability, catalog-only kinds) and a pinned frontier error for structural deviation; an embedded canonical.yaml is parity-tested against the code's own status enums and ritual verbs; store.Open resolves absent model.yaml to the embedded canonical; and verdi model check exposes all of it with 0/1/2 exit discipline, wired into make verify", anchor: outcome }
