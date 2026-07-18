@@ -128,6 +128,54 @@ func TestVocabularyCLI_RenamedStateLabels(t *testing.T) {
 	}
 }
 
+// vocabBirdsFeatureMD is a round-four birds-eye feature (class: feature +
+// problem/outcome — matrix.go's two-conjunct discriminator), the shape
+// that trips build start's feature-refusal before any status check.
+const vocabBirdsFeatureMD = `---
+id: spec/birds-feature
+kind: spec
+title: "Birds feature"
+owners: [platform-team]
+class: feature
+status: draft
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "outcome ac", evidence: [static], anchor: "#ac-1" }
+---
+# Birds feature
+`
+
+// TestVocabularyCLI_RenamedClassWordRefusals drives the class-word refusal
+// prose over the vocab-rename store
+// (judged-cli-refusal-prose-class-state-words-still-bare): build start's
+// feature-refusal speaks the renamed class words with agreeing articles —
+// "an Initiative" (model.Article over the vowel-initial rename,
+// judged-article-agreement-approximation-undisclosed), never the
+// formerly-bare "a feature spec … a story spec".
+func TestVocabularyCLI_RenamedClassWordRefusals(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                         phase7ManifestYAML,
+				".verdi/model.yaml":                         vocabModelYAML(t),
+				".verdi/specs/active/birds-feature/spec.md": vocabBirdsFeatureMD,
+			},
+			Message: "init store with a birds-eye feature + vocab-rename model",
+		},
+	})
+
+	code, _, stderr := runVerdi(t, bin, repo.Dir, "build", "start", "spec/birds-feature")
+	if code != 2 {
+		t.Fatalf("build start (birds-eye feature) = %d, want 2; stderr=%s", code, stderr)
+	}
+	want := "is an Initiative spec (birds-eye, outcome-level); build start operates on a Workstream spec that implements it, not the Initiative itself"
+	if !contains(stderr, want) {
+		t.Fatalf("build start refusal stderr = %q, want the renamed class words with agreeing articles %q", stderr, want)
+	}
+}
+
 // TestVocabularyCLI_UnflippedPredecessorDisclosure covers supersede.go's
 // left-unflipped disclosure: a closed predecessor's status line and the
 // legal-transition notation both resolve through the model.

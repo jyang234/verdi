@@ -24,6 +24,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -87,24 +88,36 @@ func cmdBuildStart(args []string, stdout, stderr io.Writer) int {
 // error (exit 2): a feature spec has no code of its own to build against —
 // only its implementing stories do.
 func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, stdout, stderr io.Writer) int {
-	spec, err := resolveBuildTarget(root, storyArg)
+	spec, err := resolveBuildTarget(root, storyArg, deps.Model)
 	if err != nil {
 		fmt.Fprintln(stderr, "build start:", err)
 		return 2
 	}
 	if spec.Class == artifact.ClassFeature && spec.Problem != nil {
-		fmt.Fprintf(stderr, "build start: %s is a feature spec (birds-eye, outcome-level); build start operates on a story spec that implements it, not the feature itself\n", spec.ID)
+		// Display resolution (L-M13(1),
+		// judged-cli-refusal-prose-class-state-words-still-bare): both
+		// class words and their agreeing articles resolve; spec.ID stays
+		// identity.
+		featureWord := deps.Model.DisplayClass("feature")
+		storyWord := deps.Model.DisplayClass("story")
+		fmt.Fprintf(stderr, "build start: %s is %s %s spec (birds-eye, outcome-level); build start operates on %s %s spec that implements it, not the %s itself\n",
+			spec.ID, model.Article(featureWord), featureWord,
+			model.Article(storyWord), storyWord, featureWord)
 		return 2
 	}
 	// A superseded spec is never re-buildable (D-12): report the successor
 	// found via the incoming supersedes chain so the operator is pointed at
 	// the spec they should build instead, rather than the generic
-	// wrong-status message below.
+	// wrong-status message below. The state WORD resolves through the
+	// model (the same DisplayState chain the wrong-status refusal below
+	// already used — this trio was the finding's pinned inconsistency);
+	// the comparison stays on the bare id.
 	if spec.Status == "superseded" {
+		supersededWord := deps.Model.DisplayState(string(spec.Class), "superseded")
 		if s, ferr := findSupersedingSpec(root, spec.ID); ferr == nil && s != nil {
-			fmt.Fprintf(stderr, "build start: refused: %s is superseded by %s; build the successor, not the superseded predecessor (03 §The amendment ladder)\n", spec.ID, s.ID)
+			fmt.Fprintf(stderr, "build start: refused: %s is %s by %s; build the successor, not the %s predecessor (03 §The amendment ladder)\n", spec.ID, supersededWord, s.ID, supersededWord)
 		} else {
-			fmt.Fprintf(stderr, "build start: refused: %s is superseded; a superseded spec is never re-buildable (03 §The amendment ladder)\n", spec.ID)
+			fmt.Fprintf(stderr, "build start: refused: %s is %s; %s %s spec is never re-buildable (03 §The amendment ladder)\n", spec.ID, supersededWord, model.Article(supersededWord), supersededWord)
 		}
 		return 1
 	}
@@ -173,7 +186,13 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 // story" (i.e. the arg parsed as a valid scheme-prefixed story ref but
 // matched no FEATURE), also scan specs/active for a class: story spec
 // whose own story: field equals storyArg.
-func resolveBuildTarget(root, storyArg string) (*artifact.SpecFrontmatter, error) {
+//
+// mdl resolves the ambiguity refusal's class word (L-M13(1)); nil is safe
+// (bare-id fallback). storyresolve's own error strings pass through
+// UNCHANGED — including the "no active feature spec has story" text this
+// function string-matches on — they are that package's identity-stable
+// diagnostics, out of this sweep's cmd/verdi scope.
+func resolveBuildTarget(root, storyArg string, mdl *model.Model) (*artifact.SpecFrontmatter, error) {
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err == nil {
 		return spec, nil
@@ -219,6 +238,9 @@ func resolveBuildTarget(root, storyArg string) (*artifact.SpecFrontmatter, error
 		for i, m := range matches {
 			names[i] = m.ID
 		}
-		return nil, fmt.Errorf("story ref %q matches more than one active story spec: %s", storyArg, strings.Join(names, ", "))
+		// "story ref" names the scheme-prefixed story: FIELD's ref form
+		// (identity, like the usage line's <story-ref>); the second class
+		// word speaks the spec's class — display, resolved (L-M13(1)).
+		return nil, fmt.Errorf("story ref %q matches more than one active %s spec: %s", storyArg, mdl.DisplayClass("story"), strings.Join(names, ", "))
 	}
 }

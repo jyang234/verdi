@@ -21,6 +21,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -96,7 +97,17 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	_ = body
 
 	if spec.Class != artifact.ClassFeature && spec.Class != artifact.ClassStory {
-		fmt.Fprintf(stderr, "accept: %s is a %s spec (no story, no acceptance criteria); only a feature or story spec can be accepted\n", ref.String(), spec.Class)
+		// Display resolution (L-M13(1)): the three class words are display
+		// prose, articles agreeing via model.Article
+		// (judged-cli-refusal-prose-class-state-words-still-bare). The
+		// "(no story, no acceptance criteria)" parenthetical names the
+		// story:/acceptance_criteria: FRONTMATTER FIELDS such a spec lacks
+		// — identity, kept bare.
+		classWord := mdl.DisplayClass(string(spec.Class))
+		featureWord := mdl.DisplayClass("feature")
+		fmt.Fprintf(stderr, "accept: %s is %s %s spec (no story, no acceptance criteria); only %s %s or %s spec can be accepted\n", ref.String(),
+			model.Article(classWord), classWord,
+			model.Article(featureWord), featureWord, mdl.DisplayClass("story"))
 		return 1
 	}
 	if spec.Status != "draft" {
@@ -136,7 +147,7 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	stubMatched := false
 	if spec.Class == artifact.ClassStory {
 		var reason string
-		stubMatched, reason = computeStubMatch(root, spec)
+		stubMatched, reason = computeStubMatch(root, spec, mdl)
 		if stubMatched {
 			fmt.Fprintf(stdout, "accept: %s: stub-matched (R4-I-12): eligible for single-approver acceptance (forge/CODEOWNERS configuration, never verdi-enforced)\n", ref.String())
 		} else {
@@ -162,8 +173,15 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 			for i, a := range radius.Affected {
 				affectedRefs[i] = a.SpecRef
 			}
-			fmt.Fprintf(stdout, "accept: %s: rung-4 feature supersession of %s — %d affected in-flight/closed stor(y/ies) %v -> computed quorum: %s (disclosed fact; approval-count enforcement stays forge/CODEOWNERS configuration, never verdi behavior, 03 §The amendment ladder)\n",
-				ref.String(), radius.PredecessorRef, len(radius.Affected), affectedRefs, radius.Quorum)
+			// Display resolution (L-M13(1)): the class word, the closed
+			// state word, and the stor(y/ies) alternation
+			// (displayAlternation) all resolve; the affected REFS and the
+			// quorum enum value stay identity.
+			fmt.Fprintf(stdout, "accept: %s: rung-4 %s supersession of %s — %d affected in-flight/%s %s %v -> computed quorum: %s (disclosed fact; approval-count enforcement stays forge/CODEOWNERS configuration, never verdi behavior, 03 §The amendment ladder)\n",
+				ref.String(), mdl.DisplayClass("feature"), radius.PredecessorRef, len(radius.Affected),
+				mdl.DisplayState("story", "closed"),
+				displayAlternation(mdl.DisplayClass("story"), mdl.DisplayClassPlural("story")),
+				affectedRefs, radius.Quorum)
 		}
 	}
 

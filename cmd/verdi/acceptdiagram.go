@@ -107,6 +107,11 @@ func runAcceptDiagram(ctx context.Context, root string, ref artifact.Ref, stdout
 		return 1
 	}
 	if diag.Status != "proposed" {
+		// L-M13(1) classification: proposed/accepted are the DIAGRAM
+		// artifact's own status enum (spec/proposal-artifact), outside
+		// verdi.model/v1's lifecycle — no vocabulary key can address them
+		// (states keys ∈ declared lifecycle states, L-M13a(5)) — so they
+		// stay bare, unlike the spec ritual's routed state words.
 		fmt.Fprintf(stderr, "accept: %s: status is %q, not proposed; only a proposed proposal can be accepted\n", ref.String(), diag.Status)
 		return 1
 	}

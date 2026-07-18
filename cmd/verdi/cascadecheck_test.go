@@ -361,7 +361,7 @@ y
 
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
-	got := runGate(ctx, repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+	got := runGate(ctx, repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runGate (cascade-stale, no reaffirmation) = %d, want 1; stdout=%s", got, stdout.String())
 	}
@@ -378,7 +378,7 @@ y
 
 	stdout.Reset()
 	stderr.Reset()
-	got = runGate(ctx, repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+	got = runGate(ctx, repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runGate (cascade-stale, reaffirmed) = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}

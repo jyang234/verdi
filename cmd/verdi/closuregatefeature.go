@@ -42,6 +42,7 @@ import (
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -50,10 +51,10 @@ import (
 // disclosure rendering) exactly as runClosureGate (closuregate.go) does
 // for a story, under its own "closure(feature):" label so the two ritual's
 // printed output is never ambiguous about which spec class is closing.
-func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, stdout io.Writer) (bool, error) {
-	cond1 := checkFeatureFoldEligible(fold)
+func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, stdout io.Writer) (bool, error) {
+	cond1 := checkFeatureFoldEligible(fold, mdl)
 	cond2 := checkStubReconciliationCondition(reconciliation)
-	cond3 := checkAllImplementingStoriesClosed(stories)
+	cond3 := checkAllImplementingStoriesClosed(stories, mdl)
 
 	// Condition 4 (spec-stale): reused verbatim from the story gate, called
 	// with the feature spec instead of a story spec. checkSpecStaleCondition
@@ -96,19 +97,24 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	}
 	cond5 := renumbered(cond5raw, "5. no unresolved pending-supersession flag")
 
+	// The label's parenthetical exists to tell a HUMAN which spec class is
+	// closing (this function's doc comment: "never ambiguous about which
+	// spec class") — display prose, resolved through the model (L-M13(1));
+	// the disclosure Source producer ids it wraps stay identity.
+	label := "closure(" + mdl.DisplayClass("feature") + "): "
 	allOK := true
 	for _, c := range []gateCondition{cond1, cond2, cond3, cond4, cond5} {
 		switch {
 		case c.Disclosed:
 			// Three-valued honesty (constitution 2/10), rendered through the
 			// shared internal/disclosure seam exactly as the story gate does.
-			fmt.Fprint(stdout, "closure(feature): ")
+			fmt.Fprint(stdout, label)
 			fmt.Fprintln(stdout, disclosure.Render(disclosure.New(c.Source, "", c.Reason)))
 		case c.OK:
-			fmt.Fprintf(stdout, "[PASS] closure(feature): %s\n", c.Name)
+			fmt.Fprintf(stdout, "[PASS] %s%s\n", label, c.Name)
 		default:
 			allOK = false
-			fmt.Fprintf(stdout, "[FAIL] closure(feature): %s\n", c.Name)
+			fmt.Fprintf(stdout, "[FAIL] %s%s\n", label, c.Name)
 			fmt.Fprintf(stdout, "       %s\n", c.Reason)
 		}
 	}
@@ -133,8 +139,12 @@ func renumbered(c gateCondition, name string) gateCondition {
 // still-no-signal, still-pending, or violated AC all block closure alike
 // (03: "A feature AC still no-signal at closure time is a hard blocker,
 // not a yellow").
-func checkFeatureFoldEligible(fold evidence.FeatureResult) gateCondition {
-	name := "1. every feature AC evidenced (03 §The feature fold, including the outcome floor)"
+func checkFeatureFoldEligible(fold evidence.FeatureResult, mdl *model.Model) gateCondition {
+	// The spoken class word resolves (L-M13(1)); the "(03 §The feature
+	// fold …)" SPEC CITATION quotes the spec's own section title —
+	// identity, kept verbatim.
+	featureWord := mdl.DisplayClass("feature")
+	name := "1. every " + featureWord + " AC evidenced (03 §The feature fold, including the outcome floor)"
 	var notEvidenced []string
 	for _, ac := range fold.ACs {
 		if ac.Status != evidence.StatusEvidenced {
@@ -145,7 +155,7 @@ func checkFeatureFoldEligible(fold evidence.FeatureResult) gateCondition {
 		return gateCondition{Name: name, OK: true}
 	}
 	sort.Strings(notEvidenced)
-	return gateCondition{Name: name, Reason: fmt.Sprintf("not every feature AC is evidenced: %v", notEvidenced)}
+	return gateCondition{Name: name, Reason: fmt.Sprintf("not every %s AC is evidenced: %v", featureWord, notEvidenced)}
 }
 
 // checkStubReconciliationCondition is the feature-closure gate's condition
@@ -174,8 +184,13 @@ func checkStubReconciliationCondition(r evidence.StubReconciliation) gateConditi
 // superseded stories (D-16) — a superseded story is neither open nor
 // closed in any sense this condition needs to police; its successor
 // carries the same implements edges and is the one that must close.
-func checkAllImplementingStoriesClosed(stories []implementingStoryEdges) gateCondition {
-	name := "3. every implementing story closed (03 §The feature fold / §Closure ritual)"
+func checkAllImplementingStoriesClosed(stories []implementingStoryEdges, mdl *model.Model) gateCondition {
+	// Display resolution (L-M13(1)): the class word, the closed state
+	// word, and the stor(y/ies) alternation (displayAlternation) resolve;
+	// the still-open REFS and the spec citations stay identity.
+	storyWord := mdl.DisplayClass("story")
+	closedWord := mdl.DisplayState("story", "closed")
+	name := "3. every implementing " + storyWord + " " + closedWord + " (03 §The feature fold / §Closure ritual)"
 	var open []string
 	for _, s := range stories {
 		if !s.Closed {
@@ -186,5 +201,6 @@ func checkAllImplementingStoriesClosed(stories []implementingStoryEdges) gateCon
 		return gateCondition{Name: name, OK: true}
 	}
 	sort.Strings(open)
-	return gateCondition{Name: name, Reason: fmt.Sprintf("implementing stor(y/ies) not yet closed: %v", open)}
+	return gateCondition{Name: name, Reason: fmt.Sprintf("implementing %s not yet %s: %v",
+		displayAlternation(storyWord, mdl.DisplayClassPlural("story")), closedWord, open)}
 }

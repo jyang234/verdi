@@ -234,7 +234,7 @@ func TestRunAttest_Happy(t *testing.T) {
 	ctx := context.Background()
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-1", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-1", nil, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runAttest = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -293,7 +293,7 @@ func TestRunAttest_RefusesUnknownStoryRef(t *testing.T) {
 	before := snapshotTree(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "jira:NO-SUCH-STORY", "ac-1", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "jira:NO-SUCH-STORY", "ac-1", nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runAttest(unknown story-ref) = %d, want 1 (verdict)", got)
 	}
@@ -313,7 +313,7 @@ func TestRunAttest_RefusesWrongClass(t *testing.T) {
 	before := snapshotTree(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "spec/attest-fixture-feature", "ac-1", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "spec/attest-fixture-feature", "ac-1", nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runAttest(feature-class target) = %d, want 1 (verdict)", got)
 	}
@@ -332,7 +332,7 @@ func TestRunAttest_RefusesUndeclaredAC(t *testing.T) {
 	before := snapshotTree(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-99", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-99", nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runAttest(undeclared ac) = %d, want 1 (verdict)", got)
 	}
@@ -362,7 +362,7 @@ func TestRunAttest_RefusesAlreadyExists(t *testing.T) {
 	before := snapshotTree(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-1", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-1", nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runAttest(already exists) = %d, want 1 (verdict)", got)
 	}
@@ -391,7 +391,7 @@ func TestRunAttest_ScaffoldRoundTrips(t *testing.T) {
 	ctx := context.Background()
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-2", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-2", nil, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runAttest = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -421,7 +421,7 @@ func TestRunAttest_OperationalOnMalformedTargetSpec(t *testing.T) {
 	before := snapshotTree(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "spec/attest-malformed", "ac-1", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "spec/attest-malformed", "ac-1", nil, &stdout, &stderr)
 	if got != 2 {
 		t.Fatalf("runAttest(malformed target spec) = %d, want 2 (operational, not a verdict)", got)
 	}
@@ -439,7 +439,7 @@ func TestRunAttest_OperationalOnFallbackScanMalformedSpec(t *testing.T) {
 	before := snapshotTree(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "jira:NO-MATCH-ANYWHERE", "ac-1", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "jira:NO-MATCH-ANYWHERE", "ac-1", nil, &stdout, &stderr)
 	if got != 2 {
 		t.Fatalf("runAttest(fallback scan hits malformed spec) = %d, want 2 (operational)", got)
 	}
@@ -457,7 +457,7 @@ func TestRunAttest_OperationalOnScanStrayDir(t *testing.T) {
 	before := snapshotTree(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "jira:NO-MATCH-ANYWHERE", "ac-1", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "jira:NO-MATCH-ANYWHERE", "ac-1", nil, &stdout, &stderr)
 	if got != 2 {
 		t.Fatalf("runAttest(scan hits stray active dir) = %d, want 2 (operational store corruption)", got)
 	}
@@ -474,7 +474,7 @@ func TestRunAttest_RefusesComponentInOwnTerms(t *testing.T) {
 	before := snapshotTree(t, repo.Dir)
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "spec/attest-component", "ac-1", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "spec/attest-component", "ac-1", nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runAttest(component target) = %d, want 1 (verdict)", got)
 	}
@@ -503,7 +503,7 @@ func TestRunAttest_OperationalOnDirectoryAtFoldPath(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-1", &stdout, &stderr)
+	got := runAttest(ctx, repo.Dir, "jira:ATTEST-1", "ac-1", nil, &stdout, &stderr)
 	if got != 2 {
 		t.Fatalf("runAttest(directory at fold path) = %d, want 2 (operational store corruption)", got)
 	}
@@ -521,7 +521,7 @@ func TestClassifyPair(t *testing.T) {
 	repo := buildAttestFixtureRepo(t)
 
 	t.Run("clean pair resolves", func(t *testing.T) {
-		spec, refusal, opErr := classifyPair(repo.Dir, "jira:ATTEST-1", "ac-1")
+		spec, refusal, opErr := classifyPair(repo.Dir, "jira:ATTEST-1", "ac-1", nil)
 		if refusal != "" || opErr != nil {
 			t.Fatalf("refusal = %q, opErr = %v, want neither", refusal, opErr)
 		}
@@ -531,7 +531,7 @@ func TestClassifyPair(t *testing.T) {
 	})
 
 	t.Run("story-ref does not resolve (verdict)", func(t *testing.T) {
-		spec, refusal, opErr := classifyPair(repo.Dir, "jira:NO-SUCH-STORY", "ac-1")
+		spec, refusal, opErr := classifyPair(repo.Dir, "jira:NO-SUCH-STORY", "ac-1", nil)
 		if refusal == "" {
 			t.Fatal("want a non-empty refusal reason (verdict)")
 		}
@@ -544,7 +544,7 @@ func TestClassifyPair(t *testing.T) {
 	})
 
 	t.Run("resolved spec is not class story (verdict)", func(t *testing.T) {
-		spec, refusal, opErr := classifyPair(repo.Dir, "spec/attest-fixture-feature", "ac-1")
+		spec, refusal, opErr := classifyPair(repo.Dir, "spec/attest-fixture-feature", "ac-1", nil)
 		if refusal == "" {
 			t.Fatal("want a non-empty refusal reason")
 		}
@@ -560,7 +560,7 @@ func TestClassifyPair(t *testing.T) {
 	})
 
 	t.Run("ac-id not declared (verdict)", func(t *testing.T) {
-		spec, refusal, opErr := classifyPair(repo.Dir, "jira:ATTEST-1", "ac-99")
+		spec, refusal, opErr := classifyPair(repo.Dir, "jira:ATTEST-1", "ac-99", nil)
 		if refusal == "" {
 			t.Fatal("want a non-empty refusal reason")
 		}
@@ -577,7 +577,7 @@ func TestClassifyPair(t *testing.T) {
 
 	t.Run("target spec present but malformed (operational)", func(t *testing.T) {
 		mrepo := buildAttestMalformedRepo(t)
-		spec, refusal, opErr := classifyPair(mrepo.Dir, "spec/attest-malformed", "ac-1")
+		spec, refusal, opErr := classifyPair(mrepo.Dir, "spec/attest-malformed", "ac-1", nil)
 		if opErr == nil {
 			t.Fatal("want a non-nil operational error for a present-but-undecodable target")
 		}

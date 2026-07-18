@@ -21,6 +21,7 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -38,7 +39,7 @@ import (
 // pending-supersession) are the identical checkSpecStaleCondition/
 // checkPendingSupersessionCondition the story gate calls, so
 // printSpecStalePathIfFailing (closepreflight.go) applies unchanged.
-func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, f forge.Forge, defaultBranchRef, head string, stdout io.Writer) (bool, error) {
+func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, mdl *model.Model, f forge.Forge, defaultBranchRef, head string, stdout io.Writer) (bool, error) {
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		return false, fmt.Errorf("close: --preflight: internal error: resolved spec has an invalid id: %w", err)
@@ -61,7 +62,7 @@ func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.Sp
 		return false, fmt.Errorf("close: --preflight: %w", err)
 	}
 
-	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, f, defaultBranchRef, manifest, stdout)
+	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, f, defaultBranchRef, manifest, mdl, stdout)
 	if err != nil {
 		return false, err
 	}

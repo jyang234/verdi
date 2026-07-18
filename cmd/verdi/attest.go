@@ -21,11 +21,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -46,15 +48,25 @@ func cmdAttest(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "attest:", err)
 		return 2
 	}
+	// The resolved operating model (store.Open's config bottleneck, L-M3):
+	// attest's refusal prose resolves display class words through
+	// Config.Model (L-M13(1)). An unresolvable store is operational (exit
+	// 2), matching every other manifest-loading verb's posture.
+	cfg, err := store.Open(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "attest:", err)
+		return 2
+	}
 
-	return runAttest(context.Background(), root, storyRefArg, acID, stdout, stderr)
+	return runAttest(context.Background(), root, storyRefArg, acID, cfg.Model, stdout, stderr)
 }
 
-// runAttest is the testable core: given an already-resolved store root,
-// run the whole scaffold ritual and return the exit code (co-2: 0 clean /
+// runAttest is the testable core: given an already-resolved store root
+// and the resolved display model (nil-safe: bare-id fallback), run the
+// whole scaffold ritual and return the exit code (co-2: 0 clean /
 // 1 verdict / 2 operational, dc-5's exact mapping).
-func runAttest(ctx context.Context, root, storyRefArg, acID string, stdout, stderr io.Writer) int {
-	spec, refusal, opErr := classifyPair(root, storyRefArg, acID)
+func runAttest(ctx context.Context, root, storyRefArg, acID string, mdl *model.Model, stdout, stderr io.Writer) int {
+	spec, refusal, opErr := classifyPair(root, storyRefArg, acID, mdl)
 	if opErr != nil {
 		fmt.Fprintln(stderr, "attest:", opErr)
 		return 2
@@ -182,8 +194,8 @@ func runAttest(ctx context.Context, root, storyRefArg, acID string, stdout, stde
 // those other verbs find). Reusing that same helper here — rather than
 // duplicating its fallback scan — is the CLAUDE.md "no copy-paste" rule
 // applied within one package.
-func classifyPair(root, storyRefArg, acID string) (spec *artifact.SpecFrontmatter, refusal string, opErr error) {
-	spec, err := resolveBuildTarget(root, storyRefArg)
+func classifyPair(root, storyRefArg, acID string, mdl *model.Model) (spec *artifact.SpecFrontmatter, refusal string, opErr error) {
+	spec, err := resolveBuildTarget(root, storyRefArg, mdl)
 	if err != nil {
 		var oe *storyresolve.OperationalError
 		if errors.As(err, &oe) {
@@ -198,12 +210,27 @@ func classifyPair(root, storyRefArg, acID string) (spec *artifact.SpecFrontmatte
 			// same verdict as any other non-story class, but re-worded in
 			// attest's own terms so the shared resolver's matrix framing does
 			// not leak (dc-5, ADJ-51 finding 3).
-			return nil, fmt.Sprintf("%s resolves to a component spec (no story, no acceptance criteria) — no STORY exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg), nil
+			//
+			// Display resolution (L-M13(1)): the emphatic STORY speaks the
+			// class — resolved and upper-cased. "component" stays bare: it
+			// is a legacy class id no model can rename (vocabulary classes
+			// keys ∈ declared classes ∪ {spike}, L-M13a(5)), and "(no
+			// story, no acceptance criteria)" names the story:/
+			// acceptance_criteria: FRONTMATTER FIELDS — identity.
+			return nil, fmt.Sprintf("%s resolves to a component spec (no story, no acceptance criteria) — no %s exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg, strings.ToUpper(mdl.DisplayClass("story"))), nil
 		}
 		return nil, err.Error(), nil
 	}
 	if spec.Class != artifact.ClassStory {
-		return nil, fmt.Sprintf("%s resolves to a %s-class spec, not a story — no STORY exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg, spec.Class), nil
+		// Display resolution (L-M13(1)): both class words resolve, with
+		// model.Article agreeing on each; the emphatic STORY is the same
+		// resolved word upper-cased. The class COMPARISON above stays on
+		// the bare id.
+		classWord := mdl.DisplayClass(string(spec.Class))
+		storyWord := mdl.DisplayClass("story")
+		return nil, fmt.Sprintf("%s resolves to %s %s-class spec, not %s %s — no %s exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg,
+			model.Article(classWord), classWord,
+			model.Article(storyWord), storyWord, strings.ToUpper(storyWord)), nil
 	}
 	for _, ac := range spec.AcceptanceCriteria {
 		if ac.ID == acID {

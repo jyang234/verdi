@@ -8,6 +8,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // stubMatchFeatureSpecMD is a minimal accepted feature carrying one stub
@@ -189,7 +190,7 @@ func TestComputeStubMatch(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			matched, reason := computeStubMatch(repo.Dir, tc.story)
+			matched, reason := computeStubMatch(repo.Dir, tc.story, nil)
 			if matched != tc.wantMatched {
 				t.Fatalf("computeStubMatch() matched = %v, want %v (reason=%q)", matched, tc.wantMatched, reason)
 			}
@@ -207,12 +208,50 @@ func TestComputeStubMatch(t *testing.T) {
 // artifact.DecodeDecisionConflict), not a fabricated verdi.deviation/v1
 // stand-in. An undispositioned judged finding disqualifies the match; a
 // fully-dispositioned one (or its absence entirely) does not.
+// TestComputeStubMatch_RenamedVocabulary proves the stub-match REASON
+// strings — printed verbatim inside accept's "not stub-matched (%s)"
+// verdict line — resolve class words through the model, with articles
+// agreeing on a vowel-initial rename (model.Article;
+// judged-cli-refusal-prose-class-state-words-still-bare and
+// judged-article-agreement-approximation-undisclosed).
+func TestComputeStubMatch_RenamedVocabulary(t *testing.T) {
+	mdl := &model.Model{
+		Schema: "verdi.model/v1",
+		Vocabulary: model.Vocabulary{
+			Classes: map[string]string{"story": "Workstream", "spike": "Investigation"},
+		},
+	}
+
+	t.Run("spike reason speaks the renamed word with an agreeing article", func(t *testing.T) {
+		s := draftStory("Stale Decline", nil, nil)
+		s.Spike = true
+		matched, reason := computeStubMatch(t.TempDir(), s, mdl)
+		if matched {
+			t.Fatal("computeStubMatch(spike) = true, want false")
+		}
+		want := "Investigation: stub-matching is not applicable (an Investigation carries no implements edges, 02 §Kind registry)"
+		if reason != want {
+			t.Fatalf("reason = %q, want %q", reason, want)
+		}
+	})
+
+	t.Run("malformed-story reason speaks the renamed word", func(t *testing.T) {
+		matched, reason := computeStubMatch(t.TempDir(), draftStory("Stale Decline", nil, nil), mdl)
+		if matched {
+			t.Fatal("computeStubMatch(no implements) = true, want false")
+		}
+		if want := "no implements edges (malformed Workstream)"; reason != want {
+			t.Fatalf("reason = %q, want %q", reason, want)
+		}
+	})
+}
+
 func TestComputeStubMatch_UndispositionedJudgedFinding(t *testing.T) {
 	repo := buildStubMatchRepo(t)
 	story := draftStory("Stale Decline", implementsAC1(), nil)
 
 	t.Run("absent report: vacuously satisfied", func(t *testing.T) {
-		matched, reason := computeStubMatch(repo.Dir, story)
+		matched, reason := computeStubMatch(repo.Dir, story, nil)
 		if !matched {
 			t.Fatalf("computeStubMatch() = false (%s), want true (no report at all)", reason)
 		}
@@ -237,7 +276,7 @@ digest: sha256:%s
 		if err := os.WriteFile(reportPath, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		matched, reason := computeStubMatch(repo.Dir, story)
+		matched, reason := computeStubMatch(repo.Dir, story, nil)
 		if matched {
 			t.Fatal("computeStubMatch() = true, want false (undispositioned judged finding)")
 		}
@@ -259,7 +298,7 @@ digest: sha256:%s
 		if err := os.WriteFile(reportPath, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		matched, reason := computeStubMatch(repo.Dir, story)
+		matched, reason := computeStubMatch(repo.Dir, story, nil)
 		if !matched {
 			t.Fatalf("computeStubMatch() = false (%s), want true (fully dispositioned)", reason)
 		}

@@ -42,7 +42,7 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -95,7 +95,7 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -147,7 +147,7 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -207,7 +207,7 @@ func TestRunPreflight_FeatureScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -255,7 +255,7 @@ func TestRunPreflight_FeatureScope_OutcomeFloorAttestation_UsesFeatureSlug(t *te
 	ctx := context.Background()
 
 	var stdout, stderr bytes.Buffer
-	rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, forgefake.New(), true, &stdout, &stderr)
+	rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
 	if rc != 1 {
 		t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 	}
@@ -291,7 +291,7 @@ func TestRunPreflight_FeatureScope_ReadyThenClose(t *testing.T) {
 
 	before := snapshotRepo(t, repo.Dir)
 	var pstdout, pstderr bytes.Buffer
-	rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+	rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 	if rc != 0 {
 		t.Fatalf("runPreflight(feature, ready) = %d, want 0; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 	}

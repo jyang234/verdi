@@ -21,6 +21,7 @@ import (
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -35,8 +36,8 @@ import (
 // pass (constitution 2/10: silence is never a pass) — rather than being
 // read as "no pending MRs exist". Only a story that implements no feature at all
 // (nothing to prove) passes that condition outright with a nil forge.
-func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, head string, stdout io.Writer) (bool, error) {
-	cond1, err := checkClosureEligible(ctx, root, spec, head)
+func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (bool, error) {
+	cond1, err := checkClosureEligible(ctx, root, spec, head, mdl)
 	if err != nil {
 		return false, err
 	}
@@ -75,8 +76,12 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 // the same story-level fold checkNoACViolated (gate.go) uses, checked for
 // full eligibility (every AC evidenced or waived) rather than merely
 // "not violated".
-func checkClosureEligible(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string) (gateCondition, error) {
-	name := "1. story eligible (every AC evidenced or waived, authoritative evidence)"
+func checkClosureEligible(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string, mdl *model.Model) (gateCondition, error) {
+	// The condition's class word is display prose and resolves (L-M13(1),
+	// nil-safe bare-id fallback); "eligible" is the fold's verdict
+	// vocabulary, not a lifecycle state — bare.
+	storyWord := mdl.DisplayClass("story")
+	name := "1. " + storyWord + " eligible (every AC evidenced or waived, authoritative evidence)"
 
 	// Preview stays false — co-1: the closure gate folds ONLY source: ci
 	// evidence, never the --preview escape hatch.
@@ -87,7 +92,7 @@ func checkClosureEligible(ctx context.Context, root string, spec *artifact.SpecF
 	if result.Eligible {
 		return gateCondition{Name: name, OK: true}, nil
 	}
-	return gateCondition{Name: name, Reason: "story is not eligible (not every AC is evidenced or waived)"}, nil
+	return gateCondition{Name: name, Reason: storyWord + " is not eligible (not every AC is evidenced or waived)"}, nil
 }
 
 // checkSpecStaleCondition is the closure gate's spec-stale condition
