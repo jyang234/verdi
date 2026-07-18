@@ -4,7 +4,7 @@ kind: spec
 title: "Model Digest"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-33
 problem: { text: "no artifact records which operating model shaped it: Provenance has no model field, the unified stamp seam's StampProvenance (built in the stamp-seam pre-work, L-M4) still takes a digest every caller passes as empty, and model.Digest() (live since model-schema) has no consumer — so once model.yaml becomes editable, an archived artifact's interpretation under the model it lived in is unrecoverable", anchor: problem }
 outcome: { text: "Provenance gains an optional model digest field; every mint routed through the stamp seam passes the resolved model's canonical-JSON digest, deterministically; artifacts stamped before the field existed still decode (schema-additive), committed fixtures stay byte-stable, and a newly produced artifact's stamp always names the exact model that governed its production", anchor: outcome }
