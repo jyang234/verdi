@@ -165,3 +165,87 @@ func TestCanonicalDisplayLayerEmpty(t *testing.T) {
 		}
 	}
 }
+
+// TestDisplayClassPlural covers the display layer's best-effort plural
+// (the vocabulary-prose closure): the no-rename fallback MUST reproduce
+// today's hand-written plurals byte-for-byte (the parity floor's plural
+// half — "stories", "spikes", "features"), and renamed words get the
+// regular English form.
+func TestDisplayClassPlural(t *testing.T) {
+	renamed := &Model{Vocabulary: Vocabulary{Classes: map[string]string{
+		"story":   "Change Request",
+		"spike":   "Deep Dive",
+		"feature": "Epic",
+	}}}
+	displayOnly := &Model{Classes: map[string]Class{"story": {Display: "Story"}}}
+	tests := []struct {
+		name string
+		m    *Model
+		id   string
+		want string
+	}{
+		{"no-rename story keeps today's plural", &Model{}, "story", "stories"},
+		{"no-rename spike keeps today's plural", &Model{}, "spike", "spikes"},
+		{"no-rename feature keeps today's plural", &Model{}, "feature", "features"},
+		{"vocabulary rename pluralizes the renamed word", renamed, "story", "Change Requests"},
+		{"single-word rename", renamed, "feature", "Epics"},
+		{"multi-word rename", renamed, "spike", "Deep Dives"},
+		{"Class.Display consonant-Y pluralizes as -ies", displayOnly, "story", "Stories"},
+		{"unknown id pluralizes its own fallback", &Model{}, "box", "boxes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.m.DisplayClassPlural(tt.id); got != tt.want {
+				t.Fatalf("DisplayClassPlural(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+
+	var nilModel *Model
+	if got := nilModel.DisplayClassPlural("story"); got != "stories" {
+		t.Fatalf("nil.DisplayClassPlural(story) = %q, want the id's own plural (nil-receiver fallback)", got)
+	}
+}
+
+// TestPluralizeDisplay pins the helper's own rules, negative edges
+// included: empty stays empty (never a bare "s"), vowel-y words never
+// get -ies, sibilant endings get -es.
+func TestPluralizeDisplay(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"", ""},
+		{"story", "stories"},
+		{"Story", "Stories"},
+		{"day", "days"},
+		{"key", "keys"},
+		{"y", "ys"}, // a single "y" has no preceding consonant to trigger -ies
+		{"epic", "epics"},
+		{"process", "processes"},
+		{"fix", "fixes"},
+		{"blitz", "blitzes"},
+		{"branch", "branches"},
+		{"wish", "wishes"},
+		{"path", "paths"}, // plain -th is not a sibilant ending
+	}
+	for _, tt := range tests {
+		if got := pluralizeDisplay(tt.in); got != tt.want {
+			t.Fatalf("pluralizeDisplay(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestCapitalize covers the label-position helper: first rune only,
+// unicode-aware, and safe on empty input.
+func TestCapitalize(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"", ""},
+		{"story", "Story"},
+		{"Story", "Story"},
+		{"change request", "Change request"},
+		{"épic", "Épic"},
+	}
+	for _, tt := range tests {
+		if got := Capitalize(tt.in); got != tt.want {
+			t.Fatalf("Capitalize(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

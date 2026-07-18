@@ -21,7 +21,11 @@
 // per-class template filenames excepted.
 package model
 
-import "github.com/jyang234/verdi/internal/canonjson"
+import (
+	"unicode"
+
+	"github.com/jyang234/verdi/internal/canonjson"
+)
 
 // Model is the top-level verdi.model/v1 document (guide §5.2, table
 // C-2). Schema, Classes, and Lifecycle are always meaningfully present
@@ -157,6 +161,25 @@ func (m *Model) DisplayVerb(id string) string {
 // DisplayState/DisplayVerb established, one level deeper because a class
 // carries two independent sources of a display word instead of one.
 // Nil-receiver-safe exactly like both of them.
+//
+// ENUMERATION RULE (the vocabulary-prose category closure,
+// spec/vocabulary-surfaces Outcome: "a rename can never leak partially"):
+// every place a surface prints a class word — feature/story, plus the
+// spike variant marker — as DISPLAY PROSE (card and stub labels, buttons,
+// guide and dialog copy, axis titles and nav labels, metadata-row labels,
+// MCP tool descriptions) resolves through this chain, or through
+// DisplayClassPlural/Capitalize beside it. The IDENTITY layer never
+// resolves: ids in refs, URLs, branch names, JSON/YAML schema fields and
+// tool-argument names, enum VALUES (annotation types on the wire, fold
+// verdict keys like story.violated/story.eligible), CSS classes, data-*
+// attributes, and testids stay bare. "spike" is a variant marker, not a
+// model class: it resolves through Vocabulary.Classes exactly like a
+// class word and otherwise falls back to itself (it has no Class.Display
+// to fall through to) — the pseudo-class treatment
+// workbench.applyModelVocabulary established. New display prose that
+// speaks a class word obligates a classification against this rule at
+// the prose site (the L-M8 posture: taxonomy decided and documented,
+// never implicit).
 func (m *Model) DisplayClass(id string) string {
 	if m == nil {
 		return id
@@ -168,6 +191,71 @@ func (m *Model) DisplayClass(id string) string {
 		return c.Display
 	}
 	return id
+}
+
+// DisplayClassPlural returns DisplayClass(id) pluralized, for display
+// prose that speaks of the class in the plural ("Implementing stories",
+// "a feature never lists its stories", "claimed by 2 spikes").
+// Best-effort English pluralization — see pluralizeDisplay — chosen so
+// the no-rename fallback reproduces today's hand-written plurals exactly
+// ("story" -> "stories", "spike" -> "spikes") and a renamed word gets the
+// common regular form ("Change Request" -> "Change Requests"). Display
+// only, exactly like DisplayClass; nil-receiver-safe.
+func (m *Model) DisplayClassPlural(id string) string {
+	return pluralizeDisplay(m.DisplayClass(id))
+}
+
+// pluralizeDisplay is the display layer's best-effort English plural:
+// consonant-"y" flips to "ies" ("story" -> "stories"), a sibilant ending
+// (s/x/z/ch/sh) appends "es", anything else appends "s". Irregular
+// plurals in a team's renamed vocabulary get the regular form — a
+// disclosed display approximation, never worth a grammar engine (the
+// smallest reversible option; the identity layer never pluralizes at
+// all).
+func pluralizeDisplay(word string) string {
+	if word == "" {
+		return ""
+	}
+	r := []rune(word)
+	last := r[len(r)-1]
+	if (last == 'y' || last == 'Y') && len(r) >= 2 && !isDisplayVowel(r[len(r)-2]) {
+		return string(r[:len(r)-1]) + "ies"
+	}
+	switch last {
+	case 's', 'S', 'x', 'X', 'z', 'Z':
+		return word + "es"
+	case 'h', 'H':
+		if len(r) >= 2 {
+			switch r[len(r)-2] {
+			case 'c', 'C', 's', 'S':
+				return word + "es"
+			}
+		}
+	}
+	return word + "s"
+}
+
+func isDisplayVowel(r rune) bool {
+	switch r {
+	case 'a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U':
+		return true
+	}
+	return false
+}
+
+// Capitalize returns word with its first rune upper-cased — the one
+// display helper for label positions that capitalize the class word
+// ("Story" as a metadata-row label, "Stories" as a section heading), kept
+// beside the display lookups so every surface capitalizes the same way
+// instead of hand-rolling variants. Identity ids are never capitalized —
+// this is display plumbing only.
+func Capitalize(word string) string {
+	if word == "" {
+		return ""
+	}
+	r := []rune(word)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }
 
 // Digest returns the resolved model's content-address: canonical-JSON
