@@ -11,8 +11,16 @@ package artifact
 // package's own TestYAMLImportSeam module-wide scan convention.
 
 import (
+	"fmt"
+	"go/ast"
+	"go/build"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -173,23 +181,63 @@ func TestProvenanceMintSites_ExactlyFour(t *testing.T) {
 	}
 }
 
-// TestNoStrayProvenanceModelAssignment is ac-2's "no bypass" half, scoped
-// to production source (excluding _test.go — a test file legitimately
-// building a *Provenance by hand for fixture/decode purposes is a
-// different concern than a production mint site bypassing the seam;
-// internal/store/open_test.go, for one example, contains the literal text
-// ".Model = " only inside t.Fatal prose strings, not a real assignment,
-// which is exactly the kind of false positive scoping to production files
-// avoids): across every production .go file in the module except
-// internal/artifact/stamp.go itself, no file assigns to a .Model field —
-// the exact mutation StampProvenance performs. A second assignment site
-// anywhere else in production code would be a silent bypass of the seam.
+// modelAssignRe matches a source-level assignment whose target is a field
+// named Model — `.Model =`, with `[^=]` after it to exclude the `==`/`>=`/`<=`
+// comparison forms. It is ONLY a pre-filter over production files: a real
+// assignment to Provenance.Model necessarily contains this text in
+// gofmt-clean source (fmt-check enforces the single-space spacing), so a
+// package with no match cannot host a bypass and is skipped unread by the
+// type checker below. The actual decision is made by go/types, never by this
+// regexp — the regexp exists to keep the (comparatively slow) type-checking
+// scoped to the handful of packages that could possibly matter.
+var modelAssignRe = regexp.MustCompile(`\.Model\s*=[^=]`)
+
+// TestNoStrayProvenanceModelAssignment is ac-2's "no bypass" half. It proves
+// that across all PRODUCTION source (excluding _test.go and
+// internal/artifact/stamp.go itself), no file assigns to the Model field OF
+// AN artifact.Provenance VALUE — the exact mutation StampProvenance performs
+// — so StampProvenance stays the single writer of that field. A second such
+// assignment anywhere in production would be a silent bypass of the seam.
+//
+// Mechanism (spec/model-digest's remediation dispatch: resolve the
+// assignee's TYPE, do not pattern-match the field name). A coarse `.Model =`
+// text scan — the shape this test originally shipped — is provably wrong: the
+// vocabulary-surfaces work legitimately assigns *model.Model to unrelated
+// Deps/HomeDeps.Model fields (internal/workbench/handler.go, directory.go),
+// which a textual scan cannot tell apart from a Provenance.Model bypass and
+// so reddened at the merged head. This version instead parses each candidate
+// package with go/parser and type-checks it with go/types, resolving each
+// `X.Model = …` assignment's RECEIVER type via types.Info.Selections; it
+// trips ONLY when that receiver is artifact.Provenance (value or pointer).
+// The stdlib source importer (importer.ForCompiler(fset, "source", nil))
+// resolves this module's own internal/... packages from source — verified
+// feasible against internal/workbench, the largest importer of this package
+// — so no build-cache export data or golang.org/x/tools dependency is
+// needed. This mirrors the repo's existing go/ast source-witness precedent
+// (internal/specalign/gatecache_test.go, internal/showcasealign) and extends
+// it with go/types receiver resolution.
+//
+// Limits, per the dispatch's "document the mechanism's limits":
+//   - Only DIRECT field assignments are seen. A reflection-based write
+//     (reflect.ValueOf(&p).Elem().FieldByName("Model").SetString(…)) carries
+//     no `.Model =` text and is not policed — exactly as the spec's own
+//     textual source-witness convention does not police it either.
+//   - A candidate package that fails to type-check is a HARD failure here,
+//     never a silent pass (CLAUDE.md: silence is never a pass): an unresolved
+//     receiver type cannot be cleared to "not a Provenance".
+//   - The four behavioral mint-path tests (report_test.go et al.)
+//     independently prove each real site routes its digest through the seam;
+//     this static witness is the no-undiscovered-FIFTH-site guard, not the
+//     sole line of defense.
 func TestNoStrayProvenanceModelAssignment(t *testing.T) {
 	root := moduleRoot(t)
-	const pattern = ".Model = "
 	const stampFile = "internal/artifact/stamp.go"
+	const artifactPkgPath = "github.com/jyang234/verdi/internal/artifact"
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	// 1. Pre-filter to the production package directories that contain at
+	//    least one `.Model =` assignment (see modelAssignRe).
+	candidateDirs := map[string]bool{}
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -203,26 +251,137 @@ func TestNoStrayProvenanceModelAssignment(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		rel, rerr := filepath.Rel(root, path)
-		if rerr != nil {
-			return rerr
-		}
-		rel = filepath.ToSlash(rel)
-		if rel == stampFile {
-			return nil
-		}
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return rerr
 		}
-		if strings.Contains(string(data), pattern) {
-			t.Errorf("%s assigns to a .Model field outside %s — model-digest ac-2 requires StampProvenance to be the only writer of Provenance.Model", rel, stampFile)
+		if modelAssignRe.Match(data) {
+			candidateDirs[filepath.Dir(path)] = true
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("walking module: %v", err)
 	}
+
+	dirs := make([]string, 0, len(candidateDirs))
+	for d := range candidateDirs {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+
+	// 2. Type-check each candidate package once, sharing a single source
+	//    importer so common dependencies are resolved (and cached) once.
+	fset := token.NewFileSet()
+	imp := importer.ForCompiler(fset, "source", nil)
+
+	var violations []string
+	for _, dir := range dirs {
+		files := parseProductionPackage(t, fset, dir)
+		if len(files) == 0 {
+			continue
+		}
+		relDir, rerr := filepath.Rel(root, dir)
+		if rerr != nil {
+			t.Fatalf("relpath %s: %v", dir, rerr)
+		}
+		importPath := "github.com/jyang234/verdi/" + filepath.ToSlash(relDir)
+
+		info := &types.Info{Selections: map[*ast.SelectorExpr]*types.Selection{}}
+		var typeErrs []string
+		conf := types.Config{
+			Importer: imp,
+			Error:    func(e error) { typeErrs = append(typeErrs, e.Error()) },
+		}
+		_, _ = conf.Check(importPath, fset, files, info)
+		if len(typeErrs) > 0 {
+			t.Fatalf("type-checking %s (a package carrying a .Model assignment) failed — the witness cannot resolve receiver types there and must not silently pass:\n%s", relDir, strings.Join(typeErrs, "\n"))
+		}
+
+		for _, f := range files {
+			ast.Inspect(f, func(n ast.Node) bool {
+				assign, ok := n.(*ast.AssignStmt)
+				if !ok {
+					return true
+				}
+				for _, lhs := range assign.Lhs {
+					sel, ok := lhs.(*ast.SelectorExpr)
+					if !ok || sel.Sel.Name != "Model" {
+						continue
+					}
+					selection := info.Selections[sel]
+					if selection == nil || !isArtifactProvenance(selection.Recv(), artifactPkgPath) {
+						continue
+					}
+					pos := fset.Position(sel.Pos())
+					rel, rerr := filepath.Rel(root, pos.Filename)
+					if rerr != nil {
+						rel = pos.Filename
+					}
+					rel = filepath.ToSlash(rel)
+					if rel == stampFile {
+						continue
+					}
+					violations = append(violations, fmt.Sprintf("%s:%d", rel, pos.Line))
+				}
+				return true
+			})
+		}
+	}
+
+	sort.Strings(violations)
+	for _, v := range violations {
+		t.Errorf("%s assigns to artifact.Provenance.Model outside %s — model-digest ac-2 requires StampProvenance to be the only writer of Provenance.Model", v, stampFile)
+	}
+}
+
+// parseProductionPackage parses every build-eligible, non-test .go file in
+// dir. build.Default.MatchFile honors build constraints so a platform- or
+// tag-excluded file never derails type-checking; every file is added to the
+// shared fset so positions and the importer line up.
+func parseProductionPackage(t *testing.T, fset *token.FileSet, dir string) []*ast.File {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading dir %s: %v", dir, err)
+	}
+	var files []*ast.File
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		ok, merr := build.Default.MatchFile(dir, e.Name())
+		if merr != nil {
+			t.Fatalf("build-constraint check %s/%s: %v", dir, e.Name(), merr)
+		}
+		if !ok {
+			continue
+		}
+		f, perr := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, 0)
+		if perr != nil {
+			t.Fatalf("parsing %s/%s: %v", dir, e.Name(), perr)
+		}
+		files = append(files, f)
+	}
+	return files
+}
+
+// isArtifactProvenance reports whether t is artifact.Provenance or a pointer
+// to it — the receiver type an assignment must have to be a genuine bypass of
+// StampProvenance. Any other .Model field owner (workbench.Deps,
+// store.Config, *model.Model, …) returns false.
+func isArtifactProvenance(t types.Type, pkgPath string) bool {
+	if t == nil {
+		return false
+	}
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = ptr.Elem()
+	}
+	named, ok := t.(*types.Named)
+	if !ok {
+		return false
+	}
+	obj := named.Obj()
+	return obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == pkgPath && obj.Name() == "Provenance"
 }
 
 // TestAttestGoMintsNoProvenance documents and proves why
