@@ -120,6 +120,9 @@ func renderDecisionFrontmatter(b *strings.Builder, fm *artifact.DecisionConflict
 		if fm.Provenance.Integrity != "" {
 			fmt.Fprintf(b, ", integrity: %s", fm.Provenance.Integrity)
 		}
+		if fm.Provenance.Model != "" {
+			fmt.Fprintf(b, ", model: %s", fm.Provenance.Model)
+		}
 		b.WriteString(" }\n")
 	}
 }

@@ -44,6 +44,16 @@ type Input struct {
 	// carries. Optional: when empty, Run accepts BoardKey itself if (and
 	// only if) it already has scheme:key shape (see package doc).
 	StoryRef string
+	// ModelDigest is the resolved operating model's canonical-JSON sha256
+	// digest (model.Model.Digest(), spec/model-digest ledger L-M5) — the
+	// caller (cmd/verdi/board.go or internal/workbench's boardCommitHandler)
+	// resolves it once via store.Open(Root).Model.Digest() ahead of calling
+	// Run, since this package never imports internal/model itself (that
+	// package already imports internal/artifact, so the reverse import
+	// would cycle). Threaded straight to freezeBoard's artifact.
+	// StampProvenance call; empty reaches StampProvenance's own panic, the
+	// same fail-closed posture Frozen's at/commit already have.
+	ModelDigest string
 }
 
 // Result is what the ritual produced.
@@ -128,7 +138,7 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 		return nil, fmt.Errorf("commitdesign: internal error: scaffold failed self-validation: %w", decErr)
 	}
 
-	frozenBoard, err := freezeBoard(board, relBoardPath, preCommit, at)
+	frozenBoard, err := freezeBoard(board, relBoardPath, preCommit, at, in.ModelDigest)
 	if err != nil {
 		return nil, fmt.Errorf("commitdesign: %w", err)
 	}
@@ -224,8 +234,10 @@ type boardContent struct {
 // history"), a Frozen stamp, and Provenance with a digest recomputable
 // from the pins (each already a pinned ref) plus the mutable board file
 // itself, named as a path@commit input (02 §Generated artifacts and
-// digests).
-func freezeBoard(board *artifact.Board, boardPath, commit, at string) (*artifact.Board, error) {
+// digests). modelDigest is stamped via artifact.StampProvenance
+// (spec/model-digest ac-2: never set inline in the Provenance{...}
+// literal below, the same way Digest is).
+func freezeBoard(board *artifact.Board, boardPath, commit, at, modelDigest string) (*artifact.Board, error) {
 	content := boardContent{Pins: board.Pins, Stickies: board.Stickies, Yarn: board.Yarn}
 	digest, err := canonjson.Digest(content)
 	if err != nil {
@@ -245,17 +257,19 @@ func freezeBoard(board *artifact.Board, boardPath, commit, at string) (*artifact
 	inputs = append(inputs, pinRefs...)
 
 	frozen := artifact.NewFrozen(at, commit)
+	prov := &artifact.Provenance{
+		Generator: "commit-to-design",
+		Version:   "v0",
+		Inputs:    inputs,
+		Digest:    digest,
+	}
+	artifact.StampProvenance(prov, modelDigest)
 	return &artifact.Board{
-		Schema:   "verdi.board/v1",
-		Pins:     board.Pins,
-		Stickies: board.Stickies,
-		Yarn:     board.Yarn,
-		Frozen:   &frozen,
-		Provenance: &artifact.Provenance{
-			Generator: "commit-to-design",
-			Version:   "v0",
-			Inputs:    inputs,
-			Digest:    digest,
-		},
+		Schema:     "verdi.board/v1",
+		Pins:       board.Pins,
+		Stickies:   board.Stickies,
+		Yarn:       board.Yarn,
+		Frozen:     &frozen,
+		Provenance: prov,
 	}, nil
 }

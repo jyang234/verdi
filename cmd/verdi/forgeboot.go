@@ -34,6 +34,29 @@ func loadManifest(root string) (*store.Manifest, error) {
 	return st.Manifest, nil
 }
 
+// resolveModelDigest resolves root's operating model digest
+// (model.Model.Digest(), spec/model-digest ledger L-M5) via store.Open —
+// Config.Model is never nil (model-schema's own guarantee), so an absent
+// .verdi/model.yaml resolves to the embedded canonical exactly as it does
+// everywhere else. This is the shared path every verb that threads a
+// ModelDigest into an align.Input/DecisionConflictInput/DiagramSweepInput
+// or a commitdesign.Input uses when it doesn't already hold a
+// *store.Config for some other reason (cmd/verdi/align.go inlines the
+// equivalent two calls itself, since it also needs the rest of the
+// resolved Config for its manifest-derived deps; board.go, close.go, and
+// closefeature.go call this instead).
+func resolveModelDigest(root string) (string, error) {
+	st, err := store.Open(root)
+	if err != nil {
+		return "", err
+	}
+	digest, err := st.Model.Digest()
+	if err != nil {
+		return "", fmt.Errorf("computing model digest: %w", err)
+	}
+	return digest, nil
+}
+
 // resolveRefCommit determines the current ref and commit sync operates
 // on. Ref resolution prefers forge-provided CI environment variables
 // (GitLab's CI_COMMIT_REF_NAME, GitHub's GITHUB_HEAD_REF for a PR run or

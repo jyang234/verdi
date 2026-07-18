@@ -51,7 +51,7 @@ func TestRunDiagramSweepAlign_WritesReport(t *testing.T) {
 	repo := buildDiagramSweepRepo(t)
 
 	var stdout, stderr bytes.Buffer
-	got := runDiagramSweepAlign(context.Background(), repo.Dir, "diagram/loansvc-future", alignDeps{}, &stdout, &stderr)
+	got := runDiagramSweepAlign(context.Background(), repo.Dir, "diagram/loansvc-future", alignDeps{ModelDigest: testResolveModelDigest(t, repo.Dir)}, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDiagramSweepAlign = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -121,7 +121,7 @@ func TestRunDiagramSweepAlign_ByteIdentity(t *testing.T) {
 	beforeSHA := sha256.Sum256(before)
 
 	var stdout, stderr bytes.Buffer
-	got := runDiagramSweepAlign(context.Background(), repo.Dir, "diagram/loansvc-future", alignDeps{}, &stdout, &stderr)
+	got := runDiagramSweepAlign(context.Background(), repo.Dir, "diagram/loansvc-future", alignDeps{ModelDigest: testResolveModelDigest(t, repo.Dir)}, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDiagramSweepAlign = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}

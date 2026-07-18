@@ -60,6 +60,7 @@ func TestGenerate_DiagramFindingDispositionSurvivesRegeneration(t *testing.T) {
 		Root: repo.Dir, Runner: seedComputeRunner(svcDir), Spec: spec, Covers: repo.Head,
 		JudgeCmd: []string{writeFakeJudge(t, fakeJudgeOKScript)}, JudgeTimeout: time.Second,
 		ExistingFindings: dispositioned,
+		ModelDigest:      testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("Generate (second): %v", err)

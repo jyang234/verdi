@@ -98,6 +98,11 @@ func TestProvenance_Validate_Happy(t *testing.T) {
 		{Generator: "verdi-close", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64},
 		{Generator: "align-judge", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Integrity: "sha256:" + hex64},
 		{Generator: "align", Version: "v0", Inputs: []string{".verdi/specs/active/foo/spec.md@3e91ab2"}, Digest: "sha256:" + hex64, Integrity: "sha256:" + hex64},
+		// Model present (spec/model-digest ac-1): same sha256:<64 hex> shape
+		// Digest/Integrity already validate against, no new vocabulary.
+		{Generator: "align", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64, Model: "sha256:" + hex64},
+		// Model absent (omitempty): a pre-model-digest artifact stays valid.
+		{Generator: "align", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64, Model: ""},
 	}
 	for _, p := range cases {
 		if err := p.Validate(); err != nil {
@@ -108,12 +113,14 @@ func TestProvenance_Validate_Happy(t *testing.T) {
 
 func TestProvenance_Validate_Negative(t *testing.T) {
 	cases := []Provenance{
-		{Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64},            // missing generator
-		{Generator: "g", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64},           // missing version
-		{Generator: "g", Version: "v0", Digest: "sha256:" + hex64},                                  // missing inputs
-		{Generator: "g", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}},                       // neither digest nor integrity
-		{Generator: "g", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "not-sha256"}, // malformed digest
-		{Generator: "g", Version: "v0", Inputs: []string{"nonsense"}, Digest: "sha256:" + hex64},    // malformed input
+		{Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64},                                           // missing generator
+		{Generator: "g", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64},                                          // missing version
+		{Generator: "g", Version: "v0", Digest: "sha256:" + hex64},                                                                 // missing inputs
+		{Generator: "g", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}},                                                      // neither digest nor integrity
+		{Generator: "g", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "not-sha256"},                                // malformed digest
+		{Generator: "g", Version: "v0", Inputs: []string{"nonsense"}, Digest: "sha256:" + hex64},                                   // malformed input
+		{Generator: "g", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64, Model: "not-sha256"},      // malformed model digest
+		{Generator: "g", Version: "v0", Inputs: []string{"spec/foo@3e91ab2"}, Digest: "sha256:" + hex64, Model: "sha256:tooshort"}, // malformed model digest, wrong length
 	}
 	for i, p := range cases {
 		if err := p.Validate(); err == nil {

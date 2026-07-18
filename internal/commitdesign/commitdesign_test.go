@@ -11,7 +11,87 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 )
+
+// fixtureModelYAML is internal/model/testdata/vocab-rename.yaml's own
+// content verbatim (already proven frontier-legal by that package's own
+// tests): structurally identical to the embedded canonical model, but with
+// vocabulary renames and different per-class template filenames — the
+// frontier's two named exceptions — so its Digest() differs from
+// model.Canonical().Digest() while still resolving cleanly through
+// store.Open. Used to prove (spec/model-digest ac-1) that a frozen board's
+// stamped model digest tracks the ACTUAL resolved model, not a constant
+// that happens to match the one model every other test fixture uses.
+const fixtureModelYAML = `schema: verdi.model/v1
+
+classes:
+  feature:
+    display: Feature
+    decomposes: stubs
+    template: custom-feature.md
+  story:
+    display: Story
+    parent: feature
+    template: custom-story.md
+
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }
+  story:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }
+
+vocabulary:
+  verbs:
+    accept: "Sign off"
+  states:
+    accepted-pending-build: "Ready to build"
+  classes:
+    feature: "Initiative"
+`
+
+// testModelDigest resolves root's operating model digest exactly the way
+// Run's real callers (cmd/verdi/board.go, internal/workbench's
+// boardCommitHandler) do — via store.Open — so Input.ModelDigest carries a
+// real, StampProvenance-accepted value in test.
+func testModelDigest(t *testing.T, root string) string {
+	t.Helper()
+	cfg, err := store.Open(root)
+	if err != nil {
+		t.Fatalf("store.Open(%s): %v", root, err)
+	}
+	digest, err := cfg.Model.Digest()
+	if err != nil {
+		t.Fatalf("Model.Digest(): %v", err)
+	}
+	return digest
+}
 
 const testManifestYAML = `schema: verdi.layout/v1
 forge: gitlab
@@ -139,7 +219,7 @@ func TestRun_Happy(t *testing.T) {
 	seedBoard(t, repo)
 	ctx := context.Background()
 
-	res, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "my-new-feature", StoryRef: "jira:LOAN-1482"})
+	res, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "my-new-feature", StoryRef: "jira:LOAN-1482", ModelDigest: testModelDigest(t, repo.Dir)})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -200,6 +280,12 @@ func TestRun_Happy(t *testing.T) {
 	if fb.Provenance.Generator != "commit-to-design" {
 		t.Errorf("Provenance.Generator = %q", fb.Provenance.Generator)
 	}
+	// spec/model-digest ac-1: the frozen board's provenance.model equals
+	// the resolved model's own Digest() (canonical here — no model.yaml).
+	wantDigest := testModelDigest(t, repo.Dir)
+	if fb.Provenance.Model != wantDigest {
+		t.Errorf("Provenance.Model = %q, want %q (the resolved canonical model's digest)", fb.Provenance.Model, wantDigest)
+	}
 	if len(fb.Stickies) != 2 {
 		t.Errorf("frozen board stickies = %+v, want 2", fb.Stickies)
 	}
@@ -229,7 +315,7 @@ func TestRun_Happy_StoryRefDefaultsFromBoardKey(t *testing.T) {
 	writeBoard(t, repo.Dir, "jira:LOAN-2000", &artifact.Board{Schema: "verdi.board/v1"})
 	ctx := context.Background()
 
-	res, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "jira:LOAN-2000", SpecName: "no-story-flag"})
+	res, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "jira:LOAN-2000", SpecName: "no-story-flag", ModelDigest: testModelDigest(t, repo.Dir)})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -283,11 +369,109 @@ func TestRun_Negative(t *testing.T) {
 	t.Run("spec already exists", func(t *testing.T) {
 		repo := buildRepo(t)
 		seedBoard(t, repo)
-		if _, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "dup", StoryRef: "jira:LOAN-1482"}); err != nil {
+		if _, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "dup", StoryRef: "jira:LOAN-1482", ModelDigest: testModelDigest(t, repo.Dir)}); err != nil {
 			t.Fatalf("first Run: %v", err)
 		}
-		if _, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "dup", StoryRef: "jira:LOAN-1482"}); err == nil {
+		if _, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "dup", StoryRef: "jira:LOAN-1482", ModelDigest: testModelDigest(t, repo.Dir)}); err == nil {
 			t.Fatal("expected an error the second time (spec dir already exists)")
 		}
 	})
+}
+
+// TestRun_ModelDigestTracksFixtureModel is spec/model-digest ac-1's
+// distinguishing case: with a store `.verdi/model.yaml` that resolves to a
+// DIFFERENT model than the embedded canonical, the frozen board's
+// provenance.model must equal THAT model's own digest — proving the
+// stamped value tracks the actual resolved model rather than a constant
+// that happens to match the one model every other test fixture uses.
+func TestRun_ModelDigestTracksFixtureModel(t *testing.T) {
+	repo := buildRepo(t)
+	seedBoard(t, repo)
+	writeFixtureModelYAML(t, repo.Dir)
+	ctx := context.Background()
+
+	fixtureDigest := testModelDigest(t, repo.Dir)
+
+	// A second, model.yaml-less repo resolves to the embedded canonical —
+	// the baseline this fixture's digest must differ from.
+	plainRepo := buildRepo(t)
+	canonicalDigest := testModelDigest(t, plainRepo.Dir)
+	if fixtureDigest == canonicalDigest {
+		t.Fatalf("fixture model.yaml's digest %q equals the canonical digest — the fixture is not actually distinct", fixtureDigest)
+	}
+
+	res, err := Run(ctx, Input{
+		Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "tracks-fixture-model", StoryRef: "jira:LOAN-1482",
+		ModelDigest: fixtureDigest,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	boardPath := filepath.Join(repo.Dir, res.BoardRelPath)
+	braw, err := os.ReadFile(boardPath)
+	if err != nil {
+		t.Fatalf("reading %s: %v", boardPath, err)
+	}
+	fb, err := artifact.DecodeBoard(braw)
+	if err != nil {
+		t.Fatalf("DecodeBoard: %v", err)
+	}
+	if fb.Provenance == nil || fb.Provenance.Model != fixtureDigest {
+		t.Fatalf("Provenance.Model = %+v, want %q (the fixture model's own digest)", fb.Provenance, fixtureDigest)
+	}
+	if fb.Provenance.Model == canonicalDigest {
+		t.Fatalf("Provenance.Model %q equals the canonical digest — expected the distinct fixture model's digest", fb.Provenance.Model)
+	}
+}
+
+// writeFixtureModelYAML writes fixtureModelYAML to root's .verdi/model.yaml
+// — a store override, resolved by store.Open in preference to the embedded
+// canonical default.
+func writeFixtureModelYAML(t *testing.T, root string) {
+	t.Helper()
+	path := filepath.Join(root, ".verdi", "model.yaml")
+	if err := os.WriteFile(path, []byte(fixtureModelYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFreezeBoard_ModelDigestDeterministic is ac-1's "identical across
+// repeated runs" property, proven at freezeBoard's own level (a pure
+// function of its arguments — no wall clock, no git I/O) rather than
+// through two full Run calls, which would need two independently-built
+// fixturegit repos and could only match byte-for-byte if their commit SHAs
+// and today's wall-clock date happened to coincide: two calls with
+// identical inputs must produce byte-identical frozen boards, including
+// the new Model field.
+func TestFreezeBoard_ModelDigestDeterministic(t *testing.T) {
+	board := &artifact.Board{
+		Schema: "verdi.board/v1",
+		Pins:   []artifact.Pin{{Ref: "spec/other@abc1234", X: 1, Y: 1}},
+	}
+	modelDigest := "sha256:" + strings.Repeat("ab", 32)
+
+	first, err := freezeBoard(board, ".verdi/data/mutable/boards/x.json", "abc1234", "2026-07-17", modelDigest)
+	if err != nil {
+		t.Fatalf("freezeBoard (first): %v", err)
+	}
+	second, err := freezeBoard(board, ".verdi/data/mutable/boards/x.json", "abc1234", "2026-07-17", modelDigest)
+	if err != nil {
+		t.Fatalf("freezeBoard (second): %v", err)
+	}
+
+	firstJSON, err := json.Marshal(first)
+	if err != nil {
+		t.Fatalf("marshal first: %v", err)
+	}
+	secondJSON, err := json.Marshal(second)
+	if err != nil {
+		t.Fatalf("marshal second: %v", err)
+	}
+	if string(firstJSON) != string(secondJSON) {
+		t.Fatalf("freezeBoard not byte-identical across calls with identical inputs:\n--- first ---\n%s\n--- second ---\n%s", firstJSON, secondJSON)
+	}
+	if first.Provenance.Model != modelDigest {
+		t.Fatalf("Provenance.Model = %q, want %q", first.Provenance.Model, modelDigest)
+	}
 }

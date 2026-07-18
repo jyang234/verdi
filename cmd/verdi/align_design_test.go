@@ -106,7 +106,7 @@ func TestAlign_DesignBranch_RegeneratePreservesGenuineReportOnJudgeFailure(t *te
 
 	// A living design sweep: the judge succeeds genuinely (judge_integrity
 	// recorded).
-	living := alignDeps{JudgeCmd: alignFakeJudgeOK(t)}
+	living := alignDeps{JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out, errb bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, false, living, &out, &errb); got != 0 {
 		t.Fatalf("runAlign (living design sweep) = %d, want 0; stderr=%s", got, errb.String())
@@ -142,7 +142,7 @@ func TestAlign_DesignBranch_RegeneratePreservesGenuineReportOnJudgeFailure(t *te
 
 	// Re-run align (NOT --freeze) with a judge that now fails outright — the
 	// witness's "timed out at the 2m ceiling" stand-in.
-	failingDeps := alignDeps{JudgeCmd: alignFakeJudgeFailing(t)}
+	failingDeps := alignDeps{JudgeCmd: alignFakeJudgeFailing(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out2, errb2 bytes.Buffer
 	got := runAlign(context.Background(), repo.Dir, false, failingDeps, &out2, &errb2)
 
@@ -169,7 +169,7 @@ func TestAlign_DesignBranchMode_WritesDecisionConflictReport(t *testing.T) {
 	repo := buildAlignDesignRepo(t)
 
 	var stdout, stderr bytes.Buffer
-	got := runAlign(context.Background(), repo.Dir, false, alignDeps{}, &stdout, &stderr)
+	got := runAlign(context.Background(), repo.Dir, false, alignDeps{ModelDigest: testResolveModelDigest(t, repo.Dir)}, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runAlign = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}

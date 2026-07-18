@@ -72,6 +72,7 @@ func runDesignAlign(ctx context.Context, root string, freeze bool, deps alignDep
 		JudgeRequired:    deps.JudgeRequired,
 		JudgeTimeout:     deps.JudgeTimeout,
 		ExistingFindings: existingFindings,
+		ModelDigest:      deps.ModelDigest,
 	}
 	if freeze {
 		at, err := gitx.CommitDateOnly(ctx, root, covers)

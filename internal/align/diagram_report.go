@@ -52,6 +52,10 @@ type DiagramSweepInput struct {
 	// comment — but a human's disposition of an unchanged finding must
 	// still survive that regeneration).
 	ExistingFindings []artifact.ConflictFinding
+	// ModelDigest mirrors Input.ModelDigest (report.go) — the resolved
+	// operating model's digest, resolved once by the caller and threaded
+	// straight to artifact.StampProvenance.
+	ModelDigest string
 }
 
 // DiagramSweepReport is GenerateDiagramSweep's output.
@@ -124,6 +128,15 @@ func GenerateDiagramSweep(ctx context.Context, in DiagramSweepInput) (*DiagramSw
 		return nil, err
 	}
 
+	prov := &artifact.Provenance{
+		Generator: generatorName,
+		Version:   diagramSweepGeneratorVersion,
+		Inputs:    []string{in.DiagramRef + "@" + in.Covers},
+		Digest:    digest,
+		Integrity: judged.Integrity,
+	}
+	artifact.StampProvenance(prov, in.ModelDigest)
+
 	fm := &artifact.DiagramSweepFrontmatter{
 		Schema:   "verdi.diagramsweep/v1",
 		Covers:   in.Covers,
@@ -134,13 +147,7 @@ func GenerateDiagramSweep(ctx context.Context, in DiagramSweepInput) (*DiagramSw
 		},
 		Integrity:      judged.Integrity,
 		JudgeIntegrity: judged.JudgeIntegrity,
-		Provenance: &artifact.Provenance{
-			Generator: generatorName,
-			Version:   diagramSweepGeneratorVersion,
-			Inputs:    []string{in.DiagramRef + "@" + in.Covers},
-			Digest:    digest,
-			Integrity: judged.Integrity,
-		},
+		Provenance:     prov,
 	}
 
 	if err := fm.Validate(); err != nil {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // TestBoardHandler_Happy proves the board page loads the fixture's real
@@ -285,6 +286,30 @@ func TestBoardCommit_Happy(t *testing.T) {
 	}
 	if fb.Frozen == nil || fb.Provenance == nil {
 		t.Fatalf("frozen board.json missing Frozen/Provenance: %+v", fb)
+	}
+
+	// spec/model-digest, closing judged finding
+	// workbench-commit-path-model-stamp-unasserted: boardCommitHandler is a
+	// production entry point to the board-freeze mint — it resolves
+	// store.Open(root).Model.Digest() per request and threads it into
+	// commitdesign.Input.ModelDigest — but no test asserted the board minted
+	// over the HTTP /commit path actually carries it. Resolve the SAME
+	// store's model digest INDEPENDENTLY here and require the over-the-wire
+	// frozen artifact to match it (non-empty, exactly the store's resolved
+	// digest), proving the handler's digest-resolution wiring end to end.
+	cfg, err := store.Open(repo.Dir)
+	if err != nil {
+		t.Fatalf("store.Open(%s): %v", repo.Dir, err)
+	}
+	wantModel, err := cfg.Model.Digest()
+	if err != nil {
+		t.Fatalf("resolving store model digest: %v", err)
+	}
+	if wantModel == "" {
+		t.Fatal("resolved store model digest is empty — the fixture store has no resolvable model")
+	}
+	if fb.Provenance.Model != wantModel {
+		t.Fatalf("frozen board's provenance.model = %q, want %q (the HTTP /commit handler must stamp the store's resolved model digest)", fb.Provenance.Model, wantModel)
 	}
 }
 

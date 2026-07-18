@@ -111,8 +111,15 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 	// build), so it ordinarily carries no impacts: at all and this call
 	// degenerates to freezing an empty-computed-section report; a
 	// grandfathered v0 feature that DOES carry impacts: is handled exactly
-	// as align.go already handles any spec.
-	alignD := alignDeps{Runner: deps.Runner, JudgeCmd: deps.JudgeCmd, JudgeRequired: deps.JudgeRequired, JudgeTimeout: deps.JudgeTimeout}
+	// as align.go already handles any spec. The regenerate fallback path
+	// mints a fresh Provenance, so this needs a resolved model digest
+	// exactly like close.go's own runClose (spec/model-digest ledger L-M5).
+	modelDigest, err := resolveModelDigest(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	alignD := alignDeps{Runner: deps.Runner, JudgeCmd: deps.JudgeCmd, JudgeRequired: deps.JudgeRequired, JudgeTimeout: deps.JudgeTimeout, ModelDigest: modelDigest}
 	if rc := runAlignForSpec(ctx, root, spec, head, true, alignD, stdout, stderr); rc != 0 {
 		fmt.Fprintln(stderr, "close: freezing the alignment report failed (see above)")
 		return rc

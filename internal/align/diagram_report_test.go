@@ -1,6 +1,7 @@
 package align
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"strings"
@@ -9,12 +10,14 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 )
 
-func diagramSweepInputBase(root string) DiagramSweepInput {
+func diagramSweepInputBase(t *testing.T, root string) DiagramSweepInput {
+	t.Helper()
 	return DiagramSweepInput{
-		Root:       root,
-		DiagramRef: "diagram/loansvc-future",
-		Body:       []byte("graph TD\n  a --> b\n"),
-		Covers:     "abc1234",
+		Root:        root,
+		DiagramRef:  "diagram/loansvc-future",
+		Body:        []byte("graph TD\n  a --> b\n"),
+		Covers:      "abc1234",
+		ModelDigest: testModelDigest(t),
 	}
 }
 
@@ -24,7 +27,7 @@ func diagramSweepInputBase(root string) DiagramSweepInput {
 // GenerateDecisionConflict's own headline exit criterion proves.
 func TestGenerateDiagramSweep_JudgeSkipped_SyntheticAbsenceFinding(t *testing.T) {
 	root := t.TempDir()
-	report, err := GenerateDiagramSweep(context.Background(), diagramSweepInputBase(root))
+	report, err := GenerateDiagramSweep(context.Background(), diagramSweepInputBase(t, root))
 	if err != nil {
 		t.Fatalf("GenerateDiagramSweep: %v", err)
 	}
@@ -49,11 +52,12 @@ func TestGenerateDiagramSweep_RoundTripIntegrity(t *testing.T) {
 	script := writeFakeJudge(t, fakeDiagramJudgeOKScript)
 
 	report, err := GenerateDiagramSweep(context.Background(), DiagramSweepInput{
-		Root:       root,
-		DiagramRef: "diagram/loansvc-future",
-		Body:       []byte("graph TD\n  a --> b\n"),
-		Covers:     "abc1234",
-		JudgeCmd:   []string{script},
+		Root:        root,
+		DiagramRef:  "diagram/loansvc-future",
+		Body:        []byte("graph TD\n  a --> b\n"),
+		Covers:      "abc1234",
+		JudgeCmd:    []string{script},
+		ModelDigest: testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("GenerateDiagramSweep: %v", err)
@@ -109,7 +113,8 @@ func TestGenerateDiagramSweep_DispositionPreservedAcrossRegeneration(t *testing.
 	first, err := GenerateDiagramSweep(context.Background(), DiagramSweepInput{
 		Root: root, DiagramRef: "diagram/loansvc-future",
 		Body: []byte("graph TD\n"), Covers: "abc1234",
-		JudgeCmd: []string{script},
+		JudgeCmd:    []string{script},
+		ModelDigest: testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("GenerateDiagramSweep (first): %v", err)
@@ -127,6 +132,7 @@ func TestGenerateDiagramSweep_DispositionPreservedAcrossRegeneration(t *testing.
 		Body: []byte("graph TD\n"), Covers: "def5678",
 		JudgeCmd:         []string{script},
 		ExistingFindings: dispositioned,
+		ModelDigest:      testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("GenerateDiagramSweep (second): %v", err)
@@ -148,7 +154,7 @@ func TestGenerateDiagramSweep_SweepProvenanceRecordedAndStaleDetectable(t *testi
 	root := t.TempDir()
 	writeADR(t, root, "retry-policy", "accepted")
 
-	report, err := GenerateDiagramSweep(context.Background(), diagramSweepInputBase(root))
+	report, err := GenerateDiagramSweep(context.Background(), diagramSweepInputBase(t, root))
 	if err != nil {
 		t.Fatalf("GenerateDiagramSweep: %v", err)
 	}
@@ -158,7 +164,7 @@ func TestGenerateDiagramSweep_SweepProvenanceRecordedAndStaleDetectable(t *testi
 	}
 
 	writeADR(t, root, "second-policy", "accepted")
-	report2, err := GenerateDiagramSweep(context.Background(), diagramSweepInputBase(root))
+	report2, err := GenerateDiagramSweep(context.Background(), diagramSweepInputBase(t, root))
 	if err != nil {
 		t.Fatalf("GenerateDiagramSweep (2): %v", err)
 	}
@@ -168,7 +174,7 @@ func TestGenerateDiagramSweep_SweepProvenanceRecordedAndStaleDetectable(t *testi
 	// The overall Provenance.Digest must also change when the diagram's own
 	// body changes, at a fixed covers/corpus — a stale sweep (rerun against
 	// changed diagram content but a cached report) must be detectable too.
-	in2 := diagramSweepInputBase(root)
+	in2 := diagramSweepInputBase(t, root)
 	in2.Body = []byte("graph TD\n  a --> b\n  b --> c\n")
 	report3, err := GenerateDiagramSweep(context.Background(), in2)
 	if err != nil {
@@ -188,7 +194,7 @@ func TestGenerateDiagramSweep_DisclosureLineAlwaysPresent(t *testing.T) {
 	root := t.TempDir()
 
 	t.Run("judge skipped (only the synthetic absence finding)", func(t *testing.T) {
-		report, err := GenerateDiagramSweep(context.Background(), diagramSweepInputBase(root))
+		report, err := GenerateDiagramSweep(context.Background(), diagramSweepInputBase(t, root))
 		if err != nil {
 			t.Fatalf("GenerateDiagramSweep: %v", err)
 		}
@@ -199,7 +205,7 @@ func TestGenerateDiagramSweep_DisclosureLineAlwaysPresent(t *testing.T) {
 
 	t.Run("judge finds a real conflict", func(t *testing.T) {
 		script := writeFakeJudge(t, fakeDiagramJudgeOKScript)
-		in := diagramSweepInputBase(root)
+		in := diagramSweepInputBase(t, root)
 		in.JudgeCmd = []string{script}
 		report, err := GenerateDiagramSweep(context.Background(), in)
 		if err != nil {
@@ -237,10 +243,93 @@ func TestGenerateDiagramSweep_Negative_EmptyRoot(t *testing.T) {
 // configured.
 func TestGenerateDiagramSweep_JudgeRequiredAndAbsent(t *testing.T) {
 	root := t.TempDir()
-	in := diagramSweepInputBase(root)
+	in := diagramSweepInputBase(t, root)
 	in.JudgeRequired = true
 	_, err := GenerateDiagramSweep(context.Background(), in)
 	if err == nil {
 		t.Fatal("GenerateDiagramSweep: want error when judge_required and no judge configured")
+	}
+}
+
+// TestGenerateDiagramSweep_ModelDigestStamped is spec/model-digest ac-1's
+// headline case for this mint site: the rendered, re-decoded
+// sweep-report.md carries provenance.model equal to the resolved
+// (canonical) model's own Digest() — proving diagram_render.go's
+// hand-rendered provenance: clause was wired to emit model:, not just
+// computed in memory and dropped.
+func TestGenerateDiagramSweep_ModelDigestStamped(t *testing.T) {
+	root := t.TempDir()
+	report, err := GenerateDiagramSweep(context.Background(), diagramSweepInputBase(t, root))
+	if err != nil {
+		t.Fatalf("GenerateDiagramSweep: %v", err)
+	}
+
+	wantDigest := testModelDigest(t)
+	if report.Frontmatter.Provenance == nil || report.Frontmatter.Provenance.Model != wantDigest {
+		t.Fatalf("Frontmatter.Provenance.Model = %+v, want %q", report.Frontmatter.Provenance, wantDigest)
+	}
+
+	decoded, err := decodeRenderedDiagramSweep(t, report.Markdown)
+	if err != nil {
+		t.Fatalf("decoding rendered sweep-report.md: %v", err)
+	}
+	if decoded.Provenance == nil || decoded.Provenance.Model != wantDigest {
+		t.Fatalf("decoded rendered markdown's Provenance.Model = %+v, want %q:\n%s", decoded.Provenance, wantDigest, report.Markdown)
+	}
+}
+
+// TestGenerateDiagramSweep_ModelDigestTracksFixtureModel is ac-1's
+// distinguishing case: a DIFFERENT resolved model produces a
+// provenance.model equal to THAT model's own digest.
+func TestGenerateDiagramSweep_ModelDigestTracksFixtureModel(t *testing.T) {
+	root := t.TempDir()
+
+	fixtureDigest := fixtureModelDigest(t)
+	canonicalDigest := testModelDigest(t)
+	if fixtureDigest == canonicalDigest {
+		t.Fatalf("fixture model digest %q equals the canonical digest — the fixture is not actually distinct", fixtureDigest)
+	}
+
+	in := diagramSweepInputBase(t, root)
+	in.ModelDigest = fixtureDigest
+	report, err := GenerateDiagramSweep(context.Background(), in)
+	if err != nil {
+		t.Fatalf("GenerateDiagramSweep: %v", err)
+	}
+	if report.Frontmatter.Provenance == nil || report.Frontmatter.Provenance.Model != fixtureDigest {
+		t.Fatalf("Provenance.Model = %+v, want %q (the fixture model's own digest)", report.Frontmatter.Provenance, fixtureDigest)
+	}
+}
+
+// TestGenerateDiagramSweep_ByteIdenticalAcrossRuns closes the diagram-sweep
+// leg of ac-1's "identical across repeated runs" obligation. Two fresh
+// GenerateDiagramSweep calls against unchanged inputs must produce
+// byte-identical output — including the provenance model: line. See
+// decision_report_test.go's TestGenerateDecisionConflict_ByteIdenticalAcrossRuns
+// for the four-suite enumeration (deviation, decision, diagram, board-freeze)
+// this test completes and closes.
+func TestGenerateDiagramSweep_ByteIdenticalAcrossRuns(t *testing.T) {
+	root := t.TempDir()
+	script := writeFakeJudge(t, fakeDiagramJudgeOKScript)
+
+	run := func() []byte {
+		report, err := GenerateDiagramSweep(context.Background(), DiagramSweepInput{
+			Root:        root,
+			DiagramRef:  "diagram/loansvc-future",
+			Body:        []byte("graph TD\n  a --> b\n"),
+			Covers:      "abc1234",
+			JudgeCmd:    []string{script},
+			ModelDigest: testModelDigest(t),
+		})
+		if err != nil {
+			t.Fatalf("GenerateDiagramSweep: %v", err)
+		}
+		return report.Markdown
+	}
+
+	first := run()
+	second := run()
+	if !bytes.Equal(first, second) {
+		t.Fatalf("GenerateDiagramSweep not byte-identical across runs:\n--- first ---\n%s\n--- second ---\n%s", first, second)
 	}
 }

@@ -121,7 +121,7 @@ func TestRunDisposition_RecordsInPlace_DigestAndIntegrityPreserved(t *testing.T)
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
 
-	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out, errb bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, false, deps, &out, &errb); got != 0 {
 		t.Fatalf("runAlign (setup) = %d, want 0; stderr=%s", got, errb.String())
@@ -237,7 +237,7 @@ func TestRunDisposition_SurvivesFreeze(t *testing.T) {
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
 
-	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t)}
+	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out, errb bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, false, living, &out, &errb); got != 0 {
 		t.Fatalf("runAlign (living) = %d, want 0; stderr=%s", got, errb.String())
@@ -276,7 +276,7 @@ func TestRunDisposition_SurvivesFreeze(t *testing.T) {
 	// faithful freeze must ignore it and stamp the disposition-verb-adjudicated
 	// living report as-is (align.FreezeInPlace, PR #99 + the D6-24/T.1
 	// keep-genuine guard, PR #101).
-	frozenDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeDrift(t)}
+	frozenDeps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeDrift(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out2, errb2 bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, true, frozenDeps, &out2, &errb2); got != 0 {
 		t.Fatalf("runAlign (freeze) = %d, want 0; stderr=%s", got, errb2.String())
@@ -326,7 +326,7 @@ func TestRunDisposition_JudgeNewlineTextRendersSingleLineAndDispositionsCleanly(
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
 
-	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeNewlineText(t)}
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeNewlineText(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
 	var out, errb bytes.Buffer
 	if got := runAlign(context.Background(), repo.Dir, false, deps, &out, &errb); got != 0 {
 		t.Fatalf("runAlign (newline-text judge) = %d, want 0; stderr=%s", got, errb.String())

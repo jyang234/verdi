@@ -56,6 +56,10 @@ type DecisionConflictInput struct {
 	// ExistingFindings are a prior report's findings, the disposition-
 	// preservation source.
 	ExistingFindings []artifact.ConflictFinding
+	// ModelDigest mirrors Input.ModelDigest (report.go) — the resolved
+	// operating model's digest, resolved once by the caller and threaded
+	// straight to artifact.StampProvenance.
+	ModelDigest string
 }
 
 // DecisionConflictReport is GenerateDecisionConflict's output.
@@ -137,6 +141,15 @@ func GenerateDecisionConflict(ctx context.Context, in DecisionConflictInput) (*D
 		return nil, err
 	}
 
+	prov := &artifact.Provenance{
+		Generator: generatorName,
+		Version:   decisionGeneratorVersion,
+		Inputs:    buildProvenanceInputs(in.Spec, in.Covers),
+		Digest:    digest,
+		Integrity: judged.Integrity,
+	}
+	artifact.StampProvenance(prov, in.ModelDigest)
+
 	fm := &artifact.DecisionConflictFrontmatter{
 		Schema:   "verdi.decisionconflict/v1",
 		Covers:   in.Covers,
@@ -148,13 +161,7 @@ func GenerateDecisionConflict(ctx context.Context, in DecisionConflictInput) (*D
 		Digest:         digest,
 		Integrity:      judged.Integrity,
 		JudgeIntegrity: judged.JudgeIntegrity,
-		Provenance: &artifact.Provenance{
-			Generator: generatorName,
-			Version:   decisionGeneratorVersion,
-			Inputs:    buildProvenanceInputs(in.Spec, in.Covers),
-			Digest:    digest,
-			Integrity: judged.Integrity,
-		},
+		Provenance:     prov,
 	}
 	if in.Freeze {
 		frozen := artifact.NewFrozen(in.FrozenAt, in.Covers)

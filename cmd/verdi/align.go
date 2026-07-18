@@ -45,6 +45,13 @@ type alignDeps struct {
 	// zero leaves internal/align's own DefaultJudgeTimeout fallback
 	// unchanged (align.Input.JudgeTimeout's zero-value contract).
 	JudgeTimeout time.Duration
+	// ModelDigest is the resolved operating model's canonical-JSON sha256
+	// digest (model.Model.Digest(), spec/model-digest ledger L-M5),
+	// resolved once in cmdAlign via store.Open and threaded into every
+	// align.Input/DecisionConflictInput/DiagramSweepInput this package
+	// builds — the report.go/decision_report.go/diagram_report.go mint
+	// sites never re-derive it themselves.
+	ModelDigest string
 }
 
 // cmdAlign is `verdi align`'s entry point, invoked by dispatch.go: resolves
@@ -77,13 +84,19 @@ func cmdAlign(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
 	}
-	manifest, err := loadManifest(root)
+	cfg, err := store.Open(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
 	}
+	manifest := cfg.Manifest
+	modelDigest, err := cfg.Model.Digest()
+	if err != nil {
+		fmt.Fprintln(stderr, "align: computing model digest:", err)
+		return 2
+	}
 
-	var deps alignDeps
+	deps := alignDeps{ModelDigest: modelDigest}
 	if manifest.Toolchain != nil {
 		deps.Runner = upstream.RealRunner{Module: manifest.Toolchain.Module, Commit: manifest.Toolchain.Commit, Dir: root}
 	}
@@ -180,6 +193,7 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		JudgeRequired:    deps.JudgeRequired,
 		JudgeTimeout:     deps.JudgeTimeout,
 		ExistingFindings: existingFindings,
+		ModelDigest:      deps.ModelDigest,
 	}
 	if freeze {
 		frozenAt, err := gitx.CommitDateOnly(ctx, root, covers)

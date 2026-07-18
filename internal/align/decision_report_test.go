@@ -1,6 +1,7 @@
 package align
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -24,6 +25,7 @@ func TestGenerateDecisionConflict_JudgeSkipped_DisclosedUnprovenComplete(t *test
 		Spec:   spec,
 		Covers: "abc1234",
 		// No JudgeCmd configured — the judge is skipped.
+		ModelDigest: testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("GenerateDecisionConflict: %v", err)
@@ -69,6 +71,7 @@ func TestGenerateDecisionConflict_ComputedIncompleteBlocksReview(t *testing.T) {
 
 	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
 		Root: root, Spec: spec, Covers: "abc1234",
+		ModelDigest: testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("GenerateDecisionConflict: %v", err)
@@ -103,7 +106,8 @@ func TestGenerateDecisionConflict_JudgedFoundAndDispositioned(t *testing.T) {
 	// First run: judged finding lands undispositioned.
 	first, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
 		Root: root, Spec: spec, Covers: "abc1234",
-		JudgeCmd: []string{script},
+		JudgeCmd:    []string{script},
+		ModelDigest: testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("GenerateDecisionConflict (first): %v", err)
@@ -123,6 +127,7 @@ func TestGenerateDecisionConflict_JudgedFoundAndDispositioned(t *testing.T) {
 		Root: root, Spec: spec, Covers: "def5678",
 		JudgeCmd:         []string{script},
 		ExistingFindings: dispositioned,
+		ModelDigest:      testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("GenerateDecisionConflict (second): %v", err)
@@ -172,6 +177,7 @@ func TestGenerateDecisionConflict_AllFourJudgedDispositions(t *testing.T) {
 		Root: root, Spec: spec, Covers: "abc1234",
 		JudgeCmd:         []string{script},
 		ExistingFindings: existing,
+		ModelDigest:      testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("GenerateDecisionConflict: %v", err)
@@ -197,6 +203,7 @@ func TestGenerateDecisionConflict_SweepProvenanceRecorded(t *testing.T) {
 	}
 	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
 		Root: root, Spec: spec, Covers: "abc1234",
+		ModelDigest: testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("GenerateDecisionConflict: %v", err)
@@ -214,6 +221,7 @@ func TestGenerateDecisionConflict_SweepProvenanceRecorded(t *testing.T) {
 	writeADR(t, root, "second-policy", "accepted")
 	report2, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
 		Root: root, Spec: spec, Covers: "abc1234",
+		ModelDigest: testModelDigest(t),
 	})
 	if err != nil {
 		t.Fatalf("GenerateDecisionConflict (2): %v", err)
@@ -236,5 +244,107 @@ func TestGenerateDecisionConflict_Negative_EmptyCovers(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("GenerateDecisionConflict(empty covers): want error, got nil")
+	}
+}
+
+// TestGenerateDecisionConflict_ModelDigestStamped is spec/model-digest
+// ac-1's headline case for this mint site: the rendered, re-decoded
+// decision-conflict-report.md carries provenance.model equal to the
+// resolved (canonical) model's own Digest() — proving decision_render.go's
+// hand-rendered provenance: clause was wired to emit model:, not just
+// computed in memory and dropped.
+func TestGenerateDecisionConflict_ModelDigestStamped(t *testing.T) {
+	root := t.TempDir()
+	spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/my-feature"}, Class: artifact.ClassFeature, Status: "draft"}
+
+	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
+		Root: root, Spec: spec, Covers: "abc1234",
+		ModelDigest: testModelDigest(t),
+	})
+	if err != nil {
+		t.Fatalf("GenerateDecisionConflict: %v", err)
+	}
+
+	wantDigest := testModelDigest(t)
+	if report.Frontmatter.Provenance == nil || report.Frontmatter.Provenance.Model != wantDigest {
+		t.Fatalf("Frontmatter.Provenance.Model = %+v, want %q", report.Frontmatter.Provenance, wantDigest)
+	}
+
+	fmBytes, _, err := artifact.SplitFrontmatter(report.Markdown)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	decoded, err := artifact.DecodeDecisionConflict(fmBytes)
+	if err != nil {
+		t.Fatalf("DecodeDecisionConflict(rendered markdown): %v\n---\n%s", err, report.Markdown)
+	}
+	if decoded.Provenance == nil || decoded.Provenance.Model != wantDigest {
+		t.Fatalf("decoded rendered markdown's Provenance.Model = %+v, want %q:\n%s", decoded.Provenance, wantDigest, report.Markdown)
+	}
+}
+
+// TestGenerateDecisionConflict_ModelDigestTracksFixtureModel is ac-1's
+// distinguishing case: a DIFFERENT resolved model produces a
+// provenance.model equal to THAT model's own digest.
+func TestGenerateDecisionConflict_ModelDigestTracksFixtureModel(t *testing.T) {
+	root := t.TempDir()
+	spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/my-feature"}, Class: artifact.ClassFeature, Status: "draft"}
+
+	fixtureDigest := fixtureModelDigest(t)
+	canonicalDigest := testModelDigest(t)
+	if fixtureDigest == canonicalDigest {
+		t.Fatalf("fixture model digest %q equals the canonical digest — the fixture is not actually distinct", fixtureDigest)
+	}
+
+	report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
+		Root: root, Spec: spec, Covers: "abc1234",
+		ModelDigest: fixtureDigest,
+	})
+	if err != nil {
+		t.Fatalf("GenerateDecisionConflict: %v", err)
+	}
+	if report.Frontmatter.Provenance == nil || report.Frontmatter.Provenance.Model != fixtureDigest {
+		t.Fatalf("Provenance.Model = %+v, want %q (the fixture model's own digest)", report.Frontmatter.Provenance, fixtureDigest)
+	}
+}
+
+// TestGenerateDecisionConflict_ByteIdenticalAcrossRuns closes the
+// decision-conflict leg of ac-1's "identical across repeated runs"
+// obligation (obligation ac-1--behavioral: "two fresh generate calls against
+// unchanged inputs must produce byte-identical model: lines", extended across
+// the four minting suites). Two fresh GenerateDecisionConflict calls against
+// unchanged inputs must produce byte-identical output — including the
+// provenance model: line — not two independently-computed digests that
+// merely agree.
+//
+// With this test ac-1's across-runs enumeration is now symmetric and CLOSED
+// over all four mint suites: deviation (report_test.go's
+// TestGenerate_ByteIdenticalAcrossRuns, the named precedent), decision
+// (here), diagram-sweep (diagram_report_test.go's
+// TestGenerateDiagramSweep_ByteIdenticalAcrossRuns), and board-freeze
+// (commitdesign's TestFreezeBoard_ModelDigestDeterministic). A fifth mint
+// suite is thereby visibly obligated to add its own across-runs leg.
+func TestGenerateDecisionConflict_ByteIdenticalAcrossRuns(t *testing.T) {
+	root := t.TempDir()
+	writeADR(t, root, "retry-policy", "accepted")
+	script := writeFakeJudge(t, fakeDecisionJudgeOKScript)
+	spec := &artifact.SpecFrontmatter{Base: artifact.Base{ID: "spec/my-feature"}, Class: artifact.ClassFeature, Status: "draft"}
+
+	run := func() []byte {
+		report, err := GenerateDecisionConflict(context.Background(), DecisionConflictInput{
+			Root: root, Spec: spec, Covers: "abc1234",
+			JudgeCmd:    []string{script},
+			ModelDigest: testModelDigest(t),
+		})
+		if err != nil {
+			t.Fatalf("GenerateDecisionConflict: %v", err)
+		}
+		return report.Markdown
+	}
+
+	first := run()
+	second := run()
+	if !bytes.Equal(first, second) {
+		t.Fatalf("GenerateDecisionConflict not byte-identical across runs:\n--- first ---\n%s\n--- second ---\n%s", first, second)
 	}
 }
