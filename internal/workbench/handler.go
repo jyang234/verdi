@@ -101,7 +101,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// here would sometimes fall through to the "/" catch-all instead (its
 	// own indexHandler 404s on any non-"/" path), which would silently
 	// turn a wrong-method request on a real route into a confusing 404.
-	mux.HandleFunc("/a/{kind}/{name}", corpusHandler(root))
+	mux.HandleFunc("/a/{kind}/{name}", corpusHandler(root, deps.Model))
 
 	// The disclosures page (spec/disclosures-panel): the checkout's
 	// current disclosures, enumerated fresh per render through the shared
@@ -111,7 +111,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 
 	// The verdict viewer: cross-commit per-AC diff of a story's derived
 	// verdicts.json snapshots.
-	mux.HandleFunc("/verdict/{story...}", verdictHandler(root))
+	mux.HandleFunc("/verdict/{story...}", verdictHandler(root, deps.Model))
 
 	// The advisory preview matrix page (03 §Evidence records: "advisory
 	// renders as preview").
@@ -159,7 +159,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// routes share one {action} pattern so the v1 literal "spec" segment
 	// above can coexist (two sibling 3-segment patterns with different
 	// literal positions would be an unresolvable ServeMux conflict).
-	mux.HandleFunc("/board/{key}", boardHandler(root))
+	mux.HandleFunc("/board/{key}", boardHandler(root, deps.Model))
 	mux.HandleFunc("/board/{key}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		switch r.PathValue("action") {
 		case "autosave":

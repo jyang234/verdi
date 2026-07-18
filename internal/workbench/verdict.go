@@ -19,6 +19,7 @@ import (
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -27,7 +28,10 @@ import (
 // mirroring internal/evidence's own (private) pattern.
 var commitDirRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 
-func verdictHandler(root string) http.HandlerFunc {
+// verdictHandler serves the viewer. mdl is the store's resolved operating
+// model: the empty-picker copy below speaks the story class word —
+// display prose, resolved (vocabulary.go); nil serves the bare id.
+func verdictHandler(root string, mdl *model.Model) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -57,7 +61,7 @@ func verdictHandler(root string) http.HandlerFunc {
 		var extra bytes.Buffer
 		extra.WriteString(`<section class="verdict-viewer">`)
 		if a == "" || b == "" {
-			writeSnapshotPicker(&extra, storyArg, commits)
+			writeSnapshotPicker(&extra, storyArg, commits, classWords{m: mdl})
 		} else {
 			recA, errA := loadSnapshot(derivedRoot, a)
 			recB, errB := loadSnapshot(derivedRoot, b)
@@ -146,7 +150,7 @@ func loadSnapshot(derivedRoot, commit string) ([]artifact.Evidence, error) {
 	return out, nil
 }
 
-func writeSnapshotPicker(buf *bytes.Buffer, storyArg string, commits []string) {
+func writeSnapshotPicker(buf *bytes.Buffer, storyArg string, commits []string, words classWords) {
 	buf.WriteString("<p>Pick two snapshots to diff:</p><ul>")
 	for _, c := range commits {
 		buf.WriteString("<li>")
@@ -168,7 +172,10 @@ func writeSnapshotPicker(buf *bytes.Buffer, storyArg string, commits []string) {
 		buf.WriteString(`</select></label> `)
 		buf.WriteString(`<button type="submit">Diff</button></form>`)
 	} else {
-		buf.WriteString("<p>Fewer than two snapshots exist yet for this story.</p>")
+		// "story" is display prose here (the class word), resolved like
+		// every other class-word site; the /verdict/{story} route and
+		// storyArg stay identity.
+		buf.WriteString("<p>Fewer than two snapshots exist yet for this " + stdhtml.EscapeString(words.word("story")) + ".</p>")
 	}
 }
 

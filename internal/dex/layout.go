@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"html/template"
 	"strings"
+
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // metaRow is one line of a page's metadata card (05 §Verdi-dex page
@@ -88,6 +90,15 @@ type pageData struct {
 	// vendored once regardless — the three-JS-file budget counts served files,
 	// not `<script>` tags — so this trims dead tags without touching it.
 	HasMermaid bool
+	// NavByStory is the site chrome's by-story link text — "by " + the
+	// model's story class display word (model.DisplayClass's enumeration
+	// rule: an axis LABEL is display prose; the /by-story/ URL it links
+	// is identity and never renames). Computed centrally in renderPage
+	// from the model every writer now threads, never per caller, so one
+	// rename reaches every page's chrome at once — a nav renamed on some
+	// pages and bare on others would be exactly the partial leak the
+	// Outcome forbids.
+	NavByStory string
 }
 
 // pageTemplate is dex's single HTML shell. Asset and cross-page links use
@@ -107,7 +118,7 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <body>
 <header class="site-head">
 <a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">dex</span></a>
-<nav class="site-nav"><a href="/by-kind/">by kind</a> <a href="/by-service/">by service</a> <a href="/by-story/">by story</a> <a href="/changelog/">what changed</a> <a href="/search/">search</a></nav>
+<nav class="site-nav"><a href="/by-kind/">by kind</a> <a href="/by-service/">by service</a> <a href="/by-story/">{{.NavByStory}}</a> <a href="/changelog/">what changed</a> <a href="/search/">search</a></nav>
 </header>
 <nav class="breadcrumb">
 {{range $i, $c := .Breadcrumb}}{{if $i}} <span class="sep">/</span> {{end}}{{if $c.URL}}<a href="{{$c.URL}}">{{$c.Label}}</a>{{else}}<span class="current">{{$c.Label}}</span>{{end}}{{end}}
@@ -155,13 +166,16 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 // renderPage executes pageTemplate against data, gating the mermaid client
 // on whether the page body actually carries a mermaid block, defaulting the
 // temporal stamp's styling hook (living-gated — every dex-synthesized page's
-// class), and deriving the copy-reference button's sha-shortened display
-// text from the full pinned form.
-func renderPage(data pageData) ([]byte, error) {
+// class), deriving the copy-reference button's sha-shortened display
+// text from the full pinned form, and resolving the chrome nav's
+// class-word label through mdl (nil falls back to the bare id, exactly
+// like every other display lookup).
+func renderPage(mdl *model.Model, data pageData) ([]byte, error) {
 	data.HasMermaid = strings.Contains(string(data.BodyHTML), `<pre class="mermaid">`)
 	if data.BannerClass == "" {
 		data.BannerClass = bannerClass(classLivingGated)
 	}
+	data.NavByStory = "by " + mdl.DisplayClass("story")
 	if data.CopyRef != "" && data.CopyRefDisplay == "" {
 		data.CopyRefDisplay = displayRef(data.CopyRef)
 	}

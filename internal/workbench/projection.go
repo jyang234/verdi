@@ -33,6 +33,12 @@ func (p *BoardProjection) applyModelVocabulary(m *model.Model) {
 	if p == nil || m == nil {
 		return
 	}
+	// The render-side class-word vocabulary rides the projection so the
+	// one renderer (boardspecrender.go) speaks resolved words in its
+	// prose too — unexported, so get_board's wire JSON is untouched
+	// (L-M9 added ClassLabel/StatusLabel to the wire deliberately; the
+	// prose vocabulary deliberately stays off it).
+	p.words = classWords{m: m}
 	name := p.Class
 	if p.Spike {
 		name = "spike"
@@ -393,6 +399,13 @@ type BoardProjection struct {
 	// the case file, exactly where the stamps they stand in for would
 	// hang. Same I/O-enrichment tier as CaseFileBadges (badges.go).
 	CaseFileDisclosures []string `json:"case_file_disclosures,omitempty"`
+	// words is the render-side class-word display vocabulary
+	// (vocabulary.go), set by applyModelVocabulary. Unexported on
+	// purpose: it exists for the HTML renderers' prose only and never
+	// enters get_board's JSON marshaling of this struct. Its zero value
+	// resolves every id to itself, so projections constructed without a
+	// model render today's bare words byte-identically.
+	words classWords
 }
 
 // buildProjection computes the deterministic projection of the four

@@ -97,7 +97,7 @@ func writeKindAxis(outDir string, stamp buildStamp, pages []*artifactPage, mdl *
 	}
 
 	for _, g := range groups {
-		if err := writeListingPage(outDir, g.url, g.title, []breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "By kind", URL: "/by-kind/"}, {Label: g.title, URL: ""}}, stamp, g.items); err != nil {
+		if err := writeListingPage(outDir, g.url, g.title, []breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "By kind", URL: "/by-kind/"}, {Label: g.title, URL: ""}}, stamp, g.items, mdl); err != nil {
 			return err
 		}
 	}
@@ -106,13 +106,13 @@ func writeKindAxis(outDir string, stamp buildStamp, pages []*artifactPage, mdl *
 	for _, g := range groups {
 		hub = append(hub, listItem{Title: g.title, URL: g.url, Sub: fmt.Sprintf("%d", len(g.items))})
 	}
-	return writeListingPage(outDir, "/by-kind/", "By kind", []breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "By kind", URL: ""}}, stamp, hub)
+	return writeListingPage(outDir, "/by-kind/", "By kind", []breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "By kind", URL: ""}}, stamp, hub, mdl)
 }
 
 // writeListingPage renders and writes a single by-kind/by-service listing
 // page at url ("/by-kind/adr/" etc.) — always living-gated, since it is
 // recomputed fresh on every dex build.
-func writeListingPage(outDir, url, title string, breadcrumb []breadcrumbEntry, stamp buildStamp, items []listItem) error {
+func writeListingPage(outDir, url, title string, breadcrumb []breadcrumbEntry, stamp buildStamp, items []listItem, mdl *model.Model) error {
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Title != items[j].Title {
 			return items[i].Title < items[j].Title
@@ -125,7 +125,7 @@ func writeListingPage(outDir, url, title string, breadcrumb []breadcrumbEntry, s
 		Banner:     livingGatedBanner(stamp),
 		BodyHTML:   renderEntryList(items),
 	}
-	out, err := renderPage(data)
+	out, err := renderPage(mdl, data)
 	if err != nil {
 		return err
 	}

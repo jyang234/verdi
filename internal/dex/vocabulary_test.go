@@ -120,6 +120,84 @@ func TestBuildV2_VocabularyRenames(t *testing.T) {
 	}
 }
 
+// TestBuildV2_ClassWordProse is the vocabulary-prose closure's dex case
+// (closure finding 2's dex half, featurelens.go's "no implementing
+// story" among the sites): over a model whose vocabulary renames story
+// to "Change Request", every class-word PROSE site in the built site
+// speaks the renamed word — the feature lens' heading, mapping column,
+// and empty marker; the chrome nav's by-story label; the home hub entry;
+// the by-story axis title; the metadata card's Story row LABEL — while
+// the identity layer (the /by-story/ URL and output paths, the tracker
+// ref VALUE) provably keeps bare ids. The rename deliberately rides
+// vocabulary.classes ON TOP of the fixture's Class.Display "Story",
+// proving the chain's first rung wins on prose sites too.
+func TestBuildV2_ClassWordProse(t *testing.T) {
+	modelYAML, err := os.ReadFile(filepath.Join("..", "model", "testdata", "vocab-rename.yaml"))
+	if err != nil {
+		t.Fatalf("reading vocab-rename.yaml: %v", err)
+	}
+	// Extend the fixture's vocabulary.classes block (its last lines) with
+	// a story rename; the frontier exempts vocabulary, so the model stays
+	// decode-clean.
+	augmented := strings.TrimRight(string(modelYAML), "\n") + "\n    story: \"Change Request\"\n"
+
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                       vocabManifestYAML,
+				".verdi/model.yaml":                       augmented,
+				".verdi/specs/active/vocab-probe/spec.md": vocabProbeSpecMD,
+			},
+			Message: "init class-word-prose store",
+		},
+	})
+
+	outDir := t.TempDir()
+	if err := Build(context.Background(), Options{Root: repo.Dir, OutDir: outDir}); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// The feature lens on the probe's permalink page.
+	probe, err := os.ReadFile(filepath.Join(outDir, "a", "spec", "vocab-probe", "index.html"))
+	if err != nil {
+		t.Fatalf("reading probe page: %v", err)
+	}
+	page := string(probe)
+	for _, want := range []string{
+		"<h2>Change Requests</h2>",
+		"<th>Implementing Change Requests</th>",
+		`<span class="empty">no implementing Change Request</span>`,
+		`<dt>Change Request</dt><dd>jira:LOAN-9001</dd>`, // the Story row: label renamed, tracker ref untouched
+		`<a href="/by-story/">by Change Request</a>`,     // chrome nav: label renamed, URL identity
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("probe page missing renamed prose %q", want)
+		}
+	}
+	for _, gone := range []string{"<h2>Stories</h2>", "Implementing stories", "no implementing story", ">by story<", "<dt>Story</dt>"} {
+		if strings.Contains(page, gone) {
+			t.Errorf("probe page still renders bare class-word prose %q", gone)
+		}
+	}
+
+	// The home hub entry and the by-story axis hub, at their UNRENAMED
+	// output paths (URL identity).
+	home, err := os.ReadFile(filepath.Join(outDir, "index.html"))
+	if err != nil {
+		t.Fatalf("reading home page: %v", err)
+	}
+	if !strings.Contains(string(home), `<a href="/by-story/">By Change Request</a>`) {
+		t.Error("home hub entry not renamed (or its /by-story/ href moved)")
+	}
+	hub, err := os.ReadFile(filepath.Join(outDir, "by-story", "index.html"))
+	if err != nil {
+		t.Fatalf("reading by-story hub (the output PATH must stay /by-story/): %v", err)
+	}
+	if !strings.Contains(string(hub), "<h1>By Change Request</h1>") {
+		t.Error("by-story axis title not renamed")
+	}
+}
+
 // TestLadderBadgeViews_FlagLabelsNotVocabularyAddressable is the ladder-
 // chip unit negative case (one per surface, failing independently): the
 // story-page ladder flags are case-file taxonomy, not lifecycle states, so

@@ -18,11 +18,14 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifactview"
 	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/render"
 )
 
-// corpusHandler answers GET /a/{kind}/{name}.
-func corpusHandler(root string) http.HandlerFunc {
+// corpusHandler answers GET /a/{kind}/{name}. mdl is the store's resolved
+// operating model — the metadata card's class-word display sites resolve
+// through it (corpusMetaRows); nil serves bare ids.
+func corpusHandler(root string, mdl *model.Model) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -85,7 +88,7 @@ func corpusHandler(root string) http.HandlerFunc {
 		page := pageData{
 			Title:            entry.Title,
 			Nav:              template.HTML(`<a href="/">index</a>`),
-			MetaRows:         corpusMetaRows(entry, meta),
+			MetaRows:         corpusMetaRows(entry, meta, mdl),
 			BodyHTML:         template.HTML(bodyHTML),
 			DispositionsHTML: render.DispositionsTable(meta.Dispositions),
 			ExtraHTML:        extra,
@@ -101,20 +104,24 @@ func corpusHandler(root string) http.HandlerFunc {
 }
 
 // corpusMetaRows builds the frontmatter card: kind, status, owners, class,
-// story, decided, frozen, reason/expiry.
-func corpusMetaRows(e *index.Entry, m artifactview.Meta) []metaRow {
+// story, decided, frozen, reason/expiry. Display words resolve through
+// mdl exactly as the dex twin's artifactMetaRows does (one rename, both
+// twins at once): the Class VALUE and the "Story" row LABEL are class
+// words, the Status VALUE a state word; the kind, the story tracker ref,
+// and every other value are identity and stay verbatim.
+func corpusMetaRows(e *index.Entry, m artifactview.Meta, mdl *model.Model) []metaRow {
 	rows := []metaRow{{Label: "Kind", Value: e.Kind}}
 	if e.Status != "" {
-		rows = append(rows, metaRow{Label: "Status", Value: e.Status})
+		rows = append(rows, metaRow{Label: "Status", Value: mdl.DisplayState("", e.Status)})
 	}
 	if len(m.Base.Owners) > 0 {
 		rows = append(rows, metaRow{Label: "Owners", Value: strings.Join(m.Base.Owners, ", ")})
 	}
 	if m.Class != "" {
-		rows = append(rows, metaRow{Label: "Class", Value: string(m.Class)})
+		rows = append(rows, metaRow{Label: "Class", Value: mdl.DisplayClass(string(m.Class))})
 	}
 	if m.Story != "" {
-		rows = append(rows, metaRow{Label: "Story", Value: m.Story})
+		rows = append(rows, metaRow{Label: model.Capitalize(mdl.DisplayClass("story")), Value: m.Story})
 	}
 	if m.Decided != "" {
 		rows = append(rows, metaRow{Label: "Decided", Value: m.Decided})

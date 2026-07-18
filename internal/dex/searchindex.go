@@ -6,6 +6,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // tokenPosting is one entry of search-index.json's per-token postings
@@ -55,7 +56,7 @@ func buildSearchIndexDoc(ix *index.Index) searchIndexDoc {
 // writeSearchIndex emits search-index.json (canonical JSON: sorted keys,
 // deterministic regardless of Go map iteration order) and the search page
 // search.js wires up via #search-box / #search-results.
-func writeSearchIndex(outDir string, stamp buildStamp, ix *index.Index) error {
+func writeSearchIndex(outDir string, stamp buildStamp, ix *index.Index, mdl *model.Model) error {
 	doc := buildSearchIndexDoc(ix)
 	data, err := canonjson.Marshal(doc)
 	if err != nil {
@@ -71,7 +72,7 @@ func writeSearchIndex(outDir string, stamp buildStamp, ix *index.Index) error {
 		Banner:     livingGatedBanner(stamp),
 		BodyHTML:   template.HTML(`<input id="search-box" type="search" placeholder="Search the store..." autofocus><ul id="search-results"></ul>`),
 	}
-	out, err := renderPage(page)
+	out, err := renderPage(mdl, page)
 	if err != nil {
 		return err
 	}

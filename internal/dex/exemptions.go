@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/decisionsweep"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // exemptionsURL is the per-ADR exemption page's URL, a subpage of the
@@ -36,7 +37,7 @@ func exemptionsTitle(adrName string, count int) string {
 // writeExemptionPages writes one exemption page per ADR page in the
 // corpus. The stated count IS the rendered list's length by construction
 // — both come from the same ExemptionCount.Sources slice.
-func writeExemptionPages(outDir string, stamp buildStamp, pages []*artifactPage, exemptions map[string]*decisionsweep.ExemptionCount, known map[string]bool) error {
+func writeExemptionPages(outDir string, stamp buildStamp, pages []*artifactPage, exemptions map[string]*decisionsweep.ExemptionCount, known map[string]bool, mdl *model.Model) error {
 	for _, p := range pages {
 		if p.Entry.Kind != "adr" {
 			continue
@@ -84,7 +85,7 @@ func writeExemptionPages(outDir string, stamp buildStamp, pages []*artifactPage,
 			Banner:   livingGatedBanner(stamp),
 			BodyHTML: template.HTML(b.String()),
 		}
-		out, err := renderPage(data)
+		out, err := renderPage(mdl, data)
 		if err != nil {
 			return err
 		}

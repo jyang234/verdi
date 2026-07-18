@@ -107,34 +107,34 @@ func Build(ctx context.Context, opts Options) error {
 			return err
 		}
 	}
-	if err := writeExemptionPages(opts.OutDir, stamp, pages, lens.exemptions, known); err != nil {
+	if err := writeExemptionPages(opts.OutDir, stamp, pages, lens.exemptions, known, mdl); err != nil {
 		return err
 	}
 	if err := writeStoryAxis(opts.OutDir, stamp, pages, mdl); err != nil {
 		return err
 	}
-	if err := writeExternalPages(opts.OutDir, stamp, ix, known, services); err != nil {
+	if err := writeExternalPages(opts.OutDir, stamp, ix, known, services, mdl); err != nil {
 		return err
 	}
 	if err := writeKindAxis(opts.OutDir, stamp, pages, mdl); err != nil {
 		return err
 	}
-	if err := writeContractsAxis(opts.OutDir, stamp, services); err != nil {
+	if err := writeContractsAxis(opts.OutDir, stamp, services, mdl); err != nil {
 		return err
 	}
-	if err := writeServiceAxis(opts.OutDir, stamp, services, pages); err != nil {
+	if err := writeServiceAxis(opts.OutDir, stamp, services, pages, mdl); err != nil {
 		return err
 	}
-	if err := writeChangelog(ctx, opts.Root, opts.OutDir, stamp, stamp.SHA); err != nil {
+	if err := writeChangelog(ctx, opts.Root, opts.OutDir, stamp, stamp.SHA, mdl); err != nil {
 		return err
 	}
-	if err := writeDisclosuresPage(ctx, opts.Root, opts.OutDir, stamp); err != nil {
+	if err := writeDisclosuresPage(ctx, opts.Root, opts.OutDir, stamp, mdl); err != nil {
 		return err
 	}
-	if err := writeSearchIndex(opts.OutDir, stamp, ix); err != nil {
+	if err := writeSearchIndex(opts.OutDir, stamp, ix, mdl); err != nil {
 		return err
 	}
-	if err := writeHome(opts.OutDir, stamp); err != nil {
+	if err := writeHome(opts.OutDir, stamp, mdl); err != nil {
 		return err
 	}
 	if err := writeStaticAssets(opts.OutDir); err != nil {

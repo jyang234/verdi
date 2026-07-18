@@ -39,6 +39,15 @@ type boardClientPayload struct {
 	// confirmation ritual mirrors creation (owner UAT round 6, item 3).
 	Removals map[string]string `json:"removals"`
 	Gate     []string          `json:"gate"`
+	// Words is the resolved class-word display vocabulary for the
+	// client's OWN prose (boardspec.js's dialog copy, refusal text, and
+	// the sticky menu's story/spike labels): only ids whose resolved
+	// word differs from the bare id, so a no-rename store's embedded
+	// page state is byte-identical (the parity floor; the ClassLabel
+	// posture). The client falls back to the bare id. Identity values —
+	// Class above, data attributes, API type fields — never read from
+	// here (vocabulary.go's enumeration rule).
+	Words map[string]string `json:"words,omitempty"`
 }
 
 // legalPairTable flattens legalEdgeTypes over every source/target kind
@@ -108,9 +117,10 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 		Class:        p.Class,
 		Git:          git,
 		Legal:        legalPairTable(),
-		Consequences: consequenceLabels,
+		Consequences: consequenceLabelsFor(p.words),
 		Removals:     removalConsequenceLabels,
 		Gate:         gateBearingTypes(),
+		Words:        p.words.renamed(),
 	}
 	stateJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -332,10 +342,13 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			// page with its archived state disclosed on the link (ADJ-39,
 			// never a dead href). data-archived mirrors the stub-story
 			// link's own disclosure attribute.
+			// "feature" in the link text is display prose and resolves
+			// (vocabulary.go); the testids, data-archived, and href stay
+			// identity.
 			if rc.Archived {
-				b.WriteString(`<a class="refcard-board-link refcard-board-link--archived" data-testid="refcard-board-link" data-archived="true" href="` + esc(rc.FeatureHref) + `">open feature <span class="badge badge-archived" data-testid="refcard-feature-archived">archived</span></a>`)
+				b.WriteString(`<a class="refcard-board-link refcard-board-link--archived" data-testid="refcard-board-link" data-archived="true" href="` + esc(rc.FeatureHref) + `">open ` + esc(p.words.word("feature")) + ` <span class="badge badge-archived" data-testid="refcard-feature-archived">archived</span></a>`)
 			} else {
-				b.WriteString(`<a class="refcard-board-link" data-testid="refcard-board-link" data-archived="false" href="` + esc(rc.FeatureHref) + `">open feature board</a>`)
+				b.WriteString(`<a class="refcard-board-link" data-testid="refcard-board-link" data-archived="false" href="` + esc(rc.FeatureHref) + `">open ` + esc(p.words.word("feature")) + ` board</a>`)
 			}
 		case rc.UnresolvedNotice != "":
 			b.WriteString(`<p class="refcard-unresolved-notice" data-testid="refcard-unresolved-notice">` + esc(rc.UnresolvedNotice) + `</p>`)
@@ -355,16 +368,20 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	for _, sv := range p.StubViews {
 		cls := "stubcard"
 		spikeAttr := ""
-		kindLabel := "story stub"
+		// The kind label's class word is display prose and resolves
+		// (vocabulary.go; "spike" resolves as the variant marker's
+		// pseudo-class word). The CSS modifier, data-spike, data-stub,
+		// and testid keep bare ids — addressing never renames.
+		kindLabel := p.words.word("story") + " stub"
 		if sv.Spike {
 			cls += " stubcard--spike"
 			spikeAttr = ` data-spike="true"`
-			kindLabel = "spike stub"
+			kindLabel = p.words.word("spike") + " stub"
 		}
 		title := designscaffold.HumanizeName(sv.Slug)
 		b.WriteString(`<div class="` + cls + `" data-testid="stub-card-` + esc(sv.Slug) + `" data-stub="` + esc(sv.Slug) + `"` + spikeAttr + ` style="left:` + px(sv.X) + `;top:` + px(sv.Y) + `">`)
 		b.WriteString(`<span class="stub-tab">` + esc(sv.Slug) + `</span>`)
-		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + kindLabel + `</span><span class="card-kind-id">declared</span></span>`)
+		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + esc(kindLabel) + `</span><span class="card-kind-id">declared</span></span>`)
 		b.WriteString(`<p class="stub-title" title="` + esc(title) + `">` + esc(title) + `</p>`)
 		// A stub is a rendered board object too (spec/badge-computes dc-3:
 		// a dangling stub reference anchors to the stub's own card) — its
@@ -407,11 +424,13 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			b.WriteString(`<p class="stub-instantiated-notice" data-testid="stub-instantiated-notice-` + esc(sv.Slug) + `">` + esc(sv.InstantiatedNotice) + `</p>`)
 		}
 		if instantiable {
-			verbLabel := "Instantiate story"
+			// The verb's object is the class word — display prose,
+			// resolved; data-instantiate and the testid keep the slug.
+			verbLabel := "Instantiate " + p.words.word("story")
 			if sv.Spike {
-				verbLabel = "Instantiate spike"
+				verbLabel = "Instantiate " + p.words.word("spike")
 			}
-			b.WriteString(`<button type="button" class="stub-instantiate" data-instantiate="` + esc(sv.Slug) + `" data-testid="instantiate-` + esc(sv.Slug) + `" title="cuts a design branch with a scaffolded spec; the serving checkout never moves">` + verbLabel + `</button>`)
+			b.WriteString(`<button type="button" class="stub-instantiate" data-instantiate="` + esc(sv.Slug) + `" data-testid="instantiate-` + esc(sv.Slug) + `" title="cuts a design branch with a scaffolded spec; the serving checkout never moves">` + esc(verbLabel) + `</button>`)
 		}
 		b.WriteString(`</div>`)
 	}
@@ -432,8 +451,19 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	for _, s := range p.Stickies {
 		proto := s.Type == string(artifact.AnnotationStory) || s.Type == string(artifact.AnnotationSpike)
 		obligationYarn := storyWall && !proto
+		// A story/spike proto-sticky's visible type word names the class
+		// it will become, so the DISPLAYED word resolves through the
+		// class chain; every other annotation type (comment, question,
+		// ...) is record taxonomy, not a class word, and stays verbatim.
+		// The sticky's type VALUE — data-annotation-type, the CSS
+		// modifier, the API field — is identity and stays bare either way
+		// (vocabulary.go).
+		typeLabel := s.Type
+		if proto {
+			typeLabel = p.words.word(s.Type)
+		}
 		b.WriteString(`<div class="sticky sticky--` + stickyTypeClass(s.Type) + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
-		b.WriteString(`<span class="sticky-type">` + esc(s.Type) + `</span>`)
+		b.WriteString(`<span class="sticky-type">` + esc(typeLabel) + `</span>`)
 		b.WriteString(`<p class="sticky-body">` + esc(s.Body) + `</p>`)
 		if s.Author != "" {
 			b.WriteString(`<span class="sticky-meta">` + esc(s.Author) + `</span>`)
@@ -443,10 +473,10 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			if s.Type == string(artifact.AnnotationSpike) {
 				target = "an open question"
 			}
-			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw attribution yarn from this ` + esc(s.Type) + ` sticky" title="drag to ` + target + ` to claim it"></button>`)
+			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw attribution yarn from this ` + esc(typeLabel) + ` sticky" title="drag to ` + target + ` to claim it"></button>`)
 		}
 		if authoring && obligationYarn {
-			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto yarn-handle--obligation" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw an obligation thread from this sticky" title="drag to a story acceptance criterion to author its evidence obligation"></button>`)
+			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto yarn-handle--obligation" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw an obligation thread from this sticky" title="drag to a ` + esc(p.words.word("story")) + ` acceptance criterion to author its evidence obligation"></button>`)
 		}
 		if authoring {
 			if proto {
@@ -609,7 +639,10 @@ func writeScopingReceipts(b *strings.Builder, p *BoardProjection, c cardView) {
 		}
 	case boardlayout.ZoneOpenQuestion:
 		if n := p.OQClaims[c.ID]; n > 1 {
-			b.WriteString(`<span class="oq-claims" data-testid="oq-claims-` + esc(c.ID) + `" data-claims="` + strconv.Itoa(n) + `" title="one spike answering many questions is normal; many spikes on one question is worth a look">claimed by ` + strconv.Itoa(n) + ` spikes</span>`)
+			// "spike"/"spikes" here are display prose (the variant
+			// marker's word); the testid and data-claims stay bare.
+			spikeWord, spikes := p.words.word("spike"), p.words.plural("spike")
+			b.WriteString(`<span class="oq-claims" data-testid="oq-claims-` + esc(c.ID) + `" data-claims="` + strconv.Itoa(n) + `" title="one ` + esc(spikeWord) + ` answering many questions is normal; many ` + esc(spikes) + ` on one question is worth a look">claimed by ` + strconv.Itoa(n) + ` ` + esc(spikes) + `</span>`)
 		}
 	}
 }
@@ -784,6 +817,11 @@ func writeZoneLabels(b *strings.Builder, p *BoardProjection) {
 // answer) can share a wall and must never collapse into one row.
 type yarnKeyEntry struct {
 	Layer, Type, Meaning string
+	// ClassWord names the class id whose display word fills Meaning's
+	// one %s — the scoping rows' planning-tense prose speaks a class
+	// word, so it resolves like every other display prose
+	// (vocabulary.go). Empty for the static meanings.
+	ClassWord string
 }
 
 // yarnKeyEntries is the legend's canonical order: the committed record's
@@ -793,14 +831,14 @@ type yarnKeyEntry struct {
 // labels stay the picker's fuller voice); the scoping pair speaks in the
 // planning tense — a claim about a future story, not the record.
 var yarnKeyEntries = []yarnKeyEntry{
-	{"spec", "implements", "this spec delivers it"},
-	{"spec", "resolves", "this spec answers it"},
-	{"spec", "depends-on", "needed background"},
-	{"spec", "supersedes", "amends it for everyone"},
-	{"spec", "exempts", "this spec is excused from it"},
-	{"scoping", "covers", "a planned story will deliver it"},
-	{"scoping", "resolves", "a planned spike will answer it"},
-	{"annotation", "relates", "scratch thread — not in the spec"},
+	{Layer: "spec", Type: "implements", Meaning: "this spec delivers it"},
+	{Layer: "spec", Type: "resolves", Meaning: "this spec answers it"},
+	{Layer: "spec", Type: "depends-on", Meaning: "needed background"},
+	{Layer: "spec", Type: "supersedes", Meaning: "amends it for everyone"},
+	{Layer: "spec", Type: "exempts", Meaning: "this spec is excused from it"},
+	{Layer: "scoping", Type: "covers", Meaning: "a planned %s will deliver it", ClassWord: "story"},
+	{Layer: "scoping", Type: "resolves", Meaning: "a planned %s will answer it", ClassWord: "spike"},
+	{Layer: "annotation", Type: "relates", Meaning: "scratch thread — not in the spec"},
 }
 
 // writeYarnKey renders the wall's legend: exactly the (layer, type)
@@ -817,11 +855,16 @@ func writeYarnKey(b *strings.Builder, p *BoardProjection) {
 		return
 	}
 	b.WriteString(`<section class="yarn-key" data-testid="yarn-key"><h2>Yarn on this wall</h2><ul>`)
+	esc := stdhtml.EscapeString
 	for _, entry := range yarnKeyEntries {
 		if !present[yarnKeyEntry{Layer: entry.Layer, Type: entry.Type}] {
 			continue
 		}
-		b.WriteString(`<li data-layer="` + entry.Layer + `" data-edge-type="` + entry.Type + `"><span class="yarn-key-swatch" aria-hidden="true"></span><span class="yarn-key-type">` + entry.Type + `</span><span class="yarn-key-what">` + entry.Meaning + `</span></li>`)
+		meaning := entry.Meaning
+		if entry.ClassWord != "" {
+			meaning = fmt.Sprintf(entry.Meaning, p.words.word(entry.ClassWord))
+		}
+		b.WriteString(`<li data-layer="` + entry.Layer + `" data-edge-type="` + entry.Type + `"><span class="yarn-key-swatch" aria-hidden="true"></span><span class="yarn-key-type">` + entry.Type + `</span><span class="yarn-key-what">` + esc(meaning) + `</span></li>`)
 	}
 	b.WriteString(`</ul></section>`)
 }
@@ -840,15 +883,22 @@ func writeYarnKey(b *strings.Builder, p *BoardProjection) {
 // unadorned: its spec IS the minimum path's story.
 func writeGuide(b *strings.Builder, p *BoardProjection) {
 	feature := p.Class == "feature"
+	// The guide's class words are display prose and resolve
+	// (vocabulary.go); pre-escaped once since they interpolate into
+	// hand-built HTML. With no rename they are the bare ids and every
+	// byte below matches today's copy.
+	esc := stdhtml.EscapeString
+	featureWord := esc(p.words.word("feature"))
+	storyWord := esc(p.words.word("story"))
 	b.WriteString(`<details class="board-guide" data-testid="board-guide"><summary>New to the wall? Four moves.</summary>`)
 	if feature {
-		b.WriteString(`<p class="guide-class-note" data-testid="guide-class-note">This is a <strong>feature</strong> wall: outcome ACs and story stubs. ` +
-			`Each story is its own spec that points up at these ACs with <strong>implements</strong> yarn &#8212; a feature never lists its stories.</p>`)
+		b.WriteString(`<p class="guide-class-note" data-testid="guide-class-note">This is a <strong>` + featureWord + `</strong> wall: outcome ACs and ` + storyWord + ` stubs. ` +
+			`Each ` + storyWord + ` is its own spec that points up at these ACs with <strong>implements</strong> yarn &#8212; a ` + featureWord + ` never lists its ` + esc(p.words.plural("story")) + `.</p>`)
 	}
 	b.WriteString(`<ol class="guide-moves">` +
 		`<li><strong>Read the case file</strong> &#8212; the problem and outcome placards above the wall are the spec&#8217;s own header.</li>`)
 	if feature {
-		b.WriteString(`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true when the feature lands (outcomes, never story-sized tasks). Drag cards anywhere; double-click one to edit its text.</li>` +
+		b.WriteString(`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true when the ` + featureWord + ` lands (outcomes, never ` + storyWord + `-sized tasks). Drag cards anywhere; double-click one to edit its text.</li>` +
 			`<li><strong>String yarn</strong> &#8212; drag the pin on a decision card to another card to type a relationship. A thread running off the top edge belongs to the spec document itself.</li>`)
 	} else {
 		b.WriteString(`<li><strong>Pin acceptance criteria</strong> &#8212; the first column says what must be true. Drag cards anywhere; double-click one to edit its text.</li>` +
