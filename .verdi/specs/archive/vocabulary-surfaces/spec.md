@@ -4,7 +4,7 @@ kind: spec
 title: "Vocabulary Surfaces"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-32
 problem: { text: "display vocabulary is hard-coded across every surface (seam S10): CLI verdict strings, workbench board labels and columns, dex lens and badge labels, and MCP tool descriptions each carry their own class/state/verb literals, so a team's rename is a Go change per surface — while the model's Vocabulary block (verdi.model/v1, live since model-schema) decodes and validates but nothing consumes it", anchor: problem }
 outcome: { text: "the resolved model's vocabulary drives display naming on all four surfaces — CLI verdicts, board, dex, MCP tool descriptions — through DisplayState/DisplayVerb/class display lookups with id fallback, while ids in refs, branches, commits, and history never change; a store with no model.yaml renders byte-identical output to today (the parity floor), and a store with vocabulary renames shows them everywhere at once, so a rename can never leak partially", anchor: outcome }
