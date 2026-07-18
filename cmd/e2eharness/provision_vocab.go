@@ -21,11 +21,19 @@ package main
 // The store's .verdi/model.yaml is internal/model/testdata's
 // vocab-rename.yaml — model-schema's own frontier fixture (accept ->
 // "Sign off", accepted-pending-build -> "Ready to build", feature ->
-// "Initiative"), read from the module tree at provision time and reused
-// verbatim, never duplicated. Its one spec, vocab-probe (a round-four
-// feature, accepted-pending-build, on main), gives the home
-// glance/directory a renamed status chip and the board a renamed
-// case-file class tag.
+// "Initiative", story -> "Workstream", spike -> "Timebox"), read from
+// the module tree at provision time and reused verbatim, never
+// duplicated. Its main-branch spec, vocab-probe (a round-four feature,
+// accepted-pending-build), gives the home glance/directory a renamed
+// status chip and the board a renamed case-file class tag. A second,
+// DRAFT feature spec, vocab-draft, lives on its own design branch with
+// the serving checkout LEFT on that branch (provisionBoard's own
+// convention) — status draft + a non-default checkout branch is exactly
+// what boardspec.go's mode switch requires — so /board/spec/vocab-draft
+// serves in AUTHORING mode and the board's CLIENT-side prose becomes
+// drivable in a real browser under the renamed vocabulary: the sticky
+// type menu's STICKY_TYPES labels and the proto-yarn dialog/refusal
+// copy (judged-client-js-prose-has-no-browser-proof).
 import (
 	"fmt"
 	"net"
@@ -63,6 +71,40 @@ Display vocabulary is hard-coded per surface.
 ## Outcome
 
 One rename reaches every surface at once.
+`
+
+// vocabDraftBranch carries the authoring fixture; the serving checkout
+// stays on it (never main), which is what makes the draft board's mode
+// authoring.
+const vocabDraftBranch = "design/vocab-draft"
+
+// vocabDraftSpec is the authoring fixture: a DRAFT round-four feature
+// (class feature, so the client's STICKY_TYPES control offers the
+// story/spike proto-stickies) with one acceptance criterion — ac-1 is
+// the drop target a misaimed spike thread refuses against
+// (boardspec.js's routeProtoYarn), which is the dialog copy the browser
+// proof asserts speaks the renamed words.
+const vocabDraftSpec = `---
+id: spec/vocab-draft
+kind: spec
+title: "Vocab draft"
+owners: [platform-team]
+class: feature
+status: draft
+problem: { text: "client-side dialog copy is rendered by boardspec.js, not the server", anchor: problem }
+outcome: { text: "the menu labels and refusal copy speak the model's renamed words", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "renamed class words reach JS-rendered prose", evidence: [behavioral] }
+---
+# Vocab draft
+
+## Problem
+
+Client-side dialog copy is rendered by boardspec.js, not the server.
+
+## Outcome
+
+The menu labels and refusal copy speak the model's renamed words.
 `
 
 // vocabFixture lazily starts its isolated server and remembers its bound
@@ -176,6 +218,31 @@ func provisionVocabStore(moduleRoot string) (string, error) {
 		return "", err
 	}
 	if err := runGit(root, nil, "remote", "set-head", "origin", "main"); err != nil {
+		return "", err
+	}
+
+	// The authoring half: the draft feature spec on its design branch,
+	// committed there (draft never lands on main — the same VL-004 posture
+	// provisionBoard cites) and the checkout LEFT on the branch, so
+	// boardspec.go's mode switch (status draft + branch != default) serves
+	// /board/spec/vocab-draft in authoring mode.
+	if err := runGit(root, nil, "checkout", "--quiet", "-b", vocabDraftBranch); err != nil {
+		return "", err
+	}
+	draftDir := filepath.Join(root, ".verdi", "specs", "active", "vocab-draft")
+	if err := os.MkdirAll(draftDir, 0o755); err != nil {
+		return "", fmt.Errorf("creating vocab-draft spec dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftDir, "spec.md"), []byte(vocabDraftSpec), 0o644); err != nil {
+		return "", fmt.Errorf("writing vocab-draft spec: %w", err)
+	}
+	if err := runGit(root, nil, "add", "-A"); err != nil {
+		return "", err
+	}
+	if err := runGit(root, nil, "commit", "--quiet", "--no-verify", "-m", "design: vocab-draft authoring fixture"); err != nil {
+		return "", err
+	}
+	if err := runGit(root, nil, "push", "--quiet", "--set-upstream", "origin", vocabDraftBranch); err != nil {
 		return "", err
 	}
 

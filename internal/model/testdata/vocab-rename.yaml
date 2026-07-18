@@ -2,6 +2,12 @@
 # classes, states, transitions, obligations) but with vocabulary renames and
 # different per-class template filenames — the frontier's two named
 # exceptions (validate.go's checkFrontier). Must decode and validate clean.
+# The classes block renames every class word a surface can speak — feature,
+# story, and the spike pseudo-class (the L-M13 carve validateVocabulary
+# admits) — so the e2e vocab store built from this file (cmd/e2eharness/
+# provision_vocab.go) can prove the rename reaches client-side JS prose:
+# the sticky menu's STICKY_TYPES labels and the proto-yarn dialog copy
+# (judged-client-js-prose-has-no-browser-proof).
 schema: verdi.model/v1
 
 classes:
@@ -53,3 +59,5 @@ vocabulary:
     accepted-pending-build: "Ready to build"
   classes:
     feature: "Initiative"
+    story: "Workstream"
+    spike: "Timebox"

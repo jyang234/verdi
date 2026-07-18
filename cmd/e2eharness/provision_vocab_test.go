@@ -52,6 +52,35 @@ func TestVocabFixture_Handler_Happy(t *testing.T) {
 	if strings.Contains(page, `>accepted-pending-build<`) {
 		t.Fatalf("home page still renders the bare state id as visible text; got: %s", page)
 	}
+
+	// The authoring half (judged-client-js-prose-has-no-browser-proof's
+	// harness obligation): the draft spec's board serves in AUTHORING mode
+	// (status draft + the checkout left on its design branch), and the
+	// embedded client state carries the renamed class words boardspec.js's
+	// STICKY_TYPES menu and proto-yarn dialog copy resolve. The words are
+	// asserted here at the payload seam; the browser-executed proof lives
+	// in e2e/tests/45-vocabulary.spec.ts.
+	resp2, err := http.Get(url + "board/spec/vocab-draft")
+	if err != nil {
+		t.Fatalf("GET %sboard/spec/vocab-draft: %v", url, err)
+	}
+	defer func() { _ = resp2.Body.Close() }()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("GET board/spec/vocab-draft status = %d, want 200", resp2.StatusCode)
+	}
+	board, err := io.ReadAll(resp2.Body)
+	if err != nil {
+		t.Fatalf("reading board body: %v", err)
+	}
+	boardPage := string(board)
+	if !strings.Contains(boardPage, `data-board-mode="authoring"`) {
+		t.Fatalf("vocab-draft board is not in authoring mode (the sticky menu and proto-yarn gestures need it); got: %s", boardPage)
+	}
+	for _, want := range []string{`"story":"Workstream"`, `"spike":"Timebox"`} {
+		if !strings.Contains(boardPage, want) {
+			t.Fatalf("vocab-draft board's embedded state is missing the renamed class word %s; got: %s", want, boardPage)
+		}
+	}
 }
 
 // TestVocabFixture_Handler_Negative_WrongMethod mirrors the endpoint

@@ -41,14 +41,15 @@ import (
 // would be caught here for all three, because this store's model.yaml is
 // deliberately distinct from canonical.
 
-// distinctModelYAML is internal/model/testdata/vocab-rename.yaml's own
-// content verbatim (already proven frontier-legal by that package's own
-// tests, and the same fixture internal/align/report_test.go and
-// internal/commitdesign/commitdesign_test.go inline for this exact purpose):
-// structurally identical to the embedded canonical model, but with
-// vocabulary renames and different per-class template filenames — the
-// frontier's two named exceptions — so its Digest() differs from
-// model.Canonical().Digest().
+// distinctModelYAML is a snapshot of internal/model/testdata/
+// vocab-rename.yaml's shape (that fixture has since grown further class
+// renames for the e2e vocab store; this inline copy needs only
+// DISTINCTNESS, not currency — the same reason internal/align/
+// report_test.go and internal/commitdesign/commitdesign_test.go inline
+// their own copies): structurally identical to the embedded canonical
+// model, but with vocabulary renames and different per-class template
+// filenames — the frontier's two named exceptions — so its Digest()
+// differs from model.Canonical().Digest().
 const distinctModelYAML = `schema: verdi.model/v1
 
 classes:
