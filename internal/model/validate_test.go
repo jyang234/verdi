@@ -26,6 +26,7 @@ func TestDecodeModel_KernelViolations(t *testing.T) {
 		{"viol-template-path-escape.yaml", `class "feature": template "../../evil.md" must be a bare filename`},
 		{"viol-hook-empty-name.yaml", `kind "hook" requires a non-empty hook name`},
 		{"viol-count-non-countersign.yaml", `count is legal only on kind "countersign"`},
+		{"viol-duplicate-verb.yaml", `transition verb "accept" is declared more than once`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {
@@ -58,14 +59,57 @@ func TestDecodeModel_KernelErrorNamesCatalog(t *testing.T) {
 
 // TestDecodeModel_Frontier proves dc-1's frontier: a well-formed model
 // (every kernel rule holds) that still describes a different transition
-// set than canonicalModel is rejected with the ONE pinned error, verbatim.
+// set than canonicalModel is rejected with the ONE pinned error, verbatim —
+// whether it ADDS a transition (viol-frontier-structural: an extra `reject`)
+// or OMITS one with no masking duplicate (viol-frontier-missing-transition:
+// `close` dropped, caught by lifecycleEqual's length arm — the companion to
+// judged-frontier-duplicate-verb-bypass's witness, proving the multiset
+// refactor kept the plain-omission path a frontier exit 1).
 func TestDecodeModel_Frontier(t *testing.T) {
-	_, err := DecodeModel(readTestdata(t, "viol-frontier-structural.yaml"))
-	if err == nil {
-		t.Fatal("DecodeModel(viol-frontier-structural.yaml): want error, got nil")
+	for _, file := range []string{
+		"viol-frontier-structural.yaml",
+		"viol-frontier-missing-transition.yaml",
+	} {
+		t.Run(file, func(t *testing.T) {
+			_, err := DecodeModel(readTestdata(t, file))
+			if err == nil {
+				t.Fatalf("DecodeModel(%s): want error, got nil", file)
+			}
+			if err.Error() != frontierErrorText {
+				t.Fatalf("DecodeModel(%s) error = %q, want the pinned frontier text %q", file, err.Error(), frontierErrorText)
+			}
+		})
 	}
-	if err.Error() != frontierErrorText {
-		t.Fatalf("DecodeModel(viol-frontier-structural.yaml) error = %q, want the pinned frontier text %q", err.Error(), frontierErrorText)
+}
+
+// TestLifecycleEqual_DuplicateVerbCannotMaskMissing is judged-frontier-
+// duplicate-verb-bypass's defense-in-depth proof, driven at the frontier
+// compare DIRECTLY: the kernel's own duplicate-verb rule now rejects such a
+// manifest at Validate time, so DecodeModel never hands lifecycleEqual a
+// duplicate — this exercises the compare on a hand-built value to prove it
+// is robust even if one ever slipped that gate. A lifecycle listing `accept`
+// twice and omitting `close` must NOT compare equal to canonical's
+// [accept, close]: staying length-2 while each accept matched canonical's one
+// accept, the pre-fix one-directional verb-map compare returned true and let
+// a whole missing transition slip the frontier. The verb-keyed multiset
+// (transitionsEqualAsMultiset) drives the extra accept's count negative and
+// fails closed — in either orientation, while canonical still equals itself.
+func TestLifecycleEqual_DuplicateVerbCannotMaskMissing(t *testing.T) {
+	canon := canonicalSpecLifecycle()
+	accept := canon.Transitions[0] // the `accept` transition, verbatim
+	dup := Lifecycle{
+		States:      canon.States,
+		Terminal:    canon.Terminal,
+		Transitions: []Transition{accept, accept}, // accept x2, no close
+	}
+	if lifecycleEqual(dup, canon) {
+		t.Fatal("lifecycleEqual(accept×2-no-close, canonical) = true, want false: a duplicate verb must not mask canonical's missing `close` (judged-frontier-duplicate-verb-bypass)")
+	}
+	if lifecycleEqual(canon, dup) {
+		t.Fatal("lifecycleEqual(canonical, accept×2-no-close) = true, want false (the compare must fail closed in either orientation)")
+	}
+	if !lifecycleEqual(canon, canonicalSpecLifecycle()) {
+		t.Fatal("lifecycleEqual(canonical, canonical) = false, want true (positive control: an unchanged lifecycle still compares equal)")
 	}
 }
 

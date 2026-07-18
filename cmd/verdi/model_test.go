@@ -370,6 +370,34 @@ func TestModelCheck_KernelViolation_Exit2(t *testing.T) {
 	}
 }
 
+// TestModelCheck_DuplicateVerb_Exit2_NamesRule reproduces judged-frontier-
+// duplicate-verb-bypass's exact driven witness end-to-end through the built
+// binary: a hand-written model.yaml whose lifecycles list `accept` twice and
+// omit `close` entirely. Before the fix this decoded CLEAN and exited 0 — the
+// manifest stayed length-2 against canonical's [accept, close] and its two
+// accepts masked the missing close in the frontier's one-directional verb-map
+// compare. Now the kernel's duplicate-transition-verb rule rejects it at
+// Validate time: a kernel validation violation is "undecodable" under ac-3's
+// own grouping, so it exits 2 (never the frontier's exit 1), with the error
+// naming the duplicate-verb rule and the offending verb — never a bare
+// "model.yaml invalid". Reuses Task 5's committed fixture rather than inlining
+// the manifest (CLAUDE.md: never copy-paste shared content).
+func TestModelCheck_DuplicateVerb_Exit2_NamesRule(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-duplicate-verb.yaml"))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (duplicate transition verb) exit = %d, want 2 (a kernel validation violation is undecodable per ac-3, never the frontier's exit 1)\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "declared more than once") {
+		t.Fatalf("stderr = %q, want it to name the duplicate-transition-verb rule", stderr)
+	}
+	if !strings.Contains(stderr, `verb "accept"`) {
+		t.Fatalf("stderr = %q, want it to name the offending verb", stderr)
+	}
+}
+
 // TestModelCheck_StoreLessCwd_Exit2 proves a missing store is
 // operational trouble (ac-3's own text names this explicitly).
 func TestModelCheck_StoreLessCwd_Exit2(t *testing.T) {
