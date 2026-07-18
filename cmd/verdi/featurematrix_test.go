@@ -315,7 +315,7 @@ func TestPrintFeatureMatrix_SupersededFeatureStatusLine(t *testing.T) {
 	var buf bytes.Buffer
 	spec := &artifact.SpecFrontmatter{Status: artifact.Status("superseded")}
 	result := evidence.FeatureResult{SpecRef: "spec/legacy-feature"}
-	printFeatureMatrix(&buf, spec, result, evidence.StubReconciliation{}, nil, nil, false)
+	printFeatureMatrix(&buf, spec, result, evidence.StubReconciliation{}, nil, nil, false, nil)
 
 	if !strings.Contains(buf.String(), "\nstatus: superseded\n") {
 		t.Fatalf("feature matrix must render the feature's own superseded status line; got:\n%s", buf.String())

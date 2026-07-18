@@ -54,6 +54,7 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -100,8 +101,17 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gate:", err)
 		return 2
 	}
+	// The resolved operating model (store.Open's config bottleneck, L-M3):
+	// the merge gate's condition prose resolves display class/state words
+	// through Config.Model (L-M13(1)). An unresolvable store is
+	// operational (exit 2), matching every other manifest-loading verb.
+	cfg, err := store.Open(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
+		return 2
+	}
 
-	return runGate(ctx, root, spec, head, resolveDefaultBranch(ctx, root), stdout, stderr)
+	return runGate(ctx, root, spec, head, resolveDefaultBranch(ctx, root), cfg.Model, stdout, stderr)
 }
 
 // resolveDefaultBranch delegates to internal/lint.ResolveDefaultBranch
@@ -141,16 +151,16 @@ type gateCondition struct {
 // default-branch ref (branch name or "" if unknown — condition 1 then
 // fails closed), evaluates all three conditions independently, prints each
 // with its reason, and returns the exit code.
-func runGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head, defaultBranchRef string, stdout, stderr io.Writer) int {
+func runGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head, defaultBranchRef string, mdl *model.Model, stdout, stderr io.Writer) int {
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate: internal error: resolved spec has an invalid id:", err)
 		return 2
 	}
 
-	cond1 := checkAcceptedOnDefaultBranch(ctx, root, specRef.Name, defaultBranchRef)
+	cond1 := checkAcceptedOnDefaultBranch(ctx, root, specRef.Name, defaultBranchRef, string(spec.Class), mdl)
 
-	cond2, err := checkNoACViolated(ctx, root, spec, head)
+	cond2, err := checkNoACViolated(ctx, root, spec, head, mdl)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate:", err)
 		return 2
@@ -210,8 +220,12 @@ func reportGateConditions(stdout io.Writer, conds []gateCondition) int {
 // gitx.Show at the default branch's current tip — never the working tree,
 // which a build branch must never be trusted to self-report (03 §Gates:
 // "builds reference accepted designs only").
-func checkAcceptedOnDefaultBranch(ctx context.Context, root, specName, defaultBranchRef string) gateCondition {
-	name := "1. spec accepted-pending-build on the default branch"
+// class and mdl resolve the condition's display STATE words (L-M13(1),
+// nil-safe): the required accepted-pending-build in the name/reason and
+// the decoded current status. The status COMPARISON below and the
+// git-read machinery stay on bare ids.
+func checkAcceptedOnDefaultBranch(ctx context.Context, root, specName, defaultBranchRef, class string, mdl *model.Model) gateCondition {
+	name := "1. spec " + mdl.DisplayState(class, "accepted-pending-build") + " on the default branch"
 	if defaultBranchRef == "" {
 		// D6-6: name every source resolveDefaultBranch tries — not just
 		// the two GitLab-CI-centric ones — plus the remedy, since this is
@@ -243,7 +257,9 @@ func checkAcceptedOnDefaultBranch(ctx context.Context, root, specName, defaultBr
 		return gateCondition{Name: name, Reason: fmt.Sprintf("spec/%s on default branch failed to decode: %v", specName, err)}
 	}
 	if decoded.Status != "accepted-pending-build" {
-		return gateCondition{Name: name, Reason: fmt.Sprintf("spec/%s status on default branch %s is %q, want accepted-pending-build", specName, defaultBranchRef, decoded.Status)}
+		return gateCondition{Name: name, Reason: fmt.Sprintf("spec/%s status on default branch %s is %q, want %s", specName, defaultBranchRef,
+			mdl.DisplayState(class, string(decoded.Status)),
+			mdl.DisplayState(class, "accepted-pending-build"))}
 	}
 	return gateCondition{Name: name, OK: true}
 }
@@ -251,7 +267,7 @@ func checkAcceptedOnDefaultBranch(ctx context.Context, root, specName, defaultBr
 // checkNoACViolated is condition 2: no AC is violated at head, per the
 // fold over authoritative (source: ci) evidence only — never --preview
 // (03 §Gates: "the gate ... consume[s] authoritative evidence only").
-func checkNoACViolated(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string) (gateCondition, error) {
+func checkNoACViolated(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string, mdl *model.Model) (gateCondition, error) {
 	name := "2. no AC violated at head (authoritative evidence)"
 
 	// A spike build branch is exempt from the evidence model (03 §Ceremony
@@ -260,13 +276,14 @@ func checkNoACViolated(ctx context.Context, root string, spec *artifact.SpecFron
 	// inoperable), disclose the exemption through the shared disclosure seam
 	// — never a silent pass — and let conditions 1/3/4 still decide the
 	// verdict. Disclosed conditions neither pass nor fail the gate on their
-	// own (reportGateConditions).
+	// own (reportGateConditions). The spoken class word resolves (L-M13(1));
+	// the disclosure Source is a producer ID — identity, bare.
 	if spec.Spike {
 		return gateCondition{
 			Name:      name,
 			Disclosed: true,
 			Source:    "gate:spike-evidence-exempt",
-			Reason:    "spike build branch is exempt from the evidence model (03 §Ceremony pricing): no acceptance criteria to fold, so condition 2 is skipped; conditions 1/3/4 still apply",
+			Reason:    mdl.DisplayClass("spike") + " build branch is exempt from the evidence model (03 §Ceremony pricing): no acceptance criteria to fold, so condition 2 is skipped; conditions 1/3/4 still apply",
 		}, nil
 	}
 

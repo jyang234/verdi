@@ -141,7 +141,7 @@ func TestGate_Condition1_FailsAlone(t *testing.T) {
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -159,7 +159,7 @@ func TestGate_Condition2_FailsAlone(t *testing.T) {
 	writeGateViolatingRecord(t, repo.Dir, repo.Head)
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -188,7 +188,7 @@ func TestGate_Condition3_FailsAlone(t *testing.T) {
 			setup(t, repo.Dir, repo.Head)
 
 			var stdout, stderr bytes.Buffer
-			got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+			got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
 			if got != 1 {
 				t.Fatalf("runGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 			}
@@ -210,7 +210,7 @@ func TestGate_AbsenceFindingMustBeDispositioned(t *testing.T) {
 		writeGateReport(t, repo.Dir, repo.Head, undispositionedAbsenceFindingYAML)
 
 		var stdout, stderr bytes.Buffer
-		got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+		got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
 		if got != 1 {
 			t.Fatalf("runGate = %d, want 1; stdout=%s", got, stdout.String())
 		}
@@ -226,7 +226,7 @@ func TestGate_AbsenceFindingMustBeDispositioned(t *testing.T) {
 		writeGateReport(t, repo.Dir, repo.Head, dispositionedAbsenceFindingYAML)
 
 		var stdout, stderr bytes.Buffer
-		got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+		got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
 		if got != 0 {
 			t.Fatalf("runGate = %d, want 0; stdout=%s", got, stdout.String())
 		}
@@ -240,7 +240,7 @@ func TestGate_AllHold(t *testing.T) {
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runGate = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -267,7 +267,7 @@ func TestGate_UnknownDefaultBranch_FailsClosed(t *testing.T) {
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "", &stdout, &stderr)
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "", nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runGate(unknown default branch) = %d, want 1", got)
 	}
@@ -358,7 +358,7 @@ digest: sha256:%s
 	}
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runGate(spike) = %d, want 0 (evidence-exempt, not inoperable); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}

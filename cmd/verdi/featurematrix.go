@@ -22,11 +22,13 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -35,7 +37,7 @@ import (
 // resolved round-four feature spec: per-AC status, frozen stubs paired
 // with the computed live `implements` mapping under the acceptance-time-
 // plan banner, and stub reconciliation state (05 §Lenses).
-func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, preview bool, stdout io.Writer) error {
+func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, preview bool, mdl *model.Model, stdout io.Writer) error {
 	ref, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		return fmt.Errorf("matrix: %w", err)
@@ -85,7 +87,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 		return fmt.Errorf("matrix: %w", err)
 	}
 
-	printFeatureMatrix(stdout, spec, result, reconciliation, stories, supersededByAC, preview)
+	printFeatureMatrix(stdout, spec, result, reconciliation, stories, supersededByAC, preview, mdl)
 	return nil
 }
 
@@ -264,7 +266,11 @@ func foldImplementingStory(ctx context.Context, root, commit string, storySpec *
 // its ref instead of silently vanishing from the row it used to occupy —
 // legible without consulting a `superseded-by` backlink (03 §rung 3), with
 // no change to the eligibility math computed above.
-func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededByAC map[string][]string, preview bool) {
+func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededByAC map[string][]string, preview bool, mdl *model.Model) {
+	// L-M13(1) classification: the "feature:"/"status:" line KEYS and the
+	// trailing feature.violated/stub_reconciliation.blocked lines are
+	// verdict/field KEYS — identity, bare. State/class words spoken as
+	// VALUES or table prose below resolve through mdl (nil-safe).
 	fmt.Fprintf(w, "feature: %s\n", result.SpecRef)
 	// ac-2 (feature-supersession-state): the feature's own frontmatter
 	// `status`, printed unconditionally so a superseded FEATURE's terminal
@@ -273,18 +279,22 @@ func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evid
 	// both the story and feature rungs" (03 §rung 3, "without consulting
 	// backlinks") for a feature you point `verdi matrix` at, not only for a
 	// superseded story rendered inside a feature's fold.
-	fmt.Fprintf(w, "status: %s\n", spec.Status)
+	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(string(spec.Class), string(spec.Status)))
 	if preview {
 		fmt.Fprintln(w, "PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)")
 	}
 	fmt.Fprintln(w)
 
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "AC\tSTATUS\tEVIDENCE\tIMPLEMENTING STORIES\tTEXT")
+	// Column headers speak the class plural as display (upper-cased,
+	// L-M13(1)); the [superseded] marker is the state word as display.
+	// Story REFS in the cells stay identity.
+	storiesHeader := strings.ToUpper(mdl.DisplayClassPlural("story"))
+	fmt.Fprintln(tw, "AC\tSTATUS\tEVIDENCE\tIMPLEMENTING "+storiesHeader+"\tTEXT")
 	for _, ac := range result.ACs {
 		entries := append([]string(nil), ac.ImplementingStories...)
 		for _, s := range supersededByAC[ac.ID] {
-			entries = append(entries, s+" [superseded]")
+			entries = append(entries, s+" ["+mdl.DisplayState("story", "superseded")+"]")
 		}
 		stories := "-"
 		if len(entries) > 0 {
@@ -304,7 +314,7 @@ func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evid
 		byStubSlug[r.Slug] = r
 	}
 	stw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(stw, "STUB\tDECLARED ACS\tLIVE STORIES\tRECONCILIATION")
+	fmt.Fprintln(stw, "STUB\tDECLARED ACS\tLIVE "+storiesHeader+"\tRECONCILIATION")
 	for _, stub := range spec.Stubs {
 		live := realizationCandidates(stories, stub)
 		liveStr := "-"
@@ -318,7 +328,8 @@ func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evid
 
 	if len(reconciliation.Unplanned) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "unplanned additions (closed stories tracing to no stub):")
+		fmt.Fprintf(w, "unplanned additions (%s %s tracing to no stub):\n",
+			mdl.DisplayState("story", "closed"), mdl.DisplayClassPlural("story"))
 		for _, u := range reconciliation.Unplanned {
 			fmt.Fprintf(w, "  %s (%s)\n", u.SpecRef, joinComma(u.ACIDs))
 		}

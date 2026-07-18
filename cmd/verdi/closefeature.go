@@ -88,13 +88,14 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 
-	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, deps.Forge, defaultBranchRef, manifest, stdout)
+	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, deps.Forge, defaultBranchRef, manifest, deps.Model, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
 	if !ok {
-		fmt.Fprintln(stdout, "close: FAIL (feature closure gate not satisfied; see conditions above)")
+		// The class word is display prose and resolves (L-M13(1)).
+		fmt.Fprintf(stdout, "close: FAIL (%s closure gate not satisfied; see conditions above)\n", deps.Model.DisplayClass("feature"))
 		return 1
 	}
 
@@ -190,7 +191,10 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		}
 		fmt.Fprintf(stdout, "close: rollup published to %s (eligible=%t)\n", spec.Story, pubRoll.Eligible)
 	} else {
-		fmt.Fprintln(stdout, "close: feature carries no story: tracker ref (R4-I-2); rollup.json is archived but not published to any tracker")
+		// The leading class word is display prose and resolves (L-M13(1));
+		// "story:" names the FRONTMATTER FIELD (trailing colon) — identity,
+		// bare — and rollup.json is a filename.
+		fmt.Fprintf(stdout, "close: %s carries no story: tracker ref (R4-I-2); rollup.json is archived but not published to any tracker\n", deps.Model.DisplayClass("feature"))
 	}
 
 	fmt.Fprintf(stdout, "close: archived %s to specs/archive/%s/ on branch %s (commit %s)\n", specRef.String(), specRef.Name, closureBranch, closeCommit)

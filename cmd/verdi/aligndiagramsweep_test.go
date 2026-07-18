@@ -152,7 +152,7 @@ func TestGate_UnaffectedByDiagramSweepFinding(t *testing.T) {
 
 	// Baseline: gate passes with no sweep report at all.
 	var baseStdout, baseStderr bytes.Buffer
-	baseGot := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", &baseStdout, &baseStderr)
+	baseGot := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &baseStdout, &baseStderr)
 	if baseGot != 0 {
 		t.Fatalf("baseline runGate = %d, want 0; stdout=%s stderr=%s", baseGot, baseStdout.String(), baseStderr.String())
 	}
@@ -171,7 +171,7 @@ func TestGate_UnaffectedByDiagramSweepFinding(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", &stdout, &stderr)
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
 	if got != baseGot {
 		t.Fatalf("runGate with an undispositioned diagram-sweep finding present = %d, want unchanged from baseline %d; stdout=%s stderr=%s", got, baseGot, stdout.String(), stderr.String())
 	}

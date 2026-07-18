@@ -13,6 +13,7 @@ import (
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -46,8 +47,14 @@ import (
 // mandatory machinery), the design-branch sweep is optional exploratory
 // tooling this phase does not build, so a store without one yet must not
 // have every story spec permanently stub-match-ineligible.
-func computeStubMatch(root string, story *artifact.SpecFrontmatter) (matched bool, reason string) {
-	featureName, acIDs, err := storyImplementsTarget(story)
+// The reason strings this function returns are printed verbatim inside
+// accept's "not stub-matched (%s)" verdict line — display prose, so every
+// class word they speak resolves through mdl (L-M13(1),
+// judged-cli-refusal-prose-class-state-words-still-bare; nil-safe bare-id
+// fallback). Feature NAMES, slugs, refs, and edge-type words (implements,
+// supersedes, exempts) stay identity.
+func computeStubMatch(root string, story *artifact.SpecFrontmatter, mdl *model.Model) (matched bool, reason string) {
+	featureName, acIDs, err := storyImplementsTarget(story, mdl)
 	if err != nil {
 		return false, err.Error()
 	}
@@ -59,17 +66,21 @@ func computeStubMatch(root string, story *artifact.SpecFrontmatter) (matched boo
 		// "spike or malformed" message is exactly the kind of ambiguous
 		// disclosure this feature exists to end.
 		if story.Spike {
-			return false, "spike: stub-matching is not applicable (a spike carries no implements edges, 02 §Kind registry)"
+			spikeWord := mdl.DisplayClass("spike")
+			return false, fmt.Sprintf("%s: stub-matching is not applicable (%s %s carries no implements edges, 02 §Kind registry)", spikeWord, model.Article(spikeWord), spikeWord)
 		}
-		return false, "no implements edges (malformed story)"
+		return false, fmt.Sprintf("no implements edges (malformed %s)", mdl.DisplayClass("story"))
 	}
 
 	feature, err := storyresolve.LoadActiveSpec(root, featureName)
 	if err != nil {
-		return false, fmt.Sprintf("implements-target feature %q could not be loaded: %v", featureName, err)
+		return false, fmt.Sprintf("implements-target %s %q could not be loaded: %v", mdl.DisplayClass("feature"), featureName, err)
 	}
 	if feature.Class != artifact.ClassFeature {
-		return false, fmt.Sprintf("implements-target %q is a %s spec, not a feature spec", featureName, feature.Class)
+		classWord := mdl.DisplayClass(string(feature.Class))
+		featureWord := mdl.DisplayClass("feature")
+		return false, fmt.Sprintf("implements-target %q is %s %s spec, not %s %s spec", featureName,
+			model.Article(classWord), classWord, model.Article(featureWord), featureWord)
 	}
 
 	implSet := sortedSet(acIDs)
@@ -81,14 +92,14 @@ func computeStubMatch(root string, story *artifact.SpecFrontmatter) (matched boo
 		}
 	}
 	if matchedStub == nil {
-		return false, "implements-set does not equal any of the feature's declared stub AC sets"
+		return false, fmt.Sprintf("implements-set does not equal any of the %s's declared stub AC sets", mdl.DisplayClass("feature"))
 	}
 
 	if store.RefSlug(story.Title) != matchedStub.Slug {
 		return false, fmt.Sprintf("RefSlug(title) %q does not equal the matched stub's slug %q", store.RefSlug(story.Title), matchedStub.Slug)
 	}
 
-	if disq, why := disqualifyingSupersedesOrExempts(root, story); disq {
+	if disq, why := disqualifyingSupersedesOrExempts(root, story, mdl); disq {
 		return false, why
 	}
 
@@ -105,7 +116,7 @@ func computeStubMatch(root string, story *artifact.SpecFrontmatter) (matched boo
 // name. An error is returned only when implements edges name more than one
 // distinct feature — everything else (no edges at all) is reported via the
 // zero-value featureName, left for the caller to read as "not matched".
-func storyImplementsTarget(story *artifact.SpecFrontmatter) (featureName string, acIDs []string, err error) {
+func storyImplementsTarget(story *artifact.SpecFrontmatter, mdl *model.Model) (featureName string, acIDs []string, err error) {
 	for _, l := range story.Links {
 		if l.Type != artifact.LinkImplements {
 			continue
@@ -117,7 +128,9 @@ func storyImplementsTarget(story *artifact.SpecFrontmatter) (featureName string,
 		if featureName == "" {
 			featureName = ref.Name
 		} else if featureName != ref.Name {
-			return "", nil, fmt.Errorf("implements edges span more than one feature (%s, %s)", featureName, ref.Name)
+			// The class word is display (this error surfaces as a
+			// stub-match reason, L-M13(1)); the two NAMES stay identity.
+			return "", nil, fmt.Errorf("implements edges span more than one %s (%s, %s)", mdl.DisplayClass("feature"), featureName, ref.Name)
 		}
 		acIDs = append(acIDs, ref.Object)
 	}
@@ -138,20 +151,24 @@ func storyImplementsTarget(story *artifact.SpecFrontmatter) (featureName string,
 // fast path applies when the feature mapping is unchanged"). Every `exempts`
 // edge, and every `supersedes` edge targeting anything else — an ADR, a
 // feature spec, a decision object — still disqualifies.
-func disqualifyingSupersedesOrExempts(root string, story *artifact.SpecFrontmatter) (bool, string) {
+func disqualifyingSupersedesOrExempts(root string, story *artifact.SpecFrontmatter, mdl *model.Model) (bool, string) {
 	links := append([]artifact.Link(nil), story.Links...)
 	for _, d := range story.Decisions {
 		links = append(links, d.Links...)
 	}
+	// The class words below are display (stub-match reasons, L-M13(1));
+	// the edge-type words (exempts, supersedes) are the link taxonomy's
+	// identity ids and stay bare, as does the ref.
+	storyWord := mdl.DisplayClass("story")
 	for _, l := range links {
 		switch l.Type {
 		case artifact.LinkExempts:
-			return true, fmt.Sprintf("story carries an exempts edge (%s), disqualifying the stub-matched fast path", l.Ref)
+			return true, fmt.Sprintf("%s carries an exempts edge (%s), disqualifying the stub-matched fast path", storyWord, l.Ref)
 		case artifact.LinkSupersedes:
 			if supersedesTargetsStory(root, l.Ref) {
 				continue // rung-3 chain edge to the predecessor story — the fast path itself
 			}
-			return true, fmt.Sprintf("story carries a supersedes edge to a non-story target (%s); only the rung-3 chain edge to a predecessor story spec is exempt", l.Ref)
+			return true, fmt.Sprintf("%s carries a supersedes edge to a non-%s target (%s); only the rung-3 chain edge to a predecessor %s spec is exempt", storyWord, storyWord, l.Ref, storyWord)
 		}
 	}
 	return false, ""

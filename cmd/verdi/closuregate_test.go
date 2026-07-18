@@ -73,7 +73,7 @@ func TestRunClosureGate_EligibleCondition(t *testing.T) {
 
 	t.Run("no attestation: not eligible", func(t *testing.T) {
 		var stdout bytes.Buffer
-		ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, repo.Head, &stdout)
+		ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +88,7 @@ func TestRunClosureGate_EligibleCondition(t *testing.T) {
 	t.Run("attestation present: eligible, closure gate passes", func(t *testing.T) {
 		seedAttestation(t, repo.Dir)
 		var stdout bytes.Buffer
-		ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, repo.Head, &stdout)
+		ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +113,7 @@ func TestRunClosureGate_SpecStaleCondition(t *testing.T) {
 `)
 
 	var stdout bytes.Buffer
-	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, repo.Head, &stdout)
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 
 	// 1. The closure gate is blocked while the MR is open.
 	var stdout bytes.Buffer
-	ok, err := runClosureGate(ctx, repo.Dir, spec, fakeForge, "main", nil, repo.Head, &stdout)
+	ok, err := runClosureGate(ctx, repo.Dir, spec, fakeForge, "main", nil, nil, repo.Head, &stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 	// 3. verdi gate is NOT blocked either, for the same reason (condition 4
 	// only ever consults local, merged specs/active/ — cascadecheck.go).
 	var gstdout, gstderr bytes.Buffer
-	gotGate := runGate(ctx, repo.Dir, spec, repo.Head, "main", &gstdout, &gstderr)
+	gotGate := runGate(ctx, repo.Dir, spec, repo.Head, "main", nil, &gstdout, &gstderr)
 	if gotGate != 0 {
 		t.Fatalf("runGate (pending-supersession only, not merged) = %d, want 0; stdout=%s stderr=%s", gotGate, gstdout.String(), gstderr.String())
 	}
@@ -194,7 +194,7 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 		spec, _ := readSpec(t, repo.Dir, "stale-decline")
 
 		var stdout bytes.Buffer
-		ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, repo.Head, &stdout)
+		ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -218,7 +218,7 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 
 		fakeForge := forgefake.New() // no seeded open MRs
 		var stdout bytes.Buffer
-		ok, err := runClosureGate(ctx, repo.Dir, spec, fakeForge, "main", nil, repo.Head, &stdout)
+		ok, err := runClosureGate(ctx, repo.Dir, spec, fakeForge, "main", nil, nil, repo.Head, &stdout)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -279,7 +279,7 @@ func TestRunClosureGate_UnreadableAttestation_OperationalFailure(t *testing.T) {
 	// Gate-function taxonomy: a non-nil "closure gate:"-wrapped error, ok
 	// false — never a swallowed (true, nil) eligible verdict.
 	var stdout bytes.Buffer
-	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, repo.Head, &stdout)
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
 	if err == nil {
 		t.Fatalf("runClosureGate(unreadable attestation) err = nil (ok=%v) — an unreadable attestation must fail closed, never swallow to a satisfied attestation (ADJ-67/D6-38); stdout=%s", ok, stdout.String())
 	}

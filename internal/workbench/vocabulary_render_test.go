@@ -178,9 +178,12 @@ func TestBoardRender_ClassWordProseModelVocabulary(t *testing.T) {
 		// The sealed wall's Instantiate affordance (finding site ~:410).
 		`>Instantiate Change Request</button>`,
 		`>Instantiate Deep Dive</button>`,
-		// The feature-wall guide note (finding site ~:845).
-		`This is a <strong>Initiative</strong> wall: outcome ACs and Change Request stubs.`,
-		`a Initiative never lists its Change Requests.`,
+		// The feature-wall guide note (finding site ~:845). The article
+		// agrees with the vowel-initial rename ("an Initiative", never the
+		// formerly-pinned ungrammatical "a Initiative") — model.Article,
+		// judged-article-agreement-approximation-undisclosed.
+		`This is an <strong>Initiative</strong> wall: outcome ACs and Change Request stubs.`,
+		`an Initiative never lists its Change Requests.`,
 		`when the Initiative lands (outcomes, never Change Request-sized tasks)`,
 		// The yarn key's scoping meanings.
 		`a planned Change Request will deliver it`,
@@ -223,6 +226,25 @@ func TestBoardRender_ClassWordProseModelVocabulary(t *testing.T) {
 	} {
 		if !strings.Contains(html, keep) {
 			t.Errorf("board region lost identity-layer string %q — a rename must never move addressing", keep)
+		}
+	}
+}
+
+// TestClassWordsIndefinite pins the article-composition helper at the
+// unit level (judged-article-agreement-approximation-undisclosed): the
+// zero value reproduces today's bare-id phrases exactly, and a
+// vowel-initial rename gets "an".
+func TestClassWordsIndefinite(t *testing.T) {
+	plain := classWords{}
+	for id, want := range map[string]string{"story": "a story", "spike": "a spike", "feature": "a feature"} {
+		if got := plain.indefinite(id); got != want {
+			t.Errorf("zero-words indefinite(%q) = %q, want %q", id, got, want)
+		}
+	}
+	renamed := classWords{m: vocabTestModel()}
+	for id, want := range map[string]string{"feature": "an Initiative", "story": "a Change Request", "spike": "a Deep Dive"} {
+		if got := renamed.indefinite(id); got != want {
+			t.Errorf("renamed indefinite(%q) = %q, want %q", id, got, want)
 		}
 	}
 }

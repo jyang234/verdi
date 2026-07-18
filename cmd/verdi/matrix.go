@@ -50,6 +50,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -81,6 +82,17 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "matrix:", err)
 		return 2
 	}
+	// The resolved operating model (store.Open's config bottleneck, L-M3):
+	// the matrix's status VALUE and table prose resolve display vocabulary
+	// through Config.Model (spec/vocabulary-surfaces ac-1, L-M13(1)). An
+	// unresolvable store is operational (exit 2), matching every other
+	// manifest-loading verb.
+	cfg, err := store.Open(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "matrix:", err)
+		return 2
+	}
+	mdl := cfg.Model
 	commit, err := gitx.RevParse(ctx, root, "HEAD")
 	if err != nil {
 		fmt.Fprintln(stderr, "matrix:", err)
@@ -108,7 +120,7 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 	//     keeps it on the story path.
 	// See featurematrix.go's doc comment for the grandfathering preserved.
 	if spec.Class == artifact.ClassFeature && spec.Problem != nil {
-		if err := cmdMatrixFeature(ctx, root, commit, spec, preview, stdout); err != nil {
+		if err := cmdMatrixFeature(ctx, root, commit, spec, preview, mdl, stdout); err != nil {
 			fmt.Fprintln(stderr, "matrix:", err)
 			return 2
 		}
@@ -144,7 +156,7 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	printMatrix(stdout, result, spec.Status, preview, obligationCells)
+	printMatrix(stdout, result, spec.Status, string(spec.Class), mdl, preview, obligationCells)
 	return 0
 }
 
@@ -210,10 +222,15 @@ func obligationCellsFor(root, specName string, acs []artifact.AcceptanceCriterio
 // id — kept as a caller-supplied map, rather than looked up here, so this
 // function stays a pure formatter over already-computed data (no disk I/O),
 // exactly as it was before this story.
-func printMatrix(w io.Writer, result evidence.StoryResult, status artifact.Status, preview bool, obligationCells map[string]string) {
+func printMatrix(w io.Writer, result evidence.StoryResult, status artifact.Status, class string, mdl *model.Model, preview bool, obligationCells map[string]string) {
+	// L-M13(1) classification: the "story:"/"spec:"/"status:" line KEYS
+	// mirror frontmatter field names, and the trailing
+	// story.violated/story.eligible lines are the fold's verdict KEYS —
+	// identity, bare. The status VALUE is a state word — display, resolved
+	// (spec/vocabulary-surfaces ac-1; nil-safe bare-id fallback).
 	fmt.Fprintf(w, "story: %s\n", result.Story)
 	fmt.Fprintf(w, "spec:  %s\n", result.SpecRef)
-	fmt.Fprintf(w, "status: %s\n", status)
+	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(class, string(status)))
 	if preview {
 		fmt.Fprintln(w, "PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)")
 	}

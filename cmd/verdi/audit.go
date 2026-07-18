@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	"github.com/jyang234/verdi/internal/decisionsweep"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -38,11 +39,15 @@ func cmdAudit(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "audit:", err)
 		return 2
 	}
-	manifest, err := loadManifest(root)
+	// store.Open (not the bare loadManifest delegate): audit's empty-sweep
+	// line resolves display vocabulary through Config.Model (L-M13(1)) —
+	// one open yields both halves.
+	cfg, err := store.Open(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "audit:", err)
 		return 2
 	}
+	manifest := cfg.Manifest
 
 	exemptsThreshold, deviationsThreshold := 0, 0
 	if manifest.Audit != nil {
@@ -50,12 +55,13 @@ func cmdAudit(args []string, stdout, stderr io.Writer) int {
 		deviationsThreshold = manifest.Audit.DeviationsStaleThreshold
 	}
 
-	return runAudit(root, exemptsThreshold, deviationsThreshold, stdout, stderr)
+	return runAudit(root, exemptsThreshold, deviationsThreshold, cfg.Model, stdout, stderr)
 }
 
-// runAudit is the testable core: given an already-resolved root and
-// thresholds, runs internal/decisionsweep.Audit and reports its findings.
-func runAudit(root string, exemptsThreshold, deviationsThreshold int, stdout, stderr io.Writer) int {
+// runAudit is the testable core: given an already-resolved root,
+// thresholds, and the resolved display model (nil-safe: bare-id
+// fallback), runs internal/decisionsweep.Audit and reports its findings.
+func runAudit(root string, exemptsThreshold, deviationsThreshold int, mdl *model.Model, stdout, stderr io.Writer) int {
 	result, err := decisionsweep.Audit(root, exemptsThreshold, deviationsThreshold)
 	if err != nil {
 		fmt.Fprintln(stderr, "audit:", err)
@@ -83,7 +89,10 @@ func runAudit(root string, exemptsThreshold, deviationsThreshold int, stdout, st
 
 	fmt.Fprintln(stdout, "== Spec-stale audit ==")
 	if len(result.SpecStale) == 0 {
-		fmt.Fprintln(stdout, "(no stories with a deviation report to audit)")
+		// The class plural is display prose and resolves (L-M13(1)); the
+		// per-row "accepted-deviations" label below is the deviation
+		// ledger's own count key, not a lifecycle state — identity.
+		fmt.Fprintf(stdout, "(no %s with a deviation report to audit)\n", mdl.DisplayClassPlural("story"))
 	}
 	for _, e := range result.SpecStale {
 		status := "ok"

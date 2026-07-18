@@ -326,6 +326,8 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
 	}
+	// L-M13(1) classification: commit subjects are history — identity; the
+	// kind here is the --kind flag's enum VALUE, bare.
 	msg := fmt.Sprintf("design start: scaffold %s (%s spec, no tracker ref)", specRef.String(), kind)
 	if storyRef != "" {
 		msg = fmt.Sprintf("design start: scaffold %s (%s spec, story %s)", specRef.String(), kind, storyRef)
@@ -339,6 +341,10 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	regenerateBaseline(ctx, root, headCommit, spec, syncDeps{Runner: deps.Runner, GoTest: deps.GoTest, Stdout: stdout, Stderr: stderr}, "design start", stderr)
 
 	fmt.Fprintf(stdout, "design start: created branch %s\n", branch)
+	// L-M13(1) classification: "(kind: %s, status: draft)" ECHOES the
+	// scaffold's literal frontmatter — the --kind enum value and the
+	// status: field value just written to disk — identity, bare (unlike
+	// accept's transition VERDICT, which resolves display state words).
 	fmt.Fprintf(stdout, "design start: scaffolded %s (kind: %s, status: draft)\n", specRef.String(), kind)
 	fmt.Fprintf(stdout, "design start: board: http://%s/board/spec/%s (run `verdi serve` from this checkout)\n", defaultWorkbenchAddr, name)
 	return 0

@@ -295,7 +295,7 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -332,7 +332,7 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -374,7 +374,7 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -422,7 +422,7 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -480,7 +480,7 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 
 		before := snapshotRepo(t, repo.Dir)
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, fg, true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, nil, fg, true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -516,7 +516,7 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -566,7 +566,7 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -603,7 +603,7 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -645,7 +645,7 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+		rc := runPreflight(ctx, repo.Dir, preflightStoryRef, &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 		}
@@ -713,7 +713,7 @@ func TestRunPreflight_StoryScope_ReadyThenClose(t *testing.T) {
 
 	before := snapshotRepo(t, repo.Dir)
 	var pstdout, pstderr bytes.Buffer
-	rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, forgefake.New(), true, &pstdout, &pstderr)
+	rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &pstdout, &pstderr)
 	if rc != 0 {
 		t.Fatalf("runPreflight(ready) = %d, want 0; stdout=%s stderr=%s", rc, pstdout.String(), pstderr.String())
 	}
@@ -757,7 +757,7 @@ func TestRunPreflight_ExitCodeMatrixAndNonMutation(t *testing.T) {
 		}
 		before := snapshotRepo(t, repo.Dir)
 		var stdout, stderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, forgefake.New(), true, &stdout, &stderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
 		if rc != 0 {
 			t.Fatalf("runPreflight(ready) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
@@ -771,7 +771,7 @@ func TestRunPreflight_ExitCodeMatrixAndNonMutation(t *testing.T) {
 		repo := buildCloseFixtureRepo(t)
 		before := snapshotRepo(t, repo.Dir)
 		var stdout, stderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, forgefake.New(), true, &stdout, &stderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight(no evidence) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
@@ -792,7 +792,7 @@ func TestRunPreflight_ExitCodeMatrixAndNonMutation(t *testing.T) {
 		}
 		before := snapshotRepo(t, repo.Dir)
 		var stdout, stderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, forgefake.New(), true, &stdout, &stderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
 		if rc != 2 {
 			t.Fatalf("runPreflight(malformed derived record) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
@@ -806,7 +806,7 @@ func TestRunPreflight_ExitCodeMatrixAndNonMutation(t *testing.T) {
 		repo := buildCloseFixtureRepo(t)
 		before := snapshotRepo(t, repo.Dir)
 		var stdout, stderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, erroringOpenMRsForge{forgefake.New()}, true, &stdout, &stderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, erroringOpenMRsForge{forgefake.New()}, true, &stdout, &stderr)
 		if rc != 2 {
 			t.Fatalf("runPreflight(forge transport error) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
@@ -856,7 +856,7 @@ func TestRunPreflight_CIGuardDisclosure(t *testing.T) {
 		clearCIEnv(t)
 		repo := readyCloseFixtureRepo(t)
 		var stdout, stderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, forgefake.New(), false, &stdout, &stderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), false, &stdout, &stderr)
 		if rc != 0 {
 			t.Fatalf("runPreflight = %d, want 0 (ready); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
@@ -870,7 +870,7 @@ func TestRunPreflight_CIGuardDisclosure(t *testing.T) {
 		t.Setenv("CI", "true")
 		repo := readyCloseFixtureRepo(t)
 		var stdout, stderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, forgefake.New(), false, &stdout, &stderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), false, &stdout, &stderr)
 		if rc != 0 {
 			t.Fatalf("runPreflight = %d, want 0 (ready); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
@@ -883,7 +883,7 @@ func TestRunPreflight_CIGuardDisclosure(t *testing.T) {
 		clearCIEnv(t)
 		repo := readyCloseFixtureRepo(t)
 		var stdout, stderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, forgefake.New(), true, &stdout, &stderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
 		if rc != 0 {
 			t.Fatalf("runPreflight = %d, want 0 (ready); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
@@ -896,7 +896,7 @@ func TestRunPreflight_CIGuardDisclosure(t *testing.T) {
 		clearCIEnv(t)
 		repo := buildCloseFixtureRepo(t) // no evidence produced: gate is unmet
 		var stdout, stderr bytes.Buffer
-		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, forgefake.New(), false, &stdout, &stderr)
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), false, &stdout, &stderr)
 		if rc != 1 {
 			t.Fatalf("runPreflight = %d, want 1 (unmet); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}

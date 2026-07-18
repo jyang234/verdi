@@ -45,6 +45,7 @@ import (
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -77,7 +78,7 @@ func closePublishGuardRefuses(forceLocal bool) bool {
 // discipline mirrors runClose exactly: 0 the gate holds (ready to close), 1
 // the gate does not (a verdict), 2 a genuine operational failure (dc-5) —
 // never for a merely-absent artifact, which is always a verdict.
-func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Manifest, f forge.Forge, forceLocal bool, stdout, stderr io.Writer) int {
+func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, stdout, stderr io.Writer) int {
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
 		fmt.Fprintln(stderr, "close: --preflight:", err)
@@ -95,9 +96,9 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 
 	var ok bool
 	if spec.Class == artifact.ClassFeature {
-		ok, err = runFeaturePreflightGate(ctx, root, spec, manifest, f, defaultBranchRef, head, stdout)
+		ok, err = runFeaturePreflightGate(ctx, root, spec, manifest, mdl, f, defaultBranchRef, head, stdout)
 	} else {
-		ok, err = runStoryPreflightGate(ctx, root, spec, manifest, f, defaultBranchRef, head, stdout)
+		ok, err = runStoryPreflightGate(ctx, root, spec, manifest, mdl, f, defaultBranchRef, head, stdout)
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -123,8 +124,8 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 // kind/path detail ac-1 requires (dc-4) and condition 2's spec-stale line
 // with the deviation-report.md path ac-1 additionally requires (neither of
 // which the shared gate's own Reason strings carry today).
-func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, f forge.Forge, defaultBranchRef, head string, stdout io.Writer) (bool, error) {
-	ok, err := runClosureGate(ctx, root, spec, f, defaultBranchRef, manifest, head, stdout)
+func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, mdl *model.Model, f forge.Forge, defaultBranchRef, head string, stdout io.Writer) (bool, error) {
+	ok, err := runClosureGate(ctx, root, spec, f, defaultBranchRef, manifest, mdl, head, stdout)
 	if err != nil {
 		return false, err
 	}

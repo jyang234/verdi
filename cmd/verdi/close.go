@@ -73,6 +73,7 @@ import (
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/provider"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
@@ -94,6 +95,11 @@ type closeDeps struct {
 	JudgeTimeout time.Duration
 	Forge        forge.Forge
 	Registry     provider.StoryProvider
+	// Model is the store's resolved operating model (store.Open's config
+	// bottleneck) — display vocabulary for the gate lines and ritual prose
+	// this verb prints (L-M13(1)). nil (every pre-existing test literal)
+	// falls back to bare ids.
+	Model *model.Model
 }
 
 // cmdClose is `verdi close`'s entry point, invoked by dispatch.go.
@@ -135,12 +141,15 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "close:", err)
 			return 2
 		}
-		manifest, err := loadManifest(root)
+		// store.Open (not the bare loadManifest delegate): the rehearsed
+		// closure-gate lines resolve display vocabulary through
+		// Config.Model (L-M13(1)) — one open yields both halves.
+		cfg, err := store.Open(root)
 		if err != nil {
 			fmt.Fprintln(stderr, "close:", err)
 			return 2
 		}
-		return runPreflight(ctx, root, storyArg, manifest, buildForgeBestEffort(ctx, root), forceLocal, stdout, stderr)
+		return runPreflight(ctx, root, storyArg, cfg.Manifest, cfg.Model, buildForgeBestEffort(ctx, root), forceLocal, stdout, stderr)
 	}
 
 	// 04 §Semantics: "PublishRollup runs in CI only" — close calls it
@@ -161,11 +170,15 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
-	manifest, err := loadManifest(root)
+	// store.Open (not the bare loadManifest delegate): close's gate lines
+	// and feature-ritual prose resolve display vocabulary through
+	// Config.Model (L-M13(1)) — one open yields both halves.
+	cfg, err := store.Open(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
+	manifest := cfg.Manifest
 
 	var runner upstream.Runner
 	if manifest.Toolchain != nil {
@@ -189,6 +202,7 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		JudgeTimeout:  judgeTimeout,
 		Forge:         buildForgeBestEffort(ctx, root),
 		Registry:      buildProviderRegistry(manifest),
+		Model:         cfg.Model,
 	}
 	return runClose(ctx, root, storyArg, manifest, deps, stdout, stderr)
 }
@@ -217,7 +231,7 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	// The closure gate (co-1: authoritative evidence only — runClosureGate
 	// folds via internal/evidence.Fold with Preview false, exactly as
 	// `verdi gate`/`verdi rollup` do; CONSUMED UNCHANGED).
-	ok, err := runClosureGate(ctx, root, spec, deps.Forge, defaultBranchRef, manifest, head, stdout)
+	ok, err := runClosureGate(ctx, root, spec, deps.Forge, defaultBranchRef, manifest, deps.Model, head, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
