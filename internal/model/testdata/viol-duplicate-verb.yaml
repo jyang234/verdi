@@ -1,0 +1,59 @@
+# judged-frontier-duplicate-verb-bypass — the judge's driven witness,
+# committed as the duplicate-transition-verb rule's ac-1 fixture. Each
+# lifecycle lists the `accept` transition TWICE and omits `close` entirely.
+# It is kernel-well-formed in every OTHER respect — `closed`/`superseded`
+# stay reachable via their terminal membership (guide C-2), every
+# transition states its obligations, and every from/to names a declared
+# state — so the ONLY kernel rule it trips is the duplicate-transition-verb
+# rule (internal/model/validate.go, Lifecycle.validate).
+#
+# Before that rule existed this manifest decoded CLEAN and `verdi model
+# check` exited 0: staying length-2 against canonical's [accept, close],
+# its two accepts each matched canonical's one accept while canonical's
+# `close` went entirely unsought, so lifecycleEqual's one-directional
+# verb-map compare returned equal and a model MISSING A WHOLE TRANSITION
+# slipped the frontier. Now Validate rejects it (exit 2 — a kernel
+# violation is "undecodable" under model-schema ac-3) before the frontier
+# is ever consulted; lifecycleEqual's verb-keyed multiset compare is the
+# defense-in-depth behind that (TestLifecycleEqual_DuplicateVerbCannotMaskMissing).
+schema: verdi.model/v1
+
+classes:
+  feature:
+    display: Feature
+    decomposes: stubs
+    template: feature.md
+  story:
+    display: Story
+    parent: feature
+    template: story.md
+
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+  story:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }

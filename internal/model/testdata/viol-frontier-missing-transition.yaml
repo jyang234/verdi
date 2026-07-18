@@ -1,0 +1,48 @@
+# Companion to viol-duplicate-verb.yaml (judged-frontier-duplicate-verb-
+# bypass): the SAME missing `close` transition, but WITHOUT the masking
+# duplicate. The feature lifecycle lists `accept` alone (length 1) against
+# canonical's [accept, close] (length 2); the story lifecycle stays
+# canonical. No duplicate hides the gap, so lifecycleEqual's length arm
+# catches it outright — this stays a plain FRONTIER deviation (exit 1, the
+# pinned text), never a kernel error. It pins that the verb-keyed multiset
+# refactor (transitionsEqualAsMultiset) did not regress the ordinary "a
+# transition is simply absent" case the bare length check always handled.
+# Kernel-clean otherwise: `closed`/`superseded` are reachable via their
+# terminal membership, so no reachability rule trips.
+schema: verdi.model/v1
+
+classes:
+  feature:
+    display: Feature
+    decomposes: stubs
+    template: feature.md
+  story:
+    display: Story
+    parent: feature
+    template: story.md
+
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+  story:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }
