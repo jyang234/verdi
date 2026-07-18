@@ -42,8 +42,11 @@ func writeStoryAxis(outDir string, stamp buildStamp, pages []*artifactPage, mdl 
 			return err
 		}
 	}
-	return writeListingPage(outDir, "/by-story/", "By story",
-		[]breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "By story", URL: ""}}, stamp, hub)
+	// The axis TITLE speaks the story class word — display prose,
+	// resolved (model.DisplayClass's enumeration rule) — while the
+	// /by-story/ URL and every archived path stay identity.
+	return writeListingPage(outDir, "/by-story/", "By "+mdl.DisplayClass("story"),
+		[]breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "By " + mdl.DisplayClass("story"), URL: ""}}, stamp, hub, mdl)
 }
 
 // writeQuartetPage renders one archived story record's quartet.
@@ -90,14 +93,14 @@ func writeQuartetPage(outDir string, stamp buildStamp, p *artifactPage, name str
 		StatusLabel: mdl.DisplayState("", p.Entry.Status),
 		Breadcrumb: []breadcrumbEntry{
 			{Label: "Home", URL: "/"},
-			{Label: "By story", URL: "/by-story/"},
+			{Label: "By " + mdl.DisplayClass("story"), URL: "/by-story/"},
 			{Label: p.Entry.Title, URL: ""},
 		},
 		Banner:   livingGatedBanner(stamp),
-		MetaRows: quartetMetaRows(p),
+		MetaRows: quartetMetaRows(p, mdl),
 		BodyHTML: template.HTML(b.String()),
 	}
-	out, err := renderPage(data)
+	out, err := renderPage(mdl, data)
 	if err != nil {
 		return err
 	}
@@ -105,11 +108,13 @@ func writeQuartetPage(outDir string, stamp buildStamp, p *artifactPage, name str
 }
 
 // quartetMetaRows is the quartet page's small metadata card: the story
-// tracker ref and the frozen stamp, both from the archived spec.
-func quartetMetaRows(p *artifactPage) []metaRow {
+// tracker ref and the frozen stamp, both from the archived spec. The
+// "Story" row LABEL is the class word (display prose, resolved); the
+// tracker-ref VALUE and the source path are identity.
+func quartetMetaRows(p *artifactPage, mdl *model.Model) []metaRow {
 	var rows []metaRow
 	if p.Meta.Story != "" {
-		rows = append(rows, metaRow{Label: "Story", Value: p.Meta.Story})
+		rows = append(rows, metaRow{Label: model.Capitalize(mdl.DisplayClass("story")), Value: p.Meta.Story})
 	}
 	if p.Meta.Base.Frozen != nil {
 		rows = append(rows, metaRow{Label: "Frozen", Value: fmt.Sprintf("%s @ %s", p.Meta.Base.Frozen.At, shortSHA(p.Meta.Base.Frozen.Commit))})

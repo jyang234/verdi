@@ -84,17 +84,24 @@ func gateBearingTypes() []string {
 	return out
 }
 
-// consequenceLabels is the one-line consequence per pickable edge type —
-// calm warnings, not modal nagging (05 §Workbench's own example wording
-// for supersedes), phrased as what the choice DOES to the spec document
-// in words a PM reads without a glossary (owner UAT round 6, item 1).
-var consequenceLabels = map[string]string{
-	string(artifact.LinkSupersedes): "amends the target for everyone once accepted; requires quorum from its owners",
-	string(artifact.LinkExempts):    "the target's rule keeps applying to everyone else — this spec alone is excused; its owners are notified",
-	string(artifact.LinkImplements): "records that this story delivers that acceptance criterion; its owners see the claim",
-	string(artifact.LinkResolves):   "records that this spike answers that open question",
-	string(artifact.LinkDependsOn):  "notes the target as required background reading; gates nothing",
-	"relates":                       "a scratch thread for your own thinking — never written into the spec document",
+// consequenceLabelsFor is the one-line consequence per pickable edge
+// type — calm warnings, not modal nagging (05 §Workbench's own example
+// wording for supersedes), phrased as what the choice DOES to the spec
+// document in words a PM reads without a glossary (owner UAT round 6,
+// item 1). The implements/resolves rows speak the story/spike class
+// words — display prose, resolved through w (vocabulary.go's enumeration
+// rule); a zero w reproduces today's literals byte-identically. Built
+// per render rather than held as a package var so the one source of
+// display truth stays the resolved model.
+func consequenceLabelsFor(w classWords) map[string]string {
+	return map[string]string{
+		string(artifact.LinkSupersedes): "amends the target for everyone once accepted; requires quorum from its owners",
+		string(artifact.LinkExempts):    "the target's rule keeps applying to everyone else — this spec alone is excused; its owners are notified",
+		string(artifact.LinkImplements): "records that this " + w.word("story") + " delivers that acceptance criterion; its owners see the claim",
+		string(artifact.LinkResolves):   "records that this " + w.word("spike") + " answers that open question",
+		string(artifact.LinkDependsOn):  "notes the target as required background reading; gates nothing",
+		"relates":                       "a scratch thread for your own thinking — never written into the spec document",
+	}
 }
 
 // removalConsequenceLabels is the same voice for taking a gate-bearing

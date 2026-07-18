@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // featureLensHTML renders the paired stub-plan/live-mapping section for a
@@ -22,14 +23,23 @@ import (
 // declared stubs still gets the full paired section — an honestly empty
 // plan next to the computed mapping (mirroring `verdi matrix`'s "(none
 // declared)"), so the reader always sees plan and reality side by side.
-func featureLensHTML(ix *index.Index, known map[string]bool, p *artifactPage) template.HTML {
+//
+// The section's story class words — the "Stories" heading, the
+// "Implementing stories" column, the "no implementing story" empty
+// marker — are display prose and resolve through mdl
+// (model.DisplayClass's enumeration rule; nil falls back to bare ids).
+// The refs, testids, and CSS classes below are identity and stay bare.
+func featureLensHTML(ix *index.Index, known map[string]bool, mdl *model.Model, p *artifactPage) template.HTML {
 	if !isRoundFourFeaturePage(p) {
 		return ""
 	}
 
+	storyWord := mdl.DisplayClass("story")
+	storiesWord := mdl.DisplayClassPlural("story")
+
 	var b strings.Builder
 	b.WriteString("<section class=\"feature-lens\">\n")
-	b.WriteString("<h2>Stories</h2>\n")
+	b.WriteString("<h2>" + template.HTMLEscapeString(model.Capitalize(storiesWord)) + "</h2>\n")
 	b.WriteString(`<div class="acceptance-plan-banner" data-testid="acceptance-plan-banner"><span class="temporal-dot" aria-hidden="true"></span>acceptance-time plan; current mapping computed below</div>` + "\n")
 
 	// The frozen plan: one entry per declared stub, in frontmatter order
@@ -54,12 +64,12 @@ func featureLensHTML(ix *index.Index, known map[string]bool, p *artifactPage) te
 	// declared.
 	b.WriteString(`<div class="live-mapping" data-testid="live-mapping">` + "\n")
 	b.WriteString("<h3>Current mapping <span class=\"lens-note\">computed from implements edges</span></h3>\n")
-	b.WriteString("<table><thead><tr><th>AC</th><th>Text</th><th>Implementing stories</th></tr></thead><tbody>\n")
+	b.WriteString("<table><thead><tr><th>AC</th><th>Text</th><th>Implementing " + template.HTMLEscapeString(storiesWord) + "</th></tr></thead><tbody>\n")
 	for _, ac := range p.Meta.AcceptanceCriteria {
 		fmt.Fprintf(&b, "<tr><td><code>%s</code></td><td>%s</td><td>", template.HTMLEscapeString(ac.ID), template.HTMLEscapeString(ac.Text))
 		stories := implementingStoryRefs(ix, p.Entry.Ref, ac.ID)
 		if len(stories) == 0 {
-			b.WriteString(`<span class="empty">no implementing story</span>`)
+			b.WriteString(`<span class="empty">no implementing ` + template.HTMLEscapeString(storyWord) + `</span>`)
 		} else {
 			for i, ref := range stories {
 				if i > 0 {

@@ -46,6 +46,16 @@ func arrOfString(desc string) map[string]any {
 // artifacts; groundwork serves graph/policy lenses — neither is
 // duplicated here). Every description ends with
 // dataNeverInstructionsNote.
+//
+// Vocabulary (spec/vocabulary-surfaces ac-3; model.DisplayClass's
+// enumeration rule): class words spoken by DESCRIPTION PROSE — tool and
+// argument descriptions alike — resolve through mdl's class-display
+// chain. The identity layer stays bare: tool names, argument NAMES
+// (story, board_story, spec), required lists, ref grammar and its
+// examples (jira:LOAN-1482, spec/name), and the fold's verdict keys
+// (story.violated/story.eligible are result-schema fields, not prose).
+// New description prose that speaks a class word obligates a
+// classification against this rule.
 func toolDefs(mdl *model.Model) []map[string]any {
 	return []map[string]any{
 		{
@@ -70,10 +80,14 @@ func toolDefs(mdl *model.Model) []map[string]any {
 			}, "ref"),
 		},
 		{
-			"name":        "get_matrix",
-			"description": "The evidence fold for a story (03 §The fold): per-AC status plus story.violated/story.eligible. Accepts exactly the two forms `verdi matrix` does (I-30): a scheme-prefixed story ref (jira:LOAN-1482) or a spec ref (spec/name)." + dataNeverInstructionsNote,
+			"name": "get_matrix",
+			// The class WORD resolves exactly like get_context_bundle's
+			// below (ac-3); story.violated/story.eligible are the fold's
+			// verdict KEYS and the `story` argument name is wire schema —
+			// identity, correctly bare.
+			"description": "The evidence fold for a " + mdl.DisplayClass("story") + " (03 §The fold): per-AC status plus story.violated/story.eligible. Accepts exactly the two forms `verdi matrix` does (I-30): a scheme-prefixed " + mdl.DisplayClass("story") + " ref (jira:LOAN-1482) or a spec ref (spec/name)." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{
-				"story":   str("a scheme-prefixed story ref (e.g. jira:LOAN-1482) or a spec ref (e.g. spec/stale-decline)"),
+				"story":   str("a scheme-prefixed " + mdl.DisplayClass("story") + " ref (e.g. jira:LOAN-1482) or a spec ref (e.g. spec/stale-decline)"),
 				"preview": boolean("include advisory (source: local) evidence alongside authoritative (source: ci), clearly labeled"),
 			}, "story"),
 		},
@@ -116,7 +130,7 @@ func toolDefs(mdl *model.Model) []map[string]any {
 				"target_ref":     str("optional: a pinned artifact ref (kind/name@commit) this annotation anchors to"),
 				"target_heading": str("optional, requires target_ref: the heading anchor slug the selector pins to"),
 				"target_quote":   str("optional, requires target_ref: the exact quoted text the selector pins to"),
-				"board_story":    str("optional: the story this sticky is placed on a board for"),
+				"board_story":    str("optional: the " + mdl.DisplayClass("story") + " this sticky is placed on a board for"),
 				"board_x":        map[string]any{"type": "number", "description": "optional, requires board_story: x coordinate"},
 				"board_y":        map[string]any{"type": "number", "description": "optional, requires board_story: y coordinate"},
 				"type":           str("comment | question | decision-needed | agent-task"),

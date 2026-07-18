@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -223,7 +224,7 @@ func specsImpacting(svc string, pages []*artifactPage) []listItem {
 // service (description, boundary contract, OpenAPI and event contracts,
 // obligations registry, active specs, ADRs, capped dependency mini-map)"):
 // a hub listing every discovered service, plus one page per service.
-func writeServiceAxis(outDir string, stamp buildStamp, services []store.Service, pages []*artifactPage) error {
+func writeServiceAxis(outDir string, stamp buildStamp, services []store.Service, pages []*artifactPage, mdl *model.Model) error {
 	var hub []listItem
 	for _, svc := range services {
 		hub = append(hub, listItem{Title: svc.Name, URL: "/by-service/" + svc.Name + "/", Sub: fmt.Sprintf("%d obligation(s)", len(svc.Obligations))})
@@ -238,7 +239,7 @@ func writeServiceAxis(outDir string, stamp buildStamp, services []store.Service,
 			Banner:     livingGatedBanner(stamp),
 			BodyHTML:   body,
 		}
-		out, err := renderPage(data)
+		out, err := renderPage(mdl, data)
 		if err != nil {
 			return err
 		}
@@ -247,7 +248,7 @@ func writeServiceAxis(outDir string, stamp buildStamp, services []store.Service,
 		}
 	}
 
-	return writeListingPage(outDir, "/by-service/", "By service", []breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "By service", URL: ""}}, stamp, hub)
+	return writeListingPage(outDir, "/by-service/", "By service", []breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "By service", URL: ""}}, stamp, hub, mdl)
 }
 
 // renderServiceBody renders one service's by-service page body: a short
@@ -302,7 +303,7 @@ func renderServiceBody(svc store.Service, pages []*artifactPage) (template.HTML,
 // §Verdi-dex IA's fourth by-kind grouping): every discovered service's
 // boundary contract and API permalink in one place, distinct from the
 // by-service axis's per-service grouping.
-func writeContractsAxis(outDir string, stamp buildStamp, services []store.Service) error {
+func writeContractsAxis(outDir string, stamp buildStamp, services []store.Service, mdl *model.Model) error {
 	var items []listItem
 	for _, svc := range services {
 		if svc.BoundaryContractPath != "" {
@@ -312,14 +313,14 @@ func writeContractsAxis(outDir string, stamp buildStamp, services []store.Servic
 			items = append(items, listItem{Title: svc.Name + " API", URL: permalinkURL(fmt.Sprintf("svc/%s/api", svc.Name)), Sub: svc.Name})
 		}
 	}
-	return writeListingPage(outDir, "/by-kind/contracts/", "Contracts and APIs", []breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "By kind", URL: "/by-kind/"}, {Label: "Contracts and APIs", URL: ""}}, stamp, items)
+	return writeListingPage(outDir, "/by-kind/contracts/", "Contracts and APIs", []breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "By kind", URL: "/by-kind/"}, {Label: "Contracts and APIs", URL: ""}}, stamp, items, mdl)
 }
 
 // writeExternalPages emits one permalink page per index-minted external
 // (svc/...) ref (05 §Verdi-dex mechanics: permalinks "+ /a/svc/... for
 // external refs"). API pages additionally get a build-emitted openapi.json
 // data file alongside, which openapi-renderer.js's script tag reads.
-func writeExternalPages(outDir string, stamp buildStamp, ix *index.Index, known map[string]bool, services []store.Service) error {
+func writeExternalPages(outDir string, stamp buildStamp, ix *index.Index, known map[string]bool, services []store.Service, mdl *model.Model) error {
 	byName := make(map[string]store.Service, len(services))
 	for _, s := range services {
 		byName[s.Name] = s
@@ -329,14 +330,14 @@ func writeExternalPages(outDir string, stamp buildStamp, ix *index.Index, known 
 		if e.Kind != "external" {
 			continue
 		}
-		if err := writeExternalPage(outDir, stamp, ix, known, e, byName); err != nil {
+		if err := writeExternalPage(outDir, stamp, ix, known, e, byName, mdl); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeExternalPage(outDir string, stamp buildStamp, ix *index.Index, known map[string]bool, e *index.Entry, byName map[string]store.Service) error {
+func writeExternalPage(outDir string, stamp buildStamp, ix *index.Index, known map[string]bool, e *index.Entry, byName map[string]store.Service, mdl *model.Model) error {
 	parts := strings.Split(e.Ref, "/")
 	if len(parts) < 3 || parts[0] != "svc" {
 		return fmt.Errorf("dex: unexpected external ref shape %q", e.Ref)
@@ -377,7 +378,7 @@ func writeExternalPage(outDir string, stamp buildStamp, ix *index.Index, known m
 		CopyRef:         e.Ref + "@" + stamp.SHA,
 		OpenAPIJSONPath: openAPIJSONPath,
 	}
-	out, err := renderPage(data)
+	out, err := renderPage(mdl, data)
 	if err != nil {
 		return err
 	}

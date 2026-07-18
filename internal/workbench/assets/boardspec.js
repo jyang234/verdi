@@ -45,6 +45,24 @@
     return window.CSS && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&");
   }
 
+  // -- class display words (spec/vocabulary-surfaces) ------------------------
+  //
+  // state.words carries the model's class-word renames (server-resolved,
+  // present only for ids that actually rename — a no-rename store embeds
+  // no words key at all), so THIS file's own display prose — dialog and
+  // refusal copy, the sticky menu's story/spike labels — speaks the same
+  // resolved vocabulary the server-rendered wall does. Fallback is the
+  // bare id. Identity values never resolve here: state.class gates,
+  // data-annotation-type / data-* reads, and every api() payload keep
+  // bare ids (internal/workbench/vocabulary.go's enumeration rule).
+  function classWord(id) {
+    return (state.words && state.words[id]) || id;
+  }
+  function classWordCap(id) {
+    var w = classWord(id);
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }
+
   // -- client-side mermaid over injected fragments ---------------------------
   //
   // The board's spec-body surfaces (the placard body dialog and the
@@ -858,25 +876,28 @@
     var story = g.proto === "story";
     var wantKind = story ? "acceptance-criterion" : "open-question";
 
+    // The dialog copy's story/spike words are display prose and resolve
+    // (classWord); g.proto — the sticky's TYPE id — stays the bare enum
+    // value everywhere it addresses (data reads, the api() payloads).
     if (toKind !== wantKind) {
       var refusal;
       if (story && toKind === "open-question") {
         refusal =
-          "A story sticky's thread claims coverage — it ties only to acceptance criteria. " +
-          "If this thought answers open questions, it wants to be a spike sticky instead.";
+          "A " + classWord("story") + " sticky's thread claims coverage — it ties only to acceptance criteria. " +
+          "If this thought answers open questions, it wants to be a " + classWord("spike") + " sticky instead.";
       } else if (!story && toKind === "acceptance-criterion") {
         refusal =
-          "A spike sticky's thread claims an answer — it ties only to open questions. " +
-          "If this thought delivers an acceptance criterion, it wants to be a story sticky instead.";
+          "A " + classWord("spike") + " sticky's thread claims an answer — it ties only to open questions. " +
+          "If this thought delivers an acceptance criterion, it wants to be a " + classWord("story") + " sticky instead.";
       } else {
         refusal =
-          "A " + g.proto + " sticky's thread has one meaning: " +
+          "A " + classWord(g.proto) + " sticky's thread has one meaning: " +
           (story
             ? "coverage of an acceptance criterion."
             : "resolution of an open question.") +
           " It has nothing to say to " + pairPhrase(toKind, toKind).replace(/^two /, "") + ".";
       }
-      protoRefusal(g.proto + " sticky", to, refusal);
+      protoRefusal(classWord(g.proto) + " sticky", to, refusal);
       return;
     }
 
@@ -884,15 +905,15 @@
     if (story) {
       openConfirm(
         "Claim coverage of " + to,
-        "Ties this story sticky to " + to + ". The thread is the coverage claim: " +
+        "Ties this " + classWord("story") + " sticky to " + to + ". The thread is the coverage claim: " +
           "when the sticky graduates into a stub, " + to + " joins its declared acceptance criteria.",
         false
       );
     } else {
       openConfirm(
         "Claim resolution of " + to,
-        "Ties this spike sticky to " + to + ". The thread is the attribution: " +
-          "when the sticky graduates into a spike stub, " + to + " joins the questions it resolves.",
+        "Ties this " + classWord("spike") + " sticky to " + to + ". The thread is the attribution: " +
+          "when the sticky graduates into a " + classWord("spike") + " stub, " + to + " joins the questions it resolves.",
         false
       );
     }
@@ -924,7 +945,7 @@
       protoRefusal(
         "obligation",
         to,
-        "An obligation binds to a story acceptance criterion — this thread lands on " +
+        "An obligation binds to a " + classWord("story") + " acceptance criterion — this thread lands on " +
           to + ", which is not one. Draw it to an AC card instead."
       );
       return;
@@ -1546,8 +1567,11 @@
   // Story/spike proto-stickies are the feature wall's scoping surface
   // (dc-5): the server refuses them anywhere else, so the control only
   // offers them there — the menu never offers what the server refuses.
+  // The menu LABEL is the class display word (a proto-sticky names what
+  // it becomes); the first element — the type VALUE sent to the server —
+  // stays the bare enum id, like state.class's own gate here.
   if (state.class === "feature") {
-    STICKY_TYPES.push(["story", "Story"], ["spike", "Spike"]);
+    STICKY_TYPES.push(["story", classWordCap("story")], ["spike", classWordCap("spike")]);
   }
 
   function startStickyEditor() {
@@ -1948,11 +1972,14 @@
           api("stub-instantiate", { id: slug })
             .then(function () {
               setStatus("");
+              // The receipt's class words are display prose (classWord);
+              // "story:" names the frontmatter FIELD and the branch/spec
+              // refs are identity — all stay bare.
               openConfirm(
-                "Story instantiated",
+                classWordCap("story") + " instantiated",
                 "Branch design/" + slug + " now carries spec/" + slug +
                   ", scaffolded from this stub. Its story: tracker ref is the placeholder " +
-                  "todo:REPLACE-ME — fill it in on the branch before the story is real. " +
+                  "todo:REPLACE-ME — fill it in on the branch before the " + classWord("story") + " is real. " +
                   "This wall (the serving checkout) has not moved.",
                 false
               );
@@ -2076,11 +2103,12 @@
     if (inst) {
       var instSlug = inst.getAttribute("data-instantiate");
       var isSpike = !!inst.closest(".stubcard--spike");
+      var instWord = classWord(isSpike ? "spike" : "story");
       pending = { instantiate: instSlug };
       openConfirm(
-        "Instantiate " + (isSpike ? "spike" : "story") + " “" + instSlug + "”",
+        "Instantiate " + instWord + " “" + instSlug + "”",
         "Cuts branch design/" + instSlug + " carrying a scaffolded " +
-          (isSpike ? "spike" : "story") + " spec bound to this stub by slug. " +
+          instWord + " spec bound to this stub by slug. " +
           "The serving checkout never moves — nothing on this wall changes until that branch merges.",
         false
       );

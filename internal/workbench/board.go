@@ -23,13 +23,17 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/commitdesign"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
 const boardStateSchema = "verdi.board/v1"
 
-// boardHandler answers GET /board/{key}: the board page.
-func boardHandler(root string) http.HandlerFunc {
+// boardHandler answers GET /board/{key}: the board page. mdl is the
+// store's resolved operating model — the commit-to-design copy and the
+// proto-sticky type chips below speak class words, which are display
+// prose and resolve (vocabulary.go); nil serves bare ids.
+func boardHandler(root string, mdl *model.Model) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -85,7 +89,7 @@ func boardHandler(root string) http.HandlerFunc {
 			clientState.Stickies = append(clientState.Stickies, sv)
 		}
 
-		out, err := renderBoardPage(clientState)
+		out, err := renderBoardPage(clientState, classWords{m: mdl})
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
 			return
@@ -148,7 +152,7 @@ window.__BOARD__ = {{.StateJSON}};
 </html>
 `))
 
-func renderBoardPage(state boardClientState) ([]byte, error) {
+func renderBoardPage(state boardClientState, words classWords) ([]byte, error) {
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return nil, err
@@ -165,7 +169,7 @@ func renderBoardPage(state boardClientState) ([]byte, error) {
 		KeyJSON   template.JS
 	}{
 		Key:       state.Key,
-		Body:      template.HTML(boardPageBody(state)),
+		Body:      template.HTML(boardPageBody(state, words)),
 		StateJSON: template.JS(stateJSON),
 		KeyJSON:   template.JS(keyJSON),
 	}
@@ -177,7 +181,7 @@ func renderBoardPage(state boardClientState) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func boardPageBody(state boardClientState) string {
+func boardPageBody(state boardClientState, words classWords) string {
 	var b bytes.Buffer
 	b.WriteString(`<div class="board-layout">`)
 
@@ -193,8 +197,16 @@ func boardPageBody(state boardClientState) string {
 		b.WriteString(`</div>`)
 	}
 	for _, s := range state.Stickies {
+		// The visible type word of a story/spike proto-sticky resolves as
+		// a class word (display prose, vocabulary.go); every other type is
+		// annotation taxonomy and renders verbatim. data-type keeps the
+		// bare enum id regardless.
+		typeLabel := s.Type
+		if s.Type == string(artifact.AnnotationStory) || s.Type == string(artifact.AnnotationSpike) {
+			typeLabel = words.word(s.Type)
+		}
 		b.WriteString(`<div class="sticky sticky--` + stickyTypeClass(s.Type) + `" data-drag data-kind="sticky" data-key="` + stdhtml.EscapeString(s.ID) + `" data-type="` + stdhtml.EscapeString(s.Type) + `" data-status="` + stdhtml.EscapeString(s.Status) + `" style="left:` + floatStr(s.X) + `px;top:` + floatStr(s.Y) + `px">`)
-		b.WriteString(`<span class="sticky-type">` + stdhtml.EscapeString(s.Type) + `</span>`)
+		b.WriteString(`<span class="sticky-type">` + stdhtml.EscapeString(typeLabel) + `</span>`)
 		b.WriteString(`<p class="sticky-body">` + stdhtml.EscapeString(s.Body) + `</p>`)
 		meta := s.Status
 		if s.Author != "" {
@@ -220,8 +232,12 @@ func boardPageBody(state boardClientState) string {
 	}
 	b.WriteString(`</section>`)
 
+	// The ritual copy's "feature" and the tracker-ref field's "Story"
+	// label are class words — display prose, resolved (vocabulary.go).
+	// The form's name/story_ref field NAMES and the commit-to-design API
+	// contract stay bare ids.
 	b.WriteString(`<section class="commit-to-design"><h2>Commit to design</h2>` +
-		`<p class="ritual-note">Freezes this board into a draft feature spec: every sticky lands in the spec's dispositions block as an open question to incorporate or contradict.</p>` +
+		`<p class="ritual-note">Freezes this board into a draft ` + stdhtml.EscapeString(words.word("feature")) + ` spec: every sticky lands in the spec's dispositions block as an open question to incorporate or contradict.</p>` +
 		// No HTML5 `required` here: an empty name must exercise the
 		// SERVER's own validation (boardCommitHandler's "name is
 		// required" 400), the same negative path a non-browser API
@@ -229,7 +245,7 @@ func boardPageBody(state boardClientState) string {
 		// swallow that test case before any request is even sent.
 		`<form id="commit-form">` +
 		`<div class="field"><label for="commit-name">Spec name</label><input id="commit-name" name="name" autocomplete="off"></div>` +
-		`<div class="field"><label for="commit-story-ref">Story ref <span class="optional">(optional)</span></label><input id="commit-story-ref" name="story_ref" autocomplete="off"></div>` +
+		`<div class="field"><label for="commit-story-ref">` + stdhtml.EscapeString(words.capital("story")) + ` ref <span class="optional">(optional)</span></label><input id="commit-story-ref" name="story_ref" autocomplete="off"></div>` +
 		`<button type="submit">Commit to design</button></form>` +
 		`<div id="commit-result" role="status"></div></section>`)
 

@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/disclosureview"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // dexDisclosuresNote is this edition's compute-provenance line — the one
@@ -29,12 +30,12 @@ import (
 const dexDisclosuresNote = "Enumerated from the checkout's state at this page's build stamp. For the live edition, open /disclosures on a running `verdi serve`. An entry here is a claim verdi is honestly not proving, not a failure."
 
 // writeDisclosuresPage emits /disclosures/ through the shared view.
-func writeDisclosuresPage(ctx context.Context, root, outDir string, stamp buildStamp) error {
+func writeDisclosuresPage(ctx context.Context, root, outDir string, stamp buildStamp, mdl *model.Model) error {
 	items, err := disclosureview.Current(ctx, root)
 	if err != nil {
 		return fmt.Errorf("dex: enumerating disclosures: %w", err)
 	}
-	out, err := renderPage(pageData{
+	out, err := renderPage(mdl, pageData{
 		Title:      "Disclosures",
 		Breadcrumb: []breadcrumbEntry{{Label: "Home", URL: "/"}, {Label: "Disclosures", URL: ""}},
 		Banner:     livingGatedBanner(stamp),

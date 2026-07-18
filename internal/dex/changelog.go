@@ -7,13 +7,14 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // writeChangelog emits dex's "what changed" feed (05 §Verdi-dex mechanics:
 // "each publish emits a 'what changed' feed from the git log of .verdi/"):
 // every commit reachable from buildCommit that touched .verdi/, most
 // recent first.
-func writeChangelog(ctx context.Context, root, outDir string, stamp buildStamp, buildCommit string) error {
+func writeChangelog(ctx context.Context, root, outDir string, stamp buildStamp, buildCommit string, mdl *model.Model) error {
 	commits, err := gitx.Log(ctx, root, buildCommit, ".verdi")
 	if err != nil {
 		return fmt.Errorf("dex: changelog: %w", err)
@@ -40,7 +41,7 @@ func writeChangelog(ctx context.Context, root, outDir string, stamp buildStamp, 
 		Banner:     livingGatedBanner(stamp),
 		BodyHTML:   template.HTML(b.String()),
 	}
-	out, err := renderPage(data)
+	out, err := renderPage(mdl, data)
 	if err != nil {
 		return err
 	}

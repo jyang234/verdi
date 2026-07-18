@@ -66,12 +66,12 @@ func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, st
 		MetaRows:         append(artifactMetaRows(p, mdl), ladder.Rows...),
 		BodyHTML:         template.HTML(bodyHTML),
 		DispositionsHTML: renderDispositionsTable(p.Meta.Dispositions),
-		FeatureLensHTML:  featureLensHTML(ix, known, p),
+		FeatureLensHTML:  featureLensHTML(ix, known, mdl, p),
 		Connections:      connections,
 		TOC:              extractTOC(bodyHTML),
 		CopyRef:          p.Entry.Ref + "@" + pinCommit,
 	}
-	out, err := renderPage(data)
+	out, err := renderPage(mdl, data)
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,10 @@ func artifactMetaRows(p *artifactPage, mdl *model.Model) []metaRow {
 		rows = append(rows, metaRow{Label: "Class", Value: mdl.DisplayClass(string(p.Meta.Class))})
 	}
 	if p.Meta.Story != "" {
-		rows = append(rows, metaRow{Label: "Story", Value: p.Meta.Story})
+		// The row LABEL is the story class word (display prose, resolved
+		// and capitalized like a label); the tracker-ref VALUE is
+		// identity and stays verbatim.
+		rows = append(rows, metaRow{Label: model.Capitalize(mdl.DisplayClass("story")), Value: p.Meta.Story})
 	}
 	if p.Meta.Decided != "" {
 		rows = append(rows, metaRow{Label: "Decided", Value: p.Meta.Decided})
