@@ -126,6 +126,15 @@ type Vocabulary struct {
 // on and to leave room for a future per-class override, but v1's own
 // vocabulary is flat: only id is consulted this phase.
 //
+// CALLER CONVENTION (Q2, final fix wave): class is forward-compat — pass
+// the artifact's own declared class id whenever the surface has one in
+// scope (a spec page passes its spec's class; a wall passes the wall's),
+// so a future per-class override lands by changing only this function.
+// Pass "" ONLY when no class genuinely exists at the call site — a
+// class-less knowledge artifact (ADR, runbook), or a degraded directory
+// entry whose content could not be read at all — never as a shortcut
+// where the class is sitting in scope.
+//
 // A nil receiver resolves id to itself (spec/vocabulary-surfaces): every
 // consuming surface — CLI verdicts, board, dex, MCP — falls back to bare
 // ids when no model was resolved, never panics and never invents a

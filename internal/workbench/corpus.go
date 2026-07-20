@@ -112,7 +112,10 @@ func corpusHandler(root string, mdl *model.Model) http.HandlerFunc {
 func corpusMetaRows(e *index.Entry, m artifactview.Meta, mdl *model.Model) []metaRow {
 	rows := []metaRow{{Label: "Kind", Value: e.Kind}}
 	if e.Status != "" {
-		rows = append(rows, metaRow{Label: "Status", Value: mdl.DisplayState("", e.Status)})
+		// The entry's own declared class rides along (Q2's caller
+		// convention at DisplayState) — "" for a class-less knowledge
+		// artifact, the documented degenerate.
+		rows = append(rows, metaRow{Label: "Status", Value: mdl.DisplayState(string(m.Class), e.Status)})
 	}
 	if len(m.Base.Owners) > 0 {
 		rows = append(rows, metaRow{Label: "Owners", Value: strings.Join(m.Base.Owners, ", ")})

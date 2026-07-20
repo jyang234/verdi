@@ -37,7 +37,7 @@ func writeStoryAxis(outDir string, stamp buildStamp, pages []*artifactPage, mdl 
 			continue
 		}
 		name := strings.TrimPrefix(p.Entry.Ref, "spec/")
-		hub = append(hub, listItem{Title: p.Entry.Title, URL: storyAxisURL(name), Status: p.Entry.Status, StatusLabel: mdl.DisplayState("", p.Entry.Status), Sub: p.Meta.Story})
+		hub = append(hub, listItem{Title: p.Entry.Title, URL: storyAxisURL(name), Status: p.Entry.Status, StatusLabel: mdl.DisplayState(string(p.Meta.Class), p.Entry.Status), Sub: p.Meta.Story})
 		if err := writeQuartetPage(outDir, stamp, p, name, mdl); err != nil {
 			return err
 		}
@@ -60,7 +60,7 @@ func writeQuartetPage(outDir string, stamp buildStamp, p *artifactPage, name str
 	b.WriteString("<h2>Spec</h2>\n")
 	fmt.Fprintf(&b, `<p><a href="%s">%s</a> <span class="badge badge-%s">%s</span></p>`+"\n",
 		template.HTMLEscapeString(permalinkURL(p.Entry.Ref)), template.HTMLEscapeString(p.Entry.Ref),
-		template.HTMLEscapeString(p.Entry.Status), template.HTMLEscapeString(mdl.DisplayState("", p.Entry.Status)))
+		template.HTMLEscapeString(p.Entry.Status), template.HTMLEscapeString(mdl.DisplayState(string(p.Meta.Class), p.Entry.Status)))
 
 	// 2. The board slot: layout.json (round four) or board.json
 	// (grandfathered v0) — labeled as what it is, never guessed.
@@ -90,7 +90,7 @@ func writeQuartetPage(outDir string, stamp buildStamp, p *artifactPage, name str
 	data := pageData{
 		Title:       p.Entry.Title,
 		Status:      p.Entry.Status,
-		StatusLabel: mdl.DisplayState("", p.Entry.Status),
+		StatusLabel: mdl.DisplayState(string(p.Meta.Class), p.Entry.Status),
 		Breadcrumb: []breadcrumbEntry{
 			{Label: "Home", URL: "/"},
 			{Label: "By " + mdl.DisplayClass("story"), URL: "/by-story/"},
