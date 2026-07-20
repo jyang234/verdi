@@ -302,6 +302,12 @@ func evaluateGuideClaimRows(t *testing.T, root string, m *artifact.GuideClaimsMa
 		if row.Status == artifact.GuideClaimInvented {
 			continue
 		}
+		// Backstop only: artifact.GuideClaimsManifest.Validate now
+		// fail-closes this at DECODE (judged-ac2-zero-witness-red-untested),
+		// so decodeRealGuideClaims never yields a witnessed-status row with
+		// an empty witness set. This branch keeps the gate honest for any
+		// future caller that hands evaluateGuideClaimRows a manifest it
+		// constructed without decoding.
 		if len(row.Witnesses) == 0 {
 			findings = append(findings, fmt.Sprintf("row %s: status %s requires at least one witness, has none", row.ID, row.Status))
 			continue

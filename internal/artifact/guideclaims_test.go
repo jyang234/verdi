@@ -52,6 +52,31 @@ func TestDecodeGuideClaims_Happy(t *testing.T) {
 	}
 }
 
+// TestGuideClaims_ExistsOrPartialRequiresWitness_Reds is
+// judged-ac2-zero-witness-red-untested's isolated red test: an EXISTS or
+// PARTIAL row with an empty witness set fails at DECODE — the rule lives in
+// GuideClaimsManifest.Validate (fail-closed, CLAUDE.md's strict-decode
+// discipline), so the decoder and the internal/specalign gate agree that a
+// row can never claim a live capability with no witness at all. Before this
+// rule moved into Validate the condition was enforced only inside the gate's
+// evaluateGuideClaimRows, untested in isolation and bypassable by any caller
+// that decoded the manifest without re-running the gate.
+func TestGuideClaims_ExistsOrPartialRequiresWitness_Reds(t *testing.T) {
+	cases := map[string]string{
+		"EXISTS row with no witnesses": "schema: verdi.guideclaims/v1\nrows:\n" +
+			"  - id: x\n    section: \"1\"\n    capability: c\n    status: EXISTS\n",
+		"PARTIAL row with caveat+cite but no witnesses": "schema: verdi.guideclaims/v1\nrows:\n" +
+			"  - id: x\n    section: \"1\"\n    capability: c\n    status: PARTIAL\n    caveat: \"narrower than it sounds\"\n    cite: \"docs/x.md#Y\"\n",
+	}
+	for name, y := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeGuideClaims([]byte(y)); err == nil {
+				t.Fatalf("%s: want a decode error (EXISTS/PARTIAL requires >=1 witness), got nil", name)
+			}
+		})
+	}
+}
+
 func TestDecodeGuideClaims_Negative(t *testing.T) {
 	const preamble = "schema: verdi.guideclaims/v1\nrows:\n"
 	cases := map[string]string{

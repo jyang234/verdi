@@ -91,9 +91,15 @@ func DecodeGuideClaims(data []byte) (*GuideClaimsManifest, error) {
 // Validate checks the schema literal and every row: id/section/capability
 // non-empty, id unique, status drawn from the closed enum, a PARTIAL
 // row's caveat is present (spec/guide-claims-gate ac-3: "a PARTIAL row
-// without accompanying caveat text reds"), and a non-EXISTS row's cite is
+// without accompanying caveat text reds"), a non-EXISTS row's cite is
 // present (ac-3: "a non-EXISTS row ... carries a cite: field ... a row
-// lacking cite: where one is required reds"). It does NOT check cite
+// lacking cite: where one is required reds"), and an EXISTS or PARTIAL row
+// binds at least one witness (ac-2: a live capability claim with no witness
+// at all is the ADJ-50 lying-gate class this story exists to close). That
+// last rule lives here at decode, fail-closed, so the decoder and
+// internal/specalign's gate agree — the gate's evaluateGuideClaimRows can
+// never be handed a witnessed-status row with an empty witness set
+// (judged-ac2-zero-witness-red-untested). It does NOT check cite
 // RESOLUTION (does the cited entry actually exist) — that is
 // internal/specalign's workspace-side-only, loud-skip-on-unavailable
 // check (ac-3's own fidelity-precedent split), since the chronicle lives
@@ -130,6 +136,9 @@ func (m GuideClaimsManifest) Validate() error {
 		}
 		if r.Status != GuideClaimExists && r.Cite == "" {
 			return fmt.Errorf("artifact: guide-claims.yaml: row %s: status %s requires a cite: field naming a chronicle/ledger entry (spec/guide-claims-gate ac-3)", label, r.Status)
+		}
+		if (r.Status == GuideClaimExists || r.Status == GuideClaimPartial) && len(r.Witnesses) == 0 {
+			return fmt.Errorf("artifact: guide-claims.yaml: row %s: status %s requires at least one witness (spec/guide-claims-gate ac-2; a live capability claim with no witness is exactly the ADJ-50 lying-gate class) — judged-ac2-zero-witness-red-untested", label, r.Status)
 		}
 		for j, w := range r.Witnesses {
 			if w.Name == "" {
