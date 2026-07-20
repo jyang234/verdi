@@ -58,7 +58,7 @@ func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, st
 	data := pageData{
 		Title:            p.Entry.Title,
 		Status:           p.Entry.Status,
-		StatusLabel:      mdl.DisplayState("", p.Entry.Status),
+		StatusLabel:      mdl.DisplayState(string(p.Meta.Class), p.Entry.Status),
 		LadderBadges:     ladderBadgeViews(mdl, ladder.Badges),
 		Breadcrumb:       pageBreadcrumb(p.Entry.Kind, p.Entry.Title, isArchivedSpec(p.RelPath)),
 		Banner:           banner,

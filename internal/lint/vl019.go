@@ -2,8 +2,10 @@ package lint
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
@@ -66,7 +68,7 @@ func (vl019) Check(in *RunInput) []Finding {
 			continue // shape already enforced at decode (obligationNameRe)
 		}
 
-		if reason, bad := badVerifiesTarget(in.Root, ref, acID); bad {
+		if reason, bad := badVerifiesTarget(in.Root, ref, acID, in.Model); bad {
 			findings = append(findings, Finding{Rule: "VL-019", Path: d.RelPath, Message: fmt.Sprintf("obligation %s verifies %s, %s", d.Obligation.ID, ref, reason)})
 		}
 	}
@@ -83,13 +85,15 @@ func (vl019) Check(in *RunInput) []Finding {
 // fails closed (unresolvable, non-spec, fragment-bearing, feature-class, or a
 // story that does not declare acID). The AC is carried by the id, never the
 // edge — exactly as it is for an attestation (obligation.go).
-func badVerifiesTarget(root, ref, acID string) (reason string, bad bool) {
+func badVerifiesTarget(root, ref, acID string, mdl *model.Model) (reason string, bad bool) {
 	r, err := artifact.ParseRef(ref)
 	if err != nil {
 		return fmt.Sprintf("which does not parse as a ref: %v", err), true
 	}
 	if r.Kind != artifact.KindSpec || r.Fragment() {
-		return "which is not a whole story-spec ref — an obligation verifies the whole spec/<story> (the AC is named by the obligation's own id, mirroring attestations)", true
+		// The compound class word is display and resolves (L-M13a(6));
+		// "spec/<story>" is the ref GRAMMAR — identity, kept bare.
+		return fmt.Sprintf("which is not a whole %s-spec ref — an obligation verifies the whole spec/<story> (the AC is named by the obligation's own id, mirroring attestations)", mdl.DisplayClass("story")), true
 	}
 
 	target, err := storyresolve.LoadSpec(root, r.Name)
@@ -98,7 +102,15 @@ func badVerifiesTarget(root, ref, acID string) (reason string, bad bool) {
 	}
 
 	if target.Class != artifact.ClassStory {
-		return fmt.Sprintf("a %s-class spec, not a STORY — obligations attach to STORY ACs only (03 §The feature fold)", target.Class), true
+		// Both class words are display: the found class with its agreeing
+		// article (model.Indefinite — the class COMPARISON above stays on
+		// the bare id), and the emphatic STORY as the resolved word
+		// upper-cased (its own article agreeing with the upper-cased
+		// spelling), mirroring cmd/verdi/attest.go's twin refusal.
+		storyEmphatic := strings.ToUpper(mdl.DisplayClass("story"))
+		return fmt.Sprintf("%s-class spec, not %s — obligations attach to %s ACs only (03 §The feature fold)",
+			model.Indefinite(mdl.DisplayClass(string(target.Class))),
+			model.Indefinite(storyEmphatic), storyEmphatic), true
 	}
 
 	for _, ac := range target.AcceptanceCriteria {

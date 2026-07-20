@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // vl006 enforces "every AC declares ≥1 expected evidence kind (activation
@@ -57,7 +58,7 @@ func (r vl006) Check(in *RunInput) []Finding {
 			findings = append(findings, locusAll(r.checkRequiredness(d), SpecLocus())...)
 		}
 		findings = append(findings, r.checkStubACs(d)...)
-		findings = append(findings, r.checkStubResolves(d)...)
+		findings = append(findings, r.checkStubResolves(d, in.Model)...)
 	}
 	return findings
 }
@@ -106,7 +107,7 @@ func (vl006) checkStubACs(d *Document) []Finding {
 // decodes and validates clean, leaving a dangling attribution reference.
 // Same guard as checkStubACs: runs for every non-grandfathered, cleanly-
 // decoded spec.
-func (vl006) checkStubResolves(d *Document) []Finding {
+func (vl006) checkStubResolves(d *Document, mdl *model.Model) []Finding {
 	var findings []Finding
 	declaredOQ := make(map[string]bool, len(d.Spec.OpenQuestions))
 	for _, q := range d.Spec.OpenQuestions {
@@ -116,7 +117,9 @@ func (vl006) checkStubResolves(d *Document) []Finding {
 		for _, oqID := range st.Resolves {
 			if !declaredOQ[oqID] {
 				// Same object-anchor as checkStubACs: the stub's own card.
-				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("spike stub %q names resolves %s, which is not a declared open question of this spec", st.Slug, oqID), Locus: ObjectLocus("stub:" + st.Slug)})
+				// The variant word is display and resolves (L-M13a(6));
+				// the slug and oq id echoes are identity.
+				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("%s stub %q names resolves %s, which is not a declared open question of this spec", mdl.DisplayClass("spike"), st.Slug, oqID), Locus: ObjectLocus("stub:" + st.Slug)})
 			}
 		}
 	}

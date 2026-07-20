@@ -346,8 +346,8 @@ func foldStory(ctx context.Context, root string, spec *artifact.SpecFrontmatter,
 
 // closeAcceptedStatusLineRe matches the sole `status: accepted-pending-build`
 // frontmatter line the closure flip rewrites to `status: closed`. Same
-// anchored, multiline shape accept.go's acceptedStatusLineRe uses for its own
-// predecessor flip — a raw, status-line-only ReplaceAll so the archived
+// anchored, multiline shape supersede.go's acceptedStatusLineRe uses for its
+// own predecessor flip — a raw, status-line-only ReplaceAll so the archived
 // spec.md differs from its active original on exactly that one line, keeping
 // VL-010's status-only archive-flip exception (D6-11) cleanly satisfiable.
 var closeAcceptedStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?accepted-pending-build"?\s*$`)
@@ -367,8 +367,10 @@ func flipSpecStatusToClosed(root, name string) error {
 		return fmt.Errorf("close: reading %s to flip status to closed: %w", specPath, err)
 	}
 	if n := len(closeAcceptedStatusLineRe.FindAll(raw, -1)); n != 1 {
+		// vocab:identity — frontmatter status-line machinery (field + enum value)
 		return fmt.Errorf("close: %s: expected exactly one status: accepted-pending-build line to flip to closed, found %d", specPath, n)
 	}
+	// vocab:identity — frontmatter status-line machinery (field + enum value)
 	newRaw := closeAcceptedStatusLineRe.ReplaceAll(raw, []byte("status: closed"))
 	if err := os.WriteFile(specPath, newRaw, 0o644); err != nil {
 		return fmt.Errorf("close: writing %s after flipping status to closed: %w", specPath, err)

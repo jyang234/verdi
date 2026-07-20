@@ -155,13 +155,16 @@ func (s Stub) Validate() error {
 	}
 	if s.Spike {
 		if len(s.Resolves) == 0 {
+			// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 			return fmt.Errorf("artifact: spike stub %s declares no resolves (the open questions it will answer)", s.Slug)
 		}
 		if len(s.AcceptanceCriteria) != 0 {
+			// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 			return fmt.Errorf("artifact: spike stub %s must not declare acceptance_criteria (02 §Kind registry, DC-4)", s.Slug)
 		}
 		for _, id := range s.Resolves {
 			if !oqIDRe.MatchString(id) {
+				// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 				return fmt.Errorf("artifact: spike stub %s: resolves entry %q is not a valid oq-<slug> id", s.Slug, id)
 			}
 		}

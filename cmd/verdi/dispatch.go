@@ -39,6 +39,7 @@ var verbPhase = map[string]int{
 	"model":           17, // extensibility phase 1, spec/model-schema ac-3 (ledger L-M1) — new verb, ratified into 05 §CLI in the same change; `verdi model check` validates .verdi/model.yaml (or the embedded canonical default) fail-closed
 }
 
+// vocab:identity — CLI verb names (identity)
 const usage = `usage: verdi <verb> [args...]
 
 verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,

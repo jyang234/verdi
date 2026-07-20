@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -80,7 +81,7 @@ func (vl022) Check(in *RunInput) []Finding {
 			if l.Type != artifact.LinkVerifies {
 				continue
 			}
-			if reason, bad := badAttestationVerifiesTarget(in.Root, l.Ref, slugSeg, acID); bad {
+			if reason, bad := badAttestationVerifiesTarget(in.Root, l.Ref, slugSeg, acID, in.Model); bad {
 				findings = append(findings, Finding{Rule: "VL-022", Path: d.RelPath, Message: fmt.Sprintf("attestation %s verifies %s, %s", d.Base.ID, l.Ref, reason)})
 			}
 		}
@@ -104,13 +105,16 @@ func (vl022) Check(in *RunInput) []Finding {
 // A whole-spec-ref edge that resolves to a NON-story spec (feature-outcome
 // attestation, R4-I-11) is OUT OF SCOPE (ADJ-51): it returns no refusal —
 // the rule's subject is story-targeting attestations only.
-func badAttestationVerifiesTarget(root, verifiesRef, slugSeg, acID string) (reason string, bad bool) {
+func badAttestationVerifiesTarget(root, verifiesRef, slugSeg, acID string, mdl *model.Model) (reason string, bad bool) {
 	r, err := artifact.ParseRef(verifiesRef)
 	if err != nil {
 		return fmt.Sprintf("which does not parse as a ref: %v", err), true
 	}
 	if r.Kind != artifact.KindSpec || r.Fragment() {
-		return "which is not a whole spec ref — an attestation verifies the whole story spec (the AC is named by the attestation's own id, 02 §Link taxonomy's closed edge vocabulary)", true
+		// The spoken class word is display and resolves (L-M13a(6) work
+		// order); "closed edge vocabulary" is 02's own term for the edge
+		// taxonomy being a closed SET — not the lifecycle state.
+		return fmt.Sprintf("which is not a whole spec ref — an attestation verifies the whole %s spec (the AC is named by the attestation's own id, 02 §Link taxonomy's closed edge vocabulary)", mdl.DisplayClass("story")), true
 	}
 
 	target, err := storyresolve.LoadSpec(root, r.Name)
@@ -138,6 +142,7 @@ func badAttestationVerifiesTarget(root, verifiesRef, slugSeg, acID string) (reas
 
 	wantSlug := store.RefSlug(target.Story)
 	if slugSeg != wantSlug {
+		// vocab:identity — story-ref slug grammar (D6-16 path/id derivation)
 		return fmt.Sprintf("whose own story-ref slug is %q, but this attestation's own directory/id segment is %q (D6-18: a spec-name/story-slug mismatch used to fold as a silent absent, never a misfiled attestation)", wantSlug, slugSeg), true
 	}
 

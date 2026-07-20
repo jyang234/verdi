@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // StubStory is one candidate implementing story for stub reconciliation:
@@ -49,6 +50,11 @@ type StubReconcileInput struct {
 	// StubWithdrawal's doc comment on why this is caller-supplied data,
 	// not a decoded artifact).
 	Withdrawals []StubWithdrawal
+	// Model is the store's resolved operating model, used ONLY to route
+	// class display words in this check's own refusal prose — exactly
+	// FeatureInput.Model's contract (see that field's doc comment): nil
+	// renders bare ids, no reconciliation DECISION ever reads it.
+	Model *model.Model
 }
 
 // StubBucket is one stub's reconciliation state (03 §Stub reconciliation).
@@ -122,7 +128,9 @@ func ReconcileStubs(in StubReconcileInput) (StubReconciliation, error) {
 		return StubReconciliation{}, fmt.Errorf("evidence: ReconcileStubs: Spec is required")
 	}
 	if in.Spec.Class != artifact.ClassFeature {
-		return StubReconciliation{}, fmt.Errorf("evidence: ReconcileStubs: spec %q is class %q, not a feature spec", in.Spec.ID, in.Spec.Class)
+		// The spoken class word is display and resolves (L-M13a(6) work
+		// order); the class COMPARISON and the echoed %q id stay bare.
+		return StubReconciliation{}, fmt.Errorf("evidence: ReconcileStubs: spec %q is class %q, not %s spec", in.Spec.ID, in.Spec.Class, model.Indefinite(in.Model.DisplayClass("feature")))
 	}
 
 	withdrawn := make(map[string]string, len(in.Withdrawals))

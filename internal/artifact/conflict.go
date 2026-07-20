@@ -44,6 +44,7 @@ func (fm ConflictFrontmatter) Validate() error {
 		}
 	}
 	if !hasChallenges {
+		// vocab:identity — spec section title citation (03 §Challenging closed decisions)
 		return fmt.Errorf("artifact: conflict must carry at least one 'challenges' link (03 §Challenging closed decisions)")
 	}
 

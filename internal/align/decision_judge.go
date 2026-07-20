@@ -175,7 +175,9 @@ func BuildDecisionSweepPrompt(ctx decisionSweepContext) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are verdi's decision-conflict judge for %s.\n\n", ctx.Spec.ID)
 	b.WriteString("Below are this spec's own declared decisions, the org ADR corpus, and — when this is a ")
+	// vocab:identity — judge-prompt scaffold speaking corpus schema ids to the agent
 	b.WriteString("story spec — its parent feature's decisions. Hunt for UNDECLARED conflicts: places where a ")
+	// vocab:identity — judge-prompt scaffold speaking corpus schema ids to the agent
 	b.WriteString("decision below contradicts an ADR or a parent-feature decision that nobody declared a ")
 	b.WriteString("supersedes/exempts edge against.\n\n")
 
@@ -196,6 +198,7 @@ func BuildDecisionSweepPrompt(ctx decisionSweepContext) []byte {
 	}
 
 	if ctx.FeatureSpec != nil {
+		// vocab:identity — judge-prompt scaffold speaking corpus schema ids to the agent
 		fmt.Fprintf(&b, "\n## Parent feature %s's decisions\n\n", ctx.FeatureSpec.ID)
 		if len(ctx.FeatureSpec.Decisions) == 0 {
 			b.WriteString("(none)\n")

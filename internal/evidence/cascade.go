@@ -92,6 +92,7 @@ func FoldCascade(supersession artifact.Supersession, stories []CascadeStory) ([]
 			case carried[id], amendedAdvisory[id]:
 				// unaffected; no bucket to record.
 			default:
+				// vocab:identity — fold-integrity diagnostic naming ids (supersession manifest machinery)
 				return nil, fmt.Errorf("evidence: FoldCascade: story %s edge names object %q, which the supersession manifest does not classify in any bucket", s.SpecRef, id)
 			}
 		}

@@ -116,6 +116,7 @@ func computeOneEdge(root string, dc artifact.Decision, l artifact.Link) artifact
 		if target.kind != artifact.KindADR {
 			return artifact.ConflictFinding{
 				ID: id, Kind: artifact.FindingComputed,
+				// vocab:identity — computed conflict-finding grammar / ADR status enum (frozen report text)
 				Text:      fmt.Sprintf("decision %s supersedes %s: unresolved — supersedes edges targeting a non-ADR decision cannot be computed-resolved (no independent status field, 02 §Kind registry); resolve via the judged section or file a conflict directly (03 §Challenging closed decisions)", dc.ID, unpinned),
 				TargetRef: unpinned,
 			}
@@ -129,10 +130,12 @@ func computeOneEdge(root string, dc artifact.Decision, l artifact.Link) artifact
 		}
 		return artifact.ConflictFinding{
 			ID: id, Kind: artifact.FindingComputed,
+			// vocab:identity — computed conflict-finding grammar / ADR status enum (frozen report text)
 			Text:        fmt.Sprintf("decision %s supersedes %s: resolved (SUPERSEDED)", dc.ID, unpinned),
 			Disposition: artifact.ConflictSuperseded,
-			Note:        "target ADR status is superseded",
-			TargetRef:   unpinned,
+			// vocab:identity — computed conflict-finding grammar / ADR status enum (frozen report text)
+			Note:      "target ADR status is superseded",
+			TargetRef: unpinned,
 		}
 	default:
 		// Unreachable: the caller only appends edges of these two types.

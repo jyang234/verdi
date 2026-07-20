@@ -80,6 +80,7 @@ func corpusHandler(root string, mdl *model.Model) http.HandlerFunc {
 		if entry.Kind == "diagram" {
 			if d, derr := artifact.DecodeDiagram(fm); derr == nil && d.Class == artifact.DiagramClassProposal {
 				link := `<p class="diagram-editor-link"><a data-testid="open-editor-link" href="/board/diagram/` +
+					// vocab:identity — "draft" the VERB (draft this proposal), not the lifecycle state
 					stdhtml.EscapeString(name) + `">Open in the board editor</a> &#8212; draft this proposal with a live preview and structural operations.</p>`
 				extra = template.HTML(link) + extra
 			}
@@ -112,7 +113,10 @@ func corpusHandler(root string, mdl *model.Model) http.HandlerFunc {
 func corpusMetaRows(e *index.Entry, m artifactview.Meta, mdl *model.Model) []metaRow {
 	rows := []metaRow{{Label: "Kind", Value: e.Kind}}
 	if e.Status != "" {
-		rows = append(rows, metaRow{Label: "Status", Value: mdl.DisplayState("", e.Status)})
+		// The entry's own declared class rides along (Q2's caller
+		// convention at DisplayState) — "" for a class-less knowledge
+		// artifact, the documented degenerate.
+		rows = append(rows, metaRow{Label: "Status", Value: mdl.DisplayState(string(m.Class), e.Status)})
 	}
 	if len(m.Base.Owners) > 0 {
 		rows = append(rows, metaRow{Label: "Owners", Value: strings.Join(m.Base.Owners, ", ")})

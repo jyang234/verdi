@@ -406,7 +406,9 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 				// match no surface serves renders as a SPAN — the ref, its
 				// archived badge, and the disclosure — never an anchor whose
 				// href could 404 or eject the operator off the branch.
+				// vocab:identity — CSS class/testid fragments (identity markup)
 				b.WriteString(`<span class="stub-story-link stub-story-link--archived stub-story-link--unservable" data-testid="stub-story-unservable-` + esc(sv.Slug) + `-` + esc(storySlug) + `" data-archived="true">` + esc(sl.Ref))
+				// vocab:identity — CSS class/testid fragments (identity markup)
 				b.WriteString(` <span class="badge badge-archived" data-testid="stub-story-archived-` + esc(sv.Slug) + `-` + esc(storySlug) + `">archived</span>`)
 				b.WriteString(` — ` + esc(sl.UnservableNotice) + `</span>`)
 				continue
@@ -415,8 +417,10 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			if sl.Archived {
 				linkCls += " stub-story-link--archived"
 			}
+			// vocab:identity — CSS class/testid fragments (identity markup)
 			b.WriteString(`<a class="` + linkCls + `" data-testid="stub-story-link-` + esc(sv.Slug) + `-` + esc(storySlug) + `" data-archived="` + esc(strconv.FormatBool(sl.Archived)) + `" href="` + esc(sl.Href) + `">` + esc(sl.Ref))
 			if sl.Archived {
+				// vocab:identity — CSS class/testid fragments (identity markup)
 				b.WriteString(` <span class="badge badge-archived" data-testid="stub-story-archived-` + esc(sv.Slug) + `-` + esc(storySlug) + `">archived</span>`)
 			}
 			b.WriteString(`</a>`)

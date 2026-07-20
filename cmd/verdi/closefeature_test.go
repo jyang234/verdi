@@ -720,7 +720,7 @@ func TestRunCloseFeature_UnreadableAttestation_OperationalFailure(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ParseRef(%q): %v", spec.ID, err)
 	}
-	_, ferr := foldFeature(ctx, repo.Dir, spec, specRef, repo.Head, map[string][]evidence.ImplementingStory{})
+	_, ferr := foldFeature(ctx, repo.Dir, spec, specRef, repo.Head, map[string][]evidence.ImplementingStory{}, nil)
 	if ferr == nil {
 		t.Fatal("foldFeature(unreadable attestation) err = nil — the fold must fail closed on an unreadable outcome attestation, never swallow it to satisfied (ADJ-67/D6-38)")
 	}

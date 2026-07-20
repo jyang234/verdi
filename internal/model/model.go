@@ -126,6 +126,15 @@ type Vocabulary struct {
 // on and to leave room for a future per-class override, but v1's own
 // vocabulary is flat: only id is consulted this phase.
 //
+// CALLER CONVENTION (Q2, final fix wave): class is forward-compat — pass
+// the artifact's own declared class id whenever the surface has one in
+// scope (a spec page passes its spec's class; a wall passes the wall's),
+// so a future per-class override lands by changing only this function.
+// Pass "" ONLY when no class genuinely exists at the call site — a
+// class-less knowledge artifact (ADR, runbook), or a degraded directory
+// entry whose content could not be read at all — never as a shortcut
+// where the class is sitting in scope.
+//
 // A nil receiver resolves id to itself (spec/vocabulary-surfaces): every
 // consuming surface — CLI verdicts, board, dex, MCP — falls back to bare
 // ids when no model was resolved, never panics and never invents a
@@ -180,6 +189,21 @@ func (m *Model) DisplayVerb(id string) string {
 // speaks a class word obligates a classification against this rule at
 // the prose site (the L-M8 posture: taxonomy decided and documented,
 // never implicit).
+//
+// ENFORCEMENT (ledger L-M13a(6), the mechanical prose witness —
+// internal/specalign's TestVocabProseWitness): production string
+// literals under cmd/ and internal/ are scanned for these class words
+// (and the lifecycle state words) spoken as prose. Every hit must
+// either resolve through this chain ON ITS OWN STATEMENT, or carry the
+// ONE mechanical classification marker `// vocab:identity — <why>` on
+// the literal's own line or the line directly above, placed AT the
+// producing site (never in a consumer package). The marker asserts the
+// bare word is deliberate: an identity-layer id (ref/usage grammar, a
+// wire enum value, a frontmatter field, a branch/CSS/testid fragment, a
+// commit subject), a machinery diagnostic speaking ids, or a
+// non-vocabulary homograph — never unclassified display prose. The
+// witness's own doc comment records the scan's mechanical rules and
+// disclosed limits.
 func (m *Model) DisplayClass(id string) string {
 	if m == nil {
 		return id
@@ -277,6 +301,22 @@ func Article(word string) string {
 		return "an"
 	}
 	return "a"
+}
+
+// Indefinite returns Article(word) + " " + word — the composed
+// "a story" / "an Initiative" form, kept beside Article as the ONE place
+// the article-word pair is assembled (Q1, final fix wave: the pair was
+// hand-composed at eleven refusal/description sites across cmd/verdi and
+// internal/mcpserve; a twelfth hand-compose would eventually disagree
+// with the a/an rule). Only for prose positions where the article
+// immediately precedes the display word; an article whose head word is
+// fixed prose ("a draft <word> spec", "a scheme-prefixed <word> ref")
+// agrees with that fixed word and never routes through this. Display
+// plumbing only, exactly like Article; Indefinite("") is "a " — a
+// degenerate compose no validated model produces (display words are
+// never empty), documented rather than special-cased.
+func Indefinite(word string) string {
+	return Article(word) + " " + word
 }
 
 // Digest returns the resolved model's content-address: canonical-JSON

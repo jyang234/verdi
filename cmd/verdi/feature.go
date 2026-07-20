@@ -19,6 +19,7 @@ import (
 // one subcommand, `start`; anything else is a usage error.
 func runFeatureVerb(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "start" {
+		// vocab:identity — CLI verb name / usage grammar (identity)
 		fmt.Fprintln(stderr, "usage: verdi feature start <story-spec | story-ref>")
 		return 2
 	}
@@ -30,6 +31,7 @@ func runFeatureVerb(args []string, stdout, stderr io.Writer) int {
 // cmdBuildStart uses.
 func cmdFeatureStart(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
+		// vocab:identity — CLI verb name / usage grammar (identity)
 		fmt.Fprintln(stderr, "feature start: usage: verdi feature start <story-spec | story-ref>")
 		return 2
 	}
@@ -38,11 +40,13 @@ func cmdFeatureStart(args []string, stdout, stderr io.Writer) int {
 	ctx := context.Background()
 	root, err := store.FindRoot(".")
 	if err != nil {
+		// vocab:identity — CLI verb name / usage grammar (identity)
 		fmt.Fprintln(stderr, "feature start:", err)
 		return 2
 	}
 	manifest, err := loadManifest(root)
 	if err != nil {
+		// vocab:identity — CLI verb name / usage grammar (identity)
 		fmt.Fprintln(stderr, "feature start:", err)
 		return 2
 	}
@@ -63,6 +67,7 @@ func cmdFeatureStart(args []string, stdout, stderr io.Writer) int {
 // and every side effect (branch cut, baseline regeneration) with `verdi
 // build start`; it differs only in the printed notice.
 func runFeatureStart(ctx context.Context, root, storyArg string, deps syncDeps, stdout, stderr io.Writer) int {
+	// vocab:identity — CLI verb name / usage grammar (identity)
 	fmt.Fprintln(stderr, "feature start: deprecated (R4-I-6) — use `verdi build start <story-spec | story-ref>` instead; proceeding")
 	return runBuildStart(ctx, root, storyArg, deps, stdout, stderr)
 }
