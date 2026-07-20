@@ -39,6 +39,10 @@ import (
 // pending-supersession) are the identical checkSpecStaleCondition/
 // checkPendingSupersessionCondition the story gate calls, so
 // printSpecStalePathIfFailing (closepreflight.go) applies unchanged.
+// Condition 6 (disposition-completeness, X-13/X-16/X-17) already names its
+// own path/undispositioned-ids/ritual text directly in its Reason string
+// (closuregate.go's checkDispositionCompleteCondition) and likewise needs
+// no enrichment.
 func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, mdl *model.Model, f forge.Forge, defaultBranchRef, head string, stdout io.Writer) (bool, error) {
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
@@ -62,7 +66,7 @@ func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.Sp
 		return false, fmt.Errorf("close: --preflight: %w", err)
 	}
 
-	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, f, defaultBranchRef, manifest, mdl, stdout)
+	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, f, defaultBranchRef, manifest, mdl, head, stdout)
 	if err != nil {
 		return false, err
 	}

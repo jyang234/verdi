@@ -632,10 +632,35 @@ func TestBoardSpec_AnnotationDelete(t *testing.T) {
 		t.Error("deleted sticky still renders")
 	}
 
-	// Negative: an id this board does not present is refused.
+	// Negative: an id this board does not present is refused — and the
+	// refusal names WHICH annotation and WHICH board (owner bug
+	// 2026-07-19: "annotations were missing, unclear where" — the
+	// message must carry the where, not just the id).
 	rec = postBoardAPI(t, h, boardFixtureName, "annotation-delete", `{"id":"a-01J8Z0K9ZZZZZZZZZZZZZZZZZZ"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("deleting a foreign annotation = %d, want 400", rec.Code)
+	}
+	for _, want := range []string{"a-01J8Z0K9ZZZZZZZZZZZZZZZZZZ", "spec/" + boardFixtureName} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("delete refusal does not name %q: %s", want, rec.Body.String())
+		}
+	}
+}
+
+// The sticky-position refusal names WHICH sticky and WHICH board too —
+// the drag-path twin of the delete refusal above (owner bug 2026-07-19).
+func TestBoardSpec_StickyPositionRefusalNamesItsBoard(t *testing.T) {
+	root := newBoardFixture(t)
+	h := NewHandler(root)
+
+	rec := postBoardAPI(t, h, boardFixtureName, "sticky-position", `{"id":"a-01J8Z0K9ZZZZZZZZZZZZZZZZZZ","x":10,"y":20}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("sticky-position on a missing sticky = %d, want 400\n%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"a-01J8Z0K9ZZZZZZZZZZZZZZZZZZ", "spec/" + boardFixtureName} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("position refusal does not name %q: %s", want, rec.Body.String())
+		}
 	}
 }
 

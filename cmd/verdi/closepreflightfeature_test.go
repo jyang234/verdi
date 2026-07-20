@@ -287,6 +287,11 @@ func TestRunPreflight_FeatureScope_ReadyThenClose(t *testing.T) {
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	// The corrected closure ritual (X-16): align (a living report covering
+	// head) -> disposition (working-tree edit) -> close (X-13/X-16/X-17's
+	// closure-gate condition 6) — without it "ready" would not actually be
+	// ready.
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 	ctx := context.Background()
 
 	before := snapshotRepo(t, repo.Dir)

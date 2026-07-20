@@ -4,7 +4,7 @@ kind: spec
 title: "Showcase Corpus Renovation"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-22
 problem: { text: "the fixture corpus that will become examples/showcase is scattered across testdata/corpus (the primary e2e feature corpus) and testdata/dexoverlay (a second, separately-layered tree grafted on for dex/supersession coverage), named after test concerns (accepted-pending-build, new-feature-x) rather than a coherent domain, and written to pass lint and assertions rather than to read well — no artifact in it has ever been vetted against a reader-facing bar. Public-showcase#ac-1 requires a single vetted store at examples/showcase where every artifact earns its place; today there is no such store, no domain, and no vetting record.", anchor: "#problem" }
 outcome: { text: "testdata/corpus and testdata/dexoverlay are relocated and merged into one committed store at examples/showcase, renamed onto a coherent LoanServ domain (services, dates, jira keys, and prose drawn from a single canon), and every artifact in it is renovated to and recorded against the three-column vetting bar — lint-clean, editorially exemplary, and narrative-coherent — with the store lint-clean end to end as a provisioned checkout.", anchor: "#outcome" }

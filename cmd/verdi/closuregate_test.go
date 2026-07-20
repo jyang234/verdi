@@ -87,6 +87,9 @@ func TestRunClosureGate_EligibleCondition(t *testing.T) {
 
 	t.Run("attestation present: eligible, closure gate passes", func(t *testing.T) {
 		seedAttestation(t, repo.Dir)
+		// Condition 4 (X-13/X-16/X-17): a living, fully-dispositioned report
+		// already covering head, so the gate genuinely holds overall.
+		writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 		var stdout bytes.Buffer
 		ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
 		if err != nil {
@@ -192,6 +195,9 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 		repo := buildClosureGateRepo(t)
 		seedAttestation(t, repo.Dir)
 		spec, _ := readSpec(t, repo.Dir, "stale-decline")
+		// Condition 4 (X-13/X-16/X-17): so the disclosure on condition 3 is
+		// the only thing keeping this gate from a full PASS.
+		writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
 		var stdout bytes.Buffer
 		ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
@@ -215,6 +221,7 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 		repo := buildClosureGateRepo(t)
 		seedAttestation(t, repo.Dir)
 		spec, _ := readSpec(t, repo.Dir, "stale-decline")
+		writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
 		fakeForge := forgefake.New() // no seeded open MRs
 		var stdout bytes.Buffer
@@ -245,6 +252,86 @@ func freshClosureGateRepoForBuildStart(t *testing.T) *fixturegit.Repo {
 		},
 		Message: "closure gate fixture, no build branch yet",
 	}})
+}
+
+// TestRunClosureGate_DispositionCompleteCondition is X-13/X-16/X-17's
+// static register for the STORY closure gate's condition 4: every failure
+// shape (no report at all — X-17's literal scenario; a stale-covers
+// report; an undispositioned finding — X-13's literal scenario) refuses,
+// naming the offenders and the closure ritual; a report that covers head
+// with every finding dispositioned passes (D6-24: the freeze-in-place
+// case must still hold). Mirrors gate_test.go's own
+// TestGate_Condition3_FailsAlone in shape — the merge gate's condition 3
+// and this closure-gate condition share the same underlying facts, just
+// different remedy text.
+func TestRunClosureGate_DispositionCompleteCondition(t *testing.T) {
+	cases := []struct {
+		name       string
+		setup      func(t *testing.T, root, head string)
+		wantOK     bool
+		wantSubstr []string
+	}{
+		{
+			name:       "no report at all (X-17)",
+			setup:      func(t *testing.T, root, head string) {},
+			wantOK:     false,
+			wantSubstr: []string{"no deviation-report.md found at", "the closure ritual is align"},
+		},
+		{
+			name: "stale covers",
+			setup: func(t *testing.T, root, head string) {
+				writeGateReport(t, root, "0000000000000000000000000000000000000b", dispositionedFindingYAML)
+			},
+			wantOK:     false,
+			wantSubstr: []string{"covers 0000000000000000000000000000000000000b, not head", "the closure ritual is align"},
+		},
+		{
+			name: "undispositioned finding (X-13)",
+			setup: func(t *testing.T, root, head string) {
+				writeGateReport(t, root, head, undispositionedFindingYAML)
+			},
+			wantOK:     false,
+			wantSubstr: []string{"undispositioned finding(s) [f-1]", "the closure ritual is align"},
+		},
+		{
+			name: "fresh, fully dispositioned (D6-24: freeze-in-place still holds)",
+			setup: func(t *testing.T, root, head string) {
+				writeGateReport(t, root, head, dispositionedFindingYAML)
+			},
+			wantOK: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildClosureGateRepo(t)
+			seedAttestation(t, repo.Dir) // condition 1 holds regardless
+			spec, _ := readSpec(t, repo.Dir, "stale-decline")
+			tc.setup(t, repo.Dir, repo.Head)
+
+			var stdout bytes.Buffer
+			ok, err := runClosureGate(context.Background(), repo.Dir, spec, forgefake.New(), "main", nil, nil, repo.Head, &stdout)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok != tc.wantOK {
+				t.Fatalf("runClosureGate() = %v, want %v; stdout=%s", ok, tc.wantOK, stdout.String())
+			}
+			if tc.wantOK {
+				if !contains(stdout.String(), "[PASS] closure: 4.") {
+					t.Fatalf("stdout = %q, want condition 4 to PASS", stdout.String())
+				}
+				return
+			}
+			if !contains(stdout.String(), "[FAIL] closure: 4.") {
+				t.Fatalf("stdout = %q, want condition 4 to FAIL", stdout.String())
+			}
+			for _, want := range tc.wantSubstr {
+				if !contains(stdout.String(), want) {
+					t.Fatalf("stdout = %q, want it to contain %q", stdout.String(), want)
+				}
+			}
+		})
+	}
 }
 
 // TestRunClosureGate_UnreadableAttestation_OperationalFailure pins ADJ-67 /

@@ -1,13 +1,13 @@
 ---
-id: {{.Ref}}
+id: {{safe .Ref}}
 kind: spec
 title: {{printf "%q" .Title}}
-owners: {{.Owners}}
+owners: {{safe .Owners}}
 class: feature{{if .StoryRef}}
-story: {{.StoryRef}}{{end}}
+story: {{safe .StoryRef}}{{end}}
 status: draft
-problem: { text: "{{.Problem}}", anchor: problem }
-outcome: { text: "{{.Outcome}}", anchor: outcome }
+problem: { text: {{printf "%q" .Problem}}, anchor: problem }
+outcome: { text: {{printf "%q" .Outcome}}, anchor: outcome }
 acceptance_criteria:
   - { id: ac-1, text: "TODO: replace with real acceptance criteria before accept", evidence: [static, attestation], anchor: ac-1 }
 stubs:

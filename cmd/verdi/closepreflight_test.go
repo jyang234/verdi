@@ -704,12 +704,8 @@ func TestSnapshotRepo_CatchesUntrackedDerivedRewrite(t *testing.T) {
 // unmodified verdi close on that same fixture succeeds (exit 0), actually
 // archiving the quartet.
 func TestRunPreflight_StoryScope_ReadyThenClose(t *testing.T) {
-	repo := buildCloseFixtureRepo(t)
+	repo := readyCloseFixtureRepo(t)
 	ctx := context.Background()
-	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
-	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
-		t.Fatalf("produceSelfHostedEvidence: %v", err)
-	}
 
 	before := snapshotRepo(t, repo.Dir)
 	var pstdout, pstderr bytes.Buffer
@@ -750,11 +746,7 @@ func TestRunPreflight_ExitCodeMatrixAndNonMutation(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("ready: exit 0, no mutation", func(t *testing.T) {
-		repo := buildCloseFixtureRepo(t)
-		prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
-		if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
-			t.Fatalf("produceSelfHostedEvidence: %v", err)
-		}
+		repo := readyCloseFixtureRepo(t)
 		before := snapshotRepo(t, repo.Dir)
 		var stdout, stderr bytes.Buffer
 		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
@@ -833,7 +825,11 @@ func clearCIEnv(t *testing.T) {
 // readyCloseFixtureRepo builds and fully evidences buildCloseFixtureRepo's
 // fixture (close_test.go) — a ready-to-close story, reused here since the
 // CI-guard clause fires regardless of the gate's own verdict and a ready
-// fixture is the least noisy backdrop to isolate it against.
+// fixture is the least noisy backdrop to isolate it against. Also writes a
+// living, fully-dispositioned deviation report covering head (X-13/X-16/
+// X-17's closure-gate condition 4) — without it, "ready" is no longer
+// actually ready: close's own freeze step would refuse rather than
+// silently regenerate-and-freeze an undispositioned report.
 func readyCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	repo := buildCloseFixtureRepo(t)
@@ -841,6 +837,7 @@ func readyCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
 		t.Fatalf("produceSelfHostedEvidence: %v", err)
 	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 	return repo
 }
 
@@ -955,12 +952,7 @@ func TestCmdClose_Preflight_Dispatch(t *testing.T) {
 
 	buildReadyDir := func(t *testing.T) string {
 		t.Helper()
-		repo := buildCloseFixtureRepo(t)
-		prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
-		if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
-			t.Fatalf("produceSelfHostedEvidence: %v", err)
-		}
-		return repo.Dir
+		return readyCloseFixtureRepo(t).Dir
 	}
 
 	t.Run("--preflight before the story arg", func(t *testing.T) {

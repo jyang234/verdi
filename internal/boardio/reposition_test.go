@@ -3,6 +3,7 @@ package boardio
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -56,11 +57,27 @@ func TestRepositionSticky(t *testing.T) {
 
 func TestRepositionSticky_Negative(t *testing.T) {
 	dir := repositionFixture(t)
-	if err := RepositionSticky(dir, "a-01J8Z0K5CCCCCCCCCCCCCCCCCC", 1, 1); err == nil {
+	err := RepositionSticky(dir, "a-01J8Z0K5CCCCCCCCCCCCCCCCCC", 1, 1)
+	if err == nil {
 		t.Fatal("repositioning a missing annotation succeeded")
 	}
-	// A targeted-only annotation has no board anchor to move.
-	if err := RepositionSticky(dir, "a-01J8Z0K4BBBBBBBBBBBBBBBBBB", 1, 1); err == nil {
+	// The refusal names WHICH annotation and WHERE it was looked for
+	// (owner bug 2026-07-19: "annotations were missing, unclear where").
+	for _, want := range []string{"a-01J8Z0K5CCCCCCCCCCCCCCCCCC", dir} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing-annotation error does not name %q: %v", want, err)
+		}
+	}
+
+	// A targeted-only annotation has no board anchor to move — named
+	// with the stream file that holds it.
+	err = RepositionSticky(dir, "a-01J8Z0K4BBBBBBBBBBBBBBBBBB", 1, 1)
+	if err == nil {
 		t.Fatal("repositioning a board-less annotation succeeded")
+	}
+	for _, want := range []string{"a-01J8Z0K4BBBBBBBBBBBBBBBBBB", "board--refi-test.jsonl"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("board-less error does not name %q: %v", want, err)
+		}
 	}
 }
