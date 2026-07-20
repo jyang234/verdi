@@ -1,11 +1,12 @@
 package residue
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -17,19 +18,24 @@ type PatternB struct {
 	Stubs    []string // realized stub slugs, sorted
 }
 
-// findPatternB scans specs (dc-2's superseded exclusion already applied
-// by the caller) for class: feature status: accepted-pending-build specs
-// whose every declared stubs[] slug resolves to an on-disk
-// .verdi/specs/archive/<slug>/spec.md carrying status: closed — a
-// working-tree check (unlike pattern (a)'s branch-tip git plumbing): a
-// realized stub's story has, BY CONSTRUCTION of the real closure ritual,
-// already reached specs/archive/ on whatever is checked out, never a
-// branch that might not be (dc-1's static obligation: "resolve to an
-// ON-DISK .verdi/specs/archive/<slug>/spec.md"). A feature declaring no
-// stubs at all has nothing to reconcile and never fires — pattern (b)
-// names a "stub-COMPLETE" feature, which presupposes a non-empty stub set
-// to be complete.
-func findPatternB(root string, specs []activeSpec) ([]PatternB, error) {
+// findPatternB scans specs (dc-2's superseded exclusion already applied by
+// the caller) for class: feature status: accepted-pending-build specs whose
+// every declared stubs[] slug is realized by a closed, MERGED story —
+// AC-1(b)'s own words. Realization is evaluated against defaultTip, the
+// audited default-branch tip: .verdi/specs/archive/<slug>/spec.md present
+// AT defaultTip carrying status: closed, read via git plumbing (the same
+// audited-ref mechanics AC-2 uses), never the working tree. So a stub whose
+// archive move rides only an unmerged close/<slug> branch is correctly NOT
+// counted as realized — the merged condition AC-1(b) names, which a
+// working-tree read silently drops.
+//
+// The feature spec itself is read from the active zone (walkActiveSpecs,
+// the working tree) like the rest of the scan; only the per-stub
+// realization check reads the audited ref. A feature declaring no stubs has
+// nothing to reconcile and never fires — pattern (b) names a
+// "stub-COMPLETE" feature, which presupposes a non-empty stub set to be
+// complete.
+func findPatternB(ctx context.Context, root, defaultTip string, specs []activeSpec) ([]PatternB, error) {
 	var out []PatternB
 	for _, s := range specs {
 		if s.FM.Class != artifact.ClassFeature {
@@ -45,7 +51,7 @@ func findPatternB(root string, specs []activeSpec) ([]PatternB, error) {
 		slugs := make([]string, 0, len(s.FM.Stubs))
 		allRealized := true
 		for _, stub := range s.FM.Stubs {
-			closed, err := archiveSpecIsClosed(root, stub.Slug)
+			closed, err := archiveSpecClosedAt(ctx, root, defaultTip, stub.Slug)
 			if err != nil {
 				return nil, err
 			}
@@ -66,29 +72,39 @@ func findPatternB(root string, specs []activeSpec) ([]PatternB, error) {
 	return out, nil
 }
 
-// archiveSpecIsClosed reports whether root's specs/archive/<slug>/spec.md
-// exists on disk and decodes with status: closed — pattern (b)'s per-stub
-// realization check. A missing archive spec.md is "not realized" (false,
-// no error, since an unrealized stub is the ordinary, expected case); a
-// present-but-malformed one is a real (operational) error, never a
-// silent false — an author would want to know their store has a broken
-// spec.md, not have it silently read as "not yet realized".
-func archiveSpecIsClosed(root, slug string) (bool, error) {
-	path := store.ArchiveSpecPath(root, slug)
-	data, err := os.ReadFile(path)
+// archiveSpecClosedAt reports whether .verdi/specs/archive/<slug>/spec.md is
+// present at ref (the audited default-branch tip) AND decodes with status:
+// closed — pattern (b)'s per-stub realization check, evaluated against the
+// audited ref via git plumbing (never the working tree), so an archive move
+// that has not merged into the default branch is not counted as a realized,
+// merged story. It reuses AC-1/AC-2's shared archiveExistsAt presence check,
+// then reads the file's content at ref with gitx.Show.
+//
+// Absent at ref: not realized (false, no error — the ordinary unrealized
+// case, exactly as an absent path is for archiveExistsAt). Present at ref
+// but undecodable: a disclosed operational error, never a silent false or a
+// guessed third path — an author would want to know the archived spec.md is
+// broken, not have it read as "not yet realized".
+func archiveSpecClosedAt(ctx context.Context, root, ref, slug string) (bool, error) {
+	present, err := archiveExistsAt(ctx, root, ref, slug)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("residue: reading %s: %w", path, err)
+		return false, err
+	}
+	if !present {
+		return false, nil
+	}
+	relPath := store.SpecRelPath(store.ZoneArchive, slug)
+	data, err := gitx.Show(ctx, root, ref, relPath)
+	if err != nil {
+		return false, fmt.Errorf("residue: reading %s at %s: %w", relPath, ref, err)
 	}
 	fm, _, err := artifact.SplitFrontmatter(data)
 	if err != nil {
-		return false, fmt.Errorf("residue: %s: %w", path, err)
+		return false, fmt.Errorf("residue: %s at %s: %w", relPath, ref, err)
 	}
 	decoded, err := artifact.DecodeSpec(fm)
 	if err != nil {
-		return false, fmt.Errorf("residue: %s: %w", path, err)
+		return false, fmt.Errorf("residue: %s at %s: %w", relPath, ref, err)
 	}
 	return decoded.Status == "closed", nil
 }

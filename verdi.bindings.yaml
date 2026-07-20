@@ -789,6 +789,137 @@ bindings:
       - "spec/operating-model#ac-2"
       - "spec/operating-model#ac-3"
       - "spec/operating-model#ac-4"
+      # spec/instruction-conformance behavioral legs (ac-1/ac-2/ac-4 declare
+      # [behavioral] only; ac-5 declares [static, behavioral] — its static
+      # leg is bound below under verdi-verify-static), all under make
+      # verify: ac-1 = internal/specalign/instructionfiles_test.go's
+      # TestEnumerateInstructionFiles (table-driven over a varying skill
+      # count, both absent/empty .claude/skills/ zero-skills boundaries, and
+      # the required-root-CLAUDE.md-absence finding) and
+      # TestEnumerateInstructionFiles_SkillAddedBetweenCalls (a skill
+      # directory added between two enumeration calls grows the returned
+      # count with no test-code edit, mirroring internal/showcasealign's own
+      # TestShowcaseCoverage_EnumerationIsComplete completeness-proof
+      # shape); ac-2 = instructionverbs_test.go's TestExtractBacktickSpans /
+      # TestExtractVerdiVerbRefs (dc-1's invocation-shape-only extraction
+      # over inline AND fenced spans) and TestUnknownVerbBanner /
+      # TestClassifyVerb (dc-2's exact-banner-match classification, execing
+      # the once-built verdi binary from a fresh rootless temp directory,
+      # mirroring helpers_test.go's runBinary/TestMain build-once precedent
+      # — both directions: an unrecognized verb fails, and waivers/
+      # verify-artifact's own distinct out-of-v0-scope message still counts
+      # as known); ac-4 = instructionconformance_test.go's
+      # TestInstructionConformance_RedFixtureFails (the committed
+      # testdata/instructionconformance/red/ fixture — an unrecognized verb
+      # inside a FENCED block plus an undisclosed retired-ritual phrase —
+      # fails naming the exact file and both offenses) and
+      # TestInstructionConformance_CleanFixturePasses (the committed
+      # testdata/instructionconformance/clean/ fixture passes with zero
+      # findings); ac-5's behavioral leg = the same file's
+      # TestInstructionConformance_RepoTreeIsClean, the combined AC-1/2/3
+      # check run against THIS repo's own real .claude/skills/*/SKILL.md
+      # (now absent — DC-4's retirement disposition applied, confirmed
+      # empty in this tree) and root CLAUDE.md, zero findings — reachable
+      # only after the build phase disposed of the pre-build
+      # commit-to-design/SKILL.md violation the spec's own outcome text
+      # names.
+      - "spec/instruction-conformance#ac-1"
+      - "spec/instruction-conformance#ac-2"
+      - "spec/instruction-conformance#ac-4"
+      - "spec/instruction-conformance#ac-5"
+      # spec/closure-hygiene behavioral legs (all three ACs declare
+      # [static, behavioral]; static legs bound below under
+      # verdi-verify-static), all under make verify: ac-1 =
+      # internal/residue/ac1_test.go's TestScan_AC1_PatternA_RED (the
+      # close/widget stranded-ritual fixture — spec name, close/widget
+      # branch, and its own tip sha all named, Flagged()==true),
+      # TestScan_AC1_PatternB_RED (the code-health-shaped stub-complete
+      # feature fixture — its own witness line, Flagged()==false per dc-3),
+      # TestScan_AC1_GREEN (every active-zone status consistent with git
+      # reality, including one status: superseded spec left in place —
+      # clean and unflagged), and
+      # TestScan_AC1_DC2_SupersededNeverCheckedEvenWhenOtherwiseShaped
+      # (dc-2's exclusion holds even when a superseded-named spec would
+      # otherwise match either pattern) — plus
+      # cmd/verdi/audit_closurehygiene_test.go's
+      # TestRunAudit_ClosureHygieneSection_AppearsAndCoexists (the
+      # dc-1/co-2 wiring proof: the new third section appears alongside the
+      # two existing sections' own byte-identical content, in ascending
+      # order, exit 1) and
+      # TestRunAudit_ClosureHygieneSection_UnresolvableDefaultBranch (an
+      # empty default-branch ref prints the disclosure line, never a
+      # guessed clean report, never flags — AC-1's own "where a default
+      # branch cannot be resolved, nothing is asserted" text, end to end
+      # through runAudit). ac-2 = ac2_test.go's
+      # TestScan_AC2_RitualIncompleteAndSupersededElsewhere (close/alpha
+      # ritual-incomplete + close/beta superseded-elsewhere in one run,
+      # only the first contributing to Flagged(); removing close/alpha then
+      # leaves the run unflagged despite close/beta's line still printing),
+      # TestScan_AC2_GREEN_NoUnmergedCloseBranches, and
+      # TestScan_AC2_MergedCloseBranchNeverClassified — plus
+      # cmd/verdi/audit_closurehygiene_test.go's
+      # TestRunAudit_ClosureHygieneSection_Clean (every section's own clean
+      # disclosure line, exit 0) and
+      # TestRunAudit_ClosureHygieneSection_PatternB_NeverFlagsAlone (dc-3's
+      # split proven through runAudit itself: a stub-complete feature alone
+      # reports STUB-COMPLETE and still exits clean). ac-3 = ac3_test.go's
+      # TestScan_AC3_MixedBranchesAndFourWorktrees (survey (a)'s exact
+      # merged-branch count/naming, plus all four worktree shapes —
+      # managed, unmanaged-merged, unmanaged-unmerged, and a detached HEAD
+      # with no branch name asserted — each correctly tagged
+      # managed/merged-or-commit-level-merged/dirty, and the overall run
+      # exiting unflagged regardless).
+      - "spec/closure-hygiene#ac-1"
+      - "spec/closure-hygiene#ac-2"
+      - "spec/closure-hygiene#ac-3"
+      # spec/ritual-integrity FEATURE outcome ACs (extensibility Phase 2,
+      # Task 1: this design series authors the feature spec + these
+      # bindings together, the X-9/#143 convention). Disclosed departure
+      # from every precedent above: none of the five implementing stories
+      # (judge-ergonomics/finding-identity/evidence-resilience/
+      # ritual-traps/guide-claims-gate) are built yet, so these four
+      # behavioral legs are a DESIGN-TIME FORWARD DECLARATION of planned
+      # producers, not a citation of existing ones — mirroring the
+      # spec/model-digest ac-1/ac-3 "Not yet built" entry below rather
+      # than the built-and-cited entries around it. Not yet built: ac-1 <-
+      # verdi/internal/align/judged_test.go (canned judge) +
+      # verdi/cmd/verdi/align_test.go built-binary cases proving the
+      # report path prints as stdout line 1 before the judge runs, --wait
+      # blocks bounded then exits 0 on completion, --wait=1 against a
+      # hung fake exits 2 WITH the path, and the report file is never
+      # observable mid-write (atomicfile) — plan Task 2 Step 1; ac-2 <-
+      # internal/align/identity_test.go's carry-forward matrix + report-
+      # regeneration tests over the canned judge (reworded-same-slug
+      # candidate pre-fill with AllDispositioned false until confirmed,
+      # escalation-under-stable-slug presenting both texts, colliding-
+      # slug disclosed as a contract violation, drifting-slug landing in
+      # not-resurfaced: with the spec-stale count unchanged under a
+      # judge-re-roll replay, the feature-close cross-report union) —
+      # plan Task 3 Step 1; ac-3 <- fixturegit cases beside
+      # cmd/verdi/sync_ancestor_test.go (a bundle referencing an
+      # unreachable commit quarantined at sync with the reason recorded,
+      # sync exit 0; closure over it reads the affected AC disclosed-
+      # unproven, never exit 2) + internal/lint/vl009_test.go's
+      # reachability-from-HEAD case (a dangling-but-unreachable
+      # frozen.commit reds, X-11b pinned) — plan Task 4 Step 1; ac-4 <-
+      # internal/artifact/object_test.go's anchor case-symmetry case
+      # (anchor: AC-1 resolves against ## AC-1) + internal/align/
+      # judged_test.go's single-prefix-for-fresh/archived-doubled-id-
+      # round-trips-untouched case + internal/lint/vl003_test.go's
+      # fragment-qualified-binding-cross-check case (a typo'd #ac-9
+      # reds) — plan Task 5 Step 1. Each leg lands under make verify once
+      # its story merges; this entry is updated to name the real test
+      # functions at that point. The attestation leg every AC also
+      # declares (L-M14's feature-AC floor) is deliberately NOT bound
+      # here or anywhere in this file — mirroring the workbench-
+      # legibility/closure-ergonomics convention above, it is hand-
+      # authored at .verdi/attestations/ritual-integrity/ac-{1..5}.md at
+      # feature closure, when the claim can be truthfully made, never at
+      # spec-cut time.
+      - "spec/ritual-integrity#ac-1"
+      - "spec/ritual-integrity#ac-2"
+      - "spec/ritual-integrity#ac-3"
+      - "spec/ritual-integrity#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -1245,3 +1376,113 @@ bindings:
       # all). Compiles, vets, and lints clean, plus these four dedicated tests,
       # under make verify.
       - "spec/operating-model#ac-5"
+      # spec/instruction-conformance ac-3/ac-5 static legs (ac-1/ac-2/ac-4
+      # are behavioral-only and have no entry here; ac-5's behavioral leg is
+      # bound above under verdi-verify-behavioral): ac-3 =
+      # internal/specalign/instructionritual_test.go's closed,
+      # case-insensitive ritualCurrentPhrasings/ritualDisclosurePhrasings
+      # sets (dc-3's conjunction: checkRetiredRitualTripwire fires only on
+      # presence of a current-ritual phrase AND absence of any disclosure
+      # phrase in the SAME file) proven by
+      # TestRitualCurrentPhrasingsMatchRealisticSentence /
+      # TestRitualDisclosurePhrasingsMatchRealisticSentence (the ADJ-47/
+      # ADJ-50 guard-repair requirement: every entry in both sets fires on a
+      # realistic sentence, never a dead pattern), plus
+      # TestFindRitualCurrentPhrasing / TestHasRitualDisclosure /
+      # TestCheckRetiredRitualTripwire (the combinator's own conjunction
+      # table, following docsync_test.go's handEditPhrasings idiom exactly,
+      # same disclosed lexical-not-semantic limit). ac-5's static leg =
+      # instructionconformance_test.go's own package-doc-pinned structural
+      # claim — "every test in this file is an ordinary, unconditional Go
+      # test function, no -run filter, no build tag, no t.Skip" — so
+      # spec-align's existing bare `go test ./internal/specalign/...`
+      # Makefile target (left unedited) reaches AC-1/AC-2/AC-3
+      # unconditionally, plus the source-level fact, confirmed in this
+      # tree, that no `.claude/skills/` directory exists at all (DC-4's
+      # retirement applied — a legal, honest zero-skills state per AC-1)
+      # and the repo-root CLAUDE.md's own CLI-verbs sentence names bare
+      # backticked words with no `verdi ` prefix (dc-1: passes ac-2
+      # vacuously, by design, never by omission) — leaving no unresolved
+      # offense in either of this story's two enumerated real files. All
+      # compile, vet, lint, and lint-store clean under make verify.
+      - "spec/instruction-conformance#ac-3"
+      - "spec/instruction-conformance#ac-5"
+      # spec/closure-hygiene static legs (all three ACs declare [static,
+      # behavioral]; behavioral legs bound above under
+      # verdi-verify-behavioral), internal/residue (dc-1's new package):
+      # ac-1 = patterna_test.go's TestFindPatternA_Happy /
+      # _Negative_NotArchivedOnOwnTip / _Negative_SpecNotActivePendingBuild
+      # and patternb_test.go's TestArchiveSpecIsClosed_Happy / _Negative +
+      # TestFindPatternB_Happy / _Negative (each pattern's own total,
+      # closed-condition function), activespecs_test.go's
+      # TestExcludeSuperseded / TestActiveStatusByName /
+      # TestActiveClassByName (dc-2's exclusion-before-either-pattern
+      # structural proof) and TestWalkActiveSpecs_Happy /
+      # _NoActiveDir_NotAnError / _Negative_ToleratesMalformedSpec, plus
+      # scan_test.go's TestResult_Flagged / TestResult_Flagged_NilReceiver
+      # (the total, closed-outcome table over EVERY AC's own exit-code
+      # posture at once: pattern-a flags, pattern-b alone never does,
+      # ritual-incomplete flags, superseded-elsewhere alone never does, the
+      # survey alone never does even unmerged+dirty+unmanaged — dc-3's
+      # whole exit-code contract in one function) and
+      # TestScan_EmptyDefaultBranchRef_AssertsNothing /
+      # TestScan_Negative_UnresolvableDefaultBranchRef_IsARealError (an
+      # empty ref asserts nothing, never a guess; a bogus non-empty ref is a
+      # real error, never silently downgraded). ac-2 =
+      # closebranches_test.go's TestCloseBranchName,
+      # TestCloseClassification_String, TestArchiveExistsAt_Happy /
+      # _NegativePath_NotAnError / _Negative_BogusRef, and
+      # TestScanCloseBranches_Happy / _Negative_NotARepo /
+      # _Negative_BogusDefaultTip / _DC2_SupersededNameExcluded /
+      # _Green_NoCloseBranches — closebranches.go's scanCloseBranches calls
+      # the ONE shared archiveExistsAt check against both a branch's own
+      # tip (feeding ArchivedOnOwnTip, AC-1 pattern (a)'s own field) and the
+      # default branch tip (feeding Class, AC-2's classification) — one
+      # implementation, not two that could silently disagree (ac-2's own
+      # static obligation). ac-3 = survey_test.go's
+      # TestScanMergedBranches_Happy / _Negative_NotARepo /
+      # _Negative_BogusDefaultTip, TestLooksLikePrimaryWorktree,
+      # TestIsUnderRoot, and TestScanWorktrees_Happy /
+      # _NoWorktreesBeyondPrimary / _Negative_NotARepo /
+      # _Negative_BogusDefaultTip (dc-4's two-signal primary-worktree
+      # exclusion and commit-level-not-guessed detached-HEAD resolution),
+      # plus commandsurface_test.go's
+      # TestCommandSurface_OnlyReadOnlyGitxCallsInProductionSource (an
+      # exhaustive go/parser AST walk over every non-test file in the
+      # package, failing on any gitx call outside the read-only
+      # allow-list — worktree list, rev-parse/merge-base, and status
+      # checks only, never add/remove/prune) and
+      # TestCommandSurface_AllowListItselfHasNoMutatingNames (the allow
+      # list's own self-check), and ac3_test.go's
+      # TestScan_AC3_ZeroGitMutatingCalls (the observable complement: every
+      # worktree and the primary checkout's own branch/HEAD byte-identical
+      # before and after a real Scan run). All compile, vet, lint, and
+      # lint-store clean under make verify.
+      - "spec/closure-hygiene#ac-1"
+      - "spec/closure-hygiene#ac-2"
+      - "spec/closure-hygiene#ac-3"
+      # spec/ritual-integrity#ac-5 static leg (extensibility Phase 2, Task
+      # 1 design-time forward declaration; ac-1..4 are bound above under
+      # verdi-verify-behavioral, same not-yet-built framing — the
+      # guide-claims-gate story is not built yet). Not yet built:
+      # verdi/internal/specalign/guideclaims_test.go's manifest strict-
+      # decode + witness-binding suite (unknown key/status fails closed;
+      # an EXISTS/PARTIAL row with no witness reds naming the row; a
+      # witness name absent from the corpus reds naming both; a witness
+      # present but missing its // guide-claim: <row-id> anchor reds; a
+      # witness present+anchored but not PASS-coupled reds via the
+      # require-pass.sh mechanism; a PARTIAL row without caveat text
+      # reds; a non-EXISTS row or any downgrade without cite: reds; a
+      # bundled multi-capability row shape fails decode; the current
+      # Appendix B state transcribed atomically is green at head) — plan
+      # Task 6 Step 1. Lands under make verify once guide-claims-gate
+      # merges. The attestation leg is NOT bound here either, same
+      # disclosure as ac-1..4: hand-authored at
+      # .verdi/attestations/ritual-integrity/ac-5.md at feature closure —
+      # no verdi.bindings.yaml entry exists for any feature-AC attestation
+      # leg anywhere in this file (see workbench-legibility/
+      # closure-ergonomics above); the feature fold's floor is
+      # attestation OR pass-record (evidence.FloorResult's OR semantics),
+      # so the unbuilt behavioral/static legs above are what the fold
+      # will actually read once real.
+      - "spec/ritual-integrity#ac-5"

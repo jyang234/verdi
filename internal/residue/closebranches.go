@@ -51,10 +51,10 @@ func (c CloseClassification) String() string {
 // CloseBranch is one unmerged close/<name> local branch — AC-2's own
 // finding shape, and (when ArchivedOnOwnTip is also true and the matching
 // active-zone spec is still status: accepted-pending-build) AC-1 pattern
-// (a)'s witness too. patterna.go derives that finding from this same
-// slice rather than re-running the tip-tree check (ac-2's static
-// obligation: "the SAME tip-tree check... called once and shared by both
-// report lines").
+// (a)'s witness too. As an implementation choice, patterna.go derives that
+// finding from this same slice rather than re-running the tip-tree check,
+// so AC-1 pattern (a) and AC-2 classify from one shared pass rather than
+// two that could drift apart.
 type CloseBranch struct {
 	Name             string // "<name>" from close/<name>
 	Branch           string // "close/<name>"
@@ -150,13 +150,13 @@ func closeBranchName(branch string) (name string, ok bool) {
 	return name, name != ""
 }
 
-// archiveExistsAt is the ONE shared tip-tree check AC-1 pattern (a) and
-// AC-2's classification both read from (ac-2's static obligation: "not two
-// independently-maintained implementations... that could silently
-// disagree"): whether .verdi/specs/archive/<name>/spec.md exists in ref's
-// tree, read via git plumbing (gitx.LsTree) — never a working-tree file
-// check, since ref may be a branch tip that is not (and, being unmerged,
-// cannot safely be) checked out.
+// archiveExistsAt is the ONE tip-tree check AC-1 pattern (a) and AC-2's
+// classification both read from — a single implementation shared by both
+// callers (an engineering choice) so they cannot silently disagree:
+// whether .verdi/specs/archive/<name>/spec.md exists in ref's tree, read
+// via git plumbing (gitx.LsTree) — never a working-tree file check, since
+// ref may be a branch tip that is not (and, being unmerged, cannot safely
+// be) checked out.
 func archiveExistsAt(ctx context.Context, root, ref, name string) (bool, error) {
 	relPath := store.SpecRelPath(store.ZoneArchive, name)
 	entries, err := gitx.LsTree(ctx, root, ref, relPath)

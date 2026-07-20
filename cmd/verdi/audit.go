@@ -204,23 +204,37 @@ func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string
 
 // renderWorktreeLine is AC-3(b)'s one-line-per-worktree disclosure,
 // naming its branch (or, for a detached HEAD, its commit alone — dc-4:
-// never a guessed branch name), and its merged/clean/managed state.
+// never a guessed branch name), and its merged/clean/managed state. Where
+// a per-worktree state could not be resolved (e.g. a worktree directory
+// deleted without `git worktree remove`), that aspect is disclosed as
+// "unresolvable" with git's own reason appended, rather than guessed
+// either way (AC-3(b): "disclosed rather than guessed").
 func renderWorktreeLine(wt residue.Worktree) string {
 	branch := "branch " + wt.Branch
 	if wt.Branch == "" {
 		branch = "detached at " + wt.Commit
 	}
 	merged := "unmerged"
-	if wt.Merged {
+	switch {
+	case wt.MergedUnresolved:
+		merged = "merge state unresolvable"
+	case wt.Merged:
 		merged = "merged"
 	}
 	clean := "dirty"
-	if !wt.Dirty {
+	switch {
+	case wt.DirtyUnresolved:
+		clean = "clean state unresolvable"
+	case !wt.Dirty:
 		clean = "clean"
 	}
 	managed := "unmanaged"
 	if wt.Managed {
 		managed = "managed"
 	}
-	return fmt.Sprintf("worktree %s: %s, %s, %s, %s", wt.Path, branch, merged, clean, managed)
+	line := fmt.Sprintf("worktree %s: %s, %s, %s, %s", wt.Path, branch, merged, clean, managed)
+	if wt.Reason != "" {
+		line += " (" + wt.Reason + ")"
+	}
+	return line
 }
