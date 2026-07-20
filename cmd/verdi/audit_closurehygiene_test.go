@@ -126,7 +126,7 @@ func TestRunAudit_ClosureHygieneSection_AppearsAndCoexists(t *testing.T) {
 	trailerIdx := strings.Index(out, "audit: FLAGGED")
 	exemptIdx := strings.Index(out, "== Exemption audit ==")
 	staleIdx := strings.Index(out, "== Spec-stale audit ==")
-	if !(exemptIdx < staleIdx && staleIdx < hygieneIdx && hygieneIdx < trailerIdx) {
+	if exemptIdx >= staleIdx || staleIdx >= hygieneIdx || hygieneIdx >= trailerIdx {
 		t.Errorf("section order wrong: exemption=%d stale=%d hygiene=%d trailer=%d, want ascending", exemptIdx, staleIdx, hygieneIdx, trailerIdx)
 	}
 }
