@@ -102,11 +102,16 @@ import (
 const guideClaimAnchorPrefix = "guide-claim:"
 
 // guideClaimWitnessDecl is one located top-level Go test function
-// declaration: which file declares it (for diagnostics) and its own Go
-// doc comment (nil if it carries none) — the anchor check's input.
+// declaration: which file first declares it (for diagnostics and the anchor
+// check), its own Go doc comment (nil if it carries none), and Sites — every
+// *_test.go file that declares a top-level test of this name. len(Sites)>1 is
+// a cross-package name collision (a package cannot declare one name twice, so
+// two sites are necessarily two packages), which checkWitnessNameUnique reds
+// for a manifest-referenced witness.
 type guideClaimWitnessDecl struct {
-	File string
-	Doc  *ast.CommentGroup
+	File  string
+	Doc   *ast.CommentGroup
+	Sites []string
 }
 
 // guideClaimCorpus maps a top-level Go test function's name to its
@@ -144,10 +149,25 @@ func guideClaimCorpusSkipDir(name string) bool {
 // buildGuideClaimCorpus walks every *_test.go file under root/<dir> for
 // each dir in dirs and indexes every top-level (receiverless) Go test
 // function declaration it finds, by name. A dir that does not exist under
-// root is skipped, not an error (a fixture root may legitimately have
-// only some of the dirs); a name declared more than once keeps the first
-// hit in walk order — ac-2's checks only need "does a corpus entry exist
-// and is it anchored", not a referee for accidental name collisions.
+// root is skipped, not an error (a fixture root may legitimately have only
+// some of the dirs).
+//
+// Witness IDENTITY here is the BARE top-level test name: the manifest names a
+// witness by "TestXxx" alone, not by package. Go permits the same TestXxx name
+// in more than one package, so a bare name can be ambiguous. The first
+// declaration in walk order supplies File/Doc (the anchor check's input),
+// while Sites records EVERY declaring file. len(Sites)>1 is a cross-package
+// collision, which checkWitnessNameUnique reds for any manifest-referenced
+// witness — turning the impostor shape (a skip on the real anchored witness
+// masked by a same-named namesake's passing PASS line) loud rather than silent
+// (judged-ac2-witness-identity-is-bare-name-not-package-qualified).
+//
+// DEFERRED RESIDUAL: the stronger fix is PACKAGE-QUALIFIED witness identity in
+// the manifest (e.g. "internal/foo.TestXxx"), so a namesake in another package
+// is simply a different witness, never a collision, and the anchor and PASS
+// bindings can never be satisfied by two different functions. That widens the
+// schema and is deferred; this gate reds on the collision rather than
+// resolving the identity model.
 func buildGuideClaimCorpus(t *testing.T, root string, dirs []string) guideClaimCorpus {
 	t.Helper()
 	corpus := guideClaimCorpus{}
@@ -183,10 +203,17 @@ func buildGuideClaimCorpus(t *testing.T, root string, dirs []string) guideClaimC
 				if !ok || fn.Recv != nil || !isGoTestFuncName(fn.Name.Name) {
 					continue
 				}
-				if _, exists := corpus[fn.Name.Name]; exists {
+				if d, exists := corpus[fn.Name.Name]; exists {
+					// A second declaration of the same top-level test name
+					// (necessarily in another package — a package cannot
+					// declare one name twice). Record the extra site so a
+					// manifest-referenced collision reds; keep the first hit's
+					// File/Doc as the anchor check's input.
+					d.Sites = append(d.Sites, path)
+					corpus[fn.Name.Name] = d
 					continue
 				}
-				corpus[fn.Name.Name] = guideClaimWitnessDecl{File: path, Doc: fn.Doc}
+				corpus[fn.Name.Name] = guideClaimWitnessDecl{File: path, Doc: fn.Doc, Sites: []string{path}}
 			}
 			return nil
 		})
@@ -239,6 +266,25 @@ func checkWitnessAnchor(corpus guideClaimCorpus, rowID string, witness artifact.
 		return fmt.Sprintf("row %s: witness %s exists in the corpus but carries no `// guide-claim: %s` anchor at its own declaration (%s) — a rename or a gutted test must become a visible lie, not a silent gap", rowID, witness.Name, rowID, decl.File)
 	}
 	return ""
+}
+
+// checkWitnessNameUnique is ac-2's witness-IDENTITY guard: a manifest-
+// referenced witness name declared in more than one package reds, naming both
+// the row and every declaration site. A bare-name witness identity cannot
+// distinguish the anchored, PASS-coupled declaration from a same-named
+// impostor, so a skip on the real witness can be masked by a passing
+// namesake's `--- PASS: <name>` line — precisely the skip shape ac-2 says must
+// red (judged-ac2-witness-identity-is-bare-name-not-package-qualified).
+// Returns "" when the name is absent (checkWitnessNameInCorpus's job) or
+// declared exactly once.
+func checkWitnessNameUnique(corpus guideClaimCorpus, rowID string, witness artifact.GuideClaimWitness) string {
+	decl, ok := corpus[witness.Name]
+	if !ok || len(decl.Sites) <= 1 {
+		return ""
+	}
+	sites := append([]string(nil), decl.Sites...)
+	sort.Strings(sites)
+	return fmt.Sprintf("row %s: witness %s is declared at %d sites (%s) — in valid Go these are different packages, so this bare-name witness is ambiguous: a skip on the anchored declaration can be masked by a same-named namesake's `--- PASS: %s` line (judged-ac2-witness-identity-is-bare-name-not-package-qualified)", rowID, witness.Name, len(sites), strings.Join(sites, ", "), witness.Name)
 }
 
 // requirePassScriptPath is scripts/require-pass.sh's committed location.
@@ -344,6 +390,12 @@ func evaluateGuideClaimRows(t *testing.T, root string, m *artifact.GuideClaimsMa
 			if f := checkWitnessNameInCorpus(corpus, row.ID, w); f != "" {
 				findings = append(findings, f)
 				continue
+			}
+			if f := checkWitnessNameUnique(corpus, row.ID, w); f != "" {
+				findings = append(findings, f)
+				continue // an ambiguous witness is already condemned; the
+				// anchor check on the first-hit declaration would be
+				// misleading when a namesake may be the one that passes.
 			}
 			if f := checkWitnessAnchor(corpus, row.ID, w); f != "" {
 				findings = append(findings, f)
@@ -499,6 +551,47 @@ func TestGuideClaimsWitnessBinding_AllThreeBindingsSatisfied_Clean(t *testing.T)
 	if f := checkWitnessesPassCoupled(t, verdiRepoRoot, []string{w.Name}, transcript); f != "" {
 		t.Errorf("pass-coupling: got finding %q, want none", f)
 	}
+}
+
+// TestGuideClaimsWitnessBinding_NameCollisionAcrossPackages_Reds is ac-2's
+// witness-identity case: a witness name declared in TWO packages reds, naming
+// both declaration sites, because a bare-name identity cannot tell the
+// anchored, PASS-coupled declaration from a same-named impostor
+// (judged-ac2-witness-identity-is-bare-name-not-package-qualified). A synthetic
+// two-package fixture: TestDup in package a (anchored) AND package b; a
+// single-package name is not a collision.
+func TestGuideClaimsWitnessBinding_NameCollisionAcrossPackages_Reds(t *testing.T) {
+	dir := t.TempDir()
+	writeGuideClaimFixtureFile(t, dir, "internal/a/a_test.go", "package a\n\n// guide-claim: 9-fake-row\nfunc TestDup(t *testing.T) {}\n\nfunc TestSingle(t *testing.T) {}\n")
+	writeGuideClaimFixtureFile(t, dir, "internal/b/b_test.go", "package b\n\nfunc TestDup(t *testing.T) {}\n")
+
+	corpus := buildGuideClaimCorpus(t, dir, []string{"internal"})
+	w := artifact.GuideClaimWitness{Name: "TestDup"}
+
+	// Binding 1 (name-in-corpus) passes — the name exists — yet it is ambiguous.
+	if f := checkWitnessNameInCorpus(corpus, "9-fake-row", w); f != "" {
+		t.Fatalf("setup invariant broken (name-in-corpus): %q", f)
+	}
+	f := checkWitnessNameUnique(corpus, "9-fake-row", w)
+	if f == "" {
+		t.Fatal("want a finding for a witness name declared in two packages, got none")
+	}
+	if !strings.Contains(f, "9-fake-row") || !strings.Contains(f, "TestDup") ||
+		!strings.Contains(f, "a_test.go") || !strings.Contains(f, "b_test.go") {
+		t.Errorf("finding = %q, want it to name the row, the witness, and BOTH declaration sites", f)
+	}
+
+	t.Run("a name declared in a single package is not a collision", func(t *testing.T) {
+		if f := checkWitnessNameUnique(corpus, "9-fake-row", artifact.GuideClaimWitness{Name: "TestSingle"}); f != "" {
+			t.Errorf("want no collision finding for a single-package name, got %q", f)
+		}
+	})
+
+	t.Run("a name absent from the corpus is not a collision", func(t *testing.T) {
+		if f := checkWitnessNameUnique(corpus, "9-fake-row", artifact.GuideClaimWitness{Name: "TestNowhere"}); f != "" {
+			t.Errorf("want no collision finding for an absent name (checkWitnessNameInCorpus's job), got %q", f)
+		}
+	})
 }
 
 // TestGuideClaimsCite_PartialWithoutCaveat_Reds is ac-3 case 1.
