@@ -837,6 +837,31 @@ bindings:
       - "spec/ritual-integrity#ac-2"
       - "spec/ritual-integrity#ac-3"
       - "spec/ritual-integrity#ac-4"
+      # spec/judge-ergonomics (spec/ritual-integrity#ac-1's implementing
+      # story, plan Task 2). Disclosed departure matching the feature
+      # entry above: not built yet, so this is a DESIGN-TIME FORWARD
+      # DECLARATION of planned producers. Not yet built: ac-1 <-
+      # cmd/verdi/align_test.go's built-binary case proving the report
+      # path prints as stdout line 1 before the judge runs, plus a
+      # concurrent-reader case proving the atomicfile-written report is
+      # never observable mid-write (loadExistingReport, align.go:329, is
+      # the reader the proof must agree with); ac-2 <- align_test.go +
+      # internal/align/judged_test.go's canned-judge cases proving
+      # --wait[=seconds] blocks bounded then exits 0 on completion, and a
+      # hung fake under --wait=1 exits 2 with the report path already
+      # printed; ac-3 <- a test exercising close's internal freeze-align
+      # path directly against the canned judge, proving it inherits the
+      # identical first-line-path/atomic-write/bounded---wait contract
+      # from the shared align engine rather than a per-verb
+      # reimplementation — plan Task 2 Step 1 throughout. Each leg lands
+      # under make verify once this story merges; this entry is updated
+      # to name the real test functions at that point. The attestation
+      # leg is not bound here — stories carry no attestation floor
+      # (spec/ritual-integrity's own L-M14 feature-AC floor is the
+      # feature's, not each implementing story's).
+      - "spec/judge-ergonomics#ac-1"
+      - "spec/judge-ergonomics#ac-2"
+      - "spec/judge-ergonomics#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
