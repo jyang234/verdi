@@ -117,7 +117,24 @@ func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit str
 			if digest != "" {
 				sources = append(sources, RecordFile{Path: recordCommit + "/" + name, Digest: digest})
 			}
-			out = append(out, recs...)
+			// spec/evidence-resilience ac-1 (finding 1): a record `verdi sync`
+			// annotated as quarantined is never authoritative evidence — a
+			// SECOND exclusion signal alongside the directory-reachability
+			// check above (belt and suspenders: EITHER signal excludes). This
+			// makes artifact/evidence.go:85-96's doc claim true for the case
+			// the annotation and directory disagree — a fetched artifact whose
+			// subdir key differs from the record's own provenance.commit, or
+			// hand-placed derived data, leaving an annotated record under a
+			// REACHABLE directory that this reachability check alone would let
+			// through and silently count as proven. The file is still recorded
+			// in sources above (its bytes were read); only its quarantined
+			// records are withheld from the fold's authoritative set.
+			for i := range recs {
+				if recs[i].Quarantine != nil {
+					continue
+				}
+				out = append(out, recs[i])
+			}
 		}
 	}
 
@@ -211,56 +228,97 @@ func ExcludedCommitDirs(ctx context.Context, gitDir, derivedRoot, commit string)
 	return out, nil
 }
 
-// QuarantinedRecords returns every evidence record found under
-// derivedRoot's commit-named subdirectories whose commit is NOT reachable
-// from commit (self or ancestor) in gitDir's history — the exact records
-// LoadRecordsWithSources excludes, but as full artifact.Evidence values
-// rather than bare commit names (ExcludedCommitDirs's own projection), so
-// a disclosure consumer can read each excluded record's evidence_for and
-// name which acceptance criterion it would have evidenced (spec/evidence-
-// resilience ac-2: "reads a quarantined record as a per-record disclosed-
-// unproven against the acceptance criterion it would have evidenced").
+// UndecodableFile names a derived-tree record file that exists but failed
+// strict decode — a truncated partial write or an older-schema record, the
+// debris a stale poisoned bundle left behind once its source branch was
+// deleted after its PR merged (spec/evidence-resilience ac-2, finding 2).
+// QuarantinedRecords surfaces it as a disclosed entry rather than an
+// operational error: the closure gate's disclosure pass must never brick on
+// exactly the degraded-evidence shape this story exists to make non-fatal.
+type UndecodableFile struct {
+	// Path is the file's slash-separated path relative to derivedRoot
+	// ("<commit>/verdicts.json").
+	Path string
+	// Reason is the strict-decode failure, verbatim.
+	Reason string
+}
+
+// QuarantinedRecords returns every evidence record under derivedRoot's
+// commit-named subdirectories that the fold excludes as non-authoritative,
+// on EITHER of the two quarantine signals (spec/evidence-resilience), plus a
+// list of any record file that failed strict decode:
 //
-// This never makes any record authoritative — it is purely a read of what
-// the fold already excludes, for legibility; it changes no verdict. It
-// mirrors LoadRecordsWithSources's own walk exactly (same directories,
-// same reachability check, same record files) so the two can never
-// disagree about what is included vs excluded. A derivedRoot that does
-// not exist on disk yields (nil, nil), matching LoadRecordsWithSources's
-// and ExcludedCommitDirs's own never-synced posture. Output is sorted
-// deterministically (recordSortKey), independent of os.ReadDir's own
+//   - directory signal: the containing commit-named directory is not
+//     reachable from commit (self or ancestor) in gitDir's history — the
+//     exact records LoadRecordsWithSources excludes by reachability;
+//   - annotation signal (ac-1, finding 1): the record carries a `verdi sync`
+//     quarantine annotation (artifact.Evidence.Quarantine), even under a
+//     REACHABLE directory — surfaced here so a record the fold now excludes
+//     on the annotation alone is disclosed rather than left silent.
+//
+// Records are returned as full artifact.Evidence values (not bare commit
+// names, ExcludedCommitDirs's own projection) so a disclosure consumer can
+// read each excluded record's evidence_for and name which acceptance
+// criterion it would have evidenced (ac-2: "reads a quarantined record as a
+// per-record disclosed-unproven against the acceptance criterion it would
+// have evidenced").
+//
+// A record file that fails strict decode inside this walk degrades to an
+// UndecodableFile entry, NEVER an error return (ac-2, finding 2): this is a
+// disclosure-only read that must never turn stale debris into an operational
+// closure-gate failure. The one genuine operational failure still surfaced
+// as an error is gitDir not being a git repository at all (ReachableFromHEAD).
+//
+// This never makes any record authoritative — it changes no verdict; it is a
+// read of what the fold already excludes, for legibility. A derivedRoot that
+// does not exist on disk yields (nil, nil, nil), matching
+// LoadRecordsWithSources's and ExcludedCommitDirs's own never-synced posture.
+// Both outputs are sorted deterministically, independent of os.ReadDir's
 // listing order.
-func QuarantinedRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]artifact.Evidence, error) {
+func QuarantinedRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]artifact.Evidence, []UndecodableFile, error) {
 	entries, err := os.ReadDir(derivedRoot)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, fmt.Errorf("evidence: reading %s: %w", derivedRoot, err)
+		return nil, nil, fmt.Errorf("evidence: reading %s: %w", derivedRoot, err)
 	}
 
 	var out []artifact.Evidence
+	var undecodable []UndecodableFile
 	for _, e := range entries {
 		if !e.IsDir() || !commitDirRe.MatchString(e.Name()) {
 			continue
 		}
 		reachable, err := gitx.ReachableFromHEAD(ctx, gitDir, e.Name(), commit)
 		if err != nil {
-			return nil, fmt.Errorf("evidence: checking ancestry of %s: %w", e.Name(), err)
-		}
-		if reachable {
-			continue
+			return nil, nil, fmt.Errorf("evidence: checking ancestry of %s: %w", e.Name(), err)
 		}
 		for _, name := range RecordFileNames {
-			recs, _, err := loadEvidenceArray(filepath.Join(derivedRoot, e.Name(), name))
-			if err != nil {
-				return nil, err
+			recs, _, lerr := loadEvidenceArray(filepath.Join(derivedRoot, e.Name(), name))
+			if lerr != nil {
+				// finding 2: undecodable debris inside quarantined data is
+				// disclosed, never an operational error. (A reachable dir's
+				// undecodable file is unreachable in the closure-gate path —
+				// foldStoryEvidence's own strict reader errors on it first —
+				// so tolerating it here only ever adds standalone robustness,
+				// never masks a reachable-data decode failure the fold missed.)
+				undecodable = append(undecodable, UndecodableFile{Path: e.Name() + "/" + name, Reason: lerr.Error()})
+				continue
 			}
-			out = append(out, recs...)
+			for i := range recs {
+				// Either signal excludes: every record under an unreachable
+				// dir (directory signal), and any annotated record even under
+				// a reachable dir (annotation signal, finding 1).
+				if !reachable || recs[i].Quarantine != nil {
+					out = append(out, recs[i])
+				}
+			}
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return recordSortKey(out[i]) < recordSortKey(out[j]) })
-	return out, nil
+	sort.SliceStable(undecodable, func(i, j int) bool { return undecodable[i].Path < undecodable[j].Path })
+	return out, undecodable, nil
 }
 
 // recordSortKey is a deterministic composite key for LoadRecords's output

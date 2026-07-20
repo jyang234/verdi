@@ -89,10 +89,17 @@ type Evidence struct {
 	// already been captured). The record is kept, never dropped, and
 	// annotated here rather than silently removed from the synced set; a
 	// quarantined record is never treated as authoritative evidence by the
-	// fold (internal/evidence), which excludes it the same way it already
-	// excludes any other non-ancestor record — see records.go's ancestry
-	// check. Schema-additive (omitempty): every pre-existing record without
-	// this field decodes exactly as before.
+	// fold (internal/evidence), which excludes it on this annotation ALONE:
+	// both LoadRecordsWithSources (the loader) and filterCandidates (the
+	// fold's own candidate filter) drop any record whose Quarantine is set,
+	// a SECOND exclusion signal alongside the directory-reachability check
+	// the loader already applies. The annotation therefore holds even when
+	// the record sits under a reachable directory — a fetched artifact whose
+	// subdir key differs from this record's own Provenance.Commit, or
+	// hand-placed derived data — the exact divergence that would otherwise
+	// let a quarantined record silently mark its AC proven. Schema-additive
+	// (omitempty): every pre-existing record without this field decodes
+	// exactly as before.
 	Quarantine *EvidenceQuarantine `json:"quarantine,omitempty"`
 	Digest     string              `json:"digest"`
 }

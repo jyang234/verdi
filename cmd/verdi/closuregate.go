@@ -134,12 +134,35 @@ func checkClosureEligible(ctx context.Context, root string, spec *artifact.SpecF
 	// verdict change: an unmet AC whose gap traces to a quarantined or
 	// otherwise-unreachable record reads as WHY, not as silent absence.
 	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
-	quarantined, qErr := evidence.QuarantinedRecords(ctx, root, derivedRoot, head)
+	quarantined, undecodable, qErr := evidence.QuarantinedRecords(ctx, root, derivedRoot, head)
 	if qErr != nil {
 		return gateCondition{}, fmt.Errorf("closure gate: %w", qErr)
 	}
 	cond.Extra = quarantineDisclosures(result.ACs, quarantined)
+	// spec/evidence-resilience ac-2 (finding 2): a record file that failed
+	// strict decode inside quarantined data is disclosed unconditionally
+	// (it cannot be tied to a specific AC — it did not decode) rather than
+	// bricking the gate operationally, so the exact stale-poisoned-bundle
+	// debris X-15 leaves reads as WHY, not as a hard fail.
+	cond.Extra = append(cond.Extra, undecodableDisclosures(undecodable)...)
 	return cond, nil
+}
+
+// undecodableDisclosures renders one disclosed-unproven line per record file
+// that failed strict decode inside quarantined data (spec/evidence-resilience
+// ac-2, finding 2). It is disclosed unconditionally — not per-AC, the way
+// quarantineDisclosures is — because an undecodable file cannot be read to
+// learn which AC its records would have evidenced; disclosing it at all is
+// what keeps the debris from passing silently while the closure run stays
+// non-operational (ac-2: "the closure run itself does not exit operationally
+// just because that one record degraded").
+func undecodableDisclosures(undecodable []evidence.UndecodableFile) []string {
+	var lines []string
+	for _, u := range undecodable {
+		text := fmt.Sprintf("a quarantined evidence record file %s is undecodable and was excluded from the fold: %s", u.Path, u.Reason)
+		lines = append(lines, disclosure.Render(disclosure.New("gate:evidence-quarantine", "", text)))
+	}
+	return lines
 }
 
 // quarantineDisclosures renders one disclosed-unproven line (spec/

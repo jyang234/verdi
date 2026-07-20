@@ -404,9 +404,12 @@ func TestQuarantinedRecords_Happy(t *testing.T) {
 	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], recordJSON(repo.Heads[0], "ci"))
 	writeDerivedVerdicts(t, derivedRoot, unreachable, recordJSON(unreachable, "ci"))
 
-	got, err := QuarantinedRecords(ctx, repo.Dir, derivedRoot, repo.Head)
+	got, undecodable, err := QuarantinedRecords(ctx, repo.Dir, derivedRoot, repo.Head)
 	if err != nil {
 		t.Fatalf("QuarantinedRecords: %v", err)
+	}
+	if len(undecodable) != 0 {
+		t.Fatalf("undecodable = %+v, want none (all files decode)", undecodable)
 	}
 	if len(got) != 1 {
 		t.Fatalf("QuarantinedRecords = %+v, want exactly 1 (the unreachable commit's record)", got)
@@ -424,12 +427,12 @@ func TestQuarantinedRecords_NoneExcluded(t *testing.T) {
 	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
 	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], recordJSON(repo.Heads[0], "ci"))
 
-	got, err := QuarantinedRecords(context.Background(), repo.Dir, derivedRoot, repo.Head)
+	got, undecodable, err := QuarantinedRecords(context.Background(), repo.Dir, derivedRoot, repo.Head)
 	if err != nil {
 		t.Fatalf("QuarantinedRecords: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("QuarantinedRecords = %v, want none excluded", got)
+	if len(got) != 0 || len(undecodable) != 0 {
+		t.Fatalf("QuarantinedRecords = %v, undecodable = %v, want both none excluded", got, undecodable)
 	}
 }
 
@@ -439,12 +442,12 @@ func TestQuarantinedRecords_NoneExcluded(t *testing.T) {
 // never-synced posture.
 func TestQuarantinedRecords_MissingDerivedRoot(t *testing.T) {
 	repo := buildRecordsRepo(t)
-	got, err := QuarantinedRecords(context.Background(), repo.Dir, filepath.Join(repo.Dir, "derived", "never-synced"), repo.Head)
+	got, undecodable, err := QuarantinedRecords(context.Background(), repo.Dir, filepath.Join(repo.Dir, "derived", "never-synced"), repo.Head)
 	if err != nil {
 		t.Fatalf("QuarantinedRecords(missing derivedRoot): %v", err)
 	}
-	if got != nil {
-		t.Fatalf("QuarantinedRecords(missing derivedRoot) = %v, want nil", got)
+	if got != nil || undecodable != nil {
+		t.Fatalf("QuarantinedRecords(missing derivedRoot) = %v, undecodable = %v, want nil/nil", got, undecodable)
 	}
 }
 
@@ -456,7 +459,103 @@ func TestQuarantinedRecords_NotARepo(t *testing.T) {
 	const commit = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 	writeDerivedVerdicts(t, derivedRoot, commit, recordJSON(commit, "ci"))
 
-	if _, err := QuarantinedRecords(context.Background(), notARepo, derivedRoot, commit); err == nil {
+	if _, _, err := QuarantinedRecords(context.Background(), notARepo, derivedRoot, commit); err == nil {
 		t.Fatal("QuarantinedRecords(gitDir not a repository at all): want error, got nil")
+	}
+}
+
+// TestQuarantinedRecords_AnnotatedUnderReachableDir_Surfaced proves
+// QuarantinedRecords discloses on EITHER signal (spec/evidence-resilience
+// finding 1): an annotated record under a REACHABLE directory is surfaced for
+// disclosure exactly as a record under an unreachable directory is, so the
+// closure gate can name it rather than leaving its excluded contribution
+// silent. A plain (unannotated) record under the same reachable dir is NOT
+// surfaced — only the excluded ones are.
+func TestQuarantinedRecords_AnnotatedUnderReachableDir_Surfaced(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	// Reachable ancestor dir carries a plain record; reachable HEAD dir
+	// carries an annotated one.
+	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], recordJSON(repo.Heads[0], "ci"))
+	writeDerivedVerdicts(t, derivedRoot, repo.Head, quarantinedRecordJSON("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "ci"))
+
+	recs, undecodable, err := QuarantinedRecords(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("QuarantinedRecords: %v", err)
+	}
+	if len(undecodable) != 0 {
+		t.Fatalf("undecodable = %+v, want none", undecodable)
+	}
+	if len(recs) != 1 || recs[0].Quarantine == nil {
+		t.Fatalf("QuarantinedRecords = %+v, want exactly the one annotated record surfaced on the annotation signal (finding 1)", recs)
+	}
+}
+
+// TestQuarantinedRecords_UndecodableUnderUnreachableDir_NotError is
+// spec/evidence-resilience finding-2's unit pin: a record file that fails
+// strict decode under an UNREACHABLE commit directory (a truncated partial
+// write / older-schema record — the debris a stale poisoned bundle left
+// behind by a deleted branch) degrades to a disclosed undecodable entry,
+// never an error return, so the disclosure pass can never brick closure.
+func TestQuarantinedRecords_UndecodableUnderUnreachableDir_NotError(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	writeDerivedVerdicts(t, derivedRoot, unreachable, `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"`)
+
+	recs, undecodable, err := QuarantinedRecords(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("QuarantinedRecords(undecodable file under unreachable dir): want no error (finding 2), got %v", err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("recs = %+v, want none (the file did not decode)", recs)
+	}
+	if len(undecodable) != 1 || !strings.Contains(undecodable[0].Path, unreachable) {
+		t.Fatalf("undecodable = %+v, want exactly one entry naming the unreachable dir's file (finding 2)", undecodable)
+	}
+}
+
+// quarantinedRecordJSON is recordJSON plus a sync-written quarantine
+// annotation (artifact.Evidence.Quarantine) — the exact shape `verdi sync`
+// leaves on a record whose provenance.commit was not reachable from HEAD at
+// sync time (spec/evidence-resilience ac-1).
+func quarantinedRecordJSON(commit, source string) string {
+	return `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"pass",` +
+		`"witness":"w","provenance":{"source":"` + source + `","pipeline":"1","commit":"` + commit + `"},` +
+		`"quarantine":{"reason":"provenance.commit ` + commit + ` was not reachable from HEAD at sync time"},` +
+		`"digest":"sha256:` + hex64 + `"}]`
+}
+
+// TestLoadRecordsWithSources_AnnotatedRecord_ExcludedEvenUnderReachableDir is
+// spec/evidence-resilience finding-1's core false-green pin: a record that
+// sync ANNOTATED as quarantined (artifact.Evidence.Quarantine set) but that
+// sits under a REACHABLE commit directory — the shape a fetched artifact
+// whose subdir key differs from the record's own provenance.commit produces,
+// or hand-placed derived data — must be excluded from the fold's loaded set
+// on the annotation signal ALONE, never silently counted as authoritative
+// just because its containing directory is reachable. Before the fix, the
+// exclusion rested entirely on directory reachability, so this record was
+// loaded and would have silently marked its AC proven.
+func TestLoadRecordsWithSources_AnnotatedRecord_ExcludedEvenUnderReachableDir(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	// repo.Head is trivially reachable from itself, yet the record carries a
+	// quarantine annotation naming a since-deleted source commit.
+	writeDerivedVerdicts(t, derivedRoot, repo.Head, quarantinedRecordJSON("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "ci"))
+
+	recs, _, err := LoadRecordsWithSources(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("LoadRecordsWithSources: %v", err)
+	}
+	for _, r := range recs {
+		if r.Quarantine != nil {
+			t.Fatalf("LoadRecordsWithSources returned a quarantined record %+v; the annotation must exclude it from the fold even under a reachable dir (finding 1)", r)
+		}
+	}
+	if len(recs) != 0 {
+		t.Fatalf("LoadRecordsWithSources = %d records, want 0 (the sole record is annotated-quarantined and must be excluded)", len(recs))
 	}
 }
