@@ -132,10 +132,20 @@ func (m Model) Validate() error {
 // that carve, taken deliberately while cheap.
 const vocabularySpikePseudoClass = "spike"
 
+// emptyVocabValueHint is K6's shared explanation, appended to every
+// empty-rename-value error validateVocabulary returns: an empty string is
+// indistinguishable, at the display layer, from no rename at all
+// (DisplayState/DisplayVerb/DisplayClass, model.go, each resolve a
+// present-but-empty value exactly like an absent key — falling straight
+// through to the id or Class.Display) so it is a near-certain typo with
+// zero visible effect, never a legitimate "rename to nothing."
+const emptyVocabValueHint = "an empty string silently falls back to the id, exactly like an absent key, almost certainly a typo — remove the key entirely to keep the default, or give it a real rename"
+
 // validateVocabulary checks that every vocabulary key names a declared
-// referent — the vocabulary keys are load-bearing now that every display
-// surface resolves through them (spec/vocabulary-surfaces), so a typo'd
-// key must fail closed at decode time, never sit silently inert:
+// referent, and that every vocabulary VALUE is non-empty — the vocabulary
+// keys are load-bearing now that every display surface resolves through
+// them (spec/vocabulary-surfaces), so a typo'd key or a typo'd-empty value
+// must fail closed at decode time, never sit silently inert:
 //
 //   - every Vocabulary.States key is a declared state in SOME lifecycle
 //     (States is a flat map, not nested per class — model.go's
@@ -144,13 +154,20 @@ const vocabularySpikePseudoClass = "spike"
 //     lifecycle (the same flat-map reasoning);
 //   - every Vocabulary.Classes key is a declared class OR the literal
 //     "spike" (vocabularySpikePseudoClass — the L-M13-ratified
-//     pseudo-class carve).
+//     pseudo-class carve);
+//   - every key present in any of the three sections carries a non-empty
+//     value (K6) — an empty string is display-indistinguishable from the
+//     key being absent altogether (DisplayState/DisplayVerb/DisplayClass
+//     each treat "" exactly like "no entry"), so it is a near-certain typo
+//     that would otherwise sit silently inert forever.
 //
-// Each violation names the offending key AND the legal set (the same
-// operator courtesy the scheme/kind catalog errors extend: learn what IS
-// legal in the same breath as learning what is not). Maps are walked in
-// sorted key order — classes, then states, then verbs — so which
-// violation is reported first is deterministic across runs.
+// Each violation names the offending key AND either the legal set (an
+// unknown key — the same operator courtesy the scheme/kind catalog errors
+// extend: learn what IS legal in the same breath as learning what is not)
+// or the empty-value hint (emptyVocabValueHint). Maps are walked in sorted
+// key order — classes, then states, then verbs, each section's own
+// unknown-key check before its own empty-value check — so which violation
+// is reported first is deterministic across runs.
 func (m Model) validateVocabulary() error {
 	legalClasses := make(map[string]bool, len(m.Classes)+1)
 	for name := range m.Classes {
@@ -173,15 +190,24 @@ func (m Model) validateVocabulary() error {
 		if !legalClasses[key] {
 			return fmt.Errorf("model: vocabulary: classes key %q is not a declared class or the spike pseudo-class (legal: %s)", key, catalogList(legalClasses))
 		}
+		if m.Vocabulary.Classes[key] == "" {
+			return fmt.Errorf("model: vocabulary: classes key %q has an empty rename value (%s)", key, emptyVocabValueHint)
+		}
 	}
 	for _, key := range sortedKeys(m.Vocabulary.States) {
 		if !legalStates[key] {
 			return fmt.Errorf("model: vocabulary: states key %q is not a declared state in any lifecycle (declared states: %s)", key, catalogList(legalStates))
 		}
+		if m.Vocabulary.States[key] == "" {
+			return fmt.Errorf("model: vocabulary: states key %q has an empty rename value (%s)", key, emptyVocabValueHint)
+		}
 	}
 	for _, key := range sortedKeys(m.Vocabulary.Verbs) {
 		if !legalVerbs[key] {
 			return fmt.Errorf("model: vocabulary: verbs key %q is not a declared transition verb in any lifecycle (declared verbs: %s)", key, catalogList(legalVerbs))
+		}
+		if m.Vocabulary.Verbs[key] == "" {
+			return fmt.Errorf("model: vocabulary: verbs key %q has an empty rename value (%s)", key, emptyVocabValueHint)
 		}
 	}
 	return nil

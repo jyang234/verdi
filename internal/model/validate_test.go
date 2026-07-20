@@ -31,6 +31,7 @@ func TestDecodeModel_KernelViolations(t *testing.T) {
 		{"viol-count-non-countersign.yaml", `count is legal only on kind "countersign"`},
 		{"viol-duplicate-verb.yaml", `transition verb "accept" is declared more than once`},
 		{"viol-vocabulary-unknown-key.yaml", `vocabulary: classes key "epic" is not a declared class or the spike pseudo-class`},
+		{"viol-vocabulary-empty-value.yaml", `vocabulary: classes key "feature" has an empty rename value`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {
@@ -115,6 +116,54 @@ func TestModelValidate_VocabularyKeys(t *testing.T) {
 				}
 				return
 			}
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error containing %q", tc.wantSubstr)
+			}
+			if !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("Validate() error = %q, want substring %q", err.Error(), tc.wantSubstr)
+			}
+		})
+	}
+}
+
+// TestModelValidate_VocabularyEmptyValueRejected is K6's own proof: an
+// empty rename VALUE (as opposed to an unknown KEY, TestModelValidate_
+// VocabularyKeys above) is a near-certain typo — DisplayState/DisplayVerb/
+// DisplayClass's own fallback chain (model.go) already treats "" as "no
+// rename" and silently falls through to the id/Class.Display, so an
+// empty value has no visible effect whatsoever, which is precisely why it
+// must fail closed at Validate time rather than sit inert. Covers all
+// three vocabulary sections; viol-vocabulary-empty-value.yaml (decode_
+// test.go's table, via readTestdata above) proves the Classes case
+// through the full DecodeModel path, this proves States and Verbs too,
+// directly against Model.Validate.
+func TestModelValidate_VocabularyEmptyValueRejected(t *testing.T) {
+	cases := []struct {
+		name       string
+		vocab      Vocabulary
+		wantSubstr string
+	}{
+		{
+			"empty classes value fails closed naming the key",
+			Vocabulary{Classes: map[string]string{"feature": ""}},
+			`model: vocabulary: classes key "feature" has an empty rename value`,
+		},
+		{
+			"empty states value fails closed naming the key",
+			Vocabulary{States: map[string]string{"accepted-pending-build": ""}},
+			`model: vocabulary: states key "accepted-pending-build" has an empty rename value`,
+		},
+		{
+			"empty verbs value fails closed naming the key",
+			Vocabulary{Verbs: map[string]string{"accept": ""}},
+			`model: vocabulary: verbs key "accept" has an empty rename value`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := canonicalModel
+			m.Vocabulary = tc.vocab
+			err := m.Validate()
 			if err == nil {
 				t.Fatalf("Validate() = nil, want error containing %q", tc.wantSubstr)
 			}
