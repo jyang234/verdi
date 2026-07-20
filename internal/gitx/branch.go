@@ -150,3 +150,31 @@ func DeleteBranch(ctx context.Context, dir, name string) error {
 	}
 	return nil
 }
+
+// DeleteMergedBranch deletes the LOCAL branch name in dir via the existing,
+// unchanged DeleteBranch ("git branch -d" — spec/gc-reclaim dc-3: git's own
+// merged/not-checked-out-anywhere check is an independent second guard
+// beyond a caller's own already-computed Merged fact, and a force-delete
+// (-D) would erase that guard entirely; DeleteMergedBranch never uses -D),
+// returning name's PRE-DELETE tip commit — resolved via the existing
+// RevParse BEFORE the delete, since a successful "-d" removes the ref and
+// its tip cannot be read back afterward (AC-2's recovery-affordance
+// requirement: "every branch actually deleted prints its pre-delete tip
+// commit").
+//
+// The returned tip is populated whenever name resolved, regardless of
+// whether the delete itself then succeeded — a caller disclosing a refused
+// deletion may still want to name the branch's own tip. Ledger R4-I-81:
+// this is composition, not duplication — the only "git branch -d" call in
+// this package remains the one inside DeleteBranch itself; DeleteMergedBranch
+// adds only the ordering (resolve-then-delete) and the returned tip.
+func DeleteMergedBranch(ctx context.Context, dir, name string) (string, error) {
+	tip, err := RevParse(ctx, dir, name)
+	if err != nil {
+		return "", fmt.Errorf("gitx: DeleteMergedBranch(%q): resolving tip: %w", name, err)
+	}
+	if err := DeleteBranch(ctx, dir, name); err != nil {
+		return tip, err
+	}
+	return tip, nil
+}
