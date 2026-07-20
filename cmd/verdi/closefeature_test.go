@@ -491,6 +491,8 @@ func scaffoldSHAFromRepo(t *testing.T, repo *fixturegit.Repo) string {
 // as the story path does — the empty-Story skip in
 // cmd/verdi/closefeature.go's runCloseFeature is conditional, not a
 // blanket "features never publish" rule.
+//
+// guide-claim: 10.1-jira-github-gitlab
 func TestRunCloseFeature_WithStoryRef_PublishesRollup(t *testing.T) {
 	opts := defaultCloseFeatureFixtureOpts()
 	opts.FeatureStory = "jira:FIXTURE-EPIC-1"

@@ -47,6 +47,8 @@ func mustCanonicalTemplate(t *testing.T, name string) []byte {
 // spec/scaffold-templates ac-1's own equivalence proof: these decoded-
 // field assertions are the "field-equal to what the retired string
 // builder produced" check, now that the string builder itself is gone.
+//
+// guide-claim: 5.3-template-contract
 func TestFeature(t *testing.T) {
 	tmpl := mustCanonicalTemplate(t, "feature.md")
 	for _, storyRef := range []string{"", "jira:LOAN-1482"} {
@@ -402,6 +404,8 @@ func TestDecodedFieldEquivalenceToLegacy(t *testing.T) {
 // decode. Each case renders through the new template path and through
 // the frozen legacy reference above from IDENTICAL inputs and asserts
 // exact string equality.
+//
+// guide-claim: 5.3-template-contract
 func TestByteForByte(t *testing.T) {
 	featureTmpl := mustCanonicalTemplate(t, "feature.md")
 	storyTmpl := mustCanonicalTemplate(t, "story.md")

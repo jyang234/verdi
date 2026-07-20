@@ -94,6 +94,7 @@ func TestOpenQuestion_Validate_Negative(t *testing.T) {
 	}
 }
 
+// guide-claim: 6.2-stubs
 func TestStub_Validate_Happy(t *testing.T) {
 	s := Stub{Slug: "borrower-update-api", AcceptanceCriteria: []string{"ac-1"}}
 	if err := s.Validate(); err != nil {

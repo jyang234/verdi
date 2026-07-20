@@ -59,6 +59,7 @@ func listMCPTools(t *testing.T) []mcpToolDef {
 	return resp.Result.Tools
 }
 
+// guide-claim: 12-mcp-tools
 func TestMCPToolInventory(t *testing.T) {
 	// 05-surfaces.md §MCP server's table, verbatim.
 	want := []string{

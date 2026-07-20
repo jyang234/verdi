@@ -319,6 +319,8 @@ func vocabProseSkipDir(root, path string) bool {
 
 // TestVocabProseWitness is the module-wide gate: zero unrouted, unmarked
 // bare vocabulary words in production string literals.
+//
+// guide-claim: 9.1-vocabulary-display-renames
 func TestVocabProseWitness(t *testing.T) {
 	root := verdiRepoRoot
 	words := vocabProseWords()

@@ -23,6 +23,9 @@ func featureSpecWithStubs(t *testing.T, stubs ...artifact.Stub) *artifact.SpecFr
 // case per bucket (realized-by, withdrawn-with-note, unplanned-addition,
 // unreconciled-blocks-closure)" — all four exercised in one feature so the
 // bidirectional check's real shape is visible in one place too.
+//
+// guide-claim: 6.2-closure-reconciliation
+// guide-claim: 8.2-stub-reconciliation-at-closure
 func TestReconcileStubs_Buckets(t *testing.T) {
 	spec := featureSpecWithStubs(t,
 		artifact.Stub{Slug: "realized-stub", AcceptanceCriteria: []string{"ac-1"}},

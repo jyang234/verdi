@@ -126,6 +126,8 @@ func provenanceLiterals(t *testing.T, src, rel string) []string {
 // Provenance{...} literal for decode/assertion fixtures (e.g.
 // internal/artifact's own Validate tests, unqualified within the same
 // package) is a different, legitimate thing this check does not police.
+//
+// guide-claim: 5.2-model-yaml-kernel-digest
 func TestProvenanceMintSites_ExactlyFour(t *testing.T) {
 	root := moduleRoot(t)
 	const marker = "artifact.Provenance{"

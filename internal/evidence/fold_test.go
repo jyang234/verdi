@@ -49,6 +49,8 @@ func foldOneAC(t *testing.T, storeRoot string, theAC artifact.AcceptanceCriterio
 
 // TestFold_EveryStatus proves each of the five fold statuses is reachable
 // (03 §The fold's full status set).
+//
+// guide-claim: 7.2-fold
 func TestFold_EveryStatus(t *testing.T) {
 	root := t.TempDir()
 	writeWaiver(t, root, "test-1", "ac-waived", testActiveWaiver)
