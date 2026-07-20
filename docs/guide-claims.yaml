@@ -191,6 +191,7 @@ rows:
     section: "7.4"
     capability: "Gate 0/1/2; `verdi close`; closure MR; rollup publish"
     status: EXISTS
+    caveat: "over the canonical model only"
     witnesses:
       - name: TestRunClose_EndToEnd
 
@@ -208,6 +209,12 @@ rows:
     status: EXISTS
     witnesses:
       - name: TestReconcileStubs_Buckets
+
+  - id: 8.2-stubs-reconciled-declarable-obligation
+    section: "8.2"
+    capability: "Stub reconciliation as a *declarable* obligation (`stubs-reconciled`)"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-design.md#9. Explicitly out of scope (disclosed)"
 
   - id: 8.3-supersession
     section: "8.3"
@@ -274,11 +281,24 @@ rows:
       - name: TestRunCloseFeature_WithStoryRef_PublishesRollup
       - name: TestBuildForge_Happy
 
+  - id: 10.1-linear-adapter
+    section: "10.1"
+    capability: "Linear adapter"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-design.md#Linear adapter (10.1 residual)"
+
   - id: 11-hooks-block
     section: "11"
     capability: "`hooks:` block, asymmetry, fail-closed, hook-as-obligation-kind"
     status: INVENTED
     cite: "docs/design/plans/2026-07-17-extensibility-chronicle.md#PHASE 1 ARCHIVED"
+
+  - id: 11-configurable-alignment-judge
+    section: "11"
+    capability: "The configurable alignment judge (the one existing seam `hooks:` generalizes)"
+    status: EXISTS
+    witnesses:
+      - name: TestRunJudged_NotConfigured
 
   - id: 12-mcp-tools
     section: "12"
@@ -286,6 +306,12 @@ rows:
     status: EXISTS
     witnesses:
       - name: TestMCPToolInventory
+
+  - id: 12-model-aware-vocabulary
+    section: "12"
+    capability: "MCP model-aware vocabulary"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-17-extensibility-chronicle.md#12's model-aware vocabulary"
 
   - id: 13-kernel-rules-frontier
     section: "13"
@@ -299,6 +325,7 @@ rows:
     section: "14.2"
     capability: "Committed vs. `data/` never-committed split"
     status: EXISTS
+    caveat: "(VL-013)"
     witnesses:
       - name: TestV0ThinSliceChecklist
 

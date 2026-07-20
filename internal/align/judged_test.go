@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// guide-claim: 11-configurable-alignment-judge
 func TestRunJudged_NotConfigured(t *testing.T) {
 	t.Run("not required: absence finding", func(t *testing.T) {
 		result, err := RunJudged(context.Background(), ExecJudgeRunner{}, JudgedInput{})
