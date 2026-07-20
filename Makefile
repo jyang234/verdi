@@ -127,8 +127,28 @@ lint-store:
 # serve a stale PASS after a cmd/verdi behavior change. Forcing a fresh run
 # keeps `make spec-align` honest in isolation (the `test` target already
 # re-runs it fresh via CROSS_BINARY_PKGS for `make test`/`make verify`).
+#
+# -v + skip surfacing (judged-ac3-resolution-check-skips-in-authoring-layout):
+# this package's workspace-side checks (guide-claims cite RESOLUTION and
+# transcription fidelity, self-hosted spec fidelity) SKIP loudly, disclosed,
+# when the out-of-repo workspace tree is absent (a bare verdi checkout). A
+# plain `go test` prints nothing for a t.Skipf in a passing package, making a
+# skip indistinguishable from a pass at the make verify surface. We run -v,
+# capture the transcript, and reprint every `--- SKIP:` notice (with its
+# disclosed reason) so a skip is never a silent pass here — CLAUDE.md's
+# three-valued honesty. On any failure the full transcript is printed for
+# debugging; on success only the disclosed skips and the package result line.
 spec-align:
-	go test -count=1 ./internal/specalign/...
+	@out="$$(go test -v -count=1 ./internal/specalign/... 2>&1)"; \
+	status=$$?; \
+	if [ "$$status" -ne 0 ]; then printf '%s\n' "$$out"; exit "$$status"; fi; \
+	skips="$$(printf '%s\n' "$$out" | grep -B1 -- '--- SKIP:' || true)"; \
+	if [ -n "$$skips" ]; then \
+		echo '=== spec-align DISCLOSED SKIPS (a skip is NOT a pass — CLAUDE.md three-valued honesty) ==='; \
+		printf '%s\n' "$$skips"; \
+		echo '==============================================================================='; \
+	fi; \
+	printf '%s\n' "$$out" | grep -E '^(ok|\?)[[:space:]]' || true
 
 # SHOWCASE_REQUIRED_TESTS is the set of tests showcase-coverage's guard demands
 # actually ran+passed (scripts/require-pass.sh enforces it). Kept in ONE named

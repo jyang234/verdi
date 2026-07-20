@@ -675,47 +675,130 @@ func TestResolveCite(t *testing.T) {
 	})
 }
 
-// guideClaimsChronicleAvailable reports whether the workspace-sibling
-// docs/ tree fidelity_test.go's own workspaceDocsDir helper looks for is
-// present under verdiRoot's parent — the SAME signal
-// TestSelfHostedSpecFidelity uses to decide whether to skip. Extracted as
-// its own predicate so the availability DECISION (not just a single
-// t.Skipf call site) is directly, unconditionally testable in both
-// directions (ac-3 case 4's "a separate case with the chronicle path
-// UNAVAILABLE" requirement).
-func guideClaimsChronicleAvailable(verdiRoot string) bool {
-	info, err := os.Stat(workspaceDocsDir(verdiRoot))
-	return err == nil && info.IsDir()
+// guideClaimsWorkspaceWalkLimit bounds guideClaimsWorkspaceRoot's walk UP
+// from the verdi module root toward the workspace root. Five levels is
+// deliberately generous but finite: the plain layout is
+// verdi-system/verdi/ (the marker one level above the module root) and the
+// deepest layout this repo actually develops in is the managed worktree
+// verdi-system/verdi-wt/<branch>/ (the marker two levels above), per this
+// repo's own gc-verb worktree convention; five leaves headroom for an
+// extra nesting while still refusing to walk unboundedly toward the
+// filesystem root (where a stray docs/design/plans on some unrelated
+// machine could otherwise false-positive).
+const guideClaimsWorkspaceWalkLimit = 5
+
+// guideClaimsWorkspaceRoot walks UP from verdiRoot (inclusive) across up to
+// guideClaimsWorkspaceWalkLimit parent levels and returns the first
+// ancestor that carries the workspace marker docs/design/plans/ — the
+// directory the guide's cites (docs/design/plans/..., docs/design/
+// concepts/...) resolve against, and the root the transcription-fidelity
+// and cite-resolution checks read the guide/chronicle from. ok is false
+// when no ancestor within the bound carries the marker: a true bare clone
+// of verdi alone, which those checks must SKIP loudly rather than fake.
+//
+// The marker is docs/design/plans specifically — NOT docs/design/specs,
+// which fidelity_test.go's own workspaceDocsDir uses via the one-level-up
+// convention. The old convention (verdiRoot/../docs/design/specs) reported
+// UNAVAILABLE in the verdi-wt/<branch>/ worktree layout where development
+// actually happens, so the cite-resolution check silently SKIPPED on the
+// very branch that authored the cites (judged-ac3-resolution-check-skips-
+// in-authoring-layout). Walking up until the marker is found makes the
+// check RUN there. Starting the walk at verdiRoot itself cannot
+// false-positive on the module root: the verdi repo's own docs/ tree
+// (docs/spikes, docs/guide-claims.yaml) never contains docs/design/plans.
+func guideClaimsWorkspaceRoot(verdiRoot string) (string, bool) {
+	dir := filepath.Clean(verdiRoot)
+	for level := 0; level <= guideClaimsWorkspaceWalkLimit; level++ {
+		marker := filepath.Join(dir, "docs", "design", "plans")
+		if info, err := os.Stat(marker); err == nil && info.IsDir() {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break // reached the filesystem root; no marker within the bound
+		}
+		dir = parent
+	}
+	return "", false
 }
 
-func TestGuideClaimsChronicleAvailable(t *testing.T) {
-	t.Run("workspace layout with a docs/design/specs sibling reports available", func(t *testing.T) {
-		// Hermetic, synthetic layout — deliberately NOT verdiRepoRoot
-		// itself: this suite may run from a git worktree nested an
-		// extra level below the real workspace root (verdi-wt/<name>/),
-		// which legitimately makes the one-level-up convention resolve
-		// to nothing there too (the exact condition
-		// TestSelfHostedSpecFidelity itself already skips on in that
-		// layout) — that is a fact about WHERE this test happens to be
-		// invoked from, not about whether this predicate's own logic is
-		// correct, so the positive case is proven against a fixture
-		// this test fully controls instead.
+// TestGuideClaimsWorkspaceRoot proves the walk-up over SYNTHETIC fixtures
+// this test fully controls — never against the live environment, because
+// where this suite is invoked from (worktree vs. plain checkout vs. bare
+// clone) is a fact about the runner, not about the walk's own logic (the
+// builder's own friction note 4; the trap the prior
+// TestGuideClaimsChronicleAvailable conceded it could not escape).
+func TestGuideClaimsWorkspaceRoot(t *testing.T) {
+	t.Run("finds the workspace root two levels up (the verdi-wt/<branch> worktree layout)", func(t *testing.T) {
 		ws := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(ws, "docs", "design", "specs"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(ws, "docs", "design", "plans"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		verdiDir := filepath.Join(ws, "verdi-wt", "feature-x")
+		if err := os.MkdirAll(verdiDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := guideClaimsWorkspaceRoot(verdiDir)
+		if !ok {
+			t.Fatal("want ok=true for a verdi module two levels below a docs/design/plans workspace root")
+		}
+		if got != ws {
+			t.Errorf("workspace root = %q, want %q", got, ws)
+		}
+	})
+	t.Run("finds the workspace root one level up (the plain verdi-system/verdi layout)", func(t *testing.T) {
+		ws := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(ws, "docs", "design", "plans"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		verdiDir := filepath.Join(ws, "verdi")
 		if err := os.MkdirAll(verdiDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if !guideClaimsChronicleAvailable(verdiDir) {
-			t.Fatal("want true for a workspace root whose docs/design/specs sibling exists")
+		got, ok := guideClaimsWorkspaceRoot(verdiDir)
+		if !ok || got != ws {
+			t.Fatalf("guideClaimsWorkspaceRoot = (%q, %v), want (%q, true)", got, ok, ws)
 		}
 	})
-	t.Run("bare verdi-only layout reports unavailable", func(t *testing.T) {
+	t.Run("marker exactly at the walk bound is found (inclusive)", func(t *testing.T) {
+		ws := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(ws, "docs", "design", "plans"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// verdiDir sits exactly guideClaimsWorkspaceWalkLimit (5) levels
+		// below ws: ws/a/b/c/d/verdi -> checks at levels 0..5 reach ws.
+		verdiDir := filepath.Join(ws, "a", "b", "c", "d", "verdi")
+		if err := os.MkdirAll(verdiDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := guideClaimsWorkspaceRoot(verdiDir); !ok || got != ws {
+			t.Fatalf("guideClaimsWorkspaceRoot = (%q, %v), want (%q, true) — the bound must be inclusive of %d levels", got, ok, ws, guideClaimsWorkspaceWalkLimit)
+		}
+	})
+	t.Run("marker beyond the walk bound is not found (bound respected)", func(t *testing.T) {
+		ws := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(ws, "docs", "design", "plans"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// One level deeper than the bound reaches: ws/a/b/c/d/e/verdi.
+		// The walk stops at ws/a (level 5) without ever reaching ws, so
+		// this stays hermetic — it never ascends into the real temp-dir
+		// ancestors above ws.
+		verdiDir := filepath.Join(ws, "a", "b", "c", "d", "e", "verdi")
+		if err := os.MkdirAll(verdiDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := guideClaimsWorkspaceRoot(verdiDir); ok {
+			t.Fatalf("want ok=false for a marker beyond %d levels, got root %q", guideClaimsWorkspaceWalkLimit, got)
+		}
+	})
+	t.Run("bare verdi-only layout reports not-found", func(t *testing.T) {
+		// A temp dir with no marker in it; the bounded walk ascends only
+		// into real temp-dir ancestors (/var/folders/...), which never
+		// carry docs/design/plans — the exact bare-verdi-checkout CI shape.
 		bare := t.TempDir()
-		if guideClaimsChronicleAvailable(bare) {
-			t.Fatal("want false for a rootless temp dir with no workspace-sibling docs/ tree — the exact bare-verdi-checkout CI shape")
+		if got, ok := guideClaimsWorkspaceRoot(bare); ok {
+			t.Fatalf("want ok=false for a rootless temp dir with no workspace marker, got root %q", got)
 		}
 	})
 }
@@ -723,16 +806,22 @@ func TestGuideClaimsChronicleAvailable(t *testing.T) {
 // TestGuideClaimsCite_ResolutionWorkspaceSideOnly is ac-3 case 4's
 // RESOLUTION leg: every non-EXISTS row's cite: in the REAL
 // verdi/docs/guide-claims.yaml must resolve to a real file+anchor under
-// the workspace root (verdi/../), mirroring TestSelfHostedSpecFidelity's
-// own skip discipline exactly — a CI checkout of verdi alone (no
-// workspace-sibling docs/design/plans/) SKIPS loudly, disclosed, never a
-// silent pass (CLAUDE.md's three-valued honesty).
+// the workspace root, found by walking UP from the module root to the
+// docs/design/plans marker (guideClaimsWorkspaceRoot) — so this check
+// RUNS in the verdi-wt/<branch> worktree layout where the cites are
+// authored, not just in the plain one-level-up layout
+// (judged-ac3-resolution-check-skips-in-authoring-layout). A true bare
+// clone of verdi alone (no workspace marker within the bound) SKIPS
+// loudly, disclosed, never a silent pass (CLAUDE.md's three-valued
+// honesty). The skip, when it fires, is surfaced at the make verify
+// surface by the spec-align target (which captures `go test -v` and
+// prints every `--- SKIP:` notice), so a skip is never invisible there.
 func TestGuideClaimsCite_ResolutionWorkspaceSideOnly(t *testing.T) {
-	if !guideClaimsChronicleAvailable(verdiRepoRoot) {
-		t.Skipf("DISCLOSURE: workspace docs dir %s not found — this looks like a checkout of verdi alone, not the full verdi-system workspace. guide-claims.yaml cite: RESOLUTION cannot be verified in this layout. This is a SKIP, not a pass: a green run here is NOT proof every cite: resolves.", workspaceDocsDir(verdiRepoRoot))
+	workspaceRoot, ok := guideClaimsWorkspaceRoot(verdiRepoRoot)
+	if !ok {
+		t.Skipf("DISCLOSURE: no workspace marker docs/design/plans found within %d levels above %s — this looks like a checkout of verdi alone, not the full verdi-system workspace. guide-claims.yaml cite: RESOLUTION cannot be verified in this layout. This is a SKIP, not a pass: a green run here is NOT proof every cite: resolves.", guideClaimsWorkspaceWalkLimit, verdiRepoRoot)
 	}
 
-	workspaceRoot := filepath.Clean(filepath.Join(verdiRepoRoot, ".."))
 	m := decodeRealGuideClaims(t, verdiRepoRoot)
 	for _, row := range m.Rows {
 		if row.Cite == "" {
