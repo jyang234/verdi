@@ -39,15 +39,32 @@ import (
 var ritualCurrentPhrasings = []string{"verdi board commit", "frozen board.json"}
 
 // ritualDisclosurePhrasings is the closed, named set of retirement/
-// grandfathered-disclosure phrasings (DC-3's element 2, its own examples
-// verbatim). Presence of ANY of these anywhere in the file is what keeps
-// DC-4's rewrite-to-disclose alternative achievable: `verdi board commit`
-// and `board.json` are real, legitimately-mentionable strings, and a
-// presence-only rule (mirroring handEditPhrasings' own unconditional
-// shape) would make an honest disclosure structurally impossible to ever
-// pass, since explaining a retirement necessarily names what was
-// retired.
-var ritualDisclosurePhrasings = []string{"retired", "grandfathered", "superseded"}
+// grandfathered-disclosure phrasings (DC-3's element 2, close to its own
+// "e.g." examples, one adjusted — see below). Presence of ANY of these
+// anywhere in the file is what keeps DC-4's rewrite-to-disclose
+// alternative achievable: `verdi board commit` and `board.json` are real,
+// legitimately-mentionable strings, and a presence-only rule (mirroring
+// handEditPhrasings' own unconditional shape) would make an honest
+// disclosure structurally impossible to ever pass, since explaining a
+// retirement necessarily names what was retired.
+//
+// "is superseded", not the bare "superseded" DC-3's text uses as its own
+// "e.g." example: running this check against this repo's own real
+// .claude/skills/commit-to-design/SKILL.md (pre-DC-4-retirement) during
+// this story's own build found that file's UNRELATED sticky-disposition
+// prose — "the idea was considered and rejected, or superseded by
+// something else in the spec" (its own promise #1, describing a board
+// sticky's disposition, nothing to do with the ritual) — contains the
+// bare word "superseded", which would have silently satisfied this
+// disclosure check and made the gate pass VACUOUSLY against the exact
+// motivating defect this story exists to catch. "is superseded" avoids
+// that specific collision (the false-positive sentence has no "is"
+// immediately before "superseded") while still matching real retirement
+// disclosure prose in this repo (verdi-surfaces/spec.md: "`verdi board
+// commit` is superseded (R4-I-9, above)"), proven in
+// TestRitualDisclosurePhrasingsMatchRealisticSentence below. Recorded as
+// PLAN-V1.md ledger R4-I-72.
+var ritualDisclosurePhrasings = []string{"retired", "grandfathered", "is superseded"}
 
 // findRitualCurrentPhrasing returns the first ritualCurrentPhrasings
 // entry present in doc (case-insensitive matching, since normal prose
@@ -130,7 +147,7 @@ func TestRitualDisclosurePhrasingsMatchRealisticSentence(t *testing.T) {
 	realisticSentences := map[string]string{
 		"retired":       "verdi board commit is retired now.",
 		"grandfathered": "VL-014 is retained but scoped to grandfathered specs only.",
-		"superseded":    "the commit-to-design ritual is superseded by board-as-projection.",
+		"is superseded": "`verdi board commit` is superseded (R4-I-9, above) rather than removed outright.",
 	}
 	if len(realisticSentences) != len(ritualDisclosurePhrasings) {
 		t.Fatalf("test table has %d realistic sentence(s), ritualDisclosurePhrasings has %d entries — every entry needs its own realistic-sentence proof", len(realisticSentences), len(ritualDisclosurePhrasings))
