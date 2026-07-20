@@ -102,6 +102,16 @@ type closeDeps struct {
 	Model *model.Model
 }
 
+// closeExpiryResumeHint is close's freeze-align resume guidance for a
+// bounded-wait expiry (finding
+// judged-close-inherits-aligns-resume-instructions-verbatim): a close caller
+// exposes no --wait flag and cannot resume by re-running align — the close
+// aborted at exit 2 and only re-running close completes the freeze and
+// archive. So close's ResumeHint names `verdi close`, in no flag language,
+// rather than inheriting align's own alignExpiryResumeHint ("re-run align …
+// optionally with a longer --wait") verbatim.
+const closeExpiryResumeHint = "Re-run verdi close once the judge window allows to complete the freeze and archive"
+
 // freezeAlignDeps builds the alignDeps for close's freeze-align step — the
 // single construction both runClose (story, this file) and runCloseFeature
 // (feature, closefeature.go) call, so the two can never drift (CLAUDE.md: no
@@ -122,6 +132,11 @@ type closeDeps struct {
 // this is that story. Every non-timeout judge failure is unchanged — it
 // still degrades and is still caught by D6-24's preserve-don't-clobber rule
 // (keepGenuineOnJudgeFailure, align.go); only the TIMEOUT shape changes.
+//
+// ResumeHint is set to closeExpiryResumeHint so that, on a --wait expiry, the
+// shared align engine's guidance speaks close's verb rather than align's flag
+// language inherited verbatim (finding
+// judged-close-inherits-aligns-resume-instructions-verbatim).
 func freezeAlignDeps(deps closeDeps, modelDigest string) alignDeps {
 	return alignDeps{
 		Runner:        deps.Runner,
@@ -130,6 +145,7 @@ func freezeAlignDeps(deps closeDeps, modelDigest string) alignDeps {
 		JudgeTimeout:  deps.JudgeTimeout,
 		ModelDigest:   modelDigest,
 		Wait:          true,
+		ResumeHint:    closeExpiryResumeHint,
 	}
 }
 

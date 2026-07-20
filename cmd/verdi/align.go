@@ -82,6 +82,18 @@ type alignDeps struct {
 	// above BEFORE calling runAlign, so this field alone is enough for
 	// runAlignForSpec to thread ac-2's contract through to align.Input.
 	Wait bool
+	// ResumeHint is the wait-expiry resume guidance runAlignForSpec prints
+	// once a bounded wait terminates the judge (the message near line 361),
+	// in the CALLER's own vocabulary (finding
+	// judged-close-inherits-aligns-resume-instructions-verbatim). The zero
+	// value is deliberately useful (CLAUDE.md): an empty ResumeHint means
+	// "this is align's own path", and runAlignForSpec falls back to
+	// alignExpiryResumeHint — cmdAlign and every direct runAlign test caller
+	// rely on that fallback rather than restating align's own hint. close
+	// overrides it via freezeAlignDeps (close.go, closeExpiryResumeHint): a
+	// close caller exposes no --wait flag and its resume verb is close, not
+	// align, so it must not inherit align's flag language verbatim.
+	ResumeHint string
 	// ModelDigest is the resolved operating model's canonical-JSON sha256
 	// digest (model.Model.Digest(), spec/model-digest ledger L-M5),
 	// resolved once in cmdAlign via store.Open and threaded into every
@@ -246,6 +258,14 @@ func runAlign(ctx context.Context, root string, freeze bool, deps alignDeps, std
 	return runAlignForSpec(ctx, root, spec, covers, freeze, deps, stdout, stderr)
 }
 
+// alignExpiryResumeHint is align's own bounded-wait resume guidance and the
+// zero-value default of alignDeps.ResumeHint: re-running align — optionally
+// with a longer --wait — starts a fresh judge exchange. close's freeze-align
+// overrides it with closeExpiryResumeHint (close.go), since its caller holds
+// a different verb and exposes no --wait flag (finding
+// judged-close-inherits-aligns-resume-instructions-verbatim).
+const alignExpiryResumeHint = "Re-run align to start a fresh judge exchange (optionally with a longer --wait)"
+
 // runAlignForSpec is runAlign's spec-taking core, factored out (round 6,
 // spec/close-verb ac-1) so a caller that has ALREADY resolved its own spec
 // by a means other than the feature/<name> build-branch convention —
@@ -358,7 +378,19 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 			// it was terminated at the bound and cannot finish this run — with
 			// no "check it later" implication. A killed judge never populates
 			// the printed path on its own; only a fresh run can.
-			fmt.Fprintf(stderr, "align: the judge subprocess was terminated at the --wait bound and cannot complete this run; no report was written and %s is unchanged. Re-run align to start a fresh judge exchange (optionally with a longer --wait) — this path will not populate on its own.\n", reportPath)
+			//
+			// The RESUME guidance speaks the caller's own verb (finding
+			// judged-close-inherits-aligns-resume-instructions-verbatim):
+			// align's own path re-runs align with a longer --wait, but close's
+			// freeze-align — which exposes no --wait flag and whose resume verb
+			// is close, not align — supplies its own ResumeHint via
+			// freezeAlignDeps so it is never told align's flag language
+			// verbatim. An unset ResumeHint is align's own path.
+			resumeHint := deps.ResumeHint
+			if resumeHint == "" {
+				resumeHint = alignExpiryResumeHint
+			}
+			fmt.Fprintf(stderr, "align: the judge subprocess was terminated at the --wait bound and cannot complete this run; no report was written and %s is unchanged. %s — this path will not populate on its own.\n", reportPath, resumeHint)
 			return 2
 		}
 		fmt.Fprintln(stderr, "align:", err)

@@ -544,6 +544,54 @@ func TestCloseFreezeAlign_WaitReachableViaProductionDeps(t *testing.T) {
 	}
 }
 
+// TestCloseFreezeAlign_ExpiryMessageSpeaksCloseVerb is the red-first pin for
+// finding judged-close-inherits-aligns-resume-instructions-verbatim: when
+// close's freeze-align hits the bounded-wait expiry, its stderr guidance must
+// speak CLOSE's verb, not align's flag language inherited verbatim. close
+// exposes no --wait flag (so "a longer --wait" is not something a close caller
+// can act on) and re-running *align* mid-close is the wrong resume verb — the
+// close aborted at exit 2 and only re-running close completes the freeze and
+// archive. So the expiry message must name `verdi close` as the way to resume,
+// carry no --wait flag language at all, and never tell the caller to "Re-run
+// align". The deps come from freezeAlignDeps — the single builder both
+// runClose and runCloseFeature use — proving the close-appropriate resume hint
+// is threaded through production deps, not a hand-built literal. align's own
+// expiry message is unchanged and still speaks --wait
+// (TestRunAlign_Wait_ExpiryMessageStatesJudgeTerminated keeps passing).
+func TestCloseFreezeAlign_ExpiryMessageSpeaksCloseVerb(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
+	if err != nil {
+		t.Fatalf("ResolveBuildSpec: %v", err)
+	}
+
+	// Exactly cmdClose's construction (closeDeps -> freezeAlignDeps): a hung
+	// judge (sleeps 5s) under a short ceiling stands in for the real judge
+	// against a bound the caller's patience cannot outlast.
+	cd := closeDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSleepy(t), JudgeTimeout: 200 * time.Millisecond}
+	alignD := freezeAlignDeps(cd, testResolveModelDigest(t, repo.Dir))
+
+	var stdout, stderr bytes.Buffer
+	got := runAlignForSpec(context.Background(), repo.Dir, spec, repo.Head, true /* close always freezes */, alignD, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("close freeze-align (production deps, hung judge) = %d, want 2 (bounded-wait expiry); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	msg := stderr.String()
+	if !strings.Contains(msg, "terminated") {
+		t.Fatalf("expiry stderr = %q, want it to stay honest that the judge was terminated at the bound", msg)
+	}
+	if !strings.Contains(msg, "verdi close") {
+		t.Fatalf("expiry stderr = %q, want the resume GUIDANCE to name `verdi close` as the resume verb (close aborted at exit 2; only re-running close completes the freeze + archive)", msg)
+	}
+	if strings.Contains(msg, "Re-run align") {
+		t.Fatalf("expiry stderr = %q, resume guidance still tells the caller to Re-run align — the wrong resume verb mid-close", msg)
+	}
+	if strings.Contains(msg, "longer --wait") {
+		t.Fatalf("expiry stderr = %q, resume guidance still speaks --wait flag language — close exposes no --wait flag, so a close caller cannot act on it (no flag language for close)", msg)
+	}
+}
+
 // TestCmdClose_RefusesOutsideCI proves 04 §Semantics's "PublishRollup runs
 // in CI only" gates `verdi close` itself (it calls PublishRollup directly,
 // spec/close-verb ac-2), mirroring rollup.go's own --force-local precedent
