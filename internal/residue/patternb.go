@@ -86,14 +86,14 @@ func findPatternB(ctx context.Context, root, defaultTip string, specs []activeSp
 // guessed third path — an author would want to know the archived spec.md is
 // broken, not have it read as "not yet realized".
 func archiveSpecClosedAt(ctx context.Context, root, ref, slug string) (bool, error) {
+	relPath := store.SpecRelPath(store.ZoneArchive, slug)
 	present, err := archiveExistsAt(ctx, root, ref, slug)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("residue: checking %s at %s: %w", relPath, ref, err)
 	}
 	if !present {
 		return false, nil
 	}
-	relPath := store.SpecRelPath(store.ZoneArchive, slug)
 	data, err := gitx.Show(ctx, root, ref, relPath)
 	if err != nil {
 		return false, fmt.Errorf("residue: reading %s at %s: %w", relPath, ref, err)
