@@ -129,7 +129,7 @@ func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThre
 	// independent pass appended to the same run — co-2: the two sections
 	// above, and their own exit-code contributions, are byte-for-byte
 	// unchanged by this addition).
-	if rc := runClosureHygieneSection(ctx, root, defaultBranchRef, stdout, stderr, &flagged); rc != 0 {
+	if rc := runClosureHygieneSection(ctx, root, defaultBranchRef, mdl, stdout, stderr, &flagged); rc != 0 {
 		return rc
 	}
 
@@ -147,7 +147,7 @@ func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThre
 // leaves *flagged untouched) on an internal/residue.Scan operational
 // error; otherwise always returns 0, setting *flagged per dc-3 (only
 // pattern (a) and a ritual-incomplete classification contribute).
-func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string, stdout, stderr io.Writer, flagged *bool) int {
+func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string, mdl *model.Model, stdout, stderr io.Writer, flagged *bool) int {
 	res, err := residue.Scan(ctx, root, defaultBranchRef)
 	if err != nil {
 		fmt.Fprintln(stderr, "audit:", err)
@@ -164,11 +164,20 @@ func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string
 		fmt.Fprintln(stdout, "(no status/git-reality contradictions found)")
 	}
 	for _, pa := range res.PatternA {
-		fmt.Fprintf(stdout, "STRANDED: spec/%s (close/%s, tip %s) — status: accepted-pending-build but its close branch already moved it to archive/, unmerged\n", pa.SpecName, pa.SpecName, pa.Tip)
+		// pa.Class is the spec's own declared class ("feature" or "story");
+		// the accepted-pending-build state word resolves through the display
+		// chain (spec/vocabulary-surfaces) rather than printing the bare
+		// wire value as prose.
+		fmt.Fprintf(stdout, "STRANDED: spec/%s (close/%s, tip %s) — status: %s but its close branch already moved it to archive/, unmerged\n",
+			pa.SpecName, pa.SpecName, pa.Tip, mdl.DisplayState(pa.Class, "accepted-pending-build"))
 		*flagged = true
 	}
 	for _, pb := range res.PatternB {
-		fmt.Fprintf(stdout, "STUB-COMPLETE: spec/%s — every declared stub realized (%s), feature not yet closed\n", pb.SpecName, strings.Join(pb.Stubs, ", "))
+		// Pattern (b) only ever fires for class: feature (dc-1's own static
+		// obligation) — both the class word and the closed state word
+		// resolve through the display chain.
+		fmt.Fprintf(stdout, "STUB-COMPLETE: spec/%s — every declared stub realized (%s), %s not yet %s\n",
+			pb.SpecName, strings.Join(pb.Stubs, ", "), mdl.DisplayClass("feature"), mdl.DisplayState("feature", "closed"))
 	}
 	for _, cb := range res.CloseBranches {
 		fmt.Fprintf(stdout, "%s: %s (tip %s)\n", cb.Branch, cb.Class, cb.Tip)

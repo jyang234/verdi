@@ -93,3 +93,15 @@ func TestActiveStatusByName(t *testing.T) {
 		t.Fatalf("activeStatusByName = %+v, want %+v", got, want)
 	}
 }
+
+func TestActiveClassByName(t *testing.T) {
+	specs := []activeSpec{
+		{Name: "a", FM: mustDecodeSpecFM(t, featureSpecMD("a", "accepted-pending-build"))},
+		{Name: "b", FM: mustDecodeSpecFM(t, storySpecMD("b", "accepted-pending-build", "a"))},
+	}
+	got := activeClassByName(specs)
+	want := map[string]string{"a": "feature", "b": "story"}
+	if len(got) != len(want) || got["a"] != want["a"] || got["b"] != want["b"] {
+		t.Fatalf("activeClassByName = %+v, want %+v", got, want)
+	}
+}

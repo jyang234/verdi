@@ -13,8 +13,13 @@ func TestFindPatternA_Happy(t *testing.T) {
 		"already-done": "accepted-pending-build", // still active per THIS lookup, but archived-elsewhere per Class
 		"fresh":        "accepted-pending-build",
 	}
+	activeClass := map[string]string{
+		"widget":       "story",
+		"already-done": "feature",
+		"fresh":        "story",
+	}
 
-	got := findPatternA(closeBranches, activeStatus)
+	got := findPatternA(closeBranches, activeStatus, activeClass)
 	if len(got) != 2 {
 		t.Fatalf("findPatternA = %+v, want exactly 2 (widget and already-done — both ArchivedOnOwnTip)", got)
 	}
@@ -24,6 +29,12 @@ func TestFindPatternA_Happy(t *testing.T) {
 	if got[1].Branch != "close/widget" || got[1].Tip != "sha-widget" {
 		t.Fatalf("findPatternA widget entry = %+v, want Branch=close/widget Tip=sha-widget", got[1])
 	}
+	if got[1].Class != "story" {
+		t.Errorf("findPatternA widget entry Class = %q, want story", got[1].Class)
+	}
+	if got[0].Class != "feature" {
+		t.Errorf("findPatternA already-done entry Class = %q, want feature", got[0].Class)
+	}
 }
 
 func TestFindPatternA_Negative_NotArchivedOnOwnTip(t *testing.T) {
@@ -32,7 +43,7 @@ func TestFindPatternA_Negative_NotArchivedOnOwnTip(t *testing.T) {
 	}
 	activeStatus := map[string]string{"fresh": "accepted-pending-build"}
 
-	got := findPatternA(closeBranches, activeStatus)
+	got := findPatternA(closeBranches, activeStatus, nil)
 	if len(got) != 0 {
 		t.Fatalf("findPatternA = %+v, want empty (never archived on its own tip)", got)
 	}
@@ -49,7 +60,7 @@ func TestFindPatternA_Negative_SpecNotActivePendingBuild(t *testing.T) {
 			if status != "" {
 				activeStatus["widget"] = status
 			}
-			got := findPatternA(closeBranches, activeStatus)
+			got := findPatternA(closeBranches, activeStatus, nil)
 			if len(got) != 0 {
 				t.Fatalf("findPatternA(status=%q) = %+v, want empty (not accepted-pending-build)", status, got)
 			}

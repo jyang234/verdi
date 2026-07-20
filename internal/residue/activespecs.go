@@ -94,6 +94,18 @@ func activeStatusByName(specs []activeSpec) map[string]string {
 	return m
 }
 
+// activeClassByName indexes specs by name to their raw class string
+// ("feature" or "story") — patterna.go's own lookup, so a PatternA
+// finding can carry the spec's declared class for the renderer's display-
+// chain resolution (spec/vocabulary-surfaces) without re-reading spec.md.
+func activeClassByName(specs []activeSpec) map[string]string {
+	m := make(map[string]string, len(specs))
+	for _, s := range specs {
+		m[s.Name] = string(s.FM.Class)
+	}
+	return m
+}
+
 // supersededNames is the set of active-zone spec names CURRENTLY at
 // status: superseded — dc-2's AC-2 exclusion lookup (closebranches.go's
 // scanCloseBranches), built from the UNFILTERED active-spec set (this is

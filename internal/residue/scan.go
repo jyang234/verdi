@@ -90,7 +90,7 @@ func Scan(ctx context.Context, root, defaultBranchRef string) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	patternA := findPatternA(closeBranches, activeStatusByName(nonSuperseded))
+	patternA := findPatternA(closeBranches, activeStatusByName(nonSuperseded), activeClassByName(nonSuperseded))
 	patternB, err := findPatternB(root, nonSuperseded)
 	if err != nil {
 		return nil, err
