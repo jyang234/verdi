@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	forgepkg "github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/forge/fake"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -245,5 +246,92 @@ func TestRunSync_CIFetch_QuarantinedFailRecord_ExcludedFromVerdict(t *testing.T)
 	}
 	if !strings.Contains(stdout.String(), "excluded from verdict") {
 		t.Errorf("stdout = %q, want the disclosure that quarantined record(s) were excluded from the verdict", stdout.String())
+	}
+}
+
+// TestRunSync_CIFetch_UndecodableUnderReachableDir_RoundTripsToClosureDisclosure
+// is spec/evidence-resilience finding-1's (FIX) round-trip pin: it proves
+// sync's stdout claim now MATCHES downstream fold behavior for the exact case
+// that used to break it — an undecodable record file keyed under a REACHABLE
+// commit dir (the bundle's own per-spec verdicts.json at the accepted commit,
+// which is self-or-ancestor of sync's commit and therefore reachable at
+// closure). sync writes the known-undecodable bytes, exits 0, and prints
+// "excluded from the fold and disclosed at closure"; the SAME on-disk tree, read
+// by the downstream fold, must then (a) NOT brick — evidence.LoadRecords
+// excludes it rather than returning the operational error that deferred ac-2's
+// removed brick to closure time — and (b) BE disclosed — evidence.
+// QuarantinedRecords (the exact channel the closure gate and close --preflight
+// render) surfaces it as undecodable. Before the fix (a) failed: LoadRecords on
+// the reachable dir returned an operational error, so the stdout claim was false.
+func TestRunSync_CIFetch_UndecodableUnderReachableDir_RoundTripsToClosureDisclosure(t *testing.T) {
+	root := buildTestStore(t)
+	head := gitInitTestStore(t, root)
+	ctx := context.Background()
+	// Truncated verdicts.json under the REACHABLE HEAD commit dir key.
+	const malformed = `[{"schema":"verdi.evidence/v1"`
+
+	f := fake.New()
+	f.SeedBundle(testRef, head, forgepkg.DerivedTree{
+		"spec--x/" + head + "/verdicts.json": []byte(malformed),
+	})
+
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{Runner: upstream.NewFakeRunner(), Forge: f, GoTest: fakeGoTest{}, Stdout: &stdout, Stderr: &stderr}
+	code := runSync(ctx, root, testRef, head, false, false, false, deps)
+	if code != 0 {
+		t.Fatalf("runSync exit = %d, want 0 (an undecodable fetched record file is quarantined-by-default); stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "excluded from the fold and disclosed at closure") {
+		t.Fatalf("stdout = %q, want sync's verbatim claim that the undecodable file is excluded from the fold and disclosed at closure", stdout.String())
+	}
+
+	// Downstream (a): the fold loader reading the SAME on-disk tree must not brick.
+	derivedRoot := filepath.Join(root, ".verdi", "data", "derived", "spec--x")
+	recs, err := evidence.LoadRecords(ctx, root, derivedRoot, head)
+	if err != nil {
+		t.Fatalf("evidence.LoadRecords on the just-synced tree: want no error (the stdout claim is now true downstream — finding 1), got %v", err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("evidence.LoadRecords = %+v, want empty (the undecodable file is excluded from the fold)", recs)
+	}
+
+	// Downstream (b): the closure-gate/preflight disclosure channel discloses it.
+	_, undecodable, qErr := evidence.QuarantinedRecords(ctx, root, derivedRoot, head)
+	if qErr != nil {
+		t.Fatalf("evidence.QuarantinedRecords: want no error, got %v", qErr)
+	}
+	if len(undecodable) != 1 || !strings.Contains(undecodable[0].Path, head+"/verdicts.json") {
+		t.Fatalf("QuarantinedRecords undecodable = %+v, want exactly one entry naming the reachable dir's verdicts.json (disclosed at closure)", undecodable)
+	}
+}
+
+// TestEvaluateTree_QuarantinedExclusion_NamesFailCount is
+// spec/evidence-resilience finding-2's (RIDER) pin: evaluateTree's
+// verdict-exclusion disclosure must NAME how many of the excluded quarantined
+// records carried a real fail — a genuinely observed failure is downgraded to a
+// disclosed exclusion, never to silence (constitution 2/10). Two quarantined
+// records (one fail, one pass) are both excluded from the verdict scan; the
+// disclosure line names "(1 carried fail)".
+func TestEvaluateTree_QuarantinedExclusion_NamesFailCount(t *testing.T) {
+	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	quarantined := func(verdict string) string {
+		return `{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"` + verdict + `",` +
+			`"witness":"w","provenance":{"source":"ci","pipeline":"1","commit":"` + gone + `"},` +
+			`"quarantine":{"reason":"provenance.commit ` + gone + ` not reachable from HEAD at sync time"},` +
+			`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}`
+	}
+	tree := forgepkg.DerivedTree{
+		"spec--x/" + gone + "/verdicts.json": []byte("[" + quarantined("fail") + "," + quarantined("pass") + "]"),
+	}
+
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{Stdout: &stdout, Stderr: &stderr}
+	code := evaluateTree(deps, tree, nil)
+	if code != 0 {
+		t.Fatalf("evaluateTree exit = %d, want 0 (both records are quarantined-and-excluded, so none drives the verdict); stderr=%s", code, stderr.String())
+	}
+	const want = "sync: 2 quarantined record(s) excluded from verdict (1 carried fail)"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout = %q, want the exact exclusion line %q naming the excluded fail count (rider)", stdout.String(), want)
 	}
 }

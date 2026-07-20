@@ -516,7 +516,9 @@ func safeJoin(root, key string) (string, error) {
 // the fold will never read as evidence cannot drive sync's exit code, or a
 // poisoned bundle's stale fail record would keep sync red on every re-sync
 // (X-15's "re-syncing did not help" shape at exit-1 severity). The count of
-// such excluded records is disclosed.
+// such excluded records is disclosed, naming how many carried a real fail
+// (spec/evidence-resilience finding 2 rider) — a genuinely observed failure is
+// downgraded to a disclosed exclusion, never to silence (constitution 2/10).
 func evaluateTree(deps syncDeps, tree forge.DerivedTree, undecodable []string) int {
 	skip := make(map[string]bool, len(undecodable))
 	for _, key := range undecodable {
@@ -528,6 +530,7 @@ func evaluateTree(deps syncDeps, tree forge.DerivedTree, undecodable []string) i
 	}
 	sort.Strings(keys) // deterministic evaluation/reporting order
 	quarantinedExcluded := 0
+	quarantinedFail := 0
 	for _, key := range keys {
 		if skip[key] {
 			continue // finding 3: quarantined-by-default undecodable file, already disclosed.
@@ -542,6 +545,13 @@ func evaluateTree(deps syncDeps, tree forge.DerivedTree, undecodable []string) i
 			for _, r := range records {
 				if r.Quarantine != nil {
 					quarantinedExcluded++
+					if r.Verdict == artifact.VerdictFail {
+						// finding 2 rider: a quarantined record that carried a real
+						// fail is a genuinely observed failure downgraded to a
+						// disclosed exclusion, never to silence — counted so the
+						// disclosure line below can name it.
+						quarantinedFail++
+					}
 					continue // finding 4: a quarantined record never drives sync's verdict exit.
 				}
 				if r.Verdict == artifact.VerdictFail {
@@ -564,7 +574,7 @@ func evaluateTree(deps syncDeps, tree forge.DerivedTree, undecodable []string) i
 		}
 	}
 	if quarantinedExcluded > 0 {
-		fmt.Fprintf(deps.Stdout, "sync: %d quarantined record(s) excluded from verdict\n", quarantinedExcluded)
+		fmt.Fprintf(deps.Stdout, "sync: %d quarantined record(s) excluded from verdict (%d carried fail)\n", quarantinedExcluded, quarantinedFail)
 	}
 	return 0
 }
