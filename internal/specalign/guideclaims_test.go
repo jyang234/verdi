@@ -137,14 +137,44 @@ func isGoTestFuncName(name string) bool {
 }
 
 // guideClaimCorpusSkipDir reports directories buildGuideClaimCorpus never
-// descends into — build/vendor noise, never legitimate witness homes.
+// descends into, mirroring the `go` tool's own package-discovery exclusions so
+// the corpus scope EQUALS the `go test ./...` transcript scope
+// (judged-ac2-collision-guard-corpus-narrower-than-transcript-scope): testdata/
+// and vendor/ are never Go packages, and a directory whose name begins with
+// '.' or '_' is invisible to `go list ./...`. node_modules/ is the e2e/ JS tree
+// — no Go, pure walk noise. TestGuideClaimCorpusScope_MatchesGoTestScope pins
+// the resulting package set equal to `go list ./...`'s over the real module.
 func guideClaimCorpusSkipDir(name string) bool {
-	switch name {
-	case "testdata", "node_modules", ".git":
+	if name == "testdata" || name == "vendor" || name == "node_modules" {
+		return true
+	}
+	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 		return true
 	}
 	return false
 }
+
+// isGuideClaimCorpusTestFile reports whether a file is one buildGuideClaimCorpus
+// indexes: a `*_test.go` file whose name the `go` tool does not itself ignore
+// (a leading '.' or '_' makes a source file invisible to the build), so the
+// corpus's file selection matches the transcript's.
+func isGuideClaimCorpusTestFile(name string) bool {
+	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+		return false
+	}
+	return strings.HasSuffix(name, "_test.go")
+}
+
+// guideClaimCorpusModuleRoots is the corpus scope the LIVE gate walks: the
+// whole module ("."), so the collision guard covers the SAME packages as the
+// `go test ./...` transcript it is checked against. Walking only cmd/ and
+// internal/ once left a namesake in any OTHER package (the module root, a
+// future tools/ tree) invisible to the collision guard while its `--- PASS:`
+// line still satisfied binding 3 — the impostor re-entering through the scope
+// mismatch (judged-ac2-collision-guard-corpus-narrower-than-transcript-scope).
+// TestGuideClaimCorpusScope_MatchesGoTestScope pins this scope equal to
+// `go list ./...`'s.
+var guideClaimCorpusModuleRoots = []string{"."}
 
 // buildGuideClaimCorpus walks every *_test.go file under root/<dir> for
 // each dir in dirs and indexes every top-level (receiverless) Go test
@@ -182,12 +212,15 @@ func buildGuideClaimCorpus(t *testing.T, root string, dirs []string) guideClaimC
 				return err
 			}
 			if info.IsDir() {
-				if guideClaimCorpusSkipDir(info.Name()) {
+				// Never skip the walk root itself by its own name (a checkout in
+				// a directory named e.g. .worktrees or _build must still be
+				// walked); below the root, apply the go-faithful exclusions.
+				if path != start && guideClaimCorpusSkipDir(info.Name()) {
 					return filepath.SkipDir
 				}
 				return nil
 			}
-			if !strings.HasSuffix(path, "_test.go") {
+			if !isGuideClaimCorpusTestFile(info.Name()) {
 				return nil
 			}
 			src, rerr := os.ReadFile(path)
@@ -422,7 +455,7 @@ func TestGuideClaimsManifest_RowToWitnessBinding(t *testing.T) {
 	root := verdiRepoRoot
 	m := decodeRealGuideClaims(t, root)
 
-	corpus := buildGuideClaimCorpus(t, root, []string{"cmd", "internal"})
+	corpus := buildGuideClaimCorpus(t, root, guideClaimCorpusModuleRoots)
 
 	seen := map[string]bool{}
 	var names []string
@@ -592,6 +625,137 @@ func TestGuideClaimsWitnessBinding_NameCollisionAcrossPackages_Reds(t *testing.T
 			t.Errorf("want no collision finding for an absent name (checkWitnessNameInCorpus's job), got %q", f)
 		}
 	})
+}
+
+// TestGuideClaimsWitnessBinding_CollisionOutsideCmdInternal_CaughtByModuleScope
+// pins the collision guard's scope to the transcript's (judged-ac2-collision-
+// guard-corpus-narrower-than-transcript-scope): the PASS transcript is
+// `go test ./...` over the WHOLE module, so a namesake in a package OUTSIDE
+// cmd/ and internal/ (here a top-level tools/ tree) emits a `--- PASS: <name>`
+// line satisfying binding 3 — the collision guard must see it too. Built over
+// the LIVE gate's own corpus scope (guideClaimCorpusModuleRoots), so narrowing
+// that scope reds here. Under the old cmd+internal-only scope the tools/
+// namesake was invisible and this test failed.
+func TestGuideClaimsWitnessBinding_CollisionOutsideCmdInternal_CaughtByModuleScope(t *testing.T) {
+	dir := t.TempDir()
+	writeGuideClaimFixtureFile(t, dir, "internal/a/a_test.go", "package a\n\n// guide-claim: 9-fake-row\nfunc TestDup(t *testing.T) {}\n")
+	writeGuideClaimFixtureFile(t, dir, "tools/t_test.go", "package tools\n\nfunc TestDup(t *testing.T) {}\n")
+
+	corpus := buildGuideClaimCorpus(t, dir, guideClaimCorpusModuleRoots)
+	f := checkWitnessNameUnique(corpus, "9-fake-row", artifact.GuideClaimWitness{Name: "TestDup"})
+	if f == "" {
+		t.Fatal("want a collision finding for a TestDup namesake in tools/ (outside cmd/internal) — the live gate's corpus scope must cover every package `go test ./...` runs (judged-ac2-collision-guard-corpus-narrower-than-transcript-scope)")
+	}
+	if !strings.Contains(f, "a_test.go") || !strings.Contains(f, "t_test.go") {
+		t.Errorf("finding = %q, want it to name BOTH the internal/a and tools/ declaration sites", f)
+	}
+}
+
+// guideClaimWalkedTestDirs returns the set of directories (relative to root,
+// forward-slashed) that the corpus walker — through the SAME
+// guideClaimCorpusSkipDir / isGuideClaimCorpusTestFile predicates
+// buildGuideClaimCorpus uses — finds a `*_test.go` file in. This is the
+// corpus's package scope, expressed as directories.
+func guideClaimWalkedTestDirs(root string) (map[string]bool, error) {
+	dirs := map[string]bool{}
+	start := filepath.Clean(root)
+	err := filepath.Walk(start, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if path != start && guideClaimCorpusSkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isGuideClaimCorpusTestFile(info.Name()) {
+			return nil
+		}
+		rel, rerr := filepath.Rel(start, filepath.Dir(path))
+		if rerr != nil {
+			return rerr
+		}
+		dirs[filepath.ToSlash(rel)] = true
+		return nil
+	})
+	return dirs, err
+}
+
+// goListTestDirs returns the set of test-bearing package directories (relative
+// to the module root, forward-slashed) that `go list ./...` reports — the exact
+// scope `go test ./...` (the transcript) runs. Directories are derived from
+// import paths with the module prefix stripped, so the comparison is immune to
+// filesystem symlink discrepancies (e.g. macOS /var vs /private/var).
+func goListTestDirs(root string) (map[string]bool, error) {
+	modCmd := exec.Command("go", "list", "-m")
+	modCmd.Dir = root
+	modOut, err := modCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("go list -m: %w", err)
+	}
+	module := strings.TrimSpace(string(modOut))
+
+	listCmd := exec.Command("go", "list", "-f", "{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}", "./...")
+	listCmd.Dir = root
+	var stderr bytes.Buffer
+	listCmd.Stderr = &stderr
+	out, err := listCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("go list ./...: %w: %s", err, stderr.String())
+	}
+	dirs := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		ip := strings.TrimSpace(line)
+		if ip == "" {
+			continue
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(ip, module), "/")
+		if rel == "" {
+			rel = "."
+		}
+		dirs[rel] = true
+	}
+	return dirs, nil
+}
+
+// TestGuideClaimCorpusScope_MatchesGoTestScope proves the collision guard's
+// corpus covers the SAME packages as the `go test ./...` transcript it is
+// checked against (judged-ac2-collision-guard-corpus-narrower-than-transcript-
+// scope): the set of test-bearing directories the corpus walker finds under the
+// real module EQUALS `go list ./...`'s test-bearing set. A walker MISS would
+// let a namesake there satisfy the PASS binding while escaping the collision
+// guard; a walker EXTRA would make the corpus broader than the transcript. Both
+// red. Loud SKIP (never a silent pass) when `go list` is unavailable.
+func TestGuideClaimCorpusScope_MatchesGoTestScope(t *testing.T) {
+	golist, err := goListTestDirs(verdiRepoRoot)
+	if err != nil {
+		t.Skipf("DISCLOSURE: `go list` unavailable under %s (%v) — cannot confirm the corpus scope equals the go test ./... transcript scope in this environment. SKIP, not a pass.", verdiRepoRoot, err)
+	}
+	walked, err := guideClaimWalkedTestDirs(verdiRepoRoot)
+	if err != nil {
+		t.Fatalf("walking the module for test dirs: %v", err)
+	}
+
+	var onlyGoList, onlyWalked []string
+	for d := range golist {
+		if !walked[d] {
+			onlyGoList = append(onlyGoList, d)
+		}
+	}
+	for d := range walked {
+		if !golist[d] {
+			onlyWalked = append(onlyWalked, d)
+		}
+	}
+	sort.Strings(onlyGoList)
+	sort.Strings(onlyWalked)
+	if len(onlyGoList) > 0 {
+		t.Errorf("go test ./... covers %d test package(s) the corpus walker MISSES (%s) — a namesake there would satisfy the PASS binding while escaping the collision guard (judged-ac2-collision-guard-corpus-narrower-than-transcript-scope)", len(onlyGoList), strings.Join(onlyGoList, ", "))
+	}
+	if len(onlyWalked) > 0 {
+		t.Errorf("the corpus walker covers %d test dir(s) go test ./... does NOT (%s) — the corpus is broader than the transcript; align the skip rules to `go list`", len(onlyWalked), strings.Join(onlyWalked, ", "))
+	}
 }
 
 // TestGuideClaimsCite_PartialWithoutCaveat_Reds is ac-3 case 1.
