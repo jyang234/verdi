@@ -57,11 +57,11 @@ func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.Sp
 	if err != nil {
 		return false, fmt.Errorf("close: --preflight: %w", err)
 	}
-	fold, err := foldFeature(ctx, root, spec, specRef, head, storiesByAC)
+	fold, err := foldFeature(ctx, root, spec, specRef, head, storiesByAC, mdl)
 	if err != nil {
 		return false, fmt.Errorf("close: --preflight: %w", err)
 	}
-	reconciliation, err := reconcileFeatureStubs(spec, stories)
+	reconciliation, err := reconcileFeatureStubs(spec, stories, mdl)
 	if err != nil {
 		return false, fmt.Errorf("close: --preflight: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -87,7 +88,10 @@ func (vl016) Check(in *RunInput) []Finding {
 				continue
 			}
 			seen[p] = true
-			findings = append(findings, Finding{Rule: "VL-016", Path: p, Message: fmt.Sprintf("path %q is outside verdi.yaml's spike_paths: allowlist %v — a spike build branch's diff must stay inside the fence (02 §Lint rules, 01 §Store manifest)", p, allowlist)})
+			// The spoken variant word is display and resolves with its
+			// agreeing article (L-M13a(6)); the spike_paths: manifest KEY
+			// is identity, kept bare.
+			findings = append(findings, Finding{Rule: "VL-016", Path: p, Message: fmt.Sprintf("path %q is outside verdi.yaml's spike_paths: allowlist %v — %s build branch's diff must stay inside the fence (02 §Lint rules, 01 §Store manifest)", p, allowlist, model.Indefinite(in.Model.DisplayClass("spike")))})
 		}
 	}
 	return findings

@@ -38,6 +38,7 @@ func featureLensHTML(ix *index.Index, known map[string]bool, mdl *model.Model, p
 	storiesWord := mdl.DisplayClassPlural("story")
 
 	var b strings.Builder
+	// vocab:identity — CSS class fragment (identity markup)
 	b.WriteString("<section class=\"feature-lens\">\n")
 	b.WriteString("<h2>" + template.HTMLEscapeString(model.Capitalize(storiesWord)) + "</h2>\n")
 	b.WriteString(`<div class="acceptance-plan-banner" data-testid="acceptance-plan-banner"><span class="temporal-dot" aria-hidden="true"></span>acceptance-time plan; current mapping computed below</div>` + "\n")

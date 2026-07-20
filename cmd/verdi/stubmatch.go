@@ -67,7 +67,7 @@ func computeStubMatch(root string, story *artifact.SpecFrontmatter, mdl *model.M
 		// disclosure this feature exists to end.
 		if story.Spike {
 			spikeWord := mdl.DisplayClass("spike")
-			return false, fmt.Sprintf("%s: stub-matching is not applicable (%s %s carries no implements edges, 02 §Kind registry)", spikeWord, model.Article(spikeWord), spikeWord)
+			return false, fmt.Sprintf("%s: stub-matching is not applicable (%s carries no implements edges, 02 §Kind registry)", spikeWord, model.Indefinite(spikeWord))
 		}
 		return false, fmt.Sprintf("no implements edges (malformed %s)", mdl.DisplayClass("story"))
 	}
@@ -79,8 +79,8 @@ func computeStubMatch(root string, story *artifact.SpecFrontmatter, mdl *model.M
 	if feature.Class != artifact.ClassFeature {
 		classWord := mdl.DisplayClass(string(feature.Class))
 		featureWord := mdl.DisplayClass("feature")
-		return false, fmt.Sprintf("implements-target %q is %s %s spec, not %s %s spec", featureName,
-			model.Article(classWord), classWord, model.Article(featureWord), featureWord)
+		return false, fmt.Sprintf("implements-target %q is %s spec, not %s spec", featureName,
+			model.Indefinite(classWord), model.Indefinite(featureWord))
 	}
 
 	implSet := sortedSet(acIDs)

@@ -149,9 +149,11 @@ func flipPredecessorToSuperseded(root, predecessorRef, successorID string, mdl *
 		return "", 0
 	}
 	if n := len(acceptedStatusLineRe.FindAll(raw, -1)); n != 1 {
+		// vocab:identity — frontmatter status-line machinery (field + enum value)
 		fmt.Fprintf(stderr, "accept: %s: expected exactly one status: accepted-pending-build line to flip, found %d\n", predPath, n)
 		return "", 2
 	}
+	// vocab:identity — frontmatter status-line machinery (field + enum value)
 	newRaw := acceptedStatusLineRe.ReplaceAll(raw, []byte("status: superseded"))
 	// Self-validate the flipped predecessor before writing (CLAUDE.md:
 	// "never fake success"): it must still decode and keep its frozen
@@ -167,6 +169,7 @@ func flipPredecessorToSuperseded(root, predecessorRef, successorID string, mdl *
 		return "", 2
 	}
 	if flipped.Status != "superseded" || flipped.Frozen == nil {
+		// vocab:identity — frontmatter status-line machinery (field + enum value)
 		fmt.Fprintf(stderr, "accept: internal error: flipped predecessor %s does not carry status: superseded with its frozen stamp\n", ref.String())
 		return "", 2
 	}

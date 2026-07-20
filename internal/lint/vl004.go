@@ -23,6 +23,7 @@ func (vl004) Check(in *RunInput) []Finding {
 			continue
 		}
 		if d.Status == "draft" {
+			// vocab:identity — frontmatter status-line echo (the rule's subject IS the literal line)
 			findings = append(findings, Finding{Rule: "VL-004", Path: d.RelPath, Message: fmt.Sprintf("status: draft on the default branch (%s)", in.LintCtx.DefaultBranch)})
 		}
 	}

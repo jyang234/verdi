@@ -223,14 +223,14 @@ func classifyPair(root, storyRefArg, acID string, mdl *model.Model) (spec *artif
 	}
 	if spec.Class != artifact.ClassStory {
 		// Display resolution (L-M13(1)): both class words resolve, with
-		// model.Article agreeing on each; the emphatic STORY is the same
-		// resolved word upper-cased. The class COMPARISON above stays on
-		// the bare id.
+		// model.Indefinite composing each article-word pair; the emphatic
+		// STORY is the same resolved word upper-cased. The class COMPARISON
+		// above stays on the bare id.
 		classWord := mdl.DisplayClass(string(spec.Class))
 		storyWord := mdl.DisplayClass("story")
-		refusal := fmt.Sprintf("%s resolves to %s %s-class spec, not %s %s — no %s exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg,
-			model.Article(classWord), classWord,
-			model.Article(storyWord), storyWord, strings.ToUpper(storyWord))
+		refusal := fmt.Sprintf("%s resolves to %s-class spec, not %s — no %s exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg,
+			model.Indefinite(classWord),
+			model.Indefinite(storyWord), strings.ToUpper(storyWord))
 
 		// L-M14 remedy 2: for a feature-class target specifically, point at
 		// the hand-authoring convention instead of dead-ending. By this

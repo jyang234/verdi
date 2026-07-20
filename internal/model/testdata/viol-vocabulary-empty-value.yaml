@@ -1,0 +1,16 @@
+# Violates: no vocabulary rename value may be the empty string (K6,
+# Model.Validate's validateVocabulary) — "feature" is a legal classes key
+# (a real declared class), but an empty string is a near-certain typo:
+# DisplayClass's own fallback chain treats an empty value as "no rename"
+# and silently falls through to the id/Class.Display (model.go), so an
+# author who meant to author a rename here gets no error and no visible
+# effect at all today. Fails closed instead, naming the offending key.
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle: {}
+vocabulary:
+  classes:
+    feature: ""

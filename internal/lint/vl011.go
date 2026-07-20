@@ -62,6 +62,7 @@ func (vl011) Check(in *RunInput) []Finding {
 		dir := d.Kind + "s"
 		wantPath := fmt.Sprintf(".verdi/%s/%s/%s.md", dir, story, acID)
 		if d.RelPath != wantPath {
+			// vocab:identity — compound-id grammar (story-slug segment semantics, I-6)
 			findings = append(findings, Finding{Rule: "VL-011", Path: d.RelPath, Message: fmt.Sprintf("id %q names story %q ac %q, which implies path %q, but this file lives at %q", d.Base.ID, story, acID, wantPath, d.RelPath)})
 		}
 
@@ -93,6 +94,7 @@ func checkObligationPath(d *Document) []Finding {
 
 	wantPath := fmt.Sprintf(".verdi/obligations/%s/%s--%s.md", story, acID, forKind)
 	if d.RelPath != wantPath {
+		// vocab:identity — compound-id grammar (story-slug segment semantics, I-6)
 		return []Finding{{Rule: "VL-011", Path: d.RelPath, Message: fmt.Sprintf("id %q names story %q ac %q for_kind %q, which implies path %q, but this file lives at %q", d.Base.ID, story, acID, forKind, wantPath, d.RelPath)}}
 	}
 	return nil

@@ -170,6 +170,7 @@ func buildProvenanceInputs(spec *artifact.SpecFrontmatter, covers string) []stri
 // byte-identical prompts.
 func BuildPrompt(spec *artifact.SpecFrontmatter, computedFindings []artifact.Finding) []byte {
 	var b strings.Builder
+	// vocab:identity — judge-prompt scaffold speaking corpus schema ids to the agent
 	fmt.Fprintf(&b, "You are verdi's alignment judge for %s (story %s).\n\n", spec.ID, spec.Story)
 	b.WriteString("Below is this build's mechanically computed alignment section (regenerated ")
 	b.WriteString("boundary contracts diffed against the spec's declared boundaries). Read the ")

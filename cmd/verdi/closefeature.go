@@ -41,6 +41,7 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/provider"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -77,12 +78,12 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 
-	fold, err := foldFeature(ctx, root, spec, specRef, head, storiesByAC)
+	fold, err := foldFeature(ctx, root, spec, specRef, head, storiesByAC, deps.Model)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
-	reconciliation, err := reconcileFeatureStubs(spec, stories)
+	reconciliation, err := reconcileFeatureStubs(spec, stories, deps.Model)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
@@ -208,10 +209,11 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 // floor's automated-record path (03 §The feature fold) — and folds it
 // together with the already-discovered, already-story-folded implementing
 // stories via evidence.FoldFeature. Mirrors close.go's foldStory shape.
-func foldFeature(ctx context.Context, root string, spec *artifact.SpecFrontmatter, specRef artifact.Ref, head string, storiesByAC map[string][]evidence.ImplementingStory) (evidence.FeatureResult, error) {
+func foldFeature(ctx context.Context, root string, spec *artifact.SpecFrontmatter, specRef artifact.Ref, head string, storiesByAC map[string][]evidence.ImplementingStory, mdl *model.Model) (evidence.FeatureResult, error) {
 	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, head)
 	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return evidence.FeatureResult{}, fmt.Errorf("loading feature evidence records: %w", err)
 	}
 	// Preview stays false — closure folds ONLY source: ci evidence, the
@@ -223,8 +225,10 @@ func foldFeature(ctx context.Context, root string, spec *artifact.SpecFrontmatte
 		Preview:     false,
 		StoreRoot:   root,
 		FeatureSlug: specRef.Name,
+		Model:       mdl,
 	})
 	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return evidence.FeatureResult{}, fmt.Errorf("folding feature evidence: %w", err)
 	}
 	return result, nil
@@ -237,12 +241,12 @@ func foldFeature(ctx context.Context, root string, spec *artifact.SpecFrontmatte
 // doc comment: no committed artifact schema for it exists) — this is the
 // same honest, nothing-invented posture cmd/verdi/featurematrix.go's own
 // call already takes, not a narrowing specific to close.
-func reconcileFeatureStubs(spec *artifact.SpecFrontmatter, stories []implementingStoryEdges) (evidence.StubReconciliation, error) {
+func reconcileFeatureStubs(spec *artifact.SpecFrontmatter, stories []implementingStoryEdges, mdl *model.Model) (evidence.StubReconciliation, error) {
 	stubStories := make([]evidence.StubStory, len(stories))
 	for i, s := range stories {
 		stubStories[i] = evidence.StubStory{SpecRef: s.SpecRef, ACIDs: s.ACIDs, Closed: s.Closed}
 	}
-	return evidence.ReconcileStubs(evidence.StubReconcileInput{Spec: spec, Stories: stubStories})
+	return evidence.ReconcileStubs(evidence.StubReconcileInput{Spec: spec, Stories: stubStories, Model: mdl})
 }
 
 // featureAllEvidenced reports whether every one of fold's feature ACs
@@ -324,6 +328,7 @@ func writeFeatureRollup(root string, specRef artifact.Ref, spec *artifact.SpecFr
 	// Self-validate before writing anything to disk (CLAUDE.md: "never fake
 	// success") — mirrors writeRollup's own self-check.
 	if err := roll.Validate(); err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return fmt.Errorf("close: internal error: built feature rollup.json failed self-validation: %w", err)
 	}
 

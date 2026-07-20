@@ -161,6 +161,7 @@ const designPrefix = "design/"
 // provenance line.
 func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.Entry, indexErr error, inReview map[string]bool, mrNotice string, mrConfigured bool, mdl *model.Model) {
 	buf.WriteString(`<section class="home-directory"><h2>Directory</h2>`)
+	// vocab:identity — the directory's own StatusGroup taxonomy word (L-M8 genus), not the lifecycle state
 	buf.WriteString(`<p class="dir-provenance">Computed from git refs: every spec on the default branch and every draft on a design branch, grouped by status.`)
 	if mrConfigured {
 		// dc-4: the in-review chip's input is a second, non-ref source —
@@ -279,7 +280,7 @@ func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name st
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(title))
 	buf.WriteString(`</a> `)
-	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, e.SpecStatus))
+	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, string(class), e.SpecStatus))
 	buf.WriteString(` `)
 	writeSourceChip(buf, e.Source)
 
@@ -355,7 +356,7 @@ func writeDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, inReview
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(e.Ref))
 	buf.WriteString(`</a> `)
-	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, e.SpecStatus))
+	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, "", e.SpecStatus))
 	buf.WriteString(` `)
 	writeSourceChip(buf, e.Source)
 
@@ -402,8 +403,13 @@ func writeStatusChip(buf *bytes.Buffer, status, label string) {
 // "" when no rename differs — so callers hand writeStatusChip a label
 // only when the model actually renames, keeping the no-model/no-rename
 // render byte-identical. Nil-safe (model.Model's nil-receiver contract).
-func statusChipLabel(m *model.Model, status string) string {
-	if label := m.DisplayState("", status); label != status {
+// class is the entry's own spec class per DisplayState's Q2 caller
+// convention — default-branch entries read it from the working tree
+// (specWorkingTreeMeta); design-branch entries pass "" (the computed
+// index deliberately carries no class, and a degraded draft may have no
+// readable content at all).
+func statusChipLabel(m *model.Model, class, status string) string {
+	if label := m.DisplayState(class, status); label != status {
 		return label
 	}
 	return ""

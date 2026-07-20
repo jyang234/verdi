@@ -62,7 +62,9 @@ func writeKindAxis(outDir string, stamp buildStamp, pages []*artifactPage, mdl *
 	var specsActive, specsArchive, adrs, diagrams, attestations, waivers, conflicts []listItem
 
 	for _, p := range pages {
-		item := listItem{Title: p.Entry.Title, URL: permalinkURL(p.Entry.Ref), Status: p.Entry.Status, StatusLabel: mdl.DisplayState("", p.Entry.Status)}
+		// The entry's own class per DisplayState's Q2 caller convention —
+		// "" for the class-less knowledge kinds (adr, diagram, ...).
+		item := listItem{Title: p.Entry.Title, URL: permalinkURL(p.Entry.Ref), Status: p.Entry.Status, StatusLabel: mdl.DisplayState(string(p.Meta.Class), p.Entry.Status)}
 		switch p.Entry.Kind {
 		case "spec":
 			if isArchivedSpec(p.RelPath) {

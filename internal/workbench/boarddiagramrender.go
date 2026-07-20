@@ -47,6 +47,7 @@ type diagramClientPayload struct {
 // diagramModeStampLabels: the editor room's state in words, mirroring the
 // board's mode stamp voice.
 var diagramModeStampLabels = map[boardModeKind]string{
+	// vocab:identity — editor-mode chrome taxonomy (live working copy), not the spec lifecycle state
 	modeAuthoring: "authoring · live draft",
 	modeReadOnly:  "read-only · sealed record",
 }

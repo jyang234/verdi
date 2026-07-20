@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +35,7 @@ import (
 // subcommand, `start` (05 §CLI); anything else is a usage error.
 func runBuildVerb(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "start" {
+		// vocab:identity — CLI usage grammar (identity arg placeholders)
 		fmt.Fprintln(stderr, "usage: verdi build start <story-spec | story-ref>")
 		return 2
 	}
@@ -45,6 +47,7 @@ func runBuildVerb(args []string, stdout, stderr io.Writer) int {
 // wires the real runner before delegating to runBuildStart.
 func cmdBuildStart(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
+		// vocab:identity — CLI usage grammar (identity arg placeholders)
 		fmt.Fprintln(stderr, "build start: usage: verdi build start <story-spec | story-ref>")
 		return 2
 	}
@@ -100,9 +103,9 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 		// identity.
 		featureWord := deps.Model.DisplayClass("feature")
 		storyWord := deps.Model.DisplayClass("story")
-		fmt.Fprintf(stderr, "build start: %s is %s %s spec (birds-eye, outcome-level); build start operates on %s %s spec that implements it, not the %s itself\n",
-			spec.ID, model.Article(featureWord), featureWord,
-			model.Article(storyWord), storyWord, featureWord)
+		fmt.Fprintf(stderr, "build start: %s is %s spec (birds-eye, outcome-level); build start operates on %s spec that implements it, not the %s itself\n",
+			spec.ID, model.Indefinite(featureWord),
+			model.Indefinite(storyWord), featureWord)
 		return 2
 	}
 	// A superseded spec is never re-buildable (D-12): report the successor
@@ -117,7 +120,7 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 		if s, ferr := findSupersedingSpec(root, spec.ID); ferr == nil && s != nil {
 			fmt.Fprintf(stderr, "build start: refused: %s is %s by %s; build the successor, not the %s predecessor (03 §The amendment ladder)\n", spec.ID, supersededWord, s.ID, supersededWord)
 		} else {
-			fmt.Fprintf(stderr, "build start: refused: %s is %s; %s %s spec is never re-buildable (03 §The amendment ladder)\n", spec.ID, supersededWord, model.Article(supersededWord), supersededWord)
+			fmt.Fprintf(stderr, "build start: refused: %s is %s; %s spec is never re-buildable (03 §The amendment ladder)\n", spec.ID, supersededWord, model.Indefinite(supersededWord))
 		}
 		return 1
 	}
@@ -182,22 +185,23 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 //
 // Resolution order: (1) storyresolve.Resolve as-is — the spec-ref form,
 // and the legacy story-ref-matches-a-class:-feature-spec form, both
-// unchanged; (2) only if that fails with "no active feature spec has
-// story" (i.e. the arg parsed as a valid scheme-prefixed story ref but
-// matched no FEATURE), also scan specs/active for a class: story spec
-// whose own story: field equals storyArg.
+// unchanged; (2) only if that fails with the typed no-match outcome
+// (storyresolve.UnmatchedStoryRefError: the arg parsed as a valid
+// scheme-prefixed story ref but matched no FEATURE), also scan
+// specs/active for a class: story spec whose own story: field equals
+// storyArg. The discriminant is errors.As on the TYPE — never the message
+// text, which used to be string-matched here as control flow and thereby
+// pinned that user-facing prose bare by coupling (ledger L-M13a(7)).
 //
 // mdl resolves the ambiguity refusal's class word (L-M13(1)); nil is safe
-// (bare-id fallback). storyresolve's own error strings pass through
-// UNCHANGED — including the "no active feature spec has story" text this
-// function string-matches on — they are that package's identity-stable
-// diagnostics, out of this sweep's cmd/verdi scope.
+// (bare-id fallback).
 func resolveBuildTarget(root, storyArg string, mdl *model.Model) (*artifact.SpecFrontmatter, error) {
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err == nil {
 		return spec, nil
 	}
-	if !strings.Contains(err.Error(), "no active feature spec has story") {
+	var unmatched *storyresolve.UnmatchedStoryRefError
+	if !errors.As(err, &unmatched) {
 		return nil, err
 	}
 

@@ -133,25 +133,43 @@ func TestOpenPrefersStoreModelYAML(t *testing.T) {
 }
 
 // TestOpen_ModelNegative proves Open's model-loading half surfaces
-// model.DecodeModel's own errors, wrapped with the same "reading
-// model.yaml: %w" / "decoding model.yaml: %w" prefixes loadModel
-// documents (open.go) — the same two-phase shape Open already gives
-// verdi.yaml.
+// model.DecodeModel's own errors UNWRAPPED (K5): loadModel (open.go) no
+// longer re-wraps a DecodeModel failure with its own "decoding
+// model.yaml: %w", since DecodeModel already self-prefixes the ONE case
+// that needs it (its strict-decode-failure path: "model: decoding
+// model.yaml: %w", decode.go) — re-wrapping THAT case doubled the prefix
+// ("decoding model.yaml: model: decoding model.yaml: ..."), the exact
+// defect this test now pins shut via the "at most one occurrence" check
+// below. Validate/checkFrontier failures were never self-prefixed with
+// "decoding model.yaml:" to begin with, so dropping loadModel's own wrap
+// leaves them with NO such framing at all — each case's wantPrefix/
+// wantDecodeMentions reflects its own real shape, not a uniform one.
 func TestOpen_ModelNegative(t *testing.T) {
 	cases := []struct {
 		name       string
 		modelYAML  string
 		wantPrefix string
+		// wantDecodeMentions is the exact number of times the literal
+		// substring "decoding model.yaml:" appears in the final error —
+		// 1 for the strict-decode-failure case (DecodeModel's own single
+		// self-prefix survives, unrewrapped), 0 for Validate/checkFrontier
+		// failures (never carried that text at all). Before the fix, the
+		// strict-decode case doubled to 2 — a HasPrefix-only check never
+		// would have caught that, which is why this test now also asserts
+		// the exact count.
+		wantDecodeMentions int
 	}{
 		{
-			name:       "malformed YAML syntax",
-			modelYAML:  "not: [valid",
-			wantPrefix: "decoding model.yaml: ",
+			name:               "malformed YAML syntax",
+			modelYAML:          "not: [valid",
+			wantPrefix:         "model: decoding model.yaml: ",
+			wantDecodeMentions: 1,
 		},
 		{
-			name:       "structurally deviant (frontier violation)",
-			modelYAML:  "schema: verdi.model/v1\nclasses: {}\nlifecycle: {}\n",
-			wantPrefix: "decoding model.yaml: ",
+			name:               "structurally deviant (frontier violation)",
+			modelYAML:          "schema: verdi.model/v1\nclasses: {}\nlifecycle: {}\n",
+			wantPrefix:         model.ErrFrontier.Error(),
+			wantDecodeMentions: 0,
 		},
 	}
 	for _, tc := range cases {
@@ -166,6 +184,9 @@ func TestOpen_ModelNegative(t *testing.T) {
 			}
 			if !strings.HasPrefix(err.Error(), tc.wantPrefix) {
 				t.Fatalf("Open(%s) error = %q, want prefix %q", tc.name, err.Error(), tc.wantPrefix)
+			}
+			if got := strings.Count(err.Error(), "decoding model.yaml:"); got != tc.wantDecodeMentions {
+				t.Fatalf("Open(%s) error = %q, contains \"decoding model.yaml:\" %d times, want exactly %d", tc.name, err.Error(), got, tc.wantDecodeMentions)
 			}
 		})
 	}

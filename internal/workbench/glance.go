@@ -198,7 +198,7 @@ func writeGlanceDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, n
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(title))
 	buf.WriteString(`</a> `)
-	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, e.SpecStatus))
+	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, string(class), e.SpecStatus))
 
 	if boardServable {
 		buf.WriteString(` &middot; <a class="glance-board" href="`)
@@ -227,5 +227,5 @@ func writeGlanceDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, md
 	buf.WriteString(`">`)
 	buf.WriteString(stdhtml.EscapeString(e.Ref))
 	buf.WriteString(`</a> `)
-	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, e.SpecStatus))
+	writeStatusChip(buf, e.SpecStatus, statusChipLabel(mdl, "", e.SpecStatus))
 }

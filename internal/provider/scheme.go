@@ -8,6 +8,7 @@ import (
 )
 
 // ErrInvalidRef means a StoryRef is not well-formed scheme:key.
+// vocab:identity — provider-port sentinel naming the tracker-ref concept
 var ErrInvalidRef = errors.New("provider: invalid story ref")
 
 // schemeRe matches the scheme prefix of a StoryRef: lowercase, starting

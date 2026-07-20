@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // vl006 enforces "every AC declares ≥1 expected evidence kind (activation
@@ -60,10 +61,10 @@ func (r vl006) Check(in *RunInput) []Finding {
 			// anchored to the AC card, same shape as the evidence-kind
 			// check above, so it sits beside it rather than inside the
 			// spec-level requiredness family.
-			findings = append(findings, r.checkFeatureACAttestation(d)...)
+			findings = append(findings, r.checkFeatureACAttestation(d, in.Model)...)
 		}
 		findings = append(findings, r.checkStubACs(d)...)
-		findings = append(findings, r.checkStubResolves(d)...)
+		findings = append(findings, r.checkStubResolves(d, in.Model)...)
 	}
 	return findings
 }
@@ -112,7 +113,7 @@ func (vl006) checkStubACs(d *Document) []Finding {
 // decodes and validates clean, leaving a dangling attribution reference.
 // Same guard as checkStubACs: runs for every non-grandfathered, cleanly-
 // decoded spec.
-func (vl006) checkStubResolves(d *Document) []Finding {
+func (vl006) checkStubResolves(d *Document, mdl *model.Model) []Finding {
 	var findings []Finding
 	declaredOQ := make(map[string]bool, len(d.Spec.OpenQuestions))
 	for _, q := range d.Spec.OpenQuestions {
@@ -122,7 +123,9 @@ func (vl006) checkStubResolves(d *Document) []Finding {
 		for _, oqID := range st.Resolves {
 			if !declaredOQ[oqID] {
 				// Same object-anchor as checkStubACs: the stub's own card.
-				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("spike stub %q names resolves %s, which is not a declared open question of this spec", st.Slug, oqID), Locus: ObjectLocus("stub:" + st.Slug)})
+				// The variant word is display and resolves (L-M13a(6));
+				// the slug and oq id echoes are identity.
+				findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("%s stub %q names resolves %s, which is not a declared open question of this spec", mdl.DisplayClass("spike"), st.Slug, oqID), Locus: ObjectLocus("stub:" + st.Slug)})
 			}
 		}
 	}
@@ -198,7 +201,7 @@ func (vl006) checkRequiredness(d *Document) []Finding {
 // a second mechanism. The check therefore only ever gates a feature spec
 // still in DRAFT — the literal "fails VL-006 and cannot activate" moment
 // — never relitigates a spec's declared evidence kinds after acceptance.
-func (vl006) checkFeatureACAttestation(d *Document) []Finding {
+func (vl006) checkFeatureACAttestation(d *Document, mdl *model.Model) []Finding {
 	if d.Spec.Class != artifact.ClassFeature || d.Spec.Frozen != nil {
 		return nil
 	}
@@ -209,8 +212,12 @@ func (vl006) checkFeatureACAttestation(d *Document) []Finding {
 		}
 		// Object-anchored (same shape as the empty-evidence-kind check
 		// above): this finding names exactly the AC card missing the
-		// outcome floor's minimum satisfying kind.
-		findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("feature acceptance criterion %s does not declare attestation among its expected evidence kinds (03 §The feature fold: the outcome floor requires attestation at minimum)", ac.ID), Locus: ObjectLocus(ac.ID)})
+		// outcome floor's minimum satisfying kind. The leading class word
+		// is display and routes through the model (L-M13a(6): best-effort
+		// in.Model, nil-safe to the bare id — the spike-stub sibling's
+		// exact pattern); the "§The feature fold" spec-section title and
+		// the ac id stay verbatim (a citation and an identity id).
+		findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("%s acceptance criterion %s does not declare attestation among its expected evidence kinds (03 §The feature fold: the outcome floor requires attestation at minimum)", mdl.DisplayClass("feature"), ac.ID), Locus: ObjectLocus(ac.ID)})
 	}
 	return findings
 }

@@ -14,8 +14,25 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
+
+// displayModel best-effort-resolves root's operating model for REFUSAL
+// prose only (the display words this package's user-facing resolution
+// refusals speak — ledger L-M13a(6)'s work order for resolve.go): a store
+// whose config cannot be opened routes bare ids (nil — model.Model's
+// nil-receiver fallback, the posture every vocabulary surface takes),
+// never a second error masking the refusal being composed. Resolved
+// lazily, only on a refusal path, so the happy path never pays the
+// store.Open.
+func displayModel(root string) *model.Model {
+	cfg, err := store.Open(root)
+	if err != nil {
+		return nil
+	}
+	return cfg.Model
+}
 
 // OperationalError marks a resolution failure that is an OPERATIONAL
 // (machinery) problem — a spec file present but unreadable or failing strict
@@ -39,10 +56,61 @@ func (e *OperationalError) Unwrap() error { return e.Err }
 // same Error() text; a caller that must distinguish it (verdi attest re-words
 // it in its own terms rather than leaking this message's matrix framing —
 // ADJ-51 finding 3) matches it with errors.As.
-type ComponentSpecError struct{ Ref string }
+type ComponentSpecError struct {
+	Ref string
+	// featureWord/storyWord are the resolved display words for the two
+	// foldable classes, baked at the producing site (Resolve — the
+	// classification lives here, never in a consumer package; ledger
+	// L-M13a(6)). Zero values render the bare ids, so a zero-value
+	// ComponentSpecError keeps today's text byte-for-byte (the parity
+	// floor).
+	featureWord, storyWord string
+}
 
 func (e *ComponentSpecError) Error() string {
-	return fmt.Sprintf("spec %q is a component spec (no story, no acceptance criteria); matrix folds only feature and story specs", e.Ref)
+	featureWord, storyWord := e.featureWord, e.storyWord
+	if featureWord == "" {
+		featureWord = "feature"
+	}
+	if storyWord == "" {
+		storyWord = "story"
+	}
+	// "component" is a legacy class id no v1 model declares or renames
+	// (vocabulary classes keys ∈ declared classes ∪ {spike}, L-M13a(5));
+	// "(no story, no acceptance criteria)" names the story:/
+	// acceptance_criteria: FRONTMATTER FIELDS the class lacks — identity,
+	// kept bare. Only the two foldable-class words are display.
+	return fmt.Sprintf("spec %q is a component spec (no story, no acceptance criteria); matrix folds only %s and %s specs", e.Ref, featureWord, storyWord)
+}
+
+// UnmatchedStoryRefError marks matchStoryRef's no-match outcome: the
+// argument parsed as a valid scheme-prefixed story ref, but no active
+// class: feature spec's story: field equals it. A typed discriminant (the
+// OperationalError pattern) because cmd/verdi's resolveBuildTarget keys
+// its story-class fallback scan on exactly this outcome — it previously
+// string-matched this message's text as control flow, which pinned the
+// prose bare by coupling (ledger L-M13a(7)). Callers that only report the
+// failure see the exact same Error() text.
+type UnmatchedStoryRefError struct {
+	// StoryRef is the scheme-prefixed story ref that matched no active
+	// feature spec's story: field.
+	StoryRef string
+	// featureWord is the resolved display word for the feature class,
+	// baked at the producing site (matchStoryRef — L-M13a(6): the
+	// classification lives at the producing site, never in a consumer
+	// package). Empty renders the bare id, so a zero-value error keeps
+	// today's text byte-for-byte (the parity floor).
+	featureWord string
+}
+
+func (e *UnmatchedStoryRefError) Error() string {
+	featureWord := e.featureWord
+	if featureWord == "" {
+		featureWord = "feature"
+	}
+	// "story:" names the FRONTMATTER FIELD the ref was matched against —
+	// identity, kept bare; only the class word is display.
+	return fmt.Sprintf("no active %s spec has story: %s", featureWord, e.StoryRef)
 }
 
 // Resolve resolves arg to a foldable spec under specs/active/ — 03 §The
@@ -68,7 +136,8 @@ func Resolve(root, arg string) (*artifact.SpecFrontmatter, error) {
 			return nil, loadErr
 		}
 		if spec.Class == artifact.ClassComponent {
-			return nil, &ComponentSpecError{Ref: arg}
+			mdl := displayModel(root)
+			return nil, &ComponentSpecError{Ref: arg, featureWord: mdl.DisplayClass("feature"), storyWord: mdl.DisplayClass("story")}
 		}
 		return spec, nil
 	}
@@ -84,6 +153,7 @@ func Resolve(root, arg string) (*artifact.SpecFrontmatter, error) {
 		return matchStoryRef(root, arg)
 	}
 
+	// vocab:identity — the "story ref" FIELD-form grammar (I-30; buildstart.go twin classification)
 	return nil, fmt.Errorf("%q is neither a scheme-prefixed story ref (e.g. jira:LOAN-1482) nor a spec ref (e.g. spec/stale-decline); this verb accepts exactly those two forms", arg)
 }
 
@@ -136,7 +206,7 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 	}
 	switch len(matches) {
 	case 0:
-		return nil, fmt.Errorf("no active feature spec has story: %s", storyRef)
+		return nil, &UnmatchedStoryRefError{StoryRef: storyRef, featureWord: displayModel(root).DisplayClass("feature")}
 	case 1:
 		return matches[0], nil
 	default:
@@ -144,7 +214,11 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 		for i, m := range matches {
 			names[i] = m.ID
 		}
-		return nil, fmt.Errorf("story ref %q matches more than one active feature spec: %s", storyRef, strings.Join(names, ", "))
+		// "story ref" names the scheme-prefixed story: FIELD's ref form
+		// (identity — cmd/verdi/buildstart.go's twin refusal pinned that
+		// classification); the class word speaks the matched specs' class
+		// — display, resolved (L-M13a(6) work order).
+		return nil, fmt.Errorf("story ref %q matches more than one active %s spec: %s", storyRef, displayModel(root).DisplayClass("feature"), strings.Join(names, ", "))
 	}
 }
 
@@ -180,6 +254,7 @@ func ResolveBuildSpec(root, branch string) (*artifact.SpecFrontmatter, error) {
 		return nil, err
 	}
 	if spec.Class == artifact.ClassComponent {
+		// vocab:identity — story:/acceptance_criteria: FRONTMATTER FIELD names
 		return nil, fmt.Errorf("storyresolve: build branch %q resolves to %s, a component spec (no story, no acceptance criteria)", branch, spec.ID)
 	}
 	return spec, nil

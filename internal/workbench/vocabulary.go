@@ -54,14 +54,15 @@ func (w classWords) plural(id string) string { return w.m.DisplayClassPlural(id)
 func (w classWords) capital(id string) string { return model.Capitalize(w.m.DisplayClass(id)) }
 
 // indefinite is the class id's display word with its agreeing indefinite
-// article ("a story" / "an Initiative") — model.Article's one a/an rule
-// (judged-article-agreement-approximation-undisclosed, L-M13a(4)), for
-// prose positions where the article immediately precedes the class word.
-// An article whose head word is fixed prose ("a draft <word> spec")
-// agrees with that fixed word instead and never routes through this.
+// article ("a story" / "an Initiative") — a delegate to model.Indefinite,
+// the one composed article-word form (Q1; the a/an rule itself is
+// model.Article, judged-article-agreement-approximation-undisclosed,
+// L-M13a(4)) — for prose positions where the article immediately precedes
+// the class word. An article whose head word is fixed prose ("a draft
+// <word> spec") agrees with that fixed word instead and never routes
+// through this.
 func (w classWords) indefinite(id string) string {
-	word := w.word(id)
-	return model.Article(word) + " " + word
+	return model.Indefinite(w.word(id))
 }
 
 // renamed returns only the class words whose display form differs from

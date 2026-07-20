@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // ImplementingStory is one story's already-folded contribution to a
@@ -72,6 +73,15 @@ type FeatureInput struct {
 	// directly) — FoldFeature takes it as given, the same "caller resolves,
 	// fold reduces" idiom Input.StorySlug already establishes.
 	FeatureSlug string
+	// Model is the store's resolved operating model, used ONLY to route
+	// class display words in this fold's own refusal prose (ledger
+	// L-M13a(6) work order; spec/vocabulary-surfaces' one class-word
+	// chain), threaded by the caller exactly like every other input —
+	// this package resolves nothing itself. nil renders bare ids
+	// (model.Model's nil-receiver fallback), so every existing caller and
+	// test literal keeps today's text byte-for-byte. No fold DECISION
+	// ever reads it: "caller resolves, fold reduces" stays intact.
+	Model *model.Model
 }
 
 // FloorResult is one feature AC's mandatory outcome-floor evaluation (03
@@ -139,7 +149,9 @@ func FoldFeature(in FeatureInput) (FeatureResult, error) {
 		return FeatureResult{}, fmt.Errorf("evidence: FoldFeature: Spec is required")
 	}
 	if in.Spec.Class != artifact.ClassFeature {
-		return FeatureResult{}, fmt.Errorf("evidence: FoldFeature: spec %q is class %q, not a feature spec", in.Spec.ID, in.Spec.Class)
+		// The spoken class word is display and resolves (L-M13a(6) work
+		// order); the class COMPARISON and the echoed %q id stay bare.
+		return FeatureResult{}, fmt.Errorf("evidence: FoldFeature: spec %q is class %q, not %s spec", in.Spec.ID, in.Spec.Class, model.Indefinite(in.Model.DisplayClass("feature")))
 	}
 	if len(in.Spec.AcceptanceCriteria) == 0 {
 		return FeatureResult{}, fmt.Errorf("evidence: FoldFeature: spec %q declares no acceptance criteria", in.Spec.ID)
@@ -151,7 +163,9 @@ func FoldFeature(in FeatureInput) (FeatureResult, error) {
 	}
 
 	candidates, err := filterCandidates(in.Records, in.Preview, acSet, func(r artifact.Evidence, ac string) error {
-		return fmt.Errorf("evidence: FoldFeature: record (kind %s, witness %q) is evidence-for unknown feature AC %q (dangling binding, 03 §Declarations)", r.Kind, r.Witness, ac)
+		// The class word is display and resolves (same chain as the
+		// class-guard refusal above); kind/witness/AC id echoes are bare.
+		return fmt.Errorf("evidence: FoldFeature: record (kind %s, witness %q) is evidence-for unknown %s AC %q (dangling binding, 03 §Declarations)", r.Kind, r.Witness, in.Model.DisplayClass("feature"), ac)
 	})
 	if err != nil {
 		return FeatureResult{}, err

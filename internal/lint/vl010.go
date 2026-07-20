@@ -143,6 +143,7 @@ func (vl010) Check(in *RunInput) []Finding {
 					continue
 				}
 			}
+			// vocab:identity — status-flip grammar naming state enum VALUES (id-level transition record)
 			findings = append(findings, Finding{Rule: "VL-010", Path: e.Path, Message: fmt.Sprintf("frozen file renamed from %s (not a pure active->archive move, nor a status-only accepted-pending-build->closed archive flip) between %s and HEAD", e.OldPath, in.LintCtx.DiffBase)})
 		}
 	}

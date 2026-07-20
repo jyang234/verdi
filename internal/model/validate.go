@@ -64,12 +64,14 @@ var ErrFrontier = errors.New(frontierErrorText)
 // which concrete lifecycle it describes (spec/model-schema ac-1, the
 // Outcome section's own rule list): the schema literal; every class
 // carries a non-empty template; every class's parent (if any) names a
-// declared class; every transition's obligations list is PRESENT (nil
-// means the `obligations:` key itself was absent — distinct from a
-// present, empty `[]`); terminal states are drawn from states and admit
-// no outgoing transition (terminal ⇒ freeze); every transition's from/to
-// names a declared state; no verb is declared by two transitions within
-// one lifecycle (a verb is a transition's identity — the frontier compare
+// declared class; no state id is declared twice within one lifecycle's
+// states, and no state id is declared twice within its terminal (K3);
+// every transition's obligations list is PRESENT (nil means the
+// `obligations:` key itself was absent — distinct from a present, empty
+// `[]`); terminal states are drawn from states and admit no outgoing
+// transition (terminal ⇒ freeze); every transition's from/to names a
+// declared state; no verb is declared by two transitions within one
+// lifecycle (a verb is a transition's identity — the frontier compare
 // keys on it — judged-frontier-duplicate-verb-bypass); every state is
 // reachable; every obligation's scheme and kind are drawn from their
 // closed catalogs; count is legal only on kind "countersign"; hook is
@@ -130,10 +132,20 @@ func (m Model) Validate() error {
 // that carve, taken deliberately while cheap.
 const vocabularySpikePseudoClass = "spike"
 
+// emptyVocabValueHint is K6's shared explanation, appended to every
+// empty-rename-value error validateVocabulary returns: an empty string is
+// indistinguishable, at the display layer, from no rename at all
+// (DisplayState/DisplayVerb/DisplayClass, model.go, each resolve a
+// present-but-empty value exactly like an absent key — falling straight
+// through to the id or Class.Display) so it is a near-certain typo with
+// zero visible effect, never a legitimate "rename to nothing."
+const emptyVocabValueHint = "an empty string silently falls back to the id, exactly like an absent key, almost certainly a typo — remove the key entirely to keep the default, or give it a real rename"
+
 // validateVocabulary checks that every vocabulary key names a declared
-// referent — the vocabulary keys are load-bearing now that every display
-// surface resolves through them (spec/vocabulary-surfaces), so a typo'd
-// key must fail closed at decode time, never sit silently inert:
+// referent, and that every vocabulary VALUE is non-empty — the vocabulary
+// keys are load-bearing now that every display surface resolves through
+// them (spec/vocabulary-surfaces), so a typo'd key or a typo'd-empty value
+// must fail closed at decode time, never sit silently inert:
 //
 //   - every Vocabulary.States key is a declared state in SOME lifecycle
 //     (States is a flat map, not nested per class — model.go's
@@ -142,13 +154,20 @@ const vocabularySpikePseudoClass = "spike"
 //     lifecycle (the same flat-map reasoning);
 //   - every Vocabulary.Classes key is a declared class OR the literal
 //     "spike" (vocabularySpikePseudoClass — the L-M13-ratified
-//     pseudo-class carve).
+//     pseudo-class carve);
+//   - every key present in any of the three sections carries a non-empty
+//     value (K6) — an empty string is display-indistinguishable from the
+//     key being absent altogether (DisplayState/DisplayVerb/DisplayClass
+//     each treat "" exactly like "no entry"), so it is a near-certain typo
+//     that would otherwise sit silently inert forever.
 //
-// Each violation names the offending key AND the legal set (the same
-// operator courtesy the scheme/kind catalog errors extend: learn what IS
-// legal in the same breath as learning what is not). Maps are walked in
-// sorted key order — classes, then states, then verbs — so which
-// violation is reported first is deterministic across runs.
+// Each violation names the offending key AND either the legal set (an
+// unknown key — the same operator courtesy the scheme/kind catalog errors
+// extend: learn what IS legal in the same breath as learning what is not)
+// or the empty-value hint (emptyVocabValueHint). Maps are walked in sorted
+// key order — classes, then states, then verbs, each section's own
+// unknown-key check before its own empty-value check — so which violation
+// is reported first is deterministic across runs.
 func (m Model) validateVocabulary() error {
 	legalClasses := make(map[string]bool, len(m.Classes)+1)
 	for name := range m.Classes {
@@ -171,22 +190,37 @@ func (m Model) validateVocabulary() error {
 		if !legalClasses[key] {
 			return fmt.Errorf("model: vocabulary: classes key %q is not a declared class or the spike pseudo-class (legal: %s)", key, catalogList(legalClasses))
 		}
+		if m.Vocabulary.Classes[key] == "" {
+			return fmt.Errorf("model: vocabulary: classes key %q has an empty rename value (%s)", key, emptyVocabValueHint)
+		}
 	}
 	for _, key := range sortedKeys(m.Vocabulary.States) {
 		if !legalStates[key] {
 			return fmt.Errorf("model: vocabulary: states key %q is not a declared state in any lifecycle (declared states: %s)", key, catalogList(legalStates))
+		}
+		if m.Vocabulary.States[key] == "" {
+			return fmt.Errorf("model: vocabulary: states key %q has an empty rename value (%s)", key, emptyVocabValueHint)
 		}
 	}
 	for _, key := range sortedKeys(m.Vocabulary.Verbs) {
 		if !legalVerbs[key] {
 			return fmt.Errorf("model: vocabulary: verbs key %q is not a declared transition verb in any lifecycle (declared verbs: %s)", key, catalogList(legalVerbs))
 		}
+		if m.Vocabulary.Verbs[key] == "" {
+			return fmt.Errorf("model: vocabulary: verbs key %q has an empty rename value (%s)", key, emptyVocabValueHint)
+		}
 	}
 	return nil
 }
 
-// validate checks one lifecycle.<name> block: terminal ⊆ states, no verb
-// is bound by two transitions within this lifecycle (a verb is a
+// validate checks one lifecycle.<name> block: no state id is declared
+// twice within `states:`, and no state id is declared twice within
+// `terminal:` (K3 — a duplicate is internally contradictory, silently
+// inert against the map[string]bool both build, and could otherwise mask
+// a genuinely missing id the same way a duplicate transition verb could
+// mask a missing transition, judged-frontier-duplicate-verb-bypass's own
+// reasoning carried to these two lists); terminal ⊆ states; no verb is
+// bound by two transitions within this lifecycle (a verb is a
 // transition's identity, judged-frontier-duplicate-verb-bypass — a
 // duplicate is internally contradictory AND could otherwise mask a missing
 // transition at the frontier compare), every transition's obligations-list
@@ -198,12 +232,18 @@ func (m Model) validateVocabulary() error {
 func (lc Lifecycle) validate(name string) error {
 	states := make(map[string]bool, len(lc.States))
 	for _, s := range lc.States {
+		if states[s] {
+			return fmt.Errorf("model: lifecycle %q: state %q is declared more than once in states", name, s)
+		}
 		states[s] = true
 	}
 	terminal := make(map[string]bool, len(lc.Terminal))
 	for _, t := range lc.Terminal {
 		if !states[t] {
 			return fmt.Errorf("model: lifecycle %q: terminal state %q is not in states", name, t)
+		}
+		if terminal[t] {
+			return fmt.Errorf("model: lifecycle %q: terminal state %q is declared more than once in terminal", name, t)
 		}
 		terminal[t] = true
 	}

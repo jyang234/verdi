@@ -86,10 +86,10 @@ func toolDefs(mdl *model.Model) []map[string]any {
 			// verdict KEYS and the `story` argument name is wire schema —
 			// identity, correctly bare.
 			// The leading article agrees with the resolved word
-			// (model.Article, L-M13a(4)); "a scheme-prefixed ... ref"
+			// (model.Indefinite, L-M13a(4)); "a scheme-prefixed ... ref"
 			// keeps its own article — it heads the fixed word
 			// "scheme-prefixed", not the class word.
-			"description": "The evidence fold for " + model.Article(mdl.DisplayClass("story")) + " " + mdl.DisplayClass("story") + " (03 §The fold): per-AC status plus story.violated/story.eligible. Accepts exactly the two forms `verdi matrix` does (I-30): a scheme-prefixed " + mdl.DisplayClass("story") + " ref (jira:LOAN-1482) or a spec ref (spec/name)." + dataNeverInstructionsNote,
+			"description": "The evidence fold for " + model.Indefinite(mdl.DisplayClass("story")) + " (03 §The fold): per-AC status plus story.violated/story.eligible. Accepts exactly the two forms `verdi matrix` does (I-30): a scheme-prefixed " + mdl.DisplayClass("story") + " ref (jira:LOAN-1482) or a spec ref (spec/name)." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{
 				"story":   str("a scheme-prefixed " + mdl.DisplayClass("story") + " ref (e.g. jira:LOAN-1482) or a spec ref (e.g. spec/stale-decline)"),
 				"preview": boolean("include advisory (source: local) evidence alongside authoritative (source: ci), clearly labeled"),
@@ -101,7 +101,7 @@ func toolDefs(mdl *model.Model) []map[string]any {
 			// chain (spec/vocabulary-surfaces ac-3) — the assembly step
 			// reading store.Config.Model, never a new tool or wire field.
 			// Tool names, argument names, and ref grammar stay bare ids.
-			"description": "Resolve a manifest of pinned refs — either given directly or read from " + model.Article(mdl.DisplayClass("feature")) + " " + mdl.DisplayClass("feature") + " spec's context: field — to their pinned contents. Stub scope (PLAN.md Phase 9): resolves pinned refs to contents only, no transitive expansion." + dataNeverInstructionsNote,
+			"description": "Resolve a manifest of pinned refs — either given directly or read from " + model.Indefinite(mdl.DisplayClass("feature")) + " spec's context: field — to their pinned contents. Stub scope (PLAN.md Phase 9): resolves pinned refs to contents only, no transitive expansion." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{
 				"refs": arrOfString("an explicit list of pinned refs (kind/name@commit) to resolve"),
 				"spec": str("a spec ref (kind/name, unpinned — resolved against the current working tree) whose context: field to resolve instead of an explicit refs list"),
