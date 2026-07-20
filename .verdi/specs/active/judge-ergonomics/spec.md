@@ -4,7 +4,7 @@ kind: spec
 title: "Judge Ergonomics"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-P2-1
 problem: { text: "every judge-backed verb — align's real LLM judge exchange, and close's internal freeze-align — runs 6-7 minutes, past an agent's foreground patience and past what a background monitor can survive (a monitor dies with the turn; nothing can resume a stopped agent from a completion event alone); X-8 witnessed this five times in one round (a builder idling silently on a port-poll, two builders self-catching hung tail-f monitors, a Fable builder and two fix agents all parking on align/verify awaiting an event that never resumes them), and nothing in the verb's own contract today tells a caller where to look or how long to wait before giving up and resuming later", anchor: problem }
 outcome: { text: "align prints its report path as the first line of stdout before the judge subprocess ever runs and writes the report atomically at completion through the existing atomicfile seam, so no partial content is ever observable at that path mid-run; a new --wait[=seconds] flag polls internally up to a bound and exits 2 with the report path already printed on expiry, never a silent hang; the contract lives once in the shared align engine so close's internal freeze-align inherits it rather than carrying a second, divergent implementation", anchor: outcome }
@@ -14,6 +14,7 @@ acceptance_criteria:
   - { id: ac-3, text: "the --wait contract is implemented once in the shared align engine: close's internal freeze-align inherits the identical first-line-path, atomic-write, and bounded --wait behavior from the same engine hook align uses, proven by exercising freeze-align's own bounded wait/expiry path directly rather than only align's — no per-verb reimplementation exists to diverge from it", evidence: [behavioral], anchor: ac-3 }
 links:
   - { type: implements, ref: "spec/ritual-integrity#ac-1" }
+frozen: { at: 2026-07-20, commit: fa6d7f561b3864496d3b4820a12c0e52af0417ff, stub_matched: true }
 ---
 # Judge Ergonomics
 
