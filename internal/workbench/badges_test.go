@@ -43,6 +43,11 @@ const badgeFeatureFixtureName = "widget-badge-feature"
 // a real authoring mistake would. internal/wallbadge's own compute-layer
 // tests (TestComputeBadges_EndToEnd) exercise the no-evidence-kind shape
 // directly, bypassing this decode boundary).
+// ac-1/ac-2 both declare attestation alongside runtime (L-M14 remedy 1,
+// internal/lint/vl006.go's checkFeatureACAttestation) — this fixture is
+// status: draft/unfrozen, so without it BOTH cards would carry a second,
+// unrelated VL-006 badge and defeat this test's own "a card naming no
+// locus-bearing finding stays bare" proof.
 const badgeFeatureFixtureSpec = `---
 id: spec/widget-badge-feature
 kind: spec
@@ -53,8 +58,8 @@ owners: [platform-team]
 problem: { text: "p", anchor: "#problem" }
 outcome: { text: "o", anchor: "#outcome" }
 acceptance_criteria:
-  - { id: ac-1, text: "does a thing", evidence: [runtime], anchor: "#ac-1" }
-  - { id: ac-2, text: "does another thing", evidence: [runtime], anchor: "#ac-2" }
+  - { id: ac-1, text: "does a thing", evidence: [runtime, attestation], anchor: "#ac-1" }
+  - { id: ac-2, text: "does another thing", evidence: [runtime, attestation], anchor: "#ac-2" }
 stubs:
   - { slug: orphan-stub, acceptance_criteria: [ac-99] }
 ---

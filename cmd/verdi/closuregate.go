@@ -8,6 +8,23 @@
 // see gate.go's doc comment for why this function is deliberately built
 // self-contained and unwired rather than invented onto a CLI surface this
 // phase does not own.
+//
+// Condition 4 (X-13/X-16/X-17, added at the round's final fix wave) is a
+// tooling addition, not itself named in 03's closure-gate text: it exists
+// because `verdi close`'s own freeze step (runAlignForSpec, align.go) has
+// exactly two behaviors — freeze the LIVING report in place verbatim when
+// it already covers head with every finding dispositioned, or fall through
+// and REGENERATE the report (fresh computed+judged findings, always
+// undispositioned on a first run) and freeze THAT in the same motion. The
+// round hit the second path as a silent trap three times: X-13 (a fresh,
+// undispositioned report rode straight into the archive), X-16 (committing
+// dispositions before close moved HEAD, so close's freeze-align saw stale
+// covers and regenerated over them), X-17 (a feature with no prior report
+// at all got one created-and-frozen, undispositioned, by close itself).
+// Condition 4 refuses BEFORE any freeze is attempted whenever close's own
+// freeze step would NOT take the safe freeze-in-place path — the identical
+// precondition align.go's own fork checks — turning the silent archive
+// into a named, exit-1 verdict instead.
 package main
 
 import (
@@ -49,9 +66,13 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 	if err != nil {
 		return false, err
 	}
+	cond4, err := checkDispositionCompleteCondition(root, spec, head)
+	if err != nil {
+		return false, err
+	}
 
 	allOK := true
-	for _, c := range []gateCondition{cond1, cond2, cond3} {
+	for _, c := range []gateCondition{cond1, cond2, cond3, cond4} {
 		switch {
 		case c.Disclosed:
 			// Three-valued honesty (constitution 2/10): the input was
@@ -197,4 +218,61 @@ func checkPendingSupersessionCondition(ctx context.Context, f forge.Forge, defau
 	sort.Strings(touched)
 	sort.Strings(mrIDs)
 	return gateCondition{Name: name, Reason: fmt.Sprintf("open supersession MR(s) %v touch object(s) %v", mrIDs, touched)}, nil
+}
+
+// dispositionRitual is the remedy every checkDispositionCompleteCondition
+// failure names (X-13/X-16/X-17's decoded runbook, extensibility-chronicle
+// 2026-07-17): align refreshes the report to head, disposition is a
+// working-tree edit (never a commit — X-16: committing first moves HEAD,
+// so close's own freeze-align sees stale covers and regenerates over the
+// dispositions), then close freezes the now-current, fully-dispositioned
+// report in place.
+const dispositionRitual = "the closure ritual is align (`verdi align`) -> disposition every finding as a working-tree edit (never commit it) -> close (`verdi close`)"
+
+// checkDispositionCompleteCondition is the closure gate's condition 4
+// (X-13/X-16/X-17, see this file's top doc comment): a living, unfrozen
+// deviation-report.md must be present in the spec's directory, cover head,
+// and carry no undispositioned finding — precisely the precondition
+// runAlignForSpec's freeze-in-place fork (align.go) requires before it
+// will stamp the report Frozen VERBATIM rather than regenerating it fresh.
+// Checked here, BEFORE close ever attempts to freeze anything, using
+// loadExistingReport (align.go) — the exact same reader the freeze step
+// itself uses, so what this condition inspects can never drift from what
+// close would actually freeze.
+//
+// D6-24 is preserved by construction: a report that already covers head
+// with every finding dispositioned (the fresh-covers-dispositioned case)
+// passes this condition and then genuinely takes the freeze-in-place path
+// — this condition never causes a regenerate that would discard
+// dispositions; it only ever refuses BEFORE a regenerate would happen.
+func checkDispositionCompleteCondition(root string, spec *artifact.SpecFrontmatter, head string) (gateCondition, error) {
+	name := "4. deviation report ready to freeze (no undispositioned findings)"
+
+	specRef, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		return gateCondition{}, fmt.Errorf("closure gate: internal error: resolved spec has an invalid id: %w", err)
+	}
+	path := store.DeviationReportPath(root, store.ZoneActive, specRef.Name)
+	report, _, err := loadExistingReport(path)
+	if err != nil {
+		return gateCondition{}, fmt.Errorf("closure gate: %w", err)
+	}
+	if report == nil {
+		return gateCondition{Name: name, Reason: fmt.Sprintf("no deviation-report.md found at %s; %s", path, dispositionRitual)}, nil
+	}
+	if report.Covers != head {
+		return gateCondition{Name: name, Reason: fmt.Sprintf("%s covers %s, not head %s; %s", path, report.Covers, head, dispositionRitual)}, nil
+	}
+
+	var undispositioned []string
+	for _, f := range report.Findings {
+		if !f.Dispositioned() {
+			undispositioned = append(undispositioned, f.ID)
+		}
+	}
+	if len(undispositioned) > 0 {
+		sort.Strings(undispositioned)
+		return gateCondition{Name: name, Reason: fmt.Sprintf("undispositioned finding(s) %v; %s", undispositioned, dispositionRitual)}, nil
+	}
+	return gateCondition{Name: name, OK: true}, nil
 }

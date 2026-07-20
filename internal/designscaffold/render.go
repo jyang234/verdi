@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -52,8 +53,14 @@ type ScaffoldData struct {
 // instantiate-then-strict-decode round trip proactively, over every
 // resolved template, so a broken template is caught at check time rather
 // than at a scaffold consumer's first use.
+//
+// The "safe" function (K4, verified latent at the round's final review) is
+// registered here so it is available to the embedded canonical templates
+// AND any store override alike — see safeScalar's own doc comment for what
+// it guards and why it is a conditional guard rather than an unconditional
+// %q.
 func Render(tmpl []byte, data ScaffoldData) (string, error) {
-	t, err := template.New("scaffold").Option("missingkey=error").Parse(string(tmpl))
+	t, err := template.New("scaffold").Funcs(template.FuncMap{"safe": safeScalar}).Option("missingkey=error").Parse(string(tmpl))
 	if err != nil {
 		return "", fmt.Errorf("designscaffold: parsing template: %w", err)
 	}
@@ -62,6 +69,45 @@ func Render(tmpl []byte, data ScaffoldData) (string, error) {
 		return "", fmt.Errorf("designscaffold: rendering template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// safeScalar guards a template position that renders a caller-supplied
+// string BARE into YAML frontmatter — id:, owners:, story: in the
+// canonical templates — against the newline-smuggle path K4 (final-review
+// residual, verified latent) named: with no escaping at all, a value
+// containing an embedded "\nsomekey: value" line renders straight through
+// as a second, illegitimate frontmatter key, and a value containing a bare
+// double quote or a ": " sequence can prematurely end or corrupt the
+// surrounding YAML plain scalar. No current caller can trigger this (every
+// real Ref/StoryRef is a validated kebab ref or scheme-prefixed tracker
+// key, and Owners is always the fixed "[unassigned]" flow-sequence
+// literal) — it is closed here defensively, at the mechanism, rather than
+// left as a latent trap for the next caller.
+//
+// It is deliberately NOT an unconditional %q the way title: already uses
+// ({{printf "%q" .Title}}, the established precedent this mirrors):
+// quoting unconditionally would change the rendered BYTES for every
+// current safe input (a bare kebab ref like "spec/foo-bar" becomes
+// "\"spec/foo-bar\"" under %q — a different byte sequence that still
+// decodes to the identical Go string, but breaks TestByteForByte's pin,
+// spec/scaffold-templates ac-1's stronger-than-decode-equivalence floor),
+// and for owners: specifically it would be actively WRONG: that position
+// holds a YAML flow-SEQUENCE literal ("[unassigned]", "[platform-team,
+// qa-lead]"), not a scalar — %q-wrapping it would turn a list into a
+// string and change the decoded TYPE, not merely the bytes. So: pass s
+// through completely unchanged when it cannot corrupt or extend the
+// surrounding YAML (no newline, no double quote, no ": " that would open a
+// new mapping pair or end a plain scalar early); %q-quote it (Go's own
+// backslash/quote/newline escaping) the rest of the time. Byte-identical
+// to today's bare rendering for every current input; fails closed (a
+// smuggled value decodes as a quoted STRING as the affected field's own
+// declared type — a list field like owners: then fails to decode as
+// []string — never silently as a second key) the moment one ever isn't.
+func safeScalar(s string) string {
+	if strings.ContainsAny(s, "\n\"") || strings.Contains(s, ": ") {
+		return fmt.Sprintf("%q", s)
+	}
+	return s
 }
 
 // LoadTemplate resolves filename's template bytes: a store override at

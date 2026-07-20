@@ -56,6 +56,12 @@ func (r vl006) Check(in *RunInput) []Finding {
 			// defect the author fixes only on that one card), so the
 			// whole family is spec-level.
 			findings = append(findings, locusAll(r.checkRequiredness(d), SpecLocus())...)
+			// checkFeatureACAttestation is L-M14 remedy 1 (03 §Declarations
+			// and binding / §The feature fold's outcome floor) — object-
+			// anchored to the AC card, same shape as the evidence-kind
+			// check above, so it sits beside it rather than inside the
+			// spec-level requiredness family.
+			findings = append(findings, r.checkFeatureACAttestation(d, in.Model)...)
 		}
 		findings = append(findings, r.checkStubACs(d)...)
 		findings = append(findings, r.checkStubResolves(d, in.Model)...)
@@ -158,6 +164,74 @@ func (vl006) checkRequiredness(d *Document) []Finding {
 	}
 
 	return findings
+}
+
+// checkFeatureACAttestation is L-M14 remedy 1: the evidence-model spec's
+// binding text (03 §Declarations and binding) is explicit that "a feature
+// AC's expected-kinds list is checked too, and MUST include `attestation`
+// — the outcome floor (§The feature fold). A feature AC that omits it
+// fails VL-006 and cannot activate" — a check L-M14's own recon found was
+// never implemented (spec/operating-model activated with pure behavioral/
+// static ACs, lint-clean). Scoped to feature-class specs only: a story AC
+// carries no outcome-floor concept (03's text is explicit the floor is a
+// FEATURE-level, two-level-model addition — "ratification round four").
+//
+// Grandfathered by ACCEPTANCE, not merely by archive location: this rule
+// did not exist when every currently-accepted feature spec predating this
+// fix was authored, and 03 §Declarations is explicit evidence kinds are
+// declared ONCE, at authoring — amending them after acceptance is the
+// supersession ladder's job, never a lint rule's (the identical reasoning
+// L-M14's own adjudication already applied to spec/operating-model: "the
+// feature closes against its ACs AS FROZEN ... amending evidence kinds on
+// a frozen spec would require full supersession, disproportionate"). That
+// reasoning holds for every already-frozen feature spec, not only the
+// archived ones — and an archive-only exemption provably is NOT the
+// cleanest scope here: examples/showcase's own committed corpus (this
+// engine's test fixture base) carries multiple currently-ACTIVE, already-
+// accepted feature specs with the identical gap (escrow-autopay/ac-2,
+// loan-workflow(-v2)/ac-2, stale-decline — none of which declare
+// attestation on every AC), so an archive-only exemption would make this
+// very engine's own baseline lint-dirty. d.Spec.Frozen != nil is the
+// correct, deterministic discriminator (never a wall-clock or commit-SHA
+// threshold, CLAUDE.md): it is set exactly at `verdi accept` time and
+// preserved verbatim through closure (cmd/verdi/close.go's
+// flipSpecStatusToClosed keeps the frozen: stamp byte-for-byte), so it
+// holds for every accepted spec whether still active or already archived
+// — "specs/archive/ exempt" is the special case of this broader rule, not
+// a second mechanism. The check therefore only ever gates a feature spec
+// still in DRAFT — the literal "fails VL-006 and cannot activate" moment
+// — never relitigates a spec's declared evidence kinds after acceptance.
+func (vl006) checkFeatureACAttestation(d *Document, mdl *model.Model) []Finding {
+	if d.Spec.Class != artifact.ClassFeature || d.Spec.Frozen != nil {
+		return nil
+	}
+	var findings []Finding
+	for _, ac := range d.Spec.AcceptanceCriteria {
+		if hasAttestationKind(ac.Evidence) {
+			continue
+		}
+		// Object-anchored (same shape as the empty-evidence-kind check
+		// above): this finding names exactly the AC card missing the
+		// outcome floor's minimum satisfying kind. The leading class word
+		// is display and routes through the model (L-M13a(6): best-effort
+		// in.Model, nil-safe to the bare id — the spike-stub sibling's
+		// exact pattern); the "§The feature fold" spec-section title and
+		// the ac id stay verbatim (a citation and an identity id).
+		findings = append(findings, Finding{Rule: "VL-006", Path: d.RelPath, Message: fmt.Sprintf("%s acceptance criterion %s does not declare attestation among its expected evidence kinds (03 §The feature fold: the outcome floor requires attestation at minimum)", mdl.DisplayClass("feature"), ac.ID), Locus: ObjectLocus(ac.ID)})
+	}
+	return findings
+}
+
+// hasAttestationKind reports whether kinds declares the attestation kind
+// — the outcome floor's minimum satisfying evidence kind (03 §The feature
+// fold).
+func hasAttestationKind(kinds []artifact.EvidenceKind) bool {
+	for _, k := range kinds {
+		if k == artifact.EvidenceAttestation {
+			return true
+		}
+	}
+	return false
 }
 
 // isNewClassSpec is this phase's judgment call settling R4-I-15's "exact

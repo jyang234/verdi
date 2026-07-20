@@ -1,14 +1,14 @@
 ---
-id: {{.Ref}}
+id: {{safe .Ref}}
 kind: spec
 title: {{printf "%q" .Title}}
-owners: {{.Owners}}
+owners: {{safe .Owners}}
 class: story
 status: draft
-story: {{.StoryRef}}
+story: {{safe .StoryRef}}
 {{if .Spike}}spike: true
-{{end}}problem: { text: "{{.Problem}}", anchor: problem }
-outcome: { text: "{{.Outcome}}", anchor: outcome }
+{{end}}problem: { text: {{printf "%q" .Problem}}, anchor: problem }
+outcome: { text: {{printf "%q" .Outcome}}, anchor: outcome }
 {{if not .Spike}}acceptance_criteria:
   - { id: ac-1, text: "TODO: replace with real acceptance criteria before accept", evidence: [static], anchor: ac-1 }
 {{end}}links:

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // TestRender_Happy proves the basic substitution shapes Render's callers
@@ -22,6 +24,87 @@ story: {{.StoryRef}}{{end}}
 	want := "title: \"A Title\"\nref: spec/x\nstory: jira:LOAN-1\n"
 	if got != want {
 		t.Fatalf("Render = %q, want %q", got, want)
+	}
+}
+
+// TestSafeScalar is K4's static register: safeScalar's own table, proving
+// the guard passes every current constrained-input SHAPE through bare
+// (the byte-parity floor TestByteForByte pins end to end) while quoting
+// exactly the three smuggle-risk shapes named in its own doc comment.
+func TestSafeScalar(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"bare kebab ref", "spec/foo-bar", "spec/foo-bar"},
+		{"owners flow-sequence literal", "[unassigned]", "[unassigned]"},
+		{"owners flow-sequence, multiple", "[platform-team, qa-lead]", "[platform-team, qa-lead]"},
+		{"scheme-prefixed story ref", "jira:LOAN-1482", "jira:LOAN-1482"},
+		{"todo placeholder story ref", "todo:REPLACE-ME", "todo:REPLACE-ME"},
+		{"embedded newline quoted", "a\nb", `"a\nb"`},
+		{"embedded double quote quoted", `a"b`, `"a\"b"`},
+		{"colon-space quoted", "TODO: replace", `"TODO: replace"`},
+		{"colon with no following space stays bare", "jira:LOAN-1", "jira:LOAN-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := safeScalar(tc.in); got != tc.want {
+				t.Errorf("safeScalar(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSafeScalar_OwnersSmugglePathClosed is K4's load-bearing security
+// proof, reproducing the exact trap the round's final review flagged as
+// latent: with owners: rendered BARE (the pre-K4 shape), a caller-supplied
+// Owners value carrying an embedded newline followed by a legitimate-
+// looking key ("[unassigned]\nspike: true") renders as TWO lines —
+// `owners: [unassigned]` then a SECOND, illegitimate top-level `spike:
+// true` frontmatter key smuggled in underneath it, silently turning a
+// plain story scaffold into a spike one. Post-K4, safeScalar quotes the
+// whole value (it contains a newline), so the rendered YAML holds ONE
+// scalar spanning what would-be two lines — which is no longer even
+// decodable as the owners: field's own declared type ([]string), so the
+// smuggle attempt fails closed at decode rather than silently annexing a
+// second key. No real caller can reach this today (Owners is always the
+// fixed "[unassigned]" literal, designscaffold.go's defaultOwnersLiteral)
+// — this exercises the mechanism directly via Render, the way a future
+// caller passing a dynamic Owners value would.
+func TestSafeScalar_OwnersSmugglePathClosed(t *testing.T) {
+	tmpl := mustCanonicalTemplate(t, "story.md")
+	data := ScaffoldData{
+		Ref:      "spec/x",
+		Title:    "X",
+		Owners:   "[unassigned]\nspike: true",
+		StoryRef: "jira:LOAN-1",
+		Links:    []StoryLink{{Type: artifact.LinkImplements, Ref: "spec/y#ac-1"}},
+	}
+	content, err := Render(tmpl, data)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// The smuggle attempt must be VISIBLE as a single quoted scalar, never
+	// as a bare second line that a naive reader (or a lenient YAML
+	// decoder) would read as its own key.
+	if strings.Contains(content, "owners: [unassigned]\nspike: true\n") {
+		t.Fatalf("owners: rendered the smuggled spike: true as a bare, separate line — the newline-smuggle path is NOT closed:\n%s", content)
+	}
+	if !strings.Contains(content, `owners: "[unassigned]\nspike: true"`) {
+		t.Fatalf("owners: did not quote the newline-carrying value as expected:\n%s", content)
+	}
+
+	// And the smuggle attempt must fail CLOSED at decode (owners: no
+	// longer decodes as []string), never silently succeed with Spike
+	// smuggled in as true.
+	fm, _, err := artifact.SplitFrontmatter([]byte(content))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	if _, err := artifact.DecodeSpec(fm); err == nil {
+		t.Fatal("DecodeSpec succeeded on a smuggled owners: value — want a strict-decode failure (fail closed, never a silently-annexed spike: true)")
 	}
 }
 
