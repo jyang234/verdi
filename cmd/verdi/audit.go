@@ -145,13 +145,29 @@ func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThre
 // two status-vs-git-reality patterns, AC-2's close/<name> classification,
 // and AC-3's read-only merged-branch/worktree survey. Returns 2 (and
 // leaves *flagged untouched) on an internal/residue.Scan operational
-// error; otherwise always returns 0, setting *flagged per dc-3 (only
-// pattern (a) and a ritual-incomplete classification contribute).
+// error; otherwise always returns 0.
+//
+// The exit-code verdict is routed through res.Flagged()
+// (internal/residue.Result.Flagged) — the single predicate dc-3 already
+// defines (only an AC-1 pattern (a) finding or an AC-2 ritual-incomplete
+// classification flags; pattern (b), AC-3's survey, and an unresolved
+// default branch never do) — rather than recomputed inline across the
+// render loops below, which are then pure disclosure. This mirrors
+// internal/decisionsweep's own routing of its spec-stale flag through one
+// shared computation (audit.go: 05 §Lenses' anti-hairball law, "computed
+// the same way — no separate logic path"), so the audit's exit code can
+// never drift from the predicate internal/residue's own tests cover.
 func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string, mdl *model.Model, stdout, stderr io.Writer, flagged *bool) int {
 	res, err := residue.Scan(ctx, root, defaultBranchRef)
 	if err != nil {
 		fmt.Fprintln(stderr, "audit:", err)
 		return 2
+	}
+	// Route the verdict through the one predicate dc-3 defines (res.Flagged),
+	// not a second inline copy: safe before the assert-nothing early return
+	// because Flagged() is false on the unresolved-default-branch zero Result.
+	if res.Flagged() {
+		*flagged = true
 	}
 
 	fmt.Fprintln(stdout, "== Closure hygiene audit ==")
@@ -170,7 +186,6 @@ func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string
 		// wire value as prose.
 		fmt.Fprintf(stdout, "STRANDED: spec/%s (close/%s, tip %s) — status: %s but its close branch already moved it to archive/, unmerged\n",
 			pa.SpecName, pa.SpecName, pa.Tip, mdl.DisplayState(pa.Class, "accepted-pending-build"))
-		*flagged = true
 	}
 	for _, pb := range res.PatternB {
 		// Pattern (b) only ever fires for class: feature (dc-1's own static
@@ -181,9 +196,6 @@ func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string
 	}
 	for _, cb := range res.CloseBranches {
 		fmt.Fprintf(stdout, "%s: %s (tip %s)\n", cb.Branch, cb.Class, cb.Tip)
-		if cb.Class == residue.RitualIncomplete {
-			*flagged = true
-		}
 	}
 
 	if len(res.MergedBranches) == 0 {
