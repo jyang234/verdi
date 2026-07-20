@@ -33,6 +33,18 @@ func worktreesRoot(root string) string {
 	return filepath.Join(root, ".verdi", "data", "worktrees")
 }
 
+// WorktreesRoot is worktreesRoot exported read-only (spec/closure-hygiene
+// dc-4, a small additive change): the managed-worktree data-zone root under
+// root, for a consumer that must classify a worktree as managed/unmanaged
+// against THIS package's own definition of "managed" rather than a second
+// hardcoded .verdi/data/worktrees/ literal (CLAUDE.md: anything used by two
+// or more packages lives in a shared internal/ package). Pure — it computes
+// the path and touches nothing; mirrors WorktreePath's own exported-wrapper
+// shape immediately below.
+func WorktreesRoot(root string) string {
+	return worktreesRoot(root)
+}
+
 // worktreePath returns the deterministic path for branch's managed
 // worktree under root.
 func worktreePath(root, branch string) string {
