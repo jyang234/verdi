@@ -1032,6 +1032,9 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   margin: 0;
   flex: 1 1 auto;
   overflow-wrap: anywhere;
+  /* a sticky keeps its author's line breaks (Shift+Enter writes one):
+     the stored newline renders as a break, never a collapsed space */
+  white-space: pre-wrap;
   font-family: var(--hand);
   font-size: 0.98rem;
   line-height: 1.35;

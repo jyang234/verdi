@@ -147,7 +147,7 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		case "object-trash":
 			err = s.actionObjectTrash(name, proj, req)
 		case "annotation-delete":
-			err = s.actionAnnotationDelete(proj, req)
+			err = s.actionAnnotationDelete(name, proj, req)
 		case "edge-delete":
 			err = s.actionEdgeDelete(name, proj, req)
 		case "edge-retype":
@@ -155,7 +155,7 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		case "position":
 			err = s.actionPosition(name, proj, req)
 		case "sticky-position":
-			err = s.actionStickyPosition(proj, req)
+			err = s.actionStickyPosition(name, proj, req)
 		case "git-commit":
 			err = s.actionGitCommit(ctx, req)
 		case "git-switch":
@@ -504,7 +504,7 @@ func (s *boardSpecServer) actionStickyGraduate(name string, proj *BoardProjectio
 		}
 	}
 	if sticky == nil {
-		return fmt.Errorf("no sticky %q on this board", req.ID)
+		return fmt.Errorf("no sticky %q on the board for spec/%s — it may have been deleted or already graduated since this wall was last refreshed", req.ID, name)
 	}
 
 	var existing []string
@@ -551,7 +551,7 @@ func (s *boardSpecServer) actionStubGraduate(name string, proj *BoardProjection,
 		}
 	}
 	if sticky == nil {
-		return fmt.Errorf("no sticky %q on this board", req.ID)
+		return fmt.Errorf("no sticky %q on the board for spec/%s — it may have been deleted or already graduated since this wall was last refreshed", req.ID, name)
 	}
 
 	var spike bool
@@ -855,7 +855,11 @@ func (s *boardSpecServer) actionRelatesGraduate(name string, proj *BoardProjecti
 // dies from the mutable stream (05 §Workbench: they graduate or they
 // die; owner UAT round 6, item 3). Only records this board actually
 // presents are deletable, and the spec document is never touched.
-func (s *boardSpecServer) actionAnnotationDelete(proj *BoardProjection, req boardAPIRequest) error {
+// Refusals name WHICH annotation and WHERE it was looked for (the board
+// and the stream directory) — the owner-reported "annotations were
+// missing, unclear where" popups were these messages firing on stale
+// double-deletes without naming their board.
+func (s *boardSpecServer) actionAnnotationDelete(name string, proj *BoardProjection, req boardAPIRequest) error {
 	if req.ID == "" {
 		return fmt.Errorf("annotation-delete requires id")
 	}
@@ -875,14 +879,15 @@ func (s *boardSpecServer) actionAnnotationDelete(proj *BoardProjection, req boar
 		}
 	}
 	if !onBoard {
-		return fmt.Errorf("no annotation %q on this board", req.ID)
+		return fmt.Errorf("no annotation %q on the board for spec/%s — it may already have been deleted or graduated since this wall was last refreshed", req.ID, name)
 	}
-	n, err := boardio.DeleteAnnotations(boardio.AnnotationsDir(s.root), []string{req.ID})
+	dir := boardio.AnnotationsDir(s.root)
+	n, err := boardio.DeleteAnnotations(dir, []string{req.ID})
 	if err != nil {
 		return err
 	}
 	if n == 0 {
-		return fmt.Errorf("annotation %q was not found in the mutable stream", req.ID)
+		return fmt.Errorf("annotation %q was not found in any mutable stream under %s", req.ID, dir)
 	}
 	return nil
 }
@@ -1010,8 +1015,9 @@ func (s *boardSpecServer) actionPosition(name string, proj *BoardProjection, req
 
 // actionStickyPosition: a sticky (or pinned-reference) drag landed — the
 // position lives inside the annotation record (02 §Record schemas:
-// board {story, x, y}); pins drag like stickies.
-func (s *boardSpecServer) actionStickyPosition(proj *BoardProjection, req boardAPIRequest) error {
+// board {story, x, y}); pins drag like stickies. The refusal names the
+// annotation AND its board (errors name what they're about).
+func (s *boardSpecServer) actionStickyPosition(name string, proj *BoardProjection, req boardAPIRequest) error {
 	for _, st := range proj.Stickies {
 		if st.ID == req.ID {
 			return boardio.RepositionSticky(boardio.AnnotationsDir(s.root), req.ID, req.X, req.Y)
@@ -1022,7 +1028,7 @@ func (s *boardSpecServer) actionStickyPosition(proj *BoardProjection, req boardA
 			return boardio.RepositionSticky(boardio.AnnotationsDir(s.root), req.ID, req.X, req.Y)
 		}
 	}
-	return fmt.Errorf("no sticky %q on this board", req.ID)
+	return fmt.Errorf("no sticky or pin %q on the board for spec/%s — it may have been deleted or graduated while the drag was in flight", req.ID, name)
 }
 
 // actionGitCommit: the board-owned commit/push (05 §Workbench: "message

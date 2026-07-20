@@ -79,7 +79,10 @@ func boardHandler(root string, mdl *model.Model) http.HandlerFunc {
 			clientState.Yarn = []artifact.Yarn{}
 		}
 		for _, s := range board.Stickies {
-			sv := stickyView{ID: s.ID, X: s.X, Y: s.Y, Body: "(annotation not found)", Type: "unknown", Status: "unknown"}
+			// The placeholder names WHICH annotation the board file cites
+			// (errors name what they're about): a bare "(annotation not
+			// found)" left the reader no thread to pull.
+			sv := stickyView{ID: s.ID, X: s.X, Y: s.Y, Body: "(annotation " + s.ID + " not found in this store's mutable streams)", Type: "unknown", Status: "unknown"}
 			if a, ok := byID[s.ID]; ok {
 				sv.Body = a.Body
 				sv.Type = string(a.Type)
@@ -258,8 +261,8 @@ func boardPageBody(state boardClientState, words classWords) string {
 // Only the sticky-creatable annotation types (internal/artifact) — the
 // four generic ones plus the scoping canvas's story/spike proto-stickies
 // (round 5.4) — get a paper color of their own; anything else, including
-// the "(annotation not found)" placeholder's "unknown", falls back to
-// the neutral note.
+// the "(annotation <id> not found …)" placeholder's "unknown", falls
+// back to the neutral note.
 func stickyTypeClass(t string) string {
 	switch t {
 	case "comment", "question", "decision-needed", "agent-task", "story", "spike":

@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,7 +21,12 @@ func TestVL006_NoEvidenceKind(t *testing.T) {
 
 // vl006NewClassMissingAllSpec is a new-class feature spec (it carries a
 // round-four constraints: block, so isNewClassSpec reports it new) with no
-// problem/outcome attributes and an AC with no anchor at all.
+// problem/outcome attributes and an AC with no anchor at all. ac-1 declares
+// attestation (L-M14 remedy 1's own new requirement) precisely so this
+// fixture stays a clean, single-concern proof of the requiredness family
+// alone — it is status: draft (unfrozen), so without attestation it would
+// ALSO trip checkFeatureACAttestation, a 4th, orthogonal finding this test
+// does not exist to prove.
 const vl006NewClassMissingAllSpec = `---
 id: spec/vl-006-new-class-missing
 kind: spec
@@ -29,7 +35,7 @@ title: "VL-006: new-class feature missing problem/outcome/anchor"
 status: draft
 owners: [platform-team]
 acceptance_criteria:
-  - { id: ac-1, text: "placeholder", evidence: [static] }
+  - { id: ac-1, text: "placeholder", evidence: [static, attestation] }
 constraints:
   - { id: co-1, text: "placeholder constraint", anchor: "#co-1" }
 ---
@@ -127,7 +133,9 @@ Placeholder outcome.
 // VL-006, same syntactic-stub-surface home the house steer names) ---
 
 // vl006StubSpecTmpl is a feature spec declaring ac-1 and ac-2 with one
-// stub whose acceptance_criteria list is the %s insertion point.
+// stub whose acceptance_criteria list is the %s insertion point. Both ACs
+// declare attestation (L-M14 remedy 1) so this status: draft fixture stays
+// a clean, single-concern proof of the stub-AC-integrity check alone.
 const vl006StubSpecTmpl = `---
 id: spec/vl-006-stub
 kind: spec
@@ -138,8 +146,8 @@ owners: [platform-team]
 problem: { text: "placeholder problem", anchor: "#problem" }
 outcome: { text: "placeholder outcome", anchor: "#outcome" }
 acceptance_criteria:
-  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
-  - { id: ac-2, text: "placeholder", evidence: [static], anchor: "#ac-2" }
+  - { id: ac-1, text: "placeholder", evidence: [static, attestation], anchor: "#ac-1" }
+  - { id: ac-2, text: "placeholder", evidence: [static, attestation], anchor: "#ac-2" }
 stubs:
   - { slug: badge-computes, acceptance_criteria: [%s] }
 ---
@@ -209,7 +217,9 @@ func TestVL006_StubACRefs(t *testing.T) {
 // one spike stub whose resolves list is the %s insertion point — the
 // DC-4 sibling check to checkStubACs, folded into the same VL-006 rule
 // (vl006.go's doc comment: "the rule that already validates stub
-// acceptance_criteria").
+// acceptance_criteria"). ac-1 declares attestation (L-M14 remedy 1) so
+// this status: draft fixture stays a clean, single-concern proof of the
+// spike-stub-resolves-integrity check alone.
 const vl006SpikeStubSpecTmpl = `---
 id: spec/vl-006-spike-stub
 kind: spec
@@ -220,7 +230,7 @@ owners: [platform-team]
 problem: { text: "placeholder problem", anchor: "#problem" }
 outcome: { text: "placeholder outcome", anchor: "#outcome" }
 acceptance_criteria:
-  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+  - { id: ac-1, text: "placeholder", evidence: [static, attestation], anchor: "#ac-1" }
 open_questions:
   - { id: oq-1, text: "placeholder", anchor: "#oq-1" }
   - { id: oq-2, text: "placeholder", anchor: "#oq-2" }
@@ -354,7 +364,9 @@ stubs:
 
 // TestVL006_NewClassSpec_FullyPopulated_Clean proves the positive
 // complement: a new-class spec with problem/outcome and every object
-// anchor present and resolving lints clean.
+// anchor present and resolving lints clean. ac-1 declares attestation
+// (L-M14 remedy 1) — required for a status: draft feature spec's own AC
+// to lint clean now that checkFeatureACAttestation exists.
 func TestVL006_NewClassSpec_FullyPopulated_Clean(t *testing.T) {
 	const fullyPopulated = `---
 id: spec/vl-006-new-class-clean
@@ -366,7 +378,7 @@ owners: [platform-team]
 problem: { text: "placeholder problem", anchor: "#problem" }
 outcome: { text: "placeholder outcome", anchor: "#outcome" }
 acceptance_criteria:
-  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+  - { id: ac-1, text: "placeholder", evidence: [static, attestation], anchor: "#ac-1" }
 ---
 # VL-006: new-class feature, fully populated
 
@@ -390,4 +402,186 @@ Placeholder.
 			t.Fatalf("VL-006 fired on a fully-populated new-class spec: %s", f.String())
 		}
 	}
+}
+
+// --- L-M14 remedy 1: feature-AC attestation floor (03 §Declarations and
+// binding / §The feature fold's outcome floor) ---
+
+// vl006FeatureACSpecTmpl renders a draft (unfrozen), new-class feature spec
+// with one AC whose evidence list is the %s insertion point.
+const vl006FeatureACSpecTmpl = `---
+id: spec/vl-006-feature-ac
+kind: spec
+class: feature
+title: "VL-006: feature AC attestation floor"
+status: draft
+owners: [platform-team]
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [%s], anchor: "#ac-1" }
+---
+# VL-006: feature AC attestation floor
+
+## Problem
+
+Placeholder problem.
+
+## Outcome
+
+Placeholder outcome.
+
+## AC-1
+
+Placeholder.
+`
+
+// attestationFloorFindings filters findings down to checkFeatureACAttestation's
+// own message shape, so a test can isolate it from any other VL-006 finding
+// the same fixture might also carry.
+func attestationFloorFindings(findings []Finding) []Finding {
+	var out []Finding
+	for _, f := range findings {
+		if f.Rule == "VL-006" && strings.Contains(f.Message, "does not declare attestation") {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// TestVL006_FeatureACAttestation is L-M14 remedy 1's static register: a
+// draft, new-class feature AC missing attestation among its declared
+// evidence kinds fires VL-006, naming the AC and the outcome-floor
+// rationale (03 §The feature fold); declaring attestation — alone or
+// alongside another kind — clears it.
+func TestVL006_FeatureACAttestation(t *testing.T) {
+	cases := []struct {
+		name     string
+		evidence string
+		wantFire bool
+	}{
+		{"missing attestation entirely (static only)", "static", true},
+		{"missing attestation entirely (behavioral only)", "behavioral", true},
+		{"attestation alone", "attestation", false},
+		{"attestation alongside another kind", "static, attestation", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := fmt.Sprintf(vl006FeatureACSpecTmpl, tc.evidence)
+			dir := adHocOverlayDir(t, ".verdi/specs/active/vl-006-feature-ac/spec.md", spec)
+			repo := buildLintRepo(t, dir)
+			findings := runLint(t, repo.Dir, Context{}, Options{})
+			got := attestationFloorFindings(findings)
+			if !tc.wantFire {
+				if len(got) != 0 {
+					t.Fatalf("attestation-floor check fired unexpectedly: %s", findingsString(got))
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("got %d attestation-floor findings, want 1:\n%s", len(got), findingsString(got))
+			}
+			if !strings.Contains(got[0].Message, "ac-1") {
+				t.Errorf("finding %q does not name ac-1", got[0].Message)
+			}
+		})
+	}
+}
+
+// TestVL006_FeatureACAttestation_StoryClassNeverRequired proves the check
+// is feature-only: a story spec's AC carries no outcome-floor concept
+// (03's text is explicit the floor is a feature-level addition), so a
+// story AC declaring only static evidence never trips it — the story-class
+// row of TestVL006_StorySpec_AlwaysNewClass already proves that fixture's
+// OWN finding is the missing-anchor one, not an attestation one; this test
+// names the attestation-floor exemption directly.
+func TestVL006_FeatureACAttestation_StoryClassNeverRequired(t *testing.T) {
+	const storySpec = `---
+id: spec/vl-006-story-ac-no-attestation
+kind: spec
+class: story
+title: "VL-006: story AC, no attestation required"
+status: draft
+owners: [platform-team]
+story: jira:VL-006-1
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+links:
+  - { type: implements, ref: "spec/stale-decline#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+---
+# VL-006: story AC, no attestation required
+`
+	dir := adHocOverlayDir(t, ".verdi/specs/active/vl-006-story-ac-no-attestation/spec.md", storySpec)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	if got := attestationFloorFindings(findings); len(got) != 0 {
+		t.Fatalf("attestation-floor check fired on a class: story AC (feature-only, 03 §The feature fold): %s", findingsString(got))
+	}
+}
+
+// vl006FeatureACFrozenSpecTmpl renders an ALREADY-ACCEPTED (frozen: set),
+// new-class feature spec whose one AC does not declare attestation — the
+// %s insertion point is the status (accepted-pending-build or closed, both
+// carry a frozen: stamp). The commit cited is stale-decline's own real,
+// reachable frozen commit (examples/showcase, also used elsewhere in this
+// package's tests) so VL-009's reachability check stays clean and never
+// muddies this test's own onlyRule/attestationFloorFindings assertions.
+const vl006FeatureACFrozenSpecTmpl = `---
+id: spec/vl-006-feature-ac-frozen
+kind: spec
+class: feature
+title: "VL-006: already-accepted feature AC, no attestation"
+status: %s
+owners: [platform-team]
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
+---
+# VL-006: already-accepted feature AC, no attestation
+
+## Problem
+
+Placeholder problem.
+
+## Outcome
+
+Placeholder outcome.
+
+## AC-1
+
+Placeholder.
+`
+
+// TestVL006_FeatureACAttestation_GrandfatheredByAcceptance is L-M14 remedy
+// 1's grandfathering proof, BROADER than archive location alone
+// (vl006.go's checkFeatureACAttestation doc comment): an already-accepted
+// (frozen: set) feature AC missing attestation never fires, whether it is
+// still active (accepted-pending-build) or already archived (closed) — the
+// same "amending evidence kinds on a frozen spec requires full
+// supersession" reasoning L-M14's own operating-model adjudication used,
+// applied generally rather than re-litigated per spec.
+func TestVL006_FeatureACAttestation_GrandfatheredByAcceptance(t *testing.T) {
+	t.Run("active, accepted-pending-build", func(t *testing.T) {
+		spec := fmt.Sprintf(vl006FeatureACFrozenSpecTmpl, "accepted-pending-build")
+		dir := adHocOverlayDir(t, ".verdi/specs/active/vl-006-feature-ac-frozen/spec.md", spec)
+		repo := buildLintRepo(t, dir)
+		findings := runLint(t, repo.Dir, Context{}, Options{})
+		if got := attestationFloorFindings(findings); len(got) != 0 {
+			t.Fatalf("attestation-floor check fired on an already-accepted, still-active feature spec: %s", findingsString(got))
+		}
+	})
+
+	t.Run("archived, closed", func(t *testing.T) {
+		spec := fmt.Sprintf(vl006FeatureACFrozenSpecTmpl, "closed")
+		dir := adHocOverlayDir(t, ".verdi/specs/archive/vl-006-feature-ac-frozen/spec.md", spec)
+		repo := buildLintRepo(t, dir)
+		findings := runLint(t, repo.Dir, Context{}, Options{})
+		if got := attestationFloorFindings(findings); len(got) != 0 {
+			t.Fatalf("attestation-floor check fired on an archived feature spec (the literal spec/operating-model case): %s", findingsString(got))
+		}
+	})
 }

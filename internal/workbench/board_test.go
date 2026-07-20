@@ -86,6 +86,30 @@ func TestBoardHandler_Negative(t *testing.T) {
 		}
 	})
 
+	t.Run("a sticky citing a missing annotation names it", func(t *testing.T) {
+		// The placeholder must carry the id (errors name what they're
+		// about; owner bug 2026-07-19: "annotations were missing,
+		// unclear where") — never a bare "(annotation not found)".
+		payload := `{"pins":[],"stickies":[{"id":"a-01J8Z0K9ZZZZZZZZZZZZZZZZZZ","x":10,"y":20}],"yarn":[]}`
+		req := httptest.NewRequest(http.MethodPost, "/board/GHOST-1/autosave", strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("autosave = %d\n%s", rec.Code, rec.Body.String())
+		}
+
+		req = httptest.NewRequest(http.MethodGet, "/board/GHOST-1", nil)
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("board page = %d", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "annotation a-01J8Z0K9ZZZZZZZZZZZZZZZZZZ not found") {
+			t.Errorf("placeholder does not name the missing annotation: body lacks the id")
+		}
+	})
+
 	t.Run("wrong method", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/board/STORY-1482", nil)
 		rec := httptest.NewRecorder()

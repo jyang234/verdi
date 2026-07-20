@@ -247,6 +247,32 @@ func buildCloseFeatureRepo(t *testing.T, opts closeFeatureFixtureOpts) *fixtureg
 	})
 }
 
+// writeCloseFeatureGateReport writes deviation-report.md directly into the
+// close-feature-fixture spec's own directory (X-13/X-16/X-17's
+// closure-gate condition 6 needs a living, fully-dispositioned,
+// head-covering report before close will freeze rather than refuse) —
+// mirrors close_test.go's own writeCloseGateReport for this file's
+// differently-named fixture family.
+func writeCloseFeatureGateReport(t *testing.T, root, covers, findingsYAML string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", "close-feature-fixture")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	content := fmt.Sprintf(`---
+schema: verdi.deviation/v1
+covers: %s
+findings:
+%s
+digest: sha256:%s
+---
+# Alignment report
+`, covers, findingsYAML, strings.Repeat("0", 64))
+	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("writing deviation-report.md: %v", err)
+	}
+}
+
 // featureFixtureEvidenceJSON renders one verdi.evidence/v1 record bound to
 // ac, with the given kind/verdict, authoritative (source: ci) at commit —
 // mirrors close_test.go's poisonRecord in shape. Named distinctly from
@@ -332,6 +358,10 @@ func TestRunCloseFeature_EndToEnd(t *testing.T) {
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	// The corrected closure ritual (X-16): align (a living report covering
+	// head) -> disposition (working-tree edit) -> close (X-13/X-16/X-17's
+	// closure-gate condition 6).
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 	ctx := context.Background()
 
 	fp := fake.New()
@@ -345,8 +375,9 @@ func TestRunCloseFeature_EndToEnd(t *testing.T) {
 	}
 
 	// Every condition PASSED (feature-gate rendering, distinct from the
-	// story gate's "closure:" label).
-	for _, cond := range []string{"1.", "2.", "3.", "4.", "5."} {
+	// story gate's "closure:" label) — including 6. (X-13/X-16/X-17's
+	// disposition-completeness condition).
+	for _, cond := range []string{"1.", "2.", "3.", "4.", "5.", "6."} {
 		if !strings.Contains(stdout.String(), "[PASS] closure(feature): "+cond) {
 			t.Fatalf("stdout missing PASS for condition %s:\n%s", cond, stdout.String())
 		}
@@ -465,6 +496,7 @@ func TestRunCloseFeature_WithStoryRef_PublishesRollup(t *testing.T) {
 	opts.FeatureStory = "jira:FIXTURE-EPIC-1"
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 	ctx := context.Background()
 
 	fp := fake.New()
@@ -517,6 +549,7 @@ func TestRunCloseFeature_BoardJSONGrandfathered_SurvivesIfPresent(t *testing.T) 
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
 	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 	ctx := context.Background()
 
 	const boardJSON = `{"schema":"verdi.board/v1","pins":[],"stickies":[],"yarn":[]}`
@@ -538,6 +571,68 @@ func TestRunCloseFeature_BoardJSONGrandfathered_SurvivesIfPresent(t *testing.T) 
 	}
 	if string(archivedBoard) != boardJSON {
 		t.Fatalf("archived board.json = %q, want byte-identical to the pre-close content %q", archivedBoard, boardJSON)
+	}
+}
+
+// TestRunCloseFeature_RefusesUndispositionedFindings is X-17's own literal
+// red-first proof at the feature scope: X-17's exact chronicled failure
+// mode is "close's internal freeze-align had CREATED the feature's first
+// deviation report (4 findings) and frozen it undispositioned, because no
+// report existed pre-close" — this fixture (fully eligible, otherwise a
+// clean happy path) has NO deviation-report.md at all before close runs,
+// which is precisely what let #162 merge undispositioned before this fix.
+// After the fix, the SAME fixture refuses (exit 1), names the ritual, and
+// archives nothing.
+func TestRunCloseFeature_RefusesUndispositionedFindings(t *testing.T) {
+	cases := []struct {
+		name       string
+		setup      func(t *testing.T, root, head string) // "" setup = no report at all (X-17)
+		wantSubstr []string
+	}{
+		{
+			name:       "no report at all (X-17's own literal scenario: close's own align call created and froze the first report)",
+			setup:      func(t *testing.T, root, head string) {},
+			wantSubstr: []string{"no deviation-report.md found at", "the closure ritual is align"},
+		},
+		{
+			name: "a living report covering head with an undispositioned finding",
+			setup: func(t *testing.T, root, head string) {
+				writeCloseFeatureGateReport(t, root, head, undispositionedFindingYAML)
+			},
+			wantSubstr: []string{"undispositioned finding(s) [f-1]", "the closure ritual is align"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := defaultCloseFeatureFixtureOpts()
+			repo := buildCloseFeatureRepo(t, opts)
+			seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+			tc.setup(t, repo.Dir, repo.Head)
+
+			fp := fake.New()
+			deps := closeFeatureDeps(fp)
+			var stdout, stderr bytes.Buffer
+			got := runClose(context.Background(), repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+			if got != 1 {
+				t.Fatalf("runClose(feature, undispositioned) = %d, want 1 (verdict, not archived); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+			}
+			for _, want := range tc.wantSubstr {
+				if !contains(stdout.String(), want) {
+					t.Fatalf("stdout = %q, want it to contain %q", stdout.String(), want)
+				}
+			}
+
+			// The X-17 proof itself: nothing archived.
+			if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "close-feature-fixture", "spec.md")); err != nil {
+				t.Fatalf("spec.md should remain in specs/active/ after a refused close: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "close-feature-fixture")); !os.IsNotExist(err) {
+				t.Fatal("specs/archive/close-feature-fixture should NOT exist — the undispositioned/missing report must never be silently frozen and archived (X-17)")
+			}
+			if branch := gitCurrentBranch(t, repo.Dir); branch != "main" {
+				t.Fatalf("current branch = %q after a refused close, want main (no closure branch cut)", branch)
+			}
+		})
 	}
 }
 
