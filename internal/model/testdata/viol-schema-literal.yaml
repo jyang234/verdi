@@ -1,0 +1,12 @@
+# Violates: schema must be exactly "verdi.model/v1" (Model.Validate,
+# validate.go's own first check) — "verdi.model/v2" pins the rejection
+# message for a schema literal a future version bump might one day
+# legitimize, but does not today (E2). Otherwise a minimal, well-formed
+# shell so this trips ONLY the schema check, which runs before anything
+# else in Validate.
+schema: verdi.model/v2
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle: {}

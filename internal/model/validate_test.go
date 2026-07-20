@@ -15,6 +15,7 @@ func TestDecodeModel_KernelViolations(t *testing.T) {
 		file       string
 		wantSubstr string
 	}{
+		{"viol-schema-literal.yaml", `model: schema "verdi.model/v2", want "verdi.model/v1"`},
 		{"viol-scheme-unknown.yaml", `obligation scheme "vibes" is not one of the kernel schemes`},
 		{"viol-kind-unknown.yaml", `obligation kind "bogus-kind" is not one of the kernel kinds`},
 		{"viol-obligations-missing.yaml", "obligations list is absent"},
