@@ -889,6 +889,27 @@ bindings:
       - "spec/finding-identity#ac-2"
       - "spec/finding-identity#ac-3"
       - "spec/finding-identity#ac-4"
+      # spec/evidence-resilience (spec/ritual-integrity#ac-3's
+      # implementing story, plan Task 4). DESIGN-TIME FORWARD
+      # DECLARATION, not built yet. Not yet built: ac-1 <- a fixturegit
+      # case beside cmd/verdi/sync_ancestor_test.go proving sync
+      # quarantines (keeps + annotates the reason on) a record
+      # referencing a commit only a since-deleted branch ever held, and
+      # exits 0; ac-2 <- a fixturegit closure case reproducing X-15's
+      # exact shape (an unrelated story's deleted branch poisoning the
+      # story being closed), proving the affected AC reads per-record
+      # disclosed-unproven and the gate never exits operationally on
+      # that account alone; ac-3 <- internal/lint/vl009_test.go's
+      # X-11b fixture (a locally-dangling, unreachable frozen.commit)
+      # reding under the tightened reachable-from-HEAD check, with a
+      # legitimate reachable commit unaffected — plan Task 4 Step 1
+      # throughout. Each leg lands under make verify once this story
+      # merges; this entry is updated to name the real test functions at
+      # that point. No attestation leg is bound here — stories carry no
+      # attestation floor.
+      - "spec/evidence-resilience#ac-1"
+      - "spec/evidence-resilience#ac-2"
+      - "spec/evidence-resilience#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
