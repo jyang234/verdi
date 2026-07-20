@@ -15,7 +15,7 @@ acceptance_criteria:
   - { id: ac-4, text: "AC-1 through AC-3's checks are proven to actually fire, not merely present: a committed fixture instruction file carries both a `verdi <verb>` reference naming a verb dispatch.go does not recognize and a retired-ritual phrase from AC-3's tripwire set with no disclosure, and driving the real check against that fixture fails with output naming the exact fixture file path and the exact offending verb or phrase — never a bare boolean, and never a `go test -run` pattern that would exit 0 by matching nothing if the underlying test function were renamed or deleted. A second, clean fixture — real verbs, and a `board commit` mention paired with a retirement disclosure — passes with zero findings, proving the checks do not also false-positive on legitimate content.", evidence: [behavioral], anchor: ac-4 }
   - { id: ac-5, text: "Run against this repo's own `.claude/skills/*/SKILL.md` and repo-root `CLAUDE.md` — not a synthetic fixture — AC-1 through AC-3's checks together report zero findings, and `go test ./internal/specalign/...` (equivalently `make spec-align`, and therefore `make verify`) exits clean. Because `.claude/skills/commit-to-design/SKILL.md` teaches `verdi board commit` as the current ritual with no retirement disclosure as authored today, this AC cannot be satisfied by this story's design-time authoring alone: it forces the build phase to apply this story's DC-4 disposition (retire the skill), or the rewrite-to-disclose alternative DC-3 deliberately leaves achievable, before `make verify` can go green on this repo's own tree again.", evidence: [static, behavioral], anchor: ac-5 }
 links:
-  - { type: implements, ref: "spec/todo-replace-feature-name#ac-1" }
+  - { type: implements, ref: "spec/assurance-integrity#ac-1" }
 decisions:
   - { id: dc-1, text: "Verb-reference extraction (AC-2) targets the literal `verdi <verb>` invocation shape inside a backtick-delimited span only, never a bare backticked verb name with no `verdi ` prefix. Investigating this repo's two real instruction files found they use different prose shapes: SKILL.md's five verb mentions are all the invocation shape (`verdi board commit ...`, `verdi lint`); CLAUDE.md's own CLI-verbs sentence instead names bare backticked verb words (gate, board, audit, close, gc, waivers, verify-artifact) with no `verdi ` prefix, a shape this rule does not extract. CLAUDE.md therefore passes AC-2 vacuously today — zero references found, not zero references checked-and-clean — which this decision discloses rather than hides. Widening the rule to classify any bare backticked lowercase-hyphenated word as a candidate verb was considered and rejected: a bare backtick span is ambiguous by construction (paths and make targets are backtick spans too), and this repo's determinism posture forbids a heuristic that would need semantic judgment to disambiguate reliably.", anchor: dc-1 }
   - { id: dc-2, text: "An extracted verb is classified known by execing the once-built verdi binary with the word as its sole argument from a fresh, rootless temp directory, and checking whether stderr is exactly dispatch.go's own top-level unknown-verb usage banner. Anything else — a verb-specific usage error, an operational store-root failure, dispatch.go's distinct not-implemented-out-of-v0-scope message, or genuine success — counts as known. This is deliberately a coarser question than verbs_test.go's own assertNotOutOfV0 helper (which detects a different branch, real-vs-not-yet-implemented): it answers does dispatch.go recognize this word at all, the correct question for prose that may accurately describe a recognized-but-out-of-scope verb.", anchor: dc-2 }
@@ -27,7 +27,7 @@ constraints:
   - { id: co-3, text: "Scope is exactly the enumerated gap: .claude/skills/*/SKILL.md plus the repo-root CLAUDE.md. Explicitly out, because each is already covered by a sibling specalign check or is out of today's inventory: README example freshness (internal/showcasealign's TestReadmeExamplesFresh), targeted architecture-doc claims (docsync_test.go), and MCP tool naming (mcptools_test.go). AGENTS.md does not exist anywhere in this repo today; it is not enumerated by this story, and a future story extends the same glob-based enumeration the moment one is added. CLI flag-level validation, as opposed to verb-level, is also out of scope: no canonical, machine-checkable flag inventory exists yet to validate prose flag mentions against, and building one is materially new scope beyond following verbs_test.go's relationship to dispatch.go.", anchor: co-3 }
   - { id: co-4, text: "The board commit CLI verb's own fate — removal, or a feature-style deprecation alias (R4-I-6) — is explicitly out of this story's scope; this story only gates what agent-facing prose teaches about it, never the dispatch table itself. cmd/verdi/board.go and dispatch.go's verbPhase[\"board\"] are untouched by this story. A future story formally deprecating or removing the verb should follow the cli:feature exclusion-from-showcase-coverage precedent (R4-I-54) as its template, rather than inventing a new pattern.", anchor: co-4 }
 open_questions:
-  - { id: oq-1, text: "instruction-conformance has no accepted parent feature to implement today: the four currently-active feature specs (code-health, disclosure-legibility, public-showcase, scoping-canvas) were each checked against this story's problem/outcome, and none covers agent-instruction conformance. R4-I-56, the most recent invention-ledger entry and also a product of this same external-assessment round, records a comparable case proceeding as a future story with no feature parent named, so a parentless story is not itself unprecedented. The links: block below therefore carries verdi design start's own standard unresolved scaffold placeholder rather than a fabricated edge into an unrelated feature's AC, so verdi lint reports one VL-003 finding against this spec until the owner either designates a real parent feature or ratifies this as a standing exception.", anchor: oq-1 }
+  - { id: oq-1, text: "RESOLVED by the owner's single-parent directive (2026-07-19). When this story was authored, instruction-conformance had no accepted parent feature: the four then-active feature specs (code-health, disclosure-legibility, public-showcase, scoping-canvas) were each checked against this story's problem/outcome and none covered agent-instruction conformance, so the links: block carried verdi design start's own unresolved scaffold placeholder (spec/todo-replace-feature-name#ac-1) rather than a fabricated edge, and verdi lint reported one standing VL-003 finding, recorded as R4-I-58 (R4-I-56 was the precedent for a parentless story proceeding on a disclosed finding). The owner then directed exactly one small parent feature for this external-assessment round; the controller designated spec/assurance-integrity, whose ac-1 is precisely this story's outcome (the parent stubs instruction-conformance against ac-1). This story's implements edge now resolves against spec/assurance-integrity#ac-1, and the VL-003 finding is gone (proven by a clean verdi lint, exit 0). Recorded in ledger R4-I-70, which supersedes R4-I-58's disclosed-finding resolution.", anchor: oq-1 }
 ---
 # Instruction Conformance
 
@@ -394,10 +394,13 @@ inventing a new pattern.
 
 ## OQ-1
 
-`instruction-conformance` has no accepted parent feature to `implements`
-today. The four currently-active feature specs — `code-health`,
-`disclosure-legibility`, `public-showcase`, `scoping-canvas` — were each
-checked against this story's problem/outcome:
+**Resolved** by the owner's single-parent directive (2026-07-19).
+
+When this story was authored, `instruction-conformance` had no accepted
+parent feature to `implements`. The four then-active feature specs —
+`code-health`, `disclosure-legibility`, `public-showcase`, `scoping-canvas`
+— were each checked against this story's problem/outcome and none covered
+agent-instruction conformance:
 
 - `code-health`'s own `co-3` closes its scope to "the pressure-test survivor
   list only — nothing else enters."
@@ -405,16 +408,22 @@ checked against this story's problem/outcome:
   unrelated by subject (disclosure vocabulary, the showcase corpus/README,
   and the wall/stub editor, respectively).
 
-R4-I-56 — the most recent invention-ledger entry, and also a product of this
-same external-assessment round — records a comparable case (`verdi
-init`/`doctor`) proceeding as "a future story" with no feature parent named,
-so a parentless story is not itself unprecedented.
+Rather than fabricate an edge into an unrelated feature's AC, the `links:`
+block carried `verdi design start`'s own unresolved scaffold placeholder
+(`spec/todo-replace-feature-name#ac-1`, `cmd/verdi/design.go`), and `verdi
+lint` reported one standing `VL-003` finding ("does not resolve"), recorded
+as **R4-I-58**. R4-I-56 — a product of this same external-assessment round
+(`verdi init`/`doctor`) — was the precedent for a parentless story
+proceeding on a disclosed finding.
 
-The `links:` block above therefore carries `verdi design start`'s own
-standard unresolved scaffold placeholder (`spec/todo-replace-feature-name#ac-1`,
-`cmd/verdi/design.go`) rather than a fabricated edge into an unrelated
-feature's AC — never resolving this ambiguity silently, and never from what
-a similarly-shaped artifact happens to do. `verdi lint` therefore reports
-one `VL-003` finding ("does not resolve") against this spec until the owner
-either designates a real parent feature or ratifies this as a standing
-exception. Recorded as R4-I-58 in `PLAN-V1.md` §7.
+The owner then directed exactly one small parent feature for this round
+(`spec/assurance-integrity` DC-1). Its **AC-1** is precisely this story's
+outcome — the parent stubs `instruction-conformance` against `ac-1`. The
+controller therefore re-pointed the `links:` edge above from the scaffold
+placeholder to `spec/assurance-integrity#ac-1`: it now resolves, and the
+`VL-003` finding is **gone**, proven by a clean `verdi lint` (exit 0, no
+`VL-003`) run against this worktree after the merge that brought the parent
+feature into the store.
+
+Recorded in ledger **R4-I-70**, which supersedes R4-I-58's disclosed-finding
+resolution.
