@@ -1,0 +1,23 @@
+# Violates: no state id may be declared twice within one lifecycle's
+# `states:` list (Lifecycle.validate, validate.go, K3) — "draft" appears
+# twice. A duplicate state is internally contradictory (it can never
+# change what map[string]bool sees, so it is silently inert today) and,
+# left unrejected, could mask a genuinely missing state the same way a
+# duplicate transition verb could mask a missing transition
+# (judged-frontier-duplicate-verb-bypass's own reasoning, carried to the
+# states/terminal lists).
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build, draft]
+    terminal: [accepted-pending-build]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }

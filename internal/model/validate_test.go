@@ -19,6 +19,8 @@ func TestDecodeModel_KernelViolations(t *testing.T) {
 		{"viol-kind-unknown.yaml", `obligation kind "bogus-kind" is not one of the kernel kinds`},
 		{"viol-obligations-missing.yaml", "obligations list is absent"},
 		{"viol-terminal-not-subset.yaml", `terminal state "bogus-state" is not in states`},
+		{"viol-duplicate-state.yaml", `state "draft" is declared more than once in states`},
+		{"viol-duplicate-terminal.yaml", `terminal state "accepted-pending-build" is declared more than once in terminal`},
 		{"viol-terminal-exit.yaml", `from "closed" is a terminal state and admits no outgoing transition`},
 		{"viol-state-unreachable.yaml", `state "orphan" is unreachable`},
 		{"viol-transition-endpoint-undeclared.yaml", `from "nonexistent-state" is not a declared state`},

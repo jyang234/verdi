@@ -1,0 +1,22 @@
+# Violates: no state id may be declared twice within one lifecycle's
+# `terminal:` list (Lifecycle.validate, validate.go, K3) —
+# "accepted-pending-build" appears twice. states: itself carries no
+# duplicate here (isolating this rule from the states-duplicate rule,
+# viol-duplicate-state.yaml), and the repeated id IS a declared state, so
+# this trips only the terminal-duplicate check, not the terminal-not-
+# subset one.
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build]
+    terminal: [accepted-pending-build, accepted-pending-build]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }

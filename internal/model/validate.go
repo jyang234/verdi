@@ -64,12 +64,14 @@ var ErrFrontier = errors.New(frontierErrorText)
 // which concrete lifecycle it describes (spec/model-schema ac-1, the
 // Outcome section's own rule list): the schema literal; every class
 // carries a non-empty template; every class's parent (if any) names a
-// declared class; every transition's obligations list is PRESENT (nil
-// means the `obligations:` key itself was absent — distinct from a
-// present, empty `[]`); terminal states are drawn from states and admit
-// no outgoing transition (terminal ⇒ freeze); every transition's from/to
-// names a declared state; no verb is declared by two transitions within
-// one lifecycle (a verb is a transition's identity — the frontier compare
+// declared class; no state id is declared twice within one lifecycle's
+// states, and no state id is declared twice within its terminal (K3);
+// every transition's obligations list is PRESENT (nil means the
+// `obligations:` key itself was absent — distinct from a present, empty
+// `[]`); terminal states are drawn from states and admit no outgoing
+// transition (terminal ⇒ freeze); every transition's from/to names a
+// declared state; no verb is declared by two transitions within one
+// lifecycle (a verb is a transition's identity — the frontier compare
 // keys on it — judged-frontier-duplicate-verb-bypass); every state is
 // reachable; every obligation's scheme and kind are drawn from their
 // closed catalogs; count is legal only on kind "countersign"; hook is
@@ -185,8 +187,14 @@ func (m Model) validateVocabulary() error {
 	return nil
 }
 
-// validate checks one lifecycle.<name> block: terminal ⊆ states, no verb
-// is bound by two transitions within this lifecycle (a verb is a
+// validate checks one lifecycle.<name> block: no state id is declared
+// twice within `states:`, and no state id is declared twice within
+// `terminal:` (K3 — a duplicate is internally contradictory, silently
+// inert against the map[string]bool both build, and could otherwise mask
+// a genuinely missing id the same way a duplicate transition verb could
+// mask a missing transition, judged-frontier-duplicate-verb-bypass's own
+// reasoning carried to these two lists); terminal ⊆ states; no verb is
+// bound by two transitions within this lifecycle (a verb is a
 // transition's identity, judged-frontier-duplicate-verb-bypass — a
 // duplicate is internally contradictory AND could otherwise mask a missing
 // transition at the frontier compare), every transition's obligations-list
@@ -198,12 +206,18 @@ func (m Model) validateVocabulary() error {
 func (lc Lifecycle) validate(name string) error {
 	states := make(map[string]bool, len(lc.States))
 	for _, s := range lc.States {
+		if states[s] {
+			return fmt.Errorf("model: lifecycle %q: state %q is declared more than once in states", name, s)
+		}
 		states[s] = true
 	}
 	terminal := make(map[string]bool, len(lc.Terminal))
 	for _, t := range lc.Terminal {
 		if !states[t] {
 			return fmt.Errorf("model: lifecycle %q: terminal state %q is not in states", name, t)
+		}
+		if terminal[t] {
+			return fmt.Errorf("model: lifecycle %q: terminal state %q is declared more than once in terminal", name, t)
 		}
 		terminal[t] = true
 	}
