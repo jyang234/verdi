@@ -1759,6 +1759,15 @@
         commitDraft();
       }, 0);
     });
+    // Enter commits the sticky; Shift+Enter stays the textarea's native
+    // newline (owner request 2026-07-19). An Enter that belongs to an
+    // IME composition is the IME's, never a commit.
+    editor.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        commitDraft();
+      }
+    });
     draft.addEventListener("keydown", function (e) {
       if (e.key === "Escape") {
         e.stopPropagation(); // the draft dies; open dialogs are not its business
