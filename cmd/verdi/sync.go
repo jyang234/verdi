@@ -254,6 +254,44 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 			fmt.Fprintln(deps.Stderr, "sync:", pinErr)
 			return 2
 		}
+		// spec/evidence-resilience ac-1 (X-15/X-11b, L-N3): quarantine —
+		// never drop, never operationally fail on — any record whose
+		// provenance.commit is not reachable from commit at sync time,
+		// BEFORE the tree is written to disk, so what lands under
+		// derivedRoot already carries the annotation.
+		quarantined, undecodable, qErr := quarantineUnreachable(ctx, root, tree, commit)
+		if qErr != nil {
+			fmt.Fprintln(deps.Stderr, "sync:", qErr)
+			return 2
+		}
+		if quarantined > 0 {
+			fmt.Fprintf(deps.Stdout, "sync: quarantined %d evidence record(s) whose provenance.commit is not reachable from %s (kept, annotated, never dropped)\n", quarantined, commit)
+		}
+		if len(undecodable) > 0 {
+			// spec/evidence-resilience finding 3: an undecodable fetched
+			// record file is quarantined-by-default — kept verbatim, never a
+			// sync-time operational failure. But the disclosure must be
+			// accurate PER KEY CLASS (finding
+			// undecodable-closure-disclosure-claim-false-for-non-per-spec-keys):
+			// only a per-spec key's undecodable file is re-surfaced at closure
+			// (evidence.QuarantinedRecords walks store.DerivedSpecDir alone), so
+			// the "disclosed at closure" claim is kept ONLY for those keys.
+			perSpecUndecodable, otherUndecodable := classifyUndecodableKeys(undecodable)
+			if len(perSpecUndecodable) > 0 {
+				// Per-spec key: the owning spec's closure gate (and close
+				// --preflight) walk this dir and re-disclose the file, so the
+				// closure-disclosure claim holds here — kept verbatim from the
+				// pre-fix line.
+				fmt.Fprintf(deps.Stdout, "sync: quarantined %d undecodable fetched record file(s) under a per-spec key (kept verbatim, never dropped; excluded from the fold and disclosed at closure): %v\n", len(perSpecUndecodable), perSpecUndecodable)
+			}
+			if len(otherUndecodable) > 0 {
+				// Non-per-spec key (the branch-keyed per-service bundle, or any
+				// other key): NO closure surface walks it, so promising a
+				// closure disclosure would be false. State the honest situation
+				// — this notice is the file's only disclosure.
+				fmt.Fprintf(deps.Stdout, "sync: quarantined %d undecodable fetched record file(s) under a non-per-spec key (kept verbatim, never dropped; never read by the fold, and no downstream surface will re-surface it — THIS notice is its only disclosure): %v\n", len(otherUndecodable), otherUndecodable)
+			}
+		}
 		if writeErr := writeDerivedTree(derivedRoot, tree); writeErr != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", writeErr)
 			return 2
@@ -267,7 +305,7 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 		// intuition. No walk-semantics change.
 		fmt.Fprintf(deps.Stdout, "sync: pulled CI evidence bundle (%d files) — accepted at commit %s, %d commit(s) back in log order from %s, into %s\n",
 			len(tree), acceptedCommit, distance, commit, derivedRoot)
-		return evaluateTree(deps, tree)
+		return evaluateTree(deps, tree, undecodable)
 
 	case errors.Is(err, forge.ErrNoBundle) && orRegen:
 		// ADJ-37 fix 1: an ancestry-enumeration failure reaches here
@@ -484,16 +522,37 @@ func safeJoin(root, key string) (string, error) {
 // if any verdicts.json record verdicts fail or any review.json entry BLOCKs
 // (surfacing failing evidence sync just materialized, matching the exit-code
 // contract's "1 = verdict failure"), 0 otherwise. A file that does not even
-// decode is an operational error (2). EVERY verdicts.json/review.json across
-// every key in the tree is checked, not just one bundle's — the tree spans
-// per-spec subdirs.
-func evaluateTree(deps syncDeps, tree forge.DerivedTree) int {
+// decode is an operational error (2), EXCEPT one quarantineUnreachable
+// already quarantined-by-default as undecodable (finding 3): those keys are
+// skipped here, never re-decoded into an operational failure, since sync has
+// already disclosed them and kept their bytes verbatim. EVERY
+// verdicts.json/review.json across every key in the tree is checked, not just
+// one bundle's — the tree spans per-spec subdirs.
+//
+// spec/evidence-resilience finding 4: a record `verdi sync` quarantined (its
+// provenance.commit unreachable) is excluded from the verdict scan — a record
+// the fold will never read as evidence cannot drive sync's exit code, or a
+// poisoned bundle's stale fail record would keep sync red on every re-sync
+// (X-15's "re-syncing did not help" shape at exit-1 severity). The count of
+// such excluded records is disclosed, naming how many carried a real fail
+// (spec/evidence-resilience finding 2 rider) — a genuinely observed failure is
+// downgraded to a disclosed exclusion, never to silence (constitution 2/10).
+func evaluateTree(deps syncDeps, tree forge.DerivedTree, undecodable []string) int {
+	skip := make(map[string]bool, len(undecodable))
+	for _, key := range undecodable {
+		skip[key] = true
+	}
 	keys := make([]string, 0, len(tree))
 	for key := range tree {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys) // deterministic evaluation/reporting order
+	quarantinedExcluded := 0
+	quarantinedFail := 0
 	for _, key := range keys {
+		if skip[key] {
+			continue // finding 3: quarantined-by-default undecodable file, already disclosed.
+		}
 		switch filepath.Base(key) {
 		case "verdicts.json":
 			var records []artifact.Evidence
@@ -502,6 +561,17 @@ func evaluateTree(deps syncDeps, tree forge.DerivedTree) int {
 				return 2
 			}
 			for _, r := range records {
+				if r.Quarantine != nil {
+					quarantinedExcluded++
+					if r.Verdict == artifact.VerdictFail {
+						// finding 2 rider: a quarantined record that carried a real
+						// fail is a genuinely observed failure downgraded to a
+						// disclosed exclusion, never to silence — counted so the
+						// disclosure line below can name it.
+						quarantinedFail++
+					}
+					continue // finding 4: a quarantined record never drives sync's verdict exit.
+				}
 				if r.Verdict == artifact.VerdictFail {
 					fmt.Fprintln(deps.Stdout, "sync: materialized bundle contains failing evidence")
 					return 1
@@ -520,6 +590,9 @@ func evaluateTree(deps syncDeps, tree forge.DerivedTree) int {
 				}
 			}
 		}
+	}
+	if quarantinedExcluded > 0 {
+		fmt.Fprintf(deps.Stdout, "sync: %d quarantined record(s) excluded from verdict (%d carried fail)\n", quarantinedExcluded, quarantinedFail)
 	}
 	return 0
 }

@@ -89,6 +89,12 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 			fmt.Fprintf(stdout, "[FAIL] closure: %s\n", c.Name)
 			fmt.Fprintf(stdout, "       %s\n", c.Reason)
 		}
+		// spec/evidence-resilience ac-2: per-record disclosed-unproven
+		// detail (e.g. checkClosureEligible's quarantine disclosures),
+		// printed regardless of which branch fired above.
+		for _, extra := range c.Extra {
+			fmt.Fprintln(stdout, extra)
+		}
 	}
 	return allOK, nil
 }
@@ -110,10 +116,82 @@ func checkClosureEligible(ctx context.Context, root string, spec *artifact.SpecF
 	if err != nil {
 		return gateCondition{}, fmt.Errorf("closure gate: %w", err)
 	}
+
+	cond := gateCondition{Name: name}
 	if result.Eligible {
-		return gateCondition{Name: name, OK: true}, nil
+		cond.OK = true
+	} else {
+		cond.Reason = storyWord + " is not eligible (not every AC is evidenced or waived)"
 	}
-	return gateCondition{Name: name, Reason: storyWord + " is not eligible (not every AC is evidenced or waived)"}, nil
+
+	// spec/evidence-resilience ac-2 (X-15/X-11b, L-N3): surface per-record
+	// disclosed-unproven detail for any unmet AC whose would-be evidence
+	// was excluded because its commit is not reachable from HEAD — this is
+	// the closure gate's OWN evidence ancestry consumer (the exact seam
+	// that used to hard-fail operationally on this shape); the fold above
+	// already stayed honest by construction (an excluded record never
+	// counts toward "evidenced"), so this adds legibility only, never a
+	// verdict change: an unmet AC whose gap traces to a quarantined or
+	// otherwise-unreachable record reads as WHY, not as silent absence.
+	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
+	quarantined, undecodable, qErr := evidence.QuarantinedRecords(ctx, root, derivedRoot, head)
+	if qErr != nil {
+		return gateCondition{}, fmt.Errorf("closure gate: %w", qErr)
+	}
+	cond.Extra = quarantineDisclosures(result.ACs, quarantined)
+	// spec/evidence-resilience ac-2 (finding 2): a record file that failed
+	// strict decode inside quarantined data is disclosed unconditionally
+	// (it cannot be tied to a specific AC — it did not decode) rather than
+	// bricking the gate operationally, so the exact stale-poisoned-bundle
+	// debris X-15 leaves reads as WHY, not as a hard fail.
+	cond.Extra = append(cond.Extra, undecodableDisclosures(undecodable)...)
+	return cond, nil
+}
+
+// undecodableDisclosures renders one disclosed-unproven line per record file
+// that failed strict decode inside quarantined data (spec/evidence-resilience
+// ac-2, finding 2). It is disclosed unconditionally — not per-AC, the way
+// quarantineDisclosures is — because an undecodable file cannot be read to
+// learn which AC its records would have evidenced; disclosing it at all is
+// what keeps the debris from passing silently while the closure run stays
+// non-operational (ac-2: "the closure run itself does not exit operationally
+// just because that one record degraded").
+func undecodableDisclosures(undecodable []evidence.UndecodableFile) []string {
+	var lines []string
+	for _, u := range undecodable {
+		text := fmt.Sprintf("a quarantined evidence record file %s is undecodable and was excluded from the fold: %s", u.Path, u.Reason)
+		lines = append(lines, disclosure.Render(disclosure.New("gate:evidence-quarantine", "", text)))
+	}
+	return lines
+}
+
+// quarantineDisclosures renders one disclosed-unproven line (spec/
+// evidence-resilience ac-2) per (unmet AC, excluded record naming that AC)
+// pair — never for a met AC (evidenced or waived has nothing to disclose,
+// mirroring closepreflight.go's own unmetStoryACDetail precedent), so a
+// reader sees WHY an AC still is not evidenced when a record that WOULD
+// have evidenced it was excluded for being unreachable, rather than
+// reading the gap as if no evidence was ever produced. Prefers the actual
+// reason `verdi sync` recorded on the record (artifact.Evidence.Quarantine,
+// ac-1) when present; falls back to a generic reachability statement for a
+// record this story's own build never had the chance to quarantine (e.g.
+// hand-placed derived data, or evidence synced before this story landed).
+func quarantineDisclosures(acs []evidence.ACResult, quarantined []artifact.Evidence) []string {
+	var lines []string
+	for _, ac := range acs {
+		if ac.Status == evidence.StatusEvidenced || ac.Status == evidence.StatusWaived {
+			continue
+		}
+		for _, rec := range evidence.RecordsForAC(quarantined, ac.ID) {
+			reason := fmt.Sprintf("provenance.commit %s is not reachable from HEAD", rec.Provenance.Commit)
+			if rec.Quarantine != nil && rec.Quarantine.Reason != "" {
+				reason = rec.Quarantine.Reason
+			}
+			text := fmt.Sprintf("a %s record (witness %q) that would have evidenced %s was excluded: %s", rec.Kind, rec.Witness, ac.ID, reason)
+			lines = append(lines, disclosure.Render(disclosure.New("gate:evidence-quarantine", ac.ID, text)))
+		}
+	}
+	return lines
 }
 
 // checkSpecStaleCondition is the closure gate's spec-stale condition

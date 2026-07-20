@@ -142,6 +142,17 @@ type gateCondition struct {
 	// internal/disclosure.Disclosure this condition renders through
 	// (reportGateConditions). Unused otherwise.
 	Source string
+	// Extra holds zero or more already-rendered disclosure lines printed
+	// immediately after this condition's own PASS/FAIL/disclosed line,
+	// regardless of which branch fired — additional legibility a single
+	// coarse condition verdict cannot carry on its own (spec/evidence-
+	// resilience ac-2: the closure eligibility condition's per-record
+	// disclosed-unproven detail for an AC whose only would-be evidence was
+	// excluded as unreachable). Each entry is already a complete rendered
+	// line (typically via internal/disclosure.Render); printing never
+	// re-derives or reformats them. Empty for every condition that has
+	// nothing beyond its own PASS/FAIL/disclosed line to add.
+	Extra []string
 }
 
 // runGate is the testable core: given an already-resolved root, the
@@ -204,6 +215,9 @@ func reportGateConditions(stdout io.Writer, conds []gateCondition) int {
 			allOK = false
 			fmt.Fprintf(stdout, "[FAIL] %s\n", c.Name)
 			fmt.Fprintf(stdout, "       %s\n", c.Reason)
+		}
+		for _, extra := range c.Extra {
+			fmt.Fprintln(stdout, extra)
 		}
 	}
 

@@ -16,6 +16,16 @@ import "github.com/jyang234/verdi/internal/artifact"
 func filterCandidates(records []artifact.Evidence, preview bool, acSet map[string]bool, errFn func(r artifact.Evidence, ac string) error) ([]artifact.Evidence, error) {
 	candidates := make([]artifact.Evidence, 0, len(records))
 	for _, r := range records {
+		// spec/evidence-resilience ac-1 (finding 1): a record `verdi sync`
+		// annotated as quarantined is never authoritative evidence — excluded
+		// here as a SECOND line of defense alongside LoadRecordsWithSources's
+		// own annotation exclusion (records.go), so a quarantined record can
+		// never mark its AC proven no matter which path delivered it into the
+		// fold (a directly-constructed Input, a matrix --preview fold, a
+		// future loader). Belt and suspenders: either seam excludes it.
+		if r.Quarantine != nil {
+			continue
+		}
 		switch r.Provenance.Source {
 		case artifact.SourceCI:
 			candidates = append(candidates, r)

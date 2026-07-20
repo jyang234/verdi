@@ -4,7 +4,7 @@
 // derived/<RefSlug(spec.ID)>/<commit>/runtime.json, the sibling of
 // verdicts.json dc-2 describes, so `verdi sync`'s ordinary forge-pull path
 // (writeDerivedTree, unchanged) and internal/evidence.LoadRecords (extended
-// to also read runtime.json — records.go's derivedRecordFiles) carry it
+// to also read runtime.json — records.go's RecordFileNames) carry it
 // through to the fold exactly like every other evidence kind.
 //
 // TWO invocation shapes:

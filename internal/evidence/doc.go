@@ -9,7 +9,7 @@
 // finds the store root, and prints the result — see cmd/verdi/matrix.go).
 // This package only folds an already-loaded record set; it does the loading
 // itself (LoadRecords, which reads both verdicts.json and runtime.json —
-// records.go's derivedRecordFiles) but leaves ref/story resolution to its
+// records.go's RecordFileNames) but leaves ref/story resolution to its
 // caller.
 //
 // The fold, verbatim (03 §The fold):

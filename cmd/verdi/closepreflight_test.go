@@ -773,24 +773,34 @@ func TestRunPreflight_ExitCodeMatrixAndNonMutation(t *testing.T) {
 		}
 	})
 
-	t.Run("operational: malformed derived record, no mutation", func(t *testing.T) {
+	t.Run("undecodable derived record under reachable dir: verdict not operational, disclosed, no mutation", func(t *testing.T) {
+		// spec/evidence-resilience finding-1 (FIX): an undecodable verdicts.json
+		// under the REACHABLE HEAD commit dir must NOT brick preflight
+		// operationally (the pre-fix behavior deferred ac-2's removed brick to
+		// closure/preflight time). It degrades to a verdict (exit 1, NOT READY):
+		// the file is excluded from the fold and disclosed as undecodable through
+		// the closure gate's own undecodableDisclosures channel, which preflight
+		// renders via runClosureGate unchanged. Still no mutation.
 		repo := buildCloseFixtureRepo(t)
 		dir := filepath.Join(repo.Dir, ".verdi", "data", "derived", store.RefSlug("spec/close-fixture"), repo.Head)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte("not valid json"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte(`[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"`), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		before := snapshotRepo(t, repo.Dir)
 		var stdout, stderr bytes.Buffer
 		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
-		if rc != 2 {
-			t.Fatalf("runPreflight(malformed derived record) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		if rc != 1 {
+			t.Fatalf("runPreflight(undecodable derived record under reachable dir) = %d, want 1 (verdict, not operational — finding 1); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "undecodable") {
+			t.Fatalf("stdout = %q, want the undecodable file disclosed (finding 1)", stdout.String())
 		}
 		after := snapshotRepo(t, repo.Dir)
 		if before != after {
-			t.Fatalf("--preflight(operational error) mutated the repo:\nbefore: %s\nafter:  %s", before, after)
+			t.Fatalf("--preflight(undecodable record) mutated the repo:\nbefore: %s\nafter:  %s", before, after)
 		}
 	})
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -37,6 +38,303 @@ x
 ## Outcome
 y
 `
+
+// closureGateQuarantineStorySpecMD is a story spec whose sole AC declares
+// [static] evidence (rather than closureGateStorySpecMD's [attestation]) —
+// spec/evidence-resilience ac-2's own test needs a real derived-evidence-
+// record AC, since an attestation-only AC never consults
+// LoadRecords/QuarantinedRecords at all. No feature link: condition 3
+// (pending-supersession) is then trivially satisfied ("no feature
+// implemented"), keeping this fixture focused on condition 1 alone.
+const closureGateQuarantineStorySpecMD = `---
+id: spec/quarantine-story
+kind: spec
+class: story
+title: "Quarantine story"
+status: accepted-pending-build
+owners: [platform-team]
+story: jira:QUAR-1
+problem: { text: "x", anchor: problem }
+outcome: { text: "y", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+links:
+  - { type: implements, ref: "spec/loan-mgmt#ac-1" }
+frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
+---
+# body
+## Problem
+x
+## Outcome
+y
+`
+
+func buildClosureGateQuarantineRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                            "schema: verdi.layout/v1\nforge: gitlab\n",
+			".verdi/specs/active/quarantine-story/spec.md": closureGateQuarantineStorySpecMD,
+		},
+		Message: "closure gate quarantine fixture",
+	}})
+	checkoutBranch(t, repo.Dir, "feature/quarantine-story")
+	return repo
+}
+
+// writeClosureGateDerivedRecord writes one verdi.evidence/v1 record array
+// under root's derived tree for specID at the given commit-named
+// subdirectory (which need not be a real commit at all — the exact shape
+// a bundle referencing a deleted branch's tip produces).
+func writeClosureGateDerivedRecord(t *testing.T, root, specID, commitDir, recordJSON string) {
+	t.Helper()
+	dir := filepath.Join(store.DerivedSpecDir(root, store.RefSlug(specID)), commitDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte(recordJSON), 0o644); err != nil {
+		t.Fatalf("writing verdicts.json: %v", err)
+	}
+}
+
+// closureGateQuarantineRecordJSON is one static-pass record for
+// spec/quarantine-story's ac-1, at provenance.commit commit.
+func closureGateQuarantineRecordJSON(commit string) string {
+	return `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"pass",` +
+		`"witness":"someFunc @ site","provenance":{"source":"ci","pipeline":"1","commit":"` + commit + `"},` +
+		`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}]`
+}
+
+// TestRunClosureGate_UnreachableCommitRecord_NeverOperational is
+// spec/evidence-resilience ac-2's core regression pin, X-15's exact shape
+// reproduced directly against the closure gate: a derived verdicts.json
+// sits under a commit-named directory that resolves to no real commit at
+// all (the branch that produced it has since been deleted) — the literal
+// shape that used to hard-fail runClosureGate operationally (git's own
+// "fatal: Not a valid commit name", surfaced as a returned error). It must
+// now evaluate cleanly (no error), read the story as NOT eligible (the
+// excluded record never silently counts as evidence), and disclose WHY —
+// a per-AC disclosed-unproven line naming the excluded record — rather
+// than leaving the gap looking like no evidence was ever produced.
+func TestRunClosureGate_UnreachableCommitRecord_NeverOperational(t *testing.T) {
+	repo := buildClosureGateQuarantineRepo(t)
+	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
+	ctx := context.Background()
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, unreachable, closureGateQuarantineRecordJSON(unreachable))
+
+	var stdout bytes.Buffer
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
+	if err != nil {
+		t.Fatalf("runClosureGate: want no error (X-15 must never brick this), got %v; stdout=%s", err, stdout.String())
+	}
+	if ok {
+		t.Fatalf("runClosureGate() = true, want false (ac-1's only record is excluded, so it is not evidenced); stdout=%s", stdout.String())
+	}
+	if !contains(stdout.String(), "[FAIL] closure: 1.") {
+		t.Fatalf("stdout = %q, want condition 1 to FAIL (never silently proven from an excluded record)", stdout.String())
+	}
+	if !contains(stdout.String(), "disclosed-unproven [gate:evidence-quarantine]") {
+		t.Fatalf("stdout = %q, want a per-record disclosed-unproven line naming the excluded record (ac-2)", stdout.String())
+	}
+	if !contains(stdout.String(), "ac-1") {
+		t.Fatalf("stdout = %q, want the disclosure to name ac-1, the AC the excluded record would have evidenced", stdout.String())
+	}
+	if !contains(stdout.String(), unreachable) {
+		t.Fatalf("stdout = %q, want the disclosure to name the unreachable commit", stdout.String())
+	}
+}
+
+// TestRunClosureGate_QuarantinedRecord_SurfacesSyncReason proves the
+// disclosure prefers the ACTUAL reason `verdi sync` recorded
+// (artifact.Evidence.Quarantine, ac-1) over a generic fallback, when the
+// derived record already carries one — the realistic end state after a
+// real sync run quarantined it.
+func TestRunClosureGate_QuarantinedRecord_SurfacesSyncReason(t *testing.T) {
+	repo := buildClosureGateQuarantineRepo(t)
+	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
+	ctx := context.Background()
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	recordJSON := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"pass",` +
+		`"witness":"someFunc @ site","provenance":{"source":"ci","pipeline":"1","commit":"` + unreachable + `"},` +
+		`"quarantine":{"reason":"custom sync-time reason naming the deleted branch"},` +
+		`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}]`
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, unreachable, recordJSON)
+
+	var stdout bytes.Buffer
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
+	if err != nil {
+		t.Fatalf("runClosureGate: %v", err)
+	}
+	if ok {
+		t.Fatalf("runClosureGate() = true, want false; stdout=%s", stdout.String())
+	}
+	if !contains(stdout.String(), "custom sync-time reason naming the deleted branch") {
+		t.Fatalf("stdout = %q, want the sync-recorded quarantine reason surfaced verbatim", stdout.String())
+	}
+}
+
+// TestRunClosureGate_AnnotatedRecordUnderReachableDir_ExcludedAndDisclosed is
+// spec/evidence-resilience finding-1's behavioral pin: a record `verdi sync`
+// ANNOTATED as quarantined that sits under a REACHABLE commit directory (its
+// subdir key differs from its own provenance.commit — hand-placed derived
+// data, or a fetched artifact keyed differently from the record's commit)
+// must NOT silently count as authoritative evidence. Before the fix, the
+// fold's exclusion rested entirely on directory reachability, so this record
+// was loaded and silently marked ac-1 proven — the exact false green ac-2's
+// honesty clause forbids. The gate must read condition 1 as FAILing (ac-1's
+// sole record is excluded on the annotation signal) AND disclose the excluded
+// record even though its directory is reachable.
+func TestRunClosureGate_AnnotatedRecordUnderReachableDir_ExcludedAndDisclosed(t *testing.T) {
+	repo := buildClosureGateQuarantineRepo(t)
+	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
+	ctx := context.Background()
+	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	// The record sits under repo.Head (REACHABLE) but carries a sync-written
+	// quarantine annotation naming a since-deleted source commit.
+	annotated := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"pass",` +
+		`"witness":"someFunc @ site","provenance":{"source":"ci","pipeline":"1","commit":"` + gone + `"},` +
+		`"quarantine":{"reason":"provenance.commit ` + gone + ` not reachable from HEAD at sync time"},` +
+		`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}]`
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, repo.Head, annotated)
+
+	var stdout bytes.Buffer
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
+	if err != nil {
+		t.Fatalf("runClosureGate: %v; stdout=%s", err, stdout.String())
+	}
+	if ok {
+		t.Fatalf("runClosureGate() = true, want false (ac-1's sole record is annotated-quarantined and must be excluded); stdout=%s", stdout.String())
+	}
+	if !contains(stdout.String(), "[FAIL] closure: 1.") {
+		t.Fatalf("stdout = %q, want condition 1 to FAIL (an annotated record must never silently prove an AC — finding 1)", stdout.String())
+	}
+	if !contains(stdout.String(), "disclosed-unproven [gate:evidence-quarantine]") {
+		t.Fatalf("stdout = %q, want the annotated record disclosed even though its directory is reachable (finding 1)", stdout.String())
+	}
+}
+
+// TestRunClosureGate_UndecodableUnderUnreachableDir_NeverOperational is
+// spec/evidence-resilience finding-2's regression pin: a verdicts.json that
+// FAILS strict decode (a truncated partial write / older-schema record — the
+// debris a stale poisoned bundle left behind by a deleted branch) sitting
+// under an UNREACHABLE commit directory must NOT brick the closure gate
+// operationally. Before the fix, checkClosureEligible's disclosure pass
+// (QuarantinedRecords) strict-decoded every file under unreachable dirs and
+// surfaced the decode failure as a returned error (operational exit 2) — on
+// exactly the degraded-evidence shape this story exists to make non-fatal.
+// The gate must instead evaluate cleanly, disclose the undecodable debris,
+// and exit per verdict discipline.
+func TestRunClosureGate_UndecodableUnderUnreachableDir_NeverOperational(t *testing.T) {
+	repo := buildClosureGateQuarantineRepo(t)
+	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
+	ctx := context.Background()
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	// A truncated / malformed verdicts.json under the unreachable dir.
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, unreachable, `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"`)
+
+	var stdout bytes.Buffer
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
+	if err != nil {
+		t.Fatalf("runClosureGate: want no error (undecodable debris inside quarantined data must never brick closure — finding 2), got %v; stdout=%s", err, stdout.String())
+	}
+	if ok {
+		t.Fatalf("runClosureGate() = true, want false; stdout=%s", stdout.String())
+	}
+	if !contains(stdout.String(), "undecodable") {
+		t.Fatalf("stdout = %q, want the undecodable quarantined file disclosed (finding 2)", stdout.String())
+	}
+}
+
+// TestRunClosureGate_UndecodableUnderReachableDir_NeverOperational is
+// spec/evidence-resilience finding-1's (FIX) core regression pin — the judge's
+// own scenario reproduced directly against the closure gate: a truncated
+// verdicts.json (the bundle's own per-spec record file, keyed by the ACCEPTED
+// commit, which is self-or-ancestor of sync's commit and therefore REACHABLE at
+// closure) must NOT brick the gate operationally. Before the fix,
+// checkClosureEligible's own fold reader (foldStoryEvidence -> LoadRecords)
+// strict-decoded every file under a reachable dir and returned the decode
+// failure as a closure-gate error (exit 2) — sync had already written the
+// known-undecodable bytes and exited 0 claiming "excluded from the fold and
+// disclosed at closure", yet the closure surface then hard-failed on exactly
+// that shape, deferring ac-2's removed brick from sync time to closure time.
+// The gate must now evaluate cleanly (no error), read the story as NOT eligible
+// (the excluded file never silently counts as evidence), and disclose the
+// undecodable debris — identical to the unreachable-dir case above, degradation
+// now being reachability-independent.
+func TestRunClosureGate_UndecodableUnderReachableDir_NeverOperational(t *testing.T) {
+	repo := buildClosureGateQuarantineRepo(t)
+	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
+	ctx := context.Background()
+
+	// A truncated / malformed verdicts.json under repo.Head — trivially
+	// reachable from itself (the accepted commit's own dir), the exact shape a
+	// truncated write of the bundle's own record file leaves behind.
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, repo.Head, `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"`)
+
+	var stdout bytes.Buffer
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
+	if err != nil {
+		t.Fatalf("runClosureGate: want no error (an undecodable record file under a REACHABLE dir must never brick closure — finding 1), got %v; stdout=%s", err, stdout.String())
+	}
+	if ok {
+		t.Fatalf("runClosureGate() = true, want false (ac-1's only record is undecodable and excluded, so it is not evidenced); stdout=%s", stdout.String())
+	}
+	if !contains(stdout.String(), "[FAIL] closure: 1.") {
+		t.Fatalf("stdout = %q, want condition 1 to FAIL (an undecodable file never silently proves an AC)", stdout.String())
+	}
+	if !contains(stdout.String(), "undecodable") {
+		t.Fatalf("stdout = %q, want the undecodable file under the reachable dir disclosed (finding 1)", stdout.String())
+	}
+}
+
+// TestRunClosureGate_UnreachableRecordProvenanceUnderReachableDir_DisclosesUnproven
+// is spec/evidence-resilience finding-2's behavioral pin at the closure gate —
+// the judge's exact scenario. An UN-annotated record whose OWN
+// provenance.commit is unreachable from HEAD, sitting under a REACHABLE
+// commit directory (repo.Head — evidence synced to disk before this story
+// landed, or hand-placed derived data), must be excluded from the fold (ac-1
+// never silently proven) and disclosed with the PRE-STORY-SYNC fallback reason
+// ("provenance.commit ... is not reachable from HEAD" — closuregate.go's
+// fallback branch, finally reachable for exactly this shape), the closure run
+// never exiting operationally. Before the fix, exclusion keyed on the
+// directory alone, so this record was loaded and silently marked ac-1 proven —
+// X-11b's false-green family surviving at the precise seam ac-2 hardens.
+func TestRunClosureGate_UnreachableRecordProvenanceUnderReachableDir_DisclosesUnproven(t *testing.T) {
+	repo := buildClosureGateQuarantineRepo(t)
+	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
+	ctx := context.Background()
+	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	// Un-annotated ci static-pass record for ac-1 under repo.Head (REACHABLE)
+	// whose OWN provenance.commit is a since-deleted commit.
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, repo.Head, closureGateQuarantineRecordJSON(gone))
+
+	var stdout bytes.Buffer
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
+	if err != nil {
+		t.Fatalf("runClosureGate: want no error (finding 2: an unreachable-provenance record under a reachable dir must never brick closure), got %v; stdout=%s", err, stdout.String())
+	}
+	if ok {
+		t.Fatalf("runClosureGate() = true, want false (ac-1's sole record has an unreachable provenance.commit and must be excluded, not silently proven); stdout=%s", stdout.String())
+	}
+	if !contains(stdout.String(), "[FAIL] closure: 1.") {
+		t.Fatalf("stdout = %q, want condition 1 to FAIL (an unreachable-provenance record never silently proves an AC — finding 2)", stdout.String())
+	}
+	if !contains(stdout.String(), "disclosed-unproven [gate:evidence-quarantine]") {
+		t.Fatalf("stdout = %q, want the per-record disclosed-unproven line even though the directory is reachable (finding 2)", stdout.String())
+	}
+	if !contains(stdout.String(), "is not reachable from HEAD") {
+		t.Fatalf("stdout = %q, want the pre-story-sync fallback reason (closuregate.go: provenance.commit ... is not reachable from HEAD)", stdout.String())
+	}
+	if !contains(stdout.String(), gone) {
+		t.Fatalf("stdout = %q, want the unreachable provenance.commit named", stdout.String())
+	}
+}
 
 func buildClosureGateRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()

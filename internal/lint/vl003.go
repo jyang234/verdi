@@ -139,8 +139,19 @@ func (vl003) checkLink(l artifact.Link, path, field string, snap *Snapshot, exte
 }
 
 // checkPin validates a pinned ref (kind/name@commit): the unpinned kind/name
-// half must resolve in the committed zone, and the commit half must name
-// real history.
+// half must resolve in the committed zone, and the commit half must be
+// reachable from HEAD in this repository's history.
+//
+// spec/evidence-resilience ac-3 (X-11b): this used to check mere object
+// existence (gitx.CommitExists), a predicate a locally-dangling object — one
+// no branch or ref anywhere reaches — satisfies just as well as a genuinely
+// pinned commit, so a pin could "look pinned to real history" while that
+// history had already stopped being retained as reachable (and the old red's
+// own claim, "not real git history", is precisely what a dangling object still
+// passes). Tightened to gitx.ReachableFromHEAD — the same primitive VL-009's
+// frozen.commit check now uses (internal/lint/vl009.go) — folding "does not
+// exist at all" and "exists but unreachable" into the same honest false,
+// closing X-11b's hole from VL-003's own git predicate too.
 func (r vl003) checkPin(in *RunInput, path, field, pinned string) []Finding {
 	var findings []Finding
 	ref, err := artifact.ParsePinnedRef(pinned)
@@ -152,11 +163,11 @@ func (r vl003) checkPin(in *RunInput, path, field, pinned string) []Finding {
 	if _, ok := in.Snapshot.ByRef[unpinned]; !ok {
 		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q names %q, which does not resolve in the committed zone", field, pinned, unpinned)})
 	}
-	ok, err := gitx.CommitExists(in.Ctx, in.Root, ref.Commit)
+	ok, err := gitx.ReachableFromHEAD(in.Ctx, in.Root, ref.Commit, "HEAD")
 	if err != nil {
 		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q: checking commit %s: %v", field, pinned, ref.Commit, err)})
 	} else if !ok {
-		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q pins commit %s, which is not real git history", field, pinned, ref.Commit)})
+		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q pins commit %s, which is not reachable from HEAD in this repository's history", field, pinned, ref.Commit)})
 	}
 	return findings
 }
