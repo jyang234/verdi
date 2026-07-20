@@ -938,6 +938,25 @@ bindings:
       - "spec/ritual-traps#ac-2"
       - "spec/ritual-traps#ac-3"
       - "spec/ritual-traps#ac-4"
+      # spec/guide-claims-gate behavioral legs (spec/ritual-integrity#ac-5's
+      # implementing story, plan Task 6, ledger L-N4 as adjudicated at
+      # Task 0). DESIGN-TIME FORWARD DECLARATION, not built yet; ac-1/ac-4
+      # are bound under verdi-verify-static below, same not-yet-built
+      # framing. Not yet built: ac-2 <-
+      # verdi/internal/specalign/guideclaims_test.go's three isolated
+      # witness-binding cases (name absent from corpus reds naming both;
+      # present but missing its // guide-claim: <row-id> anchor reds,
+      # isolating the ADJ-50 lying-gate class; present+anchored but not
+      # PASS-coupled reds via require-pass.sh) plus a positive
+      # all-three-satisfied case; ac-3 <- guideclaims_test.go's
+      # PARTIAL-without-caveat, non-EXISTS-without-cite, and
+      # downgrade-without-cite cases (the red-condition-asymmetry cure)
+      # plus the cite: two-tier presence-in-CI/resolution-workspace-side-
+      # with-loud-skip case — plan Task 6 Step 1. Lands under make verify
+      # once this story merges; this entry is updated to name the real
+      # test functions at that point.
+      - "spec/guide-claims-gate#ac-2"
+      - "spec/guide-claims-gate#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -1419,3 +1438,20 @@ bindings:
       # so the unbuilt behavioral/static legs above are what the fold
       # will actually read once real.
       - "spec/ritual-integrity#ac-5"
+      # spec/guide-claims-gate static legs (spec/ritual-integrity#ac-5's
+      # implementing story, plan Task 6; ac-2/ac-3 are bound above under
+      # verdi-verify-behavioral, same not-yet-built framing). Not yet
+      # built: ac-1 <- verdi/docs/guide-claims.yaml itself (committed,
+      # strict-decoded, transcribing the guide's current Appendix B
+      # atomically — 7.2/6.2/8.4/5.3 decomposed to sub-rows per the
+      # Task-0 adjudication) plus a decode-rejection fixture pinning a
+      # bundled multi-capability row shape as illegal; ac-4 <- the
+      # gate's registration inside internal/specalign's existing
+      # make-verify-wired suite plus its own doc comment disclosing
+      # inventory-only scope (row-to-witness; guide-to-row completeness
+      # is Task 18's hard requirement, not claimed here) — plan Task 6
+      # Step 1/2. Lands under make verify once this story merges; this
+      # entry is updated to name the real committed manifest path and
+      # test functions at that point.
+      - "spec/guide-claims-gate#ac-1"
+      - "spec/guide-claims-gate#ac-4"
