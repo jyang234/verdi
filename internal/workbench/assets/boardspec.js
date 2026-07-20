@@ -153,20 +153,71 @@
     });
   }
 
+  // -- refresh discipline (owner bug 2026-07-19: "jerky … the refresh
+  // would delay and then the screen would reset") --------------------------
+  //
+  // The DOM stays the server's projection, but the swap must respect the
+  // hand: (a) responses carry a sequence, so a slow fragment can never
+  // roll the wall back over a newer one; (b) while a gesture, an inline
+  // card edit, or a sticky draft is LIVE, an arriving fragment is not
+  // applied — it is held and resumed (as a fresh fetch, so nothing stale
+  // is ever painted) when the interaction ends; (c) the swap replaces
+  // the scrollable canvas element, so its scroll offsets are carried
+  // across — a save must never snap the wall back to the origin.
+
+  var fragmentSeq = 0; // the newest refreshFragment call owns the wall
+  var heldRefresh = false; // a refresh arrived mid-interaction; resume after
+
+  function interactionLive() {
+    if (gesture || editing) return true;
+    var c = canvas();
+    return !!(c && c.querySelector(".sticky-draft"));
+  }
+
+  function applyFragment(html) {
+    // An open derivation drawer's element lives at the body while
+    // open; put it back before the region it came from is replaced,
+    // so the swap never strands it.
+    closeBadgeDrawer();
+    var c = canvas();
+    var sx = c ? c.scrollLeft : 0;
+    var sy = c ? c.scrollTop : 0;
+    region.innerHTML = html;
+    var swapped = canvas();
+    if (swapped) {
+      swapped.scrollLeft = sx;
+      swapped.scrollTop = sy;
+    }
+    layoutYarn();
+    markClamped();
+  }
+
   function refreshFragment() {
+    var seq = ++fragmentSeq;
     return fetch(
       boardURL("/fragment")
     ).then(function (resp) {
       if (!resp.ok) throw new Error("fragment: HTTP " + resp.status);
       return resp.text().then(function (html) {
-        // An open derivation drawer's element lives at the body while
-        // open; put it back before the region it came from is replaced,
-        // so the swap never strands it.
-        closeBadgeDrawer();
-        region.innerHTML = html;
-        layoutYarn();
-        markClamped();
+        if (seq !== fragmentSeq) return; // superseded by a newer refresh
+        if (interactionLive()) {
+          heldRefresh = true; // never yank the wall out from under the hand
+          return;
+        }
+        applyFragment(html);
       });
+    });
+  }
+
+  // resumeHeldRefresh runs at every interaction end: when a refresh was
+  // held mid-gesture, re-fetch (never re-apply the held bytes — a fresh
+  // fetch cannot be stale). A gesture that ended in its own mutation
+  // already cleared the flag: that mutation's refresh supersedes.
+  function resumeHeldRefresh() {
+    if (!heldRefresh || interactionLive()) return;
+    heldRefresh = false;
+    refreshFragment().catch(function () {
+      // The wall keeps its current render; the next mutation refreshes.
     });
   }
 
@@ -174,6 +225,7 @@
   // only then report "saved" — the signal the autosave contract binds.
   function mutate(action, body) {
     setStatus("saving…");
+    heldRefresh = false; // this mutation's own refresh supersedes a held one
     return api(action, body)
       .then(function (data) {
         if (typeof data.dirty === "boolean") state.git.dirty = data.dirty;
@@ -184,6 +236,11 @@
       })
       .catch(function (err) {
         setStatus("error: " + err.message);
+        // Reconcile: the wall must never keep showing a state the server
+        // refused (a dragged card at a refused position is a lie).
+        refreshFragment().catch(function () {
+          // The error status above stays; the next mutation refreshes.
+        });
       });
   }
 
@@ -1346,10 +1403,17 @@
       return;
     }
     if (g.kind === "sticky") {
+      // Scratch dies without ceremony — and visibly NOW: the element
+      // hides the moment the delete is posted, so the stale window
+      // between POST and refresh never shows a dead-but-clickable ghost
+      // (the owner-witnessed double-delete "no annotation …" race). A
+      // refused delete reconciles it back via mutate's error refetch.
+      g.el.style.visibility = "hidden";
       mutate("annotation-delete", { id: g.el.getAttribute("data-id") });
       return;
     }
     if (g.kind === "chip") {
+      g.el.style.visibility = "hidden"; // same immediate acknowledgment
       mutate("annotation-delete", { id: g.el.getAttribute("data-annotation-id") });
       return;
     }
@@ -1411,7 +1475,21 @@
     openConfirm("Remove " + id + " from the spec", msg2, false);
   }
 
+  // finishGesture ends the gesture and THEN resumes any refresh that was
+  // held while it was live. Order matters: the branches below that end in
+  // a mutation clear the held flag themselves (their own refresh
+  // supersedes), so the resume only fires for gesture ends that wrote
+  // nothing (a cancelled drop, a yarn draw opening its picker, a snap
+  // home) — where the held projection would otherwise never arrive.
   function finishGesture(e) {
+    try {
+      finishGestureNow(e);
+    } finally {
+      resumeHeldRefresh();
+    }
+  }
+
+  function finishGestureNow(e) {
     var g = gesture;
     gesture = null;
 
@@ -1523,12 +1601,13 @@
       var svg = ensureYarnSvg();
       var draft = svg.querySelector(".yarn-draft");
       if (draft) svg.removeChild(draft);
-      return;
+    } else {
+      g.el.classList.remove("dragging");
+      g.el.style.left = g.startLeft;
+      g.el.style.top = g.startTop;
+      layoutYarn();
     }
-    g.el.classList.remove("dragging");
-    g.el.style.left = g.startLeft;
-    g.el.style.top = g.startTop;
-    layoutYarn();
+    resumeHeldRefresh(); // a cancel writes nothing; a held refresh may land now
   }
 
   // -- inline card editor (authoring is bidirectional) ----------------------
@@ -1559,6 +1638,7 @@
       if (next && next !== original) {
         mutate("edit-text", { id: card.getAttribute("data-id"), text: next });
       }
+      resumeHeldRefresh(); // an unchanged edit ends the hold with no mutation
     });
   }
 
@@ -1647,6 +1727,21 @@
       draft.appendChild(hint);
     }
 
+    // commitDraft is the one commit path (focus-out and the Enter key
+    // share it): with text AND a chosen type the sticky is minted; with
+    // text but no type the hint appears — never a silent default; with
+    // no text there is nothing to commit and the draft stays.
+    function commitDraft() {
+      var text = editor.value.trim();
+      if (!text) return;
+      if (!chosen) {
+        needType();
+        return;
+      }
+      draft.remove();
+      mutate("sticky", { text: text, type: chosen });
+    }
+
     // Commit when focus truly leaves the draft. Decided one tick later
     // against document.activeElement, not focusout's relatedTarget —
     // Safari reports null relatedTarget on blurs it routes to body, and
@@ -1656,23 +1751,28 @@
       setTimeout(function () {
         if (!draft.isConnected) return;
         if (draft.contains(document.activeElement)) return;
-        var text = editor.value.trim();
-        if (!text) {
-          draft.remove();
+        if (!editor.value.trim()) {
+          draft.remove(); // leaving an empty draft discards it
+          resumeHeldRefresh();
           return;
         }
-        if (!chosen) {
-          needType();
-          return;
-        }
-        draft.remove();
-        mutate("sticky", { text: text, type: chosen });
+        commitDraft();
       }, 0);
+    });
+    // Enter commits the sticky; Shift+Enter stays the textarea's native
+    // newline (owner request 2026-07-19). An Enter that belongs to an
+    // IME composition is the IME's, never a commit.
+    editor.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        commitDraft();
+      }
     });
     draft.addEventListener("keydown", function (e) {
       if (e.key === "Escape") {
         e.stopPropagation(); // the draft dies; open dialogs are not its business
         draft.remove();
+        resumeHeldRefresh();
       }
     });
   }
@@ -2073,9 +2173,16 @@
     if (del) {
       var what = del.getAttribute("data-delete");
       if (what === "sticky") {
-        mutate("annotation-delete", { id: del.closest(".sticky").getAttribute("data-id") });
+        // Immediate acknowledgment (same as the trash drop): the sticky
+        // hides the moment its delete is posted — no stale ghost to
+        // double-delete; a refusal reconciles it back via the refetch.
+        var deadSticky = del.closest(".sticky");
+        deadSticky.style.visibility = "hidden";
+        mutate("annotation-delete", { id: deadSticky.getAttribute("data-id") });
       } else if (what === "thread") {
-        mutate("annotation-delete", { id: del.closest(".yarn-chip").getAttribute("data-annotation-id") });
+        var deadChip = del.closest(".yarn-chip");
+        deadChip.style.visibility = "hidden";
+        mutate("annotation-delete", { id: deadChip.getAttribute("data-annotation-id") });
       } else {
         var edgeChip = del.closest(".yarn-chip");
         var edge = {
