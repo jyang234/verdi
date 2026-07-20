@@ -45,7 +45,7 @@ func RepositionSticky(dir, id string, x, y float64) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("boardio: no annotation %s found to reposition", id)
+	return fmt.Errorf("boardio: no annotation %s to reposition in any stream under %s", id, dir)
 }
 
 func repositionInFile(path, id string, x, y float64) (bool, error) {
@@ -59,7 +59,7 @@ func repositionInFile(path, id string, x, y float64) (bool, error) {
 			continue
 		}
 		if a.Board == nil {
-			return false, fmt.Errorf("boardio: annotation %s has no board anchor to reposition", id)
+			return false, fmt.Errorf("boardio: annotation %s (in %s) has no board anchor to reposition", id, path)
 		}
 		a.Board.X = x
 		a.Board.Y = y
