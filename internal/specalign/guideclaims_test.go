@@ -810,6 +810,19 @@ func parseCite(cite string) (relPath, anchor string, ok bool) {
 // workspaceRoot and contains anchor as a literal substring — ac-3's
 // RESOLUTION check (does the cited entry genuinely exist), deliberately
 // workspace-side only (the chronicle lives outside this repository).
+//
+// DISCLOSED WEAKNESS (judged-ac3-cite-shape-and-anchor-semantics-weaker-than-
+// entry-existence): resolution is substring-ANYWHERE containment, so an anchor
+// that happens to occur in unrelated prose of the cited file resolves. The
+// check therefore proves the file contains the anchor text SOMEWHERE, not that
+// a chronicle/ledger ENTRY (a heading/record) by that name exists. The named
+// residual is ENTRY-ANCHORED matching — resolving the anchor against the cited
+// file's actual entry structure (e.g. a `### <anchor>` heading or a
+// frontmatter id), not free substring containment — deferred here. The
+// complementary cite SHAPE check now runs fail-closed at decode
+// (internal/artifact.validateGuideClaimCite), so a malformed cite no longer
+// reaches this function from a decoded manifest; parseCite's own '#' guard
+// below stays as defense-in-depth for direct (non-decode) callers.
 func resolveCite(workspaceRoot, cite string) (bool, error) {
 	relPath, anchor, ok := parseCite(cite)
 	if !ok {

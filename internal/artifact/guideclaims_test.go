@@ -105,6 +105,14 @@ func TestDecodeGuideClaims_Negative(t *testing.T) {
 			"  - id: x\n    section: \"1\"\n    capability: c\n    status: PARTIAL\n    caveat: \"narrower than it sounds\"\n",
 		"non-EXISTS (INVENTED) row without cite reds (ac-3)": preamble +
 			"  - id: x\n    section: \"1\"\n    capability: c\n    status: INVENTED\n",
+		"cite is free text with no # separator (\"TODO\") rejected at decode (ac-3)": preamble +
+			"  - id: x\n    section: \"1\"\n    capability: c\n    status: INVENTED\n    cite: \"TODO\"\n",
+		"cite is a bare path with no # anchor rejected at decode (ac-3)": preamble +
+			"  - id: x\n    section: \"1\"\n    capability: c\n    status: INVENTED\n    cite: \"docs/design/plans/some-plan.md\"\n",
+		"cite has an empty anchor after # rejected at decode (ac-3)": preamble +
+			"  - id: x\n    section: \"1\"\n    capability: c\n    status: INVENTED\n    cite: \"docs/x.md#\"\n",
+		"cite has an empty path before # rejected at decode (ac-3)": preamble +
+			"  - id: x\n    section: \"1\"\n    capability: c\n    status: INVENTED\n    cite: \"#anchor\"\n",
 		"witness with empty name": preamble +
 			"  - id: x\n    section: \"1\"\n    capability: c\n    status: EXISTS\n    witnesses:\n      - name: \"\"\n",
 		"bundled multi-capability row shape (sub_claims list) rejected at decode (ac-1)": preamble +

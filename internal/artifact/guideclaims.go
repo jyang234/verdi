@@ -1,6 +1,9 @@
 package artifact
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // guideClaimsSchema is verdi.guideclaims/v1's schema literal
 // (spec/guide-claims-gate ac-1).
@@ -137,6 +140,11 @@ func (m GuideClaimsManifest) Validate() error {
 		if r.Status != GuideClaimExists && r.Cite == "" {
 			return fmt.Errorf("artifact: guide-claims.yaml: row %s: status %s requires a cite: field naming a chronicle/ledger entry (spec/guide-claims-gate ac-3)", label, r.Status)
 		}
+		if r.Cite != "" {
+			if err := validateGuideClaimCite(r.Cite); err != nil {
+				return fmt.Errorf("artifact: guide-claims.yaml: row %s: %w", label, err)
+			}
+		}
 		if (r.Status == GuideClaimExists || r.Status == GuideClaimPartial) && len(r.Witnesses) == 0 {
 			return fmt.Errorf("artifact: guide-claims.yaml: row %s: status %s requires at least one witness (spec/guide-claims-gate ac-2; a live capability claim with no witness is exactly the ADJ-50 lying-gate class) — judged-ac2-zero-witness-red-untested", label, r.Status)
 		}
@@ -145,6 +153,33 @@ func (m GuideClaimsManifest) Validate() error {
 				return fmt.Errorf("artifact: guide-claims.yaml: row %s: witness %d: name is required", label, j)
 			}
 		}
+	}
+	return nil
+}
+
+// validateGuideClaimCite enforces the `<path>#<anchor>` cite: SHAPE at DECODE
+// time (spec/guide-claims-gate ac-3), fail-closed. Before this, cite: shape
+// was validated only workspace-side inside internal/specalign's resolveCite
+// (via parseCite), so decode — and therefore CI, which strict-decodes but has
+// no access to the out-of-repo chronicle — accepted ANY non-empty string as a
+// cite: a free-text placeholder ("TODO"), a bare path with no anchor, or an
+// empty path/anchor around the '#' all passed, and CI could not tell them from
+// a genuine chronicle/ledger reference (judged-ac3-cite-shape-and-anchor-
+// semantics-weaker-than-entry-existence). The shape check has no filesystem
+// dependency, so it is identical in CI and workspace and belongs at decode
+// beside the other fail-closed rules. It validates SHAPE only — whether the
+// cited entry genuinely EXISTS remains resolveCite's workspace-side,
+// loud-skip-on-unavailable job, since the chronicle lives outside this repo.
+func validateGuideClaimCite(cite string) error {
+	i := strings.Index(cite, "#")
+	if i < 0 {
+		return fmt.Errorf("cite %q is not shaped <path>#<anchor>: no '#' anchor separator — a free-text or bare-path cite cannot be told from a real chronicle/ledger reference (spec/guide-claims-gate ac-3)", cite)
+	}
+	if strings.TrimSpace(cite[:i]) == "" {
+		return fmt.Errorf("cite %q is not shaped <path>#<anchor>: empty <path> before '#' (spec/guide-claims-gate ac-3)", cite)
+	}
+	if strings.TrimSpace(cite[i+1:]) == "" {
+		return fmt.Errorf("cite %q is not shaped <path>#<anchor>: empty <anchor> after '#' (spec/guide-claims-gate ac-3)", cite)
 	}
 	return nil
 }
