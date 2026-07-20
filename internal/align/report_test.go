@@ -283,6 +283,31 @@ func TestGenerate_JudgeRequiredAndAbsent_ReturnsSentinelError(t *testing.T) {
 	}
 }
 
+// TestGenerate_WaitExpired_ReturnsSentinelError proves spec/judge-ergonomics
+// ac-2's Input.Wait threading end to end through Generate: a judge that
+// times out under Wait produces *ErrJudgeWaitExpired (not a plain
+// operational error, not *ErrJudgeRequiredAbsent), and Generate returns no
+// Report at all — nothing for a caller to accidentally write to disk on
+// expiry.
+func TestGenerate_WaitExpired_ReturnsSentinelError(t *testing.T) {
+	repo := buildComputeRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	spec := testSpec(repo.Head)
+
+	report, err := Generate(context.Background(), Input{
+		Root: repo.Dir, Runner: seedComputeRunner(svcDir), Spec: spec, Covers: repo.Head,
+		JudgeCmd: []string{writeFakeJudge(t, fakeJudgeTimeoutScript)}, JudgeTimeout: 100 * time.Millisecond,
+		Wait: true, ModelDigest: testModelDigest(t),
+	})
+	if report != nil {
+		t.Fatalf("Generate(Wait, expired) report = %+v, want nil", report)
+	}
+	var target *ErrJudgeWaitExpired
+	if !errors.As(err, &target) {
+		t.Fatalf("Generate error = %v (%T), want *ErrJudgeWaitExpired", err, err)
+	}
+}
+
 // TestGenerate_PreservesDispositionsAcrossRegeneration proves the holds
 // finding's disposition survives an unchanged regeneration, while a
 // finding whose content changed (violated -> a different service set)

@@ -36,6 +36,11 @@ type Input struct {
 	JudgeCmd      []string
 	JudgeRequired bool
 	JudgeTimeout  time.Duration
+	// Wait mirrors JudgedInput.Wait (spec/judge-ergonomics ac-2): a judge
+	// that does not complete within JudgeTimeout makes Generate return
+	// *ErrJudgeWaitExpired instead of a Report carrying a synthetic absence
+	// finding — cmd/verdi/align.go's --wait flag sets this.
+	Wait bool
 	// Freeze requests the closure edition (`verdi align --freeze`): a
 	// Frozen stamp is added, FrozenAt (a YYYY-MM-DD date, per Frozen.At —
 	// the caller derives it from Covers's own commit date, never wall
@@ -101,9 +106,10 @@ func Generate(ctx context.Context, in Input) (*Report, error) {
 		JudgeRequired: in.JudgeRequired,
 		Timeout:       in.JudgeTimeout,
 		Prompt:        prompt,
+		Wait:          in.Wait,
 	})
 	if err != nil {
-		return nil, err // *ErrJudgeRequiredAbsent, propagated as-is
+		return nil, err // *ErrJudgeRequiredAbsent or *ErrJudgeWaitExpired, propagated as-is
 	}
 
 	digest, err := ComputeDigest(in.Covers, computed.Findings, computed.BaselineDiffs)

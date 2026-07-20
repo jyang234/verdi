@@ -32,6 +32,18 @@ type JudgedInput struct {
 	// from pinned inputs by the caller (report.go) — this package does not
 	// decide prompt content, only the exec/parse/absence contract.
 	Prompt []byte
+	// Wait requests spec/judge-ergonomics ac-2's bounded-wait contract: a
+	// judge invocation that does not complete within Timeout (StageTimeout)
+	// returns *ErrJudgeWaitExpired instead of degrading to the synthetic
+	// absence finding — an operational timeout the caller (cmd/verdi/
+	// align.go, via --wait) maps to exit 2, never a silent hang and never
+	// exit 0 with a placeholder finding standing in for a judge that simply
+	// never got to run. False (the zero value) is today's unchanged
+	// default: every failure stage, timeout included, degrades gracefully.
+	// Scoped to StageTimeout only — a judge that exits fast (even
+	// unsuccessfully) has completed, which is the ordinary absent-judge case
+	// ac-2 leaves untouched.
+	Wait bool
 }
 
 // JudgedResult is RunJudged's output: either the judge's real findings (a
@@ -60,6 +72,17 @@ func RunJudged(ctx context.Context, runner JudgeRunner, in JudgedInput) (*Judged
 
 	success, failure := runJudgeOnce(ctx, runner, in.JudgeCmd, in.Timeout, in.Prompt)
 	if failure != nil {
+		// spec/judge-ergonomics ac-2: under Wait, a timeout is reported as an
+		// operational expiry, unconditionally — even when JudgeRequired is
+		// also true ("exit 2 — not 1, since this is an operational timeout,
+		// not a verdict"). Checked BEFORE absentResult's JudgeRequired branch
+		// so it always wins over ErrJudgeRequiredAbsent on this one failure
+		// stage; every other stage (not configured, exec, exit, parse) is
+		// unaffected and keeps its existing absentResult handling regardless
+		// of Wait.
+		if in.Wait && failure.Stage == StageTimeout {
+			return nil, &ErrJudgeWaitExpired{Failure: failure}
+		}
 		return absentResult(in.JudgeRequired, failure)
 	}
 
@@ -82,6 +105,20 @@ type ErrJudgeRequiredAbsent struct{ Failure *JudgeFailure }
 
 func (e *ErrJudgeRequiredAbsent) Error() string {
 	return fmt.Sprintf("align: align.judge_required is true but no judge produced a judged section (stage=%s: %s)", e.Failure.Stage, e.Failure.Detail)
+}
+
+// ErrJudgeWaitExpired is RunJudged's (and Generate's) error when Wait is
+// true and the judge did not complete within Timeout (spec/judge-ergonomics
+// ac-2). cmd/verdi/align.go type-switches on it (errors.As) to choose exit 2
+// — an operational timeout, never verdict exit 1 (ErrJudgeRequiredAbsent's
+// code) and never exit 0 (the non-Wait default's graceful degrade). Unlike
+// ErrJudgeRequiredAbsent, this is not conditioned on JudgeRequired at all:
+// it fires whenever Wait asked for a bounded wait and the bound elapsed,
+// regardless of whether the judge was also required.
+type ErrJudgeWaitExpired struct{ Failure *JudgeFailure }
+
+func (e *ErrJudgeWaitExpired) Error() string {
+	return fmt.Sprintf("align: --wait expired before the judge completed (stage=%s: %s)", e.Failure.Stage, e.Failure.Detail)
 }
 
 // absentResult applies I-9's judge_required gate: required=true fails
