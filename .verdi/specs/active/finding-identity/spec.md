@@ -4,7 +4,7 @@ kind: spec
 title: "Finding Identity"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-P2-2
 problem: { text: "regenerating a judge-backed align report today discards every prior disposition wholesale, because internal/align/identity.go's Identity deliberately folds Kind+ID+Text into the disposition-carry hash — a load-bearing, fail-closed design guarding against a stale disposition surviving a real verdict or witness change; but a JUDGED finding's Text is the judge's own prose, which varies run to run even when nothing about the underlying issue changed, so the same fail-closed design discards every judged disposition on every regeneration, not just the ones that actually changed, and X-18 showed the second-order cost directly — a discarded disposition is simply re-recorded and re-accepted on the next pass, so the identical standing adjudication consumes budget against the spec-stale deviations threshold every time the report regenerates, and a feature can be blocked from closing by its own settled history repeating itself", anchor: problem }
 outcome: { text: "a judged finding's rule/boundary-derived slug becomes an untrusted hint for regeneration, never a trusted identity key: a regenerated finding whose slug matches a prior dispositioned finding is pre-filled as a candidate — the old ruling and old text shown beside the new text — and AllDispositioned stays false until a human confirms each candidate individually as a working-tree edit at the covering head; the frozen computed-identity rule in identity.go is unchanged byte-for-byte, a confirmed reaffirmation carries carried-from: <covers-sha> excluded from the report digest and omitempty, a finding dispositioned before but absent from a fresh run lands in not-resurfaced: persisted until a human marks it fixed, and the spec-stale budget counts unique accepted-deviation identities across findings: union not-resurfaced: while the feature-close budget unions the implementing stories' archived reports with the feature's own", anchor: outcome }
@@ -15,6 +15,7 @@ acceptance_criteria:
   - { id: ac-4, text: "the feature-close budget is a union over every implementing story's archived report plus the feature's own report, proven against the true X-18 shape (an accepted deviation recorded in one story's archived report counts exactly once, never zero and never twice, in the feature-close union); two findings that land on the same slug within a single report is disclosed as a judge-contract-violation finding in its own right, never silently deduplicated into one", evidence: [behavioral], anchor: ac-4 }
 links:
   - { type: implements, ref: "spec/ritual-integrity#ac-2" }
+frozen: { at: 2026-07-20, commit: 9cf637b1ba9b73ecfcd680b24b67ee9f3214db3b, stub_matched: true }
 ---
 # Finding Identity
 
