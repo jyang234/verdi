@@ -822,7 +822,12 @@ func guideClaimStatusRank(s artifact.GuideClaimStatus) int {
 // (judged-ac3-downgrade-rule-not-live-and-satisfiable-by-stale-cite). The
 // downgrade demands a citation specific to the downgrade, so an UNCHANGED
 // cite (nr.Cite == or.Cite, empty or not) reds; only a CHANGED cite clears
-// it. This is wired against real history by
+// it — and "changed" is STRING INEQUALITY, an approximation
+// (judged-judged-ac3-downgrade-gate-rename-evasion-and-fresh-cite-string-
+// inequality-persisting-disclosed): any other shape-valid string clears the
+// check, since resolution is skipped CI-side and substring-anywhere
+// workspace-side; a citation genuinely ABOUT the downgrade is demanded by
+// convention and review, proven only as far as these mechanisms reach. This is wired against real history by
 // TestGuideClaimsDowngrades_AgainstMergeBase below (git-diff vs the
 // merge-base with origin/main), not merely available for a future story.
 //
