@@ -40,12 +40,16 @@ integrity gaps in verdi's own repository:
 2. **Closure residue.** `verdi close` (`docs/design/specs/03-evidence-model.md`
    §Closure ritual) commits its archival output to whatever branch it runs
    on and stops there — it never checks whether that output reached the
-   default branch. On this repository's own main, a closure ritual has
-   already run and never landed (`close/showcase-corpus-renovation`'s tip
-   moved `spec/showcase-corpus-renovation` to `archive/`, but the branch
-   never merged, so the spec still reads `accepted-pending-build`), several
-   more `close/<name>` branches are pure leftover, and a stub-complete
-   feature (`spec/code-health`) sits unclosed. `verdi gc` reclaims managed
+   default branch. On this repository's own main, this closure
+   residue was live and unaddressed when the round was accepted. As of
+   2026-07-19, a closure ritual had run and never landed —
+   `close/showcase-corpus-renovation`'s tip (`24214fd`) moved
+   `spec/showcase-corpus-renovation` to `archive/` while the branch stayed
+   unmerged, so the spec still read `accepted-pending-build`; that canonical
+   exemplar has since been resolved by PR #170 (the closure merged, the
+   branch deleted), and the spec reads archived on main now. Several more
+   `close/<name>` branches remain pure leftover, and a stub-complete feature
+   (`spec/code-health`) still sits unclosed. `verdi gc` reclaims managed
    worktrees only, so none of this workspace-wide residue is even visible.
 
 The round accepted one story for each gap — `spec/instruction-conformance`
