@@ -910,6 +910,34 @@ bindings:
       - "spec/evidence-resilience#ac-1"
       - "spec/evidence-resilience#ac-2"
       - "spec/evidence-resilience#ac-3"
+      # spec/ritual-traps (spec/ritual-integrity#ac-4's implementing
+      # story, plan Task 5). DESIGN-TIME FORWARD DECLARATION, not built
+      # yet. Not yet built: ac-1 <- internal/artifact/object_test.go's
+      # mixed-case anchor: AC-1 vs ## AC-1 case (X-1, pinned as a
+      # negative that fails pre-fix) plus already-matching and
+      # still-non-matching companion cases; ac-2 <- internal/align/
+      # judged_test.go's single-prefix-for-fresh case (reproducing the
+      # doubling regression, not hand-constructed) plus a committed
+      # archived-report fixture with the old judged-judged- form
+      # round-tripping untouched; ac-3 <- internal/lint/vl003_test.go's
+      # red-to-green root-discovery demonstration (P2-3(b): a
+      # deliberately-wrong root verdi.bindings.yaml passes silently
+      # pre-fix, reds post-fix, with a clean-file companion case
+      # proving no false positives); ac-4 <- vl003_test.go's
+      # fragment-qualified typo'd-AC-id case reding by name, a
+      # correct-entry companion case (the exact shape this design
+      # series' own entries already are) continuing to pass, plus a
+      # real run of verdi lint against this repository's own root
+      # verdi.bindings.yaml post-fix confirming every fragment-
+      # qualified entry this series added resolves cleanly — plan
+      # Task 5 Step 1 throughout. Each leg lands under make verify once
+      # this story merges; this entry is updated to name the real test
+      # functions at that point. No attestation leg is bound here —
+      # stories carry no attestation floor.
+      - "spec/ritual-traps#ac-1"
+      - "spec/ritual-traps#ac-2"
+      - "spec/ritual-traps#ac-3"
+      - "spec/ritual-traps#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
