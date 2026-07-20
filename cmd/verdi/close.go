@@ -102,6 +102,37 @@ type closeDeps struct {
 	Model *model.Model
 }
 
+// freezeAlignDeps builds the alignDeps for close's freeze-align step — the
+// single construction both runClose (story, this file) and runCloseFeature
+// (feature, closefeature.go) call, so the two can never drift (CLAUDE.md: no
+// copy-paste across call sites; the two literals were byte-identical). It
+// carries close's judge configuration (from closeDeps, cmdClose's manifest
+// resolution) plus the once-resolved model digest each caller passes.
+//
+// Wait is set (spec/judge-ergonomics ac-3, finding
+// judged-close-cannot-reach-inherited-wait): close's internal freeze-align
+// inherits align's bounded-wait contract from the same runAlignForSpec hook
+// `verdi align --wait` uses, rather than the contract being latent-only for
+// close. The bound is the judge's own configured ceiling
+// (deps.JudgeTimeout — duration identical to today), and a judge that does
+// not complete within it surfaces the honest exit-2-with-report-path expiry
+// instead of hanging past a caller's patience or degrading into a synthetic
+// judge-absence finding frozen straight into the archive. This is the
+// "future story" alignDeps.Wait's own comment deferred close's opt-in to;
+// this is that story. Every non-timeout judge failure is unchanged — it
+// still degrades and is still caught by D6-24's preserve-don't-clobber rule
+// (keepGenuineOnJudgeFailure, align.go); only the TIMEOUT shape changes.
+func freezeAlignDeps(deps closeDeps, modelDigest string) alignDeps {
+	return alignDeps{
+		Runner:        deps.Runner,
+		JudgeCmd:      deps.JudgeCmd,
+		JudgeRequired: deps.JudgeRequired,
+		JudgeTimeout:  deps.JudgeTimeout,
+		ModelDigest:   modelDigest,
+		Wait:          true,
+	}
+}
+
 // cmdClose is `verdi close`'s entry point, invoked by dispatch.go.
 func cmdClose(args []string, stdout, stderr io.Writer) int {
 	forceLocal := false
@@ -273,7 +304,7 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
-	alignD := alignDeps{Runner: deps.Runner, JudgeCmd: deps.JudgeCmd, JudgeRequired: deps.JudgeRequired, JudgeTimeout: deps.JudgeTimeout, ModelDigest: modelDigest}
+	alignD := freezeAlignDeps(deps, modelDigest)
 	if rc := runAlignForSpec(ctx, root, spec, head, true, alignD, stdout, stderr); rc != 0 {
 		fmt.Fprintln(stderr, "close: freezing the alignment report failed (see above)")
 		return rc

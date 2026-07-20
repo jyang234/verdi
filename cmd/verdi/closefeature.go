@@ -121,7 +121,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
-	alignD := alignDeps{Runner: deps.Runner, JudgeCmd: deps.JudgeCmd, JudgeRequired: deps.JudgeRequired, JudgeTimeout: deps.JudgeTimeout, ModelDigest: modelDigest}
+	alignD := freezeAlignDeps(deps, modelDigest)
 	if rc := runAlignForSpec(ctx, root, spec, head, true, alignD, stdout, stderr); rc != 0 {
 		fmt.Fprintln(stderr, "close: freezing the alignment report failed (see above)")
 		return rc

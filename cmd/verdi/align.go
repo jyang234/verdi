@@ -72,12 +72,15 @@ type alignDeps struct {
 	// zero leaves internal/align's own DefaultJudgeTimeout fallback
 	// unchanged (align.Input.JudgeTimeout's zero-value contract).
 	JudgeTimeout time.Duration
-	// Wait mirrors align.Input.Wait (spec/judge-ergonomics ac-2): true when
-	// --wait was passed (cmdAlign) or a caller (close.go, in a future story)
-	// opts a freeze-align call into bounded-wait semantics. cmdAlign folds
-	// --wait=N's explicit bound into JudgeTimeout above BEFORE calling
-	// runAlign, so this field alone is enough for runAlignForSpec to thread
-	// both pieces of ac-2's contract through to align.Input.
+	// Wait mirrors align.Input.Wait (spec/judge-ergonomics ac-2/ac-3): true
+	// when --wait was passed (cmdAlign) or when close's freeze-align opts in
+	// (freezeAlignDeps, close.go — ac-3's shared-engine inheritance, no
+	// longer deferred to "a future story"). cmdAlign refuses a --wait=N below
+	// the resolved judge ceiling (--wait may only EXTEND patience, never
+	// truncate the judge — finding judged-wait-bound-conflated-with-judge-
+	// kill-timeout) and otherwise folds the extended bound into JudgeTimeout
+	// above BEFORE calling runAlign, so this field alone is enough for
+	// runAlignForSpec to thread ac-2's contract through to align.Input.
 	Wait bool
 	// ModelDigest is the resolved operating model's canonical-JSON sha256
 	// digest (model.Model.Digest(), spec/model-digest ledger L-M5),

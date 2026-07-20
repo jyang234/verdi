@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -17,6 +18,7 @@ import (
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/provider/fake"
 	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/storyresolve"
 	"github.com/jyang234/verdi/internal/upstream"
 )
 
@@ -465,6 +467,80 @@ func TestRunClose_UnresolvableStory_ExitsOperational(t *testing.T) {
 	got := runClose(context.Background(), repo.Dir, "spec/does-not-exist", &store.Manifest{}, deps, &stdout, &stderr)
 	if got != 2 {
 		t.Fatalf("runClose(unresolvable spec) = %d, want 2; stderr=%s", got, stderr.String())
+	}
+}
+
+// TestFreezeAlignDeps_OptsCloseFreezeIntoBoundedWait is FIX 2's unit-level
+// red-first pin (finding judged-close-cannot-reach-inherited-wait): the
+// single builder both runClose and runCloseFeature use for their freeze-align
+// step must carry Wait, so close's internal freeze-align inherits align's
+// bounded-wait contract (spec/judge-ergonomics ac-3) — the "future story"
+// alignDeps.Wait's own comment deferred, now realized. The bound stays the
+// judge's own configured ceiling (JudgeTimeout threaded through unchanged —
+// duration identical to today, only the timeout FAILURE SHAPE changes).
+func TestFreezeAlignDeps_OptsCloseFreezeIntoBoundedWait(t *testing.T) {
+	deps := closeDeps{
+		Runner:        upstream.NewFakeRunner(),
+		JudgeCmd:      []string{"claude", "-p"},
+		JudgeRequired: true,
+		JudgeTimeout:  42 * time.Second,
+	}
+	got := freezeAlignDeps(deps, "sha256:deadbeef")
+	if !got.Wait {
+		t.Fatal("freezeAlignDeps did not set Wait — close's freeze-align cannot reach align's bounded-wait contract (the finding's whole point)")
+	}
+	if got.JudgeTimeout != 42*time.Second {
+		t.Fatalf("freezeAlignDeps JudgeTimeout = %s, want the judge's own ceiling preserved (42s — duration identical to today)", got.JudgeTimeout)
+	}
+	if !got.JudgeRequired || got.ModelDigest != "sha256:deadbeef" || got.JudgeCmd[0] != "claude" {
+		t.Fatalf("freezeAlignDeps did not thread close's judge config/model digest faithfully: %+v", got)
+	}
+}
+
+// TestCloseFreezeAlign_WaitReachableViaProductionDeps is FIX 2's behavioral
+// red-first proof (same finding): close's freeze-align now runs Wait-bounded
+// through close's OWN deps construction, not only through a hand-built
+// Wait:true literal no production close invocation could ever produce (the
+// finding's exact gap). The deps come from freezeAlignDeps — the single
+// builder both runClose and runCloseFeature call — and drive the same
+// runAlignForSpec(freeze=true) freeze step close uses; against a hung judge
+// under a short ceiling the step exits 2 with the report path already
+// printed and nothing written, the honest expiry contract inherited whole
+// from the shared align engine. The story/feature closure gates keep a
+// PASSING close on the freeze-in-place (no-judge) path, so this exercises
+// the freeze step's judge path directly, exactly as it would run were a
+// regenerate ever reached.
+func TestCloseFreezeAlign_WaitReachableViaProductionDeps(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
+	if err != nil {
+		t.Fatalf("ResolveBuildSpec: %v", err)
+	}
+
+	// Built exactly as cmdClose builds it (closeDeps -> freezeAlignDeps): a
+	// hung judge (sleeps 5s) under a short ceiling stands in for the real
+	// 6-7-minute judge against a bound.
+	cd := closeDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSleepy(t), JudgeTimeout: 200 * time.Millisecond}
+	alignD := freezeAlignDeps(cd, testResolveModelDigest(t, repo.Dir))
+	if !alignD.Wait {
+		t.Fatal("freezeAlignDeps did not set Wait — close's freeze-align cannot reach the bounded-wait contract (the finding's whole point)")
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runAlignForSpec(context.Background(), repo.Dir, spec, repo.Head, true /* close always freezes */, alignD, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("close freeze-align (production deps, hung judge) = %d, want 2 (bounded-wait expiry); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+	if firstLine := strings.SplitN(stdout.String(), "\n", 2)[0]; firstLine != reportPath {
+		t.Fatalf("stdout first line = %q, want the report path %q printed before the bounded judge run", firstLine, reportPath)
+	}
+	if _, err := os.Stat(reportPath); err == nil {
+		t.Fatal("a frozen report was written despite the --wait expiry — close's freeze-align must write nothing on an operational timeout")
+	}
+	if !strings.Contains(stderr.String(), "terminated") {
+		t.Fatalf("expiry stderr = %q, want the honest terminated-at-the-bound message close inherits from align", stderr.String())
 	}
 }
 
