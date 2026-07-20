@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -129,5 +131,82 @@ func TestRunDesignStart_FeatureUnaffectedByStoryTemplateOverride(t *testing.T) {
 	_, raw := readSpec(t, repo.Dir, "loan-mgmt")
 	if strings.Contains(string(raw), "## Rollout Plan") {
 		t.Fatalf("feature scaffold picked up the story class's template override:\n%s", raw)
+	}
+}
+
+// classMismatchStoryTemplateYAML is K1's own driven witness: a store's
+// .verdi/templates/story.md override that hardcodes `class: feature`
+// instead of `class: story` — the exact shape a misconfigured model.yaml
+// class/template binding (or a hand-edited store override) can produce.
+// It still strict-decodes clean AS A FEATURE (Problem/Outcome/an AC are
+// present; it needs no story: or links: block), so neither
+// SplitFrontmatter nor DecodeSpec alone catches the mismatch —
+// runDesignStart must assert the decoded scaffold's own class agrees
+// with the requested --kind before ever writing it to disk.
+const classMismatchStoryTemplateYAML = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: feature
+status: draft
+problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: ac-1 }
+---
+# {{.Title}}
+`
+
+// buildPhase7RepoWithClassMismatchStoryTemplate is buildPhase7Repo plus a
+// .verdi/templates/story.md override whose rendered content declares the
+// WRONG class (K1) — distinct from buildPhase7RepoWithStoryTemplateOverride
+// above, whose override is a well-formed story (added section, custom:
+// field) that still correctly declares class: story.
+func buildPhase7RepoWithClassMismatchStoryTemplate(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	return fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":         phase7ManifestYAML,
+				"loansvc/.flowmap.yaml":     loansvcFlowmapYAML,
+				".gitattributes":            phase7GitAttributes,
+				".verdi/templates/story.md": classMismatchStoryTemplateYAML,
+			},
+			Message: "init store with a class-mismatched story.md template override",
+		},
+	})
+}
+
+// TestRunDesignStart_ClassMismatch_Exit2_NoWrite is K1's own driven
+// witness at the design-start call site: before this fix, design start
+// happily wrote spec.md with `class: feature` to specs/active/<name>/
+// while its own stdout and commit message echoed "story" (the --kind it
+// was asked for) — a silently corrupted spec directory entry, committed
+// to a real design branch. runDesignStart must refuse (exit 2) BEFORE any
+// write, leaving no branch, no commit, and no specs/active/<name>/
+// directory at all — a validation failure before the branch is cut must
+// leave the repo untouched (this function's own doc comment).
+func TestRunDesignStart_ClassMismatch_Exit2_NoWrite(t *testing.T) {
+	repo := buildPhase7RepoWithClassMismatchStoryTemplate(t)
+	ctx := context.Background()
+	manifest := phase7Manifest(t)
+	mdl := phase7Model(t)
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "jira:LOAN-1482", "stale-decline-story", manifest, mdl, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runDesignStart (class-mismatched story template) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `"feature"`) {
+		t.Fatalf("stderr = %q, want it to name the rendered class (feature)", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `"story"`) {
+		t.Fatalf("stderr = %q, want it to name the requested kind (story)", stderr.String())
+	}
+	specDir := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline-story")
+	if _, err := os.Stat(specDir); !os.IsNotExist(err) {
+		t.Fatalf("spec dir %s exists (or stat errored: %v), want no write at all on a class-identity refusal", specDir, err)
 	}
 }

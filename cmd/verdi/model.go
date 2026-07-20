@@ -229,6 +229,13 @@ func modelCheckVariantsFor(className string) []modelCheckVariant {
 // variant before spike, so a multi-failure names a deterministic first
 // offender across runs (CLAUDE.md: deterministic outputs), though today's
 // frontier (dc-1) permits only the canonical {feature, story} class set.
+// Beyond strict-decoding, each render's own class: line must also agree
+// with the class it was resolved under (designscaffold.CheckClass, K1): a
+// class's Template filename is DATA, so a misconfigured model.yaml can
+// bind one class's Template to another class's template file and still
+// strict-decode clean as the OTHER class — this identity check is the
+// only thing that catches it, at check time rather than at someone's
+// first design start or stub-instantiate.
 func checkTemplates(cfg *store.Config) error {
 	names := make([]string, 0, len(cfg.Model.Classes))
 	for name := range cfg.Model.Classes {
@@ -251,8 +258,18 @@ func checkTemplates(cfg *store.Config) error {
 			if err != nil {
 				return fmt.Errorf("template %s (class %s, %s variant) rendered content failed strict decode: %w", class.Template, name, v.name, err)
 			}
-			if _, err := artifact.DecodeSpec(fm); err != nil {
+			spec, err := artifact.DecodeSpec(fm)
+			if err != nil {
 				return fmt.Errorf("template %s (class %s, %s variant) rendered content failed strict decode: %w", class.Template, name, v.name, err)
+			}
+			// K1: the rendered content's OWN class must agree with the
+			// class it was resolved under (name) — a class's Template is
+			// DATA (model.Class.Template), and a misconfigured model.yaml
+			// can bind one class's Template to another class's template
+			// file. That still strict-decodes clean (as the OTHER class),
+			// so only this identity check catches it, at check time.
+			if err := designscaffold.CheckClass(spec, artifact.SpecClass(name)); err != nil {
+				return fmt.Errorf("template %s (class %s, %s variant): %w", class.Template, name, v.name, err)
 			}
 		}
 	}

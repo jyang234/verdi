@@ -308,6 +308,18 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		fmt.Fprintln(stderr, "design start: internal error: scaffold failed self-validation:", decodeErr)
 		return 2
 	}
+	// K1: the decoded scaffold's OWN class must agree with the requested
+	// --kind — class.Template (above) is DATA, so a misconfigured
+	// model.yaml (or a hand-edited store override) can bind kind's class
+	// to a DIFFERENT class's template file and still strict-decode clean,
+	// as the other class. Caught here, before any write: stdout and the
+	// commit message below echo the REQUESTED kind, so a silent mismatch
+	// would otherwise land a spec.md whose own class: line disagrees with
+	// everything design start told the caller it scaffolded.
+	if err := designscaffold.CheckClass(spec, kind); err != nil {
+		fmt.Fprintln(stderr, "design start: internal error: scaffold failed self-validation:", err)
+		return 2
+	}
 
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		fmt.Fprintln(stderr, "design start:", err)

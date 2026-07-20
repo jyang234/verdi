@@ -11,6 +11,81 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
+// classMismatchStoryOverride is K1's own driven witness at the
+// stub-instantiate call site: a store's .verdi/templates/story.md
+// override that hardcodes `class: feature` instead of `class: story` —
+// the exact shape a misconfigured model.yaml class/template binding (or a
+// hand-edited store override) can produce. It still strict-decodes clean
+// AS A FEATURE (Problem/Outcome/an AC are present; it needs no story: or
+// links: block), so neither SplitFrontmatter nor DecodeSpec alone catches
+// the mismatch — actionStubInstantiate must assert the decoded scaffold's
+// own class agrees with the story class it always requests, before ever
+// touching the object database.
+const classMismatchStoryOverride = `---
+id: {{.Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{.Owners}}
+class: feature
+status: draft
+problem: { text: "{{.Problem}}", anchor: problem }
+outcome: { text: "{{.Outcome}}", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: ac-1 }
+---
+# {{.Title}}
+`
+
+// newScopingAcceptedFixtureWithClassMismatchStoryOverride is
+// newScopingAcceptedFixture plus a .verdi/templates/story.md override
+// whose rendered content declares the WRONG class (K1) — distinct from
+// newScopingAcceptedFixtureWithStoryOverride above, whose override is a
+// well-formed story that still correctly declares class: story.
+func newScopingAcceptedFixtureWithClassMismatchStoryOverride(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	return fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/active/" + scopingAcceptedName + "/spec.md": scopingAcceptedSpec,
+			".verdi/.gitignore":         "data/\n",
+			".verdi/verdi.yaml":         "schema: verdi.layout/v1\n",
+			".verdi/templates/story.md": classMismatchStoryOverride,
+		},
+		Message: "seed scoping accepted fixture with a class-mismatched story.md template override",
+	}})
+}
+
+// TestBoardSpec_StubInstantiate_ClassMismatch_Refused is K1's own driven
+// witness: before this fix, stub-instantiate would happily mint a new
+// design/<slug> branch carrying a spec.md whose `class:` line disagreed
+// with the story class it always requests — a silently corrupted spec,
+// committed via git plumbing the operator never reviewed inline (05
+// §Workbench: the branch is built entirely via git plumbing). The action
+// must refuse (400) BEFORE any git plumbing runs, leaving no
+// design/borrower-update-api branch at all.
+func TestBoardSpec_StubInstantiate_ClassMismatch_Refused(t *testing.T) {
+	repo := newScopingAcceptedFixtureWithClassMismatchStoryOverride(t)
+	root := repo.Dir
+	h := NewHandler(root)
+	ctx := context.Background()
+
+	rec := postBoardAPI(t, h, scopingAcceptedName, "stub-instantiate", `{"id":"borrower-update-api"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("stub-instantiate (class-mismatched story override) = %d, want 400\n%s", rec.Code, rec.Body.String())
+	}
+	// The handler's error text lands inside a JSON string value
+	// (writeJSONError), so its own literal quotes are backslash-escaped
+	// on the wire.
+	if !strings.Contains(rec.Body.String(), `\"feature\"`) {
+		t.Fatalf("body = %q, want it to name the rendered class (feature)", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `\"story\"`) {
+		t.Fatalf("body = %q, want it to name the requested class (story)", rec.Body.String())
+	}
+	if _, err := gitx.RevParse(ctx, root, "refs/heads/design/borrower-update-api"); err == nil {
+		t.Fatal("refs/heads/design/borrower-update-api exists, want no branch minted at all on a class-identity refusal")
+	}
+}
+
 // stubInstantiateStoryOverride is a store's own .verdi/templates/story.md
 // override (spec/scaffold-templates ac-2's own worked example): it adds a
 // "Rollout Plan" body section and a custom: frontmatter field carrying a

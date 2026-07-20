@@ -705,7 +705,17 @@ func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string
 	if err != nil {
 		return fmt.Errorf("workbench: internal error: stub-instantiate scaffold failed self-validation: %w", err)
 	}
-	if _, err := artifact.DecodeSpec(fm); err != nil {
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		return fmt.Errorf("workbench: internal error: stub-instantiate scaffold failed self-validation: %w", err)
+	}
+	// K1: the decoded scaffold's OWN class must agree with the story
+	// class stub-instantiate always requests — class.Template (above) is
+	// DATA, so a misconfigured model.yaml (or a hand-edited store
+	// override) can bind the story class to a DIFFERENT class's template
+	// file and still strict-decode clean, as the other class. Caught
+	// here, before any git plumbing runs.
+	if err := designscaffold.CheckClass(spec, artifact.ClassStory); err != nil {
 		return fmt.Errorf("workbench: internal error: stub-instantiate scaffold failed self-validation: %w", err)
 	}
 

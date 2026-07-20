@@ -309,6 +309,41 @@ acceptance_criteria:
 	}
 }
 
+// TestModelCheck_ClassTemplateMismatch_Exit2_NamesClasses is K1's own
+// driven witness: class-template-mismatch.yaml binds the STORY class's
+// own Class.Template to feature.md — the embedded canonical feature.md
+// template, whose `class: feature` literal still strict-decodes clean as
+// a valid FEATURE spec. Before this fix, checkTemplates only round-tripped
+// render-then-strict-decode and never compared the rendered content's own
+// class back against the class under check, so this misconfiguration
+// passed model check silently (exit 0). checkTemplates must now assert
+// identity and fail closed — exit 2, never the frontier's exit 1 (a broken
+// class/template binding is not a structural model deviation, exactly
+// like every other checkTemplates failure) — naming the template file,
+// the declared class under check ("story"), and the class the rendered
+// content actually decoded as ("feature").
+func TestModelCheck_ClassTemplateMismatch_Exit2_NamesClasses(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "class-template-mismatch.yaml"))
+
+	stdout, stderr, code := runModelCheckBinary(t, bin, root)
+	if code != 2 {
+		t.Fatalf("verdi model check (story class bound to feature.md) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "feature.md") {
+		t.Fatalf("stderr = %q, want it to name the offending template file feature.md", stderr)
+	}
+	if !strings.Contains(stderr, "class story") {
+		t.Fatalf("stderr = %q, want it to name the declared class under check (story)", stderr)
+	}
+	if !strings.Contains(stderr, `declares class "feature"`) && !strings.Contains(stderr, `rendered content declares class "feature"`) {
+		t.Fatalf("stderr = %q, want it to name the class the rendered content actually declares (feature)", stderr)
+	}
+	if !strings.Contains(stderr, `want "story"`) {
+		t.Fatalf("stderr = %q, want it to name the class it was checked against (story)", stderr)
+	}
+}
+
 // TestModelCheck_TemplatePathEscape_Exit2_NamesRule proves the kernel's
 // bare-filename rule reaches the built binary (judged-template-filename-
 // escapes-templates-dir): a hand-written model.yaml whose class template
