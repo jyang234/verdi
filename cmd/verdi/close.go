@@ -149,6 +149,59 @@ func freezeAlignDeps(deps closeDeps, modelDigest string) alignDeps {
 	}
 }
 
+// unwindClosureBranchCut reverses close's just-made close/<name> branch cut on
+// a freeze-align failure, so the resume hint's promised retry (closeExpiryResumeHint,
+// "Re-run verdi close …") is real rather than blocked by the verb's own
+// residue (finding judged-close-resume-hint-names-a-path-close-itself-refuses).
+// Both runClose (this file) and runCloseFeature (closefeature.go) cut
+// close/<name> at cutPoint BEFORE the shared freeze step that can fail, and
+// gitx.CheckoutNewBranch deliberately refuses a name that already exists
+// (branch.go's no-clobber posture) — so a freeze failure that left the branch
+// behind made the very next `verdi close` abort at the cut, exactly the path
+// the hint promised. This is the single implementation both callers use (the
+// freezeAlignDeps precedent — no per-verb reimplementation to drift).
+//
+// It is called only on the freeze-setup / freeze-align failure path, where the
+// freeze wrote nothing (every runAlignForSpec non-zero return leaves the report
+// on disk untouched) — so close/<name> still points exactly at cutPoint and the
+// working tree's living report is intact — and it returns to originalBranch (or,
+// for a close run from a detached HEAD, the cut commit itself) via the
+// board-guard-free gitx.CheckoutExisting, since the target is that same commit
+// and nothing is lost.
+//
+// It NEVER discards committed work: it deletes only after proving close/<name>
+// still points at cutPoint (no commit beyond the cut). If anything was somehow
+// committed there, or the switch-back/delete cannot be completed, it leaves the
+// branch in place and says so on stderr rather than force-removing it — the
+// caller's exit code is already the freeze failure's, and this is best-effort
+// cleanup whose every giving-up branch is disclosed (constitution 2/10: silence
+// is never a pass), never silent.
+func unwindClosureBranchCut(ctx context.Context, root, originalBranch, closureBranch, cutPoint string, stderr io.Writer) {
+	tip, err := gitx.RevParse(ctx, root, closureBranch)
+	if err != nil {
+		fmt.Fprintf(stderr, "close: left %s in place: could not inspect it to unwind the branch cut (%v); switch back and delete it before retrying\n", closureBranch, err)
+		return
+	}
+	if tip != cutPoint {
+		fmt.Fprintf(stderr, "close: left %s in place: it carries commit(s) beyond its cut point %s and nothing was discarded; remove it manually if unneeded before retrying\n", closureBranch, cutPoint)
+		return
+	}
+	restore := originalBranch
+	if restore == "" {
+		// close ran from a detached HEAD (CurrentBranch is "" there, not an
+		// error): return to the cut commit itself rather than a branch name.
+		restore = cutPoint
+	}
+	if err := gitx.CheckoutExisting(ctx, root, restore); err != nil {
+		fmt.Fprintf(stderr, "close: left %s in place: could not switch back to %s to unwind the branch cut (%v); remove it manually before retrying\n", closureBranch, restore, err)
+		return
+	}
+	if err := gitx.DeleteBranch(ctx, root, closureBranch); err != nil {
+		fmt.Fprintf(stderr, "close: switched back to %s but left %s in place: %v; remove it manually before retrying\n", restore, closureBranch, err)
+		return
+	}
+}
+
 // cmdClose is `verdi close`'s entry point, invoked by dispatch.go.
 func cmdClose(args []string, stdout, stderr io.Writer) int {
 	forceLocal := false
@@ -303,6 +356,15 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		return 2
 	}
 
+	// The branch to return to if the freeze fails after the cut below
+	// (finding judged-close-resume-hint-names-a-path-close-itself-refuses).
+	// "" for a detached-HEAD close is not an error — unwindClosureBranchCut
+	// returns to the cut commit itself in that case.
+	originalBranch, err := gitx.CurrentBranch(ctx, root)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
 	closureBranch := "close/" + specRef.Name
 	if err := gitx.CheckoutNewBranch(ctx, root, closureBranch); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -315,14 +377,24 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	// (no living report / stale covers / an undispositioned finding),
 	// mints a fresh Provenance and needs a resolved model digest exactly
 	// like `verdi align` itself does (spec/model-digest ledger L-M5).
+	//
+	// Both post-cut, pre-commit failure points below UNWIND the branch cut
+	// before exiting (finding
+	// judged-close-resume-hint-names-a-path-close-itself-refuses): the freeze
+	// wrote nothing, so close/<name> still points at the cut and returning to
+	// originalBranch loses nothing — leaving the resume hint's promised
+	// `verdi close` retry able to complete rather than dying at the next cut's
+	// no-clobber refusal.
 	modelDigest, err := resolveModelDigest(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
 		return 2
 	}
 	alignD := freezeAlignDeps(deps, modelDigest)
 	if rc := runAlignForSpec(ctx, root, spec, head, true, alignD, stdout, stderr); rc != 0 {
 		fmt.Fprintln(stderr, "close: freezing the alignment report failed (see above)")
+		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
 		return rc
 	}
 

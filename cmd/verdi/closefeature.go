@@ -100,6 +100,15 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 1
 	}
 
+	// The branch to return to if the freeze fails after the cut below — the
+	// feature-path half of the shared unwind (finding
+	// judged-close-resume-hint-names-a-path-close-itself-refuses; "" for a
+	// detached-HEAD close is handled by unwindClosureBranchCut).
+	originalBranch, err := gitx.CurrentBranch(ctx, root)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
 	closureBranch := "close/" + specRef.Name
 	if err := gitx.CheckoutNewBranch(ctx, root, closureBranch); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -116,14 +125,21 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 	// as align.go already handles any spec. The regenerate fallback path
 	// mints a fresh Provenance, so this needs a resolved model digest
 	// exactly like close.go's own runClose (spec/model-digest ledger L-M5).
+	//
+	// Both post-cut, pre-commit failures UNWIND the branch cut before exiting
+	// (the same shared unwindClosureBranchCut runClose uses), so the resume
+	// hint's promised `verdi close` retry can complete rather than dying at
+	// the next cut's no-clobber refusal.
 	modelDigest, err := resolveModelDigest(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
 		return 2
 	}
 	alignD := freezeAlignDeps(deps, modelDigest)
 	if rc := runAlignForSpec(ctx, root, spec, head, true, alignD, stdout, stderr); rc != 0 {
 		fmt.Fprintln(stderr, "close: freezing the alignment report failed (see above)")
+		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
 		return rc
 	}
 
