@@ -862,6 +862,33 @@ bindings:
       - "spec/judge-ergonomics#ac-1"
       - "spec/judge-ergonomics#ac-2"
       - "spec/judge-ergonomics#ac-3"
+      # spec/finding-identity (spec/ritual-integrity#ac-2's implementing
+      # story, plan Task 3, ledger L-N2 as adjudicated at Task 0).
+      # DESIGN-TIME FORWARD DECLARATION, not built yet. Not yet built:
+      # ac-1 <- internal/align/identity_test.go's extended carry-forward
+      # matrix proving a same-slug reworded-text regeneration pre-fills a
+      # candidate (old ruling + old text beside new text) with
+      # AllDispositioned false until a working-tree-edit confirmation;
+      # ac-2 <- the existing holds-to-violated negative test unmodified +
+      # a new escalation-under-stable-slug case (0.35 cosmetic then 0.93
+      # real regression at one slug, both texts surfaced) + a frozen-
+      # report fixture proving VerifyDigest is unaffected by the new
+      # carried-from field; ac-3 <- a not-resurfaced: persistence case
+      # plus the exact X-18 laundering replay (re-roll a non-reproducing
+      # judge, assert the spec-stale accepted-deviation count is
+      # unchanged); ac-4 <- a feature-close budget test spanning TWO
+      # reports (a story's archived report + the feature's own,
+      # confirming exactly-once counting, not zero and not double) plus a
+      # same-report colliding-slug case disclosed as a judge-contract
+      # violation, never deduped — plan Task 3 Step 1 throughout. Each
+      # leg lands under make verify once this story merges; this entry is
+      # updated to name the real test functions at that point. No
+      # attestation leg is bound here — stories carry no attestation
+      # floor.
+      - "spec/finding-identity#ac-1"
+      - "spec/finding-identity#ac-2"
+      - "spec/finding-identity#ac-3"
+      - "spec/finding-identity#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
