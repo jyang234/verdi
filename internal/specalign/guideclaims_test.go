@@ -72,6 +72,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // guideClaimAnchorPrefix is the marker word this gate's anchors use,
@@ -529,21 +530,20 @@ func guideClaimStatusRank(s artifact.GuideClaimStatus) int {
 	}
 }
 
-// findDowngradesWithoutCite compares two manifest snapshots by row ID and
-// returns a finding for every row present in both whose status weakened
-// with no cite: in the NEW row (ac-3 case 3). Every non-EXISTS row
-// already requires cite: unconditionally at decode time
-// (artifact.GuideClaimsManifest.Validate), so any downgrade — which by
-// construction always lands on a non-EXISTS status — is already
-// structurally caught there too; this function exists so that property
-// is independently, explicitly tested and named as its own case (the
-// Task-0 design wave's refuters' red-condition-asymmetry finding), not
-// left to be inferred from the blanket rule alone. It is deliberately NOT
-// wired against this manifest's real git history by this story — there
-// is no prior committed version to diff against yet, since this commit
-// is guide-claims.yaml's first version; a future story wiring a live
-// history-diff gate can reuse this function directly.
-func findDowngradesWithoutCite(oldM, newM *artifact.GuideClaimsManifest) []string {
+// findDowngradesWithoutFreshCite compares two manifest snapshots by row ID
+// and returns a finding for every row present in both whose status weakened
+// (a rank increase) while its cite: is UNCHANGED from the pre-downgrade row
+// (ac-3 case 3). "Fresh" is the load-bearing word: a non-EXISTS row already
+// requires SOME cite: at decode (artifact.GuideClaimsManifest.Validate), so
+// a blanket "downgrade without cite" rule is satisfiable by simply keeping
+// the stale citation that justified the prior, stronger status
+// (judged-ac3-downgrade-rule-not-live-and-satisfiable-by-stale-cite). The
+// downgrade demands a citation specific to the downgrade, so an UNCHANGED
+// cite (nr.Cite == or.Cite, empty or not) reds; only a CHANGED cite clears
+// it. This is wired against real history by
+// TestGuideClaimsDowngrades_AgainstMergeBase below (git-diff vs the
+// merge-base with origin/main), not merely available for a future story.
+func findDowngradesWithoutFreshCite(oldM, newM *artifact.GuideClaimsManifest) []string {
 	oldByID := make(map[string]artifact.GuideClaimRow, len(oldM.Rows))
 	for _, r := range oldM.Rows {
 		oldByID[r.ID] = r
@@ -554,8 +554,8 @@ func findDowngradesWithoutCite(oldM, newM *artifact.GuideClaimsManifest) []strin
 		if !ok {
 			continue
 		}
-		if guideClaimStatusRank(nr.Status) > guideClaimStatusRank(or.Status) && nr.Cite == "" {
-			findings = append(findings, fmt.Sprintf("row %s: status downgraded %s -> %s with no cite:", nr.ID, or.Status, nr.Status))
+		if guideClaimStatusRank(nr.Status) > guideClaimStatusRank(or.Status) && nr.Cite == or.Cite {
+			findings = append(findings, fmt.Sprintf("row %s: status downgraded %s -> %s but cite: is unchanged from the pre-downgrade row (%q) — a downgrade demands a citation specific to the downgrade, not the stale one that justified the prior status", nr.ID, or.Status, nr.Status, nr.Cite))
 		}
 	}
 	return findings
@@ -563,9 +563,9 @@ func findDowngradesWithoutCite(oldM, newM *artifact.GuideClaimsManifest) []strin
 
 // TestFindDowngradesWithoutCite is ac-3 case 3: a fixture pair simulating
 // an EXISTS row flipping to PARTIAL across two manifest versions, plus
-// the negative paths (downgrade WITH cite; same status; an upgrade) that
-// prove the function isolates exactly the downgrade-without-cite
-// condition.
+// the negative paths (downgrade WITH a fresh cite; same status; an upgrade)
+// and the stale-cite red case that together prove the function isolates
+// exactly the downgrade-without-a-fresh-cite condition.
 func TestFindDowngradesWithoutCite(t *testing.T) {
 	old := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
 		{ID: "x", Status: artifact.GuideClaimExists},
@@ -574,20 +574,37 @@ func TestFindDowngradesWithoutCite(t *testing.T) {
 		{ID: "x", Status: artifact.GuideClaimPartial}, // constructed directly (bypassing decode) to isolate this function
 	}}
 
-	findings := findDowngradesWithoutCite(old, newNoCite)
+	findings := findDowngradesWithoutFreshCite(old, newNoCite)
 	if len(findings) != 1 {
-		t.Fatalf("findDowngradesWithoutCite = %v, want exactly 1 finding", findings)
+		t.Fatalf("findDowngradesWithoutFreshCite = %v, want exactly 1 finding", findings)
 	}
 	if !strings.Contains(findings[0], "x") {
 		t.Errorf("finding = %q, want it to name row x", findings[0])
 	}
 
-	t.Run("downgrade WITH cite is not flagged", func(t *testing.T) {
+	t.Run("downgrade WITH a fresh (changed) cite is not flagged", func(t *testing.T) {
 		newWithCite := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
 			{ID: "x", Status: artifact.GuideClaimPartial, Cite: "docs/x.md#Y"},
 		}}
-		if f := findDowngradesWithoutCite(old, newWithCite); len(f) != 0 {
-			t.Errorf("want no findings for a downgrade WITH cite, got %v", f)
+		if f := findDowngradesWithoutFreshCite(old, newWithCite); len(f) != 0 {
+			t.Errorf("want no findings for a downgrade WITH a fresh cite, got %v", f)
+		}
+	})
+
+	t.Run("downgrade keeping the SAME non-empty cite reds (stale cite)", func(t *testing.T) {
+		// judged-ac3-downgrade-rule-not-live-and-satisfiable-by-stale-cite:
+		// a PARTIAL->INVENTED downgrade that simply keeps the row's
+		// pre-existing cite unchanged must NOT satisfy the gate — the
+		// downgrade demands a citation specific to the downgrade, not the
+		// stale one that justified the prior status.
+		oldPartial := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
+			{ID: "x", Status: artifact.GuideClaimPartial, Cite: "docs/c.md#A"},
+		}}
+		newInvented := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
+			{ID: "x", Status: artifact.GuideClaimInvented, Cite: "docs/c.md#A"}, // SAME cite as before
+		}}
+		if f := findDowngradesWithoutFreshCite(oldPartial, newInvented); len(f) != 1 {
+			t.Fatalf("want 1 finding for a downgrade whose cite is unchanged from the pre-downgrade row, got %v", f)
 		}
 	})
 
@@ -595,7 +612,7 @@ func TestFindDowngradesWithoutCite(t *testing.T) {
 		same := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
 			{ID: "x", Status: artifact.GuideClaimExists},
 		}}
-		if f := findDowngradesWithoutCite(old, same); len(f) != 0 {
+		if f := findDowngradesWithoutFreshCite(old, same); len(f) != 0 {
 			t.Errorf("want no findings for an unchanged status, got %v", f)
 		}
 	})
@@ -607,8 +624,149 @@ func TestFindDowngradesWithoutCite(t *testing.T) {
 		upgraded := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
 			{ID: "x", Status: artifact.GuideClaimExists},
 		}}
-		if f := findDowngradesWithoutCite(oldInvented, upgraded); len(f) != 0 {
+		if f := findDowngradesWithoutFreshCite(oldInvented, upgraded); len(f) != 0 {
 			t.Errorf("want no findings for an upgrade, got %v", f)
+		}
+	})
+}
+
+// gitMergeBase returns `git merge-base a b` run in dir, and ok=false when
+// git has no answer: dir is not a git repo, it is a shallow clone lacking
+// the common ancestor, or b is unknown (e.g. origin/main was never fetched).
+// It never fails the test — an unavailable merge-base is a disclosed SKIP at
+// the call site, not an operational error.
+func gitMergeBase(dir, a, b string) (string, bool) {
+	out, err := exec.Command("git", "-C", dir, "merge-base", a, b).Output()
+	if err != nil {
+		return "", false
+	}
+	base := strings.TrimSpace(string(out))
+	if base == "" {
+		return "", false
+	}
+	return base, true
+}
+
+// gitShowFile returns the bytes of relPath at rev in dir's git history, and
+// ok=false when the path does not exist at that rev (git show exits
+// non-zero) — the case that matters here is the first commit that introduces
+// the manifest, whose merge-base predates it, so there is no prior value to
+// diff.
+func gitShowFile(dir, rev, relPath string) ([]byte, bool) {
+	out, err := exec.Command("git", "-C", dir, "show", rev+":"+relPath).Output()
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+// TestGuideClaimsDowngrades_AgainstMergeBase is ac-3 case 3 WIRED LIVE
+// (judged-ac3-downgrade-rule-not-live-and-satisfiable-by-stale-cite): it
+// diffs the current docs/guide-claims.yaml against the version committed at
+// the merge-base with origin/main and reds any status downgrade whose cite:
+// is unchanged (findDowngradesWithoutFreshCite). Before this, the
+// purpose-built detector existed but was wired to nothing, so no make verify
+// run would ever red a downgrade AS a downgrade.
+//
+// It SKIPS, loudly and disclosed, when the diff cannot be computed: git
+// history is unavailable (not a repo, a shallow clone, or origin/main
+// unfetched), or the manifest did not yet exist at the merge-base. The
+// latter is THIS branch's own case — guide-claims.yaml's first version has
+// no prior committed value to diff — so the gate is honestly inert here and
+// goes live for the next branch that touches the manifest once this lands on
+// main. A skip is never a silent pass (CLAUDE.md three-valued honesty); the
+// spec-align target surfaces it. The current (working-tree) manifest is the
+// "new" side, matching every other check in this gate; on a clean checkout
+// it equals HEAD.
+func TestGuideClaimsDowngrades_AgainstMergeBase(t *testing.T) {
+	base, ok := gitMergeBase(verdiRepoRoot, "HEAD", "origin/main")
+	if !ok {
+		t.Skipf("DISCLOSURE: no merge-base for HEAD..origin/main under %s (not a git repo, a shallow clone, or origin/main unfetched) — the downgrade gate cannot diff against a prior manifest here. This is a SKIP, not a pass.", verdiRepoRoot)
+	}
+	oldData, ok := gitShowFile(verdiRepoRoot, base, "docs/guide-claims.yaml")
+	if !ok {
+		t.Skipf("DISCLOSURE: docs/guide-claims.yaml does not exist at the merge-base %s — this is the manifest's first version on this branch, so there is no prior committed value to diff. The downgrade gate goes live once this lands on main and a later branch modifies the manifest. This is a SKIP, not a pass.", base)
+	}
+	oldM, err := artifact.DecodeGuideClaims(oldData)
+	if err != nil {
+		t.Fatalf("decoding guide-claims.yaml at merge-base %s: %v", base, err)
+	}
+	newM := decodeRealGuideClaims(t, verdiRepoRoot)
+	if findings := findDowngradesWithoutFreshCite(oldM, newM); len(findings) > 0 {
+		t.Errorf("guide-claims.yaml has %d status downgrade(s) without a fresh cite: vs the merge-base %s:\n  %s", len(findings), base, strings.Join(findings, "\n  "))
+	}
+}
+
+// TestGuideClaimsDowngrades_GitAware proves the git-aware wiring end-to-end
+// over a hermetic fixturegit repository (real commits, real git show/
+// merge-base), so the mechanism the live gate above depends on is committed-
+// tested independent of this repo's own history state.
+func TestGuideClaimsDowngrades_GitAware(t *testing.T) {
+	const path = "docs/guide-claims.yaml"
+	oldYAML := "schema: verdi.guideclaims/v1\nrows:\n  - id: x\n    section: \"1\"\n    capability: c\n    status: PARTIAL\n    caveat: \"narrower than it sounds\"\n    cite: \"docs/c.md#A\"\n    witnesses:\n      - name: TestSomething\n"
+	staleYAML := "schema: verdi.guideclaims/v1\nrows:\n  - id: x\n    section: \"1\"\n    capability: c\n    status: INVENTED\n    cite: \"docs/c.md#A\"\n"
+	freshYAML := "schema: verdi.guideclaims/v1\nrows:\n  - id: x\n    section: \"1\"\n    capability: c\n    status: INVENTED\n    cite: \"docs/c.md#B\"\n"
+
+	decodePair := func(t *testing.T, repo *fixturegit.Repo, oldRev, newRev string) (oldM, newM *artifact.GuideClaimsManifest) {
+		t.Helper()
+		oldData, ok := gitShowFile(repo.Dir, oldRev, path)
+		if !ok {
+			t.Fatalf("gitShowFile(%s): manifest must exist at the old rev", oldRev)
+		}
+		newData, ok := gitShowFile(repo.Dir, newRev, path)
+		if !ok {
+			t.Fatalf("gitShowFile(%s): manifest must exist at the new rev", newRev)
+		}
+		om, err := artifact.DecodeGuideClaims(oldData)
+		if err != nil {
+			t.Fatalf("decode old: %v", err)
+		}
+		nm, err := artifact.DecodeGuideClaims(newData)
+		if err != nil {
+			t.Fatalf("decode new: %v", err)
+		}
+		return om, nm
+	}
+
+	t.Run("downgrade keeping the stale cite reds via the git-diff path", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{
+			{Files: map[string]string{path: oldYAML}, Message: "seed manifest"},
+			{Files: map[string]string{path: staleYAML}, Message: "downgrade x to INVENTED keeping the same cite"},
+		})
+		base, ok := gitMergeBase(repo.Dir, repo.Head, repo.Heads[0])
+		if !ok || base != repo.Heads[0] {
+			t.Fatalf("gitMergeBase = (%q, %v), want (%q, true)", base, ok, repo.Heads[0])
+		}
+		oldM, newM := decodePair(t, repo, base, repo.Head)
+		if f := findDowngradesWithoutFreshCite(oldM, newM); len(f) != 1 {
+			t.Fatalf("want 1 downgrade-with-stale-cite finding via the git path, got %v", f)
+		}
+	})
+
+	t.Run("downgrade with a fresh (changed) cite passes", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{
+			{Files: map[string]string{path: oldYAML}, Message: "seed manifest"},
+			{Files: map[string]string{path: freshYAML}, Message: "downgrade x with a downgrade-specific cite"},
+		})
+		oldM, newM := decodePair(t, repo, repo.Heads[0], repo.Head)
+		if f := findDowngradesWithoutFreshCite(oldM, newM); len(f) != 0 {
+			t.Fatalf("want no findings for a downgrade with a fresh cite, got %v", f)
+		}
+	})
+
+	t.Run("gitMergeBase reports unavailable outside a git repo", func(t *testing.T) {
+		if base, ok := gitMergeBase(t.TempDir(), "HEAD", "origin/main"); ok {
+			t.Fatalf("want ok=false for a non-repo dir, got base %q", base)
+		}
+	})
+
+	t.Run("gitShowFile reports absent when the path predates the rev (first-version case)", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{
+			{Files: map[string]string{"README.md": "hi\n"}, Message: "no manifest yet"},
+			{Files: map[string]string{path: oldYAML}, Message: "add manifest"},
+		})
+		if _, ok := gitShowFile(repo.Dir, repo.Heads[0], path); ok {
+			t.Fatal("want ok=false for a manifest path that does not exist at the older rev — the live gate's first-version skip depends on this")
 		}
 	})
 }
