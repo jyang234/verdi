@@ -2,10 +2,12 @@ package residue
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // TestScan_AC1_PatternA_RED is obligation/closure-hygiene--ac-1--behavioral's
@@ -100,6 +102,68 @@ func TestScan_AC1_PatternB_RED(t *testing.T) {
 	}
 	if got.Flagged() {
 		t.Fatal("Scan.Flagged() = true, want false (dc-3: pattern (b) alone never flags)")
+	}
+}
+
+// TestScan_AC1_PatternB_RequiresMergedNotJustOnDisk is Defect 2's
+// RED-direction witness: AC-1 pattern (b)'s "realized by a closed, MERGED
+// story" must be evaluated against the audited default-branch tip, not the
+// working tree. A stub whose archive move rides only an unmerged
+// close/<slug> branch — the close-branch-checked-out shape spec/close-verb
+// dc-3 leaves — is NOT realized by a merged story, even though its
+// archive/<slug>/spec.md sits on disk at status: closed. Once that closure
+// merges into the default branch, the stub IS realized and pattern (b)
+// fires (never flagging, dc-3).
+func TestScan_AC1_PatternB_RequiresMergedNotJustOnDisk(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/.gitignore":                       "data/\n",
+			".verdi/specs/active/code-health/spec.md": featureSpecMD("code-health", "accepted-pending-build", "solo-stub"),
+			".verdi/specs/active/solo-stub/spec.md":   storySpecMD("solo-stub", "accepted-pending-build", "code-health"),
+		},
+		Message: "a feature and its one still-open stub story, both active on main",
+	}})
+	root := repo.Dir
+	ctx := context.Background()
+
+	// Strand the stub's closure on an unmerged close/solo-stub branch, left
+	// checked out: flip the story to closed and archive-move it (mirroring
+	// the real ritual). archive/solo-stub/spec.md now sits on disk and on
+	// this branch's own tip — but NOT on the default branch (main).
+	cutCloseBranch(t, root, "solo-stub")
+	if err := os.WriteFile(store.ActiveSpecPath(root, "solo-stub"), []byte(closedArchiveStorySpecMD("solo-stub", "code-health")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ArchiveMove(root, "solo-stub"); err != nil {
+		t.Fatalf("store.ArchiveMove(solo-stub): %v", err)
+	}
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "--quiet", "-m", "close: archive spec/solo-stub (jira:RESIDUE-1)")
+
+	// RED: with the archive riding only the unmerged branch, code-health's
+	// stub is not realized by a MERGED story — pattern (b) must not fire.
+	got, err := Scan(ctx, root, "main")
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(got.PatternB) != 0 {
+		t.Fatalf("Scan.PatternB = %+v, want empty: solo-stub's archive rides only the unmerged close/solo-stub branch, so code-health is not stub-complete via a merged story (AC-1(b))", got.PatternB)
+	}
+
+	// GREEN: merge the closure into the default branch → the archive is now
+	// present at the audited tip → the stub is realized → pattern (b) fires.
+	checkoutMain(t, root)
+	runGit(t, root, "merge", "--quiet", "--no-ff", "-m", "merge close/solo-stub", "close/solo-stub")
+
+	got2, err := Scan(ctx, root, "main")
+	if err != nil {
+		t.Fatalf("Scan (after merge): %v", err)
+	}
+	if len(got2.PatternB) != 1 || got2.PatternB[0].SpecName != "code-health" {
+		t.Fatalf("Scan.PatternB = %+v, want exactly 1 (code-health) once the archive is merged at the default tip", got2.PatternB)
+	}
+	if got2.Flagged() {
+		t.Fatal("Scan.Flagged() = true, want false (dc-3: pattern (b) never flags, even when it fires)")
 	}
 }
 
