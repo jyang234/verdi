@@ -920,6 +920,126 @@ bindings:
       - "spec/ritual-integrity#ac-2"
       - "spec/ritual-integrity#ac-3"
       - "spec/ritual-integrity#ac-4"
+      # spec/judge-ergonomics (spec/ritual-integrity#ac-1's implementing
+      # story, plan Task 2). Disclosed departure matching the feature
+      # entry above: not built yet, so this is a DESIGN-TIME FORWARD
+      # DECLARATION of planned producers. Not yet built: ac-1 <-
+      # cmd/verdi/align_test.go's built-binary case proving the report
+      # path prints as stdout line 1 before the judge runs, plus a
+      # concurrent-reader case proving the atomicfile-written report is
+      # never observable mid-write (loadExistingReport, align.go:329, is
+      # the reader the proof must agree with); ac-2 <- align_test.go +
+      # internal/align/judged_test.go's canned-judge cases proving
+      # --wait[=seconds] blocks bounded then exits 0 on completion, and a
+      # hung fake under --wait=1 exits 2 with the report path already
+      # printed; ac-3 <- a test exercising close's internal freeze-align
+      # path directly against the canned judge, proving it inherits the
+      # identical first-line-path/atomic-write/bounded---wait contract
+      # from the shared align engine rather than a per-verb
+      # reimplementation — plan Task 2 Step 1 throughout. Each leg lands
+      # under make verify once this story merges; this entry is updated
+      # to name the real test functions at that point. The attestation
+      # leg is not bound here — stories carry no attestation floor
+      # (spec/ritual-integrity's own L-M14 feature-AC floor is the
+      # feature's, not each implementing story's).
+      - "spec/judge-ergonomics#ac-1"
+      - "spec/judge-ergonomics#ac-2"
+      - "spec/judge-ergonomics#ac-3"
+      # spec/finding-identity (spec/ritual-integrity#ac-2's implementing
+      # story, plan Task 3, ledger L-N2 as adjudicated at Task 0).
+      # DESIGN-TIME FORWARD DECLARATION, not built yet. Not yet built:
+      # ac-1 <- internal/align/identity_test.go's extended carry-forward
+      # matrix proving a same-slug reworded-text regeneration pre-fills a
+      # candidate (old ruling + old text beside new text) with
+      # AllDispositioned false until a working-tree-edit confirmation;
+      # ac-2 <- the existing holds-to-violated negative test unmodified +
+      # a new escalation-under-stable-slug case (0.35 cosmetic then 0.93
+      # real regression at one slug, both texts surfaced) + a frozen-
+      # report fixture proving VerifyDigest is unaffected by the new
+      # carried-from field; ac-3 <- a not-resurfaced: persistence case
+      # plus the exact X-18 laundering replay (re-roll a non-reproducing
+      # judge, assert the spec-stale accepted-deviation count is
+      # unchanged); ac-4 <- a feature-close budget test spanning TWO
+      # reports (a story's archived report + the feature's own,
+      # confirming exactly-once counting, not zero and not double) plus a
+      # same-report colliding-slug case disclosed as a judge-contract
+      # violation, never deduped — plan Task 3 Step 1 throughout. Each
+      # leg lands under make verify once this story merges; this entry is
+      # updated to name the real test functions at that point. No
+      # attestation leg is bound here — stories carry no attestation
+      # floor.
+      - "spec/finding-identity#ac-1"
+      - "spec/finding-identity#ac-2"
+      - "spec/finding-identity#ac-3"
+      - "spec/finding-identity#ac-4"
+      # spec/evidence-resilience (spec/ritual-integrity#ac-3's
+      # implementing story, plan Task 4). DESIGN-TIME FORWARD
+      # DECLARATION, not built yet. Not yet built: ac-1 <- a fixturegit
+      # case beside cmd/verdi/sync_ancestor_test.go proving sync
+      # quarantines (keeps + annotates the reason on) a record
+      # referencing a commit only a since-deleted branch ever held, and
+      # exits 0; ac-2 <- a fixturegit closure case reproducing X-15's
+      # exact shape (an unrelated story's deleted branch poisoning the
+      # story being closed), proving the affected AC reads per-record
+      # disclosed-unproven and the gate never exits operationally on
+      # that account alone; ac-3 <- internal/lint/vl009_test.go's
+      # X-11b fixture (a locally-dangling, unreachable frozen.commit)
+      # reding under the tightened reachable-from-HEAD check, with a
+      # legitimate reachable commit unaffected — plan Task 4 Step 1
+      # throughout. Each leg lands under make verify once this story
+      # merges; this entry is updated to name the real test functions at
+      # that point. No attestation leg is bound here — stories carry no
+      # attestation floor.
+      - "spec/evidence-resilience#ac-1"
+      - "spec/evidence-resilience#ac-2"
+      - "spec/evidence-resilience#ac-3"
+      # spec/ritual-traps (spec/ritual-integrity#ac-4's implementing
+      # story, plan Task 5). DESIGN-TIME FORWARD DECLARATION, not built
+      # yet. Not yet built: ac-1 <- internal/artifact/object_test.go's
+      # mixed-case anchor: AC-1 vs ## AC-1 case (X-1, pinned as a
+      # negative that fails pre-fix) plus already-matching and
+      # still-non-matching companion cases; ac-2 <- internal/align/
+      # judged_test.go's single-prefix-for-fresh case (reproducing the
+      # doubling regression, not hand-constructed) plus a committed
+      # archived-report fixture with the old judged-judged- form
+      # round-tripping untouched; ac-3 <- internal/lint/vl003_test.go's
+      # red-to-green root-discovery demonstration (P2-3(b): a
+      # deliberately-wrong root verdi.bindings.yaml passes silently
+      # pre-fix, reds post-fix, with a clean-file companion case
+      # proving no false positives); ac-4 <- vl003_test.go's
+      # fragment-qualified typo'd-AC-id case reding by name, a
+      # correct-entry companion case (the exact shape this design
+      # series' own entries already are) continuing to pass, plus a
+      # real run of verdi lint against this repository's own root
+      # verdi.bindings.yaml post-fix confirming every fragment-
+      # qualified entry this series added resolves cleanly — plan
+      # Task 5 Step 1 throughout. Each leg lands under make verify once
+      # this story merges; this entry is updated to name the real test
+      # functions at that point. No attestation leg is bound here —
+      # stories carry no attestation floor.
+      - "spec/ritual-traps#ac-1"
+      - "spec/ritual-traps#ac-2"
+      - "spec/ritual-traps#ac-3"
+      - "spec/ritual-traps#ac-4"
+      # spec/guide-claims-gate behavioral legs (spec/ritual-integrity#ac-5's
+      # implementing story, plan Task 6, ledger L-N4 as adjudicated at
+      # Task 0). DESIGN-TIME FORWARD DECLARATION, not built yet; ac-1/ac-4
+      # are bound under verdi-verify-static below, same not-yet-built
+      # framing. Not yet built: ac-2 <-
+      # verdi/internal/specalign/guideclaims_test.go's three isolated
+      # witness-binding cases (name absent from corpus reds naming both;
+      # present but missing its // guide-claim: <row-id> anchor reds,
+      # isolating the ADJ-50 lying-gate class; present+anchored but not
+      # PASS-coupled reds via require-pass.sh) plus a positive
+      # all-three-satisfied case; ac-3 <- guideclaims_test.go's
+      # PARTIAL-without-caveat, non-EXISTS-without-cite, and
+      # downgrade-without-cite cases (the red-condition-asymmetry cure)
+      # plus the cite: two-tier presence-in-CI/resolution-workspace-side-
+      # with-loud-skip case — plan Task 6 Step 1. Lands under make verify
+      # once this story merges; this entry is updated to name the real
+      # test functions at that point.
+      - "spec/guide-claims-gate#ac-2"
+      - "spec/guide-claims-gate#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -1486,3 +1606,20 @@ bindings:
       # so the unbuilt behavioral/static legs above are what the fold
       # will actually read once real.
       - "spec/ritual-integrity#ac-5"
+      # spec/guide-claims-gate static legs (spec/ritual-integrity#ac-5's
+      # implementing story, plan Task 6; ac-2/ac-3 are bound above under
+      # verdi-verify-behavioral, same not-yet-built framing). Not yet
+      # built: ac-1 <- verdi/docs/guide-claims.yaml itself (committed,
+      # strict-decoded, transcribing the guide's current Appendix B
+      # atomically — 7.2/6.2/8.4/5.3 decomposed to sub-rows per the
+      # Task-0 adjudication) plus a decode-rejection fixture pinning a
+      # bundled multi-capability row shape as illegal; ac-4 <- the
+      # gate's registration inside internal/specalign's existing
+      # make-verify-wired suite plus its own doc comment disclosing
+      # inventory-only scope (row-to-witness; guide-to-row completeness
+      # is Task 18's hard requirement, not claimed here) — plan Task 6
+      # Step 1/2. Lands under make verify once this story merges; this
+      # entry is updated to name the real committed manifest path and
+      # test functions at that point.
+      - "spec/guide-claims-gate#ac-1"
+      - "spec/guide-claims-gate#ac-4"
