@@ -82,7 +82,27 @@ type Evidence struct {
 	Witness     string             `json:"witness"`
 	Producer    string             `json:"producer,omitempty"`
 	Provenance  EvidenceProvenance `json:"provenance"`
-	Digest      string             `json:"digest"`
+	// Quarantine is non-nil exactly when `verdi sync` found, at sync time,
+	// that Provenance.Commit was not reachable from HEAD (spec/evidence-
+	// resilience ac-1: X-15 — the routine shape a feature branch's
+	// deletion produces once its PR has merged and CI evidence for it has
+	// already been captured). The record is kept, never dropped, and
+	// annotated here rather than silently removed from the synced set; a
+	// quarantined record is never treated as authoritative evidence by the
+	// fold (internal/evidence), which excludes it the same way it already
+	// excludes any other non-ancestor record — see records.go's ancestry
+	// check. Schema-additive (omitempty): every pre-existing record without
+	// this field decodes exactly as before.
+	Quarantine *EvidenceQuarantine `json:"quarantine,omitempty"`
+	Digest     string              `json:"digest"`
+}
+
+// EvidenceQuarantine is the reason `verdi sync` quarantined a record
+// (spec/evidence-resilience ac-1) — kept minimal (a single reason string)
+// per the story's own "smallest reversible" instruction: an annotation on
+// the record, not a restructuring of the schema.
+type EvidenceQuarantine struct {
+	Reason string `json:"reason"`
 }
 
 // DecodeEvidence strict-decodes and validates a single evidence record.

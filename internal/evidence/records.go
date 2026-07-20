@@ -21,7 +21,7 @@ import (
 // artifact's own (unexported) commit sha pattern.
 var commitDirRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 
-// derivedRecordFiles are the derived-tree files under one commit directory
+// RecordFileNames are the derived-tree files under one commit directory
 // that carry verdi.evidence/v1 records (01 §Directory layout). verdicts.json
 // carries static/behavioral (and, for a hand-assembled fixture, any other
 // kind); runtime.json is spec/runtime-evidence dc-2's sibling file — "a
@@ -32,7 +32,12 @@ var commitDirRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 // the missing link spec/runtime-evidence closes — the fold
 // (internal/evidence/fold.go) already handles kind: runtime records, but
 // nothing ever loaded one until now.
-var derivedRecordFiles = []string{"verdicts.json", "runtime.json"}
+//
+// Exported (spec/evidence-resilience ac-1) so sync's own write-time
+// quarantine pass (cmd/verdi/sync_quarantine.go) scans exactly the same
+// file set this reader loads records from, rather than a second,
+// independently-maintained list that could silently drift from this one.
+var RecordFileNames = []string{"verdicts.json", "runtime.json"}
 
 // RecordFile identifies one derived-tree record file LoadRecords actually
 // read: its slash-separated path relative to derivedRoot (e.g.
@@ -49,7 +54,7 @@ type RecordFile struct {
 
 // LoadRecords loads every evidence record found in derivedRoot's immediate
 // commit-named subdirectories (both verdicts.json and runtime.json,
-// derivedRecordFiles) and keeps only those whose provenance.commit is
+// RecordFileNames) and keeps only those whose provenance.commit is
 // commit itself or a real ancestor of commit in gitDir's history (03 §The
 // fold: "current ... whose commit is an ancestor of C"). Both provenance
 // classes (ci and local) are returned — Fold decides which to trust via its
@@ -69,7 +74,7 @@ func LoadRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]art
 // It is the SAME single walk — LoadRecords delegates here — so a receipt
 // built from the manifest can never disagree with the records loaded.
 // The manifest order is deterministic (os.ReadDir's sorted directory
-// order, then derivedRecordFiles order within a commit directory).
+// order, then RecordFileNames order within a commit directory).
 func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit string) ([]artifact.Evidence, []RecordFile, error) {
 	entries, err := os.ReadDir(derivedRoot)
 	if err != nil {
@@ -95,7 +100,7 @@ func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit str
 			continue
 		}
 
-		for _, name := range derivedRecordFiles {
+		for _, name := range RecordFileNames {
 			recs, digest, err := loadEvidenceArray(filepath.Join(derivedRoot, recordCommit, name))
 			if err != nil {
 				return nil, nil, err

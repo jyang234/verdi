@@ -254,6 +254,19 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 			fmt.Fprintln(deps.Stderr, "sync:", pinErr)
 			return 2
 		}
+		// spec/evidence-resilience ac-1 (X-15/X-11b, L-N3): quarantine —
+		// never drop, never operationally fail on — any record whose
+		// provenance.commit is not reachable from commit at sync time,
+		// BEFORE the tree is written to disk, so what lands under
+		// derivedRoot already carries the annotation.
+		quarantined, qErr := quarantineUnreachable(ctx, root, tree, commit)
+		if qErr != nil {
+			fmt.Fprintln(deps.Stderr, "sync:", qErr)
+			return 2
+		}
+		if quarantined > 0 {
+			fmt.Fprintf(deps.Stdout, "sync: quarantined %d evidence record(s) whose provenance.commit is not reachable from %s (kept, annotated, never dropped)\n", quarantined, commit)
+		}
 		if writeErr := writeDerivedTree(derivedRoot, tree); writeErr != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", writeErr)
 			return 2
