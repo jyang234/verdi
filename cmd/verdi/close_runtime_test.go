@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -68,6 +70,31 @@ func buildRuntimeCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	}})
 }
 
+// writeRuntimeCloseGateReport mirrors close_test.go's own
+// writeCloseGateReport for this file's differently-named fixture
+// (runtime-close-fixture) — X-13/X-16/X-17's closure-gate condition 4
+// needs a living, fully-dispositioned, head-covering report before close
+// will freeze rather than refuse.
+func writeRuntimeCloseGateReport(t *testing.T, root, covers, findingsYAML string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", "runtime-close-fixture")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	content := fmt.Sprintf(`---
+schema: verdi.deviation/v1
+covers: %s
+findings:
+%s
+digest: sha256:%s
+---
+# Alignment report
+`, covers, findingsYAML, strings.Repeat("0", 64))
+	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("writing deviation-report.md: %v", err)
+	}
+}
+
 // TestRunClose_RuntimeEvidenceReachesRollup is spec/runtime-evidence's
 // end-to-end proof at the close level (ac-2, co-2, dc-2): a real
 // runtime-evidence producer run (runProduceRuntime, exercised for real, not
@@ -92,6 +119,9 @@ func TestRunClose_RuntimeEvidenceReachesRollup(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runProduceRuntime = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
+	// The corrected closure ritual (X-16): align (a living report covering
+	// head) -> disposition (working-tree edit) -> close.
+	writeRuntimeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
 	fp := fake.New()
 	fg := forgefake.New() // reachable, no open MRs seeded

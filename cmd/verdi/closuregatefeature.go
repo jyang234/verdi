@@ -29,7 +29,14 @@
 //     checkPendingSupersessionCondition), reused UNCHANGED against the
 //     feature spec itself rather than reimplemented — see each call site
 //     below for why that reuse is honest rather than a silently-vacuous
-//     no-op.
+//     no-op;
+//  6. disposition-completeness (X-13/X-16/X-17, closuregate.go's
+//     checkDispositionCompleteCondition — see that file's top doc comment
+//     for the full mechanism), reused UNCHANGED against the feature spec's
+//     OWN deviation-report.md: runCloseFeature (closefeature.go) freezes
+//     that exact report via the same runAlignForSpec freeze step the story
+//     path uses, so it is subject to the identical trap and needs the
+//     identical guard.
 package main
 
 import (
@@ -51,7 +58,10 @@ import (
 // disclosure rendering) exactly as runClosureGate (closuregate.go) does
 // for a story, under its own "closure(feature):" label so the two ritual's
 // printed output is never ambiguous about which spec class is closing.
-func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, stdout io.Writer) (bool, error) {
+// head is the feature spec's build head — needed by condition 6
+// (disposition-completeness) to check the feature's own deviation report
+// covers it, mirroring runClosureGate's own head parameter exactly.
+func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (bool, error) {
 	cond1 := checkFeatureFoldEligible(fold, mdl)
 	cond2 := checkStubReconciliationCondition(reconciliation)
 	cond3 := checkAllImplementingStoriesClosed(stories, mdl)
@@ -97,13 +107,24 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	}
 	cond5 := renumbered(cond5raw, "5. no unresolved pending-supersession flag")
 
+	// Condition 6 (disposition-completeness, X-13/X-16/X-17): reused
+	// unchanged from the story gate, called with the feature spec and its
+	// own build head — see this file's top doc comment for why that reuse
+	// is honest (runCloseFeature freezes THIS exact report via the same
+	// freeze step the story path uses).
+	cond6raw, err := checkDispositionCompleteCondition(root, spec, head)
+	if err != nil {
+		return false, err
+	}
+	cond6 := renumbered(cond6raw, "6. deviation report ready to freeze (no undispositioned findings)")
+
 	// The label's parenthetical exists to tell a HUMAN which spec class is
 	// closing (this function's doc comment: "never ambiguous about which
 	// spec class") — display prose, resolved through the model (L-M13(1));
 	// the disclosure Source producer ids it wraps stay identity.
 	label := "closure(" + mdl.DisplayClass("feature") + "): "
 	allOK := true
-	for _, c := range []gateCondition{cond1, cond2, cond3, cond4, cond5} {
+	for _, c := range []gateCondition{cond1, cond2, cond3, cond4, cond5, cond6} {
 		switch {
 		case c.Disclosed:
 			// Three-valued honesty (constitution 2/10), rendered through the

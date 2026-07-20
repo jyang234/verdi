@@ -24,7 +24,9 @@ import (
 // (mirrors internal/lint's own vl018CleanSpec fixture, reused here rather
 // than re-invented, since that fixture is already proven clean against the
 // real engine by lint's own test suite) — the sibling layout.json is what
-// each test below varies.
+// each test below varies. ac-1 declares attestation (L-M14 remedy 1,
+// internal/lint/vl006.go's checkFeatureACAttestation) — this fixture is
+// status: draft/unfrozen, so it is not otherwise grandfathered.
 const quartetDraftSpecMD = `---
 id: spec/quartet-lint
 kind: spec
@@ -35,7 +37,7 @@ owners: [platform-team]
 problem: { text: "placeholder problem", anchor: "#problem" }
 outcome: { text: "placeholder outcome", anchor: "#outcome" }
 acceptance_criteria:
-  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+  - { id: ac-1, text: "placeholder", evidence: [static, attestation], anchor: "#ac-1" }
 constraints:
   - { id: co-1, text: "placeholder constraint", anchor: "#co-1" }
 ---
