@@ -3,8 +3,10 @@ package reclaim
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/residue"
+	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
 // Unit identifies one reclaim UNIT (spec/gc-reclaim outcome: "a LOCAL
@@ -154,6 +156,14 @@ func Compute(res *residue.Result, invokingRoot, invokingBranch string) Plan {
 // (mirroring internal/wtmanager.decideReclaim's own ordered-switch
 // precedent) — never an arbitrary or combinatorial reason.
 //
+// The "managed" step is wt.Managed OR looksManagedAnywhere(wt.Path): the
+// former is residue's own answer, resolved against the INVOKING checkout's
+// WorktreesRoot; the latter is defense-in-depth for a worktree managed by
+// ANOTHER linked checkout, which the invoking-root survey necessarily
+// misses (see looksManagedAnywhere — align finding
+// judged-managed-jurisdiction-is-invoking-root-relative, R4-I-82). The
+// kept reason is KeptManaged either way — the closed vocabulary is untouched.
+//
 // canonicalInvokingRoot must already be canonicalPath-resolved by the
 // caller (Compute resolves it once, not per row).
 func classifyWorktreeRow(wt residue.Worktree, canonicalInvokingRoot string) (eligible bool, reason KeptReason, detail string) {
@@ -166,13 +176,51 @@ func classifyWorktreeRow(wt residue.Worktree, canonicalInvokingRoot string) (eli
 		return false, KeptDirty, ""
 	case wt.Branch == "":
 		return false, KeptDetached, ""
-	case wt.Managed:
+	case wt.Managed || looksManagedAnywhere(wt.Path):
 		return false, KeptManaged, ""
 	case canonicalPath(wt.Path) == canonicalInvokingRoot:
 		return false, KeptInvoking, ""
 	default:
 		return true, 0, ""
 	}
+}
+
+// looksManagedAnywhere reports whether path structurally sits inside SOME
+// checkout's managed-worktree data zone — a "<root>/.verdi/data/worktrees/
+// <name>" path — regardless of which checkout's root that <root> is.
+//
+// This is defense-in-depth for the cross-checkout case (align finding
+// judged-managed-jurisdiction-is-invoking-root-relative; controller
+// adjudication R4-I-82). internal/residue/survey.go resolves
+// residue.Worktree.Managed against the INVOKING checkout's own
+// wtmanager.WorktreesRoot only, yet `git worktree list` is repo-global: a
+// worktree that is MANAGED from another linked checkout's perspective — it
+// lives under THAT checkout's .verdi/data/worktrees/ — reaches this
+// predicate with Managed=false. Left unguarded, a merged+clean such row
+// would classify eligible and `gc --reclaim-unmanaged --apply` could delete
+// another checkout's managed worktree behind its manager's back. Matching
+// the managed-worktree path segment keeps it kept:managed WITHOUT
+// internal/residue changing at all (spec/gc-reclaim co-2: internal/residue
+// stays byte-untouched) and WITHOUT re-deriving any git eligibility fact
+// here (dc-1: internal/reclaim calls zero gitx primitives itself).
+//
+// The segment is DERIVED from wtmanager.WorktreesRoot, never a second
+// hardcoded literal: internal/wtmanager/naming.go is the single source of
+// truth for the .verdi/data/worktrees/ mapping, and WorktreesRoot("")
+// yields exactly that package's own relative data-zone path (OS-native
+// separators). The match is bracketed by filepath.Separator on both sides,
+// so neither a trailing-boundary collision (".../worktrees-scratch/x") nor a
+// leading-boundary one (".../prefix.verdi/data/worktrees/x") can spuriously
+// match — only a full "<sep>.verdi<sep>data<sep>worktrees<sep>" path segment
+// does. Git reports worktree paths absolute and already-resolved, so the
+// leading separator is always present for a real row.
+func looksManagedAnywhere(path string) bool {
+	if path == "" {
+		return false
+	}
+	sep := string(filepath.Separator)
+	segment := sep + wtmanager.WorktreesRoot("") + sep // e.g. "/.verdi/data/worktrees/"
+	return strings.Contains(filepath.Clean(path), segment)
 }
 
 // classifyBranchOnlyRow is dc-2's single check for a branch-only row (a
