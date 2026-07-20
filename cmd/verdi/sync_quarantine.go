@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -27,6 +28,48 @@ import (
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
 )
+
+// perSpecDerivedKeyPrefix is the leading path segment every per-spec derived
+// key carries: store.RefSlug(spec.ID), and a spec's id is always
+// "spec/<name>" (RefSlug lowercases and maps "/" -> "--"), so the key is
+// "spec--<name>/<commit>/<file>". This is the exact prefix the ONLY
+// closure-time undecodable-disclosure surface keys by — evidence.
+// QuarantinedRecords walking store.DerivedSpecDir(store.RefSlug(spec.ID)),
+// rendered by the story closure gate (closuregate.go) and close --preflight
+// (closepreflight.go). A fetched artifact also carries the branch-keyed
+// per-service bundle under store.RefSlug(<git-ref>) (forge/zip.go), which no
+// closure surface ever walks — so an undecodable file's key class decides
+// whether any downstream surface will re-surface it.
+const perSpecDerivedKeyPrefix = "spec--"
+
+// classifyUndecodableKeys partitions sync's undecodable fetched-record keys
+// (quarantineUnreachable's return) by whether the closure-time disclosure
+// surface will ever re-surface them, so sync's own notice can state the honest
+// situation PER KEY CLASS rather than promising every key a closure disclosure
+// that fires only for per-spec dirs.
+//
+// A per-spec key (first path segment begins with perSpecDerivedKeyPrefix) goes
+// to perSpec: its spec's own closure gate walks that dir (evidence.
+// QuarantinedRecords over every commit subdir, reachable or not) and
+// re-discloses the file, so sync's "excluded from the fold and disclosed at
+// closure" claim holds there. Every other key — the branch-keyed per-service
+// bundle and any non-spec key — goes to other: no closure surface walks it, so
+// sync's notice is that file's ONLY disclosure. Input order is preserved (the
+// caller's slice is already sorted), keeping both outputs deterministic.
+func classifyUndecodableKeys(undecodable []string) (perSpec, other []string) {
+	for _, key := range undecodable {
+		seg := key
+		if i := strings.IndexByte(key, '/'); i >= 0 {
+			seg = key[:i]
+		}
+		if strings.HasPrefix(seg, perSpecDerivedKeyPrefix) {
+			perSpec = append(perSpec, key)
+		} else {
+			other = append(other, key)
+		}
+	}
+	return perSpec, other
+}
 
 // quarantineUnreachable scans tree's record-bearing files
 // (evidence.RecordFileNames: verdicts.json, runtime.json — the exact set

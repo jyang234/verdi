@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -302,6 +303,144 @@ func TestRunSync_CIFetch_UndecodableUnderReachableDir_RoundTripsToClosureDisclos
 	}
 	if len(undecodable) != 1 || !strings.Contains(undecodable[0].Path, head+"/verdicts.json") {
 		t.Fatalf("QuarantinedRecords undecodable = %+v, want exactly one entry naming the reachable dir's verdicts.json (disclosed at closure)", undecodable)
+	}
+}
+
+// TestRunSync_CIFetch_UndecodableDisclosure_AccuratePerKeyClass is
+// spec/evidence-resilience finding
+// judged-undecodable-closure-disclosure-claim-false-for-non-per-spec-keys's
+// (third-loop FIX) pin: sync's undecodable-file notice must tell the truth PER
+// KEY CLASS. The only closure-time disclosure surface — evidence.
+// QuarantinedRecords walking store.DerivedSpecDir(store.RefSlug(spec.ID))
+// (closuregate.go / closepreflight.go) — walks ONLY per-spec dirs. So:
+//   - an undecodable file under a per-spec key ("spec--<name>/…") CAN be
+//     re-surfaced at that spec's closure; the "excluded from the fold and
+//     disclosed at closure" claim holds and is KEPT.
+//   - an undecodable file under any other key — the branch-keyed per-service
+//     bundle (store.RefSlug(<branch-ref>)) or any non-spec key — is NEVER
+//     walked by a closure surface, so sync's own notice is its ONLY
+//     disclosure. Promising "disclosed at closure" there is false; the honest
+//     variant names the real situation ("no downstream surface will re-surface
+//     it — THIS notice is its only disclosure") instead.
+//
+// The fetched-tree key alone decides the class; both cases seed one undecodable
+// record file and assert the right variant is present and the wrong one absent.
+func TestRunSync_CIFetch_UndecodableDisclosure_AccuratePerKeyClass(t *testing.T) {
+	// Truncated verdicts.json — fails strict decode, the exact
+	// stale-poisoned-bundle debris shape quarantineUnreachable keeps verbatim.
+	const malformed = `[{"schema":"verdi.evidence/v1"`
+	const closureClaim = "excluded from the fold and disclosed at closure"
+	const honestMarker = "no downstream surface will re-surface it"
+
+	cases := []struct {
+		name       string
+		keyPrefix  string // fetched-tree key's leading ref-slug segment (before "/<commit>/…")
+		wantSub    string // the variant that MUST appear for this key class
+		wantNotSub string // the variant that must NOT appear for this key class
+	}{
+		{
+			name:       "per_spec_key_keeps_closure_claim",
+			keyPrefix:  "spec--other-story", // store.RefSlug("spec/other-story") — a per-spec key
+			wantSub:    closureClaim,
+			wantNotSub: honestMarker,
+		},
+		{
+			name:       "branch_keyed_key_gets_honest_non_closure_variant",
+			keyPrefix:  "feature--evidence-resilience", // the branch-keyed per-service bundle, RefSlug of a git ref
+			wantSub:    honestMarker,
+			wantNotSub: closureClaim,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := buildTestStore(t)
+			head := gitInitTestStore(t, root)
+
+			f := fake.New()
+			f.SeedBundle(testRef, head, forgepkg.DerivedTree{
+				tc.keyPrefix + "/" + head + "/verdicts.json": []byte(malformed),
+			})
+
+			var stdout, stderr bytes.Buffer
+			deps := syncDeps{Runner: upstream.NewFakeRunner(), Forge: f, GoTest: fakeGoTest{}, Stdout: &stdout, Stderr: &stderr}
+			code := runSync(context.Background(), root, testRef, head, false, false, false, deps)
+			if code != 0 {
+				t.Fatalf("runSync exit = %d, want 0 (an undecodable fetched record file is quarantined-by-default, never operational); stderr=%s", code, stderr.String())
+			}
+			out := stdout.String()
+			if !strings.Contains(out, "undecodable") {
+				t.Fatalf("stdout = %q, want an undecodable disclosure at all", out)
+			}
+			if !strings.Contains(out, tc.wantSub) {
+				t.Errorf("stdout = %q\n  want it to contain %q for a %s key", out, tc.wantSub, tc.keyPrefix)
+			}
+			if strings.Contains(out, tc.wantNotSub) {
+				t.Errorf("stdout = %q\n  must NOT contain %q for a %s key (finding: the notice must be accurate per key class)", out, tc.wantNotSub, tc.keyPrefix)
+			}
+		})
+	}
+}
+
+// TestClassifyUndecodableKeys is the unit-level pin for the per-key-class
+// split that keeps sync's undecodable disclosure honest: a per-spec key
+// ("spec--<name>/…") lands in perSpec (its spec's closure gate re-discloses
+// it), and every other key — the branch-keyed per-service bundle, a bare
+// default-branch slug, or an empty input — lands in other (no closure surface
+// walks it). Input order is preserved so the disclosure lines stay
+// deterministic.
+func TestClassifyUndecodableKeys(t *testing.T) {
+	cases := []struct {
+		name        string
+		in          []string
+		wantPerSpec []string
+		wantOther   []string
+	}{
+		{
+			name:        "empty input yields two empty partitions",
+			in:          nil,
+			wantPerSpec: nil,
+			wantOther:   nil,
+		},
+		{
+			name:        "per-spec key routes to perSpec",
+			in:          []string{"spec--evidence-resilience/abc123/verdicts.json"},
+			wantPerSpec: []string{"spec--evidence-resilience/abc123/verdicts.json"},
+			wantOther:   nil,
+		},
+		{
+			name:        "branch-keyed per-service bundle routes to other",
+			in:          []string{"feature--evidence-resilience/abc123/verdicts.json"},
+			wantPerSpec: nil,
+			wantOther:   []string{"feature--evidence-resilience/abc123/verdicts.json"},
+		},
+		{
+			name:        "bare default-branch slug (no double dash) routes to other",
+			in:          []string{"main/abc123/runtime.json"},
+			wantPerSpec: nil,
+			wantOther:   []string{"main/abc123/runtime.json"},
+		},
+		{
+			name: "mixed keys split by class, order preserved",
+			in: []string{
+				"spec--a/c1/verdicts.json",
+				"feature--x/c2/runtime.json",
+				"spec--b/c3/runtime.json",
+			},
+			wantPerSpec: []string{"spec--a/c1/verdicts.json", "spec--b/c3/runtime.json"},
+			wantOther:   []string{"feature--x/c2/runtime.json"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			perSpec, other := classifyUndecodableKeys(tc.in)
+			if !reflect.DeepEqual(perSpec, tc.wantPerSpec) {
+				t.Errorf("perSpec = %#v, want %#v", perSpec, tc.wantPerSpec)
+			}
+			if !reflect.DeepEqual(other, tc.wantOther) {
+				t.Errorf("other = %#v, want %#v", other, tc.wantOther)
+			}
+		})
 	}
 }
 

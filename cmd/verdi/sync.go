@@ -269,10 +269,28 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 		}
 		if len(undecodable) > 0 {
 			// spec/evidence-resilience finding 3: an undecodable fetched
-			// record file is quarantined-by-default — kept verbatim, excluded
-			// from the fold (via directory reachability), disclosed at
-			// closure — never a sync-time operational failure.
-			fmt.Fprintf(deps.Stdout, "sync: quarantined %d undecodable fetched record file(s) (kept verbatim, never dropped; excluded from the fold and disclosed at closure): %v\n", len(undecodable), undecodable)
+			// record file is quarantined-by-default — kept verbatim, never a
+			// sync-time operational failure. But the disclosure must be
+			// accurate PER KEY CLASS (finding
+			// undecodable-closure-disclosure-claim-false-for-non-per-spec-keys):
+			// only a per-spec key's undecodable file is re-surfaced at closure
+			// (evidence.QuarantinedRecords walks store.DerivedSpecDir alone), so
+			// the "disclosed at closure" claim is kept ONLY for those keys.
+			perSpecUndecodable, otherUndecodable := classifyUndecodableKeys(undecodable)
+			if len(perSpecUndecodable) > 0 {
+				// Per-spec key: the owning spec's closure gate (and close
+				// --preflight) walk this dir and re-disclose the file, so the
+				// closure-disclosure claim holds here — kept verbatim from the
+				// pre-fix line.
+				fmt.Fprintf(deps.Stdout, "sync: quarantined %d undecodable fetched record file(s) under a per-spec key (kept verbatim, never dropped; excluded from the fold and disclosed at closure): %v\n", len(perSpecUndecodable), perSpecUndecodable)
+			}
+			if len(otherUndecodable) > 0 {
+				// Non-per-spec key (the branch-keyed per-service bundle, or any
+				// other key): NO closure surface walks it, so promising a
+				// closure disclosure would be false. State the honest situation
+				// — this notice is the file's only disclosure.
+				fmt.Fprintf(deps.Stdout, "sync: quarantined %d undecodable fetched record file(s) under a non-per-spec key (kept verbatim, never dropped; never read by the fold, and no downstream surface will re-surface it — THIS notice is its only disclosure): %v\n", len(otherUndecodable), otherUndecodable)
+			}
 		}
 		if writeErr := writeDerivedTree(derivedRoot, tree); writeErr != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", writeErr)
