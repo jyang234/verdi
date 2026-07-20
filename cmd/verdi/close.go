@@ -346,8 +346,8 @@ func foldStory(ctx context.Context, root string, spec *artifact.SpecFrontmatter,
 
 // closeAcceptedStatusLineRe matches the sole `status: accepted-pending-build`
 // frontmatter line the closure flip rewrites to `status: closed`. Same
-// anchored, multiline shape accept.go's acceptedStatusLineRe uses for its own
-// predecessor flip — a raw, status-line-only ReplaceAll so the archived
+// anchored, multiline shape supersede.go's acceptedStatusLineRe uses for its
+// own predecessor flip — a raw, status-line-only ReplaceAll so the archived
 // spec.md differs from its active original on exactly that one line, keeping
 // VL-010's status-only archive-flip exception (D6-11) cleanly satisfiable.
 var closeAcceptedStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?accepted-pending-build"?\s*$`)
