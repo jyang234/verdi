@@ -36,25 +36,39 @@ func TestMatrixHandler_Happy(t *testing.T) {
 }
 
 // TestMatrixHandler_StaleDerivedRendersLegibleError is DEFECT B's witness:
-// a store whose derived/ records pin a commit unknown to this repo's git
-// history. The fold's (correct, deliberate) loud ancestry failure must
+// a store whose derived/ records carry a genuine fold-level failure must
 // surface as a legible error page — the shared shell, the error text, and
 // the stale-derived hint — while still carrying a non-2xx status (loud
-// stays loud), not a bare 500 with the gitx error only in the server log.
+// stays loud), not a bare 500 with the underlying error only in the server
+// log.
+//
+// Trigger: a record whose evidence_for names an AC the spec does not
+// declare — the fold's OWN deliberately loud "dangling binding" guard (03
+// §Declarations: "a misspelled ac-3 must never surface as a silent
+// no-signal"), the second class isStaleDerivedError recognizes alongside
+// LoadRecords's ancestry probe. This test used to plant a derived
+// directory keyed by a commit SHA unknown to this repo's git history (the
+// "foreign derived record" shape) to trigger the ancestry probe's own
+// error — spec/evidence-resilience ac-2 (X-15) removed exactly that
+// trigger BY DESIGN: a commit-shaped derived directory that resolves to no
+// real commit at all now reads as gracefully excluded (quarantined),
+// never an operational error, so a deleted branch can never again brick a
+// story's closure OR this page. "dangling binding" is the still-genuine
+// operational-failure trigger left to prove DEFECT B's rendering — the
+// rendering mechanism itself (isStaleDerivedError, renderError) is
+// entirely unchanged by that fix.
 func TestMatrixHandler_StaleDerivedRendersLegibleError(t *testing.T) {
 	repo := buildWorkbenchFixtureRepo(t)
 
-	// Plant a derived snapshot directory whose commit SHA is a real hex
-	// shape (so it is scanned) but is NOT in this repo's git history — the
-	// exact "foreign derived record" LoadRecords raises its ancestry error
-	// on.
-	foreign := filepath.Join(repo.Dir, ".verdi", "data", "derived", "spec--stale-decline",
-		"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
-	if err := os.MkdirAll(foreign, 0o755); err != nil {
-		t.Fatalf("planting foreign derived dir: %v", err)
+	dir := filepath.Join(repo.Dir, ".verdi", "data", "derived", "spec--stale-decline", repo.Head)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("planting derived dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(foreign, "verdicts.json"), []byte("[]\n"), 0o644); err != nil {
-		t.Fatalf("writing foreign verdicts.json: %v", err)
+	record := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-99"],"kind":"static","verdict":"pass",` +
+		`"witness":"w","provenance":{"source":"ci","pipeline":"1","commit":"` + repo.Head + `"},` +
+		`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte(record), 0o644); err != nil {
+		t.Fatalf("writing verdicts.json with an unknown AC binding: %v", err)
 	}
 
 	h := NewHandler(repo.Dir)
@@ -71,7 +85,9 @@ func TestMatrixHandler_StaleDerivedRendersLegibleError(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	// The stale-derived hint (the actionable half of DEFECT B).
+	// The stale-derived hint (the actionable half of DEFECT B) — still
+	// shown for this class too (isStaleDerivedError's own, pre-existing,
+	// broader classification; unchanged by this story).
 	if !strings.Contains(body, "verdi sync --or-regen") {
 		t.Fatalf("error page missing the stale-derived hint (`verdi sync --or-regen`); got: %s", body)
 	}
@@ -79,9 +95,9 @@ func TestMatrixHandler_StaleDerivedRendersLegibleError(t *testing.T) {
 	if !strings.Contains(body, `<link rel="stylesheet" href="/assets/style.css">`) {
 		t.Fatalf("error page not rendered on the shared workbench stylesheet; got: %s", body)
 	}
-	// The underlying gitx/ancestry error text is surfaced, not swallowed.
-	if !strings.Contains(body, "ancestry") {
-		t.Fatalf("error page does not surface the underlying ancestry error; got: %s", body)
+	// The underlying fold error text is surfaced, not swallowed.
+	if !strings.Contains(body, "dangling binding") {
+		t.Fatalf("error page does not surface the underlying fold error; got: %s", body)
 	}
 }
 

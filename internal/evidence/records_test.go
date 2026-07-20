@@ -274,19 +274,43 @@ func TestExcludedCommitDirs_SkipsNonCommitShapedEntries(t *testing.T) {
 	}
 }
 
-// TestExcludedCommitDirs_Negative proves a genuine ancestry-check failure
-// (a commit-shaped directory name that resolves to no real commit at all —
-// distinct from a real, merely-non-ancestor sibling) is a surfaced
-// operational error, not a silent "excluded".
-func TestExcludedCommitDirs_Negative(t *testing.T) {
+// TestExcludedCommitDirs_UnresolvableCommitDirName_ExcludedNotError proves
+// spec/evidence-resilience ac-2's fix: a commit-shaped directory name that
+// resolves to no real commit at all (X-15's exact shape — the branch that
+// produced it has since been deleted, so the commit exists nowhere in this
+// clone's object database) is excluded, exactly like any other non-ancestor
+// commit — never a surfaced operational error. Before this story, this was
+// the literal X-15 hard-fail: `git merge-base --is-ancestor` on an
+// unresolvable commit fails with "fatal: Not a valid commit name", which
+// the old ancestry check propagated as an error rather than folding into
+// "not reachable".
+func TestExcludedCommitDirs_UnresolvableCommitDirName_ExcludedNotError(t *testing.T) {
 	repo := buildRecordsRepo(t)
 	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 	// Commit-shaped (matches commitDirRe) but not a real object in this
 	// repo's history at all.
+	writeDerivedVerdicts(t, derivedRoot, unreachable, recordJSON(unreachable, "ci"))
+
+	got, err := ExcludedCommitDirs(context.Background(), repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("ExcludedCommitDirs(unresolvable commit dir name): want no error (X-15 must never brick this), got %v", err)
+	}
+	if len(got) != 1 || got[0] != unreachable {
+		t.Fatalf("ExcludedCommitDirs(unresolvable commit dir name) = %v, want exactly [%s] (excluded, same as any other non-ancestor)", got, unreachable)
+	}
+}
+
+// TestExcludedCommitDirs_NotARepo proves a GENUINE operational failure
+// (gitDir is not a git repository at all) is still a real, surfaced error
+// — only a resolvable-but-unreachable commit is folded into "excluded".
+func TestExcludedCommitDirs_NotARepo(t *testing.T) {
+	notARepo := t.TempDir()
+	derivedRoot := filepath.Join(notARepo, "derived", "spec--test")
 	writeDerivedVerdicts(t, derivedRoot, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", recordJSON("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "ci"))
 
-	if _, err := ExcludedCommitDirs(context.Background(), repo.Dir, derivedRoot, repo.Head); err == nil {
-		t.Fatal("ExcludedCommitDirs(unresolvable commit dir name): want error, got nil")
+	if _, err := ExcludedCommitDirs(context.Background(), notARepo, derivedRoot, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"); err == nil {
+		t.Fatal("ExcludedCommitDirs(gitDir not a repository at all): want error, got nil")
 	}
 }
 
@@ -316,5 +340,123 @@ func TestLoadRecordsWithSources_Negative(t *testing.T) {
 	}
 	if recs != nil || sources != nil {
 		t.Fatalf("missing derivedRoot: records = %+v, sources = %+v, want nil/nil", recs, sources)
+	}
+}
+
+// TestLoadRecordsWithSources_UnresolvableCommitDir_ExcludedNotError is
+// spec/evidence-resilience ac-2's core regression pin, at the exact seam
+// X-15 hit: the closure gate's evidence loader used to hard-fail
+// operationally (git's own "fatal: Not a valid commit name") the moment a
+// synced bundle carried a record under a commit-named directory that
+// resolves to no real commit anywhere (a deleted, since-gc'd branch's
+// tip). It must now read as excluded — the record contributes no
+// evidence, exactly as an ordinary non-ancestor commit already would —
+// never as an operational error, so a branch deletion (however unrelated
+// to the story being closed) can never again brick that closure.
+func TestLoadRecordsWithSources_UnresolvableCommitDir_ExcludedNotError(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], recordJSON(repo.Heads[0], "ci"))
+	writeDerivedVerdicts(t, derivedRoot, unreachable, recordJSON(unreachable, "ci"))
+
+	recs, sources, err := LoadRecordsWithSources(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("LoadRecordsWithSources(unresolvable commit dir present): want no error (X-15 must never brick this), got %v", err)
+	}
+	if len(recs) != 1 || recs[0].Provenance.Commit != repo.Heads[0] {
+		t.Fatalf("LoadRecordsWithSources = %+v, want exactly the one record from the real ancestor commit; the unresolvable commit dir must be excluded, not erroring", recs)
+	}
+	if len(sources) != 1 || sources[0].Path != repo.Heads[0]+"/verdicts.json" {
+		t.Fatalf("sources = %+v, want exactly one entry naming the real ancestor's file", sources)
+	}
+}
+
+// TestLoadRecords_NotARepo proves a GENUINE operational failure (gitDir is
+// not a git repository at all) is still surfaced — only a resolvable-but-
+// unreachable commit dir name is folded into "excluded".
+func TestLoadRecords_NotARepo(t *testing.T) {
+	notARepo := t.TempDir()
+	derivedRoot := filepath.Join(notARepo, "derived", "spec--test")
+	const commit = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	writeDerivedVerdicts(t, derivedRoot, commit, recordJSON(commit, "ci"))
+
+	if _, err := LoadRecords(context.Background(), notARepo, derivedRoot, commit); err == nil {
+		t.Fatal("LoadRecords(gitDir not a repository at all): want error, got nil")
+	}
+}
+
+// TestQuarantinedRecords_Happy proves QuarantinedRecords is the mirror
+// image of LoadRecordsWithSources: it returns exactly the records
+// LoadRecordsWithSources excludes because their commit is not reachable —
+// full records (not just commit names), so a disclosure consumer
+// (cmd/verdi/closuregate.go) can read which AC(s) a quarantined or
+// otherwise-unreachable record's evidence_for would have targeted. A real,
+// included ancestor commit's record is never returned here.
+func TestQuarantinedRecords_Happy(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], recordJSON(repo.Heads[0], "ci"))
+	writeDerivedVerdicts(t, derivedRoot, unreachable, recordJSON(unreachable, "ci"))
+
+	got, err := QuarantinedRecords(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("QuarantinedRecords: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("QuarantinedRecords = %+v, want exactly 1 (the unreachable commit's record)", got)
+	}
+	if got[0].Provenance.Commit != unreachable {
+		t.Errorf("QuarantinedRecords()[0].Provenance.Commit = %q, want %q", got[0].Provenance.Commit, unreachable)
+	}
+}
+
+// TestQuarantinedRecords_NoneExcluded proves an all-ancestor derived tree
+// (the ordinary case) reports no quarantined records at all — nil, not an
+// empty-but-non-nil slice.
+func TestQuarantinedRecords_NoneExcluded(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], recordJSON(repo.Heads[0], "ci"))
+
+	got, err := QuarantinedRecords(context.Background(), repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("QuarantinedRecords: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("QuarantinedRecords = %v, want none excluded", got)
+	}
+}
+
+// TestQuarantinedRecords_MissingDerivedRoot proves a never-synced story (no
+// derived tree on disk at all) reads as "nothing quarantined", not an
+// error — mirroring LoadRecordsWithSources's and ExcludedCommitDirs's own
+// never-synced posture.
+func TestQuarantinedRecords_MissingDerivedRoot(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	got, err := QuarantinedRecords(context.Background(), repo.Dir, filepath.Join(repo.Dir, "derived", "never-synced"), repo.Head)
+	if err != nil {
+		t.Fatalf("QuarantinedRecords(missing derivedRoot): %v", err)
+	}
+	if got != nil {
+		t.Fatalf("QuarantinedRecords(missing derivedRoot) = %v, want nil", got)
+	}
+}
+
+// TestQuarantinedRecords_NotARepo proves a genuine operational failure
+// (gitDir is not a git repository at all) is still surfaced as an error.
+func TestQuarantinedRecords_NotARepo(t *testing.T) {
+	notARepo := t.TempDir()
+	derivedRoot := filepath.Join(notARepo, "derived", "spec--test")
+	const commit = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	writeDerivedVerdicts(t, derivedRoot, commit, recordJSON(commit, "ci"))
+
+	if _, err := QuarantinedRecords(context.Background(), notARepo, derivedRoot, commit); err == nil {
+		t.Fatal("QuarantinedRecords(gitDir not a repository at all): want error, got nil")
 	}
 }

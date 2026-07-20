@@ -92,11 +92,20 @@ func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit str
 		}
 		recordCommit := e.Name()
 
-		isAncestor, err := gitx.IsAncestor(ctx, gitDir, recordCommit, commit)
+		// spec/evidence-resilience ac-2 (X-15): gitx.ReachableFromHEAD,
+		// not the plain gitx.IsAncestor this used to call, so a commit-
+		// named directory that resolves to no real commit at all (a
+		// deleted, since-gc'd branch's tip — the exact shape that used to
+		// hard-fail here with git's own "fatal: Not a valid commit name")
+		// is folded into "not reachable" and excluded, the same as any
+		// other real-but-non-ancestor commit already is — never an
+		// operational error. A gitDir that is not a git repository at all
+		// is still a real, surfaced error.
+		reachable, err := gitx.ReachableFromHEAD(ctx, gitDir, recordCommit, commit)
 		if err != nil {
 			return nil, nil, fmt.Errorf("evidence: checking ancestry of %s: %w", recordCommit, err)
 		}
-		if !isAncestor {
+		if !reachable {
 			continue
 		}
 
@@ -158,14 +167,19 @@ func loadEvidenceArray(path string) (recs []artifact.Evidence, digest string, er
 
 // ExcludedCommitDirs reports every commit-named subdirectory of derivedRoot
 // that exists on disk but was excluded from LoadRecordsWithSources's own
-// output because it is neither commit itself nor a real ancestor of commit
-// in gitDir's history — the exact ancestry check LoadRecordsWithSources
-// already performs per entry (this file's own loop), captured here instead
-// of silently discarded. A fold consumer's disclosure can name this "found
-// but excluded (stale)" state for free (spec/close-preflight dc-4): the
-// walk and the ancestry check are the identical ones LoadRecordsWithSources
+// output because it is not reachable from commit in gitDir's history — the
+// exact reachability check LoadRecordsWithSources already performs per
+// entry (this file's own loop), captured here instead of silently
+// discarded. A fold consumer's disclosure can name this "found but
+// excluded (stale)" state for free (spec/close-preflight dc-4): the walk
+// and the reachability check are the identical ones LoadRecordsWithSources
 // runs, so this never risks disagreeing with what the fold actually
 // excluded, and it changes no verdict — it is a diagnostic listing only.
+// This covers BOTH a real, merely-diverged sibling commit and a commit
+// that resolves to no real object at all (spec/evidence-resilience ac-2,
+// X-15) alike — gitx.ReachableFromHEAD folds both into the same excluded
+// bucket; QuarantinedRecords is the sibling function a caller wanting the
+// excluded records themselves (not just their commit names) reaches for.
 //
 // A derivedRoot that does not exist on disk yields (nil, nil) — the same
 // never-synced authoring state LoadRecordsWithSources treats as "no
@@ -185,15 +199,67 @@ func ExcludedCommitDirs(ctx context.Context, gitDir, derivedRoot, commit string)
 		if !e.IsDir() || !commitDirRe.MatchString(e.Name()) {
 			continue
 		}
-		isAncestor, err := gitx.IsAncestor(ctx, gitDir, e.Name(), commit)
+		reachable, err := gitx.ReachableFromHEAD(ctx, gitDir, e.Name(), commit)
 		if err != nil {
 			return nil, fmt.Errorf("evidence: checking ancestry of %s: %w", e.Name(), err)
 		}
-		if !isAncestor {
+		if !reachable {
 			out = append(out, e.Name())
 		}
 	}
 	sort.Strings(out)
+	return out, nil
+}
+
+// QuarantinedRecords returns every evidence record found under
+// derivedRoot's commit-named subdirectories whose commit is NOT reachable
+// from commit (self or ancestor) in gitDir's history — the exact records
+// LoadRecordsWithSources excludes, but as full artifact.Evidence values
+// rather than bare commit names (ExcludedCommitDirs's own projection), so
+// a disclosure consumer can read each excluded record's evidence_for and
+// name which acceptance criterion it would have evidenced (spec/evidence-
+// resilience ac-2: "reads a quarantined record as a per-record disclosed-
+// unproven against the acceptance criterion it would have evidenced").
+//
+// This never makes any record authoritative — it is purely a read of what
+// the fold already excludes, for legibility; it changes no verdict. It
+// mirrors LoadRecordsWithSources's own walk exactly (same directories,
+// same reachability check, same record files) so the two can never
+// disagree about what is included vs excluded. A derivedRoot that does
+// not exist on disk yields (nil, nil), matching LoadRecordsWithSources's
+// and ExcludedCommitDirs's own never-synced posture. Output is sorted
+// deterministically (recordSortKey), independent of os.ReadDir's own
+// listing order.
+func QuarantinedRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]artifact.Evidence, error) {
+	entries, err := os.ReadDir(derivedRoot)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("evidence: reading %s: %w", derivedRoot, err)
+	}
+
+	var out []artifact.Evidence
+	for _, e := range entries {
+		if !e.IsDir() || !commitDirRe.MatchString(e.Name()) {
+			continue
+		}
+		reachable, err := gitx.ReachableFromHEAD(ctx, gitDir, e.Name(), commit)
+		if err != nil {
+			return nil, fmt.Errorf("evidence: checking ancestry of %s: %w", e.Name(), err)
+		}
+		if reachable {
+			continue
+		}
+		for _, name := range RecordFileNames {
+			recs, _, err := loadEvidenceArray(filepath.Join(derivedRoot, e.Name(), name))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, recs...)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return recordSortKey(out[i]) < recordSortKey(out[j]) })
 	return out, nil
 }
 
