@@ -4,7 +4,7 @@ kind: spec
 title: "Ritual Traps"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-P2-4
 problem: { text: "three independently-witnessed small defects tax every design series that touches them: ResolveAnchor slugifies a heading's text via SlugifyHeading but never transforms the frontmatter anchor: value before comparing, so anchor: AC-1 silently fails to resolve against ## AC-1 unless the author already knows, from unwritten convention, to write every anchor in lowercase (X-1); align's finding-id construction doubles the judged- prefix (judged-judged-...) on certain regeneration paths, a tool defect whose fix must not disturb archived reports whose dispositions already reference the doubled ids; and VL-003 validates a bindings entry's bare AC id against its owning spec's declared criteria but never resolves a fragment-qualified spec/<name>#<ac-id> entry against the named spec's own ACs at all, so a typo'd AC id in such an entry passes lint with no finding — and this gap is deeper than the parent feature's design knew: the root verdi.bindings.yaml (this very file every story in this design series appends to) is never discovered as a lint-checkable Service at all, because no .flowmap.yaml exists at the module root (D6-4), so checkBindings validates nothing in it today, bare or fragment-qualified — the fragment-check fix cannot fire on the very file it is meant to protect without a root-discovery path first (chronicle P2-3(b))", anchor: problem }
 outcome: { text: "three independently-witnessed traps close with pins proving they stay closed: ResolveAnchor slugifies both the heading side and the frontmatter anchor: value through the same SlugifyHeading transform, so anchor resolution is symmetric regardless of case; a freshly minted judged finding id carries exactly one judged- prefix while an archived report fixture carrying the old doubled judged-judged- form still decodes and round-trips completely untouched, since the fix is prospective-only; and VL-003 gains both a root-discovery path making the repository's own root verdi.bindings.yaml a checked target for the first time, and a fragment-qualified cross-check resolving spec/<name>#<ac-id> against the named spec's own declared acceptance criteria, so a typo'd AC id inside a fragment-qualified entry reds lint by name instead of passing silently — proven on the real root verdi.bindings.yaml this design series itself has been appending fragment-qualified entries to", anchor: outcome }
@@ -15,6 +15,7 @@ acceptance_criteria:
   - { id: ac-4, text: "VL-003 cross-checks a fragment-qualified verdi.bindings.yaml entry (spec/<name>#<ac-id>) against the NAMED spec's own declared acceptance criteria, not only (as today) a bare ac-<slug> entry against the bindings file's own primary spec — a typo'd AC id inside a fragment-qualified entry reds lint by name; proven on the real root verdi.bindings.yaml, whose fragment-qualified entries this design series itself has been authoring, once ac-3 makes that file a checked target", evidence: [behavioral], anchor: ac-4 }
 links:
   - { type: implements, ref: "spec/ritual-integrity#ac-4" }
+frozen: { at: 2026-07-20, commit: 931e3b40be1d375d297b08128443c37e46c93bbd, stub_matched: true }
 ---
 # Ritual Traps
 
