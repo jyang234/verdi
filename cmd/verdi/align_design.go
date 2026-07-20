@@ -110,6 +110,20 @@ func runDesignAlign(ctx context.Context, root string, freeze bool, deps alignDep
 		return 2
 	}
 
+	// DISCLOSURE (finding judged-design-mode-ac1-gap-survives-fix-round,
+	// controller-adjudicated accepted-deviation): spec/judge-ergonomics ac-1's
+	// first-line-report-path + atomic-write contract deliberately does NOT
+	// extend to this design-branch decision-conflict mode. The story's AC
+	// letter scopes to align's BUILD mode (runAlignForSpec, align.go) and
+	// close's freeze-align only; extending the same guarantee to the
+	// design-branch judge sweep is a phase residual, not this story's contract.
+	// So this mode still writes through a raw os.WriteFile — not the
+	// internal/atomicfile seam the build-branch mode now uses at both its write
+	// sites — and prints its report path only in the success summary below,
+	// never as a pre-judge first stdout line; a reader polling
+	// decision-conflict-report.md mid-sweep can therefore still observe a
+	// partial write. Left UNCHANGED here by adjudication, disclosed at the site
+	// rather than silently carried (CLAUDE.md: silence is never a pass).
 	if err := os.WriteFile(reportPath, report.Markdown, 0o644); err != nil {
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
