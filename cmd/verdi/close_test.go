@@ -158,6 +158,8 @@ func writePoisonLocalRecord(t *testing.T, root, specRef, commit string) {
 // quartet to specs/archive/ as a byte-identical (git-pure-rename) move,
 // commits it on a closure branch, and publishes the rollup to the fake
 // provider, which reads it back.
+//
+// guide-claim: 7.4-gate-close-rollup
 func TestRunClose_EndToEnd(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()

@@ -1,0 +1,336 @@
+# guide-claims.yaml — spec/guide-claims-gate (ritual-integrity#ac-5, ledger
+# L-N4). Transcribes the Integration & Startup Guide's Appendix B
+# (docs/design/concepts/2026-07-17-integration-startup-guide.md, "Appendix
+# B — Honesty ledger: this guide vs. today's binary") into ATOMIC capability
+# rows: one row names exactly one capability, carries exactly one status,
+# and binds exactly one witness set — never a bundled, multi-capability row
+# (internal/artifact's DecodeGuideClaims rejects that shape at decode).
+#
+# The four rows Appendix B's own prose bundles several independently-
+# witnessed capabilities under one status — 7.2, 6.2, 8.4, 5.3 — are
+# decomposed here into their own sub-rows per the Task-0 design wave's
+# adjudication (docs/design/plans/2026-07-20-extensibility-phase2-plan.md,
+# ledger L-N4). Every other Appendix B line becomes exactly one row here,
+# even where its own prose names more than one noun, as long as those
+# nouns share one status (L-N4: "Appendix B's prose rows become display
+# groupings").
+#
+# Every EXISTS/PARTIAL row's witnesses are bound three ways by
+# internal/specalign/guideclaims_test.go: the name exists in the corpus, a
+# `// guide-claim: <row-id>` anchor sits at the witness's own declaration,
+# and the witness is PASS-coupled inside `make verify`. Every non-EXISTS
+# row, and any row whose status is ever downgraded from a prior value,
+# carries `cite:` naming a chronicle/ledger entry outside this repository
+# (`<path-from-the-workspace-root>#<anchor text>`) — its presence is gated
+# in CI, its resolution checked workspace-side only with a loud skip.
+#
+# INVENTORY-ONLY SCOPE (spec/guide-claims-gate ac-4): this manifest and its
+# gate prove row-to-witness binding. They do NOT prove guide-to-row
+# completeness — that every claim the guide's own prose makes has a row
+# here at all — since that needs the guide itself in-repo to compare
+# against (Task 18's hard set-equality requirement, not this story's).
+schema: verdi.guideclaims/v1
+rows:
+  - id: 2.1-local-first-serve-and-dex
+    section: "2.1"
+    capability: "Local-first serve, writer lock, sharing-is-committing, dex on Pages"
+    status: EXISTS
+    witnesses:
+      - name: TestV0ThinSliceChecklist
+
+  - id: 2.2-design-build-closure-mrs
+    section: "2.2"
+    capability: "Design/build/closure MRs; CODEOWNERS as countersign; merge-is-closure"
+    status: EXISTS
+    witnesses:
+      - name: TestV0ThinSliceChecklist
+
+  - id: 4-init-wizard
+    section: "4"
+    capability: "`verdi init` interview, rigor dial, presets, `--answers`"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-plan.md#Task 10: `init-wizard` build"
+
+  - id: 5.2-model-yaml-kernel-digest
+    section: "5.2"
+    capability: "`model.yaml`; kernel validation; digest stamping"
+    status: PARTIAL
+    caveat: "the obligation-kind catalog as a declared, per-transition requirement remains INVENTED (stage 3) — only the kernel rules, digest stamping, and the catalog's static shape exist today"
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-design.md#9. Explicitly out of scope (disclosed)"
+    witnesses:
+      - name: TestDecodeModel_KernelViolations
+      - name: TestProvenanceMintSites_ExactlyFour
+
+  - id: 5.3-user-editable-templates
+    section: "5.3"
+    capability: "User-editable templates: store overrides, byte-identical embedded canonical, model check round-trips every variant"
+    status: PARTIAL
+    caveat: "the board's commit-to-design path is a third scaffold producer that does not yet honor template overrides (ledger L-M12); assigned to Phase 2's creation-surfaces track"
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-plan.md#Task 11: `creation-form` build"
+    witnesses:
+      - name: TestRunDesignStart_StoryTemplateOverride
+
+  - id: 5.3-template-contract
+    section: "5.3"
+    capability: "Template contract"
+    status: EXISTS
+    witnesses:
+      - name: TestFeature
+      - name: TestByteForByte
+
+  - id: 5.3-custom-namespace
+    section: "5.3"
+    capability: "`custom:` opaque namespace on the spec kind, with the dialect wall"
+    status: EXISTS
+    witnesses:
+      - name: TestBase_Custom_DecodesWithValues
+
+  - id: 5.3-form-field-generation
+    section: "5.3"
+    capability: "Placeholder-to-form-field generation"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-plan.md#Task 11: `creation-form` build"
+
+  - id: 6.1-creation-form
+    section: "6.1"
+    capability: "Workbench creation form"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-plan.md#Task 11: `creation-form` build"
+
+  - id: 6.1-cli-creation-flags
+    section: "6.1"
+    capability: "`--problem`/`--outcome` flags, TTY interview, `--defer-statements`"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-plan.md#Task 12: `cli-creation` build"
+
+  - id: 6.2-stubs
+    section: "6.2"
+    capability: "Stubs (kind + instantiation)"
+    status: EXISTS
+    witnesses:
+      - name: TestStub_Validate_Happy
+
+  - id: 6.2-board-stub-instantiate
+    section: "6.2"
+    capability: "Board stub-instantiate"
+    status: EXISTS
+    witnesses:
+      - name: TestBoardSpec_StubInstantiate_Plain
+
+  - id: 6.2-closure-reconciliation
+    section: "6.2"
+    capability: "Closure reconciliation"
+    status: EXISTS
+    witnesses:
+      - name: TestReconcileStubs_Buckets
+
+  - id: 6.2-from-stub-cli
+    section: "6.2"
+    capability: "`--from-stub` CLI path"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-plan.md#Task 12: `cli-creation` build"
+
+  - id: 7.1-accept-freeze-obligations
+    section: "7.1"
+    capability: "`verdi accept`, freezing, committed per-AC obligation files"
+    status: EXISTS
+    witnesses:
+      - name: TestRunAccept_Happy
+
+  - id: 7.2-ci-evidence-bundles
+    section: "7.2"
+    capability: "CI evidence bundles"
+    status: EXISTS
+    witnesses:
+      - name: TestRunSync_CI_PullsBundle
+
+  - id: 7.2-verdi-sync
+    section: "7.2"
+    capability: "`verdi sync`"
+    status: EXISTS
+    witnesses:
+      - name: TestRunSync_OrRegen_MatchesGolden
+
+  - id: 7.2-authoritative-vs-advisory
+    section: "7.2"
+    capability: "Authoritative-vs-advisory evidence"
+    status: EXISTS
+    witnesses:
+      - name: TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords
+
+  - id: 7.2-fold
+    section: "7.2"
+    capability: "Fold"
+    status: EXISTS
+    witnesses:
+      - name: TestFold_EveryStatus
+
+  - id: 7.2-matrix
+    section: "7.2"
+    capability: "Matrix"
+    status: EXISTS
+    witnesses:
+      - name: TestCmdMatrix_Golden
+
+  - id: 7.2-obligation-wall-and-receipts
+    section: "7.2"
+    capability: "Obligation wall & receipts"
+    status: EXISTS
+    witnesses:
+      - name: TestObligationWall_StoryACCardRendersObligations
+      - name: TestCmdMatrix_ObligationColumn
+
+  - id: 7.3-attest
+    section: "7.3"
+    capability: "`verdi attest`, existence-is-the-record, CODEOWNERS oracle routing"
+    status: EXISTS
+    witnesses:
+      - name: TestRunAttest_Happy
+
+  - id: 7.4-gate-close-rollup
+    section: "7.4"
+    capability: "Gate 0/1/2; `verdi close`; closure MR; rollup publish"
+    status: EXISTS
+    caveat: "over the canonical model only"
+    witnesses:
+      - name: TestRunClose_EndToEnd
+
+  - id: 8.1-align-deviation-disposition
+    section: "8.1"
+    capability: "align/deviation reports, dispositions (`--amend`), audit thresholds, spec-stale"
+    status: EXISTS
+    witnesses:
+      - name: TestRunDisposition_RecordsInPlace_DigestAndIntegrityPreserved
+      - name: TestAudit_ExemptionThresholdEndToEnd
+
+  - id: 8.2-stub-reconciliation-at-closure
+    section: "8.2"
+    capability: "Stub reconciliation at parent closure"
+    status: EXISTS
+    witnesses:
+      - name: TestReconcileStubs_Buckets
+
+  - id: 8.2-stubs-reconciled-declarable-obligation
+    section: "8.2"
+    capability: "Stub reconciliation as a *declarable* obligation (`stubs-reconciled`)"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-design.md#9. Explicitly out of scope (disclosed)"
+
+  - id: 8.3-supersession
+    section: "8.3"
+    capability: "Supersession via supersedes-link + conflict record + status flip"
+    status: EXISTS
+    witnesses:
+      - name: TestSupersession_Validate_Happy
+
+  - id: 8.4-waived-status-and-kind
+    section: "8.4"
+    capability: "`waived` fold status; `waivers/` store kind"
+    status: EXISTS
+    witnesses:
+      - name: TestDecodeWaiver_Happy
+
+  - id: 8.4-reaffirmations-kind
+    section: "8.4"
+    capability: "`reaffirmations/` store kind"
+    status: EXISTS
+    witnesses:
+      - name: TestDecodeReaffirmation_Happy
+
+  - id: 8.4-waive-verb
+    section: "8.4"
+    capability: "`verdi waive` verb, `--expires`, reaffirmation flow, audit counting of waivers"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-plan.md#Task 14: `verb-surfaces` build"
+
+  - id: 9.1-vocabulary-display-renames
+    section: "9.1"
+    capability: "Vocabulary display renames"
+    status: PARTIAL
+    caveat: "verb renames await Phase 2's action surfaces (Task 14); a residual set of class-word prose sites (matrix/attest/lint verdicts, stub-instantiate refusals) stays bare until the L-M13a(6) mechanical prose witness lands"
+    cite: "docs/design/plans/2026-07-17-extensibility-chronicle.md#W5 vocabulary CLOSED"
+    witnesses:
+      - name: TestVocabProseWitness
+
+  - id: 9.3-declared-states-verbs
+    section: "9.3"
+    capability: "Declared states/verbs (e.g. `submit`)"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-design.md#9. Explicitly out of scope (disclosed)"
+
+  - id: 9.4-flat-no-stub-hierarchy
+    section: "9.4"
+    capability: "Flat / no-stub hierarchy"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-design.md#9. Explicitly out of scope (disclosed)"
+
+  - id: 9.5-model-check-migration-guard
+    section: "9.5"
+    capability: "`model check`"
+    status: PARTIAL
+    caveat: "the live-store migration guard awaits stage 3"
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-design.md#9. Explicitly out of scope (disclosed)"
+    witnesses:
+      - name: TestModelCheck_FrontierViolation_Exit1_PinnedText
+
+  - id: 10.1-jira-github-gitlab
+    section: "10.1"
+    capability: "Jira link + one-way rollup publish; GitHub/GitLab adapters"
+    status: EXISTS
+    witnesses:
+      - name: TestRunCloseFeature_WithStoryRef_PublishesRollup
+      - name: TestBuildForge_Happy
+
+  - id: 10.1-linear-adapter
+    section: "10.1"
+    capability: "Linear adapter"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-design.md#Linear adapter (10.1 residual)"
+
+  - id: 11-hooks-block
+    section: "11"
+    capability: "`hooks:` block, asymmetry, fail-closed, hook-as-obligation-kind"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-17-extensibility-chronicle.md#PHASE 1 ARCHIVED"
+
+  - id: 11-configurable-alignment-judge
+    section: "11"
+    capability: "The configurable alignment judge (the one existing seam `hooks:` generalizes)"
+    status: EXISTS
+    witnesses:
+      - name: TestRunJudged_NotConfigured
+
+  - id: 12-mcp-tools
+    section: "12"
+    capability: "MCP: nine tools, annotation-only writes, data-never-instructions"
+    status: EXISTS
+    witnesses:
+      - name: TestMCPToolInventory
+
+  - id: 12-model-aware-vocabulary
+    section: "12"
+    capability: "MCP model-aware vocabulary"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-17-extensibility-chronicle.md#12's model-aware vocabulary"
+
+  - id: 13-kernel-rules-frontier
+    section: "13"
+    capability: "Kernel rules; frontier errors"
+    status: EXISTS
+    witnesses:
+      - name: TestDecodeModel_KernelViolations
+      - name: TestDecodeModel_Frontier
+
+  - id: 14.2-committed-vs-data-split
+    section: "14.2"
+    capability: "Committed vs. `data/` never-committed split"
+    status: EXISTS
+    caveat: "(VL-013)"
+    witnesses:
+      - name: TestV0ThinSliceChecklist
+
+  - id: 15-preset-directories
+    section: "15"
+    capability: "Preset directories"
+    status: INVENTED
+    cite: "docs/design/plans/2026-07-17-extensibility-chronicle.md#PHASE 1 ARCHIVED"

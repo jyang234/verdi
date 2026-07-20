@@ -2,6 +2,7 @@ package artifact
 
 import "testing"
 
+// guide-claim: 8.3-supersession
 func TestSupersession_Validate_Happy(t *testing.T) {
 	s := Supersession{
 		Carried:         []string{"ac-1", "co-3"},

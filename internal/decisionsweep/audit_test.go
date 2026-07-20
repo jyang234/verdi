@@ -40,11 +40,17 @@ func deviationReportMD(covers string, findings string) string {
 
 const decisionConflictTestHex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-// TestAudit_ExemptionThresholdEndToEnd is the exit criterion end to end:
-// seeding audit.exempts_conflict_threshold: 3 and three exempts edges
-// against one ADR, `Audit` auto-files a .verdi/conflicts/ record naming
-// that ADR via challenges:.
-func TestAudit_ExemptionThresholdEndToEnd(t *testing.T) {
+// TestAudit_ExemptsConflictThreshold_AutoFilesConflictRecord is the exit
+// criterion end to end: seeding audit.exempts_conflict_threshold: 3 and three
+// exempts edges against one ADR, `Audit` auto-files a .verdi/conflicts/ record
+// naming that ADR via challenges:.
+//
+// Named for the behavior it proves (not the bare "TestAudit_Exemption-
+// ThresholdEndToEnd" it once shared with cmd/verdi's audit e2e), so the
+// guide-claims-gate's bare-name witness identity for row 8.1 resolves
+// unambiguously to the anchored cmd/verdi declaration
+// (judged-ac2-witness-identity-is-bare-name-not-package-qualified).
+func TestAudit_ExemptsConflictThreshold_AutoFilesConflictRecord(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, ".verdi/verdi.yaml", "schema: verdi.layout/v1\naudit:\n  exempts_conflict_threshold: 3\n  deviations_stale_threshold: 3\n")
 	writeFile(t, root, ".verdi/adr/retry-policy.md", adrMD("retry-policy", "accepted"))

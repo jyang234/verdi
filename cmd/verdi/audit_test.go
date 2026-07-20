@@ -33,6 +33,8 @@ func adrMD(name, status string) string {
 // seeding audit.exempts_conflict_threshold: 3 and filing three exempts
 // edges against one ADR, `verdi audit` auto-files a .verdi/conflicts/
 // record naming that ADR via challenges:, and reports the flag (exit 1).
+//
+// guide-claim: 8.1-align-deviation-disposition
 func TestAudit_ExemptionThresholdEndToEnd(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{

@@ -115,6 +115,8 @@ func obligationCard(t *testing.T, proj *BoardProjection, id string) cardView {
 // path a browser hits: buildProjection positions the card, attachObligations
 // loads the obligation from disk through the one shared reader, and
 // renderBoardRegion emits the story AC card markup.
+//
+// guide-claim: 7.2-obligation-wall-and-receipts
 func TestObligationWall_StoryACCardRendersObligations(t *testing.T) {
 	root := obligationStoreWithBehavioral(t)
 	fm := mustDecodeSpecForTest(t, obligationWallStorySpec)
