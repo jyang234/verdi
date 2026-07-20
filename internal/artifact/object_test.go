@@ -244,6 +244,52 @@ func TestHeadingAnchors_And_ResolveAnchor(t *testing.T) {
 	}
 }
 
+// TestResolveAnchor_CaseSymmetry is spec/ritual-traps ac-1's X-1 witness:
+// ResolveAnchor must slugify the anchor side through the same SlugifyHeading
+// transform HeadingAnchors already applies to every heading's text, so an
+// anchor written in the heading's own original (possibly mixed) case
+// resolves exactly as a pre-lowercased one always did — a resolve-MORE
+// direction only, never resolve-less.
+func TestResolveAnchor_CaseSymmetry(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    []byte
+		anchor  string
+		want    bool
+		comment string
+	}{
+		{
+			name:    "mixed_case_anchor_against_matching_case_heading",
+			body:    []byte("# Title\n\n## AC-1\n\ntext\n"),
+			anchor:  "AC-1",
+			want:    true,
+			comment: "X-1's exact witness: anchor: AC-1 must resolve against ## AC-1 (fails pre-fix: TrimPrefix alone leaves \"AC-1\", which never matches the lowercased heading slug \"ac-1\")",
+		},
+		{
+			name:    "already_lowercase_anchor_against_mixed_case_heading",
+			body:    []byte("# Title\n\n## Ac 1\n\ntext\n"),
+			anchor:  "ac-1",
+			want:    true,
+			comment: "unchanged from before the fix: the heading side was already slugified, and an already-lowercase anchor already matched",
+		},
+		{
+			name:    "genuinely_mismatched_anchor_stays_unresolved",
+			body:    []byte("# Title\n\n## AC-1\n\ntext\n"),
+			anchor:  "AC-2",
+			want:    false,
+			comment: "proves the fix is not overly permissive: slugifying both sides still fails to resolve when the headings genuinely differ",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			anchors := HeadingAnchors(tc.body)
+			if got := ResolveAnchor(anchors, tc.anchor); got != tc.want {
+				t.Fatalf("ResolveAnchor(%v, %q) = %v, want %v — %s", anchors, tc.anchor, got, tc.want, tc.comment)
+			}
+		})
+	}
+}
+
 func TestResolveObjectAnchors_Happy(t *testing.T) {
 	const y = `
 id: spec/anchor-happy

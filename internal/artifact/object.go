@@ -271,9 +271,17 @@ func SlugifyHeading(text string) string {
 }
 
 // ResolveAnchor reports whether anchor (a "#slug" or bare "slug" reference)
-// resolves to a heading in anchors.
+// resolves to a heading in anchors. The anchor side is slugified through the
+// identical SlugifyHeading transform HeadingAnchors already applies to every
+// heading's own text before the two are compared (spec/ritual-traps ac-1,
+// X-1): without this, a frontmatter anchor: value written in the heading's
+// own original case (e.g. "AC-1" against a "## AC-1" heading) silently
+// failed to resolve unless the author already knew, from unwritten
+// convention, to write every anchor pre-lowercased. Symmetric slugification
+// only ever resolves MORE anchors than before, never fewer — an anchor that
+// already resolved keeps resolving.
 func ResolveAnchor(anchors map[string]bool, anchor string) bool {
-	return anchors[strings.TrimPrefix(anchor, "#")]
+	return anchors[SlugifyHeading(strings.TrimPrefix(anchor, "#"))]
 }
 
 // ResolveObjectAnchors checks every present attribute and object anchor in
