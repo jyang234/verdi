@@ -484,6 +484,80 @@ func scaffoldSHAFromRepo(t *testing.T, repo *fixturegit.Repo) string {
 	return repo.Heads[0]
 }
 
+// writeFrozenCloseFeatureReport writes an ALREADY-FROZEN deviation-report.md
+// into the close-feature-fixture spec's directory — the feature-path mirror of
+// close_test.go's writeFrozenCloseReport. The feature closure gate's condition
+// 6 (disposition-completeness) mirrors the story gate's condition 4 and does
+// not inspect the frozen stamp, so the gate PASSES and runCloseFeature reaches
+// its own branch cut, but the shared freeze step then refuses ("already
+// frozen") — the same reachable post-cut freeze-align failure the story test
+// uses.
+func writeFrozenCloseFeatureReport(t *testing.T, root, covers string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", "close-feature-fixture")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	content := fmt.Sprintf(`---
+schema: verdi.deviation/v1
+covers: %s
+findings:
+%sfrozen: { at: 2024-01-01, commit: %s }
+digest: sha256:%s
+---
+# Alignment report
+`, covers, dispositionedFindingYAML, covers, strings.Repeat("0", 64))
+	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("writing frozen deviation-report.md: %v", err)
+	}
+}
+
+// TestRunCloseFeature_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes is
+// the feature-path mirror of
+// TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes: the fix's
+// branch-cut unwind is a shared helper both runClose and runCloseFeature call,
+// and runCloseFeature cuts close/<name> before its own (identical, shared)
+// freeze step, so the same residue-then-blocked-retry defect and the same fix
+// apply verbatim. Driven through the whole runCloseFeature verb, not
+// runAlignForSpec directly.
+func TestRunCloseFeature_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeFrozenCloseFeatureReport(t, repo.Dir, repo.Head)
+	ctx := context.Background()
+
+	deps := closeFeatureDeps(fake.New())
+	originalBranch := gitCurrentBranch(t, repo.Dir)
+
+	var o1, e1 bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, deps, &o1, &e1)
+	if got == 0 {
+		t.Fatalf("runClose(feature, frozen report) = 0, want non-zero (freeze-align refused past the branch cut); stdout=%s stderr=%s", o1.String(), e1.String())
+	}
+	if b := gitCurrentBranch(t, repo.Dir); b != originalBranch {
+		t.Fatalf("feature: after a freeze-align failure, current branch = %q, want the original %q restored", b, originalBranch)
+	}
+	if strings.TrimSpace(gitOutput(t, repo.Dir, "branch", "--list", "close/close-feature-fixture")) != "" {
+		t.Fatal("close/close-feature-fixture still exists after a freeze-align failure — the branch cut was not unwound")
+	}
+
+	// The retry completes once the blocking condition clears (the human
+	// re-aligns): a second runClose proceeds past the branch cut and archives.
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+	var o2, e2 bytes.Buffer
+	got2 := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, deps, &o2, &e2)
+	if got2 != 0 {
+		t.Fatalf("feature retry runClose = %d, want 0 (retry completes); stdout=%s stderr=%s", got2, o2.String(), e2.String())
+	}
+	if strings.Contains(e2.String(), "already exists") {
+		t.Fatalf("feature retry aborted at the branch cut (%q) — residue still blocks the retry", e2.String())
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "close-feature-fixture", "spec.md")); err != nil {
+		t.Fatalf("feature retry did not archive the spec: %v", err)
+	}
+}
+
 // TestRunCloseFeature_WithStoryRef_PublishesRollup is the disclosed
 // decision's OTHER side: when the feature DOES carry a story: tracker ref
 // (unlike the happy path above, which deliberately mirrors

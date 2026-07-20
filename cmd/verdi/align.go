@@ -1,9 +1,33 @@
-// verdi align [--freeze] (05 §CLI, PLAN.md Phase 8): generates/refreshes
-// deviation-report.md for the current build branch's spec, inferred from
-// the checked-out branch name (feature/<name>, cut by `verdi feature
-// start` — see internal/storyresolve.ResolveBuildSpec; align takes no
-// story/spec argument, matching 05 §CLI's table). --freeze produces the
-// closure edition (a Frozen stamp at the build head).
+// verdi align [--freeze] [--wait[=seconds]] (05 §CLI, PLAN.md Phase 8):
+// generates/refreshes deviation-report.md for the current build branch's
+// spec, inferred from the checked-out branch name (feature/<name>, cut by
+// `verdi feature start` — see internal/storyresolve.ResolveBuildSpec; align
+// takes no story/spec argument, matching 05 §CLI's table). --freeze
+// produces the closure edition (a Frozen stamp at the build head).
+//
+// spec/judge-ergonomics (L-N1, X-8): every judge-backed run of this verb
+// prints the report path as stdout's FIRST line before the judge subprocess
+// ever runs (ac-1, runAlignForSpec below) and writes the report through the
+// internal/atomicfile seam at completion, so a reader polling that path
+// observes either nothing yet or the finished report, never a partial one.
+// --wait[=seconds] (ac-2) bounds how long this run waits on the judge: a
+// bare --wait reuses the already-resolved JudgeTimeout (manifest-configured
+// or internal/align's own default) as ac-2's "sane default" bound, rather
+// than inventing a second, possibly-conflicting timeout knob; --wait=N
+// EXTENDS that bound to N seconds and is refused as a usage error when N is
+// below the ceiling — --wait may only lengthen patience, never truncate the
+// judge's own run (finding judged-wait-bound-conflated-with-judge-kill-
+// timeout). Either legal form makes a judge that does not complete within
+// the bound exit 2 (an operational timeout, never a verdict) instead of
+// today's default graceful degrade to a synthetic absence finding — the
+// path is already on stdout by the time this can happen, and the expiry
+// message states the judge was terminated at the bound (never "check it
+// later", which a killed judge can never honor). The contract lives once in
+// runAlignForSpec (ac-3), the exact function close.go's freeze-align calls
+// (via freezeAlignDeps), so close inherits the bounded wait without a
+// second implementation; --wait itself is out of scope for the
+// design-branch decision-conflict mode and --diagram-sweep (rejected
+// explicitly, never silently ignored).
 //
 // verdi align --diagram-sweep <diagram-ref> (spec/judged-sweep ac-1, dc-1)
 // is a THIRD, wholly on-demand mode: unlike the build-branch and
@@ -13,7 +37,8 @@
 //
 // Exit contract (CLAUDE.md 0/1/2, PLAN.md Phase 8's exit criteria):
 // 0 report written; 1 align.judge_required is true and no judge produced a
-// judged section; 2 every other operational failure.
+// judged section; 2 every other operational failure, including a --wait
+// expiry and bad usage.
 package main
 
 import (
@@ -22,11 +47,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
@@ -45,6 +72,28 @@ type alignDeps struct {
 	// zero leaves internal/align's own DefaultJudgeTimeout fallback
 	// unchanged (align.Input.JudgeTimeout's zero-value contract).
 	JudgeTimeout time.Duration
+	// Wait mirrors align.Input.Wait (spec/judge-ergonomics ac-2/ac-3): true
+	// when --wait was passed (cmdAlign) or when close's freeze-align opts in
+	// (freezeAlignDeps, close.go — ac-3's shared-engine inheritance, no
+	// longer deferred to "a future story"). cmdAlign refuses a --wait=N below
+	// the resolved judge ceiling (--wait may only EXTEND patience, never
+	// truncate the judge — finding judged-wait-bound-conflated-with-judge-
+	// kill-timeout) and otherwise folds the extended bound into JudgeTimeout
+	// above BEFORE calling runAlign, so this field alone is enough for
+	// runAlignForSpec to thread ac-2's contract through to align.Input.
+	Wait bool
+	// ResumeHint is the wait-expiry resume guidance runAlignForSpec prints
+	// once a bounded wait terminates the judge (the message near line 361),
+	// in the CALLER's own vocabulary (finding
+	// judged-close-inherits-aligns-resume-instructions-verbatim). The zero
+	// value is deliberately useful (CLAUDE.md): an empty ResumeHint means
+	// "this is align's own path", and runAlignForSpec falls back to
+	// alignExpiryResumeHint — cmdAlign and every direct runAlign test caller
+	// rely on that fallback rather than restating align's own hint. close
+	// overrides it via freezeAlignDeps (close.go, closeExpiryResumeHint): a
+	// close caller exposes no --wait flag and its resume verb is close, not
+	// align, so it must not inherit align's flag language verbatim.
+	ResumeHint string
 	// ModelDigest is the resolved operating model's canonical-JSON sha256
 	// digest (model.Model.Digest(), spec/model-digest ledger L-M5),
 	// resolved once in cmdAlign via store.Open and threaded into every
@@ -59,9 +108,25 @@ type alignDeps struct {
 // verdi.yaml's align: block, then delegates to runAlign.
 func cmdAlign(args []string, stdout, stderr io.Writer) int {
 	freeze := false
+	wait := false
+	var waitBound time.Duration
 	diagramRef := ""
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		if a == "--wait" {
+			wait = true
+			continue
+		}
+		if secStr, ok := strings.CutPrefix(a, "--wait="); ok {
+			secs, err := strconv.Atoi(secStr)
+			if err != nil || secs <= 0 {
+				fmt.Fprintf(stderr, "align: --wait=%s: must be a positive whole number of seconds\n", secStr)
+				return 2
+			}
+			wait = true
+			waitBound = time.Duration(secs) * time.Second
+			continue
+		}
 		switch a {
 		case "--freeze":
 			freeze = true
@@ -73,9 +138,13 @@ func cmdAlign(args []string, stdout, stderr io.Writer) int {
 			i++
 			diagramRef = args[i]
 		default:
-			fmt.Fprintf(stderr, "align: unexpected argument %q; usage: verdi align [--freeze] | verdi align --diagram-sweep <diagram-ref>\n", a)
+			fmt.Fprintf(stderr, "align: unexpected argument %q; usage: verdi align [--freeze] [--wait[=seconds]] | verdi align --diagram-sweep <diagram-ref>\n", a)
 			return 2
 		}
+	}
+	if wait && diagramRef != "" {
+		fmt.Fprintln(stderr, "align: --wait and --diagram-sweep are mutually exclusive (the sweep mode is advisory/non-exhaustive and out of scope for spec/judge-ergonomics)")
+		return 2
 	}
 
 	ctx := context.Background()
@@ -106,6 +175,38 @@ func cmdAlign(args []string, stdout, stderr io.Writer) int {
 		if manifest.Align.JudgeTimeoutSeconds > 0 {
 			deps.JudgeTimeout = time.Duration(manifest.Align.JudgeTimeoutSeconds) * time.Second
 		}
+	}
+	if wait {
+		deps.Wait = true
+		if waitBound > 0 {
+			// spec/judge-ergonomics ac-2, as adjudicated for finding
+			// judged-wait-bound-conflated-with-judge-kill-timeout: --wait may
+			// only EXTEND how long align waits for the judge past the
+			// operator's own configured ceiling, never truncate the judge's
+			// own run. The wait bound and the judge's exec lifetime are the
+			// same knob here (deps.JudgeTimeout), so a bound BELOW the ceiling
+			// would silently kill a judge that would otherwise complete and
+			// gracefully degrade — refuse it as a usage error (exit 2) naming
+			// both numbers, rather than honor a truncation the flag was never
+			// meant to express. The ceiling is the manifest's
+			// align.judge_timeout_seconds if configured, else internal/align's
+			// own DefaultJudgeTimeout (the same value a bare --wait waits).
+			ceiling := align.DefaultJudgeTimeout
+			if deps.JudgeTimeout > 0 {
+				ceiling = deps.JudgeTimeout
+			}
+			if waitBound < ceiling {
+				fmt.Fprintf(stderr, "align: --wait=%d is below the judge's own patience ceiling of %ds (align.judge_timeout_seconds, or the built-in default when it is unset); --wait may only EXTEND how long align waits for the judge, never truncate the judge's own run — a bound shorter than the ceiling would kill a judge that would otherwise complete and gracefully degrade. Pass a bare --wait to wait exactly the ceiling, or --wait=N with N >= %d.\n", int(waitBound/time.Second), int(ceiling/time.Second), int(ceiling/time.Second))
+				return 2
+			}
+			deps.JudgeTimeout = waitBound
+		}
+		// A bare --wait (waitBound == 0) deliberately leaves JudgeTimeout as
+		// whatever was just resolved above — manifest's
+		// align.judge_timeout_seconds, or internal/align's own
+		// DefaultJudgeTimeout if unconfigured — as ac-2's "sane default"
+		// bound: the operator's own already-established judge ceiling,
+		// rather than a second, possibly-conflicting timeout invented here.
 	}
 
 	// Diagram-sweep mode (spec/judged-sweep ac-1, dc-1): a THIRD, wholly
@@ -138,6 +239,10 @@ func runAlign(ctx context.Context, root string, freeze bool, deps alignDeps, std
 	// design branch, grows a decision-conflict-report mode") — the two
 	// modes share this one command; see align_design.go.
 	if strings.HasPrefix(branch, "design/") {
+		if deps.Wait {
+			fmt.Fprintln(stderr, "align: --wait is not supported on a design branch (decision-conflict mode is out of scope for spec/judge-ergonomics); re-run without --wait")
+			return 2
+		}
 		return runDesignAlign(ctx, root, freeze, deps, stdout, stderr)
 	}
 	spec, err := storyresolve.ResolveBuildSpec(root, branch)
@@ -152,6 +257,14 @@ func runAlign(ctx context.Context, root string, freeze bool, deps alignDeps, std
 	}
 	return runAlignForSpec(ctx, root, spec, covers, freeze, deps, stdout, stderr)
 }
+
+// alignExpiryResumeHint is align's own bounded-wait resume guidance and the
+// zero-value default of alignDeps.ResumeHint: re-running align — optionally
+// with a longer --wait — starts a fresh judge exchange. close's freeze-align
+// overrides it with closeExpiryResumeHint (close.go), since its caller holds
+// a different verb and exposes no --wait flag (finding
+// judged-close-inherits-aligns-resume-instructions-verbatim).
+const alignExpiryResumeHint = "Re-run align to start a fresh judge exchange (optionally with a longer --wait)"
 
 // runAlignForSpec is runAlign's spec-taking core, factored out (round 6,
 // spec/close-verb ac-1) so a caller that has ALREADY resolved its own spec
@@ -169,6 +282,14 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 	reportPath := store.DeviationReportPath(root, store.ZoneActive, specRef.Name)
+
+	// spec/judge-ergonomics ac-1: the report path is stdout's FIRST line,
+	// printed before anything else below runs — in particular, before
+	// align.Generate ever invokes the judge subprocess (whichever branch
+	// below is ultimately taken: freeze-in-place, regenerate, or an early
+	// refusal). A caller — human or agent — always has a filesystem
+	// location to watch without parsing anything else this verb prints.
+	fmt.Fprintln(stdout, reportPath)
 
 	existingReport, existingBody, err := loadExistingReport(reportPath)
 	if err != nil {
@@ -194,6 +315,7 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		JudgeTimeout:     deps.JudgeTimeout,
 		ExistingFindings: existingFindings,
 		ModelDigest:      deps.ModelDigest,
+		Wait:             deps.Wait,
 	}
 	if freeze {
 		frozenAt, err := gitx.CommitDateOnly(ctx, root, covers)
@@ -219,7 +341,11 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 				fmt.Fprintln(stderr, "align:", err)
 				return 2
 			}
-			if err := os.WriteFile(reportPath, report.Markdown, 0o644); err != nil {
+			// spec/judge-ergonomics ac-1: the atomicfile seam (temp-then-
+			// rename), not a raw os.WriteFile — a reader polling reportPath
+			// observes either the prior content or the complete new content,
+			// never a partial write.
+			if err := atomicfile.Write(reportPath, report.Markdown, 0o644); err != nil {
 				fmt.Fprintln(stderr, "align:", err)
 				return 2
 			}
@@ -239,6 +365,34 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 			fmt.Fprintln(stderr, "align:", err)
 			return 1
 		}
+		// spec/judge-ergonomics ac-2: an operational timeout, not a
+		// verdict — exit 2, never exit 1's ErrJudgeRequiredAbsent path.
+		// Nothing is written here: Generate returned no Report, so
+		// reportPath (already on stdout's first line above) still names
+		// whatever was there before this run — nothing genuine to lose.
+		var waitExpired *align.ErrJudgeWaitExpired
+		if errors.As(err, &waitExpired) {
+			fmt.Fprintln(stderr, "align:", err)
+			// FIX 1(b) (finding judged-wait-bound-conflated-with-judge-kill-
+			// timeout): state what actually happened to the judge subprocess —
+			// it was terminated at the bound and cannot finish this run — with
+			// no "check it later" implication. A killed judge never populates
+			// the printed path on its own; only a fresh run can.
+			//
+			// The RESUME guidance speaks the caller's own verb (finding
+			// judged-close-inherits-aligns-resume-instructions-verbatim):
+			// align's own path re-runs align with a longer --wait, but close's
+			// freeze-align — which exposes no --wait flag and whose resume verb
+			// is close, not align — supplies its own ResumeHint via
+			// freezeAlignDeps so it is never told align's flag language
+			// verbatim. An unset ResumeHint is align's own path.
+			resumeHint := deps.ResumeHint
+			if resumeHint == "" {
+				resumeHint = alignExpiryResumeHint
+			}
+			fmt.Fprintf(stderr, "align: the judge subprocess was terminated at the --wait bound and cannot complete this run; no report was written and %s is unchanged. %s — this path will not populate on its own.\n", reportPath, resumeHint)
+			return 2
+		}
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
 	}
@@ -256,7 +410,9 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 
-	if err := os.WriteFile(reportPath, report.Markdown, 0o644); err != nil {
+	// spec/judge-ergonomics ac-1: atomicfile.Write, not os.WriteFile — see
+	// the freeze-in-place write above for the identical rationale.
+	if err := atomicfile.Write(reportPath, report.Markdown, 0o644); err != nil {
 		fmt.Fprintln(stderr, "align:", err)
 		return 2
 	}

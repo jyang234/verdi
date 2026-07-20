@@ -306,3 +306,71 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 		t.Errorf("stdout missing the audit: CLEAN trailer (pattern (b) must not flag):\n%s", out)
 	}
 }
+
+// TestRunAudit_ClosureHygieneSection_RitualIncompleteFlagsAlone closes the
+// cmd-level seam the exit-1 wiring proof
+// (TestRunAudit_ClosureHygieneSection_AppearsAndCoexists) leaves open: that
+// test co-fires an AC-1 pattern (a) STRANDED finding AND an AC-2
+// ritual-incomplete classification in the SAME run, so it cannot witness the
+// ritual-incomplete contribution to the exit code ALONE — pattern (a) would
+// flag the run even if the ritual-incomplete path never did. This fixture
+// cuts an unmerged close/<name> branch that never performed the archive move
+// on its own tip (ArchivedOnOwnTip false → NO pattern (a), asserted by the
+// absence of any STRANDED line), leaving a bare AC-2 ritual-incomplete
+// finding as the sole reason runAudit exits 1 — the exact path
+// internal/residue.Result.Flagged routes and audit.go defers to (no separate
+// inline logic path).
+func TestRunAudit_ClosureHygieneSection_RitualIncompleteFlagsAlone(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/.gitignore":                     "data/\n",
+			".verdi/specs/active/ch-widget/spec.md": closureHygieneFixtureStorySpecMD,
+		},
+		Message: "an ordinary in-flight story whose close ritual is only half-run",
+	}})
+	root := repo.Dir
+	ctx := context.Background()
+
+	// Cut close/ch-widget and strand it UNMERGED, but never archive on its
+	// own tip: an empty commit makes the branch tip diverge from main (so it
+	// is not classified as merged) while leaving archive/ch-widget absent from
+	// BOTH the branch's own tip and main. That is AC-2 ritual-incomplete (the
+	// closure has not landed on the default branch) with NO AC-1 pattern (a)
+	// (nothing was archived on the branch's own tip), even though ch-widget is
+	// still an active-zone spec at status: accepted-pending-build.
+	if err := gitx.CheckoutNewBranch(ctx, root, "close/ch-widget"); err != nil {
+		t.Fatalf("CheckoutNewBranch(close/ch-widget): %v", err)
+	}
+	runGitCmd(t, root, "commit", "--allow-empty", "--quiet", "-m", "close: begin closing spec/ch-widget (archive move not yet run)")
+	wantTip := strings.TrimSpace(gitOutput(t, root, "rev-parse", "HEAD"))
+	if err := gitx.Checkout(ctx, root, "main"); err != nil {
+		t.Fatalf("Checkout(main): %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runAudit(ctx, root, 3, 3, "main", nil, &stdout, &stderr)
+	out := stdout.String()
+
+	if got != 1 {
+		t.Fatalf("runAudit = %d, want 1 (a bare AC-2 ritual-incomplete close branch must flag the run on its own); stdout=%s stderr=%s", got, out, stderr.String())
+	}
+
+	if !strings.Contains(out, "== Closure hygiene audit ==") {
+		t.Fatalf("stdout missing == Closure hygiene audit == header:\n%s", out)
+	}
+	// The AC-2 ritual-incomplete disclosure line, in full: branch, class, tip.
+	wantLine := "close/ch-widget: ritual-incomplete (tip " + wantTip + ")"
+	if !strings.Contains(out, wantLine) {
+		t.Errorf("stdout missing the ritual-incomplete line %q:\n%s", wantLine, out)
+	}
+	// Isolation guard: NO AC-1 pattern (a) finding fired, so the exit-1
+	// verdict is attributable to the ritual-incomplete classification alone —
+	// the contribution TestRunAudit_ClosureHygieneSection_AppearsAndCoexists
+	// cannot isolate.
+	if strings.Contains(out, "STRANDED:") {
+		t.Errorf("stdout unexpectedly contains a STRANDED (pattern (a)) line; this fixture must isolate the ritual-incomplete path:\n%s", out)
+	}
+	if !strings.Contains(out, "audit: FLAGGED") {
+		t.Errorf("stdout missing the audit: FLAGGED trailer:\n%s", out)
+	}
+}
