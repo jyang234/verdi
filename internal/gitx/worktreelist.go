@@ -27,6 +27,16 @@ type WorktreeEntry struct {
 	// store checkout, but parsed rather than silently dropped so a caller
 	// sees a complete, honest inventory.
 	Bare bool
+	// Prunable is true when git marks this entry prunable (git worktree
+	// list's "prunable[ <reason>]" porcelain line) — for instance, a
+	// worktree whose directory was deleted without `git worktree remove`,
+	// so its gitdir link now points at a non-existent location. PrunableReason
+	// carries git's own explanation when it supplies one (the text after
+	// "prunable "). A caller surveying worktrees uses this to DISCLOSE why a
+	// worktree's live state (clean/dirty) could not be resolved, rather than
+	// guess it (spec/closure-hygiene AC-3(b)).
+	Prunable       bool
+	PrunableReason string
 }
 
 // WorktreeList lists every worktree registered against the repository at
@@ -50,9 +60,12 @@ func WorktreeList(ctx context.Context, dir string) ([]WorktreeEntry, error) {
 // one block per worktree, separated by a blank line, each block a set of
 // "<key>[ <value>]" lines — "worktree <path>", "HEAD <sha>", "branch
 // refs/heads/<name>", "detached", "bare", "locked[ <reason>]", "prunable[
-// <reason>]". Unrecognized lines (locked/prunable's own reason text, or
-// any future porcelain key) are ignored rather than rejected, so a newer
-// git adding a field this parser does not need never breaks it.
+// <reason>]". The "prunable" key is captured (a worktree survey needs it to
+// disclose why a stale worktree's live state cannot be resolved —
+// spec/closure-hygiene AC-3(b)); other unrecognized lines ("locked"'s own
+// reason text, or any future porcelain key) are ignored rather than
+// rejected, so a newer git adding a field this parser does not need never
+// breaks it.
 func parseWorktreeList(out string) []WorktreeEntry {
 	var entries []WorktreeEntry
 	var cur *WorktreeEntry
@@ -86,6 +99,11 @@ func parseWorktreeList(out string) []WorktreeEntry {
 		case "bare":
 			if cur != nil {
 				cur.Bare = true
+			}
+		case "prunable":
+			if cur != nil {
+				cur.Prunable = true
+				cur.PrunableReason = value // "" for a bare "prunable" line
 			}
 		}
 	}

@@ -19,16 +19,17 @@ type PatternA struct {
 }
 
 // findPatternA derives AC-1 pattern (a)'s findings from closeBranches (the
-// SAME shared pass AC-2 classifies from — ac-2's static obligation),
-// activeStatus (name -> raw status string), and activeClass (name -> raw
-// class string) — both built from the active-zone spec set with dc-2's
-// superseded-exclusion already applied by the caller before this runs: a
-// close/<name> branch whose own tip already contains archive/<name>,
-// where <name> is STILL an active-zone spec at status:
-// accepted-pending-build — all three of pattern (a)'s own conditions
-// (dc-1's static obligation): the branch exists (it is IN closeBranches at
-// all), it is unmerged (closeBranches already excludes merged branches),
-// and its own tip already archived <name>.
+// same shared pass AC-2 classifies from — one implementation feeds both, an
+// engineering choice so the two cannot drift), activeStatus (name -> raw
+// status string), and activeClass (name -> raw class string) — both built
+// from the active-zone spec set with dc-2's superseded-exclusion already
+// applied by the caller before this runs. It fires for a close/<name>
+// branch whose own tip already contains archive/<name> where <name> is
+// STILL an active-zone spec at status: accepted-pending-build. Those are,
+// as this code decomposes it, pattern (a)'s three conditions: the branch
+// exists (it is IN closeBranches at all), it is unmerged (closeBranches
+// already excludes merged branches), and its own tip already archived
+// <name>.
 func findPatternA(closeBranches []CloseBranch, activeStatus, activeClass map[string]string) []PatternA {
 	var out []PatternA
 	for _, cb := range closeBranches {

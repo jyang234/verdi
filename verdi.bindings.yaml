@@ -872,6 +872,54 @@ bindings:
       - "spec/closure-hygiene#ac-1"
       - "spec/closure-hygiene#ac-2"
       - "spec/closure-hygiene#ac-3"
+      # spec/ritual-integrity FEATURE outcome ACs (extensibility Phase 2,
+      # Task 1: this design series authors the feature spec + these
+      # bindings together, the X-9/#143 convention). Disclosed departure
+      # from every precedent above: none of the five implementing stories
+      # (judge-ergonomics/finding-identity/evidence-resilience/
+      # ritual-traps/guide-claims-gate) are built yet, so these four
+      # behavioral legs are a DESIGN-TIME FORWARD DECLARATION of planned
+      # producers, not a citation of existing ones — mirroring the
+      # spec/model-digest ac-1/ac-3 "Not yet built" entry below rather
+      # than the built-and-cited entries around it. Not yet built: ac-1 <-
+      # verdi/internal/align/judged_test.go (canned judge) +
+      # verdi/cmd/verdi/align_test.go built-binary cases proving the
+      # report path prints as stdout line 1 before the judge runs, --wait
+      # blocks bounded then exits 0 on completion, --wait=1 against a
+      # hung fake exits 2 WITH the path, and the report file is never
+      # observable mid-write (atomicfile) — plan Task 2 Step 1; ac-2 <-
+      # internal/align/identity_test.go's carry-forward matrix + report-
+      # regeneration tests over the canned judge (reworded-same-slug
+      # candidate pre-fill with AllDispositioned false until confirmed,
+      # escalation-under-stable-slug presenting both texts, colliding-
+      # slug disclosed as a contract violation, drifting-slug landing in
+      # not-resurfaced: with the spec-stale count unchanged under a
+      # judge-re-roll replay, the feature-close cross-report union) —
+      # plan Task 3 Step 1; ac-3 <- fixturegit cases beside
+      # cmd/verdi/sync_ancestor_test.go (a bundle referencing an
+      # unreachable commit quarantined at sync with the reason recorded,
+      # sync exit 0; closure over it reads the affected AC disclosed-
+      # unproven, never exit 2) + internal/lint/vl009_test.go's
+      # reachability-from-HEAD case (a dangling-but-unreachable
+      # frozen.commit reds, X-11b pinned) — plan Task 4 Step 1; ac-4 <-
+      # internal/artifact/object_test.go's anchor case-symmetry case
+      # (anchor: AC-1 resolves against ## AC-1) + internal/align/
+      # judged_test.go's single-prefix-for-fresh/archived-doubled-id-
+      # round-trips-untouched case + internal/lint/vl003_test.go's
+      # fragment-qualified-binding-cross-check case (a typo'd #ac-9
+      # reds) — plan Task 5 Step 1. Each leg lands under make verify once
+      # its story merges; this entry is updated to name the real test
+      # functions at that point. The attestation leg every AC also
+      # declares (L-M14's feature-AC floor) is deliberately NOT bound
+      # here or anywhere in this file — mirroring the workbench-
+      # legibility/closure-ergonomics convention above, it is hand-
+      # authored at .verdi/attestations/ritual-integrity/ac-{1..5}.md at
+      # feature closure, when the claim can be truthfully made, never at
+      # spec-cut time.
+      - "spec/ritual-integrity#ac-1"
+      - "spec/ritual-integrity#ac-2"
+      - "spec/ritual-integrity#ac-3"
+      - "spec/ritual-integrity#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -1413,3 +1461,28 @@ bindings:
       - "spec/closure-hygiene#ac-1"
       - "spec/closure-hygiene#ac-2"
       - "spec/closure-hygiene#ac-3"
+      # spec/ritual-integrity#ac-5 static leg (extensibility Phase 2, Task
+      # 1 design-time forward declaration; ac-1..4 are bound above under
+      # verdi-verify-behavioral, same not-yet-built framing — the
+      # guide-claims-gate story is not built yet). Not yet built:
+      # verdi/internal/specalign/guideclaims_test.go's manifest strict-
+      # decode + witness-binding suite (unknown key/status fails closed;
+      # an EXISTS/PARTIAL row with no witness reds naming the row; a
+      # witness name absent from the corpus reds naming both; a witness
+      # present but missing its // guide-claim: <row-id> anchor reds; a
+      # witness present+anchored but not PASS-coupled reds via the
+      # require-pass.sh mechanism; a PARTIAL row without caveat text
+      # reds; a non-EXISTS row or any downgrade without cite: reds; a
+      # bundled multi-capability row shape fails decode; the current
+      # Appendix B state transcribed atomically is green at head) — plan
+      # Task 6 Step 1. Lands under make verify once guide-claims-gate
+      # merges. The attestation leg is NOT bound here either, same
+      # disclosure as ac-1..4: hand-authored at
+      # .verdi/attestations/ritual-integrity/ac-5.md at feature closure —
+      # no verdi.bindings.yaml entry exists for any feature-AC attestation
+      # leg anywhere in this file (see workbench-legibility/
+      # closure-ergonomics above); the feature fold's floor is
+      # attestation OR pass-record (evidence.FloorResult's OR semantics),
+      # so the unbuilt behavioral/static legs above are what the fold
+      # will actually read once real.
+      - "spec/ritual-integrity#ac-5"
