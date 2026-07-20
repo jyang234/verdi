@@ -1041,44 +1041,62 @@ bindings:
       - "spec/guide-claims-gate#ac-2"
       - "spec/guide-claims-gate#ac-3"
       # spec/gc-reclaim (spec/residue-reclamation#ac-1's implementing
-      # story; design-phase authoring only, no build task dispatched
-      # yet). DESIGN-TIME FORWARD DECLARATION, not built yet, mirroring
-      # the spec/ritual-integrity family's own forward-declaration
-      # convention above (the EA-10 fix). spec/residue-reclamation's own
-      # feature AC is intentionally NOT bound anywhere in this file (house
-      # rule: hand-authored at closure, matching the attestation-leg
-      # convention every story entry in this file already follows). Not
-      # yet built: ac-1 <- a fixturegit case combining, in one
-      # internal/residue.Result, an eligible worktree+branch pair, an
-      # eligible branch-only row, an unmerged row (mirroring this
-      # story's own close/attest-helper/close-preflight/disposition-verb/
-      # home-status-glance witnesses), a dirty row, an unresolved-state
-      # row (Reason populated), a detached-HEAD row, a managed-worktree
-      # row, and a row at the invoking checkout's own path/branch,
-      # asserting every row is classified exactly once with no silent
-      # drop; ac-2 <- fixturegit cases proving dry-run performs zero
-      # git-mutating calls, --apply removes a clean eligible pair in
-      # order and prints its tip commit, a worktree dirtied between scan
-      # and apply is kept via WorktreeRemove's own refusal (the first
-      # second-guard witness), a branch-only row checked out at a
-      # non-invoking primary-shaped worktree is kept via
-      # DeleteMergedBranch's own -d refusal instead (the second
-      # second-guard witness, proving ledger R4-I-80's resolution), a
-      # worktree-removed-but-branch-delete-failed row asserts its own
-      # partial-outcome line rather than a generic failure, and an empty
-      # default branch ref refuses the whole run with no plan printed;
-      # ac-3 <- a built-binary test asserting a plain verdi gc run's own
-      # output still contains its pre-existing managed-worktree behavior
-      # plus a new available-but-not-run-this-invocation disclosure
-      # naming --reclaim-unmanaged, a --reclaim-unmanaged run's output
-      # contains the mirrored managed-slice-not-run disclosure alongside
-      # the pre-existing derived/cache disclosure, and a fixture
-      # exercising every ac-1 exclusion reason at once renders each as
-      # its own single line matching a golden transcript. Each leg lands
-      # under make verify once spec/gc-reclaim's own implementation
-      # merges; this entry is updated to name the real test functions at
-      # that point. No attestation leg is bound here — stories carry no
-      # attestation floor.
+      # story; merged). Behavioral legs, all under make verify: ac-1 <-
+      # internal/reclaim/ac1_test.go's
+      # TestCompute_CombinedSurvey_EveryRowClassifiedExactlyOnce (one
+      # *residue.Result combining an eligible worktree+branch pair, an
+      # eligible branch-only row, and every kept-reason shape, asserting
+      # each row classified exactly once with no silent drop) plus
+      # predicate_test.go's TestClassifyWorktreeRow_AllSevenOutcomes,
+      # TestClassifyBranchOnlyRow_BothOutcomes,
+      # TestCompute_WorktreeAndBranchOnlyRows_Assembled,
+      # TestCompute_BranchOnlyRow_ExcludedWhenAWorktreeOwnsTheName,
+      # TestCompute_EmptyResult_EmptyPlan,
+      # TestCanonicalPath_ResolvedAndUnresolvedFormsMatch, and
+      # TestCompute_InvokingPath_SurvivesSymlinkResolution, plus (R4-I-82's
+      # cross-checkout managed-jurisdiction fix) crosscheckout_test.go's
+      # TestLooksManagedAnywhere,
+      # TestClassifyWorktreeRow_ForeignManagedSegment_KeptManaged, and
+      # TestCompute_ForeignCheckoutManagedWorktree_KeptNotReclaimed (a
+      # merged+clean worktree managed by a DIFFERENT linked checkout stays
+      # kept:managed rather than reading eligible); ac-2 <-
+      # internal/reclaim/execute_test.go's TestPlan_DryRunRows_ZeroMutation
+      # (dry-run performs zero git-mutating calls),
+      # TestApply_CleanEligiblePair_ReclaimsInOrder_PrintsTip,
+      # TestApply_WorktreeDirtiedBeforeApply_RefusedWithoutAttemptingDelete_SweepContinues
+      # (the first second-guard witness),
+      # TestApply_BranchOnlyRowCheckedOutAtPrimary_RefusedViaBranchDelete_LedgerR4I80
+      # (the second second-guard witness, proving ledger R4-I-80's
+      # resolution), TestApply_BranchAdvancedAfterScan_PartialOutcome, and
+      # TestApply_BranchOnlyEligible_ReclaimsWithoutAnyWorktreeCall, plus
+      # cmd/verdi/gc_reclaim_test.go's
+      # TestRunGcReclaimUnmanaged_DryRun_PrintsPlanAndScope,
+      # TestRunGcReclaimUnmanaged_Apply_ReclaimsEligible_KeepsUnchanged, and
+      # TestRunGcReclaimUnmanaged_UnresolvableDefaultBranch_RefusesWholeRun
+      # (the empty-default-branch whole-run refusal), and
+      # internal/gitx/branch_test.go's TestDeleteMergedBranch_Happy,
+      # TestDeleteMergedBranch_Negative_RefusesUnmergedCommits,
+      # TestDeleteMergedBranch_Negative_NonexistentBranch, and
+      # TestDeleteMergedBranch_Negative_CheckedOutElsewhere (the new
+      # DeleteMergedBranch primitive itself, dc-3); ac-3 <-
+      # cmd/verdi/gc_test.go's TestGc_CLI_ReclaimsAndDisclosesScope and
+      # TestGc_CLI_KeepsDirtyAndDiscloses (plain verdi gc's pre-existing
+      # behavior plus the new disclosure), cmd/verdi/gc_reclaim_cli_test.go's
+      # TestGcReclaimUnmanaged_CLI_BothInvocationShapes_DiscloseTheOtherAsNotRun,
+      # TestGcReclaimUnmanaged_CLI_Apply_ReclaimsAndPrintsTip,
+      # TestGcReclaimUnmanaged_CLI_UnresolvableDefaultBranch_ExitsTwo, and
+      # TestGcReclaimUnmanaged_CLI_GoldenTranscript_AllSixExclusionReasons
+      # (every ac-1 exclusion reason rendering as its own single line —
+      # disclosed as a sorted line-set comparison, not a strict sequential
+      # transcript, since residue.Scan's own worktree order is a
+      # tempdir-path artifact under t.TempDir(), never a claimed content
+      # guarantee), plus internal/reclaim/report_test.go's
+      # TestRow_Line_OneTemplatePerKind and
+      # TestPlan_DryRunRows_PreservesOrderAndClassification, and
+      # cmd/verdi/gc_reclaim_test.go's
+      # TestRunGcReclaimUnmanaged_NoEligibleOrKeptItems_StillPrintsScope.
+      # No attestation leg is bound here — stories carry no attestation
+      # floor.
       - "spec/gc-reclaim#ac-1"
       - "spec/gc-reclaim#ac-2"
       - "spec/gc-reclaim#ac-3"
@@ -1666,31 +1684,36 @@ bindings:
       - "spec/guide-claims-gate#ac-1"
       - "spec/guide-claims-gate#ac-4"
       # spec/gc-reclaim static legs (spec/residue-reclamation#ac-1's
-      # implementing story; design-phase authoring only, no build task
-      # dispatched yet). DESIGN-TIME FORWARD DECLARATION, not built yet,
-      # same not-yet-built framing as verdi-verify-behavioral above. Not
-      # yet built: ac-1 <- the predicate's own pure-function shape (a
-      # total, ordered switch over *residue.Result plus the invoking
-      # checkout's root/branch, mirroring internal/wtmanager.
-      # decideReclaim's own ordered-switch precedent, with no silent
-      # seventh path) compiling, vetting, and lint-store clean, plus a
-      # compile-time check that the kept-reason type is a closed enum;
-      # ac-2 <- the execution ordering (WorktreeRemove without --force,
-      # then the new gitx.DeleteMergedBranch with git branch -d never
-      # -D), the exit-code map (0 regardless of per-item outcomes, 2 only
-      # for a whole-run operational failure), and gitx.DeleteMergedBranch
-      # itself (internal/gitx/branch.go, composed atop the existing
-      # RevParse + DeleteBranch per ledger R4-I-81, never a duplicate
-      # -d call) compiling, vetting, and lint-store clean under make
-      # verify; ac-3 <- the updated gcScopeDisclosure line(s) and the
-      # per-item line templates (dc-4) as literal, inspectable constants,
-      # plus a diff of internal/residue's and cmd/verdi/audit.go's own
-      # report-section code against this story's own merge base being
-      # empty (co-2's byte-untouched claim) — all compiling, vetting, and
-      # lint-store clean under make verify. Each leg lands under make
-      # verify once spec/gc-reclaim's own implementation merges; this
-      # entry is updated to name the real file paths and test functions
-      # at that point.
+      # implementing story; merged, plus R4-I-82's cross-checkout
+      # managed-jurisdiction fix), mirroring verdi-verify-behavioral's own
+      # entry above (built, not a forward declaration). ac-1 <- the
+      # predicate's own pure-function shape
+      # (internal/reclaim/predicate.go's
+      # Compute/classifyWorktreeRow/classifyBranchOnlyRow: a total,
+      # ordered switch over *residue.Result plus the invoking checkout's
+      # root/branch, mirroring internal/wtmanager.decideReclaim's own
+      # ordered-switch precedent, with no silent seventh path) plus the
+      # additive looksManagedAnywhere cross-checkout guard (derived from
+      # wtmanager.WorktreesRoot, internal/residue itself untouched)
+      # compiling, vetting, and lint-store clean, plus keptReasonNames'
+      # own compile-time exhaustiveness array proving the kept-reason
+      # type is a closed enum; ac-2 <- the execution ordering
+      # (internal/reclaim/execute.go's Apply/applyOne: WorktreeRemove
+      # without --force, then the new gitx.DeleteMergedBranch with git
+      # branch -d never -D), the exit-code map (0 regardless of per-item
+      # outcomes, 2 only for a whole-run operational failure), and
+      # gitx.DeleteMergedBranch itself (internal/gitx/branch.go, composed
+      # atop the existing RevParse + DeleteBranch per ledger R4-I-81,
+      # never a duplicate -d call) compiling, vetting, and lint-store
+      # clean under make verify; ac-3 <- cmd/verdi/gc.go's
+      # gcScopeDisclosureManaged/gcScopeDisclosureUnmanaged constants and
+      # internal/reclaim/report.go's Row.Line() per-kind templates (dc-4)
+      # as literal, inspectable constants, plus a diff of
+      # internal/residue's and cmd/verdi/audit.go's own report-section
+      # code against this story's own merge base — and again across the
+      # R4-I-82 fix commit — being empty (co-2's byte-untouched claim,
+      # verified directly) — all compiling, vetting, and lint-store clean
+      # under make verify.
       - "spec/gc-reclaim#ac-1"
       - "spec/gc-reclaim#ac-2"
       - "spec/gc-reclaim#ac-3"
