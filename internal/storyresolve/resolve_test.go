@@ -1,6 +1,7 @@
 package storyresolve
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +125,13 @@ func TestResolve_Negative(t *testing.T) {
 		if !strings.Contains(msg, "jira:LOAN-1482") || !strings.Contains(msg, "spec/") {
 			t.Fatalf("error %q must name both accepted forms (a scheme-prefixed story ref and a spec ref)", msg)
 		}
+		// Negative discriminant path (L-M13a(7)): the two-forms refusal is
+		// NOT the typed no-match outcome — a caller keying its fallback on
+		// UnmatchedStoryRefError must not scan for story-class specs here.
+		var unmatched *UnmatchedStoryRefError
+		if errors.As(err, &unmatched) {
+			t.Fatalf("Resolve(bare key): error %q must not be an UnmatchedStoryRefError (the arg never parsed as a story ref)", msg)
+		}
 	})
 
 	t.Run("unknown story ref", func(t *testing.T) {
@@ -135,6 +143,15 @@ func TestResolve_Negative(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "jira:NOPE-1") {
 			t.Fatalf("error %q should name the unmatched story ref", err.Error())
+		}
+		// The typed discriminant (L-M13a(7)): resolveBuildTarget keys its
+		// story-class fallback on the TYPE, never on the message text.
+		var unmatched *UnmatchedStoryRefError
+		if !errors.As(err, &unmatched) {
+			t.Fatalf("Resolve(unknown story ref): error %T %q must be an *UnmatchedStoryRefError", err, err.Error())
+		}
+		if unmatched.StoryRef != "jira:NOPE-1" {
+			t.Fatalf("UnmatchedStoryRefError.StoryRef = %q, want %q", unmatched.StoryRef, "jira:NOPE-1")
 		}
 	})
 

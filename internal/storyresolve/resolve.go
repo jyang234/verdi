@@ -45,6 +45,24 @@ func (e *ComponentSpecError) Error() string {
 	return fmt.Sprintf("spec %q is a component spec (no story, no acceptance criteria); matrix folds only feature and story specs", e.Ref)
 }
 
+// UnmatchedStoryRefError marks matchStoryRef's no-match outcome: the
+// argument parsed as a valid scheme-prefixed story ref, but no active
+// class: feature spec's story: field equals it. A typed discriminant (the
+// OperationalError pattern) because cmd/verdi's resolveBuildTarget keys
+// its story-class fallback scan on exactly this outcome — it previously
+// string-matched this message's text as control flow, which pinned the
+// prose bare by coupling (ledger L-M13a(7)). Callers that only report the
+// failure see the exact same Error() text.
+type UnmatchedStoryRefError struct {
+	// StoryRef is the scheme-prefixed story ref that matched no active
+	// feature spec's story: field.
+	StoryRef string
+}
+
+func (e *UnmatchedStoryRefError) Error() string {
+	return fmt.Sprintf("no active feature spec has story: %s", e.StoryRef)
+}
+
 // Resolve resolves arg to a foldable spec under specs/active/ — 03 §The
 // fold's "Scope: the fold is evaluated only for specs under
 // specs/active/". Per I-30, arg is EXACTLY one of two forms: a spec ref
@@ -136,7 +154,7 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 	}
 	switch len(matches) {
 	case 0:
-		return nil, fmt.Errorf("no active feature spec has story: %s", storyRef)
+		return nil, &UnmatchedStoryRefError{StoryRef: storyRef}
 	case 1:
 		return matches[0], nil
 	default:
