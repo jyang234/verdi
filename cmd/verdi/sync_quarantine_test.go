@@ -173,3 +173,77 @@ func TestRunSync_CIFetch_NonRecordFilesUntouchedByQuarantine(t *testing.T) {
 		t.Errorf("materialized review.json = %q, want the fetched bytes untouched", got)
 	}
 }
+
+// TestRunSync_CIFetch_UndecodableFetchedFile_NotOperational is
+// spec/evidence-resilience finding-3's regression pin: a fetched record file
+// (runtime.json here) that FAILS strict decode must NOT make sync exit 2
+// operationally. Before the fix, quarantineUnreachable strict-decoded every
+// fetched verdicts.json/runtime.json for its reachability check and surfaced
+// a decode failure as an operational error — a NEW sync-time hard-fail on
+// inputs unrelated to commit reachability, on the exact fetch path ac-1
+// hardens (previously the fetch path wrote runtime.json without decoding it).
+// The undecodable file is quarantined-by-default (kept verbatim on disk,
+// never dropped), sync exits 0, and stdout notes it.
+func TestRunSync_CIFetch_UndecodableFetchedFile_NotOperational(t *testing.T) {
+	root := buildTestStore(t)
+	head := gitInitTestStore(t, root)
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	// Truncated JSON under an UNREACHABLE dir key — the realistic
+	// stale-poisoned-bundle debris shape (its source branch since deleted).
+	const malformed = `[{"schema":"verdi.evidence/v1"`
+
+	f := fake.New()
+	f.SeedBundle(testRef, head, forgepkg.DerivedTree{
+		"spec--x/" + unreachable + "/runtime.json": []byte(malformed),
+	})
+
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{Runner: upstream.NewFakeRunner(), Forge: f, GoTest: fakeGoTest{}, Stdout: &stdout, Stderr: &stderr}
+	code := runSync(context.Background(), root, testRef, head, false, false, false, deps)
+	if code != 0 {
+		t.Fatalf("runSync exit = %d, want 0 (an undecodable fetched record file is quarantined-by-default, never an operational failure — finding 3); stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "undecodable") {
+		t.Errorf("stdout = %q, want sync to note the undecodable quarantined file", stdout.String())
+	}
+	got, err := os.ReadFile(filepath.Join(root, ".verdi", "data", "derived", "spec--x", unreachable, "runtime.json"))
+	if err != nil {
+		t.Fatalf("reading materialized runtime.json: %v", err)
+	}
+	if string(got) != malformed {
+		t.Errorf("materialized runtime.json = %q, want the fetched bytes kept verbatim (never dropped)", got)
+	}
+}
+
+// TestRunSync_CIFetch_QuarantinedFailRecord_ExcludedFromVerdict is
+// spec/evidence-resilience finding-4's regression pin: a record whose
+// provenance.commit is unreachable (so sync quarantines it) that ALSO carries
+// verdict:fail must NOT drive sync's exit code — a record the system has just
+// declared non-authoritative-and-excluded cannot control sync's verdict, or a
+// poisoned bundle's stale fail record keeps sync red on every re-sync (X-15's
+// "re-syncing did not help" shape at exit-1 severity). sync exits 0 (not 1),
+// disclosing that the quarantined record was excluded from the verdict.
+func TestRunSync_CIFetch_QuarantinedFailRecord_ExcludedFromVerdict(t *testing.T) {
+	root := buildTestStore(t)
+	head := gitInitTestStore(t, root)
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	failRecord := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"fail",` +
+		`"witness":"w","provenance":{"source":"ci","pipeline":"1","commit":"` + unreachable + `"},` +
+		`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}]`
+
+	f := fake.New()
+	f.SeedBundle(testRef, head, forgepkg.DerivedTree{
+		"spec--x/" + head + "/verdicts.json": []byte(failRecord),
+	})
+
+	var stdout, stderr bytes.Buffer
+	deps := syncDeps{Runner: upstream.NewFakeRunner(), Forge: f, GoTest: fakeGoTest{}, Stdout: &stdout, Stderr: &stderr}
+	code := runSync(context.Background(), root, testRef, head, false, false, false, deps)
+	if code != 0 {
+		t.Fatalf("runSync exit = %d, want 0 (a quarantined fail record must not drive sync's verdict exit — finding 4); stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "excluded from verdict") {
+		t.Errorf("stdout = %q, want the disclosure that quarantined record(s) were excluded from the verdict", stdout.String())
+	}
+}

@@ -259,13 +259,20 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 		// provenance.commit is not reachable from commit at sync time,
 		// BEFORE the tree is written to disk, so what lands under
 		// derivedRoot already carries the annotation.
-		quarantined, qErr := quarantineUnreachable(ctx, root, tree, commit)
+		quarantined, undecodable, qErr := quarantineUnreachable(ctx, root, tree, commit)
 		if qErr != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", qErr)
 			return 2
 		}
 		if quarantined > 0 {
 			fmt.Fprintf(deps.Stdout, "sync: quarantined %d evidence record(s) whose provenance.commit is not reachable from %s (kept, annotated, never dropped)\n", quarantined, commit)
+		}
+		if len(undecodable) > 0 {
+			// spec/evidence-resilience finding 3: an undecodable fetched
+			// record file is quarantined-by-default — kept verbatim, excluded
+			// from the fold (via directory reachability), disclosed at
+			// closure — never a sync-time operational failure.
+			fmt.Fprintf(deps.Stdout, "sync: quarantined %d undecodable fetched record file(s) (kept verbatim, never dropped; excluded from the fold and disclosed at closure): %v\n", len(undecodable), undecodable)
 		}
 		if writeErr := writeDerivedTree(derivedRoot, tree); writeErr != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", writeErr)
@@ -280,7 +287,7 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 		// intuition. No walk-semantics change.
 		fmt.Fprintf(deps.Stdout, "sync: pulled CI evidence bundle (%d files) — accepted at commit %s, %d commit(s) back in log order from %s, into %s\n",
 			len(tree), acceptedCommit, distance, commit, derivedRoot)
-		return evaluateTree(deps, tree)
+		return evaluateTree(deps, tree, undecodable)
 
 	case errors.Is(err, forge.ErrNoBundle) && orRegen:
 		// ADJ-37 fix 1: an ancestry-enumeration failure reaches here
@@ -497,16 +504,34 @@ func safeJoin(root, key string) (string, error) {
 // if any verdicts.json record verdicts fail or any review.json entry BLOCKs
 // (surfacing failing evidence sync just materialized, matching the exit-code
 // contract's "1 = verdict failure"), 0 otherwise. A file that does not even
-// decode is an operational error (2). EVERY verdicts.json/review.json across
-// every key in the tree is checked, not just one bundle's — the tree spans
-// per-spec subdirs.
-func evaluateTree(deps syncDeps, tree forge.DerivedTree) int {
+// decode is an operational error (2), EXCEPT one quarantineUnreachable
+// already quarantined-by-default as undecodable (finding 3): those keys are
+// skipped here, never re-decoded into an operational failure, since sync has
+// already disclosed them and kept their bytes verbatim. EVERY
+// verdicts.json/review.json across every key in the tree is checked, not just
+// one bundle's — the tree spans per-spec subdirs.
+//
+// spec/evidence-resilience finding 4: a record `verdi sync` quarantined (its
+// provenance.commit unreachable) is excluded from the verdict scan — a record
+// the fold will never read as evidence cannot drive sync's exit code, or a
+// poisoned bundle's stale fail record would keep sync red on every re-sync
+// (X-15's "re-syncing did not help" shape at exit-1 severity). The count of
+// such excluded records is disclosed.
+func evaluateTree(deps syncDeps, tree forge.DerivedTree, undecodable []string) int {
+	skip := make(map[string]bool, len(undecodable))
+	for _, key := range undecodable {
+		skip[key] = true
+	}
 	keys := make([]string, 0, len(tree))
 	for key := range tree {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys) // deterministic evaluation/reporting order
+	quarantinedExcluded := 0
 	for _, key := range keys {
+		if skip[key] {
+			continue // finding 3: quarantined-by-default undecodable file, already disclosed.
+		}
 		switch filepath.Base(key) {
 		case "verdicts.json":
 			var records []artifact.Evidence
@@ -515,6 +540,10 @@ func evaluateTree(deps syncDeps, tree forge.DerivedTree) int {
 				return 2
 			}
 			for _, r := range records {
+				if r.Quarantine != nil {
+					quarantinedExcluded++
+					continue // finding 4: a quarantined record never drives sync's verdict exit.
+				}
 				if r.Verdict == artifact.VerdictFail {
 					fmt.Fprintln(deps.Stdout, "sync: materialized bundle contains failing evidence")
 					return 1
@@ -533,6 +562,9 @@ func evaluateTree(deps syncDeps, tree forge.DerivedTree) int {
 				}
 			}
 		}
+	}
+	if quarantinedExcluded > 0 {
+		fmt.Fprintf(deps.Stdout, "sync: %d quarantined record(s) excluded from verdict\n", quarantinedExcluded)
 	}
 	return 0
 }

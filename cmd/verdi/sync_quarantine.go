@@ -43,13 +43,27 @@ import (
 // record file that actually contains at least one newly-quarantined
 // record is re-encoded (canonical JSON per CLAUDE.md).
 //
-// It returns the total number of records quarantined across the whole
-// tree, for the caller's own disclosure line. gitx.ReachableFromHEAD folds
-// both "the commit does not exist at all" and "the commit exists but no
-// ref reaches it" into an honest false, never an error — the exact X-15
-// hard-fail this story closes; only a genuine operational failure (root is
-// not a git repository at all) surfaces as an error here.
-func quarantineUnreachable(ctx context.Context, root string, tree forge.DerivedTree, headCommit string) (int, error) {
+// It returns the total number of records quarantined across the whole tree
+// and the keys of any fetched record file that failed strict decode, for the
+// caller's own disclosure lines. gitx.ReachableFromHEAD folds both "the
+// commit does not exist at all" and "the commit exists but no ref reaches
+// it" into an honest false, never an error — the exact X-15 hard-fail this
+// story closes; only a genuine operational failure (root is not a git
+// repository at all, or a re-encode fails) surfaces as an error here.
+//
+// spec/evidence-resilience finding 3: an undecodable fetched verdicts.json/
+// runtime.json is quarantined-by-default — its key is returned in
+// undecodable, its bytes are left verbatim on disk (kept, never dropped),
+// and sync does NOT exit operationally. This restores the pre-ac-1 posture:
+// before this story the fetch path wrote runtime.json to disk WITHOUT
+// decoding it, so adding a strict decode here must not turn a malformed
+// fetched file (a truncated partial write, an older-schema record — the
+// debris a deleted branch's stale bundle carries) into a NEW sync-time
+// operational failure on the exact path ac-1 hardens. The fold excludes such
+// a file via directory reachability, and the closure gate's disclosure pass
+// (evidence.QuarantinedRecords) surfaces it as undecodable — the same
+// non-fatal posture the fold/disclosure side applies to quarantined data.
+func quarantineUnreachable(ctx context.Context, root string, tree forge.DerivedTree, headCommit string) (quarantined int, undecodable []string, err error) {
 	recordFile := make(map[string]bool, len(evidence.RecordFileNames))
 	for _, name := range evidence.RecordFileNames {
 		recordFile[name] = true
@@ -67,8 +81,11 @@ func quarantineUnreachable(ctx context.Context, root string, tree forge.DerivedT
 			continue
 		}
 		var records []artifact.Evidence
-		if err := artifact.DecodeStrictJSON(tree[key], &records); err != nil {
-			return 0, fmt.Errorf("sync: decoding fetched %s for quarantine check: %w", key, err)
+		if decErr := artifact.DecodeStrictJSON(tree[key], &records); decErr != nil {
+			// finding 3: quarantine-by-default, non-fatal. Leave the bytes
+			// verbatim (continue without rewriting tree[key]) and note the key.
+			undecodable = append(undecodable, key)
+			continue
 		}
 
 		quarantinedHere := 0
@@ -84,9 +101,9 @@ func quarantineUnreachable(ctx context.Context, root string, tree forge.DerivedT
 			if records[i].Provenance.Commit == headCommit {
 				continue
 			}
-			reachable, err := gitx.ReachableFromHEAD(ctx, root, records[i].Provenance.Commit, headCommit)
-			if err != nil {
-				return 0, fmt.Errorf("sync: checking reachability of %s (from %s): %w", records[i].Provenance.Commit, key, err)
+			reachable, rerr := gitx.ReachableFromHEAD(ctx, root, records[i].Provenance.Commit, headCommit)
+			if rerr != nil {
+				return total, undecodable, fmt.Errorf("sync: checking reachability of %s (from %s): %w", records[i].Provenance.Commit, key, rerr)
 			}
 			if reachable {
 				continue
@@ -99,12 +116,12 @@ func quarantineUnreachable(ctx context.Context, root string, tree forge.DerivedT
 		if quarantinedHere == 0 {
 			continue // untouched: the original fetched bytes stand exactly as they were
 		}
-		data, err := canonjson.Marshal(records)
-		if err != nil {
-			return 0, fmt.Errorf("sync: re-encoding %s after quarantine: %w", key, err)
+		data, merr := canonjson.Marshal(records)
+		if merr != nil {
+			return total, undecodable, fmt.Errorf("sync: re-encoding %s after quarantine: %w", key, merr)
 		}
 		tree[key] = data
 		total += quarantinedHere
 	}
-	return total, nil
+	return total, undecodable, nil
 }
