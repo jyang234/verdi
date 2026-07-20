@@ -3,15 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/storyresolve"
 	"github.com/jyang234/verdi/internal/upstream"
 )
 
@@ -163,6 +166,59 @@ func alignFakeJudgeSleepy(t *testing.T) []string {
 		t.Fatalf("writing fake judge: %v", err)
 	}
 	return []string{path}
+}
+
+// alignFakeJudgeSlowOK writes a fake judge that sleeps briefly (well under
+// any --wait bound this file uses) before emitting a valid OK envelope —
+// used to prove a bounded wait blocks then completes normally, and that a
+// concurrent reader never observes partial report content while the judge
+// is still running.
+func alignFakeJudgeSlowOK(t *testing.T, sleepSeconds int) []string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fakejudge.sh")
+	script := fmt.Sprintf("#!/bin/sh\nsleep %d\ncat <<'EOF'\n{\"is_error\":false,\"subtype\":\"success\",\"result\":\"{\\\"findings\\\":[{\\\"id\\\":\\\"j-1\\\",\\\"text\\\":\\\"looks aligned\\\",\\\"confidence\\\":0.9}]}\"}\nEOF\n", sleepSeconds)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake judge: %v", err)
+	}
+	return []string{path}
+}
+
+// alignFakeJudgeSentinel writes a fake judge that touches sentinelPath the
+// MOMENT it starts running, then sleeps briefly before emitting a valid OK
+// envelope — lets a test detect "the judge subprocess has actually started"
+// without racing on timing alone (spec/judge-ergonomics ac-1: proving the
+// report path is on stdout BEFORE the judge subprocess ever runs).
+func alignFakeJudgeSentinel(t *testing.T, sentinelPath string) []string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fakejudge.sh")
+	script := fmt.Sprintf("#!/bin/sh\ntouch %q\nsleep 1\ncat <<'EOF'\n{\"is_error\":false,\"subtype\":\"success\",\"result\":\"{\\\"findings\\\":[{\\\"id\\\":\\\"j-1\\\",\\\"text\\\":\\\"looks aligned\\\",\\\"confidence\\\":0.9}]}\"}\nEOF\n", sentinelPath)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake judge: %v", err)
+	}
+	return []string{path}
+}
+
+// syncBuffer is a concurrency-safe io.Writer + String() over a bytes.Buffer
+// — align_test.go's own tests need to read stdout WHILE runAlign is still
+// executing in another goroutine (proving ordering, not just end-state),
+// which a bare bytes.Buffer does not support safely.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
 }
 
 // boundaryWriteRunnerCmd wraps a Runner to simulate `flowmap boundary`'s
@@ -707,4 +763,343 @@ func TestRunAlign_Negative(t *testing.T) {
 			t.Fatalf("cmdAlign(no store root) = %d, want 2", got)
 		}
 	})
+}
+
+// TestCmdAlign_WaitFlagParsing_Negative proves --wait[=seconds]'s usage
+// validation fails closed (exit 2, a named reason) BEFORE any store/judge
+// work happens — mirroring TestRunAlign_Negative's "unexpected argument"/"no
+// store root" shape, which also runs from an empty temp dir with no
+// fixture, since bad syntax is rejected during argument parsing itself.
+func TestCmdAlign_WaitFlagParsing_Negative(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"non-numeric seconds", []string{"--wait=abc"}},
+		{"zero seconds", []string{"--wait=0"}},
+		{"negative seconds", []string{"--wait=-5"}},
+		{"fractional seconds", []string{"--wait=1.5"}},
+		{"wait then diagram-sweep", []string{"--wait", "--diagram-sweep", "diagram/foo"}},
+		{"diagram-sweep then wait", []string{"--diagram-sweep", "diagram/foo", "--wait=5"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			var stdout, stderr bytes.Buffer
+			got := cmdAlign(tc.args, &stdout, &stderr)
+			if got != 2 {
+				t.Fatalf("cmdAlign(%v) = %d, want 2; stdout=%s stderr=%s", tc.args, got, stdout.String(), stderr.String())
+			}
+			if stderr.String() == "" {
+				t.Fatalf("cmdAlign(%v): stderr is empty, want a named reason (silence is never a pass)", tc.args)
+			}
+		})
+	}
+}
+
+// TestRunAlign_Wait_RejectedOnDesignBranch proves --wait is explicitly
+// refused (never silently ignored) on a design branch: spec/judge-ergonomics
+// scopes --wait to build-branch align and close's freeze-align only
+// (decision-conflict mode is untouched by this story), so a caller that
+// passes --wait there must be told loudly, not have the flag quietly do
+// nothing.
+func TestRunAlign_Wait_RejectedOnDesignBranch(t *testing.T) {
+	repo := buildAlignDesignRepo(t)
+	deps := alignDeps{Wait: true}
+
+	var stdout, stderr bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runAlign(design branch, Wait) = %d, want 2; stderr=%s", got, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--wait") {
+		t.Fatalf("stderr = %q, want it to name --wait as the reason", stderr.String())
+	}
+}
+
+// TestRunAlign_ReportPathPrintedBeforeJudgeRuns proves spec/judge-ergonomics
+// ac-1's ordering claim behaviorally, not just by code inspection: the
+// report path is stdout's first line WHILE the judge subprocess is
+// confirmed still running (a sentinel file the fake judge touches the
+// instant it starts), and the report itself does not exist on disk yet at
+// that same moment.
+func TestRunAlign_ReportPathPrintedBeforeJudgeRuns(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	sentinel := filepath.Join(t.TempDir(), "judge-started")
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSentinel(t, sentinel), ModelDigest: testResolveModelDigest(t, repo.Dir)}
+
+	var stdout syncBuffer
+	var stderr bytes.Buffer
+	done := make(chan int, 1)
+	go func() {
+		done <- runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(sentinel); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("judge subprocess never started (sentinel file never appeared)")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+	firstLine := strings.SplitN(stdout.String(), "\n", 2)[0]
+	if firstLine != reportPath {
+		t.Fatalf("stdout first line = %q while the judge subprocess was already confirmed running; want the report path %q printed BEFORE the judge runs", firstLine, reportPath)
+	}
+	if _, err := os.Stat(reportPath); err == nil {
+		t.Fatal("deviation-report.md already exists while the judge subprocess is still mid-run — the path must be observable before the file is")
+	}
+
+	got := <-done
+	if got != 0 {
+		t.Fatalf("runAlign = %d, want 0; stderr=%s", got, stderr.String())
+	}
+}
+
+// TestRunAlign_ReportNeverPartiallyObservable proves spec/judge-ergonomics
+// ac-1's atomic-write claim: a reader polling the report path throughout a
+// run (against a judge slow enough to give the poller a real window) must
+// only ever observe "does not exist yet" or a fully frontmatter-decodable
+// file — never a truncated/partial write, because align.go now writes
+// through the atomicfile seam (temp-then-rename) instead of a raw
+// os.WriteFile.
+func TestRunAlign_ReportNeverPartiallyObservable(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSlowOK(t, 1), ModelDigest: testResolveModelDigest(t, repo.Dir)}
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+
+	stop := make(chan struct{})
+	var pollErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			data, err := os.ReadFile(reportPath)
+			if err == nil {
+				if _, _, splitErr := artifact.SplitFrontmatter(data); splitErr != nil {
+					pollErr = fmt.Errorf("observed non-final content mid-run: %v\n%s", splitErr, data)
+					return
+				}
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	var stdout, stderr bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
+	close(stop)
+	wg.Wait()
+
+	if got != 0 {
+		t.Fatalf("runAlign = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	if pollErr != nil {
+		t.Fatal(pollErr)
+	}
+}
+
+// TestRunAlign_Wait_CompletesWithinBound proves spec/judge-ergonomics ac-2's
+// completing half at the cmd layer: Wait true, a JudgeTimeout comfortably
+// longer than the judge's own delay, blocks internally then exits 0 with
+// the report written once the judge finishes — ordinary success, just
+// bounded.
+func TestRunAlign_Wait_CompletesWithinBound(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	deps := alignDeps{
+		Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSlowOK(t, 1),
+		Wait: true, JudgeTimeout: 10 * time.Second, ModelDigest: testResolveModelDigest(t, repo.Dir),
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runAlign(Wait, completing judge) = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	fm := decodeReportFile(t, filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md"))
+	if fm.JudgeIntegrity == nil {
+		t.Fatal("report carries no judge_integrity — the judge's genuine completion under Wait was not recorded")
+	}
+}
+
+// TestRunAlign_Wait_ExpiresExitsTwoWithPathPrinted is the plan's own named
+// case: --wait's bound (here via a short injected JudgeTimeout, the
+// cmd-level equivalent of --wait=1) against a hung fake judge exits 2 (an
+// operational timeout, not a verdict), promptly, with the report path
+// already on stdout's first line and — since this is a first-ever run — no
+// report file written at all.
+func TestRunAlign_Wait_ExpiresExitsTwoWithPathPrinted(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	deps := alignDeps{
+		Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSleepy(t), // sleeps 5s
+		Wait: true, JudgeTimeout: 200 * time.Millisecond, ModelDigest: testResolveModelDigest(t, repo.Dir),
+	}
+
+	var stdout, stderr bytes.Buffer
+	start := time.Now()
+	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
+	elapsed := time.Since(start)
+
+	if got != 2 {
+		t.Fatalf("runAlign(Wait, hung judge) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if elapsed > 4*time.Second {
+		t.Fatalf("runAlign(Wait=200ms) took %s, want it bounded near the timeout, not the sleep 5", elapsed)
+	}
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+	firstLine := strings.SplitN(stdout.String(), "\n", 2)[0]
+	if firstLine != reportPath {
+		t.Fatalf("stdout first line = %q, want the report path %q printed even though the run expired", firstLine, reportPath)
+	}
+	if _, err := os.Stat(reportPath); err == nil {
+		t.Fatal("deviation-report.md was written despite --wait expiring — nothing genuine to write on an operational timeout")
+	}
+}
+
+// TestRunAlign_Wait_ExpiryPreservesExistingReport is
+// TestRunAlign_Wait_ExpiresExitsTwoWithPathPrinted's regeneration analogue,
+// mirroring D6-24's own preserve-on-failure shape: a REGENERATE run whose
+// judge expires under Wait must leave a pre-existing genuine report
+// byte-for-byte untouched, never overwritten with a partial or synthetic
+// edition.
+func TestRunAlign_Wait_ExpiryPreservesExistingReport(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+
+	living := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
+	var out, errb bytes.Buffer
+	if got := runAlign(context.Background(), repo.Dir, false, living, &out, &errb); got != 0 {
+		t.Fatalf("runAlign (living) = %d, want 0; stderr=%s", got, errb.String())
+	}
+	genuineBefore, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading living report: %v", err)
+	}
+
+	waitDeps := alignDeps{
+		Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSleepy(t),
+		Wait: true, JudgeTimeout: 200 * time.Millisecond, ModelDigest: testResolveModelDigest(t, repo.Dir),
+	}
+	var out2, errb2 bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, waitDeps, &out2, &errb2)
+	if got != 2 {
+		t.Fatalf("runAlign (regenerate, Wait expires) = %d, want 2; stdout=%s stderr=%s", got, out2.String(), errb2.String())
+	}
+	after, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading report after expired regenerate: %v", err)
+	}
+	if !bytes.Equal(genuineBefore, after) {
+		t.Fatalf("genuine living report was NOT preserved byte-for-byte across a --wait expiry:\n--- before ---\n%s\n--- after ---\n%s", genuineBefore, after)
+	}
+}
+
+// TestRunAlign_Wait_DefaultOffPreservesGracefulDegrade is the cmd-level
+// regression pin complementing internal/align's own
+// TestRunJudged_WaitFalse_TimeoutStillDegrades: with Wait left at its zero
+// value (no --wait passed), a judge timeout must still degrade to the
+// synthetic absence finding and exit 0, exactly as before this story.
+func TestRunAlign_Wait_DefaultOffPreservesGracefulDegrade(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	deps := alignDeps{
+		Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSleepy(t),
+		JudgeTimeout: 200 * time.Millisecond, ModelDigest: testResolveModelDigest(t, repo.Dir),
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runAlign(Wait=false, timeout) = %d, want 0 (graceful degrade unchanged); stderr=%s", got, stderr.String())
+	}
+	fm := decodeReportFile(t, filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md"))
+	if _, ok := findingByID(fm.Findings, align.AbsenceFindingID); !ok {
+		t.Fatalf("expected the synthetic absence finding, got %+v", fm.Findings)
+	}
+}
+
+// TestRunAlignForSpec_CloseFreezeAlign_WaitExpires proves spec/judge-ergonomics
+// ac-3 directly: runAlignForSpec is the EXACT function and call shape
+// close.go's runClose/runCloseFeature use for freeze-align
+// (runAlignForSpec(ctx, root, spec, head, true, alignD, stdout, stderr)) — this
+// test calls it the same way, with Wait set, proving close's freeze-align
+// inherits the identical first-line path, atomic-write, and bounded
+// --wait/exit-2-with-path-on-expiry behavior from the one shared engine
+// hook, not a second implementation.
+func TestRunAlignForSpec_CloseFreezeAlign_WaitExpires(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
+	if err != nil {
+		t.Fatalf("ResolveBuildSpec: %v", err)
+	}
+	deps := alignDeps{
+		Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSleepy(t),
+		Wait: true, JudgeTimeout: 200 * time.Millisecond, ModelDigest: testResolveModelDigest(t, repo.Dir),
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runAlignForSpec(context.Background(), repo.Dir, spec, repo.Head, true /* freeze — close's own call always passes true */, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runAlignForSpec(freeze=true, Wait, hung judge) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+	firstLine := strings.SplitN(stdout.String(), "\n", 2)[0]
+	if firstLine != reportPath {
+		t.Fatalf("stdout first line = %q, want the report path %q — close's freeze-align must print it exactly like align's own CLI does", firstLine, reportPath)
+	}
+	if _, err := os.Stat(reportPath); err == nil {
+		t.Fatal("no frozen report should exist — close's freeze-align must not write on a --wait expiry either")
+	}
+}
+
+// TestRunAlignForSpec_CloseFreezeAlign_WaitCompletes is
+// TestRunAlignForSpec_CloseFreezeAlign_WaitExpires's completing half: the
+// same close call shape (freeze=true) with a judge that finishes inside the
+// bound writes a genuinely frozen report through the atomicfile seam and
+// exits 0, exactly like align's own --wait success path.
+func TestRunAlignForSpec_CloseFreezeAlign_WaitCompletes(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
+	if err != nil {
+		t.Fatalf("ResolveBuildSpec: %v", err)
+	}
+	deps := alignDeps{
+		Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSlowOK(t, 1),
+		Wait: true, JudgeTimeout: 10 * time.Second, ModelDigest: testResolveModelDigest(t, repo.Dir),
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runAlignForSpec(context.Background(), repo.Dir, spec, repo.Head, true, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runAlignForSpec(freeze=true, Wait, completing judge) = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+	firstLine := strings.SplitN(stdout.String(), "\n", 2)[0]
+	if firstLine != reportPath {
+		t.Fatalf("stdout first line = %q, want the report path %q", firstLine, reportPath)
+	}
+	fm := decodeReportFile(t, reportPath)
+	if fm.Frozen == nil {
+		t.Fatal("close's freeze-align call (freeze=true) produced a report with no Frozen stamp")
+	}
+	if fm.JudgeIntegrity == nil {
+		t.Fatal("report carries no judge_integrity — the judge's genuine completion under Wait was not recorded")
+	}
 }
