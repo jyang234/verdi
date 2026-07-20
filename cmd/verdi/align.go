@@ -13,13 +13,18 @@
 // --wait[=seconds] (ac-2) bounds how long this run waits on the judge: a
 // bare --wait reuses the already-resolved JudgeTimeout (manifest-configured
 // or internal/align's own default) as ac-2's "sane default" bound, rather
-// than inventing a second, possibly-conflicting timeout knob; --wait=N sets
-// that bound to N seconds outright. Either form makes a judge that does not
-// complete within the bound exit 2 (an operational timeout, never a
-// verdict) instead of today's default graceful degrade to a synthetic
-// absence finding — the path is already on stdout by the time this can
-// happen. The contract lives once in runAlignForSpec (ac-3), the exact
-// function close.go's freeze-align calls, so close inherits it without a
+// than inventing a second, possibly-conflicting timeout knob; --wait=N
+// EXTENDS that bound to N seconds and is refused as a usage error when N is
+// below the ceiling — --wait may only lengthen patience, never truncate the
+// judge's own run (finding judged-wait-bound-conflated-with-judge-kill-
+// timeout). Either legal form makes a judge that does not complete within
+// the bound exit 2 (an operational timeout, never a verdict) instead of
+// today's default graceful degrade to a synthetic absence finding — the
+// path is already on stdout by the time this can happen, and the expiry
+// message states the judge was terminated at the bound (never "check it
+// later", which a killed judge can never honor). The contract lives once in
+// runAlignForSpec (ac-3), the exact function close.go's freeze-align calls
+// (via freezeAlignDeps), so close inherits the bounded wait without a
 // second implementation; --wait itself is out of scope for the
 // design-branch decision-conflict mode and --diagram-sweep (rejected
 // explicitly, never silently ignored).
@@ -159,6 +164,26 @@ func cmdAlign(args []string, stdout, stderr io.Writer) int {
 	if wait {
 		deps.Wait = true
 		if waitBound > 0 {
+			// spec/judge-ergonomics ac-2, as adjudicated for finding
+			// judged-wait-bound-conflated-with-judge-kill-timeout: --wait may
+			// only EXTEND how long align waits for the judge past the
+			// operator's own configured ceiling, never truncate the judge's
+			// own run. The wait bound and the judge's exec lifetime are the
+			// same knob here (deps.JudgeTimeout), so a bound BELOW the ceiling
+			// would silently kill a judge that would otherwise complete and
+			// gracefully degrade — refuse it as a usage error (exit 2) naming
+			// both numbers, rather than honor a truncation the flag was never
+			// meant to express. The ceiling is the manifest's
+			// align.judge_timeout_seconds if configured, else internal/align's
+			// own DefaultJudgeTimeout (the same value a bare --wait waits).
+			ceiling := align.DefaultJudgeTimeout
+			if deps.JudgeTimeout > 0 {
+				ceiling = deps.JudgeTimeout
+			}
+			if waitBound < ceiling {
+				fmt.Fprintf(stderr, "align: --wait=%d is below the judge's own patience ceiling of %ds (align.judge_timeout_seconds, or the built-in default when it is unset); --wait may only EXTEND how long align waits for the judge, never truncate the judge's own run — a bound shorter than the ceiling would kill a judge that would otherwise complete and gracefully degrade. Pass a bare --wait to wait exactly the ceiling, or --wait=N with N >= %d.\n", int(waitBound/time.Second), int(ceiling/time.Second), int(ceiling/time.Second))
+				return 2
+			}
 			deps.JudgeTimeout = waitBound
 		}
 		// A bare --wait (waitBound == 0) deliberately leaves JudgeTimeout as
@@ -325,7 +350,12 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		var waitExpired *align.ErrJudgeWaitExpired
 		if errors.As(err, &waitExpired) {
 			fmt.Fprintln(stderr, "align:", err)
-			fmt.Fprintf(stderr, "align: no report was written this run; %s is unchanged — re-run, optionally with a longer --wait, or check it later\n", reportPath)
+			// FIX 1(b) (finding judged-wait-bound-conflated-with-judge-kill-
+			// timeout): state what actually happened to the judge subprocess —
+			// it was terminated at the bound and cannot finish this run — with
+			// no "check it later" implication. A killed judge never populates
+			// the printed path on its own; only a fresh run can.
+			fmt.Fprintf(stderr, "align: the judge subprocess was terminated at the --wait bound and cannot complete this run; no report was written and %s is unchanged. Re-run align to start a fresh judge exchange (optionally with a longer --wait) — this path will not populate on its own.\n", reportPath)
 			return 2
 		}
 		fmt.Fprintln(stderr, "align:", err)

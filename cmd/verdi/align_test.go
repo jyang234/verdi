@@ -797,6 +797,101 @@ func TestCmdAlign_WaitFlagParsing_Negative(t *testing.T) {
 	}
 }
 
+// TestCmdAlign_WaitBelowJudgeCeiling_RefusedAsUsageError is FIX 1's
+// (finding judged-wait-bound-conflated-with-judge-kill-timeout) red-first
+// pin: --wait exists to EXTEND how long align waits for the judge, never to
+// truncate the judge's own run, so --wait=N below the resolved judge ceiling
+// (here the built-in align.DefaultJudgeTimeout, since buildAlignRepo
+// configures no align.judge_timeout_seconds) is a usage error (exit 2) that
+// names BOTH the rejected bound and the ceiling — not a silent fold of N
+// into the judge's exec timeout that kills a judge which would otherwise
+// complete and gracefully degrade. This runs through cmdAlign (not runAlign)
+// because the ceiling is only known after the manifest is resolved.
+func TestCmdAlign_WaitBelowJudgeCeiling_RefusedAsUsageError(t *testing.T) {
+	repo := buildAlignRepo(t)
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := cmdAlign([]string{"--wait=1"}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdAlign(--wait=1, default %s ceiling) = %d, want 2 (usage error); stderr=%s", align.DefaultJudgeTimeout, got, stderr.String())
+	}
+	msg := stderr.String()
+	if !strings.Contains(msg, "--wait=1") {
+		t.Fatalf("stderr = %q, want it to name the rejected bound (--wait=1)", msg)
+	}
+	ceilingSecs := int(align.DefaultJudgeTimeout / time.Second)
+	if !strings.Contains(msg, fmt.Sprintf("%d", ceilingSecs)) {
+		t.Fatalf("stderr = %q, want it to name the judge ceiling (%ds) it fell below", msg, ceilingSecs)
+	}
+	// The refusal is pre-flight (a usage error), so nothing may be written.
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")); err == nil {
+		t.Fatal("deviation-report.md was written despite the --wait usage refusal")
+	}
+}
+
+// TestCmdAlign_WaitAtOrAboveCeiling_NotRefused pins the other half of the
+// adjudication (finding judged-wait-bound-conflated-with-judge-kill-timeout):
+// a bare --wait (waits exactly the ceiling) and --wait=N with N >= the
+// ceiling stay legal — they must clear the usage guard into the run itself
+// (where this toolchain-less fixture then fails at Compute for an unrelated
+// reason). The proof they cleared the guard: the report path reached stdout
+// (runAlignForSpec prints it before any Compute/judge work) and the ceiling
+// refusal never fired. Guards against a future over-strict guard.
+func TestCmdAlign_WaitAtOrAboveCeiling_NotRefused(t *testing.T) {
+	ceilingSecs := int(align.DefaultJudgeTimeout / time.Second)
+	cases := [][]string{
+		{"--wait"},                                // bare: waits exactly the ceiling
+		{fmt.Sprintf("--wait=%d", ceilingSecs)},   // == ceiling
+		{fmt.Sprintf("--wait=%d", ceilingSecs*2)}, // > ceiling (extends)
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			repo := buildAlignRepo(t)
+			t.Chdir(repo.Dir)
+			var stdout, stderr bytes.Buffer
+			cmdAlign(args, &stdout, &stderr)
+			if strings.Contains(stderr.String(), "patience ceiling") {
+				t.Fatalf("cmdAlign(%v) was refused by the ceiling guard, want it legal; stderr=%s", args, stderr.String())
+			}
+			reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+			if !strings.Contains(stdout.String(), reportPath) {
+				t.Fatalf("cmdAlign(%v): report path not on stdout — a legal --wait must clear the guard into the run; stdout=%s stderr=%s", args, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+// TestRunAlign_Wait_ExpiryMessageStatesJudgeTerminated is FIX 1's second
+// red-first pin (same finding): the wait-expiry message must state what
+// actually happened to the judge subprocess — it was terminated at the bound
+// and cannot complete this run — and must NOT carry the old "check it later"
+// phrasing, which lied, since a killed judge never populates the printed path
+// on its own. Driven at the runAlign layer (a short injected JudgeTimeout is
+// the hermetic stand-in for a real bound) so the message text is asserted
+// directly.
+func TestRunAlign_Wait_ExpiryMessageStatesJudgeTerminated(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	deps := alignDeps{
+		Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSleepy(t), // sleeps 5s
+		Wait: true, JudgeTimeout: 200 * time.Millisecond, ModelDigest: testResolveModelDigest(t, repo.Dir),
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runAlign(Wait, hung judge) = %d, want 2; stderr=%s", got, stderr.String())
+	}
+	msg := stderr.String()
+	if !strings.Contains(msg, "terminated") {
+		t.Fatalf("expiry stderr = %q, want it to state the judge subprocess was terminated at the bound", msg)
+	}
+	if strings.Contains(msg, "check it later") {
+		t.Fatalf("expiry stderr = %q, still carries the misleading \"check it later\" phrasing (a terminated judge never populates the path on its own)", msg)
+	}
+}
+
 // TestRunAlign_Wait_RejectedOnDesignBranch proves --wait is explicitly
 // refused (never silently ignored) on a design branch: spec/judge-ergonomics
 // scopes --wait to build-branch align and close's freeze-align only
