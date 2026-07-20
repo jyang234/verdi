@@ -55,6 +55,26 @@
 // (does a witness actually assert something meaningful about the claimed
 // capability, not just exist and pass) is not machine-provable — this
 // gate proves existence, anchoring, and passing, never meaning.
+//
+// DISCLOSED DEVIATION (judged-ac2-pass-coupling-is-gate-internal-not-verify-
+// coupled, accepted): ac-2 binding 3 ("PASS-coupled in make verify") is
+// implemented as a fresh, GATE-INTERNAL `go test -v -count=1 -run ^(names)$
+// ./...` transcript checked through scripts/require-pass.sh
+// (runGuideClaimWitnessTranscript below), not as coupling to make verify's
+// own gate invocations. Two consequences are disclosed, not hidden: (1) the
+// inner run's conditions differ from make verify's real test run — notably
+// it omits -race, which `make test` uses, so a witness whose behavior
+// depended on -race would be proven under different conditions than the gate
+// it couples to; and (2) the named witnesses execute more than once per make
+// verify — the inner transcript run here, plus this package's own run under
+// `go test -race ./...` and the CROSS_BINARY_PKGS -count=1 re-run — an
+// intentional but real repeated execution. The property actually proven is
+// "the witness passes when the gate itself invokes it"; coupling to make
+// verify holds only transitively because this gate runs under spec-align.
+// The alternative — coupling the gate to make verify's own Makefile gate
+// invocations — would tie this gate to Makefile internals and is deferred.
+// The ac's named failure shapes (skip, unexercised build tag, never invoked)
+// all still red under this construction.
 package specalign
 
 import (
@@ -265,6 +285,11 @@ func checkWitnessesPassCoupled(t *testing.T, root string, names []string, transc
 // below — a nonzero go test exit must not abort this test before that
 // evaluation runs. -run is anchored per-name (^(a|b|c)$) so a longer
 // witness name can never spuriously satisfy a shorter one.
+//
+// This is the gate-internal PASS-coupling construction whose deviation is
+// disclosed at the package doc comment above (judged-ac2-pass-coupling-is-
+// gate-internal-not-verify-coupled): it omits -race and re-executes the
+// witness set, rather than coupling to make verify's own gate invocations.
 func runGuideClaimWitnessTranscript(t *testing.T, root string, names []string) string {
 	t.Helper()
 	if len(names) == 0 {
