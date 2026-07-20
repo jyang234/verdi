@@ -4,7 +4,7 @@ kind: spec
 title: "Guide Claims Gate"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-P2-5
 problem: { text: "the owner-accepted Integration & Startup Guide makes capability claims (Appendix B) that nothing in make verify ties to the corpus, so a claim can go stale silently — a witness renamed, gutted, or simply never run again leaves the guide's claim exactly as confident as the day it was written; a name-existence-only check would repeat the ADJ-50 lying-gate class (a witness merely existing proves nothing about whether it actually runs or asserts anything), and a red-condition asymmetry that only checks EXISTS rows would let a downgrade to PARTIAL or INVENTED become the cheapest way to a green gate, teaching weakening as the path of least resistance", anchor: problem }
 outcome: { text: "every capability claim lives in verdi/docs/guide-claims.yaml, a strict-decoded manifest of atomic capability rows — one capability, one status, one witness set per row, a bundled multi-capability row shape rejected at decode; every EXISTS or PARTIAL row's witness is bound three ways (the name exists in the corpus, it carries a // guide-claim: <row-id> anchor at its declaration, and it is PASS-coupled in make verify), closing the ADJ-50 lying-gate class a name-existence-only check would permit; every non-EXISTS row and every status downgrade carries a cite: naming a chronicle/ledger entry, gated in CI with workspace-side resolution and a loud skip; the whole check is wired into make verify and discloses its own scope honestly as inventory-only (row-to-witness, not yet guide-to-row completeness, which needs the guide itself in-repo first)", anchor: outcome }
@@ -15,6 +15,7 @@ acceptance_criteria:
   - { id: ac-4, text: "the gate is wired into make verify (internal/specalign grows to include it) and its own doc comment discloses the scope honestly as inventory-only: row-to-witness binding is proven, but guide-to-row completeness — that every claim the guide's prose makes has a corresponding row at all — is not, since that needs the guide itself in-repo (a later-phase, hard Task-18 requirement this story does not claim to satisfy)", evidence: [static], anchor: ac-4 }
 links:
   - { type: implements, ref: "spec/ritual-integrity#ac-5" }
+frozen: { at: 2026-07-20, commit: bd1bb1f92b7999e2aed857fe1ffb935db19249ba, stub_matched: true }
 ---
 # Guide Claims Gate
 
