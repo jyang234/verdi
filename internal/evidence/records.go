@@ -60,6 +60,14 @@ type RecordFile struct {
 // classes (ci and local) are returned — Fold decides which to trust via its
 // Preview flag.
 //
+// This is enforced PER RECORD, not merely per commit-named directory
+// (spec/evidence-resilience finding 2): a record whose OWN provenance.commit
+// is unreachable is excluded even when it sits under a reachable directory, so
+// the "commit itself or a real ancestor" claim holds even for the case a
+// record's provenance and its containing directory disagree — stale on-disk
+// evidence synced before this story landed, or hand-placed derived data —
+// never letting such a record silently count as proven.
+//
 // A derivedRoot that does not exist on disk is not an error: a story that
 // has never been synced yet has no derived data, which the fold reads
 // honestly as "no records" rather than failing operationally.
@@ -83,6 +91,15 @@ func LoadRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]art
 // reachability-independent, and the excluded file is disclosed through
 // QuarantinedRecords (undecodableDisclosures) on the closure surfaces. A
 // genuine I/O read failure is still surfaced operationally.
+//
+// A record whose OWN provenance.commit is unreachable from commit — an
+// un-annotated record under a REACHABLE commit directory whose subdir key
+// differs from the record's own commit — is likewise EXCLUDED (spec/evidence-
+// resilience finding 2), on the same gitx.ReachableFromHEAD primitive the
+// directory walk uses (never an operational error for a since-gc'd commit),
+// and disclosed through QuarantinedRecords (quarantineDisclosures' "not
+// reachable from HEAD" fallback). A record `verdi sync` already annotated as
+// quarantined is excluded on that annotation alone (finding 1).
 func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit string) ([]artifact.Evidence, []RecordFile, error) {
 	entries, err := os.ReadDir(derivedRoot)
 	if err != nil {
@@ -160,6 +177,32 @@ func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit str
 				if recs[i].Quarantine != nil {
 					continue
 				}
+				// spec/evidence-resilience finding 2 (FIX): honor each record's
+				// OWN provenance.commit, not only the commit-named directory it
+				// sits under. An un-annotated record under this REACHABLE dir
+				// whose provenance.commit is itself unreachable from commit —
+				// evidence synced to disk before this story landed (a stale
+				// on-disk bundle nobody re-synced, the exact shape X-15
+				// describes), or hand-placed derived data whose subdir key
+				// differs from the record's own commit — is EXCLUDED here,
+				// closing the third false-green direction ac-2 leaves open and
+				// making this file's LoadRecords doc claim ("only those whose
+				// provenance.commit is commit itself or a real ancestor") TRUE
+				// instead of weakening it. gitx.ReachableFromHEAD folds a
+				// since-gc'd commit into an honest exclusion, never a fold-time
+				// operational error; a not-a-repo gitDir still surfaces
+				// operationally, exactly as the directory check above already
+				// does. recordProvenanceReachable's same-commit fast path keeps
+				// the healthy case (and a non-git store carrying only matching-
+				// provenance records) from ever consulting git — the loop-1
+				// regression lesson.
+				provReachable, rerr := recordProvenanceReachable(ctx, gitDir, recs[i].Provenance.Commit, recordCommit, commit)
+				if rerr != nil {
+					return nil, nil, fmt.Errorf("evidence: checking ancestry of record provenance %s: %w", recs[i].Provenance.Commit, rerr)
+				}
+				if !provReachable {
+					continue
+				}
 				out = append(out, recs[i])
 			}
 		}
@@ -225,6 +268,34 @@ func loadEvidenceArray(path string) (recs []artifact.Evidence, digest string, er
 	return out, digest, nil
 }
 
+// recordProvenanceReachable reports whether a decoded record's OWN
+// provenance.commit is reachable from commit in gitDir's history — the
+// per-record counterpart to the commit-named-directory reachability check, so
+// a record whose provenance.commit is unreachable is excluded (and disclosed)
+// even when it sits under a reachable directory (spec/evidence-resilience
+// finding 2). dirCommit is the commit-named directory the record was read
+// from, ALREADY proven reachable by the caller's directory check: a record
+// whose provenance.commit equals that directory — the healthy invariant, a
+// record living under its own commit's dir — or equals commit itself
+// (trivially self-reachable) is therefore known reachable with NO git call.
+// That same-commit fast path mirrors sync's own quarantineUnreachable
+// (cmd/verdi/sync_quarantine.go) and keeps the healthy case, and a non-git
+// store carrying only matching-provenance records, from ever consulting git —
+// the loop-1 regression lesson. Only a genuine directory/record mismatch
+// reaches gitx.ReachableFromHEAD, which folds a since-gc'd commit into an
+// honest false (never an error); a gitDir that is not a git repository at all
+// still surfaces operationally, exactly as the directory check does.
+//
+// LoadRecordsWithSources (exclusion) and QuarantinedRecords (disclosure) share
+// this one predicate so the two can never disagree on which records the fold
+// excludes on their own provenance.
+func recordProvenanceReachable(ctx context.Context, gitDir, provenanceCommit, dirCommit, commit string) (bool, error) {
+	if provenanceCommit == dirCommit || provenanceCommit == commit {
+		return true, nil
+	}
+	return gitx.ReachableFromHEAD(ctx, gitDir, provenanceCommit, commit)
+}
+
 // ExcludedCommitDirs reports every commit-named subdirectory of derivedRoot
 // that exists on disk but was excluded from LoadRecordsWithSources's own
 // output because it is not reachable from commit in gitDir's history — the
@@ -288,16 +359,23 @@ type UndecodableFile struct {
 
 // QuarantinedRecords returns every evidence record under derivedRoot's
 // commit-named subdirectories that the fold excludes as non-authoritative,
-// on EITHER of the two quarantine signals (spec/evidence-resilience), plus a
+// on ANY of the three quarantine signals (spec/evidence-resilience), plus a
 // list of any record file that failed strict decode:
 //
 //   - directory signal: the containing commit-named directory is not
 //     reachable from commit (self or ancestor) in gitDir's history — the
-//     exact records LoadRecordsWithSources excludes by reachability;
+//     exact records LoadRecordsWithSources excludes by directory reachability;
 //   - annotation signal (ac-1, finding 1): the record carries a `verdi sync`
 //     quarantine annotation (artifact.Evidence.Quarantine), even under a
 //     REACHABLE directory — surfaced here so a record the fold now excludes
-//     on the annotation alone is disclosed rather than left silent.
+//     on the annotation alone is disclosed rather than left silent;
+//   - per-record provenance signal (finding 2): under a REACHABLE directory
+//     with no annotation, the record's OWN provenance.commit is itself
+//     unreachable — the exact records LoadRecordsWithSources now excludes on
+//     provenance (recordProvenanceReachable, shared with the loader so
+//     disclosure and exclusion agree), surfaced so the closure gate discloses
+//     WHY the AC is unevidenced via quarantineDisclosures' "not reachable
+//     from HEAD" fallback rather than reading the gap as silent absence.
 //
 // Records are returned as full artifact.Evidence values (not bare commit
 // names, ExcludedCommitDirs's own projection) so a disclosure consumer can
@@ -358,10 +436,27 @@ func QuarantinedRecords(ctx context.Context, gitDir, derivedRoot, commit string)
 				continue
 			}
 			for i := range recs {
-				// Either signal excludes: every record under an unreachable
-				// dir (directory signal), and any annotated record even under
-				// a reachable dir (annotation signal, finding 1).
+				// Any of THREE signals surfaces a record as excluded, so
+				// disclosure agrees with LoadRecordsWithSources's own exclusion:
+				//   - directory signal: the containing commit-named dir is not
+				//     reachable — every record under it is excluded;
+				//   - annotation signal (finding 1): the record carries a sync
+				//     quarantine annotation, even under a reachable dir;
+				//   - per-record provenance signal (finding 2): under a reachable
+				//     dir with no annotation, the record's OWN provenance.commit
+				//     is itself unreachable — the exact records the loader now
+				//     excludes on provenance, surfaced here so the closure gate
+				//     discloses WHY rather than leaving the exclusion silent
+				//     (quarantineDisclosures' "not reachable from HEAD" fallback).
 				if !reachable || recs[i].Quarantine != nil {
+					out = append(out, recs[i])
+					continue
+				}
+				provReachable, rerr := recordProvenanceReachable(ctx, gitDir, recs[i].Provenance.Commit, e.Name(), commit)
+				if rerr != nil {
+					return nil, nil, fmt.Errorf("evidence: checking ancestry of record provenance %s: %w", recs[i].Provenance.Commit, rerr)
+				}
+				if !provReachable {
 					out = append(out, recs[i])
 				}
 			}

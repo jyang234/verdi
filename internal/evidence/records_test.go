@@ -36,10 +36,19 @@ func writeDerivedVerdicts(t *testing.T, derivedRoot, commit, json string) {
 	}
 }
 
-func recordJSON(commit, source string) string {
-	return `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"pass",` +
+// bareRecord is one verdi.evidence/v1 record object (no array brackets) for
+// ac-1 at provenance.commit commit and the given provenance source — so a
+// test can compose a MULTI-record verdicts.json under a single commit
+// directory (e.g. a reachable-provenance record beside an unreachable-
+// provenance one, spec/evidence-resilience finding 2).
+func bareRecord(commit, source string) string {
+	return `{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"pass",` +
 		`"witness":"w","provenance":{"source":"` + source + `","pipeline":"1","commit":"` + commit + `"},` +
-		`"digest":"sha256:` + hex64 + `"}]`
+		`"digest":"sha256:` + hex64 + `"}`
+}
+
+func recordJSON(commit, source string) string {
+	return "[" + bareRecord(commit, source) + "]"
 }
 
 // TestLoadRecords_Happy proves records from an ancestor commit (and from
@@ -595,5 +604,71 @@ func TestLoadRecordsWithSources_AnnotatedRecord_ExcludedEvenUnderReachableDir(t 
 	}
 	if len(recs) != 0 {
 		t.Fatalf("LoadRecordsWithSources = %d records, want 0 (the sole record is annotated-quarantined and must be excluded)", len(recs))
+	}
+}
+
+// TestLoadRecordsWithSources_UnreachableRecordProvenanceUnderReachableDir_Excluded
+// is spec/evidence-resilience finding-2's core false-green pin at the loader
+// seam — the third false-green direction ac-2 left open. An UN-annotated
+// record whose OWN provenance.commit is unreachable from HEAD, sitting under a
+// REACHABLE commit directory (evidence synced to disk before this story
+// landed — the exact stale-on-disk bundle X-15 describes when nobody
+// re-syncs — or hand-placed derived data whose subdir key differs from the
+// record's own commit), must be EXCLUDED from the fold on its OWN provenance,
+// never loaded as authoritative and silently counted as proven. Before the
+// fix, exclusion keyed on the commit-NAMED DIRECTORY alone, so this record
+// (reachable dir, no annotation) was loaded and could silently mark its AC
+// proven. The check discriminates PER-RECORD: a reachable-provenance record
+// under the same directory (here naming a real ancestor, exercising the
+// git-consulting path rather than the same-commit fast path) still counts.
+func TestLoadRecordsWithSources_UnreachableRecordProvenanceUnderReachableDir_Excluded(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	// Both records sit under repo.Head (REACHABLE), un-annotated. One names a
+	// real ancestor (repo.Heads[0], reachable → kept); the other names a
+	// since-deleted commit (gone, unreachable → excluded).
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	writeDerivedVerdicts(t, derivedRoot, repo.Head, "["+bareRecord(repo.Heads[0], "ci")+","+bareRecord(gone, "ci")+"]")
+
+	recs, _, err := LoadRecordsWithSources(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("LoadRecordsWithSources(unreachable record provenance under reachable dir): want no error (finding 2: never operational), got %v", err)
+	}
+	for _, r := range recs {
+		if r.Provenance.Commit == gone {
+			t.Fatalf("LoadRecordsWithSources returned the record whose OWN provenance.commit %q is unreachable from HEAD; it must be excluded even under a reachable directory (finding 2)", gone)
+		}
+	}
+	if len(recs) != 1 || recs[0].Provenance.Commit != repo.Heads[0] {
+		t.Fatalf("LoadRecordsWithSources = %+v, want exactly the one record whose provenance is a real reachable ancestor (a reachable-provenance record under the same dir still counts)", recs)
+	}
+}
+
+// TestQuarantinedRecords_UnreachableProvenanceUnderReachableDir_Surfaced pins
+// finding-2's exclusion/disclosure AGREEMENT: the same un-annotated record
+// LoadRecordsWithSources now excludes on its OWN unreachable provenance.commit
+// (under a reachable dir) is ALSO surfaced by QuarantinedRecords, so the
+// closure gate discloses WHY its AC is unevidenced rather than leaving the
+// exclusion silent. A reachable-provenance record under the same dir is NOT
+// surfaced (nothing was excluded for it).
+func TestQuarantinedRecords_UnreachableProvenanceUnderReachableDir_Surfaced(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	writeDerivedVerdicts(t, derivedRoot, repo.Head, "["+bareRecord(repo.Heads[0], "ci")+","+bareRecord(gone, "ci")+"]")
+
+	recs, undecodable, err := QuarantinedRecords(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("QuarantinedRecords: %v", err)
+	}
+	if len(undecodable) != 0 {
+		t.Fatalf("undecodable = %+v, want none (both records decode)", undecodable)
+	}
+	if len(recs) != 1 || recs[0].Provenance.Commit != gone {
+		t.Fatalf("QuarantinedRecords = %+v, want exactly the one record whose OWN provenance.commit is unreachable (finding 2); the reachable-provenance record under the same dir must not be surfaced", recs)
 	}
 }

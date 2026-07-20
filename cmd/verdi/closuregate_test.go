@@ -292,6 +292,50 @@ func TestRunClosureGate_UndecodableUnderReachableDir_NeverOperational(t *testing
 	}
 }
 
+// TestRunClosureGate_UnreachableRecordProvenanceUnderReachableDir_DisclosesUnproven
+// is spec/evidence-resilience finding-2's behavioral pin at the closure gate —
+// the judge's exact scenario. An UN-annotated record whose OWN
+// provenance.commit is unreachable from HEAD, sitting under a REACHABLE
+// commit directory (repo.Head — evidence synced to disk before this story
+// landed, or hand-placed derived data), must be excluded from the fold (ac-1
+// never silently proven) and disclosed with the PRE-STORY-SYNC fallback reason
+// ("provenance.commit ... is not reachable from HEAD" — closuregate.go's
+// fallback branch, finally reachable for exactly this shape), the closure run
+// never exiting operationally. Before the fix, exclusion keyed on the
+// directory alone, so this record was loaded and silently marked ac-1 proven —
+// X-11b's false-green family surviving at the precise seam ac-2 hardens.
+func TestRunClosureGate_UnreachableRecordProvenanceUnderReachableDir_DisclosesUnproven(t *testing.T) {
+	repo := buildClosureGateQuarantineRepo(t)
+	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
+	ctx := context.Background()
+	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	// Un-annotated ci static-pass record for ac-1 under repo.Head (REACHABLE)
+	// whose OWN provenance.commit is a since-deleted commit.
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, repo.Head, closureGateQuarantineRecordJSON(gone))
+
+	var stdout bytes.Buffer
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
+	if err != nil {
+		t.Fatalf("runClosureGate: want no error (finding 2: an unreachable-provenance record under a reachable dir must never brick closure), got %v; stdout=%s", err, stdout.String())
+	}
+	if ok {
+		t.Fatalf("runClosureGate() = true, want false (ac-1's sole record has an unreachable provenance.commit and must be excluded, not silently proven); stdout=%s", stdout.String())
+	}
+	if !contains(stdout.String(), "[FAIL] closure: 1.") {
+		t.Fatalf("stdout = %q, want condition 1 to FAIL (an unreachable-provenance record never silently proves an AC — finding 2)", stdout.String())
+	}
+	if !contains(stdout.String(), "disclosed-unproven [gate:evidence-quarantine]") {
+		t.Fatalf("stdout = %q, want the per-record disclosed-unproven line even though the directory is reachable (finding 2)", stdout.String())
+	}
+	if !contains(stdout.String(), "is not reachable from HEAD") {
+		t.Fatalf("stdout = %q, want the pre-story-sync fallback reason (closuregate.go: provenance.commit ... is not reachable from HEAD)", stdout.String())
+	}
+	if !contains(stdout.String(), gone) {
+		t.Fatalf("stdout = %q, want the unreachable provenance.commit named", stdout.String())
+	}
+}
+
 func buildClosureGateRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
