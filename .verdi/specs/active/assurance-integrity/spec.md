@@ -16,7 +16,7 @@ constraints:
   - { id: co-1, text: "Scope is exactly these two stories' outcomes — none of the external assessment's other accepted or surviving items enter this feature: safe gate enforcement and an aggregate required check (assessment 02 §Priority 2), the license/version boundary (§Priority 3), instrumented external pilots (§Priority 4), risk-scoped assurance profiles (§Priority 6), the evidence-adapter contract (§Priority 7), the architecture-specific threat model (§Priority 8), machine-assisted obligation authoring (§Priority 9), and the risk inbox (§Priority 10) are all out. `verdi doctor` and a conservative `verdi init` (§Priority 5) are sanctioned separately and already recorded with their own future story (R4-I-56) — not stubbed here, and not this feature's to build.", anchor: "#co-1" }
   - { id: co-2, text: "Conservative reclamation of provably-dead worktrees and branches — the gc-extension half of the closure-hygiene problem this feature's AC-2 only detects and reports — is explicitly out. Neither in-flight story stubs it: closure-hygiene's own finding is that reclaiming anything outside .verdi/data/ needs a ratification-flow amendment to verdi-store-layout's Garbage collection section first (R4-I-66), which has not happened. This feature carries no AC that AC-2's stub story does not itself deliver (DC-1) — reclamation gets its own future AC once, and only once, a story is ready to build it (see OQ-1).", anchor: "#co-2" }
 open_questions:
-  - { id: oq-1, text: "spec/closure-residue (class: feature, status: draft, not yet committed) already exists in the sibling verdi-wt/closure-hygiene worktree — authored independently by that stream before this feature existed, to resolve the identical R4-I-58-shaped blocker under a stricter lint-must-be-green tolerance than instruction-conformance's own dispatch carried (recorded as R4-I-67, which explicitly flags both resolutions 'for the controller to reconcile if a single house convention is wanted'). Its own ac-1 (detection) duplicates this feature's AC-2 almost verbatim, and spec/closure-hygiene's current links: edge resolves against spec/closure-residue#ac-1, not this feature. Its ac-2 (reclamation, deliberately unstubbed, blocked on the same ratification question CO-2 names) has no counterpart here at all. Recommended, not executed by this authoring task (worktree isolation forbids editing verdi-wt/closure-hygiene from here): spec/closure-hygiene's implements edge re-points to spec/assurance-integrity#ac-2, and spec/closure-residue is either withdrawn before its first commit, or kept alive solely as the future home for its own still-unstubbed ac-2 once the ratification question resolves. Left to the owner/controller to action across both worktrees.", anchor: "#oq-1" }
+  - { id: oq-1, text: "RESOLVED by controller adjudication under the owner's single-parent directive (2026-07-19). spec/closure-residue (class: feature, status: draft) was committed to the sibling verdi-wt/closure-hygiene worktree (18858ab) — authored independently by that stream before this feature existed, to resolve the identical R4-I-58-shaped blocker under a stricter lint-must-be-green tolerance than instruction-conformance's own dispatch carried (R4-I-67, which flagged both resolutions 'for the controller to reconcile if a single house convention is wanted going forward'). Its ac-1 (detection) duplicated this feature's AC-2 almost verbatim; the owner directed exactly one small parent feature, so the controller designated this feature that parent and WITHDREW spec/closure-residue: spec/closure-hygiene's implements edge was re-pointed from spec/closure-residue#ac-1 to spec/assurance-integrity#ac-2 and the closure-residue directory removed, and spec/instruction-conformance's placeholder edge was re-pointed to spec/assurance-integrity#ac-1 (clearing its standing R4-I-58 VL-003 finding). Its ac-2 (reclamation, deliberately unstubbed, blocked on the ratification question CO-2 and R4-I-66 name) has no counterpart here and needs none yet — its unique content, the candidate verdi-store-layout amendment language and the full conservative reclaim design, survives verbatim in spec/closure-hygiene dc-5 and ledger R4-I-66, and its future home is a new feature authored once, and only once, that ratification question resolves (CO-2). Recorded in ledger R4-I-70, which supersedes the R4-I-58-vs-R4-I-67 divergence.", anchor: "#oq-1" }
 stubs:
   - { slug: instruction-conformance, acceptance_criteria: [ac-1] }
   - { slug: closure-hygiene, acceptance_criteria: [ac-2] }
@@ -204,35 +204,45 @@ that reclaiming anything outside `.verdi/data/` needs a ratification-flow
 amendment to `verdi-store-layout`'s Garbage collection section first
 (**R4-I-66**), which has not happened. This feature carries no AC that
 AC-2's stub story does not itself deliver (DC-1) — reclamation gets its own
-future AC once, and only once, a story is ready to build it. See OQ-1 for
-the related, currently-unresolved overlap with `spec/closure-residue`'s own
-unstubbed `ac-2`.
+future AC once, and only once, a story is ready to build it. See OQ-1,
+which records the controller's withdrawal of `spec/closure-residue` and the
+future home of its unstubbed `ac-2` (reclamation).
 
 ## OQ-1
 
-`spec/closure-residue` (`class: feature`, `status: draft`, not yet
-committed) already exists in the sibling `verdi-wt/closure-hygiene`
-worktree — authored independently by that stream, before this feature
-existed, to resolve the identical R4-I-58-shaped blocker under a stricter
-lint-must-be-green tolerance than `spec/instruction-conformance`'s own
-dispatch carried. Recorded as **R4-I-67**, which states explicitly: "the
-two dispatching tasks stated different tolerances, and both resolutions are
-disclosed here for the controller to reconcile if a single house convention
-is wanted going forward."
+**Resolved** by controller adjudication under the owner's single-parent
+directive (2026-07-19).
 
-Its own `ac-1` (detection) duplicates this feature's AC-2 almost verbatim,
-and `spec/closure-hygiene`'s current `links:` edge resolves against
-`spec/closure-residue#ac-1`, not this feature. Its `ac-2` (reclamation,
-deliberately left unstubbed, blocked on the same ratification question CO-2
-names) has no counterpart in this feature at all.
+`spec/closure-residue` (`class: feature`, `status: draft`) was committed to
+the sibling `verdi-wt/closure-hygiene` worktree (`18858ab`) — authored
+independently by that stream, before this feature existed, to resolve the
+identical R4-I-58-shaped blocker under a stricter lint-must-be-green
+tolerance than `spec/instruction-conformance`'s own dispatch carried
+(**R4-I-67**, which flagged both resolutions "for the controller to
+reconcile if a single house convention is wanted going forward"). Its own
+`ac-1` (detection) duplicated this feature's AC-2 almost verbatim, and
+`spec/closure-hygiene`'s `links:` edge then resolved against
+`spec/closure-residue#ac-1`, not this feature.
 
-Recommended, not executed by this authoring task — worktree isolation
-forbids editing `verdi-wt/closure-hygiene` from here:
+The owner directed exactly one small parent feature (DC-1). The controller
+designated **this feature** that parent and **withdrew** `spec/closure-residue`:
 
-- `spec/closure-hygiene`'s `implements` edge re-points from
-  `spec/closure-residue#ac-1` to `spec/assurance-integrity#ac-2`;
-- `spec/closure-residue` is either withdrawn before its first commit, or
-  kept alive solely as the future home for its own still-unstubbed `ac-2`
-  once the ratification question resolves.
+- `spec/closure-hygiene`'s `implements` edge was re-pointed from
+  `spec/closure-residue#ac-1` to `spec/assurance-integrity#ac-2`, and the
+  `closure-residue/` spec directory was removed from that worktree.
+- `spec/instruction-conformance`'s scaffold placeholder edge was re-pointed
+  to `spec/assurance-integrity#ac-1`, clearing the standing R4-I-58 `VL-003`
+  finding it had disclosed.
 
-Left to the owner/controller to action across both worktrees.
+`spec/closure-residue`'s own `ac-2` (reclamation, deliberately left
+unstubbed, blocked on the ratification question CO-2 and **R4-I-66** name)
+has no counterpart in this feature, and needs none yet. Its unique
+content — the candidate `verdi-store-layout` Garbage-collection amendment
+language and the full conservative reclaim design — survives verbatim in
+`spec/closure-hygiene`'s DC-5 and in ledger **R4-I-66**. Its future home is
+a new feature, authored once — and only once — that ratification question
+resolves (CO-2), never silently folded into this small, closeable feature
+after acceptance (DC-1).
+
+Recorded in ledger **R4-I-70**, which supersedes the R4-I-58-vs-R4-I-67
+divergence this open question named.
