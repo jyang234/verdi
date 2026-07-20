@@ -306,7 +306,10 @@ func TestRunAttest_RefusesUnknownStoryRef(t *testing.T) {
 // TestRunAttest_RefusesWrongClass proves AC-2/dc-5's scope boundary: a
 // story-ref that resolves to a non-story (here class: feature) spec is
 // refused under the SAME "pair does not exist" verdict (exit 1) — "no
-// STORY exists to attest an AC against" — never exit 0, never exit 2.
+// STORY exists to attest an AC against" — never exit 0, never exit 2. L-M14
+// remedy 2: the refusal additionally points at the hand-authoring
+// convention (attestations/<feature-slug>/<ac-id>.md) rather than dead-
+// ending, naming the EXACT path for this (feature, ac) pair.
 func TestRunAttest_RefusesWrongClass(t *testing.T) {
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()
@@ -319,6 +322,13 @@ func TestRunAttest_RefusesWrongClass(t *testing.T) {
 	}
 	if !contains(stderr.String(), "feature") {
 		t.Errorf("stderr = %q, want it to name the offending class", stderr.String())
+	}
+	wantPath := ".verdi/attestations/attest-fixture-feature/ac-1.md"
+	if !contains(stderr.String(), wantPath) {
+		t.Errorf("stderr = %q, want it to point at the hand-authoring convention path %q (L-M14 remedy 2)", stderr.String(), wantPath)
+	}
+	if !contains(stderr.String(), "hand-authored") {
+		t.Errorf("stderr = %q, want it to name the hand-authoring convention instead of dead-ending (L-M14 remedy 2)", stderr.String())
 	}
 	assertTreeUnchanged(t, repo.Dir, before)
 }
@@ -556,6 +566,13 @@ func TestClassifyPair(t *testing.T) {
 		}
 		if !contains(refusal, "feature") {
 			t.Errorf("refusal = %q, want it to name the offending class", refusal)
+		}
+		// L-M14 remedy 2: the feature-ref refusal points at the exact
+		// hand-authoring path for THIS (feature, ac) pair instead of
+		// dead-ending.
+		wantPath := ".verdi/attestations/attest-fixture-feature/ac-1.md"
+		if !contains(refusal, wantPath) {
+			t.Errorf("refusal = %q, want it to name the hand-authoring path %q", refusal, wantPath)
 		}
 	})
 

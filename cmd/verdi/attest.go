@@ -228,9 +228,40 @@ func classifyPair(root, storyRefArg, acID string, mdl *model.Model) (spec *artif
 		// the bare id.
 		classWord := mdl.DisplayClass(string(spec.Class))
 		storyWord := mdl.DisplayClass("story")
-		return nil, fmt.Sprintf("%s resolves to %s %s-class spec, not %s %s — no %s exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg,
+		refusal := fmt.Sprintf("%s resolves to %s %s-class spec, not %s %s — no %s exists to attest an AC against (spec/attest-helper dc-5)", storyRefArg,
 			model.Article(classWord), classWord,
-			model.Article(storyWord), storyWord, strings.ToUpper(storyWord)), nil
+			model.Article(storyWord), storyWord, strings.ToUpper(storyWord))
+
+		// L-M14 remedy 2: for a feature-class target specifically, point at
+		// the hand-authoring convention instead of dead-ending. By this
+		// point spec.Class can only be ClassFeature (resolveBuildTarget's
+		// own storyresolve.Resolve call already turns a class: component
+		// spec-ref into a ComponentSpecError, handled separately above,
+		// before this branch is ever reached) — but the check stays
+		// explicit rather than assumed, so a future spec class added here
+		// falls back to the generic refusal above rather than a wrong
+		// pointer. This verb (verdi attest) only ever scaffolds a
+		// STORY-scope attestation (attestations/<story-slug>/<ac-id>.md,
+		// I-6/I-31); a feature AC's own OUTCOME attestation (03 §The
+		// feature fold's outcome floor) is a different record at a
+		// different path — attestations/<feature-slug>/<ac-id>.md,
+		// CODEOWNERS-routed (03 §Attestations and waivers) — that no verb
+		// scaffolds today (no feature-scope AttestationScaffold exists;
+		// CODEOWNERS routing for it is aspirational, L-M14's own note).
+		// The true-closure precedent
+		// (.verdi/attestations/true-closure/ac-1.md..ac-4.md) shows the
+		// shape to hand-author: the same attestation frontmatter (id,
+		// kind, title, owners, a verifies link to the feature spec, a
+		// frozen stamp) this verb would have scaffolded, at that path.
+		if spec.Class == artifact.ClassFeature {
+			specRef, err := artifact.ParseRef(spec.ID)
+			if err != nil {
+				return nil, "", fmt.Errorf("attest: internal error: resolved spec has an invalid id: %w", err)
+			}
+			refusal += fmt.Sprintf("; a %s AC's own outcome attestation is hand-authored directly at %s (03 §The feature fold's outcome floor, §Attestations and waivers; the spec/true-closure precedent), not scaffolded by this verb",
+				classWord, evidence.AttestationPath("", specRef.Name, acID))
+		}
+		return nil, refusal, nil
 	}
 	for _, ac := range spec.AcceptanceCriteria {
 		if ac.ID == acID {
