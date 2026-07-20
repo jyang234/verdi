@@ -6,7 +6,7 @@ owners: [platform-team]
 class: story
 status: draft
 story: jira:REPLACE-ME
-problem: { text: "verdi audit (R4-I-10) checks exactly two things — ADR exemption thresholds and per-story spec-stale deviation counts (internal/decisionsweep) — and nothing else. It has no visibility into whether a spec's declared status still matches git reality, or into the closure-ritual branches (close/<name>) that verdi close (spec/close-verb dc-3) cuts and then stops at, leaving the human to push and merge. On this repository's own main today: close/showcase-corpus-renovation's tip already moved spec/showcase-corpus-renovation to archive/, but the branch never merged, so the spec still reads accepted-pending-build in specs/active/ — nothing detects that the ritual ran and never landed. Four more close/<name> branches (attest-helper, close-preflight, disposition-verb, home-status-glance) sit unmerged though archive/<name> already exists on main for each — dead leftovers indistinguishable from a genuinely stranded ritual without checking the branch's own tip tree. spec/code-health is accepted-pending-build though every stub story it declared is already closed and merged — stub reconciliation would likely pass, but nothing surfaces that. And workspace-wide, as of 2026-07-19, 153 of 169 non-default local branches are fully merged into main and never deleted, across 30 registered git worktrees, most sitting on long-archived work — verdi gc (spec/worktree-manager) reclaims managed worktrees under .verdi/data/worktrees/ only, so none of this is even visible, let alone reclaimable.", anchor: problem }
+problem: { text: "verdi audit (R4-I-10) checks exactly two things — ADR exemption thresholds and per-story spec-stale deviation counts (internal/decisionsweep) — and nothing else. It has no visibility into whether a spec's declared status still matches git reality, or into the closure-ritual branches (close/<name>) that verdi close (spec/close-verb dc-3) cuts and then stops at, leaving the human to push and merge. As of 2026-07-19, before PR #170 landed it, this repository's own main carried the canonical stranded ritual this check exists to detect: close/showcase-corpus-renovation's tip (24214fd) had moved spec/showcase-corpus-renovation to archive/ while the branch stayed unmerged, so the spec still read accepted-pending-build in specs/active/ and nothing surfaced that the ritual ran and never landed. PR #170 has since merged that closure and deleted the branch, so the spec now reads archived on main — the pattern and its fixturegit RED-direction proof (ac-1) stand regardless of that one live instance being cleaned up. Four more close/<name> branches (attest-helper, close-preflight, disposition-verb, home-status-glance) sit unmerged though archive/<name> already exists on main for each — dead leftovers indistinguishable from a genuinely stranded ritual without checking the branch's own tip tree. spec/code-health is accepted-pending-build though every stub story it declared is already closed and merged — stub reconciliation would likely pass, but nothing surfaces that. And workspace-wide, as of 2026-07-19 (main @ 0490b47), 155 of 168 non-default local branches are fully merged into main and never deleted, across 31 registered git worktrees, most sitting on long-archived work — verdi gc (spec/worktree-manager) reclaims managed worktrees under .verdi/data/worktrees/ only, so none of this is even visible, let alone reclaimable.", anchor: problem }
 outcome: { text: "verdi audit gains a third report section, additive to its existing exemption and spec-stale audits, that names every git-reality-versus-spec-status contradiction, every stranded close/<name> branch, and a read-only survey of merged-but-undeleted branches and worktrees — each finding a concrete witness (branch, tip commit, the exact contradiction), never a guess where git state cannot decide. A stranded closure ritual or a stub-complete unclosed feature flags the run (exit 1, an actionable defect); superseded-elsewhere branches and the merged-residue survey are reported but never flip the exit code, since they are ordinary git housekeeping, not defects. No reclamation of any kind is performed — this story implements spec/assurance-integrity's ac-2 only.", anchor: outcome }
 acceptance_criteria:
   - { id: ac-1, text: "verdi audit reports every active-zone spec whose declared status contradicts git reality, in two named patterns: (a) a stranded closure ritual — an active-zone spec status: accepted-pending-build named <name> for which a close/<name> branch exists, is unmerged into the default branch, and whose tip tree already contains archive/<name> (witness: spec/showcase-corpus-renovation, close/showcase-corpus-renovation); (b) a stub-complete unclosed feature — a class: feature spec status: accepted-pending-build whose every declared stubs[] slug is realized by a closed, merged story, yet the feature itself has not closed (witness: spec/code-health and its forge-transport/shared-homes/fail-loud/file-topics stubs). status: superseded specs are explicitly NOT checked (dc-2): remaining in specs/active/ under status: superseded is correct, permanent behavior (02 §Kind registry), never a finding. Pattern (a) findings flag the run (exit 1); where a default branch cannot be resolved, nothing is asserted for either pattern", evidence: [static, behavioral], anchor: ac-1 }
@@ -38,10 +38,15 @@ dc-3) cuts and then stops at, leaving the human to push and open the MR.
 
 On this repository's own main, today:
 
-`close/showcase-corpus-renovation`'s tip already moved
-`spec/showcase-corpus-renovation` to `archive/` — but the branch never
-merged, so the spec still reads `accepted-pending-build` in
-`specs/active/`. Nothing detects that the ritual ran and never landed.
+As of 2026-07-19, before PR #170 landed it, `close/showcase-corpus-renovation`'s
+tip (`24214fd`) had moved `spec/showcase-corpus-renovation` to `archive/`
+while the branch stayed unmerged, so the spec still read
+`accepted-pending-build` in `specs/active/` — the canonical stranded-ritual
+occurrence this check exists to detect, with nothing surfacing that the
+ritual ran and never landed. PR #170 has since merged that closure and
+deleted the branch, so the spec now reads archived on `main`; the pattern,
+and its fixturegit RED-direction proof (AC-1), stand regardless of that one
+live instance being cleaned up.
 
 Four more `close/<name>` branches — `attest-helper`, `close-preflight`,
 `disposition-verb`, `home-status-glance` — sit unmerged though
@@ -56,10 +61,10 @@ declared at scaffold time is already closed and merged
 reconciliation would likely pass; nothing surfaces that this feature may be
 ready to close.
 
-And workspace-wide, as of 2026-07-19, 153 of 169 non-default local branches
-are fully merged into main and were never deleted, spread across 30
-registered git worktrees — most sitting on design/feature/close branch
-trios for specs long since archived.
+And workspace-wide, as of 2026-07-19 (main @ `0490b47`), 155 of 168
+non-default local branches are fully merged into main and were never
+deleted, spread across 31 registered git worktrees — most sitting on
+design/feature/close branch trios for specs long since archived.
 `verdi gc` (spec/worktree-manager) reclaims managed worktrees under
 `.verdi/data/worktrees/` only, so none of this is even visible, let alone
 reclaimable.
@@ -90,9 +95,15 @@ contradicts git reality, in two named patterns:
 **(a) Stranded closure ritual.** An active-zone spec `status:
 accepted-pending-build` named `<name>`, for which a `close/<name>` branch
 exists, is unmerged into the default branch, and whose tip tree already
-contains `archive/<name>`. Witness: `spec/showcase-corpus-renovation` and
-`close/showcase-corpus-renovation` (tip `24214fd`, "close: archive
-spec/showcase-corpus-renovation (jira:VERDI-22)").
+contains `archive/<name>`. Canonical witness, as of 2026-07-19: this
+repository's own `spec/showcase-corpus-renovation`, whose
+`close/showcase-corpus-renovation` branch (tip `24214fd`, "close: archive
+spec/showcase-corpus-renovation (jira:VERDI-22)") had moved it to `archive/`
+while sitting unmerged. PR #170 has since merged that closure and deleted
+the branch — `spec/showcase-corpus-renovation` reads archived on `main` now
+— so this is the historical exemplar the check detects, proven live by
+AC-1's fixturegit RED-direction fixture rather than by any surviving in-repo
+instance.
 
 **(b) Stub-complete unclosed feature.** A `class: feature` spec `status:
 accepted-pending-build` whose every declared `stubs[]` slug is realized by
@@ -154,7 +165,7 @@ mutating — of:
 
 **(a) Merged branches.** Every local branch whose tip is an ancestor of
 the default branch tip (`gitx.IsAncestor`), counted and named. Witness:
-153 of this repository's own 169 non-default local branches, as of 2026-07-19.
+155 of this repository's own 168 non-default local branches, as of 2026-07-19 (main @ 0490b47).
 
 **(b) Worktrees.** Every git worktree registered against the repository
 (`git worktree list`, not limited to managed worktrees under
@@ -162,18 +173,18 @@ the default branch tip (`gitx.IsAncestor`), counted and named. Witness:
 its branch (or, for a detached HEAD, its commit) and whether that
 branch/commit is merged, whether the worktree is clean, and whether it is
 managed or unmanaged (DC-4). Witnesses drawn from this repository's own
-`verdi-wt/` orchestration worktrees, as of 2026-07-19: the worktree
-directory `feature-close` (branch `close/operating-model`, merged) is
-reclaim-candidate-shaped, as are `wave-a` (branch
-`fix/final-wave-kernel-guards`) and `wave-b` (branch
-`fix/final-wave-prose-witness`), whose PRs #167 and #166 both merged into
-`main` on 2026-07-19; the worktree directories `assess` (branch
-`feature-close`, unmerged) and `wave-c` (branch
-`fix/final-wave-ritual-guards`, tip `102f392`, unmerged) are named but
-never flagged, since their branches are not merged; `w6-exit` (detached
-HEAD at `1d6359c`, a commit that IS an ancestor of the default branch, no
-branch name at all) is disclosed with its commit-level merge state and no
-branch to report, rather than guessed at or silently skipped.
+`verdi-wt/` orchestration worktrees, as of 2026-07-19 (main @ `0490b47`):
+the worktree directory `feature-close` (branch `close/operating-model`,
+merged) is reclaim-candidate-shaped, as are `wave-a`, `wave-b`, and `wave-c`
+(branches `fix/final-wave-kernel-guards`, `fix/final-wave-prose-witness`,
+`fix/final-wave-ritual-guards`) — all three now merged into `main`
+(`wave-a`/`wave-b` via PRs #167/#166; `wave-c`'s commits landing through
+main's parallel history by 2026-07-19); the worktree directory `assess`
+(branch `feature-close`, unmerged) is named but never flagged, since its
+branch is not merged; `w6-exit` (detached HEAD at `1d6359c`, a commit that
+IS an ancestor of the default branch, no branch name at all) is disclosed
+with its commit-level merge state and no branch to report, rather than
+guessed at or silently skipped.
 
 Where a worktree's branch state cannot be resolved (for instance, a
 detached HEAD's merge state, which is checked at the commit level, not
