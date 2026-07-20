@@ -661,6 +661,21 @@ func guideClaimStatusRank(s artifact.GuideClaimStatus) int {
 // it. This is wired against real history by
 // TestGuideClaimsDowngrades_AgainstMergeBase below (git-diff vs the
 // merge-base with origin/main), not merely available for a future story.
+//
+// DISCLOSED WEAKNESS — rename evasion (judged-ac3-downgrade-gate-evadable-by-
+// row-rename-and-inert-on-main): rows are matched by ID, and a row present on
+// only one side is skipped (the first-version case this must tolerate). So the
+// cheapest weakening SHIFTS rather than closes: downgrade a status while
+// RENAMING the row's id (or delete-and-recreate under a new id) and no row is
+// present-in-both, so no downgrade is seen — decode's blanket non-EXISTS-
+// requires-cite rule is then satisfiable by any cite, not one specific to the
+// downgrade. Fix 1's EXPECTED SUB-ROW TABLE NARROWS this: renaming a row in
+// one of the four adjudicated sections (5.3/6.2/7.2/8.4) now reds via
+// findAdjudicatedSubRowMismatches (the pinned id-set no longer matches), so the
+// rename-to-evade path is closed FOR THOSE SECTIONS. It is NOT closed for rows
+// outside the adjudicated sections, whose ids are pinned by nothing; closing it
+// generally needs identity-stable row keys (a rename recorded as same-row), a
+// deferred residual.
 func findDowngradesWithoutFreshCite(oldM, newM *artifact.GuideClaimsManifest) []string {
 	oldByID := make(map[string]artifact.GuideClaimRow, len(oldM.Rows))
 	for _, r := range oldM.Rows {
@@ -796,6 +811,18 @@ func gitShowFile(dir, rev, relPath string) ([]byte, bool) {
 // spec-align target surfaces it. The current (working-tree) manifest is the
 // "new" side, matching every other check in this gate; on a clean checkout
 // it equals HEAD.
+//
+// DISCLOSED — on-main structural inertness (judged-ac3-downgrade-gate-evadable-
+// by-row-rename-and-inert-on-main): the diff baseline is hardcoded to
+// origin/main, so ON MAIN ITSELF merge-base(HEAD, origin/main) == HEAD and the
+// manifest is diffed against itself — no downgrade is ever visible there — and
+// a shallow CI clone or a differently-named remote yields a permanent (if loud)
+// skip. A downgrade is therefore never red AS a downgrade once ON main; the
+// gate deliberately bites at PR TIME, where merge-base is the fork point and a
+// PR's downgrades show against main's committed version. This is by design (the
+// PR is where review happens), not a bug, but it does mean a downgrade that
+// reaches main un-caught (e.g. via the rename evasion above, or a direct push
+// bypassing PR) is not retroactively flagged by this check on main.
 func TestGuideClaimsDowngrades_AgainstMergeBase(t *testing.T) {
 	base, ok := gitMergeBase(verdiRepoRoot, "HEAD", "origin/main")
 	if !ok {
