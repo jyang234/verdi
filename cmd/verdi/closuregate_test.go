@@ -250,6 +250,48 @@ func TestRunClosureGate_UndecodableUnderUnreachableDir_NeverOperational(t *testi
 	}
 }
 
+// TestRunClosureGate_UndecodableUnderReachableDir_NeverOperational is
+// spec/evidence-resilience finding-1's (FIX) core regression pin — the judge's
+// own scenario reproduced directly against the closure gate: a truncated
+// verdicts.json (the bundle's own per-spec record file, keyed by the ACCEPTED
+// commit, which is self-or-ancestor of sync's commit and therefore REACHABLE at
+// closure) must NOT brick the gate operationally. Before the fix,
+// checkClosureEligible's own fold reader (foldStoryEvidence -> LoadRecords)
+// strict-decoded every file under a reachable dir and returned the decode
+// failure as a closure-gate error (exit 2) — sync had already written the
+// known-undecodable bytes and exited 0 claiming "excluded from the fold and
+// disclosed at closure", yet the closure surface then hard-failed on exactly
+// that shape, deferring ac-2's removed brick from sync time to closure time.
+// The gate must now evaluate cleanly (no error), read the story as NOT eligible
+// (the excluded file never silently counts as evidence), and disclose the
+// undecodable debris — identical to the unreachable-dir case above, degradation
+// now being reachability-independent.
+func TestRunClosureGate_UndecodableUnderReachableDir_NeverOperational(t *testing.T) {
+	repo := buildClosureGateQuarantineRepo(t)
+	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
+	ctx := context.Background()
+
+	// A truncated / malformed verdicts.json under repo.Head — trivially
+	// reachable from itself (the accepted commit's own dir), the exact shape a
+	// truncated write of the bundle's own record file leaves behind.
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, repo.Head, `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"`)
+
+	var stdout bytes.Buffer
+	ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
+	if err != nil {
+		t.Fatalf("runClosureGate: want no error (an undecodable record file under a REACHABLE dir must never brick closure — finding 1), got %v; stdout=%s", err, stdout.String())
+	}
+	if ok {
+		t.Fatalf("runClosureGate() = true, want false (ac-1's only record is undecodable and excluded, so it is not evidenced); stdout=%s", stdout.String())
+	}
+	if !contains(stdout.String(), "[FAIL] closure: 1.") {
+		t.Fatalf("stdout = %q, want condition 1 to FAIL (an undecodable file never silently proves an AC)", stdout.String())
+	}
+	if !contains(stdout.String(), "undecodable") {
+		t.Fatalf("stdout = %q, want the undecodable file under the reachable dir disclosed (finding 1)", stdout.String())
+	}
+}
+
 func buildClosureGateRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{

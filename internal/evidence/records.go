@@ -75,6 +75,14 @@ func LoadRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]art
 // built from the manifest can never disagree with the records loaded.
 // The manifest order is deterministic (os.ReadDir's sorted directory
 // order, then RecordFileNames order within a commit directory).
+//
+// A record file that fails strict CONTENT decode (a truncated partial write or
+// an older-schema record) under a reachable commit directory is EXCLUDED from
+// the returned records and omitted from the manifest — never a fold-time
+// operational error (spec/evidence-resilience finding 1): degradation is
+// reachability-independent, and the excluded file is disclosed through
+// QuarantinedRecords (undecodableDisclosures) on the closure surfaces. A
+// genuine I/O read failure is still surfaced operationally.
 func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit string) ([]artifact.Evidence, []RecordFile, error) {
 	entries, err := os.ReadDir(derivedRoot)
 	if err != nil {
@@ -112,6 +120,25 @@ func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit str
 		for _, name := range RecordFileNames {
 			recs, digest, err := loadEvidenceArray(filepath.Join(derivedRoot, recordCommit, name))
 			if err != nil {
+				// spec/evidence-resilience finding 1 (FIX): an undecodable record
+				// FILE under a REACHABLE commit dir is EXCLUDED from the fold,
+				// never a fold-time operational error — degradation is
+				// reachability-independent so sync's "kept verbatim; excluded from
+				// the fold and disclosed at closure" claim (sync_quarantine.go)
+				// holds for EVERY undecodable record file, not only those under an
+				// unreachable dir this walk already skips above. The same file is
+				// surfaced as a disclosed-undecodable entry by QuarantinedRecords,
+				// which the closure gate and close --preflight render
+				// (undecodableDisclosures) — nothing is dropped silently on the
+				// closure surfaces. Returning the decode error here instead would
+				// defer the exact operational brick ac-2 removes from sync time to
+				// closure/preflight/merge-gate/matrix/rollup time. A genuine I/O
+				// READ failure (not errUndecodableRecord) is NOT degraded — it
+				// stays operational, since only a content-decode failure has a
+				// "disclosed at closure" analog the sync side's claim speaks to.
+				if errors.Is(err, errUndecodableRecord) {
+					continue
+				}
 				return nil, nil, err
 			}
 			if digest != "" {
@@ -147,14 +174,30 @@ func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit str
 	return out, sources, nil
 }
 
+// errUndecodableRecord marks a record file whose CONTENT failed strict decode
+// — malformed or truncated JSON, or an older-schema record that fails strict
+// decode — as distinct from a genuine I/O failure READING the file.
+// loadEvidenceArray wraps both content-decode failure modes (json.Unmarshal
+// and artifact.DecodeEvidence) with it so LoadRecordsWithSources can degrade a
+// content-decode failure to a reachability-independent fold exclusion
+// (spec/evidence-resilience finding 1) while still surfacing a real read
+// failure operationally. It mirrors the sync side's own "undecodable" notion,
+// which decodes in-memory bundle bytes (sync_quarantine.go) with no read step
+// at all — so only a content-decode failure has a "disclosed at closure"
+// analog for that side's claim to speak truthfully about.
+var errUndecodableRecord = errors.New("record file content is undecodable")
+
 // loadEvidenceArray strict-decodes each record in a verdi.evidence/v1 array
 // file (verdicts.json or runtime.json alike — both are the same schema, one
 // array of records, 03 §Evidence records). A commit directory with no such
-// file yet is not an error (empty slice, empty digest, nil error); a file
-// that exists but fails to decode is a real, surfaced error — a derived
-// record that is on disk but broken is worse than absent. digest is the
-// sha256 of the exact bytes read ("sha256:<hex>"), non-empty exactly when
-// the file existed.
+// file yet is not an error (empty slice, empty digest, nil error). A file
+// that exists but whose CONTENT fails strict decode returns an error wrapping
+// errUndecodableRecord — degraded to a fold exclusion by LoadRecordsWithSources
+// (never a fold-time operational brick, finding 1) and surfaced verbatim by
+// QuarantinedRecords's disclosure pass; a genuine I/O failure READING the file
+// returns a plain (non-errUndecodableRecord) error the loader still surfaces
+// operationally. digest is the sha256 of the exact bytes read ("sha256:<hex>"),
+// non-empty exactly when the file existed.
 func loadEvidenceArray(path string) (recs []artifact.Evidence, digest string, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -168,14 +211,14 @@ func loadEvidenceArray(path string) (recs []artifact.Evidence, digest string, er
 
 	var raw []json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, "", fmt.Errorf("evidence: unmarshaling %s: %w", path, err)
+		return nil, "", fmt.Errorf("evidence: unmarshaling %s: %w: %w", path, errUndecodableRecord, err)
 	}
 
 	out := make([]artifact.Evidence, 0, len(raw))
 	for i, rm := range raw {
 		rec, err := artifact.DecodeEvidence(rm)
 		if err != nil {
-			return nil, "", fmt.Errorf("evidence: %s record %d: %w", path, i, err)
+			return nil, "", fmt.Errorf("evidence: %s record %d: %w: %w", path, i, errUndecodableRecord, err)
 		}
 		out = append(out, *rec)
 	}
@@ -297,12 +340,20 @@ func QuarantinedRecords(ctx context.Context, gitDir, derivedRoot, commit string)
 		for _, name := range RecordFileNames {
 			recs, _, lerr := loadEvidenceArray(filepath.Join(derivedRoot, e.Name(), name))
 			if lerr != nil {
-				// finding 2: undecodable debris inside quarantined data is
-				// disclosed, never an operational error. (A reachable dir's
-				// undecodable file is unreachable in the closure-gate path —
-				// foldStoryEvidence's own strict reader errors on it first —
-				// so tolerating it here only ever adds standalone robustness,
-				// never masks a reachable-data decode failure the fold missed.)
+				// finding 1/2: an undecodable record file is disclosed here,
+				// never an operational error — for BOTH an unreachable dir's
+				// debris AND (since finding 1's fix) a REACHABLE dir's undecodable
+				// file, which LoadRecordsWithSources now EXCLUDES from the fold
+				// rather than erroring on. This disclosure-only walk is the same
+				// surface the closure gate and close --preflight render
+				// (undecodableDisclosures) for either case; reachability no longer
+				// gates whether the fold's own reader errors first, so this walk
+				// is now the primary disclosure of a reachable dir's undecodable
+				// file, not merely standalone robustness against one the fold
+				// missed. A genuine read failure surfaces here too, which this
+				// disclosure-only pass never escalates to an operational error
+				// (its sole operational failure stays ReachableFromHEAD's
+				// not-a-repo case).
 				undecodable = append(undecodable, UndecodableFile{Path: e.Name() + "/" + name, Reason: lerr.Error()})
 				continue
 			}

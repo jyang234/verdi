@@ -138,16 +138,54 @@ func TestLoadRecords_MissingDerivedRoot(t *testing.T) {
 	}
 }
 
-// TestLoadRecords_Negative proves a malformed verdicts.json (on disk, at
-// an ancestor commit) is a real, surfaced error — broken derived data is
-// worse than absent.
-func TestLoadRecords_Negative(t *testing.T) {
+// TestLoadRecords_UndecodableUnderReachableDir_ExcludedNotError is
+// spec/evidence-resilience finding-1's (FIX) core pin at the loader seam: a
+// verdicts.json that FAILS strict decode under an ancestor-or-self (REACHABLE)
+// commit directory — a truncated partial write of the bundle's own per-spec
+// record file, keyed by the accepted commit that is self-or-ancestor of
+// sync's commit — is now EXCLUDED from the fold, NEVER a surfaced operational
+// error. Before the fix this returned loadEvidenceArray's decode error
+// operationally, which bricked every downstream fold consumer (closure gate,
+// close --preflight, merge gate, matrix, rollup) — deferring the exact
+// operational brick ac-2 removes from sync time to closure time. Degradation
+// is now reachability-INDEPENDENT: the same file is disclosed as undecodable by
+// QuarantinedRecords wherever the fold's disclosure channel reaches (the
+// closure surfaces), matching the earlier unreachable-dir case exactly.
+func TestLoadRecords_UndecodableUnderReachableDir_ExcludedNotError(t *testing.T) {
 	repo := buildRecordsRepo(t)
 	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
-	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], "not valid json")
+	// A truncated verdicts.json under repo.Heads[0], a real ancestor of
+	// repo.Head (reachable) — the exact reachable-dir case that used to brick.
+	writeDerivedVerdicts(t, derivedRoot, repo.Heads[0], `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"`)
 
-	if _, err := LoadRecords(context.Background(), repo.Dir, derivedRoot, repo.Head); err == nil {
-		t.Fatal("LoadRecords(malformed verdicts.json): want error, got nil")
+	got, err := LoadRecords(context.Background(), repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("LoadRecords(undecodable under reachable dir): want no error (finding 1: reachability-independent degradation), got %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("LoadRecords = %+v, want empty (the undecodable file is excluded from the fold, not folded and not erroring)", got)
+	}
+}
+
+// TestLoadRecordsWithSources_ReadFailureUnderReachableDir_StillOperational
+// guards the OTHER side of finding-1's fix: only a content-DECODE failure
+// degrades to exclusion; a genuine I/O failure READING a record file the walk
+// listed is still a real, surfaced operational error (CLAUDE.md: distinguish
+// verdict failures from operational errors — the sync side that mints the
+// "disclosed at closure" claim decodes in-memory bytes with no read step, so
+// only a decode failure has a closure analog to disclose). Reproduced
+// hermetically by making <commit>/verdicts.json a DIRECTORY, so os.ReadFile
+// fails with a non-ErrNotExist read error rather than a decode error.
+func TestLoadRecordsWithSources_ReadFailureUnderReachableDir_StillOperational(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	// verdicts.json as a directory under the reachable HEAD commit dir.
+	if err := os.MkdirAll(filepath.Join(derivedRoot, repo.Head, "verdicts.json"), 0o755); err != nil {
+		t.Fatalf("mkdir verdicts.json-as-dir: %v", err)
+	}
+
+	if _, _, err := LoadRecordsWithSources(context.Background(), repo.Dir, derivedRoot, repo.Head); err == nil {
+		t.Fatal("LoadRecordsWithSources(unreadable record file under reachable dir): want a surfaced operational error (a read failure is NOT a decode failure), got nil")
 	}
 }
 
