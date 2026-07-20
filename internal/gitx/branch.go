@@ -116,3 +116,65 @@ func CheckoutNewBranch(ctx context.Context, dir, name string) error {
 	}
 	return nil
 }
+
+// CheckoutExisting switches dir to an already-existing ref (a branch short
+// name or a commit) — `git checkout <ref>` — WITHOUT gitx.Checkout's board
+// branch-switch guard (which refuses any uncommitted working-tree change). It
+// exists for the one internal case that guard would wrongly block: unwinding a
+// CheckoutNewBranch cut. A verb that cut close/<name> at HEAD and then aborted
+// must return to the ref it cut FROM — the exact commit close/<name> still
+// points at — even though the aborted step left the (untracked, uncommitted)
+// artifacts it was about to freeze in the working tree. Because the target is
+// that same commit, git changes no tracked file and carries the untracked ones
+// across untouched, so nothing is lost and the board guard's protection does
+// not apply. User-initiated branch switches must still go through Checkout.
+func CheckoutExisting(ctx context.Context, dir, ref string) error {
+	if _, err := run(ctx, dir, "checkout", ref); err != nil {
+		return fmt.Errorf("gitx: CheckoutExisting(%q): %w", ref, err)
+	}
+	return nil
+}
+
+// DeleteBranch deletes the local branch name — `git branch -d <name>`, git's
+// SAFE delete, which refuses (rather than force-removes) a branch carrying
+// commits not merged into HEAD or its upstream. That safety is the point: the
+// unwind of a CheckoutNewBranch cut deletes only a close/<name> it has already
+// proven still points at its cut commit (so `-d` trivially succeeds — that
+// commit is the HEAD it just switched back to), and if some actor put unmerged
+// commits there `-d` fails loudly and the caller leaves the branch alone
+// rather than discarding work. dir must not have name checked out (git refuses
+// to delete the current branch); the unwind switches away first.
+func DeleteBranch(ctx context.Context, dir, name string) error {
+	if _, err := run(ctx, dir, "branch", "-d", name); err != nil {
+		return fmt.Errorf("gitx: DeleteBranch(%q): %w", name, err)
+	}
+	return nil
+}
+
+// DeleteMergedBranch deletes the LOCAL branch name in dir via the existing,
+// unchanged DeleteBranch ("git branch -d" — spec/gc-reclaim dc-3: git's own
+// merged/not-checked-out-anywhere check is an independent second guard
+// beyond a caller's own already-computed Merged fact, and a force-delete
+// (-D) would erase that guard entirely; DeleteMergedBranch never uses -D),
+// returning name's PRE-DELETE tip commit — resolved via the existing
+// RevParse BEFORE the delete, since a successful "-d" removes the ref and
+// its tip cannot be read back afterward (AC-2's recovery-affordance
+// requirement: "every branch actually deleted prints its pre-delete tip
+// commit").
+//
+// The returned tip is populated whenever name resolved, regardless of
+// whether the delete itself then succeeded — a caller disclosing a refused
+// deletion may still want to name the branch's own tip. Ledger R4-I-81:
+// this is composition, not duplication — the only "git branch -d" call in
+// this package remains the one inside DeleteBranch itself; DeleteMergedBranch
+// adds only the ordering (resolve-then-delete) and the returned tip.
+func DeleteMergedBranch(ctx context.Context, dir, name string) (string, error) {
+	tip, err := RevParse(ctx, dir, name)
+	if err != nil {
+		return "", fmt.Errorf("gitx: DeleteMergedBranch(%q): resolving tip: %w", name, err)
+	}
+	if err := DeleteBranch(ctx, dir, name); err != nil {
+		return tip, err
+	}
+	return tip, nil
+}

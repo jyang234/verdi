@@ -2,6 +2,7 @@ package artifact
 
 import "testing"
 
+// guide-claim: 8.4-waived-status-and-kind
 func TestDecodeWaiver_Happy(t *testing.T) {
 	cases := map[string]string{
 		"active":              "id: waiver/story-1482--ac-4\nkind: waiver\ntitle: \"Runtime check deferred\"\nstatus: active\nowners: [platform-team]\nreason: \"runtime probe not yet built (OQ-2)\"\nfrozen: { at: 2026-05-01, commit: 3e91ab2 }\n",

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -17,6 +18,7 @@ import (
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/provider/fake"
 	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/storyresolve"
 	"github.com/jyang234/verdi/internal/upstream"
 )
 
@@ -156,6 +158,8 @@ func writePoisonLocalRecord(t *testing.T, root, specRef, commit string) {
 // quartet to specs/archive/ as a byte-identical (git-pure-rename) move,
 // commits it on a closure branch, and publishes the rollup to the fake
 // provider, which reads it back.
+//
+// guide-claim: 7.4-gate-close-rollup
 func TestRunClose_EndToEnd(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
@@ -466,6 +470,277 @@ func TestRunClose_UnresolvableStory_ExitsOperational(t *testing.T) {
 	if got != 2 {
 		t.Fatalf("runClose(unresolvable spec) = %d, want 2; stderr=%s", got, stderr.String())
 	}
+}
+
+// TestFreezeAlignDeps_OptsCloseFreezeIntoBoundedWait is FIX 2's unit-level
+// red-first pin (finding judged-close-cannot-reach-inherited-wait): the
+// single builder both runClose and runCloseFeature use for their freeze-align
+// step must carry Wait, so close's internal freeze-align inherits align's
+// bounded-wait contract (spec/judge-ergonomics ac-3) — the "future story"
+// alignDeps.Wait's own comment deferred, now realized. The bound stays the
+// judge's own configured ceiling (JudgeTimeout threaded through unchanged —
+// duration identical to today, only the timeout FAILURE SHAPE changes).
+func TestFreezeAlignDeps_OptsCloseFreezeIntoBoundedWait(t *testing.T) {
+	deps := closeDeps{
+		Runner:        upstream.NewFakeRunner(),
+		JudgeCmd:      []string{"claude", "-p"},
+		JudgeRequired: true,
+		JudgeTimeout:  42 * time.Second,
+	}
+	got := freezeAlignDeps(deps, "sha256:deadbeef")
+	if !got.Wait {
+		t.Fatal("freezeAlignDeps did not set Wait — close's freeze-align cannot reach align's bounded-wait contract (the finding's whole point)")
+	}
+	if got.JudgeTimeout != 42*time.Second {
+		t.Fatalf("freezeAlignDeps JudgeTimeout = %s, want the judge's own ceiling preserved (42s — duration identical to today)", got.JudgeTimeout)
+	}
+	if !got.JudgeRequired || got.ModelDigest != "sha256:deadbeef" || got.JudgeCmd[0] != "claude" {
+		t.Fatalf("freezeAlignDeps did not thread close's judge config/model digest faithfully: %+v", got)
+	}
+}
+
+// TestCloseFreezeAlign_WaitReachableViaProductionDeps is FIX 2's behavioral
+// red-first proof (same finding): close's freeze-align now runs Wait-bounded
+// through close's OWN deps construction, not only through a hand-built
+// Wait:true literal no production close invocation could ever produce (the
+// finding's exact gap). The deps come from freezeAlignDeps — the single
+// builder both runClose and runCloseFeature call — and drive the same
+// runAlignForSpec(freeze=true) freeze step close uses; against a hung judge
+// under a short ceiling the step exits 2 with the report path already
+// printed and nothing written, the honest expiry contract inherited whole
+// from the shared align engine. The story/feature closure gates keep a
+// PASSING close on the freeze-in-place (no-judge) path, so this exercises
+// the freeze step's judge path directly, exactly as it would run were a
+// regenerate ever reached.
+func TestCloseFreezeAlign_WaitReachableViaProductionDeps(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
+	if err != nil {
+		t.Fatalf("ResolveBuildSpec: %v", err)
+	}
+
+	// Built exactly as cmdClose builds it (closeDeps -> freezeAlignDeps): a
+	// hung judge (sleeps 5s) under a short ceiling stands in for the real
+	// 6-7-minute judge against a bound.
+	cd := closeDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSleepy(t), JudgeTimeout: 200 * time.Millisecond}
+	alignD := freezeAlignDeps(cd, testResolveModelDigest(t, repo.Dir))
+	if !alignD.Wait {
+		t.Fatal("freezeAlignDeps did not set Wait — close's freeze-align cannot reach the bounded-wait contract (the finding's whole point)")
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runAlignForSpec(context.Background(), repo.Dir, spec, repo.Head, true /* close always freezes */, alignD, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("close freeze-align (production deps, hung judge) = %d, want 2 (bounded-wait expiry); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	reportPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "deviation-report.md")
+	if firstLine := strings.SplitN(stdout.String(), "\n", 2)[0]; firstLine != reportPath {
+		t.Fatalf("stdout first line = %q, want the report path %q printed before the bounded judge run", firstLine, reportPath)
+	}
+	if _, err := os.Stat(reportPath); err == nil {
+		t.Fatal("a frozen report was written despite the --wait expiry — close's freeze-align must write nothing on an operational timeout")
+	}
+	if !strings.Contains(stderr.String(), "terminated") {
+		t.Fatalf("expiry stderr = %q, want the honest terminated-at-the-bound message close inherits from align", stderr.String())
+	}
+}
+
+// TestCloseFreezeAlign_ExpiryMessageSpeaksCloseVerb is the red-first pin for
+// finding judged-close-inherits-aligns-resume-instructions-verbatim: when
+// close's freeze-align hits the bounded-wait expiry, its stderr guidance must
+// speak CLOSE's verb, not align's flag language inherited verbatim. close
+// exposes no --wait flag (so "a longer --wait" is not something a close caller
+// can act on) and re-running *align* mid-close is the wrong resume verb — the
+// close aborted at exit 2 and only re-running close completes the freeze and
+// archive. So the expiry message must name `verdi close` as the way to resume,
+// carry no --wait flag language at all, and never tell the caller to "Re-run
+// align". The deps come from freezeAlignDeps — the single builder both
+// runClose and runCloseFeature use — proving the close-appropriate resume hint
+// is threaded through production deps, not a hand-built literal. align's own
+// expiry message is unchanged and still speaks --wait
+// (TestRunAlign_Wait_ExpiryMessageStatesJudgeTerminated keeps passing).
+func TestCloseFreezeAlign_ExpiryMessageSpeaksCloseVerb(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/stale-decline")
+	if err != nil {
+		t.Fatalf("ResolveBuildSpec: %v", err)
+	}
+
+	// Exactly cmdClose's construction (closeDeps -> freezeAlignDeps): a hung
+	// judge (sleeps 5s) under a short ceiling stands in for the real judge
+	// against a bound the caller's patience cannot outlast.
+	cd := closeDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeSleepy(t), JudgeTimeout: 200 * time.Millisecond}
+	alignD := freezeAlignDeps(cd, testResolveModelDigest(t, repo.Dir))
+
+	var stdout, stderr bytes.Buffer
+	got := runAlignForSpec(context.Background(), repo.Dir, spec, repo.Head, true /* close always freezes */, alignD, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("close freeze-align (production deps, hung judge) = %d, want 2 (bounded-wait expiry); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	msg := stderr.String()
+	if !strings.Contains(msg, "terminated") {
+		t.Fatalf("expiry stderr = %q, want it to stay honest that the judge was terminated at the bound", msg)
+	}
+	if !strings.Contains(msg, "verdi close") {
+		t.Fatalf("expiry stderr = %q, want the resume GUIDANCE to name `verdi close` as the resume verb (close aborted at exit 2; only re-running close completes the freeze + archive)", msg)
+	}
+	if strings.Contains(msg, "Re-run align") {
+		t.Fatalf("expiry stderr = %q, resume guidance still tells the caller to Re-run align — the wrong resume verb mid-close", msg)
+	}
+	if strings.Contains(msg, "longer --wait") {
+		t.Fatalf("expiry stderr = %q, resume guidance still speaks --wait flag language — close exposes no --wait flag, so a close caller cannot act on it (no flag language for close)", msg)
+	}
+}
+
+// writeFrozenCloseReport writes an ALREADY-FROZEN deviation-report.md into the
+// close-fixture spec's directory (covers head, one dispositioned finding). The
+// closure gate's condition 4 (checkDispositionCompleteCondition) does not
+// inspect the frozen stamp, so the gate PASSES and close reaches the branch
+// cut — but runAlignForSpec's freeze step then refuses ("a frozen alignment
+// report is immutable", align.go), returning non-zero AFTER close/<name> is
+// already cut. This is the reachable sibling of the finding's judge-expiry: a
+// judge expiry itself is unreachable through a gate-passing close because
+// condition 4 (X-13/X-16/X-17) forces the no-judge freeze-in-place path, but
+// the residue it leaves — close/<name> cut with nothing committed, the retry
+// blocked at the next cut — is byte-for-byte the same post-cut freeze-align
+// failure the fix must unwind.
+func writeFrozenCloseReport(t *testing.T, root, covers string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", "close-fixture")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	content := fmt.Sprintf(`---
+schema: verdi.deviation/v1
+covers: %s
+findings:
+%sfrozen: { at: 2024-01-01, commit: %s }
+digest: sha256:%s
+---
+# Alignment report
+`, covers, dispositionedFindingYAML, covers, strings.Repeat("0", 64))
+	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("writing frozen deviation-report.md: %v", err)
+	}
+}
+
+// hasLocalBranch reports whether dir carries a local branch named name.
+func hasLocalBranch(t *testing.T, dir, name string) bool {
+	t.Helper()
+	return strings.TrimSpace(gitOutput(t, dir, "branch", "--list", name)) != ""
+}
+
+// TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes is the
+// red-first proof for finding
+// judged-close-resume-hint-names-a-path-close-itself-refuses: runClose cuts
+// close/<name> BEFORE the freeze step (close.go), so a freeze-align failure
+// used to leave the branch behind and the resume hint's promised retry then
+// died at CheckoutNewBranch's no-clobber refusal — "the hint promises a path
+// the verb's own residue blocks". The fix unwinds the cut on that failure
+// path. This drives the WHOLE runClose verb through a real freeze-align
+// failure (an already-frozen active-zone report: gate passes condition 4,
+// freeze refuses — the reachable sibling of the finding's judge-expiry, see
+// writeFrozenCloseReport) rather than runAlignForSpec directly, which was the
+// finding's own criticism of the ac-3 tests, and asserts the whole loop:
+// non-zero exit, the original branch restored, close/<name> gone, and a
+// SECOND runClose proceeding PAST the branch cut to a clean archived closure
+// once the blocking condition clears (the human re-aligns — the analog of
+// "the judge window now allows").
+func TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeFrozenCloseReport(t, repo.Dir, repo.Head)
+
+	deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+	originalBranch := gitCurrentBranch(t, repo.Dir)
+
+	var o1, e1 bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &o1, &e1)
+	if got == 0 {
+		t.Fatalf("runClose(frozen report) = 0, want non-zero (freeze-align refused past the branch cut); stdout=%s stderr=%s", o1.String(), e1.String())
+	}
+	if b := gitCurrentBranch(t, repo.Dir); b != originalBranch {
+		t.Fatalf("after a freeze-align failure, current branch = %q, want the original %q restored — the branch cut was not unwound", b, originalBranch)
+	}
+	if hasLocalBranch(t, repo.Dir, "close/close-fixture") {
+		t.Fatal("close/close-fixture still exists after a freeze-align failure — the branch cut was not unwound, so the resume hint's retry is blocked at the next cut")
+	}
+
+	// The retry the resume hint promises now COMPLETES. The blocking condition
+	// clears — the human re-aligns, leaving a living, dispositioned report
+	// covering head — and a second `verdi close` proceeds past the branch cut
+	// to a clean archived closure rather than aborting at CheckoutNewBranch's
+	// no-clobber refusal (which, without the unwind, it did: proven by the red
+	// state where this second call exits 2 with "already exists").
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+	var o2, e2 bytes.Buffer
+	got2 := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &o2, &e2)
+	if got2 != 0 {
+		t.Fatalf("second runClose (the promised retry) = %d, want 0 (retry completes); stdout=%s stderr=%s", got2, o2.String(), e2.String())
+	}
+	if strings.Contains(e2.String(), "already exists") {
+		t.Fatalf("second runClose aborted at the branch cut (%q) — the residue still blocks the retry the hint promises", e2.String())
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "close-fixture", "spec.md")); err != nil {
+		t.Fatalf("the retry did not archive the spec (specs/archive/close-fixture/spec.md absent): %v", err)
+	}
+}
+
+// TestUnwindClosureBranchCut unit-tests the shared unwind helper directly,
+// covering BOTH clauses of the fix contract — in particular the "if anything
+// was somehow committed, leave it and say so honestly" clause, which the
+// runClose-driven tests never reach (close's pre-commit window always leaves
+// an empty branch).
+func TestUnwindClosureBranchCut(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty branch: restores the original and deletes", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"a.txt": "x\n"}, Message: "m"}})
+		cutPoint := repo.Head
+		checkoutBranch(t, repo.Dir, "close/foo") // git checkout -b close/foo at HEAD
+
+		var stderr bytes.Buffer
+		unwindClosureBranchCut(ctx, repo.Dir, "main", "close/foo", cutPoint, &stderr)
+
+		if b := gitCurrentBranch(t, repo.Dir); b != "main" {
+			t.Fatalf("current branch = %q, want main restored", b)
+		}
+		if hasLocalBranch(t, repo.Dir, "close/foo") {
+			t.Fatal("close/foo was not deleted")
+		}
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			t.Fatalf("a clean unwind wrote to stderr = %q, want it silent (only giving-up branches disclose)", s)
+		}
+	})
+
+	t.Run("committed branch: leaves it in place and discloses, never discarding", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{"a.txt": "x\n"}, Message: "m"}})
+		cutPoint := repo.Head
+		checkoutBranch(t, repo.Dir, "close/foo")
+		// A commit moves close/foo's tip beyond the cut point.
+		if err := os.WriteFile(filepath.Join(repo.Dir, "onbranch.txt"), []byte("work\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitOutput(t, repo.Dir, "add", "-A")
+		gitOutput(t, repo.Dir, "commit", "-m", "committed work on close/foo")
+
+		var stderr bytes.Buffer
+		unwindClosureBranchCut(ctx, repo.Dir, "main", "close/foo", cutPoint, &stderr)
+
+		if !hasLocalBranch(t, repo.Dir, "close/foo") {
+			t.Fatal("close/foo carrying a commit beyond its cut point was deleted — committed work discarded")
+		}
+		if !strings.Contains(stderr.String(), "beyond its cut point") {
+			t.Fatalf("stderr = %q, want an honest disclosure that the branch carries commit(s) beyond its cut point", stderr.String())
+		}
+	})
 }
 
 // TestCmdClose_RefusesOutsideCI proves 04 §Semantics's "PublishRollup runs

@@ -115,6 +115,8 @@ func runDispositionBinary(t *testing.T, bin, dir string, args ...string) (stdout
 // reverifiable — align.ComputeDigest recomputed from a fresh align.Compute
 // over the same fixture tree still equals the stored digest, and
 // align.VerifyIntegrity still succeeds against the genuine judge exchange.
+//
+// guide-claim: 8.1-align-deviation-disposition
 func TestRunDisposition_RecordsInPlace_DigestAndIntegrityPreserved(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := buildAlignRepo(t)

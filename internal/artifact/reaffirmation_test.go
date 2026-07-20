@@ -28,6 +28,7 @@ object: spec/loan-update@3e91ab2#ac-2
 hash: { old: ` + hashOld + `, new: ` + hashNew + ` }
 `
 
+// guide-claim: 8.4-reaffirmations-kind
 func TestDecodeReaffirmation_Happy(t *testing.T) {
 	fm, err := DecodeReaffirmation([]byte(reaffirmationHappyYAML))
 	if err != nil {

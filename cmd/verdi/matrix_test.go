@@ -185,6 +185,8 @@ func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 // is still exercised by TestCmdMatrix_RoundFourStory_RendersStoryFold's
 // sibling spec/borrower-update-api (a class: story spec, always
 // story-folded) and by TestCmdMatrix_ObligationColumn's synthetic fixture.
+//
+// guide-claim: 7.2-matrix
 func TestCmdMatrix_Golden(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,
@@ -266,6 +268,8 @@ story.eligible: false
 // (source: local) ac-3 record changes: ac-3 goes from no-signal to
 // pending (the local abstain record now counts as behavioral signal), and
 // nothing else about the table changes.
+//
+// guide-claim: 7.2-authoritative-vs-advisory
 func TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,
@@ -470,6 +474,8 @@ A golangci-lint pass over the touched packages must be clean.
 // attestations at all — deliberately, since the OBLIGATION column is
 // independent of fold status (evidence-obligations oq-1: "no fold
 // change") — and matrix still exits 0 and renders the full table.
+//
+// guide-claim: 7.2-obligation-wall-and-receipts
 func TestCmdMatrix_ObligationColumn(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{

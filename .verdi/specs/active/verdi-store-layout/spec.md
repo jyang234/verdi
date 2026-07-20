@@ -338,6 +338,11 @@ a byte-deterministic pure function of the tree.
   pruning of ref directories older than the retention window. Both are safe
   precisely because derived is disposable;
 - prunes cache entries whose layout version or tree hash no longer matches;
+- optionally, on explicit opt-in, prunes a LOCAL branch and its worktree (if
+  any) when the branch is fully merged into the default branch, its worktree
+  carries no uncommitted changes, and the worktree is not the primary
+  checkout — reads never delete without that opt-in; every run names
+  verbatim what it did and did not touch.
 - never touches the committed zone or `mutable/`.
 
 ## Scale envelope and non-goals

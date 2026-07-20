@@ -2,7 +2,9 @@ package gitx
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -202,6 +204,290 @@ func TestHasRemoteTrackingBranch_Negative(t *testing.T) {
 			t.Fatal("HasRemoteTrackingBranch outside a repo: want error, got nil")
 		}
 	})
+}
+
+func TestCheckoutExisting_Happy(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := CheckoutNewBranch(ctx, repo.Dir, "close/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	if err := CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	got, err := CurrentBranch(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+	if got != "main" {
+		t.Fatalf("after CheckoutExisting(main), CurrentBranch = %q, want main", got)
+	}
+}
+
+// TestCheckoutExisting_DirtyTreeNotRefused is the load-bearing contrast with
+// Checkout (the guarded board switch): CheckoutExisting switches even with an
+// uncommitted/untracked working tree — the unwind's exact situation, a
+// just-cut branch at the same commit carrying the artifacts an aborted freeze
+// left behind — where Checkout would refuse, and it carries the untracked
+// residue across untouched (nothing lost).
+func TestCheckoutExisting_DirtyTreeNotRefused(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := CheckoutNewBranch(ctx, repo.Dir, "close/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, "untracked.txt"), []byte("residue\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirty, err := StatusDirty(ctx, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dirty {
+		t.Fatal("precondition: expected a dirty working tree from the untracked file")
+	}
+	if err := Checkout(ctx, repo.Dir, "main"); err == nil {
+		t.Fatal("precondition: the guarded Checkout should refuse a dirty tree (contrast being tested)")
+	}
+	if err := CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main) with a dirty tree: %v — it must not refuse (nothing is lost switching back to the same commit)", err)
+	}
+	if got, _ := CurrentBranch(ctx, repo.Dir); got != "main" {
+		t.Fatalf("CurrentBranch = %q, want main", got)
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, "untracked.txt")); err != nil {
+		t.Fatalf("the untracked residue was lost across CheckoutExisting: %v", err)
+	}
+}
+
+func TestCheckoutExisting_Negative(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	t.Run("nonexistent ref", func(t *testing.T) {
+		if err := CheckoutExisting(ctx, repo.Dir, "no/such/ref"); err == nil {
+			t.Fatal("CheckoutExisting(no/such/ref): want error, got nil")
+		}
+	})
+	t.Run("not a repository at all", func(t *testing.T) {
+		if err := CheckoutExisting(ctx, t.TempDir(), "main"); err == nil {
+			t.Fatal("CheckoutExisting outside a repo: want error, got nil")
+		}
+	})
+}
+
+func TestDeleteBranch_Happy(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	// A branch cut at HEAD (trivially merged), switched away from, then deleted.
+	if err := CheckoutNewBranch(ctx, repo.Dir, "close/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	if err := CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	if err := DeleteBranch(ctx, repo.Dir, "close/x"); err != nil {
+		t.Fatalf("DeleteBranch(close/x): %v", err)
+	}
+	has, err := HasLocalBranch(ctx, repo.Dir, "close/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("close/x still exists after DeleteBranch")
+	}
+}
+
+// TestDeleteBranch_RefusesUnmergedCommits proves the SAFE-delete posture the
+// unwind relies on: a branch carrying a commit not merged into HEAD is refused
+// (`git branch -d`), never force-removed, so committed work can never be
+// silently discarded.
+func TestDeleteBranch_RefusesUnmergedCommits(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := CheckoutNewBranch(ctx, repo.Dir, "close/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, "onbranch.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddAll(ctx, repo.Dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateCommit(ctx, repo.Dir, "work only on close/x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	if err := DeleteBranch(ctx, repo.Dir, "close/x"); err == nil {
+		t.Fatal("DeleteBranch(close/x carrying an unmerged commit): want a safe-delete refusal, got nil")
+	}
+	has, err := HasLocalBranch(ctx, repo.Dir, "close/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("close/x was removed despite an unmerged commit — the safe-delete refusal did not protect it")
+	}
+}
+
+func TestDeleteBranch_Negative(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	t.Run("nonexistent branch", func(t *testing.T) {
+		if err := DeleteBranch(ctx, repo.Dir, "close/nope"); err == nil {
+			t.Fatal("DeleteBranch(nonexistent): want error, got nil")
+		}
+	})
+	t.Run("the current branch cannot be deleted", func(t *testing.T) {
+		if err := DeleteBranch(ctx, repo.Dir, "main"); err == nil {
+			t.Fatal("DeleteBranch(current branch): want error, got nil")
+		}
+	})
+}
+
+// TestDeleteMergedBranch_Happy proves dc-3's contract in full: the branch
+// is deleted (same "git branch -d" semantics as DeleteBranch — ledger
+// R4-I-81's composition, not a second, duplicate -d wrapper) AND its
+// PRE-delete tip commit is returned, unrecoverable any other way once the
+// ref is gone.
+func TestDeleteMergedBranch_Happy(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := CheckoutNewBranch(ctx, repo.Dir, "close/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	wantTip, err := RevParse(ctx, repo.Dir, "close/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+
+	gotTip, err := DeleteMergedBranch(ctx, repo.Dir, "close/x")
+	if err != nil {
+		t.Fatalf("DeleteMergedBranch(close/x): %v", err)
+	}
+	if gotTip != wantTip {
+		t.Fatalf("DeleteMergedBranch tip = %q, want %q (the branch's own pre-delete tip)", gotTip, wantTip)
+	}
+	has, err := HasLocalBranch(ctx, repo.Dir, "close/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("close/x still exists after DeleteMergedBranch")
+	}
+}
+
+// TestDeleteMergedBranch_Negative_RefusesUnmergedCommits proves
+// DeleteMergedBranch inherits DeleteBranch's own safe-delete refusal
+// (never -D) — the second, independent guard AC-2/dc-2 rely on beyond the
+// plan's own Merged fact — and still returns the tip alongside the error
+// (a caller reporting the refusal may still want to name the branch).
+func TestDeleteMergedBranch_Negative_RefusesUnmergedCommits(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := CheckoutNewBranch(ctx, repo.Dir, "close/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, "onbranch.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddAll(ctx, repo.Dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateCommit(ctx, repo.Dir, "work only on close/x"); err != nil {
+		t.Fatal(err)
+	}
+	wantTip, err := RevParse(ctx, repo.Dir, "close/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+
+	gotTip, err := DeleteMergedBranch(ctx, repo.Dir, "close/x")
+	if err == nil {
+		t.Fatal("DeleteMergedBranch(close/x carrying an unmerged commit): want a safe-delete refusal, got nil")
+	}
+	if gotTip != wantTip {
+		t.Fatalf("DeleteMergedBranch tip on refusal = %q, want %q (still resolved before the refused delete)", gotTip, wantTip)
+	}
+	has, err := HasLocalBranch(ctx, repo.Dir, "close/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("close/x was removed despite an unmerged commit — the safe-delete refusal did not protect it")
+	}
+}
+
+func TestDeleteMergedBranch_Negative_NonexistentBranch(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if _, err := DeleteMergedBranch(ctx, repo.Dir, "close/nope"); err == nil {
+		t.Fatal("DeleteMergedBranch(nonexistent): want error, got nil")
+	}
+}
+
+// TestDeleteMergedBranch_Negative_CheckedOutElsewhere proves
+// DeleteMergedBranch's second-guard refusal for a branch that is fully
+// MERGED (so a caller's own Merged fact alone would not have refused it)
+// but currently checked out in ANOTHER worktree — spec/gc-reclaim ac-2's
+// own "git's own refusal on ... an elsewhere-checked-out branch is a
+// second, independent guard beyond the plan's own Merged check" and ledger
+// R4-I-80's own second-guard witness, proven directly at this primitive's
+// own level (internal/reclaim's own tests prove it end to end through
+// Apply; this proves the gitx primitive itself refuses independently of
+// any caller).
+func TestDeleteMergedBranch_Negative_CheckedOutElsewhere(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if err := CheckoutNewBranch(ctx, repo.Dir, "design/x"); err != nil {
+		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	wantTip, err := RevParse(ctx, repo.Dir, "design/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Checkout(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("Checkout(main): %v", err)
+	}
+	// design/x is trivially merged (cut at, and never advanced past, main's
+	// own tip) — this refusal is purely about being checked out elsewhere,
+	// never about merge state.
+	wtPath := filepath.Join(t.TempDir(), "x")
+	if err := WorktreeAdd(ctx, repo.Dir, wtPath, "design/x"); err != nil {
+		t.Fatalf("WorktreeAdd: %v", err)
+	}
+
+	gotTip, err := DeleteMergedBranch(ctx, repo.Dir, "design/x")
+	if err == nil {
+		t.Fatal("DeleteMergedBranch(design/x, checked out in another worktree): want error, got nil")
+	}
+	if gotTip != wantTip {
+		t.Fatalf("DeleteMergedBranch tip on refusal = %q, want %q (still resolved before the refused delete)", gotTip, wantTip)
+	}
+	has, err := HasLocalBranch(ctx, repo.Dir, "design/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("design/x was removed despite being checked out in another worktree")
+	}
 }
 
 func TestMergeBase_Happy(t *testing.T) {
