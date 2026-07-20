@@ -279,6 +279,22 @@ func Article(word string) string {
 	return "a"
 }
 
+// Indefinite returns Article(word) + " " + word — the composed
+// "a story" / "an Initiative" form, kept beside Article as the ONE place
+// the article-word pair is assembled (Q1, final fix wave: the pair was
+// hand-composed at eleven refusal/description sites across cmd/verdi and
+// internal/mcpserve; a twelfth hand-compose would eventually disagree
+// with the a/an rule). Only for prose positions where the article
+// immediately precedes the display word; an article whose head word is
+// fixed prose ("a draft <word> spec", "a scheme-prefixed <word> ref")
+// agrees with that fixed word and never routes through this. Display
+// plumbing only, exactly like Article; Indefinite("") is "a " — a
+// degenerate compose no validated model produces (display words are
+// never empty), documented rather than special-cased.
+func Indefinite(word string) string {
+	return Article(word) + " " + word
+}
+
 // Digest returns the resolved model's content-address: canonical-JSON
 // sha256 (internal/canonjson.Digest — PLAN.md I-18's one home for the
 // canonjson-then-sha256-then-"sha256:"+hex tail, spec/shared-homes

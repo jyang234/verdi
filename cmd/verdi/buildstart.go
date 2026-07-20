@@ -100,9 +100,9 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 		// identity.
 		featureWord := deps.Model.DisplayClass("feature")
 		storyWord := deps.Model.DisplayClass("story")
-		fmt.Fprintf(stderr, "build start: %s is %s %s spec (birds-eye, outcome-level); build start operates on %s %s spec that implements it, not the %s itself\n",
-			spec.ID, model.Article(featureWord), featureWord,
-			model.Article(storyWord), storyWord, featureWord)
+		fmt.Fprintf(stderr, "build start: %s is %s spec (birds-eye, outcome-level); build start operates on %s spec that implements it, not the %s itself\n",
+			spec.ID, model.Indefinite(featureWord),
+			model.Indefinite(storyWord), featureWord)
 		return 2
 	}
 	// A superseded spec is never re-buildable (D-12): report the successor
@@ -117,7 +117,7 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 		if s, ferr := findSupersedingSpec(root, spec.ID); ferr == nil && s != nil {
 			fmt.Fprintf(stderr, "build start: refused: %s is %s by %s; build the successor, not the %s predecessor (03 §The amendment ladder)\n", spec.ID, supersededWord, s.ID, supersededWord)
 		} else {
-			fmt.Fprintf(stderr, "build start: refused: %s is %s; %s %s spec is never re-buildable (03 §The amendment ladder)\n", spec.ID, supersededWord, model.Article(supersededWord), supersededWord)
+			fmt.Fprintf(stderr, "build start: refused: %s is %s; %s spec is never re-buildable (03 §The amendment ladder)\n", spec.ID, supersededWord, model.Indefinite(supersededWord))
 		}
 		return 1
 	}

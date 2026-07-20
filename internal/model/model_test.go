@@ -255,6 +255,23 @@ func TestArticle(t *testing.T) {
 	}
 }
 
+func TestIndefinite(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"story", "a story"},
+		{"feature", "a feature"},
+		{"spike", "a spike"},
+		{"Initiative", "an Initiative"},
+		{"Change Request", "a Change Request"},
+		{"superseded", "a superseded"}, // state words compose the same way
+		{"", "a "},                     // degenerate compose; display words are never empty (documented at the definition)
+	}
+	for _, tt := range tests {
+		if got := Indefinite(tt.in); got != tt.want {
+			t.Fatalf("Indefinite(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestCapitalize(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"", ""},

@@ -98,30 +98,30 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 
 	if spec.Class != artifact.ClassFeature && spec.Class != artifact.ClassStory {
 		// Display resolution (L-M13(1)): the three class words are display
-		// prose, articles agreeing via model.Article
+		// prose, articles agreeing via model.Indefinite
 		// (judged-cli-refusal-prose-class-state-words-still-bare). The
 		// "(no story, no acceptance criteria)" parenthetical names the
 		// story:/acceptance_criteria: FRONTMATTER FIELDS such a spec lacks
 		// — identity, kept bare.
 		classWord := mdl.DisplayClass(string(spec.Class))
 		featureWord := mdl.DisplayClass("feature")
-		fmt.Fprintf(stderr, "accept: %s is %s %s spec (no story, no acceptance criteria); only %s %s or %s spec can be accepted\n", ref.String(),
-			model.Article(classWord), classWord,
-			model.Article(featureWord), featureWord, mdl.DisplayClass("story"))
+		fmt.Fprintf(stderr, "accept: %s is %s spec (no story, no acceptance criteria); only %s or %s spec can be accepted\n", ref.String(),
+			model.Indefinite(classWord),
+			model.Indefinite(featureWord), mdl.DisplayClass("story"))
 		return 1
 	}
 	if spec.Status != "draft" {
 		// Display resolution (L-M13(1)), mirroring the class-refusal branch
 		// above and buildstart.go's superseded-word refusal: the trailing
 		// draft state word is display prose too, its article agreeing via
-		// model.Article. It was the one bare state word left hard-coded
+		// model.Indefinite. It was the one bare state word left hard-coded
 		// ("only a draft spec") beside two already-resolved ones in this one
 		// sentence (judged-ac4-draft-prose-leak).
 		draftWord := mdl.DisplayState(string(spec.Class), "draft")
-		fmt.Fprintf(stderr, "accept: %s status is %q, not %s; only %s %s spec can be accepted\n", ref.String(),
+		fmt.Fprintf(stderr, "accept: %s status is %q, not %s; only %s spec can be accepted\n", ref.String(),
 			mdl.DisplayState(string(spec.Class), string(spec.Status)),
 			draftWord,
-			model.Article(draftWord), draftWord)
+			model.Indefinite(draftWord))
 		return 1
 	}
 
