@@ -49,8 +49,8 @@ func scanMergedBranches(ctx context.Context, root, defaultBranch, defaultTip str
 // flag is false. A per-worktree git failure (e.g. `git status` cannot run
 // in a worktree whose directory was deleted without `git worktree remove`)
 // sets the flag and leaves the paired field at its zero value — AC-3(b)'s
-// "disclosed rather than guessed when a worktree's state cannot be
-// resolved". The zero Worktree is therefore a fully-resolved one, and a
+// posture of a state "disclosed rather than guessed" when it cannot be
+// resolved. The zero Worktree is therefore a fully-resolved one, and a
 // stale registration never aborts the survey; it is disclosed in place.
 type Worktree struct {
 	Path    string
@@ -90,8 +90,8 @@ type Worktree struct {
 // `git worktree remove`, which git still lists, marked prunable — is an
 // expected input, not an exceptional one) is DISCLOSED on that worktree's
 // own entry, never propagated as an operational error that would abort the
-// whole audit: AC-3(b) requires the state "disclosed rather than guessed
-// when a worktree's state cannot be resolved". Only a failure to enumerate
+// whole audit: AC-3(b) requires such a state "disclosed rather than
+// guessed" when it cannot be resolved. Only a failure to enumerate
 // worktrees at all, or a primary checkout that fails dc-4's cross-check,
 // is still a hard error — those are not per-worktree resolution gaps.
 func scanWorktrees(ctx context.Context, root, defaultTip string) ([]Worktree, error) {
