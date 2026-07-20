@@ -1,0 +1,21 @@
+# Violates: every transition's `to` must name a declared state
+# (Lifecycle.validate, validate.go) — "nonexistent-state" is not in
+# states. The `from` sibling of this rule already has its own fixture
+# (viol-transition-endpoint-undeclared.yaml); this isolates the `to`
+# branch specifically (E1) — `from` here is a real declared state, so
+# only the `to` check can trip.
+schema: verdi.model/v1
+classes:
+  feature:
+    display: Feature
+    template: feature.md
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build]
+    terminal: [accepted-pending-build]
+    transitions:
+      - verb: accept
+        from: draft
+        to: nonexistent-state
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
