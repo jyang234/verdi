@@ -3,6 +3,9 @@ package lint
 import (
 	"context"
 	"sort"
+
+	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // RunInput bundles everything a Rule needs: the pre-built Snapshot, the
@@ -15,6 +18,15 @@ type RunInput struct {
 	Snapshot *Snapshot
 	LintCtx  Context
 	Opts     Options
+	// Model is the store's resolved operating model, best-effort (Run
+	// leaves it nil when the store's config cannot be opened — findings
+	// then speak bare ids via model.Model's nil-receiver fallback; never
+	// a lint failure, since lint must still run over a store whose
+	// verdi.yaml is broken and reports that through its own rules, not
+	// through a display lookup). Used ONLY to route class display words
+	// in finding prose (ledger L-M13a(6) work order); no rule DECISION
+	// ever reads it.
+	Model *model.Model
 }
 
 // Rule is one VL-xxx check.
@@ -52,7 +64,14 @@ func (e *Engine) Run(ctx context.Context, root string, lctx Context, opts Option
 		return nil, err
 	}
 
-	in := &RunInput{Ctx: ctx, Root: root, Snapshot: snap, LintCtx: lctx, Opts: opts}
+	// Display-only, best-effort (see RunInput.Model's doc comment): a
+	// store with no openable config lints exactly as before, bare ids.
+	var mdl *model.Model
+	if cfg, err := store.Open(root); err == nil {
+		mdl = cfg.Model
+	}
+
+	in := &RunInput{Ctx: ctx, Root: root, Snapshot: snap, LintCtx: lctx, Opts: opts, Model: mdl}
 
 	var findings []Finding
 	for _, r := range e.rules {

@@ -25,6 +25,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // obligationGraduatePrefix marks a sticky-graduate request whose destination
@@ -63,7 +64,10 @@ func (s *boardSpecServer) actionObligationGraduate(ctx context.Context, name str
 	// (or any non-story) wall refuses in plain language, the mirror of the
 	// scoping canvas's proto-stickies being feature-class only.
 	if proj.Class != string(artifact.ClassStory) {
-		return fmt.Errorf("an obligation attaches to a story acceptance criterion, but this wall is class %s — obligations are story-only (03 §The feature fold)", proj.Class)
+		// The spoken class words are display and resolve (L-M13a(6)); the
+		// class COMPARISON stays on bare ids.
+		storyWord := s.model.DisplayClass("story")
+		return fmt.Errorf("an obligation attaches to %s acceptance criterion, but this wall is class %s — obligations are %s-only (03 §The feature fold)", model.Indefinite(storyWord), s.model.DisplayClass(proj.Class), storyWord)
 	}
 
 	var sticky *scratchStickyView
@@ -84,7 +88,9 @@ func (s *boardSpecServer) actionObligationGraduate(ctx context.Context, name str
 	// never a silent absence; never a malformed obligation).
 	acID := req.Ref
 	if declaredKindsOf(proj)[acID] != string(boardlayout.ZoneAC) {
-		return fmt.Errorf("an obligation binds to a story acceptance criterion, but %q is not a declared AC on this wall", acID)
+		// The class word is display and resolves (L-M13a(6)); the echoed
+		// target id is identity.
+		return fmt.Errorf("an obligation binds to %s acceptance criterion, but %q is not a declared AC on this wall", model.Indefinite(s.model.DisplayClass("story")), acID)
 	}
 
 	// The (story, ac, for-kind) triple has two views the artifact requires

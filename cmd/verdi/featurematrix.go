@@ -67,6 +67,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 		Preview:     preview,
 		StoreRoot:   root,
 		FeatureSlug: featureName,
+		Model:       mdl,
 	})
 	if err != nil {
 		return fmt.Errorf("matrix: %w", err)
@@ -79,6 +80,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 	reconciliation, err := evidence.ReconcileStubs(evidence.StubReconcileInput{
 		Spec:    spec,
 		Stories: stubStories,
+		Model:   mdl,
 		// No withdrawal-declaration source exists yet at this phase (see
 		// evidence.StubWithdrawal's doc comment) — matrix reports the
 		// computed set honestly with whatever it has, never inventing one.

@@ -27,6 +27,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -104,7 +105,10 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		// generic writes-need-authoring-mode posture every other action
 		// shares.
 		if action != "stub-instantiate" && proj.Mode != modeAuthoring {
-			writeJSONError(w, http.StatusForbidden, fmt.Sprintf("board for %s is in %s mode; only an authoring board (draft spec on a design branch) accepts writes", name, proj.Mode))
+			// The parenthetical's state word is display and resolves
+			// (L-M13a(6)); the mode word and the board name are the
+			// route's own taxonomy/identity, kept bare.
+			writeJSONError(w, http.StatusForbidden, fmt.Sprintf("board for %s is in %s mode; only an authoring board (%s spec on a design branch) accepts writes", name, proj.Mode, s.model.DisplayState(proj.Class, "draft")))
 			return
 		}
 
@@ -457,7 +461,10 @@ func (s *boardSpecServer) actionSticky(name string, proj *BoardProjection, req b
 		return fmt.Errorf("sticky type %q is not creatable (one of comment, question, decision-needed, agent-task, story, spike); fail closed", req.Type)
 	}
 	if protoStickyTypes[typ] && proj.Class != string(artifact.ClassFeature) {
-		return fmt.Errorf("sticky type %q is only creatable on a feature-class wall (the scoping canvas, 02 §Record schemas); this wall is class %s", req.Type, proj.Class)
+		// The spoken class words are display and resolve (L-M13a(6));
+		// the echoed sticky TYPE %q is a wire enum value — identity. The
+		// class COMPARISON stays on bare ids.
+		return fmt.Errorf("sticky type %q is only creatable on %s-class wall (the scoping canvas, 02 §Record schemas); this wall is class %s", req.Type, model.Indefinite(s.model.DisplayClass("feature")), s.model.DisplayClass(proj.Class))
 	}
 	a, err := newAnnotation(typ, req.Text)
 	if err != nil {
@@ -641,10 +648,19 @@ func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string
 		return fmt.Errorf("stub-instantiate requires a stub slug (id)")
 	}
 	if proj.Class != string(artifact.ClassFeature) {
-		return fmt.Errorf("stub-instantiate is only available on a feature-class wall; this wall is class %s", proj.Class)
+		// The spoken class words are display and resolve — this refusal is
+		// ac-2's own surface (ledger L-M13a(6) work order); the class
+		// COMPARISON stays on bare ids.
+		return fmt.Errorf("stub-instantiate is only available on %s-class wall; this wall is class %s", model.Indefinite(s.model.DisplayClass("feature")), s.model.DisplayClass(proj.Class))
 	}
 	if proj.Status != "accepted-pending-build" {
-		return fmt.Errorf("stub-instantiate is only available on an accepted-pending-build spec (implementations build accepted specs only); this wall's status is %s", proj.Status)
+		// The state words are display and resolve (L-M13a(6) work order;
+		// the wall is feature-class — the guard above already held);
+		// "accepted" in the owner's-rule parenthetical is that rule's own
+		// word, not a lifecycle state id. The status COMPARISON stays on
+		// the bare id.
+		return fmt.Errorf("stub-instantiate is only available on %s spec (implementations build accepted specs only); this wall's status is %s",
+			model.Indefinite(s.model.DisplayState("feature", "accepted-pending-build")), s.model.DisplayState("feature", proj.Status))
 	}
 	var stub *StubView
 	for i := range proj.StubViews {
