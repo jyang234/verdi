@@ -10,6 +10,9 @@ import (
 // obligation: one committed violation fixture per kernel rule, each
 // tripping EXACTLY that rule (asserted by an exact error substring, never
 // a generic "got an error").
+//
+// guide-claim: 5.2-model-yaml-kernel-digest
+// guide-claim: 13-kernel-rules-frontier
 func TestDecodeModel_KernelViolations(t *testing.T) {
 	cases := []struct {
 		file       string
@@ -186,6 +189,8 @@ func TestModelValidate_VocabularyEmptyValueRejected(t *testing.T) {
 // `close` with no masking duplicate (viol-frontier-missing-transition:
 // caught by transitionsAxis's length arm, the companion to judged-frontier-
 // duplicate-verb-bypass's witness) — so both name the same axis.
+//
+// guide-claim: 13-kernel-rules-frontier
 func TestDecodeModel_Frontier(t *testing.T) {
 	for _, file := range []string{
 		"viol-frontier-structural.yaml",

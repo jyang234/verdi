@@ -28,6 +28,9 @@ import (
 	"github.com/jyang234/verdi/internal/workbench"
 )
 
+// guide-claim: 2.1-local-first-serve-and-dex
+// guide-claim: 2.2-design-build-closure-mrs
+// guide-claim: 14.2-committed-vs-data-split
 func TestV0ThinSliceChecklist(t *testing.T) {
 	root := verdiRepoRoot
 

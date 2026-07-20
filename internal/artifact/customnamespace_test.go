@@ -30,6 +30,8 @@ custom:
 // with its nested shape intact — scalar, nested map, and list values all
 // come through as the generic Go values yaml.v3 produces for map[string]any
 // (spec/scaffold-templates ac-2's core decode proof).
+//
+// guide-claim: 5.3-custom-namespace
 func TestBase_Custom_DecodesWithValues(t *testing.T) {
 	fm, err := DecodeSpec([]byte(customFeatureYAML))
 	if err != nil {

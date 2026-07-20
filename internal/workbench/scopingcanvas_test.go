@@ -392,6 +392,8 @@ func newScopingAcceptedFixture(t *testing.T) *fixturegit.Repo {
 // TestBoardSpec_StubInstantiate_Plain proves stub-instantiate scaffolds a
 // story spec on a fresh design/<slug> branch WITHOUT moving the serving
 // checkout's HEAD, working tree, or index (spec/scoping-canvas ac-6).
+//
+// guide-claim: 6.2-board-stub-instantiate
 func TestBoardSpec_StubInstantiate_Plain(t *testing.T) {
 	repo := newScopingAcceptedFixture(t)
 	root := repo.Dir

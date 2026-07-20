@@ -229,6 +229,8 @@ func assertTreeUnchanged(t *testing.T, root string, before map[string]string) {
 // real store.RefSlug, not a hand-typed literal), with the AC-1 frontmatter
 // fields and the unauthored marker leading the body — and never any
 // claim-shaped body prose.
+//
+// guide-claim: 7.3-attest
 func TestRunAttest_Happy(t *testing.T) {
 	repo := buildAttestFixtureRepo(t)
 	ctx := context.Background()

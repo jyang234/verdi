@@ -39,6 +39,8 @@ func scaffoldAndDesign(t *testing.T) (repo *fixturegit.Repo, preFlipHead string)
 // frozen stamp's commit equals the pre-flip HEAD, its at date equals that
 // commit's own committer date (never wall clock), and the flip itself is
 // committed.
+//
+// guide-claim: 7.1-accept-freeze-obligations
 func TestRunAccept_Happy(t *testing.T) {
 	repo, preFlipHead := scaffoldAndDesign(t)
 	ctx := context.Background()

@@ -174,6 +174,8 @@ func seedRunner(t *testing.T, root string) upstream.Runner {
 // entirely by canned upstream output (no exec, no network), materializes a
 // bundle byte-identical to testdata/svcfix-canned/bundle-golden/ — the
 // property the exit criteria calls for.
+//
+// guide-claim: 7.2-verdi-sync
 func TestRunSync_OrRegen_MatchesGolden(t *testing.T) {
 	root := buildTestStore(t)
 	runner := seedRunner(t, root)
@@ -535,6 +537,8 @@ func TestRunSync_Produce_NoServicesDiscovered_StillSucceeds(t *testing.T) {
 // bundle through the forge port and marks it materialized with source: ci
 // already baked in (the forge just returns bytes a CI run already
 // assembled with that provenance) — never touching the Runner at all.
+//
+// guide-claim: 7.2-ci-evidence-bundles
 func TestRunSync_CI_PullsBundle(t *testing.T) {
 	root := buildTestStore(t)
 	f := fake.New()

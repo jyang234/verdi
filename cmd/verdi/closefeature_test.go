@@ -484,13 +484,6 @@ func scaffoldSHAFromRepo(t *testing.T, repo *fixturegit.Repo) string {
 	return repo.Heads[0]
 }
 
-// TestRunCloseFeature_WithStoryRef_PublishesRollup is the disclosed
-// decision's OTHER side: when the feature DOES carry a story: tracker ref
-// (unlike the happy path above, which deliberately mirrors
-// spec/true-closure's story-less shape), `verdi close` publishes exactly
-// as the story path does — the empty-Story skip in
-// cmd/verdi/closefeature.go's runCloseFeature is conditional, not a
-// blanket "features never publish" rule.
 // writeFrozenCloseFeatureReport writes an ALREADY-FROZEN deviation-report.md
 // into the close-feature-fixture spec's directory — the feature-path mirror of
 // close_test.go's writeFrozenCloseReport. The feature closure gate's condition
@@ -565,6 +558,15 @@ func TestRunCloseFeature_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t 
 	}
 }
 
+// TestRunCloseFeature_WithStoryRef_PublishesRollup is the disclosed
+// decision's OTHER side: when the feature DOES carry a story: tracker ref
+// (unlike the happy path above, which deliberately mirrors
+// spec/true-closure's story-less shape), `verdi close` publishes exactly
+// as the story path does — the empty-Story skip in
+// cmd/verdi/closefeature.go's runCloseFeature is conditional, not a
+// blanket "features never publish" rule.
+//
+// guide-claim: 10.1-jira-github-gitlab
 func TestRunCloseFeature_WithStoryRef_PublishesRollup(t *testing.T) {
 	opts := defaultCloseFeatureFixtureOpts()
 	opts.FeatureStory = "jira:FIXTURE-EPIC-1"

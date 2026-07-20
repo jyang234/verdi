@@ -81,6 +81,8 @@ func buildPhase7RepoWithStoryTemplateOverride(t *testing.T) *fixturegit.Repo {
 // a store carrying .verdi/templates/story.md scaffolds the added section
 // and custom: field into every subsequent design start story spec, in
 // place of the embedded canonical story.md.
+//
+// guide-claim: 5.3-user-editable-templates
 func TestRunDesignStart_StoryTemplateOverride(t *testing.T) {
 	repo := buildPhase7RepoWithStoryTemplateOverride(t)
 	ctx := context.Background()

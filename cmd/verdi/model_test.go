@@ -375,6 +375,8 @@ func TestModelCheck_TemplatePathEscape_Exit2_NamesRule(t *testing.T) {
 // axis-naming suffix (judged-dc1-frontier-error-not-specific), proving both
 // reach the built binary through store.Open's wrapping and its errors.Is
 // exit-1 gate.
+//
+// guide-claim: 9.5-model-check-migration-guard
 func TestModelCheck_FrontierViolation_Exit1_PinnedText(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	root := writeModelCheckStoreRoot(t, readModelTestdata(t, "viol-frontier-structural.yaml"))

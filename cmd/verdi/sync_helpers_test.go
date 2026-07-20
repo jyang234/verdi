@@ -169,6 +169,8 @@ func TestBuildForge_Negative_UnknownKind(t *testing.T) {
 // are genuinely set) — the point is proving buildForge succeeds from the
 // ORIGIN URL fallback (github) and from an explicit CI_PROJECT_ID (gitlab),
 // not incidentally from the runner's own environment.
+//
+// guide-claim: 10.1-jira-github-gitlab
 func TestBuildForge_Happy(t *testing.T) {
 	t.Setenv("GITHUB_REPOSITORY_OWNER", "")
 	t.Setenv("GITHUB_REPOSITORY", "")
