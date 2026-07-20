@@ -1,29 +1,42 @@
 // verdi audit (05 §CLI, R4-I-10): audits ADR exemptions (03 §Exemption
 // audit — per-ADR active-exemption count against
 // verdi.yaml's audit.exempts_conflict_threshold, auto-filing a conflict
-// record at threshold) and mid-build deviations (03 §The amendment
-// ladder's spec-stale flag, V1-P3's internal/evidence.SpecStale, against
-// audit.deviations_stale_threshold). Both thresholds are tunable
+// record at threshold), mid-build deviations (03 §The amendment ladder's
+// spec-stale flag, V1-P3's internal/evidence.SpecStale, against
+// audit.deviations_stale_threshold), and — spec/closure-hygiene, a third,
+// additive section (dc-1) — closure hygiene: every active-zone spec whose
+// declared status contradicts git reality, every stranded close/<name>
+// branch, and a read-only survey of merged-but-undeleted branches and
+// worktrees (internal/residue.Scan). Both thresholds are tunable
 // (verdi.yaml's audit: block, decoded by internal/store) and default to 3
 // when absent (internal/decisionsweep.DefaultExemptsConflictThreshold,
 // internal/evidence.DefaultDeviationsStaleThreshold).
 //
 // Exit contract (CLAUDE.md 0/1/2): 0 clean (nothing flagged, nothing
 // newly filed beyond a routine run); 1 verdict — an ADR crossed the
-// exemption threshold this run (a new conflict was just filed) or a story
-// is spec-stale; 2 operational error. Auditing itself is never destructive
-// beyond the auto-file (deterministic, idempotent — internal/decisionsweep)
-// so a report-only run (nothing crossed a threshold) still exits 0 even
-// though `audit` "found" pre-existing, already-filed exemptions.
+// exemption threshold this run (a new conflict was just filed), a story
+// is spec-stale, a spec's active-zone status contradicts git reality
+// (spec/closure-hygiene AC-1 pattern (a)), or a close/<name> branch is
+// ritual-incomplete (AC-2); 2 operational error. Auditing itself is never
+// destructive beyond the auto-file (deterministic, idempotent —
+// internal/decisionsweep) and internal/residue's own read-only scan
+// (spec/closure-hygiene co-1) so a report-only run (nothing crossed a
+// threshold, no contradiction found) still exits 0 even though `audit`
+// "found" pre-existing, already-filed exemptions or an ordinary
+// merged-but-undeleted branch.
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/decisionsweep"
+	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/residue"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -55,13 +68,22 @@ func cmdAudit(args []string, stdout, stderr io.Writer) int {
 		deviationsThreshold = manifest.Audit.DeviationsStaleThreshold
 	}
 
-	return runAudit(root, exemptsThreshold, deviationsThreshold, cfg.Model, stdout, stderr)
+	ctx := context.Background()
+	// lint.ResolveDefaultBranch: the same "which branch is the default"
+	// seam every other verb that needs it shares (gate, close, gc, ...) —
+	// internal/residue.Scan takes it caller-resolved (mirroring
+	// internal/wtmanager.GC's own convention) rather than re-resolving it
+	// itself.
+	defaultBranchRef := lint.ResolveDefaultBranch(ctx, root)
+
+	return runAudit(ctx, root, exemptsThreshold, deviationsThreshold, defaultBranchRef, cfg.Model, stdout, stderr)
 }
 
 // runAudit is the testable core: given an already-resolved root,
-// thresholds, and the resolved display model (nil-safe: bare-id
-// fallback), runs internal/decisionsweep.Audit and reports its findings.
-func runAudit(root string, exemptsThreshold, deviationsThreshold int, mdl *model.Model, stdout, stderr io.Writer) int {
+// thresholds, the resolved default branch ref, and the resolved display
+// model (nil-safe: bare-id fallback), runs internal/decisionsweep.Audit
+// and internal/residue.Scan and reports both.
+func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThreshold int, defaultBranchRef string, mdl *model.Model, stdout, stderr io.Writer) int {
 	result, err := decisionsweep.Audit(root, exemptsThreshold, deviationsThreshold)
 	if err != nil {
 		fmt.Fprintln(stderr, "audit:", err)
@@ -103,10 +125,93 @@ func runAudit(root string, exemptsThreshold, deviationsThreshold int, mdl *model
 		fmt.Fprintf(stdout, "%s: %s (accepted-deviations: %d)\n", e.StoryRef, status, e.Result.AcceptedDeviationCount)
 	}
 
+	// == Closure hygiene audit == (spec/closure-hygiene dc-1: a third,
+	// independent pass appended to the same run — co-2: the two sections
+	// above, and their own exit-code contributions, are byte-for-byte
+	// unchanged by this addition).
+	if rc := runClosureHygieneSection(ctx, root, defaultBranchRef, stdout, stderr, &flagged); rc != 0 {
+		return rc
+	}
+
 	if flagged {
 		fmt.Fprintln(stdout, "audit: FLAGGED")
 		return 1
 	}
 	fmt.Fprintln(stdout, "audit: CLEAN")
 	return 0
+}
+
+// runClosureHygieneSection renders `== Closure hygiene audit ==`: AC-1's
+// two status-vs-git-reality patterns, AC-2's close/<name> classification,
+// and AC-3's read-only merged-branch/worktree survey. Returns 2 (and
+// leaves *flagged untouched) on an internal/residue.Scan operational
+// error; otherwise always returns 0, setting *flagged per dc-3 (only
+// pattern (a) and a ritual-incomplete classification contribute).
+func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string, stdout, stderr io.Writer, flagged *bool) int {
+	res, err := residue.Scan(ctx, root, defaultBranchRef)
+	if err != nil {
+		fmt.Fprintln(stderr, "audit:", err)
+		return 2
+	}
+
+	fmt.Fprintln(stdout, "== Closure hygiene audit ==")
+	if !res.DefaultBranchResolved {
+		fmt.Fprintln(stdout, "(default branch could not be resolved; closure hygiene checks skipped)")
+		return 0
+	}
+
+	if len(res.PatternA) == 0 && len(res.PatternB) == 0 && len(res.CloseBranches) == 0 {
+		fmt.Fprintln(stdout, "(no status/git-reality contradictions found)")
+	}
+	for _, pa := range res.PatternA {
+		fmt.Fprintf(stdout, "STRANDED: spec/%s (close/%s, tip %s) — status: accepted-pending-build but its close branch already moved it to archive/, unmerged\n", pa.SpecName, pa.SpecName, pa.Tip)
+		*flagged = true
+	}
+	for _, pb := range res.PatternB {
+		fmt.Fprintf(stdout, "STUB-COMPLETE: spec/%s — every declared stub realized (%s), feature not yet closed\n", pb.SpecName, strings.Join(pb.Stubs, ", "))
+	}
+	for _, cb := range res.CloseBranches {
+		fmt.Fprintf(stdout, "%s: %s (tip %s)\n", cb.Branch, cb.Class, cb.Tip)
+		if cb.Class == residue.RitualIncomplete {
+			*flagged = true
+		}
+	}
+
+	if len(res.MergedBranches) == 0 {
+		fmt.Fprintln(stdout, "(no merged-but-undeleted branches)")
+	} else {
+		fmt.Fprintf(stdout, "merged branches: %d (%s)\n", len(res.MergedBranches), strings.Join(res.MergedBranches, ", "))
+	}
+
+	if len(res.Worktrees) == 0 {
+		fmt.Fprintln(stdout, "(no other registered worktrees)")
+	}
+	for _, wt := range res.Worktrees {
+		fmt.Fprintln(stdout, renderWorktreeLine(wt))
+	}
+
+	return 0
+}
+
+// renderWorktreeLine is AC-3(b)'s one-line-per-worktree disclosure,
+// naming its branch (or, for a detached HEAD, its commit alone — dc-4:
+// never a guessed branch name), and its merged/clean/managed state.
+func renderWorktreeLine(wt residue.Worktree) string {
+	branch := "branch " + wt.Branch
+	if wt.Branch == "" {
+		branch = "detached at " + wt.Commit
+	}
+	merged := "unmerged"
+	if wt.Merged {
+		merged = "merged"
+	}
+	clean := "dirty"
+	if !wt.Dirty {
+		clean = "clean"
+	}
+	managed := "unmanaged"
+	if wt.Managed {
+		managed = "managed"
+	}
+	return fmt.Sprintf("worktree %s: %s, %s, %s, %s", wt.Path, branch, merged, clean, managed)
 }
