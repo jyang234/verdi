@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,6 +78,36 @@ func buildCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	}})
 }
 
+// writeCloseGateReport writes deviation-report.md directly into the
+// close-fixture spec's own directory (X-13/X-16/X-17's closure-gate
+// condition 4 needs a living, fully-dispositioned, head-covering report
+// before close will freeze rather than refuse) — writeGateReport
+// (gate_test.go) hardcodes "stale-decline" (that file's own fixture
+// family), so this story's differently-named fixture needs its own copy of
+// the same plain-write shape (never git-committed, read via os.ReadFile
+// exactly as a real `verdi align` run before its own commit would leave
+// it) — mirroring closepreflight_test.go's own writePreflightGateReport
+// precedent for the identical reason.
+func writeCloseGateReport(t *testing.T, root, covers, findingsYAML string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", "close-fixture")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	content := fmt.Sprintf(`---
+schema: verdi.deviation/v1
+covers: %s
+findings:
+%s
+digest: sha256:%s
+---
+# Alignment report
+`, covers, findingsYAML, strings.Repeat("0", 64))
+	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("writing deviation-report.md: %v", err)
+	}
+}
+
 // poisonRecord renders a source:local, verdict:fail record for ac-1 —
 // planted alongside the authoritative source:ci evidence in the happy-path
 // test to prove co-1 for real: a violating LOCAL record must never affect
@@ -118,11 +149,13 @@ func writePoisonLocalRecord(t *testing.T, root, specRef, commit string) {
 // [static, behavioral] evidence all the way to evidenced on source: ci
 // alone (a poisoned source: local fail record is planted and proven inert,
 // co-1); `verdi close` then runs the closure gate (a reachable, empty fake
-// forge — no disclosure, no open MRs), freezes the alignment report,
-// builds and digests a real rollup.json, moves the whole quartet to
-// specs/archive/ as a byte-identical (git-pure-rename) move, commits it on
-// a closure branch, and publishes the rollup to the fake provider, which
-// reads it back.
+// forge — no disclosure, no open MRs; a living, fully-dispositioned report
+// already covering head, so condition 4 — X-13/X-16/X-17 — passes and the
+// freeze step genuinely takes the freeze-in-place path, D6-24), freezes the
+// alignment report, builds and digests a real rollup.json, moves the whole
+// quartet to specs/archive/ as a byte-identical (git-pure-rename) move,
+// commits it on a closure branch, and publishes the rollup to the fake
+// provider, which reads it back.
 func TestRunClose_EndToEnd(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
@@ -136,6 +169,11 @@ func TestRunClose_EndToEnd(t *testing.T) {
 	// co-1, proven with a witness: a violating LOCAL record must never
 	// gate closure.
 	writePoisonLocalRecord(t, repo.Dir, "spec/close-fixture", repo.Head)
+	// The corrected closure ritual (X-16): align (a living report covering
+	// head) -> disposition (working-tree edit) -> close. dispositionedFindingYAML
+	// (gate_test.go) is the same minimal, already-dispositioned filler every
+	// merge-gate happy-path test already uses.
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
 	fp := fake.New()
 	fg := forgefake.New() // reachable, no open MRs seeded: condition 3 passes outright
@@ -304,6 +342,83 @@ func TestRunClose_NotEligible_ExitsOneWithNoSideEffects(t *testing.T) {
 	}
 	if _, ok := fp.PublishedField("jira:CLOSE-1"); ok {
 		t.Fatal("fake provider has a published rollup despite the closure gate failing")
+	}
+}
+
+// TestRunClose_RefusesUndispositionedFindings is X-13/X-16/X-17's
+// load-bearing red-first proof at the `verdi close` level: this exact
+// fixture (fully eligible, condition 1 through 3 all green) is what today
+// silently ARCHIVES an undispositioned report before this fix — close's
+// own internal freeze-align call falls through to the regenerate path
+// (no living report, or a stale/undispositioned one) and freezes what it
+// finds, in the same motion, with nobody having reviewed it. After the
+// fix, the SAME fixture refuses (exit 1), names the offenders, prints the
+// ritual, and — the round's own repeated lesson — leaves NOTHING
+// archived: no closure branch, no quartet move, no publish.
+func TestRunClose_RefusesUndispositionedFindings(t *testing.T) {
+	cases := []struct {
+		name       string
+		setup      func(t *testing.T, root, head string) // "" setup = no report at all (X-17)
+		wantSubstr []string
+	}{
+		{
+			name:       "no report at all (X-17's literal scenario)",
+			setup:      func(t *testing.T, root, head string) {},
+			wantSubstr: []string{"no deviation-report.md found at", "the closure ritual is align"},
+		},
+		{
+			name: "a living report covering head with an undispositioned finding (X-13's literal scenario)",
+			setup: func(t *testing.T, root, head string) {
+				writeCloseGateReport(t, root, head, undispositionedFindingYAML)
+			},
+			wantSubstr: []string{"undispositioned finding(s) [f-1]", "the closure ritual is align"},
+		},
+		{
+			name: "a stale report (X-16's literal scenario: dispositions committed, HEAD moved)",
+			setup: func(t *testing.T, root, head string) {
+				writeCloseGateReport(t, root, "0000000000000000000000000000000000000b", dispositionedFindingYAML)
+			},
+			wantSubstr: []string{"covers 0000000000000000000000000000000000000b, not head", "the closure ritual is align"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildCloseFixtureRepo(t)
+			ctx := context.Background()
+			prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+			if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+				t.Fatalf("produceSelfHostedEvidence: %v", err)
+			}
+			tc.setup(t, repo.Dir, repo.Head)
+
+			fp := fake.New()
+			deps := closeDeps{Forge: forgefake.New(), Registry: fp, Runner: upstream.NewFakeRunner()}
+			var stdout, stderr bytes.Buffer
+			got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+			if got != 1 {
+				t.Fatalf("runClose(undispositioned) = %d, want 1 (verdict, not archived); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+			}
+			for _, want := range tc.wantSubstr {
+				if !contains(stdout.String(), want) {
+					t.Fatalf("stdout = %q, want it to contain %q (naming the offenders and the ritual)", stdout.String(), want)
+				}
+			}
+
+			// The X-13/X-17 proof itself: nothing archived, no side effects —
+			// silence must never ride into the archive.
+			if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "close-fixture", "spec.md")); err != nil {
+				t.Fatalf("spec.md should remain in specs/active/ after a refused close: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "close-fixture")); !os.IsNotExist(err) {
+				t.Fatal("specs/archive/close-fixture should NOT exist — the undispositioned/stale report must never be silently frozen and archived")
+			}
+			if branch := gitCurrentBranch(t, repo.Dir); branch != "main" {
+				t.Fatalf("current branch = %q after a refused close, want main (no closure branch cut)", branch)
+			}
+			if _, ok := fp.PublishedField("jira:CLOSE-1"); ok {
+				t.Fatal("fake provider has a published rollup despite the closure gate failing")
+			}
+		})
 	}
 }
 

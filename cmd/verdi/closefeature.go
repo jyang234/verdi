@@ -88,7 +88,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 
-	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, deps.Forge, defaultBranchRef, manifest, deps.Model, stdout)
+	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, deps.Forge, defaultBranchRef, manifest, deps.Model, head, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
