@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -286,10 +287,94 @@ func TestScanWorktrees_Negative_NotARepo(t *testing.T) {
 	}
 }
 
-func TestScanWorktrees_Negative_BogusDefaultTip(t *testing.T) {
+// TestScanWorktrees_StaleWorktreeDisclosedNotAborted is Defect 1's
+// unit-level witness: a worktree registered then deleted from disk WITHOUT
+// `git worktree remove` (git still lists it, marked prunable) is DISCLOSED
+// with its clean state unresolvable — never an aborting operational error
+// (AC-3(b): "disclosed rather than guessed when a worktree's state cannot
+// be resolved"). Its merge state stays resolvable (checked in root against
+// the porcelain-reported HEAD, which git still provides for a prunable
+// entry), and git's own prunable reason is surfaced.
+func TestScanWorktrees_StaleWorktreeDisclosedNotAborted(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files:   map[string]string{".verdi/.gitignore": "data/\n"},
+		Message: "root",
+	}})
+	root := repo.Dir
+	ctx := context.Background()
+
+	if err := gitx.CheckoutNewBranch(ctx, root, "stale-branch"); err != nil {
+		t.Fatalf("CheckoutNewBranch(stale-branch): %v", err)
+	}
+	checkoutMain(t, root)
+	staleWT := filepath.Join(t.TempDir(), "stale-wt")
+	if err := gitx.WorktreeAdd(ctx, root, staleWT, "stale-branch"); err != nil {
+		t.Fatalf("WorktreeAdd(stale-branch): %v", err)
+	}
+	if err := os.RemoveAll(staleWT); err != nil {
+		t.Fatalf("RemoveAll(%s): %v", staleWT, err)
+	}
+
+	defaultTip, err := gitx.RevParse(ctx, root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := scanWorktrees(ctx, root, defaultTip)
+	if err != nil {
+		t.Fatalf("scanWorktrees aborted on a stale worktree: %v (want a disclosed entry, no error)", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("scanWorktrees = %+v, want exactly 1 (the stale worktree, primary excluded)", got)
+	}
+	wt := got[0]
+	if !wt.DirtyUnresolved {
+		t.Error("stale worktree DirtyUnresolved = false, want true (`git status` cannot run in a deleted directory)")
+	}
+	if wt.Dirty {
+		t.Error("stale worktree Dirty = true; an unresolvable clean state must not be asserted as an answer")
+	}
+	if wt.Reason == "" {
+		t.Error("stale worktree Reason is empty; want git's prunable reason disclosed")
+	}
+	if !strings.Contains(wt.Reason, "prunable") {
+		t.Errorf("stale worktree Reason = %q, want it to name the prunable cause", wt.Reason)
+	}
+	// Merge state stays resolvable: git still reports the entry's HEAD.
+	if wt.MergedUnresolved {
+		t.Error("stale worktree MergedUnresolved = true, want false (merge state is checked in root against the reported HEAD)")
+	}
+}
+
+// TestScanWorktrees_BogusDefaultTip_DisclosedPerWorktreeNotAborted proves
+// the resilience is not limited to the clean-state check: when the
+// merge-state check itself cannot resolve (here, an invalid default tip),
+// every worktree's merge state is DISCLOSED as unresolvable rather than
+// the whole survey aborting. In production Scan resolves the default tip
+// via gitx.RevParse before this is ever reached (and errors loudly on a
+// bad default-branch ref — TestScan_Negative_UnresolvableDefaultBranchRef_
+// IsARealError), so this exercises the per-worktree disclosure path
+// directly.
+func TestScanWorktrees_BogusDefaultTip_DisclosedPerWorktreeNotAborted(t *testing.T) {
 	root, _ := buildWorktreeSurveyFixture(t)
-	if _, err := scanWorktrees(context.Background(), root, "not-a-real-commit"); err == nil {
-		t.Fatal("scanWorktrees(bogus default tip): want error, got nil")
+
+	got, err := scanWorktrees(context.Background(), root, "not-a-real-commit")
+	if err != nil {
+		t.Fatalf("scanWorktrees(bogus default tip) aborted: %v (want per-worktree disclosure, no error)", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("scanWorktrees(bogus default tip) = empty, want the worktrees disclosed")
+	}
+	for _, wt := range got {
+		if !wt.MergedUnresolved {
+			t.Errorf("worktree %s MergedUnresolved = false, want true (default tip did not resolve)", wt.Path)
+		}
+		if wt.Merged {
+			t.Errorf("worktree %s Merged = true; an unresolvable merge state must not be asserted", wt.Path)
+		}
+		if wt.Reason == "" {
+			t.Errorf("worktree %s Reason is empty; want the unresolvable cause disclosed", wt.Path)
+		}
 	}
 }
 

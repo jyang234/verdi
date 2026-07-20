@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -187,6 +189,74 @@ func TestRunAudit_ClosureHygieneSection_UnresolvableDefaultBranch(t *testing.T) 
 	}
 	if !strings.Contains(out, "default branch could not be resolved") {
 		t.Errorf("stdout missing the unresolved-default-branch disclosure:\n%s", out)
+	}
+}
+
+// TestRunAudit_ClosureHygieneSection_StaleWorktreeDisclosedNotAborted is
+// Defect 1's RED-direction witness: a worktree registered against the repo
+// and then deleted from disk WITHOUT `git worktree remove` (git still lists
+// it, marked prunable) must NOT abort the whole audit. AC-3(b)'s posture is
+// "disclosed rather than guessed when a worktree's state cannot be
+// resolved" — so the stale worktree is named with its unresolvable clean
+// state disclosed, the run's exit code is unaffected (the survey never
+// flags), and the two pre-existing sections still print. Before the fix,
+// scanWorktrees propagated the `git status` failure as an operational error
+// and `verdi audit` exited 2, killing all three sections' reports.
+func TestRunAudit_ClosureHygieneSection_StaleWorktreeDisclosedNotAborted(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/.gitignore":                     "data/\n",
+			".verdi/specs/active/ch-widget/spec.md": closureHygieneFixtureStorySpecMD,
+		},
+		Message: "an ordinary in-flight story; nothing contradicts it",
+	}})
+	root := repo.Dir
+	ctx := context.Background()
+
+	// Register a real worktree on its own branch, then delete its directory
+	// from disk without `git worktree remove` — the exact stale-registration
+	// shape the spec's own 31-worktree problem statement anticipates.
+	if err := gitx.CheckoutNewBranch(ctx, root, "stale-wt-branch"); err != nil {
+		t.Fatalf("CheckoutNewBranch(stale-wt-branch): %v", err)
+	}
+	if err := gitx.Checkout(ctx, root, "main"); err != nil {
+		t.Fatalf("Checkout(main): %v", err)
+	}
+	staleWT := filepath.Join(t.TempDir(), "stale-wt")
+	if err := gitx.WorktreeAdd(ctx, root, staleWT, "stale-wt-branch"); err != nil {
+		t.Fatalf("WorktreeAdd(stale-wt-branch): %v", err)
+	}
+	if err := os.RemoveAll(staleWT); err != nil {
+		t.Fatalf("RemoveAll(%s): %v", staleWT, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runAudit(ctx, root, 3, 3, "main", nil, &stdout, &stderr)
+	out := stdout.String()
+
+	if got == 2 {
+		t.Fatalf("runAudit = 2 (aborted on a stale worktree); want the run to complete. stdout=%s stderr=%s", out, stderr.String())
+	}
+	if got != 0 {
+		t.Fatalf("runAudit = %d, want 0 (AC-3's worktree survey never flags, so a stale worktree cannot change the exit code); stdout=%s stderr=%s", got, out, stderr.String())
+	}
+
+	// All three sections still print — the stale worktree did not go dark.
+	for _, header := range []string{"== Exemption audit ==", "== Spec-stale audit ==", "== Closure hygiene audit =="} {
+		if !strings.Contains(out, header) {
+			t.Errorf("stdout missing %q header (a stale worktree must not suppress any section):\n%s", header, out)
+		}
+	}
+
+	// The stale worktree is named, with its unresolvable state disclosed.
+	if !strings.Contains(out, staleWT) {
+		t.Errorf("stdout missing the stale worktree path %q:\n%s", staleWT, out)
+	}
+	if !strings.Contains(out, "unresolvable") {
+		t.Errorf("stdout missing the 'unresolvable' disclosure for the stale worktree:\n%s", out)
+	}
+	if !strings.Contains(out, "audit: CLEAN") {
+		t.Errorf("stdout missing the audit: CLEAN trailer (the survey never flags):\n%s", out)
 	}
 }
 

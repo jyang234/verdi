@@ -44,6 +44,14 @@ func scanMergedBranches(ctx context.Context, root, defaultBranch, defaultTip str
 }
 
 // Worktree is one AC-3(b) entry: a registered, non-primary git worktree.
+//
+// Merged and Dirty are asserted facts ONLY when their paired *Unresolved
+// flag is false. A per-worktree git failure (e.g. `git status` cannot run
+// in a worktree whose directory was deleted without `git worktree remove`)
+// sets the flag and leaves the paired field at its zero value — AC-3(b)'s
+// "disclosed rather than guessed when a worktree's state cannot be
+// resolved". The zero Worktree is therefore a fully-resolved one, and a
+// stale registration never aborts the survey; it is disclosed in place.
 type Worktree struct {
 	Path    string
 	Branch  string // "" for a detached HEAD (dc-4: disclosed, never guessed)
@@ -51,6 +59,16 @@ type Worktree struct {
 	Managed bool
 	Merged  bool
 	Dirty   bool
+	// MergedUnresolved / DirtyUnresolved report that this worktree's merge
+	// state / clean state could not be resolved; when true, the paired
+	// Merged / Dirty field is not an assertion and must not be read as one.
+	MergedUnresolved bool
+	DirtyUnresolved  bool
+	// Reason names why an aspect was unresolvable — git's own prunable
+	// reason where it supplies one (a worktree directory deleted without
+	// `git worktree remove` is marked prunable), else the failing command's
+	// error. "" when everything about this worktree resolved.
+	Reason string
 }
 
 // scanWorktrees is AC-3(b): every git worktree registered against root
@@ -61,13 +79,21 @@ type Worktree struct {
 // Merged is resolved at the COMMIT level uniformly (gitx.IsAncestor
 // against defaultTip, using the worktree's own reported HEAD commit) for
 // every entry, branched or detached alike — never a guessed branch-level
-// property a detached worktree does not have (dc-4/ac-3's own disclosure
-// requirement is satisfied by construction: the same primitive resolves
-// both cases identically, so there is no separate "unknown" case to
-// reach). Managed is decided against wtmanager.WorktreesRoot (dc-4's
-// shared definition, not a second hardcoded literal). Zero git-mutating
-// calls anywhere in this path (ac-3's static obligation) — worktree list,
-// merge-base/rev-parse, and status checks only.
+// property a detached worktree does not have. Managed is decided against
+// wtmanager.WorktreesRoot (dc-4's shared definition, not a second hardcoded
+// literal). Zero git-mutating calls anywhere in this path (ac-3's static
+// obligation) — worktree list, merge-base/rev-parse, and status checks
+// only.
+//
+// A per-worktree git failure (the survey's motivating population is 31
+// long-lived registrations, so a stale one — a directory deleted without
+// `git worktree remove`, which git still lists, marked prunable — is an
+// expected input, not an exceptional one) is DISCLOSED on that worktree's
+// own entry, never propagated as an operational error that would abort the
+// whole audit: AC-3(b) requires the state "disclosed rather than guessed
+// when a worktree's state cannot be resolved". Only a failure to enumerate
+// worktrees at all, or a primary checkout that fails dc-4's cross-check,
+// is still a hard error — those are not per-worktree resolution gaps.
 func scanWorktrees(ctx context.Context, root, defaultTip string) ([]Worktree, error) {
 	entries, err := gitx.WorktreeList(ctx, root)
 	if err != nil {
@@ -90,27 +116,53 @@ func scanWorktrees(ctx context.Context, root, defaultTip string) ([]Worktree, er
 
 	var out []Worktree
 	for _, e := range entries[1:] {
-		merged, err := gitx.IsAncestor(ctx, root, e.Head, defaultTip)
-		if err != nil {
-			return nil, fmt.Errorf("residue: checking worktree %s merged: %w", e.Path, err)
-		}
-		dirty, err := gitx.StatusDirty(ctx, e.Path)
-		if err != nil {
-			return nil, fmt.Errorf("residue: checking worktree %s dirty: %w", e.Path, err)
-		}
-
-		out = append(out, Worktree{
+		wt := Worktree{
 			Path:    e.Path,
 			Branch:  e.Branch,
 			Commit:  e.Head,
 			Managed: isUnderRoot(filepath.Clean(e.Path), managedRoot),
-			Merged:  merged,
-			Dirty:   dirty,
-		})
+		}
+
+		// Merge state is resolved in root against the porcelain-reported HEAD
+		// sha, so a deleted worktree directory does not by itself break it —
+		// but any failure is disclosed on this entry, never propagated.
+		if merged, err := gitx.IsAncestor(ctx, root, e.Head, defaultTip); err != nil {
+			wt.MergedUnresolved = true
+			wt.Reason = worktreeUnresolvedReason(e, fmt.Sprintf("merge state: %v", err))
+		} else {
+			wt.Merged = merged
+		}
+
+		// Clean state runs `git status` INSIDE the worktree directory, so a
+		// worktree whose directory was deleted without `git worktree remove`
+		// cannot be resolved — disclosed here, never an abort.
+		if dirty, err := gitx.StatusDirty(ctx, e.Path); err != nil {
+			wt.DirtyUnresolved = true
+			wt.Reason = worktreeUnresolvedReason(e, fmt.Sprintf("clean state: %v", err))
+		} else {
+			wt.Dirty = dirty
+		}
+
+		out = append(out, wt)
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
+}
+
+// worktreeUnresolvedReason is the disclosure text for a worktree whose
+// live state could not be resolved: git's own prunable reason where it
+// supplies one (the honest "why" the entry is stale — a directory deleted
+// without `git worktree remove` is marked prunable, with its gitdir-link
+// explanation), else the failing command's own error.
+func worktreeUnresolvedReason(e gitx.WorktreeEntry, fallback string) string {
+	if e.Prunable {
+		if e.PrunableReason != "" {
+			return "prunable: " + e.PrunableReason
+		}
+		return "prunable"
+	}
+	return fallback
 }
 
 // looksLikePrimaryWorktree is dc-4's second, independent signal cross-

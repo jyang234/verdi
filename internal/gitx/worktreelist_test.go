@@ -82,17 +82,19 @@ func TestWorktreeList_Negative_NotARepo(t *testing.T) {
 	}
 }
 
-func TestParseWorktreeList_IgnoresUnknownLinesAndTrailingNewline(t *testing.T) {
-	// A hand-built porcelain transcript exercising locked/prunable lines
-	// (which this parser deliberately ignores rather than rejects — a
-	// newer git adding a field this parser does not need must never break
-	// it) and a trailing newline after the last block (git's real output
-	// shape, verified against a real checkout in TestWorktreeList_Happy).
+func TestParseWorktreeList_CapturesPrunableAndIgnoresOtherUnknownLines(t *testing.T) {
+	// A hand-built porcelain transcript exercising a "locked" line (still
+	// ignored — a newer git adding a field this parser does not need must
+	// never break it) and a "prunable" line (now captured, so a worktree
+	// survey can disclose WHY a stale worktree's live state is unresolvable
+	// — spec/closure-hygiene AC-3(b)), plus a trailing newline after the
+	// last block (git's real output shape, verified against a real checkout
+	// in TestWorktreeList_Happy).
 	out := "worktree /repo\n" +
 		"HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
 		"branch refs/heads/main\n" +
 		"\n" +
-		"worktree /repo/locked-wt\n" +
+		"worktree /repo/stale-wt\n" +
 		"HEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n" +
 		"detached\n" +
 		"locked custom reason\n" +
@@ -105,8 +107,17 @@ func TestParseWorktreeList_IgnoresUnknownLinesAndTrailingNewline(t *testing.T) {
 	if got[0].Path != "/repo" || got[0].Branch != "main" {
 		t.Fatalf("parseWorktreeList[0] = %+v, want Path=/repo Branch=main", got[0])
 	}
-	if got[1].Path != "/repo/locked-wt" || got[1].Branch != "" || got[1].Head == "" {
-		t.Fatalf("parseWorktreeList[1] = %+v, want Path=/repo/locked-wt, detached (Branch empty), Head set", got[1])
+	if got[0].Prunable {
+		t.Fatalf("parseWorktreeList[0].Prunable = true, want false (the primary is not prunable)")
+	}
+	if got[1].Path != "/repo/stale-wt" || got[1].Branch != "" || got[1].Head == "" {
+		t.Fatalf("parseWorktreeList[1] = %+v, want Path=/repo/stale-wt, detached (Branch empty), Head set", got[1])
+	}
+	if !got[1].Prunable {
+		t.Fatalf("parseWorktreeList[1].Prunable = false, want true (a prunable line was present)")
+	}
+	if got[1].PrunableReason != "gitdir file points to non-existent location" {
+		t.Fatalf("parseWorktreeList[1].PrunableReason = %q, want git's own reason text", got[1].PrunableReason)
 	}
 }
 
