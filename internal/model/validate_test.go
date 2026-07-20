@@ -15,13 +15,17 @@ func TestDecodeModel_KernelViolations(t *testing.T) {
 		file       string
 		wantSubstr string
 	}{
+		{"viol-schema-literal.yaml", `model: schema "verdi.model/v2", want "verdi.model/v1"`},
 		{"viol-scheme-unknown.yaml", `obligation scheme "vibes" is not one of the kernel schemes`},
 		{"viol-kind-unknown.yaml", `obligation kind "bogus-kind" is not one of the kernel kinds`},
 		{"viol-obligations-missing.yaml", "obligations list is absent"},
 		{"viol-terminal-not-subset.yaml", `terminal state "bogus-state" is not in states`},
+		{"viol-duplicate-state.yaml", `state "draft" is declared more than once in states`},
+		{"viol-duplicate-terminal.yaml", `terminal state "accepted-pending-build" is declared more than once in terminal`},
 		{"viol-terminal-exit.yaml", `from "closed" is a terminal state and admits no outgoing transition`},
 		{"viol-state-unreachable.yaml", `state "orphan" is unreachable`},
 		{"viol-transition-endpoint-undeclared.yaml", `from "nonexistent-state" is not a declared state`},
+		{"viol-transition-to-undeclared.yaml", `to "nonexistent-state" is not a declared state`},
 		{"viol-parent-unknown.yaml", `parent "nonexistent-class" is not a declared class`},
 		{"viol-template-empty.yaml", `class "feature": template must not be empty`},
 		{"viol-template-path-escape.yaml", `class "feature": template "../../evil.md" must be a bare filename`},
@@ -29,6 +33,7 @@ func TestDecodeModel_KernelViolations(t *testing.T) {
 		{"viol-count-non-countersign.yaml", `count is legal only on kind "countersign"`},
 		{"viol-duplicate-verb.yaml", `transition verb "accept" is declared more than once`},
 		{"viol-vocabulary-unknown-key.yaml", `vocabulary: classes key "epic" is not a declared class or the spike pseudo-class`},
+		{"viol-vocabulary-empty-value.yaml", `vocabulary: classes key "feature" has an empty rename value`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {
@@ -113,6 +118,54 @@ func TestModelValidate_VocabularyKeys(t *testing.T) {
 				}
 				return
 			}
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error containing %q", tc.wantSubstr)
+			}
+			if !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("Validate() error = %q, want substring %q", err.Error(), tc.wantSubstr)
+			}
+		})
+	}
+}
+
+// TestModelValidate_VocabularyEmptyValueRejected is K6's own proof: an
+// empty rename VALUE (as opposed to an unknown KEY, TestModelValidate_
+// VocabularyKeys above) is a near-certain typo — DisplayState/DisplayVerb/
+// DisplayClass's own fallback chain (model.go) already treats "" as "no
+// rename" and silently falls through to the id/Class.Display, so an
+// empty value has no visible effect whatsoever, which is precisely why it
+// must fail closed at Validate time rather than sit inert. Covers all
+// three vocabulary sections; viol-vocabulary-empty-value.yaml (decode_
+// test.go's table, via readTestdata above) proves the Classes case
+// through the full DecodeModel path, this proves States and Verbs too,
+// directly against Model.Validate.
+func TestModelValidate_VocabularyEmptyValueRejected(t *testing.T) {
+	cases := []struct {
+		name       string
+		vocab      Vocabulary
+		wantSubstr string
+	}{
+		{
+			"empty classes value fails closed naming the key",
+			Vocabulary{Classes: map[string]string{"feature": ""}},
+			`model: vocabulary: classes key "feature" has an empty rename value`,
+		},
+		{
+			"empty states value fails closed naming the key",
+			Vocabulary{States: map[string]string{"accepted-pending-build": ""}},
+			`model: vocabulary: states key "accepted-pending-build" has an empty rename value`,
+		},
+		{
+			"empty verbs value fails closed naming the key",
+			Vocabulary{Verbs: map[string]string{"accept": ""}},
+			`model: vocabulary: verbs key "accept" has an empty rename value`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := canonicalModel
+			m.Vocabulary = tc.vocab
+			err := m.Validate()
 			if err == nil {
 				t.Fatalf("Validate() = nil, want error containing %q", tc.wantSubstr)
 			}

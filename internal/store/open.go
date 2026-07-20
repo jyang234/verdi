@@ -37,7 +37,8 @@ type Config struct {
 // (YAML syntax, strict-decode, or Validate failures) — behavior-
 // preserving, so the ~10 existing loadManifest callers see byte-
 // identical errors. Model resolution runs only once verdi.yaml itself
-// is valid (see loadModel below for its own, parallel error wrapping).
+// is valid (see loadModel below for its own error wrapping, which is
+// NOT the same shape as this — K5).
 func Open(root string) (*Config, error) {
 	data, err := os.ReadFile(filepath.Join(root, ".verdi", "verdi.yaml"))
 	if err != nil {
@@ -59,10 +60,24 @@ func Open(root string) (*Config, error) {
 // loadModel resolves root's .verdi/model.yaml: strict-decoded (via
 // model.DecodeModel — kernel validation and the stage-1 frontier both
 // apply) when present, else the embedded canonical default
-// (model.Canonical(), internal/model/embed.go) when absent. Error
-// wrapping mirrors Open's own verdi.yaml prefixes ("reading model.yaml:
-// %w" / "decoding model.yaml: %w"), so a caller printing any Open error
-// sees the same two-phase (read vs. decode) shape for either file.
+// (model.Canonical(), internal/model/embed.go) when absent.
+//
+// Error wrapping is asymmetric on purpose (K5, unlike Open's own
+// verdi.yaml handling above): a read failure still gets this function's
+// own "reading model.yaml: %w" prefix, but a model.DecodeModel failure is
+// returned UNWRAPPED. DecodeModel is already the authoritative source of
+// its own error framing — its strict-decode-failure path self-prefixes
+// with "model: decoding model.yaml: %w" (decode.go), while its
+// Validate/checkFrontier failure paths return their own already-complete
+// text (a kernel rule's own "model: ..." message, or the pinned frontier
+// text) with no such prefix at all. Re-wrapping here unconditionally, as
+// this function used to, doubled the strict-decode case's prefix
+// ("decoding model.yaml: model: decoding model.yaml: ...") while adding
+// a misleading "decoding model.yaml:" framing to Validate/checkFrontier
+// failures that were never about a decode step. Passing the error
+// through keeps every %w chain intact (errors.Is(err, model.ErrFrontier)
+// still holds through this now-shorter chain) and gives each failure mode
+// exactly the framing it actually has.
 func loadModel(root string) (*model.Model, error) {
 	path := filepath.Join(root, ".verdi", "model.yaml")
 	data, err := os.ReadFile(path)
@@ -74,7 +89,7 @@ func loadModel(root string) (*model.Model, error) {
 	}
 	m, err := model.DecodeModel(data)
 	if err != nil {
-		return nil, fmt.Errorf("decoding model.yaml: %w", err)
+		return nil, err
 	}
 	return m, nil
 }

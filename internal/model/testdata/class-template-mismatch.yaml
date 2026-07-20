@@ -1,0 +1,61 @@
+# K1: the story class's own Class.Template is bound to feature.md —
+# structurally the SAME driven witness a misconfigured model.yaml can
+# produce (one class's Template filename pointed at another class's
+# template file). feature.md's own `class: feature` literal (internal/
+# designscaffold/templates/feature.md) still strict-decodes clean as a
+# valid FEATURE spec, so neither SplitFrontmatter nor DecodeSpec alone
+# catches the mismatch: checkTemplates (cmd/verdi/model.go) must assert
+# the rendered content's OWN class agrees with the class under check
+# ("story" here) or this binding passes `verdi model check` silently —
+# exit 0, before the fix (the driven witness: story.template: feature.md
+# -> model check exit 0).
+#
+# Otherwise structurally canonical and kernel/frontier clean:
+# Class.Template carries no per-class uniqueness rule and is itself
+# frontier-EXEMPT (internal/model/validate.go's checkFrontier), so this
+# decodes and validates fine on its own — the defect this fixture exists
+# to catch lives in checkTemplates' own missing cross-check, never in a
+# kernel Validate/frontier rule.
+schema: verdi.model/v1
+
+classes:
+  feature:
+    display: Feature
+    decomposes: stubs
+    template: feature.md
+  story:
+    display: Story
+    parent: feature
+    template: feature.md
+
+lifecycle:
+  feature:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }
+  story:
+    states: [draft, accepted-pending-build, closed, superseded]
+    terminal: [closed, superseded]
+    transitions:
+      - verb: accept
+        from: draft
+        to: accepted-pending-build
+        obligations:
+          - { scheme: attestation, kind: author-vouch }
+      - verb: close
+        from: accepted-pending-build
+        to: closed
+        obligations:
+          - { scheme: attestation, kind: countersign, count: 1 }
+          - { scheme: behavioral, kind: fold-green }
