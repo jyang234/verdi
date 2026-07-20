@@ -91,7 +91,9 @@ func TestRunLintVerb_FindingsExitOne(t *testing.T) {
 // lintTestNewClassFeature is a minimal, otherwise-clean round-four
 // `class: feature` spec — a new-class spec (isNewClassSpec) that VL-017
 // scopes its disclosed-unproven report to. Draft status avoids the freeze/
-// predecessor rules; problem/outcome/one outcome-AC keep it valid.
+// predecessor rules; problem/outcome/one outcome-AC keep it valid. ac-1
+// declares attestation (L-M14 remedy 1, internal/lint/vl006.go's
+// checkFeatureACAttestation) — unfrozen, so not otherwise grandfathered.
 const lintTestNewClassFeature = `---
 id: spec/borrower-update
 kind: spec
@@ -102,7 +104,7 @@ owners: [platform-team]
 problem: { text: "the update API has no PUT route", anchor: "#problem" }
 outcome: { text: "a borrower can update their application", anchor: "#outcome" }
 acceptance_criteria:
-  - { id: ac-1, text: "a borrower can update their application", evidence: [behavioral], anchor: "#ac-1" }
+  - { id: ac-1, text: "a borrower can update their application", evidence: [behavioral, attestation], anchor: "#ac-1" }
 ---
 # Borrower update
 

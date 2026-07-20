@@ -8,7 +8,7 @@ owners: [platform-team]
 problem: { text: "placeholder problem", anchor: "#problem" }
 outcome: { text: "placeholder outcome", anchor: "#outcome" }
 acceptance_criteria:
-  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+  - { id: ac-1, text: "placeholder", evidence: [static, attestation], anchor: "#ac-1" }
 constraints:
   - { id: co-1, text: "placeholder constraint", anchor: "#co-1" }
 ---
