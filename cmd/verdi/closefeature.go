@@ -213,6 +213,7 @@ func foldFeature(ctx context.Context, root string, spec *artifact.SpecFrontmatte
 	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, head)
 	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return evidence.FeatureResult{}, fmt.Errorf("loading feature evidence records: %w", err)
 	}
 	// Preview stays false — closure folds ONLY source: ci evidence, the
@@ -227,6 +228,7 @@ func foldFeature(ctx context.Context, root string, spec *artifact.SpecFrontmatte
 		Model:       mdl,
 	})
 	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return evidence.FeatureResult{}, fmt.Errorf("folding feature evidence: %w", err)
 	}
 	return result, nil
@@ -326,6 +328,7 @@ func writeFeatureRollup(root string, specRef artifact.Ref, spec *artifact.SpecFr
 	// Self-validate before writing anything to disk (CLAUDE.md: "never fake
 	// success") — mirrors writeRollup's own self-check.
 	if err := roll.Validate(); err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return fmt.Errorf("close: internal error: built feature rollup.json failed self-validation: %w", err)
 	}
 

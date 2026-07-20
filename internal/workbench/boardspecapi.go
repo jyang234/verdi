@@ -455,9 +455,11 @@ func (s *boardSpecServer) actionSticky(name string, proj *BoardProjection, req b
 	}
 	typ := artifact.AnnotationType(req.Type)
 	if req.Type == "" {
+		// vocab:identity — sticky/annotation TYPE enum values (wire)
 		return fmt.Errorf("sticky requires a type (one of comment, question, decision-needed, agent-task, story, spike)")
 	}
 	if !stickyCreatableTypes[typ] && !protoStickyTypes[typ] {
+		// vocab:identity — sticky/annotation TYPE enum values (wire)
 		return fmt.Errorf("sticky type %q is not creatable (one of comment, question, decision-needed, agent-task, story, spike); fail closed", req.Type)
 	}
 	if protoStickyTypes[typ] && proj.Class != string(artifact.ClassFeature) {
@@ -559,6 +561,7 @@ func (s *boardSpecServer) actionStubGraduate(name string, proj *BoardProjection,
 	case artifact.AnnotationSpike:
 		spike = true
 	default:
+		// vocab:identity — sticky/annotation TYPE enum values (wire)
 		return fmt.Errorf("sticky %q is a %s, not a story or spike proto-sticky; stub-graduate does not apply", req.ID, sticky.Type)
 	}
 

@@ -153,6 +153,7 @@ func Resolve(root, arg string) (*artifact.SpecFrontmatter, error) {
 		return matchStoryRef(root, arg)
 	}
 
+	// vocab:identity — the "story ref" FIELD-form grammar (I-30; buildstart.go twin classification)
 	return nil, fmt.Errorf("%q is neither a scheme-prefixed story ref (e.g. jira:LOAN-1482) nor a spec ref (e.g. spec/stale-decline); this verb accepts exactly those two forms", arg)
 }
 
@@ -253,6 +254,7 @@ func ResolveBuildSpec(root, branch string) (*artifact.SpecFrontmatter, error) {
 		return nil, err
 	}
 	if spec.Class == artifact.ClassComponent {
+		// vocab:identity — story:/acceptance_criteria: FRONTMATTER FIELD names
 		return nil, fmt.Errorf("storyresolve: build branch %q resolves to %s, a component spec (no story, no acceptance criteria)", branch, spec.ID)
 	}
 	return spec, nil

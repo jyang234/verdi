@@ -39,6 +39,7 @@ import (
 // one subcommand, `start` (05 §CLI); anything else is a usage error.
 func runDesignVerb(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "start" {
+		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
 		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name>")
 		return 2
 	}
@@ -143,9 +144,11 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 	case "story":
 		kind = artifact.ClassStory
 	case "":
+		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
 		fmt.Fprintln(stderr, "design start: --kind is required (feature|story, 05 §CLI)")
 		return 2
 	default:
+		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
 		fmt.Fprintf(stderr, "design start: --kind %q is not feature or story\n", kindArg)
 		return 2
 	}
@@ -158,9 +161,11 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 		// A feature's tracker ref is optional (05 §CLI: "features may
 		// carry no story: at all") — nothing more to parse.
 	case len(rest) == 0 && kind == artifact.ClassStory:
+		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
 		fmt.Fprintln(stderr, "design start: --kind story requires a scheme-prefixed story ref (e.g. jira:LOAN-1482)")
 		return 2
 	default:
+		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
 		fmt.Fprintln(stderr, "design start: usage: verdi design start [<ref>] --kind feature|story --name <name>")
 		return 2
 	}
@@ -214,10 +219,12 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 // than a hardcoded filename (spec/scaffold-templates ac-1 cont.).
 func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, storyRef, name string, manifest *store.Manifest, mdl *model.Model, deps designDeps, stdout, stderr io.Writer) int {
 	if kind != artifact.ClassFeature && kind != artifact.ClassStory {
+		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
 		fmt.Fprintf(stderr, "design start: internal error: kind %q is neither feature nor story\n", kind)
 		return 2
 	}
 	if kind == artifact.ClassStory && storyRef == "" {
+		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
 		fmt.Fprintln(stderr, "design start: --kind story requires a scheme-prefixed story ref (e.g. jira:LOAN-1482)")
 		return 2
 	}
@@ -231,10 +238,12 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	if storyRef != "" {
 		scheme, _, err := provider.ParseStoryRef(provider.StoryRef(storyRef))
 		if err != nil {
+			// vocab:identity — the "story ref" FIELD-form grammar (buildstart.go twin classification)
 			fmt.Fprintf(stderr, "design start: story ref %q: %v\n", storyRef, err)
 			return 2
 		}
 		if schemes := manifest.ConfiguredStorySchemes(); !schemes[scheme] {
+			// vocab:identity — the "story ref" FIELD-form grammar; scheme/provider are manifest ids
 			fmt.Fprintf(stderr, "design start: story ref %q uses scheme %q, which verdi.yaml's providers: block does not configure\n", storyRef, scheme)
 			return 2
 		}
@@ -330,6 +339,7 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	// kind here is the --kind flag's enum VALUE, bare.
 	msg := fmt.Sprintf("design start: scaffold %s (%s spec, no tracker ref)", specRef.String(), kind)
 	if storyRef != "" {
+		// vocab:identity — git commit subject (history, never display prose)
 		msg = fmt.Sprintf("design start: scaffold %s (%s spec, story %s)", specRef.String(), kind, storyRef)
 	}
 	headCommit, err := gitx.CreateCommit(ctx, root, msg)
@@ -345,6 +355,7 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	// scaffold's literal frontmatter — the --kind enum value and the
 	// status: field value just written to disk — identity, bare (unlike
 	// accept's transition VERDICT, which resolves display state words).
+	// vocab:identity — echo of the scaffolded frontmatter (field names + enum values)
 	fmt.Fprintf(stdout, "design start: scaffolded %s (kind: %s, status: draft)\n", specRef.String(), kind)
 	fmt.Fprintf(stdout, "design start: board: http://%s/board/spec/%s (run `verdi serve` from this checkout)\n", defaultWorkbenchAddr, name)
 	return 0
@@ -361,6 +372,7 @@ func resolveStoryTitle(ctx context.Context, prov provider.StoryProvider, storyRe
 	}
 	story, err := prov.Resolve(ctx, provider.StoryRef(storyRef))
 	if err != nil {
+		// vocab:identity — the "story ref" FIELD-form grammar (title enrichment disclosure)
 		fmt.Fprintf(stderr, "design start: story title resolution degraded to the raw ref %q: %v\n", storyRef, err)
 		return storyRef
 	}

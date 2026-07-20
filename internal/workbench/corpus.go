@@ -80,6 +80,7 @@ func corpusHandler(root string, mdl *model.Model) http.HandlerFunc {
 		if entry.Kind == "diagram" {
 			if d, derr := artifact.DecodeDiagram(fm); derr == nil && d.Class == artifact.DiagramClassProposal {
 				link := `<p class="diagram-editor-link"><a data-testid="open-editor-link" href="/board/diagram/` +
+					// vocab:identity — "draft" the VERB (draft this proposal), not the lifecycle state
 					stdhtml.EscapeString(name) + `">Open in the board editor</a> &#8212; draft this proposal with a live preview and structural operations.</p>`
 				extra = template.HTML(link) + extra
 			}

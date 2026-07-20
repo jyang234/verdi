@@ -57,6 +57,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return fmt.Errorf("matrix: loading feature-level evidence: %w", err)
 	}
 
@@ -186,6 +187,7 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 	for _, storyRef := range order {
 		storyName, err := artifact.ParseRef(storyRef)
 		if err != nil {
+			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 			return nil, nil, nil, fmt.Errorf("matrix: implementing story ref %q: %w", storyRef, err)
 		}
 		// storyresolve.LoadSpec (not LoadActiveSpec): an implementing story
@@ -194,9 +196,11 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 		// comment's "Defect fix" note.
 		storySpec, err := storyresolve.LoadSpec(root, storyName.Name)
 		if err != nil {
+			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 			return nil, nil, nil, fmt.Errorf("matrix: loading implementing story %s: %w", storyRef, err)
 		}
 		if storySpec == nil {
+			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 			return nil, nil, nil, fmt.Errorf("matrix: implementing story %s not found in specs/active/ or specs/archive/", storyRef)
 		}
 
@@ -239,6 +243,7 @@ func foldImplementingStory(ctx context.Context, root, commit string, storySpec *
 	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(storySpec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return evidence.StoryResult{}, fmt.Errorf("matrix: loading evidence for implementing story %s: %w", storySpec.ID, err)
 	}
 	slug := store.RefSlug(storySpec.Story)
@@ -249,6 +254,7 @@ func foldImplementingStory(ctx context.Context, root, commit string, storySpec *
 		StorySlug: slug,
 	})
 	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return evidence.StoryResult{}, fmt.Errorf("matrix: folding implementing story %s: %w", storySpec.ID, err)
 	}
 	return result, nil

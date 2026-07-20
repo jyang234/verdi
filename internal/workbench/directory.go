@@ -161,6 +161,7 @@ const designPrefix = "design/"
 // provenance line.
 func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.Entry, indexErr error, inReview map[string]bool, mrNotice string, mrConfigured bool, mdl *model.Model) {
 	buf.WriteString(`<section class="home-directory"><h2>Directory</h2>`)
+	// vocab:identity — the directory's own StatusGroup taxonomy word (L-M8 genus), not the lifecycle state
 	buf.WriteString(`<p class="dir-provenance">Computed from git refs: every spec on the default branch and every draft on a design branch, grouped by status.`)
 	if mrConfigured {
 		// dc-4: the in-review chip's input is a second, non-ref source —

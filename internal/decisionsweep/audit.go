@@ -89,6 +89,7 @@ func ScanSpecStale(root string, snap *lint.Snapshot, threshold int) ([]SpecStale
 		}
 		ref, err := artifact.ParseRef(doc.Spec.ID)
 		if err != nil {
+			// vocab:identity — operational diagnostic naming ids (machinery, not verdict prose)
 			return nil, fmt.Errorf("decisionsweep: story %s has an invalid id: %w", doc.Spec.ID, err)
 		}
 

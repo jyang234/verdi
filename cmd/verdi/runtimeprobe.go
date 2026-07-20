@@ -79,6 +79,7 @@ func runProduceRuntime(ctx context.Context, root, commit, storyArg, acID, witnes
 		return 0
 	}
 	if storyArg == "" || acID == "" || witness == "" || verdict == "" {
+		// vocab:identity — CLI flag names (identity)
 		fmt.Fprintln(deps.Stderr, "sync: --produce-runtime: --story, --ac, --verdict, and --witness must all be given together (or none at all, for the scheduled no-op)")
 		return 2
 	}

@@ -42,6 +42,7 @@ func (b *Backend) GetMatrix(ctx context.Context, argsRaw json.RawMessage) map[st
 		return toolError("get_matrix: malformed arguments: " + err.Error())
 	}
 	if args.Story == "" {
+		// vocab:identity — MCP tool ARGUMENT name (wire schema)
 		return toolError("get_matrix: story is required")
 	}
 

@@ -312,18 +312,22 @@ func (fm SpecFrontmatter) Validate() error {
 
 func (fm SpecFrontmatter) validateFeature() error {
 	if !specFeatureStatuses[fm.Status] {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: feature spec status %q is not a known status", fm.Status)
 	}
 	if fm.Spike {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: feature spec must not carry spike: true (spike is a story-class variant, 02 §Kind registry)")
 	}
 	// Story is OPTIONAL on the feature class as of round four (R4-I-2: "an
 	// epic/objective tracker ref, not a per-story binding" — moved from a
 	// required scalar to the story class). Validated only when present.
 	if fm.Story != "" && !storyRefRe.MatchString(fm.Story) {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: feature spec story %q must be scheme:key form (e.g. jira:LOAN-1482, VL-005)", fm.Story)
 	}
 	if len(fm.AcceptanceCriteria) == 0 {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: feature spec must declare at least one acceptance criterion")
 	}
 	seenAC := make(map[string]bool, len(fm.AcceptanceCriteria))
@@ -376,6 +380,7 @@ func (fm SpecFrontmatter) validateFeature() error {
 	}
 
 	frozenRequired := fm.Status == "accepted-pending-build" || fm.Status == "closed" || fm.Status == "superseded"
+	// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 	return requireFrozen(fm.Frozen, frozenRequired, "feature spec", string(fm.Status))
 }
 
@@ -386,29 +391,35 @@ func (fm SpecFrontmatter) validateFeature() error {
 // with no grandfathering tension.
 func (fm SpecFrontmatter) validateStory() error {
 	if !specFeatureStatuses[fm.Status] {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: story spec status %q is not a known status (same lifecycle as feature, 02 §Kind registry)", fm.Status)
 	}
 	if fm.Problem == nil {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: story spec requires a problem attribute (02 §Object model)")
 	}
 	if err := fm.Problem.Validate(); err != nil {
 		return fmt.Errorf("artifact: problem: %w", err)
 	}
 	if fm.Outcome == nil {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: story spec requires an outcome attribute (02 §Object model)")
 	}
 	if err := fm.Outcome.Validate(); err != nil {
 		return fmt.Errorf("artifact: outcome: %w", err)
 	}
 	if fm.Story == "" {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: story spec requires a story: scheme:key tracker ref (R4-I-2, VL-005)")
 	}
 	if !storyRefRe.MatchString(fm.Story) {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: story spec story %q must be scheme:key form (e.g. jira:LOAN-1482)", fm.Story)
 	}
 	// story class carries no feature-only fields.
 	if len(fm.Impacts) != 0 || len(fm.Context) != 0 || fm.Declares != nil ||
 		len(fm.Stubs) != 0 || fm.Supersession != nil || len(fm.Dispositions) != 0 {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: story spec must not carry feature-only fields (impacts/context/declares/stubs/supersession/dispositions)")
 	}
 
@@ -443,18 +454,22 @@ func (fm SpecFrontmatter) validateStory() error {
 	}
 	if fm.Spike {
 		if implementsCount != 0 {
+			// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 			return fmt.Errorf("artifact: spike story must carry no implements edges (02 §Kind registry: spike variant)")
 		}
 		if resolvesCount == 0 {
+			// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 			return fmt.Errorf("artifact: spike story requires >=1 resolves edge to an open-question fragment (02 §Kind registry: spike variant)")
 		}
 	} else {
 		if implementsCount == 0 {
+			// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 			return fmt.Errorf("artifact: story spec requires >=1 implements edge to a feature AC fragment (02 §Kind registry)")
 		}
 	}
 
 	frozenRequired := fm.Status == "accepted-pending-build" || fm.Status == "closed" || fm.Status == "superseded"
+	// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 	return requireFrozen(fm.Frozen, frozenRequired, "story spec", string(fm.Status))
 }
 
@@ -478,6 +493,7 @@ func (fm SpecFrontmatter) validateComponent() error {
 		return fmt.Errorf("artifact: component spec status %q is not a known status", fm.Status)
 	}
 	if fm.Story != "" {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: component spec must not carry a story (02: 'No story, no ACs')")
 	}
 	if fm.Spike || fm.Problem != nil || fm.Outcome != nil ||

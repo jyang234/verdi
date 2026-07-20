@@ -22,6 +22,7 @@ import (
 // subcommand, "commit".
 func runBoardVerb(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "commit" {
+		// vocab:identity — CLI usage/flag grammar (identity)
 		fmt.Fprintln(stderr, "usage: verdi board commit <board-key> --name <spec-name> [--story-ref <scheme:key>]")
 		return 2
 	}
@@ -40,6 +41,7 @@ func cmdBoardCommit(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if len(rest) != 1 {
+		// vocab:identity — CLI usage/flag grammar (identity)
 		fmt.Fprintln(stderr, "board commit: usage: verdi board commit <board-key> --name <spec-name> [--story-ref <scheme:key>]")
 		return 2
 	}
@@ -99,12 +101,14 @@ func extractBoardCommitFlags(args []string) (name, storyRef string, rest []strin
 				return "", "", nil, fmt.Errorf("%s requires a value", a)
 			}
 			if storyRef != "" {
+				// vocab:identity — CLI usage/flag grammar (identity)
 				return "", "", nil, fmt.Errorf("--story-ref given more than once")
 			}
 			storyRef = args[i+1]
 			i++
 		case strings.HasPrefix(a, "--story-ref=") || strings.HasPrefix(a, "-story-ref="):
 			if storyRef != "" {
+				// vocab:identity — CLI usage/flag grammar (identity)
 				return "", "", nil, fmt.Errorf("--story-ref given more than once")
 			}
 			_, storyRef, _ = strings.Cut(a, "=")

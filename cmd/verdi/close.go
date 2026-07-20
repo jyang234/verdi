@@ -367,8 +367,10 @@ func flipSpecStatusToClosed(root, name string) error {
 		return fmt.Errorf("close: reading %s to flip status to closed: %w", specPath, err)
 	}
 	if n := len(closeAcceptedStatusLineRe.FindAll(raw, -1)); n != 1 {
+		// vocab:identity — frontmatter status-line machinery (field + enum value)
 		return fmt.Errorf("close: %s: expected exactly one status: accepted-pending-build line to flip to closed, found %d", specPath, n)
 	}
+	// vocab:identity — frontmatter status-line machinery (field + enum value)
 	newRaw := closeAcceptedStatusLineRe.ReplaceAll(raw, []byte("status: closed"))
 	if err := os.WriteFile(specPath, newRaw, 0o644); err != nil {
 		return fmt.Errorf("close: writing %s after flipping status to closed: %w", specPath, err)

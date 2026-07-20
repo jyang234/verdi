@@ -94,6 +94,7 @@ func (l Link) Validate() error {
 	}
 	if l.Type == LinkStory {
 		if !storyRefRe.MatchString(l.Ref) {
+			// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 			return fmt.Errorf("artifact: story link ref %q must be scheme:key form (e.g. jira:LOAN-1482)", l.Ref)
 		}
 		return nil
@@ -106,6 +107,7 @@ func (l Link) Validate() error {
 		return fmt.Errorf("artifact: link of type %q: %w", l.Type, err)
 	}
 	if ref.Fragment() && !closedEdgeVocab[l.Type] {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: link of type %q targets object fragment %q, but only implements/resolves/supersedes/exempts/depends-on may target a fragment (02 §Link taxonomy: closed spec-object edge vocabulary)", l.Type, l.Ref)
 	}
 	return nil

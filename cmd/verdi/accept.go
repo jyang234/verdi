@@ -126,10 +126,12 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	}
 
 	if !draftStatusLineRe.Match(fm) {
+		// vocab:identity — frontmatter status-line machinery (field + enum value)
 		fmt.Fprintf(stderr, "accept: %s: internal error: decoded status is draft, but no status: draft frontmatter line was found to flip\n", specPath)
 		return 2
 	}
 	if n := len(draftStatusLineRe.FindAllIndex(fm, -1)); n != 1 {
+		// vocab:identity — frontmatter status-line machinery (field + enum value)
 		fmt.Fprintf(stderr, "accept: %s: internal error: expected exactly one status: draft line, found %d\n", specPath, n)
 		return 2
 	}
@@ -199,6 +201,7 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	}
 	frozenLine += " }"
 
+	// vocab:identity — frontmatter status-line machinery (field + enum value)
 	newFm := draftStatusLineRe.ReplaceAll(fm, []byte("status: accepted-pending-build"))
 	newFm = append(newFm, []byte("\n"+frozenLine)...)
 
@@ -251,6 +254,7 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}
+	// vocab:identity — git commit subject (history, never display prose)
 	if _, err := gitx.CreateCommit(ctx, root, fmt.Sprintf("accept: %s draft -> accepted-pending-build", ref.String())); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2

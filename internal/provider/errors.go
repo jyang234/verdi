@@ -11,6 +11,7 @@ import "errors"
 //	Unavailable/timeout   Resolve: degrade + cache stale; Publish: job retry
 var (
 	// ErrNotFound means the tracker has no story at the given ref.
+	// vocab:identity — provider-port sentinel naming the tracker-ref concept
 	ErrNotFound = errors.New("provider: story not found")
 
 	// ErrUnauthorized means the adapter's credentials were rejected by

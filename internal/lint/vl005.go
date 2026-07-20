@@ -56,14 +56,17 @@ func (vl005) checkStory(d *Document, schemes map[string]bool) []Finding {
 	}
 
 	if len(storyLinks) > 1 {
+		// vocab:identity — story: FIELD validation echo (field + scheme ids)
 		return []Finding{{Rule: "VL-005", Path: d.RelPath, Message: fmt.Sprintf("more than one type:story link (%s) plus the scalar story: field %q — exactly one story association is allowed", strings.Join(storyLinks, ", "), d.Spec.Story)}}
 	}
 	if len(storyLinks) == 1 && storyLinks[0] != d.Spec.Story {
+		// vocab:identity — story: FIELD validation echo (field + scheme ids)
 		return []Finding{{Rule: "VL-005", Path: d.RelPath, Message: fmt.Sprintf("links[] story entry %q disagrees with the canonical scalar story: field %q (I-24)", storyLinks[0], d.Spec.Story)}}
 	}
 
 	scheme, _, _ := strings.Cut(d.Spec.Story, ":")
 	if !schemes[scheme] {
+		// vocab:identity — story: FIELD validation echo (field + scheme ids)
 		findings = append(findings, Finding{Rule: "VL-005", Path: d.RelPath, Message: fmt.Sprintf("story %q uses scheme %q, which verdi.yaml does not configure a provider for", d.Spec.Story, scheme)})
 	}
 	return findings
@@ -81,6 +84,7 @@ func (vl005) checkFeatureEpicRef(d *Document, schemes map[string]bool) []Finding
 	}
 	scheme, _, _ := strings.Cut(d.Spec.Story, ":")
 	if !schemes[scheme] {
+		// vocab:identity — story: FIELD validation echo (field + scheme ids)
 		return []Finding{{Rule: "VL-005", Path: d.RelPath, Message: fmt.Sprintf("story epic ref %q uses scheme %q, which verdi.yaml does not configure a provider for", d.Spec.Story, scheme)}}
 	}
 	return nil

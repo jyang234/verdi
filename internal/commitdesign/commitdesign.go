@@ -85,11 +85,13 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	storyRef := in.StoryRef
 	if storyRef == "" {
 		if !storyRefShapeRe.MatchString(in.BoardKey) {
+			// vocab:identity — story: FIELD validation (scheme:key form)
 			return nil, fmt.Errorf("commitdesign: no story ref given, and board key %q is not itself scheme:key-shaped; pass StoryRef explicitly", in.BoardKey)
 		}
 		storyRef = in.BoardKey
 	}
 	if !storyRefShapeRe.MatchString(storyRef) {
+		// vocab:identity — story: FIELD validation (scheme:key form)
 		return nil, fmt.Errorf("commitdesign: story ref %q must be scheme:key form (e.g. jira:LOAN-1482)", storyRef)
 	}
 
@@ -206,6 +208,7 @@ func scaffoldSpec(specRef, storyRef, specName string, pins []artifact.Pin, dispo
 	title := designscaffold.HumanizeName(specName)
 
 	var b strings.Builder
+	// vocab:identity — scaffolded frontmatter template (field names + enum values)
 	fmt.Fprintf(&b, "---\nid: %s\nkind: spec\ntitle: %q\nowners: [unassigned]\nclass: feature\nstatus: draft\nstory: %s\n", specRef, title, storyRef)
 
 	if len(pins) > 0 {

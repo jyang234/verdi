@@ -142,6 +142,7 @@ func badAttestationVerifiesTarget(root, verifiesRef, slugSeg, acID string, mdl *
 
 	wantSlug := store.RefSlug(target.Story)
 	if slugSeg != wantSlug {
+		// vocab:identity — story-ref slug grammar (D6-16 path/id derivation)
 		return fmt.Sprintf("whose own story-ref slug is %q, but this attestation's own directory/id segment is %q (D6-18: a spec-name/story-slug mismatch used to fold as a silent absent, never a misfiled attestation)", wantSlug, slugSeg), true
 	}
 

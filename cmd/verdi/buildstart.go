@@ -35,6 +35,7 @@ import (
 // subcommand, `start` (05 §CLI); anything else is a usage error.
 func runBuildVerb(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "start" {
+		// vocab:identity — CLI usage grammar (identity arg placeholders)
 		fmt.Fprintln(stderr, "usage: verdi build start <story-spec | story-ref>")
 		return 2
 	}
@@ -46,6 +47,7 @@ func runBuildVerb(args []string, stdout, stderr io.Writer) int {
 // wires the real runner before delegating to runBuildStart.
 func cmdBuildStart(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
+		// vocab:identity — CLI usage grammar (identity arg placeholders)
 		fmt.Fprintln(stderr, "build start: usage: verdi build start <story-spec | story-ref>")
 		return 2
 	}

@@ -189,6 +189,21 @@ func (m *Model) DisplayVerb(id string) string {
 // speaks a class word obligates a classification against this rule at
 // the prose site (the L-M8 posture: taxonomy decided and documented,
 // never implicit).
+//
+// ENFORCEMENT (ledger L-M13a(6), the mechanical prose witness —
+// internal/specalign's TestVocabProseWitness): production string
+// literals under cmd/ and internal/ are scanned for these class words
+// (and the lifecycle state words) spoken as prose. Every hit must
+// either resolve through this chain ON ITS OWN STATEMENT, or carry the
+// ONE mechanical classification marker `// vocab:identity — <why>` on
+// the literal's own line or the line directly above, placed AT the
+// producing site (never in a consumer package). The marker asserts the
+// bare word is deliberate: an identity-layer id (ref/usage grammar, a
+// wire enum value, a frontmatter field, a branch/CSS/testid fragment, a
+// commit subject), a machinery diagnostic speaking ids, or a
+// non-vocabulary homograph — never unclassified display prose. The
+// witness's own doc comment records the scan's mechanical rules and
+// disclosed limits.
 func (m *Model) DisplayClass(id string) string {
 	if m == nil {
 		return id

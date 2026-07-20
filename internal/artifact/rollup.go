@@ -78,6 +78,7 @@ func (r Rollup) Validate() error {
 		return fmt.Errorf("artifact: rollup schema %q, want %q", r.Schema, rollupSchema)
 	}
 	if r.Story != "" && !storyRefRe.MatchString(r.Story) {
+		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: rollup story %q must be scheme:key form", r.Story)
 	}
 	ref, err := ParseRef(r.Ref)
