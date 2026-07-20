@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // guide-claim: 11-configurable-alignment-judge
@@ -186,6 +188,77 @@ func TestRunJudged_WaitTrue_JudgeRequiredTrue_TimeoutIsWaitExpiredNotRequiredAbs
 	var reqAbsent *ErrJudgeRequiredAbsent
 	if errors.As(err, &reqAbsent) {
 		t.Fatal("error must not ALSO satisfy errors.As for *ErrJudgeRequiredAbsent — that would wrongly let cmd/verdi/align.go pick exit 1 over ac-2's exit 2")
+	}
+}
+
+// TestArchivedDoubledJudgedID_DecodesAndRoundTripsUntouched is spec/ritual-
+// traps ac-2's prospective-only guarantee: a fixture standing in for an
+// already-archived deviation-report.md whose finding carries the OLD
+// doubled "judged-judged-..." id form (the exact shape judgedFindingID's
+// pre-fix minting bug at judge.go/decision_judge.go/diagram_judge.go could
+// produce on a regeneration path that fed a prior finding's own id back
+// through the judge) must still strict-decode through
+// internal/artifact.DecodeDeviation and carry every field — the doubled id
+// above all — through byte-for-byte unchanged. The fix here only ever
+// touches an id at MINT time (judgedFindingID, called from the three
+// judge-exec call sites); nothing on the decode path inspects or
+// normalizes Finding.ID at all, so a real archived disposition that already
+// references the doubled id exactly as originally minted is never silently
+// renumbered on read.
+func TestArchivedDoubledJudgedID_DecodesAndRoundTripsUntouched(t *testing.T) {
+	const doubledID = "judged-judged-retry-semantics-drift"
+	const archived = `---
+schema: verdi.deviation/v1
+covers: 0123456789abcdef0123456789abcdef01234567
+findings:
+  - id: judged-judged-retry-semantics-drift
+    kind: judged
+    text: "retry semantics match spec intent (confidence 0.87)"
+    disposition: accepted-deviation
+    note: "pre-existing behavior, dispositioned before the id-doubling fix landed"
+---
+# Deviation report
+
+Archived body text, preserved verbatim.
+`
+	fm, body, err := artifact.SplitFrontmatter([]byte(archived))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	decoded, err := artifact.DecodeDeviation(fm)
+	if err != nil {
+		t.Fatalf("DecodeDeviation(archived doubled-id fixture): %v", err)
+	}
+	if len(decoded.Findings) != 1 {
+		t.Fatalf("Findings = %+v, want exactly 1", decoded.Findings)
+	}
+	f := decoded.Findings[0]
+	if f.ID != doubledID {
+		t.Fatalf("Findings[0].ID = %q, want the archived doubled id %q preserved exactly untouched", f.ID, doubledID)
+	}
+	if f.Kind != artifact.FindingJudged {
+		t.Fatalf("Findings[0].Kind = %q, want %q", f.Kind, artifact.FindingJudged)
+	}
+	if f.Disposition != artifact.FindingAcceptedDeviation || f.Note == "" {
+		t.Fatalf("Findings[0] disposition/note not preserved: %+v", f)
+	}
+
+	// Round-trip: decoding the exact same archived bytes again is stable —
+	// decode is a pure function of its input; it never mutates or
+	// renumbers an id it reads, doubled or not.
+	fm2, body2, err := artifact.SplitFrontmatter([]byte(archived))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter (second pass): %v", err)
+	}
+	if string(fm) != string(fm2) || string(body) != string(body2) {
+		t.Fatal("SplitFrontmatter is not stable across repeated calls on the same archived bytes")
+	}
+	decoded2, err := artifact.DecodeDeviation(fm2)
+	if err != nil {
+		t.Fatalf("DecodeDeviation (second pass): %v", err)
+	}
+	if decoded2.Findings[0].ID != doubledID {
+		t.Fatalf("second decode's id = %q, want the same doubled id %q — decode must not renumber on repeat reads", decoded2.Findings[0].ID, doubledID)
 	}
 }
 

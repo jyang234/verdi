@@ -58,6 +58,17 @@ const fakeJudgeTimeoutScript = `sleep 5
 echo "should never get here"
 `
 
+// fakeJudgeAlreadyPrefixedIDScript emits a finding whose raw id already
+// carries a "judged-" prefix — the shape a regeneration/carry path
+// (spec/finding-identity) can feed back to the judge as context (e.g. a
+// prior finding's own already-minted id) and have the judge echo back
+// verbatim. Reproduces spec/ritual-traps ac-2's exact defect: minting
+// unconditionally re-prefixed this into "judged-judged-...".
+const fakeJudgeAlreadyPrefixedIDScript = `cat <<'EOF'
+{"is_error":false,"subtype":"success","result":"{\"findings\":[{\"id\":\"judged-retry-semantics-drift\",\"text\":\"retry semantics match spec intent\",\"confidence\":0.87}]}"}
+EOF
+`
+
 // fakeJudgeNewlineTextScript emits a finding whose text carries an embedded
 // newline (ADJ-53's j-4 fixture): a judge is free-text, nothing in S5's own
 // contract constrains it to a single line, so this is a legitimate — if
@@ -132,6 +143,53 @@ func TestRunJudgeOnce_Success(t *testing.T) {
 	}
 	if !strings.Contains(success.RawResult, "j-1") {
 		t.Fatalf("RawResult = %q, want the raw result string preserved", success.RawResult)
+	}
+}
+
+// TestRunJudgeOnce_AlreadyPrefixedRawID_NeverDoubles is spec/ritual-traps
+// ac-2's genuine regression reproduction: when the judge's raw finding id
+// already carries a "judged-" prefix (fakeJudgeAlreadyPrefixedIDScript,
+// modeling a regeneration path that fed a prior finding's own id back to
+// the judge as context and got it echoed back verbatim), the minted
+// Finding.ID must carry exactly ONE "judged-" prefix — never
+// "judged-judged-...". Pre-fix, this test fails with
+// ID == "judged-judged-retry-semantics-drift" (the doubled-prefix defect
+// itself), proving this is a real reproduction, not a vacuous assertion.
+func TestRunJudgeOnce_AlreadyPrefixedRawID_NeverDoubles(t *testing.T) {
+	script := writeFakeJudge(t, fakeJudgeAlreadyPrefixedIDScript)
+	success, failure := runJudgeOnce(judgeTestContext(t), ExecJudgeRunner{}, []string{script}, 0, []byte("prompt bytes"))
+	if failure != nil {
+		t.Fatalf("runJudgeOnce: unexpected failure %+v", failure)
+	}
+	if len(success.Findings) != 1 {
+		t.Fatalf("Findings = %+v, want 1", success.Findings)
+	}
+	got := success.Findings[0].ID
+	if got != "judged-retry-semantics-drift" {
+		t.Fatalf("Findings[0].ID = %q, want exactly one judged- prefix (judged-retry-semantics-drift)", got)
+	}
+	if n := strings.Count(got, "judged-"); n != 1 {
+		t.Fatalf("Findings[0].ID = %q carries %d occurrences of \"judged-\", want exactly 1", got, n)
+	}
+}
+
+// TestJudgedFindingID unit-tests the shared minting helper directly:
+// ordinary raw ids get prefixed exactly once, an already-prefixed raw id
+// (any case) is used as its own slug rather than re-prefixed, and the slug
+// transform (store.RefSlug) still applies underneath either way.
+func TestJudgedFindingID(t *testing.T) {
+	cases := []struct{ raw, want string }{
+		{"j-1", "judged-j-1"},
+		{"judged-j-1", "judged-j-1"},
+		{"Judged-Foo", "judged-foo"},
+		{"retry semantics drift", "judged-retry-semantics-drift"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			if got := judgedFindingID(tc.raw); got != tc.want {
+				t.Fatalf("judgedFindingID(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
 	}
 }
 

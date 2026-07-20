@@ -174,12 +174,37 @@ func runJudgeOnce(ctx context.Context, runner JudgeRunner, argv []string, timeou
 	findings := make([]artifact.Finding, 0, len(inner.Findings))
 	for _, jf := range inner.Findings {
 		findings = append(findings, artifact.Finding{
-			ID:   "judged-" + store.RefSlug(jf.ID),
+			ID:   judgedFindingID(jf.ID),
 			Kind: artifact.FindingJudged,
 			Text: fmt.Sprintf("%s (confidence %.2f)", normalizeJudgeText(jf.Text), jf.Confidence),
 		})
 	}
 	return &JudgeSuccess{Findings: findings, Stdin: prompt, RawResult: rawResult}, nil
+}
+
+// judgedFindingID normalizes a judge-supplied raw finding id into this
+// package's own stable "judged-<slug>" finding id, applied exactly once —
+// shared by every judge-consuming mode that mints one (this file's
+// runJudgeOnce, decision_judge.go's RunDecisionSweep, diagram_judge.go's
+// RunDiagramSweep). rawID is judge-supplied free text (S5's own contract
+// only requires {id, text, confidence}); on certain regeneration/carry
+// paths (spec/finding-identity) a caller re-presents a prior finding's own
+// already-"judged-"-prefixed id back to the judge as context, and if the
+// judge echoes it back verbatim, slugging that value and unconditionally
+// re-prefixing produced "judged-judged-..." — a tool defect
+// (spec/ritual-traps ac-2, X-1's sibling trap). Idempotent: a raw id whose
+// slug already carries the "judged-" prefix is used as-is rather than
+// re-prefixed, so this is safe regardless of how the raw id arrived. Fixed
+// prospectively only — this only ever touches an id at MINT time; nothing
+// here rewrites an id already read back off an archived report (see
+// internal/artifact's plain decode of Finding.ID, which applies no such
+// transform).
+func judgedFindingID(rawID string) string {
+	slug := store.RefSlug(rawID)
+	if strings.HasPrefix(slug, "judged-") {
+		return slug
+	}
+	return "judged-" + slug
 }
 
 // normalizeJudgeText replaces every maximal run of Unicode control
