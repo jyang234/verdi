@@ -4,7 +4,7 @@ kind: spec
 title: "GC Reclaim"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-36
 problem: { text: "spec/residue-reclamation's own ac-1 needs an implementation: verdi-store-layout's Garbage collection section now licenses, on explicit opt-in, pruning a LOCAL branch and its worktree (if any) when the branch is fully merged into the default branch, its worktree carries no uncommitted changes, and the worktree is not the primary checkout (ledger R4-I-79) — but verdi gc itself only ever reclaims managed worktrees under .verdi/data/worktrees/ (spec/worktree-manager); nothing in the binary acts on the newly-ratified unmanaged slice, and nothing computes which unmanaged branches or worktrees qualify. spec/closure-hygiene's own internal/residue package already computes exactly this survey once, for verdi audit's third report section — every local branch's merge state, every worktree's merge/clean/managed state, disclosed rather than guessed wherever it cannot be resolved — so the eligibility facts this story needs already exist as a single, tested, in-tree computation (internal/residue.Scan); the only thing missing is a consumer that turns eligible rows into a disclosed plan and, on further opt-in, an executed one.", anchor: problem }
 outcome: { text: "verdi gc gains --reclaim-unmanaged (prints the plan; touches nothing) and --reclaim-unmanaged --apply (executes it), built as a thin consumer of internal/residue.Scan's own survey rows — eligibility is never re-derived from git independently. Every reclaim-eligible LOCAL branch and its worktree (if any) is named with its tip commit; every kept row is named with one of a closed set of reasons; applying removes the worktree before its branch, each backed by git's own independent refusal as a second guard; a per-item failure is disclosed and the sweep continues; an unresolvable default branch refuses the whole run rather than asserting a plan it cannot compute. verdi gc's existing managed-worktree slice, internal/residue, and every existing verdi audit report section are untouched.", anchor: outcome }
@@ -22,6 +22,7 @@ decisions:
 constraints:
   - { id: co-1, text: "No network in any test (CLAUDE.md). Every eligibility, execution-ordering, second-guard-refusal, and disclosure-format claim is proven against fixturegit repositories with real local branches, real close/<name> archival commits where relevant, and real git worktrees materialized on local disk — mirroring spec/closure-hygiene's own co-1 and spec/worktree-manager's own co-2 precedent exactly.", anchor: co-1 }
   - { id: co-2, text: "internal/residue (the survey producer spec/closure-hygiene shipped), all three existing verdi audit report sections, and internal/wtmanager's existing managed-worktree GC logic are byte-for-byte unchanged by this story. New code is confined to internal/reclaim (a new package), one new additive gitx primitive (DeleteMergedBranch, dc-3), and cmd/verdi/gc.go's own flag dispatch plus its gcScopeDisclosure string (ac-3) — never a rewrite of anything spec/closure-hygiene or spec/worktree-manager already delivered.", anchor: co-2 }
+frozen: { at: 2026-07-20, commit: 2263d861657483b431e1e5bb2329169738056cc2, stub_matched: true }
 ---
 
 # GC Reclaim
