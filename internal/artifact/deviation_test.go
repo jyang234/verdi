@@ -323,3 +323,52 @@ digest: sha256:` + deviationHex64 + "\n"
 		t.Fatalf("NotResurfaced = %+v, want one judged backing record left intact", fm.NotResurfaced)
 	}
 }
+
+// TestIsCollisionMachineryID_AnchorsToMintedShapesNotSubstring is
+// spec/finding-identity judged-reserved-id-shape-substring-match's classifier
+// half: IsCollisionMachineryID recognizes ONLY the two shapes ReconcileJudged
+// actually MINTS — a numeric-tail collision-member suffix
+// ("<slug><CollisionInfix><n>", n a decimal) and the ContractViolationIDPrefix
+// prefix — never any id that merely CONTAINS the English word "collision"
+// between hyphens. The two verbatim pins are THIS story's own live finding
+// slugs: a bare substring test (strings.Contains(id, "-collision-")) misreads
+// both as machinery, which splits the two id consumers (ReconcileJudged's
+// candidate path, which has no machinery guard, vs. the disposition live path
+// and Validate, which key off this classifier) exactly the way L-N13 forbids —
+// the double-count/brick chain this fix closes.
+func TestIsCollisionMachineryID_AnchorsToMintedShapesNotSubstring(t *testing.T) {
+	cases := []struct {
+		id   string
+		want bool
+	}{
+		// Genuine judge slugs carrying the WORD "collision" — NOT machinery.
+		// This story's own live finding slugs, pinned verbatim: the substring
+		// classifier read both true and split the two id consumers.
+		{"judged-collision-suffixed-backing-shadow", false},
+		{"judged-collision-cv-emission-order", false},
+		// Other infix-"collision" English slugs, including numeric segments that
+		// are not the TAIL.
+		{"judged-collision-guard-corpus-narrower-than-scope", false},
+		{"judged-collision-2-way-merge-ordering", false}, // digit present, not the tail
+		{"judged-foo-collision-2-bar", false},            // "-collision-2" mid-string, not the tail
+		{"judged-foo-collision-bar", false},
+		{"judged-foo-collision-", false}, // infix present, no numeric tail
+		// Minted numeric-tail collision members — machinery.
+		{"judged-dup-collision-2", true},
+		{"judged-dup-collision-10", true},
+		// A word-"collision" slug that ITSELF collided within a run gets a real
+		// numeric suffix appended — the FINAL "-collision-<n>" is the tail.
+		{"judged-collision-cv-emission-order-collision-3", true},
+		// Reserved contract-violation prefix — machinery (fail-closed), even
+		// when the trailing slug happens to contain the word "collision".
+		{"judged-contract-violation-dup", true},
+		{"judged-contract-violation-collision-cv-emission-order", true},
+		// The CV prefix must sit at position 0 — not merely be present.
+		{"x-judged-contract-violation-dup", false},
+	}
+	for _, tc := range cases {
+		if got := IsCollisionMachineryID(tc.id); got != tc.want {
+			t.Errorf("IsCollisionMachineryID(%q) = %v, want %v", tc.id, got, tc.want)
+		}
+	}
+}

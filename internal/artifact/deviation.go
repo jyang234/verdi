@@ -2,6 +2,7 @@ package artifact
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -26,22 +27,46 @@ const CollisionInfix = "-collision-"
 // this id shape and more than one reader must agree on it byte-for-byte.
 const ContractViolationIDPrefix = "judged-contract-violation-"
 
+// collisionSuffixRe matches the numeric-tail collision-member shape
+// ReconcileJudged MINTS — CollisionInfix immediately followed by one or more
+// decimal digits at the END of the id ("<slug><CollisionInfix><n>",
+// fmt.Sprintf("%s%s%d", …), n ≥ 2). Anchored to the TAIL, not tested as a bare
+// substring: a genuine judge slug may legitimately carry the English word
+// "collision" between hyphens (e.g. judged-collision-cv-emission-order), and
+// only a numeric tail after CollisionInfix is machinery — an infix "collision"
+// word, or even a mid-string "<infix><digits>" that is not the tail, is not.
+// Built from the shared CollisionInfix literal (QuoteMeta'd) so the reserved
+// shape never drifts between the minter and this recognizer.
+var collisionSuffixRe = regexp.MustCompile(regexp.QuoteMeta(CollisionInfix) + `[0-9]+$`)
+
 // IsCollisionMachineryID reports whether id was MINTED by ReconcileJudged's
 // within-run slug-collision machinery — either a suffixed collision member
-// ("<slug><CollisionInfix><n>") or the synthetic per-slug contract-violation
-// finding ("<ContractViolationIDPrefix><slug>"). Such an id NEVER carried a
-// rendered reaffirmation Candidate (ReconcileJudged pre-fills a Candidate only
-// for a single fresh finding under a bare slug, never for any collision output,
-// ac-4), so the disposition verb must never resolve+stamp a same-id backing
-// record through the live path for it (L-N13, judged-collision-suffixed-backing-
-// shadow), and Validate legitimately permits such an id to be dispositioned in
-// findings: while a distinct-content backing record persists in not-resurfaced:.
-// The ContractViolationIDPrefix arm treats that prefix as reserved: a (rare,
-// prompt-discouraged) real judged slug of that literal shape fails CLOSED here
-// (no live-path reaffirmation), the safe direction — it never mints unearned
-// provenance.
+// ("<slug><CollisionInfix><n>", n a decimal tail — collisionSuffixRe) or the
+// synthetic per-slug contract-violation finding ("<ContractViolationIDPrefix>
+// <slug>", the prefix at position 0). The check is anchored to those two MINTED
+// shapes exactly, never a bare substring: a genuine judge slug that merely
+// contains the word "collision" between hyphens (this story's own live findings
+// judged-collision-suffixed-backing-shadow and judged-collision-cv-emission-
+// order among them) is an ORDINARY bare slug and classifies FALSE — otherwise
+// the two id consumers split the way L-N13 forbids (ReconcileJudged's candidate
+// path, which has no machinery guard, would render an ac-1 Candidate while the
+// disposition live path and Validate — both keyed off this classifier — refused
+// the same id, judged-reserved-id-shape-substring-match).
+//
+// Such a genuinely-minted id NEVER carried a rendered reaffirmation Candidate
+// (ReconcileJudged pre-fills a Candidate only for a single fresh finding under a
+// bare slug, never for any collision output, ac-4), so the disposition verb must
+// never resolve+stamp a same-id backing record through the live path for it
+// (L-N13, judged-collision-suffixed-backing-shadow), and Validate legitimately
+// permits such an id to be dispositioned in findings: while a distinct-content
+// backing record persists in not-resurfaced:. The ContractViolationIDPrefix arm
+// treats that prefix as reserved: a real judged slug of that literal shape fails
+// CLOSED here (no live-path reaffirmation), the safe direction — it never mints
+// unearned provenance. Both minted shapes are additionally reserved at the mint
+// seam (align.judgedFindingID), so a raw judge slug can never forge either and
+// reach this classifier as a false positive in the first place.
 func IsCollisionMachineryID(id string) bool {
-	return strings.Contains(id, CollisionInfix) || strings.HasPrefix(id, ContractViolationIDPrefix)
+	return collisionSuffixRe.MatchString(id) || strings.HasPrefix(id, ContractViolationIDPrefix)
 }
 
 // FindingKind tags a deviation finding as computed (regenerated graph/

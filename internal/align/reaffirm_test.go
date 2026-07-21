@@ -1006,3 +1006,33 @@ func TestReconcileJudged_ConfirmedCollisionMemberWithBacking_DoubleNonReproducti
 		t.Fatal("Validate accepted a duplicate not-resurfaced id — the residual must fail LOUDLY, never silently launder")
 	}
 }
+
+// TestReconcileJudged_WordCollisionSlug_RendersOrdinaryCandidate is the
+// candidate-path companion to the disposition-verb consumers-agree pin
+// (spec/finding-identity judged-reserved-id-shape-substring-match): a fresh
+// reworded finding at a bare slug that merely contains the WORD "collision" —
+// this story's own judged-collision-cv-emission-order — gets an ordinary ac-1
+// Candidate. ReconcileJudged has no machinery guard, so this path was always
+// correct; the fix anchors the CLASSIFIER (artifact.IsCollisionMachineryID) so
+// the OTHER consumers keyed off it — Validate's overlap relaxation and the
+// disposition live path — agree that this bare slug is a candidate, not
+// machinery (the L-N13 consumers-agree property restored).
+func TestReconcileJudged_WordCollisionSlug_RendersOrdinaryCandidate(t *testing.T) {
+	const slug = "judged-collision-cv-emission-order"
+	fresh := []artifact.Finding{
+		{ID: slug, Kind: artifact.FindingJudged, Text: "a reworded reading of the emission-order rule"},
+	}
+	existingNotResurfaced := []artifact.Finding{
+		dispositionedJudged(slug, "the older ruling text", artifact.FindingAcceptedDeviation, "owner-ratified"),
+	}
+	got := ReconcileJudged(fresh, nil, existingNotResurfaced)
+	if _, ok := got.Candidates[slug]; !ok {
+		t.Fatalf("Candidates = %+v, want an ac-1 Candidate rendered for the bare word-\"collision\" slug", got.Candidates)
+	}
+	// The classifier AGREES with the candidate path: this is an ordinary bare
+	// slug, never collision machinery. (Red before the anchoring fix: the bare
+	// "-collision-" substring classified it true.)
+	if artifact.IsCollisionMachineryID(slug) {
+		t.Fatalf("%q classified as machinery — a word-\"collision\" bare slug is an ordinary candidate", slug)
+	}
+}

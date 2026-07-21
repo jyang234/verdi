@@ -836,6 +836,61 @@ func TestRunDisposition_ConfirmsCandidate_Reaffirmation_StampsCarriedFrom(t *tes
 	}
 }
 
+// TestRunDisposition_WordCollisionSlug_CandidateConfirmed_ConsumersAgree is
+// spec/finding-identity judged-reserved-id-shape-substring-match's live-path
+// half (L-N13 consumers-agree): a GENUINE judge slug that merely contains the
+// word "collision" between hyphens — this story's own live finding
+// judged-collision-cv-emission-order — is an ORDINARY bare-slug candidate, not
+// collision machinery. ReconcileJudged always rendered it an ac-1 Candidate (no
+// machinery guard); with artifact.IsCollisionMachineryID anchored to the minted
+// shapes, the disposition verb's live path now AGREES — confirming it
+// resolves+stamps carried-from (decision == old ruling) and DRAINS the backing
+// record, exactly as for any bare-slug candidate.
+//
+// Red-first (before the fix): the classifier read the bare "-collision-"
+// substring true, so the live path withheld — no stamp, backing record left
+// standing. That standing backing record is the X-18 double-count and the seed
+// of the next-regeneration duplicate-not-resurfaced brick; draining it here is
+// the proof the chain is impossible for a word slug.
+func TestRunDisposition_WordCollisionSlug_CandidateConfirmed_ConsumersAgree(t *testing.T) {
+	const slug = "judged-collision-cv-emission-order"
+	findings := []artifact.Finding{
+		{ID: slug, Kind: artifact.FindingJudged, Text: "reworded new reading of the CV emission-order rule"},
+	}
+	notResurfaced := []artifact.Finding{
+		{ID: slug, Kind: artifact.FindingJudged, Text: "the older ruling text", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified"},
+	}
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, findings, notResurfaced, nil))
+	path := reportPathFor(root, "demo")
+
+	var stdout, stderr bytes.Buffer
+	// Same decision as the old ruling — a reaffirmation, which on an ordinary
+	// candidate stamps carried-from.
+	rc := runDisposition(root, "spec/demo", slug, artifact.FindingAcceptedDeviation, "reaffirmed: still an intentional deviation", false, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runDisposition = %d, want 0; stderr=%s", rc, stderr.String())
+	}
+
+	after := decodeReportFile(t, path)
+	f, ok := findingByID(after.Findings, slug)
+	if !ok || f.Disposition != artifact.FindingAcceptedDeviation {
+		t.Fatalf("live finding = %+v (present=%v), want dispositioned accepted-deviation", f, ok)
+	}
+	// The two consumers agree this is an ordinary candidate: a reaffirmation
+	// stamps the report's own covers.
+	if f.CarriedFrom != dispositionFixtureCovers {
+		t.Fatalf("CarriedFrom = %q, want the report's own covers %q — a word-\"collision\" bare slug is an ordinary candidate whose reaffirmation stamps provenance", f.CarriedFrom, dispositionFixtureCovers)
+	}
+	// The backing record is DRAINED — no X-18 double-count, no same-id backing
+	// left to brick the next regeneration.
+	if len(after.NotResurfaced) != 0 {
+		t.Fatalf("NotResurfaced = %+v, want empty — a confirmed candidate's backing record must be removed (the double-count/brick chain is impossible for a word slug)", after.NotResurfaced)
+	}
+	if err := after.Validate(); err != nil {
+		t.Fatalf("Validate(): %v", err)
+	}
+}
+
 // TestRunDisposition_ConfirmsCandidate_Escalation_NoCarriedFrom is ac-2's
 // escalation half: a live candidate dispositioned with a DIFFERENT decision
 // than the old ruling is NOT a reaffirmation — no carried-from is stamped —
