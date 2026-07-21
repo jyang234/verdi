@@ -1,6 +1,7 @@
 package reclaim
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -106,6 +107,42 @@ func TestRow_Line_OneTemplatePerKind(t *testing.T) {
 			t.Errorf("case %d produced a line duplicating an earlier case: %q", i, line)
 		}
 		seen[line] = true
+	}
+}
+
+// TestRow_Line_UnhandledKind_FailsClosed pins Line()'s default arm (M3):
+// a Row carrying a Kind value outside dc-4's closed set (KindEligible ..
+// KindPartial) must render a legible, self-naming "internal error:
+// unhandled row kind" line — never silently produce an empty string or one
+// of the real templates — mirroring this package's own fail-closed
+// convention (internal/artifactview.DecodeMeta's unhandled-kind guard). A
+// human reading gc output sees the numeric kind and the unit's identity,
+// so an unmapped kind is a loud diagnostic, not a silent blank. The switch
+// enumerates 0..4; a value past the enum (here 99) and a negative value
+// both exercise the arm.
+func TestRow_Line_UnhandledKind_FailsClosed(t *testing.T) {
+	wtUnit := Unit{Branch: "design/x", WorktreePath: "/store/wt/x"}
+	for _, bogus := range []Kind{Kind(99), Kind(-1)} {
+		row := Row{Kind: bogus, Unit: wtUnit}
+		got := row.Line()
+		for _, want := range []string{
+			"reclaim: internal error",
+			"unhandled row kind",
+			// the numeric kind, so the diagnostic names exactly which value fell through
+			strconv.Itoa(int(bogus)),
+			// the unit's own identity, via the same unitDesc every real arm uses
+			"worktree /store/wt/x + branch design/x",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("Row{Kind: %d}.Line() = %q, want it to contain %q (fail-closed diagnostic)", int(bogus), got, want)
+			}
+		}
+		// A bogus kind must never masquerade as one of the real report leads.
+		for _, leak := range []string{"eligible:", "kept:", "reclaimed:", "refused:", "partial:"} {
+			if strings.HasPrefix(got, leak) {
+				t.Errorf("Row{Kind: %d}.Line() = %q, must not render as the real %q template", int(bogus), got, leak)
+			}
+		}
 	}
 }
 
