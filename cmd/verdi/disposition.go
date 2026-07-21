@@ -254,13 +254,34 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	// collides with a judged not-resurfaced entry must never resolve — drain
 	// or reaffirm — that entry, nor ever receive carried-from provenance the
 	// mechanism was never meant to stamp on it.
+	//
+	// A further exclusion (judged-collision-member-backing-resolution): if
+	// findingID is a slug-collision BASE MEMBER (2+ fresh judged findings
+	// shared its slug this run, so ReconcileJudged disambiguated a
+	// "<id>-collision-<n>" sibling and deliberately pre-filled NO candidate for
+	// the slug's prior ruling — "ambiguous which of the collision's members, if
+	// either, continues the slug's lineage"), this disposition is NOT a
+	// candidate confirmation. Resolving the backing record here — removing it,
+	// and on a matching decision stamping carried-from — would assert exactly
+	// the lineage continuity the reconciler declared unresolvable, from a path
+	// where no side-by-side candidate rendering was ever produced. So the
+	// backing record is LEFT in not-resurfaced (its own exit ramp stays the
+	// sanctioned resolution, reachable once the collision clears) and never
+	// stamped; the member is dispositioned normally and the caller discloses
+	// what was left behind. artifact.Validate blesses this one dispositioned-
+	// member + same-id backing overlap for exactly a collision base member.
+	collisionBackingLeft := false
 	if oldFinding.Kind == artifact.FindingJudged {
 		if nrIdx := findNotResurfacedIndex(decoded.NotResurfaced, findingID); nrIdx != -1 {
-			oldEntry := decoded.NotResurfaced[nrIdx]
-			if decision == oldEntry.Disposition {
-				updated.Findings[idx].CarriedFrom = decoded.Covers
+			if artifact.IsCollisionBaseMemberID(decoded.Findings, findingID) {
+				collisionBackingLeft = true
+			} else {
+				oldEntry := decoded.NotResurfaced[nrIdx]
+				if decision == oldEntry.Disposition {
+					updated.Findings[idx].CarriedFrom = decoded.Covers
+				}
+				updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
 			}
-			updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
 		}
 	}
 
@@ -317,6 +338,13 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	// not-resurfaced exit ramp's own "(not-resurfaced)" output
 	// (dispositionNotResurfaced), so a reader always knows which one happened.
 	fmt.Fprintf(stdout, "disposition: %s %s %s (findings): %s -> %s\n", verb, ref.String(), findingID, decision, rationale)
+	// judged-collision-member-backing-resolution: when the dispositioned member
+	// is a slug-collision base member, its prior ruling's not-resurfaced backing
+	// record was deliberately left intact (its lineage is ambiguous). Say so, so
+	// a reader knows a standing record still awaits explicit resolution.
+	if collisionBackingLeft {
+		fmt.Fprintf(stdout, "disposition: backing record for slug %s left in not-resurfaced — lineage ambiguous (collision); resolve it explicitly\n", findingID)
+	}
 	return 0
 }
 
@@ -394,8 +422,12 @@ func commitDisposition(reportPath string, raw []byte, updated *artifact.Deviatio
 //     The entry is REMOVED, releasing its identity from the budget — never
 //     zero from the judge's silence, but one by the human's own signature.
 //   - accepted-deviation: the human RE-AFFIRMS the standing deviation without
-//     resurfacing it. The rationale is updated in place and the entry STAYS,
-//     so it STAYS COUNTED in the budget — a re-affirmation is never a release.
+//     resurfacing it. The rationale is updated in place, carried-from:
+//     <covers-sha> is stamped (ac-2's reaffirmation provenance, symmetric with
+//     the candidate path — judged-not-resurfaced-reaffirm-provenance), and the
+//     entry STAYS, so it STAYS COUNTED in the budget — a re-affirmation is never
+//     a release. A `fixed` release, by contrast, is never a reaffirmation and
+//     carries no such stamp.
 //
 // --amend is a live-findings collision guard (undispositioned vs. already-
 // dispositioned) and has no meaning here: a not-resurfaced entry is by
@@ -431,11 +463,22 @@ func dispositionNotResurfaced(reportPath string, raw []byte, decoded *artifact.D
 			newBody, n = removeWholeLine(body, oldLine)
 		}
 	case artifact.FindingAcceptedDeviation:
-		// Re-affirm in place: update the rationale, keep it counted.
+		// Re-affirm in place: update the rationale, keep it counted, and stamp
+		// carried-from: <covers-sha> (judged-not-resurfaced-reaffirm-provenance).
+		// This IS a confirmed reaffirmation of the standing ruling at the current
+		// covering head, so ac-2's "a confirmed reaffirmation carries carried-from:
+		// <covers-sha> on the disposition" applies here exactly as it does on the
+		// candidate path (runDisposition's live reaffirmation) — otherwise an
+		// in-place reaffirmation would be indistinguishable from an entry never
+		// re-confirmed, an asymmetry the reaffirmation clause does not sanction.
+		// carried-from is frontmatter-only provenance (RenderNotResurfacedLine
+		// omits it, like RenderFindingLine) and excluded from the report digest,
+		// so the body patch and every VerifyDigest stay unaffected.
 		updated.NotResurfaced = append([]artifact.Finding(nil), decoded.NotResurfaced...)
 		reaffirmed := oldEntry
 		reaffirmed.Disposition = artifact.FindingAcceptedDeviation
 		reaffirmed.Note = rationale
+		reaffirmed.CarriedFrom = decoded.Covers
 		updated.NotResurfaced[nrIdx] = reaffirmed
 		action = "reaffirmed"
 		newBody, n = replaceWholeLine(body, oldLine, align.RenderNotResurfacedLine(reaffirmed))

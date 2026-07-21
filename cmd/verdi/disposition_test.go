@@ -900,6 +900,87 @@ func TestRunDisposition_OrdinaryFinding_NoNotResurfacedEntry_Unaffected(t *testi
 	}
 }
 
+// TestRunDisposition_CollisionMember_LeavesBackingRecord_NoCarriedFrom is
+// spec/finding-identity judged-collision-member-backing-resolution's fix proof:
+// when the live finding being dispositioned is a slug-collision base member
+// (2+ fresh judged findings shared its slug this run, so ReconcileJudged
+// disambiguated a "-collision-2" sibling and deliberately pre-filled NO
+// candidate for the slug's prior ruling — "ambiguous which of the collision's
+// members, if either, continues the slug's lineage"), the verb must NOT treat
+// the disposition as a candidate confirmation: it must NOT remove the slug's
+// not-resurfaced backing record and must NOT stamp carried-from on the member.
+// carried-from may never assert a lineage continuity no candidate rendering
+// ever presented. The member is dispositioned normally, the backing record is
+// LEFT in not-resurfaced (its own exit ramp stays the sanctioned resolution),
+// and the verb says so on stdout.
+//
+// The decision deliberately EQUALS the old ruling (accepted-deviation ==
+// accepted-deviation) — the exact input under which the buggy live path stamped
+// carried-from — so this is the strongest form of the bug.
+//
+// Red-first (before the fix): the live path removed the backing record and
+// stamped carried-from onto the member, asserting the very lineage continuity
+// ReconcileJudged refused to assert.
+func TestRunDisposition_CollisionMember_LeavesBackingRecord_NoCarriedFrom(t *testing.T) {
+	bin := buildVerdiBinary(t)
+
+	// A live slug collision on judged-dup: the base member, its -collision-2
+	// sibling, and the synthetic disclosure — exactly ReconcileJudged's own
+	// output shape. The slug's prior ruling sits in not-resurfaced as an
+	// ambiguous backing record (no candidate was pre-filled for it).
+	findings := []artifact.Finding{
+		{ID: "judged-dup", Kind: artifact.FindingJudged, Text: "first reading"},
+		{ID: "judged-dup-collision-2", Kind: artifact.FindingJudged, Text: "second, different reading"},
+		{ID: "judged-contract-violation-dup", Kind: artifact.FindingJudged, Text: "judge contract violation: 2 findings shared slug \"judged-dup\" within one run"},
+	}
+	notResurfaced := []artifact.Finding{
+		{ID: "judged-dup", Kind: artifact.FindingJudged, Text: "an old ruling under the same slug", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified"},
+	}
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, findings, notResurfaced, nil))
+	path := reportPathFor(root, "demo")
+
+	stdout, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "judged-dup", "accepted-deviation", "--rationale", "this collision member is an intentional deviation")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (disposition the member normally); stderr=%s", code, stderr)
+	}
+
+	// The verb SAYS SO: the backing record is left for explicit resolution.
+	if !strings.Contains(stdout, "backing record for slug judged-dup left in not-resurfaced") ||
+		!strings.Contains(stdout, "lineage ambiguous (collision)") ||
+		!strings.Contains(stdout, "resolve it explicitly") {
+		t.Fatalf("stdout = %q, want it to disclose the backing record left in not-resurfaced with ambiguous (collision) lineage to resolve explicitly", stdout)
+	}
+
+	after := decodeReportFile(t, path)
+
+	// The member is dispositioned — but with NO carried-from (no candidate ever
+	// presented this member as the backing record's continuation).
+	member, ok := findingByID(after.Findings, "judged-dup")
+	if !ok || member.Disposition != artifact.FindingAcceptedDeviation {
+		t.Fatalf("judged-dup = %+v (present=%v), want dispositioned accepted-deviation", member, ok)
+	}
+	if member.CarriedFrom != "" {
+		t.Fatalf("judged-dup CarriedFrom = %q, want empty — a collision member's disposition must never assert a lineage no candidate presented", member.CarriedFrom)
+	}
+
+	// The backing record is INTACT in not-resurfaced, untouched.
+	nr, ok := findingByID(after.NotResurfaced, "judged-dup")
+	if !ok {
+		t.Fatalf("backing record judged-dup was removed from not-resurfaced by a collision member's disposition: %+v", after.NotResurfaced)
+	}
+	if nr.Disposition != artifact.FindingAcceptedDeviation || nr.Note != "owner-ratified" || nr.CarriedFrom != "" {
+		t.Fatalf("backing record judged-dup = %+v, want left verbatim (accepted-deviation, owner-ratified, no stamp)", nr)
+	}
+
+	// The collision siblings are untouched and the report is self-consistent.
+	if sib, ok := findingByID(after.Findings, "judged-dup-collision-2"); !ok || sib.Dispositioned() {
+		t.Fatalf("collision sibling judged-dup-collision-2 = %+v (present=%v), want present and undispositioned", sib, ok)
+	}
+	if err := after.Validate(); err != nil {
+		t.Fatalf("resulting report failed to validate: %v", err)
+	}
+}
+
 // TestRunDisposition_ComputedFindingCollidingWithJudgedNotResurfaced_DoesNotDrain
 // is spec/finding-identity judged-reaffirm-judged-kind-scope's fix proof: a
 // computed finding and a judged not-resurfaced entry share the same
@@ -1023,6 +1104,12 @@ func TestRunDisposition_NotResurfacedOnly_ExitRamp(t *testing.T) {
 		if _, ok := findingByID(after.Findings, "judged-archived"); ok {
 			t.Fatalf("judged-archived leaked INTO findings: on a not-resurfaced disposition: %+v", after.Findings)
 		}
+		// judged-not-resurfaced-reaffirm-provenance: a `fixed` release is NOT a
+		// reaffirmation, so it stamps no carried-from anywhere — the surviving
+		// live finding stays byte-clean.
+		if live, ok := findingByID(after.Findings, "judged-live"); !ok || live.CarriedFrom != "" {
+			t.Fatalf("judged-live = %+v (present=%v), want no carried-from — a release never stamps reaffirmation provenance", live, ok)
+		}
 		if got := budgetAcceptedDeviationCount(t, path); got != 1 {
 			t.Fatalf("budget after `fixed` = %d, want 1 (dropped by exactly one — the archived identity released)", got)
 		}
@@ -1056,6 +1143,14 @@ func TestRunDisposition_NotResurfacedOnly_ExitRamp(t *testing.T) {
 		}
 		if f.Disposition != artifact.FindingAcceptedDeviation || f.Note != "re-affirmed: still a standing deviation" {
 			t.Fatalf("judged-archived = %+v, want accepted-deviation with the rationale updated in place", f)
+		}
+		// judged-not-resurfaced-reaffirm-provenance: an in-place reaffirmation is
+		// a confirmed reaffirmation of the standing ruling at the current covering
+		// head, so it carries carried-from: <covers-sha> exactly like the
+		// candidate-path reaffirmation (ac-2) — making a re-confirmed entry
+		// distinguishable from one that was never re-confirmed.
+		if f.CarriedFrom != dispositionFixtureCovers {
+			t.Fatalf("judged-archived CarriedFrom = %q, want the report's own covers %q (a confirmed in-place reaffirmation)", f.CarriedFrom, dispositionFixtureCovers)
 		}
 		if got := budgetAcceptedDeviationCount(t, path); got != 2 {
 			t.Fatalf("budget after `accepted-deviation` = %d, want 2 (unchanged — a re-affirmation is never a release)", got)

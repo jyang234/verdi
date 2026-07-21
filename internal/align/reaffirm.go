@@ -159,7 +159,11 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 			// recurrence does (judged-judged-slug-collision-carry).
 			for i, f := range group {
 				if i > 0 {
-					f.ID = fmt.Sprintf("%s-collision-%d", id, i+1)
+					// artifact.CollisionInfix is the single source of this
+					// reserved shape: Validate and the disposition verb read it
+					// back to recognize a collision base member, so the literal
+					// must never be duplicated across packages.
+					f.ID = fmt.Sprintf("%s%s%d", id, artifact.CollisionInfix, i+1)
 				}
 				carried, _ := carryExactMatch(f)
 				out = append(out, carried)

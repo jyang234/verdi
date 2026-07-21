@@ -1,8 +1,48 @@
 package artifact
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const deviationSchema = "verdi.deviation/v1"
+
+// CollisionInfix is the reserved id infix ReconcileJudged (internal/align)
+// appends when it disambiguates a slug that 2+ fresh judged findings shared
+// within one run: the first member keeps the bare slug and every later member
+// becomes "<slug>-collision-<n>" (n from 2). It lives here, at the shared
+// schema seam, because it is a schema-level fact — it determines which id
+// shapes are collision members and, through Validate below, which
+// findings:/not-resurfaced: overlaps are legitimate — so it must never drift
+// between its one producer (reaffirm.go) and the consumers that read it back
+// (Validate here; cmd/verdi's disposition verb).
+const CollisionInfix = "-collision-"
+
+// IsCollisionBaseMemberID reports whether id is the still-live base member of
+// a slug collision among findings — i.e., some other finding carries an id of
+// the form "<id><CollisionInfix><n>", the disambiguated sibling ReconcileJudged
+// only ever emits for a genuine within-run slug collision. A collision base
+// member's prior ruling is deliberately left unresolved (ReconcileJudged
+// pre-fills NO candidate for it: "ambiguous which of the collision's members,
+// if either, continues the slug's lineage"), so a DISPOSITIONED base member may
+// legitimately coexist with its same-id, same-kind not-resurfaced backing
+// record — the one exception to the "a confirmed finding's backing record must
+// be removed" rule Validate otherwise enforces (spec/finding-identity
+// judged-collision-member-backing-resolution). Disclosed limitation: this keys
+// off the reserved infix shape, so a hand-authored report that BOTH leaves a
+// confirmed candidate's backing record unremoved AND happens to carry a
+// "<id>-collision-<n>" finding would slip past the SAME-KIND rejection — a
+// contrived shape no generator produces, failing safe (a truthful backing
+// record persists) rather than dangerously.
+func IsCollisionBaseMemberID(findings []Finding, id string) bool {
+	prefix := id + CollisionInfix
+	for _, f := range findings {
+		if strings.HasPrefix(f.ID, prefix) {
+			return true
+		}
+	}
+	return false
+}
 
 // FindingKind tags a deviation finding as computed (regenerated graph/
 // contract diff) or judged (the alignment subagent's semantic reading)
@@ -226,6 +266,17 @@ func (fm DeviationFrontmatter) Validate() error {
 	// cross-namespace slug collision (computed boundary ids and judged boundary
 	// slugs share the same shape), not an unremoved backing record — it must
 	// decode, never be rejected.
+	//
+	// One further exception (spec/finding-identity judged-collision-member-
+	// backing-resolution): when the dispositioned findings: entry is a
+	// slug-collision BASE MEMBER (IsCollisionBaseMemberID — some other finding
+	// carries the reserved "<id>-collision-<n>" sibling id), its same-id,
+	// same-kind not-resurfaced backing record is LEFT unresolved on purpose.
+	// ReconcileJudged pre-filled no candidate for that slug (its lineage is
+	// ambiguous across the collision's members), so dispositioning the base
+	// member is never a candidate confirmation and must never drain the backing
+	// record — the overlap is the legitimate ambiguous-lineage shape, not a
+	// malformed unremoved backing record.
 	seenNotResurfaced := make(map[string]bool, len(fm.NotResurfaced))
 	for i, f := range fm.NotResurfaced {
 		if err := f.Validate(); err != nil {
@@ -238,7 +289,7 @@ func (fm DeviationFrontmatter) Validate() error {
 			return fmt.Errorf("artifact: not-resurfaced[%d]: duplicate id %q", i, f.ID)
 		}
 		seenNotResurfaced[f.ID] = true
-		if k, ok := dispositionedFindingKind[f.ID]; ok && k == f.Kind {
+		if k, ok := dispositionedFindingKind[f.ID]; ok && k == f.Kind && !IsCollisionBaseMemberID(fm.Findings, f.ID) {
 			return fmt.Errorf("artifact: not-resurfaced[%d]: id %q is already dispositioned as a %s finding in findings — a confirmed finding's not-resurfaced backing record must be removed", i, f.ID, f.Kind)
 		}
 	}

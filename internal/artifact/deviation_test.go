@@ -246,6 +246,77 @@ digest: sha256:` + deviationHex64 + "\n"
 	}
 }
 
+// TestDecodeDeviation_NotResurfaced_DispositionedCollisionMemberKeepsBacking
+// is spec/finding-identity judged-collision-member-backing-resolution's schema
+// half: a DISPOSITIONED judged slug-collision base member may legally coexist
+// with its still-unresolved judged not-resurfaced backing record of the SAME
+// id and kind. A slug that 2+ fresh findings shared this run is disambiguated
+// by ReconcileJudged into a base member (keeping the slug) plus one or more
+// "<slug>-collision-<n>" siblings, and it pre-fills NO candidate for the
+// slug's prior ruling ("ambiguous which of the collision's members, if either,
+// continues the slug's lineage"). Dispositioning the base member therefore
+// must NOT resolve that backing record — the lineage is genuinely ambiguous —
+// so the overlap the SAME-KIND rejection normally catches (a confirmed
+// candidate whose backing was never removed) is, for a collision base member,
+// the legitimate ambiguous-lineage shape. The presence of a "<slug>-collision-
+// <n>" sibling in findings: is the schema-visible signal of that collision;
+// without one, the SAME-KIND rejection still fires
+// (TestDecodeDeviation_NotResurfaced_Negative).
+func TestDecodeDeviation_NotResurfaced_DispositionedCollisionMemberKeepsBacking(t *testing.T) {
+	y := `schema: verdi.deviation/v1
+covers: 7f3c2a1
+findings:
+  - { id: judged-dup, kind: judged, text: "first reading", disposition: fixed, note: "n" }
+  - { id: judged-dup-collision-2, kind: judged, text: "second, different reading" }
+not-resurfaced:
+  - { id: judged-dup, kind: judged, text: "an old ruling under the same slug", disposition: accepted-deviation, note: "owner-ratified" }
+digest: sha256:` + deviationHex64 + "\n"
+	fm, err := DecodeDeviation([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeDeviation: %v, want a dispositioned collision base member + its ambiguous backing record to decode cleanly", err)
+	}
+	if len(fm.Findings) != 2 || fm.Findings[0].ID != "judged-dup" || !fm.Findings[0].Dispositioned() {
+		t.Fatalf("Findings = %+v, want a dispositioned judged-dup base member alongside its -collision-2 sibling", fm.Findings)
+	}
+	if len(fm.NotResurfaced) != 1 || fm.NotResurfaced[0].ID != "judged-dup" || !fm.NotResurfaced[0].Dispositioned() {
+		t.Fatalf("NotResurfaced = %+v, want the ambiguous backing record left intact", fm.NotResurfaced)
+	}
+}
+
+// TestIsCollisionBaseMemberID is the direct unit proof for the collision
+// base-member predicate the Validate relaxation and the disposition verb both
+// key off (spec/finding-identity judged-collision-member-backing-resolution):
+// a bare slug is a base member iff a sibling of the RESERVED "<id>-collision-<n>"
+// shape is present — a shared PREFIX alone (e.g. judged-dup vs judged-duplicate)
+// is never enough, so the predicate cannot false-positive on an unrelated
+// longer id.
+func TestIsCollisionBaseMemberID(t *testing.T) {
+	collided := []Finding{
+		{ID: "judged-dup", Kind: FindingJudged, Text: "a"},
+		{ID: "judged-dup-collision-2", Kind: FindingJudged, Text: "b"},
+		{ID: "judged-other", Kind: FindingJudged, Text: "c"},
+	}
+	cases := []struct {
+		name     string
+		findings []Finding
+		id       string
+		want     bool
+	}{
+		{"base member with a -collision-2 sibling present", collided, "judged-dup", true},
+		{"the disambiguated sibling itself is not a base member", collided, "judged-dup-collision-2", false},
+		{"an ordinary finding with no sibling is not a base member", collided, "judged-other", false},
+		{"a merely longer, unrelated id is not a collision sibling", []Finding{{ID: "judged-dup", Kind: FindingJudged, Text: "a"}, {ID: "judged-duplicate", Kind: FindingJudged, Text: "b"}}, "judged-dup", false},
+		{"no findings at all", nil, "judged-dup", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsCollisionBaseMemberID(tc.findings, tc.id); got != tc.want {
+				t.Fatalf("IsCollisionBaseMemberID(%q) = %v, want %v", tc.id, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDecodeDeviation_NotResurfaced_ComputedFindingSharesJudgedID proves the
 // judged-only scope of the not-resurfaced backing relationship (spec/finding-
 // identity judged-reaffirm-judged-kind-scope): a DISPOSITIONED COMPUTED finding
