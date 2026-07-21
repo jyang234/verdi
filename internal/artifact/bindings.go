@@ -61,6 +61,19 @@ func (b Binding) Validate() error {
 // forms are already shape-validated by Binding.Validate(); this function
 // additionally requires defaultSpecRef itself to be a valid, unpinned spec
 // ref when a bare entry needs it.
+//
+// A fragment entry that ALSO pins a revision (the out-of-grammar
+// spec/<name>@<commit>#<ac-id> form) fails closed here (spec/ritual-traps
+// ac-4, finding judged-ac4-pinned-fragment-entry-silently-unpinned).
+// Binding.Validate() admits the shape (it checks only Kind==spec &&
+// Fragment()), but resolution validates an ac id against the CURRENT
+// committed spec and has no way to honor a revision pin; silently dropping
+// the @commit — this function's prior behavior — let a caller pin an entry to
+// a revision whose AC set differs from HEAD and get a verdict about the wrong
+// revision with nothing disclosing it. Honoring the pin (resolving against the
+// pinned revision's own AC set) is a disclosed future extension; until then
+// the pin is rejected, not silently ignored, so both consumers (internal/lint
+// VL-003 and cmd/verdi/selfevidence) stay fail-closed.
 func ResolveBindingAC(defaultSpecRef, entry string) (specRef, acID string, err error) {
 	if acIDRe.MatchString(entry) {
 		ref, err := ParseRef(defaultSpecRef)
@@ -75,6 +88,9 @@ func ResolveBindingAC(defaultSpecRef, entry string) (specRef, acID string, err e
 	ref, err := ParseRef(entry)
 	if err != nil || ref.Kind != KindSpec || !ref.Fragment() {
 		return "", "", fmt.Errorf("artifact: ac entry %q is neither a bare ac-<slug> id nor a spec/<name>#<ac-id> fragment ref", entry)
+	}
+	if ref.Pinned() {
+		return "", "", fmt.Errorf("artifact: ac entry %q pins a revision (the spec/<name>@<commit>#<ac-id> form); ac-id resolution validates against the current committed spec and cannot honor a revision pin — honoring pins is a disclosed future extension", entry)
 	}
 	return Ref{Kind: ref.Kind, Name: ref.Name}.String(), ref.Object, nil
 }

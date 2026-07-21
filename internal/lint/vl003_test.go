@@ -344,6 +344,43 @@ bindings:
 	}
 }
 
+// TestVL003_RootBindings_PinnedFragmentAC_RedsFailClosed is spec/ritual-traps
+// judged-ac4-pinned-fragment-entry-silently-unpinned: a fragment-qualified
+// entry that ALSO pins a revision (spec/<name>@<commit>#<ac-id>) must red —
+// this check validates AC ids against the CURRENT committed spec and cannot
+// honor a revision pin. The named ac (ac-1) is one the target spec genuinely
+// declares, so the dropped-pin path would (wrongly) pass green; the pin itself
+// is therefore the sole reason this reds. Before the fix, ResolveBindingAC
+// silently discarded the @commit and the entry validated clean against HEAD —
+// a fail-open contrary to the rest of VL-003's posture. The finding must name
+// the offending entry verbatim and disclose the honest reason.
+func TestVL003_RootBindings_PinnedFragmentAC_RedsFailClosed(t *testing.T) {
+	const pinnedEntry = "spec/vl-003-fragment-target@0123456789abcdef0123456789abcdef01234567#ac-1"
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-fragment-owner", "spec.md"), vl003FragmentOwnerSpecMD)
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-fragment-target", "spec.md"), vl003FragmentTargetSpecMD)
+	writeTestFile(t, filepath.Join(dir, "verdi.bindings.yaml"), `schema: verdi.bindings/v1
+spec: spec/vl-003-fragment-owner
+bindings:
+  - { producer: some-producer, kind: static, acs: ["`+pinnedEntry+`"] }
+`)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-003")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1 (a pinned+fragment entry must fail closed, not silently validate its ac against HEAD):\n%s", len(findings), findingsString(findings))
+	}
+	msg := findings[0].Message
+	if !strings.Contains(msg, pinnedEntry) {
+		t.Errorf("finding message = %q, want it to name the offending pinned+fragment entry %q verbatim", msg, pinnedEntry)
+	}
+	for _, want := range []string{"pin", "current", "future extension"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("finding message = %q, want it to disclose the honest reason (contain %q)", msg, want)
+		}
+	}
+}
+
 // vl003DanglingPinSpecTmpl and vl003ReachablePinSpecTmpl mirror
 // testdata/violations/VL-003/dangling-pin/...'s own shape (a feature spec
 // carrying a single context[] pin under test), authored fresh per test so

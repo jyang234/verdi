@@ -241,11 +241,14 @@ func (vl003) checkOneBindingsFile(in *RunInput, path string, bindings *artifact.
 		for _, entry := range b.ACs {
 			specRef, acID, err := artifact.ResolveBindingAC(bindings.Spec, entry)
 			if err != nil {
-				// Binding.Validate() (decode time) already shape-checks every
-				// entry as a bare ac-<slug> id or a spec/<name>#<ac-id>
-				// fragment ref, and bindings.Spec itself is confirmed above —
-				// unreachable in practice, but fail closed rather than
-				// silently skip if it somehow still does.
+				// Reached by a fragment entry that also pins a revision (the
+				// spec/<name>@<commit>#<ac-id> form): Binding.Validate() admits
+				// the shape (Kind==spec && Fragment()), but ResolveBindingAC
+				// fails closed rather than validate a pinned entry's ac against
+				// HEAD as if the pin weren't there (spec/ritual-traps ac-4,
+				// judged-ac4-pinned-fragment-entry-silently-unpinned). Every
+				// other malformed shape is already caught at decode by
+				// Binding.Validate(); this stays fail-closed for those too.
 				findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("evidence-for binding %q: ac entry %q: %v", b.Producer, entry, err)})
 				continue
 			}
