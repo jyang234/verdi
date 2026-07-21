@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/store"
 )
 
 // DiagramAbsenceFindingID is the diagram-sweep mode's synthetic "judged
@@ -224,7 +223,7 @@ func RunDiagramSweep(ctx context.Context, runner JudgeRunner, in DiagramJudgedIn
 	findings := make([]artifact.ConflictFinding, 0, len(inner.Findings))
 	for _, jf := range inner.Findings {
 		findings = append(findings, artifact.ConflictFinding{
-			ID:        "judged-" + store.RefSlug(jf.ID),
+			ID:        judgedFindingID(jf.ID),
 			Kind:      artifact.FindingJudged,
 			Text:      fmt.Sprintf("%s (confidence %.2f)", jf.Text, jf.Confidence),
 			TargetRef: jf.Target,

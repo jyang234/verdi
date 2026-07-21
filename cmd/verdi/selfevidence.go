@@ -99,8 +99,13 @@ func produceSelfHostedEvidence(root, commit string, prov artifact.EvidenceProven
 // internal/bundle.BuildVerdicts's same refusal). Dangling bindings — an AC
 // id the named spec does not actually declare — fail loudly (03
 // §Declarations: "a misspelled ac-3 must never surface as a silent
-// no-signal"), checked here since this store-root sidecar sits outside
-// VL-003's existing (service-scoped) bindings discovery.
+// no-signal"), checked here independently of VL-003's own lint-time check
+// (spec/ritual-traps ac-3/ac-4 later gave VL-003 a root-discovery path plus
+// a fragment-qualified cross-check over this same store-root sidecar): this
+// producer's failure is a hard, operational error at `sync --produce` time,
+// never a soft lint finding awaiting disposition, and it must stay correct
+// regardless of whether lint has run first, after, or not at all in a given
+// invocation.
 func selfHostedEvidence(root string, prov artifact.EvidenceProvenance) (map[string][]artifact.Evidence, error) {
 	path := filepath.Join(root, selfHostedBindingsRelPath)
 	data, err := os.ReadFile(path)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -176,7 +177,7 @@ func runJudgeOnce(ctx context.Context, runner JudgeRunner, argv []string, timeou
 		findings = append(findings, artifact.Finding{
 			ID:   judgedFindingID(jf.ID),
 			Kind: artifact.FindingJudged,
-			Text: fmt.Sprintf("%s (confidence %.2f)", normalizeJudgeText(jf.Text), jf.Confidence),
+			Text: decorateConfidence(normalizeJudgeText(jf.Text), jf.Confidence),
 		})
 	}
 	return &JudgeSuccess{Findings: findings, Stdin: prompt, RawResult: rawResult}, nil
@@ -189,37 +190,58 @@ func runJudgeOnce(ctx context.Context, runner JudgeRunner, argv []string, timeou
 // slug.
 const reservedIDGuard = "reserved"
 
-// judgedFindingID mints the stable finding id for a raw judge slug: the
-// normative "judged-" + store.RefSlug(rawSlug), then — the RESERVATION half of
-// spec/finding-identity's judged-reserved-id-shape guard
-// (judged-reserved-id-shape-substring-match) — neutralized if that id would
-// otherwise land on a shape ReconcileJudged alone may MINT
-// (artifact.IsCollisionMachineryID: the numeric-tail collision-member suffix
-// "<slug><CollisionInfix><n>" or the artifact.ContractViolationIDPrefix prefix).
+// judgedFindingID normalizes a judge-supplied raw finding id into this
+// package's own stable "judged-<slug>" finding id — the shared minting helper
+// for every judge-consuming mode (this file's runJudgeOnce,
+// decision_judge.go's RunDecisionSweep, diagram_judge.go's RunDiagramSweep).
+// rawID is judge-supplied free text (S5's contract only requires {id, text,
+// confidence}). It composes two independently-pinned guards, in order, at the
+// single MINT seam.
 //
-// A judge must never be able to FORGE either shape from its own slug, or the two
-// id consumers — ReconcileJudged's candidate path (no machinery guard) and the
-// disposition verb's live path (the IsCollisionMachineryID branch) — would
-// disagree about the same id (the L-N13 consumers-agree property): a forged
-// suffix id would get a rendered ac-1 Candidate yet have its live-path
-// resolve+stamp withheld. Anchoring the classifier to the minted shapes
-// (artifact.collisionSuffixRe) already keeps a genuine WORD-"collision" slug out
-// of the machinery class; this seam closes the other direction — a raw slug
-// shaped EXACTLY like a minted id.
+// (1) PREFIX IDEMPOTENCE + DOUBLED-ECHO PRESERVATION (spec/ritual-traps ac-2,
+// X-1's sibling trap). On certain regeneration/carry paths a caller re-presents
+// a prior finding's own already-"judged-"-prefixed id back to the judge as
+// context; if the judge echoes it verbatim, slugging that value and
+// unconditionally re-prefixing produced "judged-judged-..." — a tool defect. So
+// a raw id whose slug already carries the "judged-" prefix is used AS-IS rather
+// than re-prefixed. When that echoed id is itself an ALREADY-DOUBLED archived id
+// ("judged-judged-x") the short-circuit preserves it VERBATIM — deliberately NOT
+// normalized to "judged-x" (adjudicated, finding
+// judged-ac2-echoed-doubled-id-still-doubles): dispositions reference finding
+// ids exactly as originally minted (the W4 precedent), so collapsing a doubled
+// id would sever the id-join to any archived disposition recorded against the
+// doubled form, orphaning it. "Exactly one judged- prefix" is thus a PROSPECTIVE
+// mint-time property of fresh ids, never a retroactive renumbering of an id a
+// prior report already minted. (TestJudgedFindingID,
+// TestJudgedFindingID_EchoedDoubledID_PreservedVerbatim.)
 //
-// THE ESCAPE splices reservedIDGuard so the reserved shape breaks:
-//   - reserved PREFIX: the guard immediately after "judged-", so the id no
-//     longer begins with ContractViolationIDPrefix; and
-//   - reserved numeric TAIL: the guard as a trailing segment, so the id no
-//     longer ends in "<CollisionInfix><digits>".
+// (2) RESERVED-SHAPE ESCAPE (spec/finding-identity's judged-reserved-id-shape
+// guard, judged-reserved-id-shape-substring-match). Whatever id the prefix rule
+// yields, a judge must never end up minting one that IsCollisionMachineryID — a
+// shape ReconcileJudged ALONE may mint (the numeric-tail collision member
+// "<slug><CollisionInfix><n>" or the ContractViolationIDPrefix) — or the two id
+// consumers (ReconcileJudged's candidate path vs. the disposition verb's live
+// path) would disagree about the same id (the L-N13 consumers-agree property: a
+// forged shape gets a rendered ac-1 Candidate yet has its live-path
+// resolve+stamp withheld). The escape splices reservedIDGuard so the reserved
+// shape breaks — the guard right after "judged-" (so the id no longer begins
+// with ContractViolationIDPrefix) and/or as a trailing segment (so it no longer
+// ends in "<CollisionInfix><digits>"). Running the escape AFTER the prefix rule
+// is deliberate: it closes the forge in BOTH directions — a fresh raw slug
+// shaped exactly like a minted id, AND a judge trying to smuggle a reserved
+// shape through the verbatim echo path above (e.g. a raw
+// "judged-contract-violation-x"), which the prefix rule alone would preserve
+// intact. (TestJudgedFindingID_ReservesMintedShapes.)
 //
-// It is a literal transform, so judgedFindingID is a pure, deterministic
-// function of rawSlug — the same underlying issue keeps the SAME id across runs,
-// so its disposition still carries (spec/finding-identity's whole identity
-// contract). And because the escaped id is itself NEVER a reserved shape (its
-// prefix no longer starts with the CV literal; its tail no longer ends in
-// digits), re-minting from the escaped id's own slug is a no-op — the guard is
-// idempotent and never compounds across regenerations.
+// The two guards compose without conflict: the escape is a literal transform
+// whose result is ITSELF never a reserved shape (its prefix no longer starts
+// with the CV literal; its tail no longer ends in digits), so re-minting from an
+// escaped id — whether slug-stripped or echoed back "judged-"-prefixed — is a
+// no-op (the guard is idempotent, never compounds), and an echoed doubled id
+// that is not a reserved shape passes through both guards untouched. Fixed
+// prospectively only: this touches an id solely at MINT time; nothing rewrites
+// an id already read back off an archived report (internal/artifact decodes
+// Finding.ID with no transform).
 //
 // RESIDUAL (disclosed, self-healing): the escape is not injective, so a raw
 // judge slug that already mints to an escaped form could in principle collide
@@ -227,8 +249,18 @@ const reservedIDGuard = "reserved"
 // reserved-shaped slug, and a same-run collision is caught and disclosed by
 // ReconcileJudged's own within-run collision machinery (every member suffixed +
 // a contract-violation finding), never a silent merge.
-func judgedFindingID(rawSlug string) string {
-	id := "judged-" + store.RefSlug(rawSlug)
+func judgedFindingID(rawID string) string {
+	// (1) Prefix idempotence + doubled-echo preservation: a slug already
+	// carrying "judged-" is used as-is (a re-presented prior id is never
+	// re-prefixed; an archived doubled id survives verbatim).
+	slug := store.RefSlug(rawID)
+	id := slug
+	if !strings.HasPrefix(slug, "judged-") {
+		id = "judged-" + slug
+	}
+	// (2) Reserved-shape escape, applied to whatever (1) yielded — including a
+	// verbatim echo — so a judge can never FORGE a shape ReconcileJudged alone
+	// may mint.
 	if strings.HasPrefix(id, artifact.ContractViolationIDPrefix) {
 		// Break the reserved PREFIX: splice the guard right after "judged-".
 		id = "judged-" + reservedIDGuard + "-" + strings.TrimPrefix(id, "judged-")
@@ -240,6 +272,60 @@ func judgedFindingID(rawSlug string) string {
 		id = id + "-" + reservedIDGuard
 	}
 	return id
+}
+
+// confidenceSuffixRE matches ONE trailing " (confidence N.NN)" decoration of
+// exactly the shape decorateConfidence itself mints: a single leading space,
+// the literal "(confidence ", a %.2f-shaped number (optional sign, one-or-more
+// integer digits, a dot, exactly two fractional digits), and a closing paren —
+// anchored to end-of-string so only a genuine TAIL decoration is stripped,
+// never a mint-shaped fragment the finding text legitimately quotes mid-sentence
+// (e.g. this very defect's own report quotes a doubled "(confidence 0.30)
+// (confidence 0.30)" as its witness, which must survive intact). A one-digit
+// fractional part or a non-numeric parenthetical is not this mint shape and is
+// deliberately left alone.
+var confidenceSuffixRE = regexp.MustCompile(` \(confidence -?[0-9]+\.[0-9]{2}\)$`)
+
+// decorateConfidence appends the CURRENT run's confidence to a judge-emitted
+// finding text exactly once, idempotently — the text-half analogue of
+// judgedFindingID's "judged-" prefix idempotence, at the same ingestion seam
+// (spec/ritual-traps: the confidence suffix is the sibling trap of the prefix
+// the id half already guards).
+//
+// runJudgeOnce decorates every judged finding's text with " (confidence N.NN)".
+// On certain regeneration/carry paths (spec/finding-identity) a prior report's
+// already-decorated text is re-presented to the judge as context; if the judge
+// echoes it back verbatim, a naive append lands a SECOND suffix, and each carry
+// round adds another (the render-echo-redecorate loop that produced
+// "judged-judged-" for the id half). Before appending, strip every trailing
+// suffix of the shape this function itself mints — REPEATEDLY, so an
+// already-doubled archived echo collapses back to bare text — then append this
+// run's confidence once. The result carries exactly one suffix reflecting THIS
+// run, regardless of how many the echoed text arrived with. (A judge whose
+// genuine free-text happens to END with a mint-shaped "(confidence N.NN)" is
+// indistinguishable from an echo and is treated as one — the same benign
+// tradeoff judgedFindingID makes for a raw id that genuinely begins "judged-";
+// only the exact tail is at risk, never mid-text content, per the $ anchor.)
+//
+// Fixed prospectively only (the judgedFindingID precedent): this runs solely at
+// MINT time on a judge exchange being ingested now; nothing rewrites text
+// already read back off an archived report (internal/artifact decodes
+// Finding.Text with no transform), so reports already on disk are untouched.
+// Unlike the id half, this collapse carries no orphaning risk: nothing joins on
+// Finding.Text. It feeds align.Identity's content hash (identity.go), but that
+// hash is a same-process disposition-carry match that already fails closed on
+// ANY text change and is never a persisted join key — persisted dispositions
+// reference a finding by its ID (cmd/verdi/disposition.go matches f.ID, never
+// the text hash). A finding minted under the old doubling bug therefore simply
+// fails closed to undispositioned on its first post-fix regeneration (a human
+// re-looks once), after which the now-stable text lets its disposition carry
+// forward normally — a strict improvement, since the growing doubled text broke
+// carry every round.
+func decorateConfidence(text string, confidence float64) string {
+	for confidenceSuffixRE.MatchString(text) {
+		text = confidenceSuffixRE.ReplaceAllString(text, "")
+	}
+	return fmt.Sprintf("%s (confidence %.2f)", text, confidence)
 }
 
 // normalizeJudgeText replaces every maximal run of Unicode control

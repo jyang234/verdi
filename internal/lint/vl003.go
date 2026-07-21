@@ -175,32 +175,128 @@ func (r vl003) checkPin(in *RunInput, path, field, pinned string) []Finding {
 // checkBindings validates every discovered verdi.bindings.yaml sidecar's
 // evidence-for join: its `spec:` must resolve to a spec in the committed
 // zone, and every AC id its bindings name must be declared by that spec.
-func (vl003) checkBindings(in *RunInput) []Finding {
+// Beyond the Services loop's own discovered sidecars, the module root's own
+// verdi.bindings.yaml is root-discovered directly (spec/ritual-traps ac-3):
+// a Service is only ever discovered from a directory containing
+// .flowmap.yaml, and per D6-4 this repository deliberately has none at its
+// module root, so without this second, unconditional check the root file —
+// the very file this design series' stories append fragment-qualified
+// entries to — would stay invisible to checkBindings forever (chronicle
+// P2-3(b)).
+func (r vl003) checkBindings(in *RunInput) []Finding {
 	var findings []Finding
+	rootDiscoveredAsService := false
 	for _, svc := range in.Snapshot.Services {
+		if svc.Dir == in.Root {
+			rootDiscoveredAsService = true
+		}
 		if svc.Bindings == nil {
 			continue
 		}
-		bindingsPath := "verdi.bindings.yaml (" + svc.Name + ")"
+		findings = append(findings, r.checkOneBindingsFile(in, "verdi.bindings.yaml ("+svc.Name+")", svc.Bindings)...)
+	}
 
-		d, ok := in.Snapshot.ByRef[svc.Bindings.Spec]
-		if !ok || len(d) == 0 || d[0].Spec == nil {
-			findings = append(findings, Finding{Rule: "VL-003", Path: bindingsPath, Message: fmt.Sprintf("spec %q does not resolve to a spec in the committed zone", svc.Bindings.Spec)})
-			continue
+	// Root-discovery: skipped only when some discovered Service is ALREADY
+	// rooted exactly at the module root (a .flowmap.yaml there would make
+	// this store a flowmap service of itself — never true for this
+	// repository per D6-4, but guarding against it keeps a hypothetical
+	// store that does from having its one root bindings file double-checked
+	// under two different labels).
+	if !rootDiscoveredAsService {
+		switch {
+		case in.Snapshot.RootBindingsErr != nil:
+			findings = append(findings, Finding{Rule: "VL-003", Path: rootBindingsDisplayPath, Message: fmt.Sprintf("does not decode: %v", in.Snapshot.RootBindingsErr)})
+		case in.Snapshot.RootBindings != nil:
+			findings = append(findings, r.checkOneBindingsFile(in, rootBindingsDisplayPath, in.Snapshot.RootBindings)...)
 		}
-		acs := make(map[string]bool, len(d[0].Spec.AcceptanceCriteria))
-		for _, ac := range d[0].Spec.AcceptanceCriteria {
-			acs[ac.ID] = true
-		}
-		for _, b := range svc.Bindings.Bindings {
-			for _, ac := range b.ACs {
-				if !acs[ac] {
-					findings = append(findings, Finding{Rule: "VL-003", Path: bindingsPath, Message: fmt.Sprintf("evidence-for binding %q names ac %q, which %q does not declare", b.Producer, ac, svc.Bindings.Spec)})
-				}
+	}
+
+	return findings
+}
+
+// rootBindingsDisplayPath is the finding Path label for the module root's
+// own verdi.bindings.yaml (spec/ritual-traps ac-3) — distinguished from a
+// discovered Service's own "verdi.bindings.yaml (<service>)" label.
+const rootBindingsDisplayPath = "verdi.bindings.yaml (root)"
+
+// checkOneBindingsFile validates one decoded Bindings artifact's
+// evidence-for join against the committed zone: `spec:` (the file's own
+// primary/owning spec) must resolve, and every AC id every binding names
+// must be declared — a bare ac-<slug> entry against the owning spec's own
+// declared criteria, a fragment-qualified spec/<name>#<ac-id> entry against
+// the NAMED spec's own declared criteria instead (spec/ritual-traps ac-4;
+// artifact.ResolveBindingAC is the same resolution helper
+// cmd/verdi/selfevidence.go's self-hosted producer already uses for this
+// exact bare-vs-fragment distinction). path is the display label naming
+// which discovered/root bindings file a finding belongs to.
+func (vl003) checkOneBindingsFile(in *RunInput, path string, bindings *artifact.Bindings) []Finding {
+	var findings []Finding
+
+	_, owningResolves := in.Snapshot.ByRef[bindings.Spec]
+	if !owningResolves {
+		// The file's own primary/owning spec does not resolve. Report it once,
+		// but do NOT abandon the AC loop below: a fragment-qualified entry
+		// (spec/<name>#<ac-id>) validates against its own NAMED target spec and
+		// never touches bindings.Spec at all (spec/ritual-traps ac-4), so a
+		// typo'd fragment AC id must still red BY NAME here rather than hide
+		// behind this owning-ref finding until the owner is fixed
+		// (judged-ac4-broken-owning-spec-ref-masks-fragment-typos). Only bare
+		// ac-<slug> entries genuinely inherit bindings.Spec as their target;
+		// they are skipped in the loop, so this finding is not multiplied into
+		// one redundant per-bare-entry copy each.
+		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("spec %q does not resolve to a spec in the committed zone", bindings.Spec)})
+	}
+
+	for _, b := range bindings.Bindings {
+		for _, entry := range b.ACs {
+			if !owningResolves && artifact.IsBareACEntry(entry) {
+				// A bare entry's target IS the (unresolvable) owning spec,
+				// already reported above; validating it would only duplicate
+				// that finding. Fragment-qualified entries fall through and are
+				// validated against their own named spec regardless.
+				continue
+			}
+			specRef, acID, err := artifact.ResolveBindingAC(bindings.Spec, entry)
+			if err != nil {
+				// Reached by a fragment entry that also pins a revision (the
+				// spec/<name>@<commit>#<ac-id> form): Binding.Validate() admits
+				// the shape (Kind==spec && Fragment()), but ResolveBindingAC
+				// fails closed rather than validate a pinned entry's ac against
+				// HEAD as if the pin weren't there (spec/ritual-traps ac-4,
+				// judged-ac4-pinned-fragment-entry-silently-unpinned). Every
+				// other malformed shape is already caught at decode by
+				// Binding.Validate(); this stays fail-closed for those too.
+				findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("evidence-for binding %q: ac entry %q: %v", b.Producer, entry, err)})
+				continue
+			}
+			acs, resolved := targetACSet(in, specRef)
+			if !resolved {
+				findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("evidence-for binding %q names ac %q, whose target spec %q does not resolve to a spec in the committed zone", b.Producer, entry, specRef)})
+				continue
+			}
+			if !acs[acID] {
+				findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("evidence-for binding %q names ac %q, which %q does not declare", b.Producer, entry, specRef)})
 			}
 		}
 	}
 	return findings
+}
+
+// targetACSet resolves specRef against the committed zone and returns its
+// declared AC-id set; resolved is false when specRef does not resolve to a
+// decoded spec at all (a nil map is never returned alongside resolved ==
+// true, even for a spec declaring zero ACs, so callers can trust the bool
+// alone).
+func targetACSet(in *RunInput, specRef string) (acs map[string]bool, resolved bool) {
+	d, ok := in.Snapshot.ByRef[specRef]
+	if !ok || len(d) == 0 || d[0].Spec == nil {
+		return nil, false
+	}
+	acs = make(map[string]bool, len(d[0].Spec.AcceptanceCriteria))
+	for _, ac := range d[0].Spec.AcceptanceCriteria {
+		acs[ac.ID] = true
+	}
+	return acs, true
 }
 
 // externalRefSet computes every index-minted external ref

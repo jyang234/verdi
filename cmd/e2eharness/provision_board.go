@@ -87,6 +87,22 @@ const (
 // proof. EMPTY_SPEC (income-verification) keeps a short one-line problem
 // headline AND an empty body section: no body, no clamp — the degenerate
 // case (a short placard gets no affordance).
+//
+// The outcome attribute's anchor is deliberately written in the heading's
+// OWN case ("#Outcome" against "## Outcome") rather than pre-lowercased
+// like every other anchor in this file (spec/ritual-traps finding
+// judged-ac1-witness-case-never-crosses-the-browser-gate): ac-1's
+// slug-symmetric anchor resolution was pinned only at Go unit seams
+// (internal/artifact.TestResolveAnchor_CaseSymmetry,
+// internal/workbench.TestBodySection_MixedCaseAnchorResolves) because every
+// browser-gate fixture anchor — this one included, until now — was already
+// lowercase, so a case mismatch here never actually exercised the
+// slug-symmetric path through a real board render. 33-board-expand.spec.ts's
+// width-independent Outcome-body assertion (SHOWCASE.DESIGN_SPEC) is the
+// placard-body render gate this witness now crosses: reverting
+// attributebody.go's slugify-the-anchor-side fix (c3b7abb) reds that
+// assertion (the section is silently dropped), proving the browser gate —
+// not only the unit seams beneath it — now holds this trap shut.
 const designSpec = `---
 id: spec/refi-decline-flow
 kind: spec
@@ -95,7 +111,7 @@ title: "Refinancing decline flow"
 status: draft
 owners: [platform-team]
 problem: { text: "applicants keep acting on stale decline reasons after the underlying data changes, and the cost of that gap compounds at every touchpoint: they re-apply against a rule that no longer holds, they call support to contest a decision that has already been reversed, and some abandon the product entirely in the belief that a hard block still stands. Each of those paths generates avoidable rework for the servicing team, and every repetition erodes the applicant's trust that the decline they were shown is the decline that is actually real.", anchor: "#problem" }
-outcome: { text: "declined applicants see the current decline state and a concrete next step", anchor: "#outcome" }
+outcome: { text: "declined applicants see the current decline state and a concrete next step", anchor: "#Outcome" }
 acceptance_criteria:
   - { id: ac-1, text: "a declined applicant sees the current decline reason within a minute of a data change", evidence: [behavioral, attestation], anchor: "#ac-1" }
   - { id: ac-2, text: "a reversed decline clears the notice everywhere it was shown", evidence: [behavioral, attestation], anchor: "#ac-2" }

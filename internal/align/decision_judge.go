@@ -20,7 +20,6 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
-	"github.com/jyang234/verdi/internal/store"
 )
 
 // DecisionAbsenceFindingID is the design-branch mode's synthetic
@@ -283,7 +282,7 @@ func RunDecisionSweep(ctx context.Context, runner JudgeRunner, in DecisionJudged
 	findings := make([]artifact.ConflictFinding, 0, len(inner.Findings))
 	for _, jf := range inner.Findings {
 		findings = append(findings, artifact.ConflictFinding{
-			ID:        "judged-" + store.RefSlug(jf.ID),
+			ID:        judgedFindingID(jf.ID),
 			Kind:      artifact.FindingJudged,
 			Text:      fmt.Sprintf("%s (confidence %.2f)", normalizeJudgeText(jf.Text), jf.Confidence),
 			TargetRef: jf.Target,

@@ -54,6 +54,43 @@ Prose.
 // the removal and the "is it gone" assertion can't silently drift apart.
 const placardBodyFixtureOutcomeSection = "## Outcome\n\nA rewritten flow where:\n\n- decisions read in *plain English*\n- appeals resolve in one business day\n\n"
 
+// placardBodyMixedCaseSpec carries X-1's exact witness at the placard seam:
+// the problem and outcome attribute anchors are written in their headings'
+// OWN original case ("#Problem"/"#Outcome" against "## Problem"/"## Outcome")
+// — the mixed-case form spec/ritual-traps ac-1 taught artifact.ResolveAnchor
+// to resolve by slugifying BOTH sides. Nothing anywhere flags this spec: it
+// decodes, and its own anchor validation (SpecFrontmatter.ResolveObjectAnchors,
+// VL-014's resolver) resolves both anchors slug-symmetrically. The placard
+// body seam documents itself (attributebody.go) as bound to that SAME rule,
+// so it must resolve these anchors too — not silently drop the authored
+// prose (finding judged-ac1-workbench-placard-body-resolution-still-asymmetric).
+const placardBodyMixedCaseSpec = `---
+id: spec/placard-body-mixedcase
+kind: spec
+class: feature
+title: "Placard body mixed-case fixture"
+status: draft
+owners: [platform-team]
+problem: { text: "short problem headline", anchor: "#Problem" }
+outcome: { text: "short outcome headline", anchor: "#Outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "x", evidence: [attestation], anchor: "#ac-1" }
+---
+# Placard body mixed-case fixture
+
+## Problem
+
+Applicants distrust the mixed-case-anchored decline explainer, a distinctively worded confession.
+
+## Outcome
+
+Appeals resolve in one business day under the rewritten flow.
+
+## ac-1
+
+Prose.
+`
+
 // mustSplitAndDecode is this file's own tiny fixture helper: unlike
 // mustDecodeSpecForTest (projection_test.go), it keeps the body instead of
 // discarding it. Every OTHER buildProjection call site in this package
@@ -110,6 +147,62 @@ func TestBodySection(t *testing.T) {
 		if _, ok := bodySection([]byte(body), slug); !ok {
 			t.Errorf("bodySection did not resolve slug %q, but artifact.HeadingAnchors recognizes it as a heading", slug)
 		}
+	}
+}
+
+// TestBodySection_MixedCaseAnchorResolves is X-1's exact witness at this
+// render seam (spec/ritual-traps ac-1 / finding
+// judged-ac1-workbench-placard-body-resolution-still-asymmetric): an anchor
+// written in the heading's OWN original case ("AC-1" against "## AC-1") must
+// resolve to that section, because ac-1 made resolution slug-symmetric —
+// both sides pass through artifact.SlugifyHeading. Before this seam
+// slugified the anchor side too it found nothing (SlugifyHeading("AC-1") =
+// "ac-1" != "AC-1"), silently dropping the section's prose. The prior
+// cross-check loop above never caught this: it feeds already-lowercased
+// HeadingAnchors slugs, never the mixed-case value an author actually writes.
+func TestBodySection_MixedCaseAnchorResolves(t *testing.T) {
+	const body = "## AC-1\n\nAuthored prose under a mixed-case heading.\n"
+	const want = "Authored prose under a mixed-case heading."
+	// Every form artifact.ResolveAnchor accepts for this heading: the
+	// heading's own case, hash-prefixed, and the spaced spelling that
+	// slugifies to the same "ac-1".
+	for _, anchor := range []string{"AC-1", "#AC-1", "AC 1", "#AC 1"} {
+		t.Run(anchor, func(t *testing.T) {
+			got, ok := bodySection([]byte(body), anchor)
+			if !ok {
+				t.Fatalf("bodySection(%q) found no section; ac-1 makes this resolve against ## AC-1 (slug-symmetric), and the placard's own doc invariant binds it to that rule", anchor)
+			}
+			if got != want {
+				t.Errorf("bodySection(%q) = %q, want %q", anchor, got, want)
+			}
+		})
+	}
+}
+
+// TestBodySection_AgreesWithResolveAnchor pins the invariant bodySection's
+// own doc comment asserts and that finding
+// judged-ac1-workbench-placard-body-resolution-still-asymmetric showed was
+// false post-ac-1: a section this function finds is ALWAYS the one the
+// spec's own anchor validation (artifact.ResolveAnchor over HeadingAnchors —
+// the VL-014 resolver) would resolve to, for the SAME anchor an author
+// writes, not only its pre-lowercased slug. The biconditional is checked
+// over resolving mixed-case, resolving lowercase, and non-resolving anchors,
+// so a fix that over-resolved (matched an absent anchor) would red here too.
+func TestBodySection_AgreesWithResolveAnchor(t *testing.T) {
+	const body = "## AC-1\n\nprose\n\n## Plain Heading\n\nmore\n"
+	anchors := artifact.HeadingAnchors([]byte(body))
+	for _, anchor := range []string{
+		"AC-1", "#AC-1", "ac-1", "AC 1", // resolve to ## AC-1
+		"Plain Heading", "plain-heading", "PLAIN HEADING", // resolve to ## Plain Heading
+		"#nope", "totally-absent", "", // resolve to nothing
+	} {
+		t.Run(anchor, func(t *testing.T) {
+			wantResolves := artifact.ResolveAnchor(anchors, anchor)
+			_, ok := bodySection([]byte(body), anchor)
+			if ok != wantResolves {
+				t.Errorf("bodySection(%q) ok=%v but artifact.ResolveAnchor=%v — the two seams disagree; bodySection's documented invariant is that a section it finds is always the one the spec's own anchor validation would resolve to", anchor, ok, wantResolves)
+			}
+		})
 	}
 }
 
@@ -191,6 +284,39 @@ func TestBuildProjection_AttributeBodyHTML(t *testing.T) {
 	}
 	if again.ProblemBodyHTML != p.ProblemBodyHTML || again.OutcomeBodyHTML != p.OutcomeBodyHTML {
 		t.Error("buildProjection's attribute body HTML is not deterministic across identical inputs")
+	}
+}
+
+// TestBuildProjection_MixedCaseAnchor_PlacardBodyNotDropped is the finding's
+// end-to-end proof (spec/ritual-traps
+// judged-ac1-workbench-placard-body-resolution-still-asymmetric): a spec
+// whose problem/outcome anchors are written in their headings' own case
+// VALIDATES green (its own ResolveObjectAnchors resolves both anchors
+// slug-symmetrically, per ac-1) — so nothing upstream flags it — yet the
+// placard must carry the authored ## Problem/## Outcome body prose, not
+// silently drop it. Before the render seam was made slug-symmetric too,
+// ProblemBodyHTML/OutcomeBodyHTML both came back "" with no finding anywhere:
+// the trap ac-1 closed at the validation seam reopening, invisibly, at the
+// render seam that documents itself as bound to the same rule.
+func TestBuildProjection_MixedCaseAnchor_PlacardBodyNotDropped(t *testing.T) {
+	fm, body := mustSplitAndDecode(t, placardBodyMixedCaseSpec)
+
+	// Premise the finding rests on: the mixed-case anchors are green at the
+	// spec's OWN anchor-resolution seam (ac-1's slug-symmetric resolver), so
+	// no error and no finding is raised anywhere for this spec.
+	if err := fm.ResolveObjectAnchors(body); err != nil {
+		t.Fatalf("premise broken: mixed-case anchors must resolve green post-ac-1, got: %v", err)
+	}
+
+	p, err := buildProjection("placard-body-mixedcase", fm, body, nil, nil, nil, modeReadOnly)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	if !strings.Contains(string(p.ProblemBodyHTML), "mixed-case-anchored decline explainer") {
+		t.Errorf("ProblemBodyHTML silently dropped the authored prose for a validation-green mixed-case anchor (#Problem against ## Problem): got %q", p.ProblemBodyHTML)
+	}
+	if !strings.Contains(string(p.OutcomeBodyHTML), "Appeals resolve in one business day") {
+		t.Errorf("OutcomeBodyHTML silently dropped the authored prose for a validation-green mixed-case anchor (#Outcome against ## Outcome): got %q", p.OutcomeBodyHTML)
 	}
 }
 

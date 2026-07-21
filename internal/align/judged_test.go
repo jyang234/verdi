@@ -1,12 +1,15 @@
 package align
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // guide-claim: 11-configurable-alignment-judge
@@ -186,6 +189,124 @@ func TestRunJudged_WaitTrue_JudgeRequiredTrue_TimeoutIsWaitExpiredNotRequiredAbs
 	var reqAbsent *ErrJudgeRequiredAbsent
 	if errors.As(err, &reqAbsent) {
 		t.Fatal("error must not ALSO satisfy errors.As for *ErrJudgeRequiredAbsent — that would wrongly let cmd/verdi/align.go pick exit 1 over ac-2's exit 2")
+	}
+}
+
+// TestArchivedDoubledJudgedID_DecodesAndRoundTripsUntouched is spec/ritual-
+// traps ac-2's prospective-only guarantee: a fixture standing in for an
+// already-archived deviation-report.md whose finding carries the OLD
+// doubled "judged-judged-..." id form (the exact shape judgedFindingID's
+// pre-fix minting bug at judge.go/decision_judge.go/diagram_judge.go could
+// produce on a regeneration path that fed a prior finding's own id back
+// through the judge) must still strict-decode through
+// internal/artifact.DecodeDeviation and carry every field — the doubled id
+// above all — through byte-for-byte unchanged. The fix here only ever
+// touches an id at MINT time (judgedFindingID, called from the three
+// judge-exec call sites); nothing on the decode path inspects or
+// normalizes Finding.ID at all, so a real archived disposition that already
+// references the doubled id exactly as originally minted is never silently
+// renumbered on read.
+//
+// The test carries BOTH directions (finding judged-ac2-roundtrip-pin-has-no-
+// encode-leg): the decode/stability legs alone compare two decodes of the
+// same constant bytes and are structurally blind to the write direction —
+// they would stay green even if the report renderer mangled the id on the way
+// back to disk. The encode leg below re-encodes the decoded report through
+// align's own report renderer (RenderMarkdown, the exact seam that writes
+// deviation-report.md) and proves the doubled id, and every rendered byte of
+// its finding, survive back onto disk untouched — which is what "round-trips"
+// means and what actually protects an archived report the tooling later
+// rewrites in place.
+func TestArchivedDoubledJudgedID_DecodesAndRoundTripsUntouched(t *testing.T) {
+	const doubledID = "judged-judged-retry-semantics-drift"
+	const archived = `---
+schema: verdi.deviation/v1
+covers: 0123456789abcdef0123456789abcdef01234567
+findings:
+  - id: judged-judged-retry-semantics-drift
+    kind: judged
+    text: "retry semantics match spec intent (confidence 0.87)"
+    disposition: accepted-deviation
+    note: "pre-existing behavior, dispositioned before the id-doubling fix landed"
+digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+---
+# Deviation report
+
+Archived body text, preserved verbatim.
+`
+	fm, body, err := artifact.SplitFrontmatter([]byte(archived))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	decoded, err := artifact.DecodeDeviation(fm)
+	if err != nil {
+		t.Fatalf("DecodeDeviation(archived doubled-id fixture): %v", err)
+	}
+	if len(decoded.Findings) != 1 {
+		t.Fatalf("Findings = %+v, want exactly 1", decoded.Findings)
+	}
+	f := decoded.Findings[0]
+	if f.ID != doubledID {
+		t.Fatalf("Findings[0].ID = %q, want the archived doubled id %q preserved exactly untouched", f.ID, doubledID)
+	}
+	if f.Kind != artifact.FindingJudged {
+		t.Fatalf("Findings[0].Kind = %q, want %q", f.Kind, artifact.FindingJudged)
+	}
+	if f.Disposition != artifact.FindingAcceptedDeviation || f.Note == "" {
+		t.Fatalf("Findings[0] disposition/note not preserved: %+v", f)
+	}
+
+	// Round-trip: decoding the exact same archived bytes again is stable —
+	// decode is a pure function of its input; it never mutates or
+	// renumbers an id it reads, doubled or not.
+	fm2, body2, err := artifact.SplitFrontmatter([]byte(archived))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter (second pass): %v", err)
+	}
+	if string(fm) != string(fm2) || string(body) != string(body2) {
+		t.Fatal("SplitFrontmatter is not stable across repeated calls on the same archived bytes")
+	}
+	decoded2, err := artifact.DecodeDeviation(fm2)
+	if err != nil {
+		t.Fatalf("DecodeDeviation (second pass): %v", err)
+	}
+	if decoded2.Findings[0].ID != doubledID {
+		t.Fatalf("second decode's id = %q, want the same doubled id %q — decode must not renumber on repeat reads", decoded2.Findings[0].ID, doubledID)
+	}
+
+	// --- Encode leg: the actual write-back round-trip the pin's name promises.
+	// RenderMarkdown is align's report renderer — the exact seam that serializes
+	// a DeviationFrontmatter back onto disk as deviation-report.md.
+	reencoded := RenderMarkdown(decoded, string(body))
+	if !bytes.Contains(reencoded, []byte(doubledID)) {
+		t.Fatalf("re-encoded report does not contain the doubled id %q verbatim — the write path mangled it:\n%s", doubledID, reencoded)
+	}
+
+	fm3, body3, err := artifact.SplitFrontmatter(reencoded)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter(re-encoded): %v", err)
+	}
+	decoded3, err := artifact.DecodeDeviation(fm3)
+	if err != nil {
+		t.Fatalf("DecodeDeviation(re-encoded): %v", err)
+	}
+	if len(decoded3.Findings) != 1 {
+		t.Fatalf("re-encoded Findings = %+v, want exactly 1", decoded3.Findings)
+	}
+	rt := decoded3.Findings[0]
+	if rt.ID != doubledID {
+		t.Fatalf("round-tripped id = %q, want the doubled id %q to survive re-encoding onto disk untouched", rt.ID, doubledID)
+	}
+	if rt.Kind != f.Kind || rt.Text != f.Text || rt.Disposition != f.Disposition || rt.Note != f.Note {
+		t.Fatalf("round-tripped finding = %+v, want every field preserved through the write path (was %+v)", rt, f)
+	}
+
+	// Fixed point: re-encoding the re-decoded report reproduces the exact same
+	// bytes — the doubled id (and the whole finding) is stable across the write
+	// path, not merely present once, which is what protects a report the tooling
+	// rewrites in place across regenerations.
+	if reencoded2 := RenderMarkdown(decoded3, string(body3)); !bytes.Equal(reencoded, reencoded2) {
+		t.Fatalf("re-encode is not a fixed point — the renderer does not reproduce its own output byte-for-byte\nfirst:\n%s\nsecond:\n%s", reencoded, reencoded2)
 	}
 }
 
