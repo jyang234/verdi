@@ -445,6 +445,39 @@ bindings:
 	}
 }
 
+// TestVL003_RootBindings_MissingTargetSpec_Reds is
+// judged-vl-003-missing-target-spec-untested: checkOneBindingsFile's
+// missing-target-spec arm — a fragment-qualified entry spec/<name>#<ac-id>
+// whose NAMED target spec does not resolve in the committed zone AT ALL — had
+// no negative-path test. Its sibling arm (target resolves but does not declare
+// the ac) is pinned by TestVL003_RootBindings_TypoFragmentAC_RedsByName; the
+// "target does not resolve" arm was exercised by nothing. This pins it on the
+// root bindings file: a fragment entry naming a spec absent from the store
+// reds, naming both the offending entry and the unresolved target spec — not
+// silently pass, and not blamed on the (perfectly resolving) owning spec.
+func TestVL003_RootBindings_MissingTargetSpec_Reds(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-fragment-owner", "spec.md"), vl003FragmentOwnerSpecMD)
+	writeTestFile(t, filepath.Join(dir, "verdi.bindings.yaml"), `schema: verdi.bindings/v1
+spec: spec/vl-003-fragment-owner
+bindings:
+  - { producer: some-producer, kind: static, acs: ["spec/vl-003-does-not-exist#ac-1"] }
+`)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-003")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	msg := findings[0].Message
+	if !strings.Contains(msg, "spec/vl-003-does-not-exist#ac-1") {
+		t.Errorf("finding message = %q, want it to name the offending fragment entry", msg)
+	}
+	if !strings.Contains(msg, `whose target spec "spec/vl-003-does-not-exist" does not resolve to a spec in the committed zone`) {
+		t.Errorf("finding message = %q, want the missing-target-spec clause naming the unresolved target spec (not the owning spec)", msg)
+	}
+}
+
 // TestVL003_RootBindings_CorrectFragmentAC_StaysClean is ac-4's companion
 // case: a fragment-qualified entry naming an AC its target spec genuinely
 // DOES declare — the exact shape this design series' own bindings additions
