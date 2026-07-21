@@ -26,16 +26,31 @@ func (u Unit) HasWorktree() bool {
 }
 
 // KeptReason is AC-1's closed vocabulary for why a unit that is NOT
-// eligible was kept — unmerged, dirty, unresolved-state, detached,
-// managed, invoking, and NO seventh path. Declared in dc-2's own fixed
-// CHECK order (unresolved-state first, invoking last); a future value
-// added to this block picks up a matching keptReasonNames entry or the
-// package fails to BUILD (see keptReasonNames' own doc comment) — never a
-// silently blank or generic label.
+// eligible was kept — unresolved-state, default-branch, unmerged, dirty,
+// detached, managed, invoking. Declared in dc-2's own fixed CHECK order
+// (unresolved-state first, invoking last); a future value added to this
+// block picks up a matching keptReasonNames entry or the package fails to
+// BUILD (see keptReasonNames' own doc comment) — never a silently blank or
+// generic label.
+//
+// default-branch is R4-I-84's own addition: the closed set dc-2 originally
+// froze at six grows by ONE, to keep a worktree checked out on the default
+// branch. That was a CRITICAL-class safety hole — a clean, unmanaged, non-
+// primary, non-invoking worktree ON the default branch read Merged=true
+// (gitx.IsAncestor is reflexive) and classified ELIGIBLE, and neither
+// --apply second guard fires: `git worktree remove` succeeds on a clean
+// tree, and `git branch -d <default>` succeeds when the default branch is
+// level with its upstream (git does not protect default branches locally),
+// so the sweep could delete the local default-branch ref. The widening is
+// the same STRICTLY-CONSERVATIVE class as R4-I-83's managed-step widening:
+// it can only reclassify eligible→kept, never kept→eligible, so it can
+// never cause a deletion the frozen predicate would have prevented — to be
+// dispositioned identically if the align judge flags it.
 type KeptReason int
 
 const (
 	KeptUnresolvedState KeptReason = iota
+	KeptDefaultBranch              // R4-I-84: a worktree ON the default branch, kept before every resolvable exclusion below
 	KeptUnmerged
 	KeptDirty
 	KeptDetached
@@ -46,8 +61,8 @@ const (
 
 // keptReasonNames is KeptReason's own compile-time exhaustiveness check.
 // The right-hand side is an ellipsis-sized array literal: its type is
-// inferred solely from the highest explicit key present (here, [6]string,
-// since KeptInvoking == 5). Assigning it to keptReasonNames, whose
+// inferred solely from the highest explicit key present (here, [7]string,
+// since KeptInvoking == 6). Assigning it to keptReasonNames, whose
 // DECLARED type is the sentinel-sized [numKeptReasons]string, only
 // compiles when those two array types are IDENTICAL — which in Go requires
 // an identical length, a compile-time constant comparison. Appending a new
@@ -61,6 +76,7 @@ const (
 // matching [entry] fails the build."
 var keptReasonNames [numKeptReasons]string = [...]string{
 	KeptUnresolvedState: "unresolved-state",
+	KeptDefaultBranch:   "default-branch",
 	KeptUnmerged:        "unmerged",
 	KeptDirty:           "dirty",
 	KeptDetached:        "detached",
@@ -101,10 +117,22 @@ type Plan struct {
 
 // Compute is spec/gc-reclaim AC-1's predicate, DC-2's own ordered switch:
 // a pure function of res plus the invoking checkout's own already-resolved
-// root (compared against worktree rows' Path) and current branch (compared
-// against branch-only rows' names) — never a git call, never a re-derived
-// eligibility fact (dc-1: "internal/reclaim calls zero gitx eligibility
-// primitives itself").
+// root (compared against worktree rows' Path), current branch (compared
+// against branch-only rows' names), and the repository's already-resolved
+// default branch (compared against worktree rows' Branch — R4-I-84) — never
+// a git call, never a re-derived eligibility fact (dc-1: "internal/reclaim
+// calls zero gitx eligibility primitives itself").
+//
+// defaultBranch is threaded straight through from the SAME value the caller
+// already resolves once (cmd/verdi/gc.go's lint.ResolveDefaultBranch) and
+// hands to internal/residue.Scan — never re-derived here (dc-1). Both it and
+// wt.Branch are git's own SHORT ref form ("main"): ResolveDefaultBranch
+// strips any origin/ prefix and WorktreeEntry.Branch strips refs/heads/, so
+// the R4-I-84 arm's equality is short-to-short, the same form comparison
+// internal/residue.scanMergedBranches already relies on. defaultBranch ""
+// (unresolvable — the caller refuses the whole run before reaching here, so
+// this is defensive) matches no row: the arm is guarded so an empty default
+// never collides with a detached (empty-Branch) worktree row.
 //
 // invokingRoot is best-effort symlink-resolved before comparison (mirroring
 // internal/residue/survey.go's own resolvedRoot precedent) so a caller that
@@ -113,7 +141,7 @@ type Plan struct {
 // /private/var parity class internal/residue's own tests guard against).
 // invokingBranch "" (a detached invoking HEAD) matches no branch-only row,
 // by construction — branch names are never empty.
-func Compute(res *residue.Result, invokingRoot, invokingBranch string) Plan {
+func Compute(res *residue.Result, invokingRoot, invokingBranch, defaultBranch string) Plan {
 	canonicalInvokingRoot := canonicalPath(invokingRoot)
 
 	branchesWithWorktrees := make(map[string]bool, len(res.Worktrees))
@@ -123,7 +151,7 @@ func Compute(res *residue.Result, invokingRoot, invokingBranch string) Plan {
 		if wt.Branch != "" {
 			branchesWithWorktrees[wt.Branch] = true
 		}
-		eligible, reason, detail := classifyWorktreeRow(wt, canonicalInvokingRoot)
+		eligible, reason, detail := classifyWorktreeRow(wt, canonicalInvokingRoot, defaultBranch)
 		items = append(items, PlanItem{
 			Unit:     Unit{Branch: wt.Branch, WorktreePath: wt.Path},
 			Eligible: eligible,
@@ -138,7 +166,7 @@ func Compute(res *residue.Result, invokingRoot, invokingBranch string) Plan {
 			// never a second, branch-only entry for the same branch.
 			continue
 		}
-		eligible, reason := classifyBranchOnlyRow(name, invokingBranch)
+		eligible, reason := classifyBranchOnlyRow(name, invokingBranch, defaultBranch)
 		items = append(items, PlanItem{
 			Unit:     Unit{Branch: name},
 			Eligible: eligible,
@@ -150,11 +178,30 @@ func Compute(res *residue.Result, invokingRoot, invokingBranch string) Plan {
 }
 
 // classifyWorktreeRow is dc-2's fixed, ordered switch for a worktree row:
-// unresolved-state -> unmerged -> dirty -> detached -> managed -> invoking
-// -> eligible. A row with multiple simultaneously-true exclusion facts
-// still yields exactly the FIRST one in this order, deterministically
-// (mirroring internal/wtmanager.decideReclaim's own ordered-switch
-// precedent) — never an arbitrary or combinatorial reason.
+// unresolved-state -> default-branch -> unmerged -> dirty -> detached ->
+// managed -> invoking -> eligible. A row with multiple simultaneously-true
+// exclusion facts still yields exactly the FIRST one in this order,
+// deterministically (mirroring internal/wtmanager.decideReclaim's own
+// ordered-switch precedent) — never an arbitrary or combinatorial reason.
+//
+// The "default-branch" step (R4-I-84) is placed FIRST among the identity
+// exclusions — immediately after unresolved-state, ahead of every resolvable
+// exclusion below it — because being ON the default branch is the most
+// fundamental, least-incidental reason a worktree must never be swept: it
+// holds regardless of whether that same row also happens to be dirty,
+// managed, or the invoking checkout (all incidental, all changeable), while
+// a default-branch worktree is by construction always Merged (its HEAD is
+// the default tip, a reflexive ancestor) so the unmerged arm just below
+// could never fire for it anyway. One-reason determinism therefore reports
+// the load-bearing "default-branch" whenever true, telling a reader this row
+// would stay protected even cleaned or invoked-from-elsewhere. Unresolved-
+// state alone stays ahead of it: when git could not even resolve this
+// worktree's live state, that honest disclosure wins — and the safety
+// invariant (a kept row, for ANY reason, is never touched by --apply) holds
+// whichever reason is reported, so keeping unresolved-state first costs no
+// protection. The arm is guarded by defaultBranch != "" so an unresolvable
+// default (the caller refuses that whole run upstream) can never make a
+// detached (empty-Branch) row read as default-branch instead of detached.
 //
 // The "managed" step is wt.Managed OR looksManagedAnywhere(wt.Path): the
 // former is residue's own answer, resolved against the INVOKING checkout's
@@ -166,10 +213,12 @@ func Compute(res *residue.Result, invokingRoot, invokingBranch string) Plan {
 //
 // canonicalInvokingRoot must already be canonicalPath-resolved by the
 // caller (Compute resolves it once, not per row).
-func classifyWorktreeRow(wt residue.Worktree, canonicalInvokingRoot string) (eligible bool, reason KeptReason, detail string) {
+func classifyWorktreeRow(wt residue.Worktree, canonicalInvokingRoot, defaultBranch string) (eligible bool, reason KeptReason, detail string) {
 	switch {
 	case wt.MergedUnresolved || wt.DirtyUnresolved:
 		return false, KeptUnresolvedState, wt.Reason
+	case defaultBranch != "" && wt.Branch == defaultBranch:
+		return false, KeptDefaultBranch, ""
 	case !wt.Merged:
 		return false, KeptUnmerged, ""
 	case wt.Dirty:
@@ -223,12 +272,30 @@ func looksManagedAnywhere(path string) bool {
 	return strings.Contains(filepath.Clean(path), segment)
 }
 
-// classifyBranchOnlyRow is dc-2's single check for a branch-only row (a
-// merged branch with no worktree of its own): kept:invoking iff name is
-// the invoking checkout's own current branch, else eligible — the only
-// check this shape needs, since a bare branch has no worktree to be
-// managed, detached, dirty, or in an unresolved state.
-func classifyBranchOnlyRow(name, invokingBranch string) (eligible bool, reason KeptReason) {
+// classifyBranchOnlyRow is dc-2's check for a branch-only row (a merged
+// branch with no worktree of its own): kept:default-branch iff name is the
+// default branch (R4-I-84 belt-and-braces, below), kept:invoking iff name
+// is the invoking checkout's own current branch, else eligible — the checks
+// this shape needs, since a bare branch has no worktree to be managed,
+// detached, dirty, or in an unresolved state.
+//
+// The default-branch check here is DEFENSE-IN-DEPTH, not the primary guard:
+// internal/residue.scanMergedBranches (survey.go) already omits the default
+// branch by name from res.MergedBranches ("if b == defaultBranch { continue
+// }"), so a branch-only row structurally can never BE the default branch and
+// this arm is verified-unreachable through this package's own construction
+// today. It is kept anyway, in the same spirit as classifyWorktreeRow's own
+// looksManagedAnywhere cross-seam guard (R4-I-82): a CRITICAL-class safety
+// invariant — never delete the local default-branch ref — is made self-
+// defending at the reclaim seam that owns the predicate, so a future change
+// to residue's merged-branch survey cannot silently re-open the hole here.
+// Guarded by defaultBranch != "" to match the worktree arm; kept:default-
+// branch precedes kept:invoking for the same one-reason rationale (the
+// default-branch identity is the more fundamental keep).
+func classifyBranchOnlyRow(name, invokingBranch, defaultBranch string) (eligible bool, reason KeptReason) {
+	if defaultBranch != "" && name == defaultBranch {
+		return false, KeptDefaultBranch
+	}
 	if name == invokingBranch {
 		return false, KeptInvoking
 	}

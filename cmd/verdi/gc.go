@@ -145,7 +145,13 @@ func runGcReclaimUnmanaged(ctx context.Context, root, defaultBranchRef string, a
 		return 2
 	}
 
-	plan := reclaim.Compute(res, root, invokingBranch)
+	// defaultBranchRef — already resolved above (lint.ResolveDefaultBranch)
+	// and handed to residue.Scan — is threaded on to Compute as well, so the
+	// predicate keeps any worktree checked out ON the default branch rather
+	// than reclaiming it (R4-I-84). Same value, still resolved exactly once;
+	// residue.Scan's own DefaultBranchResolved guard above guarantees it is
+	// non-empty here.
+	plan := reclaim.Compute(res, root, invokingBranch, defaultBranchRef)
 
 	rows := plan.DryRunRows()
 	if apply {
