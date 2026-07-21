@@ -14,10 +14,19 @@ import (
 // and the diagram-alignment section as supporting, undispositioned context
 // (computed.go's doc comment on why neither is itself a finding — the
 // diagram Findings that DO ride the dispositionable path are already among
-// findings above, rendered by the renderFindings call). Deterministic given
-// deterministic inputs — Compute and PreserveDispositions both guarantee
-// that.
-func RenderBody(findings []artifact.Finding, baselineDiffs []ServiceBoundaryDiff, diagramProposals []DiagramAlignmentEntry, illustrativeDiagrams []IllustrativeFigure) string {
+// findings above, rendered by the renderFindings call), plus two
+// spec/finding-identity sections: candidates awaiting reaffirmation (ac-1's
+// pre-fill — old ruling and old text rendered beside each pending
+// candidate's new text) and not-resurfaced findings (ac-3's persisted
+// archive). Deterministic given deterministic inputs — Compute,
+// PreserveDispositions, and ReconcileJudged all guarantee that.
+//
+// candidates/notResurfaced may be nil (every caller outside this package's
+// own tests: FreezeInPlace never calls this — it reattaches an existing body
+// verbatim; disposition.go never calls this — it surgically patches one
+// rendered line in place, see its own doc comment on why. Only Generate,
+// which always has both, calls this in production).
+func RenderBody(findings []artifact.Finding, candidates map[string]JudgedCandidate, notResurfaced []artifact.Finding, baselineDiffs []ServiceBoundaryDiff, diagramProposals []DiagramAlignmentEntry, illustrativeDiagrams []IllustrativeFigure) string {
 	var b strings.Builder
 	b.WriteString("# Alignment report\n\n")
 
@@ -32,6 +41,12 @@ func RenderBody(findings []artifact.Finding, baselineDiffs []ServiceBoundaryDiff
 
 	b.WriteString("\n## Judged\n\n")
 	renderFindings(&b, findingsOfKind(findings, artifact.FindingJudged))
+
+	b.WriteString("\n### Candidates awaiting reaffirmation\n\n")
+	renderCandidates(&b, findings, candidates)
+
+	b.WriteString("\n## Not resurfaced\n\n")
+	renderNotResurfaced(&b, notResurfaced)
 
 	return b.String()
 }
@@ -76,6 +91,64 @@ func RenderFindingLine(f artifact.Finding) string {
 		line += fmt.Sprintf(" — %s", f.Note)
 	}
 	return line
+}
+
+// renderCandidates renders spec/finding-identity ac-1's pre-fill block: one
+// entry per finding in findings that has a paired candidates entry, showing
+// the fresh (new) finding's own bullet line beside its old ruling and old
+// text — so a human reviewing the report sees exactly what a same-slug
+// regeneration changed before running `verdi disposition`. Order follows
+// findings' own order (deterministic given ReconcileJudged's own
+// determinism). This section is regenerated fresh by every `verdi align`
+// run and is NOT itself surgically maintained by the disposition verb (which
+// only ever patches one finding's own bullet line, per its own doc
+// comment) — a confirmed candidate's entry here becomes stale prose until
+// the next align run, though the frontmatter (the actual source of truth
+// AllDispositioned/the gates/the spec-stale budget all read) is correct
+// immediately.
+func renderCandidates(b *strings.Builder, findings []artifact.Finding, candidates map[string]JudgedCandidate) {
+	var rendered int
+	for _, f := range findings {
+		cand, ok := candidates[f.ID]
+		if !ok {
+			continue
+		}
+		rendered++
+		fmt.Fprintf(b, "- **%s** CANDIDATE — new text: %q\n", f.ID, f.Text)
+		fmt.Fprintf(b, "  - prior ruling [%s]: %q", cand.OldDisposition, cand.OldText)
+		if cand.OldNote != "" {
+			fmt.Fprintf(b, " — %s", cand.OldNote)
+		}
+		b.WriteString("\n")
+		fmt.Fprintf(b, "  - not a disposition: confirm via `verdi disposition <spec-ref> %s <fixed|accepted-deviation> --rationale <text>`\n", f.ID)
+	}
+	if rendered == 0 {
+		b.WriteString("(none)\n")
+	}
+}
+
+// RenderNotResurfacedLine renders a single not-resurfaced entry's markdown
+// body bullet line — mirrors RenderFindingLine's shape with a distinguishing
+// prefix (never confusable, byte-for-byte, with a live finding's own bullet:
+// disposition.go's confirm path locates and removes this exact line by
+// content, symmetric to how it locates a live finding's line).
+func RenderNotResurfacedLine(f artifact.Finding) string {
+	line := fmt.Sprintf("- **%s** [not-resurfaced, was %s]: %s", f.ID, f.Disposition, f.Text)
+	if f.Note != "" {
+		line += fmt.Sprintf(" — %s", f.Note)
+	}
+	return line
+}
+
+func renderNotResurfaced(b *strings.Builder, notResurfaced []artifact.Finding) {
+	if len(notResurfaced) == 0 {
+		b.WriteString("(none)\n")
+		return
+	}
+	for _, f := range notResurfaced {
+		b.WriteString(RenderNotResurfacedLine(f))
+		b.WriteString("\n")
+	}
 }
 
 func renderBaselineDiffs(b *strings.Builder, diffs []ServiceBoundaryDiff) {
@@ -145,6 +218,25 @@ func RenderMarkdown(fm *artifact.DeviationFrontmatter, body string) []byte {
 	return []byte(b.String())
 }
 
+// renderFindingFlowMap renders one Finding as a YAML flow-mapping entry
+// (without a leading list-item indent or trailing newline — callers add
+// both), the one shared rule both findings: and not-resurfaced: render with
+// (CLAUDE.md: no copy-paste across call sites) — so carried-from: rendering
+// can never drift between the two sections.
+func renderFindingFlowMap(b *strings.Builder, f artifact.Finding) {
+	fmt.Fprintf(b, "- { id: %s, kind: %s, text: %s", f.ID, f.Kind, artifact.YAMLDoubleQuote(f.Text))
+	if f.Disposition != "" {
+		fmt.Fprintf(b, ", disposition: %s", f.Disposition)
+	}
+	if f.Note != "" {
+		fmt.Fprintf(b, ", note: %s", artifact.YAMLDoubleQuote(f.Note))
+	}
+	if f.CarriedFrom != "" {
+		fmt.Fprintf(b, ", carried-from: %s", f.CarriedFrom)
+	}
+	b.WriteString(" }")
+}
+
 func renderFrontmatter(b *strings.Builder, fm *artifact.DeviationFrontmatter) {
 	fmt.Fprintf(b, "schema: %s\n", fm.Schema)
 	fmt.Fprintf(b, "covers: %s\n", fm.Covers)
@@ -154,14 +246,22 @@ func renderFrontmatter(b *strings.Builder, fm *artifact.DeviationFrontmatter) {
 	} else {
 		b.WriteString("findings:\n")
 		for _, f := range fm.Findings {
-			fmt.Fprintf(b, "  - { id: %s, kind: %s, text: %s", f.ID, f.Kind, artifact.YAMLDoubleQuote(f.Text))
-			if f.Disposition != "" {
-				fmt.Fprintf(b, ", disposition: %s", f.Disposition)
-			}
-			if f.Note != "" {
-				fmt.Fprintf(b, ", note: %s", artifact.YAMLDoubleQuote(f.Note))
-			}
-			b.WriteString(" }\n")
+			b.WriteString("  ")
+			renderFindingFlowMap(b, f)
+			b.WriteString("\n")
+		}
+	}
+
+	// not-resurfaced: (spec/finding-identity ac-3) — schema-additive and
+	// omitempty, so an old-shaped report with none renders exactly as
+	// before this story: the key is omitted entirely, never printed as an
+	// empty list.
+	if len(fm.NotResurfaced) > 0 {
+		b.WriteString("not-resurfaced:\n")
+		for _, f := range fm.NotResurfaced {
+			b.WriteString("  ")
+			renderFindingFlowMap(b, f)
+			b.WriteString("\n")
 		}
 	}
 

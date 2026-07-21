@@ -57,7 +57,7 @@ func TestRenderFindingLine_MatchesRenderBody(t *testing.T) {
 		{ID: "judged-b", Kind: artifact.FindingJudged, Text: "a judged reading", Disposition: artifact.FindingAcceptedDeviation, Note: "tracked separately"},
 	}
 
-	body := RenderBody(findings, nil, nil, nil)
+	body := RenderBody(findings, nil, nil, nil, nil, nil)
 
 	for _, f := range findings {
 		want := RenderFindingLine(f)
