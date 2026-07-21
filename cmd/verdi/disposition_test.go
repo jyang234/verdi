@@ -873,6 +873,75 @@ func TestRunDisposition_ConfirmsCandidate_Escalation_NoCarriedFrom(t *testing.T)
 	}
 }
 
+// TestRunDisposition_Amend_RecomputesCarriedFrom is spec/finding-identity
+// judged-amend-stale-carried-from's fix proof: the --amend path applies the
+// same carried-from discipline as first-writing. By the time an amend runs the
+// backing record was already removed at the original confirmation, so the
+// judged reaffirmation branch finds nothing and cannot correct an inherited
+// stamp — the amend path must do it itself. carried-from is ac-2's
+// confirmed-reaffirmation provenance ONLY; an amend that CHANGES the decision
+// is not a reaffirmation of the ruling the stamp attested, so the inherited
+// stamp must be CLEARED, while a note-only amend (decision unchanged) keeps it.
+//
+// Red-first (before the fix): the amend path replaced only Disposition and Note
+// and never touched CarriedFrom, so amending a confirmed reaffirmation
+// (accepted-deviation carrying carried-from) to fixed left carried-from
+// standing on a decision that reaffirms nothing — misattributed provenance that
+// passed validation silently into the frozen archive.
+func TestRunDisposition_Amend_RecomputesCarriedFrom(t *testing.T) {
+	// A live finding already confirmed as a reaffirmation: accepted-deviation
+	// carrying carried-from: <covers-sha> — the exact shape runDisposition's own
+	// reaffirmation branch produces, its backing record long since removed.
+	stampedReaffirmation := func() []artifact.Finding {
+		return []artifact.Finding{
+			{ID: "judged-a", Kind: artifact.FindingJudged, Text: "a standing deviation", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified: reaffirmed", CarriedFrom: dispositionFixtureCovers},
+		}
+	}
+
+	t.Run("amend to fixed clears the inherited stamp", func(t *testing.T) {
+		root := writeDispositionStoreRoot(t, "demo", buildDispositionFixture(t, stampedReaffirmation(), nil))
+		path := reportPathFor(root, "demo")
+
+		var stdout, stderr bytes.Buffer
+		rc := runDisposition(root, "spec/demo", "judged-a", artifact.FindingFixed, "actually resolved this pass", true /* amend */, &stdout, &stderr)
+		if rc != 0 {
+			t.Fatalf("runDisposition (amend to fixed) = %d, want 0; stderr=%s", rc, stderr.String())
+		}
+
+		after := decodeReportFile(t, path)
+		f, ok := findingByID(after.Findings, "judged-a")
+		if !ok || f.Disposition != artifact.FindingFixed || f.Note != "actually resolved this pass" {
+			t.Fatalf("judged-a after amend = %+v, want fixed with the new rationale", f)
+		}
+		if f.CarriedFrom != "" {
+			t.Fatalf("CarriedFrom = %q, want CLEARED — an amend to a DIFFERING decision reaffirms nothing (ac-2)", f.CarriedFrom)
+		}
+		if err := after.Validate(); err != nil {
+			t.Fatalf("Validate() after amend: %v", err)
+		}
+	})
+
+	t.Run("note-only amend (decision unchanged) keeps the stamp", func(t *testing.T) {
+		root := writeDispositionStoreRoot(t, "demo", buildDispositionFixture(t, stampedReaffirmation(), nil))
+		path := reportPathFor(root, "demo")
+
+		var stdout, stderr bytes.Buffer
+		rc := runDisposition(root, "spec/demo", "judged-a", artifact.FindingAcceptedDeviation, "owner-ratified: reworded, still a deviation", true /* amend */, &stdout, &stderr)
+		if rc != 0 {
+			t.Fatalf("runDisposition (note-only amend) = %d, want 0; stderr=%s", rc, stderr.String())
+		}
+
+		after := decodeReportFile(t, path)
+		f, ok := findingByID(after.Findings, "judged-a")
+		if !ok || f.Disposition != artifact.FindingAcceptedDeviation || f.Note != "owner-ratified: reworded, still a deviation" {
+			t.Fatalf("judged-a after amend = %+v, want accepted-deviation with the new note", f)
+		}
+		if f.CarriedFrom != dispositionFixtureCovers {
+			t.Fatalf("CarriedFrom = %q, want KEPT (%q) — the reaffirmation the stamp attests still holds when the decision is unchanged", f.CarriedFrom, dispositionFixtureCovers)
+		}
+	})
+}
+
 // TestRunDisposition_OrdinaryFinding_NoNotResurfacedEntry_Unaffected proves
 // this story's addition is a no-op for the ordinary case: a finding with NO
 // matching not-resurfaced: entry dispositions exactly as before — no

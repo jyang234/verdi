@@ -231,6 +231,19 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	updated.Findings[idx].Disposition = decision
 	updated.Findings[idx].Note = rationale
 
+	// spec/finding-identity judged-amend-stale-carried-from: an --amend applies
+	// the same carried-from discipline as first-writing. The stamp copied from
+	// decoded above is ac-2's confirmed-reaffirmation provenance for the PRIOR
+	// decision; an amend that CHANGES the decision (the escalation the live path
+	// below explicitly never stamps) reaffirms nothing the stamp attested, so
+	// clear it. The live reaffirmation branch below cannot do this on an amend —
+	// the backing record was removed at the original confirmation, so it finds
+	// nothing to correct against. A note-only amend leaves the decision, and the
+	// reaffirmation the stamp attests, intact.
+	if amend && decision != oldFinding.Disposition {
+		updated.Findings[idx].CarriedFrom = ""
+	}
+
 	// spec/finding-identity ac-1/ac-2: this IS the "confirm a candidate as a
 	// working-tree edit" step — align.ReconcileJudged never dispositions a
 	// candidate itself (identity.go's frozen rule is never bypassed), it
