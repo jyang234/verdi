@@ -4,7 +4,7 @@ kind: spec
 title: "Evidence Resilience"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-P2-3
 problem: { text: "the closure gate's ancestry check hard-fails with an operational exit 2 (\"Not a valid commit name\") whenever a synced CI evidence bundle carries a record referencing a commit that no longer exists anywhere — which happens routinely once the branch that produced the evidence is deleted after its PR merges; this bit model-schema's closure twice in the same round, from an unrelated story's branch deletion (X-15), and re-syncing did not help because the same poisoned bundle stayed the latest successful CI run; VL-009 has the identical hole from the opposite side — its is-a-real-commit check is satisfiable by a locally-dangling object that no branch or ref reaches, a false green (X-11b) that would let a closure-time check believe evidence is sound when its upstream source has already been deleted", anchor: problem }
 outcome: { text: "sync quarantines, rather than silently drops or hard-fails on, any evidence record whose referenced commit is not reachable from HEAD at sync time, annotating the record with the quarantine reason and keeping it rather than discarding it; the closure gate's ancestry check reads a quarantined record as a per-record disclosed-unproven against the acceptance criterion it would otherwise have evidenced, never as an operational failure, so a branch deletion — however unrelated — can never again brick a story's closure; VL-009 tightens from \"is a real commit\" to \"is reachable from HEAD\", closing the false green from the other direction without changing behavior for any commit that legitimately is reachable", anchor: outcome }
