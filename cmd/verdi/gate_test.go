@@ -124,6 +124,52 @@ func writeGateViolatingRecord(t *testing.T, root, headCommit string) {
 	}
 }
 
+// writeGateRecordAt writes a source:ci record bound to ac-1 (verdict/witness
+// per args) under the derived tree at commitDir, with provenance.commit ==
+// commitDir — so its provenance reachability tracks the directory's, letting a
+// test compose a reachable pass beside an unreachable fail for the same AC.
+func writeGateRecordAt(t *testing.T, root, commitDir, verdict, witness string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "data", "derived", store.RefSlug("spec/stale-decline"), commitDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	record := fmt.Sprintf(`[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"%s","witness":"%s","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"%s"},"digest":"sha256:%s"}]`, verdict, witness, commitDir, strings.Repeat("0", 64))
+	if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte(record), 0o644); err != nil {
+		t.Fatalf("writing verdicts.json: %v", err)
+	}
+}
+
+// TestGate_Condition2_QuarantinedFail_DisclosedNotSilentFlip is
+// judged-merge-gate-quarantine-silence's fix pin: the merge gate's condition 2
+// (no AC violated) folds the SAME evidence the closure gate does, so a current
+// FAIL record excluded for unreachability flips ac-1 violated->evidenced and
+// condition 2 from FAIL to PASS. Before the fix that flip carried ZERO disclosure
+// on the merge-gate surface (only the closure gate rendered quarantine lines) —
+// the exact silent flip ac-2's intent forbids. The merge gate must now disclose
+// the excluded fail record, riding condition 2's own line.
+func TestGate_Condition2_QuarantinedFail_DisclosedNotSilentFlip(t *testing.T) {
+	repo := buildGateRepo(t, "accepted-pending-build")
+	spec := mustResolveBuildSpec(t, repo.Dir)
+	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	// A reachable pass under head (ac-1 evidences) + an unreachable fail (quarantined).
+	writeGateRecordAt(t, repo.Dir, repo.Head, "pass", "reachablePass")
+	writeGateRecordAt(t, repo.Dir, gone, "fail", "adverseFailWitness")
+
+	var stdout, stderr bytes.Buffer
+	runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
+	out := stdout.String()
+	// The flip: condition 2 PASSES (ac-1 evidenced, not violated).
+	assertConditionPasses(t, out, 2)
+	if !strings.Contains(out, "disclosed-unproven [gate:evidence-quarantine]") {
+		t.Fatalf("stdout = %q, want the excluded FAIL record disclosed on the MERGE-gate surface (judged-merge-gate-quarantine-silence)", out)
+	}
+	if !strings.Contains(out, "adverseFailWitness") || !strings.Contains(out, gone) {
+		t.Fatalf("stdout = %q, want the disclosure to name the excluded FAIL record's witness and its unreachable commit", out)
+	}
+}
+
 func mustResolveBuildSpec(t *testing.T, root string) *artifact.SpecFrontmatter {
 	t.Helper()
 	spec, err := storyresolve.ResolveBuildSpec(root, "feature/stale-decline")

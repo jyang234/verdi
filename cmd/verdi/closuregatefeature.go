@@ -62,7 +62,10 @@ import (
 // (disposition-completeness) to check the feature's own deviation report
 // covers it, mirroring runClosureGate's own head parameter exactly.
 func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededStoryRefs []string, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (bool, error) {
-	cond1 := checkFeatureFoldEligible(fold, mdl)
+	cond1, err := checkFeatureFoldEligible(ctx, root, spec, fold, head, mdl)
+	if err != nil {
+		return false, err
+	}
 	cond2 := checkStubReconciliationCondition(reconciliation)
 	cond3 := checkAllImplementingStoriesClosed(stories, mdl)
 
@@ -164,7 +167,7 @@ func renumbered(c gateCondition, name string) gateCondition {
 // still-no-signal, still-pending, or violated AC all block closure alike
 // (03: "A feature AC still no-signal at closure time is a hard blocker,
 // not a yellow").
-func checkFeatureFoldEligible(fold evidence.FeatureResult, mdl *model.Model) gateCondition {
+func checkFeatureFoldEligible(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, head string, mdl *model.Model) (gateCondition, error) {
 	// The spoken class word resolves (L-M13(1)); the "(03 §The feature
 	// fold …)" SPEC CITATION quotes the spec's own section title —
 	// identity, kept verbatim.
@@ -176,11 +179,30 @@ func checkFeatureFoldEligible(fold evidence.FeatureResult, mdl *model.Model) gat
 			notEvidenced = append(notEvidenced, fmt.Sprintf("%s=%s", ac.ID, ac.Status))
 		}
 	}
+	cond := gateCondition{Name: name}
 	if len(notEvidenced) == 0 {
-		return gateCondition{Name: name, OK: true}
+		cond.OK = true
+	} else {
+		sort.Strings(notEvidenced)
+		cond.Reason = fmt.Sprintf("not every %s AC is evidenced: %v", featureWord, notEvidenced)
 	}
-	sort.Strings(notEvidenced)
-	return gateCondition{Name: name, Reason: fmt.Sprintf("not every %s AC is evidenced: %v", featureWord, notEvidenced)}
+
+	// Endgame disclosure-extension finding 3: render the SAME per-record
+	// disclosure families the story gate does, over the FEATURE's OWN derived dir
+	// (evidenceDisclosures, gatedisclosure.go — QuarantinedRecords/UnprovableRecords
+	// over store.DerivedSpecDir(spec.ID), the exact dir foldFeature loads outcome
+	// records from). A feature AC evidenced by a record with quarantined/undecodable/
+	// unprovable ancestry — including the met-AC/unprovable-kept case — never
+	// passes silently; and an UNMET feature AC's FAIL now carries the WHY (the
+	// excluded/undecodable record that would have evidenced it) the coarse
+	// "not every AC is evidenced" reason alone cannot. Rides Extra on every
+	// verdict (runFeatureClosureGate's own loop prints it, PASS/FAIL/disclosed).
+	extra, err := evidenceDisclosures(ctx, root, spec, head, featureFoldedACs(fold.ACs))
+	if err != nil {
+		return gateCondition{}, err
+	}
+	cond.Extra = extra
+	return cond, nil
 }
 
 // checkStubReconciliationCondition is the feature-closure gate's condition
