@@ -65,11 +65,18 @@ func attributeBodyHTML(body []byte, attr *artifact.Attribute) template.HTML {
 // heading in body, mirroring the "skip, don't fail" posture
 // artifact.ResolveObjectAnchors already documents for an absent anchor.
 //
-// Heading text is slugified via artifact.SlugifyHeading — the SAME
-// exact-match algorithm 02 §Object model's general anchor-resolution rule
-// uses, also shared by artifact.HeadingAnchors/ResolveAnchor and
-// internal/lint's VL-014 — so a section this function finds is always the
-// one the spec's own anchor validation would resolve to. Only the
+// Resolution is slug-symmetric (spec/ritual-traps ac-1, superseding the
+// earlier exact-match rule): BOTH the heading text AND the anchor pass
+// through artifact.SlugifyHeading — the SAME transform
+// artifact.HeadingAnchors/ResolveAnchor and internal/lint's VL-014 apply on
+// each side — before the two slugs are compared. So an anchor written in
+// the heading's own case (anchor: AC-1 against ## AC-1, X-1's witness)
+// resolves here exactly as artifact.ResolveAnchor now resolves it, and a
+// section this function finds is always the one the spec's own anchor
+// validation would resolve to. Slugifying only the heading side (the pre-ac-1
+// shape) reopened X-1's asymmetry invisibly at this render seam: a mixed-case
+// anchor that validates and lints green found no section, and the placard
+// dropped its authored prose with no finding anywhere. Only the
 // ATX-heading-LINE recognition below (atxHeadingText) is local to this
 // package, matching the same minimal "#".."######" shape
 // artifact.HeadingAnchors and internal/mcpserve's own drift algorithm
@@ -89,7 +96,7 @@ func bodySection(body []byte, anchor string) (string, bool) {
 			continue
 		}
 		if start == -1 {
-			if artifact.SlugifyHeading(text) == anchor {
+			if artifact.SlugifyHeading(text) == artifact.SlugifyHeading(anchor) {
 				start = i + 1
 			}
 			continue
