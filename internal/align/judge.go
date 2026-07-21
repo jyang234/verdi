@@ -199,6 +199,20 @@ func runJudgeOnce(ctx context.Context, runner JudgeRunner, argv []string, timeou
 // here rewrites an id already read back off an archived report (see
 // internal/artifact's plain decode of Finding.ID, which applies no such
 // transform).
+//
+// Adjudication (spec/ritual-traps ac-2, finding
+// judged-ac2-echoed-doubled-id-still-doubles): when the raw id echoed back is
+// itself an ALREADY-DOUBLED archived id ("judged-judged-x"), the HasPrefix
+// short-circuit preserves it VERBATIM — it is deliberately NOT normalized to
+// "judged-x". This is ratified, not an oversight. Dispositions reference
+// finding ids exactly as originally minted (the W4 precedent; spec/ritual-traps
+// ac-2: "real archived dispositions reference those ids exactly as originally
+// minted"), so collapsing a doubled id here would sever the id-join to any
+// archived disposition recorded against the doubled form, orphaning it. The
+// "exactly one judged- prefix" guarantee is therefore a PROSPECTIVE mint-time
+// property of fresh ids, never a retroactive renumbering of an id a prior
+// report already minted. TestJudgedFindingID_EchoedDoubledID_PreservedVerbatim
+// pins this.
 func judgedFindingID(rawID string) string {
 	slug := store.RefSlug(rawID)
 	if strings.HasPrefix(slug, "judged-") {

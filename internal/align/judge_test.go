@@ -193,6 +193,23 @@ func TestJudgedFindingID(t *testing.T) {
 	}
 }
 
+// TestJudgedFindingID_EchoedDoubledID_PreservedVerbatim pins the adjudication
+// recorded on judgedFindingID's doc comment (spec/ritual-traps ac-2, finding
+// judged-ac2-echoed-doubled-id-still-doubles): an echoed, ALREADY-DOUBLED
+// archived id ("judged-judged-x") is preserved VERBATIM — never normalized to
+// "judged-x". Normalizing would sever the id-join to any archived disposition
+// recorded against the doubled form (dispositions reference ids exactly as
+// originally minted — the W4 precedent), orphaning it. This is a ratified
+// behavior pin, not a change: the HasPrefix short-circuit already preserves
+// it. Its value is guarding against a future "helpful" normalization that
+// would silently renumber an archived id.
+func TestJudgedFindingID_EchoedDoubledID_PreservedVerbatim(t *testing.T) {
+	const doubled = "judged-judged-x"
+	if got := judgedFindingID(doubled); got != doubled {
+		t.Fatalf("judgedFindingID(%q) = %q, want it preserved verbatim (%q) — an echoed archived doubled id must never be normalized (e.g. to \"judged-x\"), which would orphan archived dispositions that reference the doubled id exactly as minted", doubled, got, doubled)
+	}
+}
+
 // TestRunJudgeOnce_NewlineInTextIsNormalized is ADJ-53's j-4 fix proof: a
 // judge-emitted finding text carrying an embedded newline must never
 // survive into Finding.Text raw — every downstream consumer
