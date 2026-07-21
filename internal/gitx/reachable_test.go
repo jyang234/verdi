@@ -222,6 +222,82 @@ func TestReachableFromHEAD_ShallowWithinHorizon(t *testing.T) {
 	})
 }
 
+// TestReachableFromHEAD_ShallowCacheGoesStaleAcrossFullToShallow is I3's
+// red-first pin. The process-global shallow-state memo is correct for a
+// SHORT-LIVED consumer but goes dangerously stale for a LONG-LIVED one (the MCP
+// server) when a checkout is reshaped full->shallow between operations: a
+// `false` cached while the repo was full makes a later would-be-negative read as
+// a PROVEN Unreachable — a false NO — where the now-shallow repo owes
+// UnprovableShallow. ResetShallowCache (the operation-boundary hook the server
+// calls per request) cures it; a short-lived CLI keeps its memo untouched.
+//
+// The transition is genuine, not simulated: a full clone is probed (caching
+// false exactly as the server's evidence loop would on an earlier request),
+// then reshaped full->shallow in place with `git fetch --depth` — the exact
+// GitHub-Actions / operator move that can land between two server requests.
+func TestReachableFromHEAD_ShallowCacheGoesStaleAcrossFullToShallow(t *testing.T) {
+	ctx := context.Background()
+	src := buildThreeLayerRepo(t) // L1 -> L2 -> L3(tip), full source
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "checkout")
+	if _, err := run(ctx, parent, "clone", "--quiet", "file://"+src.Dir, dir); err != nil {
+		t.Fatalf("full clone of the source: %v", err)
+	}
+	// The memo is process-global; never leak this dir's poisoned entry to a
+	// sibling test (which keys on its own fresh temp dir, but be tidy regardless).
+	t.Cleanup(ResetShallowCache)
+
+	// Freshly full: a genuine would-be-negative (a well-formed but nonexistent
+	// sha) probes shallowness and caches false for dir — exactly how the server's
+	// evidence loop populates the memo on a request served while the checkout is
+	// still full.
+	const nonexistent = "0000000000000000000000000000000000000000"
+	if got, err := ReachableFromHEAD(ctx, dir, nonexistent, "HEAD"); err != nil || got != Unreachable {
+		t.Fatalf("full-clone would-be-negative = %v, %v; want Unreachable, nil (this probe caches shallow=false)", got, err)
+	}
+	if v, ok := shallowCache.Load(dir); !ok || v.(bool) {
+		t.Fatalf("precondition: shallowCache[dir] = (%v, present=%v), want a cached false", v, ok)
+	}
+
+	// Reshape full->shallow in place. L1 falls beyond the depth-2 horizon: still a
+	// loose object, but no longer a visible ancestor of HEAD — a would-be-negative
+	// whose honest answer is now UnprovableShallow, not Unreachable.
+	if _, err := run(ctx, dir, "fetch", "--quiet", "--depth=2", "origin"); err != nil {
+		t.Fatalf("reshape full->shallow: %v", err)
+	}
+	if out, err := run(ctx, dir, "rev-parse", "--is-shallow-repository"); err != nil || strings.TrimSpace(string(out)) != "true" {
+		t.Fatalf("post-reshape is-shallow-repository = %q, %v; want true (fetch --depth did not make dir shallow)", strings.TrimSpace(string(out)), err)
+	}
+
+	beyond := src.Heads[0] // L1, now beyond the horizon
+
+	// STALE — the staleness this test documents: with the process-lifetime memo
+	// still holding false, a would-be-negative reads a PROVEN Unreachable, a false
+	// NO about a commit whose reachability the now-shallow repo cannot disprove.
+	// (Correct and harmless for a short-lived CLI, which never outlives the
+	// transition; the bug is only that a long-lived consumer inherits it.)
+	stale, err := ReachableFromHEAD(ctx, dir, beyond, "HEAD")
+	if err != nil {
+		t.Fatalf("stale query: unexpected error %v", err)
+	}
+	if stale != Unreachable {
+		t.Fatalf("stale query = %v, want Unreachable — the memo still holds false, so this documents the pre-reset staleness; if it changed, the cure's seam moved", stale)
+	}
+
+	// CURE — the operation-boundary hook the long-lived server calls per request.
+	// After it, the same would-be-negative is re-probed against the now-shallow
+	// repo and returns the honest UnprovableShallow, never the stale
+	// proven-Unreachable.
+	ResetShallowCache()
+	cured, err := ReachableFromHEAD(ctx, dir, beyond, "HEAD")
+	if err != nil {
+		t.Fatalf("post-reset query: unexpected error %v", err)
+	}
+	if cured != UnprovableShallow {
+		t.Fatalf("post-reset query = %v, want UnprovableShallow (shallow history cannot prove NO; the boundary hook forced a fresh probe)", cured)
+	}
+}
+
 // TestReachability_String pins the legible names used in disclosure/test
 // output for each three-valued outcome.
 func TestReachability_String(t *testing.T) {
