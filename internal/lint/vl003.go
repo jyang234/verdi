@@ -175,28 +175,71 @@ func (r vl003) checkPin(in *RunInput, path, field, pinned string) []Finding {
 // checkBindings validates every discovered verdi.bindings.yaml sidecar's
 // evidence-for join: its `spec:` must resolve to a spec in the committed
 // zone, and every AC id its bindings name must be declared by that spec.
-func (vl003) checkBindings(in *RunInput) []Finding {
+// Beyond the Services loop's own discovered sidecars, the module root's own
+// verdi.bindings.yaml is root-discovered directly (spec/ritual-traps ac-3):
+// a Service is only ever discovered from a directory containing
+// .flowmap.yaml, and per D6-4 this repository deliberately has none at its
+// module root, so without this second, unconditional check the root file —
+// the very file this design series' stories append fragment-qualified
+// entries to — would stay invisible to checkBindings forever (chronicle
+// P2-3(b)).
+func (r vl003) checkBindings(in *RunInput) []Finding {
 	var findings []Finding
+	rootDiscoveredAsService := false
 	for _, svc := range in.Snapshot.Services {
+		if svc.Dir == in.Root {
+			rootDiscoveredAsService = true
+		}
 		if svc.Bindings == nil {
 			continue
 		}
-		bindingsPath := "verdi.bindings.yaml (" + svc.Name + ")"
+		findings = append(findings, r.checkOneBindingsFile(in, "verdi.bindings.yaml ("+svc.Name+")", svc.Bindings)...)
+	}
 
-		d, ok := in.Snapshot.ByRef[svc.Bindings.Spec]
-		if !ok || len(d) == 0 || d[0].Spec == nil {
-			findings = append(findings, Finding{Rule: "VL-003", Path: bindingsPath, Message: fmt.Sprintf("spec %q does not resolve to a spec in the committed zone", svc.Bindings.Spec)})
-			continue
+	// Root-discovery: skipped only when some discovered Service is ALREADY
+	// rooted exactly at the module root (a .flowmap.yaml there would make
+	// this store a flowmap service of itself — never true for this
+	// repository per D6-4, but guarding against it keeps a hypothetical
+	// store that does from having its one root bindings file double-checked
+	// under two different labels).
+	if !rootDiscoveredAsService {
+		switch {
+		case in.Snapshot.RootBindingsErr != nil:
+			findings = append(findings, Finding{Rule: "VL-003", Path: rootBindingsDisplayPath, Message: fmt.Sprintf("does not decode: %v", in.Snapshot.RootBindingsErr)})
+		case in.Snapshot.RootBindings != nil:
+			findings = append(findings, r.checkOneBindingsFile(in, rootBindingsDisplayPath, in.Snapshot.RootBindings)...)
 		}
-		acs := make(map[string]bool, len(d[0].Spec.AcceptanceCriteria))
-		for _, ac := range d[0].Spec.AcceptanceCriteria {
-			acs[ac.ID] = true
-		}
-		for _, b := range svc.Bindings.Bindings {
-			for _, ac := range b.ACs {
-				if !acs[ac] {
-					findings = append(findings, Finding{Rule: "VL-003", Path: bindingsPath, Message: fmt.Sprintf("evidence-for binding %q names ac %q, which %q does not declare", b.Producer, ac, svc.Bindings.Spec)})
-				}
+	}
+
+	return findings
+}
+
+// rootBindingsDisplayPath is the finding Path label for the module root's
+// own verdi.bindings.yaml (spec/ritual-traps ac-3) — distinguished from a
+// discovered Service's own "verdi.bindings.yaml (<service>)" label.
+const rootBindingsDisplayPath = "verdi.bindings.yaml (root)"
+
+// checkOneBindingsFile validates one decoded Bindings artifact's
+// evidence-for join against the committed zone: `spec:` (the file's own
+// primary/owning spec) must resolve, and every AC id every binding names
+// must be declared by it. path is the display label naming which
+// discovered/root bindings file a finding belongs to.
+func (vl003) checkOneBindingsFile(in *RunInput, path string, bindings *artifact.Bindings) []Finding {
+	var findings []Finding
+
+	d, ok := in.Snapshot.ByRef[bindings.Spec]
+	if !ok || len(d) == 0 || d[0].Spec == nil {
+		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("spec %q does not resolve to a spec in the committed zone", bindings.Spec)})
+		return findings
+	}
+	acs := make(map[string]bool, len(d[0].Spec.AcceptanceCriteria))
+	for _, ac := range d[0].Spec.AcceptanceCriteria {
+		acs[ac.ID] = true
+	}
+	for _, b := range bindings.Bindings {
+		for _, ac := range b.ACs {
+			if !acs[ac] {
+				findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("evidence-for binding %q names ac %q, which %q does not declare", b.Producer, ac, bindings.Spec)})
 			}
 		}
 	}

@@ -129,6 +129,90 @@ Placeholder.
 	}
 }
 
+// vl003RootBindingsTargetSpecMD is the ad hoc spec target root-discovery
+// tests bind against: one declared ac-1, nothing else, so a bindings entry
+// naming any other ac id is unambiguously wrong.
+const vl003RootBindingsTargetSpecMD = `---
+id: spec/vl-003-root-bindings-target
+kind: spec
+class: story
+title: "VL-003: root bindings target"
+status: draft
+owners: [platform-team]
+story: jira:LOAN-0099
+links:
+  - { type: implements, ref: "spec/stale-decline#ac-1" }
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+---
+# VL-003: root bindings target
+
+## Problem
+
+Placeholder problem.
+
+## Outcome
+
+Placeholder outcome.
+
+## AC-1
+
+Placeholder.
+`
+
+// TestVL003_RootBindings_BadBareAC_Reds is spec/ritual-traps ac-3's
+// red-to-green demonstration: a repository ROOT verdi.bindings.yaml
+// (sibling of .verdi/, no .flowmap.yaml anywhere at the module root —
+// buildLintRepo's own fixture never puts one there, exactly today's real
+// shape D6-4 describes) naming a bare ac id its target spec does not
+// declare. Before ac-3's root-discovery path, checkBindings iterates only
+// discovered Services and never sees this file at all, so this fixture
+// passes lint silently; after, it must red, naming the offending entry.
+func TestVL003_RootBindings_BadBareAC_Reds(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-root-bindings-target", "spec.md"), vl003RootBindingsTargetSpecMD)
+	writeTestFile(t, filepath.Join(dir, "verdi.bindings.yaml"), `schema: verdi.bindings/v1
+spec: spec/vl-003-root-bindings-target
+bindings:
+  - { producer: some-producer, kind: static, acs: [ac-99] }
+`)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-003")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	if !strings.Contains(findings[0].Message, "ac-99") {
+		t.Errorf("finding message = %q, want it to name the offending ac-99 entry", findings[0].Message)
+	}
+	if !strings.Contains(findings[0].Path, "verdi.bindings.yaml") {
+		t.Errorf("finding path = %q, want it to name verdi.bindings.yaml (root)", findings[0].Path)
+	}
+}
+
+// TestVL003_RootBindings_AllCorrect_StaysClean is ac-3's companion case: a
+// root verdi.bindings.yaml whose entries are all correct must produce no
+// VL-003 findings after the fix — the discovery path itself must not
+// introduce a false positive on a clean file.
+func TestVL003_RootBindings_AllCorrect_StaysClean(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-root-bindings-target", "spec.md"), vl003RootBindingsTargetSpecMD)
+	writeTestFile(t, filepath.Join(dir, "verdi.bindings.yaml"), `schema: verdi.bindings/v1
+spec: spec/vl-003-root-bindings-target
+bindings:
+  - { producer: some-producer, kind: static, acs: [ac-1] }
+`)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-003" {
+			t.Fatalf("VL-003 fired on a clean root bindings file: %s", f.String())
+		}
+	}
+}
+
 // vl003DanglingPinSpecTmpl and vl003ReachablePinSpecTmpl mirror
 // testdata/violations/VL-003/dangling-pin/...'s own shape (a feature spec
 // carrying a single context[] pin under test), authored fresh per test so
