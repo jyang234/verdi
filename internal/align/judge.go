@@ -174,12 +174,72 @@ func runJudgeOnce(ctx context.Context, runner JudgeRunner, argv []string, timeou
 	findings := make([]artifact.Finding, 0, len(inner.Findings))
 	for _, jf := range inner.Findings {
 		findings = append(findings, artifact.Finding{
-			ID:   "judged-" + store.RefSlug(jf.ID),
+			ID:   judgedFindingID(jf.ID),
 			Kind: artifact.FindingJudged,
 			Text: fmt.Sprintf("%s (confidence %.2f)", normalizeJudgeText(jf.Text), jf.Confidence),
 		})
 	}
 	return &JudgeSuccess{Findings: findings, Stdin: prompt, RawResult: rawResult}, nil
+}
+
+// reservedIDGuard is the sentinel segment judgedFindingID splices in to
+// neutralize a raw judge slug whose minted id would otherwise land on a shape
+// ReconcileJudged alone may MINT (artifact.IsCollisionMachineryID). It is a
+// fixed literal, so the escape stays a pure, deterministic function of the raw
+// slug.
+const reservedIDGuard = "reserved"
+
+// judgedFindingID mints the stable finding id for a raw judge slug: the
+// normative "judged-" + store.RefSlug(rawSlug), then — the RESERVATION half of
+// spec/finding-identity's judged-reserved-id-shape guard
+// (judged-reserved-id-shape-substring-match) — neutralized if that id would
+// otherwise land on a shape ReconcileJudged alone may MINT
+// (artifact.IsCollisionMachineryID: the numeric-tail collision-member suffix
+// "<slug><CollisionInfix><n>" or the artifact.ContractViolationIDPrefix prefix).
+//
+// A judge must never be able to FORGE either shape from its own slug, or the two
+// id consumers — ReconcileJudged's candidate path (no machinery guard) and the
+// disposition verb's live path (the IsCollisionMachineryID branch) — would
+// disagree about the same id (the L-N13 consumers-agree property): a forged
+// suffix id would get a rendered ac-1 Candidate yet have its live-path
+// resolve+stamp withheld. Anchoring the classifier to the minted shapes
+// (artifact.collisionSuffixRe) already keeps a genuine WORD-"collision" slug out
+// of the machinery class; this seam closes the other direction — a raw slug
+// shaped EXACTLY like a minted id.
+//
+// THE ESCAPE splices reservedIDGuard so the reserved shape breaks:
+//   - reserved PREFIX: the guard immediately after "judged-", so the id no
+//     longer begins with ContractViolationIDPrefix; and
+//   - reserved numeric TAIL: the guard as a trailing segment, so the id no
+//     longer ends in "<CollisionInfix><digits>".
+//
+// It is a literal transform, so judgedFindingID is a pure, deterministic
+// function of rawSlug — the same underlying issue keeps the SAME id across runs,
+// so its disposition still carries (spec/finding-identity's whole identity
+// contract). And because the escaped id is itself NEVER a reserved shape (its
+// prefix no longer starts with the CV literal; its tail no longer ends in
+// digits), re-minting from the escaped id's own slug is a no-op — the guard is
+// idempotent and never compounds across regenerations.
+//
+// RESIDUAL (disclosed, self-healing): the escape is not injective, so a raw
+// judge slug that already mints to an escaped form could in principle collide
+// with an escaped one. Both require the judge to emit a very specifically
+// reserved-shaped slug, and a same-run collision is caught and disclosed by
+// ReconcileJudged's own within-run collision machinery (every member suffixed +
+// a contract-violation finding), never a silent merge.
+func judgedFindingID(rawSlug string) string {
+	id := "judged-" + store.RefSlug(rawSlug)
+	if strings.HasPrefix(id, artifact.ContractViolationIDPrefix) {
+		// Break the reserved PREFIX: splice the guard right after "judged-".
+		id = "judged-" + reservedIDGuard + "-" + strings.TrimPrefix(id, "judged-")
+	}
+	if artifact.IsCollisionMachineryID(id) {
+		// Only the numeric-tail arm can still be true here (the CV prefix, if it
+		// was present, was just broken above). Append the guard so the id no
+		// longer ends in "<CollisionInfix><digits>".
+		id = id + "-" + reservedIDGuard
+	}
+	return id
 }
 
 // normalizeJudgeText replaces every maximal run of Unicode control

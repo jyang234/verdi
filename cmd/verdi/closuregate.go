@@ -210,20 +210,12 @@ func checkSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manife
 		return gateCondition{}, fmt.Errorf("closure gate: internal error: resolved spec has an invalid id: %w", err)
 	}
 	path := store.DeviationReportPath(root, store.ZoneActive, specRef.Name)
-	data, err := os.ReadFile(path)
+	decoded, err := loadDeviationReportIfExists(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return gateCondition{Name: name, OK: true}, nil
-		}
-		return gateCondition{}, fmt.Errorf("closure gate: reading %s: %w", path, err)
+		return gateCondition{}, err
 	}
-	fm, _, err := artifact.SplitFrontmatter(data)
-	if err != nil {
-		return gateCondition{}, fmt.Errorf("closure gate: %s: %w", path, err)
-	}
-	decoded, err := artifact.DecodeDeviation(fm)
-	if err != nil {
-		return gateCondition{}, fmt.Errorf("closure gate: %s failed to decode: %w", path, err)
+	if decoded == nil {
+		return gateCondition{Name: name, OK: true}, nil
 	}
 
 	storyACIDs := make(map[string]bool, len(spec.AcceptanceCriteria))
@@ -235,11 +227,53 @@ func checkSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manife
 		threshold = manifest.Audit.DeviationsStaleThreshold
 	}
 
-	result := evidence.SpecStale(evidence.SpecStaleInput{Findings: decoded.Findings, StoryACIDs: storyACIDs, Threshold: threshold})
+	// spec/finding-identity ac-3: the budget counts unique accepted-
+	// deviation identities across findings: UNION not-resurfaced: — a
+	// finding that a fresh judge run simply does not re-emit must never
+	// drain out of the count just because it moved out of Findings (X-18's
+	// laundering drain). The report's own not-resurfaced: goes in
+	// OwnNotResurfaced, which feeds trigger (b)'s budget by identity. It does
+	// NOT feed trigger (a): not-resurfaced: is judged-only, and a judged id can
+	// never equal an AC id, so an own-text join over it is unreachable by
+	// construction (judged-spec-stale-own-text-judged-id-prefix).
+	result := evidence.SpecStale(evidence.SpecStaleInput{
+		Findings:         decoded.Findings,
+		OwnNotResurfaced: decoded.NotResurfaced,
+		StoryACIDs:       storyACIDs,
+		Threshold:        threshold,
+	})
 	if !result.Flagged {
 		return gateCondition{Name: name, OK: true}, nil
 	}
 	return gateCondition{Name: name, Reason: fmt.Sprintf("spec-stale: own-text finding(s) %v, accepted-deviation count %d (threshold %d)", result.OwnTextFindingIDs, result.AcceptedDeviationCount, threshold)}, nil
+}
+
+// loadDeviationReportIfExists reads and strict-decodes root's
+// deviation-report.md at path, returning (nil, nil) when no file exists yet
+// (a spec with no build activity, or a story that has never run `verdi
+// align`) — never an error, since "no report" is a legitimate, common
+// state this gate's callers (checkSpecStaleCondition, and
+// closuregatefeature.go's feature-level twin) must read as trivially
+// unflagged rather than as an operational failure. A file that exists but
+// fails to decode IS a real, surfaced error (CLAUDE.md: "silence is never a
+// pass" — a broken report on disk must never be treated as "no report").
+func loadDeviationReportIfExists(path string) (*artifact.DeviationFrontmatter, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("closure gate: reading %s: %w", path, err)
+	}
+	fm, _, err := artifact.SplitFrontmatter(data)
+	if err != nil {
+		return nil, fmt.Errorf("closure gate: %s: %w", path, err)
+	}
+	decoded, err := artifact.DecodeDeviation(fm)
+	if err != nil {
+		return nil, fmt.Errorf("closure gate: %s failed to decode: %w", path, err)
+	}
+	return decoded, nil
 }
 
 // checkPendingSupersessionCondition is the closure gate's

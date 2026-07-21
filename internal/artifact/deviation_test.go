@@ -89,3 +89,286 @@ func TestDecodeDeviation_Undispositioned(t *testing.T) {
 		t.Fatalf("Findings = %+v, want one undispositioned finding", fm.Findings)
 	}
 }
+
+// TestDecodeDeviation_OldFixturesUnaffectedByNewFields is spec/finding-
+// identity ac-2's omitempty pin: every pre-existing fixture (none of which
+// carries carried-from: or not-resurfaced:) keeps decoding exactly as
+// before this story — the schema-additive fields must never become
+// mandatory or change any existing fixture's decoded shape.
+func TestDecodeDeviation_OldFixturesUnaffectedByNewFields(t *testing.T) {
+	cases := map[string]string{
+		"living": deviationLivingYAML,
+		"frozen": deviationFrozenYAML,
+	}
+	for name, y := range cases {
+		t.Run(name, func(t *testing.T) {
+			fm, err := DecodeDeviation([]byte(y))
+			if err != nil {
+				t.Fatalf("DecodeDeviation: %v", err)
+			}
+			if fm.NotResurfaced != nil {
+				t.Fatalf("NotResurfaced = %+v, want nil (old fixture names none)", fm.NotResurfaced)
+			}
+			for _, f := range fm.Findings {
+				if f.CarriedFrom != "" {
+					t.Fatalf("finding %s CarriedFrom = %q, want empty (old fixture names none)", f.ID, f.CarriedFrom)
+				}
+			}
+		})
+	}
+}
+
+// TestFinding_CarriedFrom_Validate proves carried-from's two preconditions
+// (spec/finding-identity ac-2): it must accompany a disposition (a
+// candidate — undispositioned by construction — never carries provenance
+// for a decision that has not been made) and, when present, must be a
+// well-formed commit sha (the same shape Covers/Frozen.Commit already
+// require).
+func TestFinding_CarriedFrom_Validate(t *testing.T) {
+	validSha := "7f3c2a10000000000000000000000000000000"
+	tests := []struct {
+		name    string
+		f       Finding
+		wantErr bool
+	}{
+		{
+			name: "carried-from with a disposition and a valid sha",
+			f:    Finding{ID: "judged-a", Kind: FindingJudged, Text: "t", Disposition: FindingAcceptedDeviation, Note: "n", CarriedFrom: validSha},
+		},
+		{
+			name:    "carried-from without a disposition",
+			f:       Finding{ID: "judged-a", Kind: FindingJudged, Text: "t", CarriedFrom: validSha},
+			wantErr: true,
+		},
+		{
+			name:    "carried-from not a valid sha shape",
+			f:       Finding{ID: "judged-a", Kind: FindingJudged, Text: "t", Disposition: FindingFixed, CarriedFrom: "not-a-sha"},
+			wantErr: true,
+		},
+		{
+			name: "empty carried-from is legal (the common case)",
+			f:    Finding{ID: "judged-a", Kind: FindingJudged, Text: "t", Disposition: FindingFixed},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.f.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatal("Validate(): want error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("Validate(): %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestDecodeDeviation_NotResurfaced_Happy proves a not-resurfaced: section
+// (spec/finding-identity ac-3) decodes: one previously-dispositioned judged
+// finding, absent from findings:, persisted there.
+func TestDecodeDeviation_NotResurfaced_Happy(t *testing.T) {
+	y := `schema: verdi.deviation/v1
+covers: 7f3c2a1
+findings: []
+not-resurfaced:
+  - { id: judged-a, kind: judged, text: "old text", disposition: accepted-deviation, note: "n" }
+digest: sha256:` + deviationHex64 + "\n"
+	fm, err := DecodeDeviation([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeDeviation: %v", err)
+	}
+	if len(fm.NotResurfaced) != 1 || fm.NotResurfaced[0].ID != "judged-a" {
+		t.Fatalf("NotResurfaced = %+v, want one judged-a entry", fm.NotResurfaced)
+	}
+}
+
+// TestDecodeDeviation_NotResurfaced_Negative covers not-resurfaced:'s own
+// fail-closed preconditions: every entry must already be dispositioned (an
+// undispositioned finding has no prior ruling to persist), ids must be
+// unique within the section, and an id must not be DISPOSITIONED in
+// findings: while still present in not-resurfaced: (a confirmed finding
+// must have had its backing record removed).
+func TestDecodeDeviation_NotResurfaced_Negative(t *testing.T) {
+	cases := map[string]string{
+		"undispositioned entry": `schema: verdi.deviation/v1
+covers: 7f3c2a1
+findings: []
+not-resurfaced:
+  - { id: judged-a, kind: judged, text: "old text" }
+digest: sha256:` + deviationHex64 + "\n",
+		"duplicate id within not-resurfaced": `schema: verdi.deviation/v1
+covers: 7f3c2a1
+findings: []
+not-resurfaced:
+  - { id: judged-a, kind: judged, text: "old text", disposition: fixed }
+  - { id: judged-a, kind: judged, text: "old text 2", disposition: fixed }
+digest: sha256:` + deviationHex64 + "\n",
+		"id dispositioned in findings AND still present in not-resurfaced": `schema: verdi.deviation/v1
+covers: 7f3c2a1
+findings:
+  - { id: judged-a, kind: judged, text: "new text", disposition: fixed }
+not-resurfaced:
+  - { id: judged-a, kind: judged, text: "old text", disposition: fixed }
+digest: sha256:` + deviationHex64 + "\n",
+	}
+	for name, y := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeDeviation([]byte(y)); err == nil {
+				t.Fatalf("DecodeDeviation(%s): want error, got nil", name)
+			}
+		})
+	}
+}
+
+// TestDecodeDeviation_NotResurfaced_LiveCandidateSharesID proves the
+// EXPECTED, common shape a pending candidate produces: an UNDISPOSITIONED
+// findings: entry (the fresh, reworded finding) sharing an id with a
+// DISPOSITIONED not-resurfaced: entry (its old ruling, the pre-fill's
+// backing record) is legal — this is exactly what align.ReconcileJudged
+// produces for a not-yet-confirmed candidate (spec/finding-identity ac-1).
+func TestDecodeDeviation_NotResurfaced_LiveCandidateSharesID(t *testing.T) {
+	y := `schema: verdi.deviation/v1
+covers: 7f3c2a1
+findings:
+  - { id: judged-a, kind: judged, text: "new reworded text" }
+not-resurfaced:
+  - { id: judged-a, kind: judged, text: "old text", disposition: accepted-deviation, note: "n" }
+digest: sha256:` + deviationHex64 + "\n"
+	fm, err := DecodeDeviation([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeDeviation: %v, want a live candidate + backing record to decode cleanly", err)
+	}
+	if len(fm.Findings) != 1 || fm.Findings[0].Dispositioned() {
+		t.Fatalf("Findings = %+v, want one undispositioned candidate", fm.Findings)
+	}
+	if len(fm.NotResurfaced) != 1 || !fm.NotResurfaced[0].Dispositioned() {
+		t.Fatalf("NotResurfaced = %+v, want one dispositioned backing record", fm.NotResurfaced)
+	}
+}
+
+// TestDecodeDeviation_NotResurfaced_CollisionCoexistenceRejected is
+// spec/finding-identity judged-collision-backing-regeneration-drain's schema
+// half: the SAME-KIND rejection now fires cleanly even in the presence of a
+// "<slug>-collision-<n>" sibling. The earlier design blessed a DISPOSITIONED
+// judged slug-collision base member coexisting with its same-id, same-kind
+// not-resurfaced backing record (an IsCollisionBaseMemberID exception). That
+// coexistence is the disease: it is unrepresentable now — ReconcileJudged
+// suffixes EVERY member of a collision whose slug owns a backing record, so no
+// live member ever shadows the backing record's bare id. With the exception
+// removed, a dispositioned bare-slug findings: entry sharing an id with a
+// same-kind not-resurfaced entry is rejected regardless of any collision
+// sibling — a confirmed finding's backing record must have been removed.
+func TestDecodeDeviation_NotResurfaced_CollisionCoexistenceRejected(t *testing.T) {
+	y := `schema: verdi.deviation/v1
+covers: 7f3c2a1
+findings:
+  - { id: judged-dup, kind: judged, text: "first reading", disposition: fixed, note: "n" }
+  - { id: judged-dup-collision-2, kind: judged, text: "second, different reading" }
+not-resurfaced:
+  - { id: judged-dup, kind: judged, text: "an old ruling under the same slug", disposition: accepted-deviation, note: "owner-ratified" }
+digest: sha256:` + deviationHex64 + "\n"
+	if _, err := DecodeDeviation([]byte(y)); err == nil {
+		t.Fatal("DecodeDeviation: want the same-kind backing-record overlap rejected even with a -collision-<n> sibling present, got nil error")
+	}
+}
+
+// TestDecodeDeviation_NotResurfaced_SuffixedCollisionMembersDecodeCleanly pins
+// the shape ReconcileJudged now produces for a colliding slug that owns a
+// backing record (judged-collision-backing-regeneration-drain): every live
+// member is suffixed, so the bare slug appears ONLY in not-resurfaced: — no
+// same-kind overlap — and the report decodes cleanly.
+func TestDecodeDeviation_NotResurfaced_SuffixedCollisionMembersDecodeCleanly(t *testing.T) {
+	y := `schema: verdi.deviation/v1
+covers: 7f3c2a1
+findings:
+  - { id: judged-dup-collision-1, kind: judged, text: "first reading" }
+  - { id: judged-dup-collision-2, kind: judged, text: "second, different reading" }
+not-resurfaced:
+  - { id: judged-dup, kind: judged, text: "an old ruling under the same slug", disposition: accepted-deviation, note: "owner-ratified" }
+digest: sha256:` + deviationHex64 + "\n"
+	fm, err := DecodeDeviation([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeDeviation: %v, want all-suffixed collision members + a bare-slug backing record to decode cleanly", err)
+	}
+	if len(fm.Findings) != 2 || len(fm.NotResurfaced) != 1 || fm.NotResurfaced[0].ID != "judged-dup" {
+		t.Fatalf("decoded = %+v / %+v, want two suffixed members and the bare-slug backing record", fm.Findings, fm.NotResurfaced)
+	}
+}
+
+// TestDecodeDeviation_NotResurfaced_ComputedFindingSharesJudgedID proves the
+// judged-only scope of the not-resurfaced backing relationship (spec/finding-
+// identity judged-reaffirm-judged-kind-scope): a DISPOSITIONED COMPUTED finding
+// sharing an id with a JUDGED not-resurfaced entry is a legitimate cross-
+// namespace slug collision — computed boundary ids (boundary-<from>-<to>-<via>)
+// and judged boundary slugs share the same shape — never the "unremoved judged
+// backing record" the SAME-KIND rejection catches, so it decodes cleanly. The
+// same-kind collision (a judged dispositioned finding + a judged not-resurfaced
+// entry) stays rejected (TestDecodeDeviation_NotResurfaced_Negative).
+func TestDecodeDeviation_NotResurfaced_ComputedFindingSharesJudgedID(t *testing.T) {
+	y := `schema: verdi.deviation/v1
+covers: 7f3c2a1
+findings:
+  - { id: boundary-x, kind: computed, text: "the declared boundary holds", disposition: fixed }
+not-resurfaced:
+  - { id: boundary-x, kind: judged, text: "an old judged ruling under the same slug", disposition: accepted-deviation, note: "n" }
+digest: sha256:` + deviationHex64 + "\n"
+	fm, err := DecodeDeviation([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeDeviation: %v, want a computed finding colliding with a judged not-resurfaced entry to decode cleanly (the backing relationship is judged-only)", err)
+	}
+	if len(fm.Findings) != 1 || fm.Findings[0].Kind != FindingComputed {
+		t.Fatalf("Findings = %+v, want one computed finding", fm.Findings)
+	}
+	if len(fm.NotResurfaced) != 1 || fm.NotResurfaced[0].Kind != FindingJudged {
+		t.Fatalf("NotResurfaced = %+v, want one judged backing record left intact", fm.NotResurfaced)
+	}
+}
+
+// TestIsCollisionMachineryID_AnchorsToMintedShapesNotSubstring is
+// spec/finding-identity judged-reserved-id-shape-substring-match's classifier
+// half: IsCollisionMachineryID recognizes ONLY the two shapes ReconcileJudged
+// actually MINTS — a numeric-tail collision-member suffix
+// ("<slug><CollisionInfix><n>", n a decimal) and the ContractViolationIDPrefix
+// prefix — never any id that merely CONTAINS the English word "collision"
+// between hyphens. The two verbatim pins are THIS story's own live finding
+// slugs: a bare substring test (strings.Contains(id, "-collision-")) misreads
+// both as machinery, which splits the two id consumers (ReconcileJudged's
+// candidate path, which has no machinery guard, vs. the disposition live path
+// and Validate, which key off this classifier) exactly the way L-N13 forbids —
+// the double-count/brick chain this fix closes.
+func TestIsCollisionMachineryID_AnchorsToMintedShapesNotSubstring(t *testing.T) {
+	cases := []struct {
+		id   string
+		want bool
+	}{
+		// Genuine judge slugs carrying the WORD "collision" — NOT machinery.
+		// This story's own live finding slugs, pinned verbatim: the substring
+		// classifier read both true and split the two id consumers.
+		{"judged-collision-suffixed-backing-shadow", false},
+		{"judged-collision-cv-emission-order", false},
+		// Other infix-"collision" English slugs, including numeric segments that
+		// are not the TAIL.
+		{"judged-collision-guard-corpus-narrower-than-scope", false},
+		{"judged-collision-2-way-merge-ordering", false}, // digit present, not the tail
+		{"judged-foo-collision-2-bar", false},            // "-collision-2" mid-string, not the tail
+		{"judged-foo-collision-bar", false},
+		{"judged-foo-collision-", false}, // infix present, no numeric tail
+		// Minted numeric-tail collision members — machinery.
+		{"judged-dup-collision-2", true},
+		{"judged-dup-collision-10", true},
+		// A word-"collision" slug that ITSELF collided within a run gets a real
+		// numeric suffix appended — the FINAL "-collision-<n>" is the tail.
+		{"judged-collision-cv-emission-order-collision-3", true},
+		// Reserved contract-violation prefix — machinery (fail-closed), even
+		// when the trailing slug happens to contain the word "collision".
+		{"judged-contract-violation-dup", true},
+		{"judged-contract-violation-collision-cv-emission-order", true},
+		// The CV prefix must sit at position 0 — not merely be present.
+		{"x-judged-contract-violation-dup", false},
+	}
+	for _, tc := range cases {
+		if got := IsCollisionMachineryID(tc.id); got != tc.want {
+			t.Errorf("IsCollisionMachineryID(%q) = %v, want %v", tc.id, got, tc.want)
+		}
+	}
+}

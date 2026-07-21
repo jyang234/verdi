@@ -236,15 +236,38 @@ func buildCloseFeatureRepo(t *testing.T, opts closeFeatureFixtureOpts) *fixtureg
 		featureCloseScaffoldLayer,
 		{
 			Files: map[string]string{
-				".verdi/specs/active/close-feature-fixture/spec.md":        closeFeatureSpecMD(scaffoldSHA, opts.FeatureStory),
-				".verdi/specs/archive/fixture-story-one/spec.md":           closeFeatureStorySpecMD("fixture-story-one", scaffoldSHA, "closed", "jira:FIXTURE-STORY-1", "ac-1"),
-				".verdi/specs/" + story2Dir + "/fixture-story-two/spec.md": closeFeatureStorySpecMD("fixture-story-two", scaffoldSHA, opts.Story2Status, "jira:FIXTURE-STORY-2", "ac-2"),
-				".verdi/obligations/fixture-story-one/ac-1--static.md":     closeFeatureStoryObligationMD("fixture-story-one", scaffoldSHA),
-				".verdi/obligations/fixture-story-two/ac-1--static.md":     closeFeatureStoryObligationMD("fixture-story-two", scaffoldSHA),
+				".verdi/specs/active/close-feature-fixture/spec.md":                    closeFeatureSpecMD(scaffoldSHA, opts.FeatureStory),
+				".verdi/specs/archive/fixture-story-one/spec.md":                       closeFeatureStorySpecMD("fixture-story-one", scaffoldSHA, "closed", "jira:FIXTURE-STORY-1", "ac-1"),
+				".verdi/specs/archive/fixture-story-one/deviation-report.md":           closeFeatureStoryDeviationMD(scaffoldSHA),
+				".verdi/specs/" + story2Dir + "/fixture-story-two/spec.md":             closeFeatureStorySpecMD("fixture-story-two", scaffoldSHA, opts.Story2Status, "jira:FIXTURE-STORY-2", "ac-2"),
+				".verdi/specs/" + story2Dir + "/fixture-story-two/deviation-report.md": closeFeatureStoryDeviationMD(scaffoldSHA),
+				".verdi/obligations/fixture-story-one/ac-1--static.md":                 closeFeatureStoryObligationMD("fixture-story-one", scaffoldSHA),
+				".verdi/obligations/fixture-story-two/ac-1--static.md":                 closeFeatureStoryObligationMD("fixture-story-two", scaffoldSHA),
 			},
 			Message: "add close-feature-fixture + its two implementing stories",
 		},
 	})
+}
+
+// closeFeatureStoryDeviationMD renders a minimal, valid archived deviation
+// report for an implementing story — the frozen report a genuinely-closed
+// story always carries (the story closure gate refuses to freeze without a
+// head-covering, fully-dispositioned report, so a closed story in the archive
+// zone always has one alongside its spec.md). Empty findings: it contributes
+// nothing to the feature-close spec-stale union, so the feature gate's
+// condition 4 stays a clean PASS while the archive is PRESENT — the disclosed
+// anomaly (judged-feature-union-missing-archive-silent-zero) is a CLOSED story
+// with NO archived report, the shape the OLD fixture (no story reports) modeled
+// by omission.
+func closeFeatureStoryDeviationMD(covers string) string {
+	return fmt.Sprintf(`---
+schema: verdi.deviation/v1
+covers: %s
+findings: []
+digest: sha256:%s
+---
+# Alignment report
+`, covers, strings.Repeat("0", 64))
 }
 
 // writeCloseFeatureGateReport writes deviation-report.md directly into the

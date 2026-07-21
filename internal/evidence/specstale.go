@@ -1,6 +1,9 @@
 package evidence
 
-import "github.com/jyang234/verdi/internal/artifact"
+import (
+	"github.com/jyang234/verdi/internal/align"
+	"github.com/jyang234/verdi/internal/artifact"
+)
 
 // DefaultDeviationsStaleThreshold is the spec-stale flag's threshold-count
 // trigger's default (03 §The amendment ladder: "more than a configured
@@ -30,6 +33,49 @@ type SpecStaleInput struct {
 	// first accepted-deviation, which 03's "tunable, default 3" framing
 	// never intends as the out-of-the-box behavior.
 	Threshold int
+	// OwnNotResurfaced is the SAME report's own not-resurfaced: section — the
+	// prior rulings a fresh judge run did not re-emit (artifact.
+	// DeviationFrontmatter.NotResurfaced). It feeds trigger (b) ONLY:
+	//
+	//   - trigger (b): unioned into the accepted-deviation budget by unique
+	//     content identity, so a finding that stops reproducing never drains
+	//     out of the count just because it moved out of findings: (ac-3's
+	//     laundering drain — a no-op for a single well-formed report, whose
+	//     findings: and not-resurfaced: are disjoint by id, L-N2).
+	//
+	// It does NOT feed trigger (a). The not-resurfaced: section holds only
+	// judged-kind entries (align.ReconcileJudged is its sole producer), whose
+	// "judged-"-prefixed ids can never equal an AC id (which matches ^ac-), so
+	// an own-text join over it can never contribute — the earlier scan that
+	// claimed to close an un-flag drain here was dead by construction
+	// (judged-spec-stale-own-text-judged-id-prefix; the disjointness is pinned
+	// in align.TestNotResurfacedIDsCanNeverBeACIDs).
+	//
+	// With trigger (a) reading neither, OwnNotResurfaced is now behaviourally
+	// equivalent to an AdditionalSets entry (both union into trigger (b) by
+	// identity). It is kept a distinct field only to name the namespace boundary
+	// for the reader: this set is the report's OWN; AdditionalSets is possibly
+	// cross-report.
+	OwnNotResurfaced []artifact.Finding
+	// AdditionalSets are further finding sets whose accepted-deviation
+	// dispositions count toward the SAME budget as Findings, unioned by
+	// unique content identity (align.Identity's Kind+ID+Text hash) rather
+	// than concatenated — spec/finding-identity's counterweight hardening
+	// (ledger L-N2). Used for CROSS-REPORT sets only (ac-4, the actual
+	// cross-report X-18 fix): the feature-closure gate passes every closed
+	// implementing story's ARCHIVED report's findings: + not-resurfaced: here,
+	// so a story-archived accepted deviation counts exactly once toward the
+	// feature-close budget — never zero (silently dropped because the feature's
+	// own report never reproduced it) and never twice (double-counted across
+	// the story and feature reports independently).
+	//
+	// Deliberately excluded from trigger (a)'s "own text" join: an
+	// AdditionalSets entry's finding ids are drawn from a DIFFERENT spec's own
+	// AC-id namespace (a story's archived report, at the feature level) — an id
+	// collision there must never be misread as "this spec's own declared AC
+	// text was targeted". Only Findings feeds trigger (a) (OwnNotResurfaced is
+	// judged-only and can never carry an AC-shaped id — see its doc comment).
+	AdditionalSets [][]artifact.Finding
 }
 
 // SpecStaleResult is SpecStale's outcome.
@@ -85,17 +131,90 @@ func SpecStale(in SpecStaleInput) SpecStaleResult {
 	}
 
 	var result SpecStaleResult
+
+	// Trigger (a) reads the report's OWN findings: ONLY. An own-text
+	// accepted-deviation is a finding whose id equals one of the spec's own
+	// declared AC ids — which only a COMPUTED finding can ever be (a computed
+	// finding targeting an AC's declared text), since AC ids match ^ac-
+	// (artifact acIDRe) while every judged id is "judged-"-prefixed (judge.go).
+	//
+	// OwnNotResurfaced is deliberately NOT scanned here. The not-resurfaced:
+	// section holds only judged-kind entries (align.ReconcileJudged is its sole
+	// producer), whose ids can never equal an AC id, so a scan of it could never
+	// contribute to trigger (a) — it was dead by construction
+	// (judged-spec-stale-own-text-judged-id-prefix; disjointness pinned in
+	// align.TestNotResurfacedIDsCanNeverBeACIDs). The un-flag drain the earlier
+	// scan claimed to close cannot arise on this judged-only path at all: a
+	// computed own-text deviation never enters not-resurfaced: — see trigger
+	// (b)'s note on why dropping a vanished computed deviation is honest rather
+	// than a drain. AdditionalSets is likewise never scanned for own-text: its
+	// entries are a DIFFERENT spec's AC-id namespace. Findings ids are unique
+	// within one report (artifact Validate), so no dedup is needed.
 	for _, f := range in.Findings {
-		if f.Disposition != artifact.FindingAcceptedDeviation {
-			continue
-		}
-		result.AcceptedDeviationCount++
-		if in.StoryACIDs[f.ID] {
+		if f.Disposition == artifact.FindingAcceptedDeviation && in.StoryACIDs[f.ID] {
 			result.OwnTextFindingIDs = append(result.OwnTextFindingIDs, f.ID)
 		}
 	}
 
+	// Trigger (b) — the accepted-deviation budget itself — unions Findings
+	// with OwnNotResurfaced and every AdditionalSets entry by unique content
+	// identity (align.Identity), so the SAME standing adjudication reproduced
+	// across more than one set counts exactly once (spec/finding-identity ac-3/
+	// ac-4's counterweight hardening; the field doc comments have the full
+	// rationale). For a single, well-formed report with only Findings
+	// populated, every id — and so every identity — is already unique by schema
+	// construction, so this union is a no-op there: the exact same count
+	// SpecStale always produced.
+	//
+	// This not-resurfaced counterweight covers the JUDGED path only, and
+	// correctly so (judged-spec-stale-own-text-judged-id-prefix). A judged
+	// accepted-deviation that stops reproducing is a judge NON-REPRODUCTION — the
+	// underlying issue may well still stand — so persisting it in not-resurfaced:
+	// and keeping it in the budget is the honest floor (the X-18 laundering
+	// drain). A vanishing COMPUTED accepted-deviation is the opposite: its
+	// disappearance is DETERMINISTIC — the regenerated boundary contract itself
+	// changed, so the fact the deviation described no longer exists.
+	// PreserveDispositions simply dropping such a finding is therefore honest,
+	// not a drain: the budget SHOULD fall when the boundary genuinely changed.
+	// That path never enters not-resurfaced: (align.ReconcileJudged, its sole
+	// producer, is judged-only), so it is correctly outside this union — nothing
+	// to preserve, because the disappearance is a real change of fact, not a
+	// stochastic non-reproduction.
+	sets := make([][]artifact.Finding, 0, 2+len(in.AdditionalSets))
+	sets = append(sets, in.Findings)
+	sets = append(sets, in.OwnNotResurfaced)
+	sets = append(sets, in.AdditionalSets...)
+	result.AcceptedDeviationCount = CountAcceptedDeviations(sets...)
+
 	result.TriggeredByThreshold = result.AcceptedDeviationCount > threshold
 	result.Flagged = len(result.OwnTextFindingIDs) > 0 || result.TriggeredByThreshold
 	return result
+}
+
+// CountAcceptedDeviations returns the number of DISTINCT accepted-deviation
+// dispositions across sets, unioned by unique content identity
+// (align.Identity's Kind+ID+Text hash) so the SAME standing adjudication
+// reproduced across more than one set counts exactly once. This is the one
+// accepted-deviation-budget counting rule SpecStale's threshold trigger reads —
+// and the same rule the feature-close gate reuses to count a superseded
+// implementing story's archived deviations for its disclose-and-exclude line
+// (spec/finding-identity ledger L-N12), never a second hand-rolled loop that
+// could drift from this one.
+func CountAcceptedDeviations(sets ...[]artifact.Finding) int {
+	seen := make(map[string]bool)
+	n := 0
+	for _, set := range sets {
+		for _, f := range set {
+			if f.Disposition != artifact.FindingAcceptedDeviation {
+				continue
+			}
+			id := align.Identity(f)
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			n++
+		}
+	}
+	return n
 }
