@@ -23,5 +23,6 @@ not plan time (disclosed in dc-2); derived/cache pruning bullets remain
 unimplemented (co-1); reclamation of anything unmerged — including
 redundant superseded-elsewhere close branches — remains out of scope by
 the amendment's own terms. The unmerged-branch-only disclosure gap, the
-dry-run tip omission, and the conservative dc-2 managed-guard widening
-are recorded accepted-deviations (R4-I-82/83).
+dry-run tip omission, the conservative dc-2 managed-guard widening, and
+the conservative default-branch guard widening are recorded
+accepted-deviations (R4-I-82/83/84/85).
