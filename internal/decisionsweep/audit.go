@@ -105,10 +105,11 @@ func ScanSpecStale(root string, snap *lint.Snapshot, threshold int) ([]SpecStale
 		// spec/finding-identity ac-3: unioned with the story's OWN
 		// not-resurfaced: by unique identity, so a finding a fresh judge run
 		// simply does not re-emit never drains out of the budget just because
-		// it moved out of findings: (the X-18 laundering drain); OwnNotResurfaced
-		// (same AC-id namespace) also keeps an own-text adjudication raising
-		// trigger (a) there — mirrors closuregate.go's checkSpecStaleCondition,
-		// 05 §Lenses' anti-hairball law.
+		// it moved out of findings: (the X-18 laundering drain). OwnNotResurfaced
+		// feeds trigger (b) only — not trigger (a), which is unreachable over a
+		// judged-only section whose ids can never equal an AC id
+		// (judged-spec-stale-own-text-judged-id-prefix) — mirrors closuregate.go's
+		// checkSpecStaleCondition, 05 §Lenses' anti-hairball law.
 		result := evidence.SpecStale(evidence.SpecStaleInput{
 			Findings:         findings,
 			OwnNotResurfaced: notResurfaced,

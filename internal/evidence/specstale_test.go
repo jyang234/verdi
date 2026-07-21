@@ -202,34 +202,69 @@ func TestSpecStale_AdditionalSets_OwnTextTrigger_ScopedToPrimarySetOnly(t *testi
 	}
 }
 
-// TestSpecStale_OwnNotResurfaced_OwnTextTrigger_StillFiresAfterMovingSection
-// is spec/finding-identity judged-spec-stale-own-text-not-resurfaced: an
-// accepted-deviation whose id equals one of the story's OWN declared AC ids
-// keeps raising the spec-stale flag (trigger a) after a fresh judge run stops
-// reproducing it and it moves from findings: into the report's OWN
-// not-resurfaced: section. Same report = same AC-id namespace, so the own-text
-// join covers OwnNotResurfaced too — closing the un-flag drain a
-// non-reproducing judge would otherwise open.
+// TestSpecStale_OwnNotResurfaced_DoesNotFeedTriggerA is spec/finding-identity
+// judged-spec-stale-own-text-judged-id-prefix: trigger (a)'s own-text join
+// reads ONLY Findings, never OwnNotResurfaced. The OwnNotResurfaced scan the
+// prior fix (commit 5f3e435) added was unreachable by construction — every
+// entry Generate ever writes to not-resurfaced: is judged-kind, every judged
+// finding id is "judged-"+slug (judge.go), and every AC id matches ^ac-
+// (artifact acIDRe), so a not-resurfaced entry's id can NEVER equal an AC id
+// and can never trip trigger (a). The id-shape disjointness is pinned directly
+// in internal/align (TestNotResurfacedIDsCanNeverBeACIDs).
 //
-// Only ONE accepted-deviation total, so trigger (b) — the COUNT — cannot fire
-// (1 <= default threshold 3): trigger (a) alone must carry the flag, isolating
-// the fix. Red-first (before the fix): trigger (a) scanned only Findings, so
-// the flag silently dropped the moment the finding moved to not-resurfaced:.
-func TestSpecStale_OwnNotResurfaced_OwnTextTrigger_StillFiresAfterMovingSection(t *testing.T) {
+// This test constructs the ONLY shape that could ever have tripped the dead
+// scan — a not-resurfaced accepted-deviation whose id is AC-shaped, which no
+// real judged finding can carry — and pins that it does NOT fire trigger (a).
+// Red-first (before removing the dead scan): the OwnNotResurfaced scan fired on
+// the AC-shaped id and set Flagged=true with OwnTextFindingIDs=[ac-3].
+func TestSpecStale_OwnNotResurfaced_DoesNotFeedTriggerA(t *testing.T) {
 	in := SpecStaleInput{
 		Findings:         nil,
-		OwnNotResurfaced: []artifact.Finding{judgedAcceptedDeviation("ac-3", "the spec's own ac-3 text was wrong", "owner-ratified")},
+		OwnNotResurfaced: []artifact.Finding{judgedAcceptedDeviation("ac-3", "an AC-shaped id no real judged finding can carry", "owner-ratified")},
 		StoryACIDs:       map[string]bool{"ac-1": true, "ac-2": true, "ac-3": true},
 	}
 	got := SpecStale(in)
-	if !got.Flagged {
-		t.Fatal("Flagged = false, want true — an own-text accepted-deviation in the report's own not-resurfaced: must still raise spec-stale (trigger a)")
+	if len(got.OwnTextFindingIDs) != 0 {
+		t.Fatalf("OwnTextFindingIDs = %v, want none — trigger (a) must read only Findings, never OwnNotResurfaced (the scan is unreachable by id-shape construction)", got.OwnTextFindingIDs)
 	}
-	if len(got.OwnTextFindingIDs) != 1 || got.OwnTextFindingIDs[0] != "ac-3" {
-		t.Fatalf("OwnTextFindingIDs = %v, want [ac-3]", got.OwnTextFindingIDs)
+	// One accepted-deviation total, default threshold 3: trigger (b) does not
+	// fire either, so with trigger (a) correctly silent the report is unflagged.
+	if got.Flagged {
+		t.Fatalf("Flagged = true, want false — no own-text trigger from OwnNotResurfaced and only one accepted-deviation (< threshold)")
 	}
-	if got.TriggeredByThreshold {
-		t.Fatal("TriggeredByThreshold = true, want false (one accepted-deviation; trigger a alone must carry the flag)")
+	// The entry is still COUNTED toward the budget (trigger b) — here 1, under
+	// threshold. The reachable protection is pinned in full below.
+	if got.AcceptedDeviationCount != 1 {
+		t.Fatalf("AcceptedDeviationCount = %d, want 1 (OwnNotResurfaced still feeds trigger (b)'s budget)", got.AcceptedDeviationCount)
+	}
+}
+
+// TestSpecStale_OwnNotResurfaced_OnlyThere_StillCountsBudget pins the REAL,
+// reachable protection OwnNotResurfaced provides — the one that STAYS after the
+// dead trigger-(a) scan is removed: a realistically-shaped judged
+// accepted-deviation ("judged-"-prefixed id, the only shape not-resurfaced:
+// ever holds) present ONLY in OwnNotResurfaced still counts toward trigger
+// (b)'s budget, so a standing adjudication that stopped reproducing never
+// drains out of the count just because it moved out of findings: (ac-3's X-18
+// laundering fix). This FAILs if OwnNotResurfaced is ever dropped from trigger
+// (b) too — it fences the exact boundary of the removal.
+func TestSpecStale_OwnNotResurfaced_OnlyThere_StillCountsBudget(t *testing.T) {
+	in := SpecStaleInput{
+		Findings: []artifact.Finding{
+			judgedAcceptedDeviation("judged-a", "text a", "n"),
+			judgedAcceptedDeviation("judged-b", "text b", "n"),
+			judgedAcceptedDeviation("judged-c", "text c", "n"),
+		},
+		OwnNotResurfaced: []artifact.Finding{judgedAcceptedDeviation("judged-standing", "an old, settled adjudication", "owner-ratified")},
+		StoryACIDs:       map[string]bool{},
+		Threshold:        3,
+	}
+	got := SpecStale(in)
+	if got.AcceptedDeviationCount != 4 {
+		t.Fatalf("AcceptedDeviationCount = %d, want 4 (3 in findings + 1 present only in not-resurfaced)", got.AcceptedDeviationCount)
+	}
+	if !got.TriggeredByThreshold {
+		t.Fatal("TriggeredByThreshold = false, want true (4 > threshold 3 — the not-resurfaced entry pushed the budget over)")
 	}
 }
 

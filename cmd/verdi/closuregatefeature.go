@@ -262,12 +262,13 @@ func checkAllImplementingStoriesClosed(stories []implementingStoryEdges, mdl *mo
 // how many archives actually fed the union.
 //
 // Trigger (a)'s own-text join uses ONLY the feature's own declared AC ids
-// against the feature's own report — both its findings: (Findings) and its own
-// not-resurfaced: (OwnNotResurfaced), which share the feature's AC-id
-// namespace — never AdditionalSets (see that field's own doc comment): a
-// story's archived finding id colliding with a feature AC id (both commonly
-// short forms like "ac-1") must never be misread as the feature's own text
-// having been targeted (judged-spec-stale-own-text-not-resurfaced).
+// against the feature's own report findings: (Findings) — never AdditionalSets
+// (a story's archived finding id colliding with a feature AC id, both commonly
+// short forms like "ac-1", must never be misread as the feature's own text
+// having been targeted) and never OwnNotResurfaced (the feature's own
+// not-resurfaced: is judged-only, and a judged id can never equal an AC id, so
+// an own-text join over it is unreachable by construction —
+// judged-spec-stale-own-text-judged-id-prefix).
 func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, stories []implementingStoryEdges, mdl *model.Model) (gateCondition, error) {
 	name := "4. no unresolved spec-stale flag"
 
@@ -285,10 +286,11 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 	additional := make([][]artifact.Finding, 0, 2*len(stories))
 	if own != nil {
 		ownFindings = own.Findings
-		// The feature's OWN not-resurfaced: shares the feature's AC-id
-		// namespace, so it feeds trigger (a) too (OwnNotResurfaced) — never
-		// AdditionalSets, which is for cross-report story archives only
-		// (judged-spec-stale-own-text-not-resurfaced).
+		// The feature's OWN not-resurfaced: feeds trigger (b)'s budget via
+		// OwnNotResurfaced (never AdditionalSets, which is for cross-report story
+		// archives). It does NOT feed trigger (a): not-resurfaced: is judged-only
+		// and a judged id can never equal an AC id
+		// (judged-spec-stale-own-text-judged-id-prefix).
 		ownNotResurfaced = own.NotResurfaced
 	}
 

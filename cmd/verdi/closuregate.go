@@ -232,9 +232,10 @@ func checkSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manife
 	// finding that a fresh judge run simply does not re-emit must never
 	// drain out of the count just because it moved out of Findings (X-18's
 	// laundering drain). The report's own not-resurfaced: goes in
-	// OwnNotResurfaced (not AdditionalSets): it shares the story's AC-id
-	// namespace, so an own-text accepted-deviation there keeps raising trigger
-	// (a) too (judged-spec-stale-own-text-not-resurfaced).
+	// OwnNotResurfaced, which feeds trigger (b)'s budget by identity. It does
+	// NOT feed trigger (a): not-resurfaced: is judged-only, and a judged id can
+	// never equal an AC id, so an own-text join over it is unreachable by
+	// construction (judged-spec-stale-own-text-judged-id-prefix).
 	result := evidence.SpecStale(evidence.SpecStaleInput{
 		Findings:         decoded.Findings,
 		OwnNotResurfaced: decoded.NotResurfaced,

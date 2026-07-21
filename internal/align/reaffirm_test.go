@@ -11,6 +11,56 @@ func dispositionedJudged(id, text string, disposition artifact.FindingDispositio
 	return artifact.Finding{ID: id, Kind: artifact.FindingJudged, Text: text, Disposition: disposition, Note: note}
 }
 
+// TestNotResurfacedIDsCanNeverBeACIDs is spec/finding-identity
+// judged-spec-stale-own-text-judged-id-prefix's ground-truth invariant: the
+// evidence.SpecStale trigger-(a) scan over OwnNotResurfaced was unreachable by
+// construction because a not-resurfaced entry's id can NEVER equal an
+// acceptance-criterion id. ReconcileJudged is the SOLE producer of the
+// not-resurfaced: section (report.go's Generate writes only
+// judgedRecon.NotResurfaced), it emits only judged-kind entries there, every
+// judged id is "judged-"-prefixed (judge.go, the synthetic AbsenceFindingID,
+// and contract-violation ids alike), and artifact's acIDRe requires ^ac- — so
+// the two id namespaces are provably disjoint. This pins both halves, so
+// re-adding the dead OwnNotResurfaced scan under the old premise would break
+// here.
+func TestNotResurfacedIDsCanNeverBeACIDs(t *testing.T) {
+	// A spread of every judged id shape that can land in not-resurfaced: an
+	// ordinary judged slug, the synthetic coverage-absence id, and a
+	// contract-violation id.
+	existing := []artifact.Finding{
+		dispositionedJudged("judged-retry-semantics", "t1", artifact.FindingAcceptedDeviation, "n"),
+		dispositionedJudged(AbsenceFindingID, "t2", artifact.FindingAcceptedDeviation, "n"),
+		dispositionedJudged("judged-contract-violation-foo", "t3", artifact.FindingFixed, "n"),
+	}
+	// Nothing resurfaces this run -> every prior dispositioned judged finding
+	// lands in NotResurfaced.
+	got := ReconcileJudged(nil, existing, nil)
+	if len(got.NotResurfaced) != len(existing) {
+		t.Fatalf("NotResurfaced = %d entries, want %d (nothing resurfaced)", len(got.NotResurfaced), len(existing))
+	}
+	for _, f := range got.NotResurfaced {
+		if f.Kind != artifact.FindingJudged {
+			t.Fatalf("not-resurfaced entry %s kind = %s, want judged (only judged-kind ever persists here)", f.ID, f.Kind)
+		}
+		if !strings.HasPrefix(f.ID, "judged-") {
+			t.Fatalf("not-resurfaced id %q is not judged-prefixed", f.ID)
+		}
+		// The load-bearing half: a not-resurfaced id is never a valid AC id, so
+		// a StoryACIDs/featureACIDs set (built from AC ids) can never contain
+		// it. Evidence/Text are populated so Validate fails ONLY on the id shape.
+		acShaped := artifact.AcceptanceCriterion{ID: f.ID, Text: "x", Evidence: []artifact.EvidenceKind{artifact.EvidenceBehavioral}}
+		if err := acShaped.Validate(); err == nil {
+			t.Fatalf("not-resurfaced id %q validated as an acceptance-criterion id — the trigger-(a) scan would NOT be unreachable", f.ID)
+		}
+	}
+	// Sanity: a real AC id DOES validate under the identical construction, so
+	// the rejection above is about the id shape, not a vacuously-failing check.
+	realAC := artifact.AcceptanceCriterion{ID: "ac-1", Text: "x", Evidence: []artifact.EvidenceKind{artifact.EvidenceBehavioral}}
+	if err := realAC.Validate(); err != nil {
+		t.Fatalf("ac-1 should be a valid AC id: %v", err)
+	}
+}
+
 func freshJudged(id, text string) artifact.Finding {
 	return artifact.Finding{ID: id, Kind: artifact.FindingJudged, Text: text}
 }
