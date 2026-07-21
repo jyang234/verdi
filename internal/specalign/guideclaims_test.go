@@ -863,6 +863,119 @@ func findDowngradesWithoutFreshCite(oldM, newM *artifact.GuideClaimsManifest) []
 	return findings
 }
 
+// findRenameDowngrades is judged-ac3-downgrade identity-stable row keys: the
+// residual findDowngradesWithoutFreshCite discloses — a downgrade evades the
+// id-matched check entirely by DELETING a row and RE-CREATING it under a new
+// id, since a row present on only one side is skipped, so no "present-in-both"
+// downgrade is ever seen. This closes the SILENT case with the smallest honest
+// mechanism: a row REMOVED at HEAD (present at the merge-base, absent now)
+// whose SECTION still exists in the manifest is a suspected rename/delete-and-
+// recreate and reds — UNLESS some row now in that same section carries a cite
+// that references the removal (its cite names the removed row's id), which
+// documents the removal as deliberate.
+//
+// DISCLOSED — what remains evadable (the goal is that a SILENT delete-and-
+// recreate reds, not that every rename is provably a same-row edit): the
+// "references the removal" test is substring containment of the removed id in a
+// same-section row's cite, so renaming a row AND moving it to a different
+// section in one step leaves no surviving same-section row and is not seen as a
+// rename (a genuine whole-section retirement is likewise, correctly, not
+// flagged); and the citing row need not be the recreated one — any same-section
+// row naming the removed id clears it. The mechanism raises the cost of a
+// silent delete-and-recreate downgrade from zero to "document the removal in a
+// same-section cite"; identity-stable keys strong enough to make every rename
+// provably a same-row edit are not in the schema. Wired live by
+// TestGuideClaimsDowngrades_AgainstMergeBase alongside
+// findDowngradesWithoutFreshCite.
+func findRenameDowngrades(oldM, newM *artifact.GuideClaimsManifest) []string {
+	newByID := make(map[string]bool, len(newM.Rows))
+	newSections := make(map[string]bool)
+	for _, r := range newM.Rows {
+		newByID[r.ID] = true
+		newSections[r.Section] = true
+	}
+	var findings []string
+	for _, or := range oldM.Rows {
+		if newByID[or.ID] {
+			continue // present in both — findDowngradesWithoutFreshCite's job
+		}
+		if !newSections[or.Section] {
+			continue // the whole section is gone — a genuine retirement, not a rename
+		}
+		if sameSectionRowCitesRemoval(newM, or.Section, or.ID) {
+			continue // the removal is documented by a same-section cite
+		}
+		findings = append(findings, fmt.Sprintf("row %s removed at HEAD (section %q still present) with no same-section row citing its removal — a suspected rename/delete-and-recreate that would evade the id-matched downgrade check; cite the removal of %s from a row in section %q, or retire the whole section", or.ID, or.Section, or.ID, or.Section))
+	}
+	return findings
+}
+
+// sameSectionRowCitesRemoval reports whether any row of m in section carries a
+// cite whose text names removedID — the smallest honest signal that a row's
+// removal from that section was deliberate and documented, not a silent
+// delete-and-recreate downgrade.
+func sameSectionRowCitesRemoval(m *artifact.GuideClaimsManifest, section, removedID string) bool {
+	for _, r := range m.Rows {
+		if r.Section == section && r.Cite != "" && strings.Contains(r.Cite, removedID) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestFindRenameDowngrades is judged-ac3-downgrade identity-stable row keys'
+// red-first proof: the silent delete-and-recreate (row x-old removed, x-new
+// created in the same section, no cite referencing the removal) reds, and the
+// three negative paths — the removal documented by a same-section cite naming
+// the removed id, a whole-section retirement, and every old row still present
+// by id — stay clean.
+func TestFindRenameDowngrades(t *testing.T) {
+	old := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
+		{ID: "x-old", Section: "5", Capability: "c", Status: artifact.GuideClaimExists},
+		{ID: "keep", Section: "5", Capability: "k", Status: artifact.GuideClaimExists},
+	}}
+	newSilent := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
+		{ID: "x-new", Section: "5", Capability: "c", Status: artifact.GuideClaimInvented, Cite: "docs/x.md#Y"},
+		{ID: "keep", Section: "5", Capability: "k", Status: artifact.GuideClaimExists},
+	}}
+	findings := findRenameDowngrades(old, newSilent)
+	if len(findings) != 1 {
+		t.Fatalf("findRenameDowngrades = %v, want exactly 1 finding (x-old removed, section 5 still present, no citing row)", findings)
+	}
+	if !strings.Contains(findings[0], "x-old") {
+		t.Errorf("finding = %q, want it to name the removed row x-old", findings[0])
+	}
+
+	t.Run("removal documented by a same-section cite naming the removed id is not flagged", func(t *testing.T) {
+		newDocumented := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
+			{ID: "x-new", Section: "5", Capability: "c", Status: artifact.GuideClaimInvented, Cite: "docs/x.md#supersedes x-old"},
+			{ID: "keep", Section: "5", Capability: "k", Status: artifact.GuideClaimExists},
+		}}
+		if f := findRenameDowngrades(old, newDocumented); len(f) != 0 {
+			t.Errorf("want no findings when a same-section row's cite references the removed id x-old, got %v", f)
+		}
+	})
+
+	t.Run("whole-section retirement is not a suspected rename", func(t *testing.T) {
+		newSectionGone := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
+			{ID: "z", Section: "6", Capability: "z", Status: artifact.GuideClaimExists},
+		}}
+		if f := findRenameDowngrades(old, newSectionGone); len(f) != 0 {
+			t.Errorf("want no findings when the whole section is retired, got %v", f)
+		}
+	})
+
+	t.Run("every old row still present by id is left to the id-matched check", func(t *testing.T) {
+		unchanged := &artifact.GuideClaimsManifest{Rows: []artifact.GuideClaimRow{
+			{ID: "x-old", Section: "5", Capability: "c", Status: artifact.GuideClaimExists},
+			{ID: "keep", Section: "5", Capability: "k", Status: artifact.GuideClaimExists},
+		}}
+		if f := findRenameDowngrades(old, unchanged); len(f) != 0 {
+			t.Errorf("want no findings when every old row is still present by id, got %v", f)
+		}
+	})
+}
+
 // TestFindDowngradesWithoutCite is ac-3 case 3: a fixture pair simulating
 // an EXISTS row flipping to PARTIAL across two manifest versions, plus
 // the negative paths (downgrade WITH a fresh cite; same status; an upgrade)
@@ -1009,6 +1122,13 @@ func TestGuideClaimsDowngrades_AgainstMergeBase(t *testing.T) {
 	if findings := findDowngradesWithoutFreshCite(oldM, newM); len(findings) > 0 {
 		t.Errorf("guide-claims.yaml has %d status downgrade(s) without a fresh cite: vs the merge-base %s:\n  %s", len(findings), base, strings.Join(findings, "\n  "))
 	}
+	// judged-ac3-downgrade identity-stable row keys: the id-matched check above
+	// is blind to a downgrade laundered through delete-and-recreate; this reds
+	// a row removed vs the merge-base whose section survives without a
+	// same-section cite documenting the removal (findRenameDowngrades).
+	if renames := findRenameDowngrades(oldM, newM); len(renames) > 0 {
+		t.Errorf("guide-claims.yaml has %d suspected rename/delete-and-recreate downgrade(s) vs the merge-base %s:\n  %s", len(renames), base, strings.Join(renames, "\n  "))
+	}
 }
 
 // TestGuideClaimsDowngrades_GitAware proves the git-aware wiring end-to-end
@@ -1065,6 +1185,41 @@ func TestGuideClaimsDowngrades_GitAware(t *testing.T) {
 		oldM, newM := decodePair(t, repo, repo.Heads[0], repo.Head)
 		if f := findDowngradesWithoutFreshCite(oldM, newM); len(f) != 0 {
 			t.Fatalf("want no findings for a downgrade with a fresh cite, got %v", f)
+		}
+	})
+
+	t.Run("silent delete-and-recreate downgrade reds via the git-diff path", func(t *testing.T) {
+		// x-old (EXISTS) is deleted and re-created as x-new (INVENTED) in the
+		// SAME section, with no cite naming the removal — the laundered
+		// downgrade the id-matched check is blind to (judged-ac3-downgrade
+		// identity-stable row keys). findRenameDowngrades must catch it over
+		// real git history.
+		oldRename := "schema: verdi.guideclaims/v1\nrows:\n  - id: x-old\n    section: \"1\"\n    capability: c\n    status: EXISTS\n    witnesses:\n      - name: TestSomething\n"
+		newRename := "schema: verdi.guideclaims/v1\nrows:\n  - id: x-new\n    section: \"1\"\n    capability: c\n    status: INVENTED\n    cite: \"docs/c.md#A\"\n"
+		repo := fixturegit.Build(t, []fixturegit.Layer{
+			{Files: map[string]string{path: oldRename}, Message: "seed manifest with x-old"},
+			{Files: map[string]string{path: newRename}, Message: "delete x-old, recreate as x-new same section, no removal cite"},
+		})
+		oldM, newM := decodePair(t, repo, repo.Heads[0], repo.Head)
+		if f := findRenameDowngrades(oldM, newM); len(f) != 1 {
+			t.Fatalf("want 1 suspected rename/delete-and-recreate finding via the git path, got %v", f)
+		}
+		if df := findDowngradesWithoutFreshCite(oldM, newM); len(df) != 0 {
+			t.Fatalf("id-matched check must be BLIND to the laundered downgrade (that is why the rename check exists), got %v", df)
+		}
+	})
+
+	t.Run("delete-and-recreate WITH a same-section cite naming the removal passes", func(t *testing.T) {
+		oldRename := "schema: verdi.guideclaims/v1\nrows:\n  - id: x-old\n    section: \"1\"\n    capability: c\n    status: EXISTS\n    witnesses:\n      - name: TestSomething\n"
+		// x-new's cite names x-old — the removal is documented, so it passes.
+		newDocumented := "schema: verdi.guideclaims/v1\nrows:\n  - id: x-new\n    section: \"1\"\n    capability: c\n    status: INVENTED\n    cite: \"docs/c.md#supersedes x-old\"\n"
+		repo := fixturegit.Build(t, []fixturegit.Layer{
+			{Files: map[string]string{path: oldRename}, Message: "seed manifest with x-old"},
+			{Files: map[string]string{path: newDocumented}, Message: "recreate as x-new citing the removal of x-old"},
+		})
+		oldM, newM := decodePair(t, repo, repo.Heads[0], repo.Head)
+		if f := findRenameDowngrades(oldM, newM); len(f) != 0 {
+			t.Fatalf("want no findings when the recreated row's cite names the removed id, got %v", f)
 		}
 	})
 
