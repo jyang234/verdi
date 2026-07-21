@@ -38,11 +38,25 @@ func TestRunJudged_NotConfigured(t *testing.T) {
 	})
 }
 
+// The must-complete judge exchanges in this file (a fake judge that exits or
+// prints near-instantly, then asserts on its RESULT) bind judgeTestContext(t)
+// — judge_test.go's judgeTestBudget, the D6-39 proven-flake fix — as their
+// deadline, with JudgedInput.Timeout left at its zero value so RunJudged's own
+// "timeout<=0 uses DefaultJudgeTimeout" selection stays exercised. A flat
+// injected Timeout of 1s was observed losing the race against this test's own
+// os/exec fork+exec under full-module `go test -race` load (a spurious
+// StageTimeout, never the asserted stage), the exact sibling flake
+// judgeTestContext documents. The three tests that DELIBERATELY exercise the
+// timeout stage (TestRunJudged_WaitExpires,
+// TestRunJudged_WaitFalse_TimeoutStillDegrades, and the JudgeRequired timeout
+// precedence test) keep their own tight injected Timeout + context.Background(),
+// exactly as TestRunJudgeOnce_Timeout does — there the timeout IS the behavior
+// under test.
 func TestRunJudged_ExecutionFailure(t *testing.T) {
 	script := writeFakeJudge(t, fakeJudgeNonZeroExitScript)
 
 	t.Run("not required: absence finding names the failure", func(t *testing.T) {
-		result, err := RunJudged(context.Background(), ExecJudgeRunner{}, JudgedInput{JudgeCmd: []string{script}, Timeout: time.Second})
+		result, err := RunJudged(judgeTestContext(t), ExecJudgeRunner{}, JudgedInput{JudgeCmd: []string{script}})
 		if err != nil {
 			t.Fatalf("RunJudged: %v", err)
 		}
@@ -55,7 +69,7 @@ func TestRunJudged_ExecutionFailure(t *testing.T) {
 	})
 
 	t.Run("required: align fails outright", func(t *testing.T) {
-		_, err := RunJudged(context.Background(), ExecJudgeRunner{}, JudgedInput{JudgeCmd: []string{script}, JudgeRequired: true, Timeout: time.Second})
+		_, err := RunJudged(judgeTestContext(t), ExecJudgeRunner{}, JudgedInput{JudgeCmd: []string{script}, JudgeRequired: true})
 		if err == nil {
 			t.Fatal("RunJudged(judge_required=true, failing judge): want error, got nil")
 		}
@@ -64,7 +78,7 @@ func TestRunJudged_ExecutionFailure(t *testing.T) {
 
 func TestRunJudged_Success(t *testing.T) {
 	script := writeFakeJudge(t, fakeJudgeOKScript)
-	result, err := RunJudged(context.Background(), ExecJudgeRunner{}, JudgedInput{JudgeCmd: []string{script}, Timeout: time.Second, Prompt: []byte("prompt")})
+	result, err := RunJudged(judgeTestContext(t), ExecJudgeRunner{}, JudgedInput{JudgeCmd: []string{script}, Prompt: []byte("prompt")})
 	if err != nil {
 		t.Fatalf("RunJudged: %v", err)
 	}
@@ -121,8 +135,8 @@ func TestRunJudged_WaitExpires(t *testing.T) {
 // real findings, no error, Integrity populated.
 func TestRunJudged_WaitCompletes(t *testing.T) {
 	script := writeFakeJudge(t, fakeJudgeOKScript)
-	result, err := RunJudged(context.Background(), ExecJudgeRunner{}, JudgedInput{
-		JudgeCmd: []string{script}, Timeout: time.Second, Wait: true, Prompt: []byte("prompt"),
+	result, err := RunJudged(judgeTestContext(t), ExecJudgeRunner{}, JudgedInput{
+		JudgeCmd: []string{script}, Wait: true, Prompt: []byte("prompt"),
 	})
 	if err != nil {
 		t.Fatalf("RunJudged(Wait, completing): %v", err)
@@ -160,8 +174,8 @@ func TestRunJudged_WaitFalse_TimeoutStillDegrades(t *testing.T) {
 // today's ordinary absent-judge case, unaffected by Wait.
 func TestRunJudged_WaitTrue_NonTimeoutFailureStillDegrades(t *testing.T) {
 	script := writeFakeJudge(t, fakeJudgeNonZeroExitScript)
-	result, err := RunJudged(context.Background(), ExecJudgeRunner{}, JudgedInput{
-		JudgeCmd: []string{script}, Timeout: time.Second, Wait: true,
+	result, err := RunJudged(judgeTestContext(t), ExecJudgeRunner{}, JudgedInput{
+		JudgeCmd: []string{script}, Wait: true,
 	})
 	if err != nil {
 		t.Fatalf("RunJudged(Wait=true, non-timeout failure): %v, want nil (still a graceful degrade)", err)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -89,6 +90,70 @@ func copyTree(t *testing.T, src, dst string) {
 // (attestations/escrow-autopay/ac-1.md) — present even though the fold
 // reads no-signal, since an attestation alone was never sufficient
 // without an implementing story (03 §The feature fold).
+// TestSupersededStoryRefs is supersededStoryRefs' direct table-driven unit
+// test (I2). It pins the two properties the feature-close spec-stale
+// condition depends on and that its map-flatten could silently break:
+//
+//   - dedup (L-N12): a story implementing two or more feature ACs appears
+//     under each AC's group in supersededByAC but must flatten to exactly ONE
+//     ref — the "one story across >=2 ACs" case asserts the exact singleton
+//     set, so removing the seen-guard (which would emit one ref per AC) reds
+//     it deterministically; and
+//   - deterministic order (M9): the flatten walks a map, so its first-seen
+//     order is Go-map-iteration-random — the output is sorted at the source.
+//     The "unsorted single-AC group" case uses a one-key map (single-key
+//     iteration IS deterministic) whose group is out of order, so the output
+//     order is fully determined by the source sort alone: dropping the
+//     sort.Strings reds it deterministically, not flakily.
+func TestSupersededStoryRefs(t *testing.T) {
+	cases := []struct {
+		name string
+		in   map[string][]string
+		want []string
+	}{
+		{
+			name: "empty map yields empty set",
+			in:   map[string][]string{},
+			want: nil,
+		},
+		{
+			name: "single story under a single AC",
+			in:   map[string][]string{"ac-1": {"spec/solo"}},
+			want: []string{"spec/solo"},
+		},
+		{
+			name: "one story across >=2 ACs is deduped to exactly one ref (seen-guard)",
+			in: map[string][]string{
+				"ac-1": {"spec/multi"},
+				"ac-2": {"spec/multi"},
+				"ac-3": {"spec/multi"},
+			},
+			want: []string{"spec/multi"},
+		},
+		{
+			name: "unsorted single-AC group is sorted at the source (deterministic order)",
+			in:   map[string][]string{"ac-1": {"spec/charlie", "spec/alpha", "spec/bravo"}},
+			want: []string{"spec/alpha", "spec/bravo", "spec/charlie"},
+		},
+		{
+			name: "dedup across ACs AND sorted",
+			in: map[string][]string{
+				"ac-2": {"spec/charlie", "spec/alpha"},
+				"ac-1": {"spec/bravo", "spec/alpha"},
+			},
+			want: []string{"spec/alpha", "spec/bravo", "spec/charlie"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := supersededStoryRefs(tc.in)
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("supersededStoryRefs(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCmdMatrix_FeatureRef_Golden(t *testing.T) {
 	repo := buildCorpusRepo(t)
 	copyV2FeatureFixture(t, repo.Dir,

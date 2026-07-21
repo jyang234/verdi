@@ -124,16 +124,45 @@ func ReachableFromHEAD(ctx context.Context, dir, commit, head string) (Reachabil
 	return Unreachable, nil
 }
 
-// shallowCache memoizes each dir's shallow state for the process's lifetime.
-// A repository's shallowness cannot change mid-process for verdi's reachability
-// consumers — they are short-lived CLI/gate runs (`verdi lint`, the closure
-// gate, `verdi sync`) that never `git fetch --unshallow` a checkout out from
-// under themselves — so a single probe per dir is both correct and enough,
-// sparing the evidence loops (one query per commit directory / record) a
+// shallowCache memoizes each dir's shallow state. Its correct SCOPE is one
+// logical operation: within a single lint/gate/sync run — or one MCP request —
+// a repository's shallowness cannot change under verdi, so a single probe per
+// dir spares the evidence loops (one query per commit directory / record) a
 // redundant `git rev-parse` on every would-be-negative. The probe runs only on
 // the negative path, so the healthy common case (a full clone, or an evidence
 // record whose commit is a real ancestor) never consults it at all.
+//
+// For a SHORT-LIVED consumer the process IS one operation, so a process-lifetime
+// memo is exactly right: `verdi lint`, the closure gate, and `verdi sync` each
+// run once and exit, never reshaping a checkout out from under themselves. But
+// not every consumer is short-lived — the earlier "all consumers are short-lived
+// CLI/gate runs" claim was false. The persistent MCP server (internal/mcpserve:
+// get_matrix routes through evidence.LoadRecords, which calls ReachableFromHEAD)
+// serves many requests over a long lifetime, and between two requests an
+// external actor CAN reshape its checkout full->shallow (a `git fetch --depth`,
+// a re-checkout). The one direction that then goes stale DANGEROUSLY is a cached
+// `false` (probed while full): a would-be-negative would read the stale `false`
+// and return a PROVEN Unreachable — a false NO — where the now-shallow repo owes
+// UnprovableShallow. (A cached `true` gone stale is only over-cautious:
+// UnprovableShallow where Unreachable has since become provable — never a false
+// claim, so it needs no cure.) Long-lived consumers therefore call
+// ResetShallowCache at each operation boundary; short-lived ones never do,
+// keeping their full memoization.
 var shallowCache sync.Map // dir string -> bool
+
+// ResetShallowCache clears the process-global shallow-state memo. A long-lived
+// consumer (the persistent MCP server — see shallowCache's doc) calls it at each
+// operation boundary so a checkout reshaped full->shallow between operations is
+// re-probed fresh, never answered from a stale cached `false` that would turn a
+// would-be-negative into a false PROVEN Unreachable. A short-lived CLI/gate run
+// never calls it: its whole process is one operation, so its memoization stays
+// intact and every consumer keeps proving YES as cheaply as before. Safe to call
+// concurrently with in-flight ReachableFromHEAD calls — a cleared entry simply
+// re-probes on its next miss (sync.Map semantics); the worst case is a redundant
+// `git rev-parse`, never an incorrect result.
+func ResetShallowCache() {
+	shallowCache.Clear()
+}
 
 // shallowRepository reports whether dir is a shallow clone via git's own
 // `git rev-parse --is-shallow-repository` predicate — git's supported answer
