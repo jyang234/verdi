@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -496,9 +498,78 @@ func QuarantinedRecords(ctx context.Context, gitDir, derivedRoot, commit string)
 			}
 		}
 	}
+
+	// judged-undecodable-per-spec-disclosure-commitdir: the flat loop above only
+	// re-surfaces record files sitting at <commit>/<file>, but sync's undecodable
+	// notice promises "disclosed at closure" for EVERY per-spec key (it keys on
+	// the FIRST segment, spec--<name>, alone — classifyUndecodableKeys). Walk the
+	// whole per-spec tree for any RecordFileNames file whose key shape the flat
+	// loop does NOT cover — a non-commit-shaped middle segment, or a record file
+	// nested deeper than an immediate commit dir — and disclose each that fails to
+	// decode, so that promise holds for every per-spec key shape. Undecodable
+	// disclosure is unconditional (a file that did not decode cannot be tied to a
+	// commit or an AC), so reachability is never consulted here.
+	deepUndecodable, werr := undecodableUnderNonCommitPaths(derivedRoot)
+	if werr != nil {
+		return nil, nil, fmt.Errorf("evidence: walking %s for undecodable per-spec records: %w", derivedRoot, werr)
+	}
+	undecodable = append(undecodable, deepUndecodable...)
+
 	sort.SliceStable(out, func(i, j int) bool { return recordSortKey(out[i]) < recordSortKey(out[j]) })
 	sort.SliceStable(undecodable, func(i, j int) bool { return undecodable[i].Path < undecodable[j].Path })
 	return out, undecodable, nil
+}
+
+// undecodableUnderNonCommitPaths walks derivedRoot recursively for record files
+// (RecordFileNames) whose per-spec key shape is NOT the <commit>/<file> the flat
+// commit-dir loop in QuarantinedRecords already reads — a non-commit-shaped
+// middle segment, a record file directly under derivedRoot, or one nested deeper
+// than an immediate commit dir — and returns a disclosed UndecodableFile for each
+// that fails strict decode (judged-undecodable-per-spec-disclosure-commitdir).
+// A file the flat loop already handles (<commit-shaped>/<recordfile>, exactly two
+// segments) is skipped here so it is never disclosed twice; a DECODABLE record
+// under such a path is ignored (the fold never reads it, so there is nothing to
+// disclose — this is a disclosure-only pass, never a second fold reader). Paths
+// are derivedRoot-relative and slash-separated, matching the flat loop's own
+// UndecodableFile.Path form.
+func undecodableUnderNonCommitPaths(derivedRoot string) ([]UndecodableFile, error) {
+	var out []UndecodableFile
+	err := filepath.WalkDir(derivedRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !isRecordFileName(d.Name()) {
+			return nil
+		}
+		rel, rerr := filepath.Rel(derivedRoot, path)
+		if rerr != nil {
+			return rerr
+		}
+		rel = filepath.ToSlash(rel)
+		if parts := strings.Split(rel, "/"); len(parts) == 2 && commitDirRe.MatchString(parts[0]) {
+			// <commit>/<recordfile>: the flat commit-dir loop already reads (and,
+			// if undecodable, discloses) this — never disclose it twice.
+			return nil
+		}
+		if _, _, lerr := loadEvidenceArray(path); lerr != nil {
+			out = append(out, UndecodableFile{Path: rel, Reason: lerr.Error()})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// isRecordFileName reports whether name is one of RecordFileNames.
+func isRecordFileName(name string) bool {
+	for _, rn := range RecordFileNames {
+		if name == rn {
+			return true
+		}
+	}
+	return false
 }
 
 // UnprovableRecords returns every evidence record under derivedRoot's commit-

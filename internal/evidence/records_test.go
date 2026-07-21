@@ -672,3 +672,89 @@ func TestQuarantinedRecords_UnreachableProvenanceUnderReachableDir_Surfaced(t *t
 		t.Fatalf("QuarantinedRecords = %+v, want exactly the one record whose OWN provenance.commit is unreachable (finding 2); the reachable-provenance record under the same dir must not be surfaced", recs)
 	}
 }
+
+// writeUndecodableAt writes content to derivedRoot/<relPath> (relPath
+// slash-separated), creating parents — for record files whose per-spec key
+// shape is not the flat writeDerivedVerdicts <commit>/verdicts.json.
+func writeUndecodableAt(t *testing.T, derivedRoot, relPath, content string) {
+	t.Helper()
+	full := filepath.Join(derivedRoot, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(full), err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", full, err)
+	}
+}
+
+// TestQuarantinedRecords_UndecodableUnderNonCommitShapedKey_Surfaced is
+// judged-undecodable-per-spec-disclosure-commitdir's fix pin. sync's undecodable
+// notice classifies a fetched record file as "excluded from the fold and
+// disclosed at closure" on its FIRST path segment alone (classifyUndecodableKeys:
+// spec--<name>), but before this fix the closure-side walk (QuarantinedRecords)
+// only re-surfaced record files sitting directly under an immediate commit-shaped
+// subdir (<commit>/<file>). An undecodable verdicts.json/runtime.json under a
+// per-spec key whose MIDDLE segment is not commit-shaped — or nested deeper —
+// was kept on disk with a closure disclosure that could never fire. The walk must
+// now surface EVERY per-spec key shape so the notice tells the truth.
+func TestQuarantinedRecords_UndecodableUnderNonCommitShapedKey_Surfaced(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	const malformed = `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"`
+
+	// Three per-spec key shapes whose record file is NOT <commit>/<file>:
+	//   - a NON-commit-shaped immediate middle segment,
+	//   - a deeper nesting under a non-commit-shaped segment (runtime.json),
+	//   - a deeper nesting UNDER a commit-shaped segment (the record file is not a
+	//     direct child, so the flat commit-dir loop never reads it).
+	writeUndecodableAt(t, derivedRoot, "branch-fetch/verdicts.json", malformed)
+	writeUndecodableAt(t, derivedRoot, "some/deep/key/runtime.json", malformed)
+	writeUndecodableAt(t, derivedRoot, repo.Head+"/nested/verdicts.json", malformed)
+
+	recs, undecodable, err := QuarantinedRecords(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("QuarantinedRecords: %v", err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("recs = %+v, want none (no decodable record under any of these keys)", recs)
+	}
+	wantPaths := []string{
+		"branch-fetch/verdicts.json",
+		"some/deep/key/runtime.json",
+		repo.Head + "/nested/verdicts.json",
+	}
+	if len(undecodable) != len(wantPaths) {
+		t.Fatalf("undecodable = %+v, want %d entries (every per-spec key shape disclosed at closure)", undecodable, len(wantPaths))
+	}
+	for _, want := range wantPaths {
+		found := false
+		for _, u := range undecodable {
+			if u.Path == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("undecodable = %+v, want an entry with Path %q", undecodable, want)
+		}
+	}
+}
+
+// TestQuarantinedRecords_UndecodableUnderCommitDir_NotDoubleSurfaced pins the
+// no-regression neighbor of the walk above: a plain <commit>/<file> undecodable
+// record (the flat commit-dir loop's own domain) is surfaced EXACTLY ONCE, never
+// duplicated by the added non-commit-shaped walk.
+func TestQuarantinedRecords_UndecodableUnderCommitDir_NotDoubleSurfaced(t *testing.T) {
+	repo := buildRecordsRepo(t)
+	ctx := context.Background()
+	derivedRoot := filepath.Join(repo.Dir, "derived", "spec--test")
+	writeDerivedVerdicts(t, derivedRoot, repo.Head, `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"`)
+
+	_, undecodable, err := QuarantinedRecords(ctx, repo.Dir, derivedRoot, repo.Head)
+	if err != nil {
+		t.Fatalf("QuarantinedRecords: %v", err)
+	}
+	if len(undecodable) != 1 || undecodable[0].Path != repo.Head+"/verdicts.json" {
+		t.Fatalf("undecodable = %+v, want exactly one entry %q (never double-surfaced)", undecodable, repo.Head+"/verdicts.json")
+	}
+}

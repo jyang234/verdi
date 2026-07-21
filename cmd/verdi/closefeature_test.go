@@ -858,6 +858,46 @@ func TestRunCloseFeature_ClosedStoryDiscovered_NoOperationalError(t *testing.T) 
 	}
 }
 
+// TestRunCloseFeature_QuarantinedFailAgainstFeatureAC_Disclosed is the endgame
+// disclosure-extension finding 3's pin: the feature-closure gate's condition 1
+// (checkFeatureFoldEligible) must consume QuarantinedRecords over the FEATURE's
+// OWN derived dir and render the same disclosure families the story gate does. A
+// quarantined FAIL outcome record bound to the feature's (still-evidenced) ac-1
+// must be disclosed — the met-AC/fail case — so a quarantine-caused flip is never
+// silent on the feature surface either. Before the fix condition 1 rendered no
+// per-record disclosures at all.
+func TestRunCloseFeature_QuarantinedFailAgainstFeatureAC_Disclosed(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	// A quarantined FAIL outcome record bound to the feature's ac-1, under an
+	// unreachable commit dir: excluded from the fold (ac-1 stays evidenced on the
+	// reachable behavioral pass seedCloseFeatureEvidence planted at repo.Head), so
+	// condition 1 still PASSES — but the exclusion must be disclosed.
+	writeFixtureVerdicts(t, repo.Dir, "spec/close-feature-fixture", gone,
+		`{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"behavioral","verdict":"fail","witness":"adverseFeatureFail","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"`+gone+`"},"digest":"sha256:`+strings.Repeat("a", 64)+`"}`)
+	ctx := context.Background()
+
+	deps := closeFeatureDeps(fake.New())
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runClose(feature) = %d, want 0 (ac-1 stays evidenced; the fail is excluded); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "[PASS] closure(feature): 1.") {
+		t.Fatalf("stdout = %q, want feature condition 1 to PASS (ac-1 evidenced)", out)
+	}
+	if !strings.Contains(out, "disclosed-unproven [gate:evidence-quarantine]") {
+		t.Fatalf("stdout = %q, want the excluded feature FAIL record disclosed on the feature gate (finding 3)", out)
+	}
+	if !strings.Contains(out, "adverseFeatureFail") || !strings.Contains(out, gone) {
+		t.Fatalf("stdout = %q, want the disclosure to name the excluded feature FAIL record's witness and its unreachable commit", out)
+	}
+}
+
 // TestRunCloseFeature_UnreadableAttestation_OperationalFailure pins ADJ-67 /
 // D6-38 on the FEATURE closure path. closeFeatureSpecMD declares
 // evidence: [behavioral, attestation] on every AC, so evidence.FoldFeature

@@ -147,6 +147,54 @@ func TestRunClosureGate_UnreachableCommitRecord_NeverOperational(t *testing.T) {
 	}
 }
 
+// closureGateQuarantineFailRecordJSON is one static-FAIL record for
+// spec/quarantine-story's ac-1 at provenance.commit commit — the ADVERSE record
+// whose quarantine can flip ac-1 violated->evidenced (a distinct witness so a
+// disclosure naming it is unambiguous).
+func closureGateQuarantineFailRecordJSON(commit string) string {
+	return `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"fail",` +
+		`"witness":"adverseFailWitness @ site","provenance":{"source":"ci","pipeline":"1","commit":"` + commit + `"},` +
+		`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}]`
+}
+
+// TestRunClosureGate_QuarantinedFailAgainstMetAC_Disclosed is
+// judged-quarantine-disclosure-met-ac's fix pin. An AC with a REACHABLE current
+// pass record plus a current FAIL record reads violated (fold.go's any-current-
+// fail rule); once the fail record's commit becomes unreachable it is quarantined
+// out and the AC flips to evidenced. That flip must never pass silently — the
+// excluded fail record must be disclosed against the now-MET AC, the exact
+// surface ac-2 hardens ("silence is never a pass"). Before the fix
+// quarantineDisclosures skipped every evidenced/waived AC, so the fail record
+// vanished with zero disclosure.
+func TestRunClosureGate_QuarantinedFailAgainstMetAC_Disclosed(t *testing.T) {
+	repo := buildClosureGateQuarantineRepo(t)
+	spec, _ := readSpec(t, repo.Dir, "quarantine-story")
+	ctx := context.Background()
+	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+	// A REACHABLE current pass under repo.Head (ac-1 evidences on it) and a
+	// current FAIL under an unreachable dir (quarantined -> excluded).
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, repo.Head, closureGateQuarantineRecordJSON(repo.Head))
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, gone, closureGateQuarantineFailRecordJSON(gone))
+
+	var stdout bytes.Buffer
+	if _, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout); err != nil {
+		t.Fatalf("runClosureGate: %v; stdout=%s", err, stdout.String())
+	}
+	out := stdout.String()
+	// ac-1 folds evidenced (the reachable pass counts; the fail is excluded), so
+	// condition 1 PASSES — the quarantine-caused violated->evidenced flip.
+	if !contains(out, "[PASS] closure: 1.") {
+		t.Fatalf("stdout = %q, want condition 1 to PASS (ac-1 evidenced on the reachable pass after the fail is quarantined)", out)
+	}
+	if !contains(out, "disclosed-unproven [gate:evidence-quarantine]") {
+		t.Fatalf("stdout = %q, want the quarantined FAIL record disclosed even though ac-1 is now MET (judged-quarantine-disclosure-met-ac)", out)
+	}
+	if !contains(out, "adverseFailWitness") || !contains(out, gone) {
+		t.Fatalf("stdout = %q, want the disclosure to name the excluded FAIL record's witness and its unreachable commit", out)
+	}
+}
+
 // TestRunClosureGate_QuarantinedRecord_SurfacesSyncReason proves the
 // disclosure prefers the ACTUAL reason `verdi sync` recorded
 // (artifact.Evidence.Quarantine, ac-1) over a generic fallback, when the
