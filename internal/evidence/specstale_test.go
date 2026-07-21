@@ -120,3 +120,106 @@ func TestSpecStale_Negative_NoFindings(t *testing.T) {
 		t.Fatal("Flagged = true, want false for an empty input")
 	}
 }
+
+func judgedAcceptedDeviation(id, text, note string) artifact.Finding {
+	return artifact.Finding{ID: id, Kind: artifact.FindingJudged, Text: text, Disposition: artifact.FindingAcceptedDeviation, Note: note}
+}
+
+// TestSpecStale_AdditionalSets_UnionedByIdentity_NeverDoubleCounts is
+// spec/finding-identity ac-3/ac-4's "never twice" half: the identical
+// accepted-deviation finding present in BOTH Findings and an AdditionalSets
+// entry (e.g. a report's own findings: reproducing the same finding its own
+// not-resurfaced: also names, or a feature's own report reproducing what a
+// story's archived report also names) counts exactly once.
+func TestSpecStale_AdditionalSets_UnionedByIdentity_NeverDoubleCounts(t *testing.T) {
+	f := judgedAcceptedDeviation("judged-a", "same text", "n")
+	in := SpecStaleInput{
+		Findings:       []artifact.Finding{f},
+		AdditionalSets: [][]artifact.Finding{{f}},
+		StoryACIDs:     map[string]bool{},
+	}
+	got := SpecStale(in)
+	if got.AcceptedDeviationCount != 1 {
+		t.Fatalf("AcceptedDeviationCount = %d, want 1 (the identical finding must not double count across sets)", got.AcceptedDeviationCount)
+	}
+}
+
+// TestSpecStale_AdditionalSets_NeverDropsAFindingPresentOnlyThere is the
+// "never zero" half: an accepted-deviation finding present ONLY in an
+// AdditionalSets entry (never in Findings — e.g. it lives in not-resurfaced:
+// only, or only in a story's archived report and the feature's own report
+// never reproduced it) still counts — the X-18 "silently dropped" failure
+// mode this story closes.
+func TestSpecStale_AdditionalSets_NeverDropsAFindingPresentOnlyThere(t *testing.T) {
+	f := judgedAcceptedDeviation("judged-only-there", "text", "n")
+	in := SpecStaleInput{
+		Findings:       nil,
+		AdditionalSets: [][]artifact.Finding{{f}},
+		StoryACIDs:     map[string]bool{},
+	}
+	got := SpecStale(in)
+	if got.AcceptedDeviationCount != 1 {
+		t.Fatalf("AcceptedDeviationCount = %d, want 1 (must not silently drop a finding present only in an additional set)", got.AcceptedDeviationCount)
+	}
+}
+
+// TestSpecStale_AdditionalSets_DistinctIdentitiesBothCount proves the union
+// is a real union, not a cap of 1: two DIFFERENT accepted-deviation findings
+// spread across Findings and an additional set both count.
+func TestSpecStale_AdditionalSets_DistinctIdentitiesBothCount(t *testing.T) {
+	in := SpecStaleInput{
+		Findings:       []artifact.Finding{judgedAcceptedDeviation("judged-a", "text a", "n")},
+		AdditionalSets: [][]artifact.Finding{{judgedAcceptedDeviation("judged-b", "text b", "n")}},
+		StoryACIDs:     map[string]bool{},
+	}
+	got := SpecStale(in)
+	if got.AcceptedDeviationCount != 2 {
+		t.Fatalf("AcceptedDeviationCount = %d, want 2 (two distinct identities)", got.AcceptedDeviationCount)
+	}
+}
+
+// TestSpecStale_AdditionalSets_OwnTextTrigger_ScopedToPrimarySetOnly proves
+// trigger (a)'s "own text" join is evaluated against Findings (the
+// PRIMARY/own set) only, never AdditionalSets: at the feature level (ac-4),
+// AdditionalSets carries OTHER stories' findings, whose ids (e.g. "ac-1")
+// are drawn from a DIFFERENT spec's own AC-id namespace and must never be
+// read as "the feature's own ac-1 text was targeted" just because the ids
+// happen to collide.
+func TestSpecStale_AdditionalSets_OwnTextTrigger_ScopedToPrimarySetOnly(t *testing.T) {
+	in := SpecStaleInput{
+		Findings:       nil,
+		AdditionalSets: [][]artifact.Finding{{acceptedDeviation("ac-1", "targets some OTHER spec's ac-1")}},
+		StoryACIDs:     map[string]bool{"ac-1": true},
+	}
+	got := SpecStale(in)
+	if len(got.OwnTextFindingIDs) != 0 {
+		t.Fatalf("OwnTextFindingIDs = %v, want none (own-text must not fire from an additional set)", got.OwnTextFindingIDs)
+	}
+	// The threshold-count trigger still sees it (it is still a real
+	// accepted-deviation, just not an own-text one).
+	if got.AcceptedDeviationCount != 1 {
+		t.Fatalf("AcceptedDeviationCount = %d, want 1", got.AcceptedDeviationCount)
+	}
+}
+
+// TestSpecStale_LaunderingReplay_CountUnchangedAcrossRegeneration is
+// spec/finding-identity ac-3's exact laundering-replay proof: "round 1" has
+// an accepted-deviation finding live in Findings; "round 2" simulates a
+// judge re-roll that fails to reproduce it — the identical finding now
+// lives ONLY in an AdditionalSets entry (not-resurfaced:, in the real
+// pipeline) instead of Findings. The accepted-deviation count must be
+// EXACTLY UNCHANGED across the two rounds — never decremented (the X-18
+// laundering drain this story closes) and never inflated.
+func TestSpecStale_LaunderingReplay_CountUnchangedAcrossRegeneration(t *testing.T) {
+	f := judgedAcceptedDeviation("judged-standing", "an old, settled adjudication", "owner-ratified")
+
+	round1 := SpecStale(SpecStaleInput{Findings: []artifact.Finding{f}, StoryACIDs: map[string]bool{}})
+	round2 := SpecStale(SpecStaleInput{Findings: nil, AdditionalSets: [][]artifact.Finding{{f}}, StoryACIDs: map[string]bool{}})
+
+	if round1.AcceptedDeviationCount != round2.AcceptedDeviationCount {
+		t.Fatalf("round1.AcceptedDeviationCount = %d, round2 = %d — want EXACTLY unchanged across the re-roll (X-18 laundering drain)", round1.AcceptedDeviationCount, round2.AcceptedDeviationCount)
+	}
+	if round2.AcceptedDeviationCount != 1 {
+		t.Fatalf("round2.AcceptedDeviationCount = %d, want 1", round2.AcceptedDeviationCount)
+	}
+}

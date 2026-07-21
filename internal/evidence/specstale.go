@@ -1,6 +1,9 @@
 package evidence
 
-import "github.com/jyang234/verdi/internal/artifact"
+import (
+	"github.com/jyang234/verdi/internal/align"
+	"github.com/jyang234/verdi/internal/artifact"
+)
 
 // DefaultDeviationsStaleThreshold is the spec-stale flag's threshold-count
 // trigger's default (03 §The amendment ladder: "more than a configured
@@ -30,6 +33,35 @@ type SpecStaleInput struct {
 	// first accepted-deviation, which 03's "tunable, default 3" framing
 	// never intends as the out-of-the-box behavior.
 	Threshold int
+	// AdditionalSets are further finding sets whose accepted-deviation
+	// dispositions count toward the SAME budget as Findings, unioned by
+	// unique content identity (align.Identity's Kind+ID+Text hash) rather
+	// than concatenated — spec/finding-identity's counterweight hardening
+	// (ledger L-N2):
+	//
+	//   - ac-3 (within one report): the closure gate passes the report's own
+	//     not-resurfaced: section here, so a finding that stops reproducing
+	//     under a fresh judge run never drains out of the budget just
+	//     because it moved out of findings: (the X-18 laundering drain this
+	//     union closes) — proven a no-op for a single well-formed report,
+	//     where ids (and so identities) are already unique by construction,
+	//     exactly as L-N2 itself records ("the within-report unique-identity
+	//     framing was proven a no-op").
+	//   - ac-4 (across reports, the actual cross-report X-18 fix): the
+	//     feature-closure gate passes every closed implementing story's
+	//     ARCHIVED report's findings: + not-resurfaced: here, so a story-
+	//     archived accepted deviation counts exactly once toward the
+	//     feature-close budget — never zero (silently dropped because the
+	//     feature's own report never reproduced it) and never twice
+	//     (double-counted across the story and feature reports
+	//     independently).
+	//
+	// Deliberately excluded from trigger (a)'s "own text" join: an
+	// AdditionalSets entry's finding ids are drawn from a POSSIBLY DIFFERENT
+	// spec's own AC-id namespace (a story's archived report, at the feature
+	// level) — an id collision there must never be misread as "this spec's
+	// own declared AC text was targeted". Only Findings feeds trigger (a).
+	AdditionalSets [][]artifact.Finding
 }
 
 // SpecStaleResult is SpecStale's outcome.
@@ -85,13 +117,41 @@ func SpecStale(in SpecStaleInput) SpecStaleResult {
 	}
 
 	var result SpecStaleResult
+
+	// Trigger (a) reads Findings ONLY — the primary/own set — never
+	// AdditionalSets (AdditionalSets' doc comment: an id collision against a
+	// DIFFERENT spec's AC-id namespace must never be misread as "this spec's
+	// own text was targeted").
 	for _, f := range in.Findings {
-		if f.Disposition != artifact.FindingAcceptedDeviation {
-			continue
-		}
-		result.AcceptedDeviationCount++
-		if in.StoryACIDs[f.ID] {
+		if f.Disposition == artifact.FindingAcceptedDeviation && in.StoryACIDs[f.ID] {
 			result.OwnTextFindingIDs = append(result.OwnTextFindingIDs, f.ID)
+		}
+	}
+
+	// Trigger (b) — the accepted-deviation budget itself — unions Findings
+	// with every AdditionalSets entry by unique content identity
+	// (align.Identity), so the SAME standing adjudication reproduced across
+	// more than one set counts exactly once (spec/finding-identity ac-3/
+	// ac-4's counterweight hardening; AdditionalSets' own doc comment has
+	// the full rationale). For a single, well-formed report with only
+	// Findings populated, every id — and so every identity — is already
+	// unique by schema construction, so this union is a no-op there: the
+	// exact same count SpecStale always produced.
+	seenIdentity := make(map[string]bool)
+	sets := make([][]artifact.Finding, 0, 1+len(in.AdditionalSets))
+	sets = append(sets, in.Findings)
+	sets = append(sets, in.AdditionalSets...)
+	for _, set := range sets {
+		for _, f := range set {
+			if f.Disposition != artifact.FindingAcceptedDeviation {
+				continue
+			}
+			id := align.Identity(f)
+			if seenIdentity[id] {
+				continue
+			}
+			seenIdentity[id] = true
+			result.AcceptedDeviationCount++
 		}
 	}
 

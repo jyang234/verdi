@@ -93,7 +93,7 @@ func ScanSpecStale(root string, snap *lint.Snapshot, threshold int) ([]SpecStale
 			return nil, fmt.Errorf("decisionsweep: story %s has an invalid id: %w", doc.Spec.ID, err)
 		}
 
-		findings, found, err := readDeviationFindings(root, ref.Name)
+		findings, notResurfaced, found, err := readDeviationFindings(root, ref.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +102,17 @@ func ScanSpecStale(root string, snap *lint.Snapshot, threshold int) ([]SpecStale
 		}
 
 		acIDs := storyOwnACIDs(doc.Spec)
-		result := evidence.SpecStale(evidence.SpecStaleInput{Findings: findings, StoryACIDs: acIDs, Threshold: threshold})
+		// spec/finding-identity ac-3: unioned with not-resurfaced: by unique
+		// identity, so a finding a fresh judge run simply does not re-emit
+		// never drains out of the budget just because it moved out of
+		// findings: (the X-18 laundering drain) — mirrors closuregate.go's
+		// checkSpecStaleCondition, 05 §Lenses' anti-hairball law.
+		result := evidence.SpecStale(evidence.SpecStaleInput{
+			Findings:       findings,
+			AdditionalSets: [][]artifact.Finding{notResurfaced},
+			StoryACIDs:     acIDs,
+			Threshold:      threshold,
+		})
 		out = append(out, SpecStaleEntry{StoryRef: doc.Spec.ID, Result: result})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].StoryRef < out[j].StoryRef })
@@ -123,25 +133,25 @@ func storyOwnACIDs(story *artifact.SpecFrontmatter) map[string]bool {
 // readDeviationFindings reads and strict-decodes <name>/deviation-report.md
 // from either specs/active/ or specs/archive/, returning (nil, false, nil)
 // when neither exists.
-func readDeviationFindings(root, name string) ([]artifact.Finding, bool, error) {
+func readDeviationFindings(root, name string) (findings, notResurfaced []artifact.Finding, found bool, err error) {
 	for _, statusDir := range []string{"active", "archive"} {
 		path := store.DeviationReportPath(root, statusDir, name)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			if os.IsNotExist(err) {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
 				continue
 			}
-			return nil, false, fmt.Errorf("decisionsweep: reading %s: %w", path, err)
+			return nil, nil, false, fmt.Errorf("decisionsweep: reading %s: %w", path, readErr)
 		}
-		fm, _, err := artifact.SplitFrontmatter(data)
-		if err != nil {
-			return nil, false, fmt.Errorf("decisionsweep: %s: %w", path, err)
+		fm, _, splitErr := artifact.SplitFrontmatter(data)
+		if splitErr != nil {
+			return nil, nil, false, fmt.Errorf("decisionsweep: %s: %w", path, splitErr)
 		}
-		decoded, err := artifact.DecodeDeviation(fm)
-		if err != nil {
-			return nil, false, fmt.Errorf("decisionsweep: %s: %w", path, err)
+		decoded, decodeErr := artifact.DecodeDeviation(fm)
+		if decodeErr != nil {
+			return nil, nil, false, fmt.Errorf("decisionsweep: %s: %w", path, decodeErr)
 		}
-		return decoded.Findings, true, nil
+		return decoded.Findings, decoded.NotResurfaced, true, nil
 	}
-	return nil, false, nil
+	return nil, nil, false, nil
 }
