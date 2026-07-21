@@ -347,3 +347,48 @@ acceptance_criteria:
 		t.Fatalf("ResolveObjectAnchors error = %q, want it to name the anchor rule and the offending object", err)
 	}
 }
+
+// TestResolveObjectAnchors_MismatchedAnchor_GuidanceIsSlugSymmetric pins the
+// post-ac-1 truth of the message a genuinely-failing author reads
+// (spec/ritual-traps judged-ac1-stale-exact-match-claim-in-resolver-messages).
+// ac-1 made anchor resolution slug-symmetric — both the anchor and every
+// heading go through SlugifyHeading before comparison — so the failure message
+// must no longer tell the author resolution is "exact-match" (a rule that no
+// longer holds), and must instead surface the anchor's own computed slug and
+// cite the ratifying story, pointing them at the real slug-vs-slug mismatch
+// rather than at a rule under which their anchor might already resolve.
+func TestResolveObjectAnchors_MismatchedAnchor_GuidanceIsSlugSymmetric(t *testing.T) {
+	const y = `
+id: spec/anchor-guidance
+kind: spec
+class: feature
+title: "Anchor guidance fixture"
+status: draft
+owners: [platform-team]
+problem: { text: "borrowers cannot self-serve", anchor: "#problem" }
+outcome: { text: "a borrower can update their application", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a borrower can update their application", evidence: [static], anchor: "#nonexistent-heading" }
+`
+	fm, err := DecodeSpec([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v", err)
+	}
+	// No heading whose slug is "nonexistent-heading", so ac-1's anchor
+	// genuinely fails to resolve on both the old and new rule.
+	body := []byte("# Anchor guidance fixture\n\n## Problem\n\n## Outcome\n")
+	err = fm.ResolveObjectAnchors(body)
+	if err == nil {
+		t.Fatal("ResolveObjectAnchors: want error for an anchor whose slug matches no heading, got nil")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "exact-match") {
+		t.Errorf("message = %q, still narrates the pre-ac-1 exact-match rule; ac-1 made resolution slug-symmetric (both sides through SlugifyHeading)", msg)
+	}
+	if !strings.Contains(msg, "slug") {
+		t.Errorf("message = %q, want it to surface the anchor's own slug — the real comparison is slug-vs-slug, so the true guidance is that the anchor's slug matches no heading's slug", msg)
+	}
+	if !strings.Contains(msg, "spec/ritual-traps ac-1") {
+		t.Errorf("message = %q, want it to cite spec/ritual-traps ac-1 as the ratification vehicle for the slug-symmetric reading", msg)
+	}
+}
