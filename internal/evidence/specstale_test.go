@@ -202,6 +202,53 @@ func TestSpecStale_AdditionalSets_OwnTextTrigger_ScopedToPrimarySetOnly(t *testi
 	}
 }
 
+// TestSpecStale_OwnNotResurfaced_OwnTextTrigger_StillFiresAfterMovingSection
+// is spec/finding-identity judged-spec-stale-own-text-not-resurfaced: an
+// accepted-deviation whose id equals one of the story's OWN declared AC ids
+// keeps raising the spec-stale flag (trigger a) after a fresh judge run stops
+// reproducing it and it moves from findings: into the report's OWN
+// not-resurfaced: section. Same report = same AC-id namespace, so the own-text
+// join covers OwnNotResurfaced too — closing the un-flag drain a
+// non-reproducing judge would otherwise open.
+//
+// Only ONE accepted-deviation total, so trigger (b) — the COUNT — cannot fire
+// (1 <= default threshold 3): trigger (a) alone must carry the flag, isolating
+// the fix. Red-first (before the fix): trigger (a) scanned only Findings, so
+// the flag silently dropped the moment the finding moved to not-resurfaced:.
+func TestSpecStale_OwnNotResurfaced_OwnTextTrigger_StillFiresAfterMovingSection(t *testing.T) {
+	in := SpecStaleInput{
+		Findings:         nil,
+		OwnNotResurfaced: []artifact.Finding{judgedAcceptedDeviation("ac-3", "the spec's own ac-3 text was wrong", "owner-ratified")},
+		StoryACIDs:       map[string]bool{"ac-1": true, "ac-2": true, "ac-3": true},
+	}
+	got := SpecStale(in)
+	if !got.Flagged {
+		t.Fatal("Flagged = false, want true — an own-text accepted-deviation in the report's own not-resurfaced: must still raise spec-stale (trigger a)")
+	}
+	if len(got.OwnTextFindingIDs) != 1 || got.OwnTextFindingIDs[0] != "ac-3" {
+		t.Fatalf("OwnTextFindingIDs = %v, want [ac-3]", got.OwnTextFindingIDs)
+	}
+	if got.TriggeredByThreshold {
+		t.Fatal("TriggeredByThreshold = true, want false (one accepted-deviation; trigger a alone must carry the flag)")
+	}
+}
+
+// TestSpecStale_OwnNotResurfaced_UnionedIntoBudget_NoDoubleCount proves
+// OwnNotResurfaced also feeds trigger (b) by unique content identity: the
+// identical accepted-deviation present in both Findings and OwnNotResurfaced
+// counts exactly once (the within-report no-op, ac-3).
+func TestSpecStale_OwnNotResurfaced_UnionedIntoBudget_NoDoubleCount(t *testing.T) {
+	f := judgedAcceptedDeviation("judged-a", "same text", "n")
+	got := SpecStale(SpecStaleInput{
+		Findings:         []artifact.Finding{f},
+		OwnNotResurfaced: []artifact.Finding{f},
+		StoryACIDs:       map[string]bool{},
+	})
+	if got.AcceptedDeviationCount != 1 {
+		t.Fatalf("AcceptedDeviationCount = %d, want 1 (the identical finding must not double count across findings: and its own not-resurfaced:)", got.AcceptedDeviationCount)
+	}
+}
+
 // TestSpecStale_LaunderingReplay_CountUnchangedAcrossRegeneration is
 // spec/finding-identity ac-3's exact laundering-replay proof: "round 1" has
 // an accepted-deviation finding live in Findings; "round 2" simulates a

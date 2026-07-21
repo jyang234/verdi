@@ -33,34 +33,44 @@ type SpecStaleInput struct {
 	// first accepted-deviation, which 03's "tunable, default 3" framing
 	// never intends as the out-of-the-box behavior.
 	Threshold int
+	// OwnNotResurfaced is the SAME report's own not-resurfaced: section — the
+	// prior rulings a fresh judge run did not re-emit (artifact.
+	// DeviationFrontmatter.NotResurfaced), which SHARE Findings' AC-id
+	// namespace because they are the same report/spec. It feeds BOTH triggers:
+	//
+	//   - trigger (a): an own-text accepted-deviation (id == one of the story's
+	//     own declared AC ids) keeps raising spec-stale after it moves from
+	//     findings: into this section — a fresh judge run failing to reproduce
+	//     it must never silently un-flag a standing own-text adjudication
+	//     (judged-spec-stale-own-text-not-resurfaced; the X-18 un-flag drain).
+	//   - trigger (b): unioned into the accepted-deviation budget by unique
+	//     content identity, so a finding that stops reproducing never drains
+	//     out of the count just because it moved out of findings: (ac-3's
+	//     laundering drain — a no-op for a single well-formed report, whose
+	//     findings: and not-resurfaced: are disjoint by id, L-N2).
+	//
+	// Distinct from AdditionalSets precisely on the namespace boundary: this
+	// set is the report's OWN, AdditionalSets is possibly cross-report.
+	OwnNotResurfaced []artifact.Finding
 	// AdditionalSets are further finding sets whose accepted-deviation
 	// dispositions count toward the SAME budget as Findings, unioned by
 	// unique content identity (align.Identity's Kind+ID+Text hash) rather
 	// than concatenated — spec/finding-identity's counterweight hardening
-	// (ledger L-N2):
-	//
-	//   - ac-3 (within one report): the closure gate passes the report's own
-	//     not-resurfaced: section here, so a finding that stops reproducing
-	//     under a fresh judge run never drains out of the budget just
-	//     because it moved out of findings: (the X-18 laundering drain this
-	//     union closes) — proven a no-op for a single well-formed report,
-	//     where ids (and so identities) are already unique by construction,
-	//     exactly as L-N2 itself records ("the within-report unique-identity
-	//     framing was proven a no-op").
-	//   - ac-4 (across reports, the actual cross-report X-18 fix): the
-	//     feature-closure gate passes every closed implementing story's
-	//     ARCHIVED report's findings: + not-resurfaced: here, so a story-
-	//     archived accepted deviation counts exactly once toward the
-	//     feature-close budget — never zero (silently dropped because the
-	//     feature's own report never reproduced it) and never twice
-	//     (double-counted across the story and feature reports
-	//     independently).
+	// (ledger L-N2). Used for CROSS-REPORT sets only (ac-4, the actual
+	// cross-report X-18 fix): the feature-closure gate passes every closed
+	// implementing story's ARCHIVED report's findings: + not-resurfaced: here,
+	// so a story-archived accepted deviation counts exactly once toward the
+	// feature-close budget — never zero (silently dropped because the feature's
+	// own report never reproduced it) and never twice (double-counted across
+	// the story and feature reports independently).
 	//
 	// Deliberately excluded from trigger (a)'s "own text" join: an
-	// AdditionalSets entry's finding ids are drawn from a POSSIBLY DIFFERENT
-	// spec's own AC-id namespace (a story's archived report, at the feature
-	// level) — an id collision there must never be misread as "this spec's
-	// own declared AC text was targeted". Only Findings feeds trigger (a).
+	// AdditionalSets entry's finding ids are drawn from a DIFFERENT spec's own
+	// AC-id namespace (a story's archived report, at the feature level) — an id
+	// collision there must never be misread as "this spec's own declared AC
+	// text was targeted". A report's OWN not-resurfaced: (same namespace) goes
+	// in OwnNotResurfaced, which DOES feed trigger (a); only Findings and
+	// OwnNotResurfaced feed trigger (a).
 	AdditionalSets [][]artifact.Finding
 }
 
@@ -118,28 +128,39 @@ func SpecStale(in SpecStaleInput) SpecStaleResult {
 
 	var result SpecStaleResult
 
-	// Trigger (a) reads Findings ONLY — the primary/own set — never
-	// AdditionalSets (AdditionalSets' doc comment: an id collision against a
-	// DIFFERENT spec's AC-id namespace must never be misread as "this spec's
-	// own text was targeted").
-	for _, f := range in.Findings {
-		if f.Disposition == artifact.FindingAcceptedDeviation && in.StoryACIDs[f.ID] {
-			result.OwnTextFindingIDs = append(result.OwnTextFindingIDs, f.ID)
+	// Trigger (a) reads the report's OWN sets — Findings and OwnNotResurfaced,
+	// which share this spec's AC-id namespace — never AdditionalSets
+	// (AdditionalSets' doc comment: an id collision against a DIFFERENT spec's
+	// AC-id namespace must never be misread as "this spec's own text was
+	// targeted"). Scanning OwnNotResurfaced closes the un-flag drain: an
+	// own-text accepted-deviation that stops reproducing and moves to
+	// not-resurfaced: must keep raising the flag
+	// (judged-spec-stale-own-text-not-resurfaced). Deduped by id so the
+	// candidate+backing shape (same id undispositioned in Findings, dispositioned
+	// in OwnNotResurfaced) can never list an id twice.
+	ownTextSeen := make(map[string]bool)
+	for _, set := range [][]artifact.Finding{in.Findings, in.OwnNotResurfaced} {
+		for _, f := range set {
+			if f.Disposition == artifact.FindingAcceptedDeviation && in.StoryACIDs[f.ID] && !ownTextSeen[f.ID] {
+				ownTextSeen[f.ID] = true
+				result.OwnTextFindingIDs = append(result.OwnTextFindingIDs, f.ID)
+			}
 		}
 	}
 
 	// Trigger (b) — the accepted-deviation budget itself — unions Findings
-	// with every AdditionalSets entry by unique content identity
-	// (align.Identity), so the SAME standing adjudication reproduced across
-	// more than one set counts exactly once (spec/finding-identity ac-3/
-	// ac-4's counterweight hardening; AdditionalSets' own doc comment has
-	// the full rationale). For a single, well-formed report with only
-	// Findings populated, every id — and so every identity — is already
-	// unique by schema construction, so this union is a no-op there: the
-	// exact same count SpecStale always produced.
+	// with OwnNotResurfaced and every AdditionalSets entry by unique content
+	// identity (align.Identity), so the SAME standing adjudication reproduced
+	// across more than one set counts exactly once (spec/finding-identity ac-3/
+	// ac-4's counterweight hardening; the field doc comments have the full
+	// rationale). For a single, well-formed report with only Findings
+	// populated, every id — and so every identity — is already unique by schema
+	// construction, so this union is a no-op there: the exact same count
+	// SpecStale always produced.
 	seenIdentity := make(map[string]bool)
-	sets := make([][]artifact.Finding, 0, 1+len(in.AdditionalSets))
+	sets := make([][]artifact.Finding, 0, 2+len(in.AdditionalSets))
 	sets = append(sets, in.Findings)
+	sets = append(sets, in.OwnNotResurfaced)
 	sets = append(sets, in.AdditionalSets...)
 	for _, set := range sets {
 		for _, f := range set {

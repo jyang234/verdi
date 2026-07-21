@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/forge"
@@ -483,10 +482,10 @@ func TestClosureGate_LaunderingReplay_SpecStaleCountUnchangedAcrossReroll(t *tes
 	}
 	round1Report := decodeReportFile(t, reportPathFor(repo.Dir, "stale-decline"))
 	round1Count := evidence.SpecStale(evidence.SpecStaleInput{
-		Findings:       round1Report.Findings,
-		AdditionalSets: [][]artifact.Finding{round1Report.NotResurfaced},
-		StoryACIDs:     storyACIDs,
-		Threshold:      manifest.Audit.DeviationsStaleThreshold,
+		Findings:         round1Report.Findings,
+		OwnNotResurfaced: round1Report.NotResurfaced,
+		StoryACIDs:       storyACIDs,
+		Threshold:        manifest.Audit.DeviationsStaleThreshold,
 	}).AcceptedDeviationCount
 
 	// Round 2: the judge re-rolls and does NOT re-emit j-1's slug at all.
@@ -509,10 +508,10 @@ func TestClosureGate_LaunderingReplay_SpecStaleCountUnchangedAcrossReroll(t *tes
 		t.Fatalf("checkSpecStaleCondition (round 2): %v", err)
 	}
 	round2Count := evidence.SpecStale(evidence.SpecStaleInput{
-		Findings:       after.Findings,
-		AdditionalSets: [][]artifact.Finding{after.NotResurfaced},
-		StoryACIDs:     storyACIDs,
-		Threshold:      manifest.Audit.DeviationsStaleThreshold,
+		Findings:         after.Findings,
+		OwnNotResurfaced: after.NotResurfaced,
+		StoryACIDs:       storyACIDs,
+		Threshold:        manifest.Audit.DeviationsStaleThreshold,
 	}).AcceptedDeviationCount
 
 	// The property that actually matters: the RAW accepted-deviation count

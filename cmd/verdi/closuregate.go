@@ -231,12 +231,15 @@ func checkSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manife
 	// deviation identities across findings: UNION not-resurfaced: — a
 	// finding that a fresh judge run simply does not re-emit must never
 	// drain out of the count just because it moved out of Findings (X-18's
-	// laundering drain).
+	// laundering drain). The report's own not-resurfaced: goes in
+	// OwnNotResurfaced (not AdditionalSets): it shares the story's AC-id
+	// namespace, so an own-text accepted-deviation there keeps raising trigger
+	// (a) too (judged-spec-stale-own-text-not-resurfaced).
 	result := evidence.SpecStale(evidence.SpecStaleInput{
-		Findings:       decoded.Findings,
-		AdditionalSets: [][]artifact.Finding{decoded.NotResurfaced},
-		StoryACIDs:     storyACIDs,
-		Threshold:      threshold,
+		Findings:         decoded.Findings,
+		OwnNotResurfaced: decoded.NotResurfaced,
+		StoryACIDs:       storyACIDs,
+		Threshold:        threshold,
 	})
 	if !result.Flagged {
 		return gateCondition{Name: name, OK: true}, nil

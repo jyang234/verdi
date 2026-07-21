@@ -911,8 +911,8 @@ func budgetAcceptedDeviationCount(t *testing.T, path string) int {
 	t.Helper()
 	fm := decodeReportFile(t, path)
 	return evidence.SpecStale(evidence.SpecStaleInput{
-		Findings:       fm.Findings,
-		AdditionalSets: [][]artifact.Finding{fm.NotResurfaced},
+		Findings:         fm.Findings,
+		OwnNotResurfaced: fm.NotResurfaced,
 	}).AcceptedDeviationCount
 }
 
