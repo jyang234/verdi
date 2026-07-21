@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 func TestVL003_DanglingLink(t *testing.T) {
@@ -273,6 +275,65 @@ bindings:
 		if f.Rule == "VL-003" {
 			t.Fatalf("VL-003 fired on a clean root bindings file: %s", f.String())
 		}
+	}
+}
+
+// TestVL003_RootGuard_UnnormalizedRoot_NoDoubleCheck is
+// judged-ac3-root-guard-path-equality: checkBindings skips its
+// unconditional root-discovery pass only when some discovered Service is
+// ALREADY rooted exactly at the module root (guarding a hypothetical store
+// that IS a flowmap service of itself from having its one root bindings file
+// double-checked under two labels). That guard is `svc.Dir == in.Root`, a
+// raw string compare — but svc.Dir is always filepath.Abs-normalized
+// (internal/store/discovery.go), while in.Root is whatever the caller passed.
+// A caller passing a relative or trailing-slash root defeats the guard: the
+// root-rooted service is NOT recognized, so the SAME root bindings file is
+// checked twice — once as the service's sidecar, once as RootBindings —
+// doubling every finding under two different path labels.
+//
+// This hand-builds exactly that store (a Service rooted at the module root,
+// whose Bindings are the very *artifact.Bindings BuildSnapshot also reads
+// into RootBindings) and passes in.Root with a trailing slash. Before
+// normalization, the single bad-AC entry reds TWICE; after, once — and the
+// surviving finding is the SERVICE-labeled one, proving the root file was
+// correctly recognized as the service and its root-discovery copy suppressed.
+func TestVL003_RootGuard_UnnormalizedRoot_NoDoubleCheck(t *testing.T) {
+	root := t.TempDir() // absolute, already clean
+
+	owner := &Document{
+		RelPath: ".verdi/specs/active/test-owner/spec.md",
+		Base:    artifact.Base{ID: "spec/test-owner"},
+		Spec:    &artifact.SpecFrontmatter{AcceptanceCriteria: []artifact.AcceptanceCriterion{{ID: "ac-1"}}},
+	}
+	// One bad bare entry (ac-99, undeclared by the owner) is the single
+	// finding whose duplication under two labels is the tell.
+	badBindings := &artifact.Bindings{
+		Schema: "verdi.bindings/v1",
+		Spec:   "spec/test-owner",
+		Bindings: []artifact.Binding{
+			{Producer: "some-producer", Kind: artifact.EvidenceStatic, ACs: []string{"ac-99"}},
+		},
+	}
+	snap := &Snapshot{
+		Root:  root,
+		ByRef: map[string][]*Document{"spec/test-owner": {owner}},
+		// The root-rooted service carries the same file BuildSnapshot also
+		// read into RootBindings — the real store's shape when a .flowmap.yaml
+		// sits at the module root.
+		Services:     []store.Service{{Name: "root-svc", Dir: root, Bindings: badBindings}},
+		RootBindings: badBindings,
+	}
+
+	// Trailing-slash caller: filepath.Abs normalizes it away, but a raw
+	// compare against the already-clean svc.Dir does not.
+	in := &RunInput{Ctx: context.Background(), Root: root + string(filepath.Separator), Snapshot: snap, Opts: Options{}}
+	findings := vl003{}.checkBindings(in)
+
+	if len(findings) != 1 {
+		t.Fatalf("checkBindings produced %d findings for an unnormalized (trailing-slash) root, want 1 — the root-rooted service must be recognized so its root bindings file is not also checked as RootBindings:\n%s", len(findings), findingsString(findings))
+	}
+	if !strings.Contains(findings[0].Path, "root-svc") {
+		t.Errorf("surviving finding path = %q, want the SERVICE-labeled copy (verdi.bindings.yaml (root-svc)) — proving the root file was recognized as the service and its duplicate root-discovery check suppressed", findings[0].Path)
 	}
 }
 
