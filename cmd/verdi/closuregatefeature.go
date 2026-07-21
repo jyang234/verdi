@@ -244,6 +244,14 @@ func checkAllImplementingStoriesClosed(stories []implementingStoryEdges, mdl *mo
 // (this gate never short-circuits) so this must degrade gracefully rather
 // than operationally fail.
 //
+// A CLOSED story whose archive is ABSENT is the opposite of that legitimate
+// skip: it is a store-integrity anomaly whose recorded accepted deviations
+// would silently count as zero in the union. That undercount is disclosed
+// unproven — naming the story and the anomaly — never passed silently
+// (judged-feature-union-missing-archive-silent-zero). The storiesUnioned tally
+// also rides the condition's Extra on the PASS path (not only the FAIL reason),
+// so a passing gate shows how many archives actually fed the union.
+//
 // Trigger (a)'s own-text join uses ONLY the feature's own declared AC ids
 // against the feature's own report — both its findings: (Findings) and its own
 // not-resurfaced: (OwnNotResurfaced), which share the feature's AC-id
@@ -276,8 +284,15 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 	}
 
 	storiesUnioned := 0
+	var missingArchive []string
 	for _, s := range stories {
 		if !s.Closed {
+			// A not-yet-closed implementing story legitimately has no archive
+			// yet (the closure ritual only moves a report active->archive once
+			// the story closes). Condition 3 already blocks the feature from
+			// closing while any implementing story remains open, so skipping it
+			// here is honest, never a silent undercount — the documented
+			// boundary (judged-feature-union-missing-archive-silent-zero).
 			continue
 		}
 		storyRef, err := artifact.ParseRef(s.SpecRef)
@@ -290,10 +305,43 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 			return gateCondition{}, err
 		}
 		if archived == nil {
+			// A CLOSED story with no archived report is a store-integrity
+			// anomaly, NOT a legitimate zero: its recorded accepted deviations
+			// cannot be read to feed the union. Never silently counted as zero
+			// — the condition discloses it below (three-valued honesty,
+			// constitution 2/10; judged-feature-union-missing-archive-silent-zero).
+			missingArchive = append(missingArchive, s.SpecRef)
 			continue
 		}
 		additional = append(additional, archived.Findings, archived.NotResurfaced)
 		storiesUnioned++
+	}
+
+	// Display resolution (L-M13(1), nil-safe): the class/state words resolve;
+	// the ids/counts stay identity. The union tally rides EVERY verdict of this
+	// condition (Extra, printed regardless of branch), so a PASSing gate shows
+	// how many archives fed the union, not only a failing one
+	// (judged-feature-union-missing-archive-silent-zero).
+	featureWord := mdl.DisplayClass("feature")
+	storyWord := mdl.DisplayClass("story")
+	closedWord := mdl.DisplayState("story", "closed")
+	tally := fmt.Sprintf("       [union over the %s's own report + %d %s implementing %s archive(s)]",
+		featureWord, storiesUnioned, closedWord, storyWord)
+
+	// A closed story missing its archive means the union is provably
+	// incomplete: disclose it unproven (naming the story and the anomaly)
+	// rather than passing on a budget computed from partial data.
+	if len(missingArchive) > 0 {
+		sort.Strings(missingArchive)
+		return gateCondition{
+			Name:      name,
+			Disclosed: true,
+			Source:    "gate:spec-stale-feature-union",
+			Reason: fmt.Sprintf(
+				"closed implementing %s %v missing archived deviation report(s) — recorded accepted deviations cannot be unioned into the feature-close budget (store-integrity anomaly; not counted as zero)",
+				storyWord, missingArchive),
+			Extra: []string{tally},
+		}, nil
 	}
 
 	featureACIDs := make(map[string]bool, len(spec.AcceptanceCriteria))
@@ -313,14 +361,9 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 		Threshold:        threshold,
 	})
 	if !result.Flagged {
-		return gateCondition{Name: name, OK: true}, nil
+		return gateCondition{Name: name, OK: true, Extra: []string{tally}}, nil
 	}
-	// Display resolution (L-M13(1)): the class words and the closed state
-	// word resolve; the finding ids/counts stay identity.
-	featureWord := mdl.DisplayClass("feature")
-	storyWord := mdl.DisplayClass("story")
-	closedWord := mdl.DisplayState("story", "closed")
-	return gateCondition{Name: name, Reason: fmt.Sprintf(
-		"spec-stale: own-text finding(s) %v, accepted-deviation count %d (threshold %d) [union over the %s's own report + %d %s implementing %s archive(s)]",
-		result.OwnTextFindingIDs, result.AcceptedDeviationCount, threshold, featureWord, storiesUnioned, closedWord, storyWord)}, nil
+	return gateCondition{Name: name, Extra: []string{tally}, Reason: fmt.Sprintf(
+		"spec-stale: own-text finding(s) %v, accepted-deviation count %d (threshold %d)",
+		result.OwnTextFindingIDs, result.AcceptedDeviationCount, threshold)}, nil
 }

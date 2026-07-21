@@ -122,6 +122,77 @@ func TestCheckFeatureSpecStaleCondition_UnclosedStory_NoArchiveYet_NoOperational
 	}
 }
 
+// TestCheckFeatureSpecStaleCondition_ClosedStoryMissingArchive_Disclosed is
+// spec/finding-identity judged-feature-union-missing-archive-silent-zero's fix
+// proof: a CLOSED implementing story whose archived deviation report is absent
+// is a store-integrity anomaly. Its recorded accepted deviations would count
+// exactly zero toward the feature-close union — the un-disclosed undercount
+// three-valued honesty forbids. The condition must DISCLOSE it (naming the
+// story and the anomaly), never silently pass.
+//
+// Red-first (before the fix): the loop did `archived == nil -> continue` with
+// no disclosure, so the missing archive silently contributed zero and the
+// condition passed.
+func TestCheckFeatureSpecStaleCondition_ClosedStoryMissingArchive_Disclosed(t *testing.T) {
+	root := t.TempDir()
+	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
+	// The feature's own report is present; the CLOSED implementing story has NO
+	// archived report on disk.
+	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature", "  - { id: computed-x, kind: computed, text: unrelated, disposition: fixed }\n", "")
+
+	stories := []implementingStoryEdges{{SpecRef: "spec/my-story", Closed: true}}
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil)
+	if err != nil {
+		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
+	}
+	if !cond.Disclosed {
+		t.Fatalf("cond = %+v, want Disclosed — a CLOSED story missing its archive is a store-integrity anomaly, never a silent zero", cond)
+	}
+	if cond.OK {
+		t.Fatalf("cond = %+v, want NOT OK (disclosed-unproven is never a silent pass)", cond)
+	}
+	if cond.Source == "" {
+		t.Fatalf("cond = %+v, want a disclosure Source id", cond)
+	}
+	if !strings.Contains(cond.Reason, "spec/my-story") || !strings.Contains(cond.Reason, "anomaly") {
+		t.Fatalf("cond.Reason = %q, want it to name the story and the store-integrity anomaly", cond.Reason)
+	}
+}
+
+// TestCheckFeatureSpecStaleCondition_TallyPrintsOnPass pins the second half of
+// the fix: the storiesUnioned tally rides the condition on the PASS path too
+// (previously it appeared only inside the FAIL reason), so a passing
+// feature-close gate shows how many archives actually fed the union.
+func TestCheckFeatureSpecStaleCondition_TallyPrintsOnPass(t *testing.T) {
+	root := t.TempDir()
+	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
+	// Two closed stories WITH archives (one accepted-deviation total, under
+	// threshold) plus the feature's own report — a clean PASS.
+	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "story-a", "  - { id: judged-a, kind: judged, text: t1, disposition: accepted-deviation, note: n1 }\n", "")
+	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "story-b", "  - { id: computed-y, kind: computed, text: y, disposition: fixed }\n", "")
+	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature", "  - { id: computed-x, kind: computed, text: unrelated, disposition: fixed }\n", "")
+
+	stories := []implementingStoryEdges{
+		{SpecRef: "spec/story-a", Closed: true},
+		{SpecRef: "spec/story-b", Closed: true},
+	}
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil)
+	if err != nil {
+		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
+	}
+	if !cond.OK {
+		t.Fatalf("cond = %+v, want PASS (1 accepted-deviation, threshold 3)", cond)
+	}
+	joined := strings.Join(cond.Extra, "\n")
+	if !strings.Contains(joined, "union over the feature's own report + 2 closed implementing story archive(s)") {
+		t.Fatalf("cond.Extra = %q, want the union tally printed on the PASS path", cond.Extra)
+	}
+}
+
 // TestCheckFeatureSpecStaleCondition_NoReportsAnywhere_TriviallyUnflagged
 // proves the absent-report base case (mirroring checkSpecStaleCondition's
 // own "a story with no build activity yet cannot be spec-stale"): no
