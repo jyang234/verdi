@@ -245,6 +245,15 @@ func checkAllImplementingStoriesClosed(stories []implementingStoryEdges, mdl *mo
 // content identity, align.Identity) is the mechanism; this function is only
 // responsible for GATHERING the right sets.
 //
+// L-N14 (owner-ratified P2-11, 2026-07-21): the threshold SpecStale is handed
+// is recalibrated for the enlarged union basis — effective threshold = the
+// configured per-report threshold × the number of reports actually unioned (the
+// feature's own report when present + each closed story archive read). The
+// per-report density that fires the counterweight is unchanged; the reason/tally
+// print the scaled arithmetic ("threshold 36 = 6 × 6 reports") so a reader sees
+// the unit. Story-level enforcement (closuregate.go) is a single report and is
+// untouched. See the perReport/numReports/effectiveThreshold computation below.
+//
 // A story not yet closed contributes nothing (s.Closed false skips it,
 // never an error) — it has no archived report to read yet; condition 3
 // already separately blocks the feature from closing while any implementing
@@ -395,23 +404,39 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 			supersededWord, storyWord, ref, n))
 	}
 
-	// The union tally rides EVERY verdict of this condition (Extra, printed
-	// regardless of branch), so a PASSing gate shows how many archives fed the
-	// union, not only a failing one (judged-feature-union-missing-archive-silent-
-	// zero). The superseded-exclusion lines (L-N12) ride the same Extra so they
-	// too show on every verdict.
-	tally := fmt.Sprintf("       [union over the %s's own report + %d %s implementing %s archive(s)]",
-		featureWord, storiesUnioned, closedWord, storyWord)
-	extra := append([]string{tally}, supersededExtra...)
-
 	featureACIDs := make(map[string]bool, len(spec.AcceptanceCriteria))
 	for _, ac := range spec.AcceptanceCriteria {
 		featureACIDs[ac.ID] = true
 	}
-	threshold := 0
+
+	// L-N14 (owner-ratified P2-11, 2026-07-21): the spec-stale counterweight's
+	// threshold was calibrated (value 6, DefaultDeviationsStaleThreshold when
+	// unset) for the PRE-UNION basis — a single closing report (Phase 1 X-18).
+	// L-N2/ac-4's ratified union enlarged the feature-close basis to the feature's
+	// own report PLUS every closed implementing story's archive, so the threshold
+	// now preserves PER-REPORT density across that enlarged basis: effective
+	// threshold = configured per-report threshold × number of reports actually
+	// unioned (the feature's own report when present, plus each closed story
+	// archive actually read — storiesUnioned). This is a recalibration of the
+	// UNIT, not a raising of the bar: the per-report density that fires the
+	// counterweight is unchanged, and story-level closes (closuregate.go's
+	// checkSpecStaleCondition) keep their own single-report enforcement, untouched.
+	// The per-report threshold is defaulted BEFORE the multiply (a configured
+	// 0/absent means the default PER REPORT, never a zero budget), and the product
+	// is what SpecStale is handed — never a raw 0 SpecStale would itself re-default
+	// to a single-report value, which would silently under-scale the union.
+	perReport := 0
 	if manifest != nil && manifest.Audit != nil {
-		threshold = manifest.Audit.DeviationsStaleThreshold
+		perReport = manifest.Audit.DeviationsStaleThreshold
 	}
+	if perReport <= 0 {
+		perReport = evidence.DefaultDeviationsStaleThreshold
+	}
+	numReports := storiesUnioned
+	if own != nil {
+		numReports++
+	}
+	effectiveThreshold := perReport * numReports
 
 	// Compute spec-stale over the AVAILABLE sets FIRST — the feature's own
 	// report plus whatever story archives ARE present. A missing archive can
@@ -431,12 +456,29 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 		OwnNotResurfaced: ownNotResurfaced,
 		AdditionalSets:   additional,
 		StoryACIDs:       featureACIDs,
-		Threshold:        threshold,
+		Threshold:        effectiveThreshold,
 	})
+
+	// The union tally rides EVERY verdict of this condition (Extra, printed
+	// regardless of branch), so a PASSing gate shows how many archives fed the
+	// union, the accepted-deviation count, AND the L-N14 report-scaled arithmetic
+	// — not only a failing one (judged-feature-union-missing-archive-silent-zero;
+	// P2-11's "arithmetic printed on the PASS path"). thresholdArith is the scaled
+	// derivation (empty only in the degenerate no-reports base case, numReports 0,
+	// which is always trivially unflagged). The superseded-exclusion lines (L-N12)
+	// ride the same Extra so they too show on every verdict.
+	thresholdArith := ""
+	if numReports > 0 {
+		thresholdArith = fmt.Sprintf(" (threshold %d = %d × %d reports)", effectiveThreshold, perReport, numReports)
+	}
+	tally := fmt.Sprintf("       [union over the %s's own report + %d %s implementing %s archive(s): accepted-deviation count %d%s]",
+		featureWord, storiesUnioned, closedWord, storyWord, result.AcceptedDeviationCount, thresholdArith)
+	extra := append([]string{tally}, supersededExtra...)
+
 	if result.Flagged {
 		reason := fmt.Sprintf(
-			"spec-stale: own-text finding(s) %v, accepted-deviation count %d (threshold %d)",
-			result.OwnTextFindingIDs, result.AcceptedDeviationCount, threshold)
+			"spec-stale: own-text finding(s) %v, accepted-deviation count %d%s",
+			result.OwnTextFindingIDs, result.AcceptedDeviationCount, thresholdArith)
 		if len(missingArchive) > 0 {
 			// The flag stands on the available union alone (a lower bound); a
 			// missing archive can only push the true budget higher, never clear

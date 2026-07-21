@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +9,18 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/store"
 )
+
+// nDistinctADFindings renders findingsYAML for n judged accepted-deviation
+// findings with globally-unique id+text (so each is a distinct budget
+// identity, align.Identity) — the L-N14 report-scaled-threshold tests need to
+// place a controlled number of accepted deviations across the union.
+func nDistinctADFindings(prefix string, n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "  - { id: judged-%s-%d, kind: judged, text: \"deviation %s %d\", disposition: accepted-deviation, note: n }\n", prefix, i, prefix, i)
+	}
+	return b.String()
+}
 
 // featureSpecStaleTestHex is a stand-in sha256 hex payload (64 hex chars)
 // for fixture digest/covers fields this file's deviation-report.md fixtures
@@ -61,7 +74,11 @@ func TestCheckFeatureSpecStaleCondition_UnionsStoryArchive_NeverZero(t *testing.
 	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature", "  - { id: computed-x, kind: computed, text: unrelated, disposition: fixed }\n", "")
 
 	stories := []implementingStoryEdges{{SpecRef: "spec/my-story", Closed: true}}
-	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+	// Threshold 1 per report: the union basis here is 2 reports (the feature's own
+	// + one story archive), so the L-N14 report-scaled effective threshold is 2,
+	// which the archive's 4 accepted-deviations must still exceed — the never-zero
+	// property is that they COUNT (4), not that any fixed flat threshold fires.
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 1}}
 
 	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
@@ -236,7 +253,12 @@ func TestCheckFeatureSpecStaleCondition_MissingArchive_PartialUnionOverThreshold
 		{SpecRef: "spec/story-present", Closed: true},
 		{SpecRef: "spec/story-missing", Closed: true}, // archive absent
 	}
-	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+	// Threshold 1 per report: the AVAILABLE union spans 2 reports (the feature's
+	// own + the one present story archive; the missing archive contributes no
+	// report to the basis), so the L-N14 scaled effective threshold is 2 and the
+	// present archive's 4 accepted-deviations already exceed it — a strict lower
+	// bound that a restored archive can only raise.
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 1}}
 
 	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
@@ -370,5 +392,87 @@ func TestCheckFeatureSpecStaleCondition_SupersededStory_NoArchive_NoDisclosureNo
 	}
 	if strings.Contains(strings.Join(cond.Extra, "\n"), "superseded story") {
 		t.Fatalf("cond.Extra = %q, want NO superseded-exclusion line (nothing was excluded)", cond.Extra)
+	}
+}
+
+// writeSixReportFeature lays out the P2-11 union basis: the feature's own report
+// plus five closed implementing story archives (six reports total), with adCount
+// distinct accepted-deviations concentrated in the first story's archive and a
+// single non-accepted finding in every other report so each archive exists and
+// is counted as one report toward the union basis. Returns the stories slice for
+// the feature gate. The number of reports (6) and the per-report threshold (6,
+// set by the caller's manifest) are the L-N14 recalibration's own worked example.
+func writeSixReportFeature(t *testing.T, root string, adCount int) []implementingStoryEdges {
+	t.Helper()
+	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature",
+		"  - { id: computed-own, kind: computed, text: own-unrelated, disposition: fixed }\n", "")
+	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "story-1", nDistinctADFindings("s1", adCount), "")
+	stories := []implementingStoryEdges{{SpecRef: "spec/story-1", Closed: true}}
+	for i := 2; i <= 5; i++ {
+		name := fmt.Sprintf("story-%d", i)
+		writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, name,
+			fmt.Sprintf("  - { id: computed-%d, kind: computed, text: unrelated-%d, disposition: fixed }\n", i, i), "")
+		stories = append(stories, implementingStoryEdges{SpecRef: "spec/" + name, Closed: true})
+	}
+	return stories
+}
+
+// TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_Passes is P2-11's own
+// worked example (ledger L-N14, owner-ratified 2026-07-21): 23 accepted-deviations
+// unioned across a SIX-report basis (the feature's own report + five closed
+// implementing story archives) with a per-report threshold of 6. Under the
+// pre-union flat threshold this FAILED (23 > 6); the ratified recalibration
+// preserves PER-REPORT density across the enlarged basis — effective threshold
+// = 6 × 6 = 36 — so 23 PASSES, and the scaled arithmetic is printed on the PASS
+// path (the tally rides every verdict).
+//
+// Red-first: against the pre-fix flat threshold this reds — 23 > 6 flags and the
+// condition FAILs, so cond.OK is false where this test requires true.
+func TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_Passes(t *testing.T) {
+	root := t.TempDir()
+	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
+	stories := writeSixReportFeature(t, root, 23)
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 6}}
+
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
+	if err != nil {
+		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
+	}
+	if !cond.OK {
+		t.Fatalf("cond = %+v, want PASS — 23 accepted-deviations over 6 reports is under the report-scaled threshold 36 (6 × 6)", cond)
+	}
+	joined := strings.Join(cond.Extra, "\n")
+	if !strings.Contains(joined, "count 23") {
+		t.Fatalf("cond.Extra = %q, want the accepted-deviation count 23 printed on the PASS path", cond.Extra)
+	}
+	if !strings.Contains(joined, "threshold 36 = 6 × 6 reports") {
+		t.Fatalf("cond.Extra = %q, want the scaled arithmetic 'threshold 36 = 6 × 6 reports' printed on the PASS path", cond.Extra)
+	}
+}
+
+// TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_DenseStillFails is the
+// recalibration's honesty guard (L-N14: "NOT a raising of the bar"): a genuinely
+// dense feature — 40 accepted-deviations over the same six-report basis — still
+// FAILs, because 40 exceeds the scaled threshold 36. The scaling preserves the
+// per-report density that fires the counterweight; it never lets an over-dense
+// feature through.
+func TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_DenseStillFails(t *testing.T) {
+	root := t.TempDir()
+	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
+	stories := writeSixReportFeature(t, root, 40)
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 6}}
+
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
+	if err != nil {
+		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
+	}
+	if cond.OK {
+		t.Fatalf("cond = %+v, want FAIL — 40 accepted-deviations over 6 reports exceeds the scaled threshold 36", cond)
+	}
+	if !strings.Contains(cond.Reason, "count 40") {
+		t.Fatalf("cond.Reason = %q, want it to name accepted-deviation count 40", cond.Reason)
+	}
+	if !strings.Contains(cond.Reason, "threshold 36 = 6 × 6 reports") {
+		t.Fatalf("cond.Reason = %q, want the scaled arithmetic in the failure reason", cond.Reason)
 	}
 }

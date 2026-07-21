@@ -2,6 +2,7 @@ package align
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 )
@@ -12,8 +13,15 @@ import (
 // final edition and it becomes frozen"). The living, human-dispositioned report
 // IS that final edition; freezing stamps it permanent, it does not re-derive
 // it. Every finding, disposition, and note is carried over exactly as the human
-// left them; the judged exchange (Integrity + JudgeIntegrity) and the rendered
-// body are kept byte-for-byte; only the `frozen:` stamp is added.
+// left them; the judged exchange (Integrity + JudgeIntegrity) and every body
+// section EXCEPT the two trailing spec/finding-identity sections are kept
+// byte-for-byte; only the `frozen:` stamp is added. The two trailing sections
+// (candidates awaiting reaffirmation, not-resurfaced) are re-rendered to agree
+// with the finalized frontmatter (verify finding D — a frozen report is
+// post-confirmation, so it has no pending candidates and its not-resurfaced:
+// must equal the frontmatter's), see reconcileFrozenBody. That reconciliation
+// touches body PROSE only; the digest is a pure function of the frontmatter's
+// computed findings, never the body, so it stays valid (below).
 //
 // The digest is REUSED unchanged, which is both correct and necessary: it is a
 // pure function of (covers, computed-finding id/kind/text, baseline-diffs) and
@@ -63,9 +71,50 @@ func FreezeInPlace(existing *artifact.DeviationFrontmatter, existingBody, frozen
 		return nil, fmt.Errorf("align: FreezeInPlace: stamped frontmatter failed self-validation: %w", err)
 	}
 
+	// Reconcile the body's two trailing spec/finding-identity sections with the
+	// FINAL frontmatter before freezing (verify finding D): a frozen report is
+	// post-confirmation, so it has no pending candidates and its not-resurfaced:
+	// must equal frozen.NotResurfaced. See reconcileFrozenBody.
+	body := reconcileFrozenBody(existingBody, &frozen)
+
 	return &Report{
 		Frontmatter: &frozen,
-		Body:        existingBody,
-		Markdown:    RenderMarkdown(&frozen, existingBody),
+		Body:        body,
+		Markdown:    RenderMarkdown(&frozen, body),
 	}, nil
+}
+
+// reconcileFrozenBody returns body with its two trailing spec/finding-identity
+// sections (candidates awaiting reaffirmation, ac-1; not-resurfaced, ac-3)
+// re-rendered to agree with the final frozen frontmatter, keeping every earlier
+// section (computed, boundary diff, diagram alignment, judged) byte-for-byte.
+//
+// Verify finding D: FreezeInPlace used to reattach the Generate-time body
+// verbatim, so a report frozen AFTER its candidates were confirmed carried
+// stale "### Candidates awaiting reaffirmation" and "## Not resurfaced" sections
+// the finalized frontmatter no longer had — the archived judge-ergonomics report
+// rendered each of its four findings THREE times (once live, once as a stale
+// candidate, once as a stale backing), the body disagreeing with its own
+// authoritative frontmatter. A frozen report is post-confirmation: it has no
+// pending candidates (the section resets to "(none)") and its not-resurfaced:
+// must show exactly fm.NotResurfaced. Only the two trailing sections can be
+// reconstructed from the frontmatter alone — the earlier sections carry
+// Generate-time data (baseline diffs, diagram alignment) that is not in the
+// frontmatter — so they are kept verbatim and only the trailing two are re-rendered
+// from the final state (renderTrailingSections, the same rule Generate renders
+// them with).
+//
+// A body predating these sections (no candidatesSectionMarker) is returned
+// verbatim: there is nothing to reconcile, and the digest — a pure function of
+// (covers, computed finding id/kind/text, baseline diffs), never the body prose —
+// is unaffected either way, so VerifyDigest still recomputes the same string.
+func reconcileFrozenBody(body string, fm *artifact.DeviationFrontmatter) string {
+	idx := strings.Index(body, candidatesSectionMarker)
+	if idx == -1 {
+		return body
+	}
+	var b strings.Builder
+	b.WriteString(body[:idx])
+	renderTrailingSections(&b, fm.Findings, nil, fm.NotResurfaced)
+	return b.String()
 }

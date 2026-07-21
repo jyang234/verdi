@@ -125,6 +125,121 @@ func TestFreezeInPlace_PreservesAdjudicatedStateVerbatim(t *testing.T) {
 	}
 }
 
+// TestFreezeInPlace_StripsStaleCandidateAndNotResurfacedSections is verify
+// finding D's fix proof (prospective): a candidates-bearing report, frozen
+// POST-confirmation, must render each finding exactly once — its body's two
+// trailing spec/finding-identity sections (candidates awaiting reaffirmation,
+// not-resurfaced) reconciled to the final frontmatter, not carried over from the
+// stale Generate-time body. The witness was the archived judge-ergonomics report:
+// four findings each rendered THREE times (Judged + a stale CANDIDATE block + a
+// stale not-resurfaced backing) because FreezeInPlace reattached the body verbatim.
+//
+// Red-first: against a verbatim-body FreezeInPlace the stale CANDIDATE block and
+// backing survive the freeze, so the new text renders twice and the old text
+// still appears — this test reds on all three assertions.
+func TestFreezeInPlace_StripsStaleCandidateAndNotResurfacedSections(t *testing.T) {
+	covers := strings.Repeat("a", 40)
+	newText := "retry semantics still diverge (confidence 0.90)"
+	oldText := "retry semantics diverge (confidence 0.40)"
+	confirmed := artifact.Finding{ID: "judged-retry-semantics", Kind: artifact.FindingJudged, Text: newText, Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified"}
+
+	// The living body as it stood at candidate time: the finding renders in Judged
+	// AND as a CANDIDATE (new text) AND its old ruling sits in not-resurfaced.
+	staleBody := RenderBody(
+		[]artifact.Finding{confirmed},
+		map[string]JudgedCandidate{confirmed.ID: {OldDisposition: artifact.FindingAcceptedDeviation, OldText: oldText, OldNote: "prior"}},
+		[]artifact.Finding{{ID: confirmed.ID, Kind: artifact.FindingJudged, Text: oldText, Disposition: artifact.FindingAcceptedDeviation, Note: "prior"}},
+		nil, nil, nil,
+	)
+	// Post-confirmation frontmatter: the finding is dispositioned, its backing
+	// record removed (the disposition verb does this) — no candidates, no
+	// not-resurfaced.
+	fm := &artifact.DeviationFrontmatter{
+		Schema:   "verdi.deviation/v1",
+		Covers:   covers,
+		Findings: []artifact.Finding{confirmed},
+		Digest:   "sha256:" + strings.Repeat("b", 64),
+	}
+	if err := fm.Validate(); err != nil {
+		t.Fatalf("test setup: frontmatter invalid: %v", err)
+	}
+
+	report, err := FreezeInPlace(fm, staleBody, "2026-07-15")
+	if err != nil {
+		t.Fatalf("FreezeInPlace: %v", err)
+	}
+	if n := strings.Count(report.Body, "CANDIDATE"); n != 0 {
+		t.Fatalf("frozen body still carries %d stale CANDIDATE block(s) — frozen reports have no pending candidates:\n%s", n, report.Body)
+	}
+	if strings.Contains(report.Body, oldText) {
+		t.Fatalf("frozen body still carries the stale not-resurfaced backing (old text) — the frontmatter has none:\n%s", report.Body)
+	}
+	if n := strings.Count(report.Body, newText); n != 1 {
+		t.Fatalf("finding text renders %d time(s), want exactly once (in Judged only):\n%s", n, report.Body)
+	}
+	if !strings.Contains(report.Body, "### Candidates awaiting reaffirmation\n\n(none)\n") {
+		t.Fatalf("Candidates section not reset to (none):\n%s", report.Body)
+	}
+	if !strings.Contains(report.Body, "## Not resurfaced\n\n(none)\n") {
+		t.Fatalf("Not resurfaced section not reconciled to the (empty) frontmatter:\n%s", report.Body)
+	}
+}
+
+// TestFreezeInPlace_NotResurfacedRebuiltFromFrontmatter proves the reconciliation
+// is FROM the frontmatter, not a blanket blank: a frozen report whose frontmatter
+// legitimately persists a not-resurfaced entry (a prior ruling a fresh run did
+// not re-emit, ac-3) renders exactly THAT entry — not a stale body's different
+// set — and the frozen markdown round-trips with body and frontmatter agreeing.
+func TestFreezeInPlace_NotResurfacedRebuiltFromFrontmatter(t *testing.T) {
+	covers := strings.Repeat("a", 40)
+	live := artifact.Finding{ID: "judged-a", Kind: artifact.FindingJudged, Text: "live finding", Disposition: artifact.FindingFixed}
+	persisted := artifact.Finding{ID: "judged-persisted", Kind: artifact.FindingJudged, Text: "a prior ruling not re-emitted", Disposition: artifact.FindingAcceptedDeviation, Note: "still stands"}
+
+	// A stale body whose not-resurfaced section lists a DIFFERENT entry than the
+	// frontmatter, plus a stale candidate.
+	staleBody := RenderBody(
+		[]artifact.Finding{live},
+		map[string]JudgedCandidate{"judged-a": {OldDisposition: artifact.FindingFixed, OldText: "old a text", OldNote: ""}},
+		[]artifact.Finding{{ID: "judged-stale-backing", Kind: artifact.FindingJudged, Text: "stale backing text", Disposition: artifact.FindingAcceptedDeviation, Note: "stale"}},
+		nil, nil, nil,
+	)
+	fm := &artifact.DeviationFrontmatter{
+		Schema:        "verdi.deviation/v1",
+		Covers:        covers,
+		Findings:      []artifact.Finding{live},
+		NotResurfaced: []artifact.Finding{persisted},
+		Digest:        "sha256:" + strings.Repeat("b", 64),
+	}
+	if err := fm.Validate(); err != nil {
+		t.Fatalf("test setup: frontmatter invalid: %v", err)
+	}
+
+	report, err := FreezeInPlace(fm, staleBody, "2026-07-15")
+	if err != nil {
+		t.Fatalf("FreezeInPlace: %v", err)
+	}
+	if strings.Contains(report.Body, "CANDIDATE") {
+		t.Fatalf("frozen body still carries a stale candidate:\n%s", report.Body)
+	}
+	if strings.Contains(report.Body, "stale backing text") {
+		t.Fatalf("frozen body still carries the stale not-resurfaced entry, not the frontmatter's:\n%s", report.Body)
+	}
+	if !strings.Contains(report.Body, RenderNotResurfacedLine(persisted)) {
+		t.Fatalf("frozen not-resurfaced section does not reflect the frontmatter's persisted entry:\n%s", report.Body)
+	}
+	fmBytes, _, err := artifact.SplitFrontmatter(report.Markdown)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	decoded, err := artifact.DecodeDeviation(fmBytes)
+	if err != nil {
+		t.Fatalf("DecodeDeviation(frozen markdown): %v\n%s", err, report.Markdown)
+	}
+	if len(decoded.NotResurfaced) != 1 || decoded.NotResurfaced[0].ID != "judged-persisted" {
+		t.Fatalf("frozen frontmatter not-resurfaced = %+v, want the single persisted entry", decoded.NotResurfaced)
+	}
+}
+
 // TestFreezeInPlace_Rejects covers the fail-closed precondition checks: a
 // faithful freeze must refuse rather than fake success on a missing report, an
 // already-frozen report (immutable), or a missing frozen-at stamp.

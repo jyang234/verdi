@@ -21,11 +21,13 @@ import (
 // archive). Deterministic given deterministic inputs — Compute,
 // PreserveDispositions, and ReconcileJudged all guarantee that.
 //
-// candidates/notResurfaced may be nil (every caller outside this package's
-// own tests: FreezeInPlace never calls this — it reattaches an existing body
-// verbatim; disposition.go never calls this — it surgically patches one
-// rendered line in place, see its own doc comment on why. Only Generate,
-// which always has both, calls this in production).
+// candidates/notResurfaced may be nil. Only Generate, which always has both,
+// calls RenderBody itself in production; FreezeInPlace re-renders ONLY the two
+// trailing sections (via the shared renderTrailingSections, candidates always
+// nil) to reconcile a frozen body with its final frontmatter, keeping every
+// earlier section verbatim — it never re-runs the whole body; disposition.go
+// never calls this at all — it surgically patches one rendered line in place,
+// see its own doc comment on why.
 func RenderBody(findings []artifact.Finding, candidates map[string]JudgedCandidate, notResurfaced []artifact.Finding, baselineDiffs []ServiceBoundaryDiff, diagramProposals []DiagramAlignmentEntry, illustrativeDiagrams []IllustrativeFigure) string {
 	var b strings.Builder
 	b.WriteString("# Alignment report\n\n")
@@ -42,13 +44,33 @@ func RenderBody(findings []artifact.Finding, candidates map[string]JudgedCandida
 	b.WriteString("\n## Judged\n\n")
 	renderFindings(&b, findingsOfKind(findings, artifact.FindingJudged))
 
-	b.WriteString("\n### Candidates awaiting reaffirmation\n\n")
-	renderCandidates(&b, findings, candidates)
-
-	b.WriteString("\n## Not resurfaced\n\n")
-	renderNotResurfaced(&b, notResurfaced)
+	renderTrailingSections(&b, findings, candidates, notResurfaced)
 
 	return b.String()
+}
+
+// candidatesSectionMarker is the exact heading renderTrailingSections emits for
+// the first of the two trailing spec/finding-identity sections — the boundary
+// FreezeInPlace splits an existing body at to re-render both from the final
+// frontmatter (freeze.go's reconcileFrozenBody). Kept beside renderTrailingSections
+// so the split literal and the emitted heading can never drift apart.
+const candidatesSectionMarker = "\n### Candidates awaiting reaffirmation\n"
+
+// renderTrailingSections writes deviation-report.md's two spec/finding-identity
+// trailing sections — candidates awaiting reaffirmation (ac-1's pre-fill) and
+// not-resurfaced (ac-3's persisted archive) — the single rule both callers
+// render them with: RenderBody at Generate time (with this run's live candidates
+// map and reconciled not-resurfaced set) and freeze.go's reconcileFrozenBody at
+// freeze time (candidates always nil — a frozen report has no pending candidate —
+// and not-resurfaced taken from the FINAL frontmatter). Factoring it here means a
+// frozen body's trailing sections are byte-identical to a fresh render of the
+// same final state, never a second, drifting copy of the section format.
+func renderTrailingSections(b *strings.Builder, findings []artifact.Finding, candidates map[string]JudgedCandidate, notResurfaced []artifact.Finding) {
+	b.WriteString(candidatesSectionMarker + "\n")
+	renderCandidates(b, findings, candidates)
+
+	b.WriteString("\n## Not resurfaced\n\n")
+	renderNotResurfaced(b, notResurfaced)
 }
 
 func findingsOfKind(findings []artifact.Finding, kind artifact.FindingKind) []artifact.Finding {
@@ -115,7 +137,15 @@ func renderCandidates(b *strings.Builder, findings []artifact.Finding, candidate
 		}
 		rendered++
 		fmt.Fprintf(b, "- **%s** CANDIDATE — new text: %q\n", f.ID, f.Text)
-		fmt.Fprintf(b, "  - prior ruling [%s]: %q", cand.OldDisposition, cand.OldText)
+		// A cross-level candidate (ledger L-N14) cites its archive origin so a
+		// human sees the ruling came from a CLOSED implementing story's archive
+		// before confirming; a same-report candidate (ArchiveSource empty) renders
+		// exactly as before this companion landed.
+		fmt.Fprintf(b, "  - prior ruling [%s]", cand.OldDisposition)
+		if cand.ArchiveSource != "" {
+			fmt.Fprintf(b, " from archived %s", cand.ArchiveSource)
+		}
+		fmt.Fprintf(b, ": %q", cand.OldText)
 		if cand.OldNote != "" {
 			fmt.Fprintf(b, " — %s", cand.OldNote)
 		}
