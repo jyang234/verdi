@@ -4,7 +4,7 @@ kind: spec
 title: "Guide Claims Gate"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-P2-5
 problem: { text: "the owner-accepted Integration & Startup Guide makes capability claims (Appendix B) that nothing in make verify ties to the corpus, so a claim can go stale silently — a witness renamed, gutted, or simply never run again leaves the guide's claim exactly as confident as the day it was written; a name-existence-only check would repeat the ADJ-50 lying-gate class (a witness merely existing proves nothing about whether it actually runs or asserts anything), and a red-condition asymmetry that only checks EXISTS rows would let a downgrade to PARTIAL or INVENTED become the cheapest way to a green gate, teaching weakening as the path of least resistance", anchor: problem }
 outcome: { text: "every capability claim lives in verdi/docs/guide-claims.yaml, a strict-decoded manifest of atomic capability rows — one capability, one status, one witness set per row, a bundled multi-capability row shape rejected at decode; every EXISTS or PARTIAL row's witness is bound three ways (the name exists in the corpus, it carries a // guide-claim: <row-id> anchor at its declaration, and it is PASS-coupled in make verify), closing the ADJ-50 lying-gate class a name-existence-only check would permit; every non-EXISTS row and every status downgrade carries a cite: naming a chronicle/ledger entry, gated in CI with workspace-side resolution and a loud skip; the whole check is wired into make verify and discloses its own scope honestly as inventory-only (row-to-witness, not yet guide-to-row completeness, which needs the guide itself in-repo first)", anchor: outcome }
