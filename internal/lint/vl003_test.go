@@ -611,6 +611,96 @@ func TestVL003_ContextPinDangling_Reds(t *testing.T) {
 	}
 }
 
+// vl003ShallowPinSpecTmpl mirrors vl003ReachablePinSpecTmpl (a feature spec
+// carrying a single context[] pin under test) with a fresh id — the pinned
+// kind/name half is adr/0002-outbox-events (a real committed-corpus ADR, so
+// it resolves in the committed zone) and the ONLY thing under test is the
+// commit half's reachability under a shallow horizon.
+const vl003ShallowPinSpecTmpl = `---
+id: spec/vl-003-shallow-pin
+kind: spec
+class: feature
+title: "VL-003 overlay: context pin under a shallow horizon"
+status: draft
+owners: [platform-team]
+story: jira:LOAN-0001
+context:
+  - adr/0002-outbox-events@%s
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+---
+# VL-003 overlay: context pin under a shallow horizon
+
+context[0] pins adr/0002-outbox-events at a real ancestor of HEAD that, in a
+shallow clone, sits beyond the horizon and is unfetched.
+`
+
+// TestVL003_ContextPinShallowBeyondHorizon_Notices is the P2-10b red-first
+// pin at VL-003's checkPin seam: a context[] pin whose commit half is a real
+// ancestor but sits BEYOND a shallow clone's horizon reads as a disclosed-
+// unproven NOTICE (SeverityDisclosure), never a violation — shallow history
+// cannot prove unreachability. The pin's kind/name half resolves cleanly, so
+// the ONLY VL-003 finding is the commit half's shallow-unprovable disclosure.
+func TestVL003_ContextPinShallowBeyondHorizon_Notices(t *testing.T) {
+	repo := buildLintRepo(t)
+	beyond := repo.Heads[0] // first corpus layer — a real, deep ancestor of HEAD
+
+	specRel := filepath.Join(".verdi", "specs", "active", "vl-003-shallow-pin", "spec.md")
+	writeTestFile(t, filepath.Join(repo.Dir, specRel), fmt.Sprintf(vl003ShallowPinSpecTmpl, beyond))
+	commitPaths(t, repo.Dir, "add spec pinning a beyond-horizon ancestor", specRel)
+
+	// A --depth 1 clone keeps only the tip (the committed corpus tree, with
+	// the pinned ADR present, materialized in it) and leaves every ancestor —
+	// including the pinned `beyond` commit — beyond the horizon. The untracked
+	// discovery + mutable-zone fixtures are re-provisioned in the clone (a
+	// clone copies only committed content), matching buildLintRepo's posture.
+	clone := fixturegit.ShallowClone(t, repo, 1)
+	writeLoansvcFixture(t, clone)
+	provisionMutableZone(t, clone)
+
+	findings := runLint(t, clone, Context{}, Options{})
+
+	// The corpus-wide P2-10b outcome: under a shallow horizon EVERY frozen
+	// stamp / pin the corpus carries is beyond the horizon, yet no VL-009 or
+	// VL-003 reachability check may red as a violation — each discloses.
+	// (The corpus's frozen.commit stamps are fixturegit's own deterministic
+	// layer SHAs, so they are real ancestors in a full clone and beyond the
+	// horizon here.)
+	for _, f := range findings {
+		if (f.Rule == "VL-003" || f.Rule == "VL-009") && f.Severity != SeverityDisclosure {
+			t.Fatalf("reachability rule %s redded as a violation under a shallow horizon (want disclosed-unproven): %s", f.Rule, f.String())
+		}
+	}
+
+	// This spec's own context[] pin is the disclosure under test.
+	wantPath := filepath.ToSlash(specRel)
+	var got *Finding
+	for i := range findings {
+		if findings[i].Rule == "VL-003" && findings[i].Path == wantPath {
+			got = &findings[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("no VL-003 finding for %s; findings:\n%s", wantPath, findingsString(findings))
+	}
+	if got.Severity != SeverityDisclosure {
+		t.Fatalf("severity = %v, want SeverityDisclosure (shallow cannot prove unreachability)", got.Severity)
+	}
+	if !containsAll(got.Message, beyond, "shallow history cannot prove unreachability") {
+		t.Fatalf("message = %q, want it to name the commit %q and \"shallow history cannot prove unreachability\"", got.Message, beyond)
+	}
+	if s := got.String(); !strings.HasPrefix(s, "disclosed-unproven [lint:VL-003] ") {
+		t.Fatalf("String() = %q, want a printed \"disclosed-unproven [lint:VL-003] ...\" disclosure line", s)
+	}
+	// A disclosure never carries a wall locus (even reached through the
+	// context[] call site's locusAll(SpecLocus()) wrap) — it surfaces through
+	// the disclosures channel, not the board's VL badges (which key on Locus).
+	if got.Locus != nil {
+		t.Fatalf("disclosure Locus = %+v, want nil (a disclosure never badges the wall)", got.Locus)
+	}
+}
+
 // TestVL003_ContextPinReachable_Unaffected proves the other half: a context[]
 // pin whose commit half legitimately IS reachable through ordinary history —
 // a plain ancestor of HEAD, nothing dangling about it — is entirely unaffected

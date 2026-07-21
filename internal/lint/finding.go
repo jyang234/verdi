@@ -80,13 +80,26 @@ func ObjectLocus(id string) *WallLocus { return &WallLocus{Object: id} }
 // (the spec as a whole), never a single object's card.
 func SpecLocus() *WallLocus { return &WallLocus{} }
 
-// locusAll stamps every finding in fs with locus and returns fs — a small
-// shared helper for the common case of a rule sub-check whose entire
+// locusAll stamps every VIOLATION finding in fs with locus and returns fs —
+// a small shared helper for the common case of a rule sub-check whose entire
 // return value shares one wall placement (e.g. every finding from one
 // spec-level sub-check), so call sites read as a one-line wrap rather
 // than a manual loop repeated per rule.
+//
+// A disclosure (SeverityDisclosure) is deliberately LEFT with a nil Locus: a
+// disclosed-unproven notice surfaces through the disclosures channel, never as
+// a board badge, and internal/wallbadge's VLBadges keys on Locus ALONE with no
+// severity filter — so a disclosure that inherited a locus here would wrongly
+// render as a wall chip. Leaving it nil is the same fail-closed posture
+// VL-017's own disclosure relies on (a rule that says nothing about placement
+// gets none). This matters for VL-003's checkPin, whose context[] pins are
+// wrapped with SpecLocus here: its shallow-unprovable disclosure (P2-10b) must
+// stay off the wall.
 func locusAll(fs []Finding, locus *WallLocus) []Finding {
 	for i := range fs {
+		if fs[i].Severity == SeverityDisclosure {
+			continue
+		}
 		fs[i].Locus = locus
 	}
 	return fs

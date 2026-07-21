@@ -126,11 +126,18 @@ func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit str
 		// other real-but-non-ancestor commit already is — never an
 		// operational error. A gitDir that is not a git repository at all
 		// is still a real, surfaced error.
-		reachable, err := gitx.ReachableFromHEAD(ctx, gitDir, recordCommit, commit)
+		// P2-10b: exclusion requires PROOF. Only a proven gitx.Unreachable dir
+		// is skipped (X-15's since-gc'd branch tip, X-11b's dangling object). A
+		// gitx.UnprovableShallow dir — this checkout is shallow and the commit
+		// sits beyond the horizon — is NOT excluded: its honest evidence is
+		// kept in the authoritative set and disclosed via UnprovableRecords,
+		// never silently dropped (asymmetric honesty: shallow proves YES,
+		// never NO).
+		dirReach, err := gitx.ReachableFromHEAD(ctx, gitDir, recordCommit, commit)
 		if err != nil {
 			return nil, nil, fmt.Errorf("evidence: checking ancestry of %s: %w", recordCommit, err)
 		}
-		if !reachable {
+		if dirReach == gitx.Unreachable {
 			continue
 		}
 
@@ -196,11 +203,17 @@ func LoadRecordsWithSources(ctx context.Context, gitDir, derivedRoot, commit str
 				// the healthy case (and a non-git store carrying only matching-
 				// provenance records) from ever consulting git — the loop-1
 				// regression lesson.
-				provReachable, rerr := recordProvenanceReachable(ctx, gitDir, recs[i].Provenance.Commit, recordCommit, commit)
+				// P2-10b: recordProvenanceReachable folds dirReach in, so a
+				// record under a gitx.UnprovableShallow dir is itself unprovable,
+				// never spuriously promoted to reachable by the same-commit fast
+				// path. Only a PROVEN gitx.Unreachable provenance excludes;
+				// gitx.Reachable and gitx.UnprovableShallow are both kept (the
+				// latter disclosed via UnprovableRecords).
+				provReach, rerr := recordProvenanceReachable(ctx, gitDir, recs[i].Provenance.Commit, recordCommit, commit, dirReach)
 				if rerr != nil {
 					return nil, nil, fmt.Errorf("evidence: checking ancestry of record provenance %s: %w", recs[i].Provenance.Commit, rerr)
 				}
-				if !provReachable {
+				if provReach == gitx.Unreachable {
 					continue
 				}
 				out = append(out, recs[i])
@@ -268,12 +281,15 @@ func loadEvidenceArray(path string) (recs []artifact.Evidence, digest string, er
 	return out, digest, nil
 }
 
-// recordProvenanceReachable reports whether a decoded record's OWN
-// provenance.commit is reachable from commit in gitDir's history — the
+// recordProvenanceReachable returns the three-valued gitx.Reachability of a
+// decoded record's OWN provenance.commit from commit in gitDir's history — the
 // per-record counterpart to the commit-named-directory reachability check, so
-// a record whose provenance.commit is unreachable is excluded (and disclosed)
-// even when it sits under a reachable directory (spec/evidence-resilience
-// finding 2). dirCommit is the commit-named directory the record was read
+// a record whose provenance.commit is gitx.Unreachable is excluded (and
+// disclosed) even when it sits under a reachable directory (spec/evidence-
+// resilience finding 2), while a gitx.UnprovableShallow provenance (P2-10b) is
+// kept-but-disclosed. dirReach is the caller's already-computed reachability
+// of dirCommit, folded in for the same-commit fast path so the answer is never
+// stronger than the directory the record was read from. dirCommit is the commit-named directory the record was read
 // from, ALREADY proven reachable by the caller's directory check: a record
 // whose provenance.commit equals that directory — the healthy invariant, a
 // record living under its own commit's dir — or equals commit itself
@@ -289,9 +305,19 @@ func loadEvidenceArray(path string) (recs []artifact.Evidence, digest string, er
 // LoadRecordsWithSources (exclusion) and QuarantinedRecords (disclosure) share
 // this one predicate so the two can never disagree on which records the fold
 // excludes on their own provenance.
-func recordProvenanceReachable(ctx context.Context, gitDir, provenanceCommit, dirCommit, commit string) (bool, error) {
-	if provenanceCommit == dirCommit || provenanceCommit == commit {
-		return true, nil
+func recordProvenanceReachable(ctx context.Context, gitDir, provenanceCommit, dirCommit, commit string, dirReach gitx.Reachability) (gitx.Reachability, error) {
+	if provenanceCommit == commit {
+		// Provenance is the very commit being evaluated (e.g. HEAD): always
+		// present and trivially self-reachable, shallow or not.
+		return gitx.Reachable, nil
+	}
+	if provenanceCommit == dirCommit {
+		// The record lives under its own commit's directory, so its
+		// reachability is exactly that directory's — ALREADY computed by the
+		// caller (dirReach), never re-probed. P2-10b: this propagates a
+		// gitx.UnprovableShallow dir faithfully, so a shallow-hidden record is
+		// never spuriously promoted to gitx.Reachable here.
+		return dirReach, nil
 	}
 	return gitx.ReachableFromHEAD(ctx, gitDir, provenanceCommit, commit)
 }
@@ -330,11 +356,14 @@ func ExcludedCommitDirs(ctx context.Context, gitDir, derivedRoot, commit string)
 		if !e.IsDir() || !commitDirRe.MatchString(e.Name()) {
 			continue
 		}
-		reachable, err := gitx.ReachableFromHEAD(ctx, gitDir, e.Name(), commit)
+		reach, err := gitx.ReachableFromHEAD(ctx, gitDir, e.Name(), commit)
 		if err != nil {
 			return nil, fmt.Errorf("evidence: checking ancestry of %s: %w", e.Name(), err)
 		}
-		if !reachable {
+		// P2-10b: only a PROVEN gitx.Unreachable dir is "excluded (stale)". A
+		// gitx.UnprovableShallow dir is not proven excluded — the loader keeps
+		// it — so it is not listed here (it is UnprovableRecords' domain).
+		if reach == gitx.Unreachable {
 			out = append(out, e.Name())
 		}
 	}
@@ -411,7 +440,7 @@ func QuarantinedRecords(ctx context.Context, gitDir, derivedRoot, commit string)
 		if !e.IsDir() || !commitDirRe.MatchString(e.Name()) {
 			continue
 		}
-		reachable, err := gitx.ReachableFromHEAD(ctx, gitDir, e.Name(), commit)
+		dirReach, err := gitx.ReachableFromHEAD(ctx, gitDir, e.Name(), commit)
 		if err != nil {
 			return nil, nil, fmt.Errorf("evidence: checking ancestry of %s: %w", e.Name(), err)
 		}
@@ -448,15 +477,20 @@ func QuarantinedRecords(ctx context.Context, gitDir, derivedRoot, commit string)
 				//     excludes on provenance, surfaced here so the closure gate
 				//     discloses WHY rather than leaving the exclusion silent
 				//     (quarantineDisclosures' "not reachable from HEAD" fallback).
-				if !reachable || recs[i].Quarantine != nil {
+				// P2-10b: quarantine (exclusion) requires PROOF — only a proven
+				// gitx.Unreachable directory quarantines by the directory signal.
+				// A gitx.UnprovableShallow directory is NOT excluded (the loader
+				// keeps it); its records are UnprovableRecords' domain, disclosed
+				// there rather than quarantined here.
+				if dirReach == gitx.Unreachable || recs[i].Quarantine != nil {
 					out = append(out, recs[i])
 					continue
 				}
-				provReachable, rerr := recordProvenanceReachable(ctx, gitDir, recs[i].Provenance.Commit, e.Name(), commit)
+				provReach, rerr := recordProvenanceReachable(ctx, gitDir, recs[i].Provenance.Commit, e.Name(), commit, dirReach)
 				if rerr != nil {
 					return nil, nil, fmt.Errorf("evidence: checking ancestry of record provenance %s: %w", recs[i].Provenance.Commit, rerr)
 				}
-				if !provReachable {
+				if provReach == gitx.Unreachable {
 					out = append(out, recs[i])
 				}
 			}
@@ -465,6 +499,72 @@ func QuarantinedRecords(ctx context.Context, gitDir, derivedRoot, commit string)
 	sort.SliceStable(out, func(i, j int) bool { return recordSortKey(out[i]) < recordSortKey(out[j]) })
 	sort.SliceStable(undecodable, func(i, j int) bool { return undecodable[i].Path < undecodable[j].Path })
 	return out, undecodable, nil
+}
+
+// UnprovableRecords returns every evidence record under derivedRoot's commit-
+// named subdirectories that the loader KEEPS in the authoritative fold but
+// whose reachability could not be PROVEN because this checkout is shallow
+// (P2-10b): the record's effective reachability — its commit-named directory
+// folded with its own provenance.commit (recordProvenanceReachable) — is
+// gitx.UnprovableShallow. Such a record is never excluded (exclusion requires
+// proof; asymmetric honesty: a shallow checkout proves YES, never NO), so
+// LoadRecords counts it — but it must be DISCLOSED (constitution 2) rather than
+// silently counted, so the closure gate can name that an AC's evidence rests on
+// a commit whose ancestry a shallow checkout cannot prove.
+//
+// It shares LoadRecordsWithSources's exact per-dir + per-provenance predicate,
+// so the records it names are precisely those the loader kept-but-could-not-
+// prove — never disagreeing with the fold. A record the loader EXCLUDES (a
+// proven-unreachable dir or provenance, or a sync quarantine annotation) is
+// QuarantinedRecords' domain and never appears here; a PROVEN-reachable record
+// is silent and never appears here either. An undecodable file is skipped
+// (QuarantinedRecords surfaces it as disclosed-undecodable); the sole
+// operational failure is gitDir not being a git repository at all
+// (ReachableFromHEAD). A derivedRoot absent on disk yields (nil, nil), matching
+// the never-synced posture LoadRecordsWithSources treats as "no records".
+// Output is sorted deterministically, independent of os.ReadDir's order.
+func UnprovableRecords(ctx context.Context, gitDir, derivedRoot, commit string) ([]artifact.Evidence, error) {
+	entries, err := os.ReadDir(derivedRoot)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("evidence: reading %s: %w", derivedRoot, err)
+	}
+
+	var out []artifact.Evidence
+	for _, e := range entries {
+		if !e.IsDir() || !commitDirRe.MatchString(e.Name()) {
+			continue
+		}
+		dirReach, rerr := gitx.ReachableFromHEAD(ctx, gitDir, e.Name(), commit)
+		if rerr != nil {
+			return nil, fmt.Errorf("evidence: checking ancestry of %s: %w", e.Name(), rerr)
+		}
+		if dirReach == gitx.Unreachable {
+			continue // excluded by the directory signal — QuarantinedRecords' domain
+		}
+		for _, name := range RecordFileNames {
+			recs, _, lerr := loadEvidenceArray(filepath.Join(derivedRoot, e.Name(), name))
+			if lerr != nil {
+				continue // undecodable — surfaced by QuarantinedRecords, not here
+			}
+			for i := range recs {
+				if recs[i].Quarantine != nil {
+					continue // annotation-excluded — QuarantinedRecords' domain
+				}
+				provReach, prerr := recordProvenanceReachable(ctx, gitDir, recs[i].Provenance.Commit, e.Name(), commit, dirReach)
+				if prerr != nil {
+					return nil, fmt.Errorf("evidence: checking ancestry of record provenance %s: %w", recs[i].Provenance.Commit, prerr)
+				}
+				if provReach == gitx.UnprovableShallow {
+					out = append(out, recs[i])
+				}
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return recordSortKey(out[i]) < recordSortKey(out[j]) })
+	return out, nil
 }
 
 // recordSortKey is a deterministic composite key for LoadRecords's output
