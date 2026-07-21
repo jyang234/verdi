@@ -4,7 +4,7 @@ kind: spec
 title: "Creation Form"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-P2-7
 problem: { text: "the board can only create a story through a declared stub's one-click instantiate, and every spec it scaffolds carries generic TODO placeholders because no creation surface reads the class template's own placeholders as a field contract (the ADJ-65 asymmetry's board half, guide 5.3's D-1 contract unrealized); commit-to-design is still a third, hand-rolled strings.Builder spec producer that ignores a store's own .verdi/templates/ overrides entirely (ledger L-M12), so a team's feature template override changes design start's scaffolds while board-committed feature specs silently keep the hard-coded Go shape; and a vocabulary-renamed store's board has no creation form at all whose labels could speak its display words", anchor: problem }
 outcome: { text: "internal/designscaffold gains the one placeholder-enumeration API — Fields(tmpl []byte) ([]Field, error), ordered field descriptors straight from a template's own parse tree — and the board grows a creation form generated from those descriptors: submitted values render through the same shared designscaffold producer every other creation surface calls, inherit stub-instantiate's self-validate + CheckClass posture so a form-submitted spec can never round-trip as the wrong class, and land as a scaffold commit on a fresh design/<name> branch with the serving checkout untouched; a vocabulary-renamed store's form speaks that store's display words and the created spec is TODO-free wherever a field was actually filled; commit-to-design switches to the identical producer — a store's feature-template override is honored there for the first time, byte-stable for every input the old producer already handled — discharging L-M12", anchor: outcome }
@@ -15,6 +15,7 @@ acceptance_criteria:
   - { id: ac-4, text: "commit-to-design renders through the shared designscaffold producer instead of its private strings.Builder: the feature class's declared Class.Template filename resolves a store's own .verdi/templates/ override — honored on this path for the first time, discharging L-M12's third-producer divergence, with CheckClass(feature) asserted post-render — and, absent an override, falls back to the embedded commit-to-design canonical template whose render is BYTE-IDENTICAL to the retired hand-rolled output for every input the old producer already handled, pinned by the existing TestScaffoldSpec_BytePin fixture kept byte-for-byte unchanged", evidence: [behavioral], anchor: ac-4 }
 links:
   - { type: implements, ref: "spec/creation-surfaces#ac-2" }
+frozen: { at: 2026-07-21, commit: 04e6c0ff27a3644516b3aad6667c108c7c1af1b4, stub_matched: true }
 ---
 # Creation Form
 
