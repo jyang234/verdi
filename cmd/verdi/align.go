@@ -300,22 +300,24 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		fmt.Fprintf(stderr, "align: %s is already frozen (at %s, commit %s); a frozen alignment report is immutable\n", reportPath, existingReport.Frozen.At, existingReport.Frozen.Commit)
 		return 1
 	}
-	var existingFindings []artifact.Finding
+	var existingFindings, existingNotResurfaced []artifact.Finding
 	if existingReport != nil {
 		existingFindings = existingReport.Findings
+		existingNotResurfaced = existingReport.NotResurfaced
 	}
 
 	in := align.Input{
-		Root:             root,
-		Runner:           deps.Runner,
-		Spec:             spec,
-		Covers:           covers,
-		JudgeCmd:         deps.JudgeCmd,
-		JudgeRequired:    deps.JudgeRequired,
-		JudgeTimeout:     deps.JudgeTimeout,
-		ExistingFindings: existingFindings,
-		ModelDigest:      deps.ModelDigest,
-		Wait:             deps.Wait,
+		Root:                  root,
+		Runner:                deps.Runner,
+		Spec:                  spec,
+		Covers:                covers,
+		JudgeCmd:              deps.JudgeCmd,
+		JudgeRequired:         deps.JudgeRequired,
+		JudgeTimeout:          deps.JudgeTimeout,
+		ExistingFindings:      existingFindings,
+		ExistingNotResurfaced: existingNotResurfaced,
+		ModelDigest:           deps.ModelDigest,
+		Wait:                  deps.Wait,
 	}
 	if freeze {
 		frozenAt, err := gitx.CommitDateOnly(ctx, root, covers)
@@ -418,6 +420,14 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 	}
 
 	fmt.Fprintf(stdout, "align: wrote %s (covers %s, %d findings)\n", reportPath, report.Frontmatter.Covers, len(report.Frontmatter.Findings))
+	// spec/finding-identity CONTROLLER DIRECTIVE (chronicle P2-9): a
+	// carried-vs-new tally line, printed on every regeneration, so a dry
+	// LOOP-UNTIL-DRY round (the plan's adopted loop policy) is mechanically
+	// legible as "M new == 0" without a human parsing the full report. Format
+	// matches the directive's own example verbatim: "align: N judged
+	// finding(s): K carried candidates awaiting reaffirmation, M new".
+	fmt.Fprintf(stdout, "align: %d judged finding(s): %d carried candidates awaiting reaffirmation, %d new\n",
+		report.JudgedTally.Total, report.JudgedTally.Candidates, report.JudgedTally.New)
 	if freeze {
 		fmt.Fprintf(stdout, "align: frozen at %s\n", report.Frontmatter.Frozen.At)
 	}

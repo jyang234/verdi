@@ -315,6 +315,28 @@ func TestRunAlign_WritesReport(t *testing.T) {
 	}
 }
 
+// TestRunAlign_TallyLine_ControllerDirective proves spec/finding-identity's
+// CONTROLLER DIRECTIVE (chronicle P2-9): every run prints a carried-vs-new
+// tally line in the directive's own example format, so a dry LOOP-UNTIL-DRY
+// round is mechanically legible as "M new == 0" from stdout alone. A first
+// run (nothing to carry) prints 1 total, 0 candidates, 1 new.
+func TestRunAlign_TallyLine_ControllerDirective(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	deps := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
+
+	var stdout, stderr bytes.Buffer
+	got := runAlign(context.Background(), repo.Dir, false, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runAlign = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	want := "align: 1 judged finding(s): 0 carried candidates awaiting reaffirmation, 1 new\n"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout = %q, want it to contain the tally line %q", stdout.String(), want)
+	}
+}
+
 // TestRunAlign_ByteIdenticalAcrossRuns is the cmd-level analogue of
 // internal/align's own determinism test, proving the full write-to-disk
 // path (not just Generate in isolation) is byte-identical across runs

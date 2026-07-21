@@ -23,17 +23,27 @@ import (
 // itself a legal report).
 func buildDispositionFixture(t *testing.T, findings []artifact.Finding, frozen *artifact.Frozen) []byte {
 	t.Helper()
+	return buildDispositionFixtureWithNotResurfaced(t, findings, nil, frozen)
+}
+
+// buildDispositionFixtureWithNotResurfaced is buildDispositionFixture's
+// spec/finding-identity twin: a not-resurfaced: section rides alongside
+// findings:, the shape a live candidate's backing record needs
+// (TestRunDisposition_ConfirmsCandidate_* below).
+func buildDispositionFixtureWithNotResurfaced(t *testing.T, findings, notResurfaced []artifact.Finding, frozen *artifact.Frozen) []byte {
+	t.Helper()
 	fm := &artifact.DeviationFrontmatter{
-		Schema:   "verdi.deviation/v1",
-		Covers:   "1111111111111111111111111111111111111111",
-		Findings: findings,
-		Digest:   "sha256:" + strings.Repeat("0", 64),
-		Frozen:   frozen,
+		Schema:        "verdi.deviation/v1",
+		Covers:        "1111111111111111111111111111111111111111",
+		Findings:      findings,
+		NotResurfaced: notResurfaced,
+		Digest:        "sha256:" + strings.Repeat("0", 64),
+		Frozen:        frozen,
 	}
 	if err := fm.Validate(); err != nil {
 		t.Fatalf("test setup: fixture frontmatter invalid: %v", err)
 	}
-	body := align.RenderBody(findings, nil, nil, nil)
+	body := align.RenderBody(findings, nil, notResurfaced, nil, nil, nil)
 	return align.RenderMarkdown(fm, body)
 }
 
@@ -770,5 +780,121 @@ func TestRunDisposition_ConcurrentModificationRefusesInsteadOfLosingUpdate(t *te
 	fa, ok := findingByID(after.Findings, "finding-a")
 	if !ok || fa.Dispositioned() {
 		t.Fatalf("finding-a = %+v, want it to remain undispositioned (the losing write was refused, never landed)", fa)
+	}
+}
+
+// dispositionFixtureCovers is buildDispositionFixtureWithNotResurfaced's own
+// hardcoded covers value — the "covering head" spec/finding-identity ac-1/
+// ac-2 name as where a confirmed reaffirmation's carried-from: points.
+const dispositionFixtureCovers = "1111111111111111111111111111111111111111"
+
+// TestRunDisposition_ConfirmsCandidate_Reaffirmation_StampsCarriedFrom is
+// spec/finding-identity ac-1/ac-2's "confirm as working-tree edit" proof:
+// a live candidate (an undispositioned judged finding whose id matches a
+// not-resurfaced: backing record) dispositioned with the SAME decision as
+// the old ruling is a REAFFIRMATION — the disposition verb stamps
+// carried-from: <covers-sha> and removes the now-resolved not-resurfaced
+// entry.
+func TestRunDisposition_ConfirmsCandidate_Reaffirmation_StampsCarriedFrom(t *testing.T) {
+	findings := []artifact.Finding{
+		{ID: "judged-a", Kind: artifact.FindingJudged, Text: "reworded new text"},
+	}
+	notResurfaced := []artifact.Finding{
+		{ID: "judged-a", Kind: artifact.FindingJudged, Text: "old text", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified"},
+	}
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, findings, notResurfaced, nil))
+	path := reportPathFor(root, "demo")
+
+	var stdout, stderr bytes.Buffer
+	rc := runDisposition(root, "spec/demo", "judged-a", artifact.FindingAcceptedDeviation, "reaffirmed: still an intentional deviation", false, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runDisposition = %d, want 0; stderr=%s", rc, stderr.String())
+	}
+
+	after := decodeReportFile(t, path)
+	f, ok := findingByID(after.Findings, "judged-a")
+	if !ok {
+		t.Fatal("judged-a missing from findings after confirmation")
+	}
+	if f.Disposition != artifact.FindingAcceptedDeviation {
+		t.Fatalf("Disposition = %q, want accepted-deviation", f.Disposition)
+	}
+	if f.CarriedFrom != dispositionFixtureCovers {
+		t.Fatalf("CarriedFrom = %q, want the report's own covers %q (a reaffirmation — same ruling as the old ruling)", f.CarriedFrom, dispositionFixtureCovers)
+	}
+	if len(after.NotResurfaced) != 0 {
+		t.Fatalf("NotResurfaced = %+v, want empty — a confirmed candidate's backing record must be removed", after.NotResurfaced)
+	}
+
+	// The frontmatter round-trips through the strict decode seam with
+	// carried-from present (already proven at the schema level,
+	// deviation_test.go — this is the disposition verb's own production of
+	// that shape, driven end to end).
+	if err := after.Validate(); err != nil {
+		t.Fatalf("Validate(): %v", err)
+	}
+}
+
+// TestRunDisposition_ConfirmsCandidate_Escalation_NoCarriedFrom is ac-2's
+// escalation half: a live candidate dispositioned with a DIFFERENT decision
+// than the old ruling is NOT a reaffirmation — no carried-from is stamped —
+// but the old ruling's not-resurfaced backing record is still removed
+// (superseded by the fresh, human-made decision).
+func TestRunDisposition_ConfirmsCandidate_Escalation_NoCarriedFrom(t *testing.T) {
+	findings := []artifact.Finding{
+		{ID: "judged-a", Kind: artifact.FindingJudged, Text: "this is a real regression (confidence 0.93)"},
+	}
+	notResurfaced := []artifact.Finding{
+		{ID: "judged-a", Kind: artifact.FindingJudged, Text: "looks cosmetic (confidence 0.35)", Disposition: artifact.FindingAcceptedDeviation, Note: "low confidence, deferred"},
+	}
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, findings, notResurfaced, nil))
+	path := reportPathFor(root, "demo")
+
+	var stdout, stderr bytes.Buffer
+	rc := runDisposition(root, "spec/demo", "judged-a", artifact.FindingFixed, "real regression, fixed in this PR", false, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runDisposition = %d, want 0; stderr=%s", rc, stderr.String())
+	}
+
+	after := decodeReportFile(t, path)
+	f, ok := findingByID(after.Findings, "judged-a")
+	if !ok {
+		t.Fatal("judged-a missing from findings after confirmation")
+	}
+	if f.Disposition != artifact.FindingFixed {
+		t.Fatalf("Disposition = %q, want fixed (the human's own fresh decision)", f.Disposition)
+	}
+	if f.CarriedFrom != "" {
+		t.Fatalf("CarriedFrom = %q, want empty — an escalation (different decision than the old ruling) must never be stamped as a reaffirmation", f.CarriedFrom)
+	}
+	if len(after.NotResurfaced) != 0 {
+		t.Fatalf("NotResurfaced = %+v, want empty — the old ruling is superseded, its backing record removed either way", after.NotResurfaced)
+	}
+}
+
+// TestRunDisposition_OrdinaryFinding_NoNotResurfacedEntry_Unaffected proves
+// this story's addition is a no-op for the ordinary case: a finding with NO
+// matching not-resurfaced: entry dispositions exactly as before — no
+// carried-from, NotResurfaced (already empty) untouched.
+func TestRunDisposition_OrdinaryFinding_NoNotResurfacedEntry_Unaffected(t *testing.T) {
+	findings := []artifact.Finding{
+		{ID: "computed-a", Kind: artifact.FindingComputed, Text: "declared boundary holds"},
+	}
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixture(t, findings, nil))
+	path := reportPathFor(root, "demo")
+
+	var stdout, stderr bytes.Buffer
+	rc := runDisposition(root, "spec/demo", "computed-a", artifact.FindingFixed, "reviewed", false, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runDisposition = %d, want 0; stderr=%s", rc, stderr.String())
+	}
+
+	after := decodeReportFile(t, path)
+	f, _ := findingByID(after.Findings, "computed-a")
+	if f.CarriedFrom != "" {
+		t.Fatalf("CarriedFrom = %q, want empty (no not-resurfaced counterpart existed)", f.CarriedFrom)
+	}
+	if len(after.NotResurfaced) != 0 {
+		t.Fatalf("NotResurfaced = %+v, want still empty", after.NotResurfaced)
 	}
 }

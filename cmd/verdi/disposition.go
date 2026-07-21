@@ -221,6 +221,30 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	updated.Findings[idx].Disposition = decision
 	updated.Findings[idx].Note = rationale
 
+	// spec/finding-identity ac-1/ac-2: this IS the "confirm a candidate as a
+	// working-tree edit" step — align.ReconcileJudged never dispositions a
+	// candidate itself (identity.go's frozen rule is never bypassed), it
+	// only pre-fills one; this verb, already the sanctioned single place a
+	// human records any disposition, is where a pending candidate's
+	// confirmation actually happens. If findingID's own not-resurfaced:
+	// entry (its old ruling's backing record — align.ReconcileJudged's own
+	// doc comment on why it stays there rather than a new persisted
+	// Candidate field) is present, this confirmation resolves it: a decision
+	// EQUAL to the old ruling is a REAFFIRMATION — carried-from: <covers-sha>
+	// is stamped (the report's own covering head, exactly where ac-1's
+	// "confirmed ... at the covering head" places it) — while a decision
+	// that DIFFERS is an escalation and is never stamped (ac-2: "nothing
+	// silently carries"). Either way the old entry is removed: it has been
+	// resolved, one way or the other, by a human who has now seen both
+	// texts.
+	if nrIdx := findNotResurfacedIndex(decoded.NotResurfaced, findingID); nrIdx != -1 {
+		oldEntry := decoded.NotResurfaced[nrIdx]
+		if decision == oldEntry.Disposition {
+			updated.Findings[idx].CarriedFrom = decoded.Covers
+		}
+		updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
+	}
+
 	// Never fake success (CLAUDE.md): self-validate before writing.
 	if err := updated.Validate(); err != nil {
 		fmt.Fprintln(stderr, "disposition: internal error: updated frontmatter failed self-validation:", err)
@@ -312,6 +336,29 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	}
 	fmt.Fprintf(stdout, "disposition: %s %s %s: %s -> %s\n", verb, ref.String(), findingID, decision, rationale)
 	return 0
+}
+
+// findNotResurfacedIndex returns the index of the entry in notResurfaced
+// whose id equals findingID, or -1 — spec/finding-identity's own lookup for
+// a live candidate's backing record (ids are unique within not-resurfaced:,
+// artifact.DeviationFrontmatter.Validate).
+func findNotResurfacedIndex(notResurfaced []artifact.Finding, findingID string) int {
+	for i, f := range notResurfaced {
+		if f.ID == findingID {
+			return i
+		}
+	}
+	return -1
+}
+
+// removeFindingAt returns a NEW slice with the entry at idx removed —
+// never mutates fs in place (mirrors this file's own value-copy discipline,
+// dc-2: the caller's decoded original must never be touched).
+func removeFindingAt(fs []artifact.Finding, idx int) []artifact.Finding {
+	out := make([]artifact.Finding, 0, len(fs)-1)
+	out = append(out, fs[:idx]...)
+	out = append(out, fs[idx+1:]...)
+	return out
 }
 
 // replaceWholeLine replaces the exactly-one line in body that equals
