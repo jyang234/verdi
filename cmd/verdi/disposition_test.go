@@ -900,6 +900,58 @@ func TestRunDisposition_OrdinaryFinding_NoNotResurfacedEntry_Unaffected(t *testi
 	}
 }
 
+// TestRunDisposition_ComputedFindingCollidingWithJudgedNotResurfaced_DoesNotDrain
+// is spec/finding-identity judged-reaffirm-judged-kind-scope's fix proof: a
+// computed finding and a judged not-resurfaced entry share the same
+// boundary-derived id (computed `boundary-x` live+undispositioned; judged
+// `boundary-x` a prior ruling a fresh judge run stopped reproducing). The
+// reaffirmation/not-resurfaced machinery is judged-only, so dispositioning the
+// COMPUTED finding must never drain the judged persisted record nor stamp
+// carried-from onto the computed finding — even when the decisions coincide
+// (accepted-deviation == accepted-deviation), the strongest form of the bug.
+//
+// Red-first (before the fix): the backing lookup resolved by bare id with no
+// Kind check, so dispositioning the computed finding stamped carried-from onto
+// it and silently removed the judged ruling's persisted record — an automatic
+// drain of an ac-3 entry by an unrelated finding's disposition.
+func TestRunDisposition_ComputedFindingCollidingWithJudgedNotResurfaced_DoesNotDrain(t *testing.T) {
+	findings := []artifact.Finding{
+		{ID: "boundary-x", Kind: artifact.FindingComputed, Text: "the declared boundary holds"},
+	}
+	notResurfaced := []artifact.Finding{
+		{ID: "boundary-x", Kind: artifact.FindingJudged, Text: "an old judged ruling under the same slug", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified"},
+	}
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, findings, notResurfaced, nil))
+	path := reportPathFor(root, "demo")
+
+	var stdout, stderr bytes.Buffer
+	rc := runDisposition(root, "spec/demo", "boundary-x", artifact.FindingAcceptedDeviation, "computed boundary confirmed a deviation", false, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runDisposition = %d, want 0; stderr=%s", rc, stderr.String())
+	}
+
+	after := decodeReportFile(t, path)
+	// The COMPUTED finding is dispositioned in findings:, with NO carried-from —
+	// carried-from is judged-reaffirmation provenance, never stamped on a
+	// computed finding.
+	cf, ok := findingByID(after.Findings, "boundary-x")
+	if !ok || cf.Kind != artifact.FindingComputed || cf.Disposition != artifact.FindingAcceptedDeviation {
+		t.Fatalf("computed boundary-x = %+v (present=%v), want dispositioned accepted-deviation", cf, ok)
+	}
+	if cf.CarriedFrom != "" {
+		t.Fatalf("computed boundary-x CarriedFrom = %q, want empty — carried-from must never be stamped on a computed finding", cf.CarriedFrom)
+	}
+	// The JUDGED not-resurfaced entry is UNTOUCHED — never drained by the
+	// unrelated computed finding's disposition (the ac-3 automatic-drain closed).
+	nr, ok := findingByID(after.NotResurfaced, "boundary-x")
+	if !ok {
+		t.Fatalf("judged not-resurfaced boundary-x was drained by a computed finding's disposition: %+v", after.NotResurfaced)
+	}
+	if nr.Kind != artifact.FindingJudged || nr.Disposition != artifact.FindingAcceptedDeviation || nr.Note != "owner-ratified" {
+		t.Fatalf("judged not-resurfaced boundary-x = %+v, want untouched (judged, accepted-deviation, owner-ratified)", nr)
+	}
+}
+
 // budgetAcceptedDeviationCount computes the accepted-deviation budget the
 // closure gate's spec-stale condition counts for a living report: SpecStale
 // over the report's own findings: UNION its not-resurfaced: section, by unique

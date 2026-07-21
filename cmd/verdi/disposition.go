@@ -247,12 +247,21 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	// silently carries"). Either way the old entry is removed: it has been
 	// resolved, one way or the other, by a human who has now seen both
 	// texts.
-	if nrIdx := findNotResurfacedIndex(decoded.NotResurfaced, findingID); nrIdx != -1 {
-		oldEntry := decoded.NotResurfaced[nrIdx]
-		if decision == oldEntry.Disposition {
-			updated.Findings[idx].CarriedFrom = decoded.Covers
+	//
+	// Scoped strictly to a JUDGED live finding (judged-reaffirm-judged-kind-
+	// scope): the reaffirmation mechanism is judged-only (ReconcileJudged,
+	// identity.go), so a COMPUTED finding whose boundary-derived id merely
+	// collides with a judged not-resurfaced entry must never resolve — drain
+	// or reaffirm — that entry, nor ever receive carried-from provenance the
+	// mechanism was never meant to stamp on it.
+	if oldFinding.Kind == artifact.FindingJudged {
+		if nrIdx := findNotResurfacedIndex(decoded.NotResurfaced, findingID); nrIdx != -1 {
+			oldEntry := decoded.NotResurfaced[nrIdx]
+			if decision == oldEntry.Disposition {
+				updated.Findings[idx].CarriedFrom = decoded.Covers
+			}
+			updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
 		}
-		updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
 	}
 
 	// Never fake success (CLAUDE.md): self-validate before writing.
@@ -456,13 +465,19 @@ func dispositionNotResurfaced(reportPath string, raw []byte, decoded *artifact.D
 	return 0
 }
 
-// findNotResurfacedIndex returns the index of the entry in notResurfaced
-// whose id equals findingID, or -1 — spec/finding-identity's own lookup for
-// a live candidate's backing record (ids are unique within not-resurfaced:,
-// artifact.DeviationFrontmatter.Validate).
+// findNotResurfacedIndex returns the index of the JUDGED entry in
+// notResurfaced whose id equals findingID, or -1 — spec/finding-identity's own
+// lookup for a live candidate's backing record (ids are unique within
+// not-resurfaced:, artifact.DeviationFrontmatter.Validate). Scoped to Kind ==
+// FindingJudged (judged-reaffirm-judged-kind-scope): the not-resurfaced/
+// reaffirmation machinery is judged-only, so the exit-ramp path never touches a
+// non-judged entry — belt-and-suspenders, since ReconcileJudged only ever
+// produces judged not-resurfaced entries, but this verb operates over a
+// working-tree file a human can hand-edit and must not rely on that invariant
+// holding by construction.
 func findNotResurfacedIndex(notResurfaced []artifact.Finding, findingID string) int {
 	for i, f := range notResurfaced {
-		if f.ID == findingID {
+		if f.ID == findingID && f.Kind == artifact.FindingJudged {
 			return i
 		}
 	}

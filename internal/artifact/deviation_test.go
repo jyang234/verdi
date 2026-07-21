@@ -245,3 +245,32 @@ digest: sha256:` + deviationHex64 + "\n"
 		t.Fatalf("NotResurfaced = %+v, want one dispositioned backing record", fm.NotResurfaced)
 	}
 }
+
+// TestDecodeDeviation_NotResurfaced_ComputedFindingSharesJudgedID proves the
+// judged-only scope of the not-resurfaced backing relationship (spec/finding-
+// identity judged-reaffirm-judged-kind-scope): a DISPOSITIONED COMPUTED finding
+// sharing an id with a JUDGED not-resurfaced entry is a legitimate cross-
+// namespace slug collision — computed boundary ids (boundary-<from>-<to>-<via>)
+// and judged boundary slugs share the same shape — never the "unremoved judged
+// backing record" the SAME-KIND rejection catches, so it decodes cleanly. The
+// same-kind collision (a judged dispositioned finding + a judged not-resurfaced
+// entry) stays rejected (TestDecodeDeviation_NotResurfaced_Negative).
+func TestDecodeDeviation_NotResurfaced_ComputedFindingSharesJudgedID(t *testing.T) {
+	y := `schema: verdi.deviation/v1
+covers: 7f3c2a1
+findings:
+  - { id: boundary-x, kind: computed, text: "the declared boundary holds", disposition: fixed }
+not-resurfaced:
+  - { id: boundary-x, kind: judged, text: "an old judged ruling under the same slug", disposition: accepted-deviation, note: "n" }
+digest: sha256:` + deviationHex64 + "\n"
+	fm, err := DecodeDeviation([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeDeviation: %v, want a computed finding colliding with a judged not-resurfaced entry to decode cleanly (the backing relationship is judged-only)", err)
+	}
+	if len(fm.Findings) != 1 || fm.Findings[0].Kind != FindingComputed {
+		t.Fatalf("Findings = %+v, want one computed finding", fm.Findings)
+	}
+	if len(fm.NotResurfaced) != 1 || fm.NotResurfaced[0].Kind != FindingJudged {
+		t.Fatalf("NotResurfaced = %+v, want one judged backing record left intact", fm.NotResurfaced)
+	}
+}

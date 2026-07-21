@@ -183,9 +183,10 @@ func DecodeDeviation(data []byte) (*DeviationFrontmatter, error) {
 // Validate checks the schema literal, Covers is a valid commit sha, every
 // finding is individually valid with a unique id, every not-resurfaced:
 // entry is individually valid, already dispositioned, unique among
-// themselves, and never shares an id with a DISPOSITIONED findings: entry,
-// Digest/Integrity (if present) are well-formed, and Frozen (if present) is
-// well-formed.
+// themselves, and never shares an id with a SAME-KIND dispositioned findings:
+// entry (the judged↔judged backing relationship — a cross-kind slug collision
+// is legal, judged-reaffirm-judged-kind-scope), Digest/Integrity (if present)
+// are well-formed, and Frozen (if present) is well-formed.
 func (fm DeviationFrontmatter) Validate() error {
 	if fm.Schema != deviationSchema {
 		return fmt.Errorf("artifact: deviation schema %q, want %q", fm.Schema, deviationSchema)
@@ -194,7 +195,7 @@ func (fm DeviationFrontmatter) Validate() error {
 		return fmt.Errorf("artifact: deviation covers %q is not a valid sha", fm.Covers)
 	}
 	seen := make(map[string]bool, len(fm.Findings))
-	dispositionedFindingIDs := make(map[string]bool, len(fm.Findings))
+	dispositionedFindingKind := make(map[string]FindingKind, len(fm.Findings))
 	for i, f := range fm.Findings {
 		if err := f.Validate(); err != nil {
 			return fmt.Errorf("artifact: findings[%d]: %w", i, err)
@@ -204,7 +205,7 @@ func (fm DeviationFrontmatter) Validate() error {
 		}
 		seen[f.ID] = true
 		if f.Dispositioned() {
-			dispositionedFindingIDs[f.ID] = true
+			dispositionedFindingKind[f.ID] = f.Kind
 		}
 	}
 	// not-resurfaced: (spec/finding-identity ac-3): every entry is already
@@ -214,11 +215,17 @@ func (fm DeviationFrontmatter) Validate() error {
 	// exactly the "live candidate + its backing record" shape
 	// (align.ReconcileJudged's own doc comment): a slug-only match pre-fills
 	// an UNDISPOSITIONED candidate in findings: while its old ruling stays
-	// here, verbatim, until a human confirms it. What is never legal is an
-	// id that is BOTH dispositioned in findings: and still present here — a
-	// confirmed finding must have had its not-resurfaced backing record
-	// removed (cmd/verdi's disposition verb does this), so this shape can
-	// only mean a hand-edited or otherwise malformed report.
+	// here, verbatim, until a human confirms it. What is never legal is an id
+	// that is BOTH dispositioned in findings: AS THE SAME KIND and still
+	// present here — a confirmed finding must have had its not-resurfaced
+	// backing record removed (cmd/verdi's disposition verb does this), so that
+	// shape can only mean a hand-edited or otherwise malformed report. The
+	// SAME-KIND scope is load-bearing (judged-reaffirm-judged-kind-scope): the
+	// backing relationship is judged↔judged, so a DISPOSITIONED COMPUTED
+	// finding sharing an id with a judged not-resurfaced entry is a legitimate
+	// cross-namespace slug collision (computed boundary ids and judged boundary
+	// slugs share the same shape), not an unremoved backing record — it must
+	// decode, never be rejected.
 	seenNotResurfaced := make(map[string]bool, len(fm.NotResurfaced))
 	for i, f := range fm.NotResurfaced {
 		if err := f.Validate(); err != nil {
@@ -231,8 +238,8 @@ func (fm DeviationFrontmatter) Validate() error {
 			return fmt.Errorf("artifact: not-resurfaced[%d]: duplicate id %q", i, f.ID)
 		}
 		seenNotResurfaced[f.ID] = true
-		if dispositionedFindingIDs[f.ID] {
-			return fmt.Errorf("artifact: not-resurfaced[%d]: id %q is already dispositioned in findings — a confirmed finding's not-resurfaced backing record must be removed", i, f.ID)
+		if k, ok := dispositionedFindingKind[f.ID]; ok && k == f.Kind {
+			return fmt.Errorf("artifact: not-resurfaced[%d]: id %q is already dispositioned as a %s finding in findings — a confirmed finding's not-resurfaced backing record must be removed", i, f.ID, f.Kind)
 		}
 	}
 	if fm.Digest != "" && !sha256Re.MatchString(fm.Digest) {
