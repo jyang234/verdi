@@ -235,6 +235,27 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 	return flat, byAC, supersededByAC, nil
 }
 
+// supersededStoryRefs flattens discoverImplementingStories' AC-keyed superseded
+// view (supersededByAC) into the deduplicated set of superseded implementing
+// story refs the feature-close spec-stale condition needs (L-N12): a story that
+// implements more than one feature AC appears under each, but must be
+// disclosed-and-excluded exactly once. Order is left to the consumer (the
+// condition sorts for a deterministic disclosure).
+func supersededStoryRefs(supersededByAC map[string][]string) []string {
+	seen := make(map[string]bool)
+	var refs []string
+	for _, group := range supersededByAC {
+		for _, ref := range group {
+			if seen[ref] {
+				continue
+			}
+			seen[ref] = true
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
 // foldImplementingStory runs the ordinary story-level fold (evidence.Fold)
 // for one implementing story, loading its own derived evidence and
 // consulting waivers/attestations keyed by its own story-slug — the exact

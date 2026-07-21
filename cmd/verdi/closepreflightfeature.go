@@ -53,7 +53,7 @@ func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.Sp
 	if err != nil {
 		return false, fmt.Errorf("close: --preflight: %w", err)
 	}
-	stories, storiesByAC, _, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec)
+	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec)
 	if err != nil {
 		return false, fmt.Errorf("close: --preflight: %w", err)
 	}
@@ -66,7 +66,7 @@ func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.Sp
 		return false, fmt.Errorf("close: --preflight: %w", err)
 	}
 
-	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, f, defaultBranchRef, manifest, mdl, head, stdout)
+	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, supersededStoryRefs(supersededByAC), f, defaultBranchRef, manifest, mdl, head, stdout)
 	if err != nil {
 		return false, err
 	}

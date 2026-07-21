@@ -183,43 +183,95 @@ func runJudgeOnce(ctx context.Context, runner JudgeRunner, argv []string, timeou
 	return &JudgeSuccess{Findings: findings, Stdin: prompt, RawResult: rawResult}, nil
 }
 
+// reservedIDGuard is the sentinel segment judgedFindingID splices in to
+// neutralize a raw judge slug whose minted id would otherwise land on a shape
+// ReconcileJudged alone may MINT (artifact.IsCollisionMachineryID). It is a
+// fixed literal, so the escape stays a pure, deterministic function of the raw
+// slug.
+const reservedIDGuard = "reserved"
+
 // judgedFindingID normalizes a judge-supplied raw finding id into this
-// package's own stable "judged-<slug>" finding id, applied exactly once —
-// shared by every judge-consuming mode that mints one (this file's
-// runJudgeOnce, decision_judge.go's RunDecisionSweep, diagram_judge.go's
-// RunDiagramSweep). rawID is judge-supplied free text (S5's own contract
-// only requires {id, text, confidence}); on certain regeneration/carry
-// paths (spec/finding-identity) a caller re-presents a prior finding's own
-// already-"judged-"-prefixed id back to the judge as context, and if the
-// judge echoes it back verbatim, slugging that value and unconditionally
-// re-prefixing produced "judged-judged-..." — a tool defect
-// (spec/ritual-traps ac-2, X-1's sibling trap). Idempotent: a raw id whose
-// slug already carries the "judged-" prefix is used as-is rather than
-// re-prefixed, so this is safe regardless of how the raw id arrived. Fixed
-// prospectively only — this only ever touches an id at MINT time; nothing
-// here rewrites an id already read back off an archived report (see
-// internal/artifact's plain decode of Finding.ID, which applies no such
-// transform).
+// package's own stable "judged-<slug>" finding id — the shared minting helper
+// for every judge-consuming mode (this file's runJudgeOnce,
+// decision_judge.go's RunDecisionSweep, diagram_judge.go's RunDiagramSweep).
+// rawID is judge-supplied free text (S5's contract only requires {id, text,
+// confidence}). It composes two independently-pinned guards, in order, at the
+// single MINT seam.
 //
-// Adjudication (spec/ritual-traps ac-2, finding
-// judged-ac2-echoed-doubled-id-still-doubles): when the raw id echoed back is
-// itself an ALREADY-DOUBLED archived id ("judged-judged-x"), the HasPrefix
-// short-circuit preserves it VERBATIM — it is deliberately NOT normalized to
-// "judged-x". This is ratified, not an oversight. Dispositions reference
-// finding ids exactly as originally minted (the W4 precedent; spec/ritual-traps
-// ac-2: "real archived dispositions reference those ids exactly as originally
-// minted"), so collapsing a doubled id here would sever the id-join to any
-// archived disposition recorded against the doubled form, orphaning it. The
-// "exactly one judged- prefix" guarantee is therefore a PROSPECTIVE mint-time
-// property of fresh ids, never a retroactive renumbering of an id a prior
-// report already minted. TestJudgedFindingID_EchoedDoubledID_PreservedVerbatim
-// pins this.
+// (1) PREFIX IDEMPOTENCE + DOUBLED-ECHO PRESERVATION (spec/ritual-traps ac-2,
+// X-1's sibling trap). On certain regeneration/carry paths a caller re-presents
+// a prior finding's own already-"judged-"-prefixed id back to the judge as
+// context; if the judge echoes it verbatim, slugging that value and
+// unconditionally re-prefixing produced "judged-judged-..." — a tool defect. So
+// a raw id whose slug already carries the "judged-" prefix is used AS-IS rather
+// than re-prefixed. When that echoed id is itself an ALREADY-DOUBLED archived id
+// ("judged-judged-x") the short-circuit preserves it VERBATIM — deliberately NOT
+// normalized to "judged-x" (adjudicated, finding
+// judged-ac2-echoed-doubled-id-still-doubles): dispositions reference finding
+// ids exactly as originally minted (the W4 precedent), so collapsing a doubled
+// id would sever the id-join to any archived disposition recorded against the
+// doubled form, orphaning it. "Exactly one judged- prefix" is thus a PROSPECTIVE
+// mint-time property of fresh ids, never a retroactive renumbering of an id a
+// prior report already minted. (TestJudgedFindingID,
+// TestJudgedFindingID_EchoedDoubledID_PreservedVerbatim.)
+//
+// (2) RESERVED-SHAPE ESCAPE (spec/finding-identity's judged-reserved-id-shape
+// guard, judged-reserved-id-shape-substring-match). Whatever id the prefix rule
+// yields, a judge must never end up minting one that IsCollisionMachineryID — a
+// shape ReconcileJudged ALONE may mint (the numeric-tail collision member
+// "<slug><CollisionInfix><n>" or the ContractViolationIDPrefix) — or the two id
+// consumers (ReconcileJudged's candidate path vs. the disposition verb's live
+// path) would disagree about the same id (the L-N13 consumers-agree property: a
+// forged shape gets a rendered ac-1 Candidate yet has its live-path
+// resolve+stamp withheld). The escape splices reservedIDGuard so the reserved
+// shape breaks — the guard right after "judged-" (so the id no longer begins
+// with ContractViolationIDPrefix) and/or as a trailing segment (so it no longer
+// ends in "<CollisionInfix><digits>"). Running the escape AFTER the prefix rule
+// is deliberate: it closes the forge in BOTH directions — a fresh raw slug
+// shaped exactly like a minted id, AND a judge trying to smuggle a reserved
+// shape through the verbatim echo path above (e.g. a raw
+// "judged-contract-violation-x"), which the prefix rule alone would preserve
+// intact. (TestJudgedFindingID_ReservesMintedShapes.)
+//
+// The two guards compose without conflict: the escape is a literal transform
+// whose result is ITSELF never a reserved shape (its prefix no longer starts
+// with the CV literal; its tail no longer ends in digits), so re-minting from an
+// escaped id — whether slug-stripped or echoed back "judged-"-prefixed — is a
+// no-op (the guard is idempotent, never compounds), and an echoed doubled id
+// that is not a reserved shape passes through both guards untouched. Fixed
+// prospectively only: this touches an id solely at MINT time; nothing rewrites
+// an id already read back off an archived report (internal/artifact decodes
+// Finding.ID with no transform).
+//
+// RESIDUAL (disclosed, self-healing): the escape is not injective, so a raw
+// judge slug that already mints to an escaped form could in principle collide
+// with an escaped one. Both require the judge to emit a very specifically
+// reserved-shaped slug, and a same-run collision is caught and disclosed by
+// ReconcileJudged's own within-run collision machinery (every member suffixed +
+// a contract-violation finding), never a silent merge.
 func judgedFindingID(rawID string) string {
+	// (1) Prefix idempotence + doubled-echo preservation: a slug already
+	// carrying "judged-" is used as-is (a re-presented prior id is never
+	// re-prefixed; an archived doubled id survives verbatim).
 	slug := store.RefSlug(rawID)
-	if strings.HasPrefix(slug, "judged-") {
-		return slug
+	id := slug
+	if !strings.HasPrefix(slug, "judged-") {
+		id = "judged-" + slug
 	}
-	return "judged-" + slug
+	// (2) Reserved-shape escape, applied to whatever (1) yielded — including a
+	// verbatim echo — so a judge can never FORGE a shape ReconcileJudged alone
+	// may mint.
+	if strings.HasPrefix(id, artifact.ContractViolationIDPrefix) {
+		// Break the reserved PREFIX: splice the guard right after "judged-".
+		id = "judged-" + reservedIDGuard + "-" + strings.TrimPrefix(id, "judged-")
+	}
+	if artifact.IsCollisionMachineryID(id) {
+		// Only the numeric-tail arm can still be true here (the CV prefix, if it
+		// was present, was just broken above). Append the guard so the id no
+		// longer ends in "<CollisionInfix><digits>".
+		id = id + "-" + reservedIDGuard
+	}
+	return id
 }
 
 // confidenceSuffixRE matches ONE trailing " (confidence N.NN)" decoration of

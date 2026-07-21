@@ -27,6 +27,38 @@ import (
 // three-valued honesty ("silence is never a pass"). Disposition and Note
 // are excluded from the hash on purpose: they are exactly the state being
 // preserved, not part of what identifies the finding.
+//
+// spec/finding-identity (D6-35, ledger L-N2, adjudicated at Task 0 of the
+// extensibility phase 2 design wave): this rule is UNCHANGED BYTE-FOR-BYTE
+// by that story and remains the ONLY identity rule for a computed or
+// conflict finding — the existing holds-to-violated negative test above
+// keeps passing unmodified, exactly as this comment already required. What
+// changed is layered ENTIRELY ON TOP, scoped to Kind == FindingJudged only
+// (ReconcileJudged, reaffirm.go), because a judged finding's Text is the
+// judge's own free-form prose: two runs of a real judge exchange over the
+// identical underlying issue essentially never produce byte-identical text,
+// so this Identity rule alone discards every judged disposition on every
+// regeneration, whether or not the underlying issue changed (X-18's named
+// second-order cost: a discarded disposition is simply re-recorded and
+// re-accepted next pass, consuming fresh spec-stale budget for a standing,
+// already-settled adjudication). The cure is NOT a second, looser identity
+// rule for judged findings — silently matching by id alone would reopen
+// exactly the stale-disposition hole this rule exists to close (03
+// §508-512), letting a real escalation (a low-confidence cosmetic reading
+// followed by a high-confidence real regression under the same slug) hide
+// behind an inherited disposition. Instead: a judged finding's rule/
+// boundary-derived id (the "slug", judge.go's tightened prompt contract)
+// becomes an UNTRUSTED PRE-FILL HINT only. When THIS Identity function's
+// exact match fails but the id still matches a prior dispositioned judged
+// finding, ReconcileJudged pre-fills a CANDIDATE — the old ruling and old
+// text rendered beside the new text — never a carried disposition; a human
+// must confirm it, exactly as X-16 already requires for a fresh finding. A
+// confirmed reaffirmation is recorded as an ordinary human disposition (this
+// function plays no part in it) carrying artifact.Finding.CarriedFrom as
+// provenance. So: Identity itself never changes, is never called with a
+// looser formula, and is never bypassed for a computed or conflict finding —
+// slug-primary matching is additive machinery that only ever produces a
+// human-facing candidate, never an automatic disposition.
 func Identity(f artifact.Finding) string {
 	return identityOf(string(f.Kind), f.ID, f.Text)
 }

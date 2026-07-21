@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // writeFakeJudge writes a tiny shell script honoring S5's `claude -p
@@ -443,5 +446,55 @@ func TestRunJudgeOnce_Timeout(t *testing.T) {
 	}
 	if elapsed > 4*time.Second {
 		t.Fatalf("runJudgeOnce took %s, want it to return promptly after the injected 100ms timeout, not wait for the sleep 5", elapsed)
+	}
+}
+
+// TestJudgedFindingID_ReservesMintedShapes is spec/finding-identity
+// judged-reserved-id-shape-substring-match's RESERVATION half: a RAW judge slug
+// whose normative "judged-"+RefSlug id would land on a shape ReconcileJudged
+// alone may MINT (artifact.IsCollisionMachineryID — a numeric-tail collision
+// member or the contract-violation prefix) is neutralized at this mint seam, so
+// a judge can never FORGE a machinery id and split the two id consumers (the
+// candidate path vs. the disposition live path, L-N13). The escape is a pure,
+// deterministic, idempotent function of the raw slug, so the same underlying
+// issue keeps the same id across runs and its disposition still carries.
+func TestJudgedFindingID_ReservesMintedShapes(t *testing.T) {
+	// Ordinary slugs — including a genuine WORD-"collision" slug with no numeric
+	// tail — are minted verbatim ("judged-"+RefSlug), never escaped.
+	for _, raw := range []string{"retry-semantics", "collision-cv-emission-order", "collision-suffixed-backing-shadow"} {
+		id := judgedFindingID(raw)
+		if want := "judged-" + store.RefSlug(raw); id != want {
+			t.Errorf("judgedFindingID(%q) = %q, want the verbatim mint %q (an ordinary slug is never escaped)", raw, id, want)
+		}
+		if artifact.IsCollisionMachineryID(id) {
+			t.Errorf("judgedFindingID(%q) = %q classifies as machinery — an ordinary judge slug must not", raw, id)
+		}
+	}
+
+	// A raw slug shaped EXACTLY like a minted numeric-tail collision member, one
+	// shaped like the reserved contract-violation prefix, and one that is both
+	// are each escaped away from the reserved shape.
+	for _, raw := range []string{"dup-collision-2", "contract-violation-dup", "contract-violation-foo-collision-3"} {
+		naive := "judged-" + store.RefSlug(raw)
+		if !artifact.IsCollisionMachineryID(naive) {
+			t.Fatalf("test premise broken: raw %q mints %q which is NOT a reserved shape", raw, naive)
+		}
+		id := judgedFindingID(raw)
+		if artifact.IsCollisionMachineryID(id) {
+			t.Errorf("judgedFindingID(%q) = %q still classifies as machinery — the mint seam must reserve the shape", raw, id)
+		}
+		if id == naive {
+			t.Errorf("judgedFindingID(%q) = %q was not escaped away from its reserved mint %q", raw, id, naive)
+		}
+		// Stable across runs (a pure function) — a carry keys off this id.
+		if again := judgedFindingID(raw); again != id {
+			t.Errorf("judgedFindingID(%q) not stable across calls: %q then %q", raw, id, again)
+		}
+		// Idempotent — re-minting from the ESCAPED id's own slug is a no-op (the
+		// escaped id is itself never a reserved shape), so a persisted escaped id
+		// round-trips unchanged and never compounds across regenerations.
+		if slug := strings.TrimPrefix(id, "judged-"); judgedFindingID(slug) != id {
+			t.Errorf("escaped id %q did not round-trip: judgedFindingID(%q) = %q", id, slug, judgedFindingID(slug))
+		}
 	}
 }

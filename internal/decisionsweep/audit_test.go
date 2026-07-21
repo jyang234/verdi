@@ -166,6 +166,43 @@ func TestAudit_SpecStaleOwnTextTrigger(t *testing.T) {
 	}
 }
 
+// TestAudit_SpecStale_NotResurfacedCountsToo is spec/finding-identity ac-3's
+// counterweight-hardening proof at the `verdi audit` seam (05 §Lenses' anti-
+// hairball law: dex's spec-stale badge and `verdi audit` must compute the
+// SAME way, ScanSpecStale's own doc comment) — mirroring
+// TestRunClosureGate_SpecStaleCondition's closure-gate proof of the same
+// property: an accepted-deviation finding sitting ONLY in not-resurfaced:
+// (never in findings:) still counts toward the threshold trigger, exactly
+// as if it were still live — the X-18 laundering drain this story closes.
+func TestAudit_SpecStale_NotResurfacedCountsToo(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, ".verdi/verdi.yaml", "schema: verdi.layout/v1\n")
+	writeFile(t, root, ".verdi/specs/active/drained-story/spec.md", storySpecMD("drained-story", "ac-1"))
+	report := "---\nschema: verdi.deviation/v1\ncovers: 7f3c2a1\nfindings: []\n" +
+		"not-resurfaced:\n" +
+		"  - { id: judged-f1, kind: judged, text: t1, disposition: accepted-deviation, note: n1 }\n" +
+		"  - { id: judged-f2, kind: judged, text: t2, disposition: accepted-deviation, note: n2 }\n" +
+		"  - { id: judged-f3, kind: judged, text: t3, disposition: accepted-deviation, note: n3 }\n" +
+		"  - { id: judged-f4, kind: judged, text: t4, disposition: accepted-deviation, note: n4 }\n" +
+		"digest: sha256:" + decisionConflictTestHex + "\n---\nbody\n"
+	writeFile(t, root, ".verdi/specs/active/drained-story/deviation-report.md", report)
+
+	result, err := Audit(root, 3, 3)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(result.SpecStale) != 1 {
+		t.Fatalf("SpecStale = %+v, want exactly 1 entry", result.SpecStale)
+	}
+	entry := result.SpecStale[0]
+	if !entry.Result.Flagged || !entry.Result.TriggeredByThreshold {
+		t.Fatalf("Result = %+v, want flagged via threshold — 4 accepted-deviations living in not-resurfaced: must still count", entry.Result)
+	}
+	if entry.Result.AcceptedDeviationCount != 4 {
+		t.Fatalf("AcceptedDeviationCount = %d, want 4", entry.Result.AcceptedDeviationCount)
+	}
+}
+
 // TestAudit_StoryWithNoDeviationReportSkipped proves a story that was
 // never `align`-ed (no deviation-report.md yet) is skipped, not flagged.
 func TestAudit_StoryWithNoDeviationReportSkipped(t *testing.T) {

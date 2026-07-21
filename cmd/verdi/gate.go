@@ -142,16 +142,19 @@ type gateCondition struct {
 	// internal/disclosure.Disclosure this condition renders through
 	// (reportGateConditions). Unused otherwise.
 	Source string
-	// Extra holds zero or more already-rendered disclosure lines printed
-	// immediately after this condition's own PASS/FAIL/disclosed line,
-	// regardless of which branch fired — additional legibility a single
-	// coarse condition verdict cannot carry on its own (spec/evidence-
-	// resilience ac-2: the closure eligibility condition's per-record
-	// disclosed-unproven detail for an AC whose only would-be evidence was
-	// excluded as unreachable). Each entry is already a complete rendered
-	// line (typically via internal/disclosure.Render); printing never
-	// re-derives or reformats them. Empty for every condition that has
-	// nothing beyond its own PASS/FAIL/disclosed line to add.
+	// Extra holds zero or more already-rendered lines printed immediately
+	// after this condition's own PASS/FAIL/disclosed line, regardless of which
+	// branch fired — additional legibility a single coarse condition verdict
+	// cannot carry on its own. Two current uses: per-record disclosed-unproven
+	// detail (spec/evidence-resilience ac-2: the closure eligibility condition's
+	// detail for an AC whose only would-be evidence was excluded as
+	// unreachable), and an informational tally that must show on every verdict
+	// (spec/finding-identity judged-feature-union-missing-archive-silent-zero:
+	// the feature-close spec-stale union tally, so a PASSing gate also reveals
+	// how many archives fed it). Each entry is already a complete rendered line
+	// (a disclosure via internal/disclosure.Render, or a self-contained tally);
+	// printing never re-derives or reformats them. Empty for every condition
+	// that has nothing beyond its own PASS/FAIL/disclosed line to add.
 	Extra []string
 }
 

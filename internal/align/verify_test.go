@@ -79,3 +79,31 @@ func TestComputeDigest_Deterministic(t *testing.T) {
 		t.Fatal("ComputeDigest did not change when covers changed")
 	}
 }
+
+// TestComputeDigest_CarriedFromExcluded is spec/finding-identity ac-2's
+// digest-purity pin, at the exact mechanism level: CarriedFrom (like
+// Disposition/Note above) is human/provenance state, never a pinned input —
+// digestInput's own findingIdentityOnly type only ever copies (id, kind,
+// text), so a finding carrying carried-from: produces the byte-identical
+// digest a finding without it would. Proven directly against
+// artifact.FindingComputed (the only kind ComputeDigest's own signature
+// ever reads) rather than only at the higher VerifyDigest/FreezeInPlace
+// level, so this pin cannot be satisfied by coincidence — it fails the
+// moment digestInput ever starts reading the field.
+func TestComputeDigest_CarriedFromExcluded(t *testing.T) {
+	covers := "abc123"
+	base := []artifact.Finding{{ID: "f-1", Kind: artifact.FindingComputed, Text: "t", Disposition: artifact.FindingFixed}}
+	carried := []artifact.Finding{{ID: "f-1", Kind: artifact.FindingComputed, Text: "t", Disposition: artifact.FindingFixed, CarriedFrom: "0123456789abcdef0123456789abcdef01234567"}}
+
+	d1, err := ComputeDigest(covers, base, nil)
+	if err != nil {
+		t.Fatalf("ComputeDigest: %v", err)
+	}
+	d2, err := ComputeDigest(covers, carried, nil)
+	if err != nil {
+		t.Fatalf("ComputeDigest: %v", err)
+	}
+	if d1 != d2 {
+		t.Fatalf("ComputeDigest changed when only CarriedFrom was set: %q vs %q — carried-from must be excluded from the digest (VerifyDigest must stay unaffected on every existing frozen archive)", d1, d2)
+	}
+}

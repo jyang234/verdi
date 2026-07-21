@@ -72,7 +72,7 @@ func TestRenderDiagramAlignment_EmptySets_ExplicitPlaceholders(t *testing.T) {
 // "## Computed", unconditionally — never behind a len(...) > 0 guard that
 // would make the whole subsection vanish rather than read empty.
 func TestRenderBody_DiagramAlignmentSubsection_NeverOmitted(t *testing.T) {
-	body := RenderBody(nil, nil, nil, nil)
+	body := RenderBody(nil, nil, nil, nil, nil, nil)
 	for _, want := range []string{
 		"## Computed",
 		"### Diagram alignment",

@@ -72,7 +72,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
-	stories, storiesByAC, _, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec)
+	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
@@ -89,7 +89,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 
-	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, deps.Forge, defaultBranchRef, manifest, deps.Model, head, stdout)
+	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, supersededStoryRefs(supersededByAC), deps.Forge, defaultBranchRef, manifest, deps.Model, head, stdout)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
