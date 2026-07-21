@@ -63,7 +63,7 @@ func TestCheckFeatureSpecStaleCondition_UnionsStoryArchive_NeverZero(t *testing.
 	stories := []implementingStoryEdges{{SpecRef: "spec/my-story", Closed: true}}
 	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
 
-	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil)
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
 		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestCheckFeatureSpecStaleCondition_UnionsStoryArchive_NeverTwice(t *testing
 	stories := []implementingStoryEdges{{SpecRef: "spec/my-story", Closed: true}}
 	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
 
-	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil)
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
 		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestCheckFeatureSpecStaleCondition_UnclosedStory_NoArchiveYet_NoOperational
 	stories := []implementingStoryEdges{{SpecRef: "spec/still-open", Closed: false}}
 	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
 
-	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil)
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
 		t.Fatalf("checkFeatureSpecStaleCondition: %v, want no operational error for an unclosed story", err)
 	}
@@ -147,7 +147,7 @@ func TestCheckFeatureSpecStaleCondition_ClosedStoryMissingArchive_Disclosed(t *t
 	stories := []implementingStoryEdges{{SpecRef: "spec/my-story", Closed: true}}
 	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
 
-	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil)
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
 		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestCheckFeatureSpecStaleCondition_MissingArchive_OwnTextFlag_Fails(t *test
 	stories := []implementingStoryEdges{{SpecRef: "spec/my-story", Closed: true}}
 	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
 
-	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil)
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
 		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestCheckFeatureSpecStaleCondition_MissingArchive_PartialUnionOverThreshold
 	}
 	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
 
-	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil)
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
 		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestCheckFeatureSpecStaleCondition_TallyPrintsOnPass(t *testing.T) {
 	}
 	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
 
-	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil)
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
 		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
 	}
@@ -296,11 +296,79 @@ func TestCheckFeatureSpecStaleCondition_NoReportsAnywhere_TriviallyUnflagged(t *
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
 
-	cond, err := checkFeatureSpecStaleCondition(root, feature, nil, nil, nil)
+	cond, err := checkFeatureSpecStaleCondition(root, feature, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
 	}
 	if !cond.OK {
 		t.Fatalf("cond = %+v, want PASS", cond)
+	}
+}
+
+// TestCheckFeatureSpecStaleCondition_SupersededStory_DisclosedAndExcluded is
+// spec/finding-identity judged-feature-union-superseded-story-archive's fix
+// proof (ledger L-N12): a SUPERSEDED implementing story's archived
+// accepted-deviations are EXCLUDED from the feature-close budget — supersession
+// is the spec-stale budget's own prescribed remedy — but NEVER silently: the
+// condition discloses a named line naming the story and the excluded count. Here
+// the superseded story's archive carries 4 accepted-deviations (over threshold
+// 3); excluded, the feature PASSES, and the exclusion is disclosed verbatim.
+//
+// Red-first (before the fix): discoverImplementingStories' flat view excludes
+// superseded stories (D-16), so condition 4 never saw the archive — it silently
+// contributed zero, with no disclosure and no ledger entry (ac-4's forbidden
+// silent-zero shape, for the superseded case).
+func TestCheckFeatureSpecStaleCondition_SupersededStory_DisclosedAndExcluded(t *testing.T) {
+	root := t.TempDir()
+	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
+
+	// The superseded story's ARCHIVED report carries 4 accepted-deviations.
+	supersededFindings := "  - { id: judged-a, kind: judged, text: t1, disposition: accepted-deviation, note: n1 }\n" +
+		"  - { id: judged-b, kind: judged, text: t2, disposition: accepted-deviation, note: n2 }\n" +
+		"  - { id: judged-c, kind: judged, text: t3, disposition: accepted-deviation, note: n3 }\n" +
+		"  - { id: judged-d, kind: judged, text: t4, disposition: accepted-deviation, note: n4 }\n"
+	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "superseded-story", supersededFindings, "")
+	// The feature's own report reproduces none of them.
+	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature", "  - { id: computed-x, kind: computed, text: unrelated, disposition: fixed }\n", "")
+
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+	// The story is superseded, so discoverImplementingStories excludes it from the
+	// flat `stories` view (nil here) and hands it back via the superseded set.
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, nil, []string{"spec/superseded-story"}, nil)
+	if err != nil {
+		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
+	}
+	// Excluded from the budget -> the 4 accepted-deviations do NOT flag; PASS.
+	if !cond.OK {
+		t.Fatalf("cond = %+v, want PASS — a superseded story's archived deviations are excluded (supersession is the budget's own remedy)", cond)
+	}
+	// But NEVER silently: the named exclusion line rides the condition (Extra),
+	// verbatim per L-N12.
+	joined := strings.Join(cond.Extra, "\n")
+	want := "superseded story spec/superseded-story's archived report (4 accepted-deviation(s)) excluded — supersession is the spec-stale budget's own prescribed remedy, taken"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("cond.Extra = %q, want the verbatim L-N12 exclusion line %q", cond.Extra, want)
+	}
+}
+
+// TestCheckFeatureSpecStaleCondition_SupersededStory_NoArchive_NoDisclosureNoError
+// pins the neighbor: a superseded story with NO archived report has nothing to
+// exclude and nothing to disclose (never a spurious "(0 accepted-deviation(s))"
+// line), and never an operational error.
+func TestCheckFeatureSpecStaleCondition_SupersededStory_NoArchive_NoDisclosureNoError(t *testing.T) {
+	root := t.TempDir()
+	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
+	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature", "  - { id: computed-x, kind: computed, text: unrelated, disposition: fixed }\n", "")
+
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, nil, []string{"spec/superseded-no-archive"}, nil)
+	if err != nil {
+		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
+	}
+	if !cond.OK {
+		t.Fatalf("cond = %+v, want PASS", cond)
+	}
+	if strings.Contains(strings.Join(cond.Extra, "\n"), "superseded story") {
+		t.Fatalf("cond.Extra = %q, want NO superseded-exclusion line (nothing was excluded)", cond.Extra)
 	}
 }

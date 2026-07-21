@@ -180,26 +180,41 @@ func SpecStale(in SpecStaleInput) SpecStaleResult {
 	// producer, is judged-only), so it is correctly outside this union — nothing
 	// to preserve, because the disappearance is a real change of fact, not a
 	// stochastic non-reproduction.
-	seenIdentity := make(map[string]bool)
 	sets := make([][]artifact.Finding, 0, 2+len(in.AdditionalSets))
 	sets = append(sets, in.Findings)
 	sets = append(sets, in.OwnNotResurfaced)
 	sets = append(sets, in.AdditionalSets...)
+	result.AcceptedDeviationCount = CountAcceptedDeviations(sets...)
+
+	result.TriggeredByThreshold = result.AcceptedDeviationCount > threshold
+	result.Flagged = len(result.OwnTextFindingIDs) > 0 || result.TriggeredByThreshold
+	return result
+}
+
+// CountAcceptedDeviations returns the number of DISTINCT accepted-deviation
+// dispositions across sets, unioned by unique content identity
+// (align.Identity's Kind+ID+Text hash) so the SAME standing adjudication
+// reproduced across more than one set counts exactly once. This is the one
+// accepted-deviation-budget counting rule SpecStale's threshold trigger reads —
+// and the same rule the feature-close gate reuses to count a superseded
+// implementing story's archived deviations for its disclose-and-exclude line
+// (spec/finding-identity ledger L-N12), never a second hand-rolled loop that
+// could drift from this one.
+func CountAcceptedDeviations(sets ...[]artifact.Finding) int {
+	seen := make(map[string]bool)
+	n := 0
 	for _, set := range sets {
 		for _, f := range set {
 			if f.Disposition != artifact.FindingAcceptedDeviation {
 				continue
 			}
 			id := align.Identity(f)
-			if seenIdentity[id] {
+			if seen[id] {
 				continue
 			}
-			seenIdentity[id] = true
-			result.AcceptedDeviationCount++
+			seen[id] = true
+			n++
 		}
 	}
-
-	result.TriggeredByThreshold = result.AcceptedDeviationCount > threshold
-	result.Flagged = len(result.OwnTextFindingIDs) > 0 || result.TriggeredByThreshold
-	return result
+	return n
 }

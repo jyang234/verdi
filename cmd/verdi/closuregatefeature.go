@@ -61,7 +61,7 @@ import (
 // head is the feature spec's build head — needed by condition 6
 // (disposition-completeness) to check the feature's own deviation report
 // covers it, mirroring runClosureGate's own head parameter exactly.
-func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (bool, error) {
+func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededStoryRefs []string, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (bool, error) {
 	cond1 := checkFeatureFoldEligible(fold, mdl)
 	cond2 := checkStubReconciliationCondition(reconciliation)
 	cond3 := checkAllImplementingStoriesClosed(stories, mdl)
@@ -72,7 +72,7 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	// (findings: + not-resurfaced:) — the actual cross-report X-18 fix (the
 	// within-report "unique identities" framing alone was proven a no-op,
 	// ledger L-N2). See checkFeatureSpecStaleCondition's own doc comment.
-	cond4raw, err := checkFeatureSpecStaleCondition(root, spec, manifest, stories, mdl)
+	cond4raw, err := checkFeatureSpecStaleCondition(root, spec, manifest, stories, supersededStoryRefs, mdl)
 	if err != nil {
 		return false, err
 	}
@@ -133,6 +133,14 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 			allOK = false
 			fmt.Fprintf(stdout, "[FAIL] %s%s\n", label, c.Name)
 			fmt.Fprintf(stdout, "       %s\n", c.Reason)
+		}
+		// Extra rides EVERY branch, mirroring the story gate's own loop
+		// (closuregate.go): the spec-stale union tally
+		// (judged-feature-union-missing-archive-silent-zero) and the superseded-
+		// story exclusion lines (L-N12) must show on a PASSing, FAILing, and
+		// disclosed feature gate alike — never only inside a FAIL reason.
+		for _, extra := range c.Extra {
+			fmt.Fprintln(stdout, extra)
 		}
 	}
 	return allOK, nil
@@ -269,7 +277,18 @@ func checkAllImplementingStoriesClosed(stories []implementingStoryEdges, mdl *mo
 // not-resurfaced: is judged-only, and a judged id can never equal an AC id, so
 // an own-text join over it is unreachable by construction —
 // judged-spec-stale-own-text-judged-id-prefix).
-func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, stories []implementingStoryEdges, mdl *model.Model) (gateCondition, error) {
+//
+// supersededStoryRefs are the implementing stories discoverImplementingStories
+// EXCLUDED from the flat `stories` view because they are superseded (D-16). Per
+// ledger L-N12 (judged-feature-union-superseded-story-archive) their archived
+// accepted-deviations are excluded from the budget — supersession is the
+// spec-stale counterweight's own prescribed remedy, so counting the
+// predecessor's adjudications (which concern text the successor replaced) would
+// punish the exact remedy the budget demands — but NEVER silently: each such
+// story whose archive carries accepted-deviations is disclosed in a named line
+// riding the condition's Extra (three-valued honesty), never the silent zero
+// ac-4 forbids.
+func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, stories []implementingStoryEdges, supersededStoryRefs []string, mdl *model.Model) (gateCondition, error) {
 	name := "4. no unresolved spec-stale flag"
 
 	specRef, err := artifact.ParseRef(spec.ID)
@@ -328,16 +347,54 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 		storiesUnioned++
 	}
 
+	// Superseded implementing stories (L-N12, judged-feature-union-superseded-
+	// story-archive): discoverImplementingStories already excluded these from
+	// `stories` (D-16), so their archived deviations never entered the union
+	// above — the correct EXCLUSION (once supersession has occurred the
+	// predecessor's adjudications concern text the successor replaced; counting
+	// them would punish the very remedy the spec-stale budget demands), but it
+	// must never be SILENT. Each superseded story whose archived report carries
+	// accepted-deviations is disclosed in a named line naming the story and the
+	// excluded count, riding the condition's Extra on every verdict alongside the
+	// tally. A superseded story with no archive (or none carrying
+	// accepted-deviations) has nothing to exclude and nothing to disclose.
+	sortedSuperseded := append([]string(nil), supersededStoryRefs...)
+	sort.Strings(sortedSuperseded)
+	var supersededExtra []string
+	for _, ref := range sortedSuperseded {
+		storyRef, err := artifact.ParseRef(ref)
+		if err != nil {
+			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+			return gateCondition{}, fmt.Errorf("closure gate: internal error: superseded implementing story has an invalid id: %w", err)
+		}
+		archived, err := loadDeviationReportIfExists(store.DeviationReportPath(root, store.ZoneArchive, storyRef.Name))
+		if err != nil {
+			return gateCondition{}, err
+		}
+		if archived == nil {
+			continue
+		}
+		n := evidence.CountAcceptedDeviations(archived.Findings, archived.NotResurfaced)
+		if n == 0 {
+			continue
+		}
+		supersededExtra = append(supersededExtra, fmt.Sprintf(
+			"       superseded story %s's archived report (%d accepted-deviation(s)) excluded — supersession is the spec-stale budget's own prescribed remedy, taken",
+			ref, n))
+	}
+
 	// Display resolution (L-M13(1), nil-safe): the class/state words resolve;
 	// the ids/counts stay identity. The union tally rides EVERY verdict of this
 	// condition (Extra, printed regardless of branch), so a PASSing gate shows
 	// how many archives fed the union, not only a failing one
-	// (judged-feature-union-missing-archive-silent-zero).
+	// (judged-feature-union-missing-archive-silent-zero). The superseded-exclusion
+	// lines (L-N12) ride the same Extra so they too show on every verdict.
 	featureWord := mdl.DisplayClass("feature")
 	storyWord := mdl.DisplayClass("story")
 	closedWord := mdl.DisplayState("story", "closed")
 	tally := fmt.Sprintf("       [union over the %s's own report + %d %s implementing %s archive(s)]",
 		featureWord, storiesUnioned, closedWord, storyWord)
+	extra := append([]string{tally}, supersededExtra...)
 
 	featureACIDs := make(map[string]bool, len(spec.AcceptanceCriteria))
 	for _, ac := range spec.AcceptanceCriteria {
@@ -382,7 +439,7 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 				" — flagged over the AVAILABLE union alone (a lower bound); additionally, closed implementing %s %v is missing its archived deviation report (store-integrity anomaly), which can only raise the budget further",
 				storyWord, missingArchive)
 		}
-		return gateCondition{Name: name, Extra: []string{tally}, Reason: reason}, nil
+		return gateCondition{Name: name, Extra: extra, Reason: reason}, nil
 	}
 
 	// Not flagged over the available union. A closed story missing its archive
@@ -401,9 +458,9 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 			Reason: fmt.Sprintf(
 				"closed implementing %s %v missing archived deviation report(s) — recorded accepted deviations cannot be unioned into the feature-close budget and the AVAILABLE union does not independently flag (store-integrity anomaly; not counted as zero)",
 				storyWord, missingArchive),
-			Extra: []string{tally},
+			Extra: extra,
 		}, nil
 	}
 
-	return gateCondition{Name: name, OK: true, Extra: []string{tally}}, nil
+	return gateCondition{Name: name, OK: true, Extra: extra}, nil
 }
