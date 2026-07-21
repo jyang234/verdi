@@ -8,6 +8,110 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 )
 
+// THE FINDING-IDENTITY TRUTH TABLE (spec/finding-identity, ledger L-N13)
+//
+// The complete stamp / carry / candidate behavior of the judged-reaffirmation
+// machinery — ReconcileJudged (this file) and the disposition verb's live path
+// (cmd/verdi/disposition.go) — enumerated over five axes, so the carried-from /
+// collision space is closed BY SPECIFICATION rather than by another point fix.
+// Every reachable cell is pinned: the RECONCILEJUDGED cells (does a finding
+// carry a disposition, pre-fill a Candidate, or land in not-resurfaced) by
+// TestReconcileJudged_TruthTable; the DISPOSITION-VERB cells (what a human
+// confirmation writes) by the cmd/verdi tests named below. Impossible cells are
+// named, each with the invariant that forbids it.
+//
+// AXES
+//
+//	source     fresh              a brand-new judged finding (RunJudged output)
+//	           candidate          a single fresh finding under a BARE slug whose exact
+//	                              identity missed but a same-id dispositioned prior
+//	                              exists (ac-1)
+//	           collision-member   one member of a within-run slug collision (ac-4)
+//	           contract-violation the synthetic per-slug CV finding (ac-4)
+//	           not-resurfaced     a prior dispositioned finding this round did not
+//	                              re-emit; lives solely in not-resurfaced (ac-3)
+//	id-class   bare <slug> | suffixed <slug><CollisionInfix><n> | reserved CV id.
+//	           IsCollisionMachineryID is true for suffixed + reserved.
+//	prior      none | live-dispositioned | not-resurfaced-AD | not-resurfaced-fixed
+//	decision   (disposition verb) same-as-prior | differs | amend
+//	recurrence byte-identical | reworded | reordered (a byte-identical member SET
+//	           re-emitted in another order — canonical text ranking + the sorted CV
+//	           join make it identical to byte-identical, L-N13 determinism)
+//
+// RECONCILEJUDGED CELLS — pinned by TestReconcileJudged_TruthTable
+//
+//	fresh, prior=none
+//	    → undispositioned, NO Candidate, not in not-resurfaced (a plain new finding).
+//	candidate (id-class=bare only), prior∈{live-dispositioned, not-resurfaced-AD,
+//	not-resurfaced-fixed}, recurrence=reworded
+//	    → undispositioned live + Candidate rendered (old ruling beside new text);
+//	      the prior STAYS in not-resurfaced as the Candidate's backing record until a
+//	      human confirms. Never an auto-carry (identity.go's frozen rule).
+//	recurring-exact (any source/id-class), prior=live-dispositioned or
+//	not-resurfaced-*, recurrence∈{byte-identical, reordered}
+//	    → CARRIES the prior disposition/note/carried-from via the frozen Kind+ID+Text
+//	      rule (carryExactMatch); NO Candidate; the matched prior is NOT in
+//	      not-resurfaced. The ordinary ac-2 carry and the collision/CV carry alike —
+//	      every member and the CV finding run the same carry.
+//	collision-member or contract-violation, recurrence=reworded (the member's / CV's
+//	text is no longer byte-identical)
+//	    → undispositioned; NO Candidate (ac-4: a collision never pre-fills — the human
+//	      resolves the slug's lineage); the prior lands in not-resurfaced under its
+//	      own (suffixed / reserved) id.
+//	not-resurfaced, this round does not re-emit it
+//	    → PERSISTS verbatim in not-resurfaced across any number of further rounds
+//	      (ac-3), budget-counted, until a human resolves it via the exit ramp.
+//
+// DISPOSITION-VERB CELLS (carried-from on human confirmation) — pinned in cmd/verdi
+//
+//	confirm a TRUE candidate (id-class=bare, a Candidate was rendered):
+//	    decision=same    → REAFFIRMATION: stamp carried-from=<covers>; remove backing.
+//	                       [TestRunDisposition_ConfirmsCandidate_Reaffirmation_StampsCarriedFrom]
+//	    decision=differs → ESCALATION: no stamp; remove backing (superseded).
+//	                       [TestRunDisposition_ConfirmsCandidate_Escalation_NoCarriedFrom]
+//	    decision=amend   → recompute: a differing decision clears an inherited stamp,
+//	                       a note-only amend keeps it.
+//	                       [TestRunDisposition_Amend_RecomputesCarriedFrom]
+//	confirm a COLLISION-MEMBER or CONTRACT-VIOLATION live finding sharing an id with a
+//	not-resurfaced backing record (IsCollisionMachineryID; NO Candidate was rendered),
+//	ANY decision:
+//	    → disposition the LIVE finding; NEVER stamp; LEAVE the backing record for its
+//	      exit ramp; disclose. (L-N13 presentation-predicated resolution)
+//	      [TestRunDisposition_CollisionMember_SuffixedBackingShadow_NoLivePathReaffirmation,
+//	       TestRunDisposition_ContractViolation_BackingShadow_NoLivePathReaffirmation]
+//	resolve a not-resurfaced entry via the EXIT RAMP (no live finding at its id):
+//	    →fixed  → RELEASE: remove; budget releases.  AD→AD → REAFFIRMATION: stamp.
+//	    fixed→AD → REVERSAL: no stamp; prior-ruling lineage named. [dispositionNotResurfaced]
+//	confirm an ORDINARY live finding with NO same-id not-resurfaced entry:
+//	    → dispositioned; never a carried-from stamp (nothing to reaffirm).
+//	      [TestRunDisposition_OrdinaryFinding_NoNotResurfacedEntry_Unaffected]
+//
+// IMPOSSIBLE CELLS (named, with the forbidding invariant)
+//
+//	candidate × id-class=suffixed — a Candidate is pre-filled ONLY for a single fresh
+//	    finding under a bare slug; a collision (the sole source of suffixed ids) never
+//	    yields a Candidate (ac-4), so no suffixed id is ever a Candidate.
+//	candidate × recurrence=byte-identical — a byte-identical recurrence is an exact
+//	    carry; the exact-identity match precedes the slug-only candidate path.
+//	bare collision-member × same-id backing record — when a colliding slug owns a
+//	    backing record collisionMemberIDs suffixes EVERY member (hasBacking), so no
+//	    live member keeps the bare id; the bare id is the backing record's alone
+//	    (judged-collision-backing-regeneration-drain / -same-round).
+//	contract-violation × id-class=bare — the CV id is always the reserved
+//	    ContractViolationIDPrefix shape, never a bare judge slug.
+//	fresh × prior≠none — "fresh" means no prior exists at the id, by definition.
+//
+// DOWNSTREAM RESIDUAL (disclosed; loud, never silent). Once a human has confirmed a
+// live collision member and left a distinct-content backing record at the same
+// suffixed id (the sanctioned shape), a later round in which BOTH that member's text
+// AND the backing record's text fail to reproduce would place two distinct-content
+// entries under one suffixed id in not-resurfaced. That is rejected LOUDLY by
+// Validate (a duplicate not-resurfaced id fails the report's self-validation) — never
+// a silent laundering — and is the human's cue to resolve the backing record via its
+// exit ramp once the collision clears (its first bare-of-live-members round). All
+// byte-identical / reworded / reordered recurrences are sound (matched by content
+// identity), so this is a narrow multi-reword edge, disclosed here.
+
 // JudgedCandidate is spec/finding-identity ac-1's pre-fill context: the
 // prior dispositioned finding a fresh, reworded judged finding's slug (its
 // id — judge.go's rule/boundary-derived, tightened prompt contract) matches,

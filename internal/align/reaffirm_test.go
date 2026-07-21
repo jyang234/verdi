@@ -792,3 +792,217 @@ func TestReconcileJudged_CollisionBackingBornThisRound_SuffixesEveryMember(t *te
 		}
 	}
 }
+
+// dispositionAll returns a copy of r.Findings with every finding dispositioned
+// accepted-deviation — the shape a prior round hands forward as
+// existingFindings once a human ratified a disclosed collision.
+func dispositionAll(r JudgedReconciliation) []artifact.Finding {
+	out := make([]artifact.Finding, len(r.Findings))
+	for i, f := range r.Findings {
+		f.Disposition = artifact.FindingAcceptedDeviation
+		f.Note = "owner-ratified"
+		out[i] = f
+	}
+	return out
+}
+
+// TestReconcileJudged_TruthTable is L-N13's ONE enumerating pin: one row per
+// reachable RECONCILEJUDGED cell of the finding-identity truth table documented
+// in reaffirm.go's block comment (source × id-class × prior × recurrence →
+// carry / Candidate / not-resurfaced). The DISPOSITION-VERB (decision → stamp)
+// cells are pinned by the cmd/verdi tests that comment names, not re-driven
+// here. Impossible cells are asserted as impossible where testable (a collision
+// member reworded is NOT a Candidate; a suffixed id is never a Candidate).
+func TestReconcileJudged_TruthTable(t *testing.T) {
+	dj, fj := dispositionedJudged, freshJudged
+	// The dispositioned round-1 collision output (members + CV), reused by the
+	// contract-violation rows so the CV's prior is a genuine ReconcileJudged
+	// artifact, not a hand-typed id.
+	collisionPrior := dispositionAll(ReconcileJudged([]artifact.Finding{fj("judged-dup", "alpha"), fj("judged-dup", "beta")}, nil, nil))
+
+	cases := []struct {
+		name             string
+		existingFindings []artifact.Finding
+		existingNR       []artifact.Finding
+		fresh            []artifact.Finding
+		target           string
+		wantAbsentLive   bool // target is NOT among live findings (drift / NR-only)
+		wantDisposed     bool // target live finding carries a disposition
+		wantCandidate    bool // target has a rendered Candidate
+		wantNR           []string
+	}{
+		{
+			name:   "fresh / bare / prior=none: a plain new finding",
+			fresh:  []artifact.Finding{fj("judged-new", "brand new")},
+			target: "judged-new",
+		},
+		{
+			name:             "recurring-exact / bare / live-dispositioned / byte-identical: ac-2 carry",
+			existingFindings: []artifact.Finding{dj("judged-a", "same", artifact.FindingFixed, "n")},
+			fresh:            []artifact.Finding{fj("judged-a", "same")},
+			target:           "judged-a",
+			wantDisposed:     true,
+		},
+		{
+			name:             "candidate / bare / live-dispositioned / reworded: ac-1",
+			existingFindings: []artifact.Finding{dj("judged-a", "old", artifact.FindingAcceptedDeviation, "n")},
+			fresh:            []artifact.Finding{fj("judged-a", "reworded")},
+			target:           "judged-a",
+			wantCandidate:    true,
+			wantNR:           []string{"judged-a"},
+		},
+		{
+			name:          "candidate / bare / not-resurfaced-AD / reworded: resurfaces as candidate",
+			existingNR:    []artifact.Finding{dj("judged-b", "archived", artifact.FindingAcceptedDeviation, "n")},
+			fresh:         []artifact.Finding{fj("judged-b", "reworded")},
+			target:        "judged-b",
+			wantCandidate: true,
+			wantNR:        []string{"judged-b"},
+		},
+		{
+			name:             "not-resurfaced / bare / drifted away / not reproduced: ac-3",
+			existingFindings: []artifact.Finding{dj("judged-gone", "old", artifact.FindingAcceptedDeviation, "n")},
+			fresh:            []artifact.Finding{fj("judged-other", "unrelated")},
+			target:           "judged-gone",
+			wantAbsentLive:   true,
+			wantNR:           []string{"judged-gone"},
+		},
+		{
+			name:           "not-resurfaced / bare / already-persisted / still not reproduced: persists",
+			existingNR:     []artifact.Finding{dj("judged-gone", "old", artifact.FindingAcceptedDeviation, "n")},
+			fresh:          []artifact.Finding{fj("judged-other", "still unrelated")},
+			target:         "judged-gone",
+			wantAbsentLive: true,
+			wantNR:         []string{"judged-gone"},
+		},
+		{
+			name: "collision-member / suffixed / byte-identical: carries, never a candidate",
+			existingFindings: []artifact.Finding{
+				dj("judged-dup", "alpha", artifact.FindingAcceptedDeviation, "n"),
+				dj("judged-dup-collision-2", "beta", artifact.FindingAcceptedDeviation, "n"),
+			},
+			fresh:        []artifact.Finding{fj("judged-dup", "alpha"), fj("judged-dup", "beta")},
+			target:       "judged-dup-collision-2",
+			wantDisposed: true,
+		},
+		{
+			name: "collision-member / suffixed / reordered: byte-identical SET swapped still carries",
+			existingFindings: []artifact.Finding{
+				dj("judged-dup", "alpha", artifact.FindingAcceptedDeviation, "n"),
+				dj("judged-dup-collision-2", "beta", artifact.FindingAcceptedDeviation, "n"),
+			},
+			fresh:        []artifact.Finding{fj("judged-dup", "beta"), fj("judged-dup", "alpha")}, // emission swapped
+			target:       "judged-dup-collision-2",
+			wantDisposed: true,
+		},
+		{
+			name: "collision-member / suffixed / reworded: undispositioned, NO candidate, prior to NR",
+			existingFindings: []artifact.Finding{
+				dj("judged-dup", "alpha", artifact.FindingAcceptedDeviation, "n"),
+				dj("judged-dup-collision-2", "beta", artifact.FindingAcceptedDeviation, "n"),
+			},
+			fresh:         []artifact.Finding{fj("judged-dup", "alpha"), fj("judged-dup", "beta reworded")},
+			target:        "judged-dup-collision-2",
+			wantCandidate: false,
+			wantNR:        []string{"judged-dup-collision-2"},
+		},
+		{
+			name:             "contract-violation / reserved / byte-identical: carries",
+			existingFindings: collisionPrior,
+			fresh:            []artifact.Finding{fj("judged-dup", "alpha"), fj("judged-dup", "beta")},
+			target:           "judged-contract-violation-dup",
+			wantDisposed:     true,
+		},
+		{
+			name:             "contract-violation / reserved / reworded members: CV misses, prior to NR",
+			existingFindings: collisionPrior,
+			fresh:            []artifact.Finding{fj("judged-dup", "alpha"), fj("judged-dup", "gamma")}, // beta->gamma changes the CV text
+			target:           "judged-contract-violation-dup",
+			wantCandidate:    false, // never a candidate — a fresh CV is emitted live, undispositioned
+			wantNR:           []string{"judged-contract-violation-dup", "judged-dup-collision-2"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ReconcileJudged(tc.fresh, tc.existingFindings, tc.existingNR)
+
+			live, present := findingWithID(got.Findings, tc.target)
+			if tc.wantAbsentLive {
+				if present {
+					t.Fatalf("target %q present among live findings %+v, want absent (drift / not-resurfaced only)", tc.target, got.Findings)
+				}
+			} else {
+				if !present {
+					t.Fatalf("target %q absent among live findings %+v, want present", tc.target, got.Findings)
+				}
+				if live.Dispositioned() != tc.wantDisposed {
+					t.Fatalf("target %q dispositioned=%v, want %v (finding=%+v)", tc.target, live.Dispositioned(), tc.wantDisposed, live)
+				}
+			}
+
+			if _, isCand := got.Candidates[tc.target]; isCand != tc.wantCandidate {
+				t.Fatalf("target %q Candidate=%v, want %v (Candidates=%+v)", tc.target, isCand, tc.wantCandidate, got.Candidates)
+			}
+
+			gotNR := make(map[string]bool, len(got.NotResurfaced))
+			for _, f := range got.NotResurfaced {
+				gotNR[f.ID] = true
+			}
+			if len(gotNR) != len(tc.wantNR) {
+				t.Fatalf("not-resurfaced ids = %v, want exactly %v", nrIDs(got.NotResurfaced), tc.wantNR)
+			}
+			for _, id := range tc.wantNR {
+				if !gotNR[id] {
+					t.Fatalf("not-resurfaced ids = %v, want %q present", nrIDs(got.NotResurfaced), id)
+				}
+			}
+		})
+	}
+}
+
+func nrIDs(fs []artifact.Finding) []string {
+	ids := make([]string, len(fs))
+	for i, f := range fs {
+		ids[i] = f.ID
+	}
+	return ids
+}
+
+// TestReconcileJudged_ConfirmedCollisionMemberWithBacking_DoubleNonReproductionIsLoud
+// pins the disclosed downstream residual of judged-collision-suffixed-backing-
+// shadow's fix (reaffirm.go's truth-table block comment, "DOWNSTREAM RESIDUAL").
+// Once a confirmed collision member and a distinct-content backing record share
+// one suffixed id, a round in which NEITHER text reproduces places two distinct
+// entries under that id in not-resurfaced. This is caught LOUDLY — the report's
+// own self-validation (artifact.Validate, which Generate runs) rejects a
+// duplicate not-resurfaced id — never a silent laundering; the human's cue to
+// resolve the backing record via its exit ramp once the collision clears.
+func TestReconcileJudged_ConfirmedCollisionMemberWithBacking_DoubleNonReproductionIsLoud(t *testing.T) {
+	existingFindings := []artifact.Finding{dispositionedJudged("judged-dup-collision-2", "TA confirmed member", artifact.FindingAcceptedDeviation, "n")}
+	backing := []artifact.Finding{dispositionedJudged("judged-dup-collision-2", "TB backing record", artifact.FindingAcceptedDeviation, "n")}
+	// The collision's rank-2 slot turns over entirely: neither TA nor TB reproduces.
+	fresh := []artifact.Finding{freshJudged("judged-dup", "M0 sorts first"), freshJudged("judged-dup", "TC wholly new")}
+
+	got := ReconcileJudged(fresh, existingFindings, backing)
+
+	same := 0
+	for _, f := range got.NotResurfaced {
+		if f.ID == "judged-dup-collision-2" {
+			same++
+		}
+	}
+	if same != 2 {
+		t.Fatalf("not-resurfaced = %+v, want both distinct-content priors under the shared suffixed id (the toxic shape)", got.NotResurfaced)
+	}
+	fm := &artifact.DeviationFrontmatter{
+		Schema:        "verdi.deviation/v1",
+		Covers:        strings.Repeat("a", 40),
+		Findings:      got.Findings,
+		NotResurfaced: got.NotResurfaced,
+		Digest:        "sha256:" + strings.Repeat("0", 64),
+	}
+	if err := fm.Validate(); err == nil {
+		t.Fatal("Validate accepted a duplicate not-resurfaced id — the residual must fail LOUDLY, never silently launder")
+	}
+}
