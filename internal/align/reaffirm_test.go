@@ -536,13 +536,16 @@ func TestReconcileJudged_CollisionWithBacking_CollisionClears_RegeneratesCleanly
 	}
 }
 
-// TestReconcileJudged_CollisionNoBacking_BaseMemberKeepsBareSlug pins the
-// unchanged no-backing behavior (judged-collision-backing-regeneration-drain's
-// "keep the no-backing case exactly as today"): with no backing record for the
-// slug, the first-emitted member keeps the bare slug and later members are
-// suffixed from -collision-2 — no gratuitous id churn that would break an
-// existing dispositioned base member's carry-forward.
-func TestReconcileJudged_CollisionNoBacking_BaseMemberKeepsBareSlug(t *testing.T) {
+// TestReconcileJudged_CollisionNoBacking_MinTextMemberKeepsBareSlug pins the
+// no-backing behavior after the L-N13 determinism cure (judged-collision-cv-
+// emission-order): with no backing record for the slug, the LOWEST-TEXT-RANKED
+// member keeps the bare slug and the rest are suffixed from -collision-2 by text
+// rank — never the judge's incidental emission order. Here emission order and
+// text order coincide ("first reading" < "second, different reading"), so the
+// bare/suffixed assignment is the same as the pre-cure emission scheme; the
+// swapped-order determinism the cure adds is pinned separately by
+// TestReconcileJudged_CanonicalOrdering_EmissionOrderIndependent.
+func TestReconcileJudged_CollisionNoBacking_MinTextMemberKeepsBareSlug(t *testing.T) {
 	fresh := []artifact.Finding{
 		freshJudged("judged-dup", "first reading"),
 		freshJudged("judged-dup", "second, different reading"),
@@ -555,11 +558,100 @@ func TestReconcileJudged_CollisionNoBacking_BaseMemberKeepsBareSlug(t *testing.T
 		ids[f.ID] = true
 	}
 	if !ids["judged-dup"] {
-		t.Fatalf("Findings = %+v, want the base member to keep the bare slug judged-dup (no backing record present)", got.Findings)
+		t.Fatalf("Findings = %+v, want the lowest-text member to keep the bare slug judged-dup (no backing record present)", got.Findings)
 	}
 	if !ids["judged-dup-collision-2"] {
-		t.Fatalf("Findings = %+v, want the later member suffixed -collision-2", got.Findings)
+		t.Fatalf("Findings = %+v, want the higher-text member suffixed -collision-2", got.Findings)
 	}
+}
+
+// TestReconcileJudged_CanonicalOrdering_EmissionOrderIndependent is the L-N13
+// determinism cure's headline proof (judged-collision-cv-emission-order): the
+// WHOLE collision machinery is a function of member CONTENT, never the judge's
+// incidental emission order. The SAME member set emitted in a SWAPPED order
+// must reproduce byte-identical suffixed ids AND a byte-identical
+// contract-violation text — under BOTH the no-backing and backing schemes — so
+// every prior disposition carries and nothing drains into not-resurfaced.
+//
+// Red-first (before the cure): the no-backing branch assigned the bare slug to
+// the FIRST-EMITTED member and the CV join concatenated texts in EMISSION
+// order, so a reorder flipped which member owned the bare id and changed the
+// synthetic finding's text — the exact-identity carry then missed on the
+// reshuffled members and on the CV finding, draining dispositioned priors into
+// not-resurfaced and re-opening the X-18 re-adjudication churn.
+func TestReconcileJudged_CanonicalOrdering_EmissionOrderIndependent(t *testing.T) {
+	// Emission order (A, B) but text order B < A ("alpha" < "zebra"), so a
+	// content-blind emission-order scheme would disagree with a text-rank one.
+	a := freshJudged("judged-dup", "zebra reading")
+	b := freshJudged("judged-dup", "alpha reading")
+
+	idByText := func(r JudgedReconciliation) map[string]string {
+		m := make(map[string]string)
+		for _, f := range r.Findings {
+			m[f.Text] = f.ID
+		}
+		return m
+	}
+	cvText := func(r JudgedReconciliation) string {
+		for _, f := range r.Findings {
+			if strings.HasPrefix(f.ID, "judged-contract-violation-") {
+				return f.Text
+			}
+		}
+		return ""
+	}
+
+	t.Run("no backing: ids and CV text are emission-order-independent", func(t *testing.T) {
+		fwd := ReconcileJudged([]artifact.Finding{a, b}, nil, nil)
+		rev := ReconcileJudged([]artifact.Finding{b, a}, nil, nil)
+
+		gotFwd, gotRev := idByText(fwd), idByText(rev)
+		if gotFwd["alpha reading"] != gotRev["alpha reading"] || gotFwd["zebra reading"] != gotRev["zebra reading"] {
+			t.Fatalf("id assignment differs by emission order: fwd=%v rev=%v — the bare/suffixed assignment must be text-ranked, never emission-ordered", gotFwd, gotRev)
+		}
+		if cvText(fwd) != cvText(rev) {
+			t.Fatalf("CV text differs by emission order:\n fwd=%q\n rev=%q — the join must be over canonically-sorted member texts", cvText(fwd), cvText(rev))
+		}
+	})
+
+	t.Run("backing: ids and CV text are emission-order-independent", func(t *testing.T) {
+		backing := []artifact.Finding{dispositionedJudged("judged-dup", "an old ruling", artifact.FindingAcceptedDeviation, "owner-ratified")}
+		fwd := ReconcileJudged([]artifact.Finding{a, b}, nil, backing)
+		rev := ReconcileJudged([]artifact.Finding{b, a}, nil, backing)
+
+		gotFwd, gotRev := idByText(fwd), idByText(rev)
+		if gotFwd["alpha reading"] != gotRev["alpha reading"] || gotFwd["zebra reading"] != gotRev["zebra reading"] {
+			t.Fatalf("backing id assignment differs by emission order: fwd=%v rev=%v", gotFwd, gotRev)
+		}
+		if cvText(fwd) != cvText(rev) {
+			t.Fatalf("backing CV text differs by emission order:\n fwd=%q\n rev=%q", cvText(fwd), cvText(rev))
+		}
+	})
+
+	t.Run("byte-identical set in swapped order carries every prior, drains nothing", func(t *testing.T) {
+		// Round 1 emits (A, B) and a human dispositions every member and the CV
+		// finding.
+		round1 := ReconcileJudged([]artifact.Finding{a, b}, nil, nil)
+		dispositioned := make([]artifact.Finding, len(round1.Findings))
+		for i, f := range round1.Findings {
+			f.Disposition = artifact.FindingAcceptedDeviation
+			f.Note = "owner-ratified"
+			dispositioned[i] = f
+		}
+
+		// Round 2 re-emits the SAME member set in SWAPPED order (B, A). Every
+		// member and the CV finding is a byte-identical recurrence — each must
+		// carry, nothing may drain.
+		round2 := ReconcileJudged([]artifact.Finding{b, a}, dispositioned, nil)
+		if len(round2.NotResurfaced) != 0 {
+			t.Fatalf("round2.NotResurfaced = %+v, want none — a byte-identical set re-emitted in swapped order must carry every prior, never drain", round2.NotResurfaced)
+		}
+		for _, f := range round2.Findings {
+			if !f.Dispositioned() {
+				t.Fatalf("round2 finding %s is UNDISPOSITIONED — a reordered byte-identical recurrence must carry its prior disposition", f.ID)
+			}
+		}
+	})
 }
 
 // TestReconcileJudged_CollisionBackingBornThisRound_SuffixesEveryMember is

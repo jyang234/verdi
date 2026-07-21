@@ -140,18 +140,22 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 	// dispositioned judged prior at the bare slug (existingFindings or
 	// existingNotResurfaced — the latter already covered unconditionally above).
 	// Under the no-backing scheme exactly ONE member keeps the bare id: the
-	// first-emitted (group[0]), which carryExactMatch carries the prior forward
-	// onto only if their text matches. When it does NOT, the prior is unmatched —
-	// it lands in not-resurfaced at the bare slug while a different live member
-	// sits on that same bare slug, the forbidden overlap. So mark the slug backed
-	// whenever the bare-id member would not carry the prior: every member is then
-	// suffixed and the newly-born backing record stands alone under the bare id.
+	// lowest-text-ranked member (collisionMemberIDs' text-rank-0, NOT the
+	// incidental first-emitted — L-N13's determinism contract), which
+	// carryExactMatch carries the prior forward onto only if their text matches.
+	// When it does NOT, the prior is unmatched — it lands in not-resurfaced at the
+	// bare slug while a different live member sits on that same bare slug, the
+	// forbidden overlap. So mark the slug backed whenever the bare-id member would
+	// not carry the prior: every member is then suffixed and the newly-born
+	// backing record stands alone under the bare id. Consulting the canonical
+	// min-text member (never group[0]) keeps this born-this-round decision
+	// emission-order-independent, exactly like the id assignment it guards.
 	for _, id := range order {
 		group := byID[id]
 		if len(group) < 2 {
 			continue
 		}
-		if p, ok := priorByID[id]; ok && group[0].Text != p.Text {
+		if p, ok := priorByID[id]; ok && minMemberText(group) != p.Text {
 			backingByID[id] = true
 		}
 	}
@@ -246,50 +250,59 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 	return JudgedReconciliation{Findings: out, Candidates: candidates, NotResurfaced: notResurfaced}
 }
 
+// minMemberText returns the lexicographically smallest Text among group's
+// members — the text that, under the no-backing collision scheme, lands on the
+// bare slug (collisionMemberIDs' text-rank-0 member). backingByID source (2)
+// consults it (never group[0], the incidental first-emitted member) so the
+// born-this-round backing decision is emission-order-independent, exactly like
+// the id assignment it guards (L-N13).
+func minMemberText(group []artifact.Finding) string {
+	m := group[0].Text
+	for _, f := range group[1:] {
+		if f.Text < m {
+			m = f.Text
+		}
+	}
+	return m
+}
+
 // collisionMemberIDs assigns a disambiguated id to each member of a within-run
-// slug collision (a slug 2+ fresh judged findings shared this run), branching
-// on whether the slug also owns a not-resurfaced backing record this run
-// (hasBacking). It returns the members in fresh's original emission order —
-// only their ids are rewritten — so RenderBody's finding order stays the
-// judge's own order under both schemes. artifact.CollisionInfix is the shared
-// schema seam for the reserved id shape, never duplicated across packages.
+// slug collision (a slug 2+ fresh judged findings shared this run). Every id is
+// assigned by TEXT RANK — members sorted by text, ties broken by emission index
+// (SliceStable over an identity-initialized index slice) — so the id->text
+// pairing is a function of member CONTENT, never the judge's incidental
+// emission order (L-N13's determinism contract, judged-collision-cv-emission-
+// order): a byte-identical recurrence of the same member set reproduces the
+// same ids regardless of how the judge orders its output, so each member then
+// carries its prior disposition on the frozen Kind+ID+Text rule (carryExactMatch)
+// no matter how the output was reshuffled. The returned slice stays in fresh's
+// original emission order — only ids are rewritten — so RenderBody's finding
+// order stays the judge's own under both schemes. artifact.CollisionInfix is the
+// shared schema seam for the reserved id shape, never duplicated across packages.
 //
-//   - hasBacking == false (unchanged from the original collision handling,
-//     judged-judged-slug-collision-carry): the first-emitted member keeps the
-//     bare slug and each later member becomes "<slug><CollisionInfix><n>" (n
-//     from 2, in emission order). There is no backing record on the bare slug
-//     to shadow, so keeping a live base member on it is safe and an
-//     already-dispositioned base member's id never churns.
+// hasBacking selects only WHICH ranks get suffixed, never the ranking itself:
+//
+//   - hasBacking == false (judged-judged-slug-collision-carry): the
+//     lowest-text-ranked member keeps the bare slug and each higher-ranked
+//     member becomes "<slug><CollisionInfix><n>" (n from 2, by text rank).
+//     There is no backing record on the bare slug to shadow, so keeping a live
+//     member on it is safe and — because the bare id now follows text, not
+//     emission — an already-dispositioned bare member's id never churns on a
+//     reorder.
 //
 //   - hasBacking == true (judged-collision-backing-regeneration-drain): NO
 //     member keeps the bare slug — the not-resurfaced backing record alone owns
 //     it, so the backing record's own exit ramp (cmd/verdi's disposition verb)
 //     stays reachable while the collision persists AND ReconcileJudged's
-//     id-keyed NotResurfaced rebuild can never mark the backing record
-//     resurfaced by matching a live member that merely shares its bare id.
-//     Every member is suffixed, assigned by TEXT RANK (members sorted by text,
-//     ties broken by emission index) rather than emission order, so a
-//     byte-identical recurrence of the same member set reproduces the same
-//     id->text pairing regardless of how the judge orders its output — each
-//     member then carries its prior disposition on the frozen Kind+ID+Text rule
-//     (carryExactMatch). (Disclosed edge: if a human resolves the backing
+//     NotResurfaced rebuild can never mark the backing record resurfaced by
+//     matching a live member that merely shares its bare id. Every member is
+//     suffixed by text rank. (Disclosed edge: if a human resolves the backing
 //     record between runs, hasBacking flips to false and the scheme reverts to
 //     bare-base — the affected members land undispositioned in not-resurfaced,
 //     still budget-counted, never silently dropped.)
 func collisionMemberIDs(slug string, group []artifact.Finding, hasBacking bool) []artifact.Finding {
 	out := make([]artifact.Finding, len(group))
 	copy(out, group)
-	if !hasBacking {
-		for i := range out {
-			if i > 0 {
-				out[i].ID = fmt.Sprintf("%s%s%d", slug, artifact.CollisionInfix, i+1)
-			}
-		}
-		return out
-	}
-	// Rank members by text (ties broken by emission index, via SliceStable over
-	// an identity-initialized index slice) so the id->text assignment is a
-	// function of content, never the judge's incidental emission order.
 	rank := make([]int, len(out))
 	for i := range rank {
 		rank[i] = i
@@ -298,6 +311,9 @@ func collisionMemberIDs(slug string, group []artifact.Finding, hasBacking bool) 
 		return out[rank[a]].Text < out[rank[b]].Text
 	})
 	for r, idx := range rank {
+		if !hasBacking && r == 0 {
+			continue // lowest-text member keeps the bare slug (no backing to shadow)
+		}
 		out[idx].ID = fmt.Sprintf("%s%s%d", slug, artifact.CollisionInfix, r+1)
 	}
 	return out
@@ -322,8 +338,16 @@ func contractViolationFinding(id string, group []artifact.Finding) artifact.Find
 	for i, f := range group {
 		texts[i] = f.Text
 	}
+	// Join over CANONICALLY-SORTED texts so this synthetic finding's Text is a
+	// function of the member text SET, never the judge's incidental emission
+	// order (L-N13, judged-collision-cv-emission-order). A byte-identical member
+	// set re-emitted in a swapped order then reproduces this finding
+	// byte-for-byte, and its own disposition survives via ordinary exact-identity
+	// matching (carryExactMatch) — making this function's determinism claim
+	// hold under reorder, not only under a stable emission order.
+	sort.Strings(texts)
 	return artifact.Finding{
-		ID:   "judged-contract-violation-" + strings.TrimPrefix(id, "judged-"),
+		ID:   artifact.ContractViolationIDPrefix + strings.TrimPrefix(id, "judged-"),
 		Kind: artifact.FindingJudged,
 		Text: fmt.Sprintf("judge contract violation: %d findings shared slug %q within one run — a rule/boundary-derived slug must be a stable per-finding-class identifier within a run (spec/finding-identity ac-4); texts: %s", len(group), id, strings.Join(texts, " | ")),
 	}

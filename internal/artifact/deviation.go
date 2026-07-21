@@ -2,6 +2,7 @@ package artifact
 
 import (
 	"fmt"
+	"strings"
 )
 
 const deviationSchema = "verdi.deviation/v1"
@@ -11,11 +12,37 @@ const deviationSchema = "verdi.deviation/v1"
 // within one run: a later member becomes "<slug><CollisionInfix><n>". It lives
 // here, at the shared schema seam, because it is a schema-level fact about the
 // id shapes a deviation report may legitimately carry — so the reserved literal
-// never drifts, even though ReconcileJudged (reaffirm.go, collisionMemberIDs)
-// is now its only reader: no decode-time check keys off it any longer (the
-// backing-record overlap it once relaxed is dissolved by construction —
-// judged-collision-backing-regeneration-drain).
+// never drifts across the readers that now key off it: ReconcileJudged
+// (reaffirm.go, collisionMemberIDs) mints it, Validate below relaxes its
+// same-kind not-resurfaced overlap for it (the sanctioned confirmed-collision-
+// member shape, judged-collision-suffixed-backing-shadow), and cmd/verdi's
+// disposition verb withholds live-path reaffirmation for it.
 const CollisionInfix = "-collision-"
+
+// ContractViolationIDPrefix is the reserved id prefix ReconcileJudged mints for
+// the synthetic per-slug judge-contract-violation finding it appends when a
+// slug collides (contractViolationFinding). Reserved at the shared schema seam
+// alongside CollisionInfix for the same reason: a report may legitimately carry
+// this id shape and more than one reader must agree on it byte-for-byte.
+const ContractViolationIDPrefix = "judged-contract-violation-"
+
+// IsCollisionMachineryID reports whether id was MINTED by ReconcileJudged's
+// within-run slug-collision machinery — either a suffixed collision member
+// ("<slug><CollisionInfix><n>") or the synthetic per-slug contract-violation
+// finding ("<ContractViolationIDPrefix><slug>"). Such an id NEVER carried a
+// rendered reaffirmation Candidate (ReconcileJudged pre-fills a Candidate only
+// for a single fresh finding under a bare slug, never for any collision output,
+// ac-4), so the disposition verb must never resolve+stamp a same-id backing
+// record through the live path for it (L-N13, judged-collision-suffixed-backing-
+// shadow), and Validate legitimately permits such an id to be dispositioned in
+// findings: while a distinct-content backing record persists in not-resurfaced:.
+// The ContractViolationIDPrefix arm treats that prefix as reserved: a (rare,
+// prompt-discouraged) real judged slug of that literal shape fails CLOSED here
+// (no live-path reaffirmation), the safe direction — it never mints unearned
+// provenance.
+func IsCollisionMachineryID(id string) bool {
+	return strings.Contains(id, CollisionInfix) || strings.HasPrefix(id, ContractViolationIDPrefix)
+}
 
 // FindingKind tags a deviation finding as computed (regenerated graph/
 // contract diff) or judged (the alignment subagent's semantic reading)
