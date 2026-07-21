@@ -145,7 +145,39 @@ func checkClosureEligible(ctx context.Context, root string, spec *artifact.SpecF
 	// bricking the gate operationally, so the exact stale-poisoned-bundle
 	// debris X-15 leaves reads as WHY, not as a hard fail.
 	cond.Extra = append(cond.Extra, undecodableDisclosures(undecodable)...)
+	// P2-10b: a kept-but-unprovable record — its provenance could not be proven
+	// reachable because this checkout is shallow — is counted (the AC it
+	// evidences is met), so quarantineDisclosures (which speaks only to UNMET
+	// ACs) never names it. Disclose it here so the closure run states that
+	// evidence rests on an ancestry a shallow checkout cannot prove, rather
+	// than counting it silently (constitution 2). It is NEVER excluded
+	// (exclusion requires proof), so this changes no verdict — legibility only.
+	unprovable, uErr := evidence.UnprovableRecords(ctx, root, derivedRoot, head)
+	if uErr != nil {
+		return gateCondition{}, fmt.Errorf("closure gate: %w", uErr)
+	}
+	cond.Extra = append(cond.Extra, unprovableDisclosures(unprovable)...)
 	return cond, nil
+}
+
+// unprovableDisclosures renders one disclosed-unproven line per (kept-but-
+// unprovable record, AC it evidences) pair (P2-10b): a record LoadRecords
+// counts although its provenance.commit could not be proven reachable from
+// HEAD because this checkout is shallow. Unlike quarantineDisclosures (unmet
+// ACs only), these ACs are typically MET — the record was counted — so this is
+// the only surface that names the unprovable ancestry the eligibility verdict
+// now rests on, keeping the count from passing silently (constitution 2). It
+// changes no verdict: the record is kept either way; a full-history checkout
+// would prove it outright.
+func unprovableDisclosures(unprovable []artifact.Evidence) []string {
+	var lines []string
+	for _, rec := range unprovable {
+		for _, ac := range rec.EvidenceFor {
+			text := fmt.Sprintf("a %s record (witness %q) evidencing %s was counted, but its provenance.commit %s could not be proven reachable from HEAD: this checkout is shallow, and shallow history cannot prove reachability — a full-history checkout proves it", rec.Kind, rec.Witness, ac, rec.Provenance.Commit)
+			lines = append(lines, disclosure.Render(disclosure.New("gate:evidence-unprovable", ac, text)))
+		}
+	}
+	return lines
 }
 
 // undecodableDisclosures renders one disclosed-unproven line per record file

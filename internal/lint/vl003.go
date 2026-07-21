@@ -152,6 +152,13 @@ func (vl003) checkLink(l artifact.Link, path, field string, snap *Snapshot, exte
 // frozen.commit check now uses (internal/lint/vl009.go) — folding "does not
 // exist at all" and "exists but unreachable" into the same honest false,
 // closing X-11b's hole from VL-003's own git predicate too.
+//
+// P2-10b: like VL-009's frozen.commit check, this renders
+// gitx.UnprovableShallow (a would-be-negative in a shallow checkout, where a
+// real ancestor can sit beyond the horizon and read as absent) as a
+// disclosed-unproven NOTICE (SeverityDisclosure: printed, exit-0) rather than
+// a red — shallow history cannot prove unreachability. locusAll leaves that
+// disclosure's wall locus nil so it never renders as a board badge.
 func (r vl003) checkPin(in *RunInput, path, field, pinned string) []Finding {
 	var findings []Finding
 	ref, err := artifact.ParsePinnedRef(pinned)
@@ -163,10 +170,19 @@ func (r vl003) checkPin(in *RunInput, path, field, pinned string) []Finding {
 	if _, ok := in.Snapshot.ByRef[unpinned]; !ok {
 		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q names %q, which does not resolve in the committed zone", field, pinned, unpinned)})
 	}
-	ok, err := gitx.ReachableFromHEAD(in.Ctx, in.Root, ref.Commit, "HEAD")
-	if err != nil {
+	reach, err := gitx.ReachableFromHEAD(in.Ctx, in.Root, ref.Commit, "HEAD")
+	switch {
+	case err != nil:
 		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q: checking commit %s: %v", field, pinned, ref.Commit, err)})
-	} else if !ok {
+	case reach == gitx.Reachable:
+		// Proven reachable — no finding.
+	case reach == gitx.UnprovableShallow:
+		// P2-10b: same asymmetric honesty as VL-009's frozen.commit check —
+		// a shallow checkout cannot prove the pinned commit unreachable, so
+		// disclose (SeverityDisclosure: printed, never flips the exit) rather
+		// than red a pin whose real ancestor merely sits beyond the horizon.
+		findings = append(findings, Finding{Rule: "VL-003", Path: path, Severity: SeverityDisclosure, Message: fmt.Sprintf("%s %q pins commit %s, which could not be proven reachable from HEAD: this checkout is shallow (git rev-parse --is-shallow-repository = true), and shallow history cannot prove unreachability. A full-history checkout proves it.", field, pinned, ref.Commit)})
+	default: // gitx.Unreachable — a full checkout's absence IS proof.
 		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("%s %q pins commit %s, which is not reachable from HEAD in this repository's history", field, pinned, ref.Commit)})
 	}
 	return findings

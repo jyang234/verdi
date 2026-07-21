@@ -86,13 +86,18 @@ func classifyUndecodableKeys(undecodable []string) (perSpec, other []string) {
 // record file that actually contains at least one newly-quarantined
 // record is re-encoded (canonical JSON per CLAUDE.md).
 //
-// It returns the total number of records quarantined across the whole tree
-// and the keys of any fetched record file that failed strict decode, for the
-// caller's own disclosure lines. gitx.ReachableFromHEAD folds both "the
-// commit does not exist at all" and "the commit exists but no ref reaches
-// it" into an honest false, never an error — the exact X-15 hard-fail this
-// story closes; only a genuine operational failure (root is not a git
-// repository at all, or a re-encode fails) surfaces as an error here.
+// It returns the count of records quarantined across the whole tree, the
+// count left UN-quarantined because this checkout is shallow (P2-10b), and the
+// keys of any fetched record file that failed strict decode — all for the
+// caller's own disclosure lines. gitx.ReachableFromHEAD is three-valued: it
+// folds "the commit does not exist at all" and "exists but no ref reaches it"
+// into gitx.Unreachable (the record is quarantined — the exact X-15 hard-fail
+// this story closes), while a would-be-negative in a SHALLOW checkout is
+// gitx.UnprovableShallow — NOT quarantined, because shallow history cannot
+// prove unreachability and honest evidence is never dropped on an unprovable
+// ancestry (only counted for disclosure). Only a genuine operational failure
+// (root is not a git repository at all, or a re-encode fails) surfaces as an
+// error here.
 //
 // spec/evidence-resilience finding 3: an undecodable fetched verdicts.json/
 // runtime.json is quarantined-by-default — its key is returned in
@@ -106,7 +111,7 @@ func classifyUndecodableKeys(undecodable []string) (perSpec, other []string) {
 // a file via directory reachability, and the closure gate's disclosure pass
 // (evidence.QuarantinedRecords) surfaces it as undecodable — the same
 // non-fatal posture the fold/disclosure side applies to quarantined data.
-func quarantineUnreachable(ctx context.Context, root string, tree forge.DerivedTree, headCommit string) (quarantined int, undecodable []string, err error) {
+func quarantineUnreachable(ctx context.Context, root string, tree forge.DerivedTree, headCommit string) (quarantined int, unprovableShallow int, undecodable []string, err error) {
 	recordFile := make(map[string]bool, len(evidence.RecordFileNames))
 	for _, name := range evidence.RecordFileNames {
 		recordFile[name] = true
@@ -119,6 +124,7 @@ func quarantineUnreachable(ctx context.Context, root string, tree forge.DerivedT
 	sort.Strings(keys) // deterministic scan/quarantine order
 
 	total := 0
+	unprovable := 0
 	for _, key := range keys {
 		if !recordFile[filepath.Base(key)] {
 			continue
@@ -144,13 +150,22 @@ func quarantineUnreachable(ctx context.Context, root string, tree forge.DerivedT
 			if records[i].Provenance.Commit == headCommit {
 				continue
 			}
-			reachable, rerr := gitx.ReachableFromHEAD(ctx, root, records[i].Provenance.Commit, headCommit)
+			reach, rerr := gitx.ReachableFromHEAD(ctx, root, records[i].Provenance.Commit, headCommit)
 			if rerr != nil {
-				return total, undecodable, fmt.Errorf("sync: checking reachability of %s (from %s): %w", records[i].Provenance.Commit, key, rerr)
+				return total, unprovable, undecodable, fmt.Errorf("sync: checking reachability of %s (from %s): %w", records[i].Provenance.Commit, key, rerr)
 			}
-			if reachable {
+			switch reach {
+			case gitx.Reachable:
+				continue // proven reachable — nothing to quarantine
+			case gitx.UnprovableShallow:
+				// P2-10b: this checkout is shallow, so a would-be "not reachable"
+				// is not proof — never quarantine honest evidence on it. Leave
+				// the record byte-for-byte untouched (as if reachable) and count
+				// it for the caller's disclosure notice.
+				unprovable++
 				continue
 			}
+			// gitx.Unreachable — proven gone (its source branch was deleted).
 			records[i].Quarantine = &artifact.EvidenceQuarantine{
 				Reason: fmt.Sprintf("provenance.commit %s is not reachable from %s at sync time (its source branch has likely since been deleted)", records[i].Provenance.Commit, headCommit),
 			}
@@ -161,10 +176,10 @@ func quarantineUnreachable(ctx context.Context, root string, tree forge.DerivedT
 		}
 		data, merr := canonjson.Marshal(records)
 		if merr != nil {
-			return total, undecodable, fmt.Errorf("sync: re-encoding %s after quarantine: %w", key, merr)
+			return total, unprovable, undecodable, fmt.Errorf("sync: re-encoding %s after quarantine: %w", key, merr)
 		}
 		tree[key] = data
 		total += quarantinedHere
 	}
-	return total, undecodable, nil
+	return total, unprovable, undecodable, nil
 }
