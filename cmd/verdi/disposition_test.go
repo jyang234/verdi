@@ -1262,3 +1262,90 @@ func TestRunDisposition_NotResurfacedOnly_ExitRamp(t *testing.T) {
 		assertUnchanged(t, path, before)
 	})
 }
+
+// TestRunDisposition_NotResurfacedReversal_NoStampNamesLineage is
+// spec/finding-identity judged-not-resurfaced-reversal-carried-from's fix
+// proof: the not-resurfaced exit ramp mirrors the live candidate path's
+// carried-from symmetry. A prior FIXED ruling that stops reproducing lands in
+// not-resurfaced (ReconcileJudged persists any dispositioned prior, fixed
+// included); running the exit ramp with accepted-deviation on it is a REVERSAL
+// of the standing ruling, made with no resurfaced text to judge — a contrary
+// new ruling, never a confirmed reaffirmation. It must record WITHOUT a
+// carried-from stamp and name the prior-ruling lineage in its output, so a
+// reversal is never dressed as a confirmation. A true reaffirmation (was
+// accepted-deviation -> accepted-deviation) still carries today's stamp.
+//
+// Red-first (before the fix): dispositionNotResurfaced stamped carried-from on
+// EVERY accepted-deviation decision without comparing oldEntry.Disposition, so
+// the reversal was mislabeled "reaffirmed" and stamped with ac-2's
+// reaffirmation provenance — misrepresenting a contrary ruling as a confirmed
+// reaffirmation of the old one.
+func TestRunDisposition_NotResurfacedReversal_NoStampNamesLineage(t *testing.T) {
+	bin := buildVerdiBinary(t)
+
+	t.Run("reversal (was fixed -> accepted-deviation): no stamp, names the lineage", func(t *testing.T) {
+		notResurfaced := []artifact.Finding{
+			{ID: "judged-x", Kind: artifact.FindingJudged, Text: "a prior fixed ruling that stopped reproducing", Disposition: artifact.FindingFixed, Note: "fixed last pass"},
+		}
+		root := writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, nil, notResurfaced, nil))
+		path := reportPathFor(root, "demo")
+
+		// Budget starts at 0 — a fixed entry is not an accepted deviation.
+		if got := budgetAcceptedDeviationCount(t, path); got != 0 {
+			t.Fatalf("budget before = %d, want 0 (the sole entry is fixed)", got)
+		}
+
+		stdout, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "judged-x", "accepted-deviation", "--rationale", "on reflection this is a standing deviation, not fixed")
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr)
+		}
+		t.Logf("reversal stdout: %s", strings.TrimRight(stdout, "\n"))
+
+		after := decodeReportFile(t, path)
+		f, ok := findingByID(after.NotResurfaced, "judged-x")
+		if !ok {
+			t.Fatalf("judged-x must STAY in not-resurfaced after a reversal to accepted-deviation: %+v", after.NotResurfaced)
+		}
+		if f.Disposition != artifact.FindingAcceptedDeviation {
+			t.Fatalf("Disposition = %q, want accepted-deviation (the human's new ruling)", f.Disposition)
+		}
+		// The reversal is NOT a reaffirmation — no carried-from stamp, symmetric
+		// with the live path's "a decision that DIFFERS is never stamped".
+		if f.CarriedFrom != "" {
+			t.Fatalf("CarriedFrom = %q, want empty — a reversal (was fixed) is a contrary ruling, never a confirmed reaffirmation", f.CarriedFrom)
+		}
+		// The output line names the prior ruling and the reversal at the covering
+		// head, verbatim — a contrary ruling is never dressed as a confirmation.
+		wantLine := "disposition: reversed spec/demo judged-x (not-resurfaced): was fixed, reversed to accepted-deviation at " + dispositionFixtureCovers + " -> on reflection this is a standing deviation, not fixed"
+		if got := strings.TrimRight(stdout, "\n"); got != wantLine {
+			t.Fatalf("reversal output line =\n  %q\nwant\n  %q", got, wantLine)
+		}
+		// The reversal is now counted in the accepted-deviation budget (it stays,
+		// as an accepted deviation) — exactly one identity.
+		if got := budgetAcceptedDeviationCount(t, path); got != 1 {
+			t.Fatalf("budget after reversal = %d, want 1 (the reversed entry, now an accepted deviation, stays counted)", got)
+		}
+	})
+
+	t.Run("true reaffirmation (was accepted-deviation -> accepted-deviation): keeps today's stamp", func(t *testing.T) {
+		notResurfaced := []artifact.Finding{
+			{ID: "judged-y", Kind: artifact.FindingJudged, Text: "a standing accepted deviation", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified"},
+		}
+		root := writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, nil, notResurfaced, nil))
+		path := reportPathFor(root, "demo")
+
+		stdout, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "judged-y", "accepted-deviation", "--rationale", "still a standing deviation")
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr)
+		}
+
+		after := decodeReportFile(t, path)
+		f, ok := findingByID(after.NotResurfaced, "judged-y")
+		if !ok || f.CarriedFrom != dispositionFixtureCovers {
+			t.Fatalf("judged-y = %+v (present=%v), want carried-from stamped %q — a confirmed reaffirmation keeps today's stamp", f, ok, dispositionFixtureCovers)
+		}
+		if !strings.Contains(stdout, "reaffirmed") {
+			t.Fatalf("stdout = %q, want it to name the reaffirmation (never a reversal)", stdout)
+		}
+	})
+}

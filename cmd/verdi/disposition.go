@@ -425,13 +425,19 @@ func commitDisposition(reportPath string, raw []byte, updated *artifact.Deviatio
 //   - fixed: the human affirms the underlying issue is genuinely resolved.
 //     The entry is REMOVED, releasing its identity from the budget — never
 //     zero from the judge's silence, but one by the human's own signature.
-//   - accepted-deviation: the human RE-AFFIRMS the standing deviation without
-//     resurfacing it. The rationale is updated in place, carried-from:
-//     <covers-sha> is stamped (ac-2's reaffirmation provenance, symmetric with
-//     the candidate path — judged-not-resurfaced-reaffirm-provenance), and the
-//     entry STAYS, so it STAYS COUNTED in the budget — a re-affirmation is never
-//     a release. A `fixed` release, by contrast, is never a reaffirmation and
-//     carries no such stamp.
+//   - accepted-deviation: the entry STAYS, so it STAYS COUNTED in the budget —
+//     never a release. carried-from provenance is symmetric with the live
+//     candidate path (judged-not-resurfaced-reversal-carried-from), stamped
+//     ONLY when the decision equals the standing ruling. Was accepted-deviation
+//     -> accepted-deviation is a confirmed REAFFIRMATION at the current covering
+//     head — carried-from: <covers-sha> is stamped (ac-2's reaffirmation
+//     provenance, judged-not-resurfaced-reaffirm-provenance). Was fixed ->
+//     accepted-deviation is a REVERSAL of the standing ruling, made with no
+//     resurfaced text to judge — a contrary new ruling, never a reaffirmation:
+//     NO stamp (mirroring the live path's "a decision that DIFFERS is never
+//     stamped"), and the prior-ruling lineage is named in the output line so a
+//     contrary ruling is never dressed as a confirmation. A `fixed` release, by
+//     contrast, is never a reaffirmation and carries no such stamp.
 //
 // --amend is a live-findings collision guard (undispositioned vs. already-
 // dispositioned) and has no meaning here: a not-resurfaced entry is by
@@ -451,13 +457,14 @@ func dispositionNotResurfaced(reportPath string, raw []byte, decoded *artifact.D
 	updated := *decoded
 	var newBody string
 	var n int
-	var action string
+	var action, detail string
 
 	switch decision {
 	case artifact.FindingFixed:
 		// Human-sanctioned release: drop the entry entirely.
 		updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
 		action = "released"
+		detail = fmt.Sprintf("%s -> %s", decision, rationale)
 		if len(updated.NotResurfaced) == 0 {
 			// The section is now empty — substitute renderNotResurfaced's own
 			// "(none)" placeholder so the body stays byte-identical to a fresh
@@ -467,24 +474,36 @@ func dispositionNotResurfaced(reportPath string, raw []byte, decoded *artifact.D
 			newBody, n = removeWholeLine(body, oldLine)
 		}
 	case artifact.FindingAcceptedDeviation:
-		// Re-affirm in place: update the rationale, keep it counted, and stamp
-		// carried-from: <covers-sha> (judged-not-resurfaced-reaffirm-provenance).
-		// This IS a confirmed reaffirmation of the standing ruling at the current
-		// covering head, so ac-2's "a confirmed reaffirmation carries carried-from:
-		// <covers-sha> on the disposition" applies here exactly as it does on the
-		// candidate path (runDisposition's live reaffirmation) — otherwise an
-		// in-place reaffirmation would be indistinguishable from an entry never
-		// re-confirmed, an asymmetry the reaffirmation clause does not sanction.
-		// carried-from is frontmatter-only provenance (RenderNotResurfacedLine
-		// omits it, like RenderFindingLine) and excluded from the report digest,
-		// so the body patch and every VerifyDigest stay unaffected.
+		// The entry stays counted; carried-from is symmetric with the live
+		// candidate path — stamped ONLY when the decision equals the standing
+		// ruling (judged-not-resurfaced-reversal-carried-from). carried-from is
+		// frontmatter-only provenance (RenderNotResurfacedLine omits it, like
+		// RenderFindingLine) and excluded from the report digest, so the body patch
+		// and every VerifyDigest stay unaffected either way.
 		updated.NotResurfaced = append([]artifact.Finding(nil), decoded.NotResurfaced...)
 		reaffirmed := oldEntry
 		reaffirmed.Disposition = artifact.FindingAcceptedDeviation
 		reaffirmed.Note = rationale
-		reaffirmed.CarriedFrom = decoded.Covers
+		if decision == oldEntry.Disposition {
+			// was accepted-deviation -> accepted-deviation: a confirmed
+			// REAFFIRMATION of the standing ruling at the current covering head —
+			// ac-2's reaffirmation provenance applies exactly as on the candidate
+			// path, otherwise a re-confirmed entry would be indistinguishable from
+			// one never re-confirmed.
+			reaffirmed.CarriedFrom = decoded.Covers
+			action = "reaffirmed"
+			detail = fmt.Sprintf("%s -> %s", decision, rationale)
+		} else {
+			// was fixed -> accepted-deviation: a REVERSAL, not a reaffirmation. No
+			// stamp (mirroring the live path's differing-decision guard); its absence
+			// is the durable frontmatter signal that this is not a confirmed
+			// reaffirmation. The prior-ruling lineage is named in the output line so a
+			// contrary ruling is never dressed as a confirmation.
+			reaffirmed.CarriedFrom = ""
+			action = "reversed"
+			detail = fmt.Sprintf("was %s, reversed to %s at %s -> %s", oldEntry.Disposition, decision, decoded.Covers, rationale)
+		}
 		updated.NotResurfaced[nrIdx] = reaffirmed
-		action = "reaffirmed"
 		newBody, n = replaceWholeLine(body, oldLine, align.RenderNotResurfacedLine(reaffirmed))
 	}
 
@@ -508,7 +527,7 @@ func dispositionNotResurfaced(reportPath string, raw []byte, decoded *artifact.D
 		return rc
 	}
 
-	fmt.Fprintf(stdout, "disposition: %s %s %s (not-resurfaced): %s -> %s\n", action, ref.String(), oldEntry.ID, decision, rationale)
+	fmt.Fprintf(stdout, "disposition: %s %s %s (not-resurfaced): %s\n", action, ref.String(), oldEntry.ID, detail)
 	return 0
 }
 
