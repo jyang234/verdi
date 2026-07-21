@@ -407,6 +407,87 @@ bindings:
 	}
 }
 
+// TestVL003_RootBindings_BrokenOwnerSpec_TypoFragmentAC_BothRed is
+// spec/ritual-traps judged-ac4-broken-owning-spec-ref-masks-fragment-typos:
+// the COMBINED shape a broken owning `spec:` ref + a typo'd fragment-qualified
+// entry make together. checkOneBindingsFile used to return immediately after
+// the "spec %q does not resolve" finding, skipping EVERY AC entry — but a
+// fragment-qualified entry's validation per ac-4 depends only on its NAMED
+// target spec, not on the file's own primary `spec:` at all. So a root
+// verdi.bindings.yaml whose owner ref is broken (here an unauthored owner
+// spec, the same honest false a typo'd or archived owner ref yields) hid every
+// typo'd fragment AC id behind the single owning-ref finding: lint reds, but
+// not BY NAME on the fragment entry, and fixing the owner would reveal a
+// second red the author was never told about. ac-4's promise — "a typo'd AC id
+// inside a fragment-qualified entry reds lint by name" — silently narrowed to
+// "only while the file's unrelated primary spec ref is healthy". Before the
+// fix this combined shape produced ONE finding (owning-ref only); after, it
+// produces TWO — the owning-ref AND the fragment entry, named independently.
+func TestVL003_RootBindings_BrokenOwnerSpec_TypoFragmentAC_BothRed(t *testing.T) {
+	dir := t.TempDir()
+	// The fragment's NAMED target IS authored (declares only ac-1). The
+	// bindings file's OWN owner spec (spec/vl-003-nonexistent-owner) is NOT
+	// authored — a well-formed `spec:` ref that does not resolve, standing in
+	// for the typo'd-owner / archived-owner class the finding describes.
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-fragment-target", "spec.md"), vl003FragmentTargetSpecMD)
+	writeTestFile(t, filepath.Join(dir, "verdi.bindings.yaml"), `schema: verdi.bindings/v1
+spec: spec/vl-003-nonexistent-owner
+bindings:
+  - { producer: some-producer, kind: static, acs: ["spec/vl-003-fragment-target#ac-9"] }
+`)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-003")
+	if len(findings) != 2 {
+		t.Fatalf("got %d findings, want 2 (the broken owning-ref AND the typo'd fragment entry named independently — the fragment must not hide behind the owning-ref):\n%s", len(findings), findingsString(findings))
+	}
+
+	var sawOwnerRef, sawFragmentByName bool
+	for _, f := range findings {
+		if strings.Contains(f.Message, `spec "spec/vl-003-nonexistent-owner" does not resolve to a spec in the committed zone`) {
+			sawOwnerRef = true
+		}
+		// The fragment must red BY NAME against its own target spec — not the
+		// owning spec, which does not even resolve.
+		if strings.Contains(f.Message, "spec/vl-003-fragment-target#ac-9") &&
+			strings.Contains(f.Message, `"spec/vl-003-fragment-target" does not declare`) {
+			sawFragmentByName = true
+		}
+	}
+	if !sawOwnerRef {
+		t.Errorf("want a finding naming the broken owning spec ref; got:\n%s", findingsString(findings))
+	}
+	if !sawFragmentByName {
+		t.Errorf("want the typo'd fragment entry to red BY NAME against its target spec (unnarrowed by the broken owner); got:\n%s", findingsString(findings))
+	}
+}
+
+// TestVL003_RootBindings_BrokenOwnerSpec_BareAC_StaysMasked is the companion
+// discipline for judged-ac4-broken-owning-spec-ref-masks-fragment-typos:
+// validating fragment entries independently must NOT also un-mask bare ones. A
+// bare ac-<slug> entry genuinely resolves against bindings.Spec, so when that
+// owner is broken it stays masked behind the single owning-ref finding rather
+// than spawning a redundant per-entry "target spec does not resolve" copy —
+// exactly one finding, never two. (This guards against the naive over-fix that
+// simply deletes the early return without keeping bare entries skipped.)
+func TestVL003_RootBindings_BrokenOwnerSpec_BareAC_StaysMasked(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "verdi.bindings.yaml"), `schema: verdi.bindings/v1
+spec: spec/vl-003-nonexistent-owner
+bindings:
+  - { producer: some-producer, kind: static, acs: [ac-99] }
+`)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-003")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want exactly 1 (only the broken owning-ref; a bare entry against a broken owner must not spawn a redundant per-entry finding):\n%s", len(findings), findingsString(findings))
+	}
+	if !strings.Contains(findings[0].Message, `spec "spec/vl-003-nonexistent-owner" does not resolve`) {
+		t.Errorf("finding = %q, want the single finding to be the broken owning-ref", findings[0].Message)
+	}
+}
+
 // TestVL003_RootBindings_PinnedFragmentAC_RedsFailClosed is spec/ritual-traps
 // judged-ac4-pinned-fragment-entry-silently-unpinned: a fragment-qualified
 // entry that ALSO pins a revision (spec/<name>@<commit>#<ac-id>) must red —

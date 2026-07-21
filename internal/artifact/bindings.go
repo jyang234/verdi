@@ -42,7 +42,7 @@ func (b Binding) Validate() error {
 		return fmt.Errorf("artifact: binding %q declares no ACs", b.Producer)
 	}
 	for _, ac := range b.ACs {
-		if acIDRe.MatchString(ac) {
+		if IsBareACEntry(ac) {
 			continue
 		}
 		if ref, err := ParseRef(ac); err == nil && ref.Kind == KindSpec && ref.Fragment() {
@@ -51,6 +51,19 @@ func (b Binding) Validate() error {
 		return fmt.Errorf("artifact: binding %q: ac entry %q must be a bare ac-<slug> id or a spec/<name>#<ac-id> fragment ref", b.Producer, ac)
 	}
 	return nil
+}
+
+// IsBareACEntry reports whether a Binding.ACs entry is the bare ac-<slug>
+// form — the form that resolves against the owning Bindings.Spec — rather than
+// the fragment-qualified spec/<name>#<ac-id> form, which names its own target
+// spec and resolves independently of any owning spec (see ResolveBindingAC).
+// It is the single classifier both Binding.Validate and ResolveBindingAC use
+// to tell the two forms apart, exported so consumers that must treat the legs
+// differently — e.g. internal/lint VL-003, which still validates a
+// fragment-qualified entry even when a file's own owning `spec:` ref does not
+// resolve — classify them identically rather than re-deriving the shape test.
+func IsBareACEntry(entry string) bool {
+	return acIDRe.MatchString(entry)
 }
 
 // ResolveBindingAC resolves one Binding.ACs entry against defaultSpecRef
@@ -75,7 +88,7 @@ func (b Binding) Validate() error {
 // the pin is rejected, not silently ignored, so both consumers (internal/lint
 // VL-003 and cmd/verdi/selfevidence) stay fail-closed.
 func ResolveBindingAC(defaultSpecRef, entry string) (specRef, acID string, err error) {
-	if acIDRe.MatchString(entry) {
+	if IsBareACEntry(entry) {
 		ref, err := ParseRef(defaultSpecRef)
 		if err != nil {
 			return "", "", fmt.Errorf("artifact: resolving bare ac entry %q: default spec ref %q: %w", entry, defaultSpecRef, err)

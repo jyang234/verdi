@@ -232,13 +232,30 @@ const rootBindingsDisplayPath = "verdi.bindings.yaml (root)"
 func (vl003) checkOneBindingsFile(in *RunInput, path string, bindings *artifact.Bindings) []Finding {
 	var findings []Finding
 
-	if _, ok := in.Snapshot.ByRef[bindings.Spec]; !ok {
+	_, owningResolves := in.Snapshot.ByRef[bindings.Spec]
+	if !owningResolves {
+		// The file's own primary/owning spec does not resolve. Report it once,
+		// but do NOT abandon the AC loop below: a fragment-qualified entry
+		// (spec/<name>#<ac-id>) validates against its own NAMED target spec and
+		// never touches bindings.Spec at all (spec/ritual-traps ac-4), so a
+		// typo'd fragment AC id must still red BY NAME here rather than hide
+		// behind this owning-ref finding until the owner is fixed
+		// (judged-ac4-broken-owning-spec-ref-masks-fragment-typos). Only bare
+		// ac-<slug> entries genuinely inherit bindings.Spec as their target;
+		// they are skipped in the loop, so this finding is not multiplied into
+		// one redundant per-bare-entry copy each.
 		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("spec %q does not resolve to a spec in the committed zone", bindings.Spec)})
-		return findings
 	}
 
 	for _, b := range bindings.Bindings {
 		for _, entry := range b.ACs {
+			if !owningResolves && artifact.IsBareACEntry(entry) {
+				// A bare entry's target IS the (unresolvable) owning spec,
+				// already reported above; validating it would only duplicate
+				// that finding. Fragment-qualified entries fall through and are
+				// validated against their own named spec regardless.
+				continue
+			}
 			specRef, acID, err := artifact.ResolveBindingAC(bindings.Spec, entry)
 			if err != nil {
 				// Reached by a fragment entry that also pins a revision (the

@@ -121,6 +121,38 @@ func TestResolveBindingAC_UnpinnedFragment_Unchanged(t *testing.T) {
 	}
 }
 
+// TestIsBareACEntry is the shared bare-vs-fragment classifier both
+// Binding.Validate and ResolveBindingAC route through, and internal/lint
+// VL-003 uses to decide which entries survive a broken owning `spec:` ref
+// (spec/ritual-traps judged-ac4-broken-owning-spec-ref-masks-fragment-typos):
+// only a bare ac-<slug> id is bare; every fragment-qualified or malformed form
+// is not.
+func TestIsBareACEntry(t *testing.T) {
+	cases := []struct {
+		entry string
+		want  bool
+	}{
+		{"ac-1", true},
+		{"ac-99", true},
+		{"ac-multi-part-slug", true},
+		{"spec/vl-003-fragment-target#ac-1", false},
+		{"spec/vl-003-fragment-target@0123456789abcdef0123456789abcdef01234567#ac-1", false},
+		{"spec/close-verb", false},
+		{"not-an-ac", false},
+		{"AC-1", false},
+		{"ac-", false},
+		{"ac-1-", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.entry, func(t *testing.T) {
+			if got := IsBareACEntry(tc.entry); got != tc.want {
+				t.Fatalf("IsBareACEntry(%q) = %v, want %v", tc.entry, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDecodeBindings_Negative(t *testing.T) {
 	cases := []struct {
 		name string
