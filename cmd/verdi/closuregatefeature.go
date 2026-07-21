@@ -347,6 +347,18 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 		storiesUnioned++
 	}
 
+	// Display resolution (L-M13(1), nil-safe): the class/state words resolve
+	// through the model exactly as the tally does — a store's rename is cosmetic;
+	// the ids/counts stay identity. Resolved up here so the superseded-exclusion
+	// lines below route their own vocabulary (the "superseded" state, the "story"
+	// class) through the same chain rather than baking bare vocabulary into a
+	// production literal (spec/vocabulary-surfaces, ledger L-M13a(6)). For the
+	// default vocabulary this reproduces L-N12's verbatim line.
+	featureWord := mdl.DisplayClass("feature")
+	storyWord := mdl.DisplayClass("story")
+	closedWord := mdl.DisplayState("story", "closed")
+	supersededWord := mdl.DisplayState("story", "superseded")
+
 	// Superseded implementing stories (L-N12, judged-feature-union-superseded-
 	// story-archive): discoverImplementingStories already excluded these from
 	// `stories` (D-16), so their archived deviations never entered the union
@@ -379,19 +391,15 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 			continue
 		}
 		supersededExtra = append(supersededExtra, fmt.Sprintf(
-			"       superseded story %s's archived report (%d accepted-deviation(s)) excluded — supersession is the spec-stale budget's own prescribed remedy, taken",
-			ref, n))
+			"       %s %s %s's archived report (%d accepted-deviation(s)) excluded — supersession is the spec-stale budget's own prescribed remedy, taken",
+			supersededWord, storyWord, ref, n))
 	}
 
-	// Display resolution (L-M13(1), nil-safe): the class/state words resolve;
-	// the ids/counts stay identity. The union tally rides EVERY verdict of this
-	// condition (Extra, printed regardless of branch), so a PASSing gate shows
-	// how many archives fed the union, not only a failing one
-	// (judged-feature-union-missing-archive-silent-zero). The superseded-exclusion
-	// lines (L-N12) ride the same Extra so they too show on every verdict.
-	featureWord := mdl.DisplayClass("feature")
-	storyWord := mdl.DisplayClass("story")
-	closedWord := mdl.DisplayState("story", "closed")
+	// The union tally rides EVERY verdict of this condition (Extra, printed
+	// regardless of branch), so a PASSing gate shows how many archives fed the
+	// union, not only a failing one (judged-feature-union-missing-archive-silent-
+	// zero). The superseded-exclusion lines (L-N12) ride the same Extra so they
+	// too show on every verdict.
 	tally := fmt.Sprintf("       [union over the %s's own report + %d %s implementing %s archive(s)]",
 		featureWord, storiesUnioned, closedWord, storyWord)
 	extra := append([]string{tally}, supersededExtra...)
