@@ -311,7 +311,13 @@ rows:
     section: "12"
     capability: "MCP model-aware vocabulary"
     status: INVENTED
-    cite: "docs/design/plans/2026-07-17-extensibility-chronicle.md#12's model-aware vocabulary"
+    # Repointed from the chronicle's P2-6 prose (line "...12's model-aware
+    # vocabulary, 11's parenthetical judge..."), which only MENTIONED this
+    # capability mid-sentence rather than declaring an entry for it — a
+    # prose-accident cite the entry-anchored resolution check surfaced. Now
+    # cites the phase-2 design's disclosed out-of-scope heading, the same
+    # genuine entry its INVENTED siblings (8.2, 9.3, 9.4, 9.5) name.
+    cite: "docs/design/plans/2026-07-20-extensibility-phase2-design.md#9. Explicitly out of scope (disclosed)"
 
   - id: 13-kernel-rules-frontier
     section: "13"

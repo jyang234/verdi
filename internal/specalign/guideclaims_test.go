@@ -1250,33 +1250,115 @@ func parseCite(cite string) (relPath, anchor string, ok bool) {
 	return cite[:i], cite[i+1:], true
 }
 
-// resolveCite reports whether cite names a file that exists under
-// workspaceRoot and contains anchor as a literal substring — ac-3's
-// RESOLUTION check (does the cited entry genuinely exist), deliberately
-// workspace-side only (the chronicle lives outside this repository).
+// resolveCite reports whether cite names a file under workspaceRoot in which
+// anchor opens a genuine ENTRY — ac-3's RESOLUTION check (does the cited entry
+// genuinely exist), deliberately workspace-side only (the chronicle lives
+// outside this repository). resolved is true when anchor opens an entry-shaped
+// location; disclosed is non-empty only when the substring fallback below was
+// used (naming why), so the caller can surface it loudly rather than treat it
+// as a clean entry match.
 //
-// DISCLOSED WEAKNESS (judged-ac3-cite-shape-and-anchor-semantics-weaker-than-
-// entry-existence): resolution is substring-ANYWHERE containment, so an anchor
-// that happens to occur in unrelated prose of the cited file resolves. The
-// check therefore proves the file contains the anchor text SOMEWHERE, not that
-// a chronicle/ledger ENTRY (a heading/record) by that name exists. The named
-// residual is ENTRY-ANCHORED matching — resolving the anchor against the cited
-// file's actual entry structure (e.g. a `### <anchor>` heading or a
-// frontmatter id), not free substring containment — deferred here. The
-// complementary cite SHAPE check now runs fail-closed at decode
-// (internal/artifact.validateGuideClaimCite), so a malformed cite no longer
-// reaches this function from a decoded manifest; parseCite's own '#' guard
-// below stays as defense-in-depth for direct (non-decode) callers.
-func resolveCite(workspaceRoot, cite string) (bool, error) {
+// judged-ac3-cite-resolution-substring: resolution used to be substring-
+// ANYWHERE containment, so an anchor occurring in unrelated running prose of
+// the cited file resolved — proving the file contained the text SOMEWHERE, not
+// that a chronicle/ledger ENTRY by that name existed. Now anchor must OPEN an
+// entry-shaped location (citeAnchorMatchesEntry) — a markdown heading, a
+// `**bold-entry**` opener, or a `- `/`* ` ledger list item, the shapes the real
+// chronicle/plan cites target — so a mid-prose mention no longer resolves.
+//
+// DISCLOSED FALLBACK: when the cited file has NO recognizable entry structure
+// at all (no heading/bold/list line), entry-anchoring cannot be applied
+// honestly, so resolution falls back to substring containment and DISCLOSES
+// that via the returned string — a green here is then explicitly the weaker
+// check, never silently conflated with a real entry match. The complementary
+// cite SHAPE check runs fail-closed at decode (internal/artifact.
+// validateGuideClaimCite), so a malformed cite never reaches this function from
+// a decoded manifest; parseCite's own '#' guard stays as defense-in-depth for
+// direct (non-decode) callers.
+func resolveCite(workspaceRoot, cite string) (resolved bool, disclosed string, err error) {
 	relPath, anchor, ok := parseCite(cite)
 	if !ok {
-		return false, fmt.Errorf("cite %q is not shaped <path>#<anchor>", cite)
+		return false, "", fmt.Errorf("cite %q is not shaped <path>#<anchor>", cite)
 	}
 	data, err := os.ReadFile(filepath.Join(workspaceRoot, filepath.FromSlash(relPath)))
 	if err != nil {
-		return false, fmt.Errorf("reading cited file for %q: %w", cite, err)
+		return false, "", fmt.Errorf("reading cited file for %q: %w", cite, err)
 	}
-	return strings.Contains(string(data), anchor), nil
+	matched, recognized := citeAnchorMatchesEntry(string(data), anchor)
+	if matched {
+		return true, "", nil
+	}
+	if !recognized {
+		if strings.Contains(string(data), anchor) {
+			return true, fmt.Sprintf("cite %q resolved by SUBSTRING fallback: %s carries no recognizable entry structure (no heading/bold/list line), so entry-anchoring was not applied", cite, relPath), nil
+		}
+	}
+	return false, "", nil
+}
+
+// citeAnchorMatchesEntry reports whether anchor OPENS an entry-shaped location
+// in content — a markdown heading (a `#`.. line), a `**bold-entry**` opener, or
+// a `- `/`* ` ledger list item — rather than appearing mid-line in running
+// prose (judged-ac3-cite-resolution-substring). recognized reports whether
+// content has ANY entry structure at all; when it does not, the file's format
+// is unrecognized and resolveCite falls back to substring with a disclosure.
+//
+// The accepted shapes are derived from the real files these cites target:
+// `### Task N: ... build (...)`, `## 9. Explicitly out of scope (disclosed)`,
+// `**W5 vocabulary CLOSED (PR #147...).**`, and `- Linear adapter (10.1
+// residual).`. The anchor is the entry's OPENER (the entry text after its
+// marker starts with the anchor, on a word boundary), so a real cite whose
+// heading carries trailing metadata still resolves while a buried prose mention
+// does not.
+func citeAnchorMatchesEntry(content, anchor string) (matched, recognized bool) {
+	for _, line := range strings.Split(content, "\n") {
+		entry, ok := entryText(line)
+		if !ok {
+			continue
+		}
+		recognized = true
+		if anchorOpensEntry(entry, anchor) {
+			matched = true
+		}
+	}
+	return matched, recognized
+}
+
+// entryText strips a line's entry marker — a `#`.. heading prefix, a `**` bold
+// opener, or a `- `/`* ` list bullet (after leading whitespace) — and returns
+// the entry's text with leading whitespace trimmed; ok is false for a non-entry
+// (prose, code-fence, blank) line.
+func entryText(line string) (string, bool) {
+	s := strings.TrimLeft(line, " \t")
+	switch {
+	case strings.HasPrefix(s, "#"):
+		s = strings.TrimLeft(s, "#")
+	case strings.HasPrefix(s, "**"):
+		s = s[2:]
+	case strings.HasPrefix(s, "- "), strings.HasPrefix(s, "* "):
+		s = s[2:]
+	default:
+		return "", false
+	}
+	return strings.TrimLeft(s, " \t"), true
+}
+
+// anchorOpensEntry reports whether entry begins with anchor as its opener,
+// bounded on a word boundary (the char right after the anchor, if any, is not
+// an ASCII letter or digit) so a "Task 1" anchor does not open a "Task 10"
+// entry. A non-ASCII continuation byte (e.g. an em-dash) counts as a boundary —
+// word characters in these English records are ASCII.
+func anchorOpensEntry(entry, anchor string) bool {
+	if !strings.HasPrefix(entry, anchor) {
+		return false
+	}
+	rest := entry[len(anchor):]
+	if rest == "" {
+		return true
+	}
+	c := rest[0]
+	isWordByte := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+	return !isWordByte
 }
 
 func TestResolveCite(t *testing.T) {
@@ -1284,32 +1366,77 @@ func TestResolveCite(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "docs", "chronicle.md"), []byte("...\n### PHASE 1 ARCHIVED (PR #165)\n...\n"), 0o644); err != nil {
+	// One file exercising every entry shape the real chronicle/plan cites use,
+	// plus a prose CONTINUATION line that only MENTIONS an anchor mid-sentence
+	// (the substring accident this replaces) and a `### Task 10` heading for the
+	// word-boundary case.
+	chronicle := strings.Join([]string{
+		"Intro paragraph that mentions Buried Phrase inside running prose.",
+		"### PHASE 1 ARCHIVED (PR #165 merged @ 5b8a3de)",
+		"body",
+		"## 9. Explicitly out of scope (disclosed)",
+		"**W5 vocabulary CLOSED (PR #147 merged @ fdaa57d).** F5 fix landed.",
+		"- Linear adapter (10.1 residual).",
+		"### Task 10: build (C-1)",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dir, "docs", "chronicle.md"), []byte(chronicle), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	t.Run("resolves a real file+anchor", func(t *testing.T) {
-		ok, err := resolveCite(dir, "docs/chronicle.md#PHASE 1 ARCHIVED")
-		if err != nil || !ok {
-			t.Fatalf("resolveCite = (%v, %v), want (true, nil)", ok, err)
+	entryCases := []struct {
+		name    string
+		anchor  string
+		resolve bool
+	}{
+		{"heading opener with trailing metadata", "PHASE 1 ARCHIVED", true},
+		{"heading matched exactly", "9. Explicitly out of scope (disclosed)", true},
+		{"bold-entry opener", "W5 vocabulary CLOSED", true},
+		{"ledger list item", "Linear adapter (10.1 residual)", true},
+		{"anchor only in running prose reds (the substring accident)", "Buried Phrase", false},
+		{"absent anchor reds", "NOT ANYWHERE", false},
+		{"partial-word prefix does not open a longer entry (Task 1 vs Task 10)", "Task 1", false},
+	}
+	for _, tc := range entryCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolved, disclosed, err := resolveCite(dir, "docs/chronicle.md#"+tc.anchor)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if resolved != tc.resolve {
+				t.Fatalf("resolveCite(anchor=%q) resolved=%v, want %v", tc.anchor, resolved, tc.resolve)
+			}
+			if disclosed != "" {
+				t.Errorf("a structured file must not trigger the substring fallback; got disclosure %q", disclosed)
+			}
+		})
+	}
+
+	t.Run("unstructured file: disclosed substring fallback", func(t *testing.T) {
+		// A file with NO heading/bold/list line at all — entry-anchoring cannot
+		// apply, so a substring match resolves but MUST disclose the fallback.
+		if err := os.WriteFile(filepath.Join(dir, "docs", "prose.md"), []byte("one long paragraph with Some Phrase buried in it and nothing structural.\n"), 0o644); err != nil {
+			t.Fatal(err)
 		}
-	})
-	t.Run("file exists but anchor text absent", func(t *testing.T) {
-		ok, err := resolveCite(dir, "docs/chronicle.md#NOT THERE")
+		resolved, disclosed, err := resolveCite(dir, "docs/prose.md#Some Phrase")
 		if err != nil {
-			t.Fatalf("resolveCite: unexpected error %v", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
-		if ok {
-			t.Fatal("want false for an anchor that is not in the file")
+		if !resolved {
+			t.Fatal("want resolved=true via substring fallback for an unstructured file")
+		}
+		if disclosed == "" {
+			t.Fatal("want a non-empty fallback DISCLOSURE for the unstructured file, not a silent entry-match")
 		}
 	})
+
 	t.Run("file does not exist", func(t *testing.T) {
-		if _, err := resolveCite(dir, "docs/nope.md#X"); err == nil {
+		if _, _, err := resolveCite(dir, "docs/nope.md#X"); err == nil {
 			t.Fatal("want an error for a nonexistent cited file")
 		}
 	})
 	t.Run("malformed cite (no # separator)", func(t *testing.T) {
-		if _, err := resolveCite(dir, "docs/chronicle.md"); err == nil {
+		if _, _, err := resolveCite(dir, "docs/chronicle.md"); err == nil {
 			t.Fatal("want an error for a cite with no # anchor separator")
 		}
 	})
@@ -1468,12 +1595,15 @@ func TestGuideClaimsCite_ResolutionWorkspaceSideOnly(t *testing.T) {
 			continue
 		}
 		t.Run(row.ID, func(t *testing.T) {
-			ok, err := resolveCite(workspaceRoot, row.Cite)
+			resolved, disclosed, err := resolveCite(workspaceRoot, row.Cite)
 			if err != nil {
 				t.Fatalf("row %s: cite %q did not resolve: %v", row.ID, row.Cite, err)
 			}
-			if !ok {
-				t.Fatalf("row %s: cite %q: file found but the anchor text is not present in it", row.ID, row.Cite)
+			if !resolved {
+				t.Fatalf("row %s: cite %q: file found but the anchor opens no ENTRY (heading/bold-opener/list-item) in it — it appears only in running prose, if at all (judged-ac3-cite-resolution-substring)", row.ID, row.Cite)
+			}
+			if disclosed != "" {
+				t.Logf("DISCLOSURE: row %s: %s", row.ID, disclosed)
 			}
 		})
 	}
