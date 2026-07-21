@@ -256,13 +256,18 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	// mechanism was never meant to stamp on it.
 	//
 	// A colliding slug that owns a not-resurfaced backing record never reaches
-	// this live path (judged-collision-backing-regeneration-drain): ReconcileJudged
-	// now suffixes EVERY member of such a collision ("<slug><CollisionInfix><n>",
-	// collisionMemberIDs), so the backing record alone keeps the bare slug and no
-	// live finding ever shadows it. A live judged finding sharing an id with a
-	// not-resurfaced entry is therefore always a genuine slug-only candidate (a
-	// single fresh finding under that slug, ac-1), whose confirmation legitimately
-	// resolves the backing record as above; a colliding slug's backing record is
+	// this live path: ReconcileJudged suffixes EVERY member of such a collision
+	// ("<slug><CollisionInfix><n>", collisionMemberIDs), so the backing record
+	// alone keeps the bare slug and no live finding ever shadows it. This holds
+	// for a backing record persisted by a prior round
+	// (judged-collision-backing-regeneration-drain) AND for one BORN this round —
+	// a live dispositioned prior at the slug that the fresh collision does not
+	// carry forward on its bare-id member, which now lands in not-resurfaced with
+	// every member already suffixed (judged-collision-backing-same-round). A live
+	// judged finding sharing an id with a not-resurfaced entry is therefore always
+	// a genuine slug-only candidate (a single fresh finding under that slug,
+	// ac-1), whose confirmation legitimately resolves the backing record as above;
+	// a colliding slug's backing record — pre-existing or born this round — is
 	// resolved solely through its own exit ramp (dispositionNotResurfaced),
 	// reachable at all times because its bare id is never occupied by a live
 	// member. artifact.Validate enforces the invariant from the other side — a

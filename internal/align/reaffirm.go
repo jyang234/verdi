@@ -89,16 +89,28 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 	}
 
 	// backingByID marks each slug that owns a not-resurfaced backing record this
-	// run — a dispositioned judged entry in existingNotResurfaced. When such a
-	// slug ALSO collides among fresh findings, collisionMemberIDs suffixes EVERY
-	// member so the backing record alone keeps the bare slug
-	// (judged-collision-backing-regeneration-drain): its exit ramp stays
-	// reachable and the id-keyed NotResurfaced rebuild below can never mark it
-	// resurfaced by matching a live member that merely shares its bare id. Only
-	// existingNotResurfaced feeds this — a bare-slug backing record lives there,
-	// never in existingFindings (Validate rejects a dispositioned findings: entry
-	// sharing a same-kind id with a not-resurfaced one, so the two never coexist
-	// on disk).
+	// run, so that when such a slug ALSO collides among fresh findings,
+	// collisionMemberIDs suffixes EVERY member — the backing record alone keeps
+	// the bare slug (judged-collision-backing-regeneration-drain): its exit ramp
+	// stays reachable and the id-keyed NotResurfaced rebuild below can never mark
+	// it resurfaced by matching a live member that merely shares its bare id.
+	//
+	// A slug owns a backing record in EITHER of two ways, both detected here:
+	//
+	//   (1) an entry already sitting in existingNotResurfaced (a record a prior
+	//       round already persisted) — filled unconditionally just below; and
+	//
+	//   (2) a dispositioned judged prior BORN into not-resurfaced THIS round: a
+	//       live prior at slug S in existingFindings that a fresh collision at S
+	//       reproduces on none of the members keeping the bare id — filled after
+	//       the fresh grouping below (judged-collision-backing-same-round).
+	//
+	// Source (2) is the round the record is born, and it was the hole: with only
+	// (1), hasBacking was false that exact round, the first-emitted member kept
+	// bare S, and the unmatched prior landed in not-resurfaced under the same
+	// bare S — the forbidden live-member-shadows-backing overlap. Validate
+	// rejects that overlap once on disk, so it could only ever be an in-flight
+	// computation state, which (2) now closes.
 	backingByID := make(map[string]bool, len(existingNotResurfaced))
 	for _, f := range existingNotResurfaced {
 		if f.Kind == artifact.FindingJudged && f.Dispositioned() {
@@ -121,6 +133,27 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 			order = append(order, f.ID)
 		}
 		byID[f.ID] = append(byID[f.ID], f)
+	}
+
+	// backingByID source (2) (judged-collision-backing-same-round): a colliding
+	// slug whose backing record is BORN this round. priorByID[id] is a
+	// dispositioned judged prior at the bare slug (existingFindings or
+	// existingNotResurfaced — the latter already covered unconditionally above).
+	// Under the no-backing scheme exactly ONE member keeps the bare id: the
+	// first-emitted (group[0]), which carryExactMatch carries the prior forward
+	// onto only if their text matches. When it does NOT, the prior is unmatched —
+	// it lands in not-resurfaced at the bare slug while a different live member
+	// sits on that same bare slug, the forbidden overlap. So mark the slug backed
+	// whenever the bare-id member would not carry the prior: every member is then
+	// suffixed and the newly-born backing record stands alone under the bare id.
+	for _, id := range order {
+		group := byID[id]
+		if len(group) < 2 {
+			continue
+		}
+		if p, ok := priorByID[id]; ok && group[0].Text != p.Text {
+			backingByID[id] = true
+		}
 	}
 
 	out := make([]artifact.Finding, 0, len(fresh)+1)

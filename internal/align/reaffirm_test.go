@@ -561,3 +561,88 @@ func TestReconcileJudged_CollisionNoBacking_BaseMemberKeepsBareSlug(t *testing.T
 		t.Fatalf("Findings = %+v, want the later member suffixed -collision-2", got.Findings)
 	}
 }
+
+// TestReconcileJudged_CollisionBackingBornThisRound_SuffixesEveryMember is
+// spec/finding-identity judged-collision-backing-same-round's headline fix
+// proof: the bare-slug protection collisionMemberIDs provides (suffix EVERY
+// member so the backing record alone keeps the bare slug) must also fire in
+// the exact round the backing record is BORN — when the prior report carries a
+// LIVE dispositioned judged finding at slug S (in existingFindings, not yet in
+// not-resurfaced) and a fresh run emits a 2+ member collision at S that
+// reproduces none of it. The prior, matched by no member, lands in
+// NotResurfaced at bare S THIS round; if any live member also kept bare S, that
+// is precisely the live-member-shadows-backing-record state
+// judged-collision-backing-regeneration-drain's "dissolved by construction"
+// claim (and artifact.Validate's same-kind overlap rejection) say can never
+// exist.
+//
+// Red-first (before the fix): backingByID was built from existingNotResurfaced
+// ONLY, so hasBacking was false the round the backing was born — the
+// first-emitted member kept bare S while the prior landed in NotResurfaced
+// under the same bare S, the forbidden overlap. disposition.go would then treat
+// the bare-slug live member as a genuine slug-only candidate and, on a matching
+// decision, silently resolve the prior with reaffirmation provenance and no
+// ac-1 side-by-side ever shown.
+func TestReconcileJudged_CollisionBackingBornThisRound_SuffixesEveryMember(t *testing.T) {
+	// The prior report: a single LIVE dispositioned judged finding at the slug —
+	// NOT a collision, NOT yet in not-resurfaced.
+	existingFindings := []artifact.Finding{
+		dispositionedJudged("judged-dup", "the original single ruling under this slug", artifact.FindingAcceptedDeviation, "owner-ratified"),
+	}
+	// The fresh run NEWLY emits a 2+ member collision at the same slug, byte-
+	// identical to none of the prior (the born-this-round scenario).
+	fresh := []artifact.Finding{
+		freshJudged("judged-dup", "first fresh reading"),
+		freshJudged("judged-dup", "second, different fresh reading"),
+	}
+
+	round1 := ReconcileJudged(fresh, existingFindings, nil)
+
+	// No live member may occupy the bare slug — the backing record born this
+	// round alone owns it, so its exit ramp stays reachable and no live member
+	// shadows it.
+	for _, f := range round1.Findings {
+		if f.ID == "judged-dup" {
+			t.Fatalf("Findings has a live member on the bare slug %+v — a collision whose backing record is BORN this round must still suffix EVERY member", f)
+		}
+	}
+	// Both members survive (suffixed) plus the one synthetic violation.
+	if len(round1.Findings) != 3 {
+		t.Fatalf("round1.Findings = %+v, want 3 (both suffixed members + the synthetic violation)", round1.Findings)
+	}
+	// The prior ruling lands in NotResurfaced at the bare slug, verbatim — no
+	// silent resolution, and (ReconcileJudged never stamps) NO carried-from.
+	if len(round1.NotResurfaced) != 1 || round1.NotResurfaced[0].ID != "judged-dup" {
+		t.Fatalf("round1.NotResurfaced = %+v, want the prior ruling standing alone under the bare slug", round1.NotResurfaced)
+	}
+	if round1.NotResurfaced[0].Disposition != artifact.FindingAcceptedDeviation || round1.NotResurfaced[0].Note != "owner-ratified" {
+		t.Fatalf("round1.NotResurfaced[0] = %+v, want the prior ruling preserved verbatim", round1.NotResurfaced[0])
+	}
+	if round1.NotResurfaced[0].CarriedFrom != "" {
+		t.Fatalf("round1.NotResurfaced[0].CarriedFrom = %q, want empty — a born-this-round backing record is never a reaffirmation", round1.NotResurfaced[0].CarriedFrom)
+	}
+	// A collision never pre-fills a candidate (ac-4: the human resolves lineage).
+	if len(round1.Candidates) != 0 {
+		t.Fatalf("round1.Candidates = %+v, want none for a colliding slug", round1.Candidates)
+	}
+
+	// Second round (regression-pinned): the backing record now pre-exists in
+	// not-resurfaced. Feeding round1 forward — the members dispositioned, the
+	// backing record in existingNotResurfaced — the pre-existing-backing
+	// protection (condition 1) keeps the record standing, unchanged.
+	dispositioned := make([]artifact.Finding, len(round1.Findings))
+	for i, f := range round1.Findings {
+		f.Disposition = artifact.FindingAcceptedDeviation
+		f.Note = "owner-ratified: disclosed collision"
+		dispositioned[i] = f
+	}
+	round2 := ReconcileJudged(fresh, dispositioned, round1.NotResurfaced)
+	if len(round2.NotResurfaced) != 1 || round2.NotResurfaced[0].ID != "judged-dup" {
+		t.Fatalf("round2.NotResurfaced = %+v, want the backing record still standing (second-round protection unchanged)", round2.NotResurfaced)
+	}
+	for _, f := range round2.Findings {
+		if f.ID == "judged-dup" {
+			t.Fatalf("round2.Findings has a live member on the bare slug %+v — the pre-existing backing protection must still hold", f)
+		}
+	}
+}
