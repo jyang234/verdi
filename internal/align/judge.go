@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -176,7 +177,7 @@ func runJudgeOnce(ctx context.Context, runner JudgeRunner, argv []string, timeou
 		findings = append(findings, artifact.Finding{
 			ID:   judgedFindingID(jf.ID),
 			Kind: artifact.FindingJudged,
-			Text: fmt.Sprintf("%s (confidence %.2f)", normalizeJudgeText(jf.Text), jf.Confidence),
+			Text: decorateConfidence(normalizeJudgeText(jf.Text), jf.Confidence),
 		})
 	}
 	return &JudgeSuccess{Findings: findings, Stdin: prompt, RawResult: rawResult}, nil
@@ -219,6 +220,60 @@ func judgedFindingID(rawID string) string {
 		return slug
 	}
 	return "judged-" + slug
+}
+
+// confidenceSuffixRE matches ONE trailing " (confidence N.NN)" decoration of
+// exactly the shape decorateConfidence itself mints: a single leading space,
+// the literal "(confidence ", a %.2f-shaped number (optional sign, one-or-more
+// integer digits, a dot, exactly two fractional digits), and a closing paren —
+// anchored to end-of-string so only a genuine TAIL decoration is stripped,
+// never a mint-shaped fragment the finding text legitimately quotes mid-sentence
+// (e.g. this very defect's own report quotes a doubled "(confidence 0.30)
+// (confidence 0.30)" as its witness, which must survive intact). A one-digit
+// fractional part or a non-numeric parenthetical is not this mint shape and is
+// deliberately left alone.
+var confidenceSuffixRE = regexp.MustCompile(` \(confidence -?[0-9]+\.[0-9]{2}\)$`)
+
+// decorateConfidence appends the CURRENT run's confidence to a judge-emitted
+// finding text exactly once, idempotently — the text-half analogue of
+// judgedFindingID's "judged-" prefix idempotence, at the same ingestion seam
+// (spec/ritual-traps: the confidence suffix is the sibling trap of the prefix
+// the id half already guards).
+//
+// runJudgeOnce decorates every judged finding's text with " (confidence N.NN)".
+// On certain regeneration/carry paths (spec/finding-identity) a prior report's
+// already-decorated text is re-presented to the judge as context; if the judge
+// echoes it back verbatim, a naive append lands a SECOND suffix, and each carry
+// round adds another (the render-echo-redecorate loop that produced
+// "judged-judged-" for the id half). Before appending, strip every trailing
+// suffix of the shape this function itself mints — REPEATEDLY, so an
+// already-doubled archived echo collapses back to bare text — then append this
+// run's confidence once. The result carries exactly one suffix reflecting THIS
+// run, regardless of how many the echoed text arrived with. (A judge whose
+// genuine free-text happens to END with a mint-shaped "(confidence N.NN)" is
+// indistinguishable from an echo and is treated as one — the same benign
+// tradeoff judgedFindingID makes for a raw id that genuinely begins "judged-";
+// only the exact tail is at risk, never mid-text content, per the $ anchor.)
+//
+// Fixed prospectively only (the judgedFindingID precedent): this runs solely at
+// MINT time on a judge exchange being ingested now; nothing rewrites text
+// already read back off an archived report (internal/artifact decodes
+// Finding.Text with no transform), so reports already on disk are untouched.
+// Unlike the id half, this collapse carries no orphaning risk: nothing joins on
+// Finding.Text. It feeds align.Identity's content hash (identity.go), but that
+// hash is a same-process disposition-carry match that already fails closed on
+// ANY text change and is never a persisted join key — persisted dispositions
+// reference a finding by its ID (cmd/verdi/disposition.go matches f.ID, never
+// the text hash). A finding minted under the old doubling bug therefore simply
+// fails closed to undispositioned on its first post-fix regeneration (a human
+// re-looks once), after which the now-stable text lets its disposition carry
+// forward normally — a strict improvement, since the growing doubled text broke
+// carry every round.
+func decorateConfidence(text string, confidence float64) string {
+	for confidenceSuffixRE.MatchString(text) {
+		text = confidenceSuffixRE.ReplaceAllString(text, "")
+	}
+	return fmt.Sprintf("%s (confidence %.2f)", text, confidence)
 }
 
 // normalizeJudgeText replaces every maximal run of Unicode control
