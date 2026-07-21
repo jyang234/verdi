@@ -198,6 +198,16 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 		}
 	}
 	if idx == -1 {
+		// spec/finding-identity judged-not-resurfaced-mark-fixed: the id is not
+		// a LIVE finding. If it lives SOLELY in not-resurfaced: (the primary
+		// ac-3 shape — a prior ruling a fresh judge run never resurfaces), this
+		// verb is the sanctioned human exit ramp for that entry; see
+		// dispositionNotResurfaced, which draws the laundering boundary. Only a
+		// genuinely absent id (in neither section) is the "finding not found"
+		// verdict this branch has always returned.
+		if nrIdx := findNotResurfacedIndex(decoded.NotResurfaced, findingID); nrIdx != -1 {
+			return dispositionNotResurfaced(reportPath, raw, decoded, string(body), nrIdx, decision, rationale, ref, stdout, stderr)
+		}
 		fmt.Fprintf(stderr, "disposition: finding %q not found in %s\n", findingID, reportPath)
 		return 1
 	}
@@ -285,27 +295,58 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 		return 1
 	}
 
-	markdown := align.RenderMarkdown(&updated, newBody)
+	if rc := commitDisposition(reportPath, raw, &updated, newBody, stderr); rc != 0 {
+		return rc
+	}
+
+	verb := "recorded"
+	if amend {
+		verb = "amended"
+	}
+	// spec/finding-identity: name the section the id was found in — an
+	// ordinary live-finding disposition ("(findings)") versus the
+	// not-resurfaced exit ramp's own "(not-resurfaced)" output
+	// (dispositionNotResurfaced), so a reader always knows which one happened.
+	fmt.Fprintf(stdout, "disposition: %s %s %s (findings): %s -> %s\n", verb, ref.String(), findingID, decision, rationale)
+	return 0
+}
+
+// commitDisposition renders updated+newBody into deviation-report.md's full
+// content and durably writes it to reportPath — the write tail shared by the
+// live-finding path (runDisposition) and the not-resurfaced exit ramp
+// (dispositionNotResurfaced), so both inherit ADJ-54's durability guarantees
+// with no second copy (CLAUDE.md: no copy-paste). Returns 0 on a successful
+// write, 2 on any operational failure. Callers print their own success line.
+//
+// ADJ-54 (j-7): optimistic staleness verification — re-read the report
+// IMMEDIATELY before the atomic write and refuse if its bytes have changed
+// since raw was read at the top of the caller. This verb's
+// read-decode-mutate-write has no lock, and internal/filelock's existing
+// primitive is the wrong granularity here: a per-checkout/per-worktree
+// PID-liveness writer-role lock built for long-lived daemons (verdi serve) and
+// managed-worktree reservations, not a per-report, single-shot CLI operation's
+// brief race window — using it would mean inventing a new per-report lock-path
+// convention rather than using the primitive "per its own conventions". A
+// genuine concurrent modification is an operational condition (exit 2) — an
+// environment fact, not a verdict about the target's own state — and the
+// honest remedy is simply to re-run the command against the now-current file
+// rather than silently clobber whatever changed.
+//
+// ADJ-54 (j-6): atomicfile.Write (MkdirAll + CreateTemp + fsync +
+// Rename-into-place) — this repo's own existing crash-durability primitive —
+// never a plain os.WriteFile (truncate-then-write), so an operational failure
+// mid-write (disk full, kill, crash) can never leave a truncated
+// deviation-report.md: the one store file whose judged exchange is declared
+// never reproducible (03 §Alignment report), so content not yet committed to
+// git (a just-recorded disposition, or the one genuine judge_integrity
+// exchange) would otherwise be unrecoverable.
+func commitDisposition(reportPath string, raw []byte, updated *artifact.DeviationFrontmatter, newBody string, stderr io.Writer) int {
+	markdown := align.RenderMarkdown(updated, newBody)
 
 	if dispositionTestInterleave != nil {
 		dispositionTestInterleave(reportPath)
 	}
 
-	// ADJ-54 (j-7): optimistic staleness verification — re-read the report
-	// IMMEDIATELY before the atomic write and refuse if its bytes have
-	// changed since the initial read at the top of this function. This
-	// verb's read-decode-mutate-write has no lock, and internal/filelock's
-	// existing primitive is the wrong granularity here: a per-checkout/
-	// per-worktree PID-liveness writer-role lock built for long-lived
-	// daemons (verdi serve) and managed-worktree reservations, not a
-	// per-report, single-shot CLI operation's brief race window — using it
-	// would mean inventing a new per-report lock-path convention rather
-	// than using the primitive "per its own conventions". A genuine
-	// concurrent modification is an operational condition (exit 2) — an
-	// environment fact, not a verdict about the target finding's own
-	// state — and the honest remedy is simply to re-run the command
-	// against the now-current file rather than silently clobber whatever
-	// changed.
 	current, err := os.ReadFile(reportPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "disposition: re-reading %s before write: %v\n", reportPath, err)
@@ -316,25 +357,102 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 		return 2
 	}
 
-	// ADJ-54 (j-6): atomicfile.Write (MkdirAll + CreateTemp + fsync +
-	// Rename-into-place) — this repo's own existing crash-durability
-	// primitive — never a plain os.WriteFile (truncate-then-write), so an
-	// operational failure mid-write (disk full, kill, crash) can never
-	// leave a truncated deviation-report.md: the one store file whose
-	// judged exchange is declared never reproducible (03 §Alignment
-	// report), so content not yet committed to git (a just-recorded
-	// disposition, or the one genuine judge_integrity exchange) would
-	// otherwise be unrecoverable.
 	if err := atomicfile.Write(reportPath, markdown, 0o644); err != nil {
 		fmt.Fprintln(stderr, "disposition:", err)
 		return 2
 	}
+	return 0
+}
 
-	verb := "recorded"
-	if amend {
-		verb = "amended"
+// dispositionNotResurfaced is spec/finding-identity judged-not-resurfaced-mark-fixed's
+// fix: the sanctioned human exit ramp for an id that lives SOLELY in
+// not-resurfaced: (absent from findings:) — the primary ac-3 shape, a prior
+// ruling a fresh judge run simply never re-emits. ac-3 says such an entry
+// persists "until a human explicitly marks it fixed"; this verb is that
+// explicit human act.
+//
+// The laundering boundary (X-18) this must NOT cross: the X-18 drain was the
+// JUDGE's non-reproduction automatically UNCOUNTING a standing accepted
+// deviation — a finding leaving findings: because it stopped reproducing must
+// never silently drain out of the spec-stale/feature-close budget (closed by
+// the SpecStale/ReconcileJudged union). This function is the opposite: a HUMAN,
+// through the sanctioned verb, deciding the entry's fate. That is precisely
+// ac-3's "until a human explicitly marks it fixed" clause, not an automatic
+// drain — the same X-16 working-tree-edit discipline every other disposition
+// follows.
+//
+//   - fixed: the human affirms the underlying issue is genuinely resolved.
+//     The entry is REMOVED, releasing its identity from the budget — never
+//     zero from the judge's silence, but one by the human's own signature.
+//   - accepted-deviation: the human RE-AFFIRMS the standing deviation without
+//     resurfacing it. The rationale is updated in place and the entry STAYS,
+//     so it STAYS COUNTED in the budget — a re-affirmation is never a release.
+//
+// --amend is a live-findings collision guard (undispositioned vs. already-
+// dispositioned) and has no meaning here: a not-resurfaced entry is by
+// definition already a prior ruling, and acting on it through this verb is
+// always a deliberate, explicit human decision, so the flag is not consulted.
+// Mechanics mirror the live path: value-copy the decoded original (never
+// mutate it), self-validate, surgically patch the entry's OWN rendered body
+// line to keep body and frontmatter in agreement, then write via the shared,
+// crash-durable commitDisposition tail.
+func dispositionNotResurfaced(reportPath string, raw []byte, decoded *artifact.DeviationFrontmatter, body string, nrIdx int, decision artifact.FindingDisposition, rationale string, ref artifact.Ref, stdout, stderr io.Writer) int {
+	oldEntry := decoded.NotResurfaced[nrIdx]
+	oldLine := align.RenderNotResurfacedLine(oldEntry)
+
+	// Value-copy: never mutate the decoded original (dc-2). Findings is left
+	// aliasing decoded's (never touched on this path); NotResurfaced gets a
+	// fresh backing array before any element mutation.
+	updated := *decoded
+	var newBody string
+	var n int
+	var action string
+
+	switch decision {
+	case artifact.FindingFixed:
+		// Human-sanctioned release: drop the entry entirely.
+		updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
+		action = "released"
+		if len(updated.NotResurfaced) == 0 {
+			// The section is now empty — substitute renderNotResurfaced's own
+			// "(none)" placeholder so the body stays byte-identical to a fresh
+			// align render rather than leaving a bare, entry-less heading.
+			newBody, n = replaceWholeLine(body, oldLine, "(none)")
+		} else {
+			newBody, n = removeWholeLine(body, oldLine)
+		}
+	case artifact.FindingAcceptedDeviation:
+		// Re-affirm in place: update the rationale, keep it counted.
+		updated.NotResurfaced = append([]artifact.Finding(nil), decoded.NotResurfaced...)
+		reaffirmed := oldEntry
+		reaffirmed.Disposition = artifact.FindingAcceptedDeviation
+		reaffirmed.Note = rationale
+		updated.NotResurfaced[nrIdx] = reaffirmed
+		action = "reaffirmed"
+		newBody, n = replaceWholeLine(body, oldLine, align.RenderNotResurfacedLine(reaffirmed))
 	}
-	fmt.Fprintf(stdout, "disposition: %s %s %s: %s -> %s\n", verb, ref.String(), findingID, decision, rationale)
+
+	// Never fake success (CLAUDE.md): self-validate the mutated frontmatter
+	// before writing.
+	if err := updated.Validate(); err != nil {
+		fmt.Fprintln(stderr, "disposition: internal error: updated frontmatter failed self-validation:", err)
+		return 2
+	}
+
+	// The entry's own not-resurfaced body line must appear exactly once
+	// (ADJ-52's j-2 whole-line discipline, symmetric with the live path). A
+	// mismatch is a body/frontmatter desync — a verdict about the report's own
+	// state (dc-3), never "internal error" (ADJ-53's j-5 reclassification).
+	if n != 1 {
+		fmt.Fprintf(stderr, "disposition: not-resurfaced entry %q's rendered line does not appear exactly once in %s's body (found %d) — the report's body and frontmatter have drifted out of agreement for this entry\n", oldEntry.ID, reportPath, n)
+		return 1
+	}
+
+	if rc := commitDisposition(reportPath, raw, &updated, newBody, stderr); rc != 0 {
+		return rc
+	}
+
+	fmt.Fprintf(stdout, "disposition: %s %s %s (not-resurfaced): %s -> %s\n", action, ref.String(), oldEntry.ID, decision, rationale)
 	return 0
 }
 
@@ -384,5 +502,28 @@ func replaceWholeLine(body, oldLine, newLine string) (newBody string, matches in
 		return body, matches
 	}
 	lines[found] = newLine
+	return strings.Join(lines, "\n"), matches
+}
+
+// removeWholeLine removes the exactly-one line in body equal to target,
+// matched as a COMPLETE LINE (split on "\n", never an arbitrary substring) —
+// the removal twin of replaceWholeLine, used by the not-resurfaced `fixed`
+// exit ramp (dispositionNotResurfaced) when the section retains other entries.
+// Returns body unmodified alongside the match count when that count is not
+// exactly 1, so the caller fails closed on a body/frontmatter desync rather
+// than faking success (CLAUDE.md).
+func removeWholeLine(body, target string) (newBody string, matches int) {
+	lines := strings.Split(body, "\n")
+	found := -1
+	for i, l := range lines {
+		if l == target {
+			matches++
+			found = i
+		}
+	}
+	if matches != 1 {
+		return body, matches
+	}
+	lines = append(lines[:found], lines[found+1:]...)
 	return strings.Join(lines, "\n"), matches
 }

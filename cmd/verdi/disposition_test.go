@@ -12,6 +12,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
@@ -897,4 +898,175 @@ func TestRunDisposition_OrdinaryFinding_NoNotResurfacedEntry_Unaffected(t *testi
 	if len(after.NotResurfaced) != 0 {
 		t.Fatalf("NotResurfaced = %+v, want still empty", after.NotResurfaced)
 	}
+}
+
+// budgetAcceptedDeviationCount computes the accepted-deviation budget the
+// closure gate's spec-stale condition counts for a living report: SpecStale
+// over the report's own findings: UNION its not-resurfaced: section, by unique
+// content identity — identical to cmd/verdi/closuregate.go's
+// checkSpecStaleCondition wiring. This is the exact budget
+// spec/finding-identity ac-3 says a human marking a not-resurfaced entry
+// `fixed` must RELEASE and marking it `accepted-deviation` must KEEP.
+func budgetAcceptedDeviationCount(t *testing.T, path string) int {
+	t.Helper()
+	fm := decodeReportFile(t, path)
+	return evidence.SpecStale(evidence.SpecStaleInput{
+		Findings:       fm.Findings,
+		AdditionalSets: [][]artifact.Finding{fm.NotResurfaced},
+	}).AcceptedDeviationCount
+}
+
+// TestRunDisposition_NotResurfacedOnly_ExitRamp is spec/finding-identity
+// judged-not-resurfaced-mark-fixed's fix proof: `verdi disposition` is the
+// sanctioned human exit ramp for an id that lives SOLELY in not-resurfaced:
+// (absent from findings:) — the primary ac-3 shape a fresh judge run never
+// resurfaces. `fixed` removes the entry, releasing its identity from the
+// spec-stale/feature-close budget (the human's explicit "marks it fixed",
+// ac-3's letter finally whole — NOT the X-18 judge-drain, which was automatic
+// uncounting on non-reproduction); `accepted-deviation` re-affirms it in place
+// and it STAYS COUNTED. A genuinely absent id still exits 1.
+//
+// Red-first (before the fix): every not-resurfaced-only disposition exited 1
+// "finding not found" — runDisposition's lookup searched only findings: and
+// consulted not-resurfaced: only AFTER a live findings: entry was located.
+func TestRunDisposition_NotResurfacedOnly_ExitRamp(t *testing.T) {
+	bin := buildVerdiBinary(t)
+
+	// A living report carrying TWO standing accepted deviations of distinct
+	// content identity (align.Identity = Kind+ID+Text): one a live finding,
+	// one archived in not-resurfaced:. The budget therefore starts at 2, so a
+	// release proves it drops by EXACTLY one (to 1), never coincidentally to
+	// zero.
+	fixture := func(t *testing.T) (root, path string) {
+		t.Helper()
+		findings := []artifact.Finding{
+			{ID: "judged-live", Kind: artifact.FindingJudged, Text: "a live standing deviation", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified: live"},
+		}
+		notResurfaced := []artifact.Finding{
+			{ID: "judged-archived", Kind: artifact.FindingJudged, Text: "an archived standing deviation", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified: archived"},
+		}
+		root = writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, findings, notResurfaced, nil))
+		return root, reportPathFor(root, "demo")
+	}
+
+	t.Run("fixed removes the entry and releases it from the budget", func(t *testing.T) {
+		root, path := fixture(t)
+		if got := budgetAcceptedDeviationCount(t, path); got != 2 {
+			t.Fatalf("budget before = %d, want 2 (a live + an archived accepted deviation)", got)
+		}
+
+		stdout, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "judged-archived", "fixed", "--rationale", "confirmed fixed; retire the archived entry")
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (the sanctioned not-resurfaced exit ramp); stderr=%s", code, stderr)
+		}
+		t.Logf("fixed stdout: %s", strings.TrimRight(stdout, "\n"))
+		if !strings.Contains(stdout, "not-resurfaced") {
+			t.Fatalf("stdout = %q, want it to name the not-resurfaced section the id was found in", stdout)
+		}
+
+		after := decodeReportFile(t, path)
+		if _, ok := findingByID(after.NotResurfaced, "judged-archived"); ok {
+			t.Fatalf("judged-archived still present in not-resurfaced after `fixed`: %+v", after.NotResurfaced)
+		}
+		if _, ok := findingByID(after.Findings, "judged-archived"); ok {
+			t.Fatalf("judged-archived leaked INTO findings: on a not-resurfaced disposition: %+v", after.Findings)
+		}
+		if got := budgetAcceptedDeviationCount(t, path); got != 1 {
+			t.Fatalf("budget after `fixed` = %d, want 1 (dropped by exactly one — the archived identity released)", got)
+		}
+		// The surviving body still renders a well-formed (now empty)
+		// not-resurfaced section, and the released entry's own bullet is gone.
+		body := readFile(t, path)
+		if bytes.Contains(body, []byte("an archived standing deviation")) {
+			t.Fatalf("body still contains the released entry's text; body:\n%s", body)
+		}
+	})
+
+	t.Run("accepted-deviation reaffirms in place and stays counted", func(t *testing.T) {
+		root, path := fixture(t)
+		if got := budgetAcceptedDeviationCount(t, path); got != 2 {
+			t.Fatalf("budget before = %d, want 2", got)
+		}
+
+		stdout, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "judged-archived", "accepted-deviation", "--rationale", "re-affirmed: still a standing deviation")
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr)
+		}
+		t.Logf("accepted-deviation stdout: %s", strings.TrimRight(stdout, "\n"))
+		if !strings.Contains(stdout, "not-resurfaced") {
+			t.Fatalf("stdout = %q, want it to name the not-resurfaced section", stdout)
+		}
+
+		after := decodeReportFile(t, path)
+		f, ok := findingByID(after.NotResurfaced, "judged-archived")
+		if !ok {
+			t.Fatalf("judged-archived must STAY in not-resurfaced after `accepted-deviation` (re-affirmed, never released): %+v", after.NotResurfaced)
+		}
+		if f.Disposition != artifact.FindingAcceptedDeviation || f.Note != "re-affirmed: still a standing deviation" {
+			t.Fatalf("judged-archived = %+v, want accepted-deviation with the rationale updated in place", f)
+		}
+		if got := budgetAcceptedDeviationCount(t, path); got != 2 {
+			t.Fatalf("budget after `accepted-deviation` = %d, want 2 (unchanged — a re-affirmation is never a release)", got)
+		}
+		// The updated rationale is reflected in the human-legible body too.
+		if !bytes.Contains(readFile(t, path), []byte("re-affirmed: still a standing deviation")) {
+			t.Fatalf("body does not carry the updated not-resurfaced rationale; body:\n%s", readFile(t, path))
+		}
+	})
+
+	t.Run("fixed with sibling not-resurfaced entries removes only the target line", func(t *testing.T) {
+		// Two archived accepted deviations: fixing one must drop ONLY its own
+		// body line (removeWholeLine's branch — distinct from the sole-entry
+		// "(none)" substitution above) and leave the sibling entirely intact.
+		notResurfaced := []artifact.Finding{
+			{ID: "judged-arch-1", Kind: artifact.FindingJudged, Text: "first archived deviation", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified: one"},
+			{ID: "judged-arch-2", Kind: artifact.FindingJudged, Text: "second archived deviation", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified: two"},
+		}
+		root := writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, nil, notResurfaced, nil))
+		path := reportPathFor(root, "demo")
+		if got := budgetAcceptedDeviationCount(t, path); got != 2 {
+			t.Fatalf("budget before = %d, want 2 (two archived accepted deviations)", got)
+		}
+
+		_, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "judged-arch-1", "fixed", "--rationale", "confirmed fixed")
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr)
+		}
+
+		after := decodeReportFile(t, path)
+		if _, ok := findingByID(after.NotResurfaced, "judged-arch-1"); ok {
+			t.Fatalf("judged-arch-1 still present after `fixed`: %+v", after.NotResurfaced)
+		}
+		sib, ok := findingByID(after.NotResurfaced, "judged-arch-2")
+		if !ok {
+			t.Fatalf("sibling judged-arch-2 must survive the removal untouched: %+v", after.NotResurfaced)
+		}
+		if sib.Disposition != artifact.FindingAcceptedDeviation || sib.Note != "owner-ratified: two" {
+			t.Fatalf("sibling judged-arch-2 = %+v, want untouched accepted-deviation", sib)
+		}
+		if got := budgetAcceptedDeviationCount(t, path); got != 1 {
+			t.Fatalf("budget after = %d, want 1 (only the target released)", got)
+		}
+		body := readFile(t, path)
+		if bytes.Contains(body, []byte("first archived deviation")) {
+			t.Fatalf("body still contains the removed entry's text; body:\n%s", body)
+		}
+		if !bytes.Contains(body, []byte("second archived deviation")) {
+			t.Fatalf("body dropped the sibling's line during a single-entry removal; body:\n%s", body)
+		}
+	})
+
+	t.Run("a genuinely absent id still exits 1", func(t *testing.T) {
+		root, path := fixture(t)
+		before := readFile(t, path)
+
+		_, stderr, code := runDispositionBinary(t, bin, root, "spec/demo", "no-such-finding", "fixed", "--rationale", "x")
+		if code != 1 {
+			t.Fatalf("exit = %d, want 1 (verdict — genuinely absent from both findings: and not-resurfaced:); stderr=%s", code, stderr)
+		}
+		if !strings.Contains(stderr, "no-such-finding") || !strings.Contains(stderr, "not found") {
+			t.Fatalf("stderr = %q, want it to name the absent id as not found", stderr)
+		}
+		assertUnchanged(t, path, before)
+	})
 }
