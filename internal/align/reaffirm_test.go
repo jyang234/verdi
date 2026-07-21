@@ -65,6 +65,60 @@ func freshJudged(id, text string) artifact.Finding {
 	return artifact.Finding{ID: id, Kind: artifact.FindingJudged, Text: text}
 }
 
+func findingWithID(fs []artifact.Finding, id string) (artifact.Finding, bool) {
+	for _, f := range fs {
+		if f.ID == id {
+			return f, true
+		}
+	}
+	return artifact.Finding{}, false
+}
+
+// TestReconcileJudged_ConfirmedCollisionMemberWithBacking_ByteIdenticalRecurrenceDoesNotDrain
+// is the downstream-soundness pin for judged-collision-suffixed-backing-shadow's
+// fix. Once the disposition verb leaves a distinct-content backing record
+// standing beside a now-dispositioned suffixed collision member (both at the
+// SAME suffixed id — the sanctioned post-confirmation shape), a later
+// byte-identical align recurrence must CARRY the dispositioned member forward
+// and LEAVE the backing record — never conflate the two by their shared id and
+// silently drain the backing record out of the accepted-deviation budget (the
+// exact X-18 laundering this story exists to close).
+//
+// Red-first (before keying `matched` by CONTENT IDENTITY rather than by bare
+// id): carrying the reproducing member set matched[<shared id>]=true, so the
+// distinct-identity backing record — never itself reproduced — was dropped from
+// NotResurfaced anyway.
+func TestReconcileJudged_ConfirmedCollisionMemberWithBacking_ByteIdenticalRecurrenceDoesNotDrain(t *testing.T) {
+	// The post-confirmation shape the disposition verb now persists: a
+	// dispositioned suffixed member and a distinct-content backing record, both at
+	// the same suffixed id.
+	existingFindings := []artifact.Finding{
+		dispositionedJudged("judged-dup-collision-2", "T1prime reworded", artifact.FindingAcceptedDeviation, "owner-ratified: confirmed live member"),
+	}
+	backing := []artifact.Finding{
+		dispositionedJudged("judged-dup-collision-2", "T1 older ruling", artifact.FindingAcceptedDeviation, "owner-ratified: standing"),
+	}
+	// A byte-identical recurrence: the collision re-emits and its rank-1 member
+	// reproduces "T1prime reworded" exactly, so it lands back at
+	// judged-dup-collision-2 and carries. ("AAA ..." sorts first -> bare slug.)
+	fresh := []artifact.Finding{
+		freshJudged("judged-dup", "AAA ranks first"),
+		freshJudged("judged-dup", "T1prime reworded"),
+	}
+
+	got := ReconcileJudged(fresh, existingFindings, backing)
+
+	m, ok := findingWithID(got.Findings, "judged-dup-collision-2")
+	if !ok || m.Disposition != artifact.FindingAcceptedDeviation || m.Text != "T1prime reworded" {
+		t.Fatalf("collision-2 live member = %+v (present=%v), want its prior disposition carried onto the reproducing member", m, ok)
+	}
+	// The distinct-content backing record SURVIVES — never drained by the
+	// shared-id carry.
+	if len(got.NotResurfaced) != 1 || got.NotResurfaced[0].ID != "judged-dup-collision-2" || got.NotResurfaced[0].Text != "T1 older ruling" {
+		t.Fatalf("NotResurfaced = %+v, want the distinct-content backing record still standing (never drained by the shared-id carry)", got.NotResurfaced)
+	}
+}
+
 // TestReconcileJudged_ExactMatch_CarriesForward proves AC-2's frozen rule
 // still governs the ordinary case: a fresh judged finding whose (kind, id,
 // text) is byte-identical to a prior dispositioned one carries its

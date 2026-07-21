@@ -53,6 +53,7 @@ import (
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/atomicfile"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -268,31 +269,39 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	// or reaffirm — that entry, nor ever receive carried-from provenance the
 	// mechanism was never meant to stamp on it.
 	//
-	// A colliding slug that owns a not-resurfaced backing record never reaches
-	// this live path: ReconcileJudged suffixes EVERY member of such a collision
-	// ("<slug><CollisionInfix><n>", collisionMemberIDs), so the backing record
-	// alone keeps the bare slug and no live finding ever shadows it. This holds
-	// for a backing record persisted by a prior round
-	// (judged-collision-backing-regeneration-drain) AND for one BORN this round —
-	// a live dispositioned prior at the slug that the fresh collision does not
-	// carry forward on its bare-id member, which now lands in not-resurfaced with
-	// every member already suffixed (judged-collision-backing-same-round). A live
-	// judged finding sharing an id with a not-resurfaced entry is therefore always
-	// a genuine slug-only candidate (a single fresh finding under that slug,
-	// ac-1), whose confirmation legitimately resolves the backing record as above;
-	// a colliding slug's backing record — pre-existing or born this round — is
-	// resolved solely through its own exit ramp (dispositionNotResurfaced),
-	// reachable at all times because its bare id is never occupied by a live
-	// member. artifact.Validate enforces the invariant from the other side — a
-	// dispositioned findings: entry sharing a same-kind id with a not-resurfaced
-	// entry is rejected — so this path never special-cases a collision base member.
+	// PRESENTATION-PREDICATED (L-N13, judged-collision-suffixed-backing-shadow):
+	// the resolve+stamp fires ONLY for an id that actually carried a rendered
+	// ac-1 Candidate this round. ReconcileJudged pre-fills a Candidate solely for
+	// a SINGLE fresh finding under a BARE slug — NEVER for any collision-machinery
+	// output (a suffixed member "<slug><CollisionInfix><n>" or the synthetic
+	// per-slug contract-violation finding, ac-4). Such an id can nonetheless share
+	// its id with a not-resurfaced backing record: a prior dispositioned member at
+	// a suffixed id whose next-round recurrence reworded away from the frozen
+	// Kind+ID+Text match lands in not-resurfaced under that same suffixed id while
+	// a fresh member re-occupies it live — the bare-slug invariant
+	// (judged-collision-backing-regeneration-drain) holds only for the BARE slug,
+	// not for suffixed ids. Because no side-by-side was ever rendered for a
+	// collision member, confirming it must NOT mint ac-2 reaffirmation provenance
+	// nor drain its backing record: it dispositions the LIVE finding and LEAVES
+	// the backing record standing (its exit ramp, dispositionNotResurfaced,
+	// remains its sanctioned resolution once the collision clears), disclosed.
+	// artifact.IsCollisionMachineryID is the shared decision; artifact.Validate
+	// permits the resulting dispositioned-member + same-id-backing shape from the
+	// other side. A NON-collision judged id sharing an id with a not-resurfaced
+	// entry is therefore always a genuine slug-only candidate (ac-1), whose
+	// confirmation legitimately resolves+stamps the backing record as above.
+	var leftBackingRecord bool
 	if oldFinding.Kind == artifact.FindingJudged {
 		if nrIdx := findNotResurfacedIndex(decoded.NotResurfaced, findingID); nrIdx != -1 {
-			oldEntry := decoded.NotResurfaced[nrIdx]
-			if decision == oldEntry.Disposition {
-				updated.Findings[idx].CarriedFrom = decoded.Covers
+			if artifact.IsCollisionMachineryID(findingID) {
+				leftBackingRecord = true // no candidate was ever rendered — leave it, never stamp
+			} else {
+				oldEntry := decoded.NotResurfaced[nrIdx]
+				if decision == oldEntry.Disposition {
+					updated.Findings[idx].CarriedFrom = decoded.Covers
+				}
+				updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
 			}
-			updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
 		}
 	}
 
@@ -349,6 +358,20 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	// not-resurfaced exit ramp's own "(not-resurfaced)" output
 	// (dispositionNotResurfaced), so a reader always knows which one happened.
 	fmt.Fprintf(stdout, "disposition: %s %s %s (findings): %s -> %s\n", verb, ref.String(), findingID, decision, rationale)
+	if leftBackingRecord {
+		// L-N13 (judged-collision-suffixed-backing-shadow): the live finding was
+		// dispositioned but its same-id not-resurfaced backing record was LEFT
+		// standing — a collision-machinery id never carried a rendered ac-1
+		// candidate, so no reaffirmation could be confirmed here. Disclosed, never
+		// silent (three-valued honesty): the backing record stays budget-counted
+		// and is resolved solely through its own exit ramp once the collision
+		// clears (no live member then occupies its id).
+		fmt.Fprintln(stdout, disclosure.Render(disclosure.New(
+			"disposition:collision-member-backing-left",
+			ref.String(),
+			fmt.Sprintf("%s is a within-run collision-machinery id, which never carries a rendered reaffirmation candidate; its same-id not-resurfaced backing record was left standing (budget-counted, resolved via the not-resurfaced exit ramp once the collision clears) and no carried-from was stamped", findingID),
+		)))
+	}
 	return 0
 }
 

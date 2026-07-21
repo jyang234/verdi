@@ -873,6 +873,110 @@ func TestRunDisposition_ConfirmsCandidate_Escalation_NoCarriedFrom(t *testing.T)
 	}
 }
 
+// TestRunDisposition_CollisionMember_SuffixedBackingShadow_NoLivePathReaffirmation
+// is spec/finding-identity judged-collision-suffixed-backing-shadow's fix proof
+// (L-N13's presentation-predicated resolution): a live confirmation at a
+// SUFFIXED collision-member id owning a same-id not-resurfaced backing record
+// must NOT resolve+stamp through the live path. A collision member never
+// carried a rendered ac-1 Candidate (ReconcileJudged pre-fills one only for a
+// single fresh finding under a bare slug, never for any collision output), so
+// the Candidates list — the source of truth for "the ac-1 presentation
+// happened" — has no entry for it. The live finding is dispositioned, the
+// backing record SURVIVES (its exit ramp stays its sanctioned resolution), NO
+// carried-from is minted, and the withholding is disclosed.
+//
+// Red-first (before the fix): the verb's judged branch treated the confirmation
+// exactly like a candidate confirmation — it stamped carried-from: <covers-sha>
+// (decision == old ruling) and drained the backing record from not-resurfaced,
+// minting ac-2 reaffirmation provenance on a confirmation whose ac-1 candidate
+// presentation was deliberately never rendered.
+func TestRunDisposition_CollisionMember_SuffixedBackingShadow_NoLivePathReaffirmation(t *testing.T) {
+	// FI-13's exact shape: a suffixed collision member live+undispositioned
+	// (reworded recurrence) shadowing a same-id backing record.
+	findings := []artifact.Finding{
+		{ID: "judged-dup-collision-2", Kind: artifact.FindingJudged, Text: "reworded recurrence text (T1prime)"},
+	}
+	notResurfaced := []artifact.Finding{
+		{ID: "judged-dup-collision-2", Kind: artifact.FindingJudged, Text: "the older ruling text (T1)", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified"},
+	}
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, findings, notResurfaced, nil))
+	path := reportPathFor(root, "demo")
+
+	var stdout, stderr bytes.Buffer
+	// Confirm the live member with the SAME decision as the old ruling — the
+	// exact input that, on a TRUE candidate, WOULD stamp carried-from.
+	rc := runDisposition(root, "spec/demo", "judged-dup-collision-2", artifact.FindingAcceptedDeviation, "confirming the live reworded member", false, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runDisposition = %d, want 0; stderr=%s", rc, stderr.String())
+	}
+
+	after := decodeReportFile(t, path)
+	f, ok := findingByID(after.Findings, "judged-dup-collision-2")
+	if !ok || f.Disposition != artifact.FindingAcceptedDeviation {
+		t.Fatalf("live member = %+v (present=%v), want dispositioned accepted-deviation", f, ok)
+	}
+	// NO carried-from — a collision member never carried a rendered Candidate, so
+	// no ac-2 reaffirmation provenance may be minted.
+	if f.CarriedFrom != "" {
+		t.Fatalf("CarriedFrom = %q, want empty — a collision-member confirmation never mints reaffirmation provenance (no candidate was ever rendered)", f.CarriedFrom)
+	}
+	// The backing record SURVIVES — its exit ramp remains its sanctioned
+	// resolution, never a silent live-path drain.
+	nr, ok := findingByID(after.NotResurfaced, "judged-dup-collision-2")
+	if !ok {
+		t.Fatalf("backing record judged-dup-collision-2 was drained by the live confirmation: %+v", after.NotResurfaced)
+	}
+	if nr.Disposition != artifact.FindingAcceptedDeviation || nr.Note != "owner-ratified" {
+		t.Fatalf("backing record = %+v, want preserved verbatim (budget unchanged)", nr)
+	}
+	// The withholding is disclosed, never silent (three-valued honesty).
+	if !strings.Contains(stdout.String(), "disclosed-unproven") || !strings.Contains(stdout.String(), "judged-dup-collision-2") {
+		t.Fatalf("stdout = %q, want a disclosure that the backing record was left for the exit ramp", stdout.String())
+	}
+	// The resulting report round-trips through the strict decode+validate seam:
+	// a dispositioned collision-member findings entry + a same-id backing record
+	// is the sanctioned post-confirmation shape.
+	if err := after.Validate(); err != nil {
+		t.Fatalf("Validate(): %v — the confirmed-collision-member + same-id backing shape must be legal", err)
+	}
+}
+
+// TestRunDisposition_ContractViolation_BackingShadow_NoLivePathReaffirmation is
+// the same fix's contract-violation cell: the synthetic per-slug
+// judge-contract-violation finding is collision machinery output too — never a
+// rendered Candidate — so a live confirmation at its id with a same-id backing
+// record (an older collision's CV ruling that stopped reproducing byte-for-byte)
+// likewise dispositions the live finding, leaves the backing record, and never
+// stamps.
+func TestRunDisposition_ContractViolation_BackingShadow_NoLivePathReaffirmation(t *testing.T) {
+	findings := []artifact.Finding{
+		{ID: "judged-contract-violation-dup", Kind: artifact.FindingJudged, Text: "judge contract violation: 2 findings shared slug \"judged-dup\" (fresh member texts)"},
+	}
+	notResurfaced := []artifact.Finding{
+		{ID: "judged-contract-violation-dup", Kind: artifact.FindingJudged, Text: "judge contract violation: 2 findings shared slug \"judged-dup\" (older member texts)", Disposition: artifact.FindingAcceptedDeviation, Note: "owner-ratified"},
+	}
+	root := writeDispositionStoreRoot(t, "demo", buildDispositionFixtureWithNotResurfaced(t, findings, notResurfaced, nil))
+	path := reportPathFor(root, "demo")
+
+	var stdout, stderr bytes.Buffer
+	rc := runDisposition(root, "spec/demo", "judged-contract-violation-dup", artifact.FindingAcceptedDeviation, "confirming the fresh contract violation", false, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runDisposition = %d, want 0; stderr=%s", rc, stderr.String())
+	}
+
+	after := decodeReportFile(t, path)
+	f, _ := findingByID(after.Findings, "judged-contract-violation-dup")
+	if f.CarriedFrom != "" {
+		t.Fatalf("CarriedFrom = %q, want empty — a contract-violation finding never carried a Candidate", f.CarriedFrom)
+	}
+	if _, ok := findingByID(after.NotResurfaced, "judged-contract-violation-dup"); !ok {
+		t.Fatalf("CV backing record drained by the live confirmation: %+v", after.NotResurfaced)
+	}
+	if err := after.Validate(); err != nil {
+		t.Fatalf("Validate(): %v", err)
+	}
+}
+
 // TestRunDisposition_Amend_RecomputesCarriedFrom is spec/finding-identity
 // judged-amend-stale-carried-from's fix proof: the --amend path applies the
 // same carried-from discipline as first-writing. By the time an amend runs the

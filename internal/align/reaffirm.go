@@ -168,10 +168,16 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 	// (ac-2) to f: if a prior dispositioned judged finding is byte-identical in
 	// Kind+ID+Text, f inherits its Disposition/Note/CarriedFrom (a prior
 	// CarriedFrom on an already-reaffirmed finding that keeps reproducing
-	// byte-identically survives too) and that prior is marked resurfaced (so it
-	// never also lands in NotResurfaced). This is the frozen rule itself, not
-	// slug-matching — fail-closed is preserved by byte-identity — and EVERY
-	// path that emits a fresh judged finding runs it, the collision branch
+	// byte-identically survives too) and that prior is marked resurfaced by its
+	// CONTENT IDENTITY (so it never also lands in NotResurfaced). Keying matched
+	// by Identity — not the bare id — is load-bearing once a dispositioned
+	// collision member coexists with a DISTINCT-content backing record at the
+	// SAME suffixed id (the confirmed-collision-member shape, judged-collision-
+	// suffixed-backing-shadow): carrying the reproducing member must mark only
+	// THAT identity resurfaced, never conflate and silently drain the same-id
+	// backing record whose own text did not reproduce. This is the frozen rule
+	// itself, not slug-matching — fail-closed is preserved by byte-identity — and
+	// EVERY path that emits a fresh judged finding runs it, the collision branch
 	// included (judged-judged-slug-collision-carry); the single source of the
 	// carry so no path drifts from another.
 	carryExactMatch := func(f artifact.Finding) (artifact.Finding, bool) {
@@ -182,7 +188,7 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 		f.Disposition = p.Disposition
 		f.Note = p.Note
 		f.CarriedFrom = p.CarriedFrom
-		matched[p.ID] = true
+		matched[Identity(p)] = true
 		return f, true
 	}
 
@@ -237,12 +243,17 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 		out = append(out, f)
 	}
 
+	// A prior lands in not-resurfaced iff its exact CONTENT IDENTITY (not merely
+	// its id) failed to reproduce this round — so two priors sharing a suffixed
+	// id (a carried member and its distinct-content backing record) are tracked
+	// independently and only the genuinely-vanished one persists (judged-
+	// collision-suffixed-backing-shadow).
 	var notResurfaced []artifact.Finding
 	for _, p := range prior {
 		if p.Kind != artifact.FindingJudged || !p.Dispositioned() {
 			continue
 		}
-		if !matched[p.ID] {
+		if !matched[Identity(p)] {
 			notResurfaced = append(notResurfaced, p)
 		}
 	}

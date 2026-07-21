@@ -267,12 +267,22 @@ func (fm DeviationFrontmatter) Validate() error {
 	// slugs share the same shape), not an unremoved backing record — it must
 	// decode, never be rejected.
 	//
-	// The rejection is unconditional within the same kind — no collision
-	// base-member exception (judged-collision-backing-regeneration-drain removed
-	// the earlier IsCollisionBaseMemberID relaxation): ReconcileJudged now
-	// suffixes EVERY member of a colliding slug that owns a backing record, so a
-	// live member never shadows the backing record's bare id and this overlap
-	// can only mean a hand-edited or otherwise malformed report.
+	// The rejection is unconditional within the same kind EXCEPT for a
+	// collision-machinery id (IsCollisionMachineryID: a suffixed member or the
+	// synthetic contract-violation finding). For a bare, non-collision slug the
+	// bare-slug invariant (judged-collision-backing-regeneration-drain) still
+	// holds — every member of a colliding slug that owns a backing record is
+	// suffixed, so a live member never shadows the backing record's BARE id, and
+	// a same-kind overlap there can only mean a hand-edited/malformed report. But
+	// that invariant holds ONLY for the bare slug: a prior dispositioned member at
+	// a SUFFIXED id whose recurrence reworded away from its frozen text lands in
+	// not-resurfaced under that suffixed id while a fresh member re-occupies it
+	// live (judged-collision-suffixed-backing-shadow). Confirming that live member
+	// legitimately leaves the distinct-content backing record standing for its
+	// exit ramp (cmd/verdi's disposition verb, presentation-predicated per L-N13),
+	// so a dispositioned collision-machinery findings: entry MAY coexist with a
+	// same-id not-resurfaced entry — the sanctioned confirmed-collision-member
+	// shape, permitted here from the other side.
 	seenNotResurfaced := make(map[string]bool, len(fm.NotResurfaced))
 	for i, f := range fm.NotResurfaced {
 		if err := f.Validate(); err != nil {
@@ -285,7 +295,7 @@ func (fm DeviationFrontmatter) Validate() error {
 			return fmt.Errorf("artifact: not-resurfaced[%d]: duplicate id %q", i, f.ID)
 		}
 		seenNotResurfaced[f.ID] = true
-		if k, ok := dispositionedFindingKind[f.ID]; ok && k == f.Kind {
+		if k, ok := dispositionedFindingKind[f.ID]; ok && k == f.Kind && !IsCollisionMachineryID(f.ID) {
 			return fmt.Errorf("artifact: not-resurfaced[%d]: id %q is already dispositioned as a %s finding in findings — a confirmed finding's not-resurfaced backing record must be removed", i, f.ID, f.Kind)
 		}
 	}
