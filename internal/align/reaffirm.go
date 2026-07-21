@@ -108,6 +108,28 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 	candidates := make(map[string]JudgedCandidate)
 	matched := make(map[string]bool, len(prior))
 
+	// carryExactMatch applies identity.go's frozen exact-identity carry-forward
+	// (ac-2) to f: if a prior dispositioned judged finding is byte-identical in
+	// Kind+ID+Text, f inherits its Disposition/Note/CarriedFrom (a prior
+	// CarriedFrom on an already-reaffirmed finding that keeps reproducing
+	// byte-identically survives too) and that prior is marked resurfaced (so it
+	// never also lands in NotResurfaced). This is the frozen rule itself, not
+	// slug-matching — fail-closed is preserved by byte-identity — and EVERY
+	// path that emits a fresh judged finding runs it, the collision branch
+	// included (judged-judged-slug-collision-carry); the single source of the
+	// carry so no path drifts from another.
+	carryExactMatch := func(f artifact.Finding) (artifact.Finding, bool) {
+		p, ok := priorByIdentity[Identity(f)]
+		if !ok {
+			return f, false
+		}
+		f.Disposition = p.Disposition
+		f.Note = p.Note
+		f.CarriedFrom = p.CarriedFrom
+		matched[p.ID] = true
+		return f, true
+	}
+
 	for _, id := range order {
 		group := byID[id]
 		if len(group) > 1 {
@@ -128,28 +150,34 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 			// order — the synthetic violation finding makes the situation
 			// itself visible every time it recurs, which is the honest ceiling
 			// here.
+			// Each disambiguated member's id is stable-within-this-run, so a
+			// byte-identical recurrence of THIS exact collision carries its
+			// prior disposition on the frozen Kind+ID+Text rule — the id is
+			// computed BEFORE the match so the disambiguated id is what
+			// identity hashes over. A reworded member simply misses the match
+			// and lands undispositioned, exactly as any non-identical judged
+			// recurrence does (judged-judged-slug-collision-carry).
 			for i, f := range group {
 				if i > 0 {
 					f.ID = fmt.Sprintf("%s-collision-%d", id, i+1)
 				}
-				out = append(out, f)
+				carried, _ := carryExactMatch(f)
+				out = append(out, carried)
 			}
-			out = append(out, contractViolationFinding(id, group))
+			// The synthetic contract-violation finding is deterministic given
+			// a deterministic group, so a recurring collision's OWN disposition
+			// survives via the same exact-identity carry — making
+			// contractViolationFinding's doc claim true.
+			cv, _ := carryExactMatch(contractViolationFinding(id, group))
+			out = append(out, cv)
 			continue
 		}
 
 		f := group[0]
-		if p, ok := priorByIdentity[Identity(f)]; ok {
+		if carried, ok := carryExactMatch(f); ok {
 			// Exact content match: identity.go's frozen rule already says
 			// this is "the same finding" — ordinary carry-forward, ac-2.
-			// Fully absorbed into the live finding; a prior CarriedFrom
-			// marker (an already-reaffirmed finding that keeps reproducing
-			// byte-identically) survives too.
-			f.Disposition = p.Disposition
-			f.Note = p.Note
-			f.CarriedFrom = p.CarriedFrom
-			matched[p.ID] = true
-			out = append(out, f)
+			out = append(out, carried)
 			continue
 		}
 		if p, ok := priorByID[id]; ok {
@@ -186,8 +214,11 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 // hide which of the two a human actually dispositioned). Deterministic given
 // a deterministic group (id + member order/content), so a recurring
 // collision's OWN disposition survives via ordinary exact-identity matching
-// on this synthetic finding, exactly like any other judged finding — no
-// special-casing needed elsewhere in ReconcileJudged.
+// on this synthetic finding, exactly like any other judged finding: the
+// collision branch runs the same priorByIdentity carry-forward
+// (carryExactMatch) over this finding and every disambiguated member that
+// every other path applies (judged-judged-slug-collision-carry) — so this
+// claim holds without special-casing the not-resurfaced bookkeeping.
 func contractViolationFinding(id string, group []artifact.Finding) artifact.Finding {
 	texts := make([]string, len(group))
 	for i, f := range group {

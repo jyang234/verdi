@@ -152,6 +152,122 @@ func TestReconcileJudged_CollidingSlugs_DiscloseContractViolation_NeverDedupe(t 
 	}
 }
 
+// TestReconcileJudged_CollisionRecurrence_CarriesForwardByExactIdentity is
+// spec/finding-identity judged-judged-slug-collision-carry's fix proof: a
+// deterministically recurring, BYTE-IDENTICAL collision (the same slug shared
+// by the same 2+ fresh findings, run after run) carries its prior human
+// disposition forward on every disambiguated member AND on the synthetic
+// judge-contract-violation finding — exactly the exact-identity carry
+// (identity.go's frozen Kind+ID+Text rule) every other judged finding gets,
+// making contractViolationFinding's own doc claim ("survives via ordinary
+// exact-identity matching on this synthetic finding") finally true.
+//
+// Red-first (before the fix): the collision branch emitted every member and
+// the synthetic finding undispositioned, never consulting priorByIdentity —
+// so a byte-identical recurrence dropped all three prior dispositions into
+// not-resurfaced while undispositioned byte-identical twins sat in findings:,
+// forcing a human to re-disposition the same disclosed violation every
+// regeneration.
+func TestReconcileJudged_CollisionRecurrence_CarriesForwardByExactIdentity(t *testing.T) {
+	// Round 1: two fresh findings collide on one slug. ReconcileJudged
+	// disambiguates the members and appends the synthetic violation finding —
+	// all three undispositioned on a first run.
+	fresh := []artifact.Finding{
+		freshJudged("judged-dup", "first reading"),
+		freshJudged("judged-dup", "second, different reading"),
+	}
+	round1 := ReconcileJudged(fresh, nil, nil)
+	if len(round1.Findings) != 3 {
+		t.Fatalf("round1.Findings = %+v, want 3 (both members + the synthetic violation)", round1.Findings)
+	}
+
+	// A human dispositions all three as accepted-deviation — the frozen,
+	// disclosed collision as of this covering head.
+	const note = "owner-ratified: disclosed collision, tracked"
+	dispositioned := make([]artifact.Finding, len(round1.Findings))
+	for i, f := range round1.Findings {
+		f.Disposition = artifact.FindingAcceptedDeviation
+		f.Note = note
+		dispositioned[i] = f
+	}
+
+	// Round 2: the judge deterministically re-emits the SAME collision, byte
+	// for byte. Every disambiguated member and the synthetic violation is now
+	// a byte-identical recurrence, so each CARRIES its prior disposition — no
+	// undispositioned twin, nothing draining into not-resurfaced.
+	round2 := ReconcileJudged(fresh, dispositioned, nil)
+
+	if len(round2.NotResurfaced) != 0 {
+		t.Fatalf("round2.NotResurfaced = %+v, want none — a byte-identical collision recurrence must carry, never drain into not-resurfaced", round2.NotResurfaced)
+	}
+	if len(round2.Findings) != 3 {
+		t.Fatalf("round2.Findings = %+v, want 3", round2.Findings)
+	}
+	for _, f := range round2.Findings {
+		if !f.Dispositioned() {
+			t.Fatalf("round2 finding %s is UNDISPOSITIONED — its byte-identical prior disposition must have carried (contractViolationFinding's doc claim)", f.ID)
+		}
+		if f.Disposition != artifact.FindingAcceptedDeviation || f.Note != note {
+			t.Fatalf("round2 finding %s = %+v, want the prior disposition carried verbatim", f.ID, f)
+		}
+	}
+	// A collision never pre-fills a candidate (ac-4: the human resolves the
+	// slug's lineage); an exact-identity carry is not a candidate either.
+	if len(round2.Candidates) != 0 {
+		t.Fatalf("round2.Candidates = %+v, want none for a colliding slug", round2.Candidates)
+	}
+}
+
+// TestReconcileJudged_CollisionRecurrence_RewordedMemberDoesNotCarry proves
+// the fix stays fail-closed: a NON-identical recurrence (the collision's
+// second member reworded) does NOT carry — only the byte-identical members
+// (here, the first member and, because the group's texts changed, NOT the
+// synthetic violation) carry; the reworded member lands undispositioned and
+// its prior ruling persists in not-resurfaced, exactly as a non-identical
+// judged recurrence behaves today.
+func TestReconcileJudged_CollisionRecurrence_RewordedMemberDoesNotCarry(t *testing.T) {
+	fresh1 := []artifact.Finding{
+		freshJudged("judged-dup", "first reading"),
+		freshJudged("judged-dup", "second reading"),
+	}
+	round1 := ReconcileJudged(fresh1, nil, nil)
+	dispositioned := make([]artifact.Finding, len(round1.Findings))
+	for i, f := range round1.Findings {
+		f.Disposition = artifact.FindingAcceptedDeviation
+		f.Note = "owner-ratified"
+		dispositioned[i] = f
+	}
+
+	// Round 2: the first member recurs byte-identically; the second is
+	// reworded (so the synthetic violation's text, which quotes both, also
+	// changes and is no longer byte-identical).
+	fresh2 := []artifact.Finding{
+		freshJudged("judged-dup", "first reading"),
+		freshJudged("judged-dup", "second reading, now reworded"),
+	}
+	round2 := ReconcileJudged(fresh2, dispositioned, nil)
+
+	byID := make(map[string]artifact.Finding, len(round2.Findings))
+	for _, f := range round2.Findings {
+		byID[f.ID] = f
+	}
+	if m := byID["judged-dup"]; m.Disposition != artifact.FindingAcceptedDeviation {
+		t.Fatalf("first member %+v, want its byte-identical prior disposition carried", m)
+	}
+	if m := byID["judged-dup-collision-2"]; m.Dispositioned() {
+		t.Fatalf("reworded second member %+v, want UNDISPOSITIONED (non-identical recurrence never carries)", m)
+	}
+	// The reworded member's prior ruling and the now-stale synthetic
+	// violation's prior ruling both persist in not-resurfaced (unmatched).
+	nrIDs := make(map[string]bool, len(round2.NotResurfaced))
+	for _, f := range round2.NotResurfaced {
+		nrIDs[f.ID] = true
+	}
+	if !nrIDs["judged-dup-collision-2"] {
+		t.Fatalf("NotResurfaced = %+v, want the reworded member's prior ruling persisted", round2.NotResurfaced)
+	}
+}
+
 // TestReconcileJudged_DriftingSlug_LandsInNotResurfaced is ac-3's core:
 // a prior dispositioned finding whose slug the fresh judge run simply does
 // not re-emit at all (drifted away, not reworded) lands in NotResurfaced,
