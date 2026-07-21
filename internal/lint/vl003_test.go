@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -189,6 +190,68 @@ bindings:
 	}
 	if !strings.Contains(findings[0].Path, "verdi.bindings.yaml") {
 		t.Errorf("finding path = %q, want it to name verdi.bindings.yaml (root)", findings[0].Path)
+	}
+}
+
+// TestVL003_RootBindings_BadBareAC_ServicesOnlyLoop_Blind is spec/ritual-traps
+// ac-3's *before-leg*, demonstrated-by-pin rather than asserted-in-comment
+// (judged-ac3-before-leg-of-red-to-green-only-asserted). ac-3's letter requires
+// the pre-fix absence be "not merely asserted but demonstrated red-to-green";
+// TestVL003_RootBindings_BadBareAC_Reds above pins only the after-leg, and its
+// before condition lived solely in that test's prose. This pins the before
+// mechanically, on the SAME bad-bare-AC fixture: with the module root's
+// RootBindings WITHHELD from the Snapshot (nil, no decode error — exactly the
+// pre-ea868c3 Services-only view, since checkBindings's root-discovery block is
+// a no-op precisely when RootBindings and RootBindingsErr are both nil, so the
+// current code then behaves identically to the checkBindings that had no
+// root-discovery block at all), the Services-only loop yields ZERO findings:
+// finding no .flowmap.yaml at the module root (D6-4), it never discovers the
+// root file.
+//
+// The two legs are self-proving and guard the companion against vacuity: the
+// SAME checkBindings on the SAME Snapshot WITH RootBindings present must red
+// naming ac-99 (proving the fixture is live and the mechanism can fire on this
+// exact input), and withholding RootBindings alone must silence it. The delta
+// is solely the RootBindings field, so the finding's appearance is controlled
+// entirely by the root-discovery path — structurally proving only it can see
+// the file.
+func TestVL003_RootBindings_BadBareAC_ServicesOnlyLoop_Blind(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-root-bindings-target", "spec.md"), vl003RootBindingsTargetSpecMD)
+	writeTestFile(t, filepath.Join(dir, "verdi.bindings.yaml"), `schema: verdi.bindings/v1
+spec: spec/vl-003-root-bindings-target
+bindings:
+  - { producer: some-producer, kind: static, acs: [ac-99] }
+`)
+	repo := buildLintRepo(t, dir)
+
+	snap, err := BuildSnapshot(repo.Dir, Options{})
+	if err != nil {
+		t.Fatalf("BuildSnapshot: %v", err)
+	}
+	in := &RunInput{Ctx: context.Background(), Root: repo.Dir, Snapshot: snap, Opts: Options{}}
+	r := vl003{}
+
+	// Non-vacuity leg: the fixture's root bindings file really was decoded, and
+	// the SAME checkBindings, with RootBindings present, reds naming ac-99 —
+	// without this the zero below could be a dead fixture, not a real absence.
+	if snap.RootBindings == nil {
+		t.Fatalf("fixture precondition: BuildSnapshot did not decode the root verdi.bindings.yaml (RootBindingsErr=%v); the withheld-vs-present contrast would be vacuous", snap.RootBindingsErr)
+	}
+	full := r.checkBindings(in)
+	if len(full) != 1 {
+		t.Fatalf("with RootBindings present, checkBindings produced %d findings, want 1 (the root file's ac-99 entry):\n%s", len(full), findingsString(full))
+	}
+	if !strings.Contains(full[0].Message, "ac-99") {
+		t.Fatalf("with RootBindings present, finding = %q, want it to name the offending ac-99 entry", full[0].Message)
+	}
+
+	// Before-leg: withhold RootBindings — the pre-fix Services-only view. The
+	// root file must now be invisible, so checkBindings yields zero findings.
+	snap.RootBindings = nil
+	snap.RootBindingsErr = nil
+	if blind := r.checkBindings(in); len(blind) != 0 {
+		t.Fatalf("Services-only loop (RootBindings withheld) produced %d findings, want 0 — without the root-discovery path the module-root bindings file must be invisible:\n%s", len(blind), findingsString(blind))
 	}
 }
 
