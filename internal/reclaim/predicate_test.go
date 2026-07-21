@@ -11,12 +11,14 @@ import (
 
 // allKeptReasons is the hand-maintained, authoritative enumeration of
 // every KeptReason value this story's obligation (ac-1--static) declares
-// closed: unmerged, dirty, unresolved-state, detached, managed, invoking —
-// no seventh. keptReasonNames' own compile-time array-length assertion
+// closed: unresolved-state, default-branch (R4-I-84's own conservative-
+// direction addition), unmerged, dirty, detached, managed, invoking — seven,
+// no eighth. keptReasonNames' own compile-time array-length assertion
 // (predicate.go) is what actually enforces closedness against the type
 // itself; this slice is the test-side mirror that walks it.
 var allKeptReasons = []KeptReason{
 	KeptUnresolvedState,
+	KeptDefaultBranch,
 	KeptUnmerged,
 	KeptDirty,
 	KeptDetached,
@@ -36,11 +38,12 @@ func TestKeptReason_String_ClosedSetDistinctNonEmpty(t *testing.T) {
 		}
 		seen[s] = r
 	}
-	if len(seen) != 6 {
-		t.Fatalf("got %d distinct KeptReason labels, want exactly 6 (unmerged, dirty, unresolved-state, detached, managed, invoking)", len(seen))
+	if len(seen) != 7 {
+		t.Fatalf("got %d distinct KeptReason labels, want exactly 7 (unresolved-state, default-branch, unmerged, dirty, detached, managed, invoking)", len(seen))
 	}
-	// The vocabulary itself, verbatim (ac-1's own closed list).
-	for _, want := range []string{"unmerged", "dirty", "unresolved-state", "detached", "managed", "invoking"} {
+	// The vocabulary itself, verbatim (ac-1's own closed list, grown by
+	// default-branch per R4-I-84).
+	for _, want := range []string{"unmerged", "dirty", "unresolved-state", "detached", "managed", "invoking", "default-branch"} {
 		if _, ok := seen[want]; !ok {
 			t.Errorf("closed vocabulary missing %q among rendered labels: %v", want, seen)
 		}
@@ -66,8 +69,9 @@ func TestKeptReason_String_OutOfRange_FailsClosed(t *testing.T) {
 
 // --- classifyWorktreeRow: the six-way ordered exclusion switch + eligible ---
 
-func TestClassifyWorktreeRow_AllSevenOutcomes(t *testing.T) {
+func TestClassifyWorktreeRow_AllEightOutcomes(t *testing.T) {
 	const invokingRoot = "/store/primary"
+	const defaultBranch = "main" // base.Branch is "design/x" — never the default, so existing cases are unaffected
 
 	base := residue.Worktree{
 		Path:    "/store/verdi-wt/other",
@@ -97,6 +101,34 @@ func TestClassifyWorktreeRow_AllSevenOutcomes(t *testing.T) {
 			wantElig:   false,
 			wantReason: KeptUnresolvedState,
 			wantDetail: "clean state: boom",
+		},
+		{
+			// R4-I-84: default-branch is FIRST among the identity exclusions —
+			// it precedes dirty, managed, and invoking (all set true here).
+			name:       "default-branch wins over dirty+managed+invoking (first identity exclusion)",
+			wt:         withField(base, func(w *residue.Worktree) { w.Branch = "main"; w.Dirty = true; w.Managed = true; w.Path = invokingRoot }),
+			wantElig:   false,
+			wantReason: KeptDefaultBranch,
+		},
+		{
+			// ...but unresolved-state still precedes default-branch: the one
+			// disclosure that outranks it (an unresolvable worktree is disclosed
+			// as such; the never-touched safety invariant holds either way).
+			name: "unresolved-state still precedes default-branch",
+			wt: withField(base, func(w *residue.Worktree) {
+				w.Branch = "main"
+				w.MergedUnresolved = true
+				w.Reason = "merge state: boom"
+			}),
+			wantElig:   false,
+			wantReason: KeptUnresolvedState,
+			wantDetail: "merge state: boom",
+		},
+		{
+			name:       "default-branch alone: a clean, unmanaged, non-invoking worktree ON the default branch is kept, never eligible (R4-I-84 core)",
+			wt:         withField(base, func(w *residue.Worktree) { w.Branch = "main" }),
+			wantElig:   false,
+			wantReason: KeptDefaultBranch,
 		},
 		{
 			name:       "unmerged",
@@ -129,15 +161,23 @@ func TestClassifyWorktreeRow_AllSevenOutcomes(t *testing.T) {
 			wantReason: KeptInvoking,
 		},
 		{
-			name:     "eligible: none of the six exclusions apply",
+			name:     "eligible: none of the seven exclusions apply (base.Branch design/x is non-default)",
 			wt:       base,
+			wantElig: true,
+		},
+		{
+			// Guard-not-over-broad: a NON-default branch otherwise identical to
+			// the default-branch case (merged, clean, unmanaged) stays eligible —
+			// the arm keys on exact branch equality, never a looser condition.
+			name:     "non-default merged clean stays eligible (default-branch guard not over-broad)",
+			wt:       withField(base, func(w *residue.Worktree) { w.Branch = "release/x" }),
 			wantElig: true,
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			elig, reason, detail := classifyWorktreeRow(c.wt, invokingRoot)
+			elig, reason, detail := classifyWorktreeRow(c.wt, invokingRoot, defaultBranch)
 			if elig != c.wantElig {
 				t.Errorf("eligible = %v, want %v", elig, c.wantElig)
 			}
@@ -193,7 +233,7 @@ func TestCompute_InvokingPath_SurvivesSymlinkResolution(t *testing.T) {
 	res := &residue.Result{Worktrees: []residue.Worktree{
 		{Path: resolved, Branch: "design/x", Merged: true}, // git's own already-resolved form
 	}}
-	plan := Compute(res, dir, "main") // dir: the UNRESOLVED form, as store.FindRoot(".") would return
+	plan := Compute(res, dir, "main", "main") // dir: the UNRESOLVED form, as store.FindRoot(".") would return
 	if len(plan.Items) != 1 {
 		t.Fatalf("Compute produced %d items, want 1", len(plan.Items))
 	}
@@ -213,16 +253,24 @@ func TestClassifyBranchOnlyRow_BothOutcomes(t *testing.T) {
 		name           string
 		branch         string
 		invokingBranch string
+		defaultBranch  string
 		wantElig       bool
 		wantReason     KeptReason
 	}{
-		{name: "invoking", branch: "close/x", invokingBranch: "close/x", wantElig: false, wantReason: KeptInvoking},
-		{name: "eligible: different branch", branch: "close/x", invokingBranch: "close/y", wantElig: true},
-		{name: "eligible: detached invoking HEAD never matches (empty invokingBranch)", branch: "close/x", invokingBranch: "", wantElig: true},
+		{name: "invoking", branch: "close/x", invokingBranch: "close/x", defaultBranch: "main", wantElig: false, wantReason: KeptInvoking},
+		{name: "eligible: different branch", branch: "close/x", invokingBranch: "close/y", defaultBranch: "main", wantElig: true},
+		{name: "eligible: detached invoking HEAD never matches (empty invokingBranch)", branch: "close/x", invokingBranch: "", defaultBranch: "main", wantElig: true},
+		// R4-I-84 belt-and-braces: residue.scanMergedBranches already excludes
+		// the default branch by name, so this arm is verified-unreachable through
+		// Compute's own construction — but it is exercised directly here so a
+		// future residue change cannot silently re-open the default-branch hole.
+		{name: "default-branch belt-and-braces guard fires", branch: "main", invokingBranch: "close/y", defaultBranch: "main", wantElig: false, wantReason: KeptDefaultBranch},
+		{name: "default-branch precedes invoking", branch: "main", invokingBranch: "main", defaultBranch: "main", wantElig: false, wantReason: KeptDefaultBranch},
+		{name: "empty defaultBranch never fires the guard (mirrors residue's non-empty precondition)", branch: "close/x", invokingBranch: "close/y", defaultBranch: "", wantElig: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			elig, reason := classifyBranchOnlyRow(c.branch, c.invokingBranch)
+			elig, reason := classifyBranchOnlyRow(c.branch, c.invokingBranch, c.defaultBranch)
 			if elig != c.wantElig {
 				t.Errorf("eligible = %v, want %v", elig, c.wantElig)
 			}
@@ -249,7 +297,7 @@ func TestCompute_WorktreeAndBranchOnlyRows_Assembled(t *testing.T) {
 		MergedBranches: []string{"close/a", "close/orphan", "design/b"},
 	}
 
-	plan := Compute(res, "/store/invoking", "close/a")
+	plan := Compute(res, "/store/invoking", "close/a", "main")
 
 	if len(plan.Items) != 4 {
 		t.Fatalf("Compute produced %d items, want 4 (design/a, design/b as worktree rows; close/a, close/orphan as branch-only rows; design/b's MergedBranches duplicate must not add a 5th): %+v", len(plan.Items), plan.Items)
@@ -296,7 +344,7 @@ func TestCompute_BranchOnlyRow_ExcludedWhenAWorktreeOwnsTheName(t *testing.T) {
 		},
 		MergedBranches: []string{"design/managed"},
 	}
-	plan := Compute(res, "/store/invoking", "main")
+	plan := Compute(res, "/store/invoking", "main", "main")
 	if len(plan.Items) != 1 {
 		t.Fatalf("Compute produced %d items, want exactly 1 (design/managed's worktree row only, never a second branch-only item)", len(plan.Items))
 	}
@@ -306,7 +354,7 @@ func TestCompute_BranchOnlyRow_ExcludedWhenAWorktreeOwnsTheName(t *testing.T) {
 }
 
 func TestCompute_EmptyResult_EmptyPlan(t *testing.T) {
-	plan := Compute(&residue.Result{}, "/store/invoking", "main")
+	plan := Compute(&residue.Result{}, "/store/invoking", "main", "main")
 	if len(plan.Items) != 0 {
 		t.Fatalf("Compute(empty Result) = %d items, want 0", len(plan.Items))
 	}

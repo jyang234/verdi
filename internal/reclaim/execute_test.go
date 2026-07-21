@@ -53,7 +53,7 @@ func TestPlan_DryRunRows_ZeroMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := Compute(res, root, "main")
+	plan := Compute(res, root, "main", "main")
 	rows := plan.DryRunRows()
 
 	branchesAfter, err := gitx.LocalBranches(ctx, root)
@@ -98,7 +98,7 @@ func TestApply_CleanEligiblePair_ReclaimsInOrder_PrintsTip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := Compute(res, root, "main")
+	plan := Compute(res, root, "main", "main")
 
 	rows := Apply(ctx, root, plan)
 	row := rowFor(t, rows, pair.branch)
@@ -141,7 +141,7 @@ func TestApply_WorktreeDirtiedBeforeApply_RefusedWithoutAttemptingDelete_SweepCo
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := Compute(res, root, "main")
+	plan := Compute(res, root, "main", "main")
 	if item := planItemFor(t, plan, dirtied.branch); !item.Eligible {
 		t.Fatalf("precondition: dirtied item = %+v, want Eligible at plan time (dirtying happens AFTER this)", item)
 	}
@@ -229,7 +229,7 @@ func TestApply_BranchOnlyRowCheckedOutAtPrimary_RefusedViaBranchDelete_LedgerR4I
 	// invokingBranch deliberately NOT `branch`: gc is simulated as invoked
 	// from somewhere else entirely, so the cheap invoking check cannot
 	// catch this row — only git's own second guard can (dc-2's own point).
-	plan := Compute(res, "/nonexistent/invoking/root", "main")
+	plan := Compute(res, "/nonexistent/invoking/root", "main", "main")
 	item := planItemFor(t, plan, branch)
 	if !item.Eligible {
 		t.Fatalf("plan-time: %s = %+v, want Eligible (R4-I-80: the predicate does not pre-classify this corner)", branch, item)
@@ -268,7 +268,7 @@ func TestApply_BranchAdvancedAfterScan_PartialOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := Compute(res, root, "main")
+	plan := Compute(res, root, "main", "main")
 	if item := planItemFor(t, plan, pair.branch); !item.Eligible {
 		t.Fatalf("precondition: %s = %+v, want Eligible before the race", pair.branch, item)
 	}
@@ -335,7 +335,7 @@ func TestApply_BranchOnlyEligible_ReclaimsWithoutAnyWorktreeCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := Compute(res, root, "main")
+	plan := Compute(res, root, "main", "main")
 	item := planItemFor(t, plan, branch)
 	if !item.Eligible || item.Unit.HasWorktree() {
 		t.Fatalf("precondition: %s = %+v, want an eligible branch-only unit", branch, item)

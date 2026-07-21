@@ -52,6 +52,7 @@ func TestLooksManagedAnywhere(t *testing.T) {
 // the segment guard is not over-broad.
 func TestClassifyWorktreeRow_ForeignManagedSegment_KeptManaged(t *testing.T) {
 	const invokingRoot = "/store/primary"
+	const defaultBranch = "main" // base.Branch is "design/foreign" — never the default here
 
 	// Merged, clean, branched, and NOT the invoking path — so the row reaches
 	// the managed/eligible decision (every earlier exclusion in the fixed
@@ -88,7 +89,7 @@ func TestClassifyWorktreeRow_ForeignManagedSegment_KeptManaged(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			elig, reason, _ := classifyWorktreeRow(c.wt, invokingRoot)
+			elig, reason, _ := classifyWorktreeRow(c.wt, invokingRoot, defaultBranch)
 			if elig != c.wantElig {
 				t.Errorf("eligible = %v, want %v", elig, c.wantElig)
 			}
@@ -173,7 +174,7 @@ func TestCompute_ForeignCheckoutManagedWorktree_KeptNotReclaimed(t *testing.T) {
 		t.Fatalf("fixture premise broken: foreign worktree must be merged+clean to be reclaim-eligible-shaped, got %+v", *foreignRow)
 	}
 
-	plan := Compute(res, root, "main")
+	plan := Compute(res, root, "main", "main")
 
 	item := planItemFor(t, plan, foreignBranch)
 	if item.Eligible {

@@ -98,7 +98,7 @@ func TestCompute_CombinedSurvey_EveryRowClassifiedExactlyOnce(t *testing.T) {
 		t.Fatalf("residue.Scan: %v", err)
 	}
 
-	plan := Compute(res, invoking.path, "branch-matching-nothing-in-this-fixture")
+	plan := Compute(res, invoking.path, "branch-matching-nothing-in-this-fixture", "main")
 
 	const wantRowCount = 8 // eligible, orphan, unmerged, dirty, stale, detached, managed, invoking
 	if len(plan.Items) != wantRowCount {
