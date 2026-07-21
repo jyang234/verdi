@@ -2,6 +2,7 @@ package lint
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -201,9 +202,19 @@ func (r vl003) checkPin(in *RunInput, path, field, pinned string) []Finding {
 // P2-3(b)).
 func (r vl003) checkBindings(in *RunInput) []Finding {
 	var findings []Finding
+	// svc.Dir is always filepath.Abs-normalized (internal/store's
+	// DiscoverServices), so normalize in.Root the same way before the identity
+	// compare below (judged-ac3-root-guard-path-equality): a relative or
+	// trailing-slash caller would otherwise defeat the root-rooted-service
+	// guard, and the one root bindings file — read into BOTH that service's
+	// Bindings and RootBindings — would be checked twice under two labels.
+	normalizedRoot := in.Root
+	if abs, err := filepath.Abs(in.Root); err == nil {
+		normalizedRoot = abs
+	}
 	rootDiscoveredAsService := false
 	for _, svc := range in.Snapshot.Services {
-		if svc.Dir == in.Root {
+		if svc.Dir == normalizedRoot {
 			rootDiscoveredAsService = true
 		}
 		if svc.Bindings == nil {
