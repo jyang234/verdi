@@ -360,6 +360,23 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 		in.FrozenAt = frozenAt
 	}
 
+	// Cross-level re-recording awareness (ledger L-N14 companion): a
+	// feature-context align threads its CLOSED, non-superseded implementing
+	// stories' archived rulings into ReconcileJudged, so a re-recorded ruling is
+	// a carry candidate citing the archive rather than a brand-new finding.
+	// Feature-context only (story aligns skip it), and gathered HERE — only when
+	// the run actually reaches Generate — so close's freeze-in-place branch (which
+	// returned above) never pays for the archive walk nor fails on an unrelated
+	// archive's decode error it does not need.
+	if spec.Class == artifact.ClassFeature {
+		archivedRulings, err := gatherArchivedRulings(root, specRef.Name)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		in.ArchivedRulings = archivedRulings
+	}
+
 	report, err := align.Generate(ctx, in)
 	if err != nil {
 		var reqAbsent *align.ErrJudgeRequiredAbsent

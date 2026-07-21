@@ -137,7 +137,15 @@ func renderCandidates(b *strings.Builder, findings []artifact.Finding, candidate
 		}
 		rendered++
 		fmt.Fprintf(b, "- **%s** CANDIDATE — new text: %q\n", f.ID, f.Text)
-		fmt.Fprintf(b, "  - prior ruling [%s]: %q", cand.OldDisposition, cand.OldText)
+		// A cross-level candidate (ledger L-N14) cites its archive origin so a
+		// human sees the ruling came from a CLOSED implementing story's archive
+		// before confirming; a same-report candidate (ArchiveSource empty) renders
+		// exactly as before this companion landed.
+		fmt.Fprintf(b, "  - prior ruling [%s]", cand.OldDisposition)
+		if cand.ArchiveSource != "" {
+			fmt.Fprintf(b, " from archived %s", cand.ArchiveSource)
+		}
+		fmt.Fprintf(b, ": %q", cand.OldText)
 		if cand.OldNote != "" {
 			fmt.Fprintf(b, " — %s", cand.OldNote)
 		}

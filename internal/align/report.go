@@ -56,6 +56,16 @@ type Input struct {
 	// straight to ReconcileJudged so an already-persisted entry stays
 	// persisted across any number of further non-reproducing regenerations.
 	ExistingNotResurfaced []artifact.Finding
+	// ArchivedRulings are dispositioned judged rulings drawn from the CLOSED,
+	// non-superseded implementing stories' ARCHIVED deviation reports, tagged with
+	// their source archive — the cross-level reaffirmation source (ledger L-N14
+	// companion). Populated ONLY for a feature-context align (cmd/verdi/align.go
+	// gathers them; a story align passes nil): applyArchivedRulings pre-fills a
+	// CANDIDATE citing the archive for a fresh feature finding whose slug matched
+	// no feature-report prior but matches an archived story ruling, and seats that
+	// ruling as the candidate's backing so the human-confirms path stamps
+	// carried-from — never an auto-carry.
+	ArchivedRulings []ArchivedRuling
 	// ModelDigest is the resolved operating model's canonical-JSON sha256
 	// digest (model.Model.Digest(), spec/model-digest ledger L-M5) — the
 	// caller (cmd/verdi/align.go) resolves it once via
@@ -149,6 +159,13 @@ func Generate(ctx context.Context, in Input) (*Report, error) {
 	// the ONE identity rule is never duplicated.
 	preservedComputed := PreserveDispositions(computed.Findings, findingsOfKind(in.ExistingFindings, artifact.FindingComputed))
 	judgedRecon := ReconcileJudged(judged.Findings, findingsOfKind(in.ExistingFindings, artifact.FindingJudged), in.ExistingNotResurfaced)
+	// Cross-level re-recording awareness (ledger L-N14 companion): for a
+	// feature-context align, a fresh feature finding whose slug matched no
+	// feature-report prior but matches a CLOSED implementing story's archived
+	// ruling becomes a CANDIDATE citing the archive (never an auto-carry). Nil
+	// ArchivedRulings (every story align, and a feature align with no archived
+	// implementing stories yet) leaves judgedRecon untouched.
+	judgedRecon = applyArchivedRulings(judgedRecon, in.ArchivedRulings)
 
 	preserved := make([]artifact.Finding, 0, len(preservedComputed)+len(judgedRecon.Findings))
 	preserved = append(preserved, preservedComputed...)
