@@ -2,6 +2,7 @@ package align
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -87,6 +88,24 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 		priorByID[f.ID] = f
 	}
 
+	// backingByID marks each slug that owns a not-resurfaced backing record this
+	// run — a dispositioned judged entry in existingNotResurfaced. When such a
+	// slug ALSO collides among fresh findings, collisionMemberIDs suffixes EVERY
+	// member so the backing record alone keeps the bare slug
+	// (judged-collision-backing-regeneration-drain): its exit ramp stays
+	// reachable and the id-keyed NotResurfaced rebuild below can never mark it
+	// resurfaced by matching a live member that merely shares its bare id. Only
+	// existingNotResurfaced feeds this — a bare-slug backing record lives there,
+	// never in existingFindings (Validate rejects a dispositioned findings: entry
+	// sharing a same-kind id with a not-resurfaced one, so the two never coexist
+	// on disk).
+	backingByID := make(map[string]bool, len(existingNotResurfaced))
+	for _, f := range existingNotResurfaced {
+		if f.Kind == artifact.FindingJudged && f.Dispositioned() {
+			backingByID[f.ID] = true
+		}
+	}
+
 	// Group fresh by id first (ac-4's collision rule): a slug shared by 2+
 	// fresh findings this round is the judge violating its own contract —
 	// disclosed as its own finding, never silently deduped or arbitrarily
@@ -143,28 +162,13 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 			// id, which would simply fail to decode) is the way to keep every
 			// one of them independently visible and independently
 			// dispositionable — nothing is merged or lost, only the id gains a
-			// stable-within-this-run suffix. Disclosed limitation: because a
-			// slug that collides has, by definition, no way to identify which
-			// group member is "the same one" next run, a disambiguated id's
-			// carry-forward is only as stable as the judge's own emission
-			// order — the synthetic violation finding makes the situation
-			// itself visible every time it recurs, which is the honest ceiling
-			// here.
-			// Each disambiguated member's id is stable-within-this-run, so a
-			// byte-identical recurrence of THIS exact collision carries its
-			// prior disposition on the frozen Kind+ID+Text rule — the id is
-			// computed BEFORE the match so the disambiguated id is what
-			// identity hashes over. A reworded member simply misses the match
-			// and lands undispositioned, exactly as any non-identical judged
-			// recurrence does (judged-judged-slug-collision-carry).
-			for i, f := range group {
-				if i > 0 {
-					// artifact.CollisionInfix is the single source of this
-					// reserved shape: Validate and the disposition verb read it
-					// back to recognize a collision base member, so the literal
-					// must never be duplicated across packages.
-					f.ID = fmt.Sprintf("%s%s%d", id, artifact.CollisionInfix, i+1)
-				}
+			// stable-within-this-run suffix (collisionMemberIDs). Its id is
+			// computed BEFORE the match, so a byte-identical recurrence carries
+			// its prior disposition on the frozen Kind+ID+Text rule and a
+			// reworded member misses the match and lands undispositioned, exactly
+			// as any non-identical judged recurrence does
+			// (judged-judged-slug-collision-carry).
+			for _, f := range collisionMemberIDs(id, group, backingByID[id]) {
 				carried, _ := carryExactMatch(f)
 				out = append(out, carried)
 			}
@@ -207,6 +211,63 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 	}
 
 	return JudgedReconciliation{Findings: out, Candidates: candidates, NotResurfaced: notResurfaced}
+}
+
+// collisionMemberIDs assigns a disambiguated id to each member of a within-run
+// slug collision (a slug 2+ fresh judged findings shared this run), branching
+// on whether the slug also owns a not-resurfaced backing record this run
+// (hasBacking). It returns the members in fresh's original emission order —
+// only their ids are rewritten — so RenderBody's finding order stays the
+// judge's own order under both schemes. artifact.CollisionInfix is the shared
+// schema seam for the reserved id shape, never duplicated across packages.
+//
+//   - hasBacking == false (unchanged from the original collision handling,
+//     judged-judged-slug-collision-carry): the first-emitted member keeps the
+//     bare slug and each later member becomes "<slug><CollisionInfix><n>" (n
+//     from 2, in emission order). There is no backing record on the bare slug
+//     to shadow, so keeping a live base member on it is safe and an
+//     already-dispositioned base member's id never churns.
+//
+//   - hasBacking == true (judged-collision-backing-regeneration-drain): NO
+//     member keeps the bare slug — the not-resurfaced backing record alone owns
+//     it, so the backing record's own exit ramp (cmd/verdi's disposition verb)
+//     stays reachable while the collision persists AND ReconcileJudged's
+//     id-keyed NotResurfaced rebuild can never mark the backing record
+//     resurfaced by matching a live member that merely shares its bare id.
+//     Every member is suffixed, assigned by TEXT RANK (members sorted by text,
+//     ties broken by emission index) rather than emission order, so a
+//     byte-identical recurrence of the same member set reproduces the same
+//     id->text pairing regardless of how the judge orders its output — each
+//     member then carries its prior disposition on the frozen Kind+ID+Text rule
+//     (carryExactMatch). (Disclosed edge: if a human resolves the backing
+//     record between runs, hasBacking flips to false and the scheme reverts to
+//     bare-base — the affected members land undispositioned in not-resurfaced,
+//     still budget-counted, never silently dropped.)
+func collisionMemberIDs(slug string, group []artifact.Finding, hasBacking bool) []artifact.Finding {
+	out := make([]artifact.Finding, len(group))
+	copy(out, group)
+	if !hasBacking {
+		for i := range out {
+			if i > 0 {
+				out[i].ID = fmt.Sprintf("%s%s%d", slug, artifact.CollisionInfix, i+1)
+			}
+		}
+		return out
+	}
+	// Rank members by text (ties broken by emission index, via SliceStable over
+	// an identity-initialized index slice) so the id->text assignment is a
+	// function of content, never the judge's incidental emission order.
+	rank := make([]int, len(out))
+	for i := range rank {
+		rank[i] = i
+	}
+	sort.SliceStable(rank, func(a, b int) bool {
+		return out[rank[a]].Text < out[rank[b]].Text
+	})
+	for r, idx := range rank {
+		out[idx].ID = fmt.Sprintf("%s%s%d", slug, artifact.CollisionInfix, r+1)
+	}
+	return out
 }
 
 // contractViolationFinding synthesizes ac-4's disclosed judge-contract-

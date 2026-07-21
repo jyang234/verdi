@@ -352,3 +352,162 @@ func TestReconcileJudged_ComputedFindingsIgnored(t *testing.T) {
 		t.Fatalf("NotResurfaced = %+v, want none (a computed finding is never ReconcileJudged's concern)", got.NotResurfaced)
 	}
 }
+
+// TestReconcileJudged_CollisionWithBacking_BackingRecordSurvivesRecurrence is
+// spec/finding-identity judged-collision-backing-regeneration-drain's headline
+// fix proof. When a slug collides among fresh findings AND that same slug owns
+// a not-resurfaced backing record, NO live member may keep the bare slug: every
+// member is suffixed (collisionMemberIDs) so the backing record alone owns the
+// bare id. That dissolves the id-keyed drain by construction — a byte-identical
+// recurrence of the collision can never mark the backing record "resurfaced" by
+// matching a live member that merely shares its bare id.
+//
+// Red-first (before the fix): the base member kept the bare slug, so once a
+// human dispositioned it, a byte-identical recurrence's carryExactMatch set
+// matched[bareID] and the distinct-identity backing record was silently dropped
+// from NotResurfaced — decrementing the spec-stale/feature-close budget with no
+// human act.
+func TestReconcileJudged_CollisionWithBacking_BackingRecordSurvivesRecurrence(t *testing.T) {
+	backing := []artifact.Finding{
+		dispositionedJudged("judged-dup", "an old ruling under the same slug", artifact.FindingAcceptedDeviation, "owner-ratified"),
+	}
+	fresh := []artifact.Finding{
+		freshJudged("judged-dup", "first reading"),
+		freshJudged("judged-dup", "second, different reading"),
+	}
+
+	round1 := ReconcileJudged(fresh, nil, backing)
+
+	// No live member owns the bare slug — the backing record alone keeps it, so
+	// its exit ramp stays reachable and the bookkeeping can never conflate them.
+	for _, f := range round1.Findings {
+		if f.ID == "judged-dup" {
+			t.Fatalf("Findings has a live member on the bare slug %+v — with a backing record present every member must be suffixed", f)
+		}
+	}
+	// Both members survive (suffixed) plus the one synthetic violation.
+	if len(round1.Findings) != 3 {
+		t.Fatalf("round1.Findings = %+v, want 3 (both suffixed members + the synthetic violation)", round1.Findings)
+	}
+	// The backing record survives, standing alone under the bare slug.
+	if len(round1.NotResurfaced) != 1 || round1.NotResurfaced[0].ID != "judged-dup" {
+		t.Fatalf("round1.NotResurfaced = %+v, want the backing record to survive under the bare slug", round1.NotResurfaced)
+	}
+
+	// A human dispositions every live member (their suffixed ids are what the
+	// report now carries).
+	dispositioned := make([]artifact.Finding, len(round1.Findings))
+	for i, f := range round1.Findings {
+		f.Disposition = artifact.FindingAcceptedDeviation
+		f.Note = "owner-ratified: disclosed collision"
+		dispositioned[i] = f
+	}
+
+	// Round 2: the judge re-emits the SAME collision byte-for-byte, the backing
+	// record still standing. The backing record must NOT drain.
+	round2 := ReconcileJudged(fresh, dispositioned, round1.NotResurfaced)
+
+	if len(round2.NotResurfaced) != 1 || round2.NotResurfaced[0].ID != "judged-dup" {
+		t.Fatalf("round2.NotResurfaced = %+v, want the backing record still standing — a byte-identical collision recurrence must never drain it", round2.NotResurfaced)
+	}
+	if round2.NotResurfaced[0].Disposition != artifact.FindingAcceptedDeviation || round2.NotResurfaced[0].Note != "owner-ratified" {
+		t.Fatalf("round2 backing = %+v, want it left verbatim (budget unchanged)", round2.NotResurfaced[0])
+	}
+	// Every live member still carries its prior disposition on the frozen
+	// Kind+ID+Text rule — the text-rank id assignment is deterministic.
+	for _, f := range round2.Findings {
+		if !f.Dispositioned() {
+			t.Fatalf("round2 member %s is UNDISPOSITIONED — a byte-identical recurrence must carry its prior disposition", f.ID)
+		}
+	}
+}
+
+// TestReconcileJudged_CollisionWithBacking_TextRankIsEmissionOrderStable proves
+// the backing-case id assignment is a function of member TEXT, not the judge's
+// incidental emission order: the SAME member set emitted in a different order
+// reproduces the SAME id->text pairing, so a dispositioned member carries
+// forward even when the judge reshuffles its output between runs.
+func TestReconcileJudged_CollisionWithBacking_TextRankIsEmissionOrderStable(t *testing.T) {
+	backing := []artifact.Finding{
+		dispositionedJudged("judged-dup", "an old ruling under the same slug", artifact.FindingAcceptedDeviation, "owner-ratified"),
+	}
+	order1 := []artifact.Finding{freshJudged("judged-dup", "alpha reading"), freshJudged("judged-dup", "beta reading")}
+	order2 := []artifact.Finding{freshJudged("judged-dup", "beta reading"), freshJudged("judged-dup", "alpha reading")}
+
+	idByText := func(r JudgedReconciliation) map[string]string {
+		m := make(map[string]string)
+		for _, f := range r.Findings {
+			m[f.Text] = f.ID
+		}
+		return m
+	}
+	got1 := idByText(ReconcileJudged(order1, nil, backing))
+	got2 := idByText(ReconcileJudged(order2, nil, backing))
+
+	if got1["alpha reading"] != got2["alpha reading"] || got1["beta reading"] != got2["beta reading"] {
+		t.Fatalf("id assignment differs by emission order: order1=%v order2=%v — text-rank must be order-independent", got1, got2)
+	}
+}
+
+// TestReconcileJudged_CollisionWithBacking_CollisionClears_RegeneratesCleanly
+// is judged-collision-backing-regeneration-drain's other state-table entry:
+// once a collision that owned a backing record clears, the report regenerates
+// with every not-resurfaced id distinct — so Generate's self-validation (unique
+// ids, report.go) can never reject it with a duplicate. Because the fix never
+// let a live member share the backing record's bare id, the prior suffixed
+// members drift into not-resurfaced under their OWN ids, never colliding with
+// the bare-id backing record.
+func TestReconcileJudged_CollisionWithBacking_CollisionClears_RegeneratesCleanly(t *testing.T) {
+	// A resolved collision as of the prior report: two suffixed members
+	// dispositioned in findings:, the backing record standing in not-resurfaced.
+	existingFindings := []artifact.Finding{
+		dispositionedJudged("judged-dup-collision-1", "first reading", artifact.FindingAcceptedDeviation, "n"),
+		dispositionedJudged("judged-dup-collision-2", "second, different reading", artifact.FindingAcceptedDeviation, "n"),
+	}
+	backing := []artifact.Finding{
+		dispositionedJudged("judged-dup", "an old ruling under the same slug", artifact.FindingAcceptedDeviation, "owner-ratified"),
+	}
+	// The collision clears — a fresh run emits a single, unrelated finding.
+	fresh := []artifact.Finding{freshJudged("judged-elsewhere", "a wholly different reading")}
+
+	got := ReconcileJudged(fresh, existingFindings, backing)
+
+	seen := make(map[string]bool, len(got.NotResurfaced))
+	for _, f := range got.NotResurfaced {
+		if seen[f.ID] {
+			t.Fatalf("NotResurfaced = %+v, want every id distinct — a duplicate would brick regeneration", got.NotResurfaced)
+		}
+		seen[f.ID] = true
+	}
+	for _, id := range []string{"judged-dup", "judged-dup-collision-1", "judged-dup-collision-2"} {
+		if !seen[id] {
+			t.Fatalf("NotResurfaced = %+v, want %s persisted", got.NotResurfaced, id)
+		}
+	}
+}
+
+// TestReconcileJudged_CollisionNoBacking_BaseMemberKeepsBareSlug pins the
+// unchanged no-backing behavior (judged-collision-backing-regeneration-drain's
+// "keep the no-backing case exactly as today"): with no backing record for the
+// slug, the first-emitted member keeps the bare slug and later members are
+// suffixed from -collision-2 — no gratuitous id churn that would break an
+// existing dispositioned base member's carry-forward.
+func TestReconcileJudged_CollisionNoBacking_BaseMemberKeepsBareSlug(t *testing.T) {
+	fresh := []artifact.Finding{
+		freshJudged("judged-dup", "first reading"),
+		freshJudged("judged-dup", "second, different reading"),
+	}
+
+	got := ReconcileJudged(fresh, nil, nil)
+
+	ids := make(map[string]bool, len(got.Findings))
+	for _, f := range got.Findings {
+		ids[f.ID] = true
+	}
+	if !ids["judged-dup"] {
+		t.Fatalf("Findings = %+v, want the base member to keep the bare slug judged-dup (no backing record present)", got.Findings)
+	}
+	if !ids["judged-dup-collision-2"] {
+		t.Fatalf("Findings = %+v, want the later member suffixed -collision-2", got.Findings)
+	}
+}

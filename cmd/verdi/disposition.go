@@ -255,33 +255,26 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	// or reaffirm — that entry, nor ever receive carried-from provenance the
 	// mechanism was never meant to stamp on it.
 	//
-	// A further exclusion (judged-collision-member-backing-resolution): if
-	// findingID is a slug-collision BASE MEMBER (2+ fresh judged findings
-	// shared its slug this run, so ReconcileJudged disambiguated a
-	// "<id>-collision-<n>" sibling and deliberately pre-filled NO candidate for
-	// the slug's prior ruling — "ambiguous which of the collision's members, if
-	// either, continues the slug's lineage"), this disposition is NOT a
-	// candidate confirmation. Resolving the backing record here — removing it,
-	// and on a matching decision stamping carried-from — would assert exactly
-	// the lineage continuity the reconciler declared unresolvable, from a path
-	// where no side-by-side candidate rendering was ever produced. So the
-	// backing record is LEFT in not-resurfaced (its own exit ramp stays the
-	// sanctioned resolution, reachable once the collision clears) and never
-	// stamped; the member is dispositioned normally and the caller discloses
-	// what was left behind. artifact.Validate blesses this one dispositioned-
-	// member + same-id backing overlap for exactly a collision base member.
-	collisionBackingLeft := false
+	// A colliding slug that owns a not-resurfaced backing record never reaches
+	// this live path (judged-collision-backing-regeneration-drain): ReconcileJudged
+	// now suffixes EVERY member of such a collision ("<slug><CollisionInfix><n>",
+	// collisionMemberIDs), so the backing record alone keeps the bare slug and no
+	// live finding ever shadows it. A live judged finding sharing an id with a
+	// not-resurfaced entry is therefore always a genuine slug-only candidate (a
+	// single fresh finding under that slug, ac-1), whose confirmation legitimately
+	// resolves the backing record as above; a colliding slug's backing record is
+	// resolved solely through its own exit ramp (dispositionNotResurfaced),
+	// reachable at all times because its bare id is never occupied by a live
+	// member. artifact.Validate enforces the invariant from the other side — a
+	// dispositioned findings: entry sharing a same-kind id with a not-resurfaced
+	// entry is rejected — so this path never special-cases a collision base member.
 	if oldFinding.Kind == artifact.FindingJudged {
 		if nrIdx := findNotResurfacedIndex(decoded.NotResurfaced, findingID); nrIdx != -1 {
-			if artifact.IsCollisionBaseMemberID(decoded.Findings, findingID) {
-				collisionBackingLeft = true
-			} else {
-				oldEntry := decoded.NotResurfaced[nrIdx]
-				if decision == oldEntry.Disposition {
-					updated.Findings[idx].CarriedFrom = decoded.Covers
-				}
-				updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
+			oldEntry := decoded.NotResurfaced[nrIdx]
+			if decision == oldEntry.Disposition {
+				updated.Findings[idx].CarriedFrom = decoded.Covers
 			}
+			updated.NotResurfaced = removeFindingAt(decoded.NotResurfaced, nrIdx)
 		}
 	}
 
@@ -338,13 +331,6 @@ func runDisposition(root, specArg, findingID string, decision artifact.FindingDi
 	// not-resurfaced exit ramp's own "(not-resurfaced)" output
 	// (dispositionNotResurfaced), so a reader always knows which one happened.
 	fmt.Fprintf(stdout, "disposition: %s %s %s (findings): %s -> %s\n", verb, ref.String(), findingID, decision, rationale)
-	// judged-collision-member-backing-resolution: when the dispositioned member
-	// is a slug-collision base member, its prior ruling's not-resurfaced backing
-	// record was deliberately left intact (its lineage is ambiguous). Say so, so
-	// a reader knows a standing record still awaits explicit resolution.
-	if collisionBackingLeft {
-		fmt.Fprintf(stdout, "disposition: backing record for slug %s left in not-resurfaced — lineage ambiguous (collision); resolve it explicitly\n", findingID)
-	}
 	return 0
 }
 
