@@ -126,14 +126,6 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - run: make verify
       - run: go build -o .build/verdi ./cmd/verdi
-      - name: "TEMP DIAGNOSTIC (P2-10b repro; remove before merge): git state before lint"
-        run: |
-          echo "HEAD=$(git rev-parse HEAD)"
-          echo "shallow=$(git rev-parse --is-shallow-repository)"
-          echo "object-type=$(git cat-file -t cdc4154dd70e08667d0b820c529486607244f16e 2>&1 || true)"
-          git merge-base --is-ancestor cdc4154dd70e08667d0b820c529486607244f16e HEAD && echo "ancestor=yes" || echo "ancestor=no(exit=$?)"
-          git rev-parse --verify -q cdc4154dd70e08667d0b820c529486607244f16e^{commit} && echo "revparse=ok" || echo "revparse=fail(exit=$?)"
-          echo "branch-state:"; git branch -a --contains cdc4154dd70e08667d0b820c529486607244f16e 2>&1 | head -5 || true
       - run: ./.build/verdi lint
       - name: "Produce the CI-provenance evidence bundle (source: ci), incl. verdi's own self-hosted static/behavioral evidence"
         run: ./.build/verdi sync --produce
