@@ -66,17 +66,13 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	cond2 := checkStubReconciliationCondition(reconciliation)
 	cond3 := checkAllImplementingStoriesClosed(stories, mdl)
 
-	// Condition 4 (spec-stale): reused verbatim from the story gate, called
-	// with the feature spec instead of a story spec. checkSpecStaleCondition
-	// reads specs/active/<name>/deviation-report.md and, absent, reports
-	// "trivially unflagged" (its own doc comment: "a story with no build
-	// activity yet cannot be spec-stale") — the ordinary case for a
-	// round-four feature, which is never built directly (03 §Lifecycle:
-	// stories are the unit of build; a feature is downward-blind). The
-	// condition still fires honestly on the rare case a feature spec's own
-	// directory does carry a deviation-report.md (e.g. a grandfathered v0
-	// feature that WAS built directly, A8).
-	cond4raw, err := checkSpecStaleCondition(root, spec, manifest)
+	// Condition 4 (spec-stale, spec/finding-identity ac-4): the feature-close
+	// budget is a UNION over every CLOSED implementing story's ARCHIVED
+	// report (findings: + not-resurfaced:) plus the feature's own report
+	// (findings: + not-resurfaced:) — the actual cross-report X-18 fix (the
+	// within-report "unique identities" framing alone was proven a no-op,
+	// ledger L-N2). See checkFeatureSpecStaleCondition's own doc comment.
+	cond4raw, err := checkFeatureSpecStaleCondition(root, spec, manifest, stories, mdl)
 	if err != nil {
 		return false, err
 	}
@@ -224,4 +220,101 @@ func checkAllImplementingStoriesClosed(stories []implementingStoryEdges, mdl *mo
 	sort.Strings(open)
 	return gateCondition{Name: name, Reason: fmt.Sprintf("implementing %s not yet %s: %v",
 		displayAlternation(storyWord, mdl.DisplayClassPlural("story")), closedWord, open)}
+}
+
+// checkFeatureSpecStaleCondition is the feature-closure gate's condition 4
+// (spec/finding-identity ac-4, ledger L-N2): the spec-stale budget is a
+// UNION over every CLOSED implementing story's ARCHIVED deviation report
+// (findings: + not-resurfaced:, store.ZoneArchive — the closure ritual's
+// active→archive move, store.ArchiveMove, carries a story's frozen report
+// along with its spec.md) plus the feature's own report (its own active-zone
+// findings: + not-resurfaced:) — the actual cross-report X-18 fix: an
+// accepted deviation recorded in one story's archived report counts EXACTLY
+// ONCE toward the feature-close budget, never zero (silently dropped because
+// the feature's own report never independently reproduced it) and never
+// twice (double-counted across the story and feature reports
+// independently). evidence.SpecStale's own AdditionalSets union (unique
+// content identity, align.Identity) is the mechanism; this function is only
+// responsible for GATHERING the right sets.
+//
+// A story not yet closed contributes nothing (s.Closed false skips it,
+// never an error) — it has no archived report to read yet; condition 3
+// already separately blocks the feature from closing while any implementing
+// story remains open, but every condition here is computed unconditionally
+// (this gate never short-circuits) so this must degrade gracefully rather
+// than operationally fail.
+//
+// Trigger (a)'s own-text join uses ONLY the feature's own declared AC ids
+// against the feature's own report (evidence.SpecStaleInput.Findings, never
+// AdditionalSets — see that field's own doc comment): a story's archived
+// finding id colliding with a feature AC id (both commonly short forms like
+// "ac-1") must never be misread as the feature's own text having been
+// targeted.
+func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, stories []implementingStoryEdges, mdl *model.Model) (gateCondition, error) {
+	name := "4. no unresolved spec-stale flag"
+
+	specRef, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+		return gateCondition{}, fmt.Errorf("closure gate: internal error: resolved spec has an invalid id: %w", err)
+	}
+	own, err := loadDeviationReportIfExists(store.DeviationReportPath(root, store.ZoneActive, specRef.Name))
+	if err != nil {
+		return gateCondition{}, err
+	}
+
+	var ownFindings []artifact.Finding
+	additional := make([][]artifact.Finding, 0, 1+2*len(stories))
+	if own != nil {
+		ownFindings = own.Findings
+		additional = append(additional, own.NotResurfaced)
+	}
+
+	storiesUnioned := 0
+	for _, s := range stories {
+		if !s.Closed {
+			continue
+		}
+		storyRef, err := artifact.ParseRef(s.SpecRef)
+		if err != nil {
+			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+			return gateCondition{}, fmt.Errorf("closure gate: internal error: implementing story has an invalid id: %w", err)
+		}
+		archived, err := loadDeviationReportIfExists(store.DeviationReportPath(root, store.ZoneArchive, storyRef.Name))
+		if err != nil {
+			return gateCondition{}, err
+		}
+		if archived == nil {
+			continue
+		}
+		additional = append(additional, archived.Findings, archived.NotResurfaced)
+		storiesUnioned++
+	}
+
+	featureACIDs := make(map[string]bool, len(spec.AcceptanceCriteria))
+	for _, ac := range spec.AcceptanceCriteria {
+		featureACIDs[ac.ID] = true
+	}
+	threshold := 0
+	if manifest != nil && manifest.Audit != nil {
+		threshold = manifest.Audit.DeviationsStaleThreshold
+	}
+
+	result := evidence.SpecStale(evidence.SpecStaleInput{
+		Findings:       ownFindings,
+		AdditionalSets: additional,
+		StoryACIDs:     featureACIDs,
+		Threshold:      threshold,
+	})
+	if !result.Flagged {
+		return gateCondition{Name: name, OK: true}, nil
+	}
+	// Display resolution (L-M13(1)): the class words and the closed state
+	// word resolve; the finding ids/counts stay identity.
+	featureWord := mdl.DisplayClass("feature")
+	storyWord := mdl.DisplayClass("story")
+	closedWord := mdl.DisplayState("story", "closed")
+	return gateCondition{Name: name, Reason: fmt.Sprintf(
+		"spec-stale: own-text finding(s) %v, accepted-deviation count %d (threshold %d) [union over the %s's own report + %d %s implementing %s archive(s)]",
+		result.OwnTextFindingIDs, result.AcceptedDeviationCount, threshold, featureWord, storiesUnioned, closedWord, storyWord)}, nil
 }

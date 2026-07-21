@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/forge"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
@@ -423,6 +425,112 @@ func TestRunClosureGate_SpecStaleCondition(t *testing.T) {
 	}
 	if !contains(stdout.String(), "[FAIL] closure: 2.") {
 		t.Fatalf("stdout = %q, want condition 2 to FAIL", stdout.String())
+	}
+}
+
+// alignFakeJudgeDrifted writes a fake judge that emits a DIFFERENT
+// judge-side id ("j-2") than alignFakeJudgeOK's "j-1" — a genuine judge
+// re-roll that simply does not re-emit the prior finding at all (a drifting
+// slug), the exact X-18 laundering shape this test replays.
+func alignFakeJudgeDrifted(t *testing.T) []string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fakejudge-drifted.sh")
+	script := "#!/bin/sh\ncat <<'EOF'\n{\"is_error\":false,\"subtype\":\"success\",\"result\":\"{\\\"findings\\\":[{\\\"id\\\":\\\"j-2\\\",\\\"text\\\":\\\"a different reading entirely\\\",\\\"confidence\\\":0.6}]}\"}\nEOF\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake judge: %v", err)
+	}
+	return []string{path}
+}
+
+// TestClosureGate_LaunderingReplay_SpecStaleCountUnchangedAcrossReroll is
+// spec/finding-identity ac-3's laundering-replay proof, driven end to end
+// through the REAL production path (runAlign -> disk -> runDisposition ->
+// disk -> runAlign again -> checkSpecStaleCondition, the exact closure-gate
+// function `verdi close` consults) rather than library calls in isolation —
+// the true X-18 shape: round 1's judge finds j-1, a human accepts it as a
+// deviation; round 2's judge re-rolls and simply does not re-emit j-1 at all
+// (a drifting slug). j-1 must land in not-resurfaced:, and
+// checkSpecStaleCondition's own accepted-deviation count — the exact input
+// the spec-stale threshold gate reads — must be EXACTLY UNCHANGED across the
+// reroll: never decremented (the laundering drain this story closes) and
+// never inflated.
+func TestClosureGate_LaunderingReplay_SpecStaleCountUnchangedAcrossReroll(t *testing.T) {
+	repo := buildAlignRepo(t)
+	svcDir := filepath.Join(repo.Dir, "loansvc")
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+
+	// Round 1: align finds judged-j-1; a human accepts it as a deviation.
+	deps1 := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeOK(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
+	var out1, err1 bytes.Buffer
+	if rc := runAlign(context.Background(), repo.Dir, false, deps1, &out1, &err1); rc != 0 {
+		t.Fatalf("runAlign (round 1) = %d, want 0; stderr=%s", rc, err1.String())
+	}
+	var dstdout, dstderr bytes.Buffer
+	if rc := runDisposition(repo.Dir, "spec/stale-decline", "judged-j-1", "accepted-deviation", "owner-ratified: intentional deviation", false, &dstdout, &dstderr); rc != 0 {
+		t.Fatalf("runDisposition (round 1) = %d, want 0; stderr=%s", rc, dstderr.String())
+	}
+
+	spec, _ := readSpec(t, repo.Dir, "stale-decline")
+	storyACIDs := make(map[string]bool, len(spec.AcceptanceCriteria))
+	for _, ac := range spec.AcceptanceCriteria {
+		storyACIDs[ac.ID] = true
+	}
+
+	round1Cond, err := checkSpecStaleCondition(repo.Dir, spec, manifest)
+	if err != nil {
+		t.Fatalf("checkSpecStaleCondition (round 1): %v", err)
+	}
+	round1Report := decodeReportFile(t, reportPathFor(repo.Dir, "stale-decline"))
+	round1Count := evidence.SpecStale(evidence.SpecStaleInput{
+		Findings:       round1Report.Findings,
+		AdditionalSets: [][]artifact.Finding{round1Report.NotResurfaced},
+		StoryACIDs:     storyACIDs,
+		Threshold:      manifest.Audit.DeviationsStaleThreshold,
+	}).AcceptedDeviationCount
+
+	// Round 2: the judge re-rolls and does NOT re-emit j-1's slug at all.
+	deps2 := alignDeps{Runner: alignRunner(svcDir), JudgeCmd: alignFakeJudgeDrifted(t), ModelDigest: testResolveModelDigest(t, repo.Dir)}
+	var out2, err2 bytes.Buffer
+	if rc := runAlign(context.Background(), repo.Dir, false, deps2, &out2, &err2); rc != 0 {
+		t.Fatalf("runAlign (round 2, drifted) = %d, want 0; stderr=%s", rc, err2.String())
+	}
+
+	after := decodeReportFile(t, reportPathFor(repo.Dir, "stale-decline"))
+	if _, ok := findingByID(after.Findings, "judged-j-1"); ok {
+		t.Fatalf("judged-j-1 must not resurface in findings: after a drifted re-roll, got %+v", after.Findings)
+	}
+	if _, ok := findingByID(after.NotResurfaced, "judged-j-1"); !ok {
+		t.Fatalf("judged-j-1 must land in not-resurfaced: after a drifted re-roll, got %+v", after.NotResurfaced)
+	}
+
+	round2Cond, err := checkSpecStaleCondition(repo.Dir, spec, manifest)
+	if err != nil {
+		t.Fatalf("checkSpecStaleCondition (round 2): %v", err)
+	}
+	round2Count := evidence.SpecStale(evidence.SpecStaleInput{
+		Findings:       after.Findings,
+		AdditionalSets: [][]artifact.Finding{after.NotResurfaced},
+		StoryACIDs:     storyACIDs,
+		Threshold:      manifest.Audit.DeviationsStaleThreshold,
+	}).AcceptedDeviationCount
+
+	// The property that actually matters: the RAW accepted-deviation count
+	// checkSpecStaleCondition's own evidence.SpecStale call computes is
+	// EXACTLY UNCHANGED across the reroll — never decremented (j-1 draining
+	// out just because it moved from findings: to not-resurfaced:, the X-18
+	// laundering drain) and never inflated. Threshold 3 means both rounds
+	// also PASS the gate outright (1 <= 3), asserted too, but the count
+	// equality is the load-bearing assertion — a PASS/FAIL comparison alone
+	// cannot distinguish "count stayed 1" from "count silently became 0".
+	if round1Count != round2Count {
+		t.Fatalf("accepted-deviation count = %d (round 1) vs %d (round 2), want EXACTLY unchanged across the re-roll (X-18 laundering drain)", round1Count, round2Count)
+	}
+	if round1Count != 1 {
+		t.Fatalf("round1Count = %d, want 1 (judged-j-1's own accepted-deviation)", round1Count)
+	}
+	if !round1Cond.OK || !round2Cond.OK {
+		t.Fatalf("round1Cond.OK=%v round2Cond.OK=%v, want both true (threshold 3, only 1 accepted-deviation each round)", round1Cond.OK, round2Cond.OK)
 	}
 }
 
