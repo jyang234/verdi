@@ -1100,6 +1100,50 @@ bindings:
       - "spec/gc-reclaim#ac-1"
       - "spec/gc-reclaim#ac-2"
       - "spec/gc-reclaim#ac-3"
+      # spec/creation-surfaces FEATURE outcome ACs (extensibility Phase 2,
+      # Task 9: this design series authors the feature spec + these
+      # bindings together, the X-9/#143 convention spec/ritual-integrity's
+      # own Task 1 series set). Disclosed departure from every built entry
+      # above: none of the five implementing stories (init-wizard/
+      # creation-form/cli-creation/obligation-seam/verb-surfaces) are built
+      # yet, so these five behavioral legs are a DESIGN-TIME FORWARD
+      # DECLARATION of planned producers, mirroring spec/ritual-integrity's
+      # own feature-level entry above rather than a citation of existing
+      # ones. Not yet built: ac-1 <- cmd/verdi/init_test.go's bare-path and
+      # wizard-path built-binary cases (empty dir -> .verdi/ skeleton, both
+      # paths refusing on ANY existing .verdi/ directory and naming it; the
+      # wizard's staged store passing the full runModelCheck core before a
+      # single rename promotes it, mid-interview abort and a simulated
+      # mid-write crash both leaving nothing at the real root) — plan Task
+      # 10 Step 1/2; ac-2 <- internal/workbench/boardspecapi_test.go's
+      # placeholder-enumeration and form-submitted-render cases plus
+      # verdi/e2e/tests/48-board-creation-form.spec.ts's vocab-rename
+      # fixture case (form labels speak display words, submitted spec
+      # lands TODO-free where filled) — plan Task 11 Step 1/2; ac-3 <-
+      # cmd/verdi/design_test.go's --problem/--outcome/--defer-statements
+      # cases plus a --from-stub-vs-board-action equal-output parity case
+      # — plan Task 12 Step 1; ac-4 <- cmd/verdi/accept_test.go's
+      # backstop-scaffolds-missing-stubs-before-the-lint-gate,
+      # skip-not-overwrite, and unlink-on-post-scaffold-refusal cases plus
+      # cmd/verdi/obligation_test.go's create/regenerate/
+      # refuse-on-already-frozen cases — plan Task 13 Step 1; ac-5 <-
+      # cmd/verdi/waive_test.go's waive/fold/expiry/reaffirmation/
+      # audit-count lifecycle cases (guide 8.4's letter) — plan Task 14
+      # Step 1 (ac-5's companion static leg, the verb-vocabulary witness
+      # extension, is bound under verdi-verify-static below). Each leg
+      # lands under make verify once its story merges; this entry is
+      # updated to name the real test functions at that point. The
+      # attestation leg every AC also declares (L-M14's feature-AC floor)
+      # is deliberately NOT bound here or anywhere in this file —
+      # mirroring the spec/ritual-integrity convention above, it is
+      # hand-authored at .verdi/attestations/creation-surfaces/ac-{1..5}.md
+      # at feature closure, when the claim can be truthfully made, never
+      # at spec-cut time.
+      - "spec/creation-surfaces#ac-1"
+      - "spec/creation-surfaces#ac-2"
+      - "spec/creation-surfaces#ac-3"
+      - "spec/creation-surfaces#ac-4"
+      - "spec/creation-surfaces#ac-5"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -1717,3 +1761,23 @@ bindings:
       - "spec/gc-reclaim#ac-1"
       - "spec/gc-reclaim#ac-2"
       - "spec/gc-reclaim#ac-3"
+      # spec/creation-surfaces#ac-5 static leg (extensibility Phase 2, Task
+      # 9 design-time forward declaration; ac-1..5 are ALSO bound above
+      # under verdi-verify-behavioral — ac-5 alone declares both kinds, per
+      # its waive-lifecycle-behavioral plus verb-vocabulary-witness-static
+      # evidence split; the verb-surfaces story is not built yet). Not yet
+      # built: internal/specalign/vocabprose_test.go's word-list extension
+      # to verb words, mutation-witnessed (a deliberately bare, unrouted
+      # verb word introduced anywhere this feature touches reds; green at
+      # head once seeded) — plan Task 14 Step 1. Lands under make verify
+      # once verb-surfaces merges; this entry is updated to name the real
+      # test functions at that point. The attestation leg is NOT bound
+      # here either, same disclosure as ac-1..4 above: hand-authored at
+      # .verdi/attestations/creation-surfaces/ac-5.md at feature closure —
+      # no verdi.bindings.yaml entry exists for any feature-AC attestation
+      # leg anywhere in this file (see spec/ritual-integrity above); the
+      # feature fold's floor is attestation OR pass-record
+      # (evidence.FloorResult's OR semantics), so the unbuilt
+      # behavioral/static legs above are what the fold will actually read
+      # once real.
+      - "spec/creation-surfaces#ac-5"

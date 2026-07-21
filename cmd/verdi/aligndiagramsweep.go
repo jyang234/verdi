@@ -33,6 +33,10 @@ import (
 // requires it to be a class: proposal diagram (the sweep's own stated
 // subject — spec/judged-sweep's outcome/problem text), runs
 // align.GenerateDiagramSweep, and writes the sibling sweep-report.md.
+//
+// DISCLOSURE (judged-diagram-sweep-ac1-gap, accepted-deviation): ac-1's
+// report-path-first-line + --wait contract is ratified for align's build
+// mode and close's freeze-align only, not this sweep — a disclosed residual.
 func runDiagramSweepAlign(ctx context.Context, root, diagramRef string, deps alignDeps, stdout, stderr io.Writer) int {
 	ref, err := artifact.ParseRef(diagramRef)
 	if err != nil {
