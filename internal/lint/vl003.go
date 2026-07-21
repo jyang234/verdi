@@ -222,28 +222,61 @@ const rootBindingsDisplayPath = "verdi.bindings.yaml (root)"
 // checkOneBindingsFile validates one decoded Bindings artifact's
 // evidence-for join against the committed zone: `spec:` (the file's own
 // primary/owning spec) must resolve, and every AC id every binding names
-// must be declared by it. path is the display label naming which
-// discovered/root bindings file a finding belongs to.
+// must be declared — a bare ac-<slug> entry against the owning spec's own
+// declared criteria, a fragment-qualified spec/<name>#<ac-id> entry against
+// the NAMED spec's own declared criteria instead (spec/ritual-traps ac-4;
+// artifact.ResolveBindingAC is the same resolution helper
+// cmd/verdi/selfevidence.go's self-hosted producer already uses for this
+// exact bare-vs-fragment distinction). path is the display label naming
+// which discovered/root bindings file a finding belongs to.
 func (vl003) checkOneBindingsFile(in *RunInput, path string, bindings *artifact.Bindings) []Finding {
 	var findings []Finding
 
-	d, ok := in.Snapshot.ByRef[bindings.Spec]
-	if !ok || len(d) == 0 || d[0].Spec == nil {
+	if _, ok := in.Snapshot.ByRef[bindings.Spec]; !ok {
 		findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("spec %q does not resolve to a spec in the committed zone", bindings.Spec)})
 		return findings
 	}
-	acs := make(map[string]bool, len(d[0].Spec.AcceptanceCriteria))
-	for _, ac := range d[0].Spec.AcceptanceCriteria {
-		acs[ac.ID] = true
-	}
+
 	for _, b := range bindings.Bindings {
-		for _, ac := range b.ACs {
-			if !acs[ac] {
-				findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("evidence-for binding %q names ac %q, which %q does not declare", b.Producer, ac, bindings.Spec)})
+		for _, entry := range b.ACs {
+			specRef, acID, err := artifact.ResolveBindingAC(bindings.Spec, entry)
+			if err != nil {
+				// Binding.Validate() (decode time) already shape-checks every
+				// entry as a bare ac-<slug> id or a spec/<name>#<ac-id>
+				// fragment ref, and bindings.Spec itself is confirmed above —
+				// unreachable in practice, but fail closed rather than
+				// silently skip if it somehow still does.
+				findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("evidence-for binding %q: ac entry %q: %v", b.Producer, entry, err)})
+				continue
+			}
+			acs, resolved := targetACSet(in, specRef)
+			if !resolved {
+				findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("evidence-for binding %q names ac %q, whose target spec %q does not resolve to a spec in the committed zone", b.Producer, entry, specRef)})
+				continue
+			}
+			if !acs[acID] {
+				findings = append(findings, Finding{Rule: "VL-003", Path: path, Message: fmt.Sprintf("evidence-for binding %q names ac %q, which %q does not declare", b.Producer, entry, specRef)})
 			}
 		}
 	}
 	return findings
+}
+
+// targetACSet resolves specRef against the committed zone and returns its
+// declared AC-id set; resolved is false when specRef does not resolve to a
+// decoded spec at all (a nil map is never returned alongside resolved ==
+// true, even for a spec declaring zero ACs, so callers can trust the bool
+// alone).
+func targetACSet(in *RunInput, specRef string) (acs map[string]bool, resolved bool) {
+	d, ok := in.Snapshot.ByRef[specRef]
+	if !ok || len(d) == 0 || d[0].Spec == nil {
+		return nil, false
+	}
+	acs = make(map[string]bool, len(d[0].Spec.AcceptanceCriteria))
+	for _, ac := range d[0].Spec.AcceptanceCriteria {
+		acs[ac.ID] = true
+	}
+	return acs, true
 }
 
 // externalRefSet computes every index-minted external ref

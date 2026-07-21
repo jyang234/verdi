@@ -213,6 +213,137 @@ bindings:
 	}
 }
 
+// vl003FragmentOwnerSpecMD is the ad hoc bindings file's own primary spec
+// (`spec:`) for ac-4's fragment cross-check tests — its own AC ids are
+// irrelevant to what's under test; only its existence (so `spec:` itself
+// resolves) matters.
+const vl003FragmentOwnerSpecMD = `---
+id: spec/vl-003-fragment-owner
+kind: spec
+class: story
+title: "VL-003: fragment owner"
+status: draft
+owners: [platform-team]
+story: jira:LOAN-0100
+links:
+  - { type: implements, ref: "spec/stale-decline#ac-1" }
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+---
+# VL-003: fragment owner
+
+## Problem
+
+Placeholder problem.
+
+## Outcome
+
+Placeholder outcome.
+
+## AC-1
+
+Placeholder.
+`
+
+// vl003FragmentTargetSpecMD is the fragment-qualified entry's NAMED spec —
+// distinct from the bindings file's own primary spec — declaring exactly
+// one AC (ac-1), so a fragment entry naming any other ac id is unambiguously
+// a typo.
+const vl003FragmentTargetSpecMD = `---
+id: spec/vl-003-fragment-target
+kind: spec
+class: story
+title: "VL-003: fragment target"
+status: draft
+owners: [platform-team]
+story: jira:LOAN-0101
+links:
+  - { type: implements, ref: "spec/stale-decline#ac-2" }
+problem: { text: "placeholder problem", anchor: "#problem" }
+outcome: { text: "placeholder outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static], anchor: "#ac-1" }
+---
+# VL-003: fragment target
+
+## Problem
+
+Placeholder problem.
+
+## Outcome
+
+Placeholder outcome.
+
+## AC-1
+
+Placeholder.
+`
+
+// TestVL003_RootBindings_TypoFragmentAC_RedsByName is spec/ritual-traps
+// ac-4's core new behavior, proven on the root bindings file ac-3 just made
+// a checked target: a fragment-qualified entry (spec/<name>#<ac-id>) naming
+// an AC id its NAMED target spec does not declare must red, naming both the
+// offending entry and the target spec — not silently pass (today's gap: the
+// bare-only lookup checkOneBindingsFile carried into ac-3 never resolves a
+// fragment entry against anything but the owning spec).
+func TestVL003_RootBindings_TypoFragmentAC_RedsByName(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-fragment-owner", "spec.md"), vl003FragmentOwnerSpecMD)
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-fragment-target", "spec.md"), vl003FragmentTargetSpecMD)
+	writeTestFile(t, filepath.Join(dir, "verdi.bindings.yaml"), `schema: verdi.bindings/v1
+spec: spec/vl-003-fragment-owner
+bindings:
+  - { producer: some-producer, kind: static, acs: ["spec/vl-003-fragment-target#ac-9"] }
+`)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	onlyRule(t, findings, "VL-003")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	msg := findings[0].Message
+	if !strings.Contains(msg, "spec/vl-003-fragment-target#ac-9") {
+		t.Errorf("finding message = %q, want it to name the offending fragment entry spec/vl-003-fragment-target#ac-9", msg)
+	}
+	// The discriminating assertion: the check must cross-check against the
+	// NAMED (target) spec, not the owning spec — a bare-only lookup that
+	// naively fails to match ANY fragment string would also produce a
+	// finding here, but it would (wrongly) say the OWNING spec
+	// (vl-003-fragment-owner) "does not declare" ac-9, never having looked
+	// at the target spec's own ACs at all. Pin the correct clause exactly.
+	if !strings.Contains(msg, `"spec/vl-003-fragment-target" does not declare`) {
+		t.Errorf("finding message = %q, want the clause to name the TARGET spec spec/vl-003-fragment-target as the one that does not declare ac-9 (not the owning spec vl-003-fragment-owner)", msg)
+	}
+	if strings.Contains(msg, `"spec/vl-003-fragment-owner" does not declare`) {
+		t.Errorf("finding message = %q, wrongly blames the OWNING spec rather than the fragment's named target spec", msg)
+	}
+}
+
+// TestVL003_RootBindings_CorrectFragmentAC_StaysClean is ac-4's companion
+// case: a fragment-qualified entry naming an AC its target spec genuinely
+// DOES declare — the exact shape this design series' own bindings additions
+// already are (e.g. "spec/judge-ergonomics#ac-1") — must continue to pass,
+// proving the check is additive and does not regress real entries.
+func TestVL003_RootBindings_CorrectFragmentAC_StaysClean(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-fragment-owner", "spec.md"), vl003FragmentOwnerSpecMD)
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-003-fragment-target", "spec.md"), vl003FragmentTargetSpecMD)
+	writeTestFile(t, filepath.Join(dir, "verdi.bindings.yaml"), `schema: verdi.bindings/v1
+spec: spec/vl-003-fragment-owner
+bindings:
+  - { producer: some-producer, kind: static, acs: ["spec/vl-003-fragment-target#ac-1"] }
+`)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-003" {
+			t.Fatalf("VL-003 fired on a correct fragment-qualified entry: %s", f.String())
+		}
+	}
+}
+
 // vl003DanglingPinSpecTmpl and vl003ReachablePinSpecTmpl mirror
 // testdata/violations/VL-003/dangling-pin/...'s own shape (a feature spec
 // carrying a single context[] pin under test), authored fresh per test so
