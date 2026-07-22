@@ -154,3 +154,99 @@ func assertFields(t *testing.T, got, want []Field) {
 		}
 	}
 }
+
+// -- round-2 fix coverage (judged-placeholder-enumeration-fail-closed) ------
+
+// TestFields_RootVariableReferences: $-rooted references ({{$.X}},
+// text/template's VariableNode) render against the top-level ScaffoldData
+// from ANY dot context, so they enumerate exactly like {{.X}} — including
+// inside a range body, where $ still names the root — and an unknown
+// $-rooted placeholder fails closed by name (the judge's executed
+// witness: Fields over "{{$.Bogus}} {{$.Title}}" formerly returned an
+// empty list with nil error while Render failed at execute time).
+func TestFields_RootVariableReferences(t *testing.T) {
+	got, err := Fields([]byte("problem: {{$.Problem}} title: {{$.Title}}\n"))
+	if err != nil {
+		t.Fatalf("Fields($-rooted): %v", err)
+	}
+	assertFields(t, got, []Field{
+		{Name: "Problem", Kind: FieldStatement},
+		{Name: "Title", Kind: FieldInput},
+	})
+
+	got, err = Fields([]byte("{{range .Links}}{{$.Outcome}}{{end}}\n"))
+	if err != nil {
+		t.Fatalf("Fields($ inside range body): %v", err)
+	}
+	assertFields(t, got, []Field{
+		{Name: "Links", Kind: FieldStructural},
+		{Name: "Outcome", Kind: FieldStatement},
+	})
+
+	_, err = Fields([]byte("{{$.Bogus}} {{$.Title}}"))
+	if err == nil {
+		t.Fatal("Fields({{$.Bogus}}) = nil error, want a refusal naming Bogus")
+	}
+	if !strings.Contains(err.Error(), "Bogus") {
+		t.Fatalf("error %q does not name the unknown placeholder Bogus", err)
+	}
+}
+
+// TestFields_DefinedSubTemplates: a defined sub-template invoked with the
+// root dot ({{template "x" .}} at top level, or {{template "x" $}}
+// anywhere) renders its body against the top-level value, so the body's
+// fields enumerate — and an unknown field there fails closed by name (the
+// judge's second executed witness). A sub-template invoked with a FIELD
+// gets that value as its dot: the body's relative references are the
+// passed value's own, never enumerated — the same rule as a range body.
+func TestFields_DefinedSubTemplates(t *testing.T) {
+	got, err := Fields([]byte(`{{define "head"}}{{.Title}} — {{.Problem}}{{end}}{{template "head" .}}`))
+	if err != nil {
+		t.Fatalf("Fields(sub-template with root dot): %v", err)
+	}
+	assertFields(t, got, []Field{
+		{Name: "Title", Kind: FieldInput},
+		{Name: "Problem", Kind: FieldStatement},
+	})
+
+	_, err = Fields([]byte(`{{define "head"}}{{.Runbook}}{{end}}{{template "head" .}}`))
+	if err == nil {
+		t.Fatal("Fields(sub-template with unknown field) = nil error, want a refusal naming Runbook")
+	}
+	if !strings.Contains(err.Error(), "Runbook") {
+		t.Fatalf("error %q does not name the unknown placeholder Runbook", err)
+	}
+
+	got, err = Fields([]byte(`{{define "links"}}{{range .}}{{.Ref}}{{end}}{{end}}{{template "links" .Links}}`))
+	if err != nil {
+		t.Fatalf("Fields(sub-template with field dot): %v", err)
+	}
+	assertFields(t, got, []Field{{Name: "Links", Kind: FieldStructural}})
+}
+
+// TestFields_Negative_UnprovableConstructsFailClosed: constructs the
+// walker cannot prove enumerable — a local template variable's use, or a
+// whole-value render ({{.}} / {{$}} where the dot is the root) — fail
+// closed NAMING the construct, never a silently partial field list (the
+// adjudicated rule).
+func TestFields_Negative_UnprovableConstructsFailClosed(t *testing.T) {
+	cases := []struct {
+		name, tmpl, wantNamed string
+	}{
+		{"local variable use", `{{range $i, $p := .Links}}{{$p.Ref}}{{end}}`, "$p"},
+		{"whole-value dot render", `{{.}}`, "{{.}}"},
+		{"whole-value root render", `{{printf "%v" $}}`, "$"},
+		{"undefined sub-template", `{{template "nowhere" .}}`, "nowhere"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Fields([]byte(tc.tmpl))
+			if err == nil {
+				t.Fatalf("Fields(%q) = nil error, want fail-closed refusal", tc.tmpl)
+			}
+			if !strings.Contains(err.Error(), tc.wantNamed) {
+				t.Fatalf("error %q does not name %q", err, tc.wantNamed)
+			}
+		})
+	}
+}
