@@ -104,6 +104,39 @@ func Obligations(storeRoot, specName, acID string) (map[artifact.EvidenceKind]Ob
 	return out, nil
 }
 
+// ObligationKindAt reports the for_kind of the obligation at the EXACT path,
+// drawing the three states the accept backstop's coverage predicate needs
+// (spec/obligation-seam ac-2): a DECODABLE obligation at that one convention
+// path (present=true, its decoded for_kind), NO file there (present=false,
+// err=nil — the pair is uncovered, scaffold it), or a present-but-undecodable
+// file (present=false, err non-nil — malformed at the path, refuse rather than
+// paper over).
+//
+// Unlike Obligations, it is keyed on ONE exact path and never scans
+// <acID>--*.md nor keys by decoded for_kind, so a decodable obligation misfiled
+// under another kind's filename never counts as covering the kind that filename
+// names — matching VL-020's own convention-path predicate exactly, and leaving
+// path/id agreement to VL-011 at lint time (judged-coverage-predicate-forkind-
+// keying). It decodes through the same internal/artifact seam Obligations uses.
+func ObligationKindAt(path string) (forKind artifact.EvidenceKind, present bool, err error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("evidence: reading obligation %s: %w", path, err)
+	}
+	fm, _, err := artifact.SplitFrontmatter(raw)
+	if err != nil {
+		return "", false, fmt.Errorf("evidence: obligation %s: %w", path, err)
+	}
+	decoded, err := artifact.DecodeObligation(fm)
+	if err != nil {
+		return "", false, fmt.Errorf("evidence: obligation %s: %w", path, err)
+	}
+	return decoded.ForKind, true, nil
+}
+
 // UnauthoredObligationMarker is the fixed, exported sentinel `verdi
 // obligation author` writes into a freshly created or regenerated
 // obligation's body until an operator replaces it with a real statement of

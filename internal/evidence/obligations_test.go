@@ -65,6 +65,90 @@ frozen: { at: 2026-07-13, commit: 3e91ab2 }
 A golangci-lint pass over the touched packages must be clean.
 `
 
+// TestObligationKindAt covers the exact-convention-path coverage predicate the
+// accept backstop keys on (spec/obligation-seam ac-2): a decodable obligation
+// at the path yields its for_kind (present=true, keyed on the FILE'S content,
+// never its filename — so a misfiled file reports its own for_kind, and the
+// caller's for_kind==kind check is what matches the convention); an absent file
+// is (present=false, no error); a present-but-malformed file surfaces an error.
+func TestObligationKindAt(t *testing.T) {
+	t.Run("decodable file reports its own for_kind", func(t *testing.T) {
+		root := t.TempDir()
+		writeObligationFixture(t, root, "widget-story", "ac-1--behavioral.md", testObligationBehavioralAC1)
+		path := filepath.Join(root, ".verdi", "obligations", "widget-story", "ac-1--behavioral.md")
+		forKind, present, err := ObligationKindAt(path)
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if !present {
+			t.Fatal("present = false, want true")
+		}
+		if forKind != artifact.EvidenceBehavioral {
+			t.Errorf("forKind = %q, want behavioral", forKind)
+		}
+	})
+
+	t.Run("decodable file MISFILED under another kind's name reports its OWN for_kind", func(t *testing.T) {
+		// testObligationBehavioralAC1 (for_kind: behavioral, id ...--ac-1--behavioral)
+		// filed at ac-1--static.md: it decodes (path/id agreement is VL-011's,
+		// not the decoder's), and reports for_kind behavioral — so a caller
+		// checking for_kind==static at ac-1--static.md correctly sees it does
+		// NOT cover static.
+		root := t.TempDir()
+		writeObligationFixture(t, root, "widget-story", "ac-1--static.md", testObligationBehavioralAC1)
+		path := filepath.Join(root, ".verdi", "obligations", "widget-story", "ac-1--static.md")
+		forKind, present, err := ObligationKindAt(path)
+		if err != nil {
+			t.Fatalf("err = %v, want nil (a misfiled-but-decodable file is not malformed)", err)
+		}
+		if !present || forKind != artifact.EvidenceBehavioral {
+			t.Errorf("(forKind, present) = (%q, %v), want (behavioral, true)", forKind, present)
+		}
+	})
+
+	t.Run("absent file is not present, no error", func(t *testing.T) {
+		root := t.TempDir()
+		path := filepath.Join(root, ".verdi", "obligations", "widget-story", "ac-9--static.md")
+		forKind, present, err := ObligationKindAt(path)
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if present {
+			t.Error("present = true, want false")
+		}
+		if forKind != "" {
+			t.Errorf("forKind = %q, want empty", forKind)
+		}
+	})
+
+	t.Run("present-but-malformed file surfaces an error", func(t *testing.T) {
+		root := t.TempDir()
+		// for_kind disagrees with the id's own --behavioral segment: fails
+		// DecodeObligation (DC-2 id/for_kind agreement).
+		malformed := `---
+id: obligation/widget-story--ac-1--behavioral
+kind: obligation
+title: "malformed"
+owners: [platform-team]
+for_kind: static
+links:
+  - { type: verifies, ref: "spec/widget-story" }
+frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
+---
+# malformed
+`
+		writeObligationFixture(t, root, "widget-story", "ac-1--behavioral.md", malformed)
+		path := filepath.Join(root, ".verdi", "obligations", "widget-story", "ac-1--behavioral.md")
+		_, present, err := ObligationKindAt(path)
+		if err == nil {
+			t.Fatal("err = nil, want a decode error for a present-but-malformed file")
+		}
+		if present {
+			t.Error("present = true, want false on a malformed file")
+		}
+	})
+}
+
 // TestObligations_Present proves a present, well-formed obligation decodes
 // and is returned keyed by its own for_kind, with both title and body
 // preserved (spec/obligation-wall DC-1/CO-2: the same loader must carry
