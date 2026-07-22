@@ -56,10 +56,22 @@ func HumanizeName(name string) string {
 // board's creation form, commit-to-design's producer call — falls back
 // to these same disclosed placeholders, one table, never a re-typed
 // copy per consumer.
+//
+// DefaultProblem/DefaultOutcome's own "before accept" (spec/verb-surfaces
+// ac-4, disclosed choice — see each const's own vocab:identity marker
+// below): a package-level constant shared verbatim across every creation
+// surface (board form, commit-to-design, cli-creation's --defer-statements,
+// design start's flagless fallback), with no model in scope at its own
+// declaration site. Routing it would require threading a *model.Model
+// through every one of those call sites, a materially larger refactor than
+// this story's own disclosed, minimal scope; each CONSUMING call site that
+// already resolves a model routes its own copy of this same reminder
+// instead (design.go's --defer-statements disclosure, this same story,
+// does exactly that).
 const (
 	DefaultOwners  = "[unassigned]"
-	DefaultProblem = "TODO: replace with the real problem statement before accept"
-	DefaultOutcome = "TODO: replace with the real outcome statement before accept"
+	DefaultProblem = "TODO: replace with the real problem statement before accept" // vocab:identity — shared pre-vocabulary TODO placeholder (see const-block doc comment above)
+	DefaultOutcome = "TODO: replace with the real outcome statement before accept" // vocab:identity — shared pre-vocabulary TODO placeholder (see const-block doc comment above)
 )
 
 // Feature renders a draft feature spec's markdown content by instantiating

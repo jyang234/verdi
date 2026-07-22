@@ -33,6 +33,7 @@ func writeBadgeDrawer(b *strings.Builder, bd badgeView) {
 	// dc-2's first demand), the chip's own label as the receipt's plain-
 	// language headline, and the close control.
 	b.WriteString(`<div class="drawer-head"><span class="drawer-source">` + esc(bd.Source) + `</span>`)
+	// vocab:identity — non-vocabulary homograph: dismiss-this-drawer UI aria-label plus the "drawer-close" CSS class fragment (identity)
 	b.WriteString(`<button type="button" class="drawer-close" aria-label="Close derivation drawer">&#215;</button></div>`)
 	if bd.Label != "" {
 		b.WriteString(`<p class="drawer-label">` + esc(bd.Label) + `</p>`)

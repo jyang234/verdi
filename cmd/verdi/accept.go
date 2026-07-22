@@ -51,6 +51,7 @@ var (
 // cmdAccept is `verdi accept`'s entry point, invoked by dispatch.go.
 func cmdAccept(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
+		// vocab:identity — CLI usage/verb-name grammar (identity)
 		fmt.Fprintln(stderr, "accept: usage: verdi accept <spec-ref|diagram-ref> (e.g. spec/stale-decline, diagram/loansvc-target-topology)")
 		return 2
 	}
@@ -185,7 +186,7 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	_, parentStatErr := os.Stat(obligationsParent)
 	obligationsParentPreExisted := parentStatErr == nil
 
-	createdObligations, err := scaffoldMissingObligations(root, ref.Name, spec, artifact.NewFrozen(at, preFlipHead), operatorOwner())
+	createdObligations, err := scaffoldMissingObligations(root, ref.Name, spec, artifact.NewFrozen(at, preFlipHead), operatorOwner(), mdl)
 	// spec/obligation-seam ac-3 (O-1b, judged-postflip-rollback-window): from
 	// here to the end of this function, ANY refusal or operational error must
 	// leave the tree exactly as it found it — a pristine tree, no partial

@@ -12,6 +12,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // obligationSeamStoryCleanMD is a fully lint-clean draft story spec (proven
@@ -254,7 +255,7 @@ func TestRunAccept_ScaffoldsMissingObligations_Happy(t *testing.T) {
 		if len(ob.Owners) != 1 || ob.Owners[0] != "test-operator" {
 			t.Errorf("%s: owners = %v, want [test-operator] (O-6: the accepting operator)", path, ob.Owners)
 		}
-		if !contains(string(body), obligationBackstopDisclosureLine) {
+		if !contains(string(body), obligationBackstopDisclosureLine(nil)) {
 			t.Errorf("%s: body does not carry the O-6 disclosure line verbatim:\n%s", path, body)
 		}
 	}
@@ -704,7 +705,7 @@ func TestScaffoldMissingObligations(t *testing.T) {
 	t.Run("feature class is a no-op", func(t *testing.T) {
 		root := t.TempDir()
 		spec := decodeFixtureSpec(t, someFeatureMD)
-		created, err := scaffoldMissingObligations(root, "some-feature", spec, frozen, "op")
+		created, err := scaffoldMissingObligations(root, "some-feature", spec, frozen, "op", nil)
 		if err != nil {
 			t.Fatalf("err = %v, want nil", err)
 		}
@@ -733,7 +734,7 @@ links:
 ---
 # t
 `)
-		created, err := scaffoldMissingObligations(root, "widget-story", spec, frozen, "op")
+		created, err := scaffoldMissingObligations(root, "widget-story", spec, frozen, "op", nil)
 		if err != nil {
 			t.Fatalf("err = %v, want nil", err)
 		}
@@ -761,7 +762,7 @@ links:
 ---
 # t
 `)
-		created, err := scaffoldMissingObligations(root, "widget-story", spec, frozen, "op")
+		created, err := scaffoldMissingObligations(root, "widget-story", spec, frozen, "op", nil)
 		if err != nil {
 			t.Fatalf("err = %v, want nil", err)
 		}
@@ -800,7 +801,7 @@ links:
 ---
 # t
 `)
-		created, err := scaffoldMissingObligations(root, "widget-story", spec, frozen, "op")
+		created, err := scaffoldMissingObligations(root, "widget-story", spec, frozen, "op", nil)
 		if err == nil {
 			t.Fatal("err = nil, want a decode-failure error")
 		}
@@ -831,8 +832,8 @@ func TestOperatorOwner(t *testing.T) {
 // declared text — never a fabricated claim about what the evidence
 // specifically shows.
 func TestBackstopObligationBody(t *testing.T) {
-	got := backstopObligationBody("spec/widget-story", "ac-1", artifact.EvidenceBehavioral, "the retry proves end to end")
-	if !contains(got, obligationBackstopDisclosureLine) {
+	got := backstopObligationBody(nil, "spec/widget-story", "ac-1", artifact.EvidenceBehavioral, "the retry proves end to end")
+	if !contains(got, obligationBackstopDisclosureLine(nil)) {
 		t.Errorf("body missing the O-6 disclosure line verbatim:\n%s", got)
 	}
 	if !contains(got, "ac-1") || !contains(got, "behavioral") {
@@ -840,6 +841,26 @@ func TestBackstopObligationBody(t *testing.T) {
 	}
 	if !contains(got, "the retry proves end to end") {
 		t.Errorf("body does not carry the acceptance criterion's own declared text:\n%s", got)
+	}
+}
+
+// TestBackstopObligationBody_RoutesRenamedAcceptVerb is spec/verb-surfaces
+// ac-4's own proof that this committed, frozen-into-every-scaffold
+// disclosure genuinely routes through DisplayVerb rather than merely
+// tolerating a nil model: a store that renames accept to "Sign off" gets
+// that word in both the disclosure line and the "written by <verb>'s
+// backstop" phrase — and never the bare id "accept" as prose.
+func TestBackstopObligationBody_RoutesRenamedAcceptVerb(t *testing.T) {
+	mdl := &model.Model{Vocabulary: model.Vocabulary{Verbs: map[string]string{"accept": "Sign off"}}}
+
+	line := obligationBackstopDisclosureLine(mdl)
+	if !contains(line, "Sign off") {
+		t.Fatalf("obligationBackstopDisclosureLine(renamed) = %q, want it to speak the renamed verb", line)
+	}
+
+	body := backstopObligationBody(mdl, "spec/widget-story", "ac-1", artifact.EvidenceBehavioral, "the retry proves end to end")
+	if !contains(body, "Sign off") {
+		t.Fatalf("backstopObligationBody(renamed) = %q, want it to speak the renamed verb", body)
 	}
 }
 

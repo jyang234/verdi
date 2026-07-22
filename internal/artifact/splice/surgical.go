@@ -105,6 +105,7 @@ func findMatchingClose(src []byte, start int) (int, error) {
 		}
 		i++
 	}
+	// vocab:identity — non-vocabulary homograph: "close" names the closing bracket/brace this scanner failed to find (identity)
 	return -1, fmt.Errorf("splice: no matching close for %q starting at %d", open, start)
 }
 

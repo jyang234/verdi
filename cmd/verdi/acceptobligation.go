@@ -25,6 +25,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -47,27 +48,36 @@ func operatorOwner() string {
 	return fallbackOperatorOwner
 }
 
-// obligationBackstopDisclosureLine is O-6's required disclosure, verbatim:
+// obligationBackstopDisclosureLine renders O-6's required disclosure:
 // every backstop-scaffolded obligation's body carries this line so it is
 // frozen honestly as disclosed-as-unproven, never disguised as elaborated
-// intent.
-const obligationBackstopDisclosureLine = "This obligation was scaffolded at accept; not elaborated."
+// intent. The verb word routes through DisplayVerb (spec/verb-surfaces
+// ac-4 — this committed, frozen-into-every-scaffold sentence is exactly
+// the kind of verb-speaking surface the vocabulary category covers): a
+// nil or no-rename mdl renders byte-identical to the original verbatim
+// literal ("This obligation was scaffolded at accept; not elaborated."),
+// so every existing caller's output is unchanged.
+func obligationBackstopDisclosureLine(mdl *model.Model) string {
+	return fmt.Sprintf("This obligation was scaffolded at %s; not elaborated.", mdl.DisplayVerb("accept"))
+}
 
 // backstopObligationBody renders a scaffolded obligation's body: the
 // required disclosure line (O-6), plain-language pointers at what to do
 // next, and the acceptance criterion's own already-declared text — never a
 // fabricated claim about what the evidence specifically shows, since the
-// whole point of the disclosure is that nobody has said that yet.
-func backstopObligationBody(specRef, acID string, kind artifact.EvidenceKind, acText string) string {
+// whole point of the disclosure is that nobody has said that yet. mdl
+// resolves the disclosure line's own verb word (above) and the "written
+// by <verb>'s freeze-moment backstop" phrase below through DisplayVerb.
+func backstopObligationBody(mdl *model.Model, specRef, acID string, kind artifact.EvidenceKind, acText string) string {
 	return fmt.Sprintf(
-		"%s It is a placeholder for %s's %s evidence, written by accept's\n"+
+		"%s It is a placeholder for %s's %s evidence, written by %s's\n"+
 			"freeze-moment backstop because no obligation existed for this pair\n"+
 			"when %s was accepted (spec/creation-surfaces#ac-4). Replace this body\n"+
 			"with a first-person statement of what that evidence must specifically\n"+
 			"show before relying on it — by hand, or via `verdi obligation author\n"+
 			"%s %s %s` on a design branch before the replacement itself freezes.\n"+
 			"The acceptance criterion's own declared text, for reference:\n\n%s\n",
-		obligationBackstopDisclosureLine, acID, kind, specRef, specRef, acID, kind, acText)
+		obligationBackstopDisclosureLine(mdl), acID, kind, mdl.DisplayVerb("accept"), specRef, specRef, acID, kind, acText)
 }
 
 // scaffoldMissingObligations is the backstop's own core (O-1/O-2/O-3/O-3b/
@@ -103,8 +113,11 @@ func backstopObligationBody(specRef, acID string, kind artifact.EvidenceKind, ac
 //
 // spec is the caller's already-decoded, PRE-flip spec (still carrying
 // status: draft on disk) — its own AcceptanceCriteria/Class fields are all
-// this needs; it is never mutated.
-func scaffoldMissingObligations(root, specName string, spec *artifact.SpecFrontmatter, frozen artifact.Frozen, owner string) (created []string, err error) {
+// this needs; it is never mutated. mdl is the resolved display model
+// (nil-safe: bare-id fallback), threaded to backstopObligationBody so a
+// renamed accept verb is reflected in every scaffolded obligation's body
+// (spec/verb-surfaces ac-4).
+func scaffoldMissingObligations(root, specName string, spec *artifact.SpecFrontmatter, frozen artifact.Frozen, owner string, mdl *model.Model) (created []string, err error) {
 	if spec.Class != artifact.ClassStory {
 		return nil, nil // dc-3: feature (and component) ACs never carry obligations
 	}
@@ -153,7 +166,7 @@ func scaffoldMissingObligations(root, specName string, spec *artifact.SpecFrontm
 				Title:       title,
 				ForKind:     kind,
 				VerifiesRef: specRef,
-				Body:        backstopObligationBody(specRef, ac.ID, kind, ac.Text),
+				Body:        backstopObligationBody(mdl, specRef, ac.ID, kind, ac.Text),
 				Owners:      []string{owner},
 				Frozen:      frozen,
 			})

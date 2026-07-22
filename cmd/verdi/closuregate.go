@@ -288,6 +288,7 @@ func checkPendingSupersessionCondition(ctx context.Context, f forge.Forge, defau
 // so close's own freeze-align sees stale covers and regenerates over the
 // dispositions), then close freezes the now-current, fully-dispositioned
 // report in place.
+// vocab:identity — CLI invocation grammar: names `verdi align`/`verdi close` by their bare ids (identity)
 const dispositionRitual = "the closure ritual is align (`verdi align`) -> disposition every finding as a working-tree edit (never commit it) -> close (`verdi close`)"
 
 // checkDispositionCompleteCondition is the closure gate's condition 4

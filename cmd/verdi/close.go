@@ -110,6 +110,7 @@ type closeDeps struct {
 // archive. So close's ResumeHint names `verdi close`, in no flag language,
 // rather than inheriting align's own alignExpiryResumeHint ("re-run align …
 // optionally with a longer --wait") verbatim.
+// vocab:identity — CLI invocation grammar ("verdi close", identity)
 const closeExpiryResumeHint = "Re-run verdi close once the judge window allows to complete the freeze and archive"
 
 // freezeAlignDeps builds the alignDeps for close's freeze-align step — the
@@ -223,6 +224,7 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		storyArg = a
 	}
 	if storyArg == "" {
+		// vocab:identity — CLI usage/verb-name grammar (identity)
 		fmt.Fprintln(stderr, "close: usage: verdi close <jira:STORY-KEY | spec/name> [--force-local] [--preflight]")
 		return 2
 	}
