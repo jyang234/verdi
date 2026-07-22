@@ -4,7 +4,7 @@ kind: spec
 title: "CLI Creation"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-P2-8
 problem: { text: "spec/creation-surfaces#ac-3 names the CLI half of the ADJ-65 asymmetry: design start scaffolds every draft with generic TODO placeholders no matter what flags are given, has no way to supply a real problem/outcome statement at all, and has no CLI equivalent of the board's stub-instantiate action — a team working entirely from the command line cannot create a story from a feature's declared stub without opening the board, and can never produce a TODO-free scaffold from the CLI at all. The board's own creation form already requires its statement fields non-empty before it will render a spec at all (spec/creation-form ac-2's required-statement refusal); design start has never made that promise, silently emitting the same TODO markers section-for-section regardless of what the operator actually knows about the work.", anchor: problem }
 outcome: { text: "design start grows a --problem/--outcome pair of flags that source a TODO-free scaffold section-for-section, a --defer-statements flag that commits deliberate TODOs anyway but only together with an explicit disclosure line naming them as deferred, and a TTY interview — driven from the exact same placeholder-enumeration descriptors (internal/designscaffold.Fields) the board's own creation form already reuses, one field contract, two front ends — when no creation flags are given at all; a non-interactive invocation given neither the statement flags nor --defer-statements refuses by name rather than silently emitting the old TODO placeholders. --from-stub <feature> <stub> reaches the CLI through the identical shared stub-instantiate core this story extracts out of internal/workbench/boardspecapi.go, so the board action and the CLI path can never drift — proven by an output-equality parity assertion and by the board's own existing tests passing completely unmodified. --owners deliberately stays out of scope, the same posture I-10/X-4 already ratified, disclosed rather than silently reconsidered now that the verb grows other creation flags.", anchor: outcome }
@@ -15,6 +15,7 @@ acceptance_criteria:
   - { id: ac-4, text: "--owners deliberately stays out of design start's flag surface — the same posture I-10/X-4 already ratified (05 §CLI: no magic, no tracker-derived naming, and no CLI-supplied owner override either), disclosed here rather than silently reconsidered now that the verb grows other creation flags: the usage text and the verb's whole flag-parsing source carry no --owners token anywhere", evidence: [static], anchor: ac-4 }
 links:
   - { type: implements, ref: "spec/creation-surfaces#ac-3" }
+frozen: { at: 2026-07-22, commit: e1cd2d1f957a200804b97a78829482d1ca8b57f9, stub_matched: true }
 ---
 # CLI Creation
 
