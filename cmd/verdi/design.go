@@ -40,7 +40,7 @@ import (
 func runDesignVerb(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "start" {
 		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
-		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name>")
+		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name> (or: verdi design start --from-stub <feature> <stub>)")
 		return 2
 	}
 	return cmdDesignStart(args[1:], stdout, stderr)
@@ -127,6 +127,15 @@ type designDeps struct {
 // use, so a configured jira ref resolves or degrades for the true reason per
 // 04 §Semantics) and runner, and delegates to runDesignStart.
 func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
+	// --from-stub is a wholly distinct invocation shape (spec/cli-creation
+	// ac-3, ledger L-N7): <feature> <stub>, never --kind/--name/the
+	// statement flags below — dispatched to its own file
+	// (designfromstub.go) before extractFlags' --kind/--name grammar ever
+	// sees these tokens.
+	if len(args) > 0 && args[0] == "--from-stub" {
+		return cmdDesignStartFromStub(args[1:], stdout, stderr)
+	}
+
 	kindArg, name, rest, err := extractFlags(args)
 	if err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
