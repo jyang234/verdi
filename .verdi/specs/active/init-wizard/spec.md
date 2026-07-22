@@ -147,3 +147,24 @@ nothing reaches the real root, and because a deliberate "no" is neither
 operational trouble nor a verdict it exits 0 (whereas a mid-interview
 abort or a failed/crashed staging still exits 2, under the module's 0/1/2
 exit discipline).
+
+Disclosed promotion mechanism (corrects the platform record): the raw
+`rename(2)` syscall silently REPLACES an existing empty destination
+directory on POSIX filesystems — witnessed on ext4 via libc `rename`,
+perl, coreutils `mv -T`, and a raw `renameat(2)` — which is precisely the
+silent-overwrite hazard ac-1's backstop guards against for a `.verdi/`
+that races into the operator-scaled check-to-rename window. (Go's
+`os.Rename`, which this verb previously used to promote, happens to return
+`EEXIST` over an existing directory on every filesystem tested — APFS,
+overlayfs, and ext4 — so init was never observed to overwrite in practice;
+but that is incidental runtime behavior, not a guarantee the verb
+encoded.) Promotion now uses an explicit atomic rename-exclusive —
+`renamex_np` with `RENAME_EXCL` on darwin, `renameat2` with
+`RENAME_NOREPLACE` on linux, and an unsupported-platform arm that refuses
+rather than fall back — which fails outright if ANYTHING already occupies
+the real path, empty directory or not, on every platform. This makes
+ac-1's "fails outright" backstop true-and-stronger by flag (`EEXIST` for
+anything, not merely `ENOTEMPTY` for a non-empty directory), in exactly
+one atomic rename with no `os.Mkdir` claim preceding it — so ac-3's
+single-rename promotion, and its "no other write touches the real root,"
+both still hold.

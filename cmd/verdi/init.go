@@ -18,9 +18,13 @@
 // and, when the wizard diverged from canonical, on the staged
 // model.yaml decoding back to a value identical to the interview's own
 // in-memory candidate (W-4). Both paths refuse on ANY existing .verdi/
-// directory at all, not merely an existing manifest (W-3/W-3b), because
-// the single-rename promotion itself requires .verdi to be absent or it
-// fails outright with ENOTEMPTY. The staged temporary directory is
+// directory at all, not merely an existing manifest (W-3/W-3b): an
+// up-front existence check refuses before staging, and promotion itself is
+// a single atomic rename-exclusive (renamex_np/RENAME_EXCL on darwin,
+// renameat2/RENAME_NOREPLACE on linux) that fails outright if anything —
+// an empty directory included — already occupies the real path, closing
+// the check-to-rename race a bare rename leaves open on POSIX/ext4-class
+// filesystems. The staged temporary directory is
 // removed on any pre-promotion error or refusal, and on a mid-interview
 // abort (stdin ending before every prompt is answered) — no real-store
 // write ever happens before that one rename.
@@ -103,8 +107,7 @@ func runInit(cwd string, wizard bool, stdin io.Reader, isTTY bool, stdout, stder
 	verdiDir := filepath.Join(cwd, verdiDirName)
 
 	if desc, exists := describeExistingVerdiDir(verdiDir); exists {
-		fmt.Fprintf(stderr, "init: refusing — %s already exists (verdi init is create-only; hand-edit .verdi/model.yaml and validate with `verdi model check` to reconfigure an existing store)\n", desc)
-		return 2
+		return refuseExistingVerdiDir(stderr, desc)
 	}
 
 	if wizard && !isTTY {
@@ -175,12 +178,11 @@ func runInit(cwd string, wizard bool, stdin io.Reader, isTTY bool, stdout, stder
 		}
 	}
 
-	// W-2: promotion is exactly one os.Rename of the staged .verdi
-	// subtree onto the real path — no other write ever touches the real
-	// root, before or after.
-	if err := os.Rename(filepath.Join(tempRoot, verdiDirName), verdiDir); err != nil {
-		fmt.Fprintln(stderr, "init:", err)
-		return 2
+	// W-2: promote the staged .verdi subtree onto the real path with a
+	// single atomic rename-exclusive — the one write that ever touches the
+	// real root — refusing outright if anything already exists there.
+	if code, ok := promoteStagedStore(filepath.Join(tempRoot, verdiDirName), verdiDir, stderr); !ok {
+		return code
 	}
 	promoted = true
 	_ = os.Remove(tempRoot) // best-effort: the now-empty staging wrapper
@@ -189,13 +191,54 @@ func runInit(cwd string, wizard bool, stdin io.Reader, isTTY bool, stdout, stder
 	return 0
 }
 
+// promoteStagedStore promotes the staged .verdi tree (stagedVerdi) onto the
+// real path (verdiDir) with a single atomic rename-exclusive (renameExclusive:
+// darwin renamex_np/RENAME_EXCL, linux renameat2/RENAME_NOREPLACE), returning
+// the exit code and whether promotion happened. This is spec/init-wizard
+// ac-1's promotion backstop, and it is exactly one rename — no os.Mkdir claim
+// precedes it, so no other write ever touches the real root and there is no
+// window in which a crash could leave an empty .verdi/ behind.
+//
+// If the real path already holds ANY entry — a real store, a stray directory,
+// or an empty .verdi/ that raced into the check-to-rename window after the
+// up-front describeExistingVerdiDir check passed — the rename fails with an
+// os.ErrExist-classified error on every platform (an empty destination is a
+// silent-replace hazard for a bare rename only on POSIX/ext4-class
+// filesystems; rename-exclusive closes it uniformly). That refusal reuses the
+// same create-only message the up-front check prints. Any other rename error
+// is operational (exit 2), reported as-is.
+func promoteStagedStore(stagedVerdi, verdiDir string, stderr io.Writer) (code int, promoted bool) {
+	if err := renameExclusive(stagedVerdi, verdiDir); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			desc, exists := describeExistingVerdiDir(verdiDir)
+			if !exists {
+				desc = verdiDir
+			}
+			return refuseExistingVerdiDir(stderr, desc), false
+		}
+		fmt.Fprintln(stderr, "init: promoting the staged store:", err)
+		return 2, false
+	}
+	return 0, true
+}
+
+// refuseExistingVerdiDir prints verdi init's create-only refusal for an
+// existing .verdi entry (desc from describeExistingVerdiDir) and returns the
+// operational exit code (2). Single source of that message, shared by the
+// up-front existence check (W-3/W-3b) and the atomic promotion backstop
+// (ac-1) so both name what already exists identically.
+func refuseExistingVerdiDir(stderr io.Writer, desc string) int {
+	fmt.Fprintf(stderr, "init: refusing — %s already exists (verdi init is create-only; hand-edit .verdi/model.yaml and validate with `verdi model check` to reconfigure an existing store)\n", desc)
+	return 2
+}
+
 // describeExistingVerdiDir reports whether path already exists (any
-// entry at all — W-3b's unified predicate, since os.Rename's promotion
-// target must be absent or it fails with ENOTEMPTY regardless of
-// whether a manifest lives inside) and, when it does, a plain-language
-// description of exactly what: a real store (verdi.yaml present) or a
-// stray, non-manifest directory — so the refusal names what an operator
-// actually finds there rather than a generic "already exists."
+// entry at all — W-3b's unified predicate: the atomic rename-exclusive
+// promotion requires the real path to be absent, so any existing entry,
+// empty directory included, must be refused) and, when it does, a
+// plain-language description of exactly what: a real store (verdi.yaml
+// present) or a stray, non-manifest directory — so the refusal names what
+// an operator actually finds there rather than a generic "already exists."
 func describeExistingVerdiDir(path string) (description string, exists bool) {
 	info, err := os.Lstat(path)
 	if err != nil {
