@@ -113,6 +113,29 @@ obligation misfiled under another kind's filename being exactly what a bare
 is a conservative invention that can only ever refuse where VL-020 would pass,
 never the reverse.
 
+Correction (round-3 alignment witness — recorded, not silently rewritten).
+The final sentence above — "can only ever refuse where VL-020 would pass,
+never the reverse" — was falsified by the round-3 alignment witness and is
+corrected here. That witness showed the then-current coverage predicate keyed
+coverage by an obligation's DECODED `for_kind` scanned over every
+`<acID>--*.md` file, not the exact convention path — so a decodable obligation
+misfiled at an UNDECLARED kind's filename (`for_kind: behavioral` sitting at
+`ac-1--static.md` when `ac-1` declares only `[behavioral]`) was miscounted as
+covering `(ac-1, behavioral)`. The backstop then skipped that pair and the
+story froze with `ac-1--behavioral.md` absent — which VL-020 reds at the first
+post-accept lint. That is exactly the reverse the old sentence denied: the
+backstop PASSED where VL-020 will FAIL. The fix re-keys coverage to the EXACT
+convention path `.verdi/obligations/<spec>/<acID>--<kind>.md`, so the backstop's
+predicate now EQUALS VL-020's own convention-path check, plus two deliberately
+stricter WRITE-side arms — decode-required at that path, and
+refuse-rather-than-paper-over when the file there is malformed or is a decodable
+obligation whose `for_kind` disagrees with the filename. Those arms can only
+ever refuse where VL-020 would pass; the corrected invariant is that the
+backstop never passes a declared pair VL-020 will fail. A decodable obligation
+misfiled at an undeclared kind's path is now left byte-untouched for VL-011 to
+resolve at lint time, and the declared pair's own convention path is scaffolded
+regardless.
+
 ## Ac 3
 
 On any refusal or operational error accept hits after scaffolding has
