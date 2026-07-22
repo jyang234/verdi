@@ -1247,6 +1247,108 @@ bindings:
       - "spec/creation-form#ac-2"
       - "spec/creation-form#ac-3"
       - "spec/creation-form#ac-4"
+      # spec/cli-creation (spec/creation-surfaces#ac-3's implementing story,
+      # plan Task 12, ledger L-N7 — the CLI half of the ADJ-65 asymmetry).
+      # BUILT: the story's design + build landed together (the X-9/#143
+      # convention every prior story in this file follows), green under make
+      # verify. ac-1 <- cmd/verdi/designstatements_test.go's
+      # TestRunDesignStart_ProblemOutcomeFlags_TODOFree (--problem/--outcome
+      # given together render the frontmatter problem/outcome attributes
+      # TODO-free), TestRunDesignStart_DeferStatements_
+      # DisclosesAndKeepsPlaceholders (--defer-statements keeps the
+      # placeholder TODOs but prints the disclosure line naming problem/
+      # outcome as deliberately deferred), and
+      # TestRunDesignStart_StatementFlags_Negative (the two are mutually
+      # exclusive, and --problem/--outcome must be given together — a lone
+      # flag refuses by name), plus internal/designscaffold/
+      # designscaffold_test.go's TestFeature_RealStatements/
+      # TestStory_RealStatements (the render core the flags drive, pinning
+      # the two frontmatter positions the story's own build-time correction
+      # names). ac-2 <- the same cmd file's
+      # TestRunDesignStart_TTYInterview_CollectsStatements and the
+      # built-binary TestRun_DesignStart_TTYInterview_BuiltBinary /
+      # TestRun_DesignStart_NoTTY_NoFlags_Refuses_BuiltBinary (flagless on a
+      # TTY runs the interview; flagless with no TTY refuses by name rather
+      # than emitting silent TODOs), plus internal/designinterview/
+      # interview_test.go's TestRunInterview_DerivesFromFields (the
+      # interview's prompts derive from internal/designscaffold.Fields — the
+      # one field contract) and internal/designscaffold/fields_test.go's
+      # TestFields_EmbeddedStoryTemplate/TestFields_EmbeddedFeatureTemplate
+      # (Fields enumerates the class template's own statement placeholders,
+      # the identical descriptor list the board's creation form validates
+      # against). ac-3 <- cmd/verdi/designfromstub_test.go's
+      # TestDesignStartFromStub_ParityWithBoardAction (the parity proof:
+      # given the identical feature+stub, the board action's and the CLI's
+      # rendered spec.md bytes are asserted equal — the ADJ-65 close at the
+      # mechanism, holding only because both call the one shared
+      # internal/stubinstantiate.Instantiate core),
+      # TestRunDesignStartFromStub_Plain/_Spike/_Negative, and the
+      # built-binary TestRun_DesignStartFromStub_Dispatch, plus
+      # internal/stubinstantiate/stubinstantiate_test.go's
+      # TestInstantiate_Plain/_Spike/_Negative (the extracted core in
+      # isolation) and the board's OWN existing stub-instantiate handler
+      # tests passing completely unmodified after the extraction —
+      # internal/workbench/scopingcanvas_test.go's
+      # TestBoardSpec_StubInstantiate_Plain/_Spike/_Negative and
+      # internal/workbench/stubinstantiatetemplate_test.go's
+      # TestBoardSpec_StubInstantiate_ClassMismatch_Refused/
+      # _StoreTemplateOverride (ac-3's companion static leg — the extraction
+      # is one shared package, no second CLI-side reimplementation — is bound
+      # under verdi-verify-static below). ac-4 is static-only (--owners absent
+      # from the flag surface) and is bound under verdi-verify-static below,
+      # NOT here. No attestation leg is bound here — stories carry no
+      # attestation floor.
+      - "spec/cli-creation#ac-1"
+      - "spec/cli-creation#ac-2"
+      - "spec/cli-creation#ac-3"
+      # spec/verb-surfaces (spec/creation-surfaces#ac-5's implementing story,
+      # plan Task 14, ledger L-N9 — guide 8.4's verdi waive workflow plus the
+      # verb-vocabulary witness extension). BUILT, green under make verify.
+      # ac-1 <- cmd/verdi/waive_test.go's TestRunWaive_Create_Happy /
+      # TestRunWaive_Create_NoExpiry (a create-only WaiverFrontmatter lands
+      # at waivers/<story-slug>/<ac-id>.md and stdout surfaces the configured
+      # expiry or discloses none was given), TestParseWaiveArgs_Negative
+      # (exit 2 on a missing --rationale or a malformed --expires),
+      # TestRunWaive_Create_RefusesWhenAlreadyExists (never overwrites a
+      # present waiver; the refusal names --reaffirm),
+      # TestRunWaive_RefusesUnknownStoryRef/_RefusesUndeclaredAC (the shared
+      # classifyPair resolution refusals), and the built-binary
+      # TestWaiveE2E_FullLifecycle (verdi matrix's fold reads the AC waived
+      # through the unmodified evidence.WaiverActive), plus
+      # internal/showcasealign/cli_showcase_test.go's TestCLIShowcaseWaive
+      # (the real showcase store: the record lands at the convention path,
+      # decodes, and folds waived). ac-2 <- the same cmd file's
+      # TestRunWaive_Reaffirm_RefusesWhenNoneExists (exit 1, naming the plain
+      # create form), TestRunWaive_Reaffirm_RoundTrips (the SAME file is
+      # rewritten: frozen/reason refresh, the prior reaffirmation-log entry
+      # survives verbatim, exactly one new dated entry is appended), and
+      # TestRunWaive_Reaffirm_DisclosesLapsedPriorExpiry (a prior expiry
+      # already lapsed at reaffirm time is disclosed). ac-3 <-
+      # internal/decisionsweep/waiverstale_test.go's
+      # TestAudit_WaiverStale_ActiveUnderThreshold (clean under threshold),
+      # _ThresholdCrossedFlags (crossing flags the story by name),
+      # _ExpiredStatusExcludedButDisclosed and
+      # _LapsedByDateExcludedButDisclosed (an expired-status or wall-clock-
+      # lapsed waiver is excluded from the counted-active total yet still
+      # listed), _StoryWithNoWaiversSkipped, and _ThresholdAbsentDefaults
+      # (defaults to 3 exactly as deviations_stale_threshold does) — the
+      # waiver-audit section wired into decisionsweep.Audit, reached by the
+      # built binary through cmd/verdi/audit_test.go's runAudit core (which
+      # now carries the waivers threshold alongside exempts/deviations).
+      # ac-4 <- internal/specalign/vocabprose_test.go's TestVocabProseWitness
+      # (the module-wide gate runs GREEN at head across the whole cmd/ and
+      # internal/ production tree — every verb-speaking surface routed or
+      # marked) and TestScanVocabProse_VerbWordMutationWitness (the mutation
+      # witness proves the verb-word category BITES: RED on a bare, unrouted
+      # "accept", GREEN once routed through model.DisplayVerb or marked
+      # // vocab:identity); ac-4's companion static leg (the word list
+      # derived from model.Canonical(), never hand-maintained) is bound under
+      # verdi-verify-static below. No attestation leg is bound here — stories
+      # carry no attestation floor.
+      - "spec/verb-surfaces#ac-1"
+      - "spec/verb-surfaces#ac-2"
+      - "spec/verb-surfaces#ac-3"
+      - "spec/verb-surfaces#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
@@ -1898,3 +2000,39 @@ bindings:
       # internal/evidence seam. Green under make verify. No attestation leg
       # is bound here — stories carry no attestation floor.
       - "spec/obligation-seam#ac-4"
+      # spec/cli-creation#ac-4 (static-only: --owners deliberately stays out
+      # of design start's flag surface — the I-10/X-4 ratified posture, 05
+      # §CLI). BUILT: cmd/verdi/designstatements_test.go's
+      # TestDesignGo_NoOwnersFlag is a source-text witness proving design.go's
+      # usage text and the verb's whole flag-parsing source carry no --owners
+      # token anywhere. Green under make verify.
+      - "spec/cli-creation#ac-4"
+      # spec/cli-creation#ac-3 static leg (extensibility Phase 2, Task 12;
+      # ac-1..3 are ALSO bound above under verdi-verify-behavioral — ac-3
+      # alone declares both kinds, per its parity-plus-shared-core-extraction
+      # evidence split). The static half is the extraction itself:
+      # internal/stubinstantiate is ONE shared package, and both
+      # cmd/verdi/designfromstub.go and internal/workbench/boardspecapi.go
+      # call stubinstantiate.Instantiate (no second CLI-side reimplementation
+      # to drift from the board's) — a source structure that compiles, vets,
+      # and lint-store/lint-clean under make verify and makes the behavioral
+      # parity assertion hold by construction, not by coincidence.
+      # internal/stubinstantiate/stubinstantiate_test.go's
+      # TestInstantiate_Plain/_Spike/_Negative exercise the extracted core
+      # directly. No attestation leg is bound here — stories carry no
+      # attestation floor.
+      - "spec/cli-creation#ac-3"
+      # spec/verb-surfaces#ac-4 static leg (extensibility Phase 2, Task 14;
+      # ac-1..4 are ALSO bound above under verdi-verify-behavioral — ac-4
+      # alone declares both kinds: the witness-runs-green-and-BITES behavioral
+      # half above, and this derived-not-hand-maintained static half). BUILT:
+      # internal/specalign/vocabprose_test.go's TestVocabProseWords proves the
+      # witness word list is DERIVED from model.Canonical()
+      # (mdl.Lifecycle[*].Transitions[*].Verb — today accept and close),
+      # carrying every canonical verb id alongside the existing class/state
+      # words, never hand-maintained; TestVocabMatchWords and
+      # TestScanVocabProse_Classifier pin the matcher/classifier convention.
+      # The scanner and its model-derived word list compile, vet, and
+      # lint-clean under make verify. No attestation leg is bound here —
+      # stories carry no attestation floor.
+      - "spec/verb-surfaces#ac-4"
