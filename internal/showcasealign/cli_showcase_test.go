@@ -253,7 +253,13 @@ func TestCLIShowcaseCoverage(t *testing.T) {
 	t.Run("design_start_then_accept", func(t *testing.T) {
 		root := provisionShowcaseStore(t)
 
-		stdout, stderr, code := runBinary(t, root, "design", "start", "--kind", "feature", "--name", "showcase-lifecycle-check")
+		// --defer-statements (spec/cli-creation ac-1, ledger L-N7): this
+		// harness's runBinary subprocess has no attached terminal, and
+		// design start now refuses a flagless, non-interactive invocation
+		// rather than silently emitting the old TODO placeholders — the
+		// explicit deferral this probe only needs a valid draft spec from,
+		// never real statement content.
+		stdout, stderr, code := runBinary(t, root, "design", "start", "--kind", "feature", "--name", "showcase-lifecycle-check", "--defer-statements")
 		if code != 0 {
 			t.Fatalf("verdi design start: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 		}

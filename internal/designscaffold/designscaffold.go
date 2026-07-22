@@ -69,15 +69,21 @@ const (
 // scaffold-templates ac-1: designscaffold stops building strings and
 // starts rendering templates; this function becomes Render's delegate
 // rather than its own fmt.Sprintf body). storyRef is "" when the feature
-// carries no tracker ref at all (optional for the feature class).
-func Feature(tmpl []byte, specRef, storyRef, title string) (string, error) {
+// carries no tracker ref at all (optional for the feature class). problem
+// and outcome are the statement sections' own content (spec/cli-creation
+// ac-1, ledger L-N7): every existing caller before that story passed the
+// DefaultProblem/DefaultOutcome placeholders explicitly, byte-preserving
+// their scaffold; `design start`'s --problem/--outcome flags are the first
+// caller to pass real statement text through this same rendering path,
+// rather than a second, parallel render call that could drift from it.
+func Feature(tmpl []byte, specRef, storyRef, title, problem, outcome string) (string, error) {
 	return Render(tmpl, ScaffoldData{
 		Ref:      specRef,
 		Title:    title,
 		StoryRef: storyRef,
 		Owners:   DefaultOwners,
-		Problem:  DefaultProblem,
-		Outcome:  DefaultOutcome,
+		Problem:  problem,
+		Outcome:  outcome,
 	})
 }
 
@@ -117,7 +123,15 @@ type StoryLink struct {
 // followed by zero entries decodes as a nil Links slice, which
 // validateStory then rejects for a non-spike story — TestStory_Negative_
 // NoLinks pins this).
-func Story(tmpl []byte, specRef, storyRef, title string, spike bool, links []StoryLink) (string, error) {
+// problem and outcome are the statement sections' own content (spec/
+// cli-creation ac-1, ledger L-N7): every caller before that story passed
+// the DefaultProblem/DefaultOutcome placeholders explicitly, byte-
+// preserving its scaffold — the workbench's stub-instantiate action
+// (internal/stubinstantiate) still always does, since it never collects
+// real statement text from an operator; design start's --problem/
+// --outcome flags and its TTY interview are the only callers that pass
+// real statement text through this same rendering path.
+func Story(tmpl []byte, specRef, storyRef, title string, spike bool, links []StoryLink, problem, outcome string) (string, error) {
 	return Render(tmpl, ScaffoldData{
 		Ref:      specRef,
 		Title:    title,
@@ -125,7 +139,7 @@ func Story(tmpl []byte, specRef, storyRef, title string, spike bool, links []Sto
 		Spike:    spike,
 		Links:    links,
 		Owners:   DefaultOwners,
-		Problem:  DefaultProblem,
-		Outcome:  DefaultOutcome,
+		Problem:  problem,
+		Outcome:  outcome,
 	})
 }

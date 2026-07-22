@@ -27,12 +27,14 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/atomicfile"
+	"github.com/jyang234/verdi/internal/designinterview"
 	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/provider"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
+	"golang.org/x/term"
 )
 
 // runDesignVerb dispatches `verdi design <subcommand>`. There is exactly
@@ -40,24 +42,29 @@ import (
 func runDesignVerb(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "start" {
 		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
-		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name>")
+		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name> (or: verdi design start --from-stub <feature> <stub>)")
 		return 2
 	}
 	return cmdDesignStart(args[1:], stdout, stderr)
 }
 
-// extractFlags pulls "--name"/"-name" and "--kind"/"-kind" (each as a
-// separate value token or "=value") out of args in whatever position they
-// appear, returning both values and every remaining (positional) argument
-// in order. This hand-rolled parse exists for the same reason
+// extractFlags pulls "--name"/"-name", "--kind"/"-kind", "--problem"/
+// "-problem", and "--outcome"/"-outcome" (each as a separate value token
+// or "=value"), plus the boolean "--defer-statements" (spec/cli-creation
+// ac-1, ledger L-N7), out of args in whatever position they appear,
+// returning every value and every remaining (positional) argument in
+// order. This hand-rolled parse exists for the same reason
 // extractNameFlag did pre-round-four: flag.FlagSet stops consuming flags at
 // the first non-flag token, so it cannot parse
 // "verdi design start <ref> --kind feature --name <name>" — the exact
 // ordering 05 §CLI's own example uses, a positional ref leading two
 // trailing flags — without also accepting every flag-first permutation.
-// This loop accepts both flags, in either form, in any position, relative
-// to each other and to the positional ref.
-func extractFlags(args []string) (kind, name string, rest []string, err error) {
+// This loop accepts every flag, in either form, in any position, relative
+// to each other and to the positional ref. --owners is deliberately
+// ABSENT from this grammar (spec/cli-creation ac-4, I-10/X-4) —
+// TestDesignGo_NoOwnersFlag pins its absence from this whole file's
+// source, not merely from this function.
+func extractFlags(args []string) (kind, name, problem, outcome string, deferStatements bool, rest []string, err error) {
 	take := func(label string, dst *string, i int, a string) (consumed int, err error) {
 		if strings.HasPrefix(a, "--"+label+"=") || strings.HasPrefix(a, "-"+label+"=") {
 			if *dst != "" {
@@ -82,30 +89,57 @@ func extractFlags(args []string) (kind, name string, rest []string, err error) {
 		case a == "--name" || a == "-name":
 			n, e := take("name", &name, i, a)
 			if e != nil {
-				return "", "", nil, e
+				return "", "", "", "", false, nil, e
 			}
 			i += n
 		case strings.HasPrefix(a, "--name=") || strings.HasPrefix(a, "-name="):
 			if name != "" {
-				return "", "", nil, fmt.Errorf("--name given more than once")
+				return "", "", "", "", false, nil, fmt.Errorf("--name given more than once")
 			}
 			_, name, _ = strings.Cut(a, "=")
 		case a == "--kind" || a == "-kind":
 			n, e := take("kind", &kind, i, a)
 			if e != nil {
-				return "", "", nil, e
+				return "", "", "", "", false, nil, e
 			}
 			i += n
 		case strings.HasPrefix(a, "--kind=") || strings.HasPrefix(a, "-kind="):
 			if kind != "" {
-				return "", "", nil, fmt.Errorf("--kind given more than once")
+				return "", "", "", "", false, nil, fmt.Errorf("--kind given more than once")
 			}
 			_, kind, _ = strings.Cut(a, "=")
+		case a == "--problem" || a == "-problem":
+			n, e := take("problem", &problem, i, a)
+			if e != nil {
+				return "", "", "", "", false, nil, e
+			}
+			i += n
+		case strings.HasPrefix(a, "--problem=") || strings.HasPrefix(a, "-problem="):
+			if problem != "" {
+				return "", "", "", "", false, nil, fmt.Errorf("--problem given more than once")
+			}
+			_, problem, _ = strings.Cut(a, "=")
+		case a == "--outcome" || a == "-outcome":
+			n, e := take("outcome", &outcome, i, a)
+			if e != nil {
+				return "", "", "", "", false, nil, e
+			}
+			i += n
+		case strings.HasPrefix(a, "--outcome=") || strings.HasPrefix(a, "-outcome="):
+			if outcome != "" {
+				return "", "", "", "", false, nil, fmt.Errorf("--outcome given more than once")
+			}
+			_, outcome, _ = strings.Cut(a, "=")
+		case a == "--defer-statements" || a == "-defer-statements":
+			if deferStatements {
+				return "", "", "", "", false, nil, fmt.Errorf("--defer-statements given more than once")
+			}
+			deferStatements = true
 		default:
 			rest = append(rest, a)
 		}
 	}
-	return kind, name, rest, nil
+	return kind, name, problem, outcome, deferStatements, rest, nil
 }
 
 // designDeps bundles design start's injectable dependencies (mirroring
@@ -114,10 +148,30 @@ func extractFlags(args []string) (kind, name string, rest []string, err error) {
 // real ones. Runner is nil when verdi.yaml carries no toolchain: block —
 // baseline.go's regenerateBaseline reads that as "skip gracefully",
 // never as an error.
+//
+// Problem/Outcome/DeferStatements/Stdin/IsTTY are spec/cli-creation
+// ac-1/ac-2's statement-sourcing inputs (ledger L-N7): Problem and
+// Outcome carry --problem/--outcome's values ("" when not given);
+// DeferStatements carries --defer-statements; Stdin/IsTTY are the
+// interview's injectable input source and the real-TTY predicate,
+// mirroring cmd/verdi/init.go's own stdin/isTTY injection for the init
+// wizard. The zero value of all five — no statement flags, no TTY — is
+// deliberately the REFUSAL case (runDesignStart: "cannot interview,
+// statements required"), so every pre-existing test that constructs a
+// designDeps without opting into one of the three statement-sourcing
+// modes now sets DeferStatements: true explicitly, preserving its
+// original TODO-placeholder scaffold (a disclosed migration, spec/
+// cli-creation's own build: this verb's default behavior changed by
+// construction, never silently).
 type designDeps struct {
-	Provider provider.StoryProvider
-	Runner   upstream.Runner
-	GoTest   goTestRunner
+	Provider        provider.StoryProvider
+	Runner          upstream.Runner
+	GoTest          goTestRunner
+	Problem         string
+	Outcome         string
+	DeferStatements bool
+	Stdin           io.Reader
+	IsTTY           bool
 }
 
 // cmdDesignStart is `verdi design start`'s real entry point: it parses
@@ -127,7 +181,16 @@ type designDeps struct {
 // use, so a configured jira ref resolves or degrades for the true reason per
 // 04 §Semantics) and runner, and delegates to runDesignStart.
 func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
-	kindArg, name, rest, err := extractFlags(args)
+	// --from-stub is a wholly distinct invocation shape (spec/cli-creation
+	// ac-3, ledger L-N7): <feature> <stub>, never --kind/--name/the
+	// statement flags below — dispatched to its own file
+	// (designfromstub.go) before extractFlags' --kind/--name grammar ever
+	// sees these tokens.
+	if len(args) > 0 && args[0] == "--from-stub" {
+		return cmdDesignStartFromStub(args[1:], stdout, stderr)
+	}
+
+	kindArg, name, problem, outcome, deferStatements, rest, err := extractFlags(args)
 	if err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
@@ -199,9 +262,33 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 	if manifest.Toolchain != nil {
 		runner = upstream.RealRunner{Module: manifest.Toolchain.Module, Commit: manifest.Toolchain.Commit, Dir: root}
 	}
-	deps := designDeps{Provider: reg, Runner: runner, GoTest: realGoTestRunner{}}
+	deps := designDeps{
+		Provider: reg, Runner: runner, GoTest: realGoTestRunner{},
+		Problem: problem, Outcome: outcome, DeferStatements: deferStatements,
+		Stdin: os.Stdin, IsTTY: isDesignAssumeTTY(),
+	}
 
 	return runDesignStart(ctx, root, kind, storyRef, name, manifest, cfg.Model, deps, stdout, stderr)
+}
+
+// isDesignAssumeTTY reports whether the real os.Stdin is attached to an
+// interactive terminal (golang.org/x/term.IsTerminal — a real ioctl
+// check), for design start's flagless TTY interview (spec/cli-creation
+// ac-2). VERDI_DESIGN_ASSUME_TTY=1 is a disclosed, test-only override —
+// mirroring cmd/verdi/init.go's own VERDI_INIT_ASSUME_TTY precedent
+// (itself mirroring serve.go's VERDI_REVIEW_FEED/VERDI_OPENMR_FEED
+// canned-injection convention) — that lets a built-binary test drive the
+// real interview over a scripted stdin pipe without a real terminal ever
+// being attached. A DISTINCT env var from init's own, deliberately: the
+// two verbs' test-injection surfaces stay independent even though
+// init_test.go and design_test.go share one compiled test binary. It
+// changes nothing about a real user's invocation: no production flag or
+// documented surface ever sets it.
+func isDesignAssumeTTY() bool {
+	if os.Getenv("VERDI_DESIGN_ASSUME_TTY") == "1" {
+		return true
+	}
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 // runDesignStart is the testable core: given an already-resolved root and
@@ -285,9 +372,51 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		return 2
 	}
 
+	// Statement sourcing (spec/cli-creation ac-1/ac-2, ledger L-N7): the
+	// scaffold's problem/outcome content comes from exactly one of three
+	// explicit sources — never a silent TODO placeholder by default, the
+	// behavior this verb carried before this story. --problem/--outcome
+	// given together source it directly (TODO-free); --defer-statements
+	// keeps the old placeholders, but only with an explicit disclosure
+	// line naming them deferred; otherwise, on an attached terminal, a
+	// TTY interview collects it, driven from the same designscaffold.Fields
+	// descriptors the board's creation form validates against (never a
+	// second, hand-rolled field list); a non-interactive invocation with
+	// none of the above refuses by name — "cannot interview, statements
+	// required" — rather than falling back to the retired silent default.
+	problemText, outcomeText := deps.Problem, deps.Outcome
+	switch {
+	case deps.DeferStatements && (deps.Problem != "" || deps.Outcome != ""):
+		fmt.Fprintln(stderr, "design start: --defer-statements cannot be combined with --problem/--outcome (mutually exclusive statement-sourcing modes)")
+		return 2
+	case deps.Problem != "" && deps.Outcome != "":
+		// Both given together: TODO-free, nothing more to resolve.
+	case deps.Problem != "" || deps.Outcome != "":
+		fmt.Fprintln(stderr, "design start: --problem and --outcome must be given together (a lone flag would leave one section templated and the other not); use --defer-statements to defer both instead")
+		return 2
+	case deps.DeferStatements:
+		problemText, outcomeText = designscaffold.DefaultProblem, designscaffold.DefaultOutcome
+		fmt.Fprintln(stdout, "design start: --defer-statements: problem and outcome deliberately deferred as TODO placeholders — replace both before accept")
+	default:
+		if !deps.IsTTY {
+			fmt.Fprintln(stderr, "design start: cannot interview (no attached terminal) and statements are required; pass --problem/--outcome, or --defer-statements to explicitly defer them")
+			return 2
+		}
+		stdin := deps.Stdin
+		if stdin == nil {
+			stdin = os.Stdin
+		}
+		answers, ierr := designinterview.RunInterview(tmpl, stdin, stdout)
+		if ierr != nil {
+			fmt.Fprintln(stderr, "design start:", ierr)
+			return 2
+		}
+		problemText, outcomeText = answers["Problem"], answers["Outcome"]
+	}
+
 	var content string
 	if kind == artifact.ClassFeature {
-		content, err = designscaffold.Feature(tmpl, specRef.String(), storyRef, title)
+		content, err = designscaffold.Feature(tmpl, specRef.String(), storyRef, title, problemText, outcomeText)
 	} else {
 		// design start's own placeholder edge: an implements edge to a
 		// not-yet-real feature/AC pair, since 05 §CLI names no --feature
@@ -296,7 +425,7 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		// agent replaces it with a real edge into the accepted feature this
 		// story implements.
 		links := []designscaffold.StoryLink{{Type: artifact.LinkImplements, Ref: "spec/todo-replace-feature-name#ac-1"}}
-		content, err = designscaffold.Story(tmpl, specRef.String(), storyRef, title, false, links)
+		content, err = designscaffold.Story(tmpl, specRef.String(), storyRef, title, false, links, problemText, outcomeText)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "design start: rendering template %s for class %s: %v\n", class.Template, kind, err)
