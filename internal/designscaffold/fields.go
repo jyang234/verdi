@@ -95,7 +95,7 @@ func Fields(tmpl []byte) ([]Field, error) {
 		out = append(out, Field{Name: name, Kind: kind})
 		return nil
 	}
-	if err := walkTopLevelFields(t.Tree.Root, visit); err != nil {
+	if err := walkTopLevelFields(t.Root, visit); err != nil {
 		return nil, err
 	}
 	return out, nil
