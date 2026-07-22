@@ -81,7 +81,7 @@ func TestRunAudit_ClosureHygieneSection_AppearsAndCoexists(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	got := runAudit(ctx, root, 3, 3, "main", nil, &stdout, &stderr)
+	got := runAudit(ctx, root, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)
 	out := stdout.String()
 
 	if got != 1 {
@@ -146,7 +146,7 @@ func TestRunAudit_ClosureHygieneSection_Clean(t *testing.T) {
 	}})
 
 	var stdout, stderr bytes.Buffer
-	got := runAudit(context.Background(), repo.Dir, 3, 3, "main", nil, &stdout, &stderr)
+	got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)
 	out := stdout.String()
 	if got != 0 {
 		t.Fatalf("runAudit = %d, want 0 (clean); stdout=%s stderr=%s", got, out, stderr.String())
@@ -179,7 +179,7 @@ func TestRunAudit_ClosureHygieneSection_UnresolvableDefaultBranch(t *testing.T) 
 	}})
 
 	var stdout, stderr bytes.Buffer
-	got := runAudit(context.Background(), repo.Dir, 3, 3, "", nil, &stdout, &stderr)
+	got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "", auditTestNow, nil, &stdout, &stderr)
 	out := stdout.String()
 	if got != 0 {
 		t.Fatalf("runAudit (unresolvable default branch) = %d, want 0; stdout=%s stderr=%s", got, out, stderr.String())
@@ -231,7 +231,7 @@ func TestRunAudit_ClosureHygieneSection_StaleWorktreeDisclosedNotAborted(t *test
 	}
 
 	var stdout, stderr bytes.Buffer
-	got := runAudit(ctx, root, 3, 3, "main", nil, &stdout, &stderr)
+	got := runAudit(ctx, root, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)
 	out := stdout.String()
 
 	if got == 2 {
@@ -291,7 +291,7 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 	}})
 
 	var stdout, stderr bytes.Buffer
-	got := runAudit(context.Background(), repo.Dir, 3, 3, "main", nil, &stdout, &stderr)
+	got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)
 	out := stdout.String()
 	if got != 0 {
 		t.Fatalf("runAudit = %d, want 0 (dc-3: pattern (b) alone never flags); stdout=%s stderr=%s", got, out, stderr.String())
@@ -348,7 +348,7 @@ func TestRunAudit_ClosureHygieneSection_RitualIncompleteFlagsAlone(t *testing.T)
 	}
 
 	var stdout, stderr bytes.Buffer
-	got := runAudit(ctx, root, 3, 3, "main", nil, &stdout, &stderr)
+	got := runAudit(ctx, root, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)
 	out := stdout.String()
 
 	if got != 1 {

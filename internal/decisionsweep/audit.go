@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
@@ -21,22 +22,31 @@ type SpecStaleEntry struct {
 }
 
 // AuditResult is Audit's full output: the corpus's per-ADR exemption
-// counts, the paths newly auto-filed this run, and every story's
-// spec-stale result.
+// counts, the paths newly auto-filed this run, every story's spec-stale
+// result, and every story's waiver-audit result (spec/verb-surfaces ac-3)
+// — its own clearly-separated section, never merged into SpecStale's own
+// accepted-deviation count.
 type AuditResult struct {
-	Exemptions []*ExemptionCount
-	Filed      []string
-	SpecStale  []SpecStaleEntry
+	Exemptions  []*ExemptionCount
+	Filed       []string
+	SpecStale   []SpecStaleEntry
+	WaiverStale []WaiverStaleEntry
 }
 
 // Audit runs the full `verdi audit` pipeline: walk the corpus once
 // (lint.BuildSnapshot), scan exemption backlinks and auto-file any
-// conflict that crosses exemptsThreshold, and compute spec-stale for every
+// conflict that crosses exemptsThreshold, compute spec-stale for every
 // story spec found (V1-P3's evidence.SpecStale, surfaced against
-// deviationsThreshold — 05 §CLI's `audit` row). Both thresholds <= 0 use
-// their documented defaults (DefaultExemptsConflictThreshold,
-// evidence.DefaultDeviationsStaleThreshold).
-func Audit(root string, exemptsThreshold, deviationsThreshold int) (*AuditResult, error) {
+// deviationsThreshold — 05 §CLI's `audit` row), and compute the waiver
+// audit for every story spec found (spec/verb-surfaces ac-3, surfaced
+// against waiversThreshold — the X-18 counterweight's own site, extended).
+// All three thresholds <= 0 use their documented defaults
+// (DefaultExemptsConflictThreshold, evidence.DefaultDeviationsStaleThreshold,
+// DefaultWaiversStaleThreshold). now is read once by the caller (mirroring
+// attest.go's own stamp-at-the-boundary convention) and threaded through to
+// ScanWaiverStale, never re-read here — the whole pipeline stays
+// deterministic given (root, thresholds, now).
+func Audit(root string, exemptsThreshold, deviationsThreshold, waiversThreshold int, now time.Time) (*AuditResult, error) {
 	snap, err := lint.BuildSnapshot(root, lint.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("decisionsweep: %w", err)
@@ -57,12 +67,17 @@ func Audit(root string, exemptsThreshold, deviationsThreshold int) (*AuditResult
 		return nil, err
 	}
 
+	waiverStale, err := ScanWaiverStale(root, snap, waiversThreshold, now)
+	if err != nil {
+		return nil, err
+	}
+
 	exemptions := make([]*ExemptionCount, 0, len(counts))
 	for _, ref := range SortedADRRefs(counts) {
 		exemptions = append(exemptions, counts[ref])
 	}
 
-	return &AuditResult{Exemptions: exemptions, Filed: filed, SpecStale: specStale}, nil
+	return &AuditResult{Exemptions: exemptions, Filed: filed, SpecStale: specStale, WaiverStale: waiverStale}, nil
 }
 
 // ScanSpecStale computes evidence.SpecStale for every story-class spec
