@@ -151,6 +151,39 @@ else must treat this as immutable.
 	}
 }
 
+// TestRunObligationAuthor_OperationalGitError_RefusesNeverGuesses is
+// judged-frozen-check-fail-open's proof: a NON-EMPTY diffBase whose Show/
+// ls-tree probe fails operationally (a well-formed sha that resolves to no
+// commit) must never be read as "not frozen — proceed to overwrite". The
+// verb cannot prove the target is unfrozen, so it refuses (exit 2) naming
+// the git failure rather than silently regenerating what a merge to main may
+// have frozen. The already-approved diffBase=="" posture (frozen-ness
+// unprovable at the DEFAULT-BRANCH step) is unchanged — this is about a Show
+// error AFTER a base resolved.
+func TestRunObligationAuthor_OperationalGitError_RefusesNeverGuesses(t *testing.T) {
+	repo := buildObligationAuthorRepo(t, nil)
+	ctx := context.Background()
+
+	// A syntactically valid sha that names no object in this repo: the frozen
+	// probe against it is an operational git failure, not a clean "absent at
+	// a resolvable base" answer.
+	const unresolvableBase = "0000000000000000000000000000000000000000"
+
+	var stdout, stderr bytes.Buffer
+	got := runObligationAuthor(ctx, repo.Dir, "spec/widget-story", "ac-1", "static", unresolvableBase, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runObligationAuthor(operational git error on the frozen probe) = %d, want 2 (never guess unfrozen on a git failure); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !contains(stderr.String(), "ac-1--static.md") {
+		t.Errorf("stderr = %q, want it to name the path whose frozen-ness could not be determined", stderr.String())
+	}
+	// It must NOT have proceeded to regenerate: a refused frozen probe writes
+	// nothing.
+	if _, err := os.Stat(obligationPathFor(repo.Dir, "ac-1", "static")); !os.IsNotExist(err) {
+		t.Errorf("the verb wrote an obligation despite an undecidable frozen probe (err=%v)", err)
+	}
+}
+
 // TestRunObligationAuthor_NotYetFrozen_SameFileAbsentAtDiffBase proves the
 // frozen predicate is commit-scoped, not path-existence-scoped: a
 // diffBase commit that never had the file (even though a LATER, still

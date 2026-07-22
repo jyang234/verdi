@@ -129,15 +129,28 @@ func runObligationAuthor(ctx context.Context, root, storyRefArg, acID, kindArg, 
 	// The frozen check (spec/obligation-seam ac-5): reachable from
 	// merge-base(HEAD, default branch) — the same predicate VL-010 scopes
 	// immutability with — never merely "exists on the current branch".
-	// gitx.Show against an empty store-relative path (relPath, built via
-	// store.ObligationPath("", ...) exactly as AttestationPath's own
-	// empty-root display-form convention documents) either finds the
-	// obligation committed at diffBase (frozen: refuse) or does not
-	// (proceed to create/regenerate).
+	// gitx.PathExistsAt against an empty store-relative path (relPath, built
+	// via store.ObligationPath("", ...) exactly as AttestationPath's own
+	// empty-root display-form convention documents) draws the three-way a
+	// bare gitx.Show cannot (judged-frozen-check-fail-open): the obligation
+	// is committed at diffBase (frozen: refuse), genuinely absent at a
+	// resolvable diffBase (not frozen: proceed), or the probe itself failed
+	// operationally. On that third case we must NEVER guess "not frozen" and
+	// silently regenerate content a merge to main may have frozen — VL-010
+	// itself surfaces its own git errors rather than passing on them, so this
+	// verb refuses (exit 2) naming the failure. (The already-approved
+	// diffBase=="" posture — frozen-ness unprovable because no default branch
+	// resolved at all — is upstream of here and unchanged: this discriminates
+	// only Show errors after a base resolved.)
 	relPath := store.ObligationPath("", specName, acID, string(kind))
 	absPath := store.ObligationPath(root, specName, acID, string(kind))
 	if diffBase != "" {
-		if _, showErr := gitx.Show(ctx, root, diffBase, relPath); showErr == nil {
+		frozen, existsErr := gitx.PathExistsAt(ctx, root, diffBase, relPath)
+		if existsErr != nil {
+			fmt.Fprintf(stderr, "obligation author: cannot determine whether %s is already frozen (the git probe against the merge-base failed): %v\n", relPath, existsErr)
+			return 2
+		}
+		if frozen {
 			// Deliberately avoids the "superseded" status word: this
 			// sentence describes the general amendment-ladder mechanism,
 			// never prints a spec's own status: value, so no display-chain
