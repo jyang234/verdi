@@ -72,26 +72,34 @@ func backstopObligationBody(specRef, acID string, kind artifact.EvidenceKind, ac
 
 // scaffoldMissingObligations is the backstop's own core (O-1/O-2/O-3/O-3b/
 // O-4/O-6): for a story-class spec, it scaffolds a stub obligation for
-// every declared (ac, kind) pair with no decodable obligation yet at the
-// convention path (internal/evidence.Obligations — the identical
-// decode-based predicate VL-020 itself uses, O-3b), stamping every stub
+// every declared (ac, kind) pair with no decodable obligation of that kind yet
+// at the EXACT convention path (internal/evidence.ObligationKindAt — the same
+// convention-path predicate VL-020 itself applies, O-3b), stamping every stub
 // frozen with the given frozen value (the caller passes preFlipHead's own
 // stamp, O-4) and owner (the caller passes operatorOwner(), O-6). It never
-// overwrites: a pair whose obligation already decodes is skipped outright
-// (O-3). created lists exactly the paths newly written this call, in
-// declaration order, for the caller to stage (O-2) and, on any later
-// failure, unlink (O-1b) — created is returned even when err != nil, so a
-// failure partway through scaffolding still reports what was written so
-// far.
+// overwrites: a pair whose own convention path already holds a decodable
+// obligation of that kind is skipped outright (O-3). created lists exactly the
+// paths newly written this call, in declaration order, for the caller to stage
+// (O-2) and, on any later failure, unlink (O-1b) — created is returned even
+// when err != nil, so a failure partway through scaffolding still reports what
+// was written so far.
 //
-// A pre-existing file at the convention path that FAILS to decode (a
-// present-but-malformed obligation — a real, if rare, tree state
-// evidence.Obligations itself refuses to silently paper over) is treated
-// as an operational error, not as "missing" nor as "covered": accept
-// refuses rather than guessing whether to clobber it or pretend it counts
-// (spec/obligation-seam ac-2's disclosed reading — a WRITING path's
-// posture is deliberately more conservative here than VL-020's own
-// read-only classify-and-report one).
+// Coverage is keyed on the EXACT path .verdi/obligations/<spec>/<acID>--<kind>.md
+// (judged-coverage-predicate-forkind-keying), never decoded for_kind scanned
+// over every <acID>--*.md: a decodable obligation misfiled under ANOTHER kind's
+// filename neither counts as covering the kind its filename names (the reverse
+// direction — else the real convention path is left unscaffolded and VL-020
+// reds the frozen story post-accept) nor is silently overwritten (the clobber
+// direction). path/id agreement stays VL-011's business at lint time.
+//
+// Two write-side arms are deliberately stricter than VL-020's existence-only
+// check and can only ever refuse where VL-020 would pass: a present-but-
+// undecodable file AT a declared pair's convention path (malformed) and a
+// decodable obligation occupying that path whose for_kind disagrees with the
+// filename (the clobber case) both refuse accept rather than paper over or
+// overwrite — a real, if rare, tree state accept will not guess about
+// (spec/obligation-seam ac-2's disclosed reading — a WRITING path's posture is
+// deliberately more conservative than VL-020's own read-only classify one).
 //
 // spec is the caller's already-decoded, PRE-flip spec (still carrying
 // status: draft on disk) — its own AcceptanceCriteria/Class fields are all
@@ -103,34 +111,35 @@ func scaffoldMissingObligations(root, specName string, spec *artifact.SpecFrontm
 	specRef := "spec/" + specName
 
 	for _, ac := range spec.AcceptanceCriteria {
-		existing, oerr := evidence.Obligations(root, specName, ac.ID)
-		if oerr != nil {
-			return created, fmt.Errorf("checking existing obligations for %s: %w", ac.ID, oerr)
-		}
 		for _, kind := range ac.Evidence {
-			if _, covered := existing[kind]; covered {
-				continue // O-3/O-3b: a decodable obligation already covers this pair
-			}
-
 			path := store.ObligationPath(root, specName, ac.ID, string(kind))
 
-			// judged-coverage-predicate-forkind-keying: the coverage predicate
-			// above keys on each obligation's DECODED for_kind, but a decodable
-			// obligation can sit at a DIFFERENT kind's convention filename (its
-			// for_kind disagreeing with the name — internally consistent enough
-			// to decode, path/id agreement being VL-011's job). Such a file
-			// never errored above and never counted THIS pair as covered, yet
-			// it already occupies this pair's convention path. WriteObligationFile
-			// is unconditional by design (O-5: the seam stays policy-free; the
-			// board's create-only check and this backstop each own their own
-			// overwrite policy at the call site), so the backstop must itself
-			// refuse to write over any occupied path: if anything at all already
-			// sits here, this is a conflicted state (a present file whose own
-			// for_kind disagrees with its filename) for the operator or VL-011 to
-			// reconcile — refuse operationally rather than clobber a hand-authored
-			// file. A correctly-named, decodable file was already skipped as
-			// covered above and never reaches here; a present-but-undecodable
-			// file already surfaced as an error out of evidence.Obligations.
+			// Coverage is keyed on the EXACT convention path (VL-020's own
+			// predicate) and the obligation there decoding AND declaring the
+			// kind its filename names — never decoded for_kind scanned over
+			// every <acID>--*.md file (judged-coverage-predicate-forkind-keying).
+			// So a decodable obligation misfiled under ANOTHER kind's filename
+			// neither counts as covering the kind its filename names (the reverse
+			// direction — else the real convention path stays unscaffolded and
+			// VL-020 reds the frozen story post-accept) nor is silently
+			// overwritten (the clobber direction). path/id agreement is VL-011's
+			// business at lint time, never accept's.
+			forKind, present, kerr := evidence.ObligationKindAt(path)
+			if kerr != nil {
+				// present-but-undecodable AT the convention path (malformed):
+				// refuse rather than clobber it or count it as coverage — a
+				// deliberately stricter-than-VL-020 arm that can only refuse
+				// where VL-020's existence-only check would pass.
+				return created, fmt.Errorf("existing obligation at %s is present but does not decode; refusing to overwrite or ignore it — reconcile it by hand or via VL-011/VL-001: %w", path, kerr)
+			}
+			if present && forKind == kind {
+				continue // O-3/O-3b: a decodable obligation of this kind already sits at its own convention path
+			}
+
+			// Not covered. The occupied-path stat guard (clobber direction),
+			// unchanged: if anything already occupies this exact convention path
+			// — a decodable obligation whose for_kind disagrees with the filename
+			// — refuse rather than clobber the hand-authored file.
 			if _, statErr := os.Stat(path); statErr == nil {
 				return created, fmt.Errorf("obligation already present at %s but not recognized as covering %s %s evidence — the file's own for_kind disagrees with its filename, a conflicted state to reconcile by hand or via VL-011; refusing to overwrite it", path, ac.ID, kind)
 			} else if !os.IsNotExist(statErr) {

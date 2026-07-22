@@ -131,6 +131,42 @@ A decodable, hand-authored obligation the backstop must never clobber, even
 though its filename names a different kind than its own for_kind.
 `
 
+// reverseGapStoryMD is widget-story declaring ONLY behavioral evidence on its
+// single ac-1 — the judged-coverage-predicate-forkind-keying reverse scenario:
+// with a decodable obligation misfiled at ac-1--static.md (an UNDECLARED kind's
+// path) whose for_kind is behavioral, the backstop must still scaffold the
+// DECLARED pair's own convention path ac-1--behavioral.md, never miscount the
+// misfiled file as covering it. Lint-clean (mirrors obligationSeamStoryCleanMD).
+const reverseGapStoryMD = `---
+id: spec/widget-story
+kind: spec
+title: "Widget story"
+owners: [platform-team]
+class: story
+status: draft
+story: jira:LOAN-9001
+problem: { text: "widgets are stale", anchor: problem }
+outcome: { text: "widgets are current", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "behavioral evidence holds", evidence: [behavioral], anchor: ac-1 }
+links:
+  - { type: implements, ref: "spec/some-feature#ac-1" }
+---
+# Widget story
+
+## Problem
+
+Widgets are stale.
+
+## Outcome
+
+Widgets are current.
+
+## AC-1
+
+Behavioral evidence holds.
+`
+
 // buildObligationSeamStoryRepo builds a one-layer fixturegit repo carrying
 // obligationSeamStoryCleanMD, its implements-edge target (someFeatureMD,
 // supersedepredecessor_test.go), and any extra files the caller supplies
@@ -400,6 +436,72 @@ func TestRunAccept_MisnamedDecodableObligation_RefusesNeverClobbers(t *testing.T
 	}
 	if _, err := os.Stat(obligationPathFor(repo.Dir, "ac-2", "behavioral")); !os.IsNotExist(err) {
 		t.Errorf("ac-2 must not have been scaffolded after the ac-1 refusal (err=%v)", err)
+	}
+}
+
+// TestRunAccept_MisfiledAtUndeclaredKind_ScaffoldsDeclaredPathComplete is the
+// judged-coverage-predicate-forkind-keying REVERSE-direction proof (round 3):
+// ac-1 declares only [behavioral], and the sole obligation on disk is a
+// decodable file MISFILED at ac-1--static.md (an undeclared kind's path) whose
+// for_kind is behavioral. The old for_kind-over-all-files coverage keyed that
+// file under behavioral and skipped (ac-1, behavioral) — freezing the story
+// with ac-1--behavioral.md absent, exactly the frozen-with-missing-obligation
+// gap this story exists to close (VL-020 reds it post-accept). Path-keyed
+// coverage must instead scaffold ac-1--behavioral.md at its own convention
+// path, stage it into the accept commit, complete COMPLETE, and leave the
+// misfiled file byte-untouched (path/id agreement is VL-011's job at lint).
+func TestRunAccept_MisfiledAtUndeclaredKind_ScaffoldsDeclaredPathComplete(t *testing.T) {
+	repo := buildObligationSeamStoryRepo(t, map[string]string{
+		".verdi/specs/active/widget-story/spec.md":        reverseGapStoryMD,
+		".verdi/obligations/widget-story/ac-1--static.md": misnamedDecodableAc1AsBehavioralMD,
+	})
+	ctx := context.Background()
+
+	beforeHead, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if got := runAccept(ctx, repo.Dir, "spec/widget-story", &stdout, &stderr); got != 0 {
+		t.Fatalf("runAccept = %d, want 0 (accept must complete COMPLETE); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+
+	// The declared pair (ac-1, behavioral) MUST be scaffolded at ITS OWN
+	// convention path — this is the assertion that is red today (the misfiled
+	// file was miscounted as coverage, so the real path stayed empty).
+	behavioralPath := obligationPathFor(repo.Dir, "ac-1", "behavioral")
+	if _, err := os.Stat(behavioralPath); err != nil {
+		t.Fatalf("ac-1--behavioral.md (the declared pair's convention path) was not scaffolded — a misfiled file at an undeclared kind's path was miscounted as coverage: %v", err)
+	}
+
+	// ...and it landed in the accept commit (staged, O-2).
+	afterHead, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := gitx.DiffNameStatus(ctx, repo.Dir, beforeHead, afterHead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inCommit := false
+	for _, e := range entries {
+		if e.Path == ".verdi/obligations/widget-story/ac-1--behavioral.md" {
+			inCommit = true
+		}
+	}
+	if !inCommit {
+		t.Fatalf("the scaffolded ac-1--behavioral.md is not in the accept commit: %+v", entries)
+	}
+
+	// The misfiled file at the undeclared kind's path is byte-untouched.
+	misfiled := obligationPathFor(repo.Dir, "ac-1", "static")
+	got, err := os.ReadFile(misfiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != misnamedDecodableAc1AsBehavioralMD {
+		t.Fatalf("the misfiled obligation was modified:\n--- got ---\n%s\n--- want (byte-identical) ---\n%s", got, misnamedDecodableAc1AsBehavioralMD)
 	}
 }
 
