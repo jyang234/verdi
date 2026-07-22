@@ -186,6 +186,16 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// creation-only verb's happy path CAN be exercised, by construction).
 	"cli:init": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:waive (extensibility Phase 2, spec/verb-surfaces ac-1/ac-2,
+	// spec/creation-surfaces#ac-5, ledger L-N9, guide 8.4): added alongside
+	// the new verb itself — TestCLIShowcaseWaive (cli_showcase_test.go)
+	// drives `verdi waive` and `verdi waive --reaffirm` against the real
+	// provisioned examples/showcase store's spec/borrower-update-api,
+	// proving the record lands at the real waivers/jira-loan-1482/ac-1.md
+	// convention path and decodes, verdi matrix reads it waived, and
+	// --reaffirm round-trips preserving the original log entry.
+	"cli:waive": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec

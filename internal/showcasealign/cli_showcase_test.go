@@ -100,6 +100,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
@@ -698,5 +699,76 @@ func TestCLIShowcaseInit(t *testing.T) {
 	}
 	if string(data) != "schema: verdi.layout/v1\n" {
 		t.Fatalf("freshly-init'd verdi.yaml = %q, want exactly %q", data, "schema: verdi.layout/v1\n")
+	}
+}
+
+// TestCLIShowcaseWaive (cli:waive, extensibility Phase 2, spec/verb-surfaces
+// ac-1/ac-2, spec/creation-surfaces#ac-5, ledger L-N9, guide 8.4) drives
+// `verdi waive` and `verdi waive --reaffirm` against the REAL provisioned
+// examples/showcase store's own spec/borrower-update-api (class: story,
+// status: accepted-pending-build, its own committed ac-1) — the exact spec
+// TestCLIShowcaseObligationAuthor's own doc comment names as one of two
+// specs sharing story ref jira:LOAN-1482 with spec/stale-decline, which is
+// exactly why this test addresses it by its unambiguous spec/name ref
+// rather than the collision-prone tracker ref, mirroring that test's own
+// choice. Proves: the record lands at the real, disclosed
+// waivers/jira-loan-1482/ac-1.md convention path (jira-loan-1482 being
+// store.RefSlug("jira:LOAN-1482"), borrower-update-api's own committed
+// story: field) and decodes; verdi matrix against the SAME real store
+// reads ac-1 as waived; and --reaffirm round-trips against the real
+// content, preserving the original log entry.
+func TestCLIShowcaseWaive(t *testing.T) {
+	root := provisionShowcaseStore(t)
+
+	stdout, stderr, code := runBinary(t, root, "waive", "spec/borrower-update-api", "ac-1",
+		"--rationale", "showcase fixture: no live evidence pipeline behind this example store",
+		"--expires", "2099-01-01")
+	if code != 0 {
+		t.Fatalf("verdi waive against the real showcase store: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	const relWaiver = ".verdi/waivers/jira-loan-1482/ac-1.md"
+	waiverPath := filepath.Join(root, filepath.FromSlash(relWaiver))
+	content, err := os.ReadFile(waiverPath)
+	if err != nil {
+		t.Fatalf("reading the real showcase store's newly-created waiver at %s: %v", relWaiver, err)
+	}
+	fm, _, err := artifact.SplitFrontmatter(content)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v\n%s", err, content)
+	}
+	w, err := artifact.DecodeWaiver(fm)
+	if err != nil {
+		t.Fatalf("the real showcase store's newly-created waiver does not decode: %v\n%s", err, content)
+	}
+	if w.ID != "waiver/jira-loan-1482--ac-1" {
+		t.Fatalf("waiver ID = %q, want waiver/jira-loan-1482--ac-1", w.ID)
+	}
+	if len(w.Owners) == 0 {
+		t.Fatalf("waiver Owners = %v, want the real story spec's own owners copied verbatim", w.Owners)
+	}
+
+	matrixOut, matrixErr, matrixCode := runBinary(t, root, "matrix", "spec/borrower-update-api")
+	if matrixCode != 0 {
+		t.Fatalf("verdi matrix against the real showcase store: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", matrixCode, matrixOut, matrixErr)
+	}
+	if !strings.Contains(matrixOut, "waived") {
+		t.Fatalf("verdi matrix stdout = %q, want the real ac-1 row to read waived", matrixOut)
+	}
+
+	reaffirmOut, reaffirmErr, reaffirmCode := runBinary(t, root, "waive", "spec/borrower-update-api", "ac-1", "--reaffirm",
+		"--rationale", "showcase fixture: still no live evidence pipeline behind this example store")
+	if reaffirmCode != 0 {
+		t.Fatalf("verdi waive --reaffirm against the real showcase store: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", reaffirmCode, reaffirmOut, reaffirmErr)
+	}
+	reaffirmedContent, err := os.ReadFile(waiverPath)
+	if err != nil {
+		t.Fatalf("reading the real showcase store's reaffirmed waiver: %v", err)
+	}
+	if !strings.Contains(string(reaffirmedContent), "no live evidence pipeline behind this example store") {
+		t.Fatalf("reaffirmed waiver lost the original rationale's log entry:\n%s", reaffirmedContent)
+	}
+	if !strings.Contains(string(reaffirmedContent), "still no live evidence pipeline") {
+		t.Fatalf("reaffirmed waiver missing the new rationale's log entry:\n%s", reaffirmedContent)
 	}
 }
