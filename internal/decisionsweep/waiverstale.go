@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -146,7 +147,7 @@ func scanWaiverRows(root, storySlug string, now time.Time) ([]WaiverAuditRow, er
 			return nil, fmt.Errorf("decisionsweep: %s: %w", path, derr)
 		}
 
-		lapsed := waiverLapsed(w.Expiry, now)
+		lapsed := evidence.WaiverLapsed(w.Expiry, now)
 		rows = append(rows, WaiverAuditRow{
 			ACID:         acID,
 			Path:         store.WaiverPath("", storySlug, acID),
@@ -158,26 +159,4 @@ func scanWaiverRows(root, storySlug string, now time.Time) ([]WaiverAuditRow, er
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ACID < rows[j].ACID })
 	return rows, nil
-}
-
-// waiverLapsed reports whether expiry (a YYYY-MM-DD date, or "" for none)
-// has passed as of now, at day granularity: a waiver remains active
-// THROUGH the end of its expiry day and lapses starting the day after
-// (spec/verb-surfaces ac-3's disclosed reading — the guide's own prose
-// names no finer grain than a date). now is truncated to a UTC calendar
-// day before comparing, so the caller's local time-of-day never changes
-// the verdict. A malformed expiry is not this function's concern to fail
-// on — WaiverFrontmatter.Validate() (VL-001, at lint/decode time) is where
-// that is caught; here it degrades to "never lapsed" rather than erroring
-// a scan over unrelated stories.
-func waiverLapsed(expiry string, now time.Time) bool {
-	if expiry == "" {
-		return false
-	}
-	d, err := time.Parse("2006-01-02", expiry)
-	if err != nil {
-		return false
-	}
-	nowDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	return nowDay.After(d)
 }

@@ -152,29 +152,3 @@ func TestAudit_WaiverStale_ThresholdAbsentDefaults(t *testing.T) {
 		t.Fatalf("Threshold = %d, want default %d", result.WaiverStale[0].Threshold, DefaultWaiversStaleThreshold)
 	}
 }
-
-// TestWaiverLapsed is waiverLapsed's own happy/negative table: day-
-// granularity boundary (still active THROUGH the expiry day itself, lapsed
-// starting the day after), no expiry, and a malformed date degrading to
-// "never lapsed" rather than erroring.
-func TestWaiverLapsed(t *testing.T) {
-	tests := []struct {
-		name   string
-		expiry string
-		now    time.Time
-		want   bool
-	}{
-		{"no expiry never lapses", "", time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC), false},
-		{"on the expiry day itself is not yet lapsed", "2026-08-01", time.Date(2026, 8, 1, 23, 59, 0, 0, time.UTC), false},
-		{"the day after has lapsed", "2026-08-01", time.Date(2026, 8, 2, 0, 0, 1, 0, time.UTC), true},
-		{"well before is not lapsed", "2026-08-01", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), false},
-		{"malformed expiry degrades to not-lapsed", "not-a-date", time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC), false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := waiverLapsed(tt.expiry, tt.now); got != tt.want {
-				t.Errorf("waiverLapsed(%q, %v) = %v, want %v", tt.expiry, tt.now, got, tt.want)
-			}
-		})
-	}
-}

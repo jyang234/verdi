@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/store"
@@ -51,4 +52,32 @@ func WaiverActive(storeRoot, storySlug, acID string) (bool, error) {
 		return false, fmt.Errorf("evidence: waiver %s: %w", path, err)
 	}
 	return w.Status == waiverActiveStatus, nil
+}
+
+// WaiverLapsed reports whether expiry (a YYYY-MM-DD date, or "" for none)
+// has passed as of now, at day granularity: a waiver remains active
+// THROUGH the end of its expiry day and lapses starting the day after
+// (spec/verb-surfaces ac-2/ac-3's disclosed reading — the guide's own
+// prose names no finer grain than a date). now is truncated to a UTC
+// calendar day before comparing, so the caller's local time-of-day never
+// changes the verdict. A malformed expiry is not this function's concern
+// to fail on — WaiverFrontmatter.Validate() (VL-001, at lint/decode time)
+// is where that is caught; here it degrades to "never lapsed" rather than
+// erroring a caller whose real job is unrelated to that one file (`verdi
+// audit`'s corpus-wide scan, `verdi waive --reaffirm`'s own disclosure).
+//
+// Deliberately never consulted by WaiverActive/the fold above (see its own
+// doc comment): this is the ephemeral, per-invocation surfacing path
+// (spec/verb-surfaces ac-3), not a change to the deterministic fold
+// computation.
+func WaiverLapsed(expiry string, now time.Time) bool {
+	if expiry == "" {
+		return false
+	}
+	d, err := time.Parse("2006-01-02", expiry)
+	if err != nil {
+		return false
+	}
+	nowDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	return nowDay.After(d)
 }
