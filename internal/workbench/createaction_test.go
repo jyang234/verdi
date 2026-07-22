@@ -404,3 +404,107 @@ func writeStoreTemplate(t *testing.T, root, filename, content string) {
 		t.Fatal(err)
 	}
 }
+
+// -- round-3 fix coverage ---------------------------------------------------
+
+// TestBoardSpec_Create_RequiresStatements pins the adjudicated rule for
+// judged-create-statement-required-enforcement: the "one field contract,
+// both halves" property covers required-ness, not just key names. A
+// direct API caller (no form in the way) omitting or emptying a
+// statement field is refused BY NAME — the server never silently mints
+// the TODO placeholder behind the ritual — and nothing is cut.
+func TestBoardSpec_Create_RequiresStatements(t *testing.T) {
+	cases := []struct {
+		name, body, wantNamed string
+	}{
+		{"empty Problem", `{"name":"no-problem","values":{"Problem":"","Outcome":"O"},"acs":["ac-1"]}`, "Problem"},
+		{"omitted Problem", `{"name":"no-problem","values":{"Outcome":"O"},"acs":["ac-1"]}`, "Problem"},
+		{"omitted Outcome", `{"name":"no-problem","values":{"Problem":"P"},"acs":["ac-1"]}`, "Outcome"},
+		{"whitespace Problem", `{"name":"no-problem","values":{"Problem":"   ","Outcome":"O"},"acs":["ac-1"]}`, "Problem"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newScopingAcceptedFixture(t)
+			h := NewHandler(repo.Dir)
+			rec := postBoardAPI(t, h, scopingAcceptedName, "create", tc.body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("create(%s) = %d, want 400\n%s", tc.name, rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantNamed) {
+				t.Errorf("refusal %q does not name %q", rec.Body.String(), tc.wantNamed)
+			}
+			if _, err := gitx.RevParse(context.Background(), repo.Dir, "refs/heads/design/no-problem"); err == nil {
+				t.Fatal("refused create still cut design/no-problem")
+			}
+		})
+	}
+}
+
+// TestBoardSpec_Create_OwnersNormalization pins the adjudicated rule for
+// judged-create-owners-value-shape: natural input maps deterministically
+// to the template's YAML list shape — "alice, bob" and "alice" land as
+// real owners lists, an already-bracketed literal passes through, and a
+// value that normalizes to zero names is refused NAMING Owners and the
+// required shape, never surfaced as a strict-decode internal error.
+func TestBoardSpec_Create_OwnersNormalization(t *testing.T) {
+	landed := []struct {
+		name, owners string
+		want         []string
+	}{
+		{"natural pair", "alice, bob", []string{"alice", "bob"}},
+		{"single name", "alice", []string{"alice"}},
+		{"bracketed literal", "[carol, dave]", []string{"carol", "dave"}},
+	}
+	for i, tc := range landed {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newScopingAcceptedFixture(t)
+			h := NewHandler(repo.Dir)
+			slug := "owners-case-" + string(rune('a'+i))
+			rec := postBoardAPI(t, h, scopingAcceptedName, "create",
+				`{"name":"`+slug+`","values":{"Problem":"P","Outcome":"O","Owners":"`+tc.owners+`"},"acs":["ac-1"]}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("create(Owners=%q) = %d\n%s", tc.owners, rec.Code, rec.Body.String())
+			}
+			blob, err := gitx.Show(context.Background(), repo.Dir, "design/"+slug, ".verdi/specs/active/"+slug+"/spec.md")
+			if err != nil {
+				t.Fatal(err)
+			}
+			fm, _, err := artifact.SplitFrontmatter(blob)
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec, err := artifact.DecodeSpec(fm)
+			if err != nil {
+				t.Fatalf("DecodeSpec: %v", err)
+			}
+			if len(spec.Owners) != len(tc.want) {
+				t.Fatalf("Owners = %v, want %v", spec.Owners, tc.want)
+			}
+			for j := range tc.want {
+				if spec.Owners[j] != tc.want[j] {
+					t.Fatalf("Owners = %v, want %v", spec.Owners, tc.want)
+				}
+			}
+		})
+	}
+
+	t.Run("empty after normalization refuses by name", func(t *testing.T) {
+		repo := newScopingAcceptedFixture(t)
+		h := NewHandler(repo.Dir)
+		rec := postBoardAPI(t, h, scopingAcceptedName, "create",
+			`{"name":"owners-empty","values":{"Problem":"P","Outcome":"O","Owners":" ,  , "},"acs":["ac-1"]}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("create(Owners empty) = %d, want 400\n%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "Owners") {
+			t.Errorf("refusal %q does not name Owners", body)
+		}
+		if strings.Contains(body, "self-validation") {
+			t.Errorf("refusal %q surfaces as a strict-decode internal error, want a named field refusal", body)
+		}
+		if _, err := gitx.RevParse(context.Background(), repo.Dir, "refs/heads/design/owners-empty"); err == nil {
+			t.Fatal("refused create still cut design/owners-empty")
+		}
+	})
+}

@@ -816,16 +816,43 @@ func (s *boardSpecServer) createFormFields() ([]byte, []designscaffold.Field, er
 	return tmpl, fields, nil
 }
 
+// normalizeOwners maps a submitted Owners value to the template's YAML
+// flow-sequence position (owners: {{safe .Owners}}): names split on
+// commas and trimmed, rendered as the [a, b] list literal; an
+// already-bracketed value normalizes through the identical path (so
+// "[]" and "[ , ]" refuse exactly like " , "). Zero names after
+// normalization refuses naming the field and the required shape — the
+// artifact rule is at least one owner.
+func normalizeOwners(v string) (string, error) {
+	inner := strings.TrimSpace(v)
+	if strings.HasPrefix(inner, "[") && strings.HasSuffix(inner, "]") {
+		inner = inner[1 : len(inner)-1]
+	}
+	var names []string
+	for _, p := range strings.Split(inner, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			names = append(names, p)
+		}
+	}
+	if len(names) == 0 {
+		return "", fmt.Errorf("the Owners field must list at least one owner — e.g. alice, bob (rendered as the list [alice, bob])")
+	}
+	return "[" + strings.Join(names, ", ") + "]", nil
+}
+
 // actionCreate scaffolds a free story spec from the creation form's
 // submitted values (spec/creation-form ac-2) — stub-instantiate's
 // sibling for a story no declared stub planned: same wall guards, same
 // self-validate + CheckClass gate before any git object is written, same
 // pure-plumbing branch cut. Fields are keyed by the enumerated
 // descriptors of the story class's own resolved template (unknown keys
-// refuse by name); implements edges bind to the caller-chosen declared
-// acceptance criteria of this wall (at least one, each validated);
-// unfilled fields fall back to the same disclosed placeholder defaults
-// every other scaffold consumer uses.
+// refuse by name; the template's STATEMENT fields are required and
+// refuse by name when empty — the field contract's other half, so no
+// caller can mint a silent placeholder behind the ritual); implements
+// edges bind to the caller-chosen declared acceptance criteria of this
+// wall (at least one, each validated); unfilled INPUT fields fall back
+// to the same disclosed placeholder defaults every other scaffold
+// consumer uses, Owners normalizing through normalizeOwners first.
 func (s *boardSpecServer) actionCreate(ctx context.Context, name string, proj *BoardProjection, req boardAPIRequest) error {
 	if err := s.sealedFeatureWallGuard(proj, "create"); err != nil {
 		return err
@@ -890,19 +917,51 @@ func (s *boardSpecServer) actionCreate(ctx context.Context, name string, proj *B
 		links = append(links, designscaffold.StoryLink{Type: artifact.LinkImplements, Ref: "spec/" + name + "#" + ac})
 	}
 
+	// Required-ness is the same field contract's other half (judged-
+	// create-statement-required-enforcement, adjudicated): every
+	// STATEMENT field the resolved template enumerates must arrive
+	// non-empty — the server refuses by name, mirroring the form's own
+	// refusal copy, and never silently mints the TODO placeholder behind
+	// the ritual. Deliberate TODO deferral is the CLI's explicit
+	// --defer-statements contract (spec/creation-surfaces ac-3, plan Task
+	// 12) with its disclosure line — never a silent server default.
+	var missingStatements []string
+	for _, f := range fields {
+		if f.Kind == designscaffold.FieldStatement && strings.TrimSpace(req.Values[f.Name]) == "" {
+			missingStatements = append(missingStatements, f.Name)
+		}
+	}
+	if len(missingStatements) > 0 {
+		return fmt.Errorf("create requires a non-empty %s — a work item with no stated problem or outcome is not an artifact yet; the creation surface collects these before it exists (guide 6.1), never a silent placeholder", strings.Join(missingStatements, " and "))
+	}
+
 	valueOr := func(key, fallback string) string {
 		if v, ok := req.Values[key]; ok && v != "" {
 			return v
 		}
 		return fallback
 	}
+	// Owners maps deterministically to the template's YAML list shape
+	// (judged-create-owners-value-shape, adjudicated): natural input
+	// normalizes, a bracketed literal passes through, and a value that
+	// normalizes to zero names refuses HERE by name — never surfaced as
+	// the self-validation's strict-decode internal error. Absent input
+	// keeps the disclosed placeholder default (ac-3's unfilled-field
+	// posture).
+	owners := designscaffold.DefaultOwners
+	if v, ok := req.Values["Owners"]; ok && strings.TrimSpace(v) != "" {
+		owners, err = normalizeOwners(v)
+		if err != nil {
+			return err
+		}
+	}
 	content, err := designscaffold.Render(tmpl, designscaffold.ScaffoldData{
 		Ref:      "spec/" + slug,
 		Title:    valueOr("Title", designscaffold.HumanizeName(slug)),
-		Owners:   valueOr("Owners", designscaffold.DefaultOwners),
+		Owners:   owners,
 		StoryRef: valueOr("StoryRef", stubInstantiatePlaceholderStoryRef),
-		Problem:  valueOr("Problem", designscaffold.DefaultProblem),
-		Outcome:  valueOr("Outcome", designscaffold.DefaultOutcome),
+		Problem:  req.Values["Problem"],
+		Outcome:  req.Values["Outcome"],
 		Links:    links,
 	})
 	if err != nil {
