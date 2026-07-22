@@ -79,6 +79,32 @@ The two are mutually exclusive with each other, and `--problem`/`--outcome`
 must be given together or not at all — a lone flag refuses by name rather
 than leaving one section templated and the other not.
 
+Correction (build-time witness — recorded, not silently narrowed). The
+frozen text above's "every section the class template declares renders
+TODO-free" is imprecise about WHICH sections, pinned by this story's own
+first test against the actual embedded templates
+(`internal/designscaffold/templates/story.md`/`feature.md`). The
+canonical templates carry the statement content in TWO independent
+positions: the frontmatter's `problem: { text: ... }` / `outcome: { text:
+... }` attribute — the position VL-020, the evidence-obligation rules,
+and `spec/creation-form`'s own already-shipped form all key off — and the
+body's separate `## Problem`/`## Outcome` headings, which are a fixed,
+always-literal `TODO: design notes.` that no `ScaffoldData` field
+controls at all (neither template references `.Problem`/`.Outcome` in
+its body). `--problem`/`--outcome` make the FRONTMATTER attribute
+TODO-free, exactly the property `TestFeature_RealStatements`/
+`TestStory_RealStatements`/`TestRunDesignStart_ProblemOutcomeFlags_
+TODOFree` pin; the body headings' own placeholder prose is unaffected —
+unchanged from `spec/creation-form`'s own established scope (its ac-3's
+"TODO-free in every position whose field was actually filled" already
+meant exactly this: a position a FIELD renders into, which the body
+headings are not). Changing the templates' body rendering to also
+interpolate `.Problem`/`.Outcome` was considered and declined: it would
+touch `spec/scaffold-templates` ac-1's own frozen byte-identity contract
+(`TestByteForByte`, pinned against the retired string-builder's literal
+`TODO: design notes.` body text) for every OTHER caller of `Feature`/
+`Story` too, out of this story's scope.
+
 ## Ac 2
 
 Given no creation flags at all — no `--problem`, no `--outcome`, no
@@ -120,3 +146,37 @@ tracker-derived naming, and no CLI-supplied owner override either),
 disclosed here rather than silently reconsidered now that the verb grows
 other creation flags: the usage text and the verb's whole flag-parsing
 source carry no `--owners` token anywhere.
+
+## Note
+
+Disclosed build-time decisions, recorded per the provenance discipline
+(none reverses the frozen ACs above; each fills a gap the design wave
+that pressure-tested `spec/creation-surfaces` deliberately deferred to
+"story spec time," per design doc §7):
+
+**Single-line interview answers.** The TTY interview
+(`internal/designinterview`) collects each statement field as ONE line
+of scripted or real terminal input, re-prompting on a blank answer. The
+board form's own statement fields are a free-form textarea; no CLI
+line-based multi-line-input convention exists anywhere in this module to
+build on, and inventing one was out of this story's scope. Multi-line
+statement authoring stays a design-branch hand-edit of `spec.md` itself,
+or the board form.
+
+**`--from-stub`'s exit-code convention.** Every refusal on the
+`--from-stub` path (unknown slug, wrong class/status, an already-existing
+branch, an unreadable feature spec) exits 2, matching `design start`'s
+own established local convention: every OTHER refusal in this verb — an
+invalid name, an already-existing spec directory, a malformed story ref —
+is exit 2 too (never exit 1). This keeps the verb internally consistent
+rather than introducing its first exit-1 business verdict on one path
+alone; the board's own HTTP action expresses the identical refusals as
+400 Bad Request, its own transport's equivalent.
+
+**`<feature>` is a bare spec name.** `design start --from-stub <feature>
+<stub>` takes `<feature>` as a bare, kebab-case spec name (e.g.
+`creation-surfaces`), never a `spec/`-prefixed ref — matching this verb's
+own `--name` convention for the spec being CREATED, and the board's own
+bare `{name}` URL path segment for the wall a stub-instantiate action
+runs against. The smallest reversible choice consistent with both
+existing siblings, over inventing a third addressing form.
