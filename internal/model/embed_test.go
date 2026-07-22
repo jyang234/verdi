@@ -1,12 +1,56 @@
 package model
 
 import (
+	"bytes"
 	"reflect"
 	"sort"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
 )
+
+// TestCanonicalYAML_MatchesEmbedded proves CanonicalYAML() returns
+// exactly the embedded canonical.yaml bytes (spec/init-wizard ac-2/ac-3,
+// ledger L-N5): the wizard's own hand-built model.yaml serialization
+// (internal/initwizard) starts from these bytes rather than a second,
+// drift-prone copy of the classes:/lifecycle: block.
+func TestCanonicalYAML_MatchesEmbedded(t *testing.T) {
+	got := CanonicalYAML()
+	if !bytes.Equal(got, canonicalYAML) {
+		t.Fatalf("CanonicalYAML() does not match the embedded canonicalYAML bytes")
+	}
+}
+
+// TestCanonicalYAML_ReturnsACopy proves a caller mutating the returned
+// slice can never corrupt the shared embedded asset — Canonical()'s own
+// doc comment makes the same "never a shared, cached pointer" promise
+// for the decoded *Model; CanonicalYAML extends it to the raw bytes.
+func TestCanonicalYAML_ReturnsACopy(t *testing.T) {
+	got := CanonicalYAML()
+	if len(got) == 0 {
+		t.Fatal("CanonicalYAML() returned no bytes")
+	}
+	original := got[0]
+	got[0] = original + 1 // mutate the returned copy
+
+	again := CanonicalYAML()
+	if again[0] != original {
+		t.Fatalf("mutating a prior CanonicalYAML() result changed a later call's bytes: got %q, want the original %q — CanonicalYAML must return a defensive copy", again[0], original)
+	}
+}
+
+// TestCanonicalYAML_DecodesToCanonical proves the exported bytes are
+// exactly what Canonical() itself decodes from — CanonicalYAML is not a
+// second, independently-drifting source.
+func TestCanonicalYAML_DecodesToCanonical(t *testing.T) {
+	decoded, err := DecodeModel(CanonicalYAML())
+	if err != nil {
+		t.Fatalf("decoding CanonicalYAML(): %v", err)
+	}
+	if !reflect.DeepEqual(*decoded, canonicalModel) {
+		t.Fatalf("CanonicalYAML() decodes to a DIFFERENT Model than canonicalModel")
+	}
+}
 
 // TestCanonicalYAMLMatchesGoLiteral proves the embedded canonical.yaml
 // (go:embed, embed.go) decodes to EXACTLY canonicalModel (canonical.go):

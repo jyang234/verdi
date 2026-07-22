@@ -583,3 +583,63 @@ func TestCLIShowcaseModel(t *testing.T) {
 		t.Fatalf("stdout = %q, want it to name canonical's 2 classes / 4 transitions", stdout)
 	}
 }
+
+// TestCLIShowcaseInit (cli:init, extensibility Phase 2, spec/init-wizard,
+// ledger L-N5) drives `verdi init` against the REAL provisioned
+// examples/showcase store. init's own contract (design doc §12, W-3/W-3b)
+// is create-only: it refuses on ANY existing .verdi/ directory, and
+// examples/showcase IS exactly such a store — a store that already exists
+// is precisely what init can never touch, by construction, so the genuine
+// showcase-backed proof here is the REFUSAL path: both the bare and
+// --wizard forms must refuse, exit 2, naming the real showcase store's own
+// .verdi/verdi.yaml as already present, and leave it byte-identical
+// afterward (the same before/after content-equality proof
+// TestCLIShowcaseAttest already uses for its own already-exists refusal,
+// above). The happy (creation) path cannot be exercised against showcase
+// content at all — there is no such thing as "showcase content" for a
+// store that does not exist yet — so it is proven separately, against a
+// fresh, empty scratch directory, using the SAME real binary
+// (build-then-exec, never `go run`) this whole file's tests already share.
+func TestCLIShowcaseInit(t *testing.T) {
+	root := provisionShowcaseStore(t)
+
+	manifestPath := filepath.Join(root, ".verdi", "verdi.yaml")
+	before, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("reading the real showcase store's verdi.yaml: %v", err)
+	}
+
+	for _, args := range [][]string{{"init"}, {"init", "--wizard"}} {
+		stdout, stderr, code := runBinary(t, root, args...)
+		if code != 2 {
+			t.Fatalf("verdi %v against the real showcase store: exit %d, want 2 (create-only refusal)\nstdout:\n%s\nstderr:\n%s", args, code, stdout, stderr)
+		}
+		if !strings.Contains(stderr, manifestPath) && !strings.Contains(stderr, ".verdi") {
+			t.Fatalf("verdi %v refusal stderr = %q, want it to name the real showcase store's existing .verdi/", args, stderr)
+		}
+	}
+
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("reading the real showcase store's verdi.yaml after the refused calls: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("verdi init's refusal modified the real showcase store's verdi.yaml — create-only means byte-untouched, always")
+	}
+
+	// The creation path: init's whole point is to work BEFORE any store
+	// exists, so it is proven here, against a fresh empty directory,
+	// using the same real compiled binary.
+	scratch := t.TempDir()
+	stdout, stderr, code := runBinary(t, scratch, "init")
+	if code != 0 {
+		t.Fatalf("verdi init (fresh scratch dir): exit %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	data, err := os.ReadFile(filepath.Join(scratch, ".verdi", "verdi.yaml"))
+	if err != nil {
+		t.Fatalf("reading the freshly-init'd verdi.yaml: %v", err)
+	}
+	if string(data) != "schema: verdi.layout/v1\n" {
+		t.Fatalf("freshly-init'd verdi.yaml = %q, want exactly %q", data, "schema: verdi.layout/v1\n")
+	}
+}
