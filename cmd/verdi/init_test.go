@@ -299,6 +299,37 @@ func TestInit_Wizard_RealRenames_AndTemplateCopy(t *testing.T) {
 	}
 }
 
+// TestInit_Wizard_DeclinedWrite_ExitsZeroNoOp is the write-confirmation-
+// decline pin: answering "n" at the final "Write .verdi/ ?" confirmation is
+// a deliberate, considered no-op — a clean "no", neither operational trouble
+// nor a verdict — so it exits 0 (NOT 2), prints a clear stdout line saying
+// nothing was written because the operator declined, and leaves NOTHING at
+// the real root (the staged temp directory is discarded exactly as on any
+// other pre-promotion return). This is the exit-code boundary the module's
+// 0/1/2 discipline demands, and the deliberate contrast to the two tests
+// immediately below — TestInit_Wizard_MidInterviewAbort_LeavesNothing and
+// TestInit_Wizard_SimulatedCrash_LeavesNothing — where a genuinely failed
+// staging (aborted stdin / an injected error) still exits 2, so a script can
+// tell "the operator chose not to write" apart from "init broke".
+func TestInit_Wizard_DeclinedWrite_ExitsZeroNoOp(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	dir := t.TempDir()
+
+	// All defaults, but "n" at the final write confirmation instead of "y".
+	script := strings.Repeat("\n", 9) + "n\nn\nn\n"
+
+	stdout, stderr, code := runInitBinary(t, bin, dir, script, []string{"VERDI_INIT_ASSUME_TTY=1"}, "--wizard")
+	if code != 0 {
+		t.Fatalf("verdi init --wizard (declined write) exit = %d, want 0 (a clean, deliberate decline is neither operational trouble nor a verdict)\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "declined") || !strings.Contains(stdout, "nothing was written") {
+		t.Fatalf("declined-write stdout = %q, want a clear line stating nothing was written because the operator declined", stdout)
+	}
+	if entries := listDirEntries(t, dir); len(entries) != 0 {
+		t.Fatalf("declined write left something behind: %v, want nothing at the real root", entries)
+	}
+}
+
 // TestInit_Wizard_MidInterviewAbort_LeavesNothing is obligation/init-
 // wizard--ac-3--behavioral's abort pin: stdin ending before every prompt
 // is answered exits 2 and leaves NOTHING under the target directory — no

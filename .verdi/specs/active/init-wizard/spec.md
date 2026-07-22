@@ -139,3 +139,11 @@ worktrees), before `verdi build start` ever ran — `verdi build start
 spec/init-wizard` was run afterward, once `verdi align`'s build-mode
 branch-name resolution (`storyresolve.ResolveBuildSpec`, requiring a
 `feature/<name>` branch) surfaced that the alignment step needed it.
+
+Disclosed write-confirmation surface: the `--wizard` interview ends with
+an explicit `Write .verdi/ ?` confirmation, and a decline (answering no)
+is a clean exit-0 no-op — the staged temporary directory is discarded and
+nothing reaches the real root, and because a deliberate "no" is neither
+operational trouble nor a verdict it exits 0 (whereas a mid-interview
+abort or a failed/crashed staging still exits 2, under the module's 0/1/2
+exit discipline).

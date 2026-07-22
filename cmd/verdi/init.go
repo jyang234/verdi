@@ -27,6 +27,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -125,6 +126,20 @@ func runInit(cwd string, wizard bool, stdin io.Reader, isTTY bool, stdout, stder
 
 	candidate, err := stageCandidateStore(tempRoot, wizard, stdin, stdout, stderr)
 	if err != nil {
+		// A deliberate "no" at the wizard's final write confirmation is a
+		// clean, considered no-op — neither operational trouble nor a
+		// verdict — so it exits 0 (the module's 0/1/2 discipline), with a
+		// plain stdout line stating nothing was written. The staged temp
+		// directory is still discarded (the defer above) and nothing ever
+		// reaches the real root, exactly as on any other pre-promotion
+		// return. Every OTHER staging failure — a write error, an injected
+		// crash, or an ErrAborted mid-interview abort — stays exit 2 on
+		// stderr, so a script can tell "operator chose not to write" apart
+		// from "init broke".
+		if errors.Is(err, initwizard.ErrDeclinedWrite) {
+			fmt.Fprintf(stdout, "init: declined at the write confirmation — nothing was written to %s\n", verdiDir)
+			return 0
+		}
 		return reportInitStagingError(stderr, err)
 	}
 
