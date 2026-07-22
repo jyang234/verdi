@@ -128,4 +128,20 @@ but is not yet frozen, through the identical shared renderer seam ac-4
 establishes. It refuses outright, exit 2, naming the path, when the target
 obligation is already frozen by a merge to main — frozen decided the same
 way VL-010 scopes immutability: reachable from `merge-base(HEAD, default
-branch)`, never merely "exists on disk".
+branch)`, never merely "exists on disk". Disclosed reading, controller-
+reviewed: when the default branch (and so the merge-base) cannot be
+resolved at all, this verb proceeds as create/regenerate rather than
+refusing — the same "can't prove it, don't guess" posture VL-010 itself
+wears when its own `DiffBase` is unknown, deliberately chosen over a
+fail-closed refusal because the alternative would make the verb unusable
+in exactly the hermetic, no-configured-remote layouts every other verb on
+this seam already tolerates.
+
+## Process note
+
+Disclosed ritual-order deviation: `verdi build start` was run AFTER this
+story's design/accept/build work was already complete on this same
+branch (build-start-after-build), not before as the canonical order
+names — a controller-directed correction mid-build, the branch content
+is identical to what running it first would have produced; only the
+order of ritual steps differs.
