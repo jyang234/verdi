@@ -4,16 +4,20 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/designscaffold"
 )
 
 // TestScaffoldSpec_BytePin pins scaffoldSpec's exact output bytes for a
-// slug fixture (spec/shared-homes ac-5: commitdesign's titleCase is
-// deleted for designscaffold.HumanizeName). Slug-constrained inputs
-// (kebab-case spec names, artifact.ValidateName's own charset) make the
-// two implementations' outputs identical — titleCase's byte-indexed
-// upper-casing and HumanizeName's rune-safe upper-casing agree on every
-// ASCII-only slug, which is all a spec name can ever be. This test proves
-// the swap leaves scaffoldSpec's output byte-for-byte unchanged.
+// slug fixture — the `want` literal below is UNCHANGED from before the
+// producer switch (spec/creation-form ac-4's parity pin): with no store
+// override present, the embedded commit-to-design canonical template
+// (designscaffold templates/commitdesign.md) must reproduce the retired
+// strings.Builder output byte-for-byte for every input the old producer
+// handled — pins present, dispositions present (their absence legs ride
+// the package's existing Run fixtures, which exercise empty boards).
+// History: the pin originally proved the titleCase -> HumanizeName swap
+// (spec/shared-homes ac-5); it now also proves the L-M12 switch changed
+// nothing for a store without an override.
 func TestScaffoldSpec_BytePin(t *testing.T) {
 	pins := []artifact.Pin{
 		{Ref: "adr/0001-outbox", X: 10, Y: 20},
@@ -23,7 +27,14 @@ func TestScaffoldSpec_BytePin(t *testing.T) {
 		{Sticky: "sticky-1", Disposition: artifact.DispositionIncorporated, Note: "captured"},
 	}
 
-	got := scaffoldSpec("spec/code-health-two", "jira:VERDI-1", "code-health-two", pins, dispositions)
+	tmpl, err := designscaffold.Canonical("commitdesign.md")
+	if err != nil {
+		t.Fatalf("Canonical(commitdesign.md): %v", err)
+	}
+	got, err := scaffoldSpec(tmpl, "spec/code-health-two", "jira:VERDI-1", "code-health-two", pins, dispositions)
+	if err != nil {
+		t.Fatalf("scaffoldSpec: %v", err)
+	}
 
 	const want = `---
 id: spec/code-health-two

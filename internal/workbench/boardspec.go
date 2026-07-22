@@ -271,6 +271,19 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if err := attachFamilyLinks(ctx, proj, s.root, s.fixedBranch); err != nil {
 		return nil, nil, "", err
 	}
+	// The creation form's field descriptors (spec/creation-form ac-2/ac-3):
+	// the same I/O-enrichment posture as every attach* call above. Only a
+	// sealed accepted-pending-build feature wall carries the affordance
+	// (the create action's own guard, mirrored at render); a template that
+	// cannot be resolved or enumerated degrades to a disclosed notice and
+	// no affordance — never silence, never a broken board.
+	if proj.Class == string(artifact.ClassFeature) && proj.Status == "accepted-pending-build" {
+		if _, fields, cerr := s.createFormFields(); cerr != nil {
+			proj.Notices = append(proj.Notices, "creation form unavailable: "+cerr.Error())
+		} else {
+			proj.CreateFields = fields
+		}
+	}
 	if reviewNotice != "" {
 		proj.Notices = append(proj.Notices, reviewNotice)
 	}

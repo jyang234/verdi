@@ -1144,6 +1144,30 @@ bindings:
       - "spec/creation-surfaces#ac-3"
       - "spec/creation-surfaces#ac-4"
       - "spec/creation-surfaces#ac-5"
+      # spec/creation-form (creation-surfaces#ac-2's implementing story,
+      # plan Task 11; authored with the story per the X-9/#143 convention,
+      # a design-time forward declaration until the story's build lands on
+      # this same branch): ac-1 = internal/designscaffold/fields_test.go's
+      # ordered-descriptor pins (embedded story.md/feature.md full-slice
+      # order, override-template own-fields, range-body dot-context,
+      # unknown-placeholder/parse-error fail-closed negatives); ac-2 =
+      # internal/workbench's create-action handler tests (fresh
+      # design/<name> branch via plumbing with serving checkout untouched,
+      # implements links to chosen ACs, override template honored,
+      # CheckClass fail-closed, and each named refusal: wrong wall
+      # class/status, taken branch/name, unknown value key, undeclared or
+      # zero ACs); ac-3 = verdi/e2e's board-creation-form Playwright spec
+      # over the vocab-rename fixture (renamed labels, no bare class ids
+      # as label text, empty-statement refusal, landed spec correct-class/
+      # right-branch/TODO-free-where-filled via the harness's read-only
+      # inspection window); ac-4 = internal/commitdesign's kept-unchanged
+      # TestScaffoldSpec_BytePin plus the store-override Run fixtures
+      # (override honored + CheckClass(feature), existing Run tests
+      # passing unmodified). All under make verify.
+      - "spec/creation-form#ac-1"
+      - "spec/creation-form#ac-2"
+      - "spec/creation-form#ac-3"
+      - "spec/creation-form#ac-4"
   - producer: verdi-verify-static
     kind: static
     acs:
