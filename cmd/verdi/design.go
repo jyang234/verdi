@@ -287,7 +287,7 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 
 	var content string
 	if kind == artifact.ClassFeature {
-		content, err = designscaffold.Feature(tmpl, specRef.String(), storyRef, title)
+		content, err = designscaffold.Feature(tmpl, specRef.String(), storyRef, title, designscaffold.DefaultProblem, designscaffold.DefaultOutcome)
 	} else {
 		// design start's own placeholder edge: an implements edge to a
 		// not-yet-real feature/AC pair, since 05 §CLI names no --feature
@@ -296,7 +296,7 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		// agent replaces it with a real edge into the accepted feature this
 		// story implements.
 		links := []designscaffold.StoryLink{{Type: artifact.LinkImplements, Ref: "spec/todo-replace-feature-name#ac-1"}}
-		content, err = designscaffold.Story(tmpl, specRef.String(), storyRef, title, false, links)
+		content, err = designscaffold.Story(tmpl, specRef.String(), storyRef, title, false, links, designscaffold.DefaultProblem, designscaffold.DefaultOutcome)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "design start: rendering template %s for class %s: %v\n", class.Template, kind, err)

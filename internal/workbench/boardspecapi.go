@@ -712,7 +712,7 @@ func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string
 	if err != nil {
 		return fmt.Errorf("workbench: %w", err)
 	}
-	content, err := designscaffold.Story(tmpl, "spec/"+slug, stubInstantiatePlaceholderStoryRef, designscaffold.HumanizeName(slug), stub.Spike, links)
+	content, err := designscaffold.Story(tmpl, "spec/"+slug, stubInstantiatePlaceholderStoryRef, designscaffold.HumanizeName(slug), stub.Spike, links, designscaffold.DefaultProblem, designscaffold.DefaultOutcome)
 	if err != nil {
 		return fmt.Errorf("workbench: rendering template %s for class %s: %w", class.Template, artifact.ClassStory, err)
 	}

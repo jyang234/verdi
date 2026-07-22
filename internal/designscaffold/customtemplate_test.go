@@ -56,7 +56,7 @@ TODO: design notes.
 // the embedded canonical story.md.
 func TestRender_StoreOverrideAddsCustomAndSection(t *testing.T) {
 	links := []StoryLink{{Type: artifact.LinkImplements, Ref: "spec/loan-mgmt#ac-1"}}
-	content, err := Story([]byte(overrideStoryTemplateWithCustom), "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links)
+	content, err := Story([]byte(overrideStoryTemplateWithCustom), "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links, DefaultProblem, DefaultOutcome)
 	if err != nil {
 		t.Fatalf("Story (store override template): %v", err)
 	}
@@ -92,7 +92,7 @@ func TestRender_StoreOverrideAddsCustomAndSection(t *testing.T) {
 // by an edit to some other object.
 func TestRender_StoreOverrideCustom_SurvivesSpliceRoundTrip(t *testing.T) {
 	links := []StoryLink{{Type: artifact.LinkImplements, Ref: "spec/loan-mgmt#ac-1"}}
-	content, err := Story([]byte(overrideStoryTemplateWithCustom), "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links)
+	content, err := Story([]byte(overrideStoryTemplateWithCustom), "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links, DefaultProblem, DefaultOutcome)
 	if err != nil {
 		t.Fatalf("Story (store override template): %v", err)
 	}
