@@ -16,6 +16,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/model"
 )
 
@@ -373,6 +374,15 @@ type BoardProjection struct {
 	StubViews  []StubView     `json:"stub_views,omitempty"`
 	ACCoverage map[string]int `json:"ac_coverage,omitempty"`
 	OQClaims   map[string]int `json:"oq_claims,omitempty"`
+	// CreateFields are the creation form's enumerated field descriptors
+	// (spec/creation-form ac-2/ac-3): the story class's resolved template
+	// (store override winning) run through designscaffold.Fields — ONE
+	// contract shared by the server-rendered form and the create action's
+	// submitted-values validation. Populated by the I/O enrichment tier
+	// (loadBoard) only for a sealed accepted-pending-build feature wall;
+	// empty everywhere else, so no other wall renders the affordance.
+	// Excluded from JSON: get_board's payload is unchanged.
+	CreateFields []designscaffold.Field `json:"-"`
 	// Notices are disclosed-unavailable banners rendered in the board
 	// chrome in EVERY mode (I-1(b)/I-2/M-4): a configured-but-unreachable
 	// review feed, or an assumed default branch. Not a projection of the

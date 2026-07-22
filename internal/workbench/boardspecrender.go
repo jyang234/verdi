@@ -562,12 +562,111 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		writeYarnKey(&b, p)
 	default:
 		b.WriteString(`<section class="scratch-panel sealed-panel"><h2>Sealed record</h2><p class="ritual-note">This spec is accepted; the wall is its photograph. Change means supersession (the amendment ladder).</p></section>`)
+		writeCreatePanel(&b, p)
 		writeYarnKey(&b, p)
 	}
 	b.WriteString(`</aside>`)
 	b.WriteString(`</div>`) // board-layout
 
 	return b.String()
+}
+
+// writeCreatePanel renders the sealed feature wall's creation affordance
+// (spec/creation-form ac-3): the rail panel whose button opens the
+// template-driven creation form. Rendered ONLY when the loader attached
+// enumerated field descriptors — the same sealed-accepted-feature gate
+// the create action itself enforces, so the rail never offers what the
+// server would refuse. Every spoken class word is display prose and
+// resolves (vocabulary.go); the testid and element ids stay bare.
+func writeCreatePanel(b *strings.Builder, p *BoardProjection) {
+	if len(p.CreateFields) == 0 {
+		return
+	}
+	esc := stdhtml.EscapeString
+	storyWord := p.words.word("story")
+	b.WriteString(`<section class="scratch-panel create-panel" data-testid="create-panel">`)
+	b.WriteString(`<h2>New ` + esc(storyWord) + `</h2>`)
+	b.WriteString(`<p class="ritual-note">` + esc(model.Capitalize(p.words.indefinite("story"))+" this wall's stubs did not plan. The form asks exactly what the "+storyWord+" template needs, cuts a design branch, and never moves this checkout.") + `</p>`)
+	b.WriteString(`<button type="button" id="create-spec-btn" class="create-spec-btn" data-testid="create-spec-btn">&#8853; New ` + esc(storyWord) + `</button>`)
+	b.WriteString(`</section>`)
+}
+
+// createFieldLabel maps an enumerated field descriptor to its form label
+// and disclosed-placeholder hint (spec/creation-form ac-3). Field NAMES
+// (data-field values, the API's value keys) are identity and stay bare;
+// these labels are the form's own fixed prose. "Tracker ref" deliberately
+// avoids speaking the story: frontmatter field name as prose.
+var createFieldLabels = map[string][2]string{
+	"Title":    {"Title", "derived from the name when left blank"},
+	"Owners":   {"Owners", designscaffold.DefaultOwners},
+	"StoryRef": {"Tracker ref", "todo:REPLACE-ME"},
+	"Problem":  {"Problem", "what hurts today — required"},
+	"Outcome":  {"Outcome", "what is true when this lands — required"},
+}
+
+// writeCreateDialog renders the creation form dialog (spec/creation-form
+// ac-3): fields generated from the SAME enumerated descriptors the
+// create action validates against — one contract, both halves — plus the
+// acceptance-criteria picker over this wall's declared ACs. The branch
+// tab is the identity being minted, in the stub tab's own mono voice: it
+// live-updates from the name field (boardspec.js) and encodes exactly
+// what submit will cut. Receipt and refusal copy ride data attributes,
+// resolved server-side so the client speaks display words (class words
+// through DisplayClass, verb words through DisplayVerb — never a bare
+// hand-written verb) without a client-side vocabulary table.
+func writeCreateDialog(b *strings.Builder, p *BoardProjection) {
+	esc := stdhtml.EscapeString
+	storyWord := p.words.word("story")
+	b.WriteString(`<div role="dialog" aria-label="` + esc("New "+storyWord) + `" class="board-dialog create-dialog" id="create-dialog" hidden`)
+	b.WriteString(` data-receipt-title="` + esc(model.Capitalize(storyWord)+" created") + `"`)
+	b.WriteString(` data-receipt-body="` + esc("Branch {branch} now carries spec/{name}, scaffolded from the "+storyWord+" template with the acceptance criteria you chose. Its tracker ref is still the placeholder todo:REPLACE-ME — fill it in on the branch before "+p.words.verb("accept")+". This wall (the serving checkout) has not moved.") + `"`)
+	b.WriteString(` data-error-acs="` + esc("Choose at least one acceptance criterion — the coverage claim the new "+storyWord+" is born with.") + `">`)
+	b.WriteString(`<span class="stub-tab create-branch-tab" id="create-branch-tab" aria-hidden="true">design/&#8230;</span>`)
+	b.WriteString(`<h2>New ` + esc(storyWord) + `</h2>`)
+	b.WriteString(`<p class="ritual-note">` + esc("Cuts a design branch carrying the new "+storyWord+" spec — every field below comes from the "+storyWord+" template itself. This checkout never moves.") + `</p>`)
+
+	// The name: always asked — it is the identity every FieldIdentity
+	// descriptor derives from (the ref, the branch, the directory).
+	b.WriteString(`<div class="field"><label for="create-name">Name</label>`)
+	b.WriteString(`<input id="create-name" data-testid="create-name" autocomplete="off" spellcheck="false" placeholder="kebab-case-name">`)
+	b.WriteString(`<span class="field-hint">becomes the spec ref and the design branch</span></div>`)
+
+	for _, f := range p.CreateFields {
+		if f.Kind != designscaffold.FieldInput && f.Kind != designscaffold.FieldStatement {
+			continue
+		}
+		label, ok := createFieldLabels[f.Name]
+		if !ok {
+			label = [2]string{f.Name, ""}
+		}
+		id := "create-field-" + f.Name
+		b.WriteString(`<div class="field"><label for="` + esc(id) + `">` + esc(label[0]) + `</label>`)
+		if f.Kind == designscaffold.FieldStatement {
+			b.WriteString(`<textarea id="` + esc(id) + `" data-field="` + esc(f.Name) + `" data-testid="` + esc(id) + `" data-label="` + esc(label[0]) + `" required placeholder="` + esc(label[1]) + `"></textarea>`)
+		} else {
+			b.WriteString(`<input id="` + esc(id) + `" data-field="` + esc(f.Name) + `" data-testid="` + esc(id) + `" data-label="` + esc(label[0]) + `" autocomplete="off" placeholder="` + esc(label[1]) + `">`)
+		}
+		b.WriteString(`</div>`)
+	}
+
+	// The coverage picker: the new story's implements edges, chosen from
+	// this wall's own declared acceptance criteria — real claims, never a
+	// placeholder edge.
+	b.WriteString(`<fieldset class="create-acs"><legend>Implements</legend>`)
+	b.WriteString(`<p class="ritual-note">` + esc("The acceptance criteria the new "+storyWord+" claims — at least one.") + `</p>`)
+	for _, c := range p.Cards {
+		if c.Kind != string(boardlayout.ZoneAC) {
+			continue
+		}
+		b.WriteString(`<label class="create-ac"><input type="checkbox" data-create-ac="` + esc(c.ID) + `" data-testid="create-ac-` + esc(c.ID) + `">`)
+		b.WriteString(`<span class="create-ac-id">` + esc(c.ID) + `</span> <span class="create-ac-text">` + esc(c.Text) + `</span></label>`)
+	}
+	b.WriteString(`</fieldset>`)
+
+	b.WriteString(`<p class="create-error" id="create-error" data-testid="create-error" role="alert" hidden></p>`)
+	b.WriteString(`<div class="dialog-actions"><button type="button" id="create-ok" class="btn-primary" data-testid="create-ok">` + esc("Create "+storyWord) + `</button>`)
+	b.WriteString(`<button type="button" id="create-cancel">Cancel</button></div>`)
+	b.WriteString(`</div>`)
 }
 
 // writeCaseClassTag stamps the spec's class on the case-file lockup
@@ -981,8 +1080,14 @@ func writeGitPanel(b *strings.Builder, git *boardGitState) {
 // it fires, and its receipt/refusal after, all through the same dialog.
 func renderBoardDialogs(p *BoardProjection) string {
 	if p.Mode != modeAuthoring {
-		if p.Class == string(artifact.ClassFeature) && p.Status == "accepted-pending-build" && len(p.StubViews) > 0 {
-			return `
+		// The sealed wall's live affordances need the dialog chrome:
+		// stub-instantiate's confirmation (spec/scoping-canvas ac-6) and
+		// the creation form (spec/creation-form ac-3 — CreateFields is
+		// only attached on the sealed accepted feature wall, the same
+		// gate the create action enforces).
+		if p.Class == string(artifact.ClassFeature) && p.Status == "accepted-pending-build" && (len(p.StubViews) > 0 || len(p.CreateFields) > 0) {
+			var b strings.Builder
+			b.WriteString(`
 <div class="modal-backdrop" id="modal-backdrop" hidden></div>
 <div role="alertdialog" aria-label="" class="board-dialog confirm" id="edge-confirm" hidden aria-describedby="edge-confirm-consequence">
 <h2 id="edge-confirm-title"></h2>
@@ -990,7 +1095,11 @@ func renderBoardDialogs(p *BoardProjection) string {
 <div class="field" id="edge-confirm-reason-field" hidden><label for="edge-confirm-reason">Reason</label><input id="edge-confirm-reason" autocomplete="off"></div>
 <div class="dialog-actions"><button type="button" id="edge-confirm-ok">Confirm</button>
 <button type="button" id="edge-confirm-cancel">Cancel</button></div>
-</div>`
+</div>`)
+			if len(p.CreateFields) > 0 {
+				writeCreateDialog(&b, p)
+			}
+			return b.String()
 		}
 		return ""
 	}

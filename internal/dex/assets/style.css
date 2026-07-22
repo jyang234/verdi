@@ -3164,6 +3164,93 @@ button.yarn-chip-type {
 .dir-disclosed { font-size: 0.82rem; font-style: italic; color: var(--st-pending); }
 .dir-mr-unavailable, .dir-index-failed { margin: 0.4rem 0 0.8rem; }
 
+/* the creation form (spec/creation-form ac-3): the sealed feature wall's
+   second live affordance beside stub instantiate — a free story its
+   stubs did not plan, born from the class template's own placeholders.
+   The dialog wears the stub paper's own slug tab: the design branch the
+   submit will cut, live-updating as the name is typed — the identity
+   being minted, in the machine's mono voice. Everything else stays the
+   board dialog's quiet standard chrome. */
+.create-spec-btn {
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.28rem 0.8rem;
+  cursor: pointer;
+}
+.create-spec-btn:hover, .create-spec-btn:focus-visible {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.create-dialog {
+  max-width: 30rem;
+  max-height: 76vh;
+  overflow-y: auto;
+}
+/* the branch chip: the stub tab's mono voice, sitting statically at the
+   dialog's head (the dialog scrolls, so nothing may hang outside it) —
+   the identity submit will mint, live as the name is typed */
+.create-dialog .create-branch-tab {
+  position: static;
+  display: inline-block;
+  max-width: 100%;
+  font-size: 0.62rem;
+  border-bottom: 1px solid var(--stub-edge);
+  border-radius: 5px;
+  margin-bottom: 0.5rem;
+}
+.create-dialog textarea {
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+  min-height: 4rem;
+  resize: vertical;
+}
+.create-dialog .field-hint {
+  font-size: 0.72rem;
+  color: var(--muted-solid);
+}
+.create-acs {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem 0.6rem;
+  margin: 0 0 0.8rem;
+}
+.create-acs legend {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-solid);
+  padding: 0 0.3rem;
+}
+.create-acs .ritual-note { font-size: 0.78rem; margin: 0 0 0.5rem; }
+.create-ac {
+  display: flex;
+  gap: 0.45rem;
+  align-items: baseline;
+  font-size: 0.82rem;
+  margin: 0.15rem 0;
+  cursor: pointer;
+}
+.create-ac .create-ac-id {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--muted-solid);
+}
+.create-error {
+  color: var(--st-violated);
+  font-size: 0.82rem;
+  margin: 0 0 0.7rem;
+}
+
 /* Syntax-highlighting palettes. Chroma emits no inline colour, so these two
    class-based palettes are the ONLY place code colour is defined — which is
    what lets a dark-mode browser restyle highlighted code instead of showing

@@ -783,7 +783,7 @@
     if (el) el.hidden = true;
   }
   function hideAllDialogs() {
-    ["edge-picker", "edge-confirm", "commit-dialog", "branch-guard", "graduate-menu", "branch-menu"].forEach(hide);
+    ["edge-picker", "edge-confirm", "commit-dialog", "branch-guard", "graduate-menu", "branch-menu", "create-dialog"].forEach(hide);
     var bd = document.getElementById("modal-backdrop");
     if (bd) bd.hidden = true;
   }
@@ -1899,6 +1899,115 @@
 
   function onInput(e) {
     if (e.target && e.target.id === "pin-search") fetchPinResults(e.target.value);
+    if (e.target && e.target.id === "create-name") onCreateNameInput(e.target);
+  }
+
+  // -- the creation form (spec/creation-form ac-3) ---------------------------
+  //
+  // The dialog's fields are SERVER-generated from the story template's
+  // own enumerated placeholders (one contract with the create action);
+  // this script only opens/closes it, validates required input with
+  // visible refusals (never a silent default), live-writes the branch
+  // tab — the identity submit will mint — and posts the values. All
+  // display prose (class words, the receipt's verb word) arrives
+  // server-resolved on the dialog's data attributes; nothing here
+  // hand-writes a vocabulary word.
+
+  var createKebabRe = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+  function humanizeKebab(name) {
+    return name
+      .split("-")
+      .filter(function (p) {
+        return p !== "";
+      })
+      .map(function (p) {
+        return p.charAt(0).toUpperCase() + p.slice(1);
+      })
+      .join(" ");
+  }
+
+  function createError(msg) {
+    var el = document.getElementById("create-error");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.hidden = !msg;
+  }
+
+  // The branch tab live-updates as the identity is typed, and the title
+  // field's placeholder previews its derived fallback — disclosed, never
+  // silently applied without being shown first.
+  function onCreateNameInput(input) {
+    var name = input.value.trim();
+    var tab = document.getElementById("create-branch-tab");
+    if (tab) tab.textContent = "design/" + (name || "…");
+    var title = document.querySelector('#create-dialog [data-field="Title"]');
+    if (title && name && createKebabRe.test(name)) {
+      title.placeholder = humanizeKebab(name);
+    }
+  }
+
+  function openCreateDialog() {
+    createError("");
+    show("create-dialog");
+    var nameInput = document.getElementById("create-name");
+    if (nameInput) nameInput.focus();
+  }
+
+  function submitCreate() {
+    var dlg = document.getElementById("create-dialog");
+    if (!dlg) return;
+    var name = document.getElementById("create-name").value.trim();
+    if (!createKebabRe.test(name)) {
+      createError("Name must be kebab-case (lowercase letters, digits, dashes) — it becomes the spec ref and the design branch.");
+      return;
+    }
+    var values = {};
+    var missing = [];
+    dlg.querySelectorAll("[data-field]").forEach(function (el) {
+      var v = el.value.trim();
+      if (v) {
+        values[el.getAttribute("data-field")] = v;
+      } else if (el.required) {
+        missing.push(el.getAttribute("data-label") || el.getAttribute("data-field"));
+      }
+    });
+    if (missing.length > 0) {
+      createError("Required: " + missing.join(", ") + ". A work item with no stated problem or outcome is not an artifact yet — the form collects them before it exists.");
+      return;
+    }
+    var acs = [];
+    dlg.querySelectorAll("[data-create-ac]").forEach(function (cb) {
+      if (cb.checked) acs.push(cb.getAttribute("data-create-ac"));
+    });
+    if (acs.length === 0) {
+      createError(dlg.getAttribute("data-error-acs") || "Choose at least one acceptance criterion.");
+      return;
+    }
+    createError("");
+    setStatus("cutting branch…");
+    api("create", { name: name, values: values, acs: acs })
+      .then(function () {
+        setStatus("");
+        hideAllDialogs();
+        // The receipt: server-resolved copy, the minted identities
+        // substituted in. Like the instantiate receipt, it is a notice —
+        // the confirm affordance hides.
+        openConfirm(
+          dlg.getAttribute("data-receipt-title") || "Created",
+          (dlg.getAttribute("data-receipt-body") || "")
+            .replace(/\{branch\}/g, "design/" + name)
+            .replace(/\{name\}/g, name),
+          false
+        );
+        document.getElementById("edge-confirm-ok").hidden = true;
+      })
+      .catch(function (err) {
+        // The refusal stays IN the form, beside the input it names —
+        // nothing typed is lost to a failed submit.
+        setStatus("");
+        createError(err.message);
+      });
   }
 
   // -- graduate menus ---------------------------------------------------------
@@ -2162,6 +2271,15 @@
         return;
       case "add-sticky-btn":
         startStickyEditor();
+        return;
+      case "create-spec-btn":
+        openCreateDialog();
+        return;
+      case "create-ok":
+        submitCreate();
+        return;
+      case "create-cancel":
+        hideAllDialogs();
         return;
     }
 

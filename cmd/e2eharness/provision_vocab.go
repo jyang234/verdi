@@ -40,6 +40,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/jyang234/verdi/internal/workbench"
@@ -107,13 +108,87 @@ Client-side dialog copy is rendered by boardspec.js, not the server.
 The menu labels and refusal copy speak the model's renamed words.
 `
 
+// vocabCustomStoryTemplate is the store's own .verdi/templates/
+// custom-story.md — the file the vocab-rename model's story class
+// DECLARES (template: custom-story.md), so the tailored store is real:
+// template resolution must go through the store's own override, exactly
+// the L-M12 property the creation form's e2e proves in a browser
+// (spec/creation-form ac-3). The canonical story shape plus a
+// distinctive Delivery Notes section the created spec must carry.
+const vocabCustomStoryTemplate = `---
+id: {{safe .Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{safe .Owners}}
+class: story
+status: draft
+story: {{safe .StoryRef}}
+{{if .Spike}}spike: true
+{{end}}problem: { text: {{printf "%q" .Problem}}, anchor: problem }
+outcome: { text: {{printf "%q" .Outcome}}, anchor: outcome }
+{{if not .Spike}}acceptance_criteria:
+  - { id: ac-1, text: "TODO: replace with real acceptance criteria before accept", evidence: [static], anchor: ac-1 }
+{{end}}links:
+{{range .Links}}  - { type: {{.Type}}, ref: {{printf "%q" .Ref}} }
+{{end}}---
+# {{.Title}}
+
+## Problem
+
+TODO: design notes.
+
+## Outcome
+
+TODO: design notes.
+
+## Delivery Notes
+
+TODO: how this lands safely.
+{{if not .Spike}}
+## Ac 1
+
+TODO: design notes.
+{{end}}`
+
+// vocabCustomFeatureTemplate is .verdi/templates/custom-feature.md — the
+// feature class's declared template, present for the same
+// store-is-really-tailored reason (the canonical feature shape).
+const vocabCustomFeatureTemplate = `---
+id: {{safe .Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{safe .Owners}}
+class: feature{{if .StoryRef}}
+story: {{safe .StoryRef}}{{end}}
+status: draft
+problem: { text: {{printf "%q" .Problem}}, anchor: problem }
+outcome: { text: {{printf "%q" .Outcome}}, anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "TODO: replace with real acceptance criteria before accept", evidence: [static, attestation], anchor: ac-1 }
+---
+# {{.Title}}
+
+## Problem
+
+TODO: design notes.
+
+## Outcome
+
+TODO: design notes.
+
+## Ac 1
+
+TODO: design notes.
+`
+
 // vocabFixture lazily starts its isolated server and remembers its bound
 // URL — the same start-once cache shape emptyGlanceFixture uses.
 type vocabFixture struct {
 	moduleRoot string
 
-	mu  sync.Mutex
-	url string
+	mu   sync.Mutex
+	url  string
+	root string
 }
 
 func newVocabFixture(moduleRoot string) *vocabFixture {
@@ -159,7 +234,47 @@ func (f *vocabFixture) ensureStarted() (string, error) {
 	go func() { _ = srv.Serve(ln) }()
 
 	f.url = "http://" + ln.Addr().String() + "/"
+	f.root = root
 	return f.url, nil
+}
+
+// showHandler is the vocab fixture's read-only inspection window
+// (spec/creation-form ac-3's outside-the-browser verification), the
+// inspect.go posture scoped to this isolated store: GET ?ref=<design
+// branch>&path=<store-relative path> answers `git show ref:path` from
+// the fixture's own repository — the suite's proof that a board-created
+// spec landed on exactly the branch the receipt named, without trusting
+// the browser's own claims. Read-only; design/* refs only; loopback
+// only, like every control route.
+func (f *vocabFixture) showHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	f.mu.Lock()
+	root := f.root
+	f.mu.Unlock()
+	if root == "" {
+		http.Error(w, "vocab fixture not started yet (GET /vocab-fixture first)", http.StatusConflict)
+		return
+	}
+	ref := r.URL.Query().Get("ref")
+	rel := r.URL.Query().Get("path")
+	if !strings.HasPrefix(ref, "design/") || strings.ContainsAny(ref, " \t\n:") {
+		http.Error(w, "ref must name a design/* branch", http.StatusBadRequest)
+		return
+	}
+	if rel == "" || filepath.IsAbs(rel) || strings.Contains(rel, "..") {
+		http.Error(w, "path must be a store-relative, traversal-free path", http.StatusBadRequest)
+		return
+	}
+	out, err := gitOutput(root, "show", ref+":"+rel)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(out))
 }
 
 // provisionVocabStore builds a REAL, minimal, hermetic store on disk and
@@ -181,6 +296,9 @@ func provisionVocabStore(moduleRoot string) (string, error) {
 	if err := os.MkdirAll(specDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating vocab-probe spec dir: %w", err)
 	}
+	if err := os.MkdirAll(filepath.Join(root, ".verdi", "templates"), 0o755); err != nil {
+		return "", fmt.Errorf("creating templates dir: %w", err)
+	}
 
 	modelYAML, err := os.ReadFile(filepath.Join(moduleRoot, "internal", "model", "testdata", "vocab-rename.yaml"))
 	if err != nil {
@@ -192,6 +310,12 @@ func provisionVocabStore(moduleRoot string) (string, error) {
 		filepath.Join(root, ".verdi", "model.yaml"): modelYAML,
 		filepath.Join(root, ".verdi", ".gitignore"): []byte("data/\n"),
 		filepath.Join(specDir, "spec.md"):           []byte(vocabProbeSpec),
+		// The templates the model DECLARES (custom-story.md /
+		// custom-feature.md): the store's own overrides, so template
+		// resolution exercises the real tailored-store path
+		// (spec/creation-form ac-3's override property in a browser).
+		filepath.Join(root, ".verdi", "templates", "custom-story.md"):   []byte(vocabCustomStoryTemplate),
+		filepath.Join(root, ".verdi", "templates", "custom-feature.md"): []byte(vocabCustomFeatureTemplate),
 	}
 	for path, content := range files {
 		if err := os.WriteFile(path, content, 0o644); err != nil {

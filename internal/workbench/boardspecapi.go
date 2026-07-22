@@ -47,6 +47,14 @@ type boardAPIRequest struct {
 	Y       float64 `json:"y,omitempty"`
 	Message string  `json:"message,omitempty"`
 	Branch  string  `json:"branch,omitempty"`
+	// Name, Values, and ACs are the create action's inputs
+	// (spec/creation-form ac-2): the new spec's kebab-case name, the
+	// form's submitted values keyed by the enumerated field descriptors
+	// (designscaffold.Fields — unknown keys refuse by name), and the
+	// declared acceptance criteria the new story implements.
+	Name   string            `json:"name,omitempty"`
+	Values map[string]string `json:"values,omitempty"`
+	ACs    []string          `json:"acs,omitempty"`
 }
 
 // boardAPIResponse reports the working tree's dirtiness after the
@@ -94,17 +102,18 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			writeJSONError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		// stub-instantiate is deliberately EXEMPT from the authoring-only
-		// gate (spec/scoping-canvas ac-6, flagged judgment call): it never
-		// edits the SERVED spec at all — it scaffolds an unrelated new
-		// story spec on a fresh, un-checked-out branch via git plumbing —
-		// so an accepted-pending-build wall (permanently sealed, never
-		// authoring) must still be able to run it. Its own guard (class
-		// feature, status accepted-pending-build) is enforced inside the
-		// action itself, against the wall's own state rather than the
-		// generic writes-need-authoring-mode posture every other action
-		// shares.
-		if action != "stub-instantiate" && proj.Mode != modeAuthoring {
+		// stub-instantiate and create are deliberately EXEMPT from the
+		// authoring-only gate (spec/scoping-canvas ac-6's flagged judgment
+		// call; create inherits the identical posture, spec/creation-form
+		// ac-2): neither edits the SERVED spec at all — each scaffolds an
+		// unrelated new story spec on a fresh, un-checked-out branch via
+		// git plumbing — so an accepted-pending-build wall (permanently
+		// sealed, never authoring) must still be able to run them. Their
+		// own guard (class feature, status accepted-pending-build) is
+		// enforced inside each action, against the wall's own state rather
+		// than the generic writes-need-authoring-mode posture every other
+		// action shares.
+		if action != "stub-instantiate" && action != "create" && proj.Mode != modeAuthoring {
 			// The parenthetical's state word is display and resolves
 			// (L-M13a(6)); the mode word and the board name are the
 			// route's own taxonomy/identity, kept bare.
@@ -136,6 +145,8 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			err = s.actionStubGraduate(name, proj, req)
 		case "stub-instantiate":
 			err = s.actionStubInstantiate(ctx, name, proj, req)
+		case "create":
+			err = s.actionCreate(ctx, name, proj, req)
 		case "relates":
 			err = s.actionRelates(ctx, name, proj, req)
 		case "relates-graduate":
@@ -650,20 +661,8 @@ func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string
 	if slug == "" {
 		return fmt.Errorf("stub-instantiate requires a stub slug (id)")
 	}
-	if proj.Class != string(artifact.ClassFeature) {
-		// The spoken class words are display and resolve — this refusal is
-		// ac-2's own surface (ledger L-M13a(6) work order); the class
-		// COMPARISON stays on bare ids.
-		return fmt.Errorf("stub-instantiate is only available on %s-class wall; this wall is class %s", model.Indefinite(s.model.DisplayClass("feature")), s.model.DisplayClass(proj.Class))
-	}
-	if proj.Status != "accepted-pending-build" {
-		// The state words are display and resolve (L-M13a(6) work order;
-		// the wall is feature-class — the guard above already held);
-		// "accepted" in the owner's-rule parenthetical is that rule's own
-		// word, not a lifecycle state id. The status COMPARISON stays on
-		// the bare id.
-		return fmt.Errorf("stub-instantiate is only available on %s spec (implementations build accepted specs only); this wall's status is %s",
-			model.Indefinite(s.model.DisplayState("feature", "accepted-pending-build")), s.model.DisplayState("feature", proj.Status))
+	if err := s.sealedFeatureWallGuard(proj, "stub-instantiate"); err != nil {
+		return err
 	}
 	var stub *StubView
 	for i := range proj.StubViews {
@@ -738,6 +737,40 @@ func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string
 		return fmt.Errorf("workbench: internal error: stub-instantiate scaffold failed self-validation: %w", err)
 	}
 
+	msg := fmt.Sprintf("stub-instantiate: scaffold spec/%s from stub %q of spec/%s", slug, slug, name)
+	return s.commitScaffoldBranch(ctx, slug, content, msg)
+}
+
+// sealedFeatureWallGuard is the shared wall guard both scaffold-a-story
+// actions enforce (spec/scoping-canvas ac-6; spec/creation-form ac-2
+// inherits it verbatim): class feature, status accepted-pending-build —
+// "the owner's rule: implementations build accepted specs only" —
+// checked against the wall's own state, never the generic authoring-mode
+// gate (see the handler's exemption comment). action names the refusing
+// action in the message; the spoken class/state words are display and
+// resolve (L-M13a(6)); the COMPARISONS stay on bare ids.
+func (s *boardSpecServer) sealedFeatureWallGuard(proj *BoardProjection, action string) error {
+	if proj.Class != string(artifact.ClassFeature) {
+		return fmt.Errorf("%s is only available on %s-class wall; this wall is class %s", action, model.Indefinite(s.model.DisplayClass("feature")), s.model.DisplayClass(proj.Class))
+	}
+	if proj.Status != "accepted-pending-build" {
+		// "accepted" in the owner's-rule parenthetical is that rule's own
+		// word, not a lifecycle state id.
+		return fmt.Errorf("%s is only available on %s spec (implementations build accepted specs only); this wall's status is %s",
+			action, model.Indefinite(s.model.DisplayState("feature", "accepted-pending-build")), s.model.DisplayState("feature", proj.Status))
+	}
+	return nil
+}
+
+// commitScaffoldBranch lands content as .verdi/specs/active/<slug>/spec.md
+// in exactly one commit on a fresh design/<slug> branch, entirely via git
+// plumbing — the serving checkout's HEAD, working tree, and real index
+// are never touched (spec/scoping-canvas ac-6's mechanism, shared by
+// stub-instantiate and the creation form, spec/creation-form ac-2).
+// Fails closed if the branch already exists (gitx.UpdateRef's create-only
+// atomicity — callers' RevParse pre-checks only make the common refusal
+// legible).
+func (s *boardSpecServer) commitScaffoldBranch(ctx context.Context, slug, content, msg string) error {
 	baseCommit, err := gitx.RevParse(ctx, s.root, "HEAD")
 	if err != nil {
 		return err
@@ -751,12 +784,149 @@ func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string
 	if err != nil {
 		return err
 	}
-	msg := fmt.Sprintf("stub-instantiate: scaffold spec/%s from stub %q of spec/%s", slug, slug, name)
 	commit, err := gitx.CommitTree(ctx, s.root, tree, baseCommit, msg)
 	if err != nil {
 		return err
 	}
 	return gitx.UpdateRef(ctx, s.root, "refs/heads/design/"+slug, commit)
+}
+
+// createFormFields enumerates the story class's resolved template into
+// the creation form's field descriptors (spec/creation-form ac-1/ac-2):
+// ONE contract for the server-rendered form and the submitted-values
+// validation — the two halves cannot drift. The store's own template
+// override wins, exactly as LoadTemplate resolves everywhere else.
+func (s *boardSpecServer) createFormFields() ([]byte, []designscaffold.Field, error) {
+	cfg, err := store.Open(s.root)
+	if err != nil {
+		return nil, nil, fmt.Errorf("workbench: resolving store config: %w", err)
+	}
+	class, ok := cfg.Model.Classes[string(artifact.ClassStory)]
+	if !ok {
+		return nil, nil, fmt.Errorf("workbench: internal error: resolved model has no %q class", artifact.ClassStory)
+	}
+	tmpl, err := designscaffold.LoadTemplate(s.root, class.Template)
+	if err != nil {
+		return nil, nil, fmt.Errorf("workbench: %w", err)
+	}
+	fields, err := designscaffold.Fields(tmpl)
+	if err != nil {
+		return nil, nil, fmt.Errorf("workbench: enumerating template %s: %w", class.Template, err)
+	}
+	return tmpl, fields, nil
+}
+
+// actionCreate scaffolds a free story spec from the creation form's
+// submitted values (spec/creation-form ac-2) — stub-instantiate's
+// sibling for a story no declared stub planned: same wall guards, same
+// self-validate + CheckClass gate before any git object is written, same
+// pure-plumbing branch cut. Fields are keyed by the enumerated
+// descriptors of the story class's own resolved template (unknown keys
+// refuse by name); implements edges bind to the caller-chosen declared
+// acceptance criteria of this wall (at least one, each validated);
+// unfilled fields fall back to the same disclosed placeholder defaults
+// every other scaffold consumer uses.
+func (s *boardSpecServer) actionCreate(ctx context.Context, name string, proj *BoardProjection, req boardAPIRequest) error {
+	if err := s.sealedFeatureWallGuard(proj, "create"); err != nil {
+		return err
+	}
+	slug := req.Name
+	if slug == "" {
+		// The refusal speaks the class word as display prose (L-M13a(6)).
+		return fmt.Errorf("create requires a kebab-case name for the new %s spec", s.model.DisplayClass("story"))
+	}
+	if !specNameRe.MatchString(slug) {
+		return fmt.Errorf("spec name %q must be kebab-case (02 §Identity)", slug)
+	}
+	if _, err := os.Stat(store.ActiveSpecDir(s.root, slug)); err == nil {
+		return fmt.Errorf("spec %s already exists under specs/active/ — pick another name", slug)
+	}
+	if _, err := os.Stat(store.ArchiveSpecDir(s.root, slug)); err == nil {
+		return fmt.Errorf("spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)", slug)
+	}
+	// A plain-language pre-check on the branch (the form surfaces this
+	// message verbatim); UpdateRef stays the atomic create-only guard.
+	if _, err := gitx.RevParse(ctx, s.root, "refs/heads/design/"+slug); err == nil {
+		return fmt.Errorf("branch design/%s already exists — the name is taken; check that branch out instead", slug)
+	}
+
+	tmpl, fields, err := s.createFormFields()
+	if err != nil {
+		return err
+	}
+	// Submitted values must key into the template's own enumerated
+	// input/statement fields — the form and this validation share one
+	// contract, so a drifted (or hand-crafted) client fails loudly by
+	// name rather than silently dropping input.
+	askable := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		if f.Kind == designscaffold.FieldInput || f.Kind == designscaffold.FieldStatement {
+			askable[f.Name] = true
+		}
+	}
+	for key := range req.Values {
+		if !askable[key] {
+			return fmt.Errorf("value key %q is not a fillable field of the %s class's template (fields are enumerated from the template's own placeholders, guide 5.3)", key, s.model.DisplayClass("story"))
+		}
+	}
+
+	// The chosen acceptance criteria become the story's real implements
+	// edges — at least one, each a declared AC of this wall, never design
+	// start's placeholder edge.
+	if len(req.ACs) == 0 {
+		return fmt.Errorf("create requires at least one acceptance criterion for the new %s to implement (choose from this wall's declared acceptance criteria)", s.model.DisplayClass("story"))
+	}
+	kinds := declaredKindsOf(proj)
+	seen := map[string]bool{}
+	var links []designscaffold.StoryLink
+	for _, ac := range req.ACs {
+		if kinds[ac] != string(boardlayout.ZoneAC) {
+			return fmt.Errorf("%q is not a declared acceptance criterion on this wall", ac)
+		}
+		if seen[ac] {
+			continue
+		}
+		seen[ac] = true
+		links = append(links, designscaffold.StoryLink{Type: artifact.LinkImplements, Ref: "spec/" + name + "#" + ac})
+	}
+
+	valueOr := func(key, fallback string) string {
+		if v, ok := req.Values[key]; ok && v != "" {
+			return v
+		}
+		return fallback
+	}
+	content, err := designscaffold.Render(tmpl, designscaffold.ScaffoldData{
+		Ref:      "spec/" + slug,
+		Title:    valueOr("Title", designscaffold.HumanizeName(slug)),
+		Owners:   valueOr("Owners", designscaffold.DefaultOwners),
+		StoryRef: valueOr("StoryRef", stubInstantiatePlaceholderStoryRef),
+		Problem:  valueOr("Problem", designscaffold.DefaultProblem),
+		Outcome:  valueOr("Outcome", designscaffold.DefaultOutcome),
+		Links:    links,
+	})
+	if err != nil {
+		return fmt.Errorf("workbench: rendering the %s class's template: %w", artifact.ClassStory, err)
+	}
+
+	// Self-validate + CheckClass before ever touching the object database
+	// — stub-instantiate's inherited posture (K1): class.Template is
+	// DATA, so a misconfigured binding or override can render the wrong
+	// class and still strict-decode clean.
+	fm, _, err := artifact.SplitFrontmatter([]byte(content))
+	if err != nil {
+		return fmt.Errorf("workbench: create scaffold failed self-validation: %w", err)
+	}
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		return fmt.Errorf("workbench: create scaffold failed self-validation: %w", err)
+	}
+	if err := designscaffold.CheckClass(spec, artifact.ClassStory); err != nil {
+		return fmt.Errorf("workbench: create scaffold failed self-validation (the resolved template's class binding is misconfigured): %w", err)
+	}
+
+	msg := fmt.Sprintf("create: scaffold spec/%s from the creation form of spec/%s", slug, name)
+	return s.commitScaffoldBranch(ctx, slug, content, msg)
 }
 
 // relatesTarget builds a relates endpoint's pinned target record.
