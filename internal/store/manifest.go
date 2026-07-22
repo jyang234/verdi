@@ -124,20 +124,34 @@ type ToolchainConfig struct {
 // zero-vs-absent-vs-configured default-application rule 01 does not spell
 // out mechanically. Flagged in the phase report as a candidate follow-up
 // for 01 §Store manifest to state explicitly.
+// WaiversStaleThreshold is a third counterweight threshold
+// (spec/verb-surfaces ac-3, guide 8.4: "verdi audit counts active waivers
+// with the same budget machinery as deviations"), added schema-additively
+// alongside the two above — its own field, its own count, never folded
+// into DeviationsStaleThreshold's budget (a waiver and an accepted-
+// deviation disposition are structurally different things). Same
+// zero-vs-absent-vs-configured default-application posture: this package
+// only decodes and shape-checks it; internal/decisionsweep applies the
+// documented default of 3 when absent or non-positive, exactly as
+// DeviationsStaleThreshold's own consumer already does.
 type AuditConfig struct {
 	ExemptsConflictThreshold int `yaml:"exempts_conflict_threshold"`
 	DeviationsStaleThreshold int `yaml:"deviations_stale_threshold"`
+	WaiversStaleThreshold    int `yaml:"waivers_stale_threshold,omitempty"`
 }
 
-// Validate checks both thresholds are non-negative (a negative count can
-// never be reached, which would make the counterweight permanently inert —
-// silently accepting one would hide a manifest typo).
+// Validate checks all three thresholds are non-negative (a negative count
+// can never be reached, which would make the counterweight permanently
+// inert — silently accepting one would hide a manifest typo).
 func (a AuditConfig) Validate() error {
 	if a.ExemptsConflictThreshold < 0 {
 		return fmt.Errorf("store: verdi.yaml audit.exempts_conflict_threshold %d must not be negative", a.ExemptsConflictThreshold)
 	}
 	if a.DeviationsStaleThreshold < 0 {
 		return fmt.Errorf("store: verdi.yaml audit.deviations_stale_threshold %d must not be negative", a.DeviationsStaleThreshold)
+	}
+	if a.WaiversStaleThreshold < 0 {
+		return fmt.Errorf("store: verdi.yaml audit.waivers_stale_threshold %d must not be negative", a.WaiversStaleThreshold)
 	}
 	return nil
 }

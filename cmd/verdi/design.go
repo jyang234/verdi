@@ -396,7 +396,9 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		return 2
 	case deps.DeferStatements:
 		problemText, outcomeText = designscaffold.DefaultProblem, designscaffold.DefaultOutcome
-		fmt.Fprintln(stdout, "design start: --defer-statements: problem and outcome deliberately deferred as TODO placeholders — replace both before accept")
+		// spec/verb-surfaces ac-4: the verb word routes through DisplayVerb —
+		// a cli-creation surface this feature shipped, now vocabulary-complete.
+		fmt.Fprintf(stdout, "design start: --defer-statements: problem and outcome deliberately deferred as TODO placeholders — replace both before %s\n", mdl.DisplayVerb("accept"))
 	default:
 		if !deps.IsTTY {
 			fmt.Fprintln(stderr, "design start: cannot interview (no attached terminal) and statements are required; pass --problem/--outcome, or --defer-statements to explicitly defer them")

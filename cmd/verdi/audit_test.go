@@ -5,9 +5,15 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
+
+// auditTestNow is the fixed reference "now" every runAudit test in this
+// package passes — a deterministic instant (never time.Now()) for the
+// same reason internal/decisionsweep's own audit_test.go pins one.
+var auditTestNow = time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 
 // componentSpecWithExempts renders a minimal component-class spec.md
 // carrying one decision object with an `exempts` link against adrRef —
@@ -50,7 +56,7 @@ func TestAudit_ExemptionThresholdEndToEnd(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	got := runAudit(context.Background(), repo.Dir, 3, 3, "main", nil, &stdout, &stderr)
+	got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runAudit = %d, want 1 (flagged: threshold crossed); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -64,7 +70,7 @@ func TestAudit_ExemptionThresholdEndToEnd(t *testing.T) {
 	// Re-running must be idempotent — clean the second time (nothing NEW to
 	// file), even though the exemptions themselves are still listed.
 	var stdout2, stderr2 bytes.Buffer
-	got2 := runAudit(context.Background(), repo.Dir, 3, 3, "main", nil, &stdout2, &stderr2)
+	got2 := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout2, &stderr2)
 	if got2 != 0 {
 		t.Fatalf("runAudit (second run) = %d, want 0 (idempotent, nothing new); stdout=%s", got2, stdout2.String())
 	}
@@ -86,7 +92,7 @@ func TestAudit_BelowThreshold_Clean(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	got := runAudit(context.Background(), repo.Dir, 3, 3, "main", nil, &stdout, &stderr)
+	got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runAudit = %d, want 0 (below threshold); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}

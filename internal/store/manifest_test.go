@@ -20,6 +20,7 @@ align:
 audit:
   exempts_conflict_threshold: 3
   deviations_stale_threshold: 3
+  waivers_stale_threshold: 3
 spike_paths: [spikes/**, docs/spikes/**]
 derived:
   retention_days: 14
@@ -55,6 +56,9 @@ func TestDecodeManifest_Happy(t *testing.T) {
 	}
 	if m.Audit == nil || m.Audit.ExemptsConflictThreshold != 3 || m.Audit.DeviationsStaleThreshold != 3 {
 		t.Fatalf("Audit = %+v, want both thresholds 3 (R4-I-10)", m.Audit)
+	}
+	if m.Audit.WaiversStaleThreshold != 3 {
+		t.Fatalf("Audit.WaiversStaleThreshold = %d, want 3 (spec/verb-surfaces ac-3)", m.Audit.WaiversStaleThreshold)
 	}
 	if len(m.SpikePaths) != 2 || m.SpikePaths[0] != "spikes/**" || m.SpikePaths[1] != "docs/spikes/**" {
 		t.Fatalf("SpikePaths = %+v, unexpected", m.SpikePaths)
@@ -132,6 +136,7 @@ func TestDecodeManifest_AuditNegativeThresholdRejected(t *testing.T) {
 	cases := []string{
 		"schema: verdi.layout/v1\naudit:\n  exempts_conflict_threshold: -1\n  deviations_stale_threshold: 3\n",
 		"schema: verdi.layout/v1\naudit:\n  exempts_conflict_threshold: 3\n  deviations_stale_threshold: -1\n",
+		"schema: verdi.layout/v1\naudit:\n  exempts_conflict_threshold: 3\n  deviations_stale_threshold: 3\n  waivers_stale_threshold: -1\n",
 	}
 	for _, data := range cases {
 		if _, err := DecodeManifest([]byte(data)); err == nil {

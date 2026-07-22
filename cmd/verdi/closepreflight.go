@@ -59,6 +59,7 @@ import (
 // (judged-dcj-2): without it, a "ready" preflight run locally without
 // --force-local could be followed by a real close's surprise refusal at a
 // guard --preflight itself never needs to hit.
+// vocab:identity — CLI invocation grammar ("verdi close", identity)
 const preflightGuardDisclosureText = `outside a detected CI environment and without --force-local, a real "verdi close" run on this ref would separately refuse at the CI-only publish guard (04 §Semantics: "PublishRollup runs in CI only"), regardless of the gate verdict above; this --preflight run itself never reaches that guard`
 
 // closePublishGuardRefuses is the ONE boolean evaluation both cmdClose's
@@ -110,9 +111,11 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 	}
 
 	if !ok {
+		// vocab:identity — CLI invocation grammar: "a real close" names a real `verdi close` run (identity)
 		fmt.Fprintln(stdout, "close: --preflight: NOT READY (closure gate would refuse a real close; see conditions above)")
 		return 1
 	}
+	// vocab:identity — CLI invocation grammar: "a real close" names a real `verdi close` run (identity)
 	fmt.Fprintln(stdout, "close: --preflight: READY (closure gate holds; a real close would proceed to archive)")
 	return 0
 }
