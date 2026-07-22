@@ -328,18 +328,11 @@ func decisionAbsenceFinding(f *JudgeFailure) artifact.ConflictFinding {
 	return artifact.ConflictFinding{ID: DecisionAbsenceFindingID, Kind: artifact.FindingJudged, Text: text}
 }
 
-// decodeDecisionInnerResult mirrors judge.go's decodeInnerResult (trim,
-// strip a defensive markdown fence, strict-decode).
+// decodeDecisionInnerResult decodes the decision-sweep judge's findings JSON
+// via the shared prose-tolerant inner-parse (innerparse.go: decodeJudgeInnerJSON),
+// the same seam judge.go's build-branch decodeInnerResult uses — a
+// natural-language preamble/postamble and/or a markdown fence around the object
+// is tolerated, while strict decode is preserved on the object itself.
 func decodeDecisionInnerResult(raw string) (*decisionInnerResult, error) {
-	s := strings.TrimSpace(raw)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	s = strings.TrimSpace(s)
-
-	var inner decisionInnerResult
-	if err := artifact.DecodeStrictJSON([]byte(s), &inner); err != nil {
-		return nil, err
-	}
-	return &inner, nil
+	return decodeJudgeInnerJSON[decisionInnerResult](raw)
 }
