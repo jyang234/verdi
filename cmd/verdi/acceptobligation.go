@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
@@ -112,6 +113,30 @@ func scaffoldMissingObligations(root, specName string, spec *artifact.SpecFrontm
 			}
 
 			path := store.ObligationPath(root, specName, ac.ID, string(kind))
+
+			// judged-coverage-predicate-forkind-keying: the coverage predicate
+			// above keys on each obligation's DECODED for_kind, but a decodable
+			// obligation can sit at a DIFFERENT kind's convention filename (its
+			// for_kind disagreeing with the name — internally consistent enough
+			// to decode, path/id agreement being VL-011's job). Such a file
+			// never errored above and never counted THIS pair as covered, yet
+			// it already occupies this pair's convention path. WriteObligationFile
+			// is unconditional by design (O-5: the seam stays policy-free; the
+			// board's create-only check and this backstop each own their own
+			// overwrite policy at the call site), so the backstop must itself
+			// refuse to write over any occupied path: if anything at all already
+			// sits here, this is a conflicted state (a present file whose own
+			// for_kind disagrees with its filename) for the operator or VL-011 to
+			// reconcile — refuse operationally rather than clobber a hand-authored
+			// file. A correctly-named, decodable file was already skipped as
+			// covered above and never reaches here; a present-but-undecodable
+			// file already surfaced as an error out of evidence.Obligations.
+			if _, statErr := os.Stat(path); statErr == nil {
+				return created, fmt.Errorf("obligation already present at %s but not recognized as covering %s %s evidence — the file's own for_kind disagrees with its filename, a conflicted state to reconcile by hand or via VL-011; refusing to overwrite it", path, ac.ID, kind)
+			} else if !os.IsNotExist(statErr) {
+				return created, fmt.Errorf("checking obligation path %s: %w", path, statErr)
+			}
+
 			id := fmt.Sprintf("obligation/%s--%s--%s", specName, ac.ID, kind)
 			title := fmt.Sprintf("scaffolded obligation: %s %s evidence", ac.ID, kind)
 			content := evidence.RenderObligation(evidence.ObligationInput{
@@ -135,14 +160,18 @@ func scaffoldMissingObligations(root, specName string, spec *artifact.SpecFrontm
 // unlinkScaffoldedObligations is O-1b's cleanup: given exactly the paths
 // scaffoldMissingObligations newly created this invocation (never a path
 // merely skipped as already-covered — those are never in this slice),
-// remove them, and — only when the obligations directory itself did not
-// exist before this invocation began — remove it too, best-effort, once
-// it is empty (a no-op, via the ignored ENOTEMPTY, when pre-existing
-// covered obligations still live there). A removal failure is disclosed to
-// stderr rather than silently swallowed, but never changes the caller's
-// own exit code: the caller already has the real refusal or error to
+// remove them, and then remove any directory this invocation newly created
+// and left empty: first the per-spec obligations directory (when it did not
+// pre-exist), then the .verdi/obligations/ PARENT (when IT did not pre-exist
+// either — atomicfile's MkdirAll may have created both,
+// judged-obligations-parent-dir-residue). Each os.Remove is best-effort and a
+// no-op via the ignored ENOTEMPTY when other, pre-existing files still live
+// there; the per-spec removal necessarily precedes the parent's, so a parent
+// whose sole child was that per-spec dir becomes removable. A removal failure
+// is disclosed to stderr rather than silently swallowed, but never changes the
+// caller's own exit code: the caller already has the real refusal or error to
 // report.
-func unlinkScaffoldedObligations(created []string, obligationDir string, obligationDirPreExisted bool, stderr io.Writer) {
+func unlinkScaffoldedObligations(created []string, obligationDir string, obligationDirPreExisted, obligationsParentPreExisted bool, stderr io.Writer) {
 	for _, p := range created {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			fmt.Fprintf(stderr, "accept: warning: cleaning up scaffolded obligation %s after refusal: %v\n", p, err)
@@ -150,5 +179,8 @@ func unlinkScaffoldedObligations(created []string, obligationDir string, obligat
 	}
 	if !obligationDirPreExisted {
 		_ = os.Remove(obligationDir) // best-effort; only removes it if now empty
+	}
+	if !obligationsParentPreExisted {
+		_ = os.Remove(filepath.Dir(obligationDir)) // .verdi/obligations, only if newly created and now empty
 	}
 }

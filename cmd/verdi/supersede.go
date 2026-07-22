@@ -52,13 +52,22 @@ var acceptedStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?accepted-pending
 // exactly what it modified, never the rest of the working tree) plus 0 on
 // success (including every no-op case, which contributes no path), 2 on an
 // operational failure.
-func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, mdl *model.Model, stdout, stderr io.Writer) ([]string, int) {
+// recordFlip is supersede's pre-write rollback hook: flipPredecessorToSuperseded
+// calls it with a predecessor's path and pre-flip bytes at the moment just
+// before overwriting that file, so accept's post-flip rollback
+// (spec/obligation-seam ac-3) can restore a predecessor flip alongside its own
+// spec flip if a later step fails. accept passes acceptRollback.recordFile; a
+// nil hook (any non-accept caller, or a test exercising the flip alone) is a
+// no-op.
+type recordFlip func(path string, original []byte)
+
+func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, mdl *model.Model, stdout, stderr io.Writer, record recordFlip) ([]string, int) {
 	var paths []string
 	for _, l := range spec.Links {
 		if l.Type != artifact.LinkSupersedes || !supersedesTargetsStory(root, l.Ref) {
 			continue
 		}
-		path, rc := flipPredecessorToSuperseded(root, l.Ref, spec.ID, mdl, stdout, stderr)
+		path, rc := flipPredecessorToSuperseded(root, l.Ref, spec.ID, mdl, stdout, stderr, record)
 		if rc != 0 {
 			return paths, rc
 		}
@@ -73,7 +82,7 @@ func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, mdl *mod
 	// fails closed (false) on a fragment ref, so an object-fragment
 	// `supersedes` edge (a decision-level override) never reaches here.
 	if wholeRef := wholeSpecSupersedesTarget(spec); wholeRef != "" && supersedesTargetsFeature(root, wholeRef) {
-		path, rc := flipPredecessorToSuperseded(root, wholeRef, spec.ID, mdl, stdout, stderr)
+		path, rc := flipPredecessorToSuperseded(root, wholeRef, spec.ID, mdl, stdout, stderr, record)
 		if rc != 0 {
 			return paths, rc
 		}
@@ -107,7 +116,7 @@ func supersedePredecessors(root string, spec *artifact.SpecFrontmatter, mdl *mod
 // and "" for every no-op case (malformed ref, absent, idempotent, or wrong
 // status). rc is 0 on success (including every no-op case), 2 on an
 // operational failure.
-func flipPredecessorToSuperseded(root, predecessorRef, successorID string, mdl *model.Model, stdout, stderr io.Writer) (path string, rc int) {
+func flipPredecessorToSuperseded(root, predecessorRef, successorID string, mdl *model.Model, stdout, stderr io.Writer, record recordFlip) (path string, rc int) {
 	ref, err := artifact.ParseRef(predecessorRef)
 	if err != nil {
 		return "", 0 // malformed edges are lint's concern, not accept's
@@ -172,6 +181,13 @@ func flipPredecessorToSuperseded(root, predecessorRef, successorID string, mdl *
 		// vocab:identity — frontmatter status-line machinery (field + enum value)
 		fmt.Fprintf(stderr, "accept: internal error: flipped predecessor %s does not carry status: superseded with its frozen stamp\n", ref.String())
 		return "", 2
+	}
+	// spec/obligation-seam ac-3: snapshot the predecessor's pre-flip bytes
+	// BEFORE overwriting, so accept's rollback restores this flip too if a
+	// later step (this same loop's next predecessor, AddPaths, CreateCommit)
+	// fails. record is nil for any non-accept caller.
+	if record != nil {
+		record(predPath, raw)
 	}
 	if err := os.WriteFile(predPath, newRaw, 0o644); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
