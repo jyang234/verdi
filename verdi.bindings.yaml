@@ -1144,6 +1144,54 @@ bindings:
       - "spec/creation-surfaces#ac-3"
       - "spec/creation-surfaces#ac-4"
       - "spec/creation-surfaces#ac-5"
+      # spec/obligation-seam (spec/creation-surfaces#ac-4's implementing
+      # story, plan Task 13, ledger L-N8 as adjudicated at Task 8/re-attacked
+      # at the §12 addendum). BUILT, same branch as the design/accept commits
+      # (matching spec/judge-ergonomics' own precedent's eventual landed
+      # shape). ac-1 <- cmd/verdi/acceptobligation_test.go's
+      # TestRunAccept_ScaffoldsMissingObligations_Happy (missing stubs
+      # appear, stamped the captured pre-flip HEAD, land inside the accept
+      # commit's own diff alongside the status flip) plus
+      # TestAccept_ScaffoldingPrecedesLintGateInSource (the O-1 ordering
+      # fact itself, source-pinned) plus
+      # TestObligationSeamE2E_AcceptScaffoldsMissingObligations
+      # (built-binary); ac-2 <-
+      # TestRunAccept_SkipsExistingObligations_NeverOverwrites (a
+      # pre-existing obligation's bytes survive untouched) plus
+      # TestRunAccept_MalformedExistingObligation_RefusesOperationally (a
+      # present-but-undecodable file at the convention path refuses accept
+      # operationally rather than being silently treated as covered or
+      # silently clobbered) plus TestScaffoldMissingObligations' own
+      # table-driven unit cases; ac-3 <-
+      # TestRunAccept_UnrelatedRefusal_UnlinksNewlyScaffoldedObligations
+      # (newly-created stubs unlinked, pre-existing files and HEAD
+      # untouched, a subsequent `obligation author` retry unblocked) plus
+      # TestUnlinkScaffoldedObligations' own unit cases; ac-4 <-
+      # internal/workbench/obligationauthor_test.go's existing suite
+      # (TestBoardSpec_ObligationGraduate and siblings) passing completely
+      # unmodified after the renderer moved behind the shared
+      # internal/evidence seam (behavioral leg) plus
+      # cmd/verdi/obligation_test.go's
+      # TestObligationAuthor_AtomicWrite_NoDirectCreateTemp, a source-text
+      # witness proving cmd/verdi carries no second render/self-validate
+      # implementation (static leg, bound under verdi-verify-static below);
+      # ac-5 <- cmd/verdi/obligation_test.go's TestRunObligationAuthor_
+      # Create/_Regenerate/_RefusesOnAlreadyFrozen/_NotYetFrozen_
+      # SameFileAbsentAtDiffBase/_Negative (merge-base reachability,
+      # mirroring internal/lint/vl010_test.go's own frozen-fixture
+      # construction) plus
+      # TestObligationSeamE2E_ObligationAuthorCreate/_RefusesOnAlreadyFrozen
+      # (built-binary, the latter through the REAL production default-
+      # branch/merge-base resolution, CI_DEFAULT_BRANCH=main) — plan Task 13
+      # Step 1/2 throughout. All green under make verify. No attestation leg
+      # is bound here — stories carry no attestation floor
+      # (spec/creation-surfaces' own L-M14 feature-AC floor is the
+      # feature's, not each implementing story's).
+      - "spec/obligation-seam#ac-1"
+      - "spec/obligation-seam#ac-2"
+      - "spec/obligation-seam#ac-3"
+      - "spec/obligation-seam#ac-4"
+      - "spec/obligation-seam#ac-5"
       # spec/init-wizard (spec/creation-surfaces#ac-1's implementing story,
       # plan Task 10, ledger L-N5 as amended at Task 8/design doc §12 rules
       # W-1..W-4/W-3b). DESIGN-TIME FORWARD DECLARATION, not built yet, this
@@ -1836,3 +1884,17 @@ bindings:
       # behavioral/static legs above are what the fold will actually read
       # once real.
       - "spec/creation-surfaces#ac-5"
+      # spec/obligation-seam#ac-4 static leg (extensibility Phase 2, Task
+      # 13; ac-1..5 are ALSO bound above under verdi-verify-behavioral —
+      # ac-4 alone declares both kinds, per its unmodified-board-behavior-
+      # plus-source-witness evidence split). BUILT: cmd/verdi/
+      # obligation_test.go's TestObligationAuthor_AtomicWrite_
+      # NoDirectCreateTemp is a source-text witness (mirroring
+      # internal/workbench/obligationauthor_test.go's own same-named
+      # convention) proving cmd/verdi/accept.go, acceptobligation.go, and
+      # obligation.go contain no hand-rolled obligation-frontmatter render,
+      # no yaml.Marshal, and no duplicate artifact.DecodeObligation
+      # self-validate — every obligation write routes through the one
+      # internal/evidence seam. Green under make verify. No attestation leg
+      # is bound here — stories carry no attestation floor.
+      - "spec/obligation-seam#ac-4"

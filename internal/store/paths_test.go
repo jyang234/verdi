@@ -29,6 +29,8 @@ func TestAbsolutePaths(t *testing.T) {
 		{"DecisionConflictReportPath", DecisionConflictReportPath(root, ZoneActive, "widget"), "/store/.verdi/specs/active/widget/decision-conflict-report.md"},
 		{"AttestationDir", AttestationDir(root, "story-7"), "/store/.verdi/attestations/story-7"},
 		{"AttestationPath", AttestationPath(root, "story-7", "ac-2"), "/store/.verdi/attestations/story-7/ac-2.md"},
+		{"ObligationDir", ObligationDir(root, "widget"), "/store/.verdi/obligations/widget"},
+		{"ObligationPath", ObligationPath(root, "widget", "ac-2", "behavioral"), "/store/.verdi/obligations/widget/ac-2--behavioral.md"},
 		{"DerivedRoot", DerivedRoot(root), "/store/.verdi/data/derived"},
 		{"DerivedSpecDir", DerivedSpecDir(root, "spec--widget"), "/store/.verdi/data/derived/spec--widget"},
 	}
@@ -145,5 +147,18 @@ func TestAttestationPathEmptyRootDisplayForm(t *testing.T) {
 	}
 	if got, want := AttestationDir("", "story-7"), filepath.FromSlash(".verdi/attestations/story-7"); got != want {
 		t.Errorf("AttestationDir(\"\", …) = %q, want %q", got, want)
+	}
+}
+
+// TestObligationPathEmptyRootDisplayForm is ObligationPath/ObligationDir's
+// own twin of TestAttestationPathEmptyRootDisplayForm (spec/obligation-seam
+// ac-1/ac-5's shared path seam): an empty root drops the leading element,
+// yielding the ".verdi/…"-rooted display form a refusal message names.
+func TestObligationPathEmptyRootDisplayForm(t *testing.T) {
+	if got, want := ObligationPath("", "widget", "ac-2", "behavioral"), filepath.FromSlash(".verdi/obligations/widget/ac-2--behavioral.md"); got != want {
+		t.Errorf("ObligationPath(\"\", …) = %q, want %q", got, want)
+	}
+	if got, want := ObligationDir("", "widget"), filepath.FromSlash(".verdi/obligations/widget"); got != want {
+		t.Errorf("ObligationDir(\"\", …) = %q, want %q", got, want)
 	}
 }

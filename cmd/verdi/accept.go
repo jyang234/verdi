@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -30,6 +31,22 @@ import (
 // tolerating an optional surrounding quote so a human's re-quoting edit
 // during the design branch does not break the flip.
 var draftStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?draft"?\s*$`)
+
+// acceptAddPaths and acceptCreateCommit are accept's two post-flip git write
+// ops as package-level seams, so a test can force the exact AddPaths/
+// CreateCommit failure spec/obligation-seam ac-3's post-flip rollback must
+// survive (judged-postflip-rollback-window). A real `git add`/`git commit`
+// cannot be made to fail deterministically in a clean hermetic fixture repo,
+// and accept has no deps struct to thread a fake through (its runAccept core
+// is shared by ~40 call sites); a narrowly-scoped, unexported, defer-restored
+// package var is the smallest reversible injection point — the module's
+// dependency-injection idiom (closeDeps/designDeps) reserved for real runtime
+// dependencies, this reserved for pure fault injection. Production is gitx's
+// own; tests override and restore via defer.
+var (
+	acceptAddPaths     = gitx.AddPaths
+	acceptCreateCommit = gitx.CreateCommit
+)
 
 // cmdAccept is `verdi accept`'s entry point, invoked by dispatch.go.
 func cmdAccept(args []string, stdout, stderr io.Writer) int {
@@ -136,13 +153,12 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		return 2
 	}
 
-	// D6-23: refuse to freeze a quartet the store's own linter rejects,
-	// before any part of the ritual below runs — no stub-match/blast-radius
-	// disclosure printed, no status flip, no frozen stamp (acceptlint.go).
-	if rc := lintQuartetOrRefuse(ctx, root, ref, spec, stderr); rc != 0 {
-		return rc
-	}
-
+	// spec/obligation-seam ac-1 (O-1/O-4): compute preFlipHead FIRST —
+	// before scaffolding and before the in-ritual lint gate — so every
+	// backstop-scaffolded obligation, and the spec's own flip moments
+	// later, stamp the identical commit: never the not-yet-created accept
+	// commit itself. Reordered deliberately from this function's
+	// pre-obligation-seam shape, which computed this after the lint gate.
 	preFlipHead, err := gitx.RevParse(ctx, root, "HEAD")
 	if err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
@@ -152,6 +168,50 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	if err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
+	}
+
+	// spec/obligation-seam ac-1/ac-2 (O-1/O-2/O-3/O-3b/O-6,
+	// acceptobligation.go): scaffold exactly the missing declared (ac,
+	// kind) obligation pairs to disk before the lint gate runs — a no-op
+	// for a feature-class spec (dc-3).
+	obligationDir := store.ObligationDir(root, ref.Name)
+	_, dirStatErr := os.Stat(obligationDir)
+	obligationDirPreExisted := dirStatErr == nil
+	// judged-obligations-parent-dir-residue: atomicfile's MkdirAll may newly
+	// create the .verdi/obligations/ PARENT too, not just the per-spec dir —
+	// capture whether it pre-existed so cleanup can remove it if (and only if)
+	// this invocation created it and it ends up empty.
+	obligationsParent := filepath.Dir(obligationDir)
+	_, parentStatErr := os.Stat(obligationsParent)
+	obligationsParentPreExisted := parentStatErr == nil
+
+	createdObligations, err := scaffoldMissingObligations(root, ref.Name, spec, artifact.NewFrozen(at, preFlipHead), operatorOwner())
+	// spec/obligation-seam ac-3 (O-1b, judged-postflip-rollback-window): from
+	// here to the end of this function, ANY refusal or operational error must
+	// leave the tree exactly as it found it — a pristine tree, no partial
+	// commit. That means both: unlink exactly the obligation stubs newly
+	// created above (creations), AND restore every in-place file this
+	// invocation overwrote (the spec flip, any predecessor flips) plus reset
+	// whatever it staged (rollback, recorded as we go). success flips true
+	// only immediately before the final, successful return.
+	var rollback acceptRollback
+	success := false
+	defer func() {
+		if !success {
+			rollback.restore(ctx, root, stderr)
+			unlinkScaffoldedObligations(createdObligations, obligationDir, obligationDirPreExisted, obligationsParentPreExisted, stderr)
+		}
+	}()
+	if err != nil {
+		fmt.Fprintln(stderr, "accept:", err)
+		return 2
+	}
+
+	// D6-23: refuse to freeze a quartet the store's own linter rejects,
+	// before any part of the ritual below runs — no stub-match/blast-radius
+	// disclosure printed, no status flip, no frozen stamp (acceptlint.go).
+	if rc := lintQuartetOrRefuse(ctx, root, ref, spec, stderr); rc != 0 {
+		return rc
 	}
 
 	stubMatched := false
@@ -222,6 +282,10 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	}
 
 	newContent := "---\n" + string(newFm) + "\n---\n" + string(body)
+	// ac-3: snapshot the spec's original (draft) bytes BEFORE the flip write,
+	// so any later failure restores them (raw is this spec's pre-flip content,
+	// read at the top of the ritual).
+	rollback.recordFile(specPath, raw)
 	if err := os.WriteFile(specPath, []byte(newContent), 0o644); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
@@ -237,7 +301,10 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	// predecessor keeps its frozen stamp and stays in specs/active/. Written
 	// to disk here so the caller's own scoped AddPaths/CreateCommit below
 	// lands it in the same commit as the accept flip.
-	predecessorPaths, rc := supersedePredecessors(root, spec, mdl, stdout, stderr)
+	// ac-3: the recorder snapshots each predecessor's pre-flip bytes just
+	// before supersedePredecessors overwrites it, so the rollback restores a
+	// predecessor flip alongside the spec flip on any later failure.
+	predecessorPaths, rc := supersedePredecessors(root, spec, mdl, stdout, stderr, rollback.recordFile)
 	if rc != 0 {
 		return rc
 	}
@@ -249,16 +316,26 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	// commit (round-6 witness, both acceptance agents hit it independently
 	// in the same wave); a ritual that writes a frozen stamp must not also
 	// silently commit whatever else happens to be sitting in the checkout.
+	// spec/obligation-seam ac-1 (O-2): scaffolded obligation paths join
+	// accept's scoped addPaths set so they land inside the same accept
+	// commit as the status flip — the mechanism that makes "the gap cannot
+	// be replayed away" literally true rather than aspirational.
 	addPaths := append([]string{specPath}, predecessorPaths...)
-	if err := gitx.AddPaths(ctx, root, addPaths...); err != nil {
+	addPaths = append(addPaths, createdObligations...)
+	// ac-3: record what we are about to stage BEFORE staging, so a failure at
+	// AddPaths or CreateCommit below resets exactly these index entries back
+	// to HEAD (rollback.restore, in the deferred cleanup above).
+	rollback.stage(addPaths...)
+	if err := acceptAddPaths(ctx, root, addPaths...); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}
 	// vocab:identity — git commit subject (history, never display prose)
-	if _, err := gitx.CreateCommit(ctx, root, fmt.Sprintf("accept: %s draft -> accepted-pending-build", ref.String())); err != nil {
+	if _, err := acceptCreateCommit(ctx, root, fmt.Sprintf("accept: %s draft -> accepted-pending-build", ref.String())); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}
+	success = true
 
 	// Display resolution only (spec/vocabulary-surfaces ac-1): the commit
 	// subject above stays on bare ids (history is identity, never display).

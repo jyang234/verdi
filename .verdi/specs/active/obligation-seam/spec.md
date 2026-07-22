@@ -1,0 +1,221 @@
+---
+id: spec/obligation-seam
+kind: spec
+title: "Obligation Seam"
+owners: [platform-team]
+class: story
+status: accepted-pending-build
+story: jira:VERDI-P2-9
+problem: { text: "spec/creation-surfaces#ac-4 (X-9) names a gap the design wave's re-attack pinned exactly (design doc §12 + addendum, ledger L-N8): internal/workbench/obligationauthor.go's renderObligation/writeObligationFile already exist but are unexported and board-only, so nothing at accept time enforces that a story's declared (ac, kind) evidence pairs actually have obligations behind them. Worse, accept's own quartet lint gate (cmd/verdi/accept.go's lintQuartetOrRefuse, called before the status flip) runs while the spec's on-disk status is still draft, so VL-020's own co-2 draft-tolerance means the very check that exists never actually fires during accept — a story can freeze declaring evidence kinds with zero obligations stating what that evidence must specifically show, and nothing catches it. Design-branch authors have no surface to fix this ahead of time either: the renderer's only caller is the board's sticky-graduate action. This story is itself accepted under that exact gap, by hand, per the ritual-integrity precedent (obligations authored WITH the spec, DC-3/X-9) — the dogfood irony is deliberate: it is the last story this build will ever have to hand-author obligations for, since this story's own build is what makes that hand-work unnecessary for every story that accepts after it.", anchor: problem }
+outcome: { text: "accept's freeze-moment backstop computes preFlipHead first, scaffolds exactly the missing (ac, kind) pairs to disk before the in-ritual lint gate ever runs, stamps every scaffolded obligation preFlipHead — identical to the spec's own flip stamp — and stages the newly-created paths into the accept commit itself, so a story is born with its declared evidence kinds' obligations already in hand and the pairing can never be replayed away. The backstop skips, never overwrites, any pair an already-decodable obligation already covers, keyed on the same coverage predicate VL-020 itself uses; on any refusal or error after scaffolding it unlinks exactly the obligations it newly created this invocation, leaving pre-existing files and the rest of the tree untouched. verdi obligation author gives the design branch a separate, pre-freeze surface for authoring or regenerating an obligation ahead of accept, through the identical shared renderer seam (never a second re-render in cmd/verdi) — and refuses outright on any obligation a merge to main has already frozen, since a frozen obligation is superseded through the normal ladder, never refined in place. None of this reverses VL-020's own draft-tolerance (evidence-obligations co-2 stands, vl020.go unchanged): the gap this story closes was always the freeze moment itself, by construction, never authoring-time tolerance.", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "accept computes preFlipHead before running its in-ritual lint gate, then scaffolds a stub obligation for every declared (ac, kind) pair the story's own quartet is missing, before lintQuartetOrRefuse (accept.go:142) ever runs; every scaffolded stub is stamped frozen: { at, commit: preFlipHead } — the exact same stamp the spec's own flip writes moments later, never the not-yet-created accept commit — and the newly-scaffolded paths join accept's own scoped addPaths set so they land inside the same accept commit as the status flip, proven by asserting the accept commit's own diff contains them (the X-9 'replay impossible' pin: a bare git log cannot show the pairing ever having been separable)", evidence: [behavioral], anchor: ac-1 }
+  - { id: ac-2, text: "the backstop never overwrites an existing obligation: for a story with some (ac, kind) pairs already covered by a hand- or board-authored obligation and others missing, only the missing pairs are scaffolded and every pre-existing obligation file is byte-untouched; coverage is decided by the same decode-based predicate VL-020 itself applies (a DECODABLE obligation.md at the .verdi/obligations/<spec>/<ac>--<kind>.md convention path), never a bare os.Stat, so a present-but-malformed file is never mistaken for coverage", evidence: [behavioral], anchor: ac-2 }
+  - { id: ac-3, text: "on any refusal or operational error accept hits after scaffolding has begun — an unrelated quartet lint violation, a downstream write failure, anything — accept unlinks exactly the obligation paths it newly created this invocation and leaves everything else exactly as it found it: pre-existing obligations untouched, no partial commit, a pristine working tree. Induced by forcing an unrelated quartet refusal after scaffolding has run, asserting the tree matches its pre-scaffold state byte for byte and that a subsequent obligation author or accept retry is never blocked by an orphaned stub the backstop itself left behind", evidence: [behavioral], anchor: ac-3 }
+  - { id: ac-4, text: "internal/workbench/obligationauthor.go's renderObligation, writeObligationFile, and pre-write self-validate are exported/extracted into exactly one shared seam that accept's backstop, the existing board sticky-graduate action, and verdi obligation author all three call — proven both behaviorally (the board's existing obligation-graduate tests pass completely unmodified, byte-identical rendered output) and statically (a source-text witness proves cmd/verdi carries no second render/self-validate implementation, mirroring the existing TestObligationAuthor_AtomicWrite_NoDirectCreateTemp convention)", evidence: [behavioral, static], anchor: ac-4 }
+  - { id: ac-5, text: "verdi obligation author <story-ref> <ac-id> <kind> is the design-branch, pre-freeze authoring/regeneration surface: given a declared (story, ac) pair and a known evidence kind, it creates the obligation when none exists yet at the convention path and regenerates (overwrites) it when one exists but is not yet frozen, through the identical shared renderer seam ac-4 establishes — and it refuses outright, exit 2, naming the path, when the target obligation is already frozen by a merge to main (frozen decided the same way VL-010 scopes immutability: reachable from merge-base(HEAD, default branch), never merely 'exists on disk')", evidence: [behavioral], anchor: ac-5 }
+links:
+  - { type: implements, ref: "spec/creation-surfaces#ac-4" }
+frozen: { at: 2026-07-21, commit: 67a8643f30fc797295cd1c66245c9ec523d54ec9, stub_matched: true }
+---
+# Obligation Seam
+
+## Problem
+
+`spec/creation-surfaces#ac-4` (X-9) names a gap the design wave's re-attack
+pinned exactly (design doc §12 + addendum, ledger L-N8 as adjudicated at
+Task 8): `internal/workbench/obligationauthor.go`'s `renderObligation`/
+`writeObligationFile` already exist but are unexported and reachable only
+from the board's sticky-graduate action. Nothing at accept time enforces
+that a story's declared `(ac, kind)` evidence pairs actually have
+obligations behind them.
+
+Worse, the check that already exists (VL-020) never actually fires during
+accept: `cmd/verdi/accept.go`'s quartet lint gate (`lintQuartetOrRefuse`,
+called before the status flip) runs while the spec's on-disk status is
+still `draft`, and VL-020's own co-2 draft-tolerance tolerates every draft
+unconditionally — so a story can freeze declaring evidence kinds with zero
+obligations stating what that evidence must specifically show, and nothing
+catches it. Design-branch authors have no way to get ahead of this either:
+the renderer's only caller is the board.
+
+This story is itself accepted under that exact gap, by hand, per the
+ritual-integrity precedent (obligations authored WITH the spec, DC-3/X-9)
+— deliberately: it is the last story this build will ever have to
+hand-author obligations for, since this story's own build is what makes
+that hand-work unnecessary for every story that accepts after it.
+
+## Outcome
+
+Accept's freeze-moment backstop computes `preFlipHead` first, scaffolds
+exactly the missing `(ac, kind)` pairs to disk before the in-ritual lint
+gate ever runs, stamps every scaffolded obligation `preFlipHead` —
+identical to the spec's own flip stamp — and stages the newly-created
+paths into the accept commit itself, so a story is born with its declared
+evidence kinds' obligations already in hand and the pairing can never be
+replayed away. The backstop skips, never overwrites, any pair an
+already-decodable obligation already covers, keyed on the same coverage
+predicate VL-020 itself uses; on any refusal or error after scaffolding it
+unlinks exactly the obligations it newly created this invocation, leaving
+pre-existing files and the rest of the tree untouched.
+
+`verdi obligation author` gives the design branch a separate, pre-freeze
+surface for authoring or regenerating an obligation ahead of accept,
+through the identical shared renderer seam — never a second re-render in
+`cmd/verdi` — and refuses outright on any obligation a merge to main has
+already frozen, since a frozen obligation is superseded through the normal
+ladder, never refined in place.
+
+None of this reverses VL-020's own draft-tolerance (evidence-obligations
+co-2 stands, `vl020.go` unchanged): the gap this story closes was always
+the freeze moment itself, by construction, never authoring-time tolerance.
+
+## Ac 1
+
+Accept computes `preFlipHead` before running its in-ritual lint gate, then
+scaffolds a stub obligation for every declared `(ac, kind)` pair the
+story's own quartet is missing, before `lintQuartetOrRefuse` (accept.go:142)
+ever runs. Every scaffolded stub is stamped `frozen: { at, commit:
+preFlipHead }` — the exact same stamp the spec's own flip writes moments
+later, never the not-yet-created accept commit. The newly-scaffolded paths
+join accept's own scoped `addPaths` set so they land inside the same
+accept commit as the status flip — proven by asserting the accept commit's
+own diff contains them (the X-9 "replay impossible" pin: a bare git log
+cannot show the pairing ever having been separable).
+
+## Ac 2
+
+The backstop never overwrites an existing obligation. For a story with some
+`(ac, kind)` pairs already covered by a hand- or board-authored obligation
+and others missing, only the missing pairs are scaffolded and every
+pre-existing obligation file is byte-untouched. Coverage is decided by the
+same decode-based predicate VL-020 itself applies — a DECODABLE
+obligation.md at the `.verdi/obligations/<spec>/<ac>--<kind>.md` convention
+path — never a bare `os.Stat`, so a present-but-malformed file is never
+mistaken for coverage.
+
+Disclosed reading (conservative-backstop-predicate, recorded here per the
+provenance discipline; the alignment disposition records it too). Two
+clarifications the acceptance-criterion text above leaves implicit — both
+deliberate, conservative choices this backstop makes on a WRITING path, not
+reversals of VL-020's own read-only reading. First, a present-but-undecodable
+obligation file at a declared pair's convention path is not treated as
+"missing": the backstop refuses accept operationally (exit 2) rather than
+scaffolding over it or counting it as coverage — stricter, on purpose, than
+silently continuing past it. Second, "the same decode-based predicate VL-020
+itself applies" is imprecise: VL-020's own predicate is
+existence-of-a-kind-classified-document at the path (existence only — it
+explicitly does not re-validate that document's own content), whereas the
+backstop additionally decodes each candidate AND refuses to write over ANY
+file already occupying a pair's convention path — the case of a decodable
+obligation misfiled under another kind's filename being exactly what a bare
+`for_kind`-keyed coverage check would otherwise clobber. The extra strictness
+is a conservative invention that can only ever refuse where VL-020 would pass,
+never the reverse.
+
+Correction (round-3 alignment witness — recorded, not silently rewritten).
+The final sentence above — "can only ever refuse where VL-020 would pass,
+never the reverse" — was falsified by the round-3 alignment witness and is
+corrected here. That witness showed the then-current coverage predicate keyed
+coverage by an obligation's DECODED `for_kind` scanned over every
+`<acID>--*.md` file, not the exact convention path — so a decodable obligation
+misfiled at an UNDECLARED kind's filename (`for_kind: behavioral` sitting at
+`ac-1--static.md` when `ac-1` declares only `[behavioral]`) was miscounted as
+covering `(ac-1, behavioral)`. The backstop then skipped that pair and the
+story froze with `ac-1--behavioral.md` absent — which VL-020 reds at the first
+post-accept lint. That is exactly the reverse the old sentence denied: the
+backstop PASSED where VL-020 will FAIL. The fix re-keys coverage to the EXACT
+convention path `.verdi/obligations/<spec>/<acID>--<kind>.md`, so the backstop's
+predicate now EQUALS VL-020's own convention-path check, plus two deliberately
+stricter WRITE-side arms — decode-required at that path, and
+refuse-rather-than-paper-over when the file there is malformed or is a decodable
+obligation whose `for_kind` disagrees with the filename. Those arms can only
+ever refuse where VL-020 would pass; the corrected invariant is that the
+backstop never passes a declared pair VL-020 will fail. A decodable obligation
+misfiled at an undeclared kind's path is now left byte-untouched for VL-011 to
+resolve at lint time, and the declared pair's own convention path is scaffolded
+regardless.
+
+Correction (round-4 alignment witness — recorded, not silently rewritten).
+The round-3 framing above — that the predicate "now EQUALS VL-020's own
+convention-path check, plus stricter arms" — is itself imprecise, and the
+round-4 witness pinned why. The backstop's coverage predicate is NOT the same
+as VL-020's; it is deliberately STRICTER. VL-020 (vl020.go) is existence-only:
+a document CLASSIFIED `kind: obligation` at the declared pair's convention path
+satisfies it, and it never inspects that document's own `for_kind` (path-implies
+-id is VL-011's job). The backstop additionally decodes the file and requires
+`for_kind == kind`, so there are TWO distinct states in which it refuses accept
+where VL-020 would pass — not one:
+
+  1. A decodable obligation at ANOTHER kind's filename (`for_kind: behavioral`
+     at `ac-1--static.md` when `ac-1` declares only `[behavioral]`): the
+     declared pair's own path `ac-1--behavioral.md` is ABSENT, so here VL-020
+     itself DOES red the frozen story post-accept — the round-3 justification
+     holds for this case.
+  2. A decodable obligation at the EXACT convention path `ac-1--behavioral.md`
+     whose own `for_kind` disagrees with the filename: VL-020 PASSES (the path
+     is occupied by a kind-classified obligation; it does not read `for_kind`),
+     so the round-3 justification's "VL-020 reds it" does NOT apply here — it is
+     VL-011 (path-implies-id) that independently reds this misfile at lint. The
+     backstop refusing it at accept is a deliberate, conservative accept-time
+     catch of a VL-011-class defect, one gate earlier.
+
+Both are safe: the backstop never freezes a story whose declared pair has an
+absent or internally inconsistent obligation. The frozen `ac-2` phrase "the
+same decode-based predicate VL-020 itself applies" names the shared
+convention-path LOCUS the two share, not full predicate parity; the backstop is
+stricter by deliberate design (toward more safety, never less), and that AC
+wording is queued for ratification precision. The alignment disposition records
+this as an accepted deviation.
+
+## Ac 3
+
+On any refusal or operational error accept hits after scaffolding has
+begun — an unrelated quartet lint violation, a downstream write failure,
+anything — accept unlinks exactly the obligation paths it newly created
+this invocation and leaves everything else exactly as it found it:
+pre-existing obligations untouched, no partial commit, a pristine working
+tree. Induced by forcing an unrelated quartet refusal after scaffolding has
+run, asserting the tree matches its pre-scaffold state byte for byte and
+that a subsequent `obligation author` or accept retry is never blocked by
+an orphaned stub the backstop itself left behind.
+
+## Ac 4
+
+`internal/workbench/obligationauthor.go`'s `renderObligation`,
+`writeObligationFile`, and pre-write self-validate are exported/extracted
+into exactly one shared seam that accept's backstop, the existing board
+sticky-graduate action, and `verdi obligation author` all three call.
+Proven both behaviorally (the board's existing obligation-graduate tests
+pass completely unmodified, byte-identical rendered output) and statically
+(a source-text witness proves `cmd/verdi` carries no second render/
+self-validate implementation, mirroring the existing
+`TestObligationAuthor_AtomicWrite_NoDirectCreateTemp` convention).
+
+## Ac 5
+
+`verdi obligation author <story-ref> <ac-id> <kind>` is the design-branch,
+pre-freeze authoring/regeneration surface: given a declared `(story, ac)`
+pair and a known evidence kind, it creates the obligation when none exists
+yet at the convention path and regenerates (overwrites) it when one exists
+but is not yet frozen, through the identical shared renderer seam ac-4
+establishes. It refuses outright, exit 2, naming the path, when the target
+obligation is already frozen by a merge to main — frozen decided the same
+way VL-010 scopes immutability: reachable from `merge-base(HEAD, default
+branch)`, never merely "exists on disk". Disclosed reading, controller-
+reviewed: when the default branch (and so the merge-base) cannot be
+resolved at all, this verb proceeds as create/regenerate rather than
+refusing — the same "can't prove it, don't guess" posture VL-010 itself
+wears when its own `DiffBase` is unknown, deliberately chosen over a
+fail-closed refusal because the alternative would make the verb unusable
+in exactly the hermetic, no-configured-remote layouts every other verb on
+this seam already tolerates.
+
+## Process note
+
+Disclosed ritual-order deviation: `verdi build start` was run AFTER this
+story's design/accept/build work was already complete on this same
+branch (build-start-after-build), not before as the canonical order
+names — a controller-directed correction mid-build, the branch content
+is identical to what running it first would have produced; only the
+order of ritual steps differs.

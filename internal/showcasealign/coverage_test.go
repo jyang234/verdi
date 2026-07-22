@@ -167,6 +167,15 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// proving the real embedded-canonical-default resolution path.
 	"cli:model": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:obligation (extensibility phase 2, spec/obligation-seam ac-5,
+	// spec/creation-surfaces#ac-4, ledger L-N8): added alongside the new
+	// verb itself — TestCLIShowcaseObligationAuthor (cli_showcase_test.go)
+	// drives `verdi obligation author` against the real, already-covered
+	// spec/escrow-notify story's genuine committed obligation, proving the
+	// refuse-on-already-frozen safety property against real showcase
+	// content (CI_DEFAULT_BRANCH=main makes the provisioned store's own
+	// real "main" branch resolve deterministically, no fabricated remote).
+	"cli:obligation": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 	// cli:init (extensibility Phase 2, spec/init-wizard, ledger L-N5):
 	// added alongside the new verb itself — TestCLIShowcaseInit
 	// (cli_showcase_test.go) drives `verdi init` (both the bare and
