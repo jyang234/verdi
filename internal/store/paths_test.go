@@ -31,6 +31,8 @@ func TestAbsolutePaths(t *testing.T) {
 		{"AttestationPath", AttestationPath(root, "story-7", "ac-2"), "/store/.verdi/attestations/story-7/ac-2.md"},
 		{"ObligationDir", ObligationDir(root, "widget"), "/store/.verdi/obligations/widget"},
 		{"ObligationPath", ObligationPath(root, "widget", "ac-2", "behavioral"), "/store/.verdi/obligations/widget/ac-2--behavioral.md"},
+		{"WaiverDir", WaiverDir(root, "story-7"), "/store/.verdi/waivers/story-7"},
+		{"WaiverPath", WaiverPath(root, "story-7", "ac-2"), "/store/.verdi/waivers/story-7/ac-2.md"},
 		{"DerivedRoot", DerivedRoot(root), "/store/.verdi/data/derived"},
 		{"DerivedSpecDir", DerivedSpecDir(root, "spec--widget"), "/store/.verdi/data/derived/spec--widget"},
 	}
@@ -160,5 +162,18 @@ func TestObligationPathEmptyRootDisplayForm(t *testing.T) {
 	}
 	if got, want := ObligationDir("", "widget"), filepath.FromSlash(".verdi/obligations/widget"); got != want {
 		t.Errorf("ObligationDir(\"\", …) = %q, want %q", got, want)
+	}
+}
+
+// TestWaiverPathEmptyRootDisplayForm is WaiverPath/WaiverDir's own twin of
+// TestAttestationPathEmptyRootDisplayForm (spec/verb-surfaces ac-1): an
+// empty root drops the leading element, yielding the ".verdi/…"-rooted
+// display form a disclosure names.
+func TestWaiverPathEmptyRootDisplayForm(t *testing.T) {
+	if got, want := WaiverPath("", "story-7", "ac-2"), filepath.FromSlash(".verdi/waivers/story-7/ac-2.md"); got != want {
+		t.Errorf("WaiverPath(\"\", …) = %q, want %q", got, want)
+	}
+	if got, want := WaiverDir("", "story-7"), filepath.FromSlash(".verdi/waivers/story-7"); got != want {
+		t.Errorf("WaiverDir(\"\", …) = %q, want %q", got, want)
 	}
 }

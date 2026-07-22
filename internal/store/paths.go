@@ -53,6 +53,7 @@ const (
 	specsDir        = "specs"
 	attestationsDir = "attestations"
 	obligationsDir  = "obligations"
+	waiversDir      = "waivers"
 	dataDir         = "data"
 	derivedDir      = "derived"
 
@@ -119,6 +120,27 @@ func AttestationDir(root, storySlug string) string {
 // drops an empty leading element.
 func AttestationPath(root, storySlug, acID string) string {
 	return filepath.Join(AttestationDir(root, storySlug), acID+".md")
+}
+
+// WaiverDir is a story's waiver directory under root:
+// <root>/.verdi/waivers/<storySlug>/ (03 §Attestations and waivers).
+// storySlug is the story ref's slug (store.RefSlug of the spec's story:
+// ref), the same story-slug rule AttestationDir uses — never the spec name.
+func WaiverDir(root, storySlug string) string {
+	return filepath.Join(root, verdiDir, waiversDir, storySlug)
+}
+
+// WaiverPath is the waiver file for (storySlug, acID):
+// <WaiverDir>/<acID>.md (03 §Attestations and waivers: "waivers/<story-
+// slug>/<ac-id>.md, same story-slug rule" as attestations) — the ONE
+// construction the fold's evidence.WaiverActive, `verdi waive`, and
+// `verdi audit`'s waiver section all resolve through, mirroring
+// AttestationPath's own single-assembler role. Passing an empty root
+// yields the store-relative display form (".verdi/waivers/<storySlug>/
+// <acID>.md") a disclosure prints, the same empty-root convention
+// AttestationPath documents.
+func WaiverPath(root, storySlug, acID string) string {
+	return filepath.Join(WaiverDir(root, storySlug), acID+".md")
 }
 
 // ObligationDir is a spec's evidence-obligation directory under root:
