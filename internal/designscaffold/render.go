@@ -41,6 +41,15 @@ type ScaffoldData struct {
 	ParentRef string
 	Links     []StoryLink
 	Spike     bool
+	// Pins and Dispositions are commit-to-design's content-carrying
+	// fields (spec/creation-form ac-4 — the "content-carrying
+	// template-contract extension" ledger L-M12's ratification
+	// predicted): the board's pinned refs render as context: entries,
+	// the sticky dispositions as the dispositions: block. Every other
+	// consumer leaves them zero; a template failing to reference them
+	// is never an error (the struct posture above).
+	Pins         []artifact.Pin
+	Dispositions []artifact.Disposition
 }
 
 // Render instantiates tmpl (a text/template source: an embedded canonical

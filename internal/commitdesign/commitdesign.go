@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
@@ -136,7 +135,14 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	}
 
 	specRef := "spec/" + in.SpecName
-	content := scaffoldSpec(specRef, storyRef, in.SpecName, board.Pins, dispositions)
+	tmpl, err := resolveTemplate(in.Root)
+	if err != nil {
+		return nil, err
+	}
+	content, err := scaffoldSpec(tmpl, specRef, storyRef, in.SpecName, board.Pins, dispositions)
+	if err != nil {
+		return nil, fmt.Errorf("commitdesign: rendering scaffold: %w", err)
+	}
 
 	// Self-validate before writing anything to disk (CLAUDE.md: "never
 	// fake success").
@@ -144,8 +150,16 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	if splitErr != nil {
 		return nil, fmt.Errorf("commitdesign: internal error: scaffold failed self-validation: %w", splitErr)
 	}
-	if _, decErr := artifact.DecodeSpec(fm); decErr != nil {
+	spec, decErr := artifact.DecodeSpec(fm)
+	if decErr != nil {
 		return nil, fmt.Errorf("commitdesign: internal error: scaffold failed self-validation: %w", decErr)
+	}
+	// K1, inherited from every other scaffold consumer (spec/creation-form
+	// ac-4): a store's feature.md override can hardcode the wrong class:
+	// literal and still strict-decode clean — caught here, before any
+	// write.
+	if ccErr := designscaffold.CheckClass(spec, artifact.ClassFeature); ccErr != nil {
+		return nil, fmt.Errorf("commitdesign: template for class %s failed self-validation: %w", artifact.ClassFeature, ccErr)
 	}
 
 	frozenBoard, err := freezeBoard(board, relBoardPath, preCommit, at, in.ModelDigest)
@@ -197,38 +211,65 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	}, nil
 }
 
-// scaffoldSpec renders the draft feature spec's markdown content: I-10's
+// resolveTemplate resolves commit-to-design's scaffold template in the
+// two layers spec/creation-form ac-4 ratified (the L-M12 discharge): a
+// store's own override of the FEATURE class's declared Class.Template —
+// the exact file L-M12's witness named as silently ignored on this path
+// — wins; absent one, the embedded commit-to-design canonical template
+// (designscaffold templates/commitdesign.md), whose render reproduces
+// the retired strings.Builder output byte-for-byte for every input the
+// old producer handled (TestScaffoldSpec_BytePin). The embedded
+// fallback is deliberately NOT the canonical feature.md: byte-stability
+// and override-honoring cannot both hold over it — the legacy
+// commit-to-design shape predates problem:/outcome: and carries
+// context:/dispositions: blocks feature.md has no slots for.
+func resolveTemplate(root string) ([]byte, error) {
+	cfg, err := store.Open(root)
+	if err != nil {
+		return nil, fmt.Errorf("commitdesign: resolving store config: %w", err)
+	}
+	class, ok := cfg.Model.Classes[string(artifact.ClassFeature)]
+	if !ok {
+		return nil, fmt.Errorf("commitdesign: internal error: resolved model has no %q class", artifact.ClassFeature)
+	}
+	tmpl, overridden, err := designscaffold.LoadOverride(root, class.Template)
+	if err != nil {
+		return nil, fmt.Errorf("commitdesign: %w", err)
+	}
+	if overridden {
+		return tmpl, nil
+	}
+	tmpl, err = designscaffold.Canonical("commitdesign.md")
+	if err != nil {
+		return nil, fmt.Errorf("commitdesign: %w", err)
+	}
+	return tmpl, nil
+}
+
+// scaffoldSpec renders the draft feature spec's markdown content through
+// the shared designscaffold producer (spec/creation-form ac-4 — the
+// retired strings.Builder body was the L-M12 third producer): I-10's
 // no-magic placeholder title (derived from the spec name — no tracker
 // lookup happens here, unlike `design start`'s title resolution, since
 // commit-to-design's input is a board, not a story provider), the
 // board's pinned refs as `context:`, one placeholder acceptance
 // criterion (artifact.SpecFrontmatter.Validate requires at least one),
-// and the dispositions block.
-func scaffoldSpec(specRef, storyRef, specName string, pins []artifact.Pin, dispositions []artifact.Disposition) string {
-	title := designscaffold.HumanizeName(specName)
-
-	var b strings.Builder
-	// vocab:identity — scaffolded frontmatter template (field names + enum values)
-	fmt.Fprintf(&b, "---\nid: %s\nkind: spec\ntitle: %q\nowners: [unassigned]\nclass: feature\nstatus: draft\nstory: %s\n", specRef, title, storyRef)
-
-	if len(pins) > 0 {
-		b.WriteString("context:\n")
-		for _, p := range pins {
-			fmt.Fprintf(&b, "  - %s\n", p.Ref)
-		}
-	}
-
-	b.WriteString("acceptance_criteria:\n  - { id: ac-1, text: \"TODO: replace with real acceptance criteria before accept\", evidence: [static] }\n")
-
-	if len(dispositions) > 0 {
-		b.WriteString("dispositions:\n")
-		for _, d := range dispositions {
-			fmt.Fprintf(&b, "  - { sticky: %s, disposition: %s }\n", d.Sticky, d.Disposition)
-		}
-	}
-
-	fmt.Fprintf(&b, "---\n# %s\n\nTODO: design notes.\n\nDrafted by commit-to-design from board %q. Every board sticky above is\ncarried as `open-question` until the commit-to-design skill (or a human)\npromotes it to `incorporated` or `contradicted` (I-5).\n", title, specRef)
-	return b.String()
+// and the dispositions block — all through the template's own
+// content-carrying fields (ScaffoldData.Pins/.Dispositions). The
+// statement defaults are passed for override templates that reference
+// {{.Problem}}/{{.Outcome}}; the embedded canonical ignores them, as the
+// legacy shape always did.
+func scaffoldSpec(tmpl []byte, specRef, storyRef, specName string, pins []artifact.Pin, dispositions []artifact.Disposition) (string, error) {
+	return designscaffold.Render(tmpl, designscaffold.ScaffoldData{
+		Ref:          specRef,
+		Title:        designscaffold.HumanizeName(specName),
+		StoryRef:     storyRef,
+		Owners:       designscaffold.DefaultOwners,
+		Problem:      designscaffold.DefaultProblem,
+		Outcome:      designscaffold.DefaultOutcome,
+		Pins:         pins,
+		Dispositions: dispositions,
+	})
 }
 
 // boardContent is the hashable content of a board snapshot — pins,
