@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
@@ -135,7 +136,7 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	}
 
 	specRef := "spec/" + in.SpecName
-	tmpl, err := resolveTemplate(in.Root)
+	tmpl, tmplSource, err := resolveTemplate(in.Root)
 	if err != nil {
 		return nil, err
 	}
@@ -160,6 +161,28 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	// write.
 	if ccErr := designscaffold.CheckClass(spec, artifact.ClassFeature); ccErr != nil {
 		return nil, fmt.Errorf("commitdesign: template for class %s failed self-validation: %w", artifact.ClassFeature, ccErr)
+	}
+	// Graduation must not outrun carry (judged-commitdesign-override-
+	// disposition-carry, adjudicated): dispositions and context are
+	// OPTIONAL to the feature validator, so a template override that
+	// references neither {{.Dispositions}} nor {{.Pins}} renders a spec
+	// that self-validates clean while silently dropping the board's
+	// content — and Run would then flip every sticky to graduated for a
+	// carry that never happened. Refuse instead, before anything is
+	// written, naming the omitted block(s) and the responsible template:
+	// nothing is silently dropped, nothing is marked graduated that
+	// wasn't carried. The count comparison is deliberate fail-closed
+	// simplicity: the rendered blocks must account for every input
+	// disposition and pin, or the run refuses.
+	var omitted []string
+	if len(dispositions) > 0 && len(spec.Dispositions) != len(dispositions) {
+		omitted = append(omitted, fmt.Sprintf("dispositions (%d sticky record(s), %d carried)", len(dispositions), len(spec.Dispositions)))
+	}
+	if len(board.Pins) > 0 && len(spec.Context) != len(board.Pins) {
+		omitted = append(omitted, fmt.Sprintf("context (%d pinned ref(s), %d carried)", len(board.Pins), len(spec.Context)))
+	}
+	if len(omitted) > 0 {
+		return nil, fmt.Errorf("commitdesign: template %s does not carry the board's %s — the run is refused so nothing is dropped and no sticky is falsely graduated; carry {{.Dispositions}}/{{.Pins}} in the template, or clear the board's stickies and pins before commit-to-design", tmplSource, strings.Join(omitted, " and "))
 	}
 
 	frozenBoard, err := freezeBoard(board, relBoardPath, preCommit, at, in.ModelDigest)
@@ -223,27 +246,30 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 // and override-honoring cannot both hold over it — the legacy
 // commit-to-design shape predates problem:/outcome: and carries
 // context:/dispositions: blocks feature.md has no slots for.
-func resolveTemplate(root string) ([]byte, error) {
+// It also returns a human-readable source description (the override's
+// store-relative path, or the embedded canonical's name) — the carry
+// refusal above names the responsible template with it.
+func resolveTemplate(root string) ([]byte, string, error) {
 	cfg, err := store.Open(root)
 	if err != nil {
-		return nil, fmt.Errorf("commitdesign: resolving store config: %w", err)
+		return nil, "", fmt.Errorf("commitdesign: resolving store config: %w", err)
 	}
 	class, ok := cfg.Model.Classes[string(artifact.ClassFeature)]
 	if !ok {
-		return nil, fmt.Errorf("commitdesign: internal error: resolved model has no %q class", artifact.ClassFeature)
+		return nil, "", fmt.Errorf("commitdesign: internal error: resolved model has no %q class", artifact.ClassFeature)
 	}
 	tmpl, overridden, err := designscaffold.LoadOverride(root, class.Template)
 	if err != nil {
-		return nil, fmt.Errorf("commitdesign: %w", err)
+		return nil, "", fmt.Errorf("commitdesign: %w", err)
 	}
 	if overridden {
-		return tmpl, nil
+		return tmpl, ".verdi/templates/" + class.Template + " (store override)", nil
 	}
 	tmpl, err = designscaffold.Canonical("commitdesign.md")
 	if err != nil {
-		return nil, fmt.Errorf("commitdesign: %w", err)
+		return nil, "", fmt.Errorf("commitdesign: %w", err)
 	}
-	return tmpl, nil
+	return tmpl, "commitdesign.md (embedded canonical)", nil
 }
 
 // scaffoldSpec renders the draft feature spec's markdown content through

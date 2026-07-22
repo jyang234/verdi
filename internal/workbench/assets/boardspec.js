@@ -1984,6 +1984,15 @@
       createError(dlg.getAttribute("data-error-acs") || "Choose at least one acceptance criterion.");
       return;
     }
+    // State-resolve the receipt BEFORE the values map is consumed: the
+    // tracker sentence is true only when the form HAS a tracker-ref
+    // field the operator left empty — the landed spec then really does
+    // carry the placeholder. A filled ref (or a template with no such
+    // field) landed something else, and the receipt must not claim
+    // otherwise (three-valued honesty; the copy itself is
+    // server-resolved on the dialog's data attributes).
+    var trackerField = dlg.querySelector('[data-field="StoryRef"]');
+    var trackerLeftEmpty = !!trackerField && trackerField.value.trim() === "";
     createError("");
     setStatus("cutting branch…");
     api("create", { name: name, values: values, acs: acs })
@@ -1993,11 +2002,16 @@
         // The receipt: server-resolved copy, the minted identities
         // substituted in. Like the instantiate receipt, it is a notice —
         // the confirm affordance hides.
-        openConfirm(
-          dlg.getAttribute("data-receipt-title") || "Created",
+        var parts = [
           (dlg.getAttribute("data-receipt-body") || "")
             .replace(/\{branch\}/g, "design/" + name)
             .replace(/\{name\}/g, name),
+        ];
+        if (trackerLeftEmpty) parts.push(dlg.getAttribute("data-receipt-tracker") || "");
+        parts.push(dlg.getAttribute("data-receipt-tail") || "");
+        openConfirm(
+          dlg.getAttribute("data-receipt-title") || "Created",
+          parts.filter(Boolean).join(" "),
           false
         );
         document.getElementById("edge-confirm-ok").hidden = true;

@@ -129,6 +129,44 @@ test.describe("board creation form (spec/creation-form)", () => {
     expect(spec).toContain("## Delivery Notes");
   });
 
+  test("a filled tracker ref is never called a placeholder by the receipt (state-resolved copy)", async ({
+    page,
+  }) => {
+    const vocabBase = await vocabFixtureBase(page);
+    await page.goto(`${vocabBase}board/spec/vocab-probe`);
+    await page.getByTestId("create-spec-btn").click();
+
+    await page.getByTestId("create-name").fill("tracked-quote-flow");
+    await page
+      .getByTestId("create-field-Problem")
+      .fill("Tracker refs go stale by hand");
+    await page
+      .getByTestId("create-field-Outcome")
+      .fill("The tracker ref is real from birth");
+    await page.getByTestId("create-field-StoryRef").fill("jira:QUOTE-9");
+    await page.getByTestId("create-ac-ac-1").check();
+    await page.getByTestId("create-ok").click();
+
+    // The receipt asserts only what is true of the landed artifact
+    // (judged-create-receipt-storyref-claim): the tracker ref was
+    // filled, so the placeholder sentence must not appear.
+    const receipt = page.locator("#edge-confirm");
+    await expect(receipt).toBeVisible();
+    await expect(receipt).toContainText("design/tracked-quote-flow");
+    await expect(receipt).not.toContainText("todo:REPLACE-ME");
+    await expect(receipt).not.toContainText("placeholder");
+    await page.keyboard.press("Escape");
+
+    // And the landed spec really carries the submitted ref.
+    const res = await page.request.get(
+      `${CONTROL_URL}/vocab-fixture/show?ref=design/tracked-quote-flow&path=.verdi/specs/active/tracked-quote-flow/spec.md`,
+    );
+    expect(res.ok()).toBeTruthy();
+    const spec = await res.text();
+    expect(spec).toContain("story: jira:QUOTE-9");
+    expect(spec).not.toContain("todo:REPLACE-ME");
+  });
+
   test("empty statement fields refuse visibly and nothing is created", async ({
     page,
   }) => {

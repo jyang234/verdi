@@ -367,6 +367,13 @@ func TestBoardSpec_CreateForm_Rendered(t *testing.T) {
 		`data-field="Problem"`,
 		`data-field="Outcome"`,
 		`data-create-ac="ac-1"`,
+		// The receipt copy's three state-resolvable parts (judged-create-
+		// receipt-storyref-claim): the tracker sentence is its own
+		// attribute so the client appends it ONLY when the landed spec
+		// really carries the placeholder.
+		`data-receipt-body=`,
+		`data-receipt-tracker=`,
+		`data-receipt-tail=`,
 	}
 	for _, w := range wants {
 		if !strings.Contains(body, w) {

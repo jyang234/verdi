@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // overrideFeatureTemplate is a store's own .verdi/templates/feature.md
@@ -140,5 +141,94 @@ func TestRun_StoreOverrideWrongClassRefuses(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "wrong-class")); !os.IsNotExist(statErr) {
 		t.Fatalf("refused Run left the spec dir behind (statErr=%v)", statErr)
+	}
+}
+
+// carrylessFeatureOverride mirrors the e2e vocab fixture's own
+// custom-feature.md (cmd/e2eharness/provision_vocab.go) — the exact
+// template the judge named: a valid feature scaffold that references
+// NEITHER {{.Pins}} nor {{.Dispositions}}, so a render self-validates
+// clean and passes CheckClass while carrying none of the board's
+// content.
+const carrylessFeatureOverride = `---
+id: {{safe .Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{safe .Owners}}
+class: feature{{if .StoryRef}}
+story: {{safe .StoryRef}}{{end}}
+status: draft
+problem: { text: {{printf "%q" .Problem}}, anchor: problem }
+outcome: { text: {{printf "%q" .Outcome}}, anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "TODO: replace with real acceptance criteria before accept", evidence: [static, attestation], anchor: ac-1 }
+---
+# {{.Title}}
+
+## Problem
+
+TODO: design notes.
+
+## Outcome
+
+TODO: design notes.
+`
+
+// TestRun_OverrideOmittingCarryBlocksRefuses pins the adjudicated rule
+// for judged-commitdesign-override-disposition-carry: graduation must
+// not outrun carry. With a feature-template override that omits the
+// dispositions/context blocks while the board holds stickies and pins,
+// Run REFUSES — naming the omitted blocks and the responsible override —
+// before anything is written: no spec dir, no commit, and every sticky
+// still live (never flipped to graduated) in the mutable stream.
+func TestRun_OverrideOmittingCarryBlocksRefuses(t *testing.T) {
+	repo := buildRepo(t)
+	seedBoard(t, repo)
+	tmplPath := filepath.Join(repo.Dir, ".verdi", "templates", "feature.md")
+	if err := os.MkdirAll(filepath.Dir(tmplPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmplPath, []byte(carrylessFeatureOverride), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	headBefore, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "carryless", StoryRef: "jira:LOAN-1482", ModelDigest: testModelDigest(t, repo.Dir)})
+	if err == nil {
+		t.Fatal("Run with a carryless override succeeded, want a refusal naming the omitted blocks")
+	}
+	for _, want := range []string{"dispositions", "context", ".verdi/templates/feature.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %q", err, want)
+		}
+	}
+
+	// Nothing was written or committed.
+	if _, statErr := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "carryless")); !os.IsNotExist(statErr) {
+		t.Fatalf("refused Run left the spec dir behind (statErr=%v)", statErr)
+	}
+	headAfter, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headAfter != headBefore {
+		t.Fatalf("refused Run moved HEAD %s -> %s", headBefore, headAfter)
+	}
+
+	// No sticky was flipped to graduated: the mutable stream still holds
+	// both seeded annotations with status open.
+	raw, err := os.ReadFile(filepath.Join(repo.Dir, ".verdi", "data", "mutable", "annotations", "board--story-1482.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(raw), `"status":"open"`); got != 2 {
+		t.Fatalf("annotation stream after refusal carries %d open records, want 2 (no false graduation):\n%s", got, raw)
+	}
+	if strings.Contains(string(raw), "graduated") {
+		t.Fatalf("annotation stream after refusal carries a graduated flip:\n%s", raw)
 	}
 }
