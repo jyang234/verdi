@@ -1144,6 +1144,37 @@ bindings:
       - "spec/creation-surfaces#ac-3"
       - "spec/creation-surfaces#ac-4"
       - "spec/creation-surfaces#ac-5"
+      # spec/init-wizard (spec/creation-surfaces#ac-1's implementing story,
+      # plan Task 10, ledger L-N5 as amended at Task 8/design doc §12 rules
+      # W-1..W-4/W-3b). DESIGN-TIME FORWARD DECLARATION, not built yet, this
+      # story's own design series authoring the story spec + obligations +
+      # this binding together (the X-9/#143 convention every prior story in
+      # this file follows). Not yet built: ac-1 <- cmd/verdi/init_test.go's
+      # built-binary bare-path case (empty dir -> exactly .verdi/verdi.yaml
+      # with schema: verdi.layout/v1, no model.yaml, verdi model check OK)
+      # plus the both-paths-refuse-on-any-existing-.verdi/-entry table
+      # (full manifest present vs. a stray empty .verdi/ dir, each naming
+      # what exists, exit 2, pre-existing tree byte-untouched); ac-2 <- the
+      # same file's no-TTY-refuses-exit-2 case, the stdin-script positive
+      # interview case (VERDI_INIT_ASSUME_TTY=1 + a scripted answer
+      # sequence over cmd.Stdin) proving the live-validation preview, the
+      # in-interview frontier refusal that names the frontier and continues
+      # rather than aborting, and a real-renames case proving the promoted
+      # model.yaml's vocabulary: block and the copied .verdi/templates/
+      # override files; ac-3 <- the same file's truncated-stdin
+      # mid-interview-abort case and the VERDI_INIT_SIMULATE_CRASH_AFTER
+      # injected-failure case (both: nothing at the real root, no temp
+      # litter, afterward), plus the successful-run single-os.Rename proof
+      # and the staged model.yaml's model.DecodeModel-then-reflect.
+      # DeepEqual match against the interview's own in-memory candidate
+      # *model.Model (the W-4 pin) — plan Task 10 Steps 1/2/3 throughout.
+      # Each leg lands under make verify once this story merges; this
+      # entry is updated to name the real test functions at that point. No
+      # attestation leg is bound here — stories carry no attestation
+      # floor.
+      - "spec/init-wizard#ac-1"
+      - "spec/init-wizard#ac-2"
+      - "spec/init-wizard#ac-3"
       # spec/creation-form (creation-surfaces#ac-2's implementing story,
       # plan Task 11; authored with the story per the X-9/#143 convention,
       # a design-time forward declaration until the story's build lands on

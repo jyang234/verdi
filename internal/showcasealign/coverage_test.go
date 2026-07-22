@@ -167,6 +167,16 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// proving the real embedded-canonical-default resolution path.
 	"cli:model": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:init (extensibility Phase 2, spec/init-wizard, ledger L-N5):
+	// added alongside the new verb itself — TestCLIShowcaseInit
+	// (cli_showcase_test.go) drives `verdi init` (both the bare and
+	// --wizard forms) against the real provisioned examples/showcase
+	// store, proving the create-only refusal (W-3/W-3b) against a real,
+	// already-existing store byte-untouched afterward, plus the creation
+	// path itself against a fresh scratch directory (the only place a
+	// creation-only verb's happy path CAN be exercised, by construction).
+	"cli:init": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec
