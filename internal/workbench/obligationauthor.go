@@ -21,9 +21,9 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
 )
@@ -116,25 +116,21 @@ func (s *boardSpecServer) actionObligationGraduate(ctx context.Context, name str
 	}
 	frozen := artifact.NewFrozen(at, head)
 
-	content := renderObligation(obID, title, string(forKind), verifiesRef, sticky.Body, []string{annotationAuthor()}, frozen)
-
-	// Self-validate before touching disk (CLAUDE.md: never fake success —
-	// the same pre-write posture stub-instantiate wears): the rendered
-	// obligation must split and strict-decode through the artifact seam, or
-	// the graduation refuses rather than writing a record that would not
-	// round-trip.
-	fm, _, err := artifact.SplitFrontmatter([]byte(content))
-	if err != nil {
-		return fmt.Errorf("workbench: internal error: obligation scaffold failed self-validation: %w", err)
-	}
-	if _, err := artifact.DecodeObligation(fm); err != nil {
-		return fmt.Errorf("workbench: internal error: obligation scaffold failed self-validation: %w", err)
-	}
+	content := evidence.RenderObligation(evidence.ObligationInput{
+		ID: obID, Title: title, ForKind: forKind, VerifiesRef: verifiesRef,
+		Body: sticky.Body, Owners: []string{annotationAuthor()}, Frozen: frozen,
+	})
 
 	// On-disk home .verdi/obligations/<story-slug>/<ac-id>--<for-kind>.md
 	// (DC-2). Refuse an already-authored obligation rather than overwrite
 	// one — the same fail-closed posture stub-graduate wears on a slug
-	// collision.
+	// collision. This board-side existence check is this call site's own
+	// policy, layered above evidence.WriteObligationFile's unconditional
+	// write (spec/obligation-seam ac-4/O-5: the shared seam does the
+	// render + pre-write self-validate + atomic write; whether to refuse
+	// on an existing file is each caller's own decision — `verdi
+	// obligation author`, cmd/verdi, makes a different one for its own
+	// pre-freeze regenerate case).
 	dir := filepath.Join(s.root, ".verdi", "obligations", name)
 	fileName := acID + "--" + string(forKind) + ".md"
 	path := filepath.Join(dir, fileName)
@@ -143,7 +139,7 @@ func (s *boardSpecServer) actionObligationGraduate(ctx context.Context, name str
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("workbench: checking obligation path %s: %w", path, err)
 	}
-	if err := writeObligationFile(path, []byte(content)); err != nil {
+	if err := evidence.WriteObligationFile(path, content); err != nil {
 		return err
 	}
 
@@ -154,47 +150,12 @@ func (s *boardSpecServer) actionObligationGraduate(ctx context.Context, name str
 	return err
 }
 
-// renderObligation hand-renders an obligation artifact's full markdown
-// content (frontmatter + prose body) — the inverse of
-// artifact.DecodeObligation. Frontmatter is hand-rendered, never
-// yaml.Marshal'd (the module-wide posture: internal/align/render.go,
-// internal/artifact/splice/doc.go's "never decode→struct→yaml.Marshal→
-// reassemble"), so field order and the restricted flow-mapping style match
-// the obligation fixtures exactly. The single `verifies` edge names the WHOLE
-// story spec (DC-1): the AC is carried by the id and path, not the edge.
-func renderObligation(id, title, forKind, verifiesRef, body string, owners []string, frozen artifact.Frozen) string {
-	var b strings.Builder
-	b.WriteString("---\n")
-	fmt.Fprintf(&b, "id: %s\n", id)
-	b.WriteString("kind: obligation\n")
-	fmt.Fprintf(&b, "title: %s\n", artifact.YAMLDoubleQuote(title))
-	quotedOwners := make([]string, len(owners))
-	for i, o := range owners {
-		quotedOwners[i] = artifact.YAMLDoubleQuote(o)
-	}
-	fmt.Fprintf(&b, "owners: [%s]\n", strings.Join(quotedOwners, ", "))
-	fmt.Fprintf(&b, "for_kind: %s\n", forKind)
-	b.WriteString("links:\n")
-	fmt.Fprintf(&b, "  - { type: verifies, ref: %q }\n", verifiesRef)
-	fmt.Fprintf(&b, "frozen: { at: %s, commit: %s }\n", frozen.At, frozen.Commit)
-	b.WriteString("---\n")
-	fmt.Fprintf(&b, "# %s\n\n%s\n", title, body)
-	return b.String()
-}
-
-// writeObligationFile writes the obligation atomically via the shared
-// internal/atomicfile.Write primitive (MkdirAll + CreateTemp + fsync +
-// Rename-into-place), mirroring spliceSpec's and GraduateStickies' own
-// write discipline so a crash mid-write never leaves a half-written
-// artifact in the committed zone. Previously a private
-// CreateTemp->Write->Close->Rename copy that, unlike atomicfile.Write,
-// never fsynced before the rename (CLEANUP-BEFORE #1).
-func writeObligationFile(path string, data []byte) error {
-	if err := atomicfile.Write(path, data, 0o644); err != nil {
-		return fmt.Errorf("workbench: %w", err)
-	}
-	return nil
-}
+// renderObligation and writeObligationFile used to live here, hand-rendering
+// and atomically writing an obligation's markdown content. Both are now
+// internal/evidence.RenderObligation and internal/evidence.WriteObligationFile
+// (spec/obligation-seam ac-4/O-5): the ONE shared seam accept's freeze-moment
+// backstop, `verdi obligation author`, and this board action all three call,
+// so no second render/write implementation exists to drift from this one.
 
 // firstLine returns s's first non-empty line, trimmed — the obligation's
 // one-line title (the `title:` field and the body's `# ` heading), derived

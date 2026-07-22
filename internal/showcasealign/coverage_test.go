@@ -167,6 +167,16 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// proving the real embedded-canonical-default resolution path.
 	"cli:model": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:obligation (extensibility phase 2, spec/obligation-seam ac-5,
+	// spec/creation-surfaces#ac-4, ledger L-N8): added alongside the new
+	// verb itself — TestCLIShowcaseObligationAuthor (cli_showcase_test.go)
+	// drives `verdi obligation author` against the real, already-covered
+	// spec/escrow-notify story's genuine committed obligation, proving the
+	// refuse-on-already-frozen safety property against real showcase
+	// content (CI_DEFAULT_BRANCH=main makes the provisioned store's own
+	// real "main" branch resolve deterministically, no fabricated remote).
+	"cli:obligation": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec

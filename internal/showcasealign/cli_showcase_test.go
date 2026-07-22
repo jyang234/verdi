@@ -583,3 +583,54 @@ func TestCLIShowcaseModel(t *testing.T) {
 		t.Fatalf("stdout = %q, want it to name canonical's 2 classes / 4 transitions", stdout)
 	}
 }
+
+// TestCLIShowcaseObligationAuthor drives `verdi obligation author`
+// (cli:obligation, spec/obligation-seam ac-5, spec/creation-surfaces#ac-4)
+// against the REAL, already-obligation-covered spec/escrow-notify story
+// (examples/showcase's own committed .verdi/obligations/escrow-notify/
+// ac-1--behavioral.md — genuine hand-authored evidence content, not a
+// fixture built for this test) with CI_DEFAULT_BRANCH=main set: the
+// provisioned showcase store's own git reconstruction (helpers_test.go's
+// buildShowcaseRepo) is a single-branch history whose branch is literally
+// named "main" (fixturegit's own --initial-branch=main convention), so
+// this makes internal/lint.ResolveDefaultBranch resolve deterministically
+// to that real branch (its own first, highest-priority check — no network,
+// no fabricated origin remote) and merge-base(HEAD, main) land on HEAD
+// itself, since the store never diverges from it — the real, already-
+// committed obligation is therefore genuinely "reachable from the
+// merge-base" by construction, not a synthetic frozen fixture. The
+// verb must refuse outright (exit 2, naming the path) and leave the real
+// committed file byte-for-byte untouched — obligation author's core safety
+// property, proven against real, disclosed showcase content exactly as
+// TestCLIShowcaseModel/TestCLIShowcaseDisposition prove theirs above.
+func TestCLIShowcaseObligationAuthor(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := provisionShowcaseStore(t)
+
+	const relObligation = ".verdi/obligations/escrow-notify/ac-1--behavioral.md"
+	before := readShowcaseFile(t, relObligation)
+	obligationPath := filepath.Join(root, filepath.FromSlash(relObligation))
+	onDiskBefore, err := os.ReadFile(obligationPath)
+	if err != nil {
+		t.Fatalf("test setup: reading provisioned obligation: %v", err)
+	}
+	if string(onDiskBefore) != before {
+		t.Fatalf("test setup: provisioned obligation diverges from the showcase source:\n--- provisioned ---\n%s\n--- source ---\n%s", onDiskBefore, before)
+	}
+
+	stdout, stderr, code := runBinary(t, root, "obligation", "author", "spec/escrow-notify", "ac-1", "behavioral")
+	if code != 2 {
+		t.Fatalf("verdi obligation author: exit %d, want 2 (already frozen — reachable from the merge-base with the real \"main\" branch)\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "ac-1--behavioral.md") {
+		t.Fatalf("stderr = %q, want it to name the frozen path", stderr)
+	}
+
+	after, err := os.ReadFile(obligationPath)
+	if err != nil {
+		t.Fatalf("reading obligation after refusal: %v", err)
+	}
+	if string(after) != before {
+		t.Fatalf("a frozen showcase obligation was modified despite the refusal:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+}

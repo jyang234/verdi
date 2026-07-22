@@ -136,13 +136,12 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		return 2
 	}
 
-	// D6-23: refuse to freeze a quartet the store's own linter rejects,
-	// before any part of the ritual below runs — no stub-match/blast-radius
-	// disclosure printed, no status flip, no frozen stamp (acceptlint.go).
-	if rc := lintQuartetOrRefuse(ctx, root, ref, spec, stderr); rc != 0 {
-		return rc
-	}
-
+	// spec/obligation-seam ac-1 (O-1/O-4): compute preFlipHead FIRST —
+	// before scaffolding and before the in-ritual lint gate — so every
+	// backstop-scaffolded obligation, and the spec's own flip moments
+	// later, stamp the identical commit: never the not-yet-created accept
+	// commit itself. Reordered deliberately from this function's
+	// pre-obligation-seam shape, which computed this after the lint gate.
 	preFlipHead, err := gitx.RevParse(ctx, root, "HEAD")
 	if err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
@@ -152,6 +151,39 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	if err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
+	}
+
+	// spec/obligation-seam ac-1/ac-2 (O-1/O-2/O-3/O-3b/O-6,
+	// acceptobligation.go): scaffold exactly the missing declared (ac,
+	// kind) obligation pairs to disk before the lint gate runs — a no-op
+	// for a feature-class spec (dc-3).
+	obligationDir := store.ObligationDir(root, ref.Name)
+	_, dirStatErr := os.Stat(obligationDir)
+	obligationDirPreExisted := dirStatErr == nil
+
+	createdObligations, err := scaffoldMissingObligations(root, ref.Name, spec, artifact.NewFrozen(at, preFlipHead), operatorOwner())
+	// spec/obligation-seam ac-3 (O-1b): from here to the end of this
+	// function, ANY refusal or operational error must unlink exactly the
+	// obligation stubs newly created above — pristine tree on refusal,
+	// pre-existing obligations and the rest of the tree untouched.
+	// success flips true only immediately before the final, successful
+	// return.
+	success := false
+	defer func() {
+		if !success {
+			unlinkScaffoldedObligations(createdObligations, obligationDir, obligationDirPreExisted, stderr)
+		}
+	}()
+	if err != nil {
+		fmt.Fprintln(stderr, "accept:", err)
+		return 2
+	}
+
+	// D6-23: refuse to freeze a quartet the store's own linter rejects,
+	// before any part of the ritual below runs — no stub-match/blast-radius
+	// disclosure printed, no status flip, no frozen stamp (acceptlint.go).
+	if rc := lintQuartetOrRefuse(ctx, root, ref, spec, stderr); rc != 0 {
+		return rc
 	}
 
 	stubMatched := false
@@ -249,7 +281,12 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 	// commit (round-6 witness, both acceptance agents hit it independently
 	// in the same wave); a ritual that writes a frozen stamp must not also
 	// silently commit whatever else happens to be sitting in the checkout.
+	// spec/obligation-seam ac-1 (O-2): scaffolded obligation paths join
+	// accept's scoped addPaths set so they land inside the same accept
+	// commit as the status flip — the mechanism that makes "the gap cannot
+	// be replayed away" literally true rather than aspirational.
 	addPaths := append([]string{specPath}, predecessorPaths...)
+	addPaths = append(addPaths, createdObligations...)
 	if err := gitx.AddPaths(ctx, root, addPaths...); err != nil {
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
@@ -259,6 +296,7 @@ func runAccept(ctx context.Context, root, specArg string, stdout, stderr io.Writ
 		fmt.Fprintln(stderr, "accept:", err)
 		return 2
 	}
+	success = true
 
 	// Display resolution only (spec/vocabulary-surfaces ac-1): the commit
 	// subject above stays on bare ids (history is identity, never display).
