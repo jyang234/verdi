@@ -136,6 +136,38 @@ misfiled at an undeclared kind's path is now left byte-untouched for VL-011 to
 resolve at lint time, and the declared pair's own convention path is scaffolded
 regardless.
 
+Correction (round-4 alignment witness — recorded, not silently rewritten).
+The round-3 framing above — that the predicate "now EQUALS VL-020's own
+convention-path check, plus stricter arms" — is itself imprecise, and the
+round-4 witness pinned why. The backstop's coverage predicate is NOT the same
+as VL-020's; it is deliberately STRICTER. VL-020 (vl020.go) is existence-only:
+a document CLASSIFIED `kind: obligation` at the declared pair's convention path
+satisfies it, and it never inspects that document's own `for_kind` (path-implies
+-id is VL-011's job). The backstop additionally decodes the file and requires
+`for_kind == kind`, so there are TWO distinct states in which it refuses accept
+where VL-020 would pass — not one:
+
+  1. A decodable obligation at ANOTHER kind's filename (`for_kind: behavioral`
+     at `ac-1--static.md` when `ac-1` declares only `[behavioral]`): the
+     declared pair's own path `ac-1--behavioral.md` is ABSENT, so here VL-020
+     itself DOES red the frozen story post-accept — the round-3 justification
+     holds for this case.
+  2. A decodable obligation at the EXACT convention path `ac-1--behavioral.md`
+     whose own `for_kind` disagrees with the filename: VL-020 PASSES (the path
+     is occupied by a kind-classified obligation; it does not read `for_kind`),
+     so the round-3 justification's "VL-020 reds it" does NOT apply here — it is
+     VL-011 (path-implies-id) that independently reds this misfile at lint. The
+     backstop refusing it at accept is a deliberate, conservative accept-time
+     catch of a VL-011-class defect, one gate earlier.
+
+Both are safe: the backstop never freezes a story whose declared pair has an
+absent or internally inconsistent obligation. The frozen `ac-2` phrase "the
+same decode-based predicate VL-020 itself applies" names the shared
+convention-path LOCUS the two share, not full predicate parity; the backstop is
+stricter by deliberate design (toward more safety, never less), and that AC
+wording is queued for ratification precision. The alignment disposition records
+this as an accepted deviation.
+
 ## Ac 3
 
 On any refusal or operational error accept hits after scaffolding has
