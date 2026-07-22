@@ -45,17 +45,21 @@ func HumanizeName(name string) string {
 	return strings.Join(parts, " ")
 }
 
-// defaultOwnersLiteral, defaultProblemText, and defaultOutcomeText are the
-// scaffold's own fixed placeholder values — today's hardcoded content,
-// moved verbatim from the retired string builders into ScaffoldData
-// inputs rather than a second copy baked into the template text, so a
-// store override template that wants real values instead of these
+// DefaultOwners, DefaultProblem, and DefaultOutcome are the scaffold's
+// own fixed placeholder values — today's hardcoded content, moved
+// verbatim from the retired string builders into ScaffoldData inputs
+// rather than a second copy baked into the template text, so a store
+// override template that wants real values instead of these
 // placeholders has a real, data-driven field to reference
-// ({{.Owners}}/{{.Problem}}/{{.Outcome}}).
+// ({{.Owners}}/{{.Problem}}/{{.Outcome}}). Exported (spec/creation-form
+// ac-2/ac-4): every creation surface that fills UNANSWERED fields — the
+// board's creation form, commit-to-design's producer call — falls back
+// to these same disclosed placeholders, one table, never a re-typed
+// copy per consumer.
 const (
-	defaultOwnersLiteral = "[unassigned]"
-	defaultProblemText   = "TODO: replace with the real problem statement before accept"
-	defaultOutcomeText   = "TODO: replace with the real outcome statement before accept"
+	DefaultOwners  = "[unassigned]"
+	DefaultProblem = "TODO: replace with the real problem statement before accept"
+	DefaultOutcome = "TODO: replace with the real outcome statement before accept"
 )
 
 // Feature renders a draft feature spec's markdown content by instantiating
@@ -71,9 +75,9 @@ func Feature(tmpl []byte, specRef, storyRef, title string) (string, error) {
 		Ref:      specRef,
 		Title:    title,
 		StoryRef: storyRef,
-		Owners:   defaultOwnersLiteral,
-		Problem:  defaultProblemText,
-		Outcome:  defaultOutcomeText,
+		Owners:   DefaultOwners,
+		Problem:  DefaultProblem,
+		Outcome:  DefaultOutcome,
 	})
 }
 
@@ -120,8 +124,8 @@ func Story(tmpl []byte, specRef, storyRef, title string, spike bool, links []Sto
 		StoryRef: storyRef,
 		Spike:    spike,
 		Links:    links,
-		Owners:   defaultOwnersLiteral,
-		Problem:  defaultProblemText,
-		Outcome:  defaultOutcomeText,
+		Owners:   DefaultOwners,
+		Problem:  DefaultProblem,
+		Outcome:  DefaultOutcome,
 	})
 }

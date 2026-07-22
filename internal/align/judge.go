@@ -426,21 +426,14 @@ func execJudgeEnvelope(ctx context.Context, runner JudgeRunner, argv []string, t
 	return outer.Result, nil
 }
 
-// decodeInnerResult trims whitespace and strips a defensive markdown code
-// fence (S5: "trim/strip fences defensively") before strict-decoding the
-// findings JSON verdi's own prompt asked the judge to emit.
+// decodeInnerResult decodes the judge's findings JSON out of its free-text
+// result, tolerating a natural-language preamble/postamble and/or a markdown
+// code fence around the object (innerparse.go: decodeJudgeInnerJSON) before
+// strict-decoding it. The strict-decode contract is preserved on the extracted
+// object; only the surrounding prose is widened. This is the build-branch
+// binding of the one shared inner-parse seam every judge-consuming mode uses.
 func decodeInnerResult(raw string) (*judgeInnerResult, error) {
-	s := strings.TrimSpace(raw)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	s = strings.TrimSpace(s)
-
-	var inner judgeInnerResult
-	if err := artifact.DecodeStrictJSON([]byte(s), &inner); err != nil {
-		return nil, err
-	}
-	return &inner, nil
+	return decodeJudgeInnerJSON[judgeInnerResult](raw)
 }
 
 func snippet(b []byte) string {

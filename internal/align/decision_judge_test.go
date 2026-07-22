@@ -134,3 +134,40 @@ func TestScannedDecisionIDs(t *testing.T) {
 		t.Fatalf("scannedDecisionIDs = %v, want %v (sorted)", ids, want)
 	}
 }
+
+// fakeDecisionJudgePreambleScript is the design-branch analogue of
+// judge_test.go's fakeJudgePreambleScript: the same free-text judge (S5)
+// prepends a natural-language preamble before the (target-carrying) findings
+// object. Proves the shared prose-tolerant inner-parse (innerparse.go) covers
+// the decision-sweep site too.
+const fakeDecisionJudgePreambleScript = `cat <<'EOF'
+{"is_error":false,"subtype":"success","result":"After scanning the decision corpus I found one undeclared conflict:\n\n{\"findings\":[{\"id\":\"dj-pre\",\"text\":\"dc-2 contradicts adr/retry-policy\",\"confidence\":0.7,\"target\":\"adr/retry-policy\"}]}"}
+EOF
+`
+
+// TestRunDecisionSweep_PreambleTolerated is the design-branch red-first
+// reproduction. Pre-fix, decodeDecisionInnerResult fails on the preamble and
+// RunDecisionSweep degrades to the synthetic DecisionAbsenceFindingID (so the
+// assertions on the judged id/target fail); post-fix the buried object parses
+// into the judged finding.
+func TestRunDecisionSweep_PreambleTolerated(t *testing.T) {
+	script := writeFakeJudge(t, fakeDecisionJudgePreambleScript)
+	res, err := RunDecisionSweep(context.Background(), ExecJudgeRunner{}, DecisionJudgedInput{
+		JudgeCmd: []string{script},
+		Timeout:  5 * time.Second,
+		Prompt:   []byte("prompt"),
+	})
+	if err != nil {
+		t.Fatalf("RunDecisionSweep: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %+v, want 1", res.Findings)
+	}
+	f := res.Findings[0]
+	if f.ID != "judged-dj-pre" {
+		t.Fatalf("ID = %q, want judged-dj-pre (the judged finding, not the synthetic absence finding — a preamble must not degrade the sweep)", f.ID)
+	}
+	if f.TargetRef != "adr/retry-policy" {
+		t.Fatalf("TargetRef = %q, want adr/retry-policy", f.TargetRef)
+	}
+}
