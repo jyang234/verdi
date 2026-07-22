@@ -33,6 +33,47 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
+// obligationFrozenProbeBase resolves the commit `verdi obligation author`'s
+// frozen check probes an obligation against, with the three-way discrimination
+// ac-5 needs (judged-frozen-check-fail-open) — drawn HERE at the call site
+// rather than inherited from lint.BuildContext, which deliberately collapses a
+// merge-base failure into an empty DiffBase for its own consumers' contracts
+// (this fix must not change that seam's behavior):
+//
+//   - the default branch cannot be resolved at all -> ("", false, nil): the
+//     disclosed hermetic "can't prove frozen, proceed" posture (§Ac 5), for
+//     the no-configured-remote layouts every verb on this seam tolerates.
+//   - the default branch resolves but merge-base(HEAD, it) fails OPERATIONALLY
+//     -> ("", true, err): the base is unknowable because git failed, NOT a
+//     proven absence — the caller must refuse rather than guess and overwrite
+//     what a merge to main may have frozen (the round-1 fix already refuses on
+//     a Show/ls-tree error AFTER a base resolved; this closes the sibling gap
+//     one seam up, at base COMPUTATION).
+//   - the default branch resolves and a merge-base is found -> (base, false,
+//     nil); or there is genuinely no common ancestor -> ("", false, nil), a
+//     clean git exit-1 negative (nothing is reachable from a base that does
+//     not exist, so proceed, never refuse). Both take the ordinary path.
+//
+// A package var so a test can inject the operational-merge-base-failure case a
+// clean fixture repo cannot deterministically produce; production resolves the
+// default branch exactly as lint.BuildContext does (lint.ResolveDefaultBranch),
+// so the hermetic case stays byte-identical, then discriminates the merge-base
+// outcome via gitx.MergeBaseCommit.
+var obligationFrozenProbeBase = func(ctx context.Context, root string) (base string, operationalFailure bool, err error) {
+	defaultBranch := lint.ResolveDefaultBranch(ctx, root)
+	if defaultBranch == "" {
+		return "", false, nil
+	}
+	base, found, err := gitx.MergeBaseCommit(ctx, root, "HEAD", defaultBranch)
+	if err != nil {
+		return "", true, err
+	}
+	if !found {
+		return "", false, nil
+	}
+	return base, false, nil
+}
+
 // runObligationVerb dispatches `verdi obligation <subcommand>`. There is
 // exactly one subcommand, `author` — anything else is a usage error.
 func runObligationVerb(args []string, stdout, stderr io.Writer) int {
@@ -63,8 +104,18 @@ func cmdObligationAuthor(args []string, stdout, stderr io.Writer) int {
 	}
 
 	ctx := context.Background()
-	lctx := lint.BuildContext(ctx, root)
-	return runObligationAuthor(ctx, root, storyRefArg, acID, kindArg, lctx.DiffBase, stdout, stderr)
+	base, operationalFailure, probeErr := obligationFrozenProbeBase(ctx, root)
+	if operationalFailure {
+		// judged-frozen-check-fail-open: the default branch resolved but the
+		// merge-base computation failed operationally, so we cannot prove the
+		// target is unfrozen. Refuse rather than guess — never regenerate over
+		// what a merge to main may have frozen. (A default branch that cannot
+		// be resolved at all is a different case: base is "" and we proceed,
+		// the disclosed hermetic posture.)
+		fmt.Fprintf(stderr, "obligation author: cannot determine whether the target obligation is already frozen (the merge-base with the default branch failed): %v\n", probeErr)
+		return 2
+	}
+	return runObligationAuthor(ctx, root, storyRefArg, acID, kindArg, base, stdout, stderr)
 }
 
 // runObligationAuthor is the testable core: given an already-resolved

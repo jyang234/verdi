@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -204,6 +206,89 @@ func TestRunObligationAuthor_NotYetFrozen_SameFileAbsentAtDiffBase(t *testing.T)
 	}
 }
 
+// frozenAc1StaticObligationMD is a decodable obligation used to observe
+// whether the verb wrongly "proceeds" (regenerates over it) instead of
+// refusing.
+const frozenAc1StaticObligationMD = `---
+id: obligation/widget-story--ac-1--static
+kind: obligation
+title: "already frozen by a prior merge"
+owners: [platform-team]
+for_kind: static
+links:
+  - { type: verifies, ref: "spec/widget-story" }
+frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
+---
+# already frozen by a prior merge
+
+Must be treated as immutable — never regenerated in place.
+`
+
+// TestCmdObligationAuthor_MergeBaseOperationalFailure_Refuses is the round-2
+// judged-frozen-check-fail-open proof, one seam upstream of the round-1 fix:
+// when the default branch RESOLVES but merge-base(HEAD, default) fails
+// operationally, the frozen-probe base is unknowable due to a git failure, not
+// a proven absence. cmdObligationAuthor must refuse (exit 2) naming the git
+// failure rather than treat the empty base as the hermetic "proceed" posture
+// and regenerate what a merge to main may have frozen. Injected via the
+// obligationFrozenProbeBase seam, since a clean fixture repo cannot
+// deterministically produce an operational merge-base failure.
+func TestCmdObligationAuthor_MergeBaseOperationalFailure_Refuses(t *testing.T) {
+	repo := buildObligationAuthorRepo(t, map[string]string{
+		".verdi/obligations/widget-story/ac-1--static.md": frozenAc1StaticObligationMD,
+	})
+	t.Chdir(repo.Dir)
+
+	orig := obligationFrozenProbeBase
+	obligationFrozenProbeBase = func(ctx context.Context, root string) (string, bool, error) {
+		return "", true, errors.New("injected merge-base operational failure (default branch resolved)")
+	}
+	defer func() { obligationFrozenProbeBase = orig }()
+
+	var stdout, stderr bytes.Buffer
+	got := cmdObligationAuthor([]string{"spec/widget-story", "ac-1", "static"}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdObligationAuthor(operational merge-base failure) = %d, want 2 (never guess unfrozen on a git failure); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !contains(stderr.String(), "frozen") {
+		t.Errorf("stderr = %q, want it to explain the frozen-ness could not be determined", stderr.String())
+	}
+
+	// It must NOT have regenerated the frozen obligation.
+	got2, err := os.ReadFile(obligationPathFor(repo.Dir, "ac-1", "static"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got2) != frozenAc1StaticObligationMD {
+		t.Fatalf("the frozen obligation was regenerated despite an undecidable merge-base:\n--- got ---\n%s\n--- want ---\n%s", got2, frozenAc1StaticObligationMD)
+	}
+}
+
+// TestCmdObligationAuthor_HermeticNoDefaultBranch_Proceeds is the companion
+// guard: when the default branch cannot be resolved AT ALL, the disclosed
+// hermetic "can't prove frozen, proceed" posture (§Ac 5) is preserved — the
+// verb creates the scaffold rather than refusing. Distinct from the
+// operational-failure case above by exactly the seam's discrimination.
+func TestCmdObligationAuthor_HermeticNoDefaultBranch_Proceeds(t *testing.T) {
+	repo := buildObligationAuthorRepo(t, nil)
+	t.Chdir(repo.Dir)
+
+	orig := obligationFrozenProbeBase
+	obligationFrozenProbeBase = func(ctx context.Context, root string) (string, bool, error) {
+		return "", false, nil // no default branch resolves at all — hermetic
+	}
+	defer func() { obligationFrozenProbeBase = orig }()
+
+	var stdout, stderr bytes.Buffer
+	got := cmdObligationAuthor([]string{"spec/widget-story", "ac-1", "static"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdObligationAuthor(hermetic no default branch) = %d, want 0 (disclosed proceed posture); stderr=%s", got, stderr.String())
+	}
+	if _, err := os.Stat(obligationPathFor(repo.Dir, "ac-1", "static")); err != nil {
+		t.Fatalf("expected a scaffold to be written under the hermetic posture: %v", err)
+	}
+}
+
 // TestRunObligationAuthor_Negative covers the refusal/error paths that
 // never write anything.
 func TestRunObligationAuthor_Negative(t *testing.T) {
@@ -293,6 +378,67 @@ func TestRun_ObligationDispatchesToRealVerb(t *testing.T) {
 // (spec/obligation-seam ac-4's static leg): cmd/verdi must never hand-roll
 // obligation frontmatter or a second self-validate — only ever call the
 // shared internal/evidence seam.
+// TestObligationRender_SingleSharedSeam_PackageWide strengthens ac-4's static
+// witness (judged-second-render-witness-scope). The prior witness read only two
+// NAMED files for three negative markers, proving "these two files avoid three
+// specific calls" rather than the AC's stated "cmd/verdi carries no second
+// render/self-validate implementation" — a copy in any third file, or a Sprintf
+// copy that trips none of the three markers, was outside its reach. This walks
+// EVERY non-test .go file in cmd/verdi and proves two things package-wide:
+//
+//  1. Positive render-signature scan: a copy-pasted Sprintf render of
+//     evidence.RenderObligation necessarily emits the obligation frontmatter
+//     literals `kind: obligation` and `for_kind:` together; no cmd/verdi file
+//     may carry that signature (the sole renderer lives in internal/evidence).
+//  2. Call-graph allowlist: the only producers of obligation bytes reachable
+//     from cmd/verdi are evidence.RenderObligation / evidence.WriteObligationFile,
+//     called from exactly the two legitimate call sites — a third file reaching
+//     for the seam trips this, forcing a conscious allowlist update.
+//
+// Mutation-witnessed during development: a scratch cmd/verdi file carrying a
+// hand-rolled fmt.Sprintf obligation render trips clause (1) (then removed).
+func TestObligationRender_SingleSharedSeam_PackageWide(t *testing.T) {
+	renderSeamCallSites := map[string]bool{
+		"obligation.go":       true,
+		"acceptobligation.go": true,
+	}
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("reading cmd/verdi package dir: %v", err)
+	}
+	scanned := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		src := string(data)
+		scanned++
+
+		// (1) No hand-rolled obligation-frontmatter render anywhere in cmd/verdi.
+		if strings.Contains(src, "kind: obligation") && strings.Contains(src, "for_kind:") {
+			t.Errorf("%s carries the obligation-frontmatter render signature (`kind: obligation` + `for_kind:`) — obligations must be rendered ONLY through internal/evidence.RenderObligation, never a second hand-rolled implementation in cmd/verdi (O-5, ac-4)", name)
+		}
+
+		// (2) The shared render/write seam is called only from the allowlisted
+		// call sites — obligation bytes have exactly one producer, from known
+		// sites.
+		if strings.Contains(src, "evidence.RenderObligation(") || strings.Contains(src, "evidence.WriteObligationFile(") {
+			if !renderSeamCallSites[name] {
+				t.Errorf("%s calls the obligation render/write seam but is not an allowlisted call site (allowed: obligation.go, acceptobligation.go) — obligation bytes must be produced only through the one shared seam from the known callers (ac-4)", name)
+			}
+		}
+	}
+	if scanned < 3 {
+		t.Fatalf("package-wide witness scanned only %d non-test files — expected the whole cmd/verdi package; is the test running in the package dir?", scanned)
+	}
+}
+
 func TestObligationAuthor_AtomicWrite_NoDirectCreateTemp(t *testing.T) {
 	for _, f := range []string{"obligation.go", "acceptobligation.go"} {
 		data, err := os.ReadFile(f)
