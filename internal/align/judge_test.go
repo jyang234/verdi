@@ -498,3 +498,127 @@ func TestJudgedFindingID_ReservesMintedShapes(t *testing.T) {
 		}
 	}
 }
+
+// fakeJudgePreambleScript reproduces the EXACT witnessed production shape (5x
+// this session's obligation-seam round-4 block): the free-text judge (S5,
+// `claude -p`) prepends a natural-language preamble — here narrating its
+// per-AC review — BEFORE the findings object. The leading 'I' made strict
+// decode fail at stage=inner-parse, which D6-24-preserved the prior report
+// and stalled the round. The object buried after the prose is a valid
+// 0-finding DRY verdict that MUST parse.
+const fakeJudgePreambleScript = `cat <<'EOF'
+{"is_error":false,"subtype":"success","result":"I've now reviewed all five acceptance criteria against the implementation:\n\n- **ac-1**: satisfied\n- **ac-2**: satisfied and resolved\n\n{\"findings\":[]}"}
+EOF
+`
+
+// fakeJudgePreambleWithFindingScript is the preamble variant carrying a real
+// finding: the object after the prose must decode with id/text/confidence
+// intact (never dropped along with the preamble).
+const fakeJudgePreambleWithFindingScript = `cat <<'EOF'
+{"is_error":false,"subtype":"success","result":"Here is my analysis of the acceptance criteria:\n\n{\"findings\":[{\"id\":\"pre-1\",\"text\":\"ac-3 deviates from the spec intent\",\"confidence\":0.66}]}"}
+EOF
+`
+
+// fakeJudgeTrailingProseScript is round-2's "trailing data" variant: the
+// findings object is followed by a natural-language postamble. A bare strict
+// decode rejects it (trailing data after the top-level value); the object
+// must still parse, ignoring the postamble.
+const fakeJudgeTrailingProseScript = `cat <<'EOF'
+{"is_error":false,"subtype":"success","result":"{\"findings\":[{\"id\":\"post-1\",\"text\":\"trailing case\",\"confidence\":0.33}]}\n\nThat concludes my review of the acceptance criteria."}
+EOF
+`
+
+// fakeJudgeRefusalScript is a genuine judge failure: pure prose, no JSON
+// object at all (a refusal). It MUST stay a clean StageInnerParse failure,
+// never be swallowed as a false 0-finding DRY verdict.
+const fakeJudgeRefusalScript = `cat <<'EOF'
+{"is_error":false,"subtype":"success","result":"I cannot analyze this request without additional context about the acceptance criteria."}
+EOF
+`
+
+// fakeJudgeUnknownFieldScript emits a WELL-FORMED JSON object carrying an
+// unknown field ("verdict") alongside findings. Strictness must be preserved
+// on the extracted object: this fails closed at StageInnerParse rather than
+// silently parsing as 0 findings — the prose AROUND an object is tolerated,
+// never what the object itself may contain.
+const fakeJudgeUnknownFieldScript = `cat <<'EOF'
+{"is_error":false,"subtype":"success","result":"{\"findings\":[],\"verdict\":\"clean\"}"}
+EOF
+`
+
+// TestRunJudgeOnce_Preamble is the witnessed defect's red-first reproduction:
+// a natural-language preamble around the findings object must not fail
+// inner-parse. Pre-fix, decodeInnerResult's fence-strip-then-strict-decode
+// fails on the leading prose and runJudgeOnce returns a StageInnerParse
+// failure; post-fix the buried object is extracted and parsed.
+func TestRunJudgeOnce_Preamble(t *testing.T) {
+	t.Run("witnessed preamble around a 0-finding object parses to 0 findings", func(t *testing.T) {
+		script := writeFakeJudge(t, fakeJudgePreambleScript)
+		success, failure := runJudgeOnce(judgeTestContext(t), ExecJudgeRunner{}, []string{script}, 0, []byte("p"))
+		if failure != nil {
+			t.Fatalf("runJudgeOnce: unexpected failure %+v — a natural-language preamble around the findings object must not fail inner-parse", failure)
+		}
+		if len(success.Findings) != 0 {
+			t.Fatalf("Findings = %+v, want 0 (the buried object is an empty findings list)", success.Findings)
+		}
+	})
+
+	t.Run("preamble around an object with a finding preserves id/text/confidence", func(t *testing.T) {
+		script := writeFakeJudge(t, fakeJudgePreambleWithFindingScript)
+		success, failure := runJudgeOnce(judgeTestContext(t), ExecJudgeRunner{}, []string{script}, 0, []byte("p"))
+		if failure != nil {
+			t.Fatalf("runJudgeOnce: unexpected failure %+v", failure)
+		}
+		if len(success.Findings) != 1 {
+			t.Fatalf("Findings = %+v, want 1", success.Findings)
+		}
+		f := success.Findings[0]
+		if f.ID != "judged-pre-1" {
+			t.Fatalf("ID = %q, want judged-pre-1", f.ID)
+		}
+		if !strings.Contains(f.Text, "ac-3 deviates from the spec intent") || !strings.Contains(f.Text, "0.66") {
+			t.Fatalf("Text = %q, want the judge's text and confidence intact", f.Text)
+		}
+	})
+}
+
+// TestRunJudgeOnce_TrailingProse is the postamble (round-2 "trailing data")
+// red-first reproduction: prose AFTER the object must be ignored, not treated
+// as a trailing-data strict-decode failure.
+func TestRunJudgeOnce_TrailingProse(t *testing.T) {
+	script := writeFakeJudge(t, fakeJudgeTrailingProseScript)
+	success, failure := runJudgeOnce(judgeTestContext(t), ExecJudgeRunner{}, []string{script}, 0, []byte("p"))
+	if failure != nil {
+		t.Fatalf("runJudgeOnce: unexpected failure %+v — trailing prose after the object must be ignored", failure)
+	}
+	if len(success.Findings) != 1 || success.Findings[0].ID != "judged-post-1" {
+		t.Fatalf("Findings = %+v, want one judged-post-1", success.Findings)
+	}
+}
+
+// TestRunJudgeOnce_GenuineFailuresStayInnerParse is the load-bearing negative
+// guard: widening the parse to tolerate prose must NOT turn a genuine judge
+// failure into a false "0 findings" DRY verdict. A pure-prose refusal (no
+// object) and a well-formed object with an unknown field must BOTH remain
+// clean StageInnerParse failures (strictness on the object is preserved).
+func TestRunJudgeOnce_GenuineFailuresStayInnerParse(t *testing.T) {
+	cases := []struct {
+		name   string
+		script string
+	}{
+		{"pure-prose refusal (no JSON object)", fakeJudgeRefusalScript},
+		{"well-formed object with an unknown field (strictness preserved)", fakeJudgeUnknownFieldScript},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			script := writeFakeJudge(t, tc.script)
+			success, failure := runJudgeOnce(judgeTestContext(t), ExecJudgeRunner{}, []string{script}, 0, []byte("p"))
+			if success != nil {
+				t.Fatalf("runJudgeOnce: unexpected success %+v — a genuine judge failure must never be swallowed as a false 0-finding verdict", success)
+			}
+			if failure == nil || failure.Stage != StageInnerParse {
+				t.Fatalf("failure = %+v, want a clean StageInnerParse failure", failure)
+			}
+		})
+	}
+}
