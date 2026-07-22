@@ -326,6 +326,21 @@ func provisionVocabStore(moduleRoot string) (string, error) {
 	if err := runGit(root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
 		return "", err
 	}
+	// Repo-LOCAL identity (provision_board.go's exact precedent): the
+	// PRODUCTION gitx calls this store serves — the creation form's
+	// commitScaffoldBranch plumbing, stub-instantiate — run `git
+	// commit-tree` WITHOUT deterministicGitEnv, so they need identity
+	// from the repository itself. A host whose ident auto-detection
+	// fails (a CI runner's user@host.(none)) otherwise 500s every
+	// commit-minting action while a developer laptop's well-formed
+	// auto-ident quietly passes — the exact local-green/CI-red gap this
+	// fixture shipped with.
+	if err := runGit(root, nil, "config", "user.name", "verdi-e2e"); err != nil {
+		return "", err
+	}
+	if err := runGit(root, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
+		return "", err
+	}
 	if err := runGit(root, nil, "add", "-A"); err != nil {
 		return "", err
 	}
