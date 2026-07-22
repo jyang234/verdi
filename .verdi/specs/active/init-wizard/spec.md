@@ -129,3 +129,13 @@ simulated crash injected partway through staging both leave nothing
 whatsoever at the real root — no `.verdi/` directory at all — because
 the staged temporary directory is discarded on any pre-rename error and
 no real-store write ever precedes that single rename.
+
+## Note
+
+Disclosed ritual-order deviation: this story's build commits were
+authored directly on this one `design/init-wizard` branch (per this
+build's own dispatch instruction, adapted for concurrent sibling-story
+worktrees), before `verdi build start` ever ran — `verdi build start
+spec/init-wizard` was run afterward, once `verdi align`'s build-mode
+branch-name resolution (`storyresolve.ResolveBuildSpec`, requiring a
+`feature/<name>` branch) surfaced that the alignment step needed it.
