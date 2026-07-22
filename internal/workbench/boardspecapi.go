@@ -29,6 +29,7 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/stubinstantiate"
 )
 
 // boardAPIRequest is the one strict-decoded body shape every action
@@ -638,13 +639,12 @@ func (s *boardSpecServer) actionStubGraduate(name string, proj *BoardProjection,
 	return err
 }
 
-// stubInstantiatePlaceholderStoryRef is the `story:` tracker scalar a
-// stub-instantiated story spec carries: the story class requires one
-// unconditionally (validateStory), but stub-instantiate has no real
-// tracker ref of its own to give it (ac-6: bound to its stub by slug,
-// "with no new provenance record") — an explicit, scheme-shaped
-// placeholder rather than an empty field that would fail self-validation.
-const stubInstantiatePlaceholderStoryRef = "todo:REPLACE-ME"
+// stubInstantiatePlaceholderStoryRef re-exports stubinstantiate's own
+// PlaceholderStoryRef under this package's established name (a handful of
+// other workbench call sites, e.g. actionCreate's own fallback, already
+// reference the local identifier) — never a second, independently-typed
+// constant that could drift from the shared package's own value.
+const stubInstantiatePlaceholderStoryRef = stubinstantiate.PlaceholderStoryRef
 
 // actionStubInstantiate scaffolds a declared stub's story (or spike) spec
 // on a fresh design/<slug> branch, built entirely via git plumbing so the
@@ -654,141 +654,25 @@ const stubInstantiatePlaceholderStoryRef = "todo:REPLACE-ME"
 // status accepted-pending-build: "the owner's rule: implementations
 // build accepted specs only") rather than the generic authoring-mode
 // gate — see the handler's own comment on why this action is exempted
-// from it. Fails closed if the branch already exists (gitx.UpdateRef's
-// own atomicity).
+// from it.
+//
+// A thin wrapper over internal/stubinstantiate.Instantiate (spec/
+// cli-creation ac-3, ledger L-N7): this action's own guard, stub lookup,
+// link-building, template render, self-validation, and git-plumbing
+// commit all moved into that shared package so `verdi design start
+// --from-stub` calls the IDENTICAL core rather than a second CLI-side
+// reimplementation — closing the ADJ-65 asymmetry at the mechanism. This
+// function now only translates the board's own proj/req shapes into the
+// shared core's plain arguments and back; every message and behavior is
+// unchanged (the extraction is behavior-preserving, proven by this
+// package's own existing handler tests passing unmodified).
 func (s *boardSpecServer) actionStubInstantiate(ctx context.Context, name string, proj *BoardProjection, req boardAPIRequest) error {
-	slug := req.ID
-	if slug == "" {
-		return fmt.Errorf("stub-instantiate requires a stub slug (id)")
+	stubs := make([]artifact.Stub, len(proj.StubViews))
+	for i, sv := range proj.StubViews {
+		stubs[i] = artifact.Stub{Slug: sv.Slug, Spike: sv.Spike, Resolves: sv.Resolves, AcceptanceCriteria: sv.AcceptanceCriteria}
 	}
-	if err := s.sealedFeatureWallGuard(proj, "stub-instantiate"); err != nil {
-		return err
-	}
-	var stub *StubView
-	for i := range proj.StubViews {
-		if proj.StubViews[i].Slug == slug {
-			stub = &proj.StubViews[i]
-			break
-		}
-	}
-	if stub == nil {
-		return fmt.Errorf("no stub %q declared on this spec", slug)
-	}
-
-	var links []designscaffold.StoryLink
-	if stub.Spike {
-		for _, oq := range stub.Resolves {
-			links = append(links, designscaffold.StoryLink{Type: artifact.LinkResolves, Ref: "spec/" + name + "#" + oq})
-		}
-	} else {
-		for _, ac := range stub.AcceptanceCriteria {
-			links = append(links, designscaffold.StoryLink{Type: artifact.LinkImplements, Ref: "spec/" + name + "#" + ac})
-		}
-	}
-
-	// A plain-language pre-check on the branch (the wall surfaces this
-	// message verbatim): UpdateRef below stays the atomic create-only
-	// guard — this only makes the common refusal legible, it does not
-	// replace the fail-closed write.
-	if _, err := gitx.RevParse(ctx, s.root, "refs/heads/design/"+slug); err == nil {
-		return fmt.Errorf("branch design/%s already exists — this stub was already instantiated (or the name is taken); check that branch out instead", slug)
-	}
-
-	// The story class's own template — the store's own resolved model
-	// (spec/scaffold-templates ac-1 cont.: this call site reads
-	// Class.Template off store.Open's resolved model exactly like
-	// design.go's class switch does, never a hardcoded filename), with a
-	// store override at .verdi/templates/<name>.md winning over the
-	// embedded canonical default when present.
-	cfg, err := store.Open(s.root)
-	if err != nil {
-		return fmt.Errorf("workbench: resolving store config: %w", err)
-	}
-	class, ok := cfg.Model.Classes[string(artifact.ClassStory)]
-	if !ok {
-		return fmt.Errorf("workbench: internal error: resolved model has no %q class", artifact.ClassStory)
-	}
-	tmpl, err := designscaffold.LoadTemplate(s.root, class.Template)
-	if err != nil {
-		return fmt.Errorf("workbench: %w", err)
-	}
-	content, err := designscaffold.Story(tmpl, "spec/"+slug, stubInstantiatePlaceholderStoryRef, designscaffold.HumanizeName(slug), stub.Spike, links, designscaffold.DefaultProblem, designscaffold.DefaultOutcome)
-	if err != nil {
-		return fmt.Errorf("workbench: rendering template %s for class %s: %w", class.Template, artifact.ClassStory, err)
-	}
-
-	// Self-validate before ever touching the object database (CLAUDE.md:
-	// "never fake success" — mirrors design start's own pre-write check).
-	fm, _, err := artifact.SplitFrontmatter([]byte(content))
-	if err != nil {
-		return fmt.Errorf("workbench: internal error: stub-instantiate scaffold failed self-validation: %w", err)
-	}
-	spec, err := artifact.DecodeSpec(fm)
-	if err != nil {
-		return fmt.Errorf("workbench: internal error: stub-instantiate scaffold failed self-validation: %w", err)
-	}
-	// K1: the decoded scaffold's OWN class must agree with the story
-	// class stub-instantiate always requests — class.Template (above) is
-	// DATA, so a misconfigured model.yaml (or a hand-edited store
-	// override) can bind the story class to a DIFFERENT class's template
-	// file and still strict-decode clean, as the other class. Caught
-	// here, before any git plumbing runs.
-	if err := designscaffold.CheckClass(spec, artifact.ClassStory); err != nil {
-		return fmt.Errorf("workbench: internal error: stub-instantiate scaffold failed self-validation: %w", err)
-	}
-
-	msg := fmt.Sprintf("stub-instantiate: scaffold spec/%s from stub %q of spec/%s", slug, slug, name)
-	return s.commitScaffoldBranch(ctx, slug, content, msg)
-}
-
-// sealedFeatureWallGuard is the shared wall guard both scaffold-a-story
-// actions enforce (spec/scoping-canvas ac-6; spec/creation-form ac-2
-// inherits it verbatim): class feature, status accepted-pending-build —
-// "the owner's rule: implementations build accepted specs only" —
-// checked against the wall's own state, never the generic authoring-mode
-// gate (see the handler's exemption comment). action names the refusing
-// action in the message; the spoken class/state words are display and
-// resolve (L-M13a(6)); the COMPARISONS stay on bare ids.
-func (s *boardSpecServer) sealedFeatureWallGuard(proj *BoardProjection, action string) error {
-	if proj.Class != string(artifact.ClassFeature) {
-		return fmt.Errorf("%s is only available on %s-class wall; this wall is class %s", action, model.Indefinite(s.model.DisplayClass("feature")), s.model.DisplayClass(proj.Class))
-	}
-	if proj.Status != "accepted-pending-build" {
-		// "accepted" in the owner's-rule parenthetical is that rule's own
-		// word, not a lifecycle state id.
-		return fmt.Errorf("%s is only available on %s spec (implementations build accepted specs only); this wall's status is %s",
-			action, model.Indefinite(s.model.DisplayState("feature", "accepted-pending-build")), s.model.DisplayState("feature", proj.Status))
-	}
-	return nil
-}
-
-// commitScaffoldBranch lands content as .verdi/specs/active/<slug>/spec.md
-// in exactly one commit on a fresh design/<slug> branch, entirely via git
-// plumbing — the serving checkout's HEAD, working tree, and real index
-// are never touched (spec/scoping-canvas ac-6's mechanism, shared by
-// stub-instantiate and the creation form, spec/creation-form ac-2).
-// Fails closed if the branch already exists (gitx.UpdateRef's create-only
-// atomicity — callers' RevParse pre-checks only make the common refusal
-// legible).
-func (s *boardSpecServer) commitScaffoldBranch(ctx context.Context, slug, content, msg string) error {
-	baseCommit, err := gitx.RevParse(ctx, s.root, "HEAD")
-	if err != nil {
-		return err
-	}
-	blobSHA, err := gitx.WriteBlob(ctx, s.root, []byte(content))
-	if err != nil {
-		return err
-	}
-	path := store.ActiveSpecRelPath(slug)
-	tree, err := gitx.BuildTreeWithFile(ctx, s.root, baseCommit+"^{tree}", path, blobSHA)
-	if err != nil {
-		return err
-	}
-	commit, err := gitx.CommitTree(ctx, s.root, tree, baseCommit, msg)
-	if err != nil {
-		return err
-	}
-	return gitx.UpdateRef(ctx, s.root, "refs/heads/design/"+slug, commit)
+	_, err := stubinstantiate.Instantiate(ctx, s.root, name, artifact.SpecClass(proj.Class), proj.Status, stubs, req.ID, s.model)
+	return err
 }
 
 // createFormFields enumerates the story class's resolved template into
@@ -854,7 +738,7 @@ func normalizeOwners(v string) (string, error) {
 // to the same disclosed placeholder defaults every other scaffold
 // consumer uses, Owners normalizing through normalizeOwners first.
 func (s *boardSpecServer) actionCreate(ctx context.Context, name string, proj *BoardProjection, req boardAPIRequest) error {
-	if err := s.sealedFeatureWallGuard(proj, "create"); err != nil {
+	if err := stubinstantiate.SealedFeatureWallGuard(artifact.SpecClass(proj.Class), proj.Status, "create", s.model); err != nil {
 		return err
 	}
 	slug := req.Name
@@ -985,7 +869,7 @@ func (s *boardSpecServer) actionCreate(ctx context.Context, name string, proj *B
 	}
 
 	msg := fmt.Sprintf("create: scaffold spec/%s from the creation form of spec/%s", slug, name)
-	return s.commitScaffoldBranch(ctx, slug, content, msg)
+	return stubinstantiate.CommitScaffoldBranch(ctx, s.root, slug, content, msg)
 }
 
 // relatesTarget builds a relates endpoint's pinned target record.
