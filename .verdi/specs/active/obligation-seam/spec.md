@@ -94,6 +94,25 @@ obligation.md at the `.verdi/obligations/<spec>/<ac>--<kind>.md` convention
 path — never a bare `os.Stat`, so a present-but-malformed file is never
 mistaken for coverage.
 
+Disclosed reading (conservative-backstop-predicate, recorded here per the
+provenance discipline; the alignment disposition records it too). Two
+clarifications the acceptance-criterion text above leaves implicit — both
+deliberate, conservative choices this backstop makes on a WRITING path, not
+reversals of VL-020's own read-only reading. First, a present-but-undecodable
+obligation file at a declared pair's convention path is not treated as
+"missing": the backstop refuses accept operationally (exit 2) rather than
+scaffolding over it or counting it as coverage — stricter, on purpose, than
+silently continuing past it. Second, "the same decode-based predicate VL-020
+itself applies" is imprecise: VL-020's own predicate is
+existence-of-a-kind-classified-document at the path (existence only — it
+explicitly does not re-validate that document's own content), whereas the
+backstop additionally decodes each candidate AND refuses to write over ANY
+file already occupying a pair's convention path — the case of a decodable
+obligation misfiled under another kind's filename being exactly what a bare
+`for_kind`-keyed coverage check would otherwise clobber. The extra strictness
+is a conservative invention that can only ever refuse where VL-020 would pass,
+never the reverse.
+
 ## Ac 3
 
 On any refusal or operational error accept hits after scaffolding has
