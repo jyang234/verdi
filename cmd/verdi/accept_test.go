@@ -22,7 +22,7 @@ func scaffoldAndDesign(t *testing.T) (repo *fixturegit.Repo, preFlipHead string)
 	repo = buildPhase7Repo(t)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, phase7Model(t), deps, &stdout, &stderr); got != 0 {
