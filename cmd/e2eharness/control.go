@@ -63,6 +63,7 @@ func (c *controlServer) handler() http.Handler {
 	mux.HandleFunc("/delete-branch", c.deleteBranch)
 	mux.HandleFunc("/empty-glance-fixture", c.emptyGlance.handler)
 	mux.HandleFunc("/vocab-fixture", c.vocab.handler)
+	mux.HandleFunc("/vocab-fixture/show", c.vocab.showHandler)
 	return mux
 }
 
