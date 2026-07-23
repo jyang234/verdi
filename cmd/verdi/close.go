@@ -480,10 +480,10 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 func requireUnstagedClosureIndex(ctx context.Context, root string) error {
 	paths, err := gitx.StagedPaths(ctx, root)
 	if err != nil {
-		return fmt.Errorf("checking the pre-close index: %w", err)
+		return fmt.Errorf("checking the pre-ritual index: %w", err)
 	}
 	if len(paths) != 0 {
-		return fmt.Errorf("refusing to run with pre-existing staged paths %q; commit or unstage them before close", paths)
+		return fmt.Errorf("refusing to run with pre-existing staged paths %q; commit or unstage them before running the ritual", paths)
 	}
 	return nil
 }
