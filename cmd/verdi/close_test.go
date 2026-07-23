@@ -810,6 +810,128 @@ func TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testin
 	}
 }
 
+// TestRequireCleanIndex covers the guard's three answers — clean, foreign
+// staged work, and the ritual's OWN residue — plus the operational branch
+// CLAUDE.md requires and nothing previously exercised (the
+// "checking the pre-ritual index" wrap).
+//
+// The residue case is the defect: when CreateCommit fails (a failing
+// pre-commit hook, commit.gpgsign with no key, an unset user.email), close's
+// own closure paths stay staged. The generic refusal then tells the operator
+// to "commit or unstage them", with no way to tell ritual residue from their
+// own work — and unstaging is exactly the wrong move on a half-finished
+// archive. The guard must still REFUSE (no new pass path), but say what the
+// staged paths actually are and how to recover.
+func TestRequireCleanIndex(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("clean index passes", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		if err := requireCleanIndex(ctx, repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("requireCleanIndex(clean) = %v, want nil", err)
+		}
+	})
+
+	t.Run("foreign staged work is refused generically", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
+		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
+
+		err := requireCleanIndex(ctx, repo.Dir, "close-fixture")
+		if err == nil {
+			t.Fatal("requireCleanIndex(foreign staged path) = nil, want a refusal")
+		}
+		for _, want := range []string{"verdi.bindings.yaml", "commit or unstage them"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("requireCleanIndex error = %q, want %q", err, want)
+			}
+		}
+	})
+
+	t.Run("the ritual's own closure residue is named as such", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		// Exactly what an interrupted close leaves staged: the active-zone
+		// deletion and the archive-zone tree, and nothing else.
+		if err := store.ArchiveMove(repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+
+		err := requireCleanIndex(ctx, repo.Dir, "close-fixture")
+		if err == nil {
+			t.Fatal("requireCleanIndex(closure residue) = nil, want a refusal — the guard must not open a new pass path")
+		}
+		msg := err.Error()
+		if strings.Contains(msg, "commit or unstage them before running the ritual") {
+			t.Fatalf("requireCleanIndex error = %q, want recovery-accurate text, not the generic \"commit or unstage them\" advice aimed at the operator's own work", msg)
+		}
+		for _, want := range []string{
+			"spec/close-fixture",
+			"interrupted",
+			store.SpecDirRelPath(store.ZoneArchive, "close-fixture"),
+			"git commit",
+		} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("requireCleanIndex error = %q, want it to carry %q", msg, want)
+			}
+		}
+	})
+
+	t.Run("residue mixed with foreign work is refused generically", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		if err := store.ArchiveMove(repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
+		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
+
+		err := requireCleanIndex(ctx, repo.Dir, "close-fixture")
+		if err == nil {
+			t.Fatal("requireCleanIndex(mixed) = nil, want a refusal")
+		}
+		if !strings.Contains(err.Error(), "commit or unstage them") {
+			t.Fatalf("requireCleanIndex error = %q, want the generic refusal — verdi must not claim an index it does not wholly own", err)
+		}
+	})
+
+	t.Run("a sibling spec's staged paths are not mistaken for this target's", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		// A prefix-sharing sibling name: ".../close-fixture-two/..." must not
+		// be read as residue of ".../close-fixture".
+		sibling := filepath.Join(repo.Dir, ".verdi", "specs", "active", "close-fixture-two")
+		if err := os.MkdirAll(sibling, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sibling, "spec.md"), []byte("sibling\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/specs/active/close-fixture-two")
+
+		err := requireCleanIndex(ctx, repo.Dir, "close-fixture")
+		if err == nil {
+			t.Fatal("requireCleanIndex(sibling spec staged) = nil, want a refusal")
+		}
+		if !strings.Contains(err.Error(), "commit or unstage them") {
+			t.Fatalf("requireCleanIndex error = %q, want the generic refusal for a prefix-sharing sibling", err)
+		}
+	})
+
+	t.Run("an unusable repository is an operational error, never a silent pass", func(t *testing.T) {
+		err := requireCleanIndex(ctx, t.TempDir(), "close-fixture")
+		if err == nil {
+			t.Fatal("requireCleanIndex(outside a git repository) = nil, want an operational error — a guard that cannot answer must never pass")
+		}
+		if !strings.Contains(err.Error(), "checking the pre-ritual index") {
+			t.Fatalf("requireCleanIndex error = %q, want the \"checking the pre-ritual index\" wrap", err)
+		}
+	})
+}
+
 func TestStageClosureSpec_AddPathsFailurePreservesUnrelatedState(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
