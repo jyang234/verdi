@@ -548,6 +548,9 @@ func TestRunPrepare_FrozenLivingReportIsItsOwnOperatorState(t *testing.T) {
 			if rc != 1 {
 				t.Fatalf("runPrepare(frozen living report) = %d, want 1 (a verdict: preparation cannot proceed); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 			}
+			if strings.Contains(stderr.String(), "align:") {
+				t.Fatalf("stderr = %q: the frozen state reached the operator as an unframed align refusal, not as a preparation state", stderr.String())
+			}
 			for _, want := range []string{
 				"close: --prepare: MECHANICAL WORK REQUIRED",
 				"already frozen",

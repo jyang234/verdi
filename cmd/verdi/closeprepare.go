@@ -68,6 +68,44 @@ func prepareAlignDeps(deps closeDeps, modelDigest, storyArg string) alignDeps {
 	return alignD
 }
 
+// reportFrozenState reports the one report state preparation can neither
+// refresh nor hand to the gate: an ALREADY-FROZEN living deviation report.
+// It returns 1 (a verdict — preparation cannot proceed) once it has named
+// the state, or 0 when report is absent or living, leaving every other path
+// exactly as it was.
+//
+// The state is reachable and was previously invisible in BOTH directions. A
+// frozen report covering HEAD passes the freshness check (it covers HEAD)
+// and the gate's disposition condition (which does not inspect the frozen
+// stamp), so preparation fell through to READY and printed a next command
+// that structurally cannot succeed: close's freeze step refuses an
+// already-frozen report. A frozen report that does NOT cover HEAD hit that
+// same refusal one layer down, inside the align engine, surfacing an
+// unframed `align:` line with no diagnosis and no next step.
+//
+// It is rendered under MECHANICAL WORK REQUIRED rather than a new summary
+// word: the design's state table admits exactly that for non-judgment
+// blocked states in the first iteration ("the authoritative condition text
+// remains visible and no decision is automated"), and the machine boundary
+// the design cares about — JUDGMENT REQUIRED versus everything else — is
+// preserved. Inventing a seventh state name would be spec text this code
+// has no authority to write.
+//
+// Nothing is unfrozen and nothing is repaired: a frozen report is immutable
+// (align.go's own refusal says so), and choosing between restoring a living
+// report and completing an interrupted archive move is human work.
+func reportFrozenState(report *artifact.DeviationFrontmatter, specName string, stdout io.Writer) int {
+	if report == nil || report.Frozen == nil {
+		return 0
+	}
+	reportRelPath := store.DeviationReportRelPath(store.ZoneActive, specName)
+	archiveRelPath := store.SpecDirRelPath(store.ZoneArchive, specName)
+	fmt.Fprintf(stdout, "close: --prepare: MECHANICAL WORK REQUIRED (%s is already frozen at %s, commit %s; a frozen alignment report is immutable)\n", reportRelPath, report.Frozen.At, report.Frozen.Commit)
+	fmt.Fprintln(stdout, "close: --prepare: preparation refreshes only a LIVING report and never unfreezes one; the closure ritual is equally blocked here, because its own freeze step refuses an already-frozen report.")
+	fmt.Fprintf(stdout, "close: --prepare: two paths reach this state — a freeze that ran before the archive move without that move completing, or an explicit align --freeze — and preparation cannot tell them apart. Inspect %s: if it already holds this spec the closure completed and the active copy is residue; if it does not, deciding whether to restore a living report or finish the archive move is human work.\n", archiveRelPath)
+	return 1
+}
+
 func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, forceLocal bool, stdout, stderr io.Writer) int {
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
@@ -89,6 +127,9 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	if err != nil {
 		fmt.Fprintln(stderr, "close: --prepare:", err)
 		return 2
+	}
+	if rc := reportFrozenState(report, specRef.Name, stdout); rc != 0 {
+		return rc
 	}
 
 	if report == nil || report.Covers != head {
