@@ -998,6 +998,73 @@ func TestRequireCleanIndex(t *testing.T) {
 		}
 	})
 
+	t.Run("residue is still recognised with the store root below the git root", func(t *testing.T) {
+		// The layout internal/gitx/stagedpaths.go names as supported.
+		// StagedPaths answers in REPOSITORY-root-relative paths on purpose (that
+		// is what makes it immune to diff.relative), while the closure zones are
+		// written relative to the STORE root — so without re-basing, an
+		// interrupted close's own index reads as foreign work here and the
+		// operator gets "commit or unstage them" over their half-finished
+		// archive: exactly the advice the residue refusal exists to replace.
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files: map[string]string{
+				"above.txt":               "above the store root\n",
+				"store/.verdi/verdi.yaml": "schema: verdi.layout/v1\n",
+				"store/.verdi/specs/active/close-fixture/spec.md": closeFixtureStorySpecMD,
+			},
+			Message: "seed a store root one level below the git root",
+		}})
+		root := filepath.Join(repo.Dir, "store")
+		if err := store.ArchiveMove(root, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, root, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+
+		err := requireCleanIndex(ctx, root)
+		if err == nil {
+			t.Fatal("requireCleanIndex(closure residue below the git root) = nil, want a refusal")
+		}
+		if strings.Contains(err.Error(), "commit or unstage them before running the ritual") {
+			t.Fatalf("requireCleanIndex error = %q, want the residue refusal — the store root sitting below the git root must not silently degrade ownership detection", err)
+		}
+		if !strings.Contains(err.Error(), "spec/close-fixture") {
+			t.Fatalf("requireCleanIndex error = %q, want it to name spec/close-fixture's own closure paths", err)
+		}
+	})
+
+	t.Run("staged work above the store root is never claimed as residue", func(t *testing.T) {
+		// Re-basing must not become a way to claim paths verdi does not own: a
+		// staged path outside the store root disowns the whole index, exactly as
+		// one foreign path inside it already does.
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files: map[string]string{
+				"above.txt":               "above the store root\n",
+				"store/.verdi/verdi.yaml": "schema: verdi.layout/v1\n",
+				"store/.verdi/specs/active/close-fixture/spec.md": closeFixtureStorySpecMD,
+			},
+			Message: "seed a store root one level below the git root",
+		}})
+		root := filepath.Join(repo.Dir, "store")
+		if err := store.ArchiveMove(root, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, root, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "above.txt"), "someone else's staged edit\n")
+		gitOutput(t, repo.Dir, "add", "--", "above.txt")
+
+		err := requireCleanIndex(ctx, root)
+		if err == nil {
+			t.Fatal("requireCleanIndex(residue plus work above the store root) = nil, want a refusal")
+		}
+		if !strings.Contains(err.Error(), "commit or unstage them") {
+			t.Fatalf("requireCleanIndex error = %q, want the generic refusal — verdi must not claim an index carrying paths outside its own store", err)
+		}
+	})
+
 	t.Run("a staged edit inside a COMMITTED archive is never advised away", func(t *testing.T) {
 		// Reachable with no misbehaviour whatsoever: close a spec, commit the
 		// archive (the normal end state), then later resolve a merge or rebase

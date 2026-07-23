@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // stagedPathsArgs is the ONE git invocation StagedPaths makes, spelled out
@@ -72,6 +73,30 @@ func StagedPaths(ctx context.Context, dir string) ([]string, error) {
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+// RepoPrefix returns dir's own path relative to the repository root — `git
+// rev-parse --show-prefix` — as a slash path ending in "/", or "" when dir IS
+// the repository root.
+//
+// It is StagedPaths' companion, and exists for the same layout StagedPaths'
+// own reasoning names. StagedPaths answers in REPOSITORY-root-relative paths
+// deliberately (that is precisely what makes it immune to diff.relative),
+// while a caller that passed the store root as dir reasons about paths
+// relative to THAT root. When the two roots coincide — the common layout —
+// this is "" and the two vocabularies are the same one; when the store root
+// sits below the git root, this is the only thing that relates them, and a
+// caller that skips it silently reads every staged store path as foreign.
+//
+// Only the single trailing newline is trimmed, never surrounding whitespace:
+// a directory name may legally end in a space, and TrimSpace would corrupt the
+// prefix it is supposed to relate paths through.
+func RepoPrefix(ctx context.Context, dir string) (string, error) {
+	out, err := run(ctx, dir, "rev-parse", "--show-prefix")
+	if err != nil {
+		return "", fmt.Errorf("gitx: RepoPrefix(%s): %w", dir, err)
+	}
+	return strings.TrimSuffix(string(out), "\n"), nil
 }
 
 // parseStagedStatus extracts the index-differs-from-HEAD paths from `git

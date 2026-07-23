@@ -255,6 +255,74 @@ func TestStagedPaths_SeesStagedPathsAboveDirUnderDiffRelative(t *testing.T) {
 	}
 }
 
+// TestRepoPrefix pins the one relation between StagedPaths' repository-root-
+// relative answers and the store-root vocabulary its callers reason in — the
+// two are the same vocabulary only when dir IS the repository root, and a
+// caller that assumes that silently reads every staged store path as foreign
+// in the below-git-root layout StagedPaths' own doc comment names.
+func TestRepoPrefix(t *testing.T) {
+	ctx := context.Background()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			"above.txt":         "above the store root\n",
+			"store/.verdi/keep": "store marker\n",
+		},
+		Message: "seed a store root below the git root",
+	}})
+
+	t.Run("the repository root itself has no prefix", func(t *testing.T) {
+		got, err := RepoPrefix(ctx, repo.Dir)
+		if err != nil {
+			t.Fatalf("RepoPrefix: %v", err)
+		}
+		if got != "" {
+			t.Fatalf("RepoPrefix(repository root) = %q, want %q", got, "")
+		}
+	})
+
+	t.Run("a directory below the repository root", func(t *testing.T) {
+		got, err := RepoPrefix(ctx, filepath.Join(repo.Dir, "store"))
+		if err != nil {
+			t.Fatalf("RepoPrefix: %v", err)
+		}
+		if got != "store/" {
+			t.Fatalf("RepoPrefix(store root below the git root) = %q, want %q — the trailing separator is what makes it a safe prefix to strip", got, "store/")
+		}
+	})
+
+	t.Run("a prefix a StagedPaths answer can actually be stripped with", func(t *testing.T) {
+		// The property the two functions are used for together: every staged
+		// path inside dir must begin with dir's own prefix.
+		storeRoot := filepath.Join(repo.Dir, "store")
+		if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", "keep"), []byte("edited\n"), 0o644); err != nil {
+			t.Fatalf("editing the store marker: %v", err)
+		}
+		runGitForTest(t, storeRoot, "add", "--", ".verdi/keep")
+
+		prefix, err := RepoPrefix(ctx, storeRoot)
+		if err != nil {
+			t.Fatalf("RepoPrefix: %v", err)
+		}
+		staged, err := StagedPaths(ctx, storeRoot)
+		if err != nil {
+			t.Fatalf("StagedPaths: %v", err)
+		}
+		want := []string{"store/.verdi/keep"}
+		if !reflect.DeepEqual(staged, want) {
+			t.Fatalf("StagedPaths = %#v, want %#v", staged, want)
+		}
+		if rest, ok := strings.CutPrefix(staged[0], prefix); !ok || rest != ".verdi/keep" {
+			t.Fatalf("stripping RepoPrefix %q from StagedPaths %q = (%q, %v), want (%q, true)", prefix, staged[0], rest, ok, ".verdi/keep")
+		}
+	})
+
+	t.Run("outside a repository is an operational error", func(t *testing.T) {
+		if _, err := RepoPrefix(ctx, t.TempDir()); err == nil {
+			t.Fatal("RepoPrefix outside a repository: want an operational error, got nil")
+		}
+	})
+}
+
 // TestStagedPaths_NamesBothSidesOfAStagedRename pins the refusal message's
 // completeness: `--name-only` reports only a rename's DESTINATION (R100
 // old->new renders as `new` alone), so a guard built on it under-names the
