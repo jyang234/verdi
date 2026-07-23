@@ -1121,6 +1121,57 @@ func TestRunPreflight_RehearsesTheIndexGuard(t *testing.T) {
 	})
 }
 
+// TestRunPreflight_ErrorsCarryTheModesOwnFraming covers the two operational
+// exits that spoke as the real ritual.
+//
+// runPreflight frames its resolve failure "close: --preflight:", but its
+// HEAD-resolution and gate-evaluation failures printed a bare "close:" — the
+// exact prefix runClose itself uses. Under --prepare, whose every other error
+// carries "close: --prepare:", a HEAD or gate failure therefore reached the
+// operator as `close: gitx: RevParse("HEAD") ...`, indistinguishable from a
+// real closure ritual having run. Nothing here mutates anything, and an
+// operator reading that line has no way to know it.
+func TestRunPreflight_ErrorsCarryTheModesOwnFraming(t *testing.T) {
+	ctx := context.Background()
+
+	assertFramed := func(t *testing.T, stderr string) {
+		t.Helper()
+		if stderr == "" {
+			t.Fatal("expected an operational diagnostic on stderr")
+		}
+		for _, line := range strings.Split(strings.TrimRight(stderr, "\n"), "\n") {
+			if !strings.HasPrefix(line, "close:") {
+				continue
+			}
+			if !strings.HasPrefix(line, "close: --preflight:") {
+				t.Fatalf("stderr line %q reads as a real `verdi close` ritual; every line this mode prints must name the mode", line)
+			}
+		}
+	}
+
+	t.Run("HEAD resolution failure", func(t *testing.T) {
+		// A valid store that is not inside a git repository: resolution
+		// succeeds, `git rev-parse HEAD` cannot answer.
+		root := prepareStoreWithoutGit(t)
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(ctx, root, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+		if rc != 2 {
+			t.Fatalf("runPreflight(no git) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		assertFramed(t, stderr.String())
+	})
+
+	t.Run("gate evaluation failure", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, erroringOpenMRsForge{forgefake.New()}, true, &stdout, &stderr)
+		if rc != 2 {
+			t.Fatalf("runPreflight(forge transport error) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		assertFramed(t, stderr.String())
+	})
+}
+
 // TestRunPreflight_RehearsesUncommittedFoldRecords is the second half of the
 // same contract: a real close discloses every attestation/waiver its fold
 // consumed that HEAD does not carry (close.go's discloseUncommittedFoldRecords,

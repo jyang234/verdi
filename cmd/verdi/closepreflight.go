@@ -231,9 +231,13 @@ func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifes
 		return 2
 	}
 
+	// Framed as this mode, like every other line it prints (finding: a bare
+	// "close:" here is the prefix runClose itself uses, so under --prepare a
+	// HEAD or gate failure read as a real closure ritual having run — when
+	// nothing has run and nothing has changed).
 	head, err := gitx.RevParse(ctx, root, "HEAD")
 	if err != nil {
-		fmt.Fprintln(stderr, "close:", err)
+		fmt.Fprintln(stderr, "close: --preflight:", err)
 		return 2
 	}
 	defaultBranchRef := lint.ResolveDefaultBranch(ctx, root)
@@ -245,7 +249,7 @@ func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifes
 		outcome, err = runStoryPreflightGate(ctx, root, spec, manifest, mdl, f, defaultBranchRef, head, stdout)
 	}
 	if err != nil {
-		fmt.Fprintln(stderr, "close:", err)
+		fmt.Fprintln(stderr, "close: --preflight:", err)
 		return 2
 	}
 	outcome.Disclosures += disclosures
