@@ -565,18 +565,36 @@ func requireCleanIndex(ctx context.Context, root string) error {
 // zone, so a retry's own ref no longer resolves and the guard would never see
 // a name to compare against. The index still carries the answer.
 //
-// The shape it recognises is exactly what stageClosureSpec produces and
-// nothing else: every staged path under ONE spec's active or archive closure
-// directory, with at least one under the archive zone (close always creates
-// the archive tree; a staged active zone alone is some other edit). The
-// trailing separator keeps a prefix-sharing sibling ("close-fixture-two") from
-// reading as residue of "close-fixture", and one foreign path collapses the
-// answer to "" so verdi never claims an index it does not wholly own.
+// The shape it recognises is every staged path under ONE spec's active or
+// archive closure directory, with BOTH zones represented. The trailing
+// separator keeps a prefix-sharing sibling ("close-fixture-two") from reading
+// as residue of "close-fixture", and one foreign path collapses the answer to
+// "" so verdi never claims an index it does not wholly own.
+//
+// Both zones is the load-bearing requirement, and it is a safety rule, not a
+// tidiness one. The refusal this feeds ends in "deleting the leftover
+// specs/archive/<name> directory", so the recognizer must not fire unless that
+// archive tree is provably THIS run's own creation. The staged active-zone
+// deletion is that proof: it exists only because the spec directory was
+// tracked at HEAD and this ritual moved it away. Without it the index is
+// byte-for-byte an ordinary staged edit inside an already-closed, COMMITTED
+// archived spec — resolving a merge or rebase conflict there reaches it with
+// no misbehaviour at all — and the advice would delete committed content from
+// the operator's worktree.
+//
+// The cost is disclosed rather than hidden: an interrupted close of a spec
+// that was NEVER COMMITTED stages the archive tree alone (stageClosureSpec
+// omits an untracked active zone), and that residue now falls through to the
+// generic refusal instead of the tailored one. It is still REFUSED — no new
+// pass path, no silence — and losing tailored guidance is the strictly safe
+// direction of that trade. A pure function of the index is also deliberate:
+// this guard's only job is to refuse safely, so it acquires no way to fail.
 func closureResidueName(paths []string) string {
 	const activeRoot = ".verdi/specs/active/"
 	const archiveRoot = ".verdi/specs/archive/"
 
-	name, sawArchive := "", false
+	name := ""
+	sawActive, sawArchive := false, false
 	for _, p := range paths {
 		rest, inArchive := strings.CutPrefix(p, archiveRoot)
 		if !inArchive {
@@ -595,8 +613,9 @@ func closureResidueName(paths []string) string {
 			return ""
 		}
 		sawArchive = sawArchive || inArchive
+		sawActive = sawActive || !inArchive
 	}
-	if !sawArchive {
+	if !sawActive || !sawArchive {
 		return ""
 	}
 	return name

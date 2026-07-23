@@ -830,9 +830,17 @@ func TestClosureResidueName(t *testing.T) {
 			want:  "foo",
 		},
 		{
-			name:  "archive zone alone (the active zone was untracked)",
+			// The DESTRUCTIVE misclassification. This shape is indistinguishable
+			// from an ordinary staged edit inside an already-closed, COMMITTED
+			// archived spec — resolving a merge or rebase conflict there reaches
+			// it with no misbehaviour at all — and the residue refusal's recovery
+			// advice ends in "deleting the leftover .verdi/specs/archive/foo
+			// directory", which for that index deletes committed content from the
+			// worktree. Only the active zone's staged deletion proves this ritual
+			// moved a HEAD-tracked spec directory out from under itself, which is
+			// what makes deleting the archive tree safe.
+			name:  "archive zone alone cannot be told from an edit inside a committed archive",
 			paths: []string{".verdi/specs/archive/foo/spec.md"},
-			want:  "foo",
 		},
 		{
 			name:  "active zone alone is an ordinary spec edit, not closure residue",
@@ -853,6 +861,12 @@ func TestClosureResidueName(t *testing.T) {
 		{
 			name:  "the zone directory itself, with no spec name under it",
 			paths: []string{".verdi/specs/archive/spec.md"},
+		},
+		{
+			// Both zones, but the archive half belongs to a different spec: the
+			// active-zone deletion proves nothing about THAT archive tree.
+			name:  "both zones present but naming different specs",
+			paths: []string{".verdi/specs/active/foo/spec.md", ".verdi/specs/archive/bar/spec.md"},
 		},
 		{
 			name:  "a spec directory with no file under it",
@@ -981,6 +995,37 @@ func TestRequireCleanIndex(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "commit or unstage them") {
 			t.Fatalf("requireCleanIndex error = %q, want the generic refusal for an active-zone-only edit", err)
+		}
+	})
+
+	t.Run("a staged edit inside a COMMITTED archive is never advised away", func(t *testing.T) {
+		// Reachable with no misbehaviour whatsoever: close a spec, commit the
+		// archive (the normal end state), then later resolve a merge or rebase
+		// conflict inside that archived spec — `git add` of one archive-zone
+		// path is the whole index. That index is byte-for-byte the shape an
+		// interrupted close of a never-committed spec leaves, so the residue
+		// refusal claimed it and advised "deleting the leftover
+		// .verdi/specs/archive/<name> directory": committed content, deleted
+		// from the operator's worktree on verdi's own instruction.
+		repo := buildCloseFixtureRepo(t)
+		if err := store.ArchiveMove(repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/specs")
+		gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "close: archive spec/close-fixture")
+		archived := filepath.Join(repo.Dir, filepath.FromSlash(store.SpecRelPath(store.ZoneArchive, "close-fixture")))
+		appendCloseTestFile(t, archived, "\nan edit inside the committed archive\n")
+		gitOutput(t, repo.Dir, "add", "--", store.SpecRelPath(store.ZoneArchive, "close-fixture"))
+
+		err := requireCleanIndex(ctx, repo.Dir)
+		if err == nil {
+			t.Fatal("requireCleanIndex(staged edit inside a committed archive) = nil, want a refusal")
+		}
+		if strings.Contains(err.Error(), "deleting the leftover") {
+			t.Fatalf("requireCleanIndex error = %q — it advises deleting a COMMITTED archive directory; verdi must never tell an operator to delete committed content it does not own", err)
+		}
+		if !strings.Contains(err.Error(), "commit or unstage them") {
+			t.Fatalf("requireCleanIndex error = %q, want the generic refusal: verdi cannot prove it owns this index", err)
 		}
 	})
 
