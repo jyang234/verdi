@@ -33,6 +33,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
@@ -41,6 +42,15 @@ import (
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
+
+// closureGateOutcome is the closure gate's derived result. Ready preserves
+// the gate's existing boolean verdict exactly. Disclosures counts the
+// disclosed-unproven inputs already rendered by the gate: disclosed
+// conditions and rendered per-record detail carried in gateCondition.Extra.
+type closureGateOutcome struct {
+	Ready       bool
+	Disclosures int
+}
 
 // runClosureGate evaluates 03 §Gates' closure gate for spec at head:
 // eligible (the story-level fold, authoritative evidence only), no
@@ -54,25 +64,42 @@ import (
 // read as "no pending MRs exist". Only a story that implements no feature at all
 // (nothing to prove) passes that condition outright with a nil forge.
 func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (bool, error) {
+	outcome, err := runClosureGateOutcome(ctx, root, spec, f, defaultBranchRef, manifest, mdl, head, stdout)
+	return outcome.Ready, err
+}
+
+// runClosureGateOutcome evaluates the story closure gate and retains the
+// disclosure count needed by preflight summaries. runClosureGate remains the
+// compatibility seam for real-close callers that consume only the verdict.
+func runClosureGateOutcome(ctx context.Context, root string, spec *artifact.SpecFrontmatter, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (closureGateOutcome, error) {
 	cond1, err := checkClosureEligible(ctx, root, spec, head, mdl)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond2, err := checkSpecStaleCondition(root, spec, manifest)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond3, err := checkPendingSupersessionCondition(ctx, f, defaultBranchRef, spec)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond4, err := checkDispositionCompleteCondition(root, spec, head)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 
-	allOK := true
-	for _, c := range []gateCondition{cond1, cond2, cond3, cond4} {
+	return reportClosureGateConditions(stdout, "closure: ", []gateCondition{cond1, cond2, cond3, cond4}), nil
+}
+
+// reportClosureGateConditions renders story and feature closure conditions
+// through one loop and derives their structured outcome. Extra is deliberately
+// mixed: it also carries informational feature-union tallies, so only lines
+// rendered in the shared disclosed-unproven vocabulary contribute to the
+// disclosure count.
+func reportClosureGateConditions(stdout io.Writer, label string, conditions []gateCondition) closureGateOutcome {
+	outcome := closureGateOutcome{Ready: true}
+	for _, c := range conditions {
 		switch {
 		case c.Disclosed:
 			// Three-valued honesty (constitution 2/10): the input was
@@ -80,13 +107,14 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 			// through the shared internal/disclosure seam
 			// (spec/disclosure-seam-v2, ac-1), the same Render function
 			// gate.go's reportGateConditions and lint's Finding.String() use.
-			fmt.Fprint(stdout, "closure: ")
+			outcome.Disclosures++
+			fmt.Fprint(stdout, label)
 			fmt.Fprintln(stdout, disclosure.Render(disclosure.New(c.Source, "", c.Reason)))
 		case c.OK:
-			fmt.Fprintf(stdout, "[PASS] closure: %s\n", c.Name)
+			fmt.Fprintf(stdout, "[PASS] %s%s\n", label, c.Name)
 		default:
-			allOK = false
-			fmt.Fprintf(stdout, "[FAIL] closure: %s\n", c.Name)
+			outcome.Ready = false
+			fmt.Fprintf(stdout, "[FAIL] %s%s\n", label, c.Name)
 			fmt.Fprintf(stdout, "       %s\n", c.Reason)
 		}
 		// spec/evidence-resilience ac-2: per-record disclosed-unproven
@@ -94,9 +122,12 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 		// printed regardless of which branch fired above.
 		for _, extra := range c.Extra {
 			fmt.Fprintln(stdout, extra)
+			if strings.HasPrefix(extra, disclosure.SeverityDisclosedUnproven+" [") {
+				outcome.Disclosures++
+			}
 		}
 	}
-	return allOK, nil
+	return outcome
 }
 
 // checkClosureEligible is the closure gate's "eligible is true" condition:

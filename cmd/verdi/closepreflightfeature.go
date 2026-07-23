@@ -6,9 +6,9 @@
 // closes). Mirrors runStoryPreflightGate (closepreflight.go) in shape but
 // recomputes EXACTLY runCloseFeature's (closefeature.go) own prologue —
 // discoverImplementingStories, foldFeature, reconcileFeatureStubs, all
-// already pure reads — before calling the identical runFeatureClosureGate
-// function (dc-2) close.go:170-172 dispatches to for a feature-class
-// target.
+// already pure reads — before calling runFeatureClosureGateOutcome, the same
+// underlying evaluation the real-close runFeatureClosureGate compatibility
+// wrapper consumes for a feature-class target (dc-2).
 package main
 
 import (
@@ -26,8 +26,8 @@ import (
 )
 
 // runFeaturePreflightGate runs the SAME evaluation function a real
-// feature-class `verdi close` calls first (runFeatureClosureGate,
-// closuregatefeature.go — dc-2), printing its unchanged
+// feature-class `verdi close` calls first (runFeatureClosureGateOutcome beneath
+// runFeatureClosureGate, closuregatefeature.go — dc-2), printing its unchanged
 // PASS/FAIL/disclosed "closure(feature):" lines, then enriches condition
 // 1's per-AC breakdown the same way the story path does (unmetACDetail,
 // closepreflight.go) — keyed by the feature spec's own Name (dc-6's
@@ -43,45 +43,45 @@ import (
 // own path/undispositioned-ids/ritual text directly in its Reason string
 // (closuregate.go's checkDispositionCompleteCondition) and likewise needs
 // no enrichment.
-func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, mdl *model.Model, f forge.Forge, defaultBranchRef, head string, stdout io.Writer) (bool, error) {
+func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, mdl *model.Model, f forge.Forge, defaultBranchRef, head string, stdout io.Writer) (closureGateOutcome, error) {
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
-		return false, fmt.Errorf("close: --preflight: internal error: resolved spec has an invalid id: %w", err)
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: internal error: resolved spec has an invalid id: %w", err)
 	}
 
 	ix, err := index.Build(root)
 	if err != nil {
-		return false, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
 	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec)
 	if err != nil {
-		return false, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
 	fold, err := foldFeature(ctx, root, spec, specRef, head, storiesByAC, mdl)
 	if err != nil {
-		return false, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
 	reconciliation, err := reconcileFeatureStubs(spec, stories, mdl)
 	if err != nil {
-		return false, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
 
-	ok, err := runFeatureClosureGate(ctx, root, spec, fold, reconciliation, stories, supersededStoryRefs(supersededByAC), f, defaultBranchRef, manifest, mdl, head, stdout)
+	outcome, err := runFeatureClosureGateOutcome(ctx, root, spec, fold, reconciliation, stories, supersededStoryRefs(supersededByAC), f, defaultBranchRef, manifest, mdl, head, stdout)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 
 	derivedRel, excluded, err := preflightDerivedContext(ctx, root, spec.ID, head)
 	if err != nil {
-		return false, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
 	printACDetail(stdout, unmetFeatureACDetail(fold.ACs, specRef.Name, derivedRel, excluded))
 
 	if err := printSpecStalePathIfFailing(stdout, root, spec, manifest); err != nil {
-		return false, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
 
-	return ok, nil
+	return outcome, nil
 }
 
 // unmetFeatureACDetail renders the feature outcome-floor detail for every

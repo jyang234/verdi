@@ -2,10 +2,10 @@
 // ac-1/dc-5/ADJ-23): a mode of the existing close verb, never a new one
 // (dc-1) — rehearses every condition a real `verdi close <ref>` would
 // refuse on, for a story or a feature spec alike (dc-3), through the
-// IDENTICAL evaluation functions close itself calls (dc-2: runClosureGate
-// for a story, runFeatureClosureGate for a feature, closuregate.go /
-// closuregatefeature.go, both consumed completely unchanged) — and stops
-// there. Both functions are already pure with respect to the store
+// IDENTICAL underlying evaluation close itself calls (dc-2:
+// runClosureGateOutcome for a story and runFeatureClosureGateOutcome for a
+// feature, beneath the boolean compatibility wrappers real close consumes) —
+// and stops there. Both evaluators are already pure with respect to the store
 // (nothing on disk changes until AFTER they return ok=true; the mutating
 // tail close.go/closefeature.go run afterward is never reached from here),
 // so --preflight structurally cannot cut a branch, freeze anything, write
@@ -95,11 +95,11 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 	}
 	defaultBranchRef := lint.ResolveDefaultBranch(ctx, root)
 
-	var ok bool
+	var outcome closureGateOutcome
 	if spec.Class == artifact.ClassFeature {
-		ok, err = runFeaturePreflightGate(ctx, root, spec, manifest, mdl, f, defaultBranchRef, head, stdout)
+		outcome, err = runFeaturePreflightGate(ctx, root, spec, manifest, mdl, f, defaultBranchRef, head, stdout)
 	} else {
-		ok, err = runStoryPreflightGate(ctx, root, spec, manifest, mdl, f, defaultBranchRef, head, stdout)
+		outcome, err = runStoryPreflightGate(ctx, root, spec, manifest, mdl, f, defaultBranchRef, head, stdout)
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -108,29 +108,36 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 
 	if closePublishGuardRefuses(forceLocal) {
 		fmt.Fprintln(stdout, disclosure.Render(disclosure.New("close:preflight-publish-guard", "", preflightGuardDisclosureText)))
+		outcome.Disclosures++
 	}
 
-	if !ok {
+	if !outcome.Ready {
 		// vocab:identity — CLI invocation grammar: "a real close" names a real `verdi close` run (identity)
 		fmt.Fprintln(stdout, "close: --preflight: NOT READY (closure gate would refuse a real close; see conditions above)")
 		return 1
+	}
+	if outcome.Disclosures > 0 {
+		// vocab:identity — CLI invocation grammar: "a real close" names a real `verdi close` run (identity)
+		fmt.Fprintf(stdout, "close: --preflight: READY WITH DISCLOSURES (%d disclosure(s); closure gate holds; a real close would proceed to archive)\n", outcome.Disclosures)
+		return 0
 	}
 	// vocab:identity — CLI invocation grammar: "a real close" names a real `verdi close` run (identity)
 	fmt.Fprintln(stdout, "close: --preflight: READY (closure gate holds; a real close would proceed to archive)")
 	return 0
 }
 
-// runStoryPreflightGate runs the SAME evaluation function a real story-
-// class `verdi close` calls first (runClosureGate, closuregate.go — dc-2),
-// printing its unchanged PASS/FAIL/disclosed lines, then enriches
+// runStoryPreflightGate runs the SAME underlying evaluation a real story-
+// class `verdi close` calls first (runClosureGateOutcome beneath
+// runClosureGate, closuregate.go — dc-2), printing its unchanged
+// PASS/FAIL/disclosed lines, then enriches
 // condition 1's coarse eligibility line with the exact missing-evidence-
 // kind/path detail ac-1 requires (dc-4) and condition 2's spec-stale line
 // with the deviation-report.md path ac-1 additionally requires (neither of
 // which the shared gate's own Reason strings carry today).
-func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, mdl *model.Model, f forge.Forge, defaultBranchRef, head string, stdout io.Writer) (bool, error) {
-	ok, err := runClosureGate(ctx, root, spec, f, defaultBranchRef, manifest, mdl, head, stdout)
+func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, mdl *model.Model, f forge.Forge, defaultBranchRef, head string, stdout io.Writer) (closureGateOutcome, error) {
+	outcome, err := runClosureGateOutcome(ctx, root, spec, f, defaultBranchRef, manifest, mdl, head, stdout)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 
 	// dc-2: recompute the SAME fold a second time (deterministic, pure,
@@ -143,19 +150,19 @@ func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.Spec
 	// record set (ADJ-56).
 	result, err := foldStoryEvidence(ctx, root, spec, head, false)
 	if err != nil {
-		return false, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
 	derivedRel, excluded, err := preflightDerivedContext(ctx, root, spec.ID, head)
 	if err != nil {
-		return false, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
 	printACDetail(stdout, unmetStoryACDetail(result.ACs, store.RefSlug(spec.Story), derivedRel, excluded))
 
 	if err := printSpecStalePathIfFailing(stdout, root, spec, manifest); err != nil {
-		return false, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
 
-	return ok, nil
+	return outcome, nil
 }
 
 // printSpecStalePathIfFailing recomputes checkSpecStaleCondition (the

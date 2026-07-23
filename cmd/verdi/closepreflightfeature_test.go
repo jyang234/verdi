@@ -303,6 +303,9 @@ func TestRunPreflight_FeatureScope_ReadyThenClose(t *testing.T) {
 	if strings.Contains(pstdout.String(), "[FAIL]") {
 		t.Fatalf("ready feature preflight should show no FAIL condition:\n%s", pstdout.String())
 	}
+	if !strings.Contains(pstdout.String(), "close: --preflight: READY (") || strings.Contains(pstdout.String(), "READY WITH DISCLOSURES") {
+		t.Fatalf("fully proven feature preflight should report READY without disclosures:\n%s", pstdout.String())
+	}
 	after := snapshotRepo(t, repo.Dir)
 	if before != after {
 		t.Fatalf("--preflight(feature, ready) mutated the repo:\nbefore: %s\nafter:  %s", before, after)
@@ -315,5 +318,31 @@ func TestRunPreflight_FeatureScope_ReadyThenClose(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "close-feature-fixture", "spec.md")); err != nil {
 		t.Fatalf("real close should have archived the feature quartet after a READY preflight: %v", err)
+	}
+}
+
+// TestRunPreflight_FeatureScope_PerRecordDisclosureSummary proves the feature
+// gate's per-record disclosure detail contributes to the structured preflight
+// summary without weakening or strengthening its ready verdict.
+func TestRunPreflight_FeatureScope_PerRecordDisclosureSummary(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	writeFixtureVerdicts(t, repo.Dir, "spec/close-feature-fixture", unreachable,
+		`{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"behavioral","verdict":"fail","witness":"adverseFeatureFail","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"`+unreachable+`"},"digest":"sha256:`+strings.Repeat("a", 64)+`"}`)
+
+	var stdout, stderr bytes.Buffer
+	rc := runPreflight(context.Background(), repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runPreflight(feature with disclosed record) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "disclosed-unproven [gate:evidence-quarantine]") {
+		t.Fatalf("stdout missing the per-record disclosure detail: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "close: --preflight: READY WITH DISCLOSURES (1 disclosure(s);") {
+		t.Fatalf("stdout missing the one-disclosure ready summary: %s", stdout.String())
 	}
 }

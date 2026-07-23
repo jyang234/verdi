@@ -46,7 +46,6 @@ import (
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/model"
@@ -62,9 +61,18 @@ import (
 // (disposition-completeness) to check the feature's own deviation report
 // covers it, mirroring runClosureGate's own head parameter exactly.
 func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededStoryRefs []string, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (bool, error) {
+	outcome, err := runFeatureClosureGateOutcome(ctx, root, spec, fold, reconciliation, stories, supersededStoryRefs, f, defaultBranchRef, manifest, mdl, head, stdout)
+	return outcome.Ready, err
+}
+
+// runFeatureClosureGateOutcome evaluates the feature closure gate and retains
+// the disclosure count needed by preflight summaries. runFeatureClosureGate
+// remains the compatibility seam for real-close callers that consume only the
+// verdict.
+func runFeatureClosureGateOutcome(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededStoryRefs []string, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (closureGateOutcome, error) {
 	cond1, err := checkFeatureFoldEligible(ctx, root, spec, fold, head, mdl)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond2 := checkStubReconciliationCondition(reconciliation)
 	cond3 := checkAllImplementingStoriesClosed(stories, mdl)
@@ -77,7 +85,7 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	// ledger L-N2). See checkFeatureSpecStaleCondition's own doc comment.
 	cond4raw, err := checkFeatureSpecStaleCondition(root, spec, manifest, stories, supersededStoryRefs, mdl)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond4 := renumbered(cond4raw, "4. no unresolved spec-stale flag")
 
@@ -102,7 +110,7 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	// condition rather than silently inventing new machinery.
 	cond5raw, err := checkPendingSupersessionCondition(ctx, f, defaultBranchRef, spec)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond5 := renumbered(cond5raw, "5. no unresolved pending-supersession flag")
 
@@ -113,7 +121,7 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	// freeze step the story path uses).
 	cond6raw, err := checkDispositionCompleteCondition(root, spec, head)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond6 := renumbered(cond6raw, "6. deviation report ready to freeze (no undispositioned findings)")
 
@@ -122,31 +130,7 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	// spec class") — display prose, resolved through the model (L-M13(1));
 	// the disclosure Source producer ids it wraps stay identity.
 	label := "closure(" + mdl.DisplayClass("feature") + "): "
-	allOK := true
-	for _, c := range []gateCondition{cond1, cond2, cond3, cond4, cond5, cond6} {
-		switch {
-		case c.Disclosed:
-			// Three-valued honesty (constitution 2/10), rendered through the
-			// shared internal/disclosure seam exactly as the story gate does.
-			fmt.Fprint(stdout, label)
-			fmt.Fprintln(stdout, disclosure.Render(disclosure.New(c.Source, "", c.Reason)))
-		case c.OK:
-			fmt.Fprintf(stdout, "[PASS] %s%s\n", label, c.Name)
-		default:
-			allOK = false
-			fmt.Fprintf(stdout, "[FAIL] %s%s\n", label, c.Name)
-			fmt.Fprintf(stdout, "       %s\n", c.Reason)
-		}
-		// Extra rides EVERY branch, mirroring the story gate's own loop
-		// (closuregate.go): the spec-stale union tally
-		// (judged-feature-union-missing-archive-silent-zero) and the superseded-
-		// story exclusion lines (L-N12) must show on a PASSing, FAILing, and
-		// disclosed feature gate alike — never only inside a FAIL reason.
-		for _, extra := range c.Extra {
-			fmt.Fprintln(stdout, extra)
-		}
-	}
-	return allOK, nil
+	return reportClosureGateConditions(stdout, label, []gateCondition{cond1, cond2, cond3, cond4, cond5, cond6}), nil
 }
 
 // renumbered returns c with Name replaced by name, preserving every other

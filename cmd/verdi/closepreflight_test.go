@@ -738,6 +738,51 @@ func TestRunPreflight_StoryScope_ReadyThenClose(t *testing.T) {
 	}
 }
 
+// TestRunPreflight_ReadySummaryDistinguishesDisclosures proves a ready gate is
+// summarized according to its complete three-valued outcome. Gate disclosures
+// and the preflight-only local publish-guard disclosure are both counted; they
+// remain non-blocking and therefore do not change exit 0.
+func TestRunPreflight_ReadySummaryDistinguishesDisclosures(t *testing.T) {
+	tests := []struct {
+		name            string
+		forge           forge.Forge
+		forceLocal      bool
+		wantDisclosures int
+	}{
+		{name: "fully proven gate", forge: forgefake.New(), forceLocal: true},
+		{name: "gate condition disclosed", forge: nil, forceLocal: true, wantDisclosures: 1},
+		{name: "local publish guard disclosed", forge: forgefake.New(), forceLocal: false, wantDisclosures: 1},
+		{name: "gate and local publish guard disclosed", forge: nil, forceLocal: false, wantDisclosures: 2},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clearCIEnv(t)
+			repo := readyCloseFixtureRepo(t)
+			var stdout, stderr bytes.Buffer
+			rc := runPreflight(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, tc.forge, tc.forceLocal, &stdout, &stderr)
+			if rc != 0 {
+				t.Fatalf("runPreflight = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+			}
+
+			if tc.wantDisclosures == 0 {
+				if !strings.Contains(stdout.String(), "close: --preflight: READY (") {
+					t.Fatalf("stdout missing clean READY summary: %s", stdout.String())
+				}
+				if strings.Contains(stdout.String(), "READY WITH DISCLOSURES") {
+					t.Fatalf("fully proven preflight must not claim disclosures: %s", stdout.String())
+				}
+				return
+			}
+
+			want := fmt.Sprintf("close: --preflight: READY WITH DISCLOSURES (%d disclosure(s);", tc.wantDisclosures)
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("stdout missing %q: %s", want, stdout.String())
+			}
+		})
+	}
+}
+
 // TestRunPreflight_ExitCodeMatrixAndNonMutation is ac-2--behavioral's
 // exerciser: three fixtures (ready/unmet/a genuine operational error) drive
 // exit 0/1/2 respectively, each snapshotted before and after and asserted

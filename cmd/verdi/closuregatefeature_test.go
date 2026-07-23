@@ -1,14 +1,61 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/store"
 )
+
+// TestReportClosureGateConditions_FeatureUsesStructuredOutcome pins the one
+// reporting loop shared by story and feature closure conditions. Rendered
+// disclosure detail is counted, feature-only informational Extra lines are
+// not, and an ordinary failure retains the existing not-ready semantics.
+func TestReportClosureGateConditions_FeatureUsesStructuredOutcome(t *testing.T) {
+	tests := []struct {
+		name            string
+		conditions      []gateCondition
+		wantReady       bool
+		wantDisclosures int
+	}{
+		{
+			name: "condition and per-record disclosures preserve ready",
+			conditions: []gateCondition{
+				{
+					Name: "1. every feature AC evidenced", OK: true,
+					Extra: []string{
+						disclosure.Render(disclosure.New("gate:evidence-quarantine", "ac-1", "record excluded")),
+						"       [union tally is informational, not disclosed-unproven]",
+					},
+				},
+				{Name: "4. no unresolved spec-stale flag", Disclosed: true, Source: "gate:spec-stale-feature-union", Reason: "archive unavailable"},
+			},
+			wantReady:       true,
+			wantDisclosures: 2,
+		},
+		{
+			name:            "failure remains not ready",
+			conditions:      []gateCondition{{Name: "1. every feature AC evidenced", Reason: "ac-1 pending"}},
+			wantReady:       false,
+			wantDisclosures: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			outcome := reportClosureGateConditions(&stdout, "closure(feature): ", tc.conditions)
+			if outcome.Ready != tc.wantReady || outcome.Disclosures != tc.wantDisclosures {
+				t.Fatalf("outcome = %+v, want Ready=%v Disclosures=%d; stdout=%s", outcome, tc.wantReady, tc.wantDisclosures, stdout.String())
+			}
+		})
+	}
+}
 
 // nDistinctADFindings renders findingsYAML for n judged accepted-deviation
 // findings with globally-unique id+text (so each is a distinct budget
