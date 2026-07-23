@@ -810,6 +810,72 @@ func TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testin
 	}
 }
 
+func TestStageClosureSpec_AddPathsFailurePreservesUnrelatedState(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			"staged.txt":   "committed staged content\n",
+			"unstaged.txt": "committed unstaged content\n",
+		},
+		Message: "seed closure staging failure fixture",
+	}})
+
+	stagedPath := filepath.Join(repo.Dir, "staged.txt")
+	if err := os.WriteFile(stagedPath, []byte("unrelated staged content\n"), 0o644); err != nil {
+		t.Fatalf("writing staged fixture file: %v", err)
+	}
+	gitOutput(t, repo.Dir, "add", "--", "staged.txt")
+
+	unstagedPath := filepath.Join(repo.Dir, "unstaged.txt")
+	if err := os.WriteFile(unstagedPath, []byte("unrelated unstaged content\n"), 0o644); err != nil {
+		t.Fatalf("writing unstaged fixture file: %v", err)
+	}
+	untrackedPath := filepath.Join(repo.Dir, "untracked.txt")
+	if err := os.WriteFile(untrackedPath, []byte("unrelated untracked content\n"), 0o644); err != nil {
+		t.Fatalf("writing untracked fixture file: %v", err)
+	}
+
+	statusBefore := gitOutput(t, repo.Dir, "status", "--short")
+	for _, want := range []string{"M  staged.txt", " M unstaged.txt", "?? untracked.txt"} {
+		if !strings.Contains(statusBefore, want) {
+			t.Fatalf("precondition git status = %q, want %q", statusBefore, want)
+		}
+	}
+	indexBefore := gitOutput(t, repo.Dir, "diff", "--cached", "--binary", "--")
+	worktreeBefore := gitOutput(t, repo.Dir, "diff", "--binary", "--")
+	untrackedBefore, err := os.ReadFile(untrackedPath)
+	if err != nil {
+		t.Fatalf("reading untracked fixture file before staging failure: %v", err)
+	}
+
+	const missingTarget = "missing-closure-target"
+	err = stageClosureSpec(context.Background(), repo.Dir, missingTarget)
+	if err == nil {
+		t.Fatal("stageClosureSpec(nonexistent target) = nil, want AddPaths error")
+	}
+	for _, want := range []string{"staging closure paths", "spec/" + missingTarget} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("stageClosureSpec error = %q, want context %q", err, want)
+		}
+	}
+
+	if got := gitOutput(t, repo.Dir, "status", "--short"); got != statusBefore {
+		t.Fatalf("git status changed after staging failure:\nbefore: %q\nafter:  %q", statusBefore, got)
+	}
+	if got := gitOutput(t, repo.Dir, "diff", "--cached", "--binary", "--"); got != indexBefore {
+		t.Fatalf("index changed after staging failure:\nbefore:\n%s\nafter:\n%s", indexBefore, got)
+	}
+	if got := gitOutput(t, repo.Dir, "diff", "--binary", "--"); got != worktreeBefore {
+		t.Fatalf("working-tree diff changed after staging failure:\nbefore:\n%s\nafter:\n%s", worktreeBefore, got)
+	}
+	untrackedAfter, err := os.ReadFile(untrackedPath)
+	if err != nil {
+		t.Fatalf("reading untracked fixture file after staging failure: %v", err)
+	}
+	if !bytes.Equal(untrackedAfter, untrackedBefore) {
+		t.Fatalf("untracked file changed after staging failure: got %q, want %q", untrackedAfter, untrackedBefore)
+	}
+}
+
 // TestUnwindClosureBranchCut unit-tests the shared unwind helper directly,
 // covering BOTH clauses of the fix contract — in particular the "if anything
 // was somehow committed, leave it and say so honestly" clause, which the
