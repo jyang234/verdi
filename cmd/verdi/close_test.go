@@ -1366,13 +1366,51 @@ func TestStoryFoldRecordPaths(t *testing.T) {
 			}}},
 		},
 		{
-			name: "both kinds on one AC, sorted and deduplicated",
+			name: "both kinds on one AC are sorted",
 			acs: []evidence.ACResult{
 				{ID: "ac-1", Status: evidence.StatusWaived, Kinds: []evidence.KindResult{
 					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
 				}},
 			},
 			want: []string{".verdi/attestations/" + slug + "/ac-1.md", ".verdi/waivers/" + slug + "/ac-1.md"},
+		},
+		{
+			// The deduplication half, which the row above cannot reach — its two
+			// paths are distinct, so it pins the sort alone. `evidence:
+			// [attestation, attestation]` is not rejected anywhere
+			// (artifact.validateAC accepts a repeated kind) and evidence.Fold
+			// appends one KindResult per entry, so one AC really can name the
+			// same attestation twice. Without the dedupe close prints the same
+			// disclosure line twice for one record.
+			name: "one AC naming the same attestation twice",
+			acs: []evidence.ACResult{
+				{ID: "ac-1", Status: evidence.StatusEvidenced, Kinds: []evidence.KindResult{
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+				}},
+			},
+			want: []string{".verdi/attestations/" + slug + "/ac-1.md"},
+		},
+		{
+			// The same duplication across two ACs, so the dedupe is proven to
+			// survive interleaving rather than only collapsing an adjacent pair
+			// produced by one AC.
+			name: "two ACs each naming their own record twice",
+			acs: []evidence.ACResult{
+				{ID: "ac-2", Status: evidence.StatusWaived, Kinds: []evidence.KindResult{
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+				}},
+				{ID: "ac-1", Status: evidence.StatusEvidenced, Kinds: []evidence.KindResult{
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+				}},
+			},
+			want: []string{
+				".verdi/attestations/" + slug + "/ac-1.md",
+				".verdi/attestations/" + slug + "/ac-2.md",
+				".verdi/waivers/" + slug + "/ac-2.md",
+			},
 		},
 	}
 	for _, tc := range cases {
