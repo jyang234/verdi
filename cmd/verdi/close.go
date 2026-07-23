@@ -762,7 +762,8 @@ func reportUncommittedArchiveMove(name string, stderr io.Writer) {
 const (
 	freezeReachedReport = "froze the alignment report in place"
 	freezeReachedRollup = "froze the alignment report in place and wrote rollup.json"
-	freezeReachedFlip   = "froze the alignment report in place, wrote rollup.json, and flipped the spec status to closed"
+	// vocab:identity — the frontmatter status enum value the freeze flip writes (flipSpecStatusToClosed's `status: closed`), an on-disk id this residue disclosure names, not a display state
+	freezeReachedFlip = "froze the alignment report in place, wrote rollup.json, and flipped the spec status to closed"
 )
 
 // reportUncommittedFreezeResidue discloses the in-place, uncommitted state the
@@ -802,6 +803,7 @@ func reportUncommittedFreezeResidue(name, closureBranch, reached string, stderr 
 // rather than trying to re-drive close (constitution 2/10: silence is never a
 // pass).
 func reportCommittedButUnpublished(name, closureBranch, commit, story string, stderr io.Writer) {
+	// vocab:identity — CLI invocation grammar ("re-running close" names the `verdi close` command, identity; matches closeExpiryResumeHint's marker)
 	fmt.Fprintf(stderr, "close: archived spec/%s on branch %s (commit %s), but publishing the rollup to %s FAILED (see above). The archive is committed and durable; re-running close will not retry the publish (its branch cut refuses a second pass). Publish the archived rollup on its own: verdi rollup %s --publish\n", name, closureBranch, commit, story, story)
 }
 
@@ -826,6 +828,7 @@ func reportCommittedButUnpublished(name, closureBranch, commit, story string, st
 func reportStagedClosureCommitFailure(name, closureBranch, commitMsg string, stderr io.Writer) {
 	active := store.SpecDirRelPath(store.ZoneActive, name)
 	archive := store.SpecDirRelPath(store.ZoneArchive, name)
+	// vocab:identity — CLI invocation grammar ("close's tracker publish" names the `verdi close` command's own step, identity; matches closeExpiryResumeHint's marker)
 	fmt.Fprintf(stderr, "close: the closure paths are STAGED on %s and nothing was committed; the branch and the index are left in place on purpose, because deleting either would strand this staged work. Complete it with: git commit -m %q — or abandon it by restoring the active zone (git restore --source=HEAD --staged --worktree -- %s), unstaging the archive zone (git restore --staged -- %s), and deleting the leftover %s directory. Either way close's tracker publish never ran: the rollup is archived but NOT published, and a hand-completed commit does not publish it — publish it separately with `verdi rollup <story> --publish` if this closure should reach the tracker\n", closureBranch, commitMsg, active, archive, archive)
 }
 
