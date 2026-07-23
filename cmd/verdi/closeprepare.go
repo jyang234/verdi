@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -80,7 +81,14 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	if len(undispositioned) > 0 {
 		fmt.Fprintf(stdout, "close: --prepare: JUDGMENT REQUIRED (%d undispositioned finding(s) in %s)\n", len(undispositioned), store.DeviationReportRelPath(store.ZoneActive, specRef.Name))
 		for _, finding := range undispositioned {
-			fmt.Fprintf(stdout, "verdi disposition %s %s <human-authored-disposition:fixed|accepted-deviation> --rationale \"<human-authored rationale>\"\n", specRef.String(), finding.ID)
+			fmt.Fprintf(
+				stdout,
+				"verdi disposition %s %s %s --rationale %s\n",
+				shellQuoteWord(specRef.String()),
+				shellQuoteWord(finding.ID),
+				shellQuoteWord("<human-authored-disposition:fixed|accepted-deviation>"),
+				shellQuoteWord("<human-authored rationale>"),
+			)
 		}
 		return 1
 	}
@@ -100,4 +108,30 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	}
 	fmt.Fprintf(stdout, "close: --prepare: next command: verdi close %s%s\n", storyArg, forceArg)
 	return 0
+}
+
+// shellQuoteWord renders one argument as a copyable POSIX-shell word. The
+// artifact schema deliberately accepts arbitrary non-empty finding IDs, so
+// presentation must quote rather than narrow that compatibility boundary.
+func shellQuoteWord(word string) string {
+	if word != "" {
+		safe := true
+		for _, r := range word {
+			if !isSafeShellWordRune(r) {
+				safe = false
+				break
+			}
+		}
+		if safe {
+			return word
+		}
+	}
+	return "'" + strings.ReplaceAll(word, "'", `'"'"'`) + "'"
+}
+
+func isSafeShellWordRune(r rune) bool {
+	return r >= 'a' && r <= 'z' ||
+		r >= 'A' && r <= 'Z' ||
+		r >= '0' && r <= '9' ||
+		strings.ContainsRune("_@%+=:,./-", r)
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -61,6 +62,7 @@ func TestCmdClose_PrepareParsing(t *testing.T) {
 
 func TestCmdClose_PrepareAcceptsExplicitStoryAndFeatureRefs(t *testing.T) {
 	clearCIEnv(t)
+	clearPrepareForgeEnv(t)
 
 	t.Run("story spec ref", func(t *testing.T) {
 		repo := readyCloseFixtureRepo(t)
@@ -99,6 +101,25 @@ func TestCmdClose_PrepareAcceptsExplicitStoryAndFeatureRefs(t *testing.T) {
 			t.Fatalf("--prepare archived or removed the active feature: %v", err)
 		}
 	})
+}
+
+func TestCmdClose_PrepareRunsOutsideCIWithoutForceLocal(t *testing.T) {
+	clearCIEnv(t)
+	clearPrepareForgeEnv(t)
+	repo := readyCloseFixtureRepo(t)
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	rc := cmdClose([]string{"--prepare", "spec/close-fixture"}, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("cmdClose(--prepare outside CI) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "close: --prepare: next command: verdi close spec/close-fixture\n") {
+		t.Fatalf("stdout does not contain the unguarded local preparation result: %s", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "refusing to publish outside CI") {
+		t.Fatalf("--prepare was incorrectly restored behind the publish guard: %s", stderr.String())
+	}
 }
 
 func TestRunPrepare_GeneratesAbsentOrStaleReportForStoryAndFeature(t *testing.T) {
@@ -250,7 +271,7 @@ func TestRunPrepare_CurrentUndispositionedPreservesBytesAndPrintsWorklist(t *tes
 					t.Fatalf("stdout missing judgment summary on run %d: %s", run, stdout.String())
 				}
 				for _, id := range []string{"f-1", "f-2"} {
-					want := fmt.Sprintf("verdi disposition %s %s <human-authored-disposition:fixed|accepted-deviation> --rationale \"<human-authored rationale>\"", tc.ref, id)
+					want := fmt.Sprintf("verdi disposition %s %s '<human-authored-disposition:fixed|accepted-deviation>' --rationale '<human-authored rationale>'", tc.ref, id)
 					if strings.Count(stdout.String(), want) != 1 {
 						t.Fatalf("stdout should contain one exact template %q on run %d: %s", want, run, stdout.String())
 					}
@@ -273,6 +294,56 @@ func TestRunPrepare_CurrentUndispositionedPreservesBytesAndPrintsWorklist(t *tes
 			afterOutside := snapshotOutsidePrepareReport(t, repo.Dir, reportPath)
 			if beforeOutside != afterOutside {
 				t.Fatalf("prepare mutated outside target report:\nbefore: %s\nafter:  %s", beforeOutside, afterOutside)
+			}
+		})
+	}
+}
+
+func TestRunPrepare_QuotesUnsafeFindingIDInDispositionTemplate(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	const unsafeID = `finding with spaces; $(touch SHOULD_NOT_EXIST) 'quoted'`
+	findings := fmt.Sprintf("  - { id: %s, kind: computed, text: \"open finding\" }\n", strconv.Quote(unsafeID))
+	writePrepareReport(t, repo.Dir, "close-fixture", repo.Head, findings)
+
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(
+		context.Background(),
+		repo.Dir,
+		"spec/close-fixture",
+		&store.Manifest{},
+		closeDeps{Forge: forgefake.New()},
+		true,
+		&stdout,
+		&stderr,
+	)
+	if rc != 1 {
+		t.Fatalf("runPrepare = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	const want = `verdi disposition spec/close-fixture 'finding with spaces; $(touch SHOULD_NOT_EXIST) '"'"'quoted'"'"'' '<human-authored-disposition:fixed|accepted-deviation>' --rationale '<human-authored rationale>'`
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout missing safely quoted disposition template %q:\n%s", want, stdout.String())
+	}
+}
+
+func TestShellQuoteWord(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "simple finding id", input: "finding-1", want: "finding-1"},
+		{name: "canonical spec ref", input: "spec/close-fixture", want: "spec/close-fixture"},
+		{name: "empty", input: "", want: `''`},
+		{name: "spaces", input: "two words", want: `'two words'`},
+		{name: "shell metacharacters", input: `$HOME; $(touch nope) | <bad>`, want: `'$HOME; $(touch nope) | <bad>'`},
+		{name: "single quote", input: `judge's finding`, want: `'judge'"'"'s finding'`},
+		{name: "newline", input: "line\nbreak", want: "'line\nbreak'"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shellQuoteWord(tc.input); got != tc.want {
+				t.Fatalf("shellQuoteWord(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
 	}
@@ -365,6 +436,71 @@ func TestRunPrepare_FullyDispositionedRunsAuthoritativePreflight(t *testing.T) {
 	}
 }
 
+func TestRunPrepare_OperationalErrorsReturn2WithoutMutation(t *testing.T) {
+	t.Run("malformed current report", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+		if err := os.WriteFile(reportPath, []byte("not frontmatter\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		beforeRaw, err := os.ReadFile(reportPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		beforeOutside := snapshotOutsidePrepareReport(t, repo.Dir, reportPath)
+
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(
+			context.Background(),
+			repo.Dir,
+			"spec/close-fixture",
+			&store.Manifest{},
+			closeDeps{Forge: forgefake.New()},
+			true,
+			&stdout,
+			&stderr,
+		)
+		if rc != 2 {
+			t.Fatalf("runPrepare(malformed report) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "frontmatter") {
+			t.Fatalf("stderr = %q, want malformed-report detail", stderr.String())
+		}
+		assertPreparePreserved(t, repo.Dir, reportPath, beforeRaw, beforeOutside)
+	})
+
+	t.Run("downstream preflight transport error", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+		reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+		beforeRaw, err := os.ReadFile(reportPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		beforeOutside := snapshotOutsidePrepareReport(t, repo.Dir, reportPath)
+		deps := closeDeps{Forge: erroringOpenMRsForge{forgefake.New()}}
+
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(
+			context.Background(),
+			repo.Dir,
+			"spec/close-fixture",
+			&store.Manifest{},
+			deps,
+			true,
+			&stdout,
+			&stderr,
+		)
+		if rc != 2 {
+			t.Fatalf("runPrepare(preflight transport error) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "injected transport error") {
+			t.Fatalf("stderr = %q, want downstream operational detail", stderr.String())
+		}
+		assertPreparePreserved(t, repo.Dir, reportPath, beforeRaw, beforeOutside)
+	})
+}
+
 func writePrepareReport(t *testing.T, root, specName, covers, findingsYAML string) {
 	t.Helper()
 	dir := filepath.Join(root, ".verdi", "specs", "active", specName)
@@ -382,6 +518,35 @@ findings:
 	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestSnapshotOutsidePrepareReport_DetectsIndexAndNonBranchRefMutations(t *testing.T) {
+	t.Run("index", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+		writePrepareReport(t, repo.Dir, "close-fixture", repo.Head, dispositionedFindingYAML)
+		before := snapshotOutsidePrepareReport(t, repo.Dir, reportPath)
+
+		gitOutput(t, repo.Dir, "add", store.DeviationReportRelPath(store.ZoneActive, "close-fixture"))
+
+		after := snapshotOutsidePrepareReport(t, repo.Dir, reportPath)
+		if before == after {
+			t.Fatal("snapshot did not detect a target-report index mutation")
+		}
+	})
+
+	t.Run("non-branch ref", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+		before := snapshotOutsidePrepareReport(t, repo.Dir, reportPath)
+
+		gitOutput(t, repo.Dir, "update-ref", "refs/tags/prepare-sentinel", repo.Head)
+
+		after := snapshotOutsidePrepareReport(t, repo.Dir, reportPath)
+		if before == after {
+			t.Fatal("snapshot did not detect a non-branch ref mutation")
+		}
+	})
 }
 
 func snapshotOutsidePrepareReport(t *testing.T, root, reportPath string) string {
@@ -415,7 +580,8 @@ func snapshotOutsidePrepareReport(t *testing.T, root, reportPath string) string 
 	sort.Strings(entries)
 	return "HEAD=" + gitOutput(t, root, "rev-parse", "HEAD") +
 		"branch=" + gitOutput(t, root, "symbolic-ref", "--short", "HEAD") +
-		"branches=" + gitOutput(t, root, "branch", "--list") +
+		"index=" + gitOutput(t, root, "ls-files", "--stage") +
+		"refs=" + gitOutput(t, root, "for-each-ref", "--format=%(refname)=%(objectname) %(symref)") +
 		"files=" + strings.Join(entries, ",")
 }
 
@@ -426,10 +592,26 @@ func assertPreparePreserved(t *testing.T, root, reportPath string, beforeRaw []b
 		t.Fatal(err)
 	}
 	if !bytes.Equal(beforeRaw, afterRaw) {
-		t.Fatal("prepare rewrote a current fully-dispositioned report")
+		t.Fatal("prepare rewrote the target report")
 	}
 	afterOutside := snapshotOutsidePrepareReport(t, root, reportPath)
 	if beforeOutside != afterOutside {
 		t.Fatalf("prepare mutated outside target report:\nbefore: %s\nafter:  %s", beforeOutside, afterOutside)
+	}
+}
+
+var prepareForgeEnvVars = []string{
+	"CI_API_V4_URL",
+	"CI_PROJECT_ID",
+	"CI_JOB_TOKEN",
+	"GITHUB_REPOSITORY_OWNER",
+	"GITHUB_REPOSITORY",
+	"GITHUB_TOKEN",
+}
+
+func clearPrepareForgeEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range prepareForgeEnvVars {
+		t.Setenv(name, "")
 	}
 }
