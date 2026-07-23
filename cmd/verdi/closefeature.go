@@ -319,7 +319,7 @@ func mapFeatureRollupCriteria(acs []evidence.FeatureACResult) []artifact.RollupC
 
 // writeFeatureRollup builds, self-validates, and writes rollup.json into
 // specs/active/<name>/ (still under the active zone — store.ArchiveMove
-// moves it, along with the rest of the quartet, immediately afterward) —
+// moves it with the rest of the target spec directory immediately afterward) —
 // mirrors close.go's writeRollup for a evidence.FeatureResult instead of a
 // evidence.StoryResult. spec.Story may be "" (R4-I-2: a feature's
 // story: tracker ref is optional) — artifact.Rollup.Validate() accepts an
