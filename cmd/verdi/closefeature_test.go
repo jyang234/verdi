@@ -657,9 +657,69 @@ func TestRunCloseFeature_StagingAndCommitFailuresRecover(t *testing.T) {
 		if !hasLocalBranch(t, repo.Dir, "close/close-feature-fixture") {
 			t.Fatal("close/close-feature-fixture was deleted after a commit failure — that strands the staged closure paths")
 		}
-		for _, want := range []string{"close/close-feature-fixture", "git commit"} {
+		// Finding 6, feature half: a hand-completed commit does not publish the
+		// rollup, so the shared disclosure must say the publish is left undone.
+		for _, want := range []string{"close/close-feature-fixture", "git commit", "NOT published", "verdi rollup"} {
 			if !strings.Contains(stderr.String(), want) {
 				t.Fatalf("stderr = %q, want recovery guidance naming %q", stderr.String(), want)
+			}
+		}
+	})
+}
+
+// TestRunCloseFeature_PreStageAndPublishFailuresDisclose is the feature-path
+// mirror of TestRunClose_PreStageFailuresDiscloseFreezeResidue and
+// TestRunClose_PublishFailureDisclosesCommittedButUnpublished (findings 4 and
+// 6). runCloseFeature cuts close/<name> before the same shared writeRollup /
+// flip / ArchiveMove / publish steps and wires the same shared disclosure
+// helpers, so both halves must speak. The ArchiveMove point is exercised for
+// the freeze residue (the cleanest hermetic trigger); the publish point needs a
+// feature that actually carries a story: ref, since the story-less default
+// skips the publish entirely.
+func TestRunCloseFeature_PreStageAndPublishFailuresDisclose(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ArchiveMove failure discloses the in-place freeze residue", func(t *testing.T) {
+		opts := defaultCloseFeatureFixtureOpts()
+		repo := buildCloseFeatureRepo(t, opts)
+		seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+		writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+		// A pre-existing archive directory makes ArchiveMove refuse to clobber,
+		// with the freeze, rollup write, and status flip already on disk.
+		if err := os.MkdirAll(store.ArchiveSpecDir(repo.Dir, "close-feature-fixture"), 0o755); err != nil {
+			t.Fatalf("pre-creating the archive directory: %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		if got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &stdout, &stderr); got != 2 {
+			t.Fatalf("runClose(feature ArchiveMove failure) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		for _, want := range []string{"UNCOMMITTED", store.SpecDirRelPath(store.ZoneActive, "close-feature-fixture"), "close/close-feature-fixture", "flipped the spec status to closed"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want the in-place freeze residue disclosed (%q)", stderr.String(), want)
+			}
+		}
+	})
+
+	t.Run("a committed publish failure discloses the unpublished archive", func(t *testing.T) {
+		opts := defaultCloseFeatureFixtureOpts()
+		opts.FeatureStory = "jira:FIXTURE-EPIC-1"
+		repo := buildCloseFeatureRepo(t, opts)
+		seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+		writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+		fp := fake.New()
+		fp.QueuePublishError("jira:FIXTURE-EPIC-1", fmt.Errorf("tracker unreachable"))
+		var stdout, stderr bytes.Buffer
+		if got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fp), &stdout, &stderr); got != 2 {
+			t.Fatalf("runClose(feature publish failure) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if !hasLocalBranch(t, repo.Dir, "close/close-feature-fixture") {
+			t.Fatal("close/close-feature-fixture missing — the archive commit should have landed before the publish step")
+		}
+		for _, want := range []string{"verdi rollup jira:FIXTURE-EPIC-1 --publish", "close/close-feature-fixture", "durable", "not retry the publish"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want the committed-but-unpublished disclosure naming %q", stderr.String(), want)
 			}
 		}
 	})

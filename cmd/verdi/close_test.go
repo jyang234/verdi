@@ -1560,7 +1560,10 @@ func TestRunClose_CommitFailure_LeavesRecoverableResidue(t *testing.T) {
 	if !hasLocalBranch(t, repo.Dir, "close/close-fixture") {
 		t.Fatal("close/close-fixture was deleted after a commit failure — that strands the staged closure paths on another branch's index")
 	}
-	for _, want := range []string{"close/close-fixture", "git commit"} {
+	// The archive is hand-completable, but close's publish never ran and no
+	// re-run reaches it — finding 6: a `git commit` by hand does not publish the
+	// rollup, and silence would strand it unpublished.
+	for _, want := range []string{"close/close-fixture", "git commit", "NOT published", "verdi rollup"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, want recovery guidance naming %q", stderr.String(), want)
 		}
@@ -1580,6 +1583,129 @@ func TestRunClose_CommitFailure_LeavesRecoverableResidue(t *testing.T) {
 	for _, want := range []string{"spec/close-fixture", "interrupted", "close/close-fixture"} {
 		if !strings.Contains(e2.String(), want) {
 			t.Fatalf("retry stderr = %q, want it to carry %q", e2.String(), want)
+		}
+	}
+}
+
+// seedCloseHappyPath arms the close-fixture repo to reach the post-cut ritual:
+// authoritative evidence for ac-1 and a living, fully-dispositioned gate report
+// covering head, so the gate holds and the freeze takes the freeze-in-place
+// path.
+func seedCloseHappyPath(t *testing.T, repo *fixturegit.Repo) {
+	t.Helper()
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+}
+
+// TestRunClose_PreStageFailuresDiscloseFreezeResidue is the proof for finding
+// 4: the three post-cut, pre-stage failure points (writeRollup,
+// flipSpecStatusToClosed, store.ArchiveMove) no longer return bare. By the time
+// each fires the freeze has already succeeded and rewritten the active-zone
+// report in place, so a bare return leaves a frozen report — and, further in,
+// a written rollup.json and a spec.md silently flipped to closed in the ACTIVE
+// zone — for the operator to discover alone. Each must NAME that state
+// (constitution 2/10). The design scopes rollback out, so the fix is
+// disclosure, not unwind.
+func TestRunClose_PreStageFailuresDiscloseFreezeResidue(t *testing.T) {
+	ctx := context.Background()
+	run := func(t *testing.T, repo *fixturegit.Repo) string {
+		t.Helper()
+		deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+		var stdout, stderr bytes.Buffer
+		if got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr); got != 2 {
+			t.Fatalf("runClose = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		return stderr.String()
+	}
+	assertResidue := func(t *testing.T, stderr, reachedFragment string) {
+		t.Helper()
+		for _, want := range []string{
+			"UNCOMMITTED",
+			store.SpecDirRelPath(store.ZoneActive, "close-fixture"),
+			"close/close-fixture",
+			reachedFragment,
+		} {
+			if !strings.Contains(stderr, want) {
+				t.Fatalf("stderr = %q, want the in-place freeze residue disclosed (%q)", stderr, want)
+			}
+		}
+	}
+
+	t.Run("writeRollup failure", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		seedCloseHappyPath(t, repo)
+		// rollup.json pre-created as a DIRECTORY makes writeRollup's os.WriteFile
+		// fail (EISDIR) while the freeze, which writes deviation-report.md, still
+		// succeeds — isolating this one failure point.
+		activeDir := store.ActiveSpecDir(repo.Dir, "close-fixture")
+		if err := os.Mkdir(filepath.Join(activeDir, "rollup.json"), 0o755); err != nil {
+			t.Fatalf("pre-creating rollup.json as a directory: %v", err)
+		}
+		assertResidue(t, run(t, repo), "froze the alignment report")
+	})
+
+	t.Run("flip failure", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		seedCloseHappyPath(t, repo)
+		// A read-only spec.md is readable by the gate and the freeze but makes
+		// the status flip's os.WriteFile fail (EACCES) — the freeze and rollup
+		// write have already completed by then.
+		if err := os.Chmod(store.ActiveSpecPath(repo.Dir, "close-fixture"), 0o400); err != nil {
+			t.Fatalf("chmod spec.md read-only: %v", err)
+		}
+		assertResidue(t, run(t, repo), "wrote rollup.json")
+	})
+
+	t.Run("ArchiveMove failure", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		seedCloseHappyPath(t, repo)
+		// A pre-existing archive directory makes ArchiveMove refuse to clobber —
+		// by then the freeze, the rollup write, and the status flip have all
+		// landed in the active zone.
+		if err := os.MkdirAll(store.ArchiveSpecDir(repo.Dir, "close-fixture"), 0o755); err != nil {
+			t.Fatalf("pre-creating the archive directory: %v", err)
+		}
+		assertResidue(t, run(t, repo), "flipped the spec status to closed")
+	})
+}
+
+// TestRunClose_PublishFailureDisclosesCommittedButUnpublished is finding 6's
+// proof for the publish path: the archive commit has already landed on the
+// closure branch when PublishRollup fails, so this is a committed-but-
+// incomplete state, not a re-runnable one (the retry dies at the no-clobber
+// branch cut). Silence would strand an unpublished rollup; the disclosure names
+// the archive as durable and points at `verdi rollup --publish`.
+func TestRunClose_PublishFailureDisclosesCommittedButUnpublished(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	seedCloseHappyPath(t, repo)
+
+	fp := fake.New()
+	fp.QueuePublishError("jira:CLOSE-1", fmt.Errorf("tracker unreachable"))
+	deps := closeDeps{Forge: forgefake.New(), Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(publish failure) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	// The archive commit landed before the publish — the branch exists and
+	// nothing is left staged.
+	if !hasLocalBranch(t, repo.Dir, "close/close-fixture") {
+		t.Fatal("close/close-fixture missing — the archive commit should have landed before the publish step")
+	}
+	staged, err := gitx.StagedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("StagedPaths: %v", err)
+	}
+	if len(staged) != 0 {
+		t.Fatalf("index = %#v after a committed publish failure, want empty (the commit consumed the staged paths)", staged)
+	}
+	for _, want := range []string{"verdi rollup jira:CLOSE-1 --publish", "close/close-fixture", "durable", "not retry the publish"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want the committed-but-unpublished disclosure naming %q", stderr.String(), want)
 		}
 	}
 }

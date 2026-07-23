@@ -154,6 +154,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 
 	if err := writeFeatureRollup(root, specRef, spec, head, fold); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedReport, stderr)
 		return 2
 	}
 
@@ -171,11 +172,13 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 	// retired (05 §Workbench) — there is simply nothing to move, no error.
 	if err := flipSpecStatusToClosed(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedRollup, stderr)
 		return 2
 	}
 
 	if err := store.ArchiveMove(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedFlip, stderr)
 		return 2
 	}
 
@@ -220,6 +223,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		}
 		if err := deps.Registry.PublishRollup(ctx, pubRoll); err != nil {
 			fmt.Fprintln(stderr, "close:", err)
+			reportCommittedButUnpublished(specRef.Name, closureBranch, closeCommit, spec.Story, stderr)
 			return 2
 		}
 		fmt.Fprintf(stdout, "close: rollup published to %s (eligible=%t)\n", spec.Story, pubRoll.Eligible)

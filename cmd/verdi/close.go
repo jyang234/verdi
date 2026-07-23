@@ -448,13 +448,24 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	// mints a fresh Provenance and needs a resolved model digest exactly
 	// like `verdi align` itself does (spec/model-digest ledger L-M5).
 	//
-	// Both post-cut, pre-commit failure points below UNWIND the branch cut
-	// before exiting (finding
-	// judged-close-resume-hint-names-a-path-close-itself-refuses): the freeze
-	// wrote nothing, so close/<name> still points at the cut and returning to
-	// originalBranch loses nothing — leaving the resume hint's promised
-	// `verdi close` retry able to complete rather than dying at the next cut's
-	// no-clobber refusal.
+	// The two freeze-setup failure points immediately below (resolveModelDigest
+	// and the runAlignForSpec freeze call) UNWIND the branch cut before exiting
+	// (finding judged-close-resume-hint-names-a-path-close-itself-refuses): each
+	// fails with the freeze having written NOTHING, so close/<name> still points
+	// at the cut and returning to originalBranch loses nothing — the resume
+	// hint's promised `verdi close` retry can complete rather than dying at the
+	// next cut's no-clobber refusal.
+	//
+	// The three LATER post-cut, pre-commit failure points — writeRollup,
+	// flipSpecStatusToClosed, and store.ArchiveMove — do NOT unwind. By the time
+	// any of them fails the freeze has already SUCCEEDED and rewritten the
+	// active-zone report in place, so unwinding would only carry that same dirty
+	// tree to another branch without making a re-run succeed (the frozen report
+	// and the flipped status each refuse a second pass). The closure-session
+	// design scopes transactional rollback OUT, so each of the three DISCLOSES
+	// the in-place, uncommitted state it leaves instead (reportUncommittedFreezeResidue,
+	// mirroring reportUncommittedArchiveMove) — constitution 2/10: silence is
+	// never a pass.
 	modelDigest, err := resolveModelDigest(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -470,6 +481,7 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 
 	if err := writeRollup(root, specRef, spec, head, fold); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedReport, stderr)
 		return 2
 	}
 
@@ -482,11 +494,13 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	// exception (D6-11), not the pure-rename one, is what admits the move.
 	if err := flipSpecStatusToClosed(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedRollup, stderr)
 		return 2
 	}
 
 	if err := store.ArchiveMove(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedFlip, stderr)
 		return 2
 	}
 
@@ -521,6 +535,7 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	}
 	if err := deps.Registry.PublishRollup(ctx, pubRoll); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportCommittedButUnpublished(specRef.Name, closureBranch, closeCommit, spec.Story, stderr)
 		return 2
 	}
 
@@ -740,6 +755,56 @@ func reportUncommittedArchiveMove(name string, stderr io.Writer) {
 	fmt.Fprintf(stderr, "close: nothing was committed, but this run's archive move is already on disk and UNCOMMITTED: %s is gone and %s exists. Restore the checkout before retrying: git restore --source=HEAD --staged --worktree -- %s, then delete the leftover %s directory\n", active, archive, active, archive)
 }
 
+// freezeReached* name how far the post-cut ritual got before one of the three
+// pre-stage failure points fired, so reportUncommittedFreezeResidue can say
+// exactly what this run wrote into the active zone (constitution 2/10: name the
+// state, do not gesture at it).
+const (
+	freezeReachedReport = "froze the alignment report in place"
+	freezeReachedRollup = "froze the alignment report in place and wrote rollup.json"
+	freezeReachedFlip   = "froze the alignment report in place, wrote rollup.json, and flipped the spec status to closed"
+)
+
+// reportUncommittedFreezeResidue discloses the in-place, uncommitted state the
+// three post-freeze, pre-stage failure points (writeRollup,
+// flipSpecStatusToClosed, store.ArchiveMove) leave behind — the shared
+// implementation for both rituals (the freezeAlignDeps precedent: one copy, no
+// drift), alongside reportUncommittedArchiveMove and
+// reportStagedClosureCommitFailure.
+//
+// By the time any of these fire the branch cut is made AND the freeze has
+// already succeeded, so the active-zone spec directory carries this run's
+// uncommitted work — a frozen deviation-report.md, and, per reached, possibly a
+// fresh rollup.json and a status flipped to closed. None of it is staged or
+// committed, and the closure branch is still checked out with no commit on it.
+//
+// It deliberately does NOT unwind. Unwinding is the freeze-FAILURE path's move,
+// valid only because that path wrote nothing; here the freeze wrote, so
+// switching branches would merely carry the same dirty tree elsewhere without
+// making a re-run succeed — CheckoutNewBranch's no-clobber cut, the frozen
+// report, and the flipped status each refuse a second pass. The closure-session
+// design scopes transactional rollback OUT, so close leaves the state where it
+// is and NAMES it, the branch included. rollup.json and a from-scratch frozen
+// report are fresh files `git restore` will not remove, so the abandon path
+// spells out the untracked cleanup rather than implying one command suffices.
+func reportUncommittedFreezeResidue(name, closureBranch, reached string, stderr io.Writer) {
+	active := store.SpecDirRelPath(store.ZoneActive, name)
+	fmt.Fprintf(stderr, "close: nothing was staged or committed, but this run already %s in the active-zone spec directory %s and left it UNCOMMITTED on branch %s; re-running will not resume it (the branch cut, the frozen report, and the flipped status each refuse a second pass). To abandon this run: restore the tracked files (git restore --source=HEAD --staged --worktree -- %s), delete any untracked leftovers it wrote there (rollup.json, and the frozen deviation-report.md if it was not previously committed), then switch off %s and delete it\n", reached, active, closureBranch, active, closureBranch)
+}
+
+// reportCommittedButUnpublished discloses the one committed-but-incomplete
+// state close can reach: the archive commit landed on the closure branch, then
+// the tracker publish (ac-2) failed. The archive IS durable, so this is not a
+// re-runnable failure — the next `verdi close` dies at the no-clobber branch
+// cut, and even a hand-completed retry would not re-enter the publish. The
+// rollup is already committed in the archive, so the honest recovery is to
+// publish that same record on its own with `verdi rollup <story> --publish`
+// rather than trying to re-drive close (constitution 2/10: silence is never a
+// pass).
+func reportCommittedButUnpublished(name, closureBranch, commit, story string, stderr io.Writer) {
+	fmt.Fprintf(stderr, "close: archived spec/%s on branch %s (commit %s), but publishing the rollup to %s FAILED (see above). The archive is committed and durable; re-running close will not retry the publish (its branch cut refuses a second pass). Publish the archived rollup on its own: verdi rollup %s --publish\n", name, closureBranch, commit, story, story)
+}
+
 // reportStagedClosureCommitFailure discloses the state a commit failure leaves
 // behind — the shared implementation for both rituals, mirroring
 // reportUncommittedArchiveMove.
@@ -751,10 +816,17 @@ func reportUncommittedArchiveMove(name string, stderr io.Writer) {
 // completes what the ritual started — and the next `verdi close` recognises
 // exactly this residue rather than blaming the operator for it
 // (closureResidueRefusal).
+//
+// Completing the commit by hand does NOT publish the rollup: close's tracker
+// publish (ac-2) runs only AFTER its own commit, which this path never reached,
+// and no re-run re-enters it (the retry dies at the no-clobber branch cut). So
+// the disclosure names the archive as hand-completable but the publish as left
+// undone — silence about the publish would strand an unpublished rollup an
+// operator believes `git commit` finished.
 func reportStagedClosureCommitFailure(name, closureBranch, commitMsg string, stderr io.Writer) {
 	active := store.SpecDirRelPath(store.ZoneActive, name)
 	archive := store.SpecDirRelPath(store.ZoneArchive, name)
-	fmt.Fprintf(stderr, "close: the closure paths are STAGED on %s and nothing was committed; the branch and the index are left in place on purpose, because deleting either would strand this staged work. Complete it with: git commit -m %q — or abandon it by restoring the active zone (git restore --source=HEAD --staged --worktree -- %s), unstaging the archive zone (git restore --staged -- %s), and deleting the leftover %s directory\n", closureBranch, commitMsg, active, archive, archive)
+	fmt.Fprintf(stderr, "close: the closure paths are STAGED on %s and nothing was committed; the branch and the index are left in place on purpose, because deleting either would strand this staged work. Complete it with: git commit -m %q — or abandon it by restoring the active zone (git restore --source=HEAD --staged --worktree -- %s), unstaging the archive zone (git restore --staged -- %s), and deleting the leftover %s directory. Either way close's tracker publish never ran: the rollup is archived but NOT published, and a hand-completed commit does not publish it — publish it separately with `verdi rollup <story> --publish` if this closure should reach the tracker\n", closureBranch, commitMsg, active, archive, archive)
 }
 
 // closeUncommittedRecordSource is the disclosure source id for a human record
