@@ -174,6 +174,13 @@ func closePublishGuardRefuses(forceLocal bool) bool {
 type preflightPrelude struct {
 	// Disclosures the caller already printed for this run.
 	Disclosures int
+	// IndexGuardRehearsed records that the caller already ran
+	// disclosePreflightIndexGuard for this run and counted its result into
+	// Disclosures. Preparation must rehearse the guard itself, because it can
+	// stop (ALIGNMENT REQUIRED, JUDGMENT REQUIRED) and can write, long before
+	// it ever reaches preflight; this field keeps the same refusal from being
+	// printed and counted a second time when it does reach it.
+	IndexGuardRehearsed bool
 }
 
 // runPreflight is the standalone `verdi close --preflight <ref>` mode: a run
@@ -213,7 +220,10 @@ func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifes
 	//
 	// Counted into the outcome below, once the gate has produced one —
 	// together with whatever the caller already disclosed before reaching here.
-	disclosures := prelude.Disclosures + disclosePreflightIndexGuard(ctx, root, stdout)
+	disclosures := prelude.Disclosures
+	if !prelude.IndexGuardRehearsed {
+		disclosures += disclosePreflightIndexGuard(ctx, root, stdout)
+	}
 
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {

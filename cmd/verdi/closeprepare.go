@@ -214,6 +214,29 @@ func reloadRefreshedReport(reportPath string, stderr io.Writer) (*artifact.Devia
 // current report with undispositioned findings (human judgment, printed as
 // exact disposition commands), and otherwise the authoritative preflight.
 func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, forceLocal bool, stdout, stderr io.Writer) int {
+	// Every disclosure preparation itself makes, so the readiness summary
+	// runPreflight prints below can count them: a run that disclosed must never
+	// reach the design's bare READY.
+	prelude := preflightPrelude{}
+
+	// Rehearsed FIRST, before preparation resolves anything and before its one
+	// destructive write — the real ritual's own order (requireCleanIndex is
+	// runClose's first act, close.go).
+	//
+	// Preparation cannot delegate this to runPreflight the way it delegates the
+	// gate: it reaches preflight only after refreshing a stale report and only
+	// when nothing is undispositioned, so in BOTH of its own stopping states an
+	// operator with a dirty index was never told the real close refuses before
+	// it evaluates a single condition. Rehearsing here also makes the canonical
+	// interrupted close (archive move done, commit failed) diagnosable through
+	// --prepare, whose resolve otherwise fails first on a spec that is already
+	// out of the active zone.
+	//
+	// It stays a DISCLOSURE and changes no verdict: preparation writes only the
+	// living deviation report, which needs no clean index and clears none.
+	prelude.Disclosures += disclosePreflightIndexGuard(ctx, root, stdout)
+	prelude.IndexGuardRehearsed = true
+
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
 		fmt.Fprintln(stderr, "close: --prepare:", err)
@@ -245,11 +268,6 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	if rc := reportFrozenState(report, specRef.Name, stdout); rc != 0 {
 		return rc
 	}
-
-	// Every disclosure preparation itself makes, so the readiness summary
-	// runPreflight prints below can count them: a run that disclosed must
-	// never reach the design's bare READY.
-	prelude := preflightPrelude{}
 
 	if report == nil || report.Covers != head {
 		freshness := "absent"

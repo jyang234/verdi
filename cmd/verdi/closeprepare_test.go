@@ -652,6 +652,118 @@ func TestRunPrepare_ReadySummaryCountsPreparationsOwnDisclosures(t *testing.T) {
 	}
 }
 
+// TestRunPrepare_RehearsesTheIndexGuardBeforeItWrites covers preparation's own
+// half of the index-guard rehearsal.
+//
+// Preparation reached the guard only through runPreflight — and it reaches
+// runPreflight only AFTER regenerating a stale report, and only when no
+// finding is undispositioned. So in both of preparation's own stopping states
+// (ALIGNMENT REQUIRED and JUDGMENT REQUIRED) an operator with a dirty index
+// was never told that the real close refuses before it evaluates anything, and
+// the one rehearsal that did run ran after preparation's single destructive
+// write. Hoisting preflight's rehearsal above its resolve does not fix this:
+// preparation never gets there.
+//
+// The rehearsal is a DISCLOSURE here exactly as it is there: no verdict moves,
+// nothing new refuses, and preparation still writes only the target report.
+func TestRunPrepare_RehearsesTheIndexGuardBeforeItWrites(t *testing.T) {
+	ctx := context.Background()
+	deps := func(t *testing.T) closeDeps {
+		return closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New()}
+	}
+
+	t.Run("disclosed before the refresh writes, in the ALIGNMENT REQUIRED state", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
+		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
+
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps(t), true, &stdout, &stderr)
+		if rc != 1 {
+			t.Fatalf("runPrepare(absent report, dirty index) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		out := stdout.String()
+		guardAt := strings.Index(out, "disclosed-unproven ["+preflightIndexGuardSource+"]")
+		if guardAt < 0 {
+			t.Fatalf("preparation refreshed the report and never told the operator the real close refuses at its index guard:\n%s", out)
+		}
+		writeAt := strings.Index(out, "close: --prepare: ALIGNMENT REQUIRED")
+		if writeAt < 0 || guardAt > writeAt {
+			t.Fatalf("the rehearsal must precede preparation's own destructive write (guard at %d, refresh at %d):\n%s", guardAt, writeAt, out)
+		}
+	})
+
+	t.Run("disclosed in the JUDGMENT REQUIRED state, which never reaches preflight", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		writePrepareReport(t, repo.Dir, "close-fixture", repo.Head, undispositionedFindingYAML)
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
+		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
+
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps(t), true, &stdout, &stderr)
+		if rc != 1 {
+			t.Fatalf("runPrepare(undispositioned, dirty index) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "disclosed-unproven ["+preflightIndexGuardSource+"]") {
+			t.Fatalf("JUDGMENT REQUIRED returns before preflight ever runs, so this state disclosed nothing about the index guard:\n%s", stdout.String())
+		}
+	})
+
+	t.Run("an interrupted closure's residue reaches its own diagnosis", func(t *testing.T) {
+		repo := readyCloseFixtureRepo(t)
+		if err := store.ArchiveMove(repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps(t), true, &stdout, &stderr)
+		if rc != 2 {
+			t.Fatalf("runPrepare(closure residue) = %d, want 2 — the ref genuinely no longer resolves; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		for _, want := range []string{"interrupted", store.SpecDirRelPath(store.ZoneArchive, "close-fixture"), "git commit"} {
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("--prepare must reach the same residue diagnosis the real close gives, %q:\nstdout=%s\nstderr=%s", want, stdout.String(), stderr.String())
+			}
+		}
+	})
+
+	t.Run("a clean index rehearses nothing", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		writePrepareReport(t, repo.Dir, "close-fixture", repo.Head, undispositionedFindingYAML)
+
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps(t), true, &stdout, &stderr)
+		if rc != 1 {
+			t.Fatalf("runPrepare(clean index) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if strings.Contains(stdout.String(), preflightIndexGuardSource) {
+			t.Fatalf("a clean index must rehearse nothing — a disclosure that fires unconditionally teaches operators to ignore it:\n%s", stdout.String())
+		}
+	})
+
+	t.Run("preparation and preflight rehearse the guard once between them", func(t *testing.T) {
+		repo := readyCloseFixtureRepo(t)
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
+		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
+
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps(t), true, &stdout, &stderr)
+		if rc != 0 {
+			t.Fatalf("runPrepare(ready, dirty index) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		out := stdout.String()
+		if got := strings.Count(out, "disclosed-unproven ["+preflightIndexGuardSource+"]"); got != 1 {
+			t.Fatalf("the index guard was rehearsed %d times in one run, want exactly 1:\n%s", got, out)
+		}
+		if !strings.Contains(out, "READY WITH DISCLOSURES (1 disclosure(s)") {
+			t.Fatalf("one rehearsal must be counted once:\n%s", out)
+		}
+	})
+}
+
 // writeFrozenPrepareReport writes an ALREADY-FROZEN deviation-report.md
 // into specName's active directory — writePrepareReport's frozen twin, and
 // the story/prepare-path mirror of closefeature_test.go's
