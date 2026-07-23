@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -118,30 +117,4 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	// vocab:identity — CLI next-command verb-name grammar (identity)
 	fmt.Fprintf(stdout, "close: --prepare: next command: verdi close %s%s\n", storyArg, forceArg)
 	return 0
-}
-
-// shellQuoteWord renders one argument as a copyable POSIX-shell word. The
-// artifact schema deliberately accepts arbitrary non-empty finding IDs, so
-// presentation must quote rather than narrow that compatibility boundary.
-func shellQuoteWord(word string) string {
-	if word != "" {
-		safe := true
-		for _, r := range word {
-			if !isSafeShellWordRune(r) {
-				safe = false
-				break
-			}
-		}
-		if safe {
-			return word
-		}
-	}
-	return "'" + strings.ReplaceAll(word, "'", `'"'"'`) + "'"
-}
-
-func isSafeShellWordRune(r rune) bool {
-	return r >= 'a' && r <= 'z' ||
-		r >= 'A' && r <= 'Z' ||
-		r >= '0' && r <= '9' ||
-		strings.ContainsRune("_@%+=:,./-", r)
 }
