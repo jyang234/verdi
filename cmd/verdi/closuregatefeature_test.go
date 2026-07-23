@@ -44,6 +44,23 @@ func TestReportClosureGateConditions_FeatureUsesStructuredOutcome(t *testing.T) 
 			wantReady:       false,
 			wantDisclosures: 0,
 		},
+		{
+			// The format belongs to internal/disclosure alone. A line that
+			// merely APES the vocabulary — the severity word and a bracket,
+			// but never routed through New/Render — is not a disclosure and
+			// must not be counted as one. A local prefix test in this package
+			// counts it, which is exactly the reconstruction the seam exists
+			// to forbid (spec/disclosure-seam-v2 ac-1).
+			name: "a hand-built line that apes the vocabulary is not counted",
+			conditions: []gateCondition{
+				{
+					Name: "1. every feature AC evidenced", OK: true,
+					Extra: []string{disclosure.SeverityDisclosedUnproven + " [pending] this line was never routed through the seam"},
+				},
+			},
+			wantReady:       true,
+			wantDisclosures: 0,
+		},
 	}
 
 	for _, tc := range tests {

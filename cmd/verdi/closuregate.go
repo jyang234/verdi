@@ -33,7 +33,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
@@ -102,6 +101,13 @@ func runClosureGateOutcome(ctx context.Context, root string, spec *artifact.Spec
 // mixed: it also carries informational feature-union tallies, so only lines
 // rendered in the shared disclosed-unproven vocabulary contribute to the
 // disclosure count.
+//
+// "Rendered in the shared vocabulary" is asked of internal/disclosure itself
+// (disclosure.IsRendered), never reconstructed here. This package reproducing
+// Render's grammar with a local prefix test was a second, silent copy of it:
+// it counted any line that merely opened with the severity word, and any
+// change to Render would have zeroed the count with no compile error and no
+// failing test outside cmd/verdi.
 func reportClosureGateConditions(stdout io.Writer, label string, conditions []gateCondition) closureGateOutcome {
 	outcome := closureGateOutcome{Ready: true}
 	for _, c := range conditions {
@@ -127,7 +133,7 @@ func reportClosureGateConditions(stdout io.Writer, label string, conditions []ga
 		// printed regardless of which branch fired above.
 		for _, extra := range c.Extra {
 			fmt.Fprintln(stdout, extra)
-			if strings.HasPrefix(extra, disclosure.SeverityDisclosedUnproven+" [") {
+			if disclosure.IsRendered(extra) {
 				outcome.Disclosures++
 			}
 		}

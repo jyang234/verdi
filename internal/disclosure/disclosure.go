@@ -17,7 +17,10 @@
 // it through Render, instead of formatting their own ad hoc string.
 package disclosure
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // SeverityDisclosedUnproven is the one severity value the system
 // currently produces: constitution 2's three-valued honesty has exactly
@@ -75,4 +78,42 @@ func Render(d Disclosure) string {
 		scopeSuffix = " " + d.Scope
 	}
 	return fmt.Sprintf("%s [%s]%s: %s", d.Severity, d.Source, scopeSuffix, d.Text)
+}
+
+// IsRendered reports whether s is a line Render produced — the recognizer
+// half of ac-1's "a reader who recognizes one disclosure recognizes all of
+// them", for the CONSUMERS that must recognize one too.
+//
+// It exists because the format has to live in exactly one package. A
+// consumer that reconstructs it locally (cmd/verdi's closure-gate reporting
+// loop counted disclosures with strings.HasPrefix(SeverityDisclosedUnproven
+// +" [")) is a second, silent copy of Render's grammar: it accepts prose
+// that merely opens with the severity word, and the day Render's format
+// changes it starts matching nothing at all — no compile error, no failing
+// test outside that consumer. Both halves now change together, here, under
+// TestIsRendered_RecognizesEveryRender.
+//
+// A line is recognized only in Render's own exact shape — the severity, the
+// bracketed non-empty source, then either ": " (no scope) or " <scope>: "
+// — so an indented, hand-built, or merely severity-quoting line is NOT a
+// disclosure. That is the intended reading: a producer that wants its line
+// counted routes it through New/Render, exactly as ac-1 already requires,
+// rather than approximating the vocabulary by hand.
+func IsRendered(s string) bool {
+	rest, ok := strings.CutPrefix(s, SeverityDisclosedUnproven+" [")
+	if !ok {
+		return false
+	}
+	source, after, ok := strings.Cut(rest, "]")
+	if !ok || source == "" {
+		return false
+	}
+	if strings.HasPrefix(after, ": ") {
+		return true // the unscoped form: "…[source]: text".
+	}
+	// The scoped form: "…[source] <scope>: text". The scope is whatever
+	// precedes the FIRST ": " — a scope carrying its own ": " still leaves a
+	// recognizable prefix, since the remainder is simply read as text.
+	scope, _, ok := strings.Cut(after, ": ")
+	return ok && strings.HasPrefix(scope, " ") && strings.TrimSpace(scope) != ""
 }

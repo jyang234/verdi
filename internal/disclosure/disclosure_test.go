@@ -83,3 +83,60 @@ func TestRender_EqualDisclosuresRenderIdentically(t *testing.T) {
 		t.Fatalf("Render(a) = %q, Render(b) = %q; equal Disclosures must render identically", Render(a), Render(b))
 	}
 }
+
+// TestIsRendered is the recognizer's own table: every string Render can
+// produce is recognized, and the near-misses a consumer would otherwise
+// hand-match with a prefix test are not.
+//
+// The negative rows are the point. A consumer that reconstructs the render
+// format locally (cmd/verdi's closure-gate reporting loop did, with
+// strings.HasPrefix(SeverityDisclosedUnproven+" [")) both accepts prose that
+// merely opens with the severity word and silently zeroes its count the day
+// Render's format changes — with no compile error and no failing test outside
+// this package.
+func TestIsRendered(t *testing.T) {
+	cases := []struct {
+		name string
+		s    string
+		want bool
+	}{
+		{"rendered with a scope", Render(New("gate:evidence-quarantine", "ac-1", "a record was excluded")), true},
+		{"rendered without a scope", Render(New("mcp:review-feed", "", "forge unreachable")), true},
+		{"rendered with an empty text", Render(New("gate:example", "", "")), true},
+		{"rendered with a scope carrying its own colon", Render(New("gate:x", "spec/a: b", "text")), true},
+		{"rendered line indented for a nested report", "  " + Render(New("gate:x", "", "text")), false},
+		{"prose that merely opens with the severity word", SeverityDisclosedUnproven + " is what this line reports", false},
+		{"prose naming the severity mid-sentence", "the check is disclosed-unproven [gate:x]: text", false},
+		{"the severity word and a bracket but no source", SeverityDisclosedUnproven + " []: text", false},
+		{"an unterminated source bracket", SeverityDisclosedUnproven + " [gate:x", false},
+		{"a source with no text separator at all", SeverityDisclosedUnproven + " [gate:x] just more words", false},
+		{"an informational tally line the feature gate also carries", "       [union over the feature's own report + 2 closed implementing story archive(s): accepted-deviation count 1]", false},
+		{"an ordinary gate PASS line", "[PASS] closure(feature): 1. every feature AC evidenced", false},
+		{"the empty string", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsRendered(tc.s); got != tc.want {
+				t.Fatalf("IsRendered(%q) = %v, want %v", tc.s, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIsRendered_RecognizesEveryRender closes the drift loop the predicate
+// exists for: whatever Render emits, IsRendered accepts. A future edit to
+// Render's format that this package does not also teach IsRendered fails
+// HERE, in the package that owns the format, rather than silently zeroing a
+// disclosure count in cmd/verdi.
+func TestIsRendered_RecognizesEveryRender(t *testing.T) {
+	for _, d := range []Disclosure{
+		New("lint:VL-017", "", "the mutable zone is absent"),
+		New("gate:pending-supersession", "spec/x", "no forge configured"),
+		New("close:uncommitted-fold-record", ".verdi/waivers/jira-close-1/ac-1.md", "HEAD does not carry it"),
+		New("gate:spec-stale-feature-union", "spec/a", ""),
+	} {
+		if got := Render(d); !IsRendered(got) {
+			t.Fatalf("IsRendered(Render(%+v)) = false; every rendered disclosure must be recognizable", d)
+		}
+	}
+}
