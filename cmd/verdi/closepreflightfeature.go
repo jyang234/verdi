@@ -71,6 +71,16 @@ func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.Sp
 		return closureGateOutcome{}, err
 	}
 
+	// The feature half of the story path's own rehearsal (closepreflight.go),
+	// mirroring where runCloseFeature discloses these: right after the gate,
+	// before its branch cut. Attestations only, keyed by the FEATURE's own name
+	// (dc-6) — the same featureFoldRecordPaths the real ritual calls.
+	rehearsed, err := rehearseUncommittedFoldRecords(ctx, root, head, featureFoldRecordPaths(specRef.Name, fold.ACs), stdout)
+	if err != nil {
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
+	}
+	outcome.Disclosures += rehearsed
+
 	derivedRel, excluded, err := preflightDerivedContext(ctx, root, spec.ID, head)
 	if err != nil {
 		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)

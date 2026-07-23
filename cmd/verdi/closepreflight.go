@@ -12,6 +12,18 @@
 // a file, or publish a rollup, in any of its three outcomes (ready / unmet
 // / operational error).
 //
+// "EVERY condition" includes the refusals a real close makes OUTSIDE its
+// closure gate, which are the ones a gate-shaped rehearsal quietly misses:
+// the pre-ritual index guard it refuses at first (requireCleanIndex,
+// close.go), the CI-only publish guard it refuses at last (dc-1), and the
+// pre-cut disclosure it makes over consumed human records HEAD does not carry
+// (discloseUncommittedFoldRecords, close.go). Each is rehearsed here through
+// the REAL run's own function — one predicate, two print sites, never a
+// second copy of the decision (dc-1/dc-2) — and each is rehearsed as a
+// DISCLOSURE, counted in the summary but never a verdict: only the closure
+// gate decides ready vs not ready, and rehearsing an operator-state refusal
+// must not quietly become a new way to fail one.
+//
 // Where the gate's own per-condition breakdown is already itemized enough
 // — spec-stale's own-text finding id(s), pending-supersession's MR/object
 // ids, stub-reconciliation's unreconciled slugs, the implementing-stories
@@ -62,6 +74,76 @@ import (
 // vocab:identity — CLI invocation grammar ("verdi close", identity)
 const preflightGuardDisclosureText = `outside a detected CI environment and without --force-local, a real "verdi close" run on this ref would separately refuse at the CI-only publish guard (04 §Semantics: "PublishRollup runs in CI only"), regardless of the gate verdict above; this --preflight run itself never reaches that guard`
 
+// preflightIndexGuardSource is the disclosure source id for the rehearsal of
+// close's own pre-ritual index guard (requireCleanIndex, close.go).
+const preflightIndexGuardSource = "close:preflight-index-guard"
+
+// disclosePreflightIndexGuard rehearses the FIRST refusal a real `verdi close`
+// performs — requireCleanIndex (close.go), an exit-2 refusal a real run hits
+// before it evaluates any closure condition at all. It returns the number of
+// disclosures printed (0 or 1), so --preflight's summary counts what it
+// rehearsed.
+//
+// This file's own contract is that --preflight "rehearses EVERY condition a
+// real `verdi close <ref>` would refuse on". The index guard was added to
+// runClose without being added here, and the gap had teeth: with a dirty index
+// --preflight reported READY and --prepare went on to echo `verdi close <ref>`
+// as the next command, while that exact command exits 2.
+//
+// It is a DISCLOSURE, never a new failing condition. The closure gate's
+// pass/fail semantics are not this guard's to change (a dirty index is an
+// operator-state refusal, not a verdict about the spec), and --preflight
+// mutates nothing, so it neither needs a clean index nor clears one. The real
+// guard's OWN error text is carried verbatim, so the operator gets the same
+// recovery guidance the real refusal would have given them — including
+// closureResidueRefusal's exact recovery for an interrupted ritual's residue,
+// which no re-worded summary here could reproduce.
+//
+// requireCleanIndex's operational branch (an unusable repository, which cannot
+// answer and therefore never passes) discloses through this same line: a real
+// close does not get past the guard in that case either, which is exactly what
+// the text says.
+func disclosePreflightIndexGuard(ctx context.Context, root string, stdout io.Writer) int {
+	err := requireCleanIndex(ctx, root)
+	if err == nil {
+		return 0
+	}
+	fmt.Fprintln(stdout, disclosure.Render(disclosure.New(preflightIndexGuardSource, "", preflightIndexGuardText(err))))
+	return 1
+}
+
+// preflightIndexGuardText is the index-guard rehearsal's human half, carrying
+// the real guard's own refusal verbatim.
+func preflightIndexGuardText(err error) string {
+	// vocab:identity — CLI invocation grammar ("verdi close", identity)
+	return fmt.Sprintf(`a real "verdi close" run on this ref would not get past its own pre-ritual index guard, before the closure gate is ever evaluated: %v — this --preflight run mutates nothing, so it neither needs a clean index nor clears one`, err)
+}
+
+// rehearseUncommittedFoldRecords prints close's own pre-cut disclosure over the
+// human records this fold consumed that HEAD does not carry identically
+// (discloseUncommittedFoldRecords, close.go — attestations and waivers live
+// outside both closure paths, so a real close names them before the branch
+// cut), and returns how many lines it printed so the summary counts them.
+//
+// Both halves come from close's OWN functions: the same
+// discloseUncommittedFoldRecords a real close calls, over the same
+// uncommittedFoldRecordPaths predicate that decides which lines it prints —
+// never a second, re-derived predicate (dc-2's one-predicate rule). That
+// predicate is simply ASKED twice, deterministically and side-effect free,
+// exactly as this file already recomputes the fold (runStoryPreflightGate) and
+// the spec-stale condition (printSpecStalePathIfFailing) a second time for
+// their own presentation facts.
+func rehearseUncommittedFoldRecords(ctx context.Context, root, head string, consumed []string, stdout io.Writer) (int, error) {
+	uncommitted, err := uncommittedFoldRecordPaths(ctx, root, head, consumed)
+	if err != nil {
+		return 0, err
+	}
+	if err := discloseUncommittedFoldRecords(ctx, root, head, consumed, stdout); err != nil {
+		return 0, err
+	}
+	return len(uncommitted), nil
+}
+
 // closePublishGuardRefuses is the ONE boolean evaluation both cmdClose's
 // own CI-only publish-guard refusal and --preflight's guard disclosure
 // (dc-1) call — factored out so the two print sites can never independently
@@ -88,6 +170,12 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 
 	fmt.Fprintf(stdout, "close: --preflight %s (dry run: rehearses the closure gate only; nothing on disk changes and nothing is published)\n", storyArg)
 
+	// Rehearsed FIRST, in the real ritual's own order: requireCleanIndex is
+	// the first thing runClose does, before it resolves anything or evaluates
+	// a single condition. Counted into the outcome below, once the gate has
+	// produced one.
+	indexGuardDisclosures := disclosePreflightIndexGuard(ctx, root, stdout)
+
 	head, err := gitx.RevParse(ctx, root, "HEAD")
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -105,6 +193,7 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
+	outcome.Disclosures += indexGuardDisclosures
 
 	if closePublishGuardRefuses(forceLocal) {
 		fmt.Fprintln(stdout, disclosure.Render(disclosure.New("close:preflight-publish-guard", "", preflightGuardDisclosureText)))
@@ -152,6 +241,16 @@ func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.Spec
 	if err != nil {
 		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
+
+	// Rehearsed in the real ritual's own order too: a real close discloses
+	// these immediately after recomputing this same fold, before its branch
+	// cut (close.go's runClose). The slug is the story-scope one (dc-6).
+	rehearsed, err := rehearseUncommittedFoldRecords(ctx, root, head, storyFoldRecordPaths(store.RefSlug(spec.Story), result.ACs), stdout)
+	if err != nil {
+		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
+	}
+	outcome.Disclosures += rehearsed
+
 	derivedRel, excluded, err := preflightDerivedContext(ctx, root, spec.ID, head)
 	if err != nil {
 		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
