@@ -460,6 +460,122 @@ func TestRunPrepare_CurrentUndispositionedPreservesBytesAndPrintsWorklist(t *tes
 	}
 }
 
+// writeFrozenPrepareReport writes an ALREADY-FROZEN deviation-report.md
+// into specName's active directory — writePrepareReport's frozen twin, and
+// the story/prepare-path mirror of closefeature_test.go's
+// writeFrozenCloseFeatureReport. A frozen living report is reachable state:
+// close freezes the report in place BEFORE it moves the spec to the archive
+// zone, so any failure between those two steps leaves exactly this on disk.
+func writeFrozenPrepareReport(t *testing.T, root, specName, covers, findingsYAML string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", specName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := fmt.Sprintf(`---
+schema: verdi.deviation/v1
+covers: %s
+findings:
+%sfrozen: { at: 2024-01-01, commit: %s }
+digest: sha256:%s
+---
+# Alignment report
+`, covers, findingsYAML, covers, strings.Repeat("0", 64))
+	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRunPrepare_FrozenLivingReportIsItsOwnOperatorState covers the state
+// runPrepare never read: report.Frozen.
+//
+// A frozen report covering HEAD satisfied the freshness check (it covers
+// HEAD) and the disposition check (the closure gate's disposition condition
+// does not inspect the frozen stamp), so preparation fell through to a
+// clean READY and printed `verdi close <ref>` as the next command — a
+// command that structurally cannot succeed, because close's freeze step
+// refuses an already-frozen report. A frozen report NOT covering HEAD hit
+// that refusal one layer down, surfacing a bare `align:` line with no
+// preparation framing, no diagnosis, and no next step.
+//
+// Preparation must name the state honestly, must not invent a pass path,
+// and must not unfreeze anything: a frozen report is immutable, and
+// deciding what to do about one is human work.
+func TestRunPrepare_FrozenLivingReportIsItsOwnOperatorState(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func(*testing.T) *fixturegit.Repo
+		// covers is the frozen report's covers commit; empty means HEAD.
+		covers string
+	}{
+		{
+			name:  "frozen report covering HEAD",
+			build: readyCloseFixtureRepo,
+		},
+		{
+			name:   "frozen report not covering HEAD",
+			build:  buildCloseFixtureRepo,
+			covers: strings.Repeat("a", 40),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := tc.build(t)
+			covers := tc.covers
+			if covers == "" {
+				covers = repo.Head
+			}
+			writeFrozenPrepareReport(t, repo.Dir, "close-fixture", covers, dispositionedFindingYAML)
+			reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+			beforeRaw, err := os.ReadFile(reportPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeOutside := snapshotOutsidePrepareReport(t, repo.Dir, reportPath)
+
+			var stdout, stderr bytes.Buffer
+			rc := runPrepare(
+				context.Background(),
+				repo.Dir,
+				"spec/close-fixture",
+				&store.Manifest{},
+				closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New()},
+				true,
+				&stdout,
+				&stderr,
+			)
+			if rc != 1 {
+				t.Fatalf("runPrepare(frozen living report) = %d, want 1 (a verdict: preparation cannot proceed); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+			}
+			for _, want := range []string{
+				"close: --prepare: MECHANICAL WORK REQUIRED",
+				"already frozen",
+				store.DeviationReportRelPath(store.ZoneActive, "close-fixture"),
+			} {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("stdout missing %q: %s", want, stdout.String())
+				}
+			}
+			if strings.Contains(stdout.String(), "next command") {
+				t.Fatalf("preparation offered a next command over a frozen report: %s", stdout.String())
+			}
+			if strings.Contains(stdout.String(), "READY") {
+				t.Fatalf("preparation reported readiness over a frozen report: %s", stdout.String())
+			}
+			if strings.Contains(stdout.String(), "ALIGNMENT REQUIRED") || strings.Contains(stdout.String(), "JUDGMENT REQUIRED") {
+				t.Fatalf("preparation misreported the frozen state as alignment or judgment work: %s", stdout.String())
+			}
+
+			decoded := decodeReportFile(t, reportPath)
+			if decoded.Frozen == nil {
+				t.Fatal("preparation unfroze the report")
+			}
+			assertPreparePreserved(t, repo.Dir, reportPath, beforeRaw, beforeOutside)
+		})
+	}
+}
+
 func TestRunPrepare_QuotesUnsafeFindingIDInDispositionTemplate(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	const unsafeID = `finding with spaces; $(touch SHOULD_NOT_EXIST) 'quoted'`

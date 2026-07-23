@@ -33,13 +33,12 @@ one whole-store directory, per-branch draft walls, and the diagram editor — is
 human write surface. Merge requests are the only durable write path.** Nothing is
 duplicated, so nothing can drift.
 
-The trust spine runs through the whole system, with an explicit human-governed
-closure boundary: CI's `verdi sync --produce` stamps its bundle `source: ci` and
-uploads it as the `verdi-evidence` artifact; a local run stamps `source: local`
-and only ever previews (D6-10). Gates and the closure ritual fold
-**authoritative** (`source: ci`) records only. The upstream analysis toolchain
-(flowmap/groundwork) is executed as pinned CLIs and its JSON strictly decoded —
-never linked as a library. Four
+The trust spine runs through the whole system, and since round 6 it is closed for
+real: CI's `verdi sync --produce` stamps its bundle `source: ci` and uploads it as
+the `verdi-evidence` artifact; a local run stamps `source: local` and only ever
+previews (D6-10). Gates and the closure ritual fold **authoritative** (`source: ci`)
+records only. The upstream analysis toolchain (flowmap/groundwork) is executed as
+pinned CLIs and its JSON strictly decoded — never linked as a library. Four
 workflows carry it: `verify.yml` (the full gate on code paths, then evidence
 production), `spec-gate.yml` (the fast lint/readiness gate on spec- and doc-only
 changes, so no PR is ever silently ungated), `pages.yml` (the dex, published on

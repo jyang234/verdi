@@ -345,7 +345,7 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 // whole closure ritual and return the exit code (CLAUDE.md: 0 clean,
 // 1 the closure gate did not hold, 2 operational error).
 func runClose(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, stdout, stderr io.Writer) int {
-	if err := requireUnstagedClosureIndex(ctx, root); err != nil {
+	if err := requireCleanIndex(ctx, root); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
@@ -491,18 +491,19 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	return 0
 }
 
-// requireUnstagedClosureIndex refuses to begin either close ritual when the
-// caller already owns staged work. Close creates a commit, so inheriting index
-// entries would make that commit claim changes the ritual did not produce.
-// This checks only the index: unrelated unstaged and untracked work is legal
-// and intentionally survives closure.
+// requireCleanIndex refuses to begin either close ritual unless the index is
+// EMPTY relative to HEAD. Close creates a commit, so inheriting index entries
+// would make that commit claim changes the ritual did not produce. It requires
+// nothing to be UNSTAGED — unrelated unstaged and untracked work is legal and
+// intentionally survives closure — which is why it is named for the condition
+// its own refusal text states rather than for the working tree.
 //
 // D6-33 applied to close (ledger L-N15(2)): the same AddAll-swept-the-whole-
 // working-tree defect `verdi accept` was fixed for. The check runs before
 // every mutation — branch cut, align freeze, rollup, status flip, archive
 // move — because a later ordinary commit would carry inherited index entries
 // regardless of how narrowly the ritual itself stages.
-func requireUnstagedClosureIndex(ctx context.Context, root string) error {
+func requireCleanIndex(ctx context.Context, root string) error {
 	paths, err := gitx.StagedPaths(ctx, root)
 	if err != nil {
 		return fmt.Errorf("checking the pre-ritual index: %w", err)
