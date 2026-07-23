@@ -341,7 +341,8 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	//
 	// It stays a DISCLOSURE and changes no verdict: preparation writes only the
 	// living deviation report, which needs no clean index and clears none.
-	prelude.Disclosures += disclosePreflightIndexGuard(ctx, root, stdout)
+	indexGuardDisclosures := disclosePreflightIndexGuard(ctx, root, stdout)
+	prelude.Disclosures += indexGuardDisclosures
 	prelude.IndexGuardRehearsed = true
 
 	spec, err := storyresolve.Resolve(root, storyArg)
@@ -425,6 +426,25 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	forceArg := ""
 	if forceLocal {
 		forceArg = " --force-local"
+	}
+	// A run that rehearsed the index guard and got a refusal has just proved
+	// that the command below exits 2, so calling it NEXT with nothing attached
+	// is the same three-valued dishonesty this file exists to remove.
+	//
+	// The command is KEPT and qualified rather than suppressed. The exit class
+	// stays 0 and belongs there: the closure gate holds, and a dirty index is
+	// operator state, not a verdict about the spec — which is exactly why the
+	// rehearsal is a disclosure and not a condition. Deleting the echo would
+	// smuggle that verdict change in through presentation, since an exit-0 run
+	// naming no next step reads as "nothing to do". Nor is the command wrong:
+	// after a `git commit` or `git restore` it succeeds unchanged. What was
+	// dishonest was the word NEXT while something must happen first — so this
+	// names the ordering instead of hiding the command, and the design's own
+	// READY rows keep both halves they ask for (the real close command, and
+	// what the human must weigh before running it).
+	if indexGuardDisclosures > 0 {
+		// vocab:identity — CLI invocation grammar ("verdi close", identity)
+		fmt.Fprintln(stdout, `close: --prepare: the closure gate holds, but the index-guard rehearsal above refuses the command below: a real "verdi close" exits 2 there, before it evaluates any closure condition. Clear the index first (the rehearsal names how), then run it.`)
 	}
 	// The echoed ref is quoted for the same reason every word of the
 	// disposition templates above is: this is a line an operator copies into

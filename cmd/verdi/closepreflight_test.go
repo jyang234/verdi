@@ -1100,7 +1100,21 @@ func TestRunPreflight_RehearsesTheIndexGuard(t *testing.T) {
 		}
 	})
 
-	t.Run("--prepare surfaces the same rehearsal before echoing its next command", func(t *testing.T) {
+	// The echoed next command is KEPT, not suppressed, and annotated instead.
+	//
+	// The exit class is right where it is and does not move: the closure gate
+	// holds, and a dirty index is operator state, not a verdict about the spec
+	// — which is the entire reason this rehearsal is a disclosure rather than a
+	// condition. Deleting the echoed command would smuggle that verdict change
+	// in through presentation: an exit-0 run naming no next step reads as
+	// "nothing to do", strictly less than the operator has today. The command
+	// is also not the wrong one — after a `git commit` or `git restore` it
+	// succeeds unchanged. What was dishonest was calling it NEXT while
+	// something must happen first, so the fix names the ordering rather than
+	// hiding the command. The design's own READY rows ask the tool to print the
+	// real close command and ask the human to decide whether to proceed;
+	// deciding needs both the command and what stands in its way.
+	t.Run("--prepare annotates the next command the rehearsal says would refuse", func(t *testing.T) {
 		repo := readyCloseFixtureRepo(t)
 		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
 		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
@@ -1109,14 +1123,39 @@ func TestRunPreflight_RehearsesTheIndexGuard(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		rc := runPrepare(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
 		if rc != 0 {
-			t.Fatalf("runPrepare(dirty index) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+			t.Fatalf("runPrepare(dirty index) = %d, want 0 — the closure gate holds and a dirty index is not a verdict; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
 		out := stdout.String()
-		if !strings.Contains(out, "next command: verdi close") {
-			t.Fatalf("fixture bug: this subtest exists to police the state where --prepare echoes its next command:\n%s", out)
+		echoAt := strings.Index(out, "next command: verdi close")
+		if echoAt < 0 {
+			t.Fatalf("the next command must still be printed, not suppressed:\n%s", out)
 		}
 		if !strings.Contains(out, "disclosed-unproven ["+preflightIndexGuardSource+"]") {
 			t.Fatalf("--prepare echoed `verdi close` as the next command with no word that the real run refuses at the index guard:\n%s", out)
+		}
+		// The disclosure alone is not enough: it sits above a summary saying
+		// the gate holds, and the very next line calls a command that exits 2
+		// "next". The echo itself has to carry the ordering.
+		warnAt := strings.Index(out, "close: --prepare: the closure gate holds, but the index-guard rehearsal above refuses the command below")
+		if warnAt < 0 {
+			t.Fatalf("--prepare called a command NEXT that the same run just said exits 2, with nothing attached to the echo:\n%s", out)
+		}
+		if warnAt > echoAt {
+			t.Fatalf("the caveat must precede the command it qualifies (caveat at %d, echo at %d):\n%s", warnAt, echoAt, out)
+		}
+	})
+
+	t.Run("--prepare with a clean index annotates nothing", func(t *testing.T) {
+		repo := readyCloseFixtureRepo(t)
+
+		deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+		if rc != 0 {
+			t.Fatalf("runPrepare(clean index) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if strings.Contains(stdout.String(), "refuses the command below") {
+			t.Fatalf("a run whose index guard rehearsed nothing must qualify nothing:\n%s", stdout.String())
 		}
 	})
 }
