@@ -75,19 +75,21 @@ const prepareRegenerationSource = "close:prepare-regeneration"
 //
 // Preparation only refreshes a report that does not cover HEAD, and
 // regeneration re-derives findings from scratch: align.PreserveDispositions
-// carries a disposition forward only where the regenerated finding's
-// (kind, id, text) content hash matches exactly, and ReconcileJudged
-// re-offers a non-matching prior judged ruling as a candidate a human must
-// confirm rather than as a carried disposition. A finding whose text
-// drifted — or which this run does not re-derive at all — therefore loses
-// its disposition and its human-authored note.
+// carries a computed disposition forward only where the regenerated finding's
+// (kind, id, text) content hash matches exactly, and nothing persists an
+// unmatched computed prior — so a computed finding whose text drifted, or
+// which this run does not re-derive at all, loses its disposition and its
+// human-authored note outright. A judged prior is not destroyed (ReconcileJudged
+// persists it into not-resurfaced: and re-offers a recurrence as a candidate),
+// but its settled ruling stops applying until a human reaffirms it; each kind
+// is disclosed as what it actually is, per regeneratedDispositionText.
 //
 // That behavior is the design's ("retry safety is scoped to the same
 // repository state") and is deliberately NOT changed here: this function
-// adds no branch, refuses nothing, and returns nothing. What it removes is
-// the silence. Three-valued honesty admits proven, violated-with-witness,
+// adds no branch and refuses nothing; it returns only a count. What it removes
+// is the silence. Three-valued honesty admits proven, violated-with-witness,
 // and disclosed-as-unproven — never a silent discard of human judgment —
-// so the loss is rendered through the shared disclosure seam, in the one
+// so the cost is rendered through the shared disclosure seam, in the one
 // vocabulary every other disclosure in this binary speaks, rather than as a
 // local fmt.Sprintf that could drift from it.
 func discloseRegeneratedDispositions(report *artifact.DeviationFrontmatter, specRef artifact.Ref, head string, stdout io.Writer) int {
@@ -110,21 +112,35 @@ func discloseRegeneratedDispositions(report *artifact.DeviationFrontmatter, spec
 }
 
 // regeneratedDispositionText is one disclosure's human-readable half: which
-// finding, what human state it holds, and the exact rule that decides
-// whether that state survives the refresh — stated per kind, because judged
-// and computed findings do not follow the same carry rule.
+// finding, what human state it holds, and the exact outcome the refresh has
+// for it — stated per kind, because judged and computed findings do not follow
+// the same rule and do not suffer the same cost.
+//
+// The judged arm once warned that a ruling "may not survive" the refresh. It
+// cannot fail to survive: internal/align's ReconcileJudged persists EVERY
+// unmatched dispositioned judged prior, so a judged ruling in findings: is
+// carried on an exact content match and otherwise lands in not-resurfaced:
+// with its note intact, from where a recurrence at the same id is re-offered
+// as a candidate. Naming that as a possible loss made the judged arm fire
+// unconditionally for a loss that never happens, which is the exact way to
+// teach an operator to ignore the computed arm beside it — where the loss is
+// real (identity.go's PreserveDispositions is content-hash-exact and nothing
+// persists an unmatched computed prior anywhere).
+//
+// What the judged arm discloses instead is the cost that IS real: a settled
+// ruling stops applying until a human reaffirms it.
 func regeneratedDispositionText(finding artifact.Finding, head string) string {
 	note := ""
 	if finding.Note != "" {
 		note = " and a human-authored note"
 	}
-	carry := "a disposition survives only where the regenerated finding's kind, id and text are identical"
+	outcome := "a disposition survives only where the regenerated finding's kind, id and text are identical — so this one may not survive it"
 	if finding.Kind == artifact.FindingJudged {
-		carry = "a judged ruling survives only where the regenerated finding's kind, id and text are identical, and is otherwise re-offered as a candidate a human must reaffirm"
+		outcome = "a judged ruling is carried only where the regenerated finding's kind, id and text are identical, and otherwise moves to not-resurfaced: with its note intact, from where a recurrence at the same id is re-offered as a candidate — so this one is not discarded, but the settled ruling stops applying until a human reaffirms it"
 	}
 	return fmt.Sprintf(
-		"%s (%s) holds the human disposition %q%s; the refresh about to run for HEAD %s re-derives every finding, and %s — so this one may not survive it",
-		finding.ID, finding.Kind, finding.Disposition, note, head, carry,
+		"%s (%s) holds the human disposition %q%s; the refresh about to run for HEAD %s re-derives every finding, and %s",
+		finding.ID, finding.Kind, finding.Disposition, note, head, outcome,
 	)
 }
 

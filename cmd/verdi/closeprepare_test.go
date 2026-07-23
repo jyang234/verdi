@@ -465,11 +465,14 @@ func TestRunPrepare_CurrentUndispositionedPreservesBytesAndPrintsWorklist(t *tes
 //
 // A second preparation run at a MOVED head regenerates the report, and
 // regeneration carries a disposition forward only where the regenerated
-// finding's (kind, id, text) hash matches exactly (align.PreserveDispositions);
-// judged findings additionally reach ReconcileJudged, which re-offers a
-// non-matching prior ruling as a candidate a human must confirm. So a
-// dispositioned finding whose text drifted — or which this run does not
-// re-derive at all — loses its disposition AND its human-authored note.
+// finding's (kind, id, text) hash matches exactly (align.PreserveDispositions).
+// So a dispositioned COMPUTED finding whose text drifted — or which this run
+// does not re-derive at all — loses its disposition AND its human-authored
+// note. A judged finding instead reaches ReconcileJudged, which persists the
+// unmatched prior into not-resurfaced: and re-offers a recurrence as a
+// candidate a human must reaffirm; the ruling is not destroyed, but it stops
+// applying (TestRunPrepare_JudgedRegenerationDisclosureNamesReaffirmationNotLoss
+// pins both halves).
 //
 // That behavior conforms to the design (retry safety is scoped to "the same
 // repository state") and is NOT changed here. What was missing was the
@@ -529,6 +532,85 @@ func TestRunPrepare_DisclosesDispositionsBeforeRegeneratingAStaleReport(t *testi
 		if f, ok := findingByID(updated.Findings, id); ok && f.Dispositioned() {
 			t.Fatalf("test premise broken: %s survived regeneration dispositioned (%+v); the disclosure would be describing nothing", id, f)
 		}
+	}
+}
+
+// TestRunPrepare_JudgedRegenerationDisclosureNamesReaffirmationNotLoss holds
+// the regeneration disclosure to its own standard.
+//
+// TestRunPrepare_NoRegenerationDisclosureWithoutDispositionsToLose exists
+// because "a disclosure that fires unconditionally teaches operators to ignore
+// it" — and the judged arm was the unconditional one. It warned that a judged
+// ruling "may not survive" the refresh, but internal/align/reaffirm.go
+// persists EVERY unmatched dispositioned judged prior: a judged ruling in
+// findings: is carried on an exact content match, and otherwise moves to
+// not-resurfaced: with its note intact, from where a recurrence at the same id
+// is re-offered as a candidate a human must reaffirm. It is never discarded.
+//
+// So the judged arm fired for every dispositioned judged finding while naming
+// a loss that cannot occur — diluting the computed arm, which is the genuine
+// loss. This test proves the mechanism first, then pins the corrected text.
+func TestRunPrepare_JudgedRegenerationDisclosureNamesReaffirmationNotLoss(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	const findings = `  - { id: f-1, kind: computed, text: "boundary holds", disposition: fixed, note: "verified by hand" }
+  - { id: judged-j-1, kind: judged, text: "a prior semantic reading", disposition: accepted-deviation, note: "accepted for this release" }
+`
+	writePrepareReport(t, repo.Dir, "close-fixture", strings.Repeat("a", 40), findings)
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+
+	// A judge that re-emits the SAME slug with DIFFERENT text: the exact drift
+	// ReconcileJudged answers with a candidate pre-fill plus a not-resurfaced
+	// backing record.
+	deps := closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New(), JudgeCmd: alignFakeJudgeOK(t)}
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+	if rc != 1 {
+		t.Fatalf("runPrepare(stale report) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+
+	// Ground truth first: the judged ruling survived the refresh, verbatim.
+	updated := decodeReportFile(t, reportPath)
+	archived, ok := findingByID(updated.NotResurfaced, "judged-j-1")
+	if !ok {
+		t.Fatalf("premise broken: the judged prior did not land in not-resurfaced: %+v", updated)
+	}
+	if archived.Disposition != artifact.FindingAcceptedDeviation || archived.Note != "accepted for this release" {
+		t.Fatalf("not-resurfaced entry = %+v, want the human ruling and note carried verbatim", archived)
+	}
+	if live, ok := findingByID(updated.Findings, "judged-j-1"); !ok || live.Dispositioned() {
+		t.Fatalf("live judged-j-1 = %+v (present=%v), want an undispositioned candidate awaiting reaffirmation", live, ok)
+	}
+	// The computed prior, by contrast, really is gone.
+	if f, ok := findingByID(updated.Findings, "f-1"); ok && f.Dispositioned() {
+		t.Fatalf("premise broken: the computed prior survived dispositioned (%+v)", f)
+	}
+
+	out := stdout.String()
+	judgedLine, computedLine := "", ""
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "["+prepareRegenerationSource+"]") {
+			continue
+		}
+		switch {
+		case strings.Contains(line, ": judged-j-1 "):
+			judgedLine = line
+		case strings.Contains(line, ": f-1 "):
+			computedLine = line
+		}
+	}
+	if judgedLine == "" || computedLine == "" {
+		t.Fatalf("expected one regeneration disclosure per dispositioned finding:\n%s", out)
+	}
+	if strings.Contains(judgedLine, "may not survive it") {
+		t.Fatalf("the judged arm warns of a loss the refresh cannot cause:\n%s", judgedLine)
+	}
+	for _, want := range []string{"not-resurfaced:", "candidate"} {
+		if !strings.Contains(judgedLine, want) {
+			t.Fatalf("the judged arm must name what actually happens (%q):\n%s", want, judgedLine)
+		}
+	}
+	if !strings.Contains(computedLine, "may not survive it") {
+		t.Fatalf("the computed arm names the genuine loss and must keep saying so:\n%s", computedLine)
 	}
 }
 
