@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
@@ -267,6 +269,117 @@ func TestRunPrepare_GeneratesAbsentOrStaleReportForStoryAndFeature(t *testing.T)
 				t.Fatalf("prepare mutated outside target report:\nbefore: %s\nafter:  %s", before, after)
 			}
 		})
+	}
+}
+
+// TestRunPrepare_JudgeTimeoutIsOperationalNotASyntheticFinding pins the
+// bounded-wait contract close's freeze-align already inherits
+// (freezeAlignDeps, close.go — spec/judge-ergonomics ac-3) onto
+// preparation's refresh, which builds the SAME engine's deps.
+//
+// Without Wait, a judge that outruns its ceiling does not error: RunJudged
+// degrades to the synthetic "judged coverage absent" finding
+// (align.AbsenceFindingID), preparation writes that into the living report,
+// prints it as JUDGMENT REQUIRED with a disposition template, and once a
+// human dispositions it close's freeze takes the freeze-in-place branch and
+// stamps the synthetic judge failure into the archive VERBATIM — never
+// re-running the judge. Preparation is the step that produces the report
+// close later freezes, so it must surface a judge timeout as the honest
+// operational expiry instead of manufacturing judgment work out of it.
+func TestRunPrepare_JudgeTimeoutIsOperationalNotASyntheticFinding(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+	deps := closeDeps{
+		Runner:       upstream.NewFakeRunner(),
+		JudgeCmd:     alignFakeJudgeSleepy(t), // sleeps 5s
+		JudgeTimeout: 200 * time.Millisecond,
+		Forge:        forgefake.New(),
+	}
+
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+	if rc != 2 {
+		t.Fatalf("runPrepare(judge outruns its ceiling) = %d, want 2 (operational expiry, never a verdict); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(reportPath); !os.IsNotExist(err) {
+		t.Fatalf("a timed-out judge left a report at %s (err=%v); nothing may be written on the expiry path", reportPath, err)
+	}
+	if strings.Contains(stdout.String(), "JUDGMENT REQUIRED") {
+		t.Fatalf("a timed-out judge was presented as human judgment work: %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), align.AbsenceFindingID) {
+		t.Fatalf("preparation printed a disposition template for the synthetic %s finding: %s", align.AbsenceFindingID, stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "terminated at the --wait bound") {
+		t.Fatalf("stderr = %q, want the bounded-wait expiry diagnostic", stderr.String())
+	}
+}
+
+// TestRunPrepare_JudgeTimeoutResumeHintSpeaksPreparation is the companion
+// to the test above, and the reason preparation overrides exactly one field
+// of freezeAlignDeps: alignDeps.ResumeHint is documented as the CALLING
+// verb's own vocabulary (finding judged-close-inherits-aligns-resume-
+// instructions-verbatim). close's hint tells the operator to re-run
+// `verdi close` to complete the freeze and archive — for someone who ran
+// --prepare precisely to NOT freeze or archive yet, inheriting it verbatim
+// would point at the real ritual instead of at the resumable preparation
+// they were running.
+func TestRunPrepare_JudgeTimeoutResumeHintSpeaksPreparation(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	deps := closeDeps{
+		Runner:       upstream.NewFakeRunner(),
+		JudgeCmd:     alignFakeJudgeSleepy(t),
+		JudgeTimeout: 200 * time.Millisecond,
+		Forge:        forgefake.New(),
+	}
+
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+	if rc != 2 {
+		t.Fatalf("runPrepare(judge outruns its ceiling) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "verdi close --prepare spec/close-fixture") {
+		t.Fatalf("stderr = %q, want the resume hint to name preparation's own command", stderr.String())
+	}
+	if strings.Contains(stderr.String(), closeExpiryResumeHint) {
+		t.Fatalf("stderr = %q, inherits close's own freeze/archive resume hint verbatim", stderr.String())
+	}
+	if strings.Contains(stderr.String(), alignExpiryResumeHint) {
+		t.Fatalf("stderr = %q, inherits align's own --wait flag language verbatim", stderr.String())
+	}
+}
+
+// TestPrepareAlignDeps_IsFreezeAlignDepsWithOnlyTheResumeHintOverridden is
+// the structural guard behind the two behavioral tests above: preparation's
+// align deps must come from close's single freezeAlignDeps construction, so
+// a field added to alignDeps later cannot be silently dropped on this path
+// the way Wait and ResumeHint once were. DeepEqual over the whole struct is
+// deliberate — it fails on any new field preparation forgets.
+func TestPrepareAlignDeps_IsFreezeAlignDepsWithOnlyTheResumeHintOverridden(t *testing.T) {
+	deps := closeDeps{
+		Runner:        upstream.NewFakeRunner(),
+		JudgeCmd:      []string{"/bin/true"},
+		JudgeRequired: true,
+		JudgeTimeout:  7 * time.Second,
+		Forge:         forgefake.New(),
+	}
+	const digest = "sha256:" + "abc"
+
+	want := freezeAlignDeps(deps, digest)
+	got := prepareAlignDeps(deps, digest, "spec/close-fixture")
+
+	if got.ResumeHint == want.ResumeHint {
+		t.Fatalf("ResumeHint = %q, want preparation's own resume vocabulary rather than close's", got.ResumeHint)
+	}
+	if !strings.Contains(got.ResumeHint, "verdi close --prepare spec/close-fixture") {
+		t.Fatalf("ResumeHint = %q, want it to name the command that resumes this run", got.ResumeHint)
+	}
+	want.ResumeHint = got.ResumeHint
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("prepareAlignDeps = %+v, want freezeAlignDeps' construction %+v with only ResumeHint overridden", got, want)
+	}
+	if !got.Wait {
+		t.Fatal("Wait = false: a judge timeout would degrade into a synthetic finding instead of an operational expiry")
 	}
 }
 

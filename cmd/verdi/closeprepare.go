@@ -24,6 +24,50 @@ import (
 // readiness stays the existing closure gate's verdict. Preserving a current
 // undispositioned report byte-for-byte is what keeps X-16's forcing
 // function intact across retries.
+// prepareExpiryResumeHint is preparation's own bounded-wait resume guidance
+// (alignDeps.ResumeHint), naming the exact command that resumes THIS run.
+//
+// The field is documented as the calling verb's own vocabulary, and neither
+// existing hint is preparation's: align's speaks a --wait flag preparation
+// exposes no way to pass, and close's ("Re-run verdi close … to complete
+// the freeze and archive") would send an operator who ran --prepare
+// precisely so as NOT to freeze or archive yet into the real ritual
+// instead. The ref goes through shellQuoteWord for the same reason the
+// disposition templates do — it is a line the operator copies.
+func prepareExpiryResumeHint(storyArg string) string {
+	// vocab:identity — CLI invocation grammar ("verdi close --prepare", identity)
+	return "Re-run verdi close --prepare " + shellQuoteWord(storyArg) + " once the judge window allows"
+}
+
+// prepareAlignDeps builds the alignDeps preparation hands the shared align
+// engine. It is freezeAlignDeps' single construction (close.go) with
+// exactly one field overridden, never a second literal: close introduced
+// that helper so its two callers "can never drift", and preparation writes
+// the very report close later freezes, so it must inherit the same judge
+// contract rather than restate a subset of it.
+//
+// Wait is the field that makes this load-bearing (spec/judge-ergonomics
+// ac-3). Without it, a judge that outruns its ceiling does not fail: it
+// degrades to align's synthetic "judged coverage absent" finding, which
+// preparation would write into the living report and present as ordinary
+// JUDGMENT REQUIRED work. Once a human dispositioned that synthetic
+// finding, close's freeze-in-place branch (align.go) would stamp the judge
+// failure into the archive verbatim, without ever re-running the judge —
+// exactly what freezeAlignDeps' Wait prevents for close's own freeze.
+//
+// ResumeHint is the one documented per-caller field (see the alignDeps
+// field's own doc comment, and finding judged-close-inherits-aligns-resume-
+// instructions-verbatim, which exists because inheriting another verb's
+// resume language verbatim misdirects the operator). Overriding it is a
+// deliberate, tested divergence — TestRunPrepare_JudgeTimeoutResumeHint
+// SpeaksPreparation pins it — not a silent omission; every other field,
+// including any field added to alignDeps later, comes from freezeAlignDeps.
+func prepareAlignDeps(deps closeDeps, modelDigest, storyArg string) alignDeps {
+	alignD := freezeAlignDeps(deps, modelDigest)
+	alignD.ResumeHint = prepareExpiryResumeHint(storyArg)
+	return alignD
+}
+
 func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, forceLocal bool, stdout, stderr io.Writer) int {
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
@@ -57,14 +101,7 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 			fmt.Fprintln(stderr, "close: --prepare:", err)
 			return 2
 		}
-		alignD := alignDeps{
-			Runner:        deps.Runner,
-			JudgeCmd:      deps.JudgeCmd,
-			JudgeRequired: deps.JudgeRequired,
-			JudgeTimeout:  deps.JudgeTimeout,
-			ModelDigest:   modelDigest,
-		}
-		if rc := runAlignForSpec(ctx, root, spec, head, false, alignD, stdout, stderr); rc != 0 {
+		if rc := runAlignForSpec(ctx, root, spec, head, false, prepareAlignDeps(deps, modelDigest, storyArg), stdout, stderr); rc != 0 {
 			return rc
 		}
 		fmt.Fprintf(stdout, "close: --prepare: ALIGNMENT REQUIRED (living report was %s for HEAD %s; the existing align engine refreshed it)\n", freshness, head)
