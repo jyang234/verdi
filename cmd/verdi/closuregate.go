@@ -47,6 +47,11 @@ import (
 // the gate's existing boolean verdict exactly. Disclosures counts the
 // disclosed-unproven inputs already rendered by the gate: disclosed
 // conditions and rendered per-record detail carried in gateCondition.Extra.
+//
+// Ledger L-N15(3): legibility only, never a gate-semantics change. Failing
+// closed on a disclosed-unproven condition would reverse the binding
+// closure-ergonomics decision and is left to explicit ratification; real
+// close keeps consuming Ready alone through the compatibility wrappers.
 type closureGateOutcome struct {
 	Ready       bool
 	Disclosures int

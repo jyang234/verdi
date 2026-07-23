@@ -61,8 +61,12 @@
 // which --preflight never reaches. See closepreflight.go/
 // closepreflightfeature.go for the full implementation.
 //
-// --prepare (closure-session ergonomics) is the resumable operator entry
-// point for both classes. Given an explicit ref, it refreshes an absent or
+// --prepare (closure-session ergonomics, ledger L-N15(1)) is the resumable
+// operator entry point for both classes — a MODE of this verb, never a new
+// one, on close-preflight dc-1's ruling (a bare mode-selecting switch; no
+// 05 §CLI inventory change), and dispatched before the CI-only publish
+// guard on that same reasoning since it never reaches a publish. Given an
+// explicit ref, it refreshes an absent or
 // stale living alignment report, then stops at every undispositioned finding
 // for human judgment. Re-running it at the same HEAD preserves that report
 // byte-for-byte instead of regenerating it. Once every finding is
@@ -492,6 +496,12 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 // entries would make that commit claim changes the ritual did not produce.
 // This checks only the index: unrelated unstaged and untracked work is legal
 // and intentionally survives closure.
+//
+// D6-33 applied to close (ledger L-N15(2)): the same AddAll-swept-the-whole-
+// working-tree defect `verdi accept` was fixed for. The check runs before
+// every mutation — branch cut, align freeze, rollup, status flip, archive
+// move — because a later ordinary commit would carry inherited index entries
+// regardless of how narrowly the ritual itself stages.
 func requireUnstagedClosureIndex(ctx context.Context, root string) error {
 	paths, err := gitx.StagedPaths(ctx, root)
 	if err != nil {
@@ -506,6 +516,11 @@ func requireUnstagedClosureIndex(ctx context.Context, root string) error {
 // stageClosureSpec stages exactly the target spec's active-zone deletion and
 // archive-zone tree. Story and feature closure share this one path assembler
 // so neither ritual can widen its commit ownership independently.
+//
+// The guarantee is deliberately stated as "only the target spec's paths",
+// NOT "only files the ritual itself wrote" (ledger L-N15(2)): an uncommitted
+// edit inside the target spec directory still rides the archive tree — the
+// same property that lets the living deviation report be frozen in place.
 func stageClosureSpec(ctx context.Context, root, name string) error {
 	active := store.SpecDirRelPath(store.ZoneActive, name)
 	archive := store.SpecDirRelPath(store.ZoneArchive, name)

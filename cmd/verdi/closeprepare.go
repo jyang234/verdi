@@ -16,6 +16,15 @@ import (
 // feature ref. It may refresh only the target's living deviation report; all
 // judgment remains a human-authored disposition and final closure remains a
 // separate invocation of the existing close ritual.
+//
+// Ledger L-N15(1). State is DERIVED, never persisted — a closure-session
+// file was rejected as a second source of truth for HEAD, report freshness,
+// findings, and gate state. This composes the existing engines only
+// (storyresolve.Resolve, runAlignForSpec(freeze=false), runPreflight): no
+// second align engine, no second gate, and no new pass path — final
+// readiness stays the existing closure gate's verdict. Preserving a current
+// undispositioned report byte-for-byte is what keeps X-16's forcing
+// function intact across retries.
 func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, forceLocal bool, stdout, stderr io.Writer) int {
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
