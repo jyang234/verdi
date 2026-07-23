@@ -926,6 +926,214 @@ func TestRunPrepare_NextCommandQuotesTheRefItEchoes(t *testing.T) {
 	}
 }
 
+// prepareStoreWithoutGit builds a minimal, VALID store that is not inside a
+// git repository: enough for storyresolve.Resolve to load the fixture story,
+// but nothing for `git rev-parse HEAD` to answer. It is the only hermetic
+// way to reach preparation's HEAD-resolution failure, which runs before any
+// report is read. (If the machine's temp directory were itself inside a
+// repository, rev-parse would succeed and the test would fail loudly rather
+// than silently pass.)
+func prepareStoreWithoutGit(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, ".verdi", "specs", "active", "close-fixture")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".verdi", "verdi.yaml"), []byte("schema: verdi.layout/v1\nforge: github\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte(closeFixtureStorySpecMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// TestRunPrepare_SetupFailuresReturn2BeforeAnyRefresh covers preparation's
+// setup failures — every step that runs before the align engine is ever
+// called. Each must be operational (exit 2), must carry preparation's own
+// framing so the operator knows which verb refused, and must leave no report
+// behind: none of these failures has decided anything about the target.
+func TestRunPrepare_SetupFailuresReturn2BeforeAnyRefresh(t *testing.T) {
+	tests := []struct {
+		name       string
+		ref        string
+		build      func(*testing.T) string
+		wantStderr []string
+	}{
+		{
+			name:       "spec ref names no active spec",
+			ref:        "spec/no-such-spec",
+			build:      func(t *testing.T) string { return buildCloseFixtureRepo(t).Dir },
+			wantStderr: []string{"close: --prepare:", filepath.Join("active", "no-such-spec", "spec.md")},
+		},
+		{
+			name:       "argument is in neither accepted form",
+			ref:        "not-a-ref",
+			build:      func(t *testing.T) string { return buildCloseFixtureRepo(t).Dir },
+			wantStderr: []string{"close: --prepare:", "neither a scheme-prefixed story ref"},
+		},
+		{
+			name:       "story ref matches no active spec",
+			ref:        "jira:NOT-A-STORY-1",
+			build:      func(t *testing.T) string { return buildCloseFixtureRepo(t).Dir },
+			wantStderr: []string{"close: --prepare:", "jira:NOT-A-STORY-1"},
+		},
+		{
+			name:       "HEAD cannot be resolved",
+			ref:        "spec/close-fixture",
+			build:      prepareStoreWithoutGit,
+			wantStderr: []string{"close: --prepare:", `gitx: RevParse("HEAD")`},
+		},
+		{
+			name: "operating model cannot be resolved",
+			ref:  "spec/close-fixture",
+			build: func(t *testing.T) string {
+				repo := buildCloseFixtureRepo(t)
+				// A strict-decode failure in the store's own manifest: the
+				// digest preparation must stamp into a refreshed report
+				// cannot be derived, so the refresh must not run at all.
+				if err := os.WriteFile(filepath.Join(repo.Dir, ".verdi", "verdi.yaml"), []byte("schema: verdi.layout/v1\nnot_a_manifest_field: true\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return repo.Dir
+			},
+			wantStderr: []string{"close: --prepare:", "verdi.yaml"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := tc.build(t)
+
+			var stdout, stderr bytes.Buffer
+			rc := runPrepare(
+				context.Background(),
+				root,
+				tc.ref,
+				&store.Manifest{},
+				closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New()},
+				true,
+				&stdout,
+				&stderr,
+			)
+			if rc != 2 {
+				t.Fatalf("runPrepare = %d, want 2 (operational); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+			}
+			for _, want := range tc.wantStderr {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), want)
+				}
+			}
+			reportPath := store.DeviationReportPath(root, store.ZoneActive, "close-fixture")
+			if _, err := os.Stat(reportPath); !os.IsNotExist(err) {
+				t.Fatalf("a setup failure wrote %s (err=%v); nothing may be written before the target is resolved and refreshable", reportPath, err)
+			}
+		})
+	}
+}
+
+// TestRunPrepare_AlignFailurePropagatesItsVerdict covers the refresh-failed
+// branch with align's OTHER exit class. A configured-but-absent required
+// judge is align's verdict (exit 1), not an operational failure, and
+// preparation must return the engine's own class rather than reclassifying
+// it — the exit-2 half of the same branch is proven by
+// TestRunPrepare_JudgeTimeoutIsOperationalNotASyntheticFinding.
+func TestRunPrepare_AlignFailurePropagatesItsVerdict(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+	deps := closeDeps{Runner: upstream.NewFakeRunner(), JudgeRequired: true, Forge: forgefake.New()}
+
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+	if rc != 1 {
+		t.Fatalf("runPrepare(required judge absent) = %d, want align's own verdict 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "judge_required") {
+		t.Fatalf("stderr = %q, want align's own required-judge diagnostic", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "ALIGNMENT REQUIRED") {
+		t.Fatalf("a failed refresh was reported as a completed one: %s", stdout.String())
+	}
+	if _, err := os.Stat(reportPath); !os.IsNotExist(err) {
+		t.Fatalf("a failed refresh wrote %s (err=%v)", reportPath, err)
+	}
+}
+
+// TestReloadRefreshedReport covers preparation's post-refresh contract with
+// the align engine: a refresh that reported success must have left a
+// decodable report where preparation is about to read it.
+//
+// The two failure rows are unreachable THROUGH runPrepare by construction —
+// nothing executes between align's atomic write and this read, so no
+// hermetic test can make the file vanish or rot in between. They are
+// nonetheless real post-conditions of a shared engine this code does not
+// own, so the check lives in a function that can be driven directly rather
+// than as an inline branch no test can reach.
+func TestReloadRefreshedReport(t *testing.T) {
+	t.Run("decodable report", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		writePrepareReport(t, repo.Dir, "close-fixture", repo.Head, dispositionedFindingYAML)
+		reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+
+		var stderr bytes.Buffer
+		report, rc := reloadRefreshedReport(reportPath, &stderr)
+		if rc != 0 {
+			t.Fatalf("reloadRefreshedReport = %d, want 0; stderr=%s", rc, stderr.String())
+		}
+		if report == nil || report.Covers != repo.Head {
+			t.Fatalf("report = %+v, want the report covering %s", report, repo.Head)
+		}
+		if stderr.String() != "" {
+			t.Fatalf("stderr = %q, want silence on the success path", stderr.String())
+		}
+	})
+
+	t.Run("report present but undecodable", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+		if err := os.MkdirAll(filepath.Dir(reportPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(reportPath, []byte("not frontmatter\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		var stderr bytes.Buffer
+		report, rc := reloadRefreshedReport(reportPath, &stderr)
+		if rc != 2 {
+			t.Fatalf("reloadRefreshedReport(undecodable) = %d, want 2; stderr=%s", rc, stderr.String())
+		}
+		if report != nil {
+			t.Fatalf("report = %+v, want nil", report)
+		}
+		for _, want := range []string{"close: --prepare:", "frontmatter"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), want)
+			}
+		}
+	})
+
+	t.Run("report absent after a successful refresh", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+
+		var stderr bytes.Buffer
+		report, rc := reloadRefreshedReport(reportPath, &stderr)
+		if rc != 2 {
+			t.Fatalf("reloadRefreshedReport(absent) = %d, want 2; stderr=%s", rc, stderr.String())
+		}
+		if report != nil {
+			t.Fatalf("report = %+v, want nil", report)
+		}
+		for _, want := range []string{"close: --prepare:", "align returned success but", reportPath} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), want)
+			}
+		}
+	})
+}
+
 func TestRunPrepare_OperationalErrorsReturn2WithoutMutation(t *testing.T) {
 	t.Run("malformed current report", func(t *testing.T) {
 		repo := buildCloseFixtureRepo(t)

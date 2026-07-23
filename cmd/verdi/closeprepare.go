@@ -154,6 +154,33 @@ func reportFrozenState(report *artifact.DeviationFrontmatter, specName string, s
 	return 1
 }
 
+// reloadRefreshedReport re-reads the living report the align engine has just
+// reported refreshing, and enforces that engine's post-condition: a refresh
+// that returned success left a decodable report at reportPath. It returns
+// (report, 0) on success and (nil, 2) once it has named the failure — an
+// operational one either way, since the engine, not the operator, broke its
+// contract.
+//
+// It is a function rather than two inline branches because nothing executes
+// between align's atomic write and this read, which makes both failures
+// unreachable through runPrepare by construction and therefore untestable
+// there. They are still real post-conditions of a shared engine this file
+// does not own — silently treating a vanished report as "no findings" would
+// walk straight into the gate — so the check lives where a test can drive it
+// (TestReloadRefreshedReport).
+func reloadRefreshedReport(reportPath string, stderr io.Writer) (*artifact.DeviationFrontmatter, int) {
+	report, _, err := loadExistingReport(reportPath)
+	if err != nil {
+		fmt.Fprintln(stderr, "close: --prepare:", err)
+		return nil, 2
+	}
+	if report == nil {
+		fmt.Fprintf(stderr, "close: --prepare: align returned success but %s is absent\n", reportPath)
+		return nil, 2
+	}
+	return report, 0
+}
+
 // runPrepare derives the next closure-session state for an explicit story or
 // feature ref. It may refresh only the target's living deviation report; all
 // judgment remains a human-authored disposition and final closure remains a
@@ -182,6 +209,13 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	}
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
+		// Unreachable by construction, and deliberately kept: storyresolve
+		// only ever returns a spec decoded through artifact.DecodeSpec, whose
+		// validateBase has already run ParseRef over this exact id. No
+		// hermetic test can reach this branch (there is no seam between the
+		// two calls to inject through) — it guards against that decode
+		// contract changing out from under this file, exactly as
+		// runAlignForSpec's identical guard does.
 		fmt.Fprintln(stderr, "close: --prepare: internal error: resolved spec has an invalid id:", err)
 		return 2
 	}
@@ -216,15 +250,11 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 		}
 		fmt.Fprintf(stdout, "close: --prepare: ALIGNMENT REQUIRED (living report was %s for HEAD %s; the existing align engine refreshed it)\n", freshness, head)
 
-		report, _, err = loadExistingReport(reportPath)
-		if err != nil {
-			fmt.Fprintln(stderr, "close: --prepare:", err)
-			return 2
+		refreshed, rc := reloadRefreshedReport(reportPath, stderr)
+		if rc != 0 {
+			return rc
 		}
-		if report == nil {
-			fmt.Fprintf(stderr, "close: --prepare: align returned success but %s is absent\n", reportPath)
-			return 2
-		}
+		report = refreshed
 	}
 
 	undispositioned := make([]artifact.Finding, 0, len(report.Findings))
