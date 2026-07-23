@@ -889,6 +889,43 @@ func TestRunPrepare_FullyDispositionedRunsAuthoritativePreflight(t *testing.T) {
 	}
 }
 
+// TestRunPrepare_NextCommandQuotesTheRefItEchoes covers the last unquoted
+// word preparation emits: every word of the disposition templates is quoted,
+// but the READY line echoed the caller's ref raw.
+//
+// storyresolve constrains what can resolve — a story ref must match
+// artifact's scheme:key grammar, and a spec ref must be kebab-case — so most
+// of the argument space cannot carry shell metacharacters. The exception is
+// real: ParseRef also accepts a fragment ref (spec/<name>#<object-id>), and
+// Resolve ignores the fragment when loading the spec, so
+// `spec/close-fixture#ac-1` resolves and was echoed bare. Under zsh with
+// extended_glob set — an ordinary user configuration — `#` is a pattern
+// operator, and the pasted line dies with "no matches found" before it ever
+// reaches the verb. Quoting the echoed word costs nothing and does not
+// depend on that analysis staying true.
+func TestRunPrepare_NextCommandQuotesTheRefItEchoes(t *testing.T) {
+	repo := readyCloseFixtureRepo(t)
+
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(
+		context.Background(),
+		repo.Dir,
+		"spec/close-fixture#ac-1",
+		&store.Manifest{},
+		closeDeps{Forge: forgefake.New()},
+		true,
+		&stdout,
+		&stderr,
+	)
+	if rc != 0 {
+		t.Fatalf("runPrepare(fragment ref) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	const want = `close: --prepare: next command: verdi close 'spec/close-fixture#ac-1' --force-local`
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout missing the safely quoted next command %q:\n%s", want, stdout.String())
+	}
+}
+
 func TestRunPrepare_OperationalErrorsReturn2WithoutMutation(t *testing.T) {
 	t.Run("malformed current report", func(t *testing.T) {
 		repo := buildCloseFixtureRepo(t)

@@ -810,6 +810,65 @@ func TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testin
 	}
 }
 
+// TestClosureResidueName table-drives the index-shape derivation the residue
+// refusal rests on. Ownership must come from the INDEX, never from the
+// caller's target argument: an interrupted close has already moved the spec
+// out of the active zone, so a retry's own ref no longer resolves.
+func TestClosureResidueName(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths []string
+		want  string
+	}{
+		{name: "empty index"},
+		{
+			name:  "an interrupted close's own two zones",
+			paths: []string{".verdi/specs/active/foo/spec.md", ".verdi/specs/archive/foo/rollup.json", ".verdi/specs/archive/foo/spec.md"},
+			want:  "foo",
+		},
+		{
+			name:  "archive zone alone (the active zone was untracked)",
+			paths: []string{".verdi/specs/archive/foo/spec.md"},
+			want:  "foo",
+		},
+		{
+			name:  "active zone alone is an ordinary spec edit, not closure residue",
+			paths: []string{".verdi/specs/active/foo/spec.md"},
+		},
+		{
+			name:  "one foreign path disowns the whole index",
+			paths: []string{".verdi/specs/active/foo/spec.md", ".verdi/specs/archive/foo/spec.md", "README.md"},
+		},
+		{
+			name:  "two different specs' closure paths",
+			paths: []string{".verdi/specs/archive/foo/spec.md", ".verdi/specs/archive/bar/spec.md"},
+		},
+		{
+			name:  "a prefix-sharing sibling is a different spec",
+			paths: []string{".verdi/specs/active/foo/spec.md", ".verdi/specs/archive/foo-two/spec.md"},
+		},
+		{
+			name:  "the zone directory itself, with no spec name under it",
+			paths: []string{".verdi/specs/archive/spec.md"},
+		},
+		{
+			name:  "a spec directory with no file under it",
+			paths: []string{".verdi/specs/archive/foo"},
+		},
+		{
+			name:  "an attestation is never closure residue",
+			paths: []string{".verdi/attestations/jira-close-1/ac-1.md"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := closureResidueName(tc.paths); got != tc.want {
+				t.Fatalf("closureResidueName(%v) = %q, want %q", tc.paths, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestRequireCleanIndex covers the guard's three answers — clean, foreign
 // staged work, and the ritual's OWN residue — plus the operational branch
 // CLAUDE.md requires and nothing previously exercised (the
@@ -827,7 +886,7 @@ func TestRequireCleanIndex(t *testing.T) {
 
 	t.Run("clean index passes", func(t *testing.T) {
 		repo := buildCloseFixtureRepo(t)
-		if err := requireCleanIndex(ctx, repo.Dir, "close-fixture"); err != nil {
+		if err := requireCleanIndex(ctx, repo.Dir); err != nil {
 			t.Fatalf("requireCleanIndex(clean) = %v, want nil", err)
 		}
 	})
@@ -837,7 +896,7 @@ func TestRequireCleanIndex(t *testing.T) {
 		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
 		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
 
-		err := requireCleanIndex(ctx, repo.Dir, "close-fixture")
+		err := requireCleanIndex(ctx, repo.Dir)
 		if err == nil {
 			t.Fatal("requireCleanIndex(foreign staged path) = nil, want a refusal")
 		}
@@ -859,7 +918,7 @@ func TestRequireCleanIndex(t *testing.T) {
 			t.Fatalf("stageClosureSpec: %v", err)
 		}
 
-		err := requireCleanIndex(ctx, repo.Dir, "close-fixture")
+		err := requireCleanIndex(ctx, repo.Dir)
 		if err == nil {
 			t.Fatal("requireCleanIndex(closure residue) = nil, want a refusal — the guard must not open a new pass path")
 		}
@@ -890,7 +949,7 @@ func TestRequireCleanIndex(t *testing.T) {
 		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
 		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
 
-		err := requireCleanIndex(ctx, repo.Dir, "close-fixture")
+		err := requireCleanIndex(ctx, repo.Dir)
 		if err == nil {
 			t.Fatal("requireCleanIndex(mixed) = nil, want a refusal")
 		}
@@ -899,10 +958,11 @@ func TestRequireCleanIndex(t *testing.T) {
 		}
 	})
 
-	t.Run("a sibling spec's staged paths are not mistaken for this target's", func(t *testing.T) {
+	t.Run("an ordinary active-zone spec edit is not closure residue", func(t *testing.T) {
 		repo := buildCloseFixtureRepo(t)
-		// A prefix-sharing sibling name: ".../close-fixture-two/..." must not
-		// be read as residue of ".../close-fixture".
+		// Authoring a brand-new spec stages active-zone paths only. Close never
+		// stages the active zone without also creating an archive tree, so this
+		// is the operator's own work and gets the generic refusal.
 		sibling := filepath.Join(repo.Dir, ".verdi", "specs", "active", "close-fixture-two")
 		if err := os.MkdirAll(sibling, 0o755); err != nil {
 			t.Fatal(err)
@@ -912,17 +972,17 @@ func TestRequireCleanIndex(t *testing.T) {
 		}
 		gitOutput(t, repo.Dir, "add", "--", ".verdi/specs/active/close-fixture-two")
 
-		err := requireCleanIndex(ctx, repo.Dir, "close-fixture")
+		err := requireCleanIndex(ctx, repo.Dir)
 		if err == nil {
-			t.Fatal("requireCleanIndex(sibling spec staged) = nil, want a refusal")
+			t.Fatal("requireCleanIndex(active-zone edit staged) = nil, want a refusal")
 		}
 		if !strings.Contains(err.Error(), "commit or unstage them") {
-			t.Fatalf("requireCleanIndex error = %q, want the generic refusal for a prefix-sharing sibling", err)
+			t.Fatalf("requireCleanIndex error = %q, want the generic refusal for an active-zone-only edit", err)
 		}
 	})
 
 	t.Run("an unusable repository is an operational error, never a silent pass", func(t *testing.T) {
-		err := requireCleanIndex(ctx, t.TempDir(), "close-fixture")
+		err := requireCleanIndex(ctx, t.TempDir())
 		if err == nil {
 			t.Fatal("requireCleanIndex(outside a git repository) = nil, want an operational error — a guard that cannot answer must never pass")
 		}

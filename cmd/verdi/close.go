@@ -346,23 +346,13 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 // whole closure ritual and return the exit code (CLAUDE.md: 0 clean,
 // 1 the closure gate did not hold, 2 operational error).
 func runClose(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, stdout, stderr io.Writer) int {
-	// Resolve BEFORE the index guard. storyresolve.Resolve and
-	// artifact.ParseRef are pure reads — nothing on disk changes, so the
-	// design's "before alignment freeze, rollup creation, status flip, or
-	// archive move" ordering still holds — and they give the guard the one
-	// fact it needs to tell close's own interrupted residue apart from the
-	// operator's staged work (closureResidueRefusal).
-	spec, err := storyresolve.Resolve(root, storyArg)
-	if err != nil {
+	if err := requireCleanIndex(ctx, root); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
-	specRef, err := artifact.ParseRef(spec.ID)
+
+	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
-		fmt.Fprintln(stderr, "close: internal error: resolved spec has an invalid id:", err)
-		return 2
-	}
-	if err := requireCleanIndex(ctx, root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
@@ -396,6 +386,12 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	fold, err := foldStory(ctx, root, spec, head)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+
+	specRef, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		fmt.Fprintln(stderr, "close: internal error: resolved spec has an invalid id:", err)
 		return 2
 	}
 
@@ -508,10 +504,7 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 // every mutation — branch cut, align freeze, rollup, status flip, archive
 // move — because a later ordinary commit would carry inherited index entries
 // regardless of how narrowly the ritual itself stages.
-// name is the resolved target spec's directory name, so the refusal can tell
-// the ritual's OWN interrupted residue apart from the operator's work (see
-// closureResidueRefusal). Pass "" only where no target is resolved yet.
-func requireCleanIndex(ctx context.Context, root, name string) error {
+func requireCleanIndex(ctx context.Context, root string) error {
 	paths, err := gitx.StagedPaths(ctx, root)
 	if err != nil {
 		return fmt.Errorf("checking the pre-ritual index: %w", err)
@@ -519,38 +512,60 @@ func requireCleanIndex(ctx context.Context, root, name string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	if onlyClosurePaths(paths, name) {
+	if name := closureResidueName(paths); name != "" {
 		return closureResidueRefusal(ctx, root, name, paths)
 	}
 	return fmt.Errorf("refusing to run with pre-existing staged paths %q; commit or unstage them before running the ritual", paths)
 }
 
-// onlyClosurePaths reports whether EVERY staged path lies inside the target
-// spec's own two closure zones — the exact set stageClosureSpec stages, and
-// therefore the only index shape close itself can have produced. It is
-// deliberately all-or-nothing: one foreign path and the answer is false, so
-// verdi never claims ownership of an index it does not wholly own. The
-// trailing separator keeps a prefix-sharing sibling ("close-fixture-two")
-// from reading as residue of "close-fixture".
-func onlyClosurePaths(paths []string, name string) bool {
-	if name == "" || len(paths) == 0 {
-		return false
-	}
-	prefixes := [2]string{
-		store.SpecDirRelPath(store.ZoneActive, name) + "/",
-		store.SpecDirRelPath(store.ZoneArchive, name) + "/",
-	}
+// closureResidueName returns the spec name an index full of closure residue
+// belongs to, or "" when the staged set is not that shape.
+//
+// Ownership is derived from the INDEX, never from the caller's target
+// argument: an interrupted close has already moved the spec out of the active
+// zone, so a retry's own ref no longer resolves and the guard would never see
+// a name to compare against. The index still carries the answer.
+//
+// The shape it recognises is exactly what stageClosureSpec produces and
+// nothing else: every staged path under ONE spec's active or archive closure
+// directory, with at least one under the archive zone (close always creates
+// the archive tree; a staged active zone alone is some other edit). The
+// trailing separator keeps a prefix-sharing sibling ("close-fixture-two") from
+// reading as residue of "close-fixture", and one foreign path collapses the
+// answer to "" so verdi never claims an index it does not wholly own.
+func closureResidueName(paths []string) string {
+	const activeRoot = ".verdi/specs/active/"
+	const archiveRoot = ".verdi/specs/archive/"
+
+	name, sawArchive := "", false
 	for _, p := range paths {
-		if !strings.HasPrefix(p, prefixes[0]) && !strings.HasPrefix(p, prefixes[1]) {
-			return false
+		rest, inArchive := strings.CutPrefix(p, archiveRoot)
+		if !inArchive {
+			var inActive bool
+			if rest, inActive = strings.CutPrefix(p, activeRoot); !inActive {
+				return ""
+			}
 		}
+		specName, _, hasChild := strings.Cut(rest, "/")
+		if !hasChild || specName == "" {
+			return ""
+		}
+		if name == "" {
+			name = specName
+		} else if specName != name {
+			return ""
+		}
+		sawArchive = sawArchive || inArchive
 	}
-	return true
+	if !sawArchive {
+		return ""
+	}
+	return name
 }
 
-// closureResidueRefusal is the refusal for an index carrying nothing but the
-// target's own closure paths: an earlier run of this very ritual staged them
-// and then failed to commit (a failing pre-commit hook, commit.gpgsign with no
+// closureResidueRefusal is the refusal for an index carrying nothing but one
+// spec's own closure paths: an earlier run of this very ritual staged them and
+// then failed to commit (a failing pre-commit hook, commit.gpgsign with no
 // key, an unset user.email are the reachable causes).
 //
 // It still REFUSES — the guard opens no new pass path, and a second ritual
