@@ -30,9 +30,10 @@
 //     CONSUMED via extraction — same Generate/write logic `verdi align
 //     --freeze` uses, without depending on the feature/<name> build-branch
 //     naming convention), build and canonjson-digest rollup.json, and move
-//     the whole quartet to specs/archive/<name>/ (store.ArchiveMove, a
-//     pure rename — VL-010's sole legal exception on an otherwise-frozen
-//     spec.md).
+//     the whole target spec directory to specs/archive/<name>/
+//     (store.ArchiveMove). Every archive contains spec.md, the frozen
+//     deviation-report.md, and rollup.json; a grandfathered board.json
+//     moves with the directory only when already present.
 //  4. Commit only the target spec's active-zone deletion and archive-zone
 //     tree on the closure branch. A pre-existing staged path is refused
 //     before any mutation; unrelated unstaged and untracked work survives
@@ -439,9 +440,9 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	// Flip the spec's status accepted-pending-build → closed as part of the
 	// archive step (02 §Kind registry: story/feature specs transition
 	// "… → closed(archive)"). Done in the active-zone spec.md BEFORE
-	// ArchiveMove renames the directory, so the whole quartet moves in one
-	// shot: the spec.md moves with its sole status-line change and everything
-	// else byte-identical — VL-010's round-6 status-only archive-flip
+	// ArchiveMove renames the whole target spec directory in one shot:
+	// spec.md moves with its sole status-line change and every other present
+	// file moves byte-identically — VL-010's round-6 status-only archive-flip
 	// exception (D6-11), not the pure-rename one, is what admits the move.
 	if err := flipSpecStatusToClosed(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -560,7 +561,7 @@ func flipSpecStatusToClosed(root, name string) error {
 
 // writeRollup builds, self-validates, and writes rollup.json into
 // specs/active/<name>/ (still under the active zone — store.ArchiveMove
-// moves it, along with the rest of the quartet, immediately afterward).
+// moves it with the rest of the target spec directory immediately afterward).
 func writeRollup(root string, specRef artifact.Ref, spec *artifact.SpecFrontmatter, head string, fold evidence.StoryResult) error {
 	roll := artifact.Rollup{
 		Schema:   "verdi.rollup/v1",

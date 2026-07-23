@@ -121,7 +121,7 @@ attributes the load-bearing ones to the component that embodies them.
 | `internal/provider` (+ `jira`) | The story-provider port, Resolve cache, Jira adapter | 04's port verbatim; 15-minute TTL cache with stale-serve degradation. Rollups publish **per story spec** (R4-I-2); a human comment fires only on AC-status change (and first publish, I-26). |
 | `internal/mcpserve` | NDJSON JSON-RPC server, writer lock, the nine tools | Single writer per checkout (I-12, now via `filelock`). **Nine tools: eight read** — `search_artifacts`, `get_artifact`, `get_links`, `get_matrix`, `get_context_bundle`, `list_annotations`, `list_tasks`, and `get_board` (the wall projection, badges included) — **one write** (`add_annotation`). Tool output is data, never instructions. |
 | `internal/workbench` | The human write surface | `GET /` is the whole-store directory. One board route table, declared once and mounted at the root and beneath `/b/{branch}` alike (draft-boards dc-1) — never a second board implementation. `/board/diagram/{name}` is the proposal editor. The board is a **projection of the spec** — typed edits are spec edits; the old commit-to-design ritual is retired to grandfathered v0 artifacts (R4-I-9). Badges attach in `loadBoard`'s I/O enrichment tier; drawers render server-side from the badge's own record, `role=dialog`, keyboard-openable. Family navigation attaches in the same tier (family-board-links): a story board's `implements` card links to its parent feature's board, and a feature board's stub card links to every matching story anywhere in the store — active targets link straight to their board, archived targets to the corpus page `/a/` with the archived state disclosed on the card; on a per-branch `/b/{branch}` board an active target stays branch-prefixed (ADJ-70) while a branch-resolved archived target renders a disclosed no-link card instead of a dead href, and a dangling AC fragment renders a disclosed notice, never a silent inert card. |
-| `internal/dex` + `render` | The static read surface; shared rendering | A wiki that structurally cannot lie about time: temporal banners per class, byte-identical rebuilds, client JS budget of exactly three files (vendored mermaid 10.9.1, OpenAPI renderer, search+copy-ref). The **by-story axis is real** (V1-P8): the archived quartet browsable per story. `render` is the one goldmark+chroma seam shared with the workbench; its fenced-mermaid path badges every illustrative figure "illustrative · not deterministically verifiable" — the proposal render path is never painted with that badge. |
+| `internal/dex` + `render` | The static read surface; shared rendering | A wiki that structurally cannot lie about time: temporal banners per class, byte-identical rebuilds, client JS budget of exactly three files (vendored mermaid 10.9.1, OpenAPI renderer, search+copy-ref). The **by-story axis is real** (V1-P8): the archived closure record is browsable per story. `render` is the one goldmark+chroma seam shared with the workbench; its fenced-mermaid path badges every illustrative figure "illustrative · not deterministically verifiable" — the proposal render path is never painted with that badge. |
 | `internal/specalign` | The spec-alignment gate | Self-hosted specs proven byte-identical to the originals modulo the status line; checklist items as named subtests; MCP tool and CLI verb inventories checked against 05's tables. Runs inside `make verify`. |
 | `cmd/verdi` | Verb dispatch only | Exit contract 0 clean / 1 verdict / 2 operational, everywhere. `verdi build start` replaced `feature start` (kept one release as a deprecation alias, R4-I-6). `close`, `gc`, and `audit` are real verbs now — `close --prepare <ref>` derives the next human-visible closure state, while real `close` drives stories **and** features to archived closure; `gc` is honestly scoped to the managed-worktree reclamation slice and says so on every run (worktree-manager dc-5). Only `waivers` and `verify-artifact` still decline as out of scope. |
 
@@ -307,21 +307,27 @@ attributes the load-bearing ones to the component that embodies them.
    no unresolved spec-stale or pending-supersession; features additionally
    require the outcome floor, stub reconciliation, and every implementing
    story closed. Before any mutation it refuses a non-empty staged index and
-   names the staged paths. Human-authored evidence and attestations must already
-   be committed; the living disposition report remains an unstaged part of the
-   target quartet.
+   names the staged paths. The operator must commit every required
+   human-authored record, including attestations, before close. The current
+   command reads attestations from the working tree and does not verify that
+   they are committed. The living disposition report remains unstaged until
+   close freezes it inside the target spec directory.
 
    Once ready, close cuts `close/<name>`, freezes the report, builds the digested
-   `rollup.json`, flips `accepted-pending-build → closed`, and moves the target
-   to `specs/archive/<name>/`. Its commit owns exactly
+   `rollup.json`, flips `accepted-pending-build → closed`, and moves the whole
+   target spec directory to `specs/archive/<name>/`. The archive contains
+   `spec.md`, `rollup.json`, and the frozen `deviation-report.md`; a
+   grandfathered frozen `board.json` moves with the directory only when already
+   present. Existing sidecars such as `layout.json` move with the directory too.
+   The closure commit owns exactly
    `.verdi/specs/active/<name>` (the tracked deletion) and
    `.verdi/specs/archive/<name>` (the archive tree). Unrelated unstaged and
    untracked files survive outside the commit. Rollup publication is CI-only
    unless the explicit `--force-local` testing escape hatch is used.
 6. **Archive.** `closed` is the only terminal status under `specs/archive/`;
    a `superseded` spec stays in `specs/active/` as its own terminal record
-   (D-12). The archived quartet — spec, frozen board, rollup, deviation report —
-   is the by-story axis's permanent exhibit.
+   (D-12). The archive tree is the by-story axis's permanent exhibit; a frozen
+   board appears only in grandfathered trees that already carried one.
 
 ### F — The agent journey  *(coding agent · MCP)*
 
@@ -342,8 +348,8 @@ attributes the load-bearing ones to the component that embodies them.
 1. **Every merge to main** rebuilds the dex (`pages.yml`) — the site is a pure
    function of the tree.
 2. **Browse by kind, by service, or by story** — the by-story axis serves each
-   archived quartet. Permalinks are refs (`/a/spec/stale-decline`); every page
-   banners its temporal class; frozen pages refuse to claim currency.
+   archived closure record. Permalinks are refs (`/a/spec/stale-decline`);
+   every page banners its temporal class; frozen pages refuse to claim currency.
    Illustrative body figures render badged "illustrative · not deterministically
    verifiable" at the shared render seam — never silently blended with verified
    proposals.
