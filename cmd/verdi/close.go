@@ -801,6 +801,22 @@ func sortedUnique(paths []string) []string {
 // would store for the current bytes, so attributes and filters are applied
 // exactly as a real commit would apply them. Nothing here guesses: an
 // operational failure propagates rather than silently reading as "clean".
+//
+// All three questions resolve rel against the SAME base — the store root this
+// runs with (gitx sets cmd.Dir to it) — which the `./` in the rev-parse
+// argument is load-bearing for. store.FindRoot walks up to the nearest .verdi,
+// so the store root can legitimately sit BELOW the git root (the layout
+// internal/gitx/stagedpaths.go names and stagedpaths_test.go builds), and
+// there git resolves the three forms differently by default:
+// `git ls-tree -- <path>` and `git hash-object <path>` take a working-directory-
+// relative path, while `<rev>:<path>` is documented to resolve a BARE path
+// against the working tree's root — a different file, usually a nonexistent
+// one, which exits non-zero and turned every close of a story with a committed
+// attestation into an operational failure. `<rev>:./<path>` is the documented
+// spelling for "relative to the current working directory", which is what the
+// other two already do. The fix is deliberately local: the bare `<rev>:<path>`
+// shape is pre-existing and pervasive (gitx.Show alone has ten callers), and
+// re-basing all of it is a separate, much larger change than this one.
 func uncommittedFoldRecordPaths(ctx context.Context, root, commit string, paths []string) ([]string, error) {
 	var out []string
 	for _, rel := range paths {
@@ -812,7 +828,7 @@ func uncommittedFoldRecordPaths(ctx context.Context, root, commit string, paths 
 			out = append(out, rel)
 			continue
 		}
-		committed, err := gitx.RevParse(ctx, root, commit+":"+rel)
+		committed, err := gitx.RevParse(ctx, root, commit+":./"+rel)
 		if err != nil {
 			return nil, fmt.Errorf("resolving %s at %s: %w", rel, commit, err)
 		}

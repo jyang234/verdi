@@ -1161,6 +1161,64 @@ func TestUncommittedFoldRecordPaths(t *testing.T) {
 	})
 }
 
+// TestUncommittedFoldRecordPaths_StoreRootBelowGitRoot is the red-first proof
+// that the predicate's two git questions must resolve their path against the
+// SAME base. internal/gitx/stagedpaths.go states the layout this exercises as
+// a supported one — store.FindRoot walks up to the nearest .verdi, "so it can
+// legitimately sit BELOW the git root" — and gitx always runs with
+// cmd.Dir = that store root.
+//
+// In that layout the two questions disagreed. `git ls-tree ... -- <path>`
+// (gitx.PathExistsAt) takes a pathspec, which git resolves against the process
+// working directory, so it found the record; `git rev-parse <commit>:<path>`
+// resolves a bare path against the WORKING TREE ROOT instead, so it resolved a
+// path one directory up that does not exist and exited non-zero. close,
+// --preflight and --prepare then ALL exited 2 on the happy path for any story
+// whose attestation or waiver is committed — the very state the design wants.
+func TestUncommittedFoldRecordPaths_StoreRootBelowGitRoot(t *testing.T) {
+	ctx := context.Background()
+	const rel = ".verdi/waivers/jira-close-1/ac-1.md"
+
+	build := func(t *testing.T) (string, string) {
+		t.Helper()
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files: map[string]string{
+				"above.txt":                "above the store root\n",
+				"store/.verdi/verdi.yaml":  "schema: verdi.layout/v1\n",
+				"store/" + rel:             "a committed waiver\n",
+				"store/.verdi/specs/.keep": "",
+			},
+			Message: "seed a store root one level below the git root",
+		}})
+		return filepath.Join(repo.Dir, "store"), repo.Head
+	}
+
+	t.Run("a committed, unmodified record is clean", func(t *testing.T) {
+		storeRoot, head := build(t)
+
+		got, err := uncommittedFoldRecordPaths(ctx, storeRoot, head, []string{rel})
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths(store root below the git root) = %v, want no error: both git questions must resolve the path against the same base", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want none — the record is committed at HEAD, byte-identical", got)
+		}
+	})
+
+	t.Run("a committed record edited in the working tree is still named", func(t *testing.T) {
+		storeRoot, head := build(t)
+		appendCloseTestFile(t, filepath.Join(storeRoot, filepath.FromSlash(rel)), "an uncommitted edit\n")
+
+		got, err := uncommittedFoldRecordPaths(ctx, storeRoot, head, []string{rel})
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths(store root below the git root): %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{rel}) {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want the edited record %#v — a consistent base must not turn the disclosure off", got, []string{rel})
+		}
+	})
+}
+
 // TestStoryFoldRecordPaths table-drives which fold inputs count as CONSUMED —
 // the paths whose absence from HEAD is worth disclosing.
 func TestStoryFoldRecordPaths(t *testing.T) {
