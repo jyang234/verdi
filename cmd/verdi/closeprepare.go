@@ -62,7 +62,16 @@ func prepareAlignDeps(deps closeDeps, modelDigest, storyArg string) alignDeps {
 const prepareRegenerationSource = "close:prepare-regeneration"
 
 // discloseRegeneratedDispositions names every human disposition a refresh is
-// about to regenerate over, BEFORE the refresh runs.
+// about to regenerate over, BEFORE the refresh runs, and returns how many
+// disclosures it printed so preparation's own summary can count them.
+//
+// Counting is not bookkeeping. Printing alone reproduced, one layer up,
+// exactly the defect this function was written to close: the lines went out
+// through the shared seam and the readiness summary — which counts only the
+// closure gate's conditions and preflight's own sources — still printed bare
+// READY, a word the design's state table reserves for a gate "fully satisfied
+// with no disclosures". A run that says a human-authored note is about to be
+// destroyed can never end in that word.
 //
 // Preparation only refreshes a report that does not cover HEAD, and
 // regeneration re-derives findings from scratch: align.PreserveDispositions
@@ -81,10 +90,11 @@ const prepareRegenerationSource = "close:prepare-regeneration"
 // so the loss is rendered through the shared disclosure seam, in the one
 // vocabulary every other disclosure in this binary speaks, rather than as a
 // local fmt.Sprintf that could drift from it.
-func discloseRegeneratedDispositions(report *artifact.DeviationFrontmatter, specRef artifact.Ref, head string, stdout io.Writer) {
+func discloseRegeneratedDispositions(report *artifact.DeviationFrontmatter, specRef artifact.Ref, head string, stdout io.Writer) int {
 	if report == nil {
-		return
+		return 0
 	}
+	printed := 0
 	for _, finding := range report.Findings {
 		if !finding.Dispositioned() {
 			continue
@@ -94,7 +104,9 @@ func discloseRegeneratedDispositions(report *artifact.DeviationFrontmatter, spec
 			specRef.String(),
 			regeneratedDispositionText(finding, head),
 		)))
+		printed++
 	}
+	return printed
 }
 
 // regeneratedDispositionText is one disclosure's human-readable half: which
@@ -234,6 +246,11 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 		return rc
 	}
 
+	// Every disclosure preparation itself makes, so the readiness summary
+	// runPreflight prints below can count them: a run that disclosed must
+	// never reach the design's bare READY.
+	prelude := preflightPrelude{}
+
 	if report == nil || report.Covers != head {
 		freshness := "absent"
 		if report != nil {
@@ -244,7 +261,7 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 			fmt.Fprintln(stderr, "close: --prepare:", err)
 			return 2
 		}
-		discloseRegeneratedDispositions(report, specRef, head, stdout)
+		prelude.Disclosures += discloseRegeneratedDispositions(report, specRef, head, stdout)
 		if rc := runAlignForSpec(ctx, root, spec, head, false, prepareAlignDeps(deps, modelDigest, storyArg), stdout, stderr); rc != 0 {
 			return rc
 		}
@@ -278,7 +295,7 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 		return 1
 	}
 
-	rc := runPreflight(ctx, root, storyArg, manifest, deps.Model, deps.Forge, forceLocal, stdout, stderr)
+	rc := runPreflightWithPrelude(ctx, root, storyArg, manifest, deps.Model, deps.Forge, forceLocal, prelude, stdout, stderr)
 	if rc == 1 {
 		fmt.Fprintln(stdout, "close: --prepare: MECHANICAL WORK REQUIRED (closure preflight is NOT READY; see its diagnostics above)")
 		return 1

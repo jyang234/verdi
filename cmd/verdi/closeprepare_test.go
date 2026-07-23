@@ -580,6 +580,78 @@ func TestRunPrepare_NoRegenerationDisclosureWithoutDispositionsToLose(t *testing
 	}
 }
 
+// alignFakeJudgeNoFindings writes a fake judge returning a well-formed S5
+// envelope carrying an EMPTY findings list — a judge that genuinely ran and
+// had nothing to say.
+//
+// It is what makes the regenerate-all-the-way-to-READY path reachable in a
+// hermetic test. With no judge configured at all, RunJudged degrades to the
+// synthetic judged-coverage-absent finding (internal/align/judged.go), which
+// is undispositioned and stops preparation at JUDGMENT REQUIRED — so every
+// existing regeneration test returns 1 and never reaches the summary line.
+func alignFakeJudgeNoFindings(t *testing.T) []string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fakejudge.sh")
+	script := "#!/bin/sh\ncat <<'EOF'\n{\"is_error\":false,\"subtype\":\"success\",\"result\":\"{\\\"findings\\\":[]}\"}\nEOF\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake judge: %v", err)
+	}
+	return []string{path}
+}
+
+// TestRunPrepare_ReadySummaryCountsPreparationsOwnDisclosures is the whole
+// point of counting rather than merely printing.
+//
+// Preparation's regeneration disclosure went out through the shared seam and
+// NOTHING counted it: runPrepare returned whatever runPreflight printed, and
+// that summary's disclosure count covers only the closure gate's own
+// conditions plus preflight's own sources. So a run could print
+// "a human-authored note is about to be destroyed" and then, three lines
+// later, "READY (closure gate holds)" — with zero disclosures named. The
+// design's state table binds READY to "the existing closure gate is fully
+// satisfied with NO disclosures".
+//
+// The state is reachable exactly as reported: a living report covering an OLD
+// head carries a dispositioned COMPUTED finding this run does not re-derive,
+// so no undispositioned finding survives the refresh to stop preparation at
+// JUDGMENT REQUIRED, the gate holds, and --force-local suppresses the publish
+// guard. The note was destroyed; the summary said nothing.
+func TestRunPrepare_ReadySummaryCountsPreparationsOwnDisclosures(t *testing.T) {
+	repo := readyCloseFixtureRepo(t)
+	const findings = `  - { id: f-1, kind: computed, text: "boundary holds", disposition: fixed, note: "verified by hand" }
+`
+	writePrepareReport(t, repo.Dir, "close-fixture", strings.Repeat("a", 40), findings)
+
+	deps := closeDeps{
+		Runner:   upstream.NewFakeRunner(),
+		Forge:    forgefake.New(),
+		JudgeCmd: alignFakeJudgeNoFindings(t),
+	}
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runPrepare(stale report, regenerates to a holding gate) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+
+	out := stdout.String()
+	// Premise: this run really did disclose, and the loss it disclosed is real.
+	if !strings.Contains(out, "disclosed-unproven [close:prepare-regeneration] spec/close-fixture: f-1") {
+		t.Fatalf("fixture bug: this test exists to police a run that DISCLOSED; nothing was disclosed:\n%s", out)
+	}
+	updated := decodeReportFile(t, store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture"))
+	if f, ok := findingByID(updated.Findings, "f-1"); ok {
+		t.Fatalf("fixture bug: f-1 survived the refresh (%+v); the disclosure would be describing nothing", f)
+	}
+
+	if strings.Contains(out, "READY (closure gate holds") {
+		t.Fatalf("a run that disclosed a destroyed human disposition printed bare READY, which the design reserves for a gate satisfied with NO disclosures:\n%s", out)
+	}
+	if !strings.Contains(out, "READY WITH DISCLOSURES (1 disclosure(s)") {
+		t.Fatalf("preparation's own disclosure was printed but never counted into the summary:\n%s", out)
+	}
+}
+
 // writeFrozenPrepareReport writes an ALREADY-FROZEN deviation-report.md
 // into specName's active directory — writePrepareReport's frozen twin, and
 // the story/prepare-path mirror of closefeature_test.go's

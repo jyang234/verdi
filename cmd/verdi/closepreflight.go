@@ -153,15 +153,50 @@ func closePublishGuardRefuses(forceLocal bool) bool {
 	return !lint.ReadCIEnv().InCI && !forceLocal
 }
 
-// runPreflight is `--preflight`'s testable dispatch core: resolves storyArg
-// exactly as runClose does (storyresolve.Resolve, the identical I-30
+// preflightPrelude carries what a CALLER already rehearsed and disclosed
+// before handing control to runPreflight, so the readiness summary counts
+// every disclosure of the whole run exactly once.
+//
+// It exists because --prepare is a run that can disclose before preflight is
+// ever reached. Preparation's regeneration disclosure (closeprepare.go) names
+// every human disposition a refresh is about to destroy, and nothing counted
+// those lines: the summary runPreflight prints covers only the closure gate's
+// own conditions plus preflight's own sources. A run could therefore say "a
+// human-authored note is about to be destroyed", destroy it, and print bare
+// READY — which the design's state table reserves for a gate that is "fully
+// satisfied with no disclosures".
+//
+// Nothing about the verdict or the exit class is this type's business: it
+// carries a COUNT, and a count only ever moves the summary between READY and
+// READY WITH DISCLOSURES, exactly as the design's own Disclosures field does.
+// The zero value is the ordinary `verdi close --preflight` invocation —
+// nothing rehearsed yet, nothing to count.
+type preflightPrelude struct {
+	// Disclosures the caller already printed for this run.
+	Disclosures int
+}
+
+// runPreflight is the standalone `verdi close --preflight <ref>` mode: a run
+// whose preflight IS the whole run, so nothing has been rehearsed or disclosed
+// before it reaches here — the empty prelude.
+func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, stdout, stderr io.Writer) int {
+	return runPreflightWithPrelude(ctx, root, storyArg, manifest, mdl, f, forceLocal, preflightPrelude{}, stdout, stderr)
+}
+
+// runPreflightWithPrelude is `--preflight`'s testable dispatch core: resolves
+// storyArg exactly as runClose does (storyresolve.Resolve, the identical I-30
 // two-form contract), then routes to the story or feature preflight gate by
 // the resolved spec's Class — the same dispatch runClose itself performs
 // (close.go's "if spec.Class == artifact.ClassFeature", dc-3). Exit
 // discipline mirrors runClose exactly: 0 the gate holds (ready to close), 1
 // the gate does not (a verdict), 2 a genuine operational failure (dc-5) —
 // never for a merely-absent artifact, which is always a verdict.
-func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, stdout, stderr io.Writer) int {
+//
+// prelude is what an EARLIER phase of the same run already rehearsed and
+// disclosed (--prepare's regeneration disclosure); its count joins this
+// function's own so the readiness summary describes the whole run rather than
+// its last phase.
+func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, prelude preflightPrelude, stdout, stderr io.Writer) int {
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
 		fmt.Fprintln(stderr, "close: --preflight:", err)
@@ -173,8 +208,9 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 	// Rehearsed FIRST, in the real ritual's own order: requireCleanIndex is
 	// the first thing runClose does, before it resolves anything or evaluates
 	// a single condition. Counted into the outcome below, once the gate has
-	// produced one.
-	indexGuardDisclosures := disclosePreflightIndexGuard(ctx, root, stdout)
+	// produced one — together with whatever the caller already disclosed
+	// before reaching here.
+	disclosures := prelude.Disclosures + disclosePreflightIndexGuard(ctx, root, stdout)
 
 	head, err := gitx.RevParse(ctx, root, "HEAD")
 	if err != nil {
@@ -193,7 +229,7 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
-	outcome.Disclosures += indexGuardDisclosures
+	outcome.Disclosures += disclosures
 
 	if closePublishGuardRefuses(forceLocal) {
 		fmt.Fprintln(stdout, disclosure.Render(disclosure.New("close:preflight-publish-guard", "", preflightGuardDisclosureText)))
