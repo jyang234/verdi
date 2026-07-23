@@ -93,27 +93,51 @@ func Render(d Disclosure) string {
 // test outside that consumer. Both halves now change together, here, under
 // TestIsRendered_RecognizesEveryRender.
 //
-// A line is recognized only in Render's own exact shape — the severity, the
-// bracketed non-empty source, then either ": " (no scope) or " <scope>: "
-// — so an indented, hand-built, or merely severity-quoting line is NOT a
-// disclosure. That is the intended reading: a producer that wants its line
-// counted routes it through New/Render, exactly as ac-1 already requires,
-// rather than approximating the vocabulary by hand.
+// The recognized language is EXACTLY Render's image: IsRendered(Render(d)) is
+// true for every Disclosure d whatsoever, and every accepted string is one
+// some Disclosure renders to. Anything weaker is a silent miscount — a
+// consumer counting disclosures drops a line that was printed — and
+// constitution 2/10 has no room for that; anything stronger claims lines the
+// format never produced. The predicate therefore polices no producer inputs of
+// its own: an empty source renders, so it is recognized, and whether a source
+// may be empty is New's question, not the recognizer's.
+//
+// The search over bracket positions is what makes the first half true. Render
+// interpolates the source between "[" and "]" without escaping it, so the
+// source's own "]" (if any) is not the closing one; a parse that cut at the
+// FIRST "]" rejected `disclosed-unproven [a]b]: t`, which Render emits for the
+// source "a]b". Trying every "]" accepts iff SOME decomposition is a valid
+// render, which is the definition being implemented.
+//
+// A line still has to be in that exact shape — the severity, the bracket, then
+// either ": " (no scope) or " <scope>: " with a non-empty scope — so an
+// indented, hand-built, or merely severity-quoting line is NOT a disclosure.
+// That is the intended reading: a producer that wants its line counted routes
+// it through New/Render, exactly as ac-1 already requires, rather than
+// approximating the vocabulary by hand.
 func IsRendered(s string) bool {
 	rest, ok := strings.CutPrefix(s, SeverityDisclosedUnproven+" [")
 	if !ok {
 		return false
 	}
-	source, after, ok := strings.Cut(rest, "]")
-	if !ok || source == "" {
-		return false
+	for i := 0; i < len(rest); i++ {
+		if rest[i] != ']' {
+			continue
+		}
+		after := rest[i+1:]
+		// The unscoped form: "…[source]: text".
+		if strings.HasPrefix(after, ": ") {
+			return true
+		}
+		// The scoped form: "…[source] <scope>: text". The separator is looked
+		// for from index 2 on, never index 1: at index 1 the scope would be
+		// empty, and Render emits the unscoped form for an empty scope — so
+		// accepting it there would accept a string no Disclosure renders to.
+		// Anywhere past that, the scope is whatever precedes it (its own ": "
+		// and "]" included) and the rest is simply text.
+		if len(after) >= 2 && after[0] == ' ' && strings.Contains(after[2:], ": ") {
+			return true
+		}
 	}
-	if strings.HasPrefix(after, ": ") {
-		return true // the unscoped form: "…[source]: text".
-	}
-	// The scoped form: "…[source] <scope>: text". The scope is whatever
-	// precedes the FIRST ": " — a scope carrying its own ": " still leaves a
-	// recognizable prefix, since the remainder is simply read as text.
-	scope, _, ok := strings.Cut(after, ": ")
-	return ok && strings.HasPrefix(scope, " ") && strings.TrimSpace(scope) != ""
+	return false
 }

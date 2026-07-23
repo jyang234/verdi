@@ -104,10 +104,16 @@ func TestIsRendered(t *testing.T) {
 		{"rendered without a scope", Render(New("mcp:review-feed", "", "forge unreachable")), true},
 		{"rendered with an empty text", Render(New("gate:example", "", "")), true},
 		{"rendered with a scope carrying its own colon", Render(New("gate:x", "spec/a: b", "text")), true},
+		{"rendered with a source carrying its own bracket", Render(New("a]b", "", "text")), true},
 		{"rendered line indented for a nested report", "  " + Render(New("gate:x", "", "text")), false},
 		{"prose that merely opens with the severity word", SeverityDisclosedUnproven + " is what this line reports", false},
 		{"prose naming the severity mid-sentence", "the check is disclosed-unproven [gate:x]: text", false},
-		{"the severity word and a bracket but no source", SeverityDisclosedUnproven + " []: text", false},
+		// An empty source is a real Render output — New accepts it, Render emits
+		// `disclosed-unproven []: text`, so the recognizer must accept it too:
+		// the guarantee is EXACTLY Render's image, and rejecting this row was one
+		// of the forward-direction misses (New("","","text")) the property test
+		// now guards against.
+		{"the empty-source form New/Render actually produce", SeverityDisclosedUnproven + " []: text", true},
 		{"an unterminated source bracket", SeverityDisclosedUnproven + " [gate:x", false},
 		{"a source with no text separator at all", SeverityDisclosedUnproven + " [gate:x] just more words", false},
 		{"an informational tally line the feature gate also carries", "       [union over the feature's own report + 2 closed implementing story archive(s): accepted-deviation count 1]", false},
@@ -128,15 +134,49 @@ func TestIsRendered(t *testing.T) {
 // Render's format that this package does not also teach IsRendered fails
 // HERE, in the package that owns the format, rather than silently zeroing a
 // disclosure count in cmd/verdi.
+//
+// It is generated over the CROSS PRODUCT of adversarial sources, scopes and
+// texts rather than a handful of realistic literals, because the realistic
+// literals were exactly the problem: every source in the tree today is a
+// package constant with no bracket in it, so a fixed list proves the invariant
+// only for producers that already exist. The generated rows include the ones
+// that broke it — a source carrying "]", an empty source, a whitespace scope,
+// a scope carrying the ": " separator — so a future producer that reaches any
+// of them is caught here and not by a silently short disclosure count.
 func TestIsRendered_RecognizesEveryRender(t *testing.T) {
-	for _, d := range []Disclosure{
-		New("lint:VL-017", "", "the mutable zone is absent"),
-		New("gate:pending-supersession", "spec/x", "no forge configured"),
-		New("close:uncommitted-fold-record", ".verdi/waivers/jira-close-1/ac-1.md", "HEAD does not carry it"),
-		New("gate:spec-stale-feature-union", "spec/a", ""),
-	} {
-		if got := Render(d); !IsRendered(got) {
-			t.Fatalf("IsRendered(Render(%+v)) = false; every rendered disclosure must be recognizable", d)
+	sources := []string{
+		"lint:VL-017",
+		"gate:pending-supersession",
+		"close:uncommitted-fold-record",
+		"",          // New accepts it; Render emits it; the recognizer must too.
+		" ",         // whitespace-only
+		"a]b",       // a bracket inside the source: the first "]" is not the end
+		"]",         // nothing but a bracket
+		"a]b]c",     // several
+		"[x]",       // brackets in both directions
+		"gate:x: y", // the text separator inside the source
+		"disclosed-unproven [z]",
+	}
+	scopes := []string{
+		"",
+		"spec/x",
+		".verdi/waivers/jira-close-1/ac-1.md",
+		" ",         // whitespace-only: Render still takes the scoped branch
+		"a]b",       // a bracket inside the scope
+		"spec/a: b", // the text separator inside the scope
+		"]: ",
+		"  ",
+	}
+	texts := []string{"", "text", ": ", "]", "a: b", "\n"}
+
+	for _, source := range sources {
+		for _, scope := range scopes {
+			for _, text := range texts {
+				d := New(source, scope, text)
+				if got := Render(d); !IsRendered(got) {
+					t.Fatalf("IsRendered(Render(%+v)) = false on %q; every rendered disclosure must be recognizable, or a consumer's disclosure count is silently short", d, got)
+				}
+			}
 		}
 	}
 }
