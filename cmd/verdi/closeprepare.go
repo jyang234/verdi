@@ -6,24 +6,12 @@ import (
 	"io"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
-// runPrepare derives the next closure-session state for an explicit story or
-// feature ref. It may refresh only the target's living deviation report; all
-// judgment remains a human-authored disposition and final closure remains a
-// separate invocation of the existing close ritual.
-//
-// Ledger L-N15(1). State is DERIVED, never persisted — a closure-session
-// file was rejected as a second source of truth for HEAD, report freshness,
-// findings, and gate state. This composes the existing engines only
-// (storyresolve.Resolve, runAlignForSpec(freeze=false), runPreflight): no
-// second align engine, no second gate, and no new pass path — final
-// readiness stays the existing closure gate's verdict. Preserving a current
-// undispositioned report byte-for-byte is what keeps X-16's forcing
-// function intact across retries.
 // prepareExpiryResumeHint is preparation's own bounded-wait resume guidance
 // (alignDeps.ResumeHint), naming the exact command that resumes THIS run.
 //
@@ -68,6 +56,66 @@ func prepareAlignDeps(deps closeDeps, modelDigest, storyArg string) alignDeps {
 	return alignD
 }
 
+// prepareRegenerationSource is the disclosure source id for preparation's
+// one destructive step (internal/disclosure's producer-id convention: the
+// verb and the condition, never a new taxonomy).
+const prepareRegenerationSource = "close:prepare-regeneration"
+
+// discloseRegeneratedDispositions names every human disposition a refresh is
+// about to regenerate over, BEFORE the refresh runs.
+//
+// Preparation only refreshes a report that does not cover HEAD, and
+// regeneration re-derives findings from scratch: align.PreserveDispositions
+// carries a disposition forward only where the regenerated finding's
+// (kind, id, text) content hash matches exactly, and ReconcileJudged
+// re-offers a non-matching prior judged ruling as a candidate a human must
+// confirm rather than as a carried disposition. A finding whose text
+// drifted — or which this run does not re-derive at all — therefore loses
+// its disposition and its human-authored note.
+//
+// That behavior is the design's ("retry safety is scoped to the same
+// repository state") and is deliberately NOT changed here: this function
+// adds no branch, refuses nothing, and returns nothing. What it removes is
+// the silence. Three-valued honesty admits proven, violated-with-witness,
+// and disclosed-as-unproven — never a silent discard of human judgment —
+// so the loss is rendered through the shared disclosure seam, in the one
+// vocabulary every other disclosure in this binary speaks, rather than as a
+// local fmt.Sprintf that could drift from it.
+func discloseRegeneratedDispositions(report *artifact.DeviationFrontmatter, specRef artifact.Ref, head string, stdout io.Writer) {
+	if report == nil {
+		return
+	}
+	for _, finding := range report.Findings {
+		if !finding.Dispositioned() {
+			continue
+		}
+		fmt.Fprintln(stdout, disclosure.Render(disclosure.New(
+			prepareRegenerationSource,
+			specRef.String(),
+			regeneratedDispositionText(finding, head),
+		)))
+	}
+}
+
+// regeneratedDispositionText is one disclosure's human-readable half: which
+// finding, what human state it holds, and the exact rule that decides
+// whether that state survives the refresh — stated per kind, because judged
+// and computed findings do not follow the same carry rule.
+func regeneratedDispositionText(finding artifact.Finding, head string) string {
+	note := ""
+	if finding.Note != "" {
+		note = " and a human-authored note"
+	}
+	carry := "a disposition survives only where the regenerated finding's kind, id and text are identical"
+	if finding.Kind == artifact.FindingJudged {
+		carry = "a judged ruling survives only where the regenerated finding's kind, id and text are identical, and is otherwise re-offered as a candidate a human must reaffirm"
+	}
+	return fmt.Sprintf(
+		"%s (%s) holds the human disposition %q%s; the refresh about to run for HEAD %s re-derives every finding, and %s — so this one may not survive it",
+		finding.ID, finding.Kind, finding.Disposition, note, head, carry,
+	)
+}
+
 // reportFrozenState reports the one report state preparation can neither
 // refresh nor hand to the gate: an ALREADY-FROZEN living deviation report.
 // It returns 1 (a verdict — preparation cannot proceed) once it has named
@@ -106,6 +154,26 @@ func reportFrozenState(report *artifact.DeviationFrontmatter, specName string, s
 	return 1
 }
 
+// runPrepare derives the next closure-session state for an explicit story or
+// feature ref. It may refresh only the target's living deviation report; all
+// judgment remains a human-authored disposition and final closure remains a
+// separate invocation of the existing close ritual.
+//
+// Ledger L-N15(1). State is DERIVED, never persisted — a closure-session
+// file was rejected as a second source of truth for HEAD, report freshness,
+// findings, and gate state. This composes the existing engines only
+// (storyresolve.Resolve, runAlignForSpec(freeze=false), runPreflight): no
+// second align engine, no second gate, and no new pass path — final
+// readiness stays the existing closure gate's verdict. Preserving a current
+// undispositioned report byte-for-byte is what keeps X-16's forcing
+// function intact across retries.
+//
+// The states it derives, in the order they are decided: an already-frozen
+// report (reportFrozenState — neither refreshable nor closeable), an absent
+// or stale report (refreshed through the shared align engine, after
+// discloseRegeneratedDispositions names what that refresh may cost), a
+// current report with undispositioned findings (human judgment, printed as
+// exact disposition commands), and otherwise the authoritative preflight.
 func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, forceLocal bool, stdout, stderr io.Writer) int {
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
@@ -142,6 +210,7 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 			fmt.Fprintln(stderr, "close: --prepare:", err)
 			return 2
 		}
+		discloseRegeneratedDispositions(report, specRef, head, stdout)
 		if rc := runAlignForSpec(ctx, root, spec, head, false, prepareAlignDeps(deps, modelDigest, storyArg), stdout, stderr); rc != 0 {
 			return rc
 		}

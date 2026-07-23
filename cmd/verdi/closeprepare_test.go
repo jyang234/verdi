@@ -460,6 +460,126 @@ func TestRunPrepare_CurrentUndispositionedPreservesBytesAndPrintsWorklist(t *tes
 	}
 }
 
+// TestRunPrepare_DisclosesDispositionsBeforeRegeneratingAStaleReport pins
+// the honesty obligation on preparation's one destructive path.
+//
+// A second preparation run at a MOVED head regenerates the report, and
+// regeneration carries a disposition forward only where the regenerated
+// finding's (kind, id, text) hash matches exactly (align.PreserveDispositions);
+// judged findings additionally reach ReconcileJudged, which re-offers a
+// non-matching prior ruling as a candidate a human must confirm. So a
+// dispositioned finding whose text drifted — or which this run does not
+// re-derive at all — loses its disposition AND its human-authored note.
+//
+// That behavior conforms to the design (retry safety is scoped to "the same
+// repository state") and is NOT changed here. What was missing was the
+// disclosure: the run destroyed human-authored judgment silently. Silence is
+// never a pass, so preparation must name what it is about to regenerate
+// over, before it regenerates, through the shared disclosure seam.
+func TestRunPrepare_DisclosesDispositionsBeforeRegeneratingAStaleReport(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	const findings = `  - { id: f-1, kind: computed, text: "boundary holds", disposition: fixed, note: "verified by hand against the adapter" }
+  - { id: f-2, kind: judged, text: "a prior semantic reading", disposition: accepted-deviation, note: "accepted for this release" }
+  - { id: f-3, kind: computed, text: "still open" }
+`
+	writePrepareReport(t, repo.Dir, "close-fixture", strings.Repeat("a", 40), findings)
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(
+		context.Background(),
+		repo.Dir,
+		"spec/close-fixture",
+		&store.Manifest{},
+		closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New()},
+		true,
+		&stdout,
+		&stderr,
+	)
+	if rc != 1 {
+		t.Fatalf("runPrepare(stale report) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"disclosed-unproven [close:prepare-regeneration] spec/close-fixture: f-1",
+		"disclosed-unproven [close:prepare-regeneration] spec/close-fixture: f-2",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout does not disclose the dispositioned finding %q it regenerated over:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "] spec/close-fixture: f-3") {
+		t.Fatalf("stdout disclosed f-3, which carries no human disposition to lose:\n%s", out)
+	}
+
+	// Ordering is the whole point: a disclosure printed after the fact
+	// would name work already destroyed.
+	discloseAt := strings.Index(out, "disclosed-unproven [close:prepare-regeneration]")
+	alignAt := strings.Index(out, "close: --prepare: ALIGNMENT REQUIRED")
+	if discloseAt < 0 || alignAt < 0 || discloseAt > alignAt {
+		t.Fatalf("disclosure must precede the refresh (disclosure at %d, alignment line at %d):\n%s", discloseAt, alignAt, out)
+	}
+
+	// The loss the disclosure is about is real, not hypothetical: neither
+	// hand-written finding survives this run's regeneration with its
+	// disposition intact.
+	updated := decodeReportFile(t, reportPath)
+	for _, id := range []string{"f-1", "f-2"} {
+		if f, ok := findingByID(updated.Findings, id); ok && f.Dispositioned() {
+			t.Fatalf("test premise broken: %s survived regeneration dispositioned (%+v); the disclosure would be describing nothing", id, f)
+		}
+	}
+}
+
+// TestRunPrepare_NoRegenerationDisclosureWithoutDispositionsToLose is the
+// negative half: the disclosure is a report of real loss, so an absent
+// report and a stale report carrying no human disposition must not print
+// one. A disclosure that fires unconditionally teaches operators to ignore
+// it.
+func TestRunPrepare_NoRegenerationDisclosureWithoutDispositionsToLose(t *testing.T) {
+	tests := []struct {
+		name     string
+		findings string
+		// stale is false for the absent-report case.
+		stale bool
+	}{
+		{name: "absent report"},
+		{
+			name:     "stale report with no dispositions",
+			stale:    true,
+			findings: "  - { id: f-1, kind: computed, text: \"still open\" }\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildCloseFixtureRepo(t)
+			if tc.stale {
+				writePrepareReport(t, repo.Dir, "close-fixture", strings.Repeat("a", 40), tc.findings)
+			}
+
+			var stdout, stderr bytes.Buffer
+			rc := runPrepare(
+				context.Background(),
+				repo.Dir,
+				"spec/close-fixture",
+				&store.Manifest{},
+				closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New()},
+				true,
+				&stdout,
+				&stderr,
+			)
+			if rc != 1 {
+				t.Fatalf("runPrepare = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+			}
+			if strings.Contains(stdout.String(), "close:prepare-regeneration") {
+				t.Fatalf("preparation disclosed a loss with nothing to lose:\n%s", stdout.String())
+			}
+		})
+	}
+}
+
 // writeFrozenPrepareReport writes an ALREADY-FROZEN deviation-report.md
 // into specName's active directory — writePrepareReport's frozen twin, and
 // the story/prepare-path mirror of closefeature_test.go's
