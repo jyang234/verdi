@@ -83,11 +83,11 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 		for _, finding := range undispositioned {
 			fmt.Fprintf(
 				stdout,
-				"verdi disposition %s %s %s --rationale %s\n",
+				"verdi disposition --rationale %s -- %s %s %s\n",
+				shellQuoteWord("<human-authored rationale>"),
 				shellQuoteWord(specRef.String()),
 				shellQuoteWord(finding.ID),
 				shellQuoteWord("<human-authored-disposition:fixed|accepted-deviation>"),
-				shellQuoteWord("<human-authored rationale>"),
 			)
 		}
 		return 1

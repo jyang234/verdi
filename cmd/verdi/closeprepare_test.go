@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
@@ -183,7 +185,7 @@ func TestRunPrepare_GeneratesAbsentOrStaleReportForStoryAndFeature(t *testing.T)
 			if rc != 1 {
 				t.Fatalf("runPrepare = %d, want 1 (fresh findings need judgment); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 			}
-			for _, want := range []string{"ALIGNMENT REQUIRED", "JUDGMENT REQUIRED", "verdi disposition " + tc.ref} {
+			for _, want := range []string{"ALIGNMENT REQUIRED", "JUDGMENT REQUIRED", "verdi disposition --rationale", "-- " + tc.ref} {
 				if !strings.Contains(stdout.String(), want) {
 					t.Fatalf("stdout missing %q: %s", want, stdout.String())
 				}
@@ -271,7 +273,7 @@ func TestRunPrepare_CurrentUndispositionedPreservesBytesAndPrintsWorklist(t *tes
 					t.Fatalf("stdout missing judgment summary on run %d: %s", run, stdout.String())
 				}
 				for _, id := range []string{"f-1", "f-2"} {
-					want := fmt.Sprintf("verdi disposition %s %s '<human-authored-disposition:fixed|accepted-deviation>' --rationale '<human-authored rationale>'", tc.ref, id)
+					want := fmt.Sprintf("verdi disposition --rationale '<human-authored rationale>' -- %s %s '<human-authored-disposition:fixed|accepted-deviation>'", tc.ref, id)
 					if strings.Count(stdout.String(), want) != 1 {
 						t.Fatalf("stdout should contain one exact template %q on run %d: %s", want, run, stdout.String())
 					}
@@ -319,9 +321,86 @@ func TestRunPrepare_QuotesUnsafeFindingIDInDispositionTemplate(t *testing.T) {
 	if rc != 1 {
 		t.Fatalf("runPrepare = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 	}
-	const want = `verdi disposition spec/close-fixture 'finding with spaces; $(touch SHOULD_NOT_EXIST) '"'"'quoted'"'"'' '<human-authored-disposition:fixed|accepted-deviation>' --rationale '<human-authored rationale>'`
+	const want = `verdi disposition --rationale '<human-authored rationale>' -- spec/close-fixture 'finding with spaces; $(touch SHOULD_NOT_EXIST) '"'"'quoted'"'"'' '<human-authored-disposition:fixed|accepted-deviation>'`
 	if !strings.Contains(stdout.String(), want) {
 		t.Fatalf("stdout missing safely quoted disposition template %q:\n%s", want, stdout.String())
+	}
+}
+
+func TestRunPrepare_FlagShapedFindingIDTemplateDispositionsIntendedFinding(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	findings := []artifact.Finding{{
+		ID:   "--amend",
+		Kind: artifact.FindingComputed,
+		Text: "flag-shaped finding remains a legal artifact id",
+	}}
+	report := &artifact.DeviationFrontmatter{
+		Schema:   "verdi.deviation/v1",
+		Covers:   repo.Head,
+		Findings: findings,
+		Digest:   "sha256:" + strings.Repeat("0", 64),
+	}
+	if err := report.Validate(); err != nil {
+		t.Fatalf("test setup: flag-shaped finding did not validate: %v", err)
+	}
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+	raw := align.RenderMarkdown(report, align.RenderBody(findings, nil, nil, nil, nil, nil))
+	if err := os.WriteFile(reportPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(
+		context.Background(),
+		repo.Dir,
+		"spec/close-fixture",
+		&store.Manifest{},
+		closeDeps{Forge: forgefake.New()},
+		true,
+		&stdout,
+		&stderr,
+	)
+	if rc != 1 {
+		t.Fatalf("runPrepare = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	const wantTemplate = "verdi disposition --rationale '<human-authored rationale>' -- spec/close-fixture --amend '<human-authored-disposition:fixed|accepted-deviation>'"
+	var template string
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if strings.HasPrefix(line, "verdi disposition ") {
+			template = line
+			break
+		}
+	}
+	if template != wantTemplate {
+		t.Fatalf("emitted template = %q, want delimiter-safe template %q:\n%s", template, wantTemplate, stdout.String())
+	}
+
+	bin := buildVerdiBinary(t)
+	command := strings.Replace(
+		template,
+		shellQuoteWord("<human-authored rationale>"),
+		shellQuoteWord("reviewed the flag-shaped finding"),
+		1,
+	)
+	command = strings.Replace(
+		command,
+		shellQuoteWord("<human-authored-disposition:fixed|accepted-deviation>"),
+		shellQuoteWord("fixed"),
+		1,
+	)
+	command = strings.Replace(command, "verdi disposition", shellQuoteWord(bin)+" disposition", 1)
+	cmd := exec.Command("/bin/sh", "-c", command)
+	cmd.Dir = repo.Dir
+	var dispositionStdout, dispositionStderr bytes.Buffer
+	cmd.Stdout = &dispositionStdout
+	cmd.Stderr = &dispositionStderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("executing edited emitted template %q: %v; stdout=%s stderr=%s", command, err, dispositionStdout.String(), dispositionStderr.String())
+	}
+	updated := decodeReportFile(t, reportPath)
+	finding, ok := findingByID(updated.Findings, "--amend")
+	if !ok || finding.Disposition != artifact.FindingFixed || finding.Note != "reviewed the flag-shaped finding" {
+		t.Fatalf("flag-shaped finding after disposition = %+v, want fixed with the supplied rationale", finding)
 	}
 }
 
