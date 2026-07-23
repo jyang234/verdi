@@ -100,6 +100,15 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 1
 	}
 
+	// The feature half of the story ritual's own uncommitted-fold-record
+	// disclosure (close.go's closeUncommittedRecordSource), on the same shared
+	// predicate. Attestations only: there is no waived status at the feature
+	// level, and the slug is the feature's own name (dc-6).
+	if err := discloseUncommittedFoldRecords(ctx, root, head, featureFoldRecordPaths(specRef.Name, fold.ACs), stdout); err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+
 	// The branch to return to if the freeze fails after the cut below — the
 	// feature-path half of the shared unwind (finding
 	// judged-close-resume-hint-names-a-path-close-itself-refuses; "" for a

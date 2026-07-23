@@ -549,6 +549,55 @@ func TestRunCloseFeature_PreExistingStagedPathsRefusedBeforeMutation(t *testing.
 	}
 }
 
+// TestRunCloseFeature_DisclosesUncommittedOutcomeAttestation is the feature
+// half of close_test.go's TestRunClose_DisclosesFoldRecordsMissingFromHEAD.
+// The feature outcome floor is satisfied here by an AUTHORED attestation
+// alone (opts.FeatureAC2FloorSatisfied is false, so ac-2 carries no outcome
+// record) that was never `git add`ed: the gate passes on a working-tree file
+// that enters neither the closure commit nor the archive, and the feature
+// attestation slug is the FEATURE's own name, not a story ref's slug (dc-6).
+func TestRunCloseFeature_DisclosesUncommittedOutcomeAttestation(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	opts.FeatureAC2FloorSatisfied = false
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	path := store.AttestationPath(repo.Dir, "close-feature-fixture", "ac-2")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir attestation dir: %v", err)
+	}
+	attestation := `---
+id: attestation/close-feature-fixture--ac-2
+kind: attestation
+title: "ac-2 outcome attested"
+owners: [platform-team]
+links:
+  - { type: verifies, ref: "spec/close-feature-fixture" }
+frozen: { at: 2024-01-01, commit: ` + repo.Head + ` }
+---
+# ac-2
+
+I observed the second fixture outcome hold.
+`
+	if err := os.WriteFile(path, []byte(attestation), 0o644); err != nil {
+		t.Fatalf("writing attestation: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runClose(context.Background(), repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runClose(feature, attestation-satisfied floor) = %d, want 0 — gate semantics must not change; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	rel := store.AttestationPath("", "close-feature-fixture", "ac-2")
+	for _, want := range []string{"disclosed-unproven", rel} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want a disclosure naming the uncommitted outcome attestation %q", stdout.String(), want)
+		}
+	}
+	assertClosureCommitOwnsOnlySpecPaths(t, repo.Dir, "close-feature-fixture")
+}
+
 // TestRunCloseFeature_StagingAndCommitFailuresRecover is the feature half of
 // the story ritual's own post-archive-move recovery proof (close_test.go's
 // TestRunClose_StagingFailure_UnwindsBranchCut and

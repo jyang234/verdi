@@ -82,11 +82,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -407,6 +409,17 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		return 2
 	}
 
+	// Name every attestation/waiver the gate just folded on that HEAD does not
+	// carry identically. This changes no verdict — it discloses the one class
+	// of fold input that neither the index guard nor the exact staging can
+	// account for, because both live outside the closure paths this ritual
+	// commits (see closeUncommittedRecordSource). It runs BEFORE the branch
+	// cut, so the disclosure survives any later operational failure.
+	if err := discloseUncommittedFoldRecords(ctx, root, head, storyFoldRecordPaths(store.RefSlug(spec.Story), fold.ACs), stdout); err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		fmt.Fprintln(stderr, "close: internal error: resolved spec has an invalid id:", err)
@@ -685,6 +698,149 @@ func reportStagedClosureCommitFailure(name, closureBranch, commitMsg string, std
 	active := store.SpecDirRelPath(store.ZoneActive, name)
 	archive := store.SpecDirRelPath(store.ZoneArchive, name)
 	fmt.Fprintf(stderr, "close: the closure paths are STAGED on %s and nothing was committed; the branch and the index are left in place on purpose, because deleting either would strand this staged work. Complete it with: git commit -m %q — or abandon it by restoring the active zone (git restore --source=HEAD --staged --worktree -- %s), unstaging the archive zone (git restore --staged -- %s), and deleting the leftover %s directory\n", closureBranch, commitMsg, active, archive, archive)
+}
+
+// closeUncommittedRecordSource is the disclosure source id for a human record
+// the closure fold consumed out of the working tree that HEAD does not carry
+// identically, and uncommittedFoldRecordText is its explanation.
+//
+// Attestations and waivers live OUTSIDE both closure paths
+// (.verdi/attestations/<storySlug>/<acID>.md, .verdi/waivers/...), and the
+// fold reads them from the working tree with plain os.Stat/os.ReadFile — no
+// git, no reachability check. With close committing only the target spec's own
+// two paths, an operator can author one, never `git add` it, and have the
+// index guard pass (untracked is not staged), the gate PASS on that file, and
+// the closure commit and archive contain no trace of it. Under the old
+// AddAll-the-working-tree staging it was swept in.
+//
+// The closure-session design DELIBERATELY refuses to absorb such records
+// ("human records must already be committed in the HEAD they attest to"), and
+// changing gate semantics is explicitly out of scope — so close neither
+// absorbs nor refuses. What was missing is any word about a stated
+// precondition nothing enforces. close-preflight dc-1 met this identical shape
+// ("a mode can report ready while a real close would refuse") and recorded
+// "closed, not disclaimed": a runtime disclosure computed by the same
+// predicate, never prose in a design document. In CI the working tree equals
+// HEAD, so this cannot arise there; it bites the documented --force-local
+// local-close route.
+const (
+	closeUncommittedRecordSource = "close:uncommitted-fold-record"
+	// vocab:identity — names the .verdi store paths and the `git add` verb (identity)
+	uncommittedFoldRecordText = "the closure fold read this human record from the working tree, but HEAD does not carry it identically; close commits only the target spec's own active and archive paths, so this record enters neither the closure commit nor the archive — commit it in the HEAD it attests to (03 §Attestations and waivers) if it belongs to this closure's record"
+)
+
+// storyFoldRecordPaths returns the store-relative attestation and waiver paths
+// a STORY fold consumed to reach its verdict, sorted and deduplicated.
+//
+// "Consumed" means the file materially made an AC pass: a waived AC consumed
+// its waiver (evidence.WaiverActive returns true only for a present, active
+// one), and an AttestationAuthored kind slot consumed its attestation. An
+// unauthored scaffold satisfies nothing (spec/attest-helper dc-3), so it is
+// not consumed. Everything is READ from the fold's own already-computed
+// result — never re-derived over a differently-filtered record set (dc-2;
+// ADJ-56) — so this can never disagree with the verdict it describes.
+//
+// Exposed as a plain function of (slug, results) so the preflight and prepare
+// rehearsal paths can call this same predicate rather than growing a second
+// copy of it.
+func storyFoldRecordPaths(storySlug string, acs []evidence.ACResult) []string {
+	var paths []string
+	for _, ac := range acs {
+		if ac.Status == evidence.StatusWaived {
+			paths = append(paths, filepath.ToSlash(store.WaiverPath("", storySlug, ac.ID)))
+		}
+		for _, k := range ac.Kinds {
+			if k.Kind == artifact.EvidenceAttestation && k.Attestation == evidence.AttestationAuthored {
+				paths = append(paths, filepath.ToSlash(store.AttestationPath("", storySlug, ac.ID)))
+			}
+		}
+	}
+	return sortedUnique(paths)
+}
+
+// featureFoldRecordPaths is storyFoldRecordPaths' feature-class counterpart,
+// reading the fold's own outcome-floor evaluation. It names attestations only:
+// there is no waived status at the feature level (03 §The feature fold's table
+// names exactly four statuses; waivers are a story-level-only mechanism), and
+// the attestation slug is the FEATURE's own name, not a story ref's slug
+// (evidence.FoldFeature's FeatureSlug; spec/close-preflight dc-6).
+func featureFoldRecordPaths(featureSlug string, acs []evidence.FeatureACResult) []string {
+	var paths []string
+	for _, ac := range acs {
+		if ac.Floor.DeclaresAttestation && ac.Floor.Attestation == evidence.AttestationAuthored {
+			paths = append(paths, filepath.ToSlash(store.AttestationPath("", featureSlug, ac.ID)))
+		}
+	}
+	return sortedUnique(paths)
+}
+
+// sortedUnique sorts in place and drops duplicates, so one AC satisfied by
+// both a waiver and an attestation names each path once.
+func sortedUnique(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	sort.Strings(paths)
+	out := paths[:1]
+	for _, p := range paths[1:] {
+		if p != out[len(out)-1] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// uncommittedFoldRecordPaths returns the subset of paths whose working-tree
+// content is not byte-identical to what commit carries — either absent there
+// entirely (never `git add`ed) or committed and since edited.
+//
+// Presence is asked through gitx.PathExistsAt precisely for its three-way
+// contract: a proven absence at a resolvable commit is an answer, while an
+// unresolvable commit or a broken repository is an error. Content equality
+// then compares git's own committed blob id against the blob id `git add`
+// would store for the current bytes, so attributes and filters are applied
+// exactly as a real commit would apply them. Nothing here guesses: an
+// operational failure propagates rather than silently reading as "clean".
+func uncommittedFoldRecordPaths(ctx context.Context, root, commit string, paths []string) ([]string, error) {
+	var out []string
+	for _, rel := range paths {
+		present, err := gitx.PathExistsAt(ctx, root, commit, rel)
+		if err != nil {
+			return nil, fmt.Errorf("checking whether %s is committed at %s: %w", rel, commit, err)
+		}
+		if !present {
+			out = append(out, rel)
+			continue
+		}
+		committed, err := gitx.RevParse(ctx, root, commit+":"+rel)
+		if err != nil {
+			return nil, fmt.Errorf("resolving %s at %s: %w", rel, commit, err)
+		}
+		working, err := gitx.HashObject(ctx, root, filepath.FromSlash(rel))
+		if err != nil {
+			return nil, fmt.Errorf("hashing the working-tree %s: %w", rel, err)
+		}
+		if committed != working {
+			out = append(out, rel)
+		}
+	}
+	return out, nil
+}
+
+// discloseUncommittedFoldRecords prints one disclosure per consumed record
+// commit does not carry identically, through the shared internal/disclosure
+// seam so it reads in the same vocabulary as every other disclosure. It prints
+// nothing when every consumed record is clean — the CI case, and the intended
+// local one.
+func discloseUncommittedFoldRecords(ctx context.Context, root, commit string, consumed []string, stdout io.Writer) error {
+	uncommitted, err := uncommittedFoldRecordPaths(ctx, root, commit, consumed)
+	if err != nil {
+		return err
+	}
+	for _, rel := range uncommitted {
+		fmt.Fprintln(stdout, disclosure.Render(disclosure.New(closeUncommittedRecordSource, rel, uncommittedFoldRecordText)))
+	}
+	return nil
 }
 
 // foldStory loads spec's authoritative (source: ci) evidence and folds it,

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -992,6 +993,229 @@ func TestRequireCleanIndex(t *testing.T) {
 			t.Fatalf("requireCleanIndex error = %q, want the \"checking the pre-ritual index\" wrap", err)
 		}
 	})
+}
+
+// writeCloseFixtureWaiver writes an ACTIVE waiver for the close fixture
+// story's ac-1 straight into the working tree, exactly as `verdi waive` leaves
+// it before the operator commits. frozenCommit is stamped so the record
+// validates; nothing here is git-added.
+func writeCloseFixtureWaiver(t *testing.T, root, frozenCommit string) string {
+	t.Helper()
+	slug := store.RefSlug("jira:CLOSE-1")
+	path := store.WaiverPath(root, slug, "ac-1")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir waiver dir: %v", err)
+	}
+	content := `---
+id: waiver/` + slug + `--ac-1
+kind: waiver
+title: "Close fixture waiver"
+owners: [platform-team]
+status: active
+reason: "the fixture AC is waived for this closure"
+frozen: { at: 2024-01-01, commit: ` + frozenCommit + ` }
+---
+# Waiver
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing waiver: %v", err)
+	}
+	return store.WaiverPath("", slug, "ac-1")
+}
+
+// TestRunClose_DisclosesFoldRecordsMissingFromHEAD is the red-first proof for
+// the silence this change's own exact staging converted a captured input into.
+//
+// Attestations and waivers live OUTSIDE both closure paths
+// (.verdi/attestations/<storySlug>/<acID>.md, .verdi/waivers/...), and the
+// fold reads them from the WORKING TREE with plain os.Stat/os.ReadFile — no
+// git, no reachability check. So an operator can author one, not `git add` it,
+// run close, and have the index guard pass (untracked is not staged), the gate
+// PASS on that file, and the closure commit and archive contain no trace of
+// it. Under the old AddAll it was swept in.
+//
+// The design DELIBERATELY refuses to absorb such records ("human records must
+// already be committed in the HEAD they attest to"), and changing gate
+// semantics is explicitly out of scope — so close must neither absorb it nor
+// refuse. The defect is SILENCE about a stated precondition nothing enforces.
+// close-preflight dc-1 met this identical shape and ruled "closed, not
+// disclaimed": a runtime disclosure from the same predicate, not prose in a
+// design document.
+func TestRunClose_DisclosesFoldRecordsMissingFromHEAD(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("an uncommitted waiver the fold consumed is disclosed", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		// No evidence records at all: ac-1 folds to eligible ONLY through the
+		// waiver, so the uncommitted file is genuinely load-bearing.
+		writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+
+		deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+		var stdout, stderr bytes.Buffer
+		got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+		if got != 0 {
+			t.Fatalf("runClose(waived AC, uncommitted waiver) = %d, want 0 — gate semantics must not change; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		out := stdout.String()
+		for _, want := range []string{"disclosed-unproven", rel} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("stdout = %q, want a disclosure naming the uncommitted waiver %q", out, want)
+			}
+		}
+		// The closure commit still owns only the two closure paths: the fix is
+		// a disclosure, never absorption.
+		assertClosureCommitOwnsOnlySpecPaths(t, repo.Dir, "close-fixture")
+	})
+
+	t.Run("a waiver already committed at HEAD is silent", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/waivers")
+		gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "commit the waiver")
+		head := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+		writeCloseGateReport(t, repo.Dir, head, dispositionedFindingYAML)
+
+		deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+		var stdout, stderr bytes.Buffer
+		got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+		if got != 0 {
+			t.Fatalf("runClose(committed waiver) = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if strings.Contains(stdout.String(), "uncommitted-fold-record") {
+			t.Fatalf("stdout = %q, want no disclosure for a record already committed in HEAD", stdout.String())
+		}
+	})
+}
+
+// TestUncommittedFoldRecordPaths unit-tests the predicate the disclosure rests
+// on, including the negative paths the end-to-end tests cannot reach. It is
+// exposed as a function precisely so the preflight/prepare rehearsal paths can
+// call the SAME predicate later rather than re-deriving it.
+func TestUncommittedFoldRecordPaths(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("absent from HEAD, present in the working tree", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+
+		got, err := uncommittedFoldRecordPaths(ctx, repo.Dir, repo.Head, []string{rel})
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths: %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{rel}) {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want %#v", got, []string{rel})
+		}
+	})
+
+	t.Run("committed and unmodified", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/waivers")
+		gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "commit the waiver")
+		head := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+
+		got, err := uncommittedFoldRecordPaths(ctx, repo.Dir, head, []string{rel})
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want none", got)
+		}
+	})
+
+	t.Run("committed but edited in the working tree", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/waivers")
+		gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "commit the waiver")
+		head := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+		appendCloseTestFile(t, filepath.Join(repo.Dir, filepath.FromSlash(rel)), "\nan uncommitted edit\n")
+
+		got, err := uncommittedFoldRecordPaths(ctx, repo.Dir, head, []string{rel})
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths: %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{rel}) {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want the edited record %#v", got, []string{rel})
+		}
+	})
+
+	t.Run("no consumed records at all", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		got, err := uncommittedFoldRecordPaths(ctx, repo.Dir, repo.Head, nil)
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want none", got)
+		}
+	})
+
+	t.Run("an unresolvable commit is an operational error, never a guessed answer", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+		if _, err := uncommittedFoldRecordPaths(ctx, repo.Dir, strings.Repeat("0", 40), []string{rel}); err == nil {
+			t.Fatal("uncommittedFoldRecordPaths(bogus commit) = nil error, want an operational failure rather than a guess about presence")
+		}
+	})
+}
+
+// TestStoryFoldRecordPaths table-drives which fold inputs count as CONSUMED —
+// the paths whose absence from HEAD is worth disclosing.
+func TestStoryFoldRecordPaths(t *testing.T) {
+	const slug = "jira-close-1"
+	cases := []struct {
+		name string
+		acs  []evidence.ACResult
+		want []string
+	}{
+		{name: "nothing consumed", acs: []evidence.ACResult{{ID: "ac-1", Status: evidence.StatusEvidenced}}},
+		{
+			name: "a waived AC consumed its waiver",
+			acs:  []evidence.ACResult{{ID: "ac-1", Status: evidence.StatusWaived}},
+			want: []string{".verdi/waivers/" + slug + "/ac-1.md"},
+		},
+		{
+			name: "an authored attestation was consumed",
+			acs: []evidence.ACResult{{ID: "ac-2", Status: evidence.StatusEvidenced, Kinds: []evidence.KindResult{
+				{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+			}}},
+			want: []string{".verdi/attestations/" + slug + "/ac-2.md"},
+		},
+		{
+			name: "an unauthored scaffold satisfies nothing and is not consumed",
+			acs: []evidence.ACResult{{ID: "ac-3", Status: evidence.StatusPending, Kinds: []evidence.KindResult{
+				{Kind: artifact.EvidenceAttestation, Attestation: evidence.AttestationUnauthored},
+			}}},
+		},
+		{
+			name: "a non-attestation kind names no store record",
+			acs: []evidence.ACResult{{ID: "ac-4", Status: evidence.StatusEvidenced, Kinds: []evidence.KindResult{
+				{Kind: artifact.EvidenceStatic, Satisfied: true},
+			}}},
+		},
+		{
+			name: "both kinds on one AC, sorted and deduplicated",
+			acs: []evidence.ACResult{
+				{ID: "ac-1", Status: evidence.StatusWaived, Kinds: []evidence.KindResult{
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+				}},
+			},
+			want: []string{".verdi/attestations/" + slug + "/ac-1.md", ".verdi/waivers/" + slug + "/ac-1.md"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := storyFoldRecordPaths(slug, tc.acs)
+			if len(got) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("storyFoldRecordPaths = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
 }
 
 // TestStageClosureSpec_UntrackedActiveZoneStillStagesTheArchive is the
