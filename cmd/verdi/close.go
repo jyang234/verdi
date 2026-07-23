@@ -207,6 +207,7 @@ func unwindClosureBranchCut(ctx context.Context, root, originalBranch, closureBr
 func cmdClose(args []string, stdout, stderr io.Writer) int {
 	forceLocal := false
 	preflight := false
+	prepare := false
 	var storyArg string
 	for _, a := range args {
 		switch a {
@@ -216,6 +217,9 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		case "--preflight":
 			preflight = true
 			continue
+		case "--prepare":
+			prepare = true
+			continue
 		}
 		if storyArg != "" {
 			fmt.Fprintf(stderr, "close: unexpected extra argument %q\n", a)
@@ -223,9 +227,13 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		}
 		storyArg = a
 	}
+	if prepare && preflight {
+		fmt.Fprintln(stderr, "close: --prepare and --preflight are mutually exclusive")
+		return 2
+	}
 	if storyArg == "" {
 		// vocab:identity — CLI usage/verb-name grammar (identity)
-		fmt.Fprintln(stderr, "close: usage: verdi close <jira:STORY-KEY | spec/name> [--force-local] [--preflight]")
+		fmt.Fprintln(stderr, "close: usage: verdi close <jira:STORY-KEY | spec/name> [--force-local] [--preflight | --prepare]")
 		return 2
 	}
 
@@ -253,17 +261,18 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		}
 		return runPreflight(ctx, root, storyArg, cfg.Manifest, cfg.Model, buildForgeBestEffort(ctx, root), forceLocal, stdout, stderr)
 	}
-
 	// 04 §Semantics: "PublishRollup runs in CI only" — close calls it
 	// directly (ac-2), so the same CI-only discipline `rollup --publish`
 	// already enforces (I-32) applies here, mirrored exactly.
-	inCI := lint.ReadCIEnv().InCI
-	if closePublishGuardRefuses(forceLocal) {
-		fmt.Fprintln(stderr, "close: refusing to publish outside CI (04 §Semantics: \"PublishRollup runs in CI only\"); pass --force-local to run anyway for local testing only")
-		return 2
-	}
-	if !inCI {
-		fmt.Fprintln(stderr, "close: --force-local: running outside CI; this escape hatch exists for local testing only and its publish is NON-AUTHORITATIVE (04 §Semantics: PublishRollup runs in CI only)")
+	if !prepare {
+		inCI := lint.ReadCIEnv().InCI
+		if closePublishGuardRefuses(forceLocal) {
+			fmt.Fprintln(stderr, "close: refusing to publish outside CI (04 §Semantics: \"PublishRollup runs in CI only\"); pass --force-local to run anyway for local testing only")
+			return 2
+		}
+		if !inCI {
+			fmt.Fprintln(stderr, "close: --force-local: running outside CI; this escape hatch exists for local testing only and its publish is NON-AUTHORITATIVE (04 §Semantics: PublishRollup runs in CI only)")
+		}
 	}
 
 	ctx := context.Background()
@@ -305,6 +314,9 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		Forge:         buildForgeBestEffort(ctx, root),
 		Registry:      buildProviderRegistry(manifest),
 		Model:         cfg.Model,
+	}
+	if prepare {
+		return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
 	}
 	return runClose(ctx, root, storyArg, manifest, deps, stdout, stderr)
 }
