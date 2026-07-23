@@ -197,20 +197,29 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 // function's own so the readiness summary describes the whole run rather than
 // its last phase.
 func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, prelude preflightPrelude, stdout, stderr io.Writer) int {
+	fmt.Fprintf(stdout, "close: --preflight %s (dry run: rehearses the closure gate only; nothing on disk changes and nothing is published)\n", storyArg)
+
+	// Rehearsed FIRST, in the real ritual's own order: requireCleanIndex is
+	// the first thing runClose does, before it RESOLVES anything or evaluates a
+	// single condition. It takes only root, so it can genuinely run here, and
+	// running here is load-bearing rather than cosmetic: the canonical
+	// interrupted close (archive move done, commit failed) has already moved
+	// the spec out of the active zone, so the target ref no longer resolves —
+	// and with the rehearsal placed after resolution, both --preflight and
+	// --prepare died on "reading .../active/<name>/spec.md: no such file or
+	// directory" while the real close reached closureResidueRefusal's exact
+	// recovery. That diagnosis already existed in-repo and was simply
+	// unreachable from either new mode.
+	//
+	// Counted into the outcome below, once the gate has produced one —
+	// together with whatever the caller already disclosed before reaching here.
+	disclosures := prelude.Disclosures + disclosePreflightIndexGuard(ctx, root, stdout)
+
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
 		fmt.Fprintln(stderr, "close: --preflight:", err)
 		return 2
 	}
-
-	fmt.Fprintf(stdout, "close: --preflight %s (dry run: rehearses the closure gate only; nothing on disk changes and nothing is published)\n", storyArg)
-
-	// Rehearsed FIRST, in the real ritual's own order: requireCleanIndex is
-	// the first thing runClose does, before it resolves anything or evaluates
-	// a single condition. Counted into the outcome below, once the gate has
-	// produced one — together with whatever the caller already disclosed
-	// before reaching here.
-	disclosures := prelude.Disclosures + disclosePreflightIndexGuard(ctx, root, stdout)
 
 	head, err := gitx.RevParse(ctx, root, "HEAD")
 	if err != nil {

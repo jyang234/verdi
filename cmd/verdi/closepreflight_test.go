@@ -1063,6 +1063,43 @@ func TestRunPreflight_RehearsesTheIndexGuard(t *testing.T) {
 		}
 	})
 
+	t.Run("the rehearsal survives a target that no longer resolves", func(t *testing.T) {
+		// The canonical interrupted close: ArchiveMove completed, the commit
+		// failed, so the spec is already OUT of the active zone and its closure
+		// paths are staged — the exact state close.go's own residue refusal
+		// (closureResidueRefusal) was written to diagnose.
+		repo := readyCloseFixtureRepo(t)
+		if err := store.ArchiveMove(repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+
+		// The real close in this state reaches its residue diagnosis, because
+		// requireCleanIndex genuinely runs before it resolves anything.
+		guardErr := requireCleanIndex(ctx, repo.Dir)
+		if guardErr == nil {
+			t.Fatal("fixture bug: requireCleanIndex should refuse closure residue")
+		}
+
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+		if rc != 2 {
+			t.Fatalf("runPreflight(interrupted closure residue) = %d, want 2 — the ref genuinely no longer resolves; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "disclosed-unproven ["+preflightIndexGuardSource+"]") {
+			t.Fatalf("the index guard is documented as rehearsed FIRST, before anything is resolved, yet resolution failed first and the operator got no rehearsal at all:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+		}
+		// The precise recovery already exists in-repo; the whole point of
+		// carrying the real guard's own text is that it reaches both modes.
+		for _, want := range []string{"interrupted", store.SpecDirRelPath(store.ZoneArchive, "close-fixture"), "git commit"} {
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("the rehearsal must carry the real residue diagnosis %q:\n%s", want, stdout.String())
+			}
+		}
+	})
+
 	t.Run("--prepare surfaces the same rehearsal before echoing its next command", func(t *testing.T) {
 		repo := readyCloseFixtureRepo(t)
 		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
