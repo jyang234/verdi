@@ -106,6 +106,7 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	if forceLocal {
 		forceArg = " --force-local"
 	}
+	// vocab:identity — CLI next-command verb-name grammar (identity)
 	fmt.Fprintf(stdout, "close: --prepare: next command: verdi close %s%s\n", storyArg, forceArg)
 	return 0
 }
