@@ -227,11 +227,20 @@ func TestRunPrepare_GeneratesAbsentOrStaleReportForStoryAndFeature(t *testing.T)
 			}
 			before := snapshotOutsidePrepareReport(t, repo.Dir, reportPath)
 
-			deps := closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New()}
+			// A judge that genuinely runs: this test is about regenerating a
+			// report and printing the judgment worklist for what it derives.
+			// With no judge at all the only finding is align's synthetic
+			// judged-coverage-absent stand-in, which is a machine failure and
+			// deliberately gets no disposition template
+			// (TestRunPrepare_JudgeAbsenceIsNotPresentedAsHumanJudgment).
+			deps := closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New(), JudgeCmd: alignFakeJudgeOK(t)}
 			var stdout, stderr bytes.Buffer
 			rc := runPrepare(context.Background(), repo.Dir, tc.ref, &store.Manifest{}, deps, true, &stdout, &stderr)
 			if rc != 1 {
 				t.Fatalf("runPrepare = %d, want 1 (fresh findings need judgment); stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+			}
+			if strings.Contains(stdout.String(), align.AbsenceFindingID) {
+				t.Fatalf("fixture bug: the worklist under test must come from a judge that ran, not from the synthetic absence finding: %s", stdout.String())
 			}
 			for _, want := range []string{"ALIGNMENT REQUIRED", "JUDGMENT REQUIRED", "verdi disposition --rationale", "-- " + tc.ref} {
 				if !strings.Contains(stdout.String(), want) {
@@ -1152,6 +1161,92 @@ func TestRunPrepare_FlagShapedFindingIDTemplateDispositionsIntendedFinding(t *te
 	if !ok || finding.Disposition != artifact.FindingFixed || finding.Note != "reviewed the flag-shaped finding" {
 		t.Fatalf("flag-shaped finding after disposition = %+v, want fixed with the supplied rationale", finding)
 	}
+}
+
+// TestRunPrepare_JudgeAbsenceIsNotPresentedAsHumanJudgment covers the one
+// undispositioned finding that is not human work at all.
+//
+// A judge that crashed, or was never configured, does not fail: RunJudged
+// degrades to align's synthetic judged-coverage-absent finding, which
+// preparation wrote into the living report and then presented as ordinary
+// JUDGMENT REQUIRED work — complete with a copy-paste `verdi disposition`
+// template offering `fixed | accepted-deviation`. Once dispositioned, closure
+// gate condition 4 passes and close's freeze-in-place branch stamps the judge
+// failure into the archive verbatim, without ever re-running the judge: the
+// exact harm prepareAlignDeps' own doc comment describes.
+//
+// prepareAlignDeps' Wait closes only the TIMEOUT shape (judged.go checks
+// Wait && Stage == StageTimeout). Crash and not-configured stay open on this
+// path, and stderr says nothing — the failure detail exists only inside the
+// synthetic finding's own text.
+func TestRunPrepare_JudgeAbsenceIsNotPresentedAsHumanJudgment(t *testing.T) {
+	template := func(ref, id string) string {
+		return fmt.Sprintf("verdi disposition --rationale '<human-authored rationale>' -- %s %s '<human-authored-disposition:fixed|accepted-deviation>'", ref, id)
+	}
+
+	machineFailures := []struct {
+		name       string
+		judgeCmd   func(*testing.T) []string
+		wantDetail string
+	}{
+		{name: "no judge configured", wantDetail: "no align.judge_cmd configured"},
+		{name: "the judge crashed", judgeCmd: alignFakeJudgeFailing, wantDetail: "exit=7"},
+	}
+	for _, tc := range machineFailures {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildCloseFixtureRepo(t)
+			deps := closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New()}
+			if tc.judgeCmd != nil {
+				deps.JudgeCmd = tc.judgeCmd(t)
+			}
+
+			var stdout, stderr bytes.Buffer
+			rc := runPrepare(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+			if rc != 1 {
+				t.Fatalf("runPrepare = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+			}
+			// Premise: this run really did produce the synthetic finding, and
+			// nothing on stderr told the operator the judge failed.
+			report := decodeReportFile(t, store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture"))
+			if _, ok := findingByID(report.Findings, align.AbsenceFindingID); !ok {
+				t.Fatalf("fixture bug: no synthetic %s finding was produced: %+v", align.AbsenceFindingID, report.Findings)
+			}
+			if strings.Contains(stderr.String(), "judge") {
+				t.Fatalf("fixture bug: this test exists because the judge failure is silent on stderr: %s", stderr.String())
+			}
+
+			out := stdout.String()
+			if strings.Contains(out, template("spec/close-fixture", align.AbsenceFindingID)) {
+				t.Fatalf("a machine failure was scripted as human judgment with a copy-paste disposition template:\n%s", out)
+			}
+			for _, want := range []string{align.AbsenceFindingID, tc.wantDetail, "freeze", "judge"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("the judge failure must be named plainly, carrying %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+
+	t.Run("genuine findings beside it keep their exact templates", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		findings := fmt.Sprintf(`  - { id: f-1, kind: computed, text: "a real open finding" }
+  - { id: %s, kind: judged, text: "judged coverage absent: the judge fell over" }
+`, align.AbsenceFindingID)
+		writePrepareReport(t, repo.Dir, "close-fixture", repo.Head, findings)
+
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, closeDeps{Forge: forgefake.New()}, true, &stdout, &stderr)
+		if rc != 1 {
+			t.Fatalf("runPrepare = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		out := stdout.String()
+		if want := template("spec/close-fixture", "f-1"); !strings.Contains(out, want) {
+			t.Fatalf("a genuine finding lost its exact template %q:\n%s", want, out)
+		}
+		if strings.Contains(out, template("spec/close-fixture", align.AbsenceFindingID)) {
+			t.Fatalf("the synthetic finding kept its template:\n%s", out)
+		}
+	})
 }
 
 func TestRunPrepare_FullyDispositionedRunsAuthoritativePreflight(t *testing.T) {

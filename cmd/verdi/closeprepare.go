@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -252,6 +253,53 @@ func reloadRefreshedReport(reportPath string, stderr io.Writer) (*artifact.Devia
 	return report, 0
 }
 
+// printJudgmentWork renders one undispositioned finding as the work it
+// actually is: an exact `verdi disposition` command for a genuine finding, and
+// a plain diagnosis for align's synthetic judged-coverage-absent stand-in,
+// which is not human work at all.
+func printJudgmentWork(stdout io.Writer, finding artifact.Finding, specRef artifact.Ref, storyArg string) {
+	if finding.ID == align.AbsenceFindingID {
+		printJudgeAbsence(stdout, finding, storyArg)
+		return
+	}
+	fmt.Fprintf(
+		stdout,
+		"verdi disposition --rationale %s -- %s %s %s\n",
+		shellQuoteWord("<human-authored rationale>"),
+		shellQuoteWord(specRef.String()),
+		shellQuoteWord(finding.ID),
+		shellQuoteWord("<human-authored-disposition:fixed|accepted-deviation>"),
+	)
+}
+
+// printJudgeAbsence names align's synthetic judged-coverage-absent finding as
+// the MACHINE failure it is, in place of the disposition template preparation
+// prints for real findings.
+//
+// A judge that crashed or was never configured does not fail the run: RunJudged
+// degrades to this one synthetic finding (judged.go's absent-result contract),
+// which preparation writes into the living report and used to present as
+// ordinary JUDGMENT REQUIRED work, complete with a copy-paste template offering
+// `fixed | accepted-deviation`. Once dispositioned, closure gate condition 4
+// passes and close's freeze-in-place branch stamps the judge failure into the
+// archive verbatim without ever re-running the judge — the exact harm
+// prepareAlignDeps' own doc comment describes. Its Wait closes only the TIMEOUT
+// shape; crash and not-configured reach here, and stderr says nothing, so the
+// synthetic finding's own text is the only place the failure detail exists.
+//
+// Withholding the template is the whole fix, and it withholds only the PASTE.
+// Accepting absent judged coverage remains a legal, governed human ruling (03
+// §Alignment report: "skipping the judge is never free, always visible to the
+// reviewer, and countable in audit") — it simply has to be authored
+// deliberately rather than pasted from a line the tool suggested. Nothing about
+// the verdict, the state, or the exit class moves: this is still JUDGMENT
+// REQUIRED, still exit 1, and preparation still chooses no disposition.
+func printJudgeAbsence(stdout io.Writer, finding artifact.Finding, storyArg string) {
+	fmt.Fprintf(stdout, "close: --prepare: %s is NOT a semantic reading a human can judge — it is align's synthetic stand-in for a judge that produced none: %q\n", finding.ID, finding.Text)
+	// vocab:identity — CLI invocation grammar ("verdi close --prepare", identity)
+	fmt.Fprintf(stdout, "close: --prepare: no disposition template is printed for it. Dispositioning it satisfies the closure gate's disposition condition, and close then freezes this report in place — stamping the judge failure into the archive verbatim, without ever re-running the judge. Repair the judge (align.judge_cmd in verdi.yaml) and re-run verdi close --prepare %s; accepting absent judged coverage instead is a deliberate human ruling to author by hand.\n", shellQuoteWord(storyArg))
+}
+
 // runPrepare derives the next closure-session state for an explicit story or
 // feature ref. It may refresh only the target's living deviation report; all
 // judgment remains a human-authored disposition and final closure remains a
@@ -360,14 +408,7 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	if len(undispositioned) > 0 {
 		fmt.Fprintf(stdout, "close: --prepare: JUDGMENT REQUIRED (%d undispositioned finding(s) in %s)\n", len(undispositioned), store.DeviationReportRelPath(store.ZoneActive, specRef.Name))
 		for _, finding := range undispositioned {
-			fmt.Fprintf(
-				stdout,
-				"verdi disposition --rationale %s -- %s %s %s\n",
-				shellQuoteWord("<human-authored rationale>"),
-				shellQuoteWord(specRef.String()),
-				shellQuoteWord(finding.ID),
-				shellQuoteWord("<human-authored-disposition:fixed|accepted-deviation>"),
-			)
+			printJudgmentWork(stdout, finding, specRef, storyArg)
 		}
 		return 1
 	}
