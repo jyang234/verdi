@@ -33,12 +33,13 @@ one whole-store directory, per-branch draft walls, and the diagram editor — is
 human write surface. Merge requests are the only durable write path.** Nothing is
 duplicated, so nothing can drift.
 
-The trust spine runs through the whole system, and since round 6 it is closed for
-real: CI's `verdi sync --produce` stamps its bundle `source: ci` and uploads it as
-the `verdi-evidence` artifact; a local run stamps `source: local` and only ever
-previews (D6-10). Gates and the closure ritual fold **authoritative** (`source: ci`)
-records only. The upstream analysis toolchain (flowmap/groundwork) is executed as
-pinned CLIs and its JSON strictly decoded — never linked as a library. Four
+The trust spine runs through the whole system, with an explicit human-governed
+closure boundary: CI's `verdi sync --produce` stamps its bundle `source: ci` and
+uploads it as the `verdi-evidence` artifact; a local run stamps `source: local`
+and only ever previews (D6-10). Gates and the closure ritual fold
+**authoritative** (`source: ci`) records only. The upstream analysis toolchain
+(flowmap/groundwork) is executed as pinned CLIs and its JSON strictly decoded —
+never linked as a library. Four
 workflows carry it: `verify.yml` (the full gate on code paths, then evidence
 production), `spec-gate.yml` (the fast lint/readiness gate on spec- and doc-only
 changes, so no PR is ever silently ungated), `pages.yml` (the dex, published on
@@ -122,7 +123,7 @@ attributes the load-bearing ones to the component that embodies them.
 | `internal/workbench` | The human write surface | `GET /` is the whole-store directory. One board route table, declared once and mounted at the root and beneath `/b/{branch}` alike (draft-boards dc-1) — never a second board implementation. `/board/diagram/{name}` is the proposal editor. The board is a **projection of the spec** — typed edits are spec edits; the old commit-to-design ritual is retired to grandfathered v0 artifacts (R4-I-9). Badges attach in `loadBoard`'s I/O enrichment tier; drawers render server-side from the badge's own record, `role=dialog`, keyboard-openable. Family navigation attaches in the same tier (family-board-links): a story board's `implements` card links to its parent feature's board, and a feature board's stub card links to every matching story anywhere in the store — active targets link straight to their board, archived targets to the corpus page `/a/` with the archived state disclosed on the card; on a per-branch `/b/{branch}` board an active target stays branch-prefixed (ADJ-70) while a branch-resolved archived target renders a disclosed no-link card instead of a dead href, and a dangling AC fragment renders a disclosed notice, never a silent inert card. |
 | `internal/dex` + `render` | The static read surface; shared rendering | A wiki that structurally cannot lie about time: temporal banners per class, byte-identical rebuilds, client JS budget of exactly three files (vendored mermaid 10.9.1, OpenAPI renderer, search+copy-ref). The **by-story axis is real** (V1-P8): the archived quartet browsable per story. `render` is the one goldmark+chroma seam shared with the workbench; its fenced-mermaid path badges every illustrative figure "illustrative · not deterministically verifiable" — the proposal render path is never painted with that badge. |
 | `internal/specalign` | The spec-alignment gate | Self-hosted specs proven byte-identical to the originals modulo the status line; checklist items as named subtests; MCP tool and CLI verb inventories checked against 05's tables. Runs inside `make verify`. |
-| `cmd/verdi` | Verb dispatch only | Exit contract 0 clean / 1 verdict / 2 operational, everywhere. `verdi build start` replaced `feature start` (kept one release as a deprecation alias, R4-I-6). `close`, `gc`, and `audit` are real verbs now — `close` drives stories **and** features to archived closure; `gc` is honestly scoped to the managed-worktree reclamation slice and says so on every run (worktree-manager dc-5). Only `waivers` and `verify-artifact` still decline as out of scope. |
+| `cmd/verdi` | Verb dispatch only | Exit contract 0 clean / 1 verdict / 2 operational, everywhere. `verdi build start` replaced `feature start` (kept one release as a deprecation alias, R4-I-6). `close`, `gc`, and `audit` are real verbs now — `close --prepare <ref>` derives the next human-visible closure state, while real `close` drives stories **and** features to archived closure; `gc` is honestly scoped to the managed-worktree reclamation slice and says so on every run (worktree-manager dc-5). Only `waivers` and `verify-artifact` still decline as out of scope. |
 
 ---
 
@@ -257,7 +258,7 @@ attributes the load-bearing ones to the component that embodies them.
    report ∧ no unresolved rung-4 cascade block. A red cell never ships; an
    undispositioned deviation never ships.
 
-### E — The closure ritual: bind → sync → close → archive  *(the loop, closed)*
+### E — The closure session: prepare → human judgment → preflight → close
 
 1. **Bind.** Each AC declares its expected evidence kinds (VL-006), and each
    declared kind is pinned by a first-class **`kind: obligation`** artifact
@@ -280,27 +281,44 @@ attributes the load-bearing ones to the component that embodies them.
    records through `verdi sync --produce-runtime` (bare, it is a disclosed
    honest no-op — verdi has no live service, and fabricating a passing record
    is forbidden). `verdi sync` folds it all into `derived/`.
-3. **Close.** The ritual now opens with a rehearsal: **`verdi close
-   <story|feature> --preflight`** (close-preflight) runs the identical
-   closure-gate evaluation read-only and names — per AC and evidence kind —
-   exactly what a real close would refuse on: an absent attestation
-   distinguished from a scaffolded-but-unauthored one, each named with its
-   exact path, and a derived-commit directory found on disk but excluded as
-   a non-ancestor, disclosed by name. It writes nothing, and is dispatched
-   before the CI-only publish guard, so it runs from any checkout, not only
-   CI.
-   **`verdi close <story>`** then runs the closure gate for real — every AC
-   evidenced or waived folding `source: ci` records only, no unresolved
-   spec-stale, no unresolved pending-supersession (those block closure, not
-   merge — builds keep moving) — then cuts `close/<name>`, freezes the alignment
-   report, builds the digested `rollup.json`, moves the quartet to
-   `specs/archive/<name>/`, and flips `accepted-pending-build → closed` in the
-   same ritual (D6-11 Option B; VL-010's second status-only exception admits
-   exactly this transition). Rollup publication to the tracker is CI-only.
-   **`verdi close <feature>`** does the same for a feature once every feature AC
-   is evidenced (outcome floor included), stub reconciliation passes, and every
-   implementing story is closed.
-4. **Archive.** `closed` is the only terminal status under `specs/archive/`;
+3. **Prepare.** Run preparation with an explicit story or feature ref:
+
+   ```text
+   verdi close --prepare <jira:STORY-KEY | spec/name> [--force-local]
+   ```
+
+   An absent or stale living alignment report is refreshed for HEAD through the
+   existing align engine. A current report with open findings stops at
+   **`JUDGMENT REQUIRED`** and prints one exact `verdi disposition` template per
+   finding. This is a human-only stop: inspect the witnesses, choose `fixed` or
+   `accepted-deviation`, and author the rationale. Retrying preparation at the
+   same HEAD preserves that report byte-for-byte; it does not regenerate the
+   findings or invoke the judge again.
+4. **Preflight.** After every finding is dispositioned, rerun `--prepare`. It
+   enters the same read-only gate evaluation available directly as
+   **`verdi close --preflight <ref> [--force-local]`**. The result is
+   **`MECHANICAL WORK REQUIRED`** with the existing artifact/path diagnostics,
+   **`READY WITH DISCLOSURES`** with every disclosure retained, or **`READY`**.
+   Preparation writes only an absent or stale target living report; it never
+   chooses a disposition, cuts a branch, freezes a report, archives, commits,
+   publishes, pushes, or opens a pull request.
+5. **Close.** Run the exact close command preparation prints. Real close repeats
+   the closure gate — story ACs evidenced or waived from `source: ci` records,
+   no unresolved spec-stale or pending-supersession; features additionally
+   require the outcome floor, stub reconciliation, and every implementing
+   story closed. Before any mutation it refuses a non-empty staged index and
+   names the staged paths. Human-authored evidence and attestations must already
+   be committed; the living disposition report remains an unstaged part of the
+   target quartet.
+
+   Once ready, close cuts `close/<name>`, freezes the report, builds the digested
+   `rollup.json`, flips `accepted-pending-build → closed`, and moves the target
+   to `specs/archive/<name>/`. Its commit owns exactly
+   `.verdi/specs/active/<name>` (the tracked deletion) and
+   `.verdi/specs/archive/<name>` (the archive tree). Unrelated unstaged and
+   untracked files survive outside the commit. Rollup publication is CI-only
+   unless the explicit `--force-local` testing escape hatch is used.
+6. **Archive.** `closed` is the only terminal status under `specs/archive/`;
    a `superseded` spec stays in `specs/active/` as its own terminal record
    (D-12). The archived quartet — spec, frozen board, rollup, deviation report —
    is the by-story axis's permanent exhibit.
@@ -407,7 +425,9 @@ flowchart LR
 Diamonds are gates that can refuse: `build start` refuses non-accepted and
 superseded specs, the spec MR is guarded by lint and `spec-gate.yml`, `verdi gate`
 holds implementation MRs to four conditions, and the closure gate holds `verdi
-close` to CI evidence alone. The closure path is solid now — the loop closes.
+close` to authoritative evidence and governance conditions. Closure is
+deliberately resumable rather than automatic: preparation stops for human
+judgment and repeats whenever repository state advances.
 
 ```mermaid
 flowchart LR
@@ -435,12 +455,21 @@ flowchart LR
         ROLLUP["verdi rollup --publish<br/><i>per story, idempotent</i>"]
         DEXB["pages.yml → the dex<br/><i>pure fn of the tree</i>"]
         PROBE["runtime-probe.yml (cron)<br/><i>kind: runtime records</i>"]
-        CGATE{"closure gate<br/>all ACs on CI evidence ·<br/>no stale · no pending-supersession"}
-        CLOSE["verdi close<br/><i>freeze report · rollup.json ·<br/>quartet → archive · status closed</i>"]
+        PREP["verdi close --prepare &lt;ref&gt;<br/><i>refresh absent/stale living report</i>"]
+        JUDGE{"JUDGMENT REQUIRED?<br/><i>human-only stop</i>"}
+        DISP["verdi disposition …<br/><i>human decision + rationale;<br/>leave report unstaged</i>"]
+        PREFLIGHT{"closure preflight<br/><i>inside prepare, or<br/>verdi close --preflight &lt;ref&gt;</i>"}
+        MECH["MECHANICAL WORK REQUIRED<br/><i>repair named gate inputs</i>"]
+        READY["READY / READY WITH DISCLOSURES<br/><i>review every disclosure</i>"]
+        CLOSE["verdi close &lt;ref&gt;<br/><i>refuse staged index first · freeze · rollup ·<br/>active deletion + archive tree only → commit</i>"]
         MERGE --> ROLLUP
         MERGE --> DEXB
-        MERGE --> PROBE --> CGATE
-        CGATE -- pass --> CLOSE
+        MERGE --> PROBE --> PREP
+        PREP --> JUDGE
+        JUDGE -- yes --> DISP --> PREP
+        JUDGE -- no --> PREFLIGHT
+        PREFLIGHT -- not-ready --> MECH --> PREP
+        PREFLIGHT -- ready --> READY --> CLOSE
     end
 
     SPECMR -- "merge = acceptance" --> BS

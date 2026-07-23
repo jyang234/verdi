@@ -1,4 +1,4 @@
-// verdi close <jira:STORY-KEY | spec/name | feature spec/name> (05 §CLI;
+// verdi close <jira:STORY-KEY | spec/name> [--force-local] (05 §CLI;
 // 03 §Closure ritual; spec/close-verb ac-1, ac-2, ac-3, dc-3): drives a
 // merged verdi STORY to a true, archived closure on authoritative
 // (source: ci) evidence alone, then publishes its rollup to the configured
@@ -33,7 +33,10 @@
 //     the whole quartet to specs/archive/<name>/ (store.ArchiveMove, a
 //     pure rename — VL-010's sole legal exception on an otherwise-frozen
 //     spec.md).
-//  4. Commit the quartet + the archive rename on the closure branch.
+//  4. Commit only the target spec's active-zone deletion and archive-zone
+//     tree on the closure branch. A pre-existing staged path is refused
+//     before any mutation; unrelated unstaged and untracked work survives
+//     outside this commit.
 //  5. Publish the rollup to the configured tracker (ac-2) — the round-6
 //     hermetic fake provider by default (spec/close-verb dc-2), a real
 //     Jira adapter by a pure config change.
@@ -56,6 +59,15 @@
 // below — that guard exists solely to protect step 5's publish call,
 // which --preflight never reaches. See closepreflight.go/
 // closepreflightfeature.go for the full implementation.
+//
+// --prepare (closure-session ergonomics) is the resumable operator entry
+// point for both classes. Given an explicit ref, it refreshes an absent or
+// stale living alignment report, then stops at every undispositioned finding
+// for human judgment. Re-running it at the same HEAD preserves that report
+// byte-for-byte instead of regenerating it. Once every finding is
+// dispositioned, it enters the identical preflight path above and reports
+// MECHANICAL WORK REQUIRED, READY WITH DISCLOSURES, or READY. Preparation
+// never freezes, archives, commits, publishes, or chooses a disposition.
 package main
 
 import (
@@ -233,7 +245,9 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 	}
 	if storyArg == "" {
 		// vocab:identity — CLI usage/verb-name grammar (identity)
-		fmt.Fprintln(stderr, "close: usage: verdi close <jira:STORY-KEY | spec/name> [--force-local] [--preflight | --prepare]")
+		fmt.Fprintln(stderr, `close: usage: verdi close <jira:STORY-KEY | spec/name> [--force-local]
+              verdi close --preflight <jira:STORY-KEY | spec/name> [--force-local]
+              verdi close --prepare <jira:STORY-KEY | spec/name> [--force-local]`)
 		return 2
 	}
 

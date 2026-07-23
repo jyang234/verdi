@@ -34,7 +34,7 @@ func TestCmdClose_PrepareParsing(t *testing.T) {
 		{
 			name:     "missing explicit ref",
 			args:     []string{"--prepare"},
-			wantText: "usage: verdi close",
+			wantText: "verdi close --prepare <jira:STORY-KEY | spec/name> [--force-local]",
 		},
 		{
 			name:     "prepare and preflight are mutually exclusive",
@@ -121,6 +121,52 @@ func TestCmdClose_PrepareRunsOutsideCIWithoutForceLocal(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "refusing to publish outside CI") {
 		t.Fatalf("--prepare was incorrectly restored behind the publish guard: %s", stderr.String())
+	}
+}
+
+// TestClosePrepare_BuiltBinaryResumesCurrentJudgmentStop covers the one
+// boundary the runPrepare and cmdClose tests above cannot: the documented
+// `verdi close --prepare <ref>` grammar through the built binary, including a
+// second process invocation over the same current report. The retry must
+// return the same human-only stop without regenerating the report.
+func TestClosePrepare_BuiltBinaryResumesCurrentJudgmentStop(t *testing.T) {
+	clearCIEnv(t)
+	clearPrepareForgeEnv(t)
+	repo := buildCloseFixtureRepo(t)
+	const findings = `  - { id: f-1, kind: computed, text: "human judgment remains" }
+`
+	writePrepareReport(t, repo.Dir, "close-fixture", repo.Head, findings)
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+	before, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := buildVerdiBinary(t)
+
+	for run := 1; run <= 2; run++ {
+		code, stdout, stderr := runVerdi(t, bin, repo.Dir, "close", "--prepare", "spec/close-fixture")
+		if code != 1 {
+			t.Fatalf("built binary prepare run %d = %d, want 1; stdout=%s stderr=%s", run, code, stdout, stderr)
+		}
+		for _, want := range []string{
+			"close: --prepare: JUDGMENT REQUIRED (1 undispositioned finding(s)",
+			"verdi disposition --rationale '<human-authored rationale>' -- spec/close-fixture f-1 '<human-authored-disposition:fixed|accepted-deviation>'",
+		} {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("built binary prepare run %d stdout missing %q: %s", run, want, stdout)
+			}
+		}
+		if strings.Contains(stdout, "ALIGNMENT REQUIRED") {
+			t.Fatalf("built binary prepare run %d regenerated a current report: %s", run, stdout)
+		}
+	}
+
+	after, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("built binary prepare retry changed the current undispositioned report")
 	}
 }
 
