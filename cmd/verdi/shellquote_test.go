@@ -73,6 +73,7 @@ func TestShellQuoteWord_RoundTripsThroughRealShells(t *testing.T) {
 		"kind=computed",
 		"finding-1",
 		"spec/close-fixture",
+		"spec/close-fixture#ac-1",
 		"--amend",
 		"two words",
 		`judge's finding`,
@@ -82,24 +83,34 @@ func TestShellQuoteWord_RoundTripsThroughRealShells(t *testing.T) {
 		"tilde~inside",
 	}
 
-	for _, shell := range []string{"/bin/sh", "/bin/zsh", "/bin/bash"} {
-		t.Run(shell, func(t *testing.T) {
-			if _, err := os.Stat(shell); err != nil {
-				t.Skipf("%s is absent on this machine: its round-trip is disclosed-unproven here (%v)", shell, err)
+	// prelude is per-shell, because the hazard depends on options an
+	// ordinary user sets: zsh's extended_glob (widely enabled, including by
+	// popular zsh frameworks) makes '#' a pattern operator, so a bare
+	// fragment ref dies with "no matches found" before the command runs.
+	shells := []struct{ path, prelude string }{
+		{path: "/bin/sh"},
+		{path: "/bin/zsh", prelude: "setopt extended_glob; "},
+		{path: "/bin/bash"},
+	}
+
+	for _, shell := range shells {
+		t.Run(shell.path, func(t *testing.T) {
+			if _, err := os.Stat(shell.path); err != nil {
+				t.Skipf("%s is absent on this machine: its round-trip is disclosed-unproven here (%v)", shell.path, err)
 			}
 			for _, word := range words {
 				// printf %s writes the parsed word with no added newline, so
 				// stdout is exactly what the shell made of the emitted word.
-				script := "set -- " + shellQuoteWord(word) + `; printf %s "$1"`
-				cmd := exec.Command(shell, "-c", script)
+				script := shell.prelude + "set -- " + shellQuoteWord(word) + `; printf %s "$1"`
+				cmd := exec.Command(shell.path, "-c", script)
 				var stdout, stderr bytes.Buffer
 				cmd.Stdout = &stdout
 				cmd.Stderr = &stderr
 				if err := cmd.Run(); err != nil {
-					t.Fatalf("%s -c %q: %v; stderr=%s", shell, script, err, stderr.String())
+					t.Fatalf("%s -c %q: %v; stderr=%s", shell.path, script, err, stderr.String())
 				}
 				if stdout.String() != word {
-					t.Fatalf("%s parsed %s as %q, want the original word %q", shell, shellQuoteWord(word), stdout.String(), word)
+					t.Fatalf("%s parsed %s as %q, want the original word %q", shell.path, shellQuoteWord(word), stdout.String(), word)
 				}
 			}
 		})

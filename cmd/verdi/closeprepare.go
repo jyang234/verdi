@@ -261,7 +261,18 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 	if forceLocal {
 		forceArg = " --force-local"
 	}
+	// The echoed ref is quoted for the same reason every word of the
+	// disposition templates above is: this is a line an operator copies into
+	// a shell, and correctness must not rest on an argument-grammar analysis
+	// holding forever. That analysis is currently narrow but NOT empty:
+	// storyresolve accepts only artifact's scheme:key story refs and
+	// kebab-case spec refs, whose characters are all shell-safe — except
+	// that ParseRef also admits a fragment ref (spec/<name>#<object-id>) and
+	// Resolve ignores the fragment when loading the spec, so
+	// `spec/close-fixture#ac-1` resolves and reaches this line. Under zsh
+	// with extended_glob set, a bare '#' is a pattern operator and the
+	// pasted command dies with "no matches found" before reaching the verb.
 	// vocab:identity — CLI next-command verb-name grammar (identity)
-	fmt.Fprintf(stdout, "close: --prepare: next command: verdi close %s%s\n", storyArg, forceArg)
+	fmt.Fprintf(stdout, "close: --prepare: next command: verdi close %s%s\n", shellQuoteWord(storyArg), forceArg)
 	return 0
 }
