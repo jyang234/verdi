@@ -170,14 +170,21 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 
+	// The same two-shaped recovery the story ritual performs (close.go), on
+	// the same shared helpers so neither ritual can drift: a staging failure
+	// staged nothing and unwinds the branch cut; a commit failure left the
+	// closure paths staged and keeps the branch on purpose.
 	if err := stageClosureSpec(ctx, root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedArchiveMove(specRef.Name, stderr)
+		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
 		return 2
 	}
 	commitMsg := fmt.Sprintf("close: archive %s", specRef.String())
-	closeCommit, err := gitx.CreateCommit(ctx, root, commitMsg)
+	closeCommit, err := closeCreateCommit(ctx, root, commitMsg)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportStagedClosureCommitFailure(specRef.Name, closureBranch, commitMsg, stderr)
 		return 2
 	}
 

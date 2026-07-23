@@ -120,6 +120,21 @@ type closeDeps struct {
 	Model *model.Model
 }
 
+// closeAddPaths and closeCreateCommit are the closure ritual's two post-
+// archive-move git write ops as package-level seams, so a test can force the
+// exact AddPaths/CreateCommit failure each ritual's recovery path must
+// survive. This mirrors `verdi accept`'s already-proven pattern verbatim
+// (accept.go's acceptAddPaths/acceptCreateCommit, spec/obligation-seam ac-3)
+// rather than inventing a second injection style: a real `git add`/`git
+// commit` cannot be made to fail deterministically in a clean hermetic fixture
+// repo, and closeDeps is reserved for real runtime dependencies (a runner, a
+// forge, a provider registry), never for pure fault injection. Production is
+// gitx's own; tests override and restore via defer.
+var (
+	closeAddPaths     = gitx.AddPaths
+	closeCreateCommit = gitx.CreateCommit
+)
+
 // closeExpiryResumeHint is close's freeze-align resume guidance for a
 // bounded-wait expiry (finding
 // judged-close-inherits-aligns-resume-instructions-verbatim): a close caller
@@ -180,13 +195,16 @@ func freezeAlignDeps(deps closeDeps, modelDigest string) alignDeps {
 // the hint promised. This is the single implementation both callers use (the
 // freezeAlignDeps precedent — no per-verb reimplementation to drift).
 //
-// It is called only on the freeze-setup / freeze-align failure path, where the
-// freeze wrote nothing (every runAlignForSpec non-zero return leaves the report
-// on disk untouched) — so close/<name> still points exactly at cutPoint and the
-// working tree's living report is intact — and it returns to originalBranch (or,
-// for a close run from a detached HEAD, the cut commit itself) via the
-// board-guard-free gitx.CheckoutExisting, since the target is that same commit
-// and nothing is lost.
+// It is called on the two post-cut failure paths that committed and staged
+// NOTHING: the freeze-setup / freeze-align failure (where the freeze wrote
+// nothing — every runAlignForSpec non-zero return leaves the report on disk
+// untouched) and the staging failure (where `git add` recorded no index entry).
+// close/<name> therefore still points exactly at cutPoint, and it returns to
+// originalBranch (or, for a close run from a detached HEAD, the cut commit
+// itself) via the board-guard-free gitx.CheckoutExisting, since the target is
+// that same commit and nothing is lost. It is deliberately NOT called on the
+// commit failure, where the closure paths ARE staged and deleting the branch
+// would strand that index (reportStagedClosureCommitFailure).
 //
 // It NEVER discards committed work: it deletes only after proving close/<name>
 // still points at cutPoint (no commit beyond the cut). If anything was somehow
@@ -459,14 +477,22 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		return 2
 	}
 
+	// Staging and committing are the ritual's last two failure points, and
+	// each leaves a different state (see the two report helpers): a staging
+	// failure staged nothing, so the branch cut is unwound exactly as the
+	// freeze-align failure path unwinds it; a commit failure left the closure
+	// paths staged, so the branch is kept on purpose.
 	if err := stageClosureSpec(ctx, root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedArchiveMove(specRef.Name, stderr)
+		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
 		return 2
 	}
 	commitMsg := fmt.Sprintf("close: archive %s (%s)", specRef.String(), spec.Story)
-	closeCommit, err := gitx.CreateCommit(ctx, root, commitMsg)
+	closeCommit, err := closeCreateCommit(ctx, root, commitMsg)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportStagedClosureCommitFailure(specRef.Name, closureBranch, commitMsg, stderr)
 		return 2
 	}
 
@@ -599,13 +625,66 @@ func closureResidueRefusal(ctx context.Context, root, name string, paths []strin
 // NOT "only files the ritual itself wrote" (ledger L-N15(2)): an uncommitted
 // edit inside the target spec directory still rides the archive tree — the
 // same property that lets the living deviation report be frozen in place.
+//
+// The active-zone pathspec is included only when the spec directory is
+// actually tracked. `git add` is FATAL (rc 128) and stages NOTHING when ANY
+// pathspec matches neither the working tree nor the index — a failure mode
+// gitx.AddAll never had. After the archive move the active-zone directory is
+// gone from the working tree, so that pathspec survives on its index entries
+// alone, which exist exactly when the directory is tracked at HEAD: this runs
+// on close/<name> at its cut point, and requireCleanIndex already proved the
+// index equals HEAD before the ritual mutated anything. A spec that was never
+// committed therefore has no deletion to record, and asking git to record one
+// anyway would abort the whole staging step and lose the archive tree with it.
 func stageClosureSpec(ctx context.Context, root, name string) error {
 	active := store.SpecDirRelPath(store.ZoneActive, name)
 	archive := store.SpecDirRelPath(store.ZoneArchive, name)
-	if err := gitx.AddPaths(ctx, root, active, archive); err != nil {
+
+	tracked, err := gitx.PathExistsAt(ctx, root, "HEAD", active)
+	if err != nil {
+		return fmt.Errorf("staging closure paths for spec/%s: %w", name, err)
+	}
+	var paths []string
+	if tracked {
+		paths = append(paths, active)
+	}
+	paths = append(paths, archive)
+
+	if err := closeAddPaths(ctx, root, paths...); err != nil {
 		return fmt.Errorf("staging closure paths for spec/%s: %w", name, err)
 	}
 	return nil
+}
+
+// reportUncommittedArchiveMove discloses the checkout state a staging failure
+// leaves behind — one implementation for both rituals (the freezeAlignDeps
+// precedent: no per-verb copy to drift). The caller unwinds the branch cut,
+// but the archive move itself is NOT rolled back — transactional rollback of
+// every post-branch-cut operational failure is explicitly out of the closure-
+// session design's scope — so silence here would leave the operator to
+// discover a moved spec directory on their own (constitution 2/10: silence is
+// never a pass).
+func reportUncommittedArchiveMove(name string, stderr io.Writer) {
+	active := store.SpecDirRelPath(store.ZoneActive, name)
+	archive := store.SpecDirRelPath(store.ZoneArchive, name)
+	fmt.Fprintf(stderr, "close: nothing was committed, but this run's archive move is already on disk and UNCOMMITTED: %s is gone and %s exists. Restore the checkout before retrying: git restore --source=HEAD --staged --worktree -- %s, then delete the leftover %s directory\n", active, archive, active, archive)
+}
+
+// reportStagedClosureCommitFailure discloses the state a commit failure leaves
+// behind — the shared implementation for both rituals, mirroring
+// reportUncommittedArchiveMove.
+//
+// Unlike the staging failure, this path deliberately does NOT unwind the
+// branch cut: the closure paths are already staged, and deleting close/<name>
+// would strand that index on whatever branch the unwind returned to. Leaving
+// the branch is also the more recoverable state — a single `git commit`
+// completes what the ritual started — and the next `verdi close` recognises
+// exactly this residue rather than blaming the operator for it
+// (closureResidueRefusal).
+func reportStagedClosureCommitFailure(name, closureBranch, commitMsg string, stderr io.Writer) {
+	active := store.SpecDirRelPath(store.ZoneActive, name)
+	archive := store.SpecDirRelPath(store.ZoneArchive, name)
+	fmt.Fprintf(stderr, "close: the closure paths are STAGED on %s and nothing was committed; the branch and the index are left in place on purpose, because deleting either would strand this staged work. Complete it with: git commit -m %q — or abandon it by restoring the active zone (git restore --source=HEAD --staged --worktree -- %s), unstaging the archive zone (git restore --staged -- %s), and deleting the leftover %s directory\n", closureBranch, commitMsg, active, archive, archive)
 }
 
 // foldStory loads spec's authoritative (source: ci) evidence and folds it,

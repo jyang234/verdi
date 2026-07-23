@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/provider/fake"
 	"github.com/jyang234/verdi/internal/store"
@@ -990,6 +992,164 @@ func TestRequireCleanIndex(t *testing.T) {
 			t.Fatalf("requireCleanIndex error = %q, want the \"checking the pre-ritual index\" wrap", err)
 		}
 	})
+}
+
+// TestStageClosureSpec_UntrackedActiveZoneStillStagesTheArchive is the
+// red-first proof for the staging step's new, unwindable failure mode.
+// `git add` is FATAL (rc 128) and stages NOTHING when a pathspec matches
+// neither the working tree nor the index — and after the archive move, the
+// active-zone pathspec matches neither when the spec directory was never
+// committed. gitx.AddAll never had this failure mode.
+//
+// The moved-away-but-TRACKED case (the common one, since `verdi accept`
+// commits the spec directory) is fine: the pathspec matches the index entry
+// and records the deletion. This covers the edge where it does not.
+func TestStageClosureSpec_UntrackedActiveZoneStillStagesTheArchive(t *testing.T) {
+	ctx := context.Background()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
+		Message: "seed a store with no committed spec",
+	}})
+
+	const name = "untracked-fixture"
+	dir := store.ActiveSpecDir(repo.Dir, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte("---\nid: spec/"+name+"\n---\n"), 0o644); err != nil {
+		t.Fatalf("writing untracked spec.md: %v", err)
+	}
+	if err := store.ArchiveMove(repo.Dir, name); err != nil {
+		t.Fatalf("ArchiveMove: %v", err)
+	}
+
+	if err := stageClosureSpec(ctx, repo.Dir, name); err != nil {
+		t.Fatalf("stageClosureSpec(untracked active zone) = %v, want the archive tree staged: an active-zone pathspec with nothing to record is not a reason to stage nothing at all", err)
+	}
+	staged, err := gitx.StagedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("StagedPaths: %v", err)
+	}
+	want := []string{store.SpecRelPath(store.ZoneArchive, name)}
+	if !reflect.DeepEqual(staged, want) {
+		t.Fatalf("staged paths = %#v, want exactly the archive tree %#v", staged, want)
+	}
+}
+
+// TestRunClose_StagingFailure_UnwindsBranchCut is the red-first proof for the
+// unwind gap: a staging failure after the branch cut left HEAD on
+// close/<name>, the spec physically moved to the archive, the report frozen,
+// rollup.json written — and no unwindClosureBranchCut call at all, so the
+// retry died at CheckoutNewBranch's no-clobber refusal. `verdi accept` already
+// solved the identical shape by exposing its two post-flip git write ops as
+// package-level seams (accept.go's acceptAddPaths/acceptCreateCommit,
+// spec/obligation-seam ac-3); this mirrors that proven pattern rather than
+// inventing a new one.
+func TestRunClose_StagingFailure_UnwindsBranchCut(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	originalBranch := gitCurrentBranch(t, repo.Dir)
+	restore := closeAddPaths
+	closeAddPaths = func(context.Context, string, ...string) error {
+		return fmt.Errorf("forced staging failure")
+	}
+	defer func() { closeAddPaths = restore }()
+
+	fp := fake.New()
+	deps := closeDeps{Forge: forgefake.New(), Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(staging failure) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if b := gitCurrentBranch(t, repo.Dir); b != originalBranch {
+		t.Fatalf("current branch = %q, want the original %q restored — the branch cut was not unwound", b, originalBranch)
+	}
+	if hasLocalBranch(t, repo.Dir, "close/close-fixture") {
+		t.Fatal("close/close-fixture still exists after a staging failure — the retry is blocked at the next cut's no-clobber refusal")
+	}
+	if _, ok := fp.PublishedField("jira:CLOSE-1"); ok {
+		t.Fatal("rollup published despite the staging failure")
+	}
+	// Nothing was staged, so the index must still be clean.
+	staged, err := gitx.StagedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("StagedPaths: %v", err)
+	}
+	if len(staged) != 0 {
+		t.Fatalf("index = %#v after a staging failure, want empty", staged)
+	}
+	// The archive move is uncommitted on disk. Silence about that is never a
+	// pass: the operator must be told what state the checkout is in.
+	for _, want := range []string{store.SpecDirRelPath(store.ZoneArchive, "close-fixture"), "UNCOMMITTED"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want it to disclose the uncommitted archive move (%q)", stderr.String(), want)
+		}
+	}
+}
+
+// TestRunClose_CommitFailure_LeavesRecoverableResidue proves the OTHER post-
+// staging failure (a failing pre-commit hook, commit.gpgsign with no key, an
+// unset user.email) leaves a state the operator can actually act on: the
+// branch and the staged closure paths are deliberately KEPT — deleting the
+// branch would strand the staged work on the original branch's index — and
+// both the failure message and the retry's own refusal say exactly that.
+func TestRunClose_CommitFailure_LeavesRecoverableResidue(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	restore := closeCreateCommit
+	closeCreateCommit = func(context.Context, string, string) (string, error) {
+		return "", fmt.Errorf("forced commit failure")
+	}
+	defer func() { closeCreateCommit = restore }()
+
+	fp := fake.New()
+	deps := closeDeps{Forge: forgefake.New(), Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(commit failure) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if _, ok := fp.PublishedField("jira:CLOSE-1"); ok {
+		t.Fatal("rollup published despite the commit failure")
+	}
+	if !hasLocalBranch(t, repo.Dir, "close/close-fixture") {
+		t.Fatal("close/close-fixture was deleted after a commit failure — that strands the staged closure paths on another branch's index")
+	}
+	for _, want := range []string{"close/close-fixture", "git commit"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want recovery guidance naming %q", stderr.String(), want)
+		}
+	}
+
+	// The retry: the ritual's own residue is recognised and explained, rather
+	// than the operator being told to unstage their own half-finished archive.
+	closeCreateCommit = restore
+	var o2, e2 bytes.Buffer
+	got2 := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &o2, &e2)
+	if got2 != 2 {
+		t.Fatalf("retry after a commit failure = %d, want operational exit 2 (the guard opens no new pass path); stdout=%s stderr=%s", got2, o2.String(), e2.String())
+	}
+	if strings.Contains(e2.String(), "commit or unstage them before running the ritual") {
+		t.Fatalf("retry stderr = %q, want residue-accurate guidance rather than the generic staged-work advice", e2.String())
+	}
+	for _, want := range []string{"spec/close-fixture", "interrupted", "close/close-fixture"} {
+		if !strings.Contains(e2.String(), want) {
+			t.Fatalf("retry stderr = %q, want it to carry %q", e2.String(), want)
+		}
+	}
 }
 
 func TestStageClosureSpec_AddPathsFailurePreservesUnrelatedState(t *testing.T) {

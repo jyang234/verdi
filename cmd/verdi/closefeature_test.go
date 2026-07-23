@@ -549,6 +549,73 @@ func TestRunCloseFeature_PreExistingStagedPathsRefusedBeforeMutation(t *testing.
 	}
 }
 
+// TestRunCloseFeature_StagingAndCommitFailuresRecover is the feature half of
+// the story ritual's own post-archive-move recovery proof (close_test.go's
+// TestRunClose_StagingFailure_UnwindsBranchCut and
+// TestRunClose_CommitFailure_LeavesRecoverableResidue). Both rituals cut
+// close/<name> before the same shared staging step, so both need the same two
+// recoveries; driving them through runClose keeps the feature path from
+// silently regressing while the story path stays green.
+func TestRunCloseFeature_StagingAndCommitFailuresRecover(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a staging failure unwinds the branch cut", func(t *testing.T) {
+		opts := defaultCloseFeatureFixtureOpts()
+		repo := buildCloseFeatureRepo(t, opts)
+		seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+		writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+		originalBranch := gitCurrentBranch(t, repo.Dir)
+		restore := closeAddPaths
+		closeAddPaths = func(context.Context, string, ...string) error {
+			return fmt.Errorf("forced staging failure")
+		}
+		defer func() { closeAddPaths = restore }()
+
+		var stdout, stderr bytes.Buffer
+		got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("runClose(feature staging failure) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if b := gitCurrentBranch(t, repo.Dir); b != originalBranch {
+			t.Fatalf("current branch = %q, want the original %q restored — the feature ritual's branch cut was not unwound", b, originalBranch)
+		}
+		if hasLocalBranch(t, repo.Dir, "close/close-feature-fixture") {
+			t.Fatal("close/close-feature-fixture still exists after a staging failure — the retry is blocked at the next cut")
+		}
+		if !strings.Contains(stderr.String(), "UNCOMMITTED") {
+			t.Fatalf("stderr = %q, want the uncommitted archive move disclosed", stderr.String())
+		}
+	})
+
+	t.Run("a commit failure keeps the branch and explains the recovery", func(t *testing.T) {
+		opts := defaultCloseFeatureFixtureOpts()
+		repo := buildCloseFeatureRepo(t, opts)
+		seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+		writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+		restore := closeCreateCommit
+		closeCreateCommit = func(context.Context, string, string) (string, error) {
+			return "", fmt.Errorf("forced commit failure")
+		}
+		defer func() { closeCreateCommit = restore }()
+
+		var stdout, stderr bytes.Buffer
+		got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("runClose(feature commit failure) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if !hasLocalBranch(t, repo.Dir, "close/close-feature-fixture") {
+			t.Fatal("close/close-feature-fixture was deleted after a commit failure — that strands the staged closure paths")
+		}
+		for _, want := range []string{"close/close-feature-fixture", "git commit"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want recovery guidance naming %q", stderr.String(), want)
+			}
+		}
+	})
+}
+
 func TestRunCloseFeature_UnrelatedWorkingTreeChangesSurviveAndStayOutOfCommit(t *testing.T) {
 	opts := defaultCloseFeatureFixtureOpts()
 	repo := buildCloseFeatureRepo(t, opts)
