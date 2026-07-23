@@ -20,11 +20,12 @@ import (
 // empty index while `git commit` still records the staged change (both proven
 // against real git in stagedpaths_test.go):
 //
-//   - Submodule pointer bumps. `diff.ignoreSubmodules=all` in any config
-//     scope, or a COMMITTED .gitmodules carrying `ignore = all` (so every
-//     clone inherits it), hides a staged gitlink change from `git diff
-//     --cached`. `git diff-index --cached` is measurably NOT a fix: the
-//     .gitmodules form hides the bump from it too.
+//   - Submodule pointer bumps. Every `ignore` setting — `diff.ignoreSubmodules`
+//     or `submodule.<name>.ignore` in any config scope, or a COMMITTED
+//     .gitmodules carrying `ignore = all` (so every clone inherits it) — hides
+//     a staged gitlink change from `git diff --cached`. `git diff-index
+//     --cached` is measurably NOT a fix: the two per-submodule forms hide the
+//     bump from it too.
 //   - Staged paths outside dir. `diff.relative=true` scopes diff output to the
 //     process's working directory, and this package always runs with
 //     cmd.Dir = the store root — which store.FindRoot resolves by walking up
@@ -35,18 +36,27 @@ import (
 // `git status --porcelain` answers both correctly: its v1 format is documented
 // as backward-compatible, its paths are repository-root-relative regardless of
 // the working directory or status.relativePaths, and it reports index-vs-HEAD
-// differences it is not asked to suppress. The explicit flags close its own
-// two configurable holes and one cost:
+// differences it is not asked to suppress. The two explicit flags buy a cost
+// reduction and a parsing guarantee, nothing about correctness:
 //
-//   - --ignore-submodules=none overrides both diff.ignoreSubmodules and
-//     .gitmodules' per-submodule `ignore`, so no repository config can blind
-//     the guard to a staged pointer bump.
 //   - --untracked-files=no drops the untracked scan entirely: untracked files
 //     are legal during closure and are filtered out below anyway, and the scan
 //     is the expensive part of status on a large checkout.
 //   - -z emits NUL-delimited, never-quoted paths, so every legal path byte
 //     (whitespace, newlines, non-ASCII) survives core.quotePath.
-var stagedPathsArgs = []string{"status", "--porcelain", "-z", "--ignore-submodules=none", "--untracked-files=no"}
+//
+// NO --ignore-submodules flag is passed, in either direction, and that is a
+// measured choice rather than an omission. An `ignore` setting suppresses only
+// status's WORKTREE column; the INDEX column reports a staged gitlink bump as
+// `M` under every configuration (asserted per-configuration in
+// stagedpaths_test.go), and the index column is the only one parseStagedStatus
+// reads. `--ignore-submodules=none` would therefore change no answer this
+// guard can see, while forcing status to recurse into every submodule worktree
+// hunting for dirty and untracked content — the same expensive scan
+// --untracked-files=no exists to drop, overriding an operator's own explicit
+// "do not scan submodules" setting, in a guard that runs inside other people's
+// repositories.
+var stagedPathsArgs = []string{"status", "--porcelain", "-z", "--untracked-files=no"}
 
 // StagedPaths returns the repository-relative paths whose index entries
 // differ from HEAD, sorted so callers can report them deterministically.

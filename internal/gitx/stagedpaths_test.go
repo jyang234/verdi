@@ -168,12 +168,20 @@ func stageGitlinkBump(t *testing.T, dir, gitmodules string) {
 }
 
 // TestStagedPaths_SeesStagedSubmoduleBumpUnderIgnoreConfigs is the red-first
-// proof that the guard's primitive may not be `git diff --cached`: two
-// ORDINARY git configurations make that command report an empty index while
-// `git commit` still records the staged submodule pointer bump, so a fail-open
+// proof that the guard's primitive may not be `git diff --cached`: ORDINARY
+// git configurations make that command report an empty index while `git
+// commit` still records the staged submodule pointer bump, so a fail-open
 // StagedPaths lets a closure commit absorb unowned staged work. verdi runs
 // inside other people's repositories, so "this repo has no submodules" is not
 // a defense.
+//
+// It also pins the reason stagedPathsArgs passes NO --ignore-submodules flag.
+// Every one of these configurations leaves the INDEX column reporting the bump
+// — that column is the only one parseStagedStatus reads — so forcing
+// `--ignore-submodules=none` changes no answer the guard can see while making
+// status recurse into every submodule worktree. Asserting the property here is
+// what keeps the doc comment honest: deleting the flag used to leave this
+// whole suite green, which meant a comment claiming a property no test proved.
 func TestStagedPaths_SeesStagedSubmoduleBumpUnderIgnoreConfigs(t *testing.T) {
 	ctx := context.Background()
 	const plainGitmodules = "[submodule \"sub\"]\n\tpath = sub\n\turl = ./sub\n"
@@ -183,6 +191,11 @@ func TestStagedPaths_SeesStagedSubmoduleBumpUnderIgnoreConfigs(t *testing.T) {
 		name       string
 		gitmodules string
 		config     [][2]string
+		// diffIndexAlsoBlind records whether `git diff-index --cached` — the
+		// obvious "but surely the plumbing form is safe" answer — is blinded
+		// too. Asserted only where the doc claims it, never in the other
+		// direction, so this test never over-pins git's own behaviour.
+		diffIndexAlsoBlind bool
 	}{
 		{
 			name:       "diff.ignoreSubmodules=all in repository config",
@@ -190,8 +203,21 @@ func TestStagedPaths_SeesStagedSubmoduleBumpUnderIgnoreConfigs(t *testing.T) {
 			config:     [][2]string{{"diff.ignoreSubmodules", "all"}},
 		},
 		{
-			name:       "committed .gitmodules carrying ignore = all (every clone inherits it)",
-			gitmodules: ignoringGitmodules,
+			name:               "committed .gitmodules carrying ignore = all (every clone inherits it)",
+			gitmodules:         ignoringGitmodules,
+			diffIndexAlsoBlind: true,
+		},
+		{
+			name:               "submodule.<name>.ignore=all in repository config",
+			gitmodules:         plainGitmodules,
+			config:             [][2]string{{"submodule.sub.ignore", "all"}},
+			diffIndexAlsoBlind: true,
+		},
+		{
+			name:               "every ignore scope at once",
+			gitmodules:         ignoringGitmodules,
+			config:             [][2]string{{"diff.ignoreSubmodules", "all"}, {"submodule.sub.ignore", "all"}},
+			diffIndexAlsoBlind: true,
 		},
 	}
 	for _, tc := range cases {
@@ -214,6 +240,17 @@ func TestStagedPaths_SeesStagedSubmoduleBumpUnderIgnoreConfigs(t *testing.T) {
 			}
 			if !found {
 				t.Fatalf("StagedPaths = %#v, want the staged submodule pointer bump %q named; git would still commit it, so an empty answer here is a fail-open safety guard", got, "sub")
+			}
+
+			// The other half of the doc's claim, previously unasserted: the diff
+			// forms this guard rejected really are blind here.
+			if out := runGitForTest(t, repo.Dir, "diff", "--cached", "--name-only"); strings.TrimSpace(out) != "" {
+				t.Fatalf("`git diff --cached --name-only` = %q, want empty — the doc's stated reason for rejecting it as the primitive", out)
+			}
+			if tc.diffIndexAlsoBlind {
+				if out := runGitForTest(t, repo.Dir, "diff-index", "--cached", "--name-only", "HEAD"); strings.TrimSpace(out) != "" {
+					t.Fatalf("`git diff-index --cached --name-only HEAD` = %q, want empty — the doc claims the plumbing form is measurably not a fix here either", out)
+				}
 			}
 		})
 	}
