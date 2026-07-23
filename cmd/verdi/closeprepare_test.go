@@ -614,6 +614,92 @@ func TestRunPrepare_JudgedRegenerationDisclosureNamesReaffirmationNotLoss(t *tes
 	}
 }
 
+// writePrepareReportWithNotResurfaced is writePrepareReport plus an explicit
+// not-resurfaced: section — the shape only a hand-edited or externally-written
+// report can carry for a non-judged entry, which is exactly the shape under
+// test.
+func writePrepareReportWithNotResurfaced(t *testing.T, root, specName, covers, findingsYAML, notResurfacedYAML string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", specName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := fmt.Sprintf(`---
+schema: verdi.deviation/v1
+covers: %s
+findings:
+%snot-resurfaced:
+%sdigest: sha256:%s
+---
+# Alignment report
+`, covers, findingsYAML, notResurfacedYAML, strings.Repeat("0", 64))
+	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRunPrepare_DisclosesDiscardedNotResurfacedDispositions covers the half of
+// the report the regeneration disclosure never looked at.
+//
+// discloseRegeneratedDispositions iterated findings: only. A COMPUTED-kind
+// dispositioned entry in not-resurfaced: is destroyed by a refresh with no
+// disclosure at all: internal/align/reaffirm.go filters priors to judged twice
+// over (once when indexing them, once when rebuilding the section), so such an
+// entry is neither carried nor persisted.
+//
+// Nothing in the tool produces a computed not-resurfaced entry, so reaching
+// this needs a hand-edited or externally-written report — which is precisely
+// why it is not dismissible. artifact.DeviationFrontmatter.Validate accepts the
+// shape, and the sibling reader over the same working-tree file takes the
+// opposite posture on purpose (disposition.go's findNotResurfacedIndex scopes
+// itself to judged as "belt-and-suspenders ... but this verb operates over a
+// working-tree file a human can hand-edit and must not rely on that invariant
+// holding by construction"). This holds the same standard.
+func TestRunPrepare_DisclosesDiscardedNotResurfacedDispositions(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	const findings = `  - { id: f-1, kind: computed, text: "still open" }
+`
+	const notResurfaced = `  - { id: nr-computed, kind: computed, text: "an older boundary reading", disposition: accepted-deviation, note: "ratified by the owner" }
+  - { id: judged-nr-kept, kind: judged, text: "an older semantic reading", disposition: accepted-deviation, note: "accepted for this release" }
+`
+	writePrepareReportWithNotResurfaced(t, repo.Dir, "close-fixture", strings.Repeat("a", 40), findings, notResurfaced)
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+
+	deps := closeDeps{Runner: upstream.NewFakeRunner(), Forge: forgefake.New(), JudgeCmd: alignFakeJudgeOK(t)}
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+	if rc != 1 {
+		t.Fatalf("runPrepare(stale report) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+
+	// Ground truth: the computed entry is gone from BOTH sections, and the
+	// judged one beside it is untouched.
+	updated := decodeReportFile(t, reportPath)
+	if f, ok := findingByID(updated.NotResurfaced, "nr-computed"); ok {
+		t.Fatalf("premise broken: the computed not-resurfaced entry survived (%+v); there would be nothing to disclose", f)
+	}
+	if f, ok := findingByID(updated.Findings, "nr-computed"); ok {
+		t.Fatalf("premise broken: the computed not-resurfaced entry was carried into findings (%+v)", f)
+	}
+	kept, ok := findingByID(updated.NotResurfaced, "judged-nr-kept")
+	if !ok || kept.Note != "accepted for this release" {
+		t.Fatalf("judged not-resurfaced entry = %+v (present=%v), want it persisted verbatim", kept, ok)
+	}
+
+	out := stdout.String()
+	discloseAt := strings.Index(out, "["+prepareRegenerationSource+"] spec/close-fixture: nr-computed")
+	if discloseAt < 0 {
+		t.Fatalf("a human ruling in not-resurfaced: was destroyed with no disclosure at all:\n%s", out)
+	}
+	alignAt := strings.Index(out, "close: --prepare: ALIGNMENT REQUIRED")
+	if alignAt < 0 || discloseAt > alignAt {
+		t.Fatalf("the disclosure must precede the refresh (disclosure at %d, refresh at %d):\n%s", discloseAt, alignAt, out)
+	}
+	if strings.Contains(out, "] spec/close-fixture: judged-nr-kept") {
+		t.Fatalf("a judged not-resurfaced entry is persisted unchanged and must not be disclosed as a cost:\n%s", out)
+	}
+}
+
 // TestRunPrepare_NoRegenerationDisclosureWithoutDispositionsToLose is the
 // negative half: the disclosure is a report of real loss, so an absent
 // report and a stale report carrying no human disposition must not print

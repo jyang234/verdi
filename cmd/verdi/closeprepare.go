@@ -97,18 +97,61 @@ func discloseRegeneratedDispositions(report *artifact.DeviationFrontmatter, spec
 		return 0
 	}
 	printed := 0
+	emit := func(text string) {
+		fmt.Fprintln(stdout, disclosure.Render(disclosure.New(
+			prepareRegenerationSource,
+			specRef.String(),
+			text,
+		)))
+		printed++
+	}
 	for _, finding := range report.Findings {
 		if !finding.Dispositioned() {
 			continue
 		}
-		fmt.Fprintln(stdout, disclosure.Render(disclosure.New(
-			prepareRegenerationSource,
-			specRef.String(),
-			regeneratedDispositionText(finding, head),
-		)))
-		printed++
+		emit(regeneratedDispositionText(finding, head))
+	}
+	for _, finding := range report.NotResurfaced {
+		if !finding.Dispositioned() || finding.Kind == artifact.FindingJudged {
+			continue
+		}
+		emit(discardedNotResurfacedText(finding, head))
 	}
 	return printed
+}
+
+// discardedNotResurfacedText is the disclosure for a dispositioned NON-JUDGED
+// entry sitting in not-resurfaced: — a human ruling the refresh discards
+// outright, with nothing anywhere to recover it from.
+//
+// internal/align's ReconcileJudged filters priors to judged twice over (once
+// indexing them, once rebuilding the section), so such an entry is neither
+// carried into findings: nor persisted back into not-resurfaced:. It simply
+// stops existing.
+//
+// Nothing in the tool produces a non-judged not-resurfaced entry, so reaching
+// this state needs a hand-edited or externally-written report — which is why
+// the check belongs here rather than being assumed away.
+// artifact.DeviationFrontmatter.Validate accepts the shape, and the sibling
+// reader over this same working-tree file holds exactly this posture on
+// purpose: disposition.go's findNotResurfacedIndex scopes itself to judged as
+// "belt-and-suspenders ... but this verb operates over a working-tree file a
+// human can hand-edit and must not rely on that invariant holding by
+// construction". Preparation reads the same file and owes the same standard —
+// and unlike that verb, preparation is the one that destroys it.
+//
+// A JUDGED entry there is deliberately silent: it is persisted unchanged, so
+// there is no cost to disclose and every reason not to dilute the two arms
+// beside it that name real ones.
+func discardedNotResurfacedText(finding artifact.Finding, head string) string {
+	note := ""
+	if finding.Note != "" {
+		note = " and a human-authored note"
+	}
+	return fmt.Sprintf(
+		"%s (%s) sits in not-resurfaced: holding the human disposition %q%s; the refresh about to run for HEAD %s rebuilds that section from JUDGED priors alone — the reaffirmation machinery is judged-only — so a %s entry there is neither carried nor persisted and this one is discarded outright",
+		finding.ID, finding.Kind, finding.Disposition, note, head, finding.Kind,
+	)
 }
 
 // regeneratedDispositionText is one disclosure's human-readable half: which
