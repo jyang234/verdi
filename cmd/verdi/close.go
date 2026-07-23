@@ -326,6 +326,11 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 // whole closure ritual and return the exit code (CLAUDE.md: 0 clean,
 // 1 the closure gate did not hold, 2 operational error).
 func runClose(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, stdout, stderr io.Writer) int {
+	if err := requireUnstagedClosureIndex(ctx, root); err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -434,7 +439,7 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		return 2
 	}
 
-	if err := gitx.AddAll(ctx, root); err != nil {
+	if err := stageClosureSpec(ctx, root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
@@ -465,6 +470,34 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	fmt.Fprintln(stdout, "close: this verb stops at the branch (dc-3) — push it and open the closure MR/PR yourself:")
 	fmt.Fprintf(stdout, "  git push -u origin %s\n", closureBranch)
 	return 0
+}
+
+// requireUnstagedClosureIndex refuses to begin either close ritual when the
+// caller already owns staged work. Close creates a commit, so inheriting index
+// entries would make that commit claim changes the ritual did not produce.
+// This checks only the index: unrelated unstaged and untracked work is legal
+// and intentionally survives closure.
+func requireUnstagedClosureIndex(ctx context.Context, root string) error {
+	paths, err := gitx.StagedPaths(ctx, root)
+	if err != nil {
+		return fmt.Errorf("checking the pre-close index: %w", err)
+	}
+	if len(paths) != 0 {
+		return fmt.Errorf("refusing to run with pre-existing staged paths %q; commit or unstage them before close", paths)
+	}
+	return nil
+}
+
+// stageClosureSpec stages exactly the target spec's active-zone deletion and
+// archive-zone tree. Story and feature closure share this one path assembler
+// so neither ritual can widen its commit ownership independently.
+func stageClosureSpec(ctx context.Context, root, name string) error {
+	active := store.SpecDirRelPath(store.ZoneActive, name)
+	archive := store.SpecDirRelPath(store.ZoneArchive, name)
+	if err := gitx.AddPaths(ctx, root, active, archive); err != nil {
+		return fmt.Errorf("staging closure paths for spec/%s: %w", name, err)
+	}
+	return nil
 }
 
 // foldStory loads spec's authoritative (source: ci) evidence and folds it,

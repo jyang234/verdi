@@ -494,6 +494,113 @@ func TestRunCloseFeature_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestRunCloseFeature_PreExistingStagedPathsRefusedBeforeMutation(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-feature-fixture")
+	reportBefore, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading pre-close feature deviation report: %v", err)
+	}
+	appendCloseTestFile(t, filepath.Join(repo.Dir, ".verdi", "verdi.yaml"), "# staged feature-close note\n")
+	gitOutput(t, repo.Dir, "add", ".verdi/verdi.yaml")
+
+	fp := fake.New()
+	var stdout, stderr bytes.Buffer
+	got := runClose(context.Background(), repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fp), &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(feature with staged path) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), ".verdi/verdi.yaml") {
+		t.Fatalf("stderr = %q, want staged path named", stderr.String())
+	}
+	if branch := gitCurrentBranch(t, repo.Dir); branch != "main" {
+		t.Fatalf("current branch = %q, want main (refusal must precede feature branch cut)", branch)
+	}
+	if hasLocalBranch(t, repo.Dir, "close/close-feature-fixture") {
+		t.Fatal("close/close-feature-fixture exists despite pre-existing staged path")
+	}
+	activeSpec, err := os.ReadFile(store.ActiveSpecPath(repo.Dir, "close-feature-fixture"))
+	if err != nil {
+		t.Fatalf("reading active feature spec after refusal: %v", err)
+	}
+	wantActiveSpec := closeFeatureSpecMD(scaffoldSHAFromRepo(t, repo), opts.FeatureStory)
+	if string(activeSpec) != wantActiveSpec {
+		t.Fatal("active feature spec changed despite staged-path refusal")
+	}
+	if _, err := os.Stat(store.ArchiveSpecDir(repo.Dir, "close-feature-fixture")); !os.IsNotExist(err) {
+		t.Fatalf("feature archive directory exists despite staged-path refusal: %v", err)
+	}
+	reportAfter, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading post-refusal feature deviation report: %v", err)
+	}
+	if !bytes.Equal(reportAfter, reportBefore) {
+		t.Fatal("feature deviation report changed despite staged-path refusal")
+	}
+	if _, err := os.Stat(filepath.Join(store.ActiveSpecDir(repo.Dir, "close-feature-fixture"), "rollup.json")); !os.IsNotExist(err) {
+		t.Fatalf("feature rollup.json exists despite staged-path refusal: %v", err)
+	}
+	if _, ok := fp.PublishedField(""); ok {
+		t.Fatal("feature rollup published despite staged-path refusal")
+	}
+}
+
+func TestRunCloseFeature_UnrelatedWorkingTreeChangesSurviveAndStayOutOfCommit(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	modifiedPath := filepath.Join(repo.Dir, ".verdi", "verdi.yaml")
+	const modifiedSuffix = "# unrelated feature-close working-tree edit\n"
+	appendCloseTestFile(t, modifiedPath, modifiedSuffix)
+	untrackedRel := "feature-closure-scratch.txt"
+	untrackedPath := filepath.Join(repo.Dir, untrackedRel)
+	const untrackedContent = "keep this feature-close scratch file\n"
+	if err := os.WriteFile(untrackedPath, []byte(untrackedContent), 0o644); err != nil {
+		t.Fatalf("writing unrelated feature-close untracked file: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runClose(context.Background(), repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runClose(feature with unrelated dirty files) = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+
+	modifiedAfter, err := os.ReadFile(modifiedPath)
+	if err != nil {
+		t.Fatalf("reading unrelated modified feature-close file: %v", err)
+	}
+	if !strings.HasSuffix(string(modifiedAfter), modifiedSuffix) {
+		t.Fatalf("unrelated modified feature-close file did not survive: %q", modifiedAfter)
+	}
+	untrackedAfter, err := os.ReadFile(untrackedPath)
+	if err != nil {
+		t.Fatalf("reading unrelated untracked feature-close file: %v", err)
+	}
+	if string(untrackedAfter) != untrackedContent {
+		t.Fatalf("unrelated feature-close untracked file = %q, want %q", untrackedAfter, untrackedContent)
+	}
+	status := gitOutput(t, repo.Dir, "status", "--short")
+	for _, want := range []string{" M .verdi/verdi.yaml", "?? " + untrackedRel} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("git status after feature close = %q, want surviving working-tree entry %q", status, want)
+		}
+	}
+	assertClosureCommitOwnsOnlySpecPaths(t, repo.Dir, "close-feature-fixture")
+	if got := strings.TrimSpace(gitOutput(t, repo.Dir, "ls-tree", "-r", "--name-only", "HEAD", "--", untrackedRel)); got != "" {
+		t.Fatalf("unrelated feature-close untracked file entered closure commit tree: %q", got)
+	}
+	committedManifest := gitOutput(t, repo.Dir, "show", "HEAD:.verdi/verdi.yaml")
+	if strings.Contains(committedManifest, modifiedSuffix) {
+		t.Fatal("unrelated feature-close tracked modification entered closure commit")
+	}
+}
+
 // scaffoldSHAFromRepo re-derives the scaffold layer's SHA from an already-
 // built repo's own history (Heads[0] — the first layer every fixture in
 // this file builds) rather than recomputing it via a second throwaway

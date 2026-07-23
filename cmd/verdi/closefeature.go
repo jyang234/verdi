@@ -170,7 +170,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 
-	if err := gitx.AddAll(ctx, root); err != nil {
+	if err := stageClosureSpec(ctx, root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}

@@ -317,6 +317,123 @@ func TestRunClose_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestRunClose_PreExistingStagedPathsRefusedBeforeMutation(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+	reportBefore, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading pre-close deviation report: %v", err)
+	}
+	appendCloseTestFile(t, filepath.Join(repo.Dir, ".verdi", "verdi.yaml"), "# staged manifest note\n")
+	appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged binding note\n")
+	gitOutput(t, repo.Dir, "add", ".verdi/verdi.yaml", "verdi.bindings.yaml")
+
+	fp := fake.New()
+	deps := closeDeps{Forge: forgefake.New(), Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(with staged paths) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	for _, path := range []string{".verdi/verdi.yaml", "verdi.bindings.yaml"} {
+		if !strings.Contains(stderr.String(), path) {
+			t.Fatalf("stderr = %q, want staged path %q named", stderr.String(), path)
+		}
+	}
+	if branch := gitCurrentBranch(t, repo.Dir); branch != "main" {
+		t.Fatalf("current branch = %q, want main (refusal must precede branch cut)", branch)
+	}
+	if hasLocalBranch(t, repo.Dir, "close/close-fixture") {
+		t.Fatal("close/close-fixture exists despite pre-existing staged paths")
+	}
+	activeSpec, err := os.ReadFile(store.ActiveSpecPath(repo.Dir, "close-fixture"))
+	if err != nil {
+		t.Fatalf("reading active spec after refusal: %v", err)
+	}
+	if string(activeSpec) != closeFixtureStorySpecMD {
+		t.Fatal("active spec changed despite staged-path refusal")
+	}
+	if _, err := os.Stat(store.ArchiveSpecDir(repo.Dir, "close-fixture")); !os.IsNotExist(err) {
+		t.Fatalf("archive directory exists despite staged-path refusal: %v", err)
+	}
+	reportAfter, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading post-refusal deviation report: %v", err)
+	}
+	if !bytes.Equal(reportAfter, reportBefore) {
+		t.Fatal("deviation report changed despite staged-path refusal")
+	}
+	if _, err := os.Stat(filepath.Join(store.ActiveSpecDir(repo.Dir, "close-fixture"), "rollup.json")); !os.IsNotExist(err) {
+		t.Fatalf("rollup.json exists despite staged-path refusal: %v", err)
+	}
+	if _, ok := fp.PublishedField("jira:CLOSE-1"); ok {
+		t.Fatal("rollup published despite staged-path refusal")
+	}
+}
+
+func TestRunClose_UnrelatedWorkingTreeChangesSurviveAndStayOutOfCommit(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	modifiedPath := filepath.Join(repo.Dir, "verdi.bindings.yaml")
+	const modifiedSuffix = "# unrelated working-tree edit\n"
+	appendCloseTestFile(t, modifiedPath, modifiedSuffix)
+	untrackedRel := "closure-scratch.txt"
+	untrackedPath := filepath.Join(repo.Dir, untrackedRel)
+	const untrackedContent = "keep this untracked scratch file\n"
+	if err := os.WriteFile(untrackedPath, []byte(untrackedContent), 0o644); err != nil {
+		t.Fatalf("writing unrelated untracked file: %v", err)
+	}
+
+	deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runClose(with unrelated dirty files) = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+
+	modifiedAfter, err := os.ReadFile(modifiedPath)
+	if err != nil {
+		t.Fatalf("reading unrelated modified file after close: %v", err)
+	}
+	if !strings.HasSuffix(string(modifiedAfter), modifiedSuffix) {
+		t.Fatalf("unrelated modified file did not survive close: %q", modifiedAfter)
+	}
+	untrackedAfter, err := os.ReadFile(untrackedPath)
+	if err != nil {
+		t.Fatalf("reading unrelated untracked file after close: %v", err)
+	}
+	if string(untrackedAfter) != untrackedContent {
+		t.Fatalf("unrelated untracked file = %q, want %q", untrackedAfter, untrackedContent)
+	}
+	status := gitOutput(t, repo.Dir, "status", "--short")
+	for _, want := range []string{" M verdi.bindings.yaml", "?? " + untrackedRel} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("git status after close = %q, want surviving working-tree entry %q", status, want)
+		}
+	}
+	assertClosureCommitOwnsOnlySpecPaths(t, repo.Dir, "close-fixture")
+	if got := strings.TrimSpace(gitOutput(t, repo.Dir, "ls-tree", "-r", "--name-only", "HEAD", "--", untrackedRel)); got != "" {
+		t.Fatalf("unrelated untracked file entered closure commit tree: %q", got)
+	}
+	committedBindings := gitOutput(t, repo.Dir, "show", "HEAD:verdi.bindings.yaml")
+	if strings.Contains(committedBindings, modifiedSuffix) {
+		t.Fatal("unrelated tracked modification entered closure commit")
+	}
+}
+
 // TestRunClose_NotEligible_ExitsOneWithNoSideEffects proves the closure
 // gate actually gates: with no evidence at all, `verdi close` exits 1,
 // creates no closure branch, moves nothing, and publishes nothing.
@@ -826,6 +943,45 @@ func TestCmdClose_Negative(t *testing.T) {
 func gitCurrentBranch(t *testing.T, dir string) string {
 	t.Helper()
 	return strings.TrimSpace(gitOutput(t, dir, "symbolic-ref", "--short", "HEAD"))
+}
+
+func appendCloseTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("opening %s for append: %v", path, err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		t.Fatalf("appending to %s: %v", path, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("closing %s after append: %v", path, err)
+	}
+}
+
+func assertClosureCommitOwnsOnlySpecPaths(t *testing.T, dir, name string) {
+	t.Helper()
+	activePrefix := store.SpecDirRelPath(store.ZoneActive, name) + "/"
+	archivePrefix := store.SpecDirRelPath(store.ZoneArchive, name) + "/"
+	changed := strings.Fields(gitOutput(t, dir, "diff", "--no-renames", "--name-only", "HEAD^", "HEAD"))
+	if len(changed) == 0 {
+		t.Fatal("closure commit changed no paths")
+	}
+	var sawActive, sawArchive bool
+	for _, path := range changed {
+		switch {
+		case strings.HasPrefix(path, activePrefix):
+			sawActive = true
+		case strings.HasPrefix(path, archivePrefix):
+			sawArchive = true
+		default:
+			t.Fatalf("closure commit changed unrelated path %q; all changed paths: %v", path, changed)
+		}
+	}
+	if !sawActive || !sawArchive {
+		t.Fatalf("closure commit paths = %v, want both %s and %s trees", changed, activePrefix, archivePrefix)
+	}
 }
 
 func gitOutput(t *testing.T, dir string, args ...string) string {
