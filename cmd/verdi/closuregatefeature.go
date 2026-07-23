@@ -46,6 +46,7 @@ import (
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/model"
@@ -132,6 +133,13 @@ func runFeatureClosureGateOutcome(ctx context.Context, root string, spec *artifa
 	label := "closure(" + mdl.DisplayClass("feature") + "): "
 	return reportClosureGateConditions(stdout, label, []gateCondition{cond1, cond2, cond3, cond4, cond5, cond6}), nil
 }
+
+// supersededExclusionSource is the disclosure source id for L-N12's
+// superseded-implementing-story exclusion — the producing condition, in
+// internal/disclosure's own producer-id convention (the surface and the rule,
+// never a new taxonomy), matching the "gate:spec-stale-feature-union" id the
+// same condition already uses for its own disclosed verdict.
+const supersededExclusionSource = "gate:spec-stale-superseded-exclusion"
 
 // renumbered returns c with Name replaced by name, preserving every other
 // field — used to re-present a reused story-gate condition (whose own
@@ -300,9 +308,10 @@ func checkAllImplementingStoriesClosed(stories []implementingStoryEdges, mdl *mo
 // spec-stale counterweight's own prescribed remedy, so counting the
 // predecessor's adjudications (which concern text the successor replaced) would
 // punish the exact remedy the budget demands — but NEVER silently: each such
-// story whose archive carries accepted-deviations is disclosed in a named line
-// riding the condition's Extra (three-valued honesty), never the silent zero
-// ac-4 forbids.
+// story whose archive carries accepted-deviations is DISCLOSED, through the
+// shared internal/disclosure seam (spec/disclosure-seam-v2 ac-1: never a local
+// fmt.Sprintf), riding the condition's Extra (three-valued honesty) — never
+// the silent zero ac-4 forbids.
 func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, stories []implementingStoryEdges, supersededStoryRefs []string, mdl *model.Model) (gateCondition, error) {
 	name := "4. no unresolved spec-stale flag"
 
@@ -381,10 +390,20 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 	// predecessor's adjudications concern text the successor replaced; counting
 	// them would punish the very remedy the spec-stale budget demands), but it
 	// must never be SILENT. Each superseded story whose archived report carries
-	// accepted-deviations is disclosed in a named line naming the story and the
-	// excluded count, riding the condition's Extra on every verdict alongside the
-	// tally. A superseded story with no archive (or none carrying
-	// accepted-deviations) has nothing to exclude and nothing to disclose.
+	// accepted-deviations is disclosed — naming the story and the excluded count
+	// — riding the condition's Extra on every verdict alongside the tally. A
+	// superseded story with no archive (or none carrying accepted-deviations)
+	// has nothing to exclude and nothing to disclose.
+	//
+	// It is rendered through the shared seam (disclosure.New/Render), not a
+	// local fmt.Sprintf. That is what spec/disclosure-seam-v2 ac-1 already
+	// required of every disclosure call site, and the hand-formatted line this
+	// replaces violated it twice over: a reader who recognized every other
+	// disclosure did not recognize this one, and its 7-space indent kept the
+	// reporting loop's own count (reportClosureGateConditions) from ever seeing
+	// it — so a feature preflight could print this exclusion and still summarize
+	// READY claiming ZERO disclosures. It changes the BASIS of the spec-stale
+	// verdict, so it is a disclosure in substance, and now in form.
 	sortedSuperseded := append([]string(nil), supersededStoryRefs...)
 	sort.Strings(sortedSuperseded)
 	var supersededExtra []string
@@ -405,9 +424,14 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 		if n == 0 {
 			continue
 		}
-		supersededExtra = append(supersededExtra, fmt.Sprintf(
-			"       %s %s %s's archived report (%d accepted-deviation(s)) excluded — supersession is the spec-stale budget's own prescribed remedy, taken",
-			supersededWord, storyWord, ref, n))
+		// The story ref is the disclosure's SCOPE (the artifact this
+		// disclosure is about), so the text never repeats it; the class and
+		// state words resolve through the model exactly as the tally's do
+		// (L-M13a(6)).
+		supersededExtra = append(supersededExtra, disclosure.Render(disclosure.New(
+			supersededExclusionSource, ref, fmt.Sprintf(
+				"this %s %s's archived report (%d accepted-deviation(s)) is excluded from the %s-close budget — supersession is the spec-stale budget's own prescribed remedy, taken",
+				supersededWord, storyWord, n, featureWord))))
 	}
 
 	featureACIDs := make(map[string]bool, len(spec.AcceptanceCriteria))
