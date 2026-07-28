@@ -1100,6 +1100,42 @@ bindings:
       - "spec/gc-reclaim#ac-1"
       - "spec/gc-reclaim#ac-2"
       - "spec/gc-reclaim#ac-3"
+      # spec/disclosure-legibility family (both stories merged to main;
+      # every AC declares [behavioral] only, so no static entries exist
+      # for them below).
+      # spec/disclosure-seam-v2's legs: cmd/verdi/disclosure_seam_test.go's
+      # ac-1/ac-2 exercisers (the three call sites — lint findings at
+      # disclosure severity, the merge gate's reportGateConditions, the
+      # closure gate's condition loop — render through
+      # internal/disclosure's one seam, proven equal to
+      # disclosure.Render(disclosure.New(...)) from each site's own
+      # inputs; equivalent states produce identical text), plus
+      # closuregate_test.go's TestRunClosureGate_PendingSupersession
+      # DisclosedUnproven end-to-end pin — all under make verify.
+      - "spec/disclosure-seam-v2#ac-1"
+      - "spec/disclosure-seam-v2#ac-2"
+      # spec/disclosures-panel's legs: internal/disclosureview's
+      # enumeration + shared-markup suite (disclosureview_test.go), the
+      # workbench and dex page tests consuming it, and
+      # e2e/tests/19-disclosures.spec.ts (6 Playwright specs) under make
+      # verify's e2e step.
+      - "spec/disclosures-panel#ac-1"
+      - "spec/disclosures-panel#ac-2"
+      - "spec/disclosures-panel#ac-3"
+      # spec/disclosure-legibility FEATURE ACs (both declare [behavioral,
+      # attestation]): the behavioral legs are the same suites bound just
+      # above — ac-1 (one consistent vocabulary wherever a disclosure
+      # appears) <- the seam exercisers proving every call site renders
+      # through internal/disclosure; ac-2 (one view enumerating every
+      # current disclosure) <- disclosureview + workbench/dex page tests +
+      # e2e/tests/19-disclosures.spec.ts. The attestation legs are already
+      # hand-authored at .verdi/attestations/disclosure-legibility/
+      # ac-{1,2}.md (the workbench-legibility precedent above: `verdi
+      # attest` is story-scoped per spec/attest-helper dc-5, so feature
+      # outcome attestations are hand-authored) — no binding entry exists
+      # for any feature-AC attestation leg anywhere in this file.
+      - "spec/disclosure-legibility#ac-1"
+      - "spec/disclosure-legibility#ac-2"
       # spec/creation-surfaces FEATURE outcome ACs (extensibility Phase 2,
       # Task 9: this design series authors the feature spec + these
       # bindings together, the X-9/#143 convention spec/ritual-integrity's
