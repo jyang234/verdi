@@ -1100,6 +1100,28 @@ bindings:
       - "spec/gc-reclaim#ac-1"
       - "spec/gc-reclaim#ac-2"
       - "spec/gc-reclaim#ac-3"
+      # spec/disclosure-legibility family (both stories merged to main;
+      # every AC declares [behavioral] only, so no static entries exist
+      # for them below).
+      # spec/disclosure-seam-v2's legs: cmd/verdi/disclosure_seam_test.go's
+      # ac-1/ac-2 exercisers (the three call sites — lint findings at
+      # disclosure severity, the merge gate's reportGateConditions, the
+      # closure gate's condition loop — render through
+      # internal/disclosure's one seam, proven equal to
+      # disclosure.Render(disclosure.New(...)) from each site's own
+      # inputs; equivalent states produce identical text), plus
+      # closuregate_test.go's TestRunClosureGate_PendingSupersession
+      # DisclosedUnproven end-to-end pin — all under make verify.
+      - "spec/disclosure-seam-v2#ac-1"
+      - "spec/disclosure-seam-v2#ac-2"
+      # spec/disclosures-panel's legs: internal/disclosureview's
+      # enumeration + shared-markup suite (disclosureview_test.go), the
+      # workbench and dex page tests consuming it, and
+      # e2e/tests/19-disclosures.spec.ts (6 Playwright specs) under make
+      # verify's e2e step.
+      - "spec/disclosures-panel#ac-1"
+      - "spec/disclosures-panel#ac-2"
+      - "spec/disclosures-panel#ac-3"
   - producer: verdi-verify-static
     kind: static
     acs:
