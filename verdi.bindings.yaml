@@ -1122,6 +1122,20 @@ bindings:
       - "spec/disclosures-panel#ac-1"
       - "spec/disclosures-panel#ac-2"
       - "spec/disclosures-panel#ac-3"
+      # spec/disclosure-legibility FEATURE ACs (both declare [behavioral,
+      # attestation]): the behavioral legs are the same suites bound just
+      # above — ac-1 (one consistent vocabulary wherever a disclosure
+      # appears) <- the seam exercisers proving every call site renders
+      # through internal/disclosure; ac-2 (one view enumerating every
+      # current disclosure) <- disclosureview + workbench/dex page tests +
+      # e2e/tests/19-disclosures.spec.ts. The attestation legs are already
+      # hand-authored at .verdi/attestations/disclosure-legibility/
+      # ac-{1,2}.md (the workbench-legibility precedent above: `verdi
+      # attest` is story-scoped per spec/attest-helper dc-5, so feature
+      # outcome attestations are hand-authored) — no binding entry exists
+      # for any feature-AC attestation leg anywhere in this file.
+      - "spec/disclosure-legibility#ac-1"
+      - "spec/disclosure-legibility#ac-2"
   - producer: verdi-verify-static
     kind: static
     acs:
