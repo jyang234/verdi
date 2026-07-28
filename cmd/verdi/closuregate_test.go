@@ -691,6 +691,33 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 	})
 }
 
+// TestRunClosureGateOutcome_CountsConditionAndRecordDisclosuresWithoutChangingReady
+// proves the structured closure outcome counts both disclosure families the
+// gate already prints while preserving the gate's existing boolean semantics:
+// neither a condition-level unavailable input nor an excluded per-record
+// detail turns an otherwise-ready gate into a refusal.
+func TestRunClosureGateOutcome_CountsConditionAndRecordDisclosuresWithoutChangingReady(t *testing.T) {
+	repo := buildClosureGateRepo(t)
+	seedAttestation(t, repo.Dir)
+	spec, _ := readSpec(t, repo.Dir, "stale-decline")
+	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	writeClosureGateDerivedRecord(t, repo.Dir, spec.ID, unreachable, closureGateQuarantineFailRecordJSON(unreachable))
+
+	var stdout bytes.Buffer
+	outcome, err := runClosureGateOutcome(context.Background(), repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outcome.Ready {
+		t.Fatalf("outcome.Ready = false, want true (disclosures do not change the gate verdict); stdout=%s", stdout.String())
+	}
+	if outcome.Disclosures != 2 {
+		t.Fatalf("outcome.Disclosures = %d, want 2 (one pending-supersession condition + one quarantined record); stdout=%s", outcome.Disclosures, stdout.String())
+	}
+}
+
 // freshClosureGateRepoForBuildStart builds a repo whose story spec is
 // still status: draft-free accepted-pending-build with NO build branch cut
 // yet, isolated from buildClosureGateRepo's own repo (which already sits

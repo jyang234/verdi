@@ -303,6 +303,9 @@ func TestRunPreflight_FeatureScope_ReadyThenClose(t *testing.T) {
 	if strings.Contains(pstdout.String(), "[FAIL]") {
 		t.Fatalf("ready feature preflight should show no FAIL condition:\n%s", pstdout.String())
 	}
+	if !strings.Contains(pstdout.String(), "close: --preflight: READY (") || strings.Contains(pstdout.String(), "READY WITH DISCLOSURES") {
+		t.Fatalf("fully proven feature preflight should report READY without disclosures:\n%s", pstdout.String())
+	}
 	after := snapshotRepo(t, repo.Dir)
 	if before != after {
 		t.Fatalf("--preflight(feature, ready) mutated the repo:\nbefore: %s\nafter:  %s", before, after)
@@ -315,5 +318,99 @@ func TestRunPreflight_FeatureScope_ReadyThenClose(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "close-feature-fixture", "spec.md")); err != nil {
 		t.Fatalf("real close should have archived the feature quartet after a READY preflight: %v", err)
+	}
+}
+
+// TestRunPreflight_FeatureScope_RehearsesUncommittedFoldRecords is the feature
+// half of --preflight's rehearsal of close's own pre-cut disclosure over
+// consumed human records HEAD does not carry (closepreflight_test.go covers
+// the story half). runCloseFeature calls discloseUncommittedFoldRecords over
+// featureFoldRecordPaths — attestations only, keyed by the FEATURE's own name
+// (dc-6) — so --preflight must rehearse exactly that, through the same
+// functions.
+func TestRunPreflight_FeatureScope_RehearsesUncommittedFoldRecords(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	// An AUTHORED outcome attestation at the FeatureSlug path, never `git
+	// add`ed: the fold consumes it, and the closure commit and archive will
+	// carry no trace of it (attestations live outside both closure paths).
+	rel := writeUncommittedFeatureAttestation(t, repo.Dir, "close-feature-fixture", "ac-1")
+
+	ctx := context.Background()
+	before := snapshotRepo(t, repo.Dir)
+	var stdout, stderr bytes.Buffer
+	rc := runPreflight(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runPreflight(feature, uncommitted attestation) = %d, want 0 — gate semantics must not change; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	want := "disclosed-unproven [" + closeUncommittedRecordSource + "] " + rel + ":"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout missing the rehearsed uncommitted-fold-record disclosure %q:\n%s", want, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "close: --preflight: READY WITH DISCLOSURES (1 disclosure(s);") {
+		t.Fatalf("the rehearsed disclosure must be COUNTED, not merely printed:\n%s", stdout.String())
+	}
+	after := snapshotRepo(t, repo.Dir)
+	if before != after {
+		t.Fatalf("--preflight(feature, uncommitted attestation) mutated the repo:\nbefore: %s\nafter:  %s", before, after)
+	}
+
+	// Agreement (ac-3): a real close on the byte-identical fixture prints the
+	// SAME line, from the same predicate.
+	var cstdout, cstderr bytes.Buffer
+	if got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &cstdout, &cstderr); got != 0 {
+		t.Fatalf("runClose(feature) = %d, want 0; stdout=%s stderr=%s", got, cstdout.String(), cstderr.String())
+	}
+	if !strings.Contains(cstdout.String(), want) {
+		t.Fatalf("close stdout missing the SAME disclosure preflight rehearsed %q:\n%s", want, cstdout.String())
+	}
+}
+
+// writeUncommittedFeatureAttestation writes an AUTHORED attestation (no
+// unauthored sentinel — an unauthored scaffold satisfies nothing and is
+// therefore never "consumed") straight into the working tree at the
+// FeatureSlug-keyed path, exactly as an operator authoring one by hand leaves
+// it before any `git add`. Returns its store-relative path.
+func writeUncommittedFeatureAttestation(t *testing.T, root, featureSlug, acID string) string {
+	t.Helper()
+	path := store.AttestationPath(root, featureSlug, acID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir attestation dir: %v", err)
+	}
+	content := "---\nid: attestation/" + featureSlug + "--" + acID + "\nkind: attestation\ntitle: \"" + acID +
+		"\"\nowners: [platform-team]\nfrozen: { at: 2024-01-01, commit: " + gateFakeFrozenCommit + " }\n---\n# " + acID +
+		"\nVerified by hand, per the fixture's own narrative.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing attestation: %v", err)
+	}
+	return filepath.ToSlash(store.AttestationPath("", featureSlug, acID))
+}
+
+// TestRunPreflight_FeatureScope_PerRecordDisclosureSummary proves the feature
+// gate's per-record disclosure detail contributes to the structured preflight
+// summary without weakening or strengthening its ready verdict.
+func TestRunPreflight_FeatureScope_PerRecordDisclosureSummary(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	const unreachable = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	writeFixtureVerdicts(t, repo.Dir, "spec/close-feature-fixture", unreachable,
+		`{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"behavioral","verdict":"fail","witness":"adverseFeatureFail","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"`+unreachable+`"},"digest":"sha256:`+strings.Repeat("a", 64)+`"}`)
+
+	var stdout, stderr bytes.Buffer
+	rc := runPreflight(context.Background(), repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runPreflight(feature with disclosed record) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "disclosed-unproven [gate:evidence-quarantine]") {
+		t.Fatalf("stdout missing the per-record disclosure detail: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "close: --preflight: READY WITH DISCLOSURES (1 disclosure(s);") {
+		t.Fatalf("stdout missing the one-disclosure ready summary: %s", stdout.String())
 	}
 }

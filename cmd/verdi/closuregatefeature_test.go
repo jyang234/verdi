@@ -1,14 +1,136 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/store"
 )
+
+// featureQuarantineCondition returns condition 1 carrying the per-record
+// disclosure detail its REAL producer emits — quarantineDisclosures
+// (gatedisclosure.go), over one excluded record naming an unmet AC — rather
+// than a hand-typed line that only resembles one. What the loop must count is
+// whatever the producers actually emit, so the producers are what the loop is
+// tested against.
+func featureQuarantineCondition() gateCondition {
+	return gateCondition{
+		Name: "1. every feature AC evidenced", OK: true,
+		Extra: quarantineDisclosures(
+			[]foldedAC{{ID: "ac-1", Status: evidence.StatusPending}},
+			[]artifact.Evidence{{
+				Kind:        artifact.EvidenceBehavioral,
+				Verdict:     artifact.VerdictPass,
+				Witness:     "excluded-witness",
+				EvidenceFor: []string{"ac-1"},
+				Provenance:  artifact.EvidenceProvenance{Commit: strings.Repeat("c", 40)},
+			}},
+		),
+	}
+}
+
+// featureSupersededExclusionCondition returns condition 4 exactly as its REAL
+// producer (checkFeatureSpecStaleCondition) emits it for a feature whose
+// SUPERSEDED implementing story carries archived accepted-deviations: Extra
+// holds the informational union tally AND the L-N12 exclusion line. Those two
+// lines are the whole point of this test — one is informational and must never
+// count, the other is a disclosure and must.
+func featureSupersededExclusionCondition(t *testing.T) gateCondition {
+	t.Helper()
+	root := t.TempDir()
+	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
+	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "superseded-story", nDistinctADFindings("sup", 4), "")
+	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature",
+		"  - { id: computed-x, kind: computed, text: unrelated, disposition: fixed }\n", "")
+
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, nil, []string{"spec/superseded-story"}, nil)
+	if err != nil {
+		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
+	}
+	if !cond.OK {
+		t.Fatalf("fixture bug: cond = %+v, want the PASS-with-exclusion shape this test needs", cond)
+	}
+	return cond
+}
+
+// TestReportClosureGateConditions_FeatureUsesStructuredOutcome pins the one
+// reporting loop shared by story and feature closure conditions. Rendered
+// disclosure detail is counted, feature-only informational Extra lines are
+// not, and an ordinary failure retains the existing not-ready semantics.
+//
+// Every counted line comes from the producer that really emits it. The
+// superseded-exclusion row is why: it was hand-formatted with a 7-space indent
+// and so never matched the loop's own count, which let a feature preflight
+// print a disclosed exclusion and still summarize READY claiming ZERO
+// disclosures. A fabricated stand-in literal cannot witness that.
+func TestReportClosureGateConditions_FeatureUsesStructuredOutcome(t *testing.T) {
+	tests := []struct {
+		name            string
+		conditions      []gateCondition
+		wantReady       bool
+		wantDisclosures int
+	}{
+		{
+			name: "condition and per-record disclosures preserve ready",
+			conditions: []gateCondition{
+				featureQuarantineCondition(),
+				{Name: "4. no unresolved spec-stale flag", Disclosed: true, Source: "gate:spec-stale-feature-union", Reason: "archive unavailable"},
+			},
+			wantReady:       true,
+			wantDisclosures: 2,
+		},
+		{
+			// L-N12's exclusion changes the BASIS of the spec-stale verdict
+			// and its producer calls it "disclosed in a named line" — so it
+			// counts, exactly once, alongside the informational union tally
+			// riding the same Extra, which never counts.
+			name:            "the superseded-story exclusion counts; the union tally does not",
+			conditions:      []gateCondition{featureSupersededExclusionCondition(t)},
+			wantReady:       true,
+			wantDisclosures: 1,
+		},
+		{
+			name:            "failure remains not ready",
+			conditions:      []gateCondition{{Name: "1. every feature AC evidenced", Reason: "ac-1 pending"}},
+			wantReady:       false,
+			wantDisclosures: 0,
+		},
+		{
+			// The format belongs to internal/disclosure alone. A line that
+			// merely APES the vocabulary — the severity word and a bracket,
+			// but never routed through New/Render — is not a disclosure and
+			// must not be counted as one. A local prefix test in this package
+			// counts it, which is exactly the reconstruction the seam exists
+			// to forbid (spec/disclosure-seam-v2 ac-1).
+			name: "a hand-built line that apes the vocabulary is not counted",
+			conditions: []gateCondition{
+				{
+					Name: "1. every feature AC evidenced", OK: true,
+					Extra: []string{disclosure.SeverityDisclosedUnproven + " [pending] this line was never routed through the seam"},
+				},
+			},
+			wantReady:       true,
+			wantDisclosures: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			outcome := reportClosureGateConditions(&stdout, "closure(feature): ", tc.conditions)
+			if outcome.Ready != tc.wantReady || outcome.Disclosures != tc.wantDisclosures {
+				t.Fatalf("outcome = %+v, want Ready=%v Disclosures=%d; stdout=%s", outcome, tc.wantReady, tc.wantDisclosures, stdout.String())
+			}
+		})
+	}
+}
 
 // nDistinctADFindings renders findingsYAML for n judged accepted-deviation
 // findings with globally-unique id+text (so each is a distinct budget
@@ -340,6 +462,14 @@ func TestCheckFeatureSpecStaleCondition_NoReportsAnywhere_TriviallyUnflagged(t *
 // superseded stories (D-16), so condition 4 never saw the archive — it silently
 // contributed zero, with no disclosure and no ledger entry (ac-4's forbidden
 // silent-zero shape, for the superseded case).
+//
+// The line is asserted as a DISCLOSURE, not as a literal: it is built by the
+// shared seam (disclosure.New/Render, spec/disclosure-seam-v2 ac-1), so this
+// test pins the seam's own vocabulary — the source id, the scope, and the
+// substance — and disclosure.IsRendered's recognizability, rather than a
+// hand-typed rendering this package would then own a second copy of. It was
+// hand-formatted with a 7-space indent before, which is precisely why the
+// reporting loop never counted it.
 func TestCheckFeatureSpecStaleCondition_SupersededStory_DisclosedAndExcluded(t *testing.T) {
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
@@ -364,12 +494,25 @@ func TestCheckFeatureSpecStaleCondition_SupersededStory_DisclosedAndExcluded(t *
 	if !cond.OK {
 		t.Fatalf("cond = %+v, want PASS — a superseded story's archived deviations are excluded (supersession is the budget's own remedy)", cond)
 	}
-	// But NEVER silently: the named exclusion line rides the condition (Extra),
-	// verbatim per L-N12.
-	joined := strings.Join(cond.Extra, "\n")
-	want := "superseded story spec/superseded-story's archived report (4 accepted-deviation(s)) excluded — supersession is the spec-stale budget's own prescribed remedy, taken"
-	if !strings.Contains(joined, want) {
-		t.Fatalf("cond.Extra = %q, want the verbatim L-N12 exclusion line %q", cond.Extra, want)
+	// But NEVER silently: the named exclusion rides the condition (Extra), as a
+	// disclosure a reader recognizes as one (L-N12 + spec/disclosure-seam-v2).
+	var exclusion string
+	for _, line := range cond.Extra {
+		if strings.Contains(line, "spec/superseded-story") {
+			exclusion = line
+		}
+	}
+	if exclusion == "" {
+		t.Fatalf("cond.Extra = %q, want an exclusion line naming the superseded story", cond.Extra)
+	}
+	if !disclosure.IsRendered(exclusion) {
+		t.Fatalf("exclusion line = %q, want it rendered through the shared disclosure seam — an exclusion that changes the spec-stale verdict's BASIS must read as a disclosure and be counted as one", exclusion)
+	}
+	want := disclosure.Render(disclosure.New(
+		supersededExclusionSource, "spec/superseded-story",
+		"this superseded story's archived report (4 accepted-deviation(s)) is excluded from the feature-close budget — supersession is the spec-stale budget's own prescribed remedy, taken"))
+	if exclusion != want {
+		t.Fatalf("exclusion line = %q, want %q (L-N12's substance: the story, the excluded count, and the remedy that justifies it)", exclusion, want)
 	}
 }
 

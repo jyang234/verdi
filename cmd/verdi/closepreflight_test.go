@@ -738,6 +738,51 @@ func TestRunPreflight_StoryScope_ReadyThenClose(t *testing.T) {
 	}
 }
 
+// TestRunPreflight_ReadySummaryDistinguishesDisclosures proves a ready gate is
+// summarized according to its complete three-valued outcome. Gate disclosures
+// and the preflight-only local publish-guard disclosure are both counted; they
+// remain non-blocking and therefore do not change exit 0.
+func TestRunPreflight_ReadySummaryDistinguishesDisclosures(t *testing.T) {
+	tests := []struct {
+		name            string
+		forge           forge.Forge
+		forceLocal      bool
+		wantDisclosures int
+	}{
+		{name: "fully proven gate", forge: forgefake.New(), forceLocal: true},
+		{name: "gate condition disclosed", forge: nil, forceLocal: true, wantDisclosures: 1},
+		{name: "local publish guard disclosed", forge: forgefake.New(), forceLocal: false, wantDisclosures: 1},
+		{name: "gate and local publish guard disclosed", forge: nil, forceLocal: false, wantDisclosures: 2},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clearCIEnv(t)
+			repo := readyCloseFixtureRepo(t)
+			var stdout, stderr bytes.Buffer
+			rc := runPreflight(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, tc.forge, tc.forceLocal, &stdout, &stderr)
+			if rc != 0 {
+				t.Fatalf("runPreflight = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+			}
+
+			if tc.wantDisclosures == 0 {
+				if !strings.Contains(stdout.String(), "close: --preflight: READY (") {
+					t.Fatalf("stdout missing clean READY summary: %s", stdout.String())
+				}
+				if strings.Contains(stdout.String(), "READY WITH DISCLOSURES") {
+					t.Fatalf("fully proven preflight must not claim disclosures: %s", stdout.String())
+				}
+				return
+			}
+
+			want := fmt.Sprintf("close: --preflight: READY WITH DISCLOSURES (%d disclosure(s);", tc.wantDisclosures)
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("stdout missing %q: %s", want, stdout.String())
+			}
+		})
+	}
+}
+
 // TestRunPreflight_ExitCodeMatrixAndNonMutation is ac-2--behavioral's
 // exerciser: three fixtures (ready/unmet/a genuine operational error) drive
 // exit 0/1/2 respectively, each snapshotted before and after and asserted
@@ -950,6 +995,289 @@ func TestPreflightGuardDisclosure_AgreesWithRealGuard(t *testing.T) {
 	if got := closePublishGuardRefuses(true); got != forceLocalGuardRefused {
 		t.Fatalf("closePublishGuardRefuses(true) = %v, want %v", got, forceLocalGuardRefused)
 	}
+}
+
+// TestRunPreflight_RehearsesTheIndexGuard closes the contract gap this
+// branch opened. runClose's FIRST act is requireCleanIndex (close.go), an
+// exit-2 refusal — and --preflight, whose own doc comment promises it
+// "rehearses EVERY condition a real `verdi close <ref>` would refuse on",
+// never rehearsed it: with a dirty index --preflight printed READY and exit
+// 0, and --prepare went on to echo `verdi close <ref>` as the next command,
+// while that very command exits 2.
+//
+// The rehearsal is a DISCLOSURE, never a gate failure: the closure gate's
+// pass/fail semantics are not this guard's to change, and preflight stays
+// side-effect free (asserted below). It carries the real guard's OWN refusal
+// text, so the recovery guidance an operator needs is the same one the real
+// refusal would have given them.
+func TestRunPreflight_RehearsesTheIndexGuard(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a dirty index is disclosed, counted, and does not change the verdict", func(t *testing.T) {
+		repo := readyCloseFixtureRepo(t)
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
+		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
+
+		// The real close on this byte-identical fixture refuses, exit 2 — the
+		// behavior --preflight must not contradict. Proven here rather than
+		// assumed, so this test fails if the guard itself ever moves.
+		if err := requireCleanIndex(ctx, repo.Dir); err == nil {
+			t.Fatal("fixture bug: requireCleanIndex should refuse a dirty index")
+		}
+
+		before := snapshotRepo(t, repo.Dir)
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+		if rc != 0 {
+			t.Fatalf("runPreflight(dirty index) = %d, want 0 — the rehearsal is a disclosure, never a new gate failure; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "disclosed-unproven ["+preflightIndexGuardSource+"]") {
+			t.Fatalf("stdout must disclose that a real close refuses at the index guard:\n%s", out)
+		}
+		if !strings.Contains(out, "verdi.bindings.yaml") {
+			t.Fatalf("the disclosure must carry the real guard's own refusal text (the staged paths and how to recover):\n%s", out)
+		}
+		if !strings.Contains(out, "close: --preflight: READY WITH DISCLOSURES (1 disclosure(s);") {
+			t.Fatalf("the rehearsed refusal must be COUNTED, not merely printed:\n%s", out)
+		}
+
+		after := snapshotRepo(t, repo.Dir)
+		if before != after {
+			t.Fatalf("--preflight(dirty index) mutated the repo:\nbefore: %s\nafter:  %s", before, after)
+		}
+	})
+
+	t.Run("a clean index rehearses nothing", func(t *testing.T) {
+		repo := readyCloseFixtureRepo(t)
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+		if rc != 0 {
+			t.Fatalf("runPreflight(clean) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if strings.Contains(stdout.String(), preflightIndexGuardSource) {
+			t.Fatalf("a clean index must print no index-guard disclosure:\n%s", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "close: --preflight: READY (") {
+			t.Fatalf("a clean, fully proven preflight must still read plain READY:\n%s", stdout.String())
+		}
+	})
+
+	t.Run("the rehearsal survives a target that no longer resolves", func(t *testing.T) {
+		// The canonical interrupted close: ArchiveMove completed, the commit
+		// failed, so the spec is already OUT of the active zone and its closure
+		// paths are staged — the exact state close.go's own residue refusal
+		// (closureResidueRefusal) was written to diagnose.
+		repo := readyCloseFixtureRepo(t)
+		if err := store.ArchiveMove(repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+
+		// The real close in this state reaches its residue diagnosis, because
+		// requireCleanIndex genuinely runs before it resolves anything.
+		guardErr := requireCleanIndex(ctx, repo.Dir)
+		if guardErr == nil {
+			t.Fatal("fixture bug: requireCleanIndex should refuse closure residue")
+		}
+
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+		if rc != 2 {
+			t.Fatalf("runPreflight(interrupted closure residue) = %d, want 2 — the ref genuinely no longer resolves; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "disclosed-unproven ["+preflightIndexGuardSource+"]") {
+			t.Fatalf("the index guard is documented as rehearsed FIRST, before anything is resolved, yet resolution failed first and the operator got no rehearsal at all:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+		}
+		// The precise recovery already exists in-repo; the whole point of
+		// carrying the real guard's own text is that it reaches both modes.
+		for _, want := range []string{"interrupted", store.SpecDirRelPath(store.ZoneArchive, "close-fixture"), "git commit"} {
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("the rehearsal must carry the real residue diagnosis %q:\n%s", want, stdout.String())
+			}
+		}
+	})
+
+	// The echoed next command is KEPT, not suppressed, and annotated instead.
+	//
+	// The exit class is right where it is and does not move: the closure gate
+	// holds, and a dirty index is operator state, not a verdict about the spec
+	// — which is the entire reason this rehearsal is a disclosure rather than a
+	// condition. Deleting the echoed command would smuggle that verdict change
+	// in through presentation: an exit-0 run naming no next step reads as
+	// "nothing to do", strictly less than the operator has today. The command
+	// is also not the wrong one — after a `git commit` or `git restore` it
+	// succeeds unchanged. What was dishonest was calling it NEXT while
+	// something must happen first, so the fix names the ordering rather than
+	// hiding the command. The design's own READY rows ask the tool to print the
+	// real close command and ask the human to decide whether to proceed;
+	// deciding needs both the command and what stands in its way.
+	t.Run("--prepare annotates the next command the rehearsal says would refuse", func(t *testing.T) {
+		repo := readyCloseFixtureRepo(t)
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
+		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
+
+		deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+		if rc != 0 {
+			t.Fatalf("runPrepare(dirty index) = %d, want 0 — the closure gate holds and a dirty index is not a verdict; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		out := stdout.String()
+		echoAt := strings.Index(out, "next command: verdi close")
+		if echoAt < 0 {
+			t.Fatalf("the next command must still be printed, not suppressed:\n%s", out)
+		}
+		if !strings.Contains(out, "disclosed-unproven ["+preflightIndexGuardSource+"]") {
+			t.Fatalf("--prepare echoed `verdi close` as the next command with no word that the real run refuses at the index guard:\n%s", out)
+		}
+		// The disclosure alone is not enough: it sits above a summary saying
+		// the gate holds, and the very next line calls a command that exits 2
+		// "next". The echo itself has to carry the ordering.
+		warnAt := strings.Index(out, "close: --prepare: the closure gate holds, but the index-guard rehearsal above refuses the command below")
+		if warnAt < 0 {
+			t.Fatalf("--prepare called a command NEXT that the same run just said exits 2, with nothing attached to the echo:\n%s", out)
+		}
+		if warnAt > echoAt {
+			t.Fatalf("the caveat must precede the command it qualifies (caveat at %d, echo at %d):\n%s", warnAt, echoAt, out)
+		}
+	})
+
+	t.Run("--prepare with a clean index annotates nothing", func(t *testing.T) {
+		repo := readyCloseFixtureRepo(t)
+
+		deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+		var stdout, stderr bytes.Buffer
+		rc := runPrepare(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, true, &stdout, &stderr)
+		if rc != 0 {
+			t.Fatalf("runPrepare(clean index) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if strings.Contains(stdout.String(), "refuses the command below") {
+			t.Fatalf("a run whose index guard rehearsed nothing must qualify nothing:\n%s", stdout.String())
+		}
+	})
+}
+
+// TestRunPreflight_ErrorsCarryTheModesOwnFraming covers the two operational
+// exits that spoke as the real ritual.
+//
+// runPreflight frames its resolve failure "close: --preflight:", but its
+// HEAD-resolution and gate-evaluation failures printed a bare "close:" — the
+// exact prefix runClose itself uses. Under --prepare, whose every other error
+// carries "close: --prepare:", a HEAD or gate failure therefore reached the
+// operator as `close: gitx: RevParse("HEAD") ...`, indistinguishable from a
+// real closure ritual having run. Nothing here mutates anything, and an
+// operator reading that line has no way to know it.
+func TestRunPreflight_ErrorsCarryTheModesOwnFraming(t *testing.T) {
+	ctx := context.Background()
+
+	assertFramed := func(t *testing.T, stderr string) {
+		t.Helper()
+		if stderr == "" {
+			t.Fatal("expected an operational diagnostic on stderr")
+		}
+		for _, line := range strings.Split(strings.TrimRight(stderr, "\n"), "\n") {
+			if !strings.HasPrefix(line, "close:") {
+				continue
+			}
+			if !strings.HasPrefix(line, "close: --preflight:") {
+				t.Fatalf("stderr line %q reads as a real `verdi close` ritual; every line this mode prints must name the mode", line)
+			}
+		}
+	}
+
+	t.Run("HEAD resolution failure", func(t *testing.T) {
+		// A valid store that is not inside a git repository: resolution
+		// succeeds, `git rev-parse HEAD` cannot answer.
+		root := prepareStoreWithoutGit(t)
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(ctx, root, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+		if rc != 2 {
+			t.Fatalf("runPreflight(no git) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		assertFramed(t, stderr.String())
+	})
+
+	t.Run("gate evaluation failure", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, erroringOpenMRsForge{forgefake.New()}, true, &stdout, &stderr)
+		if rc != 2 {
+			t.Fatalf("runPreflight(forge transport error) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		assertFramed(t, stderr.String())
+	})
+}
+
+// TestRunPreflight_RehearsesUncommittedFoldRecords is the second half of the
+// same contract: a real close discloses every attestation/waiver its fold
+// consumed that HEAD does not carry (close.go's discloseUncommittedFoldRecords,
+// before the branch cut), so --preflight must rehearse that too — through the
+// SAME functions, never a re-derived second predicate (close-preflight dc-2's
+// one-predicate rule).
+func TestRunPreflight_RehearsesUncommittedFoldRecords(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("an uncommitted waiver the fold consumed is disclosed and counted", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		// No evidence records at all: ac-1 folds eligible ONLY through the
+		// waiver, so the uncommitted file is genuinely load-bearing — the exact
+		// fixture TestRunClose_DisclosesFoldRecordsMissingFromHEAD drives real
+		// close with.
+		writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+
+		before := snapshotRepo(t, repo.Dir)
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+		if rc != 0 {
+			t.Fatalf("runPreflight(waived AC, uncommitted waiver) = %d, want 0 — gate semantics must not change; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		out := stdout.String()
+		want := "disclosed-unproven [" + closeUncommittedRecordSource + "] " + rel + ":"
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing the rehearsed uncommitted-fold-record disclosure %q:\n%s", want, out)
+		}
+		if !strings.Contains(out, "close: --preflight: READY WITH DISCLOSURES (1 disclosure(s);") {
+			t.Fatalf("the rehearsed disclosure must be COUNTED, not merely printed:\n%s", out)
+		}
+
+		after := snapshotRepo(t, repo.Dir)
+		if before != after {
+			t.Fatalf("--preflight(uncommitted waiver) mutated the repo:\nbefore: %s\nafter:  %s", before, after)
+		}
+
+		// Agreement (ac-3): the real close on the byte-identical fixture prints
+		// the SAME line, from the same predicate.
+		deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+		var cstdout, cstderr bytes.Buffer
+		if got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &cstdout, &cstderr); got != 0 {
+			t.Fatalf("runClose = %d, want 0; stdout=%s stderr=%s", got, cstdout.String(), cstderr.String())
+		}
+		if !strings.Contains(cstdout.String(), want) {
+			t.Fatalf("close stdout missing the SAME disclosure preflight rehearsed %q:\n%s", want, cstdout.String())
+		}
+	})
+
+	t.Run("a waiver already committed at HEAD rehearses nothing", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/waivers")
+		gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "commit the waiver")
+		head := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+		writeCloseGateReport(t, repo.Dir, head, dispositionedFindingYAML)
+
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+		if rc != 0 {
+			t.Fatalf("runPreflight(committed waiver) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		if strings.Contains(stdout.String(), closeUncommittedRecordSource) {
+			t.Fatalf("a record already committed in HEAD needs no disclosure:\n%s", stdout.String())
+		}
+	})
 }
 
 // TestCmdClose_Preflight_Dispatch covers cmdClose's own --preflight
