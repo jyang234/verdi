@@ -7,6 +7,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/forge"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
@@ -178,23 +179,32 @@ func TestReviewMirroredAnnotations_UnresolvedThreadStaysOpen(t *testing.T) {
 // failing the whole read — the local annotations still return.
 type erroringOpenMRForge struct{ *forgefake.Forge }
 
+// errForgeTransport is the failure erroringOpenMRForge reports; the test
+// re-renders it through the shared seam to derive the notice it expects,
+// so the test itself never re-authors the disclosure vocabulary
+// (spec/disclosure-seam-v2 ac-1).
+var errForgeTransport = errors.New("forge: simulated transport failure")
+
 func (erroringOpenMRForge) ListOpenMRs(ctx context.Context, targetBranch string) ([]forge.OpenMR, error) {
-	return nil, errors.New("forge: simulated transport failure")
+	return nil, errForgeTransport
 }
 
 func TestReviewMirroredAnnotations_ForgeErrorDegradesToDisclosure(t *testing.T) {
 	repo := buildReviewFixture(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	b := &Backend{Root: repo.Dir, Forge: erroringOpenMRForge{forgefake.New()}}
-	items, disclosure, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
+	items, notice, err := b.reviewMirroredAnnotations(context.Background(), artifact.Ref{Kind: "spec", Name: "loan-update"})
 	if err != nil {
 		t.Fatalf("reviewMirroredAnnotations: want nil error (degrades to disclosure), got %v", err)
 	}
 	if items != nil {
 		t.Fatalf("items = %+v, want nil on a failing feed", items)
 	}
-	if disclosure == "" {
-		t.Fatal("disclosure = empty, want a review-population-unavailable notice (never silence)")
+	// Never silence — and rendered through the ONE seam, never a locally
+	// authored format string.
+	want := disclosure.Render(disclosure.ReviewUnavailableTransport(errForgeTransport))
+	if notice != want {
+		t.Fatalf("disclosure = %q, want the shared seam's rendering %q", notice, want)
 	}
 }
 

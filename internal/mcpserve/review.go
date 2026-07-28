@@ -16,11 +16,11 @@ package mcpserve
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
@@ -59,6 +59,14 @@ import (
 // call) DEGRADES to a disclosure rather than a hard tool error, matching
 // the board's non-blocking posture (I-2) and gate_threads.go's
 // disclosed-unproven stance — the local annotations still return.
+//
+// Every disclosure this function returns is rendered through the one
+// internal/disclosure seam (spec/disclosure-seam-v2 ac-1), never a local
+// fmt.Sprintf: b.ReviewUnavailable arrives already rendered by cmd/verdi's
+// startup wiring, and the transport failures below render
+// disclosure.ReviewUnavailableTransport — the SAME constructor
+// internal/workbench's board uses, so one state reads one way on both
+// surfaces (ac-2).
 func (b *Backend) reviewMirroredAnnotations(ctx context.Context, unpinned artifact.Ref) ([]annotationItem, string, error) {
 	if b.Forge == nil {
 		return nil, b.ReviewUnavailable, nil
@@ -84,7 +92,7 @@ func (b *Backend) reviewMirroredAnnotations(ctx context.Context, unpinned artifa
 	}
 	mrID, err := forge.FindOpenMR(ctx, b.Forge, defaultBranch, branch)
 	if err != nil {
-		return nil, fmt.Sprintf("review population unavailable: %v", err), nil
+		return nil, disclosure.Render(disclosure.ReviewUnavailableTransport(err)), nil
 	}
 	if mrID == "" {
 		return nil, "", nil
@@ -92,7 +100,7 @@ func (b *Backend) reviewMirroredAnnotations(ctx context.Context, unpinned artifa
 
 	comments, err := b.Forge.ListComments(ctx, mrID)
 	if err != nil {
-		return nil, fmt.Sprintf("review population unavailable: %v", err), nil
+		return nil, disclosure.Render(disclosure.ReviewUnavailableTransport(err)), nil
 	}
 
 	// Resolution state is best-effort: a query failure here still leaves

@@ -15,6 +15,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 )
@@ -1027,8 +1028,14 @@ func TestLegalEdgeTypes(t *testing.T) {
 // configured-but-unreachable forge from the failure side (I-2).
 type erroringFeed struct{}
 
+// errFeedUnreachable is the failure erroringFeed reports; the tests below
+// re-render it through the shared seam to derive the notice they expect,
+// so no test re-authors the disclosure vocabulary either
+// (spec/disclosure-seam-v2 ac-1).
+var errFeedUnreachable = errors.New("forge unreachable: dial tcp 10.0.0.1:443: connect: connection refused")
+
 func (erroringFeed) ListMRComments(context.Context, string) ([]MRComment, bool, error) {
-	return nil, false, errors.New("forge unreachable: dial tcp 10.0.0.1:443: connect: connection refused")
+	return nil, false, errFeedUnreachable
 }
 
 // TestBoard_FeedError_DegradesNotBlocks proves I-2: a feed error on an
@@ -1052,14 +1059,17 @@ func TestBoard_FeedError_DegradesNotBlocks(t *testing.T) {
 	if !strings.Contains(body, `data-testid="card-ac-1"`) {
 		t.Error("authoring board content missing on a feed error (should be fully rendered)")
 	}
-	// The failure is disclosed, never silent.
-	if !strings.Contains(body, `data-testid="board-notice"`) || !strings.Contains(body, "review feed unavailable") {
-		t.Errorf("feed error not disclosed as a board notice:\n%s", body)
+	// The failure is disclosed, never silent — and disclosed through the
+	// shared internal/disclosure seam, never a locally authored string
+	// (spec/disclosure-seam-v2 ac-1).
+	wantNotice := disclosure.Render(disclosure.ReviewUnavailableTransport(errFeedUnreachable))
+	if !strings.Contains(body, `data-testid="board-notice"`) || !strings.Contains(body, wantNotice) {
+		t.Errorf("feed error not disclosed as a board notice through the shared seam (%q):\n%s", wantNotice, body)
 	}
 	// The fragment surface degrades identically (post-mutation re-render).
 	frag := httptest.NewRecorder()
 	h.ServeHTTP(frag, httptest.NewRequest(http.MethodGet, "/board/spec/"+boardFixtureName+"/fragment", nil))
-	if frag.Code != http.StatusOK || !strings.Contains(frag.Body.String(), "review feed unavailable") {
+	if frag.Code != http.StatusOK || !strings.Contains(frag.Body.String(), wantNotice) {
 		t.Errorf("fragment on feed error = %d, want 200 with the disclosure notice", frag.Code)
 	}
 }
@@ -1086,7 +1096,7 @@ func TestBoard_NoForge_Silent(t *testing.T) {
 	h := NewHandlerWith(root, Deps{})
 
 	body := getBoard(t, h, boardFixtureName).Body.String()
-	for _, absent := range []string{"review feed unavailable", "review state cannot be shown"} {
+	for _, absent := range []string{"could not be consulted", "review state cannot be shown"} {
 		if strings.Contains(body, absent) {
 			t.Errorf("unconfigured forge should be silent, but board contains %q", absent)
 		}

@@ -219,11 +219,15 @@ func reviewUnavailableReason(kind string) string {
 
 // reviewUnavailableDisclosure is the structured seam value behind
 // reviewUnavailableReason — the ONE decision point for the
-// configured-but-unreachable review-feed disclosure. serve.go hands it to
-// the workbench's /disclosures page (workbench.Deps.Disclosures,
+// configured-but-no-credentials review-feed disclosure. serve.go hands it
+// to the workbench's /disclosures page (workbench.Deps.Disclosures,
 // spec/disclosures-panel ac-1) so the panel enumerates the same value the
 // board chrome and list_annotations render, never a re-derived copy.
+//
+// The text itself is authored in internal/disclosure, alongside the
+// render-time transport-failure state the board and list_annotations
+// disclose: the two are one family and must not drift apart, and a
+// package under internal/ cannot import this main package to share it.
 func reviewUnavailableDisclosure(kind string) disclosure.Disclosure {
-	text := fmt.Sprintf("forge %q is configured (verdi.yaml) but no credentials are available to reach it; review state cannot be shown", kind)
-	return disclosure.New("mcp:review-feed", "", text)
+	return disclosure.ReviewUnavailableNoCredentials(kind)
 }

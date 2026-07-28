@@ -200,7 +200,10 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// renders the projection plus the disclosure. The startup-time
 	// disclosure (forge configured but no credentials, s.reviewUnavailable)
 	// seeds the notice; a render-time transport error overrides it with the
-	// live reason.
+	// live reason. Both are rendered through the same internal/disclosure
+	// seam and the same review-feed source, so the override changes which
+	// cause is named — never the vocabulary a reader has learned
+	// (spec/disclosure-seam-v2 ac-1/ac-2).
 	var comments []MRComment
 	underReview := false
 	reviewNotice := s.reviewUnavailable
@@ -209,7 +212,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 		if ferr != nil {
 			// Configured AND reachable enough to attempt, but the call
 			// failed: disclose, never silence, never a 500 (I-1(b)/I-2).
-			reviewNotice = "review feed unavailable: " + ferr.Error()
+			reviewNotice = disclosure.Render(disclosure.ReviewUnavailableTransport(ferr))
 		} else {
 			comments, underReview = c, ur
 		}
