@@ -3,7 +3,7 @@ id: spec/public-showcase
 kind: spec
 class: feature
 title: "Public showcase corpus, drift gate, and README"
-status: accepted-pending-build
+status: closed
 owners: [platform-team]
 problem: { text: "verdi has no public README and no canonical example store; e2e fixtures sprawl per-feature with no gate keeping new capabilities showcased", anchor: "#problem" }
 outcome: { text: "a vetted showcase store at examples/showcase is the e2e feature corpus, make verify fails on unshowcased capabilities, and the README quick-starts from it", anchor: "#outcome" }
