@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
@@ -247,7 +248,8 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 		// check the fetched bundle's recorded tool provenance against the
 		// manifest pin BEFORE any of its records are accepted onto disk. A
 		// mismatch is an operational refusal; an absent carrier is a
-		// disclosed-unproven notice (checkFetchedToolPin prints it), never
+		// disclosed-unproven notice (checkFetchedToolPin renders it through
+		// the internal/disclosure seam), never
 		// a silent skip and never a spurious refusal of a pre-carrier or
 		// tool-less (self-hosted producer) bundle.
 		if pinErr := checkFetchedToolPin(root, tree, deps.Stdout); pinErr != nil {
@@ -464,6 +466,34 @@ func writeDerivedTree(derivedRoot string, tree forge.DerivedTree) error {
 	return nil
 }
 
+// The absent-carrier tool-pin disclosure. It lives here, beside its one
+// producer (checkFetchedToolPin), exactly as close.go's
+// close:uncommitted-fold-record and closepreflight.go's guard disclosures
+// live beside theirs: only the RENDERING is shared (internal/disclosure's
+// New/Render), and only a family with producers in two or more packages —
+// the review-feed one — needs its constructor hoisted into the seam
+// package itself (CLAUDE.md's shared-internal rule, disclosure/reviewfeed.go's
+// own placement note).
+const (
+	toolPinCarrierAbsentSource = "sync:tool-pin-carrier-absent"
+	// The text names the observed fact and its consequence, and NEVER its own
+	// severity: disclosure.Render supplies the one vocabulary word
+	// (spec/disclosure-legibility#ac-1). The pre-seam line declared
+	// "disclosed-unproven" in prose instead, which no consumer of
+	// disclosure.IsRendered could recognize or count
+	// (judged-sync-toolpin-disclosure-outside-seam).
+	toolPinCarrierAbsentText = "the fetched bundle carries no toolchain.json (a pre-carrier bundle, or its producer ran no upstream tool), so the I-4 tool-pin check could not run for this intake"
+)
+
+// toolPinCarrierAbsentDisclosure is the structured value the absent-carrier
+// state constructs at its existing decision point, so the printed line IS
+// that value rendered — never a second, hand-aligned copy of it. The scope
+// is empty: nothing in the fetched tree is the missing carrier, so the
+// disclosure names the intake as a whole (the checkout-wide form).
+func toolPinCarrierAbsentDisclosure() disclosure.Disclosure {
+	return disclosure.New(toolPinCarrierAbsentSource, "", toolPinCarrierAbsentText)
+}
+
 // checkFetchedToolPin is the I-4 secondary defense at fetched-bundle
 // intake (spec/forge-transport ac-4/dc-4; adjudicated 2026-07-13: the
 // carrier is toolchain.json, since no other bundle artifact records the
@@ -473,8 +503,11 @@ func writeDerivedTree(derivedRoot string, tree forge.DerivedTree) error {
 // present with no pin configured) returns an error — the caller's
 // operational refusal (exit 2) — with CheckToolPin's own message naming
 // both the recorded tool string and the pinned commit. A tree with NO
-// carrier anywhere prints a one-line disclosed-unproven notice on stdout
-// and returns nil: a pre-carrier bundle, or one whose producer ran no
+// carrier anywhere prints one line on stdout — toolPinCarrierAbsentDisclosure
+// rendered through the shared internal/disclosure seam, so it reads in the
+// same disclosed-unproven vocabulary every other surface uses and is
+// recognizable to disclosure.IsRendered — and returns nil: a pre-carrier
+// bundle, or one whose producer ran no
 // upstream tool (the self-hosted producer, selfevidence.go), is honestly
 // tool-less — disclosed, never silently passed and never spuriously
 // refused. The manifest is read only when a carrier is present, so
@@ -487,7 +520,7 @@ func checkFetchedToolPin(root string, tree forge.DerivedTree, stdout io.Writer) 
 		}
 	}
 	if len(keys) == 0 {
-		fmt.Fprintln(stdout, "sync: fetched bundle carries no toolchain.json (a pre-carrier bundle, or its producer ran no upstream tool); the I-4 tool-pin check is disclosed-unproven for this intake")
+		fmt.Fprintln(stdout, disclosure.Render(toolPinCarrierAbsentDisclosure()))
 		return nil
 	}
 	sort.Strings(keys) // deterministic check/refusal order
