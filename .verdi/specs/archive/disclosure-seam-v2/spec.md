@@ -4,7 +4,7 @@ kind: spec
 title: "Disclosure Seam"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-R5-2
 problem: { text: "spec/disclosure-seam's minimal scoping (rename disclosure text in place, introduce no new shared type or package) cannot satisfy its own ac-1: the three disclosure call sites hold structurally different data at their own point of rendering (a lint Finding's Rule+Path+Message, a gate condition's Name+Reason two-line block, and review_unavailable's bare sentence), so no string rename can make their phrasing textually identical — proven by a failing exerciser and filed as conflict/disclosure-seam-rename-insufficient", anchor: "#problem" }
 outcome: { text: "the three disclosure call sites construct a shared Disclosure value and render it through one function, so their phrasing is identical by construction rather than by coincidentally-matching hand-authored strings", anchor: "#outcome" }
