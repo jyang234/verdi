@@ -1136,6 +1136,22 @@ bindings:
       # for any feature-AC attestation leg anywhere in this file.
       - "spec/disclosure-legibility#ac-1"
       - "spec/disclosure-legibility#ac-2"
+      # spec/public-showcase FEATURE ACs (ac-1/ac-2 declare [static,
+      # behavioral]; ac-3 [behavioral]; no attestation kind declared, so
+      # the feature outcome floor reads these pass-records). Each binds
+      # the same evidence its one implementing story (all three now
+      # archived) binds elsewhere in this file: ac-1 <-
+      # showcase-corpus-renovation#ac-1's corpus construction + vetting
+      # proofs (the two-history rebuild, lint-showcase, the ADJ-16
+      # ratified evidence definition — see that story's own entry above);
+      # ac-2 <- showcase-drift-gate#ac-1's named-gap coverage proofs
+      # (TestShowcaseCoverage both directions, lint-showcase/
+      # showcase-coverage in make verify's chain); ac-3 <-
+      # public-readme#ac-1's TestReadmeExamplesFresh verbatim-reproduction
+      # gate over every tagged README block.
+      - "spec/public-showcase#ac-1"
+      - "spec/public-showcase#ac-2"
+      - "spec/public-showcase#ac-3"
       # spec/creation-surfaces FEATURE outcome ACs (extensibility Phase 2,
       # Task 9: this design series authors the feature spec + these
       # bindings together, the X-9/#143 convention spec/ritual-integrity's
@@ -1752,6 +1768,15 @@ bindings:
       # spec-align and before e2e. All compile, vet, lint, and lint-store
       # clean under make verify.
       - "spec/showcase-drift-gate#ac-1"
+      # spec/public-showcase FEATURE ACs' static legs (ac-1/ac-2; ac-3 is
+      # behavioral-only and has no entry here): the same statics their
+      # implementing stories bind in this list — ac-1 <-
+      # showcase-corpus-renovation#ac-1's committed-corpus statics
+      # (examples/showcase as the single store, layers.txt, the vetting
+      # doc's zero-unrecorded file rows); ac-2 <- showcase-drift-gate#
+      # ac-1's three-axis inventory + Makefile named-gate statics.
+      - "spec/public-showcase#ac-1"
+      - "spec/public-showcase#ac-2"
       # spec/closure-ergonomics family static legs (closure-groundwork
       # task): spec/attest-helper is the only story of the four declaring
       # the static kind on every AC.
