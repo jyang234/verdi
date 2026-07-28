@@ -65,6 +65,13 @@ func (w classWords) indefinite(id string) string {
 	return model.Indefinite(w.word(id))
 }
 
+// verb is a lifecycle verb id's display word (id fallback), through the
+// identical model chain (model.DisplayVerb) — the verb-word display
+// discipline spec/creation-surfaces ac-5 names: a verb-speaking surface
+// this feature creates (the creation form's copy, spec/creation-form
+// ac-3) routes its verb words here, never hand-written bare verb prose.
+func (w classWords) verb(id string) string { return w.m.DisplayVerb(id) }
+
 // renamed returns only the class words whose display form differs from
 // the bare id — the payload map boardspec.js reads for its own dialog
 // copy and menu labels, empty (omitted) for a no-rename store so the

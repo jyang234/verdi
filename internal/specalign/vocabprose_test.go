@@ -1,20 +1,26 @@
 // The L-M13a(6) mechanical prose witness (ledger, docs/design/plans/
 // 2026-07-17-extensibility-phase1-plan.md: "a mechanical prose-witness
 // (production string literals scanned for class words; every hit routed
-// or classification-marked) — sweeps don't converge, enforcement does").
+// or classification-marked) — sweeps don't converge, enforcement does"),
+// extended to VERB words at spec/verb-surfaces ac-4 (spec/creation-
+// surfaces#ac-5, ledger L-N9): "TestVocabProseWitness's word list extends
+// to verb words in this same story, so a bare, unrouted verb word
+// introduced anywhere this feature touches reds the witness by
+// construction."
 //
 // TestVocabProseWitness scans every PRODUCTION Go string literal under
 // cmd/ and internal/ for the operating model's class words (canonical
-// classes + the spike pseudo-class, singular and display-plural) and
-// lifecycle state words spoken as prose, and requires every hit to be
-// either
+// classes + the spike pseudo-class, singular and display-plural),
+// lifecycle state words, and lifecycle VERB words (today: accept, close)
+// spoken as prose, and requires every hit to be either
 //
 //   - ROUTED: its own enclosing statement (or top-level declaration)
-//     visibly engages the display chain — a Display*/display* call,
-//     model.Indefinite/Article/Capitalize, the workbench classWords
-//     methods (word/plural/capital/indefinite), or an identifier ending
-//     in Word/Words (the house convention for resolved display-word
-//     locals: classWord, featureWord, ...); or
+//     visibly engages the display chain — a Display*/display* call
+//     (DisplayVerb included, for verb words), model.Indefinite/Article/
+//     Capitalize, the workbench classWords methods (word/plural/capital/
+//     indefinite/verb), or an identifier ending in Word/Words (the house
+//     convention for resolved display-word locals: classWord,
+//     featureWord, verbWord, ...); or
 //   - MARKED: the one mechanical classification marker comment,
 //     `// vocab:identity — <why>`, on the literal's own starting line or
 //     the line directly above it, placed AT the producing site (never in
@@ -26,8 +32,9 @@
 //
 // The word lists are DERIVED from the embedded canonical model at run
 // time (model.Canonical()), never hand-maintained: declared class ids
-// plus "spike" (the L-M13 pseudo-class) with their display plurals, and
-// the union of every lifecycle's state ids.
+// plus "spike" (the L-M13 pseudo-class) with their display plurals, the
+// union of every lifecycle's state ids, and the union of every
+// lifecycle's own declared transition verb ids.
 //
 // Mechanical rules, and their disclosed limits:
 //
@@ -96,13 +103,19 @@ var vocabStockPhrases = []string{"fail closed", "fails closed", "failing closed"
 // chain (see the file doc comment's ROUTED bullet). Applied to statement
 // source text whose string literals and comments have been blanked, so
 // literal or comment text can never self-route a statement.
-var vocabRouteRe = regexp.MustCompile(`\b[Dd]isplay[A-Za-z]*\s*\(|\bIndefinite\(|\bArticle\(|\bCapitalize\(|\bclassWords\b|\.word\(|\.plural\(|\.capital\(|\.indefinite\(|\b[A-Za-z0-9_]*[Ww]ords?\b`)
+var vocabRouteRe = regexp.MustCompile(`\b[Dd]isplay[A-Za-z]*\s*\(|\bIndefinite\(|\bArticle\(|\bCapitalize\(|\bclassWords\b|\.word\(|\.plural\(|\.capital\(|\.indefinite\(|\.verb\(|\b[A-Za-z0-9_]*[Ww]ords?\b`)
 
 // vocabProseWords derives the witness's word list from the embedded
 // canonical model: every declared class id and its display plural, the
-// spike pseudo-class and its plural (L-M13 rule 3), and the union of
-// every lifecycle's state ids. Sorted longest-first so a longer word is
-// matched (and blanked) before any shorter word could hit inside it.
+// spike pseudo-class and its plural (L-M13 rule 3), the union of every
+// lifecycle's state ids, and — spec/verb-surfaces ac-4, the verb-word
+// category's own birth — the union of every lifecycle's own declared
+// VERB ids (Transitions[].Verb; today: accept, close). Never hand-
+// maintained: a store that renamed or added a canonical transition verb
+// widens what this witness scans automatically, the same property the
+// class/state derivation already has. Sorted longest-first so a longer
+// word is matched (and blanked) before any shorter word could hit inside
+// it.
 func vocabProseWords() []string {
 	mdl := model.Canonical()
 	seen := map[string]bool{}
@@ -123,6 +136,9 @@ func vocabProseWords() []string {
 	for _, lc := range mdl.Lifecycle {
 		for _, s := range lc.States {
 			add(s)
+		}
+		for _, tr := range lc.Transitions {
+			add(tr.Verb)
 		}
 	}
 	sort.Slice(words, func(i, j int) bool {
@@ -379,8 +395,10 @@ func TestVocabProseWitness(t *testing.T) {
 }
 
 // TestVocabProseWords proves the derived word list carries the canonical
-// classes, the spike pseudo-class, display plurals, and every canonical
-// lifecycle state — and is longest-first (the matcher's precondition).
+// classes, the spike pseudo-class, display plurals, every canonical
+// lifecycle state, and — spec/verb-surfaces ac-4 — every canonical
+// lifecycle verb (accept, close) — and is longest-first (the matcher's
+// precondition).
 func TestVocabProseWords(t *testing.T) {
 	words := vocabProseWords()
 	got := map[string]bool{}
@@ -390,6 +408,7 @@ func TestVocabProseWords(t *testing.T) {
 	for _, want := range []string{
 		"feature", "features", "story", "stories", "spike", "spikes",
 		"draft", "accepted-pending-build", "closed", "superseded",
+		"accept", "close",
 	} {
 		if !got[want] {
 			t.Errorf("vocabProseWords() is missing %q (have %v)", want, words)
@@ -569,4 +588,91 @@ func f() string {
 			}
 		})
 	}
+}
+
+// TestScanVocabProse_VerbWordMutationWitness is spec/verb-surfaces ac-4's
+// own mutation-witness proof, mirroring TestScanVocabProse_Classifier's
+// established convention (and the class/state word lists' own precedent):
+// it proves the scanner, extended with verb words, is RED on a
+// deliberately bare, unrouted verb word ("accept") — a synthetic mutation
+// of what a routed production site would look like with its routing
+// stripped out — and GREEN once that same word is routed through
+// DisplayVerb, or once it carries the vocab:identity marker instead. This
+// is the evidence that the new verb-word category actually BITES, not
+// merely that vocabProseWords() happens to contain "accept"/"close".
+func TestScanVocabProse_VerbWordMutationWitness(t *testing.T) {
+	words := vocabProseWords()
+
+	t.Run("RED: a bare, unrouted verb word in production prose", func(t *testing.T) {
+		src := `package p
+func f() string {
+	return "run this before you accept the story"
+}
+`
+		got, err := scanVocabProse("synth.go", []byte(src), words)
+		if err != nil {
+			t.Fatalf("scanVocabProse: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("scanVocabProse violations = %d (%v), want exactly 1 (RED) — the verb-word category must bite a bare hit", len(got), got)
+		}
+		hasAccept := false
+		for _, w := range got[0].Words {
+			if w == "accept" {
+				hasAccept = true
+			}
+		}
+		if !hasAccept {
+			t.Fatalf("violation Words = %v, want it to name \"accept\"", got[0].Words)
+		}
+	})
+
+	t.Run("GREEN: the identical verb word routed through DisplayVerb", func(t *testing.T) {
+		src := `package p
+func f(mdl M) string {
+	return sprintf("run this before you "+mdl.DisplayVerb("accept")+" the story")
+}
+`
+		got, err := scanVocabProse("synth.go", []byte(src), words)
+		if err != nil {
+			t.Fatalf("scanVocabProse: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("scanVocabProse violations = %d (%v), want 0 (GREEN) once routed through DisplayVerb", len(got), got)
+		}
+	})
+
+	t.Run("GREEN: the identical verb word marked vocab:identity", func(t *testing.T) {
+		src := `package p
+func f() string {
+	return "run this before you accept the story" // vocab:identity — CLI verb name
+}
+`
+		got, err := scanVocabProse("synth.go", []byte(src), words)
+		if err != nil {
+			t.Fatalf("scanVocabProse: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("scanVocabProse violations = %d (%v), want 0 (GREEN) once marked vocab:identity", len(got), got)
+		}
+	})
+
+	t.Run("GREEN: a workbench-style .verb( call site routes, receiver name aside", func(t *testing.T) {
+		// The receiver is deliberately named "p" (not "words"/"classWords")
+		// so this exercises vocabRouteRe's own \.verb\( arm specifically —
+		// never the pre-existing identifier-ends-in-Word(s) catch-all a
+		// "words"-named receiver would coincidentally satisfy instead.
+		src := `package p
+func f(p ClassWords) string {
+	return "run this before you " + p.verb("accept") + " the story"
+}
+`
+		got, err := scanVocabProse("synth.go", []byte(src), words)
+		if err != nil {
+			t.Fatalf("scanVocabProse: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("scanVocabProse violations = %d (%v), want 0 (GREEN) — a .verb( call site routes", len(got), got)
+		}
+	})
 }

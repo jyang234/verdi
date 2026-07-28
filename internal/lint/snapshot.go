@@ -65,6 +65,22 @@ type Snapshot struct {
 	ManifestErr error
 
 	Services []store.Service
+
+	// RootBindings is the module root's own verdi.bindings.yaml (spec/
+	// ritual-traps ac-3), decoded — sibling of .verdi/, never nested inside
+	// a .flowmap.yaml service root (D6-4: this repository's own root
+	// bindings file documents that the verdi repo is deliberately not a
+	// flowmap service of itself). A Service is only ever discovered from a
+	// directory containing .flowmap.yaml, so without reading this path
+	// directly, a store's root bindings file would stay permanently
+	// invisible to every Service-scoped rule (chronicle P2-3(b)). nil when
+	// the file is absent (the ordinary case for most stores, which declare
+	// bindings only inside a discovered service root) or when present but
+	// not well-formed (RootBindingsErr then names why) — mirroring
+	// Manifest/ManifestErr's own present-but-broken-is-a-field, not a hard
+	// BuildSnapshot failure, convention.
+	RootBindings    *artifact.Bindings
+	RootBindingsErr error
 }
 
 // BuildSnapshot walks root and assembles a Snapshot.
@@ -112,6 +128,18 @@ func BuildSnapshot(root string, opts Options) (*Snapshot, error) {
 		snap.GitAttributes = data
 	} else if !os.IsNotExist(err) {
 		snap.GitAttributesErr = err
+	}
+
+	rootBindingsPath := filepath.Join(root, "verdi.bindings.yaml")
+	if data, err := os.ReadFile(rootBindingsPath); err == nil {
+		b, decErr := artifact.DecodeBindings(data)
+		if decErr != nil {
+			snap.RootBindingsErr = decErr
+		} else {
+			snap.RootBindings = b
+		}
+	} else if !os.IsNotExist(err) {
+		snap.RootBindingsErr = err
 	}
 
 	manifestPath := filepath.Join(root, ".verdi", "verdi.yaml")

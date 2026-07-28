@@ -1,5 +1,6 @@
-// verdi disposition <spec-ref> <finding-id> <fixed|accepted-deviation>
-// --rationale <text> [--amend] (05 §CLI, spec/disposition-verb dc-1):
+// verdi disposition --rationale <text> [--amend] [--] <spec-ref>
+// <finding-id> <fixed|accepted-deviation> (05 §CLI,
+// spec/disposition-verb dc-1):
 // records a reviewer's decision on a deviation-report.md finding IN PLACE —
 // the sanctioned replacement for the round-6 hand-edit flow (D6-25).
 //
@@ -57,7 +58,7 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-const dispositionUsage = "disposition: usage: verdi disposition <spec-ref> <finding-id> <fixed|accepted-deviation> --rationale <text> [--amend]"
+const dispositionUsage = "disposition: usage: verdi disposition --rationale <text> [--amend] [--] <spec-ref> <finding-id> <fixed|accepted-deviation> (-- ends option parsing)"
 
 // dispositionTestInterleave, when non-nil, is invoked by runDisposition
 // immediately before its final write — a test-only seam (ADJ-54's j-7 TDD
@@ -92,26 +93,34 @@ func cmdDisposition(args []string, stdout, stderr io.Writer) int {
 // before any file is touched.
 func parseDispositionArgs(args []string, stderr io.Writer) (positional []string, decision artifact.FindingDisposition, rationale string, amend bool, rc int) {
 	var rationaleSet bool
+	endOfOptions := false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		switch a {
-		case "--rationale":
-			if i+1 >= len(args) {
-				fmt.Fprintln(stderr, "disposition: --rationale requires a <text> argument")
-				return nil, "", "", false, 2
+		if !endOfOptions {
+			switch a {
+			case "--":
+				endOfOptions = true
+				continue
+			case "--rationale":
+				if i+1 >= len(args) {
+					fmt.Fprintln(stderr, "disposition: --rationale requires a <text> argument")
+					return nil, "", "", false, 2
+				}
+				i++
+				rationale = args[i]
+				rationaleSet = true
+				continue
+			case "--amend":
+				amend = true
+				continue
+			default:
+				if strings.HasPrefix(a, "--") {
+					fmt.Fprintf(stderr, "disposition: unrecognized flag %q\n", a)
+					return nil, "", "", false, 2
+				}
 			}
-			i++
-			rationale = args[i]
-			rationaleSet = true
-		case "--amend":
-			amend = true
-		default:
-			if strings.HasPrefix(a, "--") {
-				fmt.Fprintf(stderr, "disposition: unrecognized flag %q\n", a)
-				return nil, "", "", false, 2
-			}
-			positional = append(positional, a)
 		}
+		positional = append(positional, a)
 	}
 
 	if len(positional) != 3 {

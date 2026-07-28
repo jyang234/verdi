@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 )
@@ -35,4 +36,23 @@ func Canonical() *Model {
 		panic(fmt.Sprintf("model: embedded canonical.yaml failed to decode: %v (packaging defect, not a user-facing condition — see embed_test.go)", err))
 	}
 	return m
+}
+
+// CanonicalYAML returns a defensive copy of the embedded canonical.yaml
+// bytes verbatim (spec/init-wizard ac-2/ac-3, ledger L-N5, design doc §12
+// W-4): the one raw-bytes source a hand-built model.yaml derives from.
+// There is no Model→YAML marshal seam anywhere in this codebase (the
+// module-wide "hand-render, strict-decode-verify" posture
+// internal/workbench/obligationauthor.go's renderObligation already
+// documents); a caller that needs to WRITE a model.yaml describing the
+// canonical shape plus a vocabulary: block (internal/initwizard) starts
+// from these bytes and appends to them, rather than re-deriving the
+// classes:/lifecycle: block a third time (canonical.go's Go-literal twin
+// is already the second). A copy, never the shared embedded slice
+// itself — mirroring Canonical()'s own "never a shared, cached pointer"
+// promise one level down, so a caller mutating (or appending to) its own
+// copy can never corrupt what a later call, in this process or another
+// goroutine, reads.
+func CanonicalYAML() []byte {
+	return bytes.Clone(canonicalYAML)
 }

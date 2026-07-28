@@ -32,6 +32,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jyang234/verdi/internal/decisionsweep"
 	"github.com/jyang234/verdi/internal/lint"
@@ -62,10 +63,11 @@ func cmdAudit(args []string, stdout, stderr io.Writer) int {
 	}
 	manifest := cfg.Manifest
 
-	exemptsThreshold, deviationsThreshold := 0, 0
+	exemptsThreshold, deviationsThreshold, waiversThreshold := 0, 0, 0
 	if manifest.Audit != nil {
 		exemptsThreshold = manifest.Audit.ExemptsConflictThreshold
 		deviationsThreshold = manifest.Audit.DeviationsStaleThreshold
+		waiversThreshold = manifest.Audit.WaiversStaleThreshold
 	}
 
 	ctx := context.Background()
@@ -76,15 +78,24 @@ func cmdAudit(args []string, stdout, stderr io.Writer) int {
 	// itself.
 	defaultBranchRef := lint.ResolveDefaultBranch(ctx, root)
 
-	return runAudit(ctx, root, exemptsThreshold, deviationsThreshold, defaultBranchRef, cfg.Model, stdout, stderr)
+	// now is read exactly once, here at the boundary (attest.go's own
+	// stamp-at-the-boundary convention), and threaded through to
+	// decisionsweep.Audit's waiver-expiry scan — never re-read downstream,
+	// so a single invocation's disclosure is internally consistent.
+	now := time.Now().UTC()
+
+	return runAudit(ctx, root, exemptsThreshold, deviationsThreshold, waiversThreshold, defaultBranchRef, now, cfg.Model, stdout, stderr)
 }
 
 // runAudit is the testable core: given an already-resolved root,
-// thresholds, the resolved default branch ref, and the resolved display
-// model (nil-safe: bare-id fallback), runs internal/decisionsweep.Audit
-// and internal/residue.Scan and reports both.
-func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThreshold int, defaultBranchRef string, mdl *model.Model, stdout, stderr io.Writer) int {
-	result, err := decisionsweep.Audit(root, exemptsThreshold, deviationsThreshold)
+// thresholds, the resolved default branch ref, the invocation's own wall-
+// clock read (for the waiver-audit section's expiry disclosure — never
+// re-read internally, so the whole run is deterministic given its
+// arguments), and the resolved display model (nil-safe: bare-id
+// fallback), runs internal/decisionsweep.Audit and internal/residue.Scan
+// and reports both.
+func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThreshold, waiversThreshold int, defaultBranchRef string, now time.Time, mdl *model.Model, stdout, stderr io.Writer) int {
+	result, err := decisionsweep.Audit(root, exemptsThreshold, deviationsThreshold, waiversThreshold, now)
 	if err != nil {
 		fmt.Fprintln(stderr, "audit:", err)
 		return 2
@@ -123,6 +134,33 @@ func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThre
 			flagged = true
 		}
 		fmt.Fprintf(stdout, "%s: %s (accepted-deviations: %d)\n", e.StoryRef, status, e.Result.AcceptedDeviationCount)
+	}
+
+	// == Waiver audit == (spec/verb-surfaces ac-3, guide 8.4: "verdi audit
+	// counts active waivers with the same budget machinery as deviations"
+	// — its own clearly-labeled count, never merged into the
+	// accepted-deviations budget the section above reports).
+	fmt.Fprintln(stdout, "== Waiver audit ==")
+	if len(result.WaiverStale) == 0 {
+		fmt.Fprintf(stdout, "(no %s with a waiver to audit)\n", mdl.DisplayClassPlural("story"))
+	}
+	for _, e := range result.WaiverStale {
+		status := "ok"
+		if e.Flagged {
+			status = "WAIVER-STALE"
+			flagged = true
+		}
+		fmt.Fprintf(stdout, "%s: %s (active waivers: %d)\n", e.StoryRef, status, e.ActiveCount)
+		for _, w := range e.Waivers {
+			expiry := "no expiry"
+			if w.Expiry != "" {
+				expiry = "expires " + w.Expiry
+				if w.Lapsed {
+					expiry += " (LAPSED)"
+				}
+			}
+			fmt.Fprintf(stdout, "  - %s: status %s, %s\n", w.ACID, w.Status, expiry)
+		}
 	}
 
 	// == Closure hygiene audit == (spec/closure-hygiene dc-1: a third,

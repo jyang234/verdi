@@ -271,18 +271,32 @@ func SlugifyHeading(text string) string {
 }
 
 // ResolveAnchor reports whether anchor (a "#slug" or bare "slug" reference)
-// resolves to a heading in anchors.
+// resolves to a heading in anchors. The anchor side is slugified through the
+// identical SlugifyHeading transform HeadingAnchors already applies to every
+// heading's own text before the two are compared (spec/ritual-traps ac-1,
+// X-1): without this, a frontmatter anchor: value written in the heading's
+// own original case (e.g. "AC-1" against a "## AC-1" heading) silently
+// failed to resolve unless the author already knew, from unwritten
+// convention, to write every anchor pre-lowercased. Symmetric slugification
+// only ever resolves MORE anchors than before, never fewer — an anchor that
+// already resolved keeps resolving.
 func ResolveAnchor(anchors map[string]bool, anchor string) bool {
-	return anchors[strings.TrimPrefix(anchor, "#")]
+	return anchors[SlugifyHeading(strings.TrimPrefix(anchor, "#"))]
 }
 
 // ResolveObjectAnchors checks every present attribute and object anchor in
-// fm against body's actual headings (02 §Object model's exact-match
-// resolution rule), returning the first mismatch, named with which
-// attribute/object it belongs to. An empty anchor is skipped rather than
-// treated as a mismatch: v0 grandfathered feature specs, and any decode
-// path that validates frontmatter without a document body, never populate
-// these fields at all (see Attribute's and AcceptanceCriterion's own
+// fm against body's actual headings and returns the first mismatch, named
+// with which attribute/object it belongs to. Resolution is slug-symmetric,
+// not exact-match: ResolveAnchor puts both the anchor and every heading
+// through the same SlugifyHeading transform (case-folded, punctuation
+// dropped, spaces hyphenated) and compares the resulting slugs, so
+// `anchor: "AC 1"` resolves against a `## AC-1` heading (spec/ritual-traps
+// ac-1, the ratification vehicle for this reading of 02 §Object model; it
+// superseded the earlier exact-match rule under which only an anchor already
+// written as the heading's own slug resolved). An empty anchor is skipped
+// rather than treated as a mismatch: v0 grandfathered feature specs, and any
+// decode path that validates frontmatter without a document body, never
+// populate these fields at all (see Attribute's and AcceptanceCriterion's own
 // requiredness notes) — this method is the separate, body-aware resolution
 // step callers run once a body is available.
 func (fm SpecFrontmatter) ResolveObjectAnchors(body []byte) error {
@@ -292,7 +306,13 @@ func (fm SpecFrontmatter) ResolveObjectAnchors(body []byte) error {
 			return nil
 		}
 		if !ResolveAnchor(anchors, anchor) {
-			return fmt.Errorf("artifact: %s anchor %q does not resolve to a heading in the document body (02 §Object model: anchor resolution is exact-match)", label, anchor)
+			// Truthful post-ac-1 guidance: comparison is slug-vs-slug, so
+			// surface the anchor's own computed slug and say no heading's slug
+			// matches it — not the stale "make it match exactly" (spec/
+			// ritual-traps ac-1). e.g. `anchor: "AC 1"` already resolves
+			// against `## AC-1`, so a genuine failure is a real slug mismatch.
+			slug := SlugifyHeading(strings.TrimPrefix(anchor, "#"))
+			return fmt.Errorf("artifact: %s anchor %q does not resolve to a heading in the document body: its slug %q matches no heading's slug (resolution is slug-symmetric, spec/ritual-traps ac-1)", label, anchor, slug)
 		}
 		return nil
 	}

@@ -1,10 +1,64 @@
 package evidence
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
 )
+
+// TestCountAcceptedDeviations_CarriedFromCollapsesCrossLevelSlug pins L-N14's
+// union arithmetic for the cross-level reaffirmation case (ledger L-N14
+// companion): a confirmed feature-level reaffirmation (carried-from set) of an
+// archived story ruling is the SAME deviation as that archived ruling, even
+// though the feature judge reworded the text under the same slug. The two must
+// collapse to ONE in the feature-close union — never counted twice (once in the
+// story archive under the old text, once in the feature report under the new
+// text).
+//
+// Red-first: the content-identity union (kind+id+text, which excludes
+// carried-from) reads the reworded texts as two distinct identities and counts 2.
+func TestCountAcceptedDeviations_CarriedFromCollapsesCrossLevelSlug(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	storyArchive := []artifact.Finding{
+		{ID: "judged-retry-semantics", Kind: artifact.FindingJudged, Text: "OLD story-level text", Disposition: artifact.FindingAcceptedDeviation, Note: "n"},
+	}
+	featureReport := []artifact.Finding{
+		{ID: "judged-retry-semantics", Kind: artifact.FindingJudged, Text: "NEW feature-level wording", Disposition: artifact.FindingAcceptedDeviation, Note: "reaffirmed", CarriedFrom: sha},
+	}
+	if got := CountAcceptedDeviations(featureReport, storyArchive); got != 1 {
+		t.Fatalf("CountAcceptedDeviations = %d, want 1 — a carried-from feature reaffirmation collapses with the same-slug archived ruling it reaffirms", got)
+	}
+}
+
+// TestCountAcceptedDeviations_NoCarriedFrom_SameSlugDifferentText_CountsTwice
+// guards the collapse's precondition: WITHOUT a carried-from reaffirmation, two
+// same-slug accepted-deviations with DIFFERENT text remain distinct content
+// identities and count twice — the collapse fires ONLY on a human-confirmed
+// carried-from reaffirmation, never on a bare slug coincidence (which would
+// silently under-count two genuinely different rulings that merely reused a slug).
+func TestCountAcceptedDeviations_NoCarriedFrom_SameSlugDifferentText_CountsTwice(t *testing.T) {
+	a := []artifact.Finding{{ID: "judged-s", Kind: artifact.FindingJudged, Text: "ruling one", Disposition: artifact.FindingAcceptedDeviation, Note: "n"}}
+	b := []artifact.Finding{{ID: "judged-s", Kind: artifact.FindingJudged, Text: "ruling two", Disposition: artifact.FindingAcceptedDeviation, Note: "n"}}
+	if got := CountAcceptedDeviations(a, b); got != 2 {
+		t.Fatalf("CountAcceptedDeviations = %d, want 2 — without carried-from, same-slug different-text ADs are distinct identities", got)
+	}
+}
+
+// TestCountAcceptedDeviations_CarriedFromWithinReport_CountsOnce keeps the
+// ordinary within-report reaffirmation count correct: a confirmed reaffirmation
+// standing alone at its slug (the disposition verb removed its backing record) is
+// one accepted-deviation, exactly as before the collapse layered on.
+func TestCountAcceptedDeviations_CarriedFromWithinReport_CountsOnce(t *testing.T) {
+	sha := strings.Repeat("b", 40)
+	report := []artifact.Finding{
+		{ID: "judged-x", Kind: artifact.FindingJudged, Text: "reaffirmed ruling", Disposition: artifact.FindingAcceptedDeviation, Note: "n", CarriedFrom: sha},
+		{ID: "computed-y", Kind: artifact.FindingComputed, Text: "unrelated", Disposition: artifact.FindingAcceptedDeviation, Note: "n"},
+	}
+	if got := CountAcceptedDeviations(report); got != 2 {
+		t.Fatalf("CountAcceptedDeviations = %d, want 2 — a lone carried-from finding plus one unrelated AD", got)
+	}
+}
 
 func acceptedDeviation(id, note string) artifact.Finding {
 	return artifact.Finding{ID: id, Kind: artifact.FindingComputed, Text: "some deviation text", Disposition: artifact.FindingAcceptedDeviation, Note: note}

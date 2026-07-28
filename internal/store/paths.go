@@ -52,6 +52,8 @@ const (
 	verdiDir        = ".verdi"
 	specsDir        = "specs"
 	attestationsDir = "attestations"
+	obligationsDir  = "obligations"
+	waiversDir      = "waivers"
 	dataDir         = "data"
 	derivedDir      = "derived"
 
@@ -118,6 +120,57 @@ func AttestationDir(root, storySlug string) string {
 // drops an empty leading element.
 func AttestationPath(root, storySlug, acID string) string {
 	return filepath.Join(AttestationDir(root, storySlug), acID+".md")
+}
+
+// WaiverDir is a story's waiver directory under root:
+// <root>/.verdi/waivers/<storySlug>/ (03 §Attestations and waivers).
+// storySlug is the story ref's slug (store.RefSlug of the spec's story:
+// ref), the same story-slug rule AttestationDir uses — never the spec name.
+func WaiverDir(root, storySlug string) string {
+	return filepath.Join(root, verdiDir, waiversDir, storySlug)
+}
+
+// WaiverPath is the waiver file for (storySlug, acID):
+// <WaiverDir>/<acID>.md (03 §Attestations and waivers: "waivers/<story-
+// slug>/<ac-id>.md, same story-slug rule" as attestations) — the ONE
+// construction the fold's evidence.WaiverActive, `verdi waive`, and
+// `verdi audit`'s waiver section all resolve through, mirroring
+// AttestationPath's own single-assembler role. Passing an empty root
+// yields the store-relative display form (".verdi/waivers/<storySlug>/
+// <acID>.md") a disclosure prints, the same empty-root convention
+// AttestationPath documents.
+func WaiverPath(root, storySlug, acID string) string {
+	return filepath.Join(WaiverDir(root, storySlug), acID+".md")
+}
+
+// ObligationDir is a spec's evidence-obligation directory under root:
+// <root>/.verdi/obligations/<specName>/ (spec/obligation-artifact DC-2).
+// specName is the spec's OWN directory name under specs/active/ (or
+// specs/archive/) — NOT a story's tracker-ref slug (the keying
+// AttestationDir uses): a story's own spec.md is always resolvable by
+// name, while its story: ref may be absent, reused, or resolve
+// differently over time. This is the same keying
+// internal/workbench/obligationauthor.go's actionObligationGraduate and
+// internal/lint's VL-020 already construct inline; this accessor is the
+// one place a NEW caller resolves it, per this file's own single-assembler
+// rationale — VL-011/VL-020's existing inline constructions are
+// deliberately left as they stand (spec/obligation-seam ac-1..3's own
+// scope is the accept backstop and `verdi obligation author`, never
+// vl020.go).
+func ObligationDir(root, specName string) string {
+	return filepath.Join(root, verdiDir, obligationsDir, specName)
+}
+
+// ObligationPath is the obligation file for (specName, acID, kind):
+// <ObligationDir>/<acID>--<kind>.md (spec/obligation-artifact DC-2) — the
+// ONE construction accept's freeze-moment backstop and `verdi obligation
+// author` both resolve through (spec/obligation-seam ac-1/ac-5), mirroring
+// AttestationPath's own single-assembler role for attestations. Passing an
+// empty root yields the store-relative display form
+// (".verdi/obligations/<specName>/<acID>--<kind>.md") a disclosure prints,
+// the same empty-root convention AttestationPath documents.
+func ObligationPath(root, specName, acID, kind string) string {
+	return filepath.Join(ObligationDir(root, specName), acID+"--"+kind+".md")
 }
 
 // DerivedRoot is the derived-artifact tree root under root:

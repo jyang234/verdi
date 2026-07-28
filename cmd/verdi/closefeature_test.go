@@ -494,6 +494,289 @@ func TestRunCloseFeature_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestRunCloseFeature_PreExistingStagedPathsRefusedBeforeMutation(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-feature-fixture")
+	reportBefore, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading pre-close feature deviation report: %v", err)
+	}
+	appendCloseTestFile(t, filepath.Join(repo.Dir, ".verdi", "verdi.yaml"), "# staged feature-close note\n")
+	gitOutput(t, repo.Dir, "add", ".verdi/verdi.yaml")
+
+	fp := fake.New()
+	var stdout, stderr bytes.Buffer
+	got := runClose(context.Background(), repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fp), &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(feature with staged path) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), ".verdi/verdi.yaml") {
+		t.Fatalf("stderr = %q, want staged path named", stderr.String())
+	}
+	if branch := gitCurrentBranch(t, repo.Dir); branch != "main" {
+		t.Fatalf("current branch = %q, want main (refusal must precede feature branch cut)", branch)
+	}
+	if hasLocalBranch(t, repo.Dir, "close/close-feature-fixture") {
+		t.Fatal("close/close-feature-fixture exists despite pre-existing staged path")
+	}
+	activeSpec, err := os.ReadFile(store.ActiveSpecPath(repo.Dir, "close-feature-fixture"))
+	if err != nil {
+		t.Fatalf("reading active feature spec after refusal: %v", err)
+	}
+	wantActiveSpec := closeFeatureSpecMD(scaffoldSHAFromRepo(t, repo), opts.FeatureStory)
+	if string(activeSpec) != wantActiveSpec {
+		t.Fatal("active feature spec changed despite staged-path refusal")
+	}
+	if _, err := os.Stat(store.ArchiveSpecDir(repo.Dir, "close-feature-fixture")); !os.IsNotExist(err) {
+		t.Fatalf("feature archive directory exists despite staged-path refusal: %v", err)
+	}
+	reportAfter, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading post-refusal feature deviation report: %v", err)
+	}
+	if !bytes.Equal(reportAfter, reportBefore) {
+		t.Fatal("feature deviation report changed despite staged-path refusal")
+	}
+	if _, err := os.Stat(filepath.Join(store.ActiveSpecDir(repo.Dir, "close-feature-fixture"), "rollup.json")); !os.IsNotExist(err) {
+		t.Fatalf("feature rollup.json exists despite staged-path refusal: %v", err)
+	}
+	if _, ok := fp.PublishedField(""); ok {
+		t.Fatal("feature rollup published despite staged-path refusal")
+	}
+}
+
+// TestRunCloseFeature_DisclosesUncommittedOutcomeAttestation is the feature
+// half of close_test.go's TestRunClose_DisclosesFoldRecordsMissingFromHEAD.
+// The feature outcome floor is satisfied here by an AUTHORED attestation
+// alone (opts.FeatureAC2FloorSatisfied is false, so ac-2 carries no outcome
+// record) that was never `git add`ed: the gate passes on a working-tree file
+// that enters neither the closure commit nor the archive, and the feature
+// attestation slug is the FEATURE's own name, not a story ref's slug (dc-6).
+func TestRunCloseFeature_DisclosesUncommittedOutcomeAttestation(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	opts.FeatureAC2FloorSatisfied = false
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	path := store.AttestationPath(repo.Dir, "close-feature-fixture", "ac-2")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir attestation dir: %v", err)
+	}
+	attestation := `---
+id: attestation/close-feature-fixture--ac-2
+kind: attestation
+title: "ac-2 outcome attested"
+owners: [platform-team]
+links:
+  - { type: verifies, ref: "spec/close-feature-fixture" }
+frozen: { at: 2024-01-01, commit: ` + repo.Head + ` }
+---
+# ac-2
+
+I observed the second fixture outcome hold.
+`
+	if err := os.WriteFile(path, []byte(attestation), 0o644); err != nil {
+		t.Fatalf("writing attestation: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runClose(context.Background(), repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runClose(feature, attestation-satisfied floor) = %d, want 0 — gate semantics must not change; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	rel := store.AttestationPath("", "close-feature-fixture", "ac-2")
+	for _, want := range []string{"disclosed-unproven", rel} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want a disclosure naming the uncommitted outcome attestation %q", stdout.String(), want)
+		}
+	}
+	assertClosureCommitOwnsOnlySpecPaths(t, repo.Dir, "close-feature-fixture")
+}
+
+// TestRunCloseFeature_StagingAndCommitFailuresRecover is the feature half of
+// the story ritual's own post-archive-move recovery proof (close_test.go's
+// TestRunClose_StagingFailure_UnwindsBranchCut and
+// TestRunClose_CommitFailure_LeavesRecoverableResidue). Both rituals cut
+// close/<name> before the same shared staging step, so both need the same two
+// recoveries; driving them through runClose keeps the feature path from
+// silently regressing while the story path stays green.
+func TestRunCloseFeature_StagingAndCommitFailuresRecover(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a staging failure unwinds the branch cut", func(t *testing.T) {
+		opts := defaultCloseFeatureFixtureOpts()
+		repo := buildCloseFeatureRepo(t, opts)
+		seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+		writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+		originalBranch := gitCurrentBranch(t, repo.Dir)
+		restore := closeAddPaths
+		closeAddPaths = func(context.Context, string, ...string) error {
+			return fmt.Errorf("forced staging failure")
+		}
+		defer func() { closeAddPaths = restore }()
+
+		var stdout, stderr bytes.Buffer
+		got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("runClose(feature staging failure) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if b := gitCurrentBranch(t, repo.Dir); b != originalBranch {
+			t.Fatalf("current branch = %q, want the original %q restored — the feature ritual's branch cut was not unwound", b, originalBranch)
+		}
+		if hasLocalBranch(t, repo.Dir, "close/close-feature-fixture") {
+			t.Fatal("close/close-feature-fixture still exists after a staging failure — the retry is blocked at the next cut")
+		}
+		if !strings.Contains(stderr.String(), "UNCOMMITTED") {
+			t.Fatalf("stderr = %q, want the uncommitted archive move disclosed", stderr.String())
+		}
+	})
+
+	t.Run("a commit failure keeps the branch and explains the recovery", func(t *testing.T) {
+		opts := defaultCloseFeatureFixtureOpts()
+		repo := buildCloseFeatureRepo(t, opts)
+		seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+		writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+		restore := closeCreateCommit
+		closeCreateCommit = func(context.Context, string, string) (string, error) {
+			return "", fmt.Errorf("forced commit failure")
+		}
+		defer func() { closeCreateCommit = restore }()
+
+		var stdout, stderr bytes.Buffer
+		got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("runClose(feature commit failure) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if !hasLocalBranch(t, repo.Dir, "close/close-feature-fixture") {
+			t.Fatal("close/close-feature-fixture was deleted after a commit failure — that strands the staged closure paths")
+		}
+		// Finding 6, feature half: a hand-completed commit does not publish the
+		// rollup, so the shared disclosure must say the publish is left undone.
+		for _, want := range []string{"close/close-feature-fixture", "git commit", "NOT published", "verdi rollup"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want recovery guidance naming %q", stderr.String(), want)
+			}
+		}
+	})
+}
+
+// TestRunCloseFeature_PreStageAndPublishFailuresDisclose is the feature-path
+// mirror of TestRunClose_PreStageFailuresDiscloseFreezeResidue and
+// TestRunClose_PublishFailureDisclosesCommittedButUnpublished (findings 4 and
+// 6). runCloseFeature cuts close/<name> before the same shared writeRollup /
+// flip / ArchiveMove / publish steps and wires the same shared disclosure
+// helpers, so both halves must speak. The ArchiveMove point is exercised for
+// the freeze residue (the cleanest hermetic trigger); the publish point needs a
+// feature that actually carries a story: ref, since the story-less default
+// skips the publish entirely.
+func TestRunCloseFeature_PreStageAndPublishFailuresDisclose(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ArchiveMove failure discloses the in-place freeze residue", func(t *testing.T) {
+		opts := defaultCloseFeatureFixtureOpts()
+		repo := buildCloseFeatureRepo(t, opts)
+		seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+		writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+		// A pre-existing archive directory makes ArchiveMove refuse to clobber,
+		// with the freeze, rollup write, and status flip already on disk.
+		if err := os.MkdirAll(store.ArchiveSpecDir(repo.Dir, "close-feature-fixture"), 0o755); err != nil {
+			t.Fatalf("pre-creating the archive directory: %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		if got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &stdout, &stderr); got != 2 {
+			t.Fatalf("runClose(feature ArchiveMove failure) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		for _, want := range []string{"UNCOMMITTED", store.SpecDirRelPath(store.ZoneActive, "close-feature-fixture"), "close/close-feature-fixture", "flipped the spec status to closed"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want the in-place freeze residue disclosed (%q)", stderr.String(), want)
+			}
+		}
+	})
+
+	t.Run("a committed publish failure discloses the unpublished archive", func(t *testing.T) {
+		opts := defaultCloseFeatureFixtureOpts()
+		opts.FeatureStory = "jira:FIXTURE-EPIC-1"
+		repo := buildCloseFeatureRepo(t, opts)
+		seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+		writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+		fp := fake.New()
+		fp.QueuePublishError("jira:FIXTURE-EPIC-1", fmt.Errorf("tracker unreachable"))
+		var stdout, stderr bytes.Buffer
+		if got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fp), &stdout, &stderr); got != 2 {
+			t.Fatalf("runClose(feature publish failure) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if !hasLocalBranch(t, repo.Dir, "close/close-feature-fixture") {
+			t.Fatal("close/close-feature-fixture missing — the archive commit should have landed before the publish step")
+		}
+		for _, want := range []string{"verdi rollup jira:FIXTURE-EPIC-1 --publish", "close/close-feature-fixture", "durable", "not retry the publish"} {
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want the committed-but-unpublished disclosure naming %q", stderr.String(), want)
+			}
+		}
+	})
+}
+
+func TestRunCloseFeature_UnrelatedWorkingTreeChangesSurviveAndStayOutOfCommit(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	modifiedPath := filepath.Join(repo.Dir, ".verdi", "verdi.yaml")
+	const modifiedSuffix = "# unrelated feature-close working-tree edit\n"
+	appendCloseTestFile(t, modifiedPath, modifiedSuffix)
+	untrackedRel := "feature-closure-scratch.txt"
+	untrackedPath := filepath.Join(repo.Dir, untrackedRel)
+	const untrackedContent = "keep this feature-close scratch file\n"
+	if err := os.WriteFile(untrackedPath, []byte(untrackedContent), 0o644); err != nil {
+		t.Fatalf("writing unrelated feature-close untracked file: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runClose(context.Background(), repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, closeFeatureDeps(fake.New()), &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runClose(feature with unrelated dirty files) = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+
+	modifiedAfter, err := os.ReadFile(modifiedPath)
+	if err != nil {
+		t.Fatalf("reading unrelated modified feature-close file: %v", err)
+	}
+	if !strings.HasSuffix(string(modifiedAfter), modifiedSuffix) {
+		t.Fatalf("unrelated modified feature-close file did not survive: %q", modifiedAfter)
+	}
+	untrackedAfter, err := os.ReadFile(untrackedPath)
+	if err != nil {
+		t.Fatalf("reading unrelated untracked feature-close file: %v", err)
+	}
+	if string(untrackedAfter) != untrackedContent {
+		t.Fatalf("unrelated feature-close untracked file = %q, want %q", untrackedAfter, untrackedContent)
+	}
+	status := gitOutput(t, repo.Dir, "status", "--short")
+	for _, want := range []string{" M .verdi/verdi.yaml", "?? " + untrackedRel} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("git status after feature close = %q, want surviving working-tree entry %q", status, want)
+		}
+	}
+	assertClosureCommitOwnsOnlySpecPaths(t, repo.Dir, "close-feature-fixture")
+	if got := strings.TrimSpace(gitOutput(t, repo.Dir, "ls-tree", "-r", "--name-only", "HEAD", "--", untrackedRel)); got != "" {
+		t.Fatalf("unrelated feature-close untracked file entered closure commit tree: %q", got)
+	}
+	committedManifest := gitOutput(t, repo.Dir, "show", "HEAD:.verdi/verdi.yaml")
+	if strings.Contains(committedManifest, modifiedSuffix) {
+		t.Fatal("unrelated feature-close tracked modification entered closure commit")
+	}
+}
+
 // scaffoldSHAFromRepo re-derives the scaffold layer's SHA from an already-
 // built repo's own history (Heads[0] — the first layer every fixture in
 // this file builds) rather than recomputing it via a second throwaway
@@ -855,6 +1138,46 @@ func TestRunCloseFeature_ClosedStoryDiscovered_NoOperationalError(t *testing.T) 
 	}
 	if !strings.Contains(stdout.String(), fmt.Sprintf("[PASS] closure(feature): %s", "3. every implementing story closed")) {
 		t.Fatalf("stdout should show condition 3 (every implementing story closed) passing: %s", stdout.String())
+	}
+}
+
+// TestRunCloseFeature_QuarantinedFailAgainstFeatureAC_Disclosed is the endgame
+// disclosure-extension finding 3's pin: the feature-closure gate's condition 1
+// (checkFeatureFoldEligible) must consume QuarantinedRecords over the FEATURE's
+// OWN derived dir and render the same disclosure families the story gate does. A
+// quarantined FAIL outcome record bound to the feature's (still-evidenced) ac-1
+// must be disclosed — the met-AC/fail case — so a quarantine-caused flip is never
+// silent on the feature surface either. Before the fix condition 1 rendered no
+// per-record disclosures at all.
+func TestRunCloseFeature_QuarantinedFailAgainstFeatureAC_Disclosed(t *testing.T) {
+	opts := defaultCloseFeatureFixtureOpts()
+	repo := buildCloseFeatureRepo(t, opts)
+	seedCloseFeatureEvidence(t, repo.Dir, repo.Head, opts)
+	writeCloseFeatureGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+	const gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	// A quarantined FAIL outcome record bound to the feature's ac-1, under an
+	// unreachable commit dir: excluded from the fold (ac-1 stays evidenced on the
+	// reachable behavioral pass seedCloseFeatureEvidence planted at repo.Head), so
+	// condition 1 still PASSES — but the exclusion must be disclosed.
+	writeFixtureVerdicts(t, repo.Dir, "spec/close-feature-fixture", gone,
+		`{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"behavioral","verdict":"fail","witness":"adverseFeatureFail","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"`+gone+`"},"digest":"sha256:`+strings.Repeat("a", 64)+`"}`)
+	ctx := context.Background()
+
+	deps := closeFeatureDeps(fake.New())
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-feature-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runClose(feature) = %d, want 0 (ac-1 stays evidenced; the fail is excluded); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "[PASS] closure(feature): 1.") {
+		t.Fatalf("stdout = %q, want feature condition 1 to PASS (ac-1 evidenced)", out)
+	}
+	if !strings.Contains(out, "disclosed-unproven [gate:evidence-quarantine]") {
+		t.Fatalf("stdout = %q, want the excluded feature FAIL record disclosed on the feature gate (finding 3)", out)
+	}
+	if !strings.Contains(out, "adverseFeatureFail") || !strings.Contains(out, gone) {
+		t.Fatalf("stdout = %q, want the disclosure to name the excluded feature FAIL record's witness and its unreachable commit", out)
 	}
 }
 

@@ -310,18 +310,34 @@ func checkNoACViolated(ctx context.Context, root string, spec *artifact.SpecFron
 	if err != nil {
 		return gateCondition{}, err
 	}
-	if !result.Violated {
-		return gateCondition{Name: name, OK: true}, nil
+
+	cond := gateCondition{Name: name}
+	if result.Violated {
+		var violated []string
+		for _, ac := range result.ACs {
+			if ac.Status == evidence.StatusViolated {
+				violated = append(violated, ac.ID)
+			}
+		}
+		sort.Strings(violated)
+		cond.Reason = fmt.Sprintf("violated AC(s): %v", violated)
+	} else {
+		cond.OK = true
 	}
 
-	var violated []string
-	for _, ac := range result.ACs {
-		if ac.Status == evidence.StatusViolated {
-			violated = append(violated, ac.ID)
-		}
+	// judged-merge-gate-quarantine-silence: the merge gate folds the SAME
+	// evidence the closure gate does, so a current fail record excluded as
+	// unreachable flips an AC violated->not-violated and this condition FAIL->
+	// PASS. Disclose the exclusions this verdict rests on — the identical
+	// families the closure gate renders (evidenceDisclosures, gatedisclosure.go)
+	// — so that flip is never silent on the merge-gate surface either. Rides both
+	// the PASS and FAIL line (reportGateConditions prints Extra on every branch).
+	extra, err := evidenceDisclosures(ctx, root, spec, head, storyFoldedACs(result.ACs))
+	if err != nil {
+		return gateCondition{}, err
 	}
-	sort.Strings(violated)
-	return gateCondition{Name: name, Reason: fmt.Sprintf("violated AC(s): %v", violated)}, nil
+	cond.Extra = extra
+	return cond, nil
 }
 
 // checkCascadeCondition is condition 4: no unresolved rung-4 cascade block

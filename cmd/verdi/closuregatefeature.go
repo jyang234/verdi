@@ -62,7 +62,19 @@ import (
 // (disposition-completeness) to check the feature's own deviation report
 // covers it, mirroring runClosureGate's own head parameter exactly.
 func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededStoryRefs []string, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (bool, error) {
-	cond1 := checkFeatureFoldEligible(fold, mdl)
+	outcome, err := runFeatureClosureGateOutcome(ctx, root, spec, fold, reconciliation, stories, supersededStoryRefs, f, defaultBranchRef, manifest, mdl, head, stdout)
+	return outcome.Ready, err
+}
+
+// runFeatureClosureGateOutcome evaluates the feature closure gate and retains
+// the disclosure count needed by preflight summaries. runFeatureClosureGate
+// remains the compatibility seam for real-close callers that consume only the
+// verdict.
+func runFeatureClosureGateOutcome(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededStoryRefs []string, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (closureGateOutcome, error) {
+	cond1, err := checkFeatureFoldEligible(ctx, root, spec, fold, head, mdl)
+	if err != nil {
+		return closureGateOutcome{}, err
+	}
 	cond2 := checkStubReconciliationCondition(reconciliation)
 	cond3 := checkAllImplementingStoriesClosed(stories, mdl)
 
@@ -74,7 +86,7 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	// ledger L-N2). See checkFeatureSpecStaleCondition's own doc comment.
 	cond4raw, err := checkFeatureSpecStaleCondition(root, spec, manifest, stories, supersededStoryRefs, mdl)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond4 := renumbered(cond4raw, "4. no unresolved spec-stale flag")
 
@@ -99,7 +111,7 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	// condition rather than silently inventing new machinery.
 	cond5raw, err := checkPendingSupersessionCondition(ctx, f, defaultBranchRef, spec)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond5 := renumbered(cond5raw, "5. no unresolved pending-supersession flag")
 
@@ -110,7 +122,7 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	// freeze step the story path uses).
 	cond6raw, err := checkDispositionCompleteCondition(root, spec, head)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond6 := renumbered(cond6raw, "6. deviation report ready to freeze (no undispositioned findings)")
 
@@ -119,32 +131,15 @@ func runFeatureClosureGate(ctx context.Context, root string, spec *artifact.Spec
 	// spec class") — display prose, resolved through the model (L-M13(1));
 	// the disclosure Source producer ids it wraps stay identity.
 	label := "closure(" + mdl.DisplayClass("feature") + "): "
-	allOK := true
-	for _, c := range []gateCondition{cond1, cond2, cond3, cond4, cond5, cond6} {
-		switch {
-		case c.Disclosed:
-			// Three-valued honesty (constitution 2/10), rendered through the
-			// shared internal/disclosure seam exactly as the story gate does.
-			fmt.Fprint(stdout, label)
-			fmt.Fprintln(stdout, disclosure.Render(disclosure.New(c.Source, "", c.Reason)))
-		case c.OK:
-			fmt.Fprintf(stdout, "[PASS] %s%s\n", label, c.Name)
-		default:
-			allOK = false
-			fmt.Fprintf(stdout, "[FAIL] %s%s\n", label, c.Name)
-			fmt.Fprintf(stdout, "       %s\n", c.Reason)
-		}
-		// Extra rides EVERY branch, mirroring the story gate's own loop
-		// (closuregate.go): the spec-stale union tally
-		// (judged-feature-union-missing-archive-silent-zero) and the superseded-
-		// story exclusion lines (L-N12) must show on a PASSing, FAILing, and
-		// disclosed feature gate alike — never only inside a FAIL reason.
-		for _, extra := range c.Extra {
-			fmt.Fprintln(stdout, extra)
-		}
-	}
-	return allOK, nil
+	return reportClosureGateConditions(stdout, label, []gateCondition{cond1, cond2, cond3, cond4, cond5, cond6}), nil
 }
+
+// supersededExclusionSource is the disclosure source id for L-N12's
+// superseded-implementing-story exclusion — the producing condition, in
+// internal/disclosure's own producer-id convention (the surface and the rule,
+// never a new taxonomy), matching the "gate:spec-stale-feature-union" id the
+// same condition already uses for its own disclosed verdict.
+const supersededExclusionSource = "gate:spec-stale-superseded-exclusion"
 
 // renumbered returns c with Name replaced by name, preserving every other
 // field — used to re-present a reused story-gate condition (whose own
@@ -164,7 +159,7 @@ func renumbered(c gateCondition, name string) gateCondition {
 // still-no-signal, still-pending, or violated AC all block closure alike
 // (03: "A feature AC still no-signal at closure time is a hard blocker,
 // not a yellow").
-func checkFeatureFoldEligible(fold evidence.FeatureResult, mdl *model.Model) gateCondition {
+func checkFeatureFoldEligible(ctx context.Context, root string, spec *artifact.SpecFrontmatter, fold evidence.FeatureResult, head string, mdl *model.Model) (gateCondition, error) {
 	// The spoken class word resolves (L-M13(1)); the "(03 §The feature
 	// fold …)" SPEC CITATION quotes the spec's own section title —
 	// identity, kept verbatim.
@@ -176,11 +171,30 @@ func checkFeatureFoldEligible(fold evidence.FeatureResult, mdl *model.Model) gat
 			notEvidenced = append(notEvidenced, fmt.Sprintf("%s=%s", ac.ID, ac.Status))
 		}
 	}
+	cond := gateCondition{Name: name}
 	if len(notEvidenced) == 0 {
-		return gateCondition{Name: name, OK: true}
+		cond.OK = true
+	} else {
+		sort.Strings(notEvidenced)
+		cond.Reason = fmt.Sprintf("not every %s AC is evidenced: %v", featureWord, notEvidenced)
 	}
-	sort.Strings(notEvidenced)
-	return gateCondition{Name: name, Reason: fmt.Sprintf("not every %s AC is evidenced: %v", featureWord, notEvidenced)}
+
+	// Endgame disclosure-extension finding 3: render the SAME per-record
+	// disclosure families the story gate does, over the FEATURE's OWN derived dir
+	// (evidenceDisclosures, gatedisclosure.go — QuarantinedRecords/UnprovableRecords
+	// over store.DerivedSpecDir(spec.ID), the exact dir foldFeature loads outcome
+	// records from). A feature AC evidenced by a record with quarantined/undecodable/
+	// unprovable ancestry — including the met-AC/unprovable-kept case — never
+	// passes silently; and an UNMET feature AC's FAIL now carries the WHY (the
+	// excluded/undecodable record that would have evidenced it) the coarse
+	// "not every AC is evidenced" reason alone cannot. Rides Extra on every
+	// verdict (runFeatureClosureGate's own loop prints it, PASS/FAIL/disclosed).
+	extra, err := evidenceDisclosures(ctx, root, spec, head, featureFoldedACs(fold.ACs))
+	if err != nil {
+		return gateCondition{}, err
+	}
+	cond.Extra = extra
+	return cond, nil
 }
 
 // checkStubReconciliationCondition is the feature-closure gate's condition
@@ -245,6 +259,15 @@ func checkAllImplementingStoriesClosed(stories []implementingStoryEdges, mdl *mo
 // content identity, align.Identity) is the mechanism; this function is only
 // responsible for GATHERING the right sets.
 //
+// L-N14 (owner-ratified P2-11, 2026-07-21): the threshold SpecStale is handed
+// is recalibrated for the enlarged union basis — effective threshold = the
+// configured per-report threshold × the number of reports actually unioned (the
+// feature's own report when present + each closed story archive read). The
+// per-report density that fires the counterweight is unchanged; the reason/tally
+// print the scaled arithmetic ("threshold 36 = 6 × 6 reports") so a reader sees
+// the unit. Story-level enforcement (closuregate.go) is a single report and is
+// untouched. See the perReport/numReports/effectiveThreshold computation below.
+//
 // A story not yet closed contributes nothing (s.Closed false skips it,
 // never an error) — it has no archived report to read yet; condition 3
 // already separately blocks the feature from closing while any implementing
@@ -285,9 +308,10 @@ func checkAllImplementingStoriesClosed(stories []implementingStoryEdges, mdl *mo
 // spec-stale counterweight's own prescribed remedy, so counting the
 // predecessor's adjudications (which concern text the successor replaced) would
 // punish the exact remedy the budget demands — but NEVER silently: each such
-// story whose archive carries accepted-deviations is disclosed in a named line
-// riding the condition's Extra (three-valued honesty), never the silent zero
-// ac-4 forbids.
+// story whose archive carries accepted-deviations is DISCLOSED, through the
+// shared internal/disclosure seam (spec/disclosure-seam-v2 ac-1: never a local
+// fmt.Sprintf), riding the condition's Extra (three-valued honesty) — never
+// the silent zero ac-4 forbids.
 func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, stories []implementingStoryEdges, supersededStoryRefs []string, mdl *model.Model) (gateCondition, error) {
 	name := "4. no unresolved spec-stale flag"
 
@@ -366,10 +390,20 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 	// predecessor's adjudications concern text the successor replaced; counting
 	// them would punish the very remedy the spec-stale budget demands), but it
 	// must never be SILENT. Each superseded story whose archived report carries
-	// accepted-deviations is disclosed in a named line naming the story and the
-	// excluded count, riding the condition's Extra on every verdict alongside the
-	// tally. A superseded story with no archive (or none carrying
-	// accepted-deviations) has nothing to exclude and nothing to disclose.
+	// accepted-deviations is disclosed — naming the story and the excluded count
+	// — riding the condition's Extra on every verdict alongside the tally. A
+	// superseded story with no archive (or none carrying accepted-deviations)
+	// has nothing to exclude and nothing to disclose.
+	//
+	// It is rendered through the shared seam (disclosure.New/Render), not a
+	// local fmt.Sprintf. That is what spec/disclosure-seam-v2 ac-1 already
+	// required of every disclosure call site, and the hand-formatted line this
+	// replaces violated it twice over: a reader who recognized every other
+	// disclosure did not recognize this one, and its 7-space indent kept the
+	// reporting loop's own count (reportClosureGateConditions) from ever seeing
+	// it — so a feature preflight could print this exclusion and still summarize
+	// READY claiming ZERO disclosures. It changes the BASIS of the spec-stale
+	// verdict, so it is a disclosure in substance, and now in form.
 	sortedSuperseded := append([]string(nil), supersededStoryRefs...)
 	sort.Strings(sortedSuperseded)
 	var supersededExtra []string
@@ -390,28 +424,49 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 		if n == 0 {
 			continue
 		}
-		supersededExtra = append(supersededExtra, fmt.Sprintf(
-			"       %s %s %s's archived report (%d accepted-deviation(s)) excluded — supersession is the spec-stale budget's own prescribed remedy, taken",
-			supersededWord, storyWord, ref, n))
+		// The story ref is the disclosure's SCOPE (the artifact this
+		// disclosure is about), so the text never repeats it; the class and
+		// state words resolve through the model exactly as the tally's do
+		// (L-M13a(6)).
+		supersededExtra = append(supersededExtra, disclosure.Render(disclosure.New(
+			supersededExclusionSource, ref, fmt.Sprintf(
+				"this %s %s's archived report (%d accepted-deviation(s)) is excluded from the %s-close budget — supersession is the spec-stale budget's own prescribed remedy, taken",
+				supersededWord, storyWord, n, featureWord))))
 	}
-
-	// The union tally rides EVERY verdict of this condition (Extra, printed
-	// regardless of branch), so a PASSing gate shows how many archives fed the
-	// union, not only a failing one (judged-feature-union-missing-archive-silent-
-	// zero). The superseded-exclusion lines (L-N12) ride the same Extra so they
-	// too show on every verdict.
-	tally := fmt.Sprintf("       [union over the %s's own report + %d %s implementing %s archive(s)]",
-		featureWord, storiesUnioned, closedWord, storyWord)
-	extra := append([]string{tally}, supersededExtra...)
 
 	featureACIDs := make(map[string]bool, len(spec.AcceptanceCriteria))
 	for _, ac := range spec.AcceptanceCriteria {
 		featureACIDs[ac.ID] = true
 	}
-	threshold := 0
+
+	// L-N14 (owner-ratified P2-11, 2026-07-21): the spec-stale counterweight's
+	// threshold was calibrated (value 6, DefaultDeviationsStaleThreshold when
+	// unset) for the PRE-UNION basis — a single closing report (Phase 1 X-18).
+	// L-N2/ac-4's ratified union enlarged the feature-close basis to the feature's
+	// own report PLUS every closed implementing story's archive, so the threshold
+	// now preserves PER-REPORT density across that enlarged basis: effective
+	// threshold = configured per-report threshold × number of reports actually
+	// unioned (the feature's own report when present, plus each closed story
+	// archive actually read — storiesUnioned). This is a recalibration of the
+	// UNIT, not a raising of the bar: the per-report density that fires the
+	// counterweight is unchanged, and story-level closes (closuregate.go's
+	// checkSpecStaleCondition) keep their own single-report enforcement, untouched.
+	// The per-report threshold is defaulted BEFORE the multiply (a configured
+	// 0/absent means the default PER REPORT, never a zero budget), and the product
+	// is what SpecStale is handed — never a raw 0 SpecStale would itself re-default
+	// to a single-report value, which would silently under-scale the union.
+	perReport := 0
 	if manifest != nil && manifest.Audit != nil {
-		threshold = manifest.Audit.DeviationsStaleThreshold
+		perReport = manifest.Audit.DeviationsStaleThreshold
 	}
+	if perReport <= 0 {
+		perReport = evidence.DefaultDeviationsStaleThreshold
+	}
+	numReports := storiesUnioned
+	if own != nil {
+		numReports++
+	}
+	effectiveThreshold := perReport * numReports
 
 	// Compute spec-stale over the AVAILABLE sets FIRST — the feature's own
 	// report plus whatever story archives ARE present. A missing archive can
@@ -431,12 +486,29 @@ func checkFeatureSpecStaleCondition(root string, spec *artifact.SpecFrontmatter,
 		OwnNotResurfaced: ownNotResurfaced,
 		AdditionalSets:   additional,
 		StoryACIDs:       featureACIDs,
-		Threshold:        threshold,
+		Threshold:        effectiveThreshold,
 	})
+
+	// The union tally rides EVERY verdict of this condition (Extra, printed
+	// regardless of branch), so a PASSing gate shows how many archives fed the
+	// union, the accepted-deviation count, AND the L-N14 report-scaled arithmetic
+	// — not only a failing one (judged-feature-union-missing-archive-silent-zero;
+	// P2-11's "arithmetic printed on the PASS path"). thresholdArith is the scaled
+	// derivation (empty only in the degenerate no-reports base case, numReports 0,
+	// which is always trivially unflagged). The superseded-exclusion lines (L-N12)
+	// ride the same Extra so they too show on every verdict.
+	thresholdArith := ""
+	if numReports > 0 {
+		thresholdArith = fmt.Sprintf(" (threshold %d = %d × %d reports)", effectiveThreshold, perReport, numReports)
+	}
+	tally := fmt.Sprintf("       [union over the %s's own report + %d %s implementing %s archive(s): accepted-deviation count %d%s]",
+		featureWord, storiesUnioned, closedWord, storyWord, result.AcceptedDeviationCount, thresholdArith)
+	extra := append([]string{tally}, supersededExtra...)
+
 	if result.Flagged {
 		reason := fmt.Sprintf(
-			"spec-stale: own-text finding(s) %v, accepted-deviation count %d (threshold %d)",
-			result.OwnTextFindingIDs, result.AcceptedDeviationCount, threshold)
+			"spec-stale: own-text finding(s) %v, accepted-deviation count %d%s",
+			result.OwnTextFindingIDs, result.AcceptedDeviationCount, thresholdArith)
 		if len(missingArchive) > 0 {
 			// The flag stands on the available union alone (a lower bound); a
 			// missing archive can only push the true budget higher, never clear

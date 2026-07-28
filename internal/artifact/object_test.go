@@ -244,6 +244,52 @@ func TestHeadingAnchors_And_ResolveAnchor(t *testing.T) {
 	}
 }
 
+// TestResolveAnchor_CaseSymmetry is spec/ritual-traps ac-1's X-1 witness:
+// ResolveAnchor must slugify the anchor side through the same SlugifyHeading
+// transform HeadingAnchors already applies to every heading's text, so an
+// anchor written in the heading's own original (possibly mixed) case
+// resolves exactly as a pre-lowercased one always did — a resolve-MORE
+// direction only, never resolve-less.
+func TestResolveAnchor_CaseSymmetry(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    []byte
+		anchor  string
+		want    bool
+		comment string
+	}{
+		{
+			name:    "mixed_case_anchor_against_matching_case_heading",
+			body:    []byte("# Title\n\n## AC-1\n\ntext\n"),
+			anchor:  "AC-1",
+			want:    true,
+			comment: "X-1's exact witness: anchor: AC-1 must resolve against ## AC-1 (fails pre-fix: TrimPrefix alone leaves \"AC-1\", which never matches the lowercased heading slug \"ac-1\")",
+		},
+		{
+			name:    "already_lowercase_anchor_against_mixed_case_heading",
+			body:    []byte("# Title\n\n## Ac 1\n\ntext\n"),
+			anchor:  "ac-1",
+			want:    true,
+			comment: "unchanged from before the fix: the heading side was already slugified, and an already-lowercase anchor already matched",
+		},
+		{
+			name:    "genuinely_mismatched_anchor_stays_unresolved",
+			body:    []byte("# Title\n\n## AC-1\n\ntext\n"),
+			anchor:  "AC-2",
+			want:    false,
+			comment: "proves the fix is not overly permissive: slugifying both sides still fails to resolve when the headings genuinely differ",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			anchors := HeadingAnchors(tc.body)
+			if got := ResolveAnchor(anchors, tc.anchor); got != tc.want {
+				t.Fatalf("ResolveAnchor(%v, %q) = %v, want %v — %s", anchors, tc.anchor, got, tc.want, tc.comment)
+			}
+		})
+	}
+}
+
 func TestResolveObjectAnchors_Happy(t *testing.T) {
 	const y = `
 id: spec/anchor-happy
@@ -299,5 +345,50 @@ acceptance_criteria:
 	}
 	if !strings.Contains(err.Error(), "anchor") || !strings.Contains(err.Error(), "ac-1") {
 		t.Fatalf("ResolveObjectAnchors error = %q, want it to name the anchor rule and the offending object", err)
+	}
+}
+
+// TestResolveObjectAnchors_MismatchedAnchor_GuidanceIsSlugSymmetric pins the
+// post-ac-1 truth of the message a genuinely-failing author reads
+// (spec/ritual-traps judged-ac1-stale-exact-match-claim-in-resolver-messages).
+// ac-1 made anchor resolution slug-symmetric — both the anchor and every
+// heading go through SlugifyHeading before comparison — so the failure message
+// must no longer tell the author resolution is "exact-match" (a rule that no
+// longer holds), and must instead surface the anchor's own computed slug and
+// cite the ratifying story, pointing them at the real slug-vs-slug mismatch
+// rather than at a rule under which their anchor might already resolve.
+func TestResolveObjectAnchors_MismatchedAnchor_GuidanceIsSlugSymmetric(t *testing.T) {
+	const y = `
+id: spec/anchor-guidance
+kind: spec
+class: feature
+title: "Anchor guidance fixture"
+status: draft
+owners: [platform-team]
+problem: { text: "borrowers cannot self-serve", anchor: "#problem" }
+outcome: { text: "a borrower can update their application", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a borrower can update their application", evidence: [static], anchor: "#nonexistent-heading" }
+`
+	fm, err := DecodeSpec([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v", err)
+	}
+	// No heading whose slug is "nonexistent-heading", so ac-1's anchor
+	// genuinely fails to resolve on both the old and new rule.
+	body := []byte("# Anchor guidance fixture\n\n## Problem\n\n## Outcome\n")
+	err = fm.ResolveObjectAnchors(body)
+	if err == nil {
+		t.Fatal("ResolveObjectAnchors: want error for an anchor whose slug matches no heading, got nil")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "exact-match") {
+		t.Errorf("message = %q, still narrates the pre-ac-1 exact-match rule; ac-1 made resolution slug-symmetric (both sides through SlugifyHeading)", msg)
+	}
+	if !strings.Contains(msg, "slug") {
+		t.Errorf("message = %q, want it to surface the anchor's own slug — the real comparison is slug-vs-slug, so the true guidance is that the anchor's slug matches no heading's slug", msg)
+	}
+	if !strings.Contains(msg, "spec/ritual-traps ac-1") {
+		t.Errorf("message = %q, want it to cite spec/ritual-traps ac-1 as the ratification vehicle for the slug-symmetric reading", msg)
 	}
 }

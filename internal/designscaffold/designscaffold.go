@@ -45,17 +45,33 @@ func HumanizeName(name string) string {
 	return strings.Join(parts, " ")
 }
 
-// defaultOwnersLiteral, defaultProblemText, and defaultOutcomeText are the
-// scaffold's own fixed placeholder values — today's hardcoded content,
-// moved verbatim from the retired string builders into ScaffoldData
-// inputs rather than a second copy baked into the template text, so a
-// store override template that wants real values instead of these
+// DefaultOwners, DefaultProblem, and DefaultOutcome are the scaffold's
+// own fixed placeholder values — today's hardcoded content, moved
+// verbatim from the retired string builders into ScaffoldData inputs
+// rather than a second copy baked into the template text, so a store
+// override template that wants real values instead of these
 // placeholders has a real, data-driven field to reference
-// ({{.Owners}}/{{.Problem}}/{{.Outcome}}).
+// ({{.Owners}}/{{.Problem}}/{{.Outcome}}). Exported (spec/creation-form
+// ac-2/ac-4): every creation surface that fills UNANSWERED fields — the
+// board's creation form, commit-to-design's producer call — falls back
+// to these same disclosed placeholders, one table, never a re-typed
+// copy per consumer.
+//
+// DefaultProblem/DefaultOutcome's own "before accept" (spec/verb-surfaces
+// ac-4, disclosed choice — see each const's own vocab:identity marker
+// below): a package-level constant shared verbatim across every creation
+// surface (board form, commit-to-design, cli-creation's --defer-statements,
+// design start's flagless fallback), with no model in scope at its own
+// declaration site. Routing it would require threading a *model.Model
+// through every one of those call sites, a materially larger refactor than
+// this story's own disclosed, minimal scope; each CONSUMING call site that
+// already resolves a model routes its own copy of this same reminder
+// instead (design.go's --defer-statements disclosure, this same story,
+// does exactly that).
 const (
-	defaultOwnersLiteral = "[unassigned]"
-	defaultProblemText   = "TODO: replace with the real problem statement before accept"
-	defaultOutcomeText   = "TODO: replace with the real outcome statement before accept"
+	DefaultOwners  = "[unassigned]"
+	DefaultProblem = "TODO: replace with the real problem statement before accept" // vocab:identity — shared pre-vocabulary TODO placeholder (see const-block doc comment above)
+	DefaultOutcome = "TODO: replace with the real outcome statement before accept" // vocab:identity — shared pre-vocabulary TODO placeholder (see const-block doc comment above)
 )
 
 // Feature renders a draft feature spec's markdown content by instantiating
@@ -65,15 +81,21 @@ const (
 // scaffold-templates ac-1: designscaffold stops building strings and
 // starts rendering templates; this function becomes Render's delegate
 // rather than its own fmt.Sprintf body). storyRef is "" when the feature
-// carries no tracker ref at all (optional for the feature class).
-func Feature(tmpl []byte, specRef, storyRef, title string) (string, error) {
+// carries no tracker ref at all (optional for the feature class). problem
+// and outcome are the statement sections' own content (spec/cli-creation
+// ac-1, ledger L-N7): every existing caller before that story passed the
+// DefaultProblem/DefaultOutcome placeholders explicitly, byte-preserving
+// their scaffold; `design start`'s --problem/--outcome flags are the first
+// caller to pass real statement text through this same rendering path,
+// rather than a second, parallel render call that could drift from it.
+func Feature(tmpl []byte, specRef, storyRef, title, problem, outcome string) (string, error) {
 	return Render(tmpl, ScaffoldData{
 		Ref:      specRef,
 		Title:    title,
 		StoryRef: storyRef,
-		Owners:   defaultOwnersLiteral,
-		Problem:  defaultProblemText,
-		Outcome:  defaultOutcomeText,
+		Owners:   DefaultOwners,
+		Problem:  problem,
+		Outcome:  outcome,
 	})
 }
 
@@ -113,15 +135,23 @@ type StoryLink struct {
 // followed by zero entries decodes as a nil Links slice, which
 // validateStory then rejects for a non-spike story — TestStory_Negative_
 // NoLinks pins this).
-func Story(tmpl []byte, specRef, storyRef, title string, spike bool, links []StoryLink) (string, error) {
+// problem and outcome are the statement sections' own content (spec/
+// cli-creation ac-1, ledger L-N7): every caller before that story passed
+// the DefaultProblem/DefaultOutcome placeholders explicitly, byte-
+// preserving its scaffold — the workbench's stub-instantiate action
+// (internal/stubinstantiate) still always does, since it never collects
+// real statement text from an operator; design start's --problem/
+// --outcome flags and its TTY interview are the only callers that pass
+// real statement text through this same rendering path.
+func Story(tmpl []byte, specRef, storyRef, title string, spike bool, links []StoryLink, problem, outcome string) (string, error) {
 	return Render(tmpl, ScaffoldData{
 		Ref:      specRef,
 		Title:    title,
 		StoryRef: storyRef,
 		Spike:    spike,
 		Links:    links,
-		Owners:   defaultOwnersLiteral,
-		Problem:  defaultProblemText,
-		Outcome:  defaultOutcomeText,
+		Owners:   DefaultOwners,
+		Problem:  problem,
+		Outcome:  outcome,
 	})
 }

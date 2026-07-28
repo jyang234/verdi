@@ -244,3 +244,40 @@ func TestScannedIDs_NilSpec(t *testing.T) {
 		t.Fatalf("scannedIDs = %v, want empty for a nil Spec", ids)
 	}
 }
+
+// fakeDiagramJudgePreambleScript is the diagram-sweep analogue of
+// judge_test.go's fakeJudgePreambleScript / decision_judge_test.go's
+// fakeDecisionJudgePreambleScript: a natural-language preamble precedes the
+// findings object. Proves the shared prose-tolerant inner-parse (innerparse.go)
+// covers the diagram-sweep site too.
+const fakeDiagramJudgePreambleScript = `cat <<'EOF'
+{"is_error":false,"subtype":"success","result":"Reviewing the proposed diagram against the corpus:\n\n{\"findings\":[{\"id\":\"dsj-pre\",\"text\":\"new sync edge collides with the outbox mandate\",\"confidence\":0.72,\"target\":\"adr/outbox-mandate\"}]}"}
+EOF
+`
+
+// TestRunDiagramSweep_PreambleTolerated is the diagram-sweep red-first
+// reproduction. Pre-fix, decodeDiagramInnerResult fails on the preamble and
+// RunDiagramSweep degrades to the synthetic DiagramAbsenceFindingID; post-fix
+// the buried object parses into the judged finding.
+func TestRunDiagramSweep_PreambleTolerated(t *testing.T) {
+	script := writeFakeJudge(t, fakeDiagramJudgePreambleScript)
+	res, err := RunDiagramSweep(context.Background(), ExecJudgeRunner{}, DiagramJudgedInput{
+		DiagramRef: "diagram/loansvc-future",
+		Body:       []byte("graph TD\n  a --> b\n"),
+		JudgeCmd:   []string{script},
+		Timeout:    5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("RunDiagramSweep: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %+v, want 1", res.Findings)
+	}
+	f := res.Findings[0]
+	if f.ID != "judged-dsj-pre" {
+		t.Fatalf("ID = %q, want judged-dsj-pre (the judged finding, not the synthetic absence finding — a preamble must not degrade the sweep)", f.ID)
+	}
+	if f.TargetRef != "adr/outbox-mandate" {
+		t.Fatalf("TargetRef = %q, want adr/outbox-mandate", f.TargetRef)
+	}
+}

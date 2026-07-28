@@ -83,3 +83,100 @@ func TestRender_EqualDisclosuresRenderIdentically(t *testing.T) {
 		t.Fatalf("Render(a) = %q, Render(b) = %q; equal Disclosures must render identically", Render(a), Render(b))
 	}
 }
+
+// TestIsRendered is the recognizer's own table: every string Render can
+// produce is recognized, and the near-misses a consumer would otherwise
+// hand-match with a prefix test are not.
+//
+// The negative rows are the point. A consumer that reconstructs the render
+// format locally (cmd/verdi's closure-gate reporting loop did, with
+// strings.HasPrefix(SeverityDisclosedUnproven+" [")) both accepts prose that
+// merely opens with the severity word and silently zeroes its count the day
+// Render's format changes — with no compile error and no failing test outside
+// this package.
+func TestIsRendered(t *testing.T) {
+	cases := []struct {
+		name string
+		s    string
+		want bool
+	}{
+		{"rendered with a scope", Render(New("gate:evidence-quarantine", "ac-1", "a record was excluded")), true},
+		{"rendered without a scope", Render(New("mcp:review-feed", "", "forge unreachable")), true},
+		{"rendered with an empty text", Render(New("gate:example", "", "")), true},
+		{"rendered with a scope carrying its own colon", Render(New("gate:x", "spec/a: b", "text")), true},
+		{"rendered with a source carrying its own bracket", Render(New("a]b", "", "text")), true},
+		{"rendered line indented for a nested report", "  " + Render(New("gate:x", "", "text")), false},
+		{"prose that merely opens with the severity word", SeverityDisclosedUnproven + " is what this line reports", false},
+		{"prose naming the severity mid-sentence", "the check is disclosed-unproven [gate:x]: text", false},
+		// An empty source is a real Render output — New accepts it, Render emits
+		// `disclosed-unproven []: text`, so the recognizer must accept it too:
+		// the guarantee is EXACTLY Render's image, and rejecting this row was one
+		// of the forward-direction misses (New("","","text")) the property test
+		// now guards against.
+		{"the empty-source form New/Render actually produce", SeverityDisclosedUnproven + " []: text", true},
+		{"an unterminated source bracket", SeverityDisclosedUnproven + " [gate:x", false},
+		{"a source with no text separator at all", SeverityDisclosedUnproven + " [gate:x] just more words", false},
+		{"an informational tally line the feature gate also carries", "       [union over the feature's own report + 2 closed implementing story archive(s): accepted-deviation count 1]", false},
+		{"an ordinary gate PASS line", "[PASS] closure(feature): 1. every feature AC evidenced", false},
+		{"the empty string", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsRendered(tc.s); got != tc.want {
+				t.Fatalf("IsRendered(%q) = %v, want %v", tc.s, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIsRendered_RecognizesEveryRender closes the drift loop the predicate
+// exists for: whatever Render emits, IsRendered accepts. A future edit to
+// Render's format that this package does not also teach IsRendered fails
+// HERE, in the package that owns the format, rather than silently zeroing a
+// disclosure count in cmd/verdi.
+//
+// It is generated over the CROSS PRODUCT of adversarial sources, scopes and
+// texts rather than a handful of realistic literals, because the realistic
+// literals were exactly the problem: every source in the tree today is a
+// package constant with no bracket in it, so a fixed list proves the invariant
+// only for producers that already exist. The generated rows include the ones
+// that broke it — a source carrying "]", an empty source, a whitespace scope,
+// a scope carrying the ": " separator — so a future producer that reaches any
+// of them is caught here and not by a silently short disclosure count.
+func TestIsRendered_RecognizesEveryRender(t *testing.T) {
+	sources := []string{
+		"lint:VL-017",
+		"gate:pending-supersession",
+		"close:uncommitted-fold-record",
+		"",          // New accepts it; Render emits it; the recognizer must too.
+		" ",         // whitespace-only
+		"a]b",       // a bracket inside the source: the first "]" is not the end
+		"]",         // nothing but a bracket
+		"a]b]c",     // several
+		"[x]",       // brackets in both directions
+		"gate:x: y", // the text separator inside the source
+		"disclosed-unproven [z]",
+	}
+	scopes := []string{
+		"",
+		"spec/x",
+		".verdi/waivers/jira-close-1/ac-1.md",
+		" ",         // whitespace-only: Render still takes the scoped branch
+		"a]b",       // a bracket inside the scope
+		"spec/a: b", // the text separator inside the scope
+		"]: ",
+		"  ",
+	}
+	texts := []string{"", "text", ": ", "]", "a: b", "\n"}
+
+	for _, source := range sources {
+		for _, scope := range scopes {
+			for _, text := range texts {
+				d := New(source, scope, text)
+				if got := Render(d); !IsRendered(got) {
+					t.Fatalf("IsRendered(Render(%+v)) = false on %q; every rendered disclosure must be recognizable, or a consumer's disclosure count is silently short", d, got)
+				}
+			}
+		}
+	}
+}

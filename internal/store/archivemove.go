@@ -18,13 +18,13 @@ import (
 // VL-010's sole legal exception on an otherwise-frozen spec (a
 // 100%-similarity git rename, internal/lint's vl010.go) can be satisfied
 // for spec.md, which has carried its `frozen:` stamp since `verdi accept`
-// ran, long before any closure branch exists. Callers that need the
-// archived quartet's OTHER members (a frozen deviation-report.md, a fresh
+// ran, long before any closure branch exists. Callers that need closure
+// records in the archive tree (a frozen deviation-report.md, a fresh
 // rollup.json) must write them into the active-zone directory BEFORE
-// calling ArchiveMove, so they move along with everything else in one
-// shot — never written directly into the archive zone, which would leave
-// the directory momentarily split across both zones if any step failed
-// partway.
+// calling ArchiveMove, so they move with the whole target spec directory in
+// one shot — never written directly into the archive zone, which would
+// leave the directory momentarily split across both zones if any step
+// failed partway.
 //
 // name must already exist under specs/active/ and contain a spec.md (the
 // one file every spec directory is guaranteed to carry); the target under

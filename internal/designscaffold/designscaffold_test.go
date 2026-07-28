@@ -52,7 +52,7 @@ func mustCanonicalTemplate(t *testing.T, name string) []byte {
 func TestFeature(t *testing.T) {
 	tmpl := mustCanonicalTemplate(t, "feature.md")
 	for _, storyRef := range []string{"", "jira:LOAN-1482"} {
-		content, err := Feature(tmpl, "spec/stale-decline", storyRef, "Stale decline handling")
+		content, err := Feature(tmpl, "spec/stale-decline", storyRef, "Stale decline handling", DefaultProblem, DefaultOutcome)
 		if err != nil {
 			t.Fatalf("Feature: %v", err)
 		}
@@ -89,7 +89,7 @@ func TestFeature(t *testing.T) {
 func TestStory_Plain(t *testing.T) {
 	tmpl := mustCanonicalTemplate(t, "story.md")
 	links := []StoryLink{{Type: artifact.LinkImplements, Ref: "spec/loan-mgmt#ac-1"}}
-	content, err := Story(tmpl, "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links)
+	content, err := Story(tmpl, "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links, DefaultProblem, DefaultOutcome)
 	if err != nil {
 		t.Fatalf("Story: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestStory_Spike(t *testing.T) {
 		{Type: artifact.LinkResolves, Ref: "spec/scoping-canvas#oq-1"},
 		{Type: artifact.LinkResolves, Ref: "spec/scoping-canvas#oq-2"},
 	}
-	content, err := Story(tmpl, "spec/retry-strategy-spike", "todo:REPLACE-ME", "Retry Strategy Spike", true, links)
+	content, err := Story(tmpl, "spec/retry-strategy-spike", "todo:REPLACE-ME", "Retry Strategy Spike", true, links, DefaultProblem, DefaultOutcome)
 	if err != nil {
 		t.Fatalf("Story: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestStory_Spike(t *testing.T) {
 // retired strings.Builder version did.
 func TestStory_Negative_NoLinks(t *testing.T) {
 	tmpl := mustCanonicalTemplate(t, "story.md")
-	content, err := Story(tmpl, "spec/x", "jira:LOAN-1", "X", false, nil)
+	content, err := Story(tmpl, "spec/x", "jira:LOAN-1", "X", false, nil, DefaultProblem, DefaultOutcome)
 	if err != nil {
 		t.Fatalf("Story: %v", err)
 	}
@@ -186,6 +186,62 @@ func TestStory_Negative_NoLinks(t *testing.T) {
 	}
 	if _, err := artifact.DecodeSpec(fm); err == nil {
 		t.Fatal("Story with no links decoded successfully, want a validateStory failure (no implements edge)")
+	}
+}
+
+// TestFeature_RealStatements and TestStory_RealStatements are spec/
+// cli-creation ac-1's own floor: Feature/Story render whatever problem/
+// outcome text a caller supplies into the frontmatter's own problem:/
+// outcome: attribute — the position VL-020/the evidence-obligation rules
+// and creation-form's own already-shipped form both key off — rather than
+// always hardcoding the Default* placeholder text there. This is
+// deliberately scoped to that ONE position: the canonical templates' body
+// "## Problem"/"## Outcome" headings carry their own separate, always-
+// literal "TODO: design notes." prose that no ScaffoldData field
+// controls at all (confirmed against templates/story.md and feature.md —
+// neither body section references .Problem/.Outcome), exactly the same
+// scope creation-form's own accepted ac-3 established ("TODO-free in
+// every position whose field was actually filled" — the body heading's
+// notes are not a position any field renders into, so they are UNCHANGED
+// by this story, on the design branch same as always). Asserting the
+// SPECIFIC Default* placeholder strings are gone (never a blanket
+// "TODO" substring check, which would incorrectly demand this story
+// silently touch the frozen scaffold-templates byte-identity contract
+// TestByteForByte pins) is therefore the correct, achievable property.
+func TestFeature_RealStatements(t *testing.T) {
+	tmpl := mustCanonicalTemplate(t, "feature.md")
+	content, err := Feature(tmpl, "spec/real-thing", "", "Real Thing", "the real problem statement", "the real outcome statement")
+	if err != nil {
+		t.Fatalf("Feature: %v", err)
+	}
+	if strings.Contains(content, DefaultProblem) || strings.Contains(content, DefaultOutcome) {
+		t.Fatalf("Feature output with real statements still contains a Default placeholder:\n%s", content)
+	}
+	spec := decodeScaffold(t, content)
+	if spec.Problem == nil || spec.Problem.Text != "the real problem statement" {
+		t.Fatalf("Problem = %+v, want the supplied text", spec.Problem)
+	}
+	if spec.Outcome == nil || spec.Outcome.Text != "the real outcome statement" {
+		t.Fatalf("Outcome = %+v, want the supplied text", spec.Outcome)
+	}
+}
+
+func TestStory_RealStatements(t *testing.T) {
+	tmpl := mustCanonicalTemplate(t, "story.md")
+	links := []StoryLink{{Type: artifact.LinkImplements, Ref: "spec/loan-mgmt#ac-1"}}
+	content, err := Story(tmpl, "spec/real-thing-story", "jira:LOAN-1", "Real Thing Story", false, links, "the real problem statement", "the real outcome statement")
+	if err != nil {
+		t.Fatalf("Story: %v", err)
+	}
+	if strings.Contains(content, DefaultProblem) || strings.Contains(content, DefaultOutcome) {
+		t.Fatalf("Story output with real statements still contains a Default placeholder:\n%s", content)
+	}
+	spec := decodeScaffold(t, content)
+	if spec.Problem == nil || spec.Problem.Text != "the real problem statement" {
+		t.Fatalf("Problem = %+v, want the supplied text", spec.Problem)
+	}
+	if spec.Outcome == nil || spec.Outcome.Text != "the real outcome statement" {
+		t.Fatalf("Outcome = %+v, want the supplied text", spec.Outcome)
 	}
 }
 
@@ -356,7 +412,7 @@ func TestDecodedFieldEquivalenceToLegacy(t *testing.T) {
 	storyTmpl := mustCanonicalTemplate(t, "story.md")
 
 	t.Run("feature, no story ref", func(t *testing.T) {
-		got, err := Feature(featureTmpl, "spec/stale-decline", "", "Stale decline handling")
+		got, err := Feature(featureTmpl, "spec/stale-decline", "", "Stale decline handling", DefaultProblem, DefaultOutcome)
 		if err != nil {
 			t.Fatalf("Feature: %v", err)
 		}
@@ -365,7 +421,7 @@ func TestDecodedFieldEquivalenceToLegacy(t *testing.T) {
 	})
 
 	t.Run("feature, with story ref", func(t *testing.T) {
-		got, err := Feature(featureTmpl, "spec/loan-mgmt", "jira:LOAN-1482", "Loan Mgmt")
+		got, err := Feature(featureTmpl, "spec/loan-mgmt", "jira:LOAN-1482", "Loan Mgmt", DefaultProblem, DefaultOutcome)
 		if err != nil {
 			t.Fatalf("Feature: %v", err)
 		}
@@ -375,7 +431,7 @@ func TestDecodedFieldEquivalenceToLegacy(t *testing.T) {
 
 	t.Run("story, plain, one link", func(t *testing.T) {
 		links := []StoryLink{{Type: artifact.LinkImplements, Ref: "spec/loan-mgmt#ac-1"}}
-		got, err := Story(storyTmpl, "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links)
+		got, err := Story(storyTmpl, "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links, DefaultProblem, DefaultOutcome)
 		if err != nil {
 			t.Fatalf("Story: %v", err)
 		}
@@ -388,7 +444,7 @@ func TestDecodedFieldEquivalenceToLegacy(t *testing.T) {
 			{Type: artifact.LinkResolves, Ref: "spec/scoping-canvas#oq-1"},
 			{Type: artifact.LinkResolves, Ref: "spec/scoping-canvas#oq-2"},
 		}
-		got, err := Story(storyTmpl, "spec/retry-strategy-spike", "todo:REPLACE-ME", "Retry Strategy Spike", true, links)
+		got, err := Story(storyTmpl, "spec/retry-strategy-spike", "todo:REPLACE-ME", "Retry Strategy Spike", true, links, DefaultProblem, DefaultOutcome)
 		if err != nil {
 			t.Fatalf("Story: %v", err)
 		}
@@ -411,7 +467,7 @@ func TestByteForByte(t *testing.T) {
 	storyTmpl := mustCanonicalTemplate(t, "story.md")
 
 	t.Run("feature, no story ref", func(t *testing.T) {
-		got, err := Feature(featureTmpl, "spec/stale-decline", "", "Stale decline handling")
+		got, err := Feature(featureTmpl, "spec/stale-decline", "", "Stale decline handling", DefaultProblem, DefaultOutcome)
 		if err != nil {
 			t.Fatalf("Feature: %v", err)
 		}
@@ -422,7 +478,7 @@ func TestByteForByte(t *testing.T) {
 	})
 
 	t.Run("feature, with story ref", func(t *testing.T) {
-		got, err := Feature(featureTmpl, "spec/loan-mgmt", "jira:LOAN-1482", "Loan Mgmt")
+		got, err := Feature(featureTmpl, "spec/loan-mgmt", "jira:LOAN-1482", "Loan Mgmt", DefaultProblem, DefaultOutcome)
 		if err != nil {
 			t.Fatalf("Feature: %v", err)
 		}
@@ -434,7 +490,7 @@ func TestByteForByte(t *testing.T) {
 
 	t.Run("story, plain, one link", func(t *testing.T) {
 		links := []StoryLink{{Type: artifact.LinkImplements, Ref: "spec/loan-mgmt#ac-1"}}
-		got, err := Story(storyTmpl, "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links)
+		got, err := Story(storyTmpl, "spec/loan-mgmt-story", "jira:LOAN-1482", "Loan Mgmt Story", false, links, DefaultProblem, DefaultOutcome)
 		if err != nil {
 			t.Fatalf("Story: %v", err)
 		}
@@ -445,7 +501,7 @@ func TestByteForByte(t *testing.T) {
 	})
 
 	t.Run("story, plain, zero links", func(t *testing.T) {
-		got, err := Story(storyTmpl, "spec/x", "jira:LOAN-1", "X", false, nil)
+		got, err := Story(storyTmpl, "spec/x", "jira:LOAN-1", "X", false, nil, DefaultProblem, DefaultOutcome)
 		if err != nil {
 			t.Fatalf("Story: %v", err)
 		}
@@ -460,7 +516,7 @@ func TestByteForByte(t *testing.T) {
 			{Type: artifact.LinkResolves, Ref: "spec/scoping-canvas#oq-1"},
 			{Type: artifact.LinkResolves, Ref: "spec/scoping-canvas#oq-2"},
 		}
-		got, err := Story(storyTmpl, "spec/retry-strategy-spike", "todo:REPLACE-ME", "Retry Strategy Spike", true, links)
+		got, err := Story(storyTmpl, "spec/retry-strategy-spike", "todo:REPLACE-ME", "Retry Strategy Spike", true, links, DefaultProblem, DefaultOutcome)
 		if err != nil {
 			t.Fatalf("Story: %v", err)
 		}

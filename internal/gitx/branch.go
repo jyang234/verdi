@@ -58,6 +58,31 @@ func MergeBase(ctx context.Context, dir, a, b string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// MergeBaseCommit is MergeBase drawing the clean three-way `git merge-base`
+// itself signals, which the bare MergeBase collapses: a common ancestor
+// (found=true, the sha), NO common ancestor (found=false, no error — git exits
+// 1 with empty output, a legitimate "these histories never meet" answer, not a
+// failure), or an operational failure (a bad/unresolvable ref, a broken repo —
+// git exits 128, a surfaced error). A caller deciding a frozen-immutability
+// question can proceed on found=false yet refuse on err != nil, never
+// conflating "no merge base exists" with "could not ask git at all" — the same
+// distinction CommitExists draws for commits and PathExistsAt for tree paths.
+func MergeBaseCommit(ctx context.Context, dir, a, b string) (base string, found bool, err error) {
+	out, runErr := run(ctx, dir, "merge-base", a, b)
+	if runErr != nil {
+		// git merge-base exits 1 (and only 1) for "no common ancestor"; any
+		// other non-zero exit (128 for a bad ref or broken repo) is
+		// operational. Discriminate on the exit code so the no-ancestor
+		// negative is never mistaken for a failure, nor vice versa.
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 1 {
+			return "", false, nil
+		}
+		return "", false, runErr
+	}
+	return strings.TrimSpace(string(out)), true, nil
+}
+
 // HasLocalBranch reports whether dir has a LOCAL ref named
 // refs/heads/<name> — never a remote-tracking one (`git show-ref --verify
 // --quiet refs/heads/<name>`, exit 0 = present, exit 1 = absent). This is

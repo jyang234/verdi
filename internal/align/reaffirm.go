@@ -129,6 +129,29 @@ type JudgedCandidate struct {
 	OldDisposition artifact.FindingDisposition
 	OldText        string
 	OldNote        string
+	// ArchiveSource, when non-empty, marks a CROSS-LEVEL candidate (ledger L-N14
+	// companion): a fresh FEATURE-level judged finding whose slug matched no
+	// feature-report prior but matched a dispositioned ruling in a CLOSED,
+	// non-superseded implementing story's ARCHIVED report. It holds that archive's
+	// spec ref (e.g. "spec/judge-ergonomics"), rendered beside the candidate so a
+	// human sees the ruling's archive origin before confirming. Empty for an
+	// ordinary same-report candidate. A cross-level candidate is still NOT a
+	// disposition (identity.go's frozen rule is never bypassed); the archived
+	// ruling is seated as its backing record so the ordinary human-confirms path
+	// (cmd/verdi's disposition verb) stamps carried-from on confirmation.
+	ArchiveSource string
+}
+
+// ArchivedRuling pairs a dispositioned judged finding drawn from a CLOSED,
+// non-superseded implementing story's ARCHIVED deviation report (its findings: or
+// not-resurfaced: section) with the archive it came from — the cross-level
+// reaffirmation source (ledger L-N14 companion, the D6-35 slug-drift residual's
+// cross-level case). Source is the archived spec ref (e.g. "spec/judge-ergonomics").
+// Threaded into Generate only for a feature-context align (cmd/verdi/align.go
+// gathers them; story aligns pass none), and consumed by applyArchivedRulings.
+type ArchivedRuling struct {
+	Finding artifact.Finding
+	Source  string
 }
 
 // JudgedReconciliation is ReconcileJudged's output.
@@ -363,6 +386,91 @@ func ReconcileJudged(fresh, existingFindings, existingNotResurfaced []artifact.F
 	}
 
 	return JudgedReconciliation{Findings: out, Candidates: candidates, NotResurfaced: notResurfaced}
+}
+
+// applyArchivedRulings layers cross-level re-recording awareness (ledger L-N14
+// companion) ON TOP of a JudgedReconciliation computed from the FEATURE report's
+// OWN priors, for a feature-context align only (recon's own callers pass the
+// gathered implementing-story archives; a story align passes none). It never
+// touches ReconcileJudged's within-report truth table: it only acts on a fresh
+// feature finding ReconcileJudged already left as a plain NEW finding — no
+// feature-report prior at its slug, so no exact carry and no same-report
+// candidate — that a CLOSED, non-superseded implementing story's ARCHIVED report
+// dispositioned under the same judged slug. For each such finding it pre-fills a
+// CANDIDATE citing the archive (JudgedCandidate.ArchiveSource) and seats the
+// archived ruling in NotResurfaced as that candidate's backing record, so the
+// ordinary human-confirms path (cmd/verdi's disposition verb) stamps carried-from
+// on confirmation — never an auto-carry (identity.go's frozen rule is never
+// bypassed), same discipline as a same-report candidate, nothing silent.
+//
+// Feature-report priors ALWAYS take precedence: a slug ReconcileJudged already
+// resolved (an exact carry, so f.Dispositioned; or a same-report candidate, so
+// recon.Candidates[f.ID] is set) is skipped — the feature's own prior, not an
+// archive, governs it. Collision-machinery ids never pre-fill (ac-4). Because a
+// resolved slug is skipped, the seated backing's id never collides with a
+// feature-report prior already in NotResurfaced — the candidate+backing shape
+// Validate permits (an undispositioned live finding beside its same-id backing).
+func applyArchivedRulings(recon JudgedReconciliation, archived []ArchivedRuling) JudgedReconciliation {
+	if len(archived) == 0 {
+		return recon
+	}
+
+	// Index archived dispositioned judged rulings by slug (id). The caller sorts
+	// `archived` deterministically (by source, then id), so first-per-slug wins
+	// deterministically when two implementing stories archived the same slug.
+	archByID := make(map[string]ArchivedRuling, len(archived))
+	for _, a := range archived {
+		if a.Finding.Kind != artifact.FindingJudged || !a.Finding.Dispositioned() {
+			continue
+		}
+		if _, ok := archByID[a.Finding.ID]; !ok {
+			archByID[a.Finding.ID] = a
+		}
+	}
+
+	candidates := recon.Candidates
+	if candidates == nil {
+		candidates = make(map[string]JudgedCandidate)
+	}
+	notResurfaced := recon.NotResurfaced
+
+	for _, f := range recon.Findings {
+		// Feature-report priors always take precedence, in fresh order for
+		// determinism: an exact carry (dispositioned) or a same-report candidate is
+		// already resolved by the feature's own prior; a collision member/CV never
+		// pre-fills (ac-4). Only a genuinely NEW feature finding consults the archives.
+		if f.Dispositioned() {
+			continue
+		}
+		if _, ok := candidates[f.ID]; ok {
+			continue
+		}
+		if artifact.IsCollisionMachineryID(f.ID) {
+			continue
+		}
+		a, ok := archByID[f.ID]
+		if !ok {
+			continue
+		}
+		// A cross-level slug match: pre-fill a candidate citing the archive and seat
+		// the archived ruling as its backing record, so the ordinary human-confirms
+		// path (cmd/verdi's disposition verb) stamps carried-from on confirmation —
+		// never an auto-carry (the fresh finding stays undispositioned). The seated
+		// id equals f.ID; f is undispositioned and (skipped above) owns no
+		// feature-report prior at this slug, so the candidate+backing shape validates
+		// and the seated id is unique in not-resurfaced.
+		candidates[f.ID] = JudgedCandidate{
+			OldDisposition: a.Finding.Disposition,
+			OldText:        a.Finding.Text,
+			OldNote:        a.Finding.Note,
+			ArchiveSource:  a.Source,
+		}
+		notResurfaced = append(notResurfaced, a.Finding)
+	}
+
+	recon.Candidates = candidates
+	recon.NotResurfaced = notResurfaced
+	return recon
 }
 
 // minMemberText returns the lexicographically smallest Text among group's

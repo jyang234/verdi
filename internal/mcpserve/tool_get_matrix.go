@@ -46,6 +46,16 @@ func (b *Backend) GetMatrix(ctx context.Context, argsRaw json.RawMessage) map[st
 		return toolError("get_matrix: story is required")
 	}
 
+	// The MCP server is long-lived: between requests an external actor can
+	// reshape this checkout full->shallow, so the process-global shallow-state
+	// memo (gitx) must not carry a stale `false` across requests into the
+	// reachability probes evidence.LoadRecords runs below — that stale `false`
+	// would turn a would-be-negative into a false PROVEN Unreachable. Re-establish
+	// per-request freshness at this operation boundary (gitx.ResetShallowCache's
+	// doc); within the request the memo still spares the evidence loop redundant
+	// probes, and short-lived CLI callers of the same primitive never reset.
+	gitx.ResetShallowCache()
+
 	spec, err := storyresolve.Resolve(b.Root, args.Story)
 	if err != nil {
 		return toolError("get_matrix: " + err.Error())

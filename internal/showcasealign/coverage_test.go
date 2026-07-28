@@ -167,6 +167,35 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// proving the real embedded-canonical-default resolution path.
 	"cli:model": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:obligation (extensibility phase 2, spec/obligation-seam ac-5,
+	// spec/creation-surfaces#ac-4, ledger L-N8): added alongside the new
+	// verb itself — TestCLIShowcaseObligationAuthor (cli_showcase_test.go)
+	// drives `verdi obligation author` against the real, already-covered
+	// spec/escrow-notify story's genuine committed obligation, proving the
+	// refuse-on-already-frozen safety property against real showcase
+	// content (CI_DEFAULT_BRANCH=main makes the provisioned store's own
+	// real "main" branch resolve deterministically, no fabricated remote).
+	"cli:obligation": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	// cli:init (extensibility Phase 2, spec/init-wizard, ledger L-N5):
+	// added alongside the new verb itself — TestCLIShowcaseInit
+	// (cli_showcase_test.go) drives `verdi init` (both the bare and
+	// --wizard forms) against the real provisioned examples/showcase
+	// store, proving the create-only refusal (W-3/W-3b) against a real,
+	// already-existing store byte-untouched afterward, plus the creation
+	// path itself against a fresh scratch directory (the only place a
+	// creation-only verb's happy path CAN be exercised, by construction).
+	"cli:init": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
+	// cli:waive (extensibility Phase 2, spec/verb-surfaces ac-1/ac-2,
+	// spec/creation-surfaces#ac-5, ledger L-N9, guide 8.4): added alongside
+	// the new verb itself — TestCLIShowcaseWaive (cli_showcase_test.go)
+	// drives `verdi waive` and `verdi waive --reaffirm` against the real
+	// provisioned examples/showcase store's spec/borrower-update-api,
+	// proving the record lands at the real waivers/jira-loan-1482/ac-1.md
+	// convention path and decodes, verdi matrix reads it waived, and
+	// --reaffirm round-trips preserving the original log entry.
+	"cli:waive": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec

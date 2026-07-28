@@ -100,6 +100,15 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 1
 	}
 
+	// The feature half of the story ritual's own uncommitted-fold-record
+	// disclosure (close.go's closeUncommittedRecordSource), on the same shared
+	// predicate. Attestations only: there is no waived status at the feature
+	// level, and the slug is the feature's own name (dc-6).
+	if err := discloseUncommittedFoldRecords(ctx, root, head, featureFoldRecordPaths(specRef.Name, fold.ACs), stdout); err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+
 	// The branch to return to if the freeze fails after the cut below — the
 	// feature-path half of the shared unwind (finding
 	// judged-close-resume-hint-names-a-path-close-itself-refuses; "" for a
@@ -145,6 +154,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 
 	if err := writeFeatureRollup(root, specRef, spec, head, fold); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedReport, stderr)
 		return 2
 	}
 
@@ -162,22 +172,31 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 	// retired (05 §Workbench) — there is simply nothing to move, no error.
 	if err := flipSpecStatusToClosed(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedRollup, stderr)
 		return 2
 	}
 
 	if err := store.ArchiveMove(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedFlip, stderr)
 		return 2
 	}
 
-	if err := gitx.AddAll(ctx, root); err != nil {
+	// The same two-shaped recovery the story ritual performs (close.go), on
+	// the same shared helpers so neither ritual can drift: a staging failure
+	// staged nothing and unwinds the branch cut; a commit failure left the
+	// closure paths staged and keeps the branch on purpose.
+	if err := stageClosureSpec(ctx, root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedArchiveMove(specRef.Name, stderr)
+		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
 		return 2
 	}
 	commitMsg := fmt.Sprintf("close: archive %s", specRef.String())
-	closeCommit, err := gitx.CreateCommit(ctx, root, commitMsg)
+	closeCommit, err := closeCreateCommit(ctx, root, commitMsg)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportStagedClosureCommitFailure(specRef.Name, closureBranch, commitMsg, stderr)
 		return 2
 	}
 
@@ -204,6 +223,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		}
 		if err := deps.Registry.PublishRollup(ctx, pubRoll); err != nil {
 			fmt.Fprintln(stderr, "close:", err)
+			reportCommittedButUnpublished(specRef.Name, closureBranch, closeCommit, spec.Story, stderr)
 			return 2
 		}
 		fmt.Fprintf(stdout, "close: rollup published to %s (eligible=%t)\n", spec.Story, pubRoll.Eligible)
@@ -319,7 +339,7 @@ func mapFeatureRollupCriteria(acs []evidence.FeatureACResult) []artifact.RollupC
 
 // writeFeatureRollup builds, self-validates, and writes rollup.json into
 // specs/active/<name>/ (still under the active zone — store.ArchiveMove
-// moves it, along with the rest of the quartet, immediately afterward) —
+// moves it with the rest of the target spec directory immediately afterward) —
 // mirrors close.go's writeRollup for a evidence.FeatureResult instead of a
 // evidence.StoryResult. spec.Story may be "" (R4-I-2: a feature's
 // story: tracker ref is optional) — artifact.Rollup.Validate() accepts an

@@ -42,6 +42,20 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
+// closureGateOutcome is the closure gate's derived result. Ready preserves
+// the gate's existing boolean verdict exactly. Disclosures counts the
+// disclosed-unproven inputs already rendered by the gate: disclosed
+// conditions and rendered per-record detail carried in gateCondition.Extra.
+//
+// Ledger L-N15(3): legibility only, never a gate-semantics change. Failing
+// closed on a disclosed-unproven condition would reverse the binding
+// closure-ergonomics decision and is left to explicit ratification; real
+// close keeps consuming Ready alone through the compatibility wrappers.
+type closureGateOutcome struct {
+	Ready       bool
+	Disclosures int
+}
+
 // runClosureGate evaluates 03 §Gates' closure gate for spec at head:
 // eligible (the story-level fold, authoritative evidence only), no
 // unresolved spec-stale flag, and no unresolved pending-supersession flag.
@@ -54,25 +68,49 @@ import (
 // read as "no pending MRs exist". Only a story that implements no feature at all
 // (nothing to prove) passes that condition outright with a nil forge.
 func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (bool, error) {
+	outcome, err := runClosureGateOutcome(ctx, root, spec, f, defaultBranchRef, manifest, mdl, head, stdout)
+	return outcome.Ready, err
+}
+
+// runClosureGateOutcome evaluates the story closure gate and retains the
+// disclosure count needed by preflight summaries. runClosureGate remains the
+// compatibility seam for real-close callers that consume only the verdict.
+func runClosureGateOutcome(ctx context.Context, root string, spec *artifact.SpecFrontmatter, f forge.Forge, defaultBranchRef string, manifest *store.Manifest, mdl *model.Model, head string, stdout io.Writer) (closureGateOutcome, error) {
 	cond1, err := checkClosureEligible(ctx, root, spec, head, mdl)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond2, err := checkSpecStaleCondition(root, spec, manifest)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond3, err := checkPendingSupersessionCondition(ctx, f, defaultBranchRef, spec)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 	cond4, err := checkDispositionCompleteCondition(root, spec, head)
 	if err != nil {
-		return false, err
+		return closureGateOutcome{}, err
 	}
 
-	allOK := true
-	for _, c := range []gateCondition{cond1, cond2, cond3, cond4} {
+	return reportClosureGateConditions(stdout, "closure: ", []gateCondition{cond1, cond2, cond3, cond4}), nil
+}
+
+// reportClosureGateConditions renders story and feature closure conditions
+// through one loop and derives their structured outcome. Extra is deliberately
+// mixed: it also carries informational feature-union tallies, so only lines
+// rendered in the shared disclosed-unproven vocabulary contribute to the
+// disclosure count.
+//
+// "Rendered in the shared vocabulary" is asked of internal/disclosure itself
+// (disclosure.IsRendered), never reconstructed here. This package reproducing
+// Render's grammar with a local prefix test was a second, silent copy of it:
+// it counted any line that merely opened with the severity word, and any
+// change to Render would have zeroed the count with no compile error and no
+// failing test outside cmd/verdi.
+func reportClosureGateConditions(stdout io.Writer, label string, conditions []gateCondition) closureGateOutcome {
+	outcome := closureGateOutcome{Ready: true}
+	for _, c := range conditions {
 		switch {
 		case c.Disclosed:
 			// Three-valued honesty (constitution 2/10): the input was
@@ -80,13 +118,14 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 			// through the shared internal/disclosure seam
 			// (spec/disclosure-seam-v2, ac-1), the same Render function
 			// gate.go's reportGateConditions and lint's Finding.String() use.
-			fmt.Fprint(stdout, "closure: ")
+			outcome.Disclosures++
+			fmt.Fprint(stdout, label)
 			fmt.Fprintln(stdout, disclosure.Render(disclosure.New(c.Source, "", c.Reason)))
 		case c.OK:
-			fmt.Fprintf(stdout, "[PASS] closure: %s\n", c.Name)
+			fmt.Fprintf(stdout, "[PASS] %s%s\n", label, c.Name)
 		default:
-			allOK = false
-			fmt.Fprintf(stdout, "[FAIL] closure: %s\n", c.Name)
+			outcome.Ready = false
+			fmt.Fprintf(stdout, "[FAIL] %s%s\n", label, c.Name)
 			fmt.Fprintf(stdout, "       %s\n", c.Reason)
 		}
 		// spec/evidence-resilience ac-2: per-record disclosed-unproven
@@ -94,9 +133,12 @@ func runClosureGate(ctx context.Context, root string, spec *artifact.SpecFrontma
 		// printed regardless of which branch fired above.
 		for _, extra := range c.Extra {
 			fmt.Fprintln(stdout, extra)
+			if disclosure.IsRendered(extra) {
+				outcome.Disclosures++
+			}
 		}
 	}
-	return allOK, nil
+	return outcome
 }
 
 // checkClosureEligible is the closure gate's "eligible is true" condition:
@@ -124,74 +166,23 @@ func checkClosureEligible(ctx context.Context, root string, spec *artifact.SpecF
 		cond.Reason = storyWord + " is not eligible (not every AC is evidenced or waived)"
 	}
 
-	// spec/evidence-resilience ac-2 (X-15/X-11b, L-N3): surface per-record
-	// disclosed-unproven detail for any unmet AC whose would-be evidence
-	// was excluded because its commit is not reachable from HEAD — this is
-	// the closure gate's OWN evidence ancestry consumer (the exact seam
-	// that used to hard-fail operationally on this shape); the fold above
-	// already stayed honest by construction (an excluded record never
-	// counts toward "evidenced"), so this adds legibility only, never a
-	// verdict change: an unmet AC whose gap traces to a quarantined or
-	// otherwise-unreachable record reads as WHY, not as silent absence.
-	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
-	quarantined, undecodable, qErr := evidence.QuarantinedRecords(ctx, root, derivedRoot, head)
-	if qErr != nil {
-		return gateCondition{}, fmt.Errorf("closure gate: %w", qErr)
+	// spec/evidence-resilience ac-2 (X-15/X-11b, L-N3) + the endgame
+	// disclosure-extension (judged-quarantine-disclosure-met-ac): surface the
+	// per-record disclosed-unproven detail this eligibility verdict rests on — an
+	// excluded record that would have evidenced an unmet AC, an excluded FAIL
+	// record whose quarantine flipped a now-MET AC out of violated, an undecodable
+	// record file, or a kept-but-unprovable (shallow-ancestry) record. The fold
+	// above already stayed honest by construction (an excluded record never counts
+	// toward "evidenced"; a kept-unprovable one is never silently trusted), so this
+	// adds legibility only, never a verdict change. Shared with the merge and
+	// feature gates via evidenceDisclosures (gatedisclosure.go) so all three
+	// verdict-consumption surfaces disclose the same exclusions.
+	extra, err := evidenceDisclosures(ctx, root, spec, head, storyFoldedACs(result.ACs))
+	if err != nil {
+		return gateCondition{}, fmt.Errorf("closure gate: %w", err)
 	}
-	cond.Extra = quarantineDisclosures(result.ACs, quarantined)
-	// spec/evidence-resilience ac-2 (finding 2): a record file that failed
-	// strict decode inside quarantined data is disclosed unconditionally
-	// (it cannot be tied to a specific AC — it did not decode) rather than
-	// bricking the gate operationally, so the exact stale-poisoned-bundle
-	// debris X-15 leaves reads as WHY, not as a hard fail.
-	cond.Extra = append(cond.Extra, undecodableDisclosures(undecodable)...)
+	cond.Extra = extra
 	return cond, nil
-}
-
-// undecodableDisclosures renders one disclosed-unproven line per record file
-// that failed strict decode inside quarantined data (spec/evidence-resilience
-// ac-2, finding 2). It is disclosed unconditionally — not per-AC, the way
-// quarantineDisclosures is — because an undecodable file cannot be read to
-// learn which AC its records would have evidenced; disclosing it at all is
-// what keeps the debris from passing silently while the closure run stays
-// non-operational (ac-2: "the closure run itself does not exit operationally
-// just because that one record degraded").
-func undecodableDisclosures(undecodable []evidence.UndecodableFile) []string {
-	var lines []string
-	for _, u := range undecodable {
-		text := fmt.Sprintf("a quarantined evidence record file %s is undecodable and was excluded from the fold: %s", u.Path, u.Reason)
-		lines = append(lines, disclosure.Render(disclosure.New("gate:evidence-quarantine", "", text)))
-	}
-	return lines
-}
-
-// quarantineDisclosures renders one disclosed-unproven line (spec/
-// evidence-resilience ac-2) per (unmet AC, excluded record naming that AC)
-// pair — never for a met AC (evidenced or waived has nothing to disclose,
-// mirroring closepreflight.go's own unmetStoryACDetail precedent), so a
-// reader sees WHY an AC still is not evidenced when a record that WOULD
-// have evidenced it was excluded for being unreachable, rather than
-// reading the gap as if no evidence was ever produced. Prefers the actual
-// reason `verdi sync` recorded on the record (artifact.Evidence.Quarantine,
-// ac-1) when present; falls back to a generic reachability statement for a
-// record this story's own build never had the chance to quarantine (e.g.
-// hand-placed derived data, or evidence synced before this story landed).
-func quarantineDisclosures(acs []evidence.ACResult, quarantined []artifact.Evidence) []string {
-	var lines []string
-	for _, ac := range acs {
-		if ac.Status == evidence.StatusEvidenced || ac.Status == evidence.StatusWaived {
-			continue
-		}
-		for _, rec := range evidence.RecordsForAC(quarantined, ac.ID) {
-			reason := fmt.Sprintf("provenance.commit %s is not reachable from HEAD", rec.Provenance.Commit)
-			if rec.Quarantine != nil && rec.Quarantine.Reason != "" {
-				reason = rec.Quarantine.Reason
-			}
-			text := fmt.Sprintf("a %s record (witness %q) that would have evidenced %s was excluded: %s", rec.Kind, rec.Witness, ac.ID, reason)
-			lines = append(lines, disclosure.Render(disclosure.New("gate:evidence-quarantine", ac.ID, text)))
-		}
-	}
-	return lines
 }
 
 // checkSpecStaleCondition is the closure gate's spec-stale condition
@@ -339,6 +330,7 @@ func checkPendingSupersessionCondition(ctx context.Context, f forge.Forge, defau
 // so close's own freeze-align sees stale covers and regenerates over the
 // dispositions), then close freezes the now-current, fully-dispositioned
 // report in place.
+// vocab:identity — CLI invocation grammar: names `verdi align`/`verdi close` by their bare ids (identity)
 const dispositionRitual = "the closure ritual is align (`verdi align`) -> disposition every finding as a working-tree edit (never commit it) -> close (`verdi close`)"
 
 // checkDispositionCompleteCondition is the closure gate's condition 4

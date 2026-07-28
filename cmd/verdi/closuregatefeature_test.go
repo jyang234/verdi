@@ -1,13 +1,148 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/store"
 )
+
+// featureQuarantineCondition returns condition 1 carrying the per-record
+// disclosure detail its REAL producer emits — quarantineDisclosures
+// (gatedisclosure.go), over one excluded record naming an unmet AC — rather
+// than a hand-typed line that only resembles one. What the loop must count is
+// whatever the producers actually emit, so the producers are what the loop is
+// tested against.
+func featureQuarantineCondition() gateCondition {
+	return gateCondition{
+		Name: "1. every feature AC evidenced", OK: true,
+		Extra: quarantineDisclosures(
+			[]foldedAC{{ID: "ac-1", Status: evidence.StatusPending}},
+			[]artifact.Evidence{{
+				Kind:        artifact.EvidenceBehavioral,
+				Verdict:     artifact.VerdictPass,
+				Witness:     "excluded-witness",
+				EvidenceFor: []string{"ac-1"},
+				Provenance:  artifact.EvidenceProvenance{Commit: strings.Repeat("c", 40)},
+			}},
+		),
+	}
+}
+
+// featureSupersededExclusionCondition returns condition 4 exactly as its REAL
+// producer (checkFeatureSpecStaleCondition) emits it for a feature whose
+// SUPERSEDED implementing story carries archived accepted-deviations: Extra
+// holds the informational union tally AND the L-N12 exclusion line. Those two
+// lines are the whole point of this test — one is informational and must never
+// count, the other is a disclosure and must.
+func featureSupersededExclusionCondition(t *testing.T) gateCondition {
+	t.Helper()
+	root := t.TempDir()
+	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
+	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "superseded-story", nDistinctADFindings("sup", 4), "")
+	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature",
+		"  - { id: computed-x, kind: computed, text: unrelated, disposition: fixed }\n", "")
+
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, nil, []string{"spec/superseded-story"}, nil)
+	if err != nil {
+		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
+	}
+	if !cond.OK {
+		t.Fatalf("fixture bug: cond = %+v, want the PASS-with-exclusion shape this test needs", cond)
+	}
+	return cond
+}
+
+// TestReportClosureGateConditions_FeatureUsesStructuredOutcome pins the one
+// reporting loop shared by story and feature closure conditions. Rendered
+// disclosure detail is counted, feature-only informational Extra lines are
+// not, and an ordinary failure retains the existing not-ready semantics.
+//
+// Every counted line comes from the producer that really emits it. The
+// superseded-exclusion row is why: it was hand-formatted with a 7-space indent
+// and so never matched the loop's own count, which let a feature preflight
+// print a disclosed exclusion and still summarize READY claiming ZERO
+// disclosures. A fabricated stand-in literal cannot witness that.
+func TestReportClosureGateConditions_FeatureUsesStructuredOutcome(t *testing.T) {
+	tests := []struct {
+		name            string
+		conditions      []gateCondition
+		wantReady       bool
+		wantDisclosures int
+	}{
+		{
+			name: "condition and per-record disclosures preserve ready",
+			conditions: []gateCondition{
+				featureQuarantineCondition(),
+				{Name: "4. no unresolved spec-stale flag", Disclosed: true, Source: "gate:spec-stale-feature-union", Reason: "archive unavailable"},
+			},
+			wantReady:       true,
+			wantDisclosures: 2,
+		},
+		{
+			// L-N12's exclusion changes the BASIS of the spec-stale verdict
+			// and its producer calls it "disclosed in a named line" — so it
+			// counts, exactly once, alongside the informational union tally
+			// riding the same Extra, which never counts.
+			name:            "the superseded-story exclusion counts; the union tally does not",
+			conditions:      []gateCondition{featureSupersededExclusionCondition(t)},
+			wantReady:       true,
+			wantDisclosures: 1,
+		},
+		{
+			name:            "failure remains not ready",
+			conditions:      []gateCondition{{Name: "1. every feature AC evidenced", Reason: "ac-1 pending"}},
+			wantReady:       false,
+			wantDisclosures: 0,
+		},
+		{
+			// The format belongs to internal/disclosure alone. A line that
+			// merely APES the vocabulary — the severity word and a bracket,
+			// but never routed through New/Render — is not a disclosure and
+			// must not be counted as one. A local prefix test in this package
+			// counts it, which is exactly the reconstruction the seam exists
+			// to forbid (spec/disclosure-seam-v2 ac-1).
+			name: "a hand-built line that apes the vocabulary is not counted",
+			conditions: []gateCondition{
+				{
+					Name: "1. every feature AC evidenced", OK: true,
+					Extra: []string{disclosure.SeverityDisclosedUnproven + " [pending] this line was never routed through the seam"},
+				},
+			},
+			wantReady:       true,
+			wantDisclosures: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			outcome := reportClosureGateConditions(&stdout, "closure(feature): ", tc.conditions)
+			if outcome.Ready != tc.wantReady || outcome.Disclosures != tc.wantDisclosures {
+				t.Fatalf("outcome = %+v, want Ready=%v Disclosures=%d; stdout=%s", outcome, tc.wantReady, tc.wantDisclosures, stdout.String())
+			}
+		})
+	}
+}
+
+// nDistinctADFindings renders findingsYAML for n judged accepted-deviation
+// findings with globally-unique id+text (so each is a distinct budget
+// identity, align.Identity) — the L-N14 report-scaled-threshold tests need to
+// place a controlled number of accepted deviations across the union.
+func nDistinctADFindings(prefix string, n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "  - { id: judged-%s-%d, kind: judged, text: \"deviation %s %d\", disposition: accepted-deviation, note: n }\n", prefix, i, prefix, i)
+	}
+	return b.String()
+}
 
 // featureSpecStaleTestHex is a stand-in sha256 hex payload (64 hex chars)
 // for fixture digest/covers fields this file's deviation-report.md fixtures
@@ -61,7 +196,11 @@ func TestCheckFeatureSpecStaleCondition_UnionsStoryArchive_NeverZero(t *testing.
 	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature", "  - { id: computed-x, kind: computed, text: unrelated, disposition: fixed }\n", "")
 
 	stories := []implementingStoryEdges{{SpecRef: "spec/my-story", Closed: true}}
-	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+	// Threshold 1 per report: the union basis here is 2 reports (the feature's own
+	// + one story archive), so the L-N14 report-scaled effective threshold is 2,
+	// which the archive's 4 accepted-deviations must still exceed — the never-zero
+	// property is that they COUNT (4), not that any fixed flat threshold fires.
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 1}}
 
 	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
@@ -236,7 +375,12 @@ func TestCheckFeatureSpecStaleCondition_MissingArchive_PartialUnionOverThreshold
 		{SpecRef: "spec/story-present", Closed: true},
 		{SpecRef: "spec/story-missing", Closed: true}, // archive absent
 	}
-	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 3}}
+	// Threshold 1 per report: the AVAILABLE union spans 2 reports (the feature's
+	// own + the one present story archive; the missing archive contributes no
+	// report to the basis), so the L-N14 scaled effective threshold is 2 and the
+	// present archive's 4 accepted-deviations already exceed it — a strict lower
+	// bound that a restored archive can only raise.
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 1}}
 
 	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
 	if err != nil {
@@ -318,6 +462,14 @@ func TestCheckFeatureSpecStaleCondition_NoReportsAnywhere_TriviallyUnflagged(t *
 // superseded stories (D-16), so condition 4 never saw the archive — it silently
 // contributed zero, with no disclosure and no ledger entry (ac-4's forbidden
 // silent-zero shape, for the superseded case).
+//
+// The line is asserted as a DISCLOSURE, not as a literal: it is built by the
+// shared seam (disclosure.New/Render, spec/disclosure-seam-v2 ac-1), so this
+// test pins the seam's own vocabulary — the source id, the scope, and the
+// substance — and disclosure.IsRendered's recognizability, rather than a
+// hand-typed rendering this package would then own a second copy of. It was
+// hand-formatted with a 7-space indent before, which is precisely why the
+// reporting loop never counted it.
 func TestCheckFeatureSpecStaleCondition_SupersededStory_DisclosedAndExcluded(t *testing.T) {
 	root := t.TempDir()
 	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
@@ -342,12 +494,25 @@ func TestCheckFeatureSpecStaleCondition_SupersededStory_DisclosedAndExcluded(t *
 	if !cond.OK {
 		t.Fatalf("cond = %+v, want PASS — a superseded story's archived deviations are excluded (supersession is the budget's own remedy)", cond)
 	}
-	// But NEVER silently: the named exclusion line rides the condition (Extra),
-	// verbatim per L-N12.
-	joined := strings.Join(cond.Extra, "\n")
-	want := "superseded story spec/superseded-story's archived report (4 accepted-deviation(s)) excluded — supersession is the spec-stale budget's own prescribed remedy, taken"
-	if !strings.Contains(joined, want) {
-		t.Fatalf("cond.Extra = %q, want the verbatim L-N12 exclusion line %q", cond.Extra, want)
+	// But NEVER silently: the named exclusion rides the condition (Extra), as a
+	// disclosure a reader recognizes as one (L-N12 + spec/disclosure-seam-v2).
+	var exclusion string
+	for _, line := range cond.Extra {
+		if strings.Contains(line, "spec/superseded-story") {
+			exclusion = line
+		}
+	}
+	if exclusion == "" {
+		t.Fatalf("cond.Extra = %q, want an exclusion line naming the superseded story", cond.Extra)
+	}
+	if !disclosure.IsRendered(exclusion) {
+		t.Fatalf("exclusion line = %q, want it rendered through the shared disclosure seam — an exclusion that changes the spec-stale verdict's BASIS must read as a disclosure and be counted as one", exclusion)
+	}
+	want := disclosure.Render(disclosure.New(
+		supersededExclusionSource, "spec/superseded-story",
+		"this superseded story's archived report (4 accepted-deviation(s)) is excluded from the feature-close budget — supersession is the spec-stale budget's own prescribed remedy, taken"))
+	if exclusion != want {
+		t.Fatalf("exclusion line = %q, want %q (L-N12's substance: the story, the excluded count, and the remedy that justifies it)", exclusion, want)
 	}
 }
 
@@ -370,5 +535,87 @@ func TestCheckFeatureSpecStaleCondition_SupersededStory_NoArchive_NoDisclosureNo
 	}
 	if strings.Contains(strings.Join(cond.Extra, "\n"), "superseded story") {
 		t.Fatalf("cond.Extra = %q, want NO superseded-exclusion line (nothing was excluded)", cond.Extra)
+	}
+}
+
+// writeSixReportFeature lays out the P2-11 union basis: the feature's own report
+// plus five closed implementing story archives (six reports total), with adCount
+// distinct accepted-deviations concentrated in the first story's archive and a
+// single non-accepted finding in every other report so each archive exists and
+// is counted as one report toward the union basis. Returns the stories slice for
+// the feature gate. The number of reports (6) and the per-report threshold (6,
+// set by the caller's manifest) are the L-N14 recalibration's own worked example.
+func writeSixReportFeature(t *testing.T, root string, adCount int) []implementingStoryEdges {
+	t.Helper()
+	writeFeatureStaleDeviationReport(t, root, store.ZoneActive, "my-feature",
+		"  - { id: computed-own, kind: computed, text: own-unrelated, disposition: fixed }\n", "")
+	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "story-1", nDistinctADFindings("s1", adCount), "")
+	stories := []implementingStoryEdges{{SpecRef: "spec/story-1", Closed: true}}
+	for i := 2; i <= 5; i++ {
+		name := fmt.Sprintf("story-%d", i)
+		writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, name,
+			fmt.Sprintf("  - { id: computed-%d, kind: computed, text: unrelated-%d, disposition: fixed }\n", i, i), "")
+		stories = append(stories, implementingStoryEdges{SpecRef: "spec/" + name, Closed: true})
+	}
+	return stories
+}
+
+// TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_Passes is P2-11's own
+// worked example (ledger L-N14, owner-ratified 2026-07-21): 23 accepted-deviations
+// unioned across a SIX-report basis (the feature's own report + five closed
+// implementing story archives) with a per-report threshold of 6. Under the
+// pre-union flat threshold this FAILED (23 > 6); the ratified recalibration
+// preserves PER-REPORT density across the enlarged basis — effective threshold
+// = 6 × 6 = 36 — so 23 PASSES, and the scaled arithmetic is printed on the PASS
+// path (the tally rides every verdict).
+//
+// Red-first: against the pre-fix flat threshold this reds — 23 > 6 flags and the
+// condition FAILs, so cond.OK is false where this test requires true.
+func TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_Passes(t *testing.T) {
+	root := t.TempDir()
+	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
+	stories := writeSixReportFeature(t, root, 23)
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 6}}
+
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
+	if err != nil {
+		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
+	}
+	if !cond.OK {
+		t.Fatalf("cond = %+v, want PASS — 23 accepted-deviations over 6 reports is under the report-scaled threshold 36 (6 × 6)", cond)
+	}
+	joined := strings.Join(cond.Extra, "\n")
+	if !strings.Contains(joined, "count 23") {
+		t.Fatalf("cond.Extra = %q, want the accepted-deviation count 23 printed on the PASS path", cond.Extra)
+	}
+	if !strings.Contains(joined, "threshold 36 = 6 × 6 reports") {
+		t.Fatalf("cond.Extra = %q, want the scaled arithmetic 'threshold 36 = 6 × 6 reports' printed on the PASS path", cond.Extra)
+	}
+}
+
+// TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_DenseStillFails is the
+// recalibration's honesty guard (L-N14: "NOT a raising of the bar"): a genuinely
+// dense feature — 40 accepted-deviations over the same six-report basis — still
+// FAILs, because 40 exceeds the scaled threshold 36. The scaling preserves the
+// per-report density that fires the counterweight; it never lets an over-dense
+// feature through.
+func TestCheckFeatureSpecStaleCondition_ReportScaledThreshold_DenseStillFails(t *testing.T) {
+	root := t.TempDir()
+	feature := featureStaleTestSpec("spec/my-feature", "ac-1")
+	stories := writeSixReportFeature(t, root, 40)
+	manifest := &store.Manifest{Audit: &store.AuditConfig{DeviationsStaleThreshold: 6}}
+
+	cond, err := checkFeatureSpecStaleCondition(root, feature, manifest, stories, nil, nil)
+	if err != nil {
+		t.Fatalf("checkFeatureSpecStaleCondition: %v", err)
+	}
+	if cond.OK {
+		t.Fatalf("cond = %+v, want FAIL — 40 accepted-deviations over 6 reports exceeds the scaled threshold 36", cond)
+	}
+	if !strings.Contains(cond.Reason, "count 40") {
+		t.Fatalf("cond.Reason = %q, want it to name accepted-deviation count 40", cond.Reason)
+	}
+	if !strings.Contains(cond.Reason, "threshold 36 = 6 × 6 reports") {
+		t.Fatalf("cond.Reason = %q, want the scaled arithmetic in the failure reason", cond.Reason)
 	}
 }

@@ -88,7 +88,7 @@ func TestRunDesignStart_StoryTemplateOverride(t *testing.T) {
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	mdl := phase7Model(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "jira:LOAN-1482", "stale-decline-story", manifest, mdl, deps, &stdout, &stderr)
@@ -122,7 +122,7 @@ func TestRunDesignStart_FeatureUnaffectedByStoryTemplateOverride(t *testing.T) {
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	mdl := phase7Model(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "loan-mgmt", manifest, mdl, deps, &stdout, &stderr)
@@ -194,7 +194,7 @@ func TestRunDesignStart_ClassMismatch_Exit2_NoWrite(t *testing.T) {
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	mdl := phase7Model(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "jira:LOAN-1482", "stale-decline-story", manifest, mdl, deps, &stdout, &stderr)

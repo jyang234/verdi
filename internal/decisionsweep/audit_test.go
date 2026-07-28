@@ -3,9 +3,17 @@ package decisionsweep
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 )
+
+// testAuditNow is the fixed reference "now" every pre-existing Audit test
+// above passes — none of them exercise waiver-expiry lapsing, so a fixed,
+// deterministic instant (never time.Now()) keeps them reproducible exactly
+// like every other test in this module. TestAudit_WaiverStale* below pass
+// their own explicit, varied `now` values to exercise lapsing precisely.
+var testAuditNow = time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 
 func storySpecMD(name string, acFragments ...string) string {
 	links := ""
@@ -58,7 +66,7 @@ func TestAudit_ExemptsConflictThreshold_AutoFilesConflictRecord(t *testing.T) {
 	writeFile(t, root, ".verdi/specs/active/spec-b/spec.md", componentSpecWithExempts("spec-b", "dc-1", "adr/retry-policy", "reason B"))
 	writeFile(t, root, ".verdi/specs/active/spec-c/spec.md", componentSpecWithExempts("spec-c", "dc-1", "adr/retry-policy", "reason C"))
 
-	result, err := Audit(root, 3, 3)
+	result, err := Audit(root, 3, 3, 3, testAuditNow)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -92,7 +100,7 @@ func TestAudit_ExemptsConflictThreshold_AutoFilesConflictRecord(t *testing.T) {
 	}
 
 	// Re-running must not duplicate the filing (idempotent).
-	result2, err := Audit(root, 3, 3)
+	result2, err := Audit(root, 3, 3, 3, testAuditNow)
 	if err != nil {
 		t.Fatalf("Audit (second run): %v", err)
 	}
@@ -114,7 +122,7 @@ func TestAudit_SpecStaleSurfaced(t *testing.T) {
 		"  - { id: f-4, kind: judged, text: t4, disposition: accepted-deviation, note: n4 }\n"
 	writeFile(t, root, ".verdi/specs/active/my-story/deviation-report.md", deviationReportMD("7f3c2a1", findings))
 
-	result, err := Audit(root, 3, 3)
+	result, err := Audit(root, 3, 3, 3, testAuditNow)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -150,7 +158,7 @@ func TestAudit_SpecStaleOwnTextTrigger(t *testing.T) {
 		"  - { id: ac-feat, kind: judged, text: t2, disposition: accepted-deviation, note: n2 }\n"
 	writeFile(t, root, ".verdi/specs/active/own-story/deviation-report.md", deviationReportMD("7f3c2a1", findings))
 
-	result, err := Audit(root, 3, 3)
+	result, err := Audit(root, 3, 3, 3, testAuditNow)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -187,7 +195,7 @@ func TestAudit_SpecStale_NotResurfacedCountsToo(t *testing.T) {
 		"digest: sha256:" + decisionConflictTestHex + "\n---\nbody\n"
 	writeFile(t, root, ".verdi/specs/active/drained-story/deviation-report.md", report)
 
-	result, err := Audit(root, 3, 3)
+	result, err := Audit(root, 3, 3, 3, testAuditNow)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -210,7 +218,7 @@ func TestAudit_StoryWithNoDeviationReportSkipped(t *testing.T) {
 	writeFile(t, root, ".verdi/verdi.yaml", "schema: verdi.layout/v1\n")
 	writeFile(t, root, ".verdi/specs/active/my-story/spec.md", storySpecMD("my-story"))
 
-	result, err := Audit(root, 3, 3)
+	result, err := Audit(root, 3, 3, 3, testAuditNow)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -220,7 +228,7 @@ func TestAudit_StoryWithNoDeviationReportSkipped(t *testing.T) {
 }
 
 func TestAudit_Negative_NoVerdiDir(t *testing.T) {
-	if _, err := Audit(t.TempDir(), 3, 3); err == nil {
+	if _, err := Audit(t.TempDir(), 3, 3, 3, testAuditNow); err == nil {
 		t.Fatal("Audit(no .verdi dir): want error, got nil")
 	}
 }
@@ -228,7 +236,7 @@ func TestAudit_Negative_NoVerdiDir(t *testing.T) {
 func TestAudit_EmptyCorpusNoOp(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, ".verdi/verdi.yaml", "schema: verdi.layout/v1\n")
-	result, err := Audit(root, 3, 3)
+	result, err := Audit(root, 3, 3, 3, testAuditNow)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}

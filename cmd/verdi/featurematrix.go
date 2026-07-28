@@ -239,8 +239,12 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 // view (supersededByAC) into the deduplicated set of superseded implementing
 // story refs the feature-close spec-stale condition needs (L-N12): a story that
 // implements more than one feature AC appears under each, but must be
-// disclosed-and-excluded exactly once. Order is left to the consumer (the
-// condition sorts for a deterministic disclosure).
+// disclosed-and-excluded exactly once. The output is sorted here at the source
+// (the M9 determinism note): supersededByAC is a map, so the flatten's first-
+// seen order is Go-map-iteration-random — sorting once here makes this function
+// deterministic on its own rather than leaving each caller to re-sort. The
+// spec-stale condition (closuregatefeature.go) still sorts its own defensive
+// copy; that stays correct, merely redundant, on an already-sorted slice.
 func supersededStoryRefs(supersededByAC map[string][]string) []string {
 	seen := make(map[string]bool)
 	var refs []string
@@ -253,6 +257,7 @@ func supersededStoryRefs(supersededByAC map[string][]string) []string {
 			refs = append(refs, ref)
 		}
 	}
+	sort.Strings(refs)
 	return refs
 }
 

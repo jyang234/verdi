@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/store"
 )
 
 // DiagramAbsenceFindingID is the diagram-sweep mode's synthetic "judged
@@ -224,7 +223,7 @@ func RunDiagramSweep(ctx context.Context, runner JudgeRunner, in DiagramJudgedIn
 	findings := make([]artifact.ConflictFinding, 0, len(inner.Findings))
 	for _, jf := range inner.Findings {
 		findings = append(findings, artifact.ConflictFinding{
-			ID:        "judged-" + store.RefSlug(jf.ID),
+			ID:        judgedFindingID(jf.ID),
 			Kind:      artifact.FindingJudged,
 			Text:      fmt.Sprintf("%s (confidence %.2f)", jf.Text, jf.Confidence),
 			TargetRef: jf.Target,
@@ -270,19 +269,11 @@ func diagramAbsenceFinding(f *JudgeFailure) artifact.ConflictFinding {
 	return artifact.ConflictFinding{ID: DiagramAbsenceFindingID, Kind: artifact.FindingJudged, Text: text}
 }
 
-// decodeDiagramInnerResult mirrors decision_judge.go's
-// decodeDecisionInnerResult (trim, strip a defensive markdown fence,
-// strict-decode).
+// decodeDiagramInnerResult decodes the diagram-sweep judge's findings JSON via
+// the shared prose-tolerant inner-parse (innerparse.go: decodeJudgeInnerJSON),
+// mirroring decodeDecisionInnerResult — a natural-language preamble/postamble
+// and/or a markdown fence around the object is tolerated, while strict decode
+// is preserved on the object itself.
 func decodeDiagramInnerResult(raw string) (*diagramInnerResult, error) {
-	s := strings.TrimSpace(raw)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	s = strings.TrimSpace(s)
-
-	var inner diagramInnerResult
-	if err := artifact.DecodeStrictJSON([]byte(s), &inner); err != nil {
-		return nil, err
-	}
-	return &inner, nil
+	return decodeJudgeInnerJSON[diagramInnerResult](raw)
 }

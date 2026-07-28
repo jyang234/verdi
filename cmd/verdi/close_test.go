@@ -7,14 +7,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/provider/fake"
 	"github.com/jyang234/verdi/internal/store"
@@ -314,6 +317,123 @@ func TestRunClose_EndToEnd(t *testing.T) {
 		if f.Rule == "VL-002" || f.Rule == "VL-010" {
 			t.Fatalf("re-lint of post-close store fired %s (the round-6 fix should make the archived quartet clean of it): %s", f.Rule, f.String())
 		}
+	}
+}
+
+func TestRunClose_PreExistingStagedPathsRefusedBeforeMutation(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	reportPath := store.DeviationReportPath(repo.Dir, store.ZoneActive, "close-fixture")
+	reportBefore, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading pre-close deviation report: %v", err)
+	}
+	appendCloseTestFile(t, filepath.Join(repo.Dir, ".verdi", "verdi.yaml"), "# staged manifest note\n")
+	appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged binding note\n")
+	gitOutput(t, repo.Dir, "add", ".verdi/verdi.yaml", "verdi.bindings.yaml")
+
+	fp := fake.New()
+	deps := closeDeps{Forge: forgefake.New(), Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(with staged paths) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	for _, path := range []string{".verdi/verdi.yaml", "verdi.bindings.yaml"} {
+		if !strings.Contains(stderr.String(), path) {
+			t.Fatalf("stderr = %q, want staged path %q named", stderr.String(), path)
+		}
+	}
+	if branch := gitCurrentBranch(t, repo.Dir); branch != "main" {
+		t.Fatalf("current branch = %q, want main (refusal must precede branch cut)", branch)
+	}
+	if hasLocalBranch(t, repo.Dir, "close/close-fixture") {
+		t.Fatal("close/close-fixture exists despite pre-existing staged paths")
+	}
+	activeSpec, err := os.ReadFile(store.ActiveSpecPath(repo.Dir, "close-fixture"))
+	if err != nil {
+		t.Fatalf("reading active spec after refusal: %v", err)
+	}
+	if string(activeSpec) != closeFixtureStorySpecMD {
+		t.Fatal("active spec changed despite staged-path refusal")
+	}
+	if _, err := os.Stat(store.ArchiveSpecDir(repo.Dir, "close-fixture")); !os.IsNotExist(err) {
+		t.Fatalf("archive directory exists despite staged-path refusal: %v", err)
+	}
+	reportAfter, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("reading post-refusal deviation report: %v", err)
+	}
+	if !bytes.Equal(reportAfter, reportBefore) {
+		t.Fatal("deviation report changed despite staged-path refusal")
+	}
+	if _, err := os.Stat(filepath.Join(store.ActiveSpecDir(repo.Dir, "close-fixture"), "rollup.json")); !os.IsNotExist(err) {
+		t.Fatalf("rollup.json exists despite staged-path refusal: %v", err)
+	}
+	if _, ok := fp.PublishedField("jira:CLOSE-1"); ok {
+		t.Fatal("rollup published despite staged-path refusal")
+	}
+}
+
+func TestRunClose_UnrelatedWorkingTreeChangesSurviveAndStayOutOfCommit(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	modifiedPath := filepath.Join(repo.Dir, "verdi.bindings.yaml")
+	const modifiedSuffix = "# unrelated working-tree edit\n"
+	appendCloseTestFile(t, modifiedPath, modifiedSuffix)
+	untrackedRel := "closure-scratch.txt"
+	untrackedPath := filepath.Join(repo.Dir, untrackedRel)
+	const untrackedContent = "keep this untracked scratch file\n"
+	if err := os.WriteFile(untrackedPath, []byte(untrackedContent), 0o644); err != nil {
+		t.Fatalf("writing unrelated untracked file: %v", err)
+	}
+
+	deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runClose(with unrelated dirty files) = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+
+	modifiedAfter, err := os.ReadFile(modifiedPath)
+	if err != nil {
+		t.Fatalf("reading unrelated modified file after close: %v", err)
+	}
+	if !strings.HasSuffix(string(modifiedAfter), modifiedSuffix) {
+		t.Fatalf("unrelated modified file did not survive close: %q", modifiedAfter)
+	}
+	untrackedAfter, err := os.ReadFile(untrackedPath)
+	if err != nil {
+		t.Fatalf("reading unrelated untracked file after close: %v", err)
+	}
+	if string(untrackedAfter) != untrackedContent {
+		t.Fatalf("unrelated untracked file = %q, want %q", untrackedAfter, untrackedContent)
+	}
+	status := gitOutput(t, repo.Dir, "status", "--short")
+	for _, want := range []string{" M verdi.bindings.yaml", "?? " + untrackedRel} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("git status after close = %q, want surviving working-tree entry %q", status, want)
+		}
+	}
+	assertClosureCommitOwnsOnlySpecPaths(t, repo.Dir, "close-fixture")
+	if got := strings.TrimSpace(gitOutput(t, repo.Dir, "ls-tree", "-r", "--name-only", "HEAD", "--", untrackedRel)); got != "" {
+		t.Fatalf("unrelated untracked file entered closure commit tree: %q", got)
+	}
+	committedBindings := gitOutput(t, repo.Dir, "show", "HEAD:verdi.bindings.yaml")
+	if strings.Contains(committedBindings, modifiedSuffix) {
+		t.Fatal("unrelated tracked modification entered closure commit")
 	}
 }
 
@@ -693,6 +813,969 @@ func TestRunClose_FreezeAlignFailure_UnwindsBranchCutAndRetryCompletes(t *testin
 	}
 }
 
+// TestClosureResidueName table-drives the index-shape derivation the residue
+// refusal rests on. Ownership must come from the INDEX, never from the
+// caller's target argument: an interrupted close has already moved the spec
+// out of the active zone, so a retry's own ref no longer resolves.
+func TestClosureResidueName(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths []string
+		want  string
+	}{
+		{name: "empty index"},
+		{
+			name:  "an interrupted close's own two zones",
+			paths: []string{".verdi/specs/active/foo/spec.md", ".verdi/specs/archive/foo/rollup.json", ".verdi/specs/archive/foo/spec.md"},
+			want:  "foo",
+		},
+		{
+			// The DESTRUCTIVE misclassification. This shape is indistinguishable
+			// from an ordinary staged edit inside an already-closed, COMMITTED
+			// archived spec — resolving a merge or rebase conflict there reaches
+			// it with no misbehaviour at all — and the residue refusal's recovery
+			// advice ends in "deleting the leftover .verdi/specs/archive/foo
+			// directory", which for that index deletes committed content from the
+			// worktree. Only the active zone's staged deletion proves this ritual
+			// moved a HEAD-tracked spec directory out from under itself, which is
+			// what makes deleting the archive tree safe.
+			name:  "archive zone alone cannot be told from an edit inside a committed archive",
+			paths: []string{".verdi/specs/archive/foo/spec.md"},
+		},
+		{
+			name:  "active zone alone is an ordinary spec edit, not closure residue",
+			paths: []string{".verdi/specs/active/foo/spec.md"},
+		},
+		{
+			name:  "one foreign path disowns the whole index",
+			paths: []string{".verdi/specs/active/foo/spec.md", ".verdi/specs/archive/foo/spec.md", "README.md"},
+		},
+		{
+			name:  "two different specs' closure paths",
+			paths: []string{".verdi/specs/archive/foo/spec.md", ".verdi/specs/archive/bar/spec.md"},
+		},
+		{
+			name:  "a prefix-sharing sibling is a different spec",
+			paths: []string{".verdi/specs/active/foo/spec.md", ".verdi/specs/archive/foo-two/spec.md"},
+		},
+		{
+			name:  "the zone directory itself, with no spec name under it",
+			paths: []string{".verdi/specs/archive/spec.md"},
+		},
+		{
+			// Both zones, but the archive half belongs to a different spec: the
+			// active-zone deletion proves nothing about THAT archive tree.
+			name:  "both zones present but naming different specs",
+			paths: []string{".verdi/specs/active/foo/spec.md", ".verdi/specs/archive/bar/spec.md"},
+		},
+		{
+			name:  "a spec directory with no file under it",
+			paths: []string{".verdi/specs/archive/foo"},
+		},
+		{
+			name:  "an attestation is never closure residue",
+			paths: []string{".verdi/attestations/jira-close-1/ac-1.md"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := closureResidueName(tc.paths); got != tc.want {
+				t.Fatalf("closureResidueName(%v) = %q, want %q", tc.paths, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRequireCleanIndex covers the guard's three answers — clean, foreign
+// staged work, and the ritual's OWN residue — plus the operational branch
+// CLAUDE.md requires and nothing previously exercised (the
+// "checking the pre-ritual index" wrap).
+//
+// The residue case is the defect: when CreateCommit fails (a failing
+// pre-commit hook, commit.gpgsign with no key, an unset user.email), close's
+// own closure paths stay staged. The generic refusal then tells the operator
+// to "commit or unstage them", with no way to tell ritual residue from their
+// own work — and unstaging is exactly the wrong move on a half-finished
+// archive. The guard must still REFUSE (no new pass path), but say what the
+// staged paths actually are and how to recover.
+func TestRequireCleanIndex(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("clean index passes", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		if err := requireCleanIndex(ctx, repo.Dir); err != nil {
+			t.Fatalf("requireCleanIndex(clean) = %v, want nil", err)
+		}
+	})
+
+	t.Run("foreign staged work is refused generically", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
+		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
+
+		err := requireCleanIndex(ctx, repo.Dir)
+		if err == nil {
+			t.Fatal("requireCleanIndex(foreign staged path) = nil, want a refusal")
+		}
+		for _, want := range []string{"verdi.bindings.yaml", "commit or unstage them"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("requireCleanIndex error = %q, want %q", err, want)
+			}
+		}
+	})
+
+	t.Run("the ritual's own closure residue is named as such", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		// Exactly what an interrupted close leaves staged: the active-zone
+		// deletion and the archive-zone tree, and nothing else.
+		if err := store.ArchiveMove(repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+
+		err := requireCleanIndex(ctx, repo.Dir)
+		if err == nil {
+			t.Fatal("requireCleanIndex(closure residue) = nil, want a refusal — the guard must not open a new pass path")
+		}
+		msg := err.Error()
+		if strings.Contains(msg, "commit or unstage them before running the ritual") {
+			t.Fatalf("requireCleanIndex error = %q, want recovery-accurate text, not the generic \"commit or unstage them\" advice aimed at the operator's own work", msg)
+		}
+		for _, want := range []string{
+			"spec/close-fixture",
+			"interrupted",
+			store.SpecDirRelPath(store.ZoneArchive, "close-fixture"),
+			"git commit",
+		} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("requireCleanIndex error = %q, want it to carry %q", msg, want)
+			}
+		}
+	})
+
+	t.Run("residue mixed with foreign work is refused generically", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		if err := store.ArchiveMove(repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "verdi.bindings.yaml"), "# staged\n")
+		gitOutput(t, repo.Dir, "add", "--", "verdi.bindings.yaml")
+
+		err := requireCleanIndex(ctx, repo.Dir)
+		if err == nil {
+			t.Fatal("requireCleanIndex(mixed) = nil, want a refusal")
+		}
+		if !strings.Contains(err.Error(), "commit or unstage them") {
+			t.Fatalf("requireCleanIndex error = %q, want the generic refusal — verdi must not claim an index it does not wholly own", err)
+		}
+	})
+
+	t.Run("an ordinary active-zone spec edit is not closure residue", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		// Authoring a brand-new spec stages active-zone paths only. Close never
+		// stages the active zone without also creating an archive tree, so this
+		// is the operator's own work and gets the generic refusal.
+		sibling := filepath.Join(repo.Dir, ".verdi", "specs", "active", "close-fixture-two")
+		if err := os.MkdirAll(sibling, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sibling, "spec.md"), []byte("sibling\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/specs/active/close-fixture-two")
+
+		err := requireCleanIndex(ctx, repo.Dir)
+		if err == nil {
+			t.Fatal("requireCleanIndex(active-zone edit staged) = nil, want a refusal")
+		}
+		if !strings.Contains(err.Error(), "commit or unstage them") {
+			t.Fatalf("requireCleanIndex error = %q, want the generic refusal for an active-zone-only edit", err)
+		}
+	})
+
+	t.Run("residue is still recognised with the store root below the git root", func(t *testing.T) {
+		// The layout internal/gitx/stagedpaths.go names as supported.
+		// StagedPaths answers in REPOSITORY-root-relative paths on purpose (that
+		// is what makes it immune to diff.relative), while the closure zones are
+		// written relative to the STORE root — so without re-basing, an
+		// interrupted close's own index reads as foreign work here and the
+		// operator gets "commit or unstage them" over their half-finished
+		// archive: exactly the advice the residue refusal exists to replace.
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files: map[string]string{
+				"above.txt":               "above the store root\n",
+				"store/.verdi/verdi.yaml": "schema: verdi.layout/v1\n",
+				"store/.verdi/specs/active/close-fixture/spec.md": closeFixtureStorySpecMD,
+			},
+			Message: "seed a store root one level below the git root",
+		}})
+		root := filepath.Join(repo.Dir, "store")
+		if err := store.ArchiveMove(root, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, root, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+
+		err := requireCleanIndex(ctx, root)
+		if err == nil {
+			t.Fatal("requireCleanIndex(closure residue below the git root) = nil, want a refusal")
+		}
+		if strings.Contains(err.Error(), "commit or unstage them before running the ritual") {
+			t.Fatalf("requireCleanIndex error = %q, want the residue refusal — the store root sitting below the git root must not silently degrade ownership detection", err)
+		}
+		if !strings.Contains(err.Error(), "spec/close-fixture") {
+			t.Fatalf("requireCleanIndex error = %q, want it to name spec/close-fixture's own closure paths", err)
+		}
+	})
+
+	t.Run("staged work above the store root is never claimed as residue", func(t *testing.T) {
+		// Re-basing must not become a way to claim paths verdi does not own: a
+		// staged path outside the store root disowns the whole index, exactly as
+		// one foreign path inside it already does.
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files: map[string]string{
+				"above.txt":               "above the store root\n",
+				"store/.verdi/verdi.yaml": "schema: verdi.layout/v1\n",
+				"store/.verdi/specs/active/close-fixture/spec.md": closeFixtureStorySpecMD,
+			},
+			Message: "seed a store root one level below the git root",
+		}})
+		root := filepath.Join(repo.Dir, "store")
+		if err := store.ArchiveMove(root, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		if err := stageClosureSpec(ctx, root, "close-fixture"); err != nil {
+			t.Fatalf("stageClosureSpec: %v", err)
+		}
+		appendCloseTestFile(t, filepath.Join(repo.Dir, "above.txt"), "someone else's staged edit\n")
+		gitOutput(t, repo.Dir, "add", "--", "above.txt")
+
+		err := requireCleanIndex(ctx, root)
+		if err == nil {
+			t.Fatal("requireCleanIndex(residue plus work above the store root) = nil, want a refusal")
+		}
+		if !strings.Contains(err.Error(), "commit or unstage them") {
+			t.Fatalf("requireCleanIndex error = %q, want the generic refusal — verdi must not claim an index carrying paths outside its own store", err)
+		}
+	})
+
+	t.Run("a staged edit inside a COMMITTED archive is never advised away", func(t *testing.T) {
+		// Reachable with no misbehaviour whatsoever: close a spec, commit the
+		// archive (the normal end state), then later resolve a merge or rebase
+		// conflict inside that archived spec — `git add` of one archive-zone
+		// path is the whole index. That index is byte-for-byte the shape an
+		// interrupted close of a never-committed spec leaves, so the residue
+		// refusal claimed it and advised "deleting the leftover
+		// .verdi/specs/archive/<name> directory": committed content, deleted
+		// from the operator's worktree on verdi's own instruction.
+		repo := buildCloseFixtureRepo(t)
+		if err := store.ArchiveMove(repo.Dir, "close-fixture"); err != nil {
+			t.Fatalf("ArchiveMove: %v", err)
+		}
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/specs")
+		gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "close: archive spec/close-fixture")
+		archived := filepath.Join(repo.Dir, filepath.FromSlash(store.SpecRelPath(store.ZoneArchive, "close-fixture")))
+		appendCloseTestFile(t, archived, "\nan edit inside the committed archive\n")
+		gitOutput(t, repo.Dir, "add", "--", store.SpecRelPath(store.ZoneArchive, "close-fixture"))
+
+		err := requireCleanIndex(ctx, repo.Dir)
+		if err == nil {
+			t.Fatal("requireCleanIndex(staged edit inside a committed archive) = nil, want a refusal")
+		}
+		if strings.Contains(err.Error(), "deleting the leftover") {
+			t.Fatalf("requireCleanIndex error = %q — it advises deleting a COMMITTED archive directory; verdi must never tell an operator to delete committed content it does not own", err)
+		}
+		if !strings.Contains(err.Error(), "commit or unstage them") {
+			t.Fatalf("requireCleanIndex error = %q, want the generic refusal: verdi cannot prove it owns this index", err)
+		}
+	})
+
+	t.Run("an unusable repository is an operational error, never a silent pass", func(t *testing.T) {
+		err := requireCleanIndex(ctx, t.TempDir())
+		if err == nil {
+			t.Fatal("requireCleanIndex(outside a git repository) = nil, want an operational error — a guard that cannot answer must never pass")
+		}
+		if !strings.Contains(err.Error(), "checking the pre-ritual index") {
+			t.Fatalf("requireCleanIndex error = %q, want the \"checking the pre-ritual index\" wrap", err)
+		}
+	})
+}
+
+// writeCloseFixtureWaiver writes an ACTIVE waiver for the close fixture
+// story's ac-1 straight into the working tree, exactly as `verdi waive` leaves
+// it before the operator commits. frozenCommit is stamped so the record
+// validates; nothing here is git-added.
+func writeCloseFixtureWaiver(t *testing.T, root, frozenCommit string) string {
+	t.Helper()
+	slug := store.RefSlug("jira:CLOSE-1")
+	path := store.WaiverPath(root, slug, "ac-1")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir waiver dir: %v", err)
+	}
+	content := `---
+id: waiver/` + slug + `--ac-1
+kind: waiver
+title: "Close fixture waiver"
+owners: [platform-team]
+status: active
+reason: "the fixture AC is waived for this closure"
+frozen: { at: 2024-01-01, commit: ` + frozenCommit + ` }
+---
+# Waiver
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing waiver: %v", err)
+	}
+	return store.WaiverPath("", slug, "ac-1")
+}
+
+// TestRunClose_DisclosesFoldRecordsMissingFromHEAD is the red-first proof for
+// the silence this change's own exact staging converted a captured input into.
+//
+// Attestations and waivers live OUTSIDE both closure paths
+// (.verdi/attestations/<storySlug>/<acID>.md, .verdi/waivers/...), and the
+// fold reads them from the WORKING TREE with plain os.Stat/os.ReadFile — no
+// git, no reachability check. So an operator can author one, not `git add` it,
+// run close, and have the index guard pass (untracked is not staged), the gate
+// PASS on that file, and the closure commit and archive contain no trace of
+// it. Under the old AddAll it was swept in.
+//
+// The design DELIBERATELY refuses to absorb such records ("human records must
+// already be committed in the HEAD they attest to"), and changing gate
+// semantics is explicitly out of scope — so close must neither absorb it nor
+// refuse. The defect is SILENCE about a stated precondition nothing enforces.
+// close-preflight dc-1 met this identical shape and ruled "closed, not
+// disclaimed": a runtime disclosure from the same predicate, not prose in a
+// design document.
+func TestRunClose_DisclosesFoldRecordsMissingFromHEAD(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("an uncommitted waiver the fold consumed is disclosed", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		// No evidence records at all: ac-1 folds to eligible ONLY through the
+		// waiver, so the uncommitted file is genuinely load-bearing.
+		writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+
+		deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+		var stdout, stderr bytes.Buffer
+		got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+		if got != 0 {
+			t.Fatalf("runClose(waived AC, uncommitted waiver) = %d, want 0 — gate semantics must not change; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		out := stdout.String()
+		for _, want := range []string{"disclosed-unproven", rel} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("stdout = %q, want a disclosure naming the uncommitted waiver %q", out, want)
+			}
+		}
+		// The closure commit still owns only the two closure paths: the fix is
+		// a disclosure, never absorption.
+		assertClosureCommitOwnsOnlySpecPaths(t, repo.Dir, "close-fixture")
+	})
+
+	t.Run("a waiver already committed at HEAD is silent", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/waivers")
+		gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "commit the waiver")
+		head := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+		writeCloseGateReport(t, repo.Dir, head, dispositionedFindingYAML)
+
+		deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+		var stdout, stderr bytes.Buffer
+		got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+		if got != 0 {
+			t.Fatalf("runClose(committed waiver) = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if strings.Contains(stdout.String(), "uncommitted-fold-record") {
+			t.Fatalf("stdout = %q, want no disclosure for a record already committed in HEAD", stdout.String())
+		}
+	})
+}
+
+// TestUncommittedFoldRecordPaths unit-tests the predicate the disclosure rests
+// on, including the negative paths the end-to-end tests cannot reach. It is
+// exposed as a function precisely so the preflight/prepare rehearsal paths can
+// call the SAME predicate later rather than re-deriving it.
+func TestUncommittedFoldRecordPaths(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("absent from HEAD, present in the working tree", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+
+		got, err := uncommittedFoldRecordPaths(ctx, repo.Dir, repo.Head, []string{rel})
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths: %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{rel}) {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want %#v", got, []string{rel})
+		}
+	})
+
+	t.Run("committed and unmodified", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/waivers")
+		gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "commit the waiver")
+		head := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+
+		got, err := uncommittedFoldRecordPaths(ctx, repo.Dir, head, []string{rel})
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want none", got)
+		}
+	})
+
+	t.Run("committed but edited in the working tree", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+		gitOutput(t, repo.Dir, "add", "--", ".verdi/waivers")
+		gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "commit the waiver")
+		head := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+		appendCloseTestFile(t, filepath.Join(repo.Dir, filepath.FromSlash(rel)), "\nan uncommitted edit\n")
+
+		got, err := uncommittedFoldRecordPaths(ctx, repo.Dir, head, []string{rel})
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths: %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{rel}) {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want the edited record %#v", got, []string{rel})
+		}
+	})
+
+	t.Run("no consumed records at all", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		got, err := uncommittedFoldRecordPaths(ctx, repo.Dir, repo.Head, nil)
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want none", got)
+		}
+	})
+
+	t.Run("an unresolvable commit is an operational error, never a guessed answer", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		rel := writeCloseFixtureWaiver(t, repo.Dir, repo.Head)
+		if _, err := uncommittedFoldRecordPaths(ctx, repo.Dir, strings.Repeat("0", 40), []string{rel}); err == nil {
+			t.Fatal("uncommittedFoldRecordPaths(bogus commit) = nil error, want an operational failure rather than a guess about presence")
+		}
+	})
+}
+
+// TestUncommittedFoldRecordPaths_StoreRootBelowGitRoot is the red-first proof
+// that the predicate's two git questions must resolve their path against the
+// SAME base. internal/gitx/stagedpaths.go states the layout this exercises as
+// a supported one — store.FindRoot walks up to the nearest .verdi, "so it can
+// legitimately sit BELOW the git root" — and gitx always runs with
+// cmd.Dir = that store root.
+//
+// In that layout the two questions disagreed. `git ls-tree ... -- <path>`
+// (gitx.PathExistsAt) takes a pathspec, which git resolves against the process
+// working directory, so it found the record; `git rev-parse <commit>:<path>`
+// resolves a bare path against the WORKING TREE ROOT instead, so it resolved a
+// path one directory up that does not exist and exited non-zero. close,
+// --preflight and --prepare then ALL exited 2 on the happy path for any story
+// whose attestation or waiver is committed — the very state the design wants.
+func TestUncommittedFoldRecordPaths_StoreRootBelowGitRoot(t *testing.T) {
+	ctx := context.Background()
+	const rel = ".verdi/waivers/jira-close-1/ac-1.md"
+
+	build := func(t *testing.T) (string, string) {
+		t.Helper()
+		repo := fixturegit.Build(t, []fixturegit.Layer{{
+			Files: map[string]string{
+				"above.txt":                "above the store root\n",
+				"store/.verdi/verdi.yaml":  "schema: verdi.layout/v1\n",
+				"store/" + rel:             "a committed waiver\n",
+				"store/.verdi/specs/.keep": "",
+			},
+			Message: "seed a store root one level below the git root",
+		}})
+		return filepath.Join(repo.Dir, "store"), repo.Head
+	}
+
+	t.Run("a committed, unmodified record is clean", func(t *testing.T) {
+		storeRoot, head := build(t)
+
+		got, err := uncommittedFoldRecordPaths(ctx, storeRoot, head, []string{rel})
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths(store root below the git root) = %v, want no error: both git questions must resolve the path against the same base", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want none — the record is committed at HEAD, byte-identical", got)
+		}
+	})
+
+	t.Run("a committed record edited in the working tree is still named", func(t *testing.T) {
+		storeRoot, head := build(t)
+		appendCloseTestFile(t, filepath.Join(storeRoot, filepath.FromSlash(rel)), "an uncommitted edit\n")
+
+		got, err := uncommittedFoldRecordPaths(ctx, storeRoot, head, []string{rel})
+		if err != nil {
+			t.Fatalf("uncommittedFoldRecordPaths(store root below the git root): %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{rel}) {
+			t.Fatalf("uncommittedFoldRecordPaths = %#v, want the edited record %#v — a consistent base must not turn the disclosure off", got, []string{rel})
+		}
+	})
+}
+
+// TestStoryFoldRecordPaths table-drives which fold inputs count as CONSUMED —
+// the paths whose absence from HEAD is worth disclosing.
+func TestStoryFoldRecordPaths(t *testing.T) {
+	const slug = "jira-close-1"
+	cases := []struct {
+		name string
+		acs  []evidence.ACResult
+		want []string
+	}{
+		{name: "nothing consumed", acs: []evidence.ACResult{{ID: "ac-1", Status: evidence.StatusEvidenced}}},
+		{
+			name: "a waived AC consumed its waiver",
+			acs:  []evidence.ACResult{{ID: "ac-1", Status: evidence.StatusWaived}},
+			want: []string{".verdi/waivers/" + slug + "/ac-1.md"},
+		},
+		{
+			name: "an authored attestation was consumed",
+			acs: []evidence.ACResult{{ID: "ac-2", Status: evidence.StatusEvidenced, Kinds: []evidence.KindResult{
+				{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+			}}},
+			want: []string{".verdi/attestations/" + slug + "/ac-2.md"},
+		},
+		{
+			name: "an unauthored scaffold satisfies nothing and is not consumed",
+			acs: []evidence.ACResult{{ID: "ac-3", Status: evidence.StatusPending, Kinds: []evidence.KindResult{
+				{Kind: artifact.EvidenceAttestation, Attestation: evidence.AttestationUnauthored},
+			}}},
+		},
+		{
+			name: "a non-attestation kind names no store record",
+			acs: []evidence.ACResult{{ID: "ac-4", Status: evidence.StatusEvidenced, Kinds: []evidence.KindResult{
+				{Kind: artifact.EvidenceStatic, Satisfied: true},
+			}}},
+		},
+		{
+			name: "both kinds on one AC are sorted",
+			acs: []evidence.ACResult{
+				{ID: "ac-1", Status: evidence.StatusWaived, Kinds: []evidence.KindResult{
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+				}},
+			},
+			want: []string{".verdi/attestations/" + slug + "/ac-1.md", ".verdi/waivers/" + slug + "/ac-1.md"},
+		},
+		{
+			// The deduplication half, which the row above cannot reach — its two
+			// paths are distinct, so it pins the sort alone. `evidence:
+			// [attestation, attestation]` is not rejected anywhere
+			// (artifact.validateAC accepts a repeated kind) and evidence.Fold
+			// appends one KindResult per entry, so one AC really can name the
+			// same attestation twice. Without the dedupe close prints the same
+			// disclosure line twice for one record.
+			name: "one AC naming the same attestation twice",
+			acs: []evidence.ACResult{
+				{ID: "ac-1", Status: evidence.StatusEvidenced, Kinds: []evidence.KindResult{
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+				}},
+			},
+			want: []string{".verdi/attestations/" + slug + "/ac-1.md"},
+		},
+		{
+			// The same duplication across two ACs, so the dedupe is proven to
+			// survive interleaving rather than only collapsing an adjacent pair
+			// produced by one AC.
+			name: "two ACs each naming their own record twice",
+			acs: []evidence.ACResult{
+				{ID: "ac-2", Status: evidence.StatusWaived, Kinds: []evidence.KindResult{
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+				}},
+				{ID: "ac-1", Status: evidence.StatusEvidenced, Kinds: []evidence.KindResult{
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+					{Kind: artifact.EvidenceAttestation, Satisfied: true, Attestation: evidence.AttestationAuthored},
+				}},
+			},
+			want: []string{
+				".verdi/attestations/" + slug + "/ac-1.md",
+				".verdi/attestations/" + slug + "/ac-2.md",
+				".verdi/waivers/" + slug + "/ac-2.md",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := storyFoldRecordPaths(slug, tc.acs)
+			if len(got) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("storyFoldRecordPaths = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStageClosureSpec_UntrackedActiveZoneStillStagesTheArchive is the
+// red-first proof for the staging step's new, unwindable failure mode.
+// `git add` is FATAL (rc 128) and stages NOTHING when a pathspec matches
+// neither the working tree nor the index — and after the archive move, the
+// active-zone pathspec matches neither when the spec directory was never
+// committed. gitx.AddAll never had this failure mode.
+//
+// The moved-away-but-TRACKED case (the common one, since `verdi accept`
+// commits the spec directory) is fine: the pathspec matches the index entry
+// and records the deletion. This covers the edge where it does not.
+func TestStageClosureSpec_UntrackedActiveZoneStillStagesTheArchive(t *testing.T) {
+	ctx := context.Background()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
+		Message: "seed a store with no committed spec",
+	}})
+
+	const name = "untracked-fixture"
+	dir := store.ActiveSpecDir(repo.Dir, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte("---\nid: spec/"+name+"\n---\n"), 0o644); err != nil {
+		t.Fatalf("writing untracked spec.md: %v", err)
+	}
+	if err := store.ArchiveMove(repo.Dir, name); err != nil {
+		t.Fatalf("ArchiveMove: %v", err)
+	}
+
+	if err := stageClosureSpec(ctx, repo.Dir, name); err != nil {
+		t.Fatalf("stageClosureSpec(untracked active zone) = %v, want the archive tree staged: an active-zone pathspec with nothing to record is not a reason to stage nothing at all", err)
+	}
+	staged, err := gitx.StagedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("StagedPaths: %v", err)
+	}
+	want := []string{store.SpecRelPath(store.ZoneArchive, name)}
+	if !reflect.DeepEqual(staged, want) {
+		t.Fatalf("staged paths = %#v, want exactly the archive tree %#v", staged, want)
+	}
+}
+
+// TestRunClose_StagingFailure_UnwindsBranchCut is the red-first proof for the
+// unwind gap: a staging failure after the branch cut left HEAD on
+// close/<name>, the spec physically moved to the archive, the report frozen,
+// rollup.json written — and no unwindClosureBranchCut call at all, so the
+// retry died at CheckoutNewBranch's no-clobber refusal. `verdi accept` already
+// solved the identical shape by exposing its two post-flip git write ops as
+// package-level seams (accept.go's acceptAddPaths/acceptCreateCommit,
+// spec/obligation-seam ac-3); this mirrors that proven pattern rather than
+// inventing a new one.
+func TestRunClose_StagingFailure_UnwindsBranchCut(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	originalBranch := gitCurrentBranch(t, repo.Dir)
+	restore := closeAddPaths
+	closeAddPaths = func(context.Context, string, ...string) error {
+		return fmt.Errorf("forced staging failure")
+	}
+	defer func() { closeAddPaths = restore }()
+
+	fp := fake.New()
+	deps := closeDeps{Forge: forgefake.New(), Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(staging failure) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if b := gitCurrentBranch(t, repo.Dir); b != originalBranch {
+		t.Fatalf("current branch = %q, want the original %q restored — the branch cut was not unwound", b, originalBranch)
+	}
+	if hasLocalBranch(t, repo.Dir, "close/close-fixture") {
+		t.Fatal("close/close-fixture still exists after a staging failure — the retry is blocked at the next cut's no-clobber refusal")
+	}
+	if _, ok := fp.PublishedField("jira:CLOSE-1"); ok {
+		t.Fatal("rollup published despite the staging failure")
+	}
+	// Nothing was staged, so the index must still be clean.
+	staged, err := gitx.StagedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("StagedPaths: %v", err)
+	}
+	if len(staged) != 0 {
+		t.Fatalf("index = %#v after a staging failure, want empty", staged)
+	}
+	// The archive move is uncommitted on disk. Silence about that is never a
+	// pass: the operator must be told what state the checkout is in.
+	for _, want := range []string{store.SpecDirRelPath(store.ZoneArchive, "close-fixture"), "UNCOMMITTED"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want it to disclose the uncommitted archive move (%q)", stderr.String(), want)
+		}
+	}
+}
+
+// TestRunClose_CommitFailure_LeavesRecoverableResidue proves the OTHER post-
+// staging failure (a failing pre-commit hook, commit.gpgsign with no key, an
+// unset user.email) leaves a state the operator can actually act on: the
+// branch and the staged closure paths are deliberately KEPT — deleting the
+// branch would strand the staged work on the original branch's index — and
+// both the failure message and the retry's own refusal say exactly that.
+func TestRunClose_CommitFailure_LeavesRecoverableResidue(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+
+	restore := closeCreateCommit
+	closeCreateCommit = func(context.Context, string, string) (string, error) {
+		return "", fmt.Errorf("forced commit failure")
+	}
+	defer func() { closeCreateCommit = restore }()
+
+	fp := fake.New()
+	deps := closeDeps{Forge: forgefake.New(), Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(commit failure) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if _, ok := fp.PublishedField("jira:CLOSE-1"); ok {
+		t.Fatal("rollup published despite the commit failure")
+	}
+	if !hasLocalBranch(t, repo.Dir, "close/close-fixture") {
+		t.Fatal("close/close-fixture was deleted after a commit failure — that strands the staged closure paths on another branch's index")
+	}
+	// The archive is hand-completable, but close's publish never ran and no
+	// re-run reaches it — finding 6: a `git commit` by hand does not publish the
+	// rollup, and silence would strand it unpublished.
+	for _, want := range []string{"close/close-fixture", "git commit", "NOT published", "verdi rollup"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want recovery guidance naming %q", stderr.String(), want)
+		}
+	}
+
+	// The retry: the ritual's own residue is recognised and explained, rather
+	// than the operator being told to unstage their own half-finished archive.
+	closeCreateCommit = restore
+	var o2, e2 bytes.Buffer
+	got2 := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &o2, &e2)
+	if got2 != 2 {
+		t.Fatalf("retry after a commit failure = %d, want operational exit 2 (the guard opens no new pass path); stdout=%s stderr=%s", got2, o2.String(), e2.String())
+	}
+	if strings.Contains(e2.String(), "commit or unstage them before running the ritual") {
+		t.Fatalf("retry stderr = %q, want residue-accurate guidance rather than the generic staged-work advice", e2.String())
+	}
+	for _, want := range []string{"spec/close-fixture", "interrupted", "close/close-fixture"} {
+		if !strings.Contains(e2.String(), want) {
+			t.Fatalf("retry stderr = %q, want it to carry %q", e2.String(), want)
+		}
+	}
+}
+
+// seedCloseHappyPath arms the close-fixture repo to reach the post-cut ritual:
+// authoritative evidence for ac-1 and a living, fully-dispositioned gate report
+// covering head, so the gate holds and the freeze takes the freeze-in-place
+// path.
+func seedCloseHappyPath(t *testing.T, repo *fixturegit.Repo) {
+	t.Helper()
+	prov := artifact.EvidenceProvenance{Source: artifact.SourceCI, Pipeline: "1", Job: "1", Commit: repo.Head}
+	if err := produceSelfHostedEvidence(repo.Dir, repo.Head, prov); err != nil {
+		t.Fatalf("produceSelfHostedEvidence: %v", err)
+	}
+	writeCloseGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+}
+
+// TestRunClose_PreStageFailuresDiscloseFreezeResidue is the proof for finding
+// 4: the three post-cut, pre-stage failure points (writeRollup,
+// flipSpecStatusToClosed, store.ArchiveMove) no longer return bare. By the time
+// each fires the freeze has already succeeded and rewritten the active-zone
+// report in place, so a bare return leaves a frozen report — and, further in,
+// a written rollup.json and a spec.md silently flipped to closed in the ACTIVE
+// zone — for the operator to discover alone. Each must NAME that state
+// (constitution 2/10). The design scopes rollback out, so the fix is
+// disclosure, not unwind.
+func TestRunClose_PreStageFailuresDiscloseFreezeResidue(t *testing.T) {
+	ctx := context.Background()
+	run := func(t *testing.T, repo *fixturegit.Repo) string {
+		t.Helper()
+		deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
+		var stdout, stderr bytes.Buffer
+		if got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr); got != 2 {
+			t.Fatalf("runClose = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		return stderr.String()
+	}
+	assertResidue := func(t *testing.T, stderr, reachedFragment string) {
+		t.Helper()
+		for _, want := range []string{
+			"UNCOMMITTED",
+			store.SpecDirRelPath(store.ZoneActive, "close-fixture"),
+			"close/close-fixture",
+			reachedFragment,
+		} {
+			if !strings.Contains(stderr, want) {
+				t.Fatalf("stderr = %q, want the in-place freeze residue disclosed (%q)", stderr, want)
+			}
+		}
+	}
+
+	t.Run("writeRollup failure", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		seedCloseHappyPath(t, repo)
+		// rollup.json pre-created as a DIRECTORY makes writeRollup's os.WriteFile
+		// fail (EISDIR) while the freeze, which writes deviation-report.md, still
+		// succeeds — isolating this one failure point.
+		activeDir := store.ActiveSpecDir(repo.Dir, "close-fixture")
+		if err := os.Mkdir(filepath.Join(activeDir, "rollup.json"), 0o755); err != nil {
+			t.Fatalf("pre-creating rollup.json as a directory: %v", err)
+		}
+		assertResidue(t, run(t, repo), "froze the alignment report")
+	})
+
+	t.Run("flip failure", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		seedCloseHappyPath(t, repo)
+		// A read-only spec.md is readable by the gate and the freeze but makes
+		// the status flip's os.WriteFile fail (EACCES) — the freeze and rollup
+		// write have already completed by then.
+		if err := os.Chmod(store.ActiveSpecPath(repo.Dir, "close-fixture"), 0o400); err != nil {
+			t.Fatalf("chmod spec.md read-only: %v", err)
+		}
+		assertResidue(t, run(t, repo), "wrote rollup.json")
+	})
+
+	t.Run("ArchiveMove failure", func(t *testing.T) {
+		repo := buildCloseFixtureRepo(t)
+		seedCloseHappyPath(t, repo)
+		// A pre-existing archive directory makes ArchiveMove refuse to clobber —
+		// by then the freeze, the rollup write, and the status flip have all
+		// landed in the active zone.
+		if err := os.MkdirAll(store.ArchiveSpecDir(repo.Dir, "close-fixture"), 0o755); err != nil {
+			t.Fatalf("pre-creating the archive directory: %v", err)
+		}
+		assertResidue(t, run(t, repo), "flipped the spec status to closed")
+	})
+}
+
+// TestRunClose_PublishFailureDisclosesCommittedButUnpublished is finding 6's
+// proof for the publish path: the archive commit has already landed on the
+// closure branch when PublishRollup fails, so this is a committed-but-
+// incomplete state, not a re-runnable one (the retry dies at the no-clobber
+// branch cut). Silence would strand an unpublished rollup; the disclosure names
+// the archive as durable and points at `verdi rollup --publish`.
+func TestRunClose_PublishFailureDisclosesCommittedButUnpublished(t *testing.T) {
+	repo := buildCloseFixtureRepo(t)
+	ctx := context.Background()
+	seedCloseHappyPath(t, repo)
+
+	fp := fake.New()
+	fp.QueuePublishError("jira:CLOSE-1", fmt.Errorf("tracker unreachable"))
+	deps := closeDeps{Forge: forgefake.New(), Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(ctx, repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(publish failure) = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	// The archive commit landed before the publish — the branch exists and
+	// nothing is left staged.
+	if !hasLocalBranch(t, repo.Dir, "close/close-fixture") {
+		t.Fatal("close/close-fixture missing — the archive commit should have landed before the publish step")
+	}
+	staged, err := gitx.StagedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("StagedPaths: %v", err)
+	}
+	if len(staged) != 0 {
+		t.Fatalf("index = %#v after a committed publish failure, want empty (the commit consumed the staged paths)", staged)
+	}
+	for _, want := range []string{"verdi rollup jira:CLOSE-1 --publish", "close/close-fixture", "durable", "not retry the publish"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want the committed-but-unpublished disclosure naming %q", stderr.String(), want)
+		}
+	}
+}
+
+func TestStageClosureSpec_AddPathsFailurePreservesUnrelatedState(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			"staged.txt":   "committed staged content\n",
+			"unstaged.txt": "committed unstaged content\n",
+		},
+		Message: "seed closure staging failure fixture",
+	}})
+
+	stagedPath := filepath.Join(repo.Dir, "staged.txt")
+	if err := os.WriteFile(stagedPath, []byte("unrelated staged content\n"), 0o644); err != nil {
+		t.Fatalf("writing staged fixture file: %v", err)
+	}
+	gitOutput(t, repo.Dir, "add", "--", "staged.txt")
+
+	unstagedPath := filepath.Join(repo.Dir, "unstaged.txt")
+	if err := os.WriteFile(unstagedPath, []byte("unrelated unstaged content\n"), 0o644); err != nil {
+		t.Fatalf("writing unstaged fixture file: %v", err)
+	}
+	untrackedPath := filepath.Join(repo.Dir, "untracked.txt")
+	if err := os.WriteFile(untrackedPath, []byte("unrelated untracked content\n"), 0o644); err != nil {
+		t.Fatalf("writing untracked fixture file: %v", err)
+	}
+
+	statusBefore := gitOutput(t, repo.Dir, "status", "--short")
+	for _, want := range []string{"M  staged.txt", " M unstaged.txt", "?? untracked.txt"} {
+		if !strings.Contains(statusBefore, want) {
+			t.Fatalf("precondition git status = %q, want %q", statusBefore, want)
+		}
+	}
+	indexBefore := gitOutput(t, repo.Dir, "diff", "--cached", "--binary", "--")
+	worktreeBefore := gitOutput(t, repo.Dir, "diff", "--binary", "--")
+	untrackedBefore, err := os.ReadFile(untrackedPath)
+	if err != nil {
+		t.Fatalf("reading untracked fixture file before staging failure: %v", err)
+	}
+
+	const missingTarget = "missing-closure-target"
+	err = stageClosureSpec(context.Background(), repo.Dir, missingTarget)
+	if err == nil {
+		t.Fatal("stageClosureSpec(nonexistent target) = nil, want AddPaths error")
+	}
+	for _, want := range []string{"staging closure paths", "spec/" + missingTarget} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("stageClosureSpec error = %q, want context %q", err, want)
+		}
+	}
+
+	if got := gitOutput(t, repo.Dir, "status", "--short"); got != statusBefore {
+		t.Fatalf("git status changed after staging failure:\nbefore: %q\nafter:  %q", statusBefore, got)
+	}
+	if got := gitOutput(t, repo.Dir, "diff", "--cached", "--binary", "--"); got != indexBefore {
+		t.Fatalf("index changed after staging failure:\nbefore:\n%s\nafter:\n%s", indexBefore, got)
+	}
+	if got := gitOutput(t, repo.Dir, "diff", "--binary", "--"); got != worktreeBefore {
+		t.Fatalf("working-tree diff changed after staging failure:\nbefore:\n%s\nafter:\n%s", worktreeBefore, got)
+	}
+	untrackedAfter, err := os.ReadFile(untrackedPath)
+	if err != nil {
+		t.Fatalf("reading untracked fixture file after staging failure: %v", err)
+	}
+	if !bytes.Equal(untrackedAfter, untrackedBefore) {
+		t.Fatalf("untracked file changed after staging failure: got %q, want %q", untrackedAfter, untrackedBefore)
+	}
+}
+
 // TestUnwindClosureBranchCut unit-tests the shared unwind helper directly,
 // covering BOTH clauses of the fix contract — in particular the "if anything
 // was somehow committed, leave it and say so honestly" clause, which the
@@ -826,6 +1909,45 @@ func TestCmdClose_Negative(t *testing.T) {
 func gitCurrentBranch(t *testing.T, dir string) string {
 	t.Helper()
 	return strings.TrimSpace(gitOutput(t, dir, "symbolic-ref", "--short", "HEAD"))
+}
+
+func appendCloseTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("opening %s for append: %v", path, err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		t.Fatalf("appending to %s: %v", path, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("closing %s after append: %v", path, err)
+	}
+}
+
+func assertClosureCommitOwnsOnlySpecPaths(t *testing.T, dir, name string) {
+	t.Helper()
+	activePrefix := store.SpecDirRelPath(store.ZoneActive, name) + "/"
+	archivePrefix := store.SpecDirRelPath(store.ZoneArchive, name) + "/"
+	changed := strings.Fields(gitOutput(t, dir, "diff", "--no-renames", "--name-only", "HEAD^", "HEAD"))
+	if len(changed) == 0 {
+		t.Fatal("closure commit changed no paths")
+	}
+	var sawActive, sawArchive bool
+	for _, path := range changed {
+		switch {
+		case strings.HasPrefix(path, activePrefix):
+			sawActive = true
+		case strings.HasPrefix(path, archivePrefix):
+			sawArchive = true
+		default:
+			t.Fatalf("closure commit changed unrelated path %q; all changed paths: %v", path, changed)
+		}
+	}
+	if !sawActive || !sawArchive {
+		t.Fatalf("closure commit paths = %v, want both %s and %s trees", changed, activePrefix, archivePrefix)
+	}
 }
 
 func gitOutput(t *testing.T, dir string, args ...string) string {

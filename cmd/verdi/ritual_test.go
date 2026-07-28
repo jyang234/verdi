@@ -204,7 +204,7 @@ func TestRoundFourRitual_FullLoop(t *testing.T) {
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	prov := seedRitualProvider(t)
-	designDepsV := designDeps{Provider: prov, Runner: nil, GoTest: fakeGoTest{}}
+	designDepsV := designDeps{Provider: prov, Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 	buildDeps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
 
 	// --- 1. verdi design start jira:LOAN-1483 --kind feature --name loan-mgmt ---

@@ -209,6 +209,7 @@ func renderDiagramEditorRegion(v *diagramEditorView) string {
 		b.WriteString(`<span class="diagram-render-error-tag">base does not verify</span>`)
 		b.WriteString(`<pre class="diagram-render-error-msg" id="diagram-peek-failure-msg"></pre>`)
 		b.WriteString(`</div>`)
+		// vocab:identity — non-vocabulary homograph: dismiss-this-panel UI button/aria-label plus CSS class/id fragments (identity)
 		b.WriteString(`<button type="button" id="peek-close-btn" class="diagram-peek-close" aria-label="Close before-peek">close</button>`)
 		b.WriteString(`</div>`)
 	}

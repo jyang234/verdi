@@ -41,6 +41,15 @@ type ScaffoldData struct {
 	ParentRef string
 	Links     []StoryLink
 	Spike     bool
+	// Pins and Dispositions are commit-to-design's content-carrying
+	// fields (spec/creation-form ac-4 — the "content-carrying
+	// template-contract extension" ledger L-M12's ratification
+	// predicted): the board's pinned refs render as context: entries,
+	// the sticky dispositions as the dispositions: block. Every other
+	// consumer leaves them zero; a template failing to reference them
+	// is never an error (the struct posture above).
+	Pins         []artifact.Pin
+	Dispositions []artifact.Disposition
 }
 
 // Render instantiates tmpl (a text/template source: an embedded canonical
@@ -119,28 +128,57 @@ func safeScalar(s string) string {
 // loadModel). filename is a class's own Class.Template value (model.Class,
 // kernel-required non-empty) — callers resolve it from the store's
 // already-open model, never hardcode a class-to-filename mapping here.
+//
+// LoadTemplate composes the two halves below (spec/creation-form ac-4
+// exposed them): LoadOverride for the store's own layer, Canonical for
+// the embedded fallback of the same name. A consumer whose canonical
+// default is NOT the same-named embedded class template — commit-to-
+// design, whose no-override shape is the byte-pinned legacy scaffold —
+// composes them differently; everyone else keeps calling this.
 func LoadTemplate(root, filename string) ([]byte, error) {
+	data, ok, err := LoadOverride(root, filename)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return data, nil
+	}
+	return Canonical(filename)
+}
+
+// LoadOverride reads the store's own template override for filename at
+// .verdi/templates/<filename> under root: (bytes, true, nil) when one
+// exists, (nil, false, nil) when the store carries none — absence is
+// never an error (the absence-changes-nothing posture) — and a real
+// read failure or an unsafe filename fails closed.
+func LoadOverride(root, filename string) ([]byte, bool, error) {
 	// Defense-in-depth on the containment invariant internal/model's
 	// Model.Validate kernel rule already enforces (judged-template-filename-
 	// escapes-templates-dir): filename must be a BARE filename, so the join
 	// below cannot escape .verdi/templates/. Rejecting a separator-carrying,
 	// absolute, or . / .. value HERE keeps the invariant even for a caller
-	// that reaches LoadTemplate without a Validate-clean model — a specific,
+	// that reaches LoadOverride without a Validate-clean model — a specific,
 	// fail-closed refusal naming the rule rather than an incidental
 	// file-not-found on a resolved-elsewhere path. One shared definition
 	// (artifact.IsBareFilename) backs both layers.
 	if !artifact.IsBareFilename(filename) {
-		return nil, fmt.Errorf("designscaffold: template filename %q must be a bare filename under .verdi/templates/ (no path separator, absolute path, or . / ..)", filename)
+		return nil, false, fmt.Errorf("designscaffold: template filename %q must be a bare filename under .verdi/templates/ (no path separator, absolute path, or . / ..)", filename)
 	}
 	override := filepath.Join(root, ".verdi", "templates", filename)
 	data, err := os.ReadFile(override)
 	if err == nil {
-		return data, nil
+		return data, true, nil
 	}
 	if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("designscaffold: reading template override %s: %w", override, err)
+		return nil, false, fmt.Errorf("designscaffold: reading template override %s: %w", override, err)
 	}
-	data, err = embeddedTemplates.ReadFile("templates/" + filename)
+	return nil, false, nil
+}
+
+// Canonical returns the embedded canonical template named filename —
+// the shipped default a store with no override of its own resolves to.
+func Canonical(filename string) ([]byte, error) {
+	data, err := embeddedTemplates.ReadFile("templates/" + filename)
 	if err != nil {
 		return nil, fmt.Errorf("designscaffold: no embedded canonical template named %q: %w", filename, err)
 	}

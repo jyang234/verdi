@@ -1,4 +1,4 @@
-// verdi close <jira:STORY-KEY | spec/name | feature spec/name> (05 §CLI;
+// verdi close <jira:STORY-KEY | spec/name> [--force-local] (05 §CLI;
 // 03 §Closure ritual; spec/close-verb ac-1, ac-2, ac-3, dc-3): drives a
 // merged verdi STORY to a true, archived closure on authoritative
 // (source: ci) evidence alone, then publishes its rollup to the configured
@@ -30,10 +30,14 @@
 //     CONSUMED via extraction — same Generate/write logic `verdi align
 //     --freeze` uses, without depending on the feature/<name> build-branch
 //     naming convention), build and canonjson-digest rollup.json, and move
-//     the whole quartet to specs/archive/<name>/ (store.ArchiveMove, a
-//     pure rename — VL-010's sole legal exception on an otherwise-frozen
-//     spec.md).
-//  4. Commit the quartet + the archive rename on the closure branch.
+//     the whole target spec directory to specs/archive/<name>/
+//     (store.ArchiveMove). Every archive contains spec.md, the frozen
+//     deviation-report.md, and rollup.json; a grandfathered board.json
+//     moves with the directory only when already present.
+//  4. Commit only the target spec's active-zone deletion and archive-zone
+//     tree on the closure branch. A pre-existing staged path is refused
+//     before any mutation; unrelated unstaged and untracked work survives
+//     outside this commit.
 //  5. Publish the rollup to the configured tracker (ac-2) — the round-6
 //     hermetic fake provider by default (spec/close-verb dc-2), a real
 //     Jira adapter by a pure config change.
@@ -56,6 +60,19 @@
 // below — that guard exists solely to protect step 5's publish call,
 // which --preflight never reaches. See closepreflight.go/
 // closepreflightfeature.go for the full implementation.
+//
+// --prepare (closure-session ergonomics, ledger L-N15(1)) is the resumable
+// operator entry point for both classes — a MODE of this verb, never a new
+// one, on close-preflight dc-1's ruling (a bare mode-selecting switch; no
+// 05 §CLI inventory change), and dispatched before the CI-only publish
+// guard on that same reasoning since it never reaches a publish. Given an
+// explicit ref, it refreshes an absent or
+// stale living alignment report, then stops at every undispositioned finding
+// for human judgment. Re-running it at the same HEAD preserves that report
+// byte-for-byte instead of regenerating it. Once every finding is
+// dispositioned, it enters the identical preflight path above and reports
+// MECHANICAL WORK REQUIRED, READY WITH DISCLOSURES, or READY. Preparation
+// never freezes, archives, commits, publishes, or chooses a disposition.
 package main
 
 import (
@@ -65,10 +82,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -102,6 +122,21 @@ type closeDeps struct {
 	Model *model.Model
 }
 
+// closeAddPaths and closeCreateCommit are the closure ritual's two post-
+// archive-move git write ops as package-level seams, so a test can force the
+// exact AddPaths/CreateCommit failure each ritual's recovery path must
+// survive. This mirrors `verdi accept`'s already-proven pattern verbatim
+// (accept.go's acceptAddPaths/acceptCreateCommit, spec/obligation-seam ac-3)
+// rather than inventing a second injection style: a real `git add`/`git
+// commit` cannot be made to fail deterministically in a clean hermetic fixture
+// repo, and closeDeps is reserved for real runtime dependencies (a runner, a
+// forge, a provider registry), never for pure fault injection. Production is
+// gitx's own; tests override and restore via defer.
+var (
+	closeAddPaths     = gitx.AddPaths
+	closeCreateCommit = gitx.CreateCommit
+)
+
 // closeExpiryResumeHint is close's freeze-align resume guidance for a
 // bounded-wait expiry (finding
 // judged-close-inherits-aligns-resume-instructions-verbatim): a close caller
@@ -110,6 +145,7 @@ type closeDeps struct {
 // archive. So close's ResumeHint names `verdi close`, in no flag language,
 // rather than inheriting align's own alignExpiryResumeHint ("re-run align …
 // optionally with a longer --wait") verbatim.
+// vocab:identity — CLI invocation grammar ("verdi close", identity)
 const closeExpiryResumeHint = "Re-run verdi close once the judge window allows to complete the freeze and archive"
 
 // freezeAlignDeps builds the alignDeps for close's freeze-align step — the
@@ -161,13 +197,16 @@ func freezeAlignDeps(deps closeDeps, modelDigest string) alignDeps {
 // the hint promised. This is the single implementation both callers use (the
 // freezeAlignDeps precedent — no per-verb reimplementation to drift).
 //
-// It is called only on the freeze-setup / freeze-align failure path, where the
-// freeze wrote nothing (every runAlignForSpec non-zero return leaves the report
-// on disk untouched) — so close/<name> still points exactly at cutPoint and the
-// working tree's living report is intact — and it returns to originalBranch (or,
-// for a close run from a detached HEAD, the cut commit itself) via the
-// board-guard-free gitx.CheckoutExisting, since the target is that same commit
-// and nothing is lost.
+// It is called on the two post-cut failure paths that committed and staged
+// NOTHING: the freeze-setup / freeze-align failure (where the freeze wrote
+// nothing — every runAlignForSpec non-zero return leaves the report on disk
+// untouched) and the staging failure (where `git add` recorded no index entry).
+// close/<name> therefore still points exactly at cutPoint, and it returns to
+// originalBranch (or, for a close run from a detached HEAD, the cut commit
+// itself) via the board-guard-free gitx.CheckoutExisting, since the target is
+// that same commit and nothing is lost. It is deliberately NOT called on the
+// commit failure, where the closure paths ARE staged and deleting the branch
+// would strand that index (reportStagedClosureCommitFailure).
 //
 // It NEVER discards committed work: it deletes only after proving close/<name>
 // still points at cutPoint (no commit beyond the cut). If anything was somehow
@@ -206,6 +245,7 @@ func unwindClosureBranchCut(ctx context.Context, root, originalBranch, closureBr
 func cmdClose(args []string, stdout, stderr io.Writer) int {
 	forceLocal := false
 	preflight := false
+	prepare := false
 	var storyArg string
 	for _, a := range args {
 		switch a {
@@ -215,6 +255,9 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		case "--preflight":
 			preflight = true
 			continue
+		case "--prepare":
+			prepare = true
+			continue
 		}
 		if storyArg != "" {
 			fmt.Fprintf(stderr, "close: unexpected extra argument %q\n", a)
@@ -222,8 +265,15 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		}
 		storyArg = a
 	}
+	if prepare && preflight {
+		fmt.Fprintln(stderr, "close: --prepare and --preflight are mutually exclusive")
+		return 2
+	}
 	if storyArg == "" {
-		fmt.Fprintln(stderr, "close: usage: verdi close <jira:STORY-KEY | spec/name> [--force-local] [--preflight]")
+		// vocab:identity — CLI usage/verb-name grammar (identity)
+		fmt.Fprintln(stderr, `close: usage: verdi close <jira:STORY-KEY | spec/name> [--force-local]
+              verdi close --preflight <jira:STORY-KEY | spec/name> [--force-local]
+              verdi close --prepare <jira:STORY-KEY | spec/name> [--force-local]`)
 		return 2
 	}
 
@@ -251,17 +301,18 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		}
 		return runPreflight(ctx, root, storyArg, cfg.Manifest, cfg.Model, buildForgeBestEffort(ctx, root), forceLocal, stdout, stderr)
 	}
-
 	// 04 §Semantics: "PublishRollup runs in CI only" — close calls it
 	// directly (ac-2), so the same CI-only discipline `rollup --publish`
 	// already enforces (I-32) applies here, mirrored exactly.
-	inCI := lint.ReadCIEnv().InCI
-	if closePublishGuardRefuses(forceLocal) {
-		fmt.Fprintln(stderr, "close: refusing to publish outside CI (04 §Semantics: \"PublishRollup runs in CI only\"); pass --force-local to run anyway for local testing only")
-		return 2
-	}
-	if !inCI {
-		fmt.Fprintln(stderr, "close: --force-local: running outside CI; this escape hatch exists for local testing only and its publish is NON-AUTHORITATIVE (04 §Semantics: PublishRollup runs in CI only)")
+	if !prepare {
+		inCI := lint.ReadCIEnv().InCI
+		if closePublishGuardRefuses(forceLocal) {
+			fmt.Fprintln(stderr, "close: refusing to publish outside CI (04 §Semantics: \"PublishRollup runs in CI only\"); pass --force-local to run anyway for local testing only")
+			return 2
+		}
+		if !inCI {
+			fmt.Fprintln(stderr, "close: --force-local: running outside CI; this escape hatch exists for local testing only and its publish is NON-AUTHORITATIVE (04 §Semantics: PublishRollup runs in CI only)")
+		}
 	}
 
 	ctx := context.Background()
@@ -304,6 +355,9 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		Registry:      buildProviderRegistry(manifest),
 		Model:         cfg.Model,
 	}
+	if prepare {
+		return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
+	}
 	return runClose(ctx, root, storyArg, manifest, deps, stdout, stderr)
 }
 
@@ -312,6 +366,11 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 // whole closure ritual and return the exit code (CLAUDE.md: 0 clean,
 // 1 the closure gate did not hold, 2 operational error).
 func runClose(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, stdout, stderr io.Writer) int {
+	if err := requireCleanIndex(ctx, root); err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+
 	spec, err := storyresolve.Resolve(root, storyArg)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -350,6 +409,17 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		return 2
 	}
 
+	// Name every attestation/waiver the gate just folded on that HEAD does not
+	// carry identically. This changes no verdict — it discloses the one class
+	// of fold input that neither the index guard nor the exact staging can
+	// account for, because both live outside the closure paths this ritual
+	// commits (see closeUncommittedRecordSource). It runs BEFORE the branch
+	// cut, so the disclosure survives any later operational failure.
+	if err := discloseUncommittedFoldRecords(ctx, root, head, storyFoldRecordPaths(store.RefSlug(spec.Story), fold.ACs), stdout); err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		fmt.Fprintln(stderr, "close: internal error: resolved spec has an invalid id:", err)
@@ -378,13 +448,24 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	// mints a fresh Provenance and needs a resolved model digest exactly
 	// like `verdi align` itself does (spec/model-digest ledger L-M5).
 	//
-	// Both post-cut, pre-commit failure points below UNWIND the branch cut
-	// before exiting (finding
-	// judged-close-resume-hint-names-a-path-close-itself-refuses): the freeze
-	// wrote nothing, so close/<name> still points at the cut and returning to
-	// originalBranch loses nothing — leaving the resume hint's promised
-	// `verdi close` retry able to complete rather than dying at the next cut's
-	// no-clobber refusal.
+	// The two freeze-setup failure points immediately below (resolveModelDigest
+	// and the runAlignForSpec freeze call) UNWIND the branch cut before exiting
+	// (finding judged-close-resume-hint-names-a-path-close-itself-refuses): each
+	// fails with the freeze having written NOTHING, so close/<name> still points
+	// at the cut and returning to originalBranch loses nothing — the resume
+	// hint's promised `verdi close` retry can complete rather than dying at the
+	// next cut's no-clobber refusal.
+	//
+	// The three LATER post-cut, pre-commit failure points — writeRollup,
+	// flipSpecStatusToClosed, and store.ArchiveMove — do NOT unwind. By the time
+	// any of them fails the freeze has already SUCCEEDED and rewritten the
+	// active-zone report in place, so unwinding would only carry that same dirty
+	// tree to another branch without making a re-run succeed (the frozen report
+	// and the flipped status each refuse a second pass). The closure-session
+	// design scopes transactional rollback OUT, so each of the three DISCLOSES
+	// the in-place, uncommitted state it leaves instead (reportUncommittedFreezeResidue,
+	// mirroring reportUncommittedArchiveMove) — constitution 2/10: silence is
+	// never a pass.
 	modelDigest, err := resolveModelDigest(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
@@ -400,34 +481,45 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 
 	if err := writeRollup(root, specRef, spec, head, fold); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedReport, stderr)
 		return 2
 	}
 
 	// Flip the spec's status accepted-pending-build → closed as part of the
 	// archive step (02 §Kind registry: story/feature specs transition
 	// "… → closed(archive)"). Done in the active-zone spec.md BEFORE
-	// ArchiveMove renames the directory, so the whole quartet moves in one
-	// shot: the spec.md moves with its sole status-line change and everything
-	// else byte-identical — VL-010's round-6 status-only archive-flip
+	// ArchiveMove renames the whole target spec directory in one shot:
+	// spec.md moves with its sole status-line change and every other present
+	// file moves byte-identically — VL-010's round-6 status-only archive-flip
 	// exception (D6-11), not the pure-rename one, is what admits the move.
 	if err := flipSpecStatusToClosed(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedRollup, stderr)
 		return 2
 	}
 
 	if err := store.ArchiveMove(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedFlip, stderr)
 		return 2
 	}
 
-	if err := gitx.AddAll(ctx, root); err != nil {
+	// Staging and committing are the ritual's last two failure points, and
+	// each leaves a different state (see the two report helpers): a staging
+	// failure staged nothing, so the branch cut is unwound exactly as the
+	// freeze-align failure path unwinds it; a commit failure left the closure
+	// paths staged, so the branch is kept on purpose.
+	if err := stageClosureSpec(ctx, root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportUncommittedArchiveMove(specRef.Name, stderr)
+		unwindClosureBranchCut(ctx, root, originalBranch, closureBranch, head, stderr)
 		return 2
 	}
 	commitMsg := fmt.Sprintf("close: archive %s (%s)", specRef.String(), spec.Story)
-	closeCommit, err := gitx.CreateCommit(ctx, root, commitMsg)
+	closeCommit, err := closeCreateCommit(ctx, root, commitMsg)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportStagedClosureCommitFailure(specRef.Name, closureBranch, commitMsg, stderr)
 		return 2
 	}
 
@@ -443,6 +535,7 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	}
 	if err := deps.Registry.PublishRollup(ctx, pubRoll); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
+		reportCommittedButUnpublished(specRef.Name, closureBranch, closeCommit, spec.Story, stderr)
 		return 2
 	}
 
@@ -451,6 +544,451 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	fmt.Fprintln(stdout, "close: this verb stops at the branch (dc-3) — push it and open the closure MR/PR yourself:")
 	fmt.Fprintf(stdout, "  git push -u origin %s\n", closureBranch)
 	return 0
+}
+
+// requireCleanIndex refuses to begin either close ritual unless the index is
+// EMPTY relative to HEAD. Close creates a commit, so inheriting index entries
+// would make that commit claim changes the ritual did not produce. It requires
+// nothing to be UNSTAGED — unrelated unstaged and untracked work is legal and
+// intentionally survives closure — which is why it is named for the condition
+// its own refusal text states rather than for the working tree.
+//
+// D6-33 applied to close (ledger L-N15(2)): the same AddAll-swept-the-whole-
+// working-tree defect `verdi accept` was fixed for. The check runs before
+// every mutation — branch cut, align freeze, rollup, status flip, archive
+// move — because a later ordinary commit would carry inherited index entries
+// regardless of how narrowly the ritual itself stages.
+func requireCleanIndex(ctx context.Context, root string) error {
+	paths, err := gitx.StagedPaths(ctx, root)
+	if err != nil {
+		return fmt.Errorf("checking the pre-ritual index: %w", err)
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	if name := closureResidueName(storeRelativeStagedPaths(ctx, root, paths)); name != "" {
+		return closureResidueRefusal(ctx, root, name, paths)
+	}
+	return fmt.Errorf("refusing to run with pre-existing staged paths %q; commit or unstage them before running the ritual", paths)
+}
+
+// storeRelativeStagedPaths re-bases gitx.StagedPaths' answers onto the store
+// root, which is the base closureResidueName's zone prefixes are written in.
+//
+// The two bases differ exactly when the store root sits below the git root
+// (store.FindRoot walks up to the nearest .verdi), and StagedPaths answers in
+// REPOSITORY-root-relative paths on purpose — that is the property that makes
+// it immune to diff.relative. Without this, an interrupted close's own index
+// reads as foreign work in that layout and the operator is told to "commit or
+// unstage" their half-finished archive: precisely the advice the residue
+// refusal exists to replace.
+//
+// It returns nil — an index no name can be derived from, so the generic
+// refusal stands — when any staged path lies OUTSIDE the store root, or when
+// the prefix cannot be resolved at all. Both are the safe direction: verdi
+// never claims an index it cannot prove it owns, and the refusal itself is
+// already decided either way (the same posture closureResidueRefusal takes
+// with CurrentBranch's error). Only the ownership question is asked in the
+// store's vocabulary; both refusals still name paths exactly as git named
+// them.
+func storeRelativeStagedPaths(ctx context.Context, root string, paths []string) []string {
+	prefix, err := gitx.RepoPrefix(ctx, root)
+	if err != nil {
+		return nil
+	}
+	if prefix == "" {
+		return paths
+	}
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		rest, inStore := strings.CutPrefix(p, prefix)
+		if !inStore {
+			return nil
+		}
+		out[i] = rest
+	}
+	return out
+}
+
+// closureResidueName returns the spec name an index full of closure residue
+// belongs to, or "" when the staged set is not that shape.
+//
+// Ownership is derived from the INDEX, never from the caller's target
+// argument: an interrupted close has already moved the spec out of the active
+// zone, so a retry's own ref no longer resolves and the guard would never see
+// a name to compare against. The index still carries the answer.
+//
+// The shape it recognises is every staged path under ONE spec's active or
+// archive closure directory, with BOTH zones represented. The trailing
+// separator keeps a prefix-sharing sibling ("close-fixture-two") from reading
+// as residue of "close-fixture", and one foreign path collapses the answer to
+// "" so verdi never claims an index it does not wholly own.
+//
+// Both zones is the load-bearing requirement, and it is a safety rule, not a
+// tidiness one. The refusal this feeds ends in "deleting the leftover
+// specs/archive/<name> directory", so the recognizer must not fire unless that
+// archive tree is provably THIS run's own creation. The staged active-zone
+// deletion is that proof: it exists only because the spec directory was
+// tracked at HEAD and this ritual moved it away. Without it the index is
+// byte-for-byte an ordinary staged edit inside an already-closed, COMMITTED
+// archived spec — resolving a merge or rebase conflict there reaches it with
+// no misbehaviour at all — and the advice would delete committed content from
+// the operator's worktree.
+//
+// The cost is disclosed rather than hidden: an interrupted close of a spec
+// that was NEVER COMMITTED stages the archive tree alone (stageClosureSpec
+// omits an untracked active zone), and that residue now falls through to the
+// generic refusal instead of the tailored one. It is still REFUSED — no new
+// pass path, no silence — and losing tailored guidance is the strictly safe
+// direction of that trade. A pure function of the index is also deliberate:
+// this guard's only job is to refuse safely, so it acquires no way to fail.
+func closureResidueName(paths []string) string {
+	const activeRoot = ".verdi/specs/active/"
+	const archiveRoot = ".verdi/specs/archive/"
+
+	name := ""
+	sawActive, sawArchive := false, false
+	for _, p := range paths {
+		rest, inArchive := strings.CutPrefix(p, archiveRoot)
+		if !inArchive {
+			var inActive bool
+			if rest, inActive = strings.CutPrefix(p, activeRoot); !inActive {
+				return ""
+			}
+		}
+		specName, _, hasChild := strings.Cut(rest, "/")
+		if !hasChild || specName == "" {
+			return ""
+		}
+		if name == "" {
+			name = specName
+		} else if specName != name {
+			return ""
+		}
+		sawArchive = sawArchive || inArchive
+		sawActive = sawActive || !inArchive
+	}
+	if !sawActive || !sawArchive {
+		return ""
+	}
+	return name
+}
+
+// closureResidueRefusal is the refusal for an index carrying nothing but one
+// spec's own closure paths: an earlier run of this very ritual staged them and
+// then failed to commit (a failing pre-commit hook, commit.gpgsign with no
+// key, an unset user.email are the reachable causes).
+//
+// It still REFUSES — the guard opens no new pass path, and a second ritual
+// over a half-finished archive is exactly what must not happen. What changes
+// is the guidance: the generic "commit or unstage them" text is addressed to
+// an operator's own staged work, and following it means unstaging your own
+// half-finished archive with no way to tell ritual residue from real work.
+// Here the state is known exactly, so the recovery is named exactly.
+func closureResidueRefusal(ctx context.Context, root, name string, paths []string) error {
+	active := store.SpecDirRelPath(store.ZoneActive, name)
+	archive := store.SpecDirRelPath(store.ZoneArchive, name)
+	where := ""
+	// CurrentBranch's error is deliberately swallowed: this is refusal prose
+	// enrichment, and the refusal itself is already decided. A detached HEAD
+	// returns ("", nil) and simply adds no clause.
+	if branch, err := gitx.CurrentBranch(ctx, root); err == nil && branch == "close/"+name {
+		where = fmt.Sprintf(" You are on %s, where that run left off.", branch)
+	}
+	return fmt.Errorf("refusing to run: the index already carries spec/%s's OWN closure paths %q — an interrupted run of this ritual staged them and never committed.%s "+
+		"Complete it with `git commit`, or abandon it by restoring the active zone (git restore --source=HEAD --staged --worktree -- %s), "+
+		"unstaging the archive zone (git restore --staged -- %s), and deleting the leftover %s directory. "+
+		"Unstaging alone is not enough: the spec directory is already moved on disk",
+		name, paths, where, active, archive, archive)
+}
+
+// stageClosureSpec stages exactly the target spec's active-zone deletion and
+// archive-zone tree. Story and feature closure share this one path assembler
+// so neither ritual can widen its commit ownership independently.
+//
+// The guarantee is deliberately stated as "only the target spec's paths",
+// NOT "only files the ritual itself wrote" (ledger L-N15(2)): an uncommitted
+// edit inside the target spec directory still rides the archive tree — the
+// same property that lets the living deviation report be frozen in place.
+//
+// The active-zone pathspec is included only when the spec directory is
+// actually tracked. `git add` is FATAL (rc 128) and stages NOTHING when ANY
+// pathspec matches neither the working tree nor the index — a failure mode
+// gitx.AddAll never had. After the archive move the active-zone directory is
+// gone from the working tree, so that pathspec survives on its index entries
+// alone, which exist exactly when the directory is tracked at HEAD: this runs
+// on close/<name> at its cut point, and requireCleanIndex already proved the
+// index equals HEAD before the ritual mutated anything. A spec that was never
+// committed therefore has no deletion to record, and asking git to record one
+// anyway would abort the whole staging step and lose the archive tree with it.
+func stageClosureSpec(ctx context.Context, root, name string) error {
+	active := store.SpecDirRelPath(store.ZoneActive, name)
+	archive := store.SpecDirRelPath(store.ZoneArchive, name)
+
+	tracked, err := gitx.PathExistsAt(ctx, root, "HEAD", active)
+	if err != nil {
+		return fmt.Errorf("staging closure paths for spec/%s: %w", name, err)
+	}
+	var paths []string
+	if tracked {
+		paths = append(paths, active)
+	}
+	paths = append(paths, archive)
+
+	if err := closeAddPaths(ctx, root, paths...); err != nil {
+		return fmt.Errorf("staging closure paths for spec/%s: %w", name, err)
+	}
+	return nil
+}
+
+// reportUncommittedArchiveMove discloses the checkout state a staging failure
+// leaves behind — one implementation for both rituals (the freezeAlignDeps
+// precedent: no per-verb copy to drift). The caller unwinds the branch cut,
+// but the archive move itself is NOT rolled back — transactional rollback of
+// every post-branch-cut operational failure is explicitly out of the closure-
+// session design's scope — so silence here would leave the operator to
+// discover a moved spec directory on their own (constitution 2/10: silence is
+// never a pass).
+func reportUncommittedArchiveMove(name string, stderr io.Writer) {
+	active := store.SpecDirRelPath(store.ZoneActive, name)
+	archive := store.SpecDirRelPath(store.ZoneArchive, name)
+	fmt.Fprintf(stderr, "close: nothing was committed, but this run's archive move is already on disk and UNCOMMITTED: %s is gone and %s exists. Restore the checkout before retrying: git restore --source=HEAD --staged --worktree -- %s, then delete the leftover %s directory\n", active, archive, active, archive)
+}
+
+// freezeReached* name how far the post-cut ritual got before one of the three
+// pre-stage failure points fired, so reportUncommittedFreezeResidue can say
+// exactly what this run wrote into the active zone (constitution 2/10: name the
+// state, do not gesture at it).
+const (
+	freezeReachedReport = "froze the alignment report in place"
+	freezeReachedRollup = "froze the alignment report in place and wrote rollup.json"
+	// vocab:identity — the frontmatter status enum value the freeze flip writes (flipSpecStatusToClosed's `status: closed`), an on-disk id this residue disclosure names, not a display state
+	freezeReachedFlip = "froze the alignment report in place, wrote rollup.json, and flipped the spec status to closed"
+)
+
+// reportUncommittedFreezeResidue discloses the in-place, uncommitted state the
+// three post-freeze, pre-stage failure points (writeRollup,
+// flipSpecStatusToClosed, store.ArchiveMove) leave behind — the shared
+// implementation for both rituals (the freezeAlignDeps precedent: one copy, no
+// drift), alongside reportUncommittedArchiveMove and
+// reportStagedClosureCommitFailure.
+//
+// By the time any of these fire the branch cut is made AND the freeze has
+// already succeeded, so the active-zone spec directory carries this run's
+// uncommitted work — a frozen deviation-report.md, and, per reached, possibly a
+// fresh rollup.json and a status flipped to closed. None of it is staged or
+// committed, and the closure branch is still checked out with no commit on it.
+//
+// It deliberately does NOT unwind. Unwinding is the freeze-FAILURE path's move,
+// valid only because that path wrote nothing; here the freeze wrote, so
+// switching branches would merely carry the same dirty tree elsewhere without
+// making a re-run succeed — CheckoutNewBranch's no-clobber cut, the frozen
+// report, and the flipped status each refuse a second pass. The closure-session
+// design scopes transactional rollback OUT, so close leaves the state where it
+// is and NAMES it, the branch included. rollup.json and a from-scratch frozen
+// report are fresh files `git restore` will not remove, so the abandon path
+// spells out the untracked cleanup rather than implying one command suffices.
+func reportUncommittedFreezeResidue(name, closureBranch, reached string, stderr io.Writer) {
+	active := store.SpecDirRelPath(store.ZoneActive, name)
+	fmt.Fprintf(stderr, "close: nothing was staged or committed, but this run already %s in the active-zone spec directory %s and left it UNCOMMITTED on branch %s; re-running will not resume it (the branch cut, the frozen report, and the flipped status each refuse a second pass). To abandon this run: restore the tracked files (git restore --source=HEAD --staged --worktree -- %s), delete any untracked leftovers it wrote there (rollup.json, and the frozen deviation-report.md if it was not previously committed), then switch off %s and delete it\n", reached, active, closureBranch, active, closureBranch)
+}
+
+// reportCommittedButUnpublished discloses the one committed-but-incomplete
+// state close can reach: the archive commit landed on the closure branch, then
+// the tracker publish (ac-2) failed. The archive IS durable, so this is not a
+// re-runnable failure — the next `verdi close` dies at the no-clobber branch
+// cut, and even a hand-completed retry would not re-enter the publish. The
+// rollup is already committed in the archive, so the honest recovery is to
+// publish that same record on its own with `verdi rollup <story> --publish`
+// rather than trying to re-drive close (constitution 2/10: silence is never a
+// pass).
+func reportCommittedButUnpublished(name, closureBranch, commit, story string, stderr io.Writer) {
+	// vocab:identity — CLI invocation grammar ("re-running close" names the `verdi close` command, identity; matches closeExpiryResumeHint's marker)
+	fmt.Fprintf(stderr, "close: archived spec/%s on branch %s (commit %s), but publishing the rollup to %s FAILED (see above). The archive is committed and durable; re-running close will not retry the publish (its branch cut refuses a second pass). Publish the archived rollup on its own: verdi rollup %s --publish\n", name, closureBranch, commit, story, story)
+}
+
+// reportStagedClosureCommitFailure discloses the state a commit failure leaves
+// behind — the shared implementation for both rituals, mirroring
+// reportUncommittedArchiveMove.
+//
+// Unlike the staging failure, this path deliberately does NOT unwind the
+// branch cut: the closure paths are already staged, and deleting close/<name>
+// would strand that index on whatever branch the unwind returned to. Leaving
+// the branch is also the more recoverable state — a single `git commit`
+// completes what the ritual started — and the next `verdi close` recognises
+// exactly this residue rather than blaming the operator for it
+// (closureResidueRefusal).
+//
+// Completing the commit by hand does NOT publish the rollup: close's tracker
+// publish (ac-2) runs only AFTER its own commit, which this path never reached,
+// and no re-run re-enters it (the retry dies at the no-clobber branch cut). So
+// the disclosure names the archive as hand-completable but the publish as left
+// undone — silence about the publish would strand an unpublished rollup an
+// operator believes `git commit` finished.
+func reportStagedClosureCommitFailure(name, closureBranch, commitMsg string, stderr io.Writer) {
+	active := store.SpecDirRelPath(store.ZoneActive, name)
+	archive := store.SpecDirRelPath(store.ZoneArchive, name)
+	// vocab:identity — CLI invocation grammar ("close's tracker publish" names the `verdi close` command's own step, identity; matches closeExpiryResumeHint's marker)
+	fmt.Fprintf(stderr, "close: the closure paths are STAGED on %s and nothing was committed; the branch and the index are left in place on purpose, because deleting either would strand this staged work. Complete it with: git commit -m %q — or abandon it by restoring the active zone (git restore --source=HEAD --staged --worktree -- %s), unstaging the archive zone (git restore --staged -- %s), and deleting the leftover %s directory. Either way close's tracker publish never ran: the rollup is archived but NOT published, and a hand-completed commit does not publish it — publish it separately with `verdi rollup <story> --publish` if this closure should reach the tracker\n", closureBranch, commitMsg, active, archive, archive)
+}
+
+// closeUncommittedRecordSource is the disclosure source id for a human record
+// the closure fold consumed out of the working tree that HEAD does not carry
+// identically, and uncommittedFoldRecordText is its explanation.
+//
+// Attestations and waivers live OUTSIDE both closure paths
+// (.verdi/attestations/<storySlug>/<acID>.md, .verdi/waivers/...), and the
+// fold reads them from the working tree with plain os.Stat/os.ReadFile — no
+// git, no reachability check. With close committing only the target spec's own
+// two paths, an operator can author one, never `git add` it, and have the
+// index guard pass (untracked is not staged), the gate PASS on that file, and
+// the closure commit and archive contain no trace of it. Under the old
+// AddAll-the-working-tree staging it was swept in.
+//
+// The closure-session design DELIBERATELY refuses to absorb such records
+// ("human records must already be committed in the HEAD they attest to"), and
+// changing gate semantics is explicitly out of scope — so close neither
+// absorbs nor refuses. What was missing is any word about a stated
+// precondition nothing enforces. close-preflight dc-1 met this identical shape
+// ("a mode can report ready while a real close would refuse") and recorded
+// "closed, not disclaimed": a runtime disclosure computed by the same
+// predicate, never prose in a design document. In CI the working tree equals
+// HEAD, so this cannot arise there; it bites the documented --force-local
+// local-close route.
+const (
+	closeUncommittedRecordSource = "close:uncommitted-fold-record"
+	// vocab:identity — names the .verdi store paths and the `git add` verb (identity)
+	uncommittedFoldRecordText = "the closure fold read this human record from the working tree, but HEAD does not carry it identically; close commits only the target spec's own active and archive paths, so this record enters neither the closure commit nor the archive — commit it in the HEAD it attests to (03 §Attestations and waivers) if it belongs to this closure's record"
+)
+
+// storyFoldRecordPaths returns the store-relative attestation and waiver paths
+// a STORY fold consumed to reach its verdict, sorted and deduplicated.
+//
+// "Consumed" means the file materially made an AC pass: a waived AC consumed
+// its waiver (evidence.WaiverActive returns true only for a present, active
+// one), and an AttestationAuthored kind slot consumed its attestation. An
+// unauthored scaffold satisfies nothing (spec/attest-helper dc-3), so it is
+// not consumed. Everything is READ from the fold's own already-computed
+// result — never re-derived over a differently-filtered record set (dc-2;
+// ADJ-56) — so this can never disagree with the verdict it describes.
+//
+// Exposed as a plain function of (slug, results) so the preflight and prepare
+// rehearsal paths can call this same predicate rather than growing a second
+// copy of it.
+func storyFoldRecordPaths(storySlug string, acs []evidence.ACResult) []string {
+	var paths []string
+	for _, ac := range acs {
+		if ac.Status == evidence.StatusWaived {
+			paths = append(paths, filepath.ToSlash(store.WaiverPath("", storySlug, ac.ID)))
+		}
+		for _, k := range ac.Kinds {
+			if k.Kind == artifact.EvidenceAttestation && k.Attestation == evidence.AttestationAuthored {
+				paths = append(paths, filepath.ToSlash(store.AttestationPath("", storySlug, ac.ID)))
+			}
+		}
+	}
+	return sortedUnique(paths)
+}
+
+// featureFoldRecordPaths is storyFoldRecordPaths' feature-class counterpart,
+// reading the fold's own outcome-floor evaluation. It names attestations only:
+// there is no waived status at the feature level (03 §The feature fold's table
+// names exactly four statuses; waivers are a story-level-only mechanism), and
+// the attestation slug is the FEATURE's own name, not a story ref's slug
+// (evidence.FoldFeature's FeatureSlug; spec/close-preflight dc-6).
+func featureFoldRecordPaths(featureSlug string, acs []evidence.FeatureACResult) []string {
+	var paths []string
+	for _, ac := range acs {
+		if ac.Floor.DeclaresAttestation && ac.Floor.Attestation == evidence.AttestationAuthored {
+			paths = append(paths, filepath.ToSlash(store.AttestationPath("", featureSlug, ac.ID)))
+		}
+	}
+	return sortedUnique(paths)
+}
+
+// sortedUnique sorts in place and drops duplicates, so one AC satisfied by
+// both a waiver and an attestation names each path once.
+func sortedUnique(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	sort.Strings(paths)
+	out := paths[:1]
+	for _, p := range paths[1:] {
+		if p != out[len(out)-1] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// uncommittedFoldRecordPaths returns the subset of paths whose working-tree
+// content is not byte-identical to what commit carries — either absent there
+// entirely (never `git add`ed) or committed and since edited.
+//
+// Presence is asked through gitx.PathExistsAt precisely for its three-way
+// contract: a proven absence at a resolvable commit is an answer, while an
+// unresolvable commit or a broken repository is an error. Content equality
+// then compares git's own committed blob id against the blob id `git add`
+// would store for the current bytes, so attributes and filters are applied
+// exactly as a real commit would apply them. Nothing here guesses: an
+// operational failure propagates rather than silently reading as "clean".
+//
+// All three questions resolve rel against the SAME base — the store root this
+// runs with (gitx sets cmd.Dir to it) — which the `./` in the rev-parse
+// argument is load-bearing for. store.FindRoot walks up to the nearest .verdi,
+// so the store root can legitimately sit BELOW the git root (the layout
+// internal/gitx/stagedpaths.go names and stagedpaths_test.go builds), and
+// there git resolves the three forms differently by default:
+// `git ls-tree -- <path>` and `git hash-object <path>` take a working-directory-
+// relative path, while `<rev>:<path>` is documented to resolve a BARE path
+// against the working tree's root — a different file, usually a nonexistent
+// one, which exits non-zero and turned every close of a story with a committed
+// attestation into an operational failure. `<rev>:./<path>` is the documented
+// spelling for "relative to the current working directory", which is what the
+// other two already do. The fix is deliberately local: the bare `<rev>:<path>`
+// shape is pre-existing and pervasive (gitx.Show alone has ten callers), and
+// re-basing all of it is a separate, much larger change than this one.
+func uncommittedFoldRecordPaths(ctx context.Context, root, commit string, paths []string) ([]string, error) {
+	var out []string
+	for _, rel := range paths {
+		present, err := gitx.PathExistsAt(ctx, root, commit, rel)
+		if err != nil {
+			return nil, fmt.Errorf("checking whether %s is committed at %s: %w", rel, commit, err)
+		}
+		if !present {
+			out = append(out, rel)
+			continue
+		}
+		committed, err := gitx.RevParse(ctx, root, commit+":./"+rel)
+		if err != nil {
+			return nil, fmt.Errorf("resolving %s at %s: %w", rel, commit, err)
+		}
+		working, err := gitx.HashObject(ctx, root, filepath.FromSlash(rel))
+		if err != nil {
+			return nil, fmt.Errorf("hashing the working-tree %s: %w", rel, err)
+		}
+		if committed != working {
+			out = append(out, rel)
+		}
+	}
+	return out, nil
+}
+
+// discloseUncommittedFoldRecords prints one disclosure per consumed record
+// commit does not carry identically, through the shared internal/disclosure
+// seam so it reads in the same vocabulary as every other disclosure. It prints
+// nothing when every consumed record is clean — the CI case, and the intended
+// local one.
+func discloseUncommittedFoldRecords(ctx context.Context, root, commit string, consumed []string, stdout io.Writer) error {
+	uncommitted, err := uncommittedFoldRecordPaths(ctx, root, commit, consumed)
+	if err != nil {
+		return err
+	}
+	for _, rel := range uncommitted {
+		fmt.Fprintln(stdout, disclosure.Render(disclosure.New(closeUncommittedRecordSource, rel, uncommittedFoldRecordText)))
+	}
+	return nil
 }
 
 // foldStory loads spec's authoritative (source: ci) evidence and folds it,
@@ -499,7 +1037,7 @@ func flipSpecStatusToClosed(root, name string) error {
 
 // writeRollup builds, self-validates, and writes rollup.json into
 // specs/active/<name>/ (still under the active zone — store.ArchiveMove
-// moves it, along with the rest of the quartet, immediately afterward).
+// moves it with the rest of the target spec directory immediately afterward).
 func writeRollup(root string, specRef artifact.Ref, spec *artifact.SpecFrontmatter, head string, fold evidence.StoryResult) error {
 	roll := artifact.Rollup{
 		Schema:   "verdi.rollup/v1",

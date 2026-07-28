@@ -259,13 +259,20 @@ func runSync(ctx context.Context, root, ref, commit string, orRegen, produce, fo
 		// provenance.commit is not reachable from commit at sync time,
 		// BEFORE the tree is written to disk, so what lands under
 		// derivedRoot already carries the annotation.
-		quarantined, undecodable, qErr := quarantineUnreachable(ctx, root, tree, commit)
+		quarantined, unprovableShallow, undecodable, qErr := quarantineUnreachable(ctx, root, tree, commit)
 		if qErr != nil {
 			fmt.Fprintln(deps.Stderr, "sync:", qErr)
 			return 2
 		}
 		if quarantined > 0 {
 			fmt.Fprintf(deps.Stdout, "sync: quarantined %d evidence record(s) whose provenance.commit is not reachable from %s (kept, annotated, never dropped)\n", quarantined, commit)
+		}
+		if unprovableShallow > 0 {
+			// P2-10b: this checkout is shallow, so these records' ancestry could
+			// not be proven — they are NOT quarantined (shallow history cannot
+			// prove unreachability; honest evidence is never dropped on an
+			// unprovable ancestry), only disclosed here and again at closure.
+			fmt.Fprintf(deps.Stdout, "sync: %d evidence record(s) whose provenance.commit could not be proven reachable from %s were left un-quarantined: this checkout is shallow (git rev-parse --is-shallow-repository = true), and shallow history cannot prove unreachability — kept as-is, never dropped\n", unprovableShallow, commit)
 		}
 		if len(undecodable) > 0 {
 			// spec/evidence-resilience finding 3: an undecodable fetched

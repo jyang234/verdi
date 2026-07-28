@@ -200,21 +200,66 @@ func SpecStale(in SpecStaleInput) SpecStaleResult {
 // implementing story's archived deviations for its disclose-and-exclude line
 // (spec/finding-identity ledger L-N12), never a second hand-rolled loop that
 // could drift from this one.
+//
+// L-N14 companion (cross-level re-recording awareness): a CONFIRMED feature-level
+// reaffirmation carries CarriedFrom — a human's signature that it is the SAME
+// deviation as the prior ruling under that judged slug, INCLUDING a cross-level
+// prior in an implementing story's archive whose text the feature judge reworded.
+// Content identity (kind+id+text) alone would read the reworded texts as two
+// distinct identities and double-count the archived ruling against its
+// feature-level reaffirmation. So the count collapses by SLUG (kind+id) for any
+// slug a carried-from accepted-deviation occupies: every accepted-deviation at
+// that slug counts once. This is scoped strictly to carried-from slugs — a bare
+// slug coincidence between two genuinely different rulings (no reaffirmation)
+// still counts by content identity, never silently deduped. Within a single
+// well-formed report ids are unique, so this collapse is a no-op there (the exact
+// count SpecStale always produced); it only ever changes the CROSS-report feature
+// union, exactly where L-N14's re-recording target lives.
 func CountAcceptedDeviations(sets ...[]artifact.Finding) int {
-	seen := make(map[string]bool)
+	// First pass: every (kind,id) slug a carried-from accepted-deviation occupies.
+	carriedSlug := make(map[string]bool)
+	for _, set := range sets {
+		for _, f := range set {
+			if f.Disposition == artifact.FindingAcceptedDeviation && f.CarriedFrom != "" {
+				carriedSlug[acceptedDeviationSlugKey(f)] = true
+			}
+		}
+	}
+
+	seenSlug := make(map[string]bool)
+	seenIdentity := make(map[string]bool)
 	n := 0
 	for _, set := range sets {
 		for _, f := range set {
 			if f.Disposition != artifact.FindingAcceptedDeviation {
 				continue
 			}
-			id := align.Identity(f)
-			if seen[id] {
+			if slug := acceptedDeviationSlugKey(f); carriedSlug[slug] {
+				// A slug a confirmed reaffirmation owns: every accepted-deviation at
+				// this slug is the same deviation — count it once, text-independent.
+				if seenSlug[slug] {
+					continue
+				}
+				seenSlug[slug] = true
+				n++
 				continue
 			}
-			seen[id] = true
+			id := align.Identity(f)
+			if seenIdentity[id] {
+				continue
+			}
+			seenIdentity[id] = true
 			n++
 		}
 	}
 	return n
+}
+
+// acceptedDeviationSlugKey is the (kind,id) collapse key L-N14's cross-level
+// reaffirmation counts by — the judged SLUG, text excluded (align.Identity folds
+// text in; this deliberately does not). A null separator keeps kind and id
+// unambiguous. Never the budget's default key: it is consulted only for slugs a
+// carried-from reaffirmation occupies (see CountAcceptedDeviations).
+func acceptedDeviationSlugKey(f artifact.Finding) string {
+	return string(f.Kind) + "\x00" + f.ID
 }

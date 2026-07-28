@@ -29,7 +29,7 @@ func TestRunDesignStart_Happy(t *testing.T) {
 	repo := buildPhase7Repo(t)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, phase7Model(t), deps, &stdout, &stderr)
@@ -89,7 +89,7 @@ func TestRunDesignStart_FeatureWithNoRef(t *testing.T) {
 	repo := buildPhase7Repo(t)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "loan-mgmt", manifest, phase7Model(t), deps, &stdout, &stderr)
@@ -113,7 +113,7 @@ func TestRunDesignStart_FeatureWithEpicRef(t *testing.T) {
 	repo := buildPhase7Repo(t)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "loan-mgmt", manifest, phase7Model(t), deps, &stdout, &stderr)
@@ -133,7 +133,7 @@ func TestRunDesignStart_Story(t *testing.T) {
 	repo := buildPhase7Repo(t)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "jira:LOAN-1482", "stale-decline-story", manifest, phase7Model(t), deps, &stdout, &stderr)
@@ -160,7 +160,7 @@ func TestRunDesignStart_StoryRequiresRef(t *testing.T) {
 	repo := buildPhase7Repo(t)
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "", "some-story", manifest, phase7Model(t), deps, &stdout, &stderr)
@@ -183,7 +183,7 @@ func TestRunDesignStart_ProviderResolveFails_DegradesToRawRef(t *testing.T) {
 
 	p := providerfake.New()
 	p.FailResolve("jira:LOAN-9999", provider.ErrNotFound)
-	deps := designDeps{Provider: p, Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: p, Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-9999", "some-feature", manifest, phase7Model(t), deps, &stdout, &stderr)
@@ -226,7 +226,7 @@ func TestRunDesignStart_ConfiguredProviderUnreachable_DegradesForTrueReason(t *t
 
 	p := providerfake.New()
 	p.FailResolve("jira:LOAN-9999", provider.ErrUnavailable)
-	deps := designDeps{Provider: p, Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: p, Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
 	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-9999", "some-feature", manifest, phase7Model(t), deps, &stdout, &stderr)
@@ -245,7 +245,7 @@ func TestRunDesignStart_ConfiguredProviderUnreachable_DegradesForTrueReason(t *t
 // error paths.
 func TestRunDesignStart_Negative(t *testing.T) {
 	manifest := phase7Manifest(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 	ctx := context.Background()
 
 	t.Run("invalid name", func(t *testing.T) {
@@ -307,9 +307,9 @@ func TestCmdDesignStart_NameFlagOrdering(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"flags after positional", []string{"jira:LOAN-1482", "--kind", "feature", "--name", "stale-decline"}},
-		{"flags before positional", []string{"--kind", "feature", "--name", "stale-decline", "jira:LOAN-1482"}},
-		{"flag=value form", []string{"jira:LOAN-1482", "--kind=feature", "--name=stale-decline"}},
+		{"flags after positional", []string{"jira:LOAN-1482", "--kind", "feature", "--name", "stale-decline", "--defer-statements"}},
+		{"flags before positional", []string{"--kind", "feature", "--name", "stale-decline", "--defer-statements", "jira:LOAN-1482"}},
+		{"flag=value form", []string{"jira:LOAN-1482", "--kind=feature", "--name=stale-decline", "--defer-statements"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -418,7 +418,7 @@ func TestRunDesignStart_ScaffoldUsesAtomicWrite(t *testing.T) {
 			repo := buildPhase7Repo(t)
 			ctx := context.Background()
 			manifest := phase7Manifest(t)
-			deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}}
+			deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 			var stdout, stderr bytes.Buffer
 			got := runDesignStart(ctx, repo.Dir, tc.kind, "jira:LOAN-1482", tc.specName, manifest, phase7Model(t), deps, &stdout, &stderr)

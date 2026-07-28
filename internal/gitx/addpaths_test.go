@@ -95,6 +95,68 @@ func TestAddPathsCommit_MultiplePaths(t *testing.T) {
 	}
 }
 
+// TestAddPaths_PathspecsResolveAgainstDir pins WHERE a relative pathspec
+// resolves, because AddPaths' own doc comment used to state the opposite:
+// "paths may be absolute or dir-relative; git resolves either against the
+// repository root regardless of the process's current working directory".
+//
+// `git add`'s pathspecs resolve against the process's working directory —
+// dir, which run() sets as cmd.Dir — not against the repository root. Every
+// caller today happens to pass dir = the store root with store-relative
+// paths, so the two readings coincide and nothing is broken; a future caller
+// who believed the comment and passed a repository-root-relative path from a
+// subdirectory dir would get a fatal, empty-staging `git add` instead.
+func TestAddPaths_PathspecsResolveAgainstDir(t *testing.T) {
+	ctx := context.Background()
+
+	// `dir/` already exists in the fixture; above.txt sits at the repository
+	// root, one level ABOVE the dir the command will run in.
+	repo := buildRepo(t)
+	subdir := filepath.Join(repo.Dir, "dir")
+	if err := os.WriteFile(filepath.Join(repo.Dir, "above.txt"), []byte("above\n"), 0o644); err != nil {
+		t.Fatalf("writing above.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subdir, "inner.txt"), []byte("inner\n"), 0o644); err != nil {
+		t.Fatalf("writing dir/inner.txt: %v", err)
+	}
+
+	t.Run("a repository-root-relative path from a subdirectory dir does NOT resolve", func(t *testing.T) {
+		err := AddPaths(ctx, subdir, "above.txt")
+		if err == nil {
+			t.Fatal("AddPaths(subdir, \"above.txt\") = nil; pathspecs resolve against dir, not the repository root, so this must fail")
+		}
+		if !strings.Contains(err.Error(), "did not match any files") {
+			t.Fatalf("AddPaths error = %v, want git's own unmatched-pathspec fatal", err)
+		}
+	})
+
+	t.Run("a dir-relative path resolves", func(t *testing.T) {
+		if err := AddPaths(ctx, subdir, "inner.txt"); err != nil {
+			t.Fatalf("AddPaths(subdir, \"inner.txt\"): %v", err)
+		}
+		staged, err := StagedPaths(ctx, repo.Dir)
+		if err != nil {
+			t.Fatalf("StagedPaths: %v", err)
+		}
+		if len(staged) != 1 || staged[0] != "dir/inner.txt" {
+			t.Fatalf("StagedPaths = %v, want exactly [dir/inner.txt]", staged)
+		}
+	})
+
+	t.Run("an absolute path resolves from any dir", func(t *testing.T) {
+		if err := AddPaths(ctx, subdir, filepath.Join(repo.Dir, "above.txt")); err != nil {
+			t.Fatalf("AddPaths(subdir, <abs>/above.txt): %v", err)
+		}
+		staged, err := StagedPaths(ctx, repo.Dir)
+		if err != nil {
+			t.Fatalf("StagedPaths: %v", err)
+		}
+		if len(staged) != 2 || staged[0] != "above.txt" {
+			t.Fatalf("StagedPaths = %v, want above.txt staged alongside dir/inner.txt", staged)
+		}
+	})
+}
+
 // TestAddPaths_Negative covers AddPaths' own operational-error paths: no
 // paths given, and a path outside any git repository.
 func TestAddPaths_Negative(t *testing.T) {
