@@ -122,10 +122,17 @@ func TestPointerFile_RoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading data dir: %v", err)
 	}
+	// Any temp residue at all, whatever the writer names it — the guard is
+	// deliberately not pinned to one prefix, so it kept holding when the
+	// write moved from this package's own ".serve.path.tmp-*" to
+	// internal/atomicfile's ".atomicfile-*.tmp".
 	for _, e := range entries {
-		if strings.Contains(e.Name(), ".tmp-") {
+		if strings.Contains(e.Name(), ".tmp") {
 			t.Fatalf("leftover temp file %q after WritePointerFile (should be renamed away)", e.Name())
 		}
+	}
+	if len(entries) != 1 || entries[0].Name() != "serve.path" {
+		t.Fatalf("data dir after WritePointerFile = %v, want exactly [serve.path]", entries)
 	}
 }
 

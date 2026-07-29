@@ -1,9 +1,14 @@
 // Package atomicfile provides the one shared atomic-write primitive for
-// the store's mutable-zone files (spec/shared-homes ac-1). It collapses
-// four hand copies of the same temp-then-rename idiom — boardio's
+// the store's mutable-zone files (spec/shared-homes ac-1). At extraction it
+// collapsed four hand copies of the same temp-then-rename idiom — boardio's
 // boardstate.go, graduate.go, and reposition.go's own writeFileAtomic;
 // boardlayout/file.go — which had drifted (only boardstate.go did
-// MkdirAll) and uniformly lacked an fsync, so none was crash-durable.
+// MkdirAll) and uniformly lacked an fsync, so none was crash-durable. A
+// fifth, mcpserve/sockpath.go's WritePointerFile, predated the extraction,
+// was missed by that sweep, and was migrated later; it had the same
+// missing fsync. Treat the count as historical, not as an inventory: this
+// package is the single home, so any new temp-then-rename outside it is a
+// defect regardless of how many there once were.
 //
 // Write follows D3's temp-then-rename pattern: MkdirAll the parent
 // directory, CreateTemp in that same directory (so the final Rename is a
@@ -11,7 +16,7 @@
 // content, Chmod to the caller's requested permissions, Close, then Rename
 // into place. dc-1 disclosed this story's one behavior addition beyond
 // pure extraction: the fsync before rename, closing the crash-durability
-// gap the audit found uniform across all four copies. Parent-directory
+// gap the audit found uniform across every copy. Parent-directory
 // fsync is deliberately NOT added (dc-1) — macOS/CI filesystems differ on
 // dir-fsync semantics and no witness demands it; the smallest reversible
 // step. The temp file is removed on every error path so a failed write
