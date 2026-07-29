@@ -14,9 +14,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/jyang234/verdi/internal/diagrambase"
 )
@@ -104,20 +102,6 @@ const cannedDiagramVerification = `{
 }
 `
 
-// runGitOut runs git in dir and returns its trimmed stdout — the output
-// sibling of git.go's runGit, for the one provisioning step that needs a
-// value back (resolving the base-pinning commit).
-func runGitOut(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), deterministicGitEnv...)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git %v: %w", args, err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 // provisionDiagrams writes the editor fixtures onto the ALREADY CHECKED
 // OUT design branch (provisionBoard leaves the store there) in two
 // commits: the base and the un-derived proposals first, then — with that
@@ -153,7 +137,7 @@ func provisionDiagrams(scratch, storeRoot string) (verificationPath string, err 
 	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: diagram editor fixtures (base + proposals)"); err != nil {
 		return "", err
 	}
-	baseCommit, err := runGitOut(storeRoot, "rev-parse", "HEAD")
+	baseCommit, err := gitOutput(storeRoot, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
 	}

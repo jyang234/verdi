@@ -9,37 +9,9 @@ import (
 	"github.com/jyang234/verdi/internal/diagrambase"
 )
 
-// TestRunGitOut_Happy proves runGitOut returns the command's trimmed
-// stdout. Local git only — no network (co-4).
-func TestRunGitOut_Happy(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not found on PATH")
-	}
-	dir := t.TempDir()
-	if err := runGit(dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-	if err := runGit(dir, nil, "commit", "--quiet", "--no-verify", "--allow-empty", "-m", "seed"); err != nil {
-		t.Fatalf("git commit: %v", err)
-	}
-	sha, err := runGitOut(dir, "rev-parse", "HEAD")
-	if err != nil {
-		t.Fatalf("runGitOut: %v", err)
-	}
-	if len(sha) != 40 || strings.TrimSpace(sha) != sha {
-		t.Fatalf("rev-parse HEAD = %q, want a trimmed 40-hex SHA", sha)
-	}
-}
-
-// TestRunGitOut_Failure proves a failing invocation surfaces an error.
-func TestRunGitOut_Failure(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not found on PATH")
-	}
-	if _, err := runGitOut(filepath.Join(t.TempDir(), "missing"), "rev-parse", "HEAD"); err == nil {
-		t.Fatal("expected an error running git in a nonexistent dir")
-	}
-}
+// The trimmed-stdout query seam these fixtures resolve their base commit
+// through is git.go's gitOutput; its happy and failure paths are covered by
+// git_test.go's TestGitOutput, not duplicated here.
 
 // TestProvisionDiagrams provisions into a scratch store and proves the
 // derived fixture's pinned source_digest genuinely verifies through the
@@ -80,7 +52,7 @@ func TestProvisionDiagrams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provisionDiagrams: %v", err)
 	}
-	if _, err := runGitOut(storeRoot, "cat-file", "-e", "HEAD:.verdi/diagrams/"+diagramDerivedName+".mermaid"); err != nil {
+	if _, err := gitOutput(storeRoot, "cat-file", "-e", "HEAD:.verdi/diagrams/"+diagramDerivedName+".mermaid"); err != nil {
 		t.Fatalf("derived proposal not committed: %v", err)
 	}
 	if verificationPath == "" {
@@ -93,14 +65,14 @@ func TestProvisionDiagrams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	derivedRaw, err := runGitOut(storeRoot, "show", "HEAD:.verdi/diagrams/"+diagramDerivedName+".mermaid")
+	derivedRaw, err := gitOutput(storeRoot, "show", "HEAD:.verdi/diagrams/"+diagramDerivedName+".mermaid")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(derivedRaw, "source_digest: "+sourceDigest) {
 		t.Fatalf("derived fixture does not pin the real base source_digest %s:\n%s", sourceDigest, derivedRaw)
 	}
-	corruptRaw, err := runGitOut(storeRoot, "show", "HEAD:.verdi/diagrams/"+diagramCorruptName+".mermaid")
+	corruptRaw, err := gitOutput(storeRoot, "show", "HEAD:.verdi/diagrams/"+diagramCorruptName+".mermaid")
 	if err != nil {
 		t.Fatal(err)
 	}

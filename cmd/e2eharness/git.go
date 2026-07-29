@@ -1,13 +1,22 @@
 package main
 
 // The single git-invocation seam (file-topics ac-4): every scratch-store git
-// call — the corpus seed commit, the bare local origin init, and the design
-// branch's fixture commit — used to run through its own hand-typed closure,
-// and only one of the three pinned deterministic dates. runGit replaces all
-// three so every commit e2eharness produces has a fixed SHA (nothing here
-// asserts a specific hash — this is determinism-for-its-own-sake, matching
-// the guarantee internal/fixturegit gives the Go test suites, at
-// test-harness weight rather than fixturegit's golden-SHA machinery).
+// call in this package goes through runGit (command) or gitOutput (query)
+// — the corpus seed commit, the bare local origin init, the design branch's
+// fixture commit, and every provisioner's reads. Each used to run through
+// its own hand-typed closure carrying its own env, and only one of them
+// pinned the deterministic dates; the seam is why every commit e2eharness
+// produces now has a fixed SHA (nothing here asserts a specific hash — this
+// is determinism-for-its-own-sake, matching the guarantee
+// internal/fixturegit gives the Go test suites, at test-harness weight
+// rather than fixturegit's golden-SHA machinery).
+//
+// The seam has drifted once and been repaired: provision_diagram.go grew a
+// near-identical runGitOut after this file shipped, and it has been folded
+// back into gitOutput. There is exactly ONE deliberate exception, and it
+// documents its own reason: provision_showcase_draft.go's gitShowBytes,
+// which must return RAW bytes where gitOutput trims. Anything else that
+// needs to shell out to git belongs here.
 
 import (
 	"fmt"
