@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/decisionsweep"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
@@ -116,4 +118,148 @@ func TestAudit_Negative_UnexpectedArgs(t *testing.T) {
 	if got != 2 {
 		t.Fatalf("cmdAudit(bogus arg) = %d, want 2", got)
 	}
+}
+
+// auditWaiverStorySpecMD renders a minimal story-class spec.md the waiver
+// audit's own scan (internal/decisionsweep.ScanWaiverStale) will pick up:
+// class story, a `story:` link so it has a slug to look waivers up under.
+func auditWaiverStorySpecMD(name string) string {
+	return "---\nid: spec/" + name + "\nkind: spec\ntitle: \"" + name + "\"\nclass: story\nstatus: draft\nowners: [platform-team]\n" +
+		"story: jira:LOAN-1\nproblem: { text: \"p\", anchor: \"#p\" }\noutcome: { text: \"o\", anchor: \"#o\" }\n---\nbody\n"
+}
+
+// auditWaiverMD renders a minimal waiver record — this file's own copy of
+// the shape internal/decisionsweep's own tests use (a per-package test
+// fixture string, not shared production logic).
+func auditWaiverMD(acID, status, expiry string) string {
+	expiryLine := ""
+	if expiry != "" {
+		expiryLine = "expiry: " + expiry + "\n"
+	}
+	return "---\nid: waiver/jira-loan-1--" + acID + "\nkind: waiver\ntitle: \"waiver\"\nowners: [platform-team]\n" +
+		"status: " + status + "\nreason: \"hotfix\"\n" + expiryLine +
+		"links:\n  - { type: verifies, ref: spec/waiver-story }\n" +
+		"frozen: { at: 2026-07-19, commit: 8c2d41f }\n---\nbody\n"
+}
+
+// TestLapsedWaiverDisclosure pins the disclosure VALUE the lapsed-waiver
+// state constructs — its source, its scope (the waiver's own store-relative
+// path: this disclosure IS about one artifact, unlike the checkout-wide
+// forms), its derived id and its fixed severity — mirroring
+// internal/disclosure's own constructor tests and cmd/verdi's sync tool-pin
+// precedent.
+func TestLapsedWaiverDisclosure(t *testing.T) {
+	row := decisionsweep.WaiverAuditRow{
+		ACID:   "ac-1",
+		Path:   ".verdi/waivers/jira-loan-1/ac-1.md",
+		Status: "active",
+		Expiry: "2026-01-01",
+		Lapsed: true,
+	}
+	d := lapsedWaiverDisclosure(row)
+	if d.Source != lapsedWaiverSource {
+		t.Errorf("Source = %q, want %q", d.Source, lapsedWaiverSource)
+	}
+	if d.Scope != row.Path {
+		t.Errorf("Scope = %q, want the waiver's store-relative path %q", d.Scope, row.Path)
+	}
+	if d.ID != lapsedWaiverSource+"/"+row.Path {
+		t.Errorf("ID = %q, want source/scope", d.ID)
+	}
+	if d.Severity != disclosure.SeverityDisclosedUnproven {
+		t.Errorf("Severity = %q, want %q", d.Severity, disclosure.SeverityDisclosedUnproven)
+	}
+	if !strings.Contains(d.Text, row.Expiry) {
+		t.Errorf("Text = %q, want it to name the recorded expiry %q", d.Text, row.Expiry)
+	}
+	// Negative path — the defect this replaced: a hand-authored "(LAPSED)"
+	// marker that spoke its own severity word. Render supplies the one
+	// vocabulary word; a text that restates either marker is the lookalike
+	// coming back.
+	if strings.Contains(d.Text, disclosure.SeverityDisclosedUnproven) {
+		t.Errorf("Text = %q states the severity itself; Render already supplies it", d.Text)
+	}
+	if strings.Contains(d.Text, "LAPSED") {
+		t.Errorf("Text = %q still carries the hand-authored (LAPSED) marker", d.Text)
+	}
+	if !disclosure.IsRendered(disclosure.Render(d)) {
+		t.Errorf("Render(%+v) is not recognized as a disclosure line", d)
+	}
+	// The text must be a pure function of the row — no wall-clock read (the
+	// invocation's single `now` already decided Lapsed at the boundary).
+	if second := lapsedWaiverDisclosure(row); second != d {
+		t.Errorf("lapsedWaiverDisclosure is not deterministic: %+v vs %+v", second, d)
+	}
+}
+
+// TestAudit_LapsedWaiver_RendersThroughTheSeam exercises the producing call
+// site: a story whose only waiver has lapsed by wall-clock emits exactly the
+// seam's rendering of the lapsed-waiver disclosure, flush-left so
+// disclosure.IsRendered recognizes it (spec/verb-surfaces ac-3's "discloses
+// whether an active-status waiver's recorded expiry has already lapsed";
+// judged-ac-1-vocabulary-coverage).
+//
+// The run stays CLEAN (exit 0): a lapsed waiver is excluded from the counted-
+// active total, so it can never cross the threshold by itself — a disclosure,
+// never a verdict. The WAIVER-STALE flag line is the verdict half and is
+// deliberately NOT a disclosure; the negative path below pins that an
+// unlapsed waiver emits no disclosure line at all.
+func TestAudit_LapsedWaiver_RendersThroughTheSeam(t *testing.T) {
+	build := func(t *testing.T, expiry string) *fixturegit.Repo {
+		t.Helper()
+		return fixturegit.Build(t, []fixturegit.Layer{{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                        "schema: verdi.layout/v1\n",
+				".verdi/specs/active/waiver-story/spec.md": auditWaiverStorySpecMD("waiver-story"),
+				".verdi/waivers/jira-loan-1/ac-1.md":       auditWaiverMD("ac-1", "active", expiry),
+			},
+			Message: "seed one waiver",
+		}})
+	}
+
+	want := disclosure.Render(lapsedWaiverDisclosure(decisionsweep.WaiverAuditRow{
+		ACID:   "ac-1",
+		Path:   ".verdi/waivers/jira-loan-1/ac-1.md",
+		Status: "active",
+		Expiry: "2026-01-01",
+		Lapsed: true,
+	}))
+
+	t.Run("lapsed expiry discloses through the seam", func(t *testing.T) {
+		repo := build(t, "2026-01-01") // well before auditTestNow
+		var stdout, stderr bytes.Buffer
+		if got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr); got != 0 {
+			t.Fatalf("runAudit = %d, want 0 (a lapsed waiver never counts active, so it never flags); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		found := false
+		for _, line := range strings.Split(stdout.String(), "\n") {
+			if line == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("stdout = %q, want the seam-rendered lapsed-waiver disclosure %q", stdout.String(), want)
+		}
+		if strings.Contains(stdout.String(), "(LAPSED)") {
+			t.Errorf("stdout = %q still carries the hand-authored (LAPSED) marker", stdout.String())
+		}
+		// ac-3's listing obligation is untouched: the row still names the AC,
+		// its status and its expiry.
+		if !strings.Contains(stdout.String(), "ac-1: status active, expires 2026-01-01") {
+			t.Errorf("stdout = %q, want the waiver row still listing AC/status/expiry (ac-3)", stdout.String())
+		}
+	})
+
+	t.Run("unlapsed expiry discloses nothing", func(t *testing.T) {
+		repo := build(t, "2026-12-31") // well after auditTestNow
+		var stdout, stderr bytes.Buffer
+		if got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr); got != 0 {
+			t.Fatalf("runAudit = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		for _, line := range strings.Split(stdout.String(), "\n") {
+			if disclosure.IsRendered(line) {
+				t.Errorf("stdout emitted a disclosure line %q for an unlapsed waiver; the notice must never become background noise", line)
+			}
+		}
+	})
 }
