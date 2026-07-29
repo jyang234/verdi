@@ -4,7 +4,7 @@ kind: spec
 title: "Disclosure Legibility"
 owners: [platform-team]
 class: feature
-status: accepted-pending-build
+status: closed
 problem: { text: "verdi's own disclosed-unproven states — VL-017's mutable-zone-absent notice, align's synthetic-absence findings, evidence-model's three-valued honesty markers — surface scattered across CLI stderr, lint output, and alignment reports in ad hoc wording, so an operator cannot answer \"what is verdi currently not proving, in total?\" without grepping several surfaces by hand and reading each one's own phrasing", anchor: "#problem" }
 outcome: { text: "an operator can see, in one vocabulary and one place, every claim verdi is currently not proving", anchor: "#outcome" }
 acceptance_criteria:
