@@ -16,7 +16,7 @@ links:
   - { type: implements, ref: "spec/scoping-canvas#ac-6" }
 decisions:
   - { id: dc-1, text: "retro-decomposition, disclosed: minted after its behavior merged (ledger R4-I-87) — and this story's own five siblings, itself included, were minted through exactly this paved road, the feature's tool closing its own loop", anchor: "#dc-1" }
-  - { id: dc-2, text: "the stub-to-story binding is the ratified slug equality (parent dc-3), never a new provenance link — the scaffold writes implements edges to the parent's acceptance criteria and nothing else into the link graph", anchor: "#dc-2" }
+  - { id: dc-2, text: "the stub-to-story binding is the ratified slug equality (parent dc-3), never a new provenance link — the scaffold writes exactly the edges the stub declares — implements edges to the parent's acceptance criteria for a plain stub, resolves edges to the parent's open questions for a spike stub (the ratified R4 resolves edge, carrying parent dc-2's graduated attribution into the instantiated spec) — and nothing beyond the stub's own declaration into the link graph", anchor: "#dc-2" }
 constraints:
   - { id: co-1, text: "no network in any test: the shared core, both surfaces, the parity assertion, and every refusal are exercised by fixturegit-backed unit tests and hermetic Playwright specs, all under make verify", anchor: "#co-1" }
 ---
@@ -73,8 +73,12 @@ own loop.
 ## DC-2
 
 The stub-to-story binding is the ratified slug equality (parent dc-3),
-never a new provenance link: the scaffold writes implements edges to the
-parent's acceptance criteria and nothing else into the link graph.
+never a new provenance link. The scaffold writes exactly the edges the
+stub declares — implements edges to the parent's acceptance criteria for
+a plain stub, resolves edges to the parent's open questions for a spike
+stub (the ratified R4 resolves edge, carrying parent dc-2's graduated
+attribution into the instantiated spec) — and nothing beyond the stub's
+own declaration into the link graph.
 
 ## CO-1
 
