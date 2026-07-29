@@ -77,6 +77,25 @@ bindings:
       - "spec/file-topics#ac-2"
       - "spec/file-topics#ac-3"
       - "spec/file-topics#ac-4"
+      # spec/code-health FEATURE ACs (all five declare [static, behavioral];
+      # no attestation kind, so the feature outcome floor reads these
+      # pass-records — the public-showcase/disclosure-legibility feature-AC
+      # precedent). Each binds the same evidence its implementing stories
+      # (all four archived) bind in this file: ac-1 <- fail-loud#ac-1's
+      # repo-hygiene no-tracked-binary witness; ac-2 <- forge-transport#
+      # ac-1..4's pagination-drain, deadline, 429, shared-seam, and
+      # tool-pin suites; ac-3 <- shared-homes#ac-1..5's one-home
+      # extractions with byte-equivalence proofs; ac-4 <- fail-loud#
+      # ac-2..3's fail-loud witnesses (cascadecheck exit-2, errors.Is,
+      # runtimeprobe fail-verdict pin, mcpserve fail-closed decodes) with
+      # the count/registry corrections under ac-4's static leg below;
+      # ac-5 <- file-topics#ac-1..4's verbatim moves, rename, and harness
+      # rework suites. All under make verify.
+      - "spec/code-health#ac-1"
+      - "spec/code-health#ac-2"
+      - "spec/code-health#ac-3"
+      - "spec/code-health#ac-4"
+      - "spec/code-health#ac-5"
       # spec/evidence-obligations stories (obligation-artifact/gate/wall):
       # behavioral legs = the decode/round-trip, VL-019/VL-020 lint, matrix
       # render, and board graduation/render tests + e2e, all under make
@@ -1442,6 +1461,22 @@ bindings:
       - "spec/file-topics#ac-2"
       - "spec/file-topics#ac-3"
       - "spec/file-topics#ac-4"
+      # spec/code-health FEATURE ACs' static legs (all five declare
+      # [static, ...]): the same statics their implementing stories bind
+      # just above — ac-1 <- fail-loud#ac-1 (repo check, .gitignore);
+      # ac-2 <- forge-transport#ac-1..4 (shared transport seam, ratified
+      # decode-policy comment, toolchain carrier); ac-3 <- shared-homes#
+      # ac-1..5 (one home per shared behavior, both walks on the shared
+      # classification table); ac-4 <- fail-loud#ac-2..4 (stated
+      # contracts, corrected counts, VL-019 registry row); ac-5 <-
+      # file-topics#ac-1..4 (relocated topic files, runtimeprobe rename,
+      # harness wiring). All compile, vet, lint, and lint-store clean
+      # under make verify.
+      - "spec/code-health#ac-1"
+      - "spec/code-health#ac-2"
+      - "spec/code-health#ac-3"
+      - "spec/code-health#ac-4"
+      - "spec/code-health#ac-5"
       # spec/evidence-obligations stories' static legs: the obligation kind
       # + VL-019/VL-020 rules + the loader are declared and compile/vet/
       # lint-store clean under make verify.
