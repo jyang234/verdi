@@ -4,7 +4,7 @@ kind: spec
 title: "Story Stickies"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-R54-1
 problem: { text: "scoping-canvas dc-1 makes stickies the stub authoring surface, but before this slice a story-shaped claim had no typed home on the wall: stubs could only be hand-edited into feature frontmatter, and an untyped note's yarn to an acceptance criterion carried no machine-readable coverage meaning", anchor: "#problem" }
 outcome: { text: "a story proto-sticky parks handwritten in the stubs band of a feature wall, its yarn to acceptance criteria is the coverage claim, and graduation mints the declared stub — the yarn becoming the stub's acceptance_criteria list — typeset in place, with empty or illegal claims refused legibly", anchor: "#outcome" }
@@ -19,6 +19,7 @@ decisions:
   - { id: dc-2, text: "the sticky is scratch tier first, contract second, exactly the sticky lifecycle the parent's dc-1 names: graduation is the only path from handwritten claim to frontmatter stub, and the attribution yarn stays untyped relates-threads (parent dc-5) — the endpoint pair carries the meaning", anchor: "#dc-2" }
 constraints:
   - { id: co-1, text: "no network in any test: the wall paths are exercised by hermetic Playwright specs over provisioned fixture stores and Go unit tests over fixture projections, all under make verify", anchor: "#co-1" }
+frozen: { at: 2026-07-28, commit: 42ccf1e2043781b80789fdf1a2eb8c99f90285e3, stub_matched: true }
 ---
 # Story Stickies
 
