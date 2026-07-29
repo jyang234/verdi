@@ -3,8 +3,14 @@ import { SHOWCASE } from "./fixtures";
 
 // The advisory preview matrix page: GET /matrix/{story...} renders the
 // same fold `verdi matrix --preview` computes (03 §Evidence records),
-// always behind the mandatory PREVIEW — ADVISORY banner — a preview must
-// never be mistaken for the gate's answer (internal/workbench/matrix.go).
+// always behind the mandatory advisory-preview disclosure banner — a
+// preview must never be mistaken for the gate's answer
+// (internal/workbench/matrix.go). The banner's text is the seam-rendered
+// line "disclosed-unproven [matrix:advisory-preview]: ..." — the SAME
+// vocabulary `verdi matrix --preview` prints (internal/disclosure,
+// spec/disclosure-legibility#ac-1). Specs cannot import Go, so the
+// assertions below pin only the line's stable tokens — the severity word
+// and the source id — never its long prose.
 //
 // Fixture choice, disclosed: SHOWCASE.READONLY_SPEC's own derived
 // snapshots pin fixturegit golden SHAs that the harness's fresh scratch
@@ -22,11 +28,12 @@ test("advisory preview matrix folds real records behind the mandatory banner", a
   await expect(page).toHaveTitle(/Advisory preview matrix:/);
 
   // The mandatory advisory banner (03 §Evidence records): impossible to
-  // miss, and explicit that local evidence is never authoritative.
+  // miss, speaking the one disclosure vocabulary, and explicit that local
+  // evidence is never authoritative.
   const banner = page.locator(".preview-banner");
   await expect(banner).toBeVisible();
-  await expect(banner).toContainText("PREVIEW");
-  await expect(banner).toContainText("ADVISORY");
+  await expect(banner).toContainText("disclosed-unproven");
+  await expect(banner).toContainText("matrix:advisory-preview");
   await expect(banner).toContainText("never authoritative");
 
   // The folded per-AC table.
@@ -59,8 +66,8 @@ test("advisory preview matrix renders a committed showcase story's fold", async 
 
   const banner = page.locator(".preview-banner");
   await expect(banner).toBeVisible();
-  await expect(banner).toContainText("PREVIEW");
-  await expect(banner).toContainText("ADVISORY");
+  await expect(banner).toContainText("disclosed-unproven");
+  await expect(banner).toContainText("matrix:advisory-preview");
 
   // The committed story declares one AC with no derived records in this
   // store — the fold reads that honestly as no-signal, never a blank.

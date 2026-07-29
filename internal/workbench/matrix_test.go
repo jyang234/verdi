@@ -1,12 +1,15 @@
 package workbench
 
 import (
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/disclosure"
 )
 
 func TestMatrixHandler_Happy(t *testing.T) {
@@ -21,8 +24,18 @@ func TestMatrixHandler_Happy(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "PREVIEW") || !strings.Contains(body, "ADVISORY") {
-		t.Fatalf("missing the clearly-labeled PREVIEW/ADVISORY banner (03 §Evidence records), got: %s", body)
+	// The mandatory banner (03 §Evidence records) is the seam-rendered
+	// advisory-preview disclosure — the expectation is DERIVED from
+	// disclosure.Render of the shared constructor, never a second copy of
+	// the wording (spec/disclosure-legibility#ac-1), and pins the exact
+	// markup renderMatrixHTML emits: the vocabulary prefix in <strong>,
+	// then the disclosure's own text, all HTML-escaped.
+	d := disclosure.AdvisoryPreview()
+	prefix := strings.TrimSuffix(disclosure.Render(d), ": "+d.Text)
+	wantBanner := `<div class="preview-banner" role="alert"><strong>` +
+		html.EscapeString(prefix) + `</strong>: ` + html.EscapeString(d.Text) + `</div>`
+	if !strings.Contains(body, wantBanner) {
+		t.Fatalf("missing the seam-rendered advisory-preview disclosure banner %q, got: %s", wantBanner, body)
 	}
 	if !strings.Contains(body, "matrix-table") {
 		t.Fatalf("missing matrix table, got: %s", body)

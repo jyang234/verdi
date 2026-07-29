@@ -316,12 +316,12 @@ func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evid
 	// superseded story rendered inside a feature's fold.
 	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(string(spec.Class), string(spec.Status)))
 	if preview {
-		// The SAME constructor the story rung uses (matrix.go's
-		// advisoryPreviewDisclosure), rendered through the same seam — one
-		// state, one vocabulary, at both rungs. This line was a hand-authored
-		// duplicate of matrix.go's own banner string before
+		// The SAME constructor the story rung and the workbench matrix page
+		// use (disclosure.AdvisoryPreview), rendered through the same seam —
+		// one state, one vocabulary, on every surface. This line was a
+		// hand-authored duplicate of matrix.go's own banner string before
 		// spec/disclosure-legibility#ac-1's migration.
-		fmt.Fprintln(w, disclosure.Render(advisoryPreviewDisclosure()))
+		fmt.Fprintln(w, disclosure.Render(disclosure.AdvisoryPreview()))
 	}
 	fmt.Fprintln(w)
 

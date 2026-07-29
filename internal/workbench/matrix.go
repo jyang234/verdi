@@ -1,10 +1,10 @@
 // The advisory preview matrix page: GET /matrix/{story...} — the same
 // fold `verdi matrix --preview` computes (03 §Evidence records: "advisory
-// renders as preview"), rendered as an HTML table with an explicit,
-// impossible-to-miss PREVIEW banner distinguishing advisory (source:
-// local) evidence from authoritative (source: ci) evidence — 03's own
-// requirement that a preview never be mistaken for the gate's real
-// answer.
+// renders as preview"), rendered as an HTML table behind an explicit,
+// impossible-to-miss advisory-preview disclosure banner distinguishing
+// advisory (source: local) evidence from authoritative (source: ci)
+// evidence — 03's own requirement that a preview never be mistaken for
+// the gate's real answer.
 package workbench
 
 import (
@@ -12,7 +12,9 @@ import (
 	stdhtml "html"
 	"html/template"
 	"net/http"
+	"strings"
 
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/store"
@@ -74,14 +76,36 @@ func matrixHandler(root string) http.HandlerFunc {
 	}
 }
 
-// renderMatrixHTML renders result as an HTML table, clearly labeled
-// PREVIEW: ADVISORY (03 §Evidence records — the banner this page exists
-// to guarantee is never absent, since this handler always folds with
-// Preview: true; there is no non-preview mode on this page — the
-// authoritative gate is `verdi gate`/CI, never a workbench read page).
+// renderMatrixHTML renders result as an HTML table behind the mandatory
+// advisory-preview disclosure banner (03 §Evidence records — the banner
+// this page exists to guarantee is never absent, since this handler always
+// folds with Preview: true; there is no non-preview mode on this page —
+// the authoritative gate is `verdi gate`/CI, never a workbench read page).
+//
+// The banner's text content is EXACTLY the seam-rendered line
+// disclosure.Render(disclosure.AdvisoryPreview()) — the same line `verdi
+// matrix --preview` prints — never a page-local wording of the state
+// (spec/disclosure-legibility#ac-1: one vocabulary; the pre-seam banner
+// hand-authored a third, "PREVIEW — ADVISORY", for this same state). Only
+// the vocabulary prefix (severity + [source]) is additionally wrapped in
+// <strong>, so the part a CLI reader already recognizes is the part the
+// eye lands on; the split is derived from the rendered line and the
+// Disclosure's own Text — never a second copy of Render's grammar — and
+// falls back to the whole line unemphasized if the shapes ever diverge.
 func renderMatrixHTML(result evidence.StoryResult) template.HTML {
 	var buf bytes.Buffer
-	buf.WriteString(`<div class="preview-banner" role="alert"><strong>PREVIEW — ADVISORY</strong>: includes local (uncommitted-pipeline) evidence alongside CI-authoritative evidence. Not the merge gate's answer; local evidence is never authoritative (04/03).</div>`)
+	d := disclosure.AdvisoryPreview()
+	line := disclosure.Render(d)
+	buf.WriteString(`<div class="preview-banner" role="alert">`)
+	if prefix, ok := strings.CutSuffix(line, ": "+d.Text); ok {
+		buf.WriteString("<strong>")
+		buf.WriteString(stdhtml.EscapeString(prefix))
+		buf.WriteString("</strong>: ")
+		buf.WriteString(stdhtml.EscapeString(d.Text))
+	} else {
+		buf.WriteString(stdhtml.EscapeString(line))
+	}
+	buf.WriteString(`</div>`)
 	buf.WriteString(`<table class="matrix-table"><thead><tr><th>AC</th><th>Status</th><th>Evidence</th><th>Text</th></tr></thead><tbody>`)
 	for _, r := range result.ACs {
 		buf.WriteString("<tr><td>")

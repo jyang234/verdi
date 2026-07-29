@@ -298,12 +298,12 @@ func TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords(t *testing.T) {
 	// specific before/after values changed.
 	//
 	// The banner line is INTERPOLATED from the seam
-	// (disclosure.Render(advisoryPreviewDisclosure())), never re-typed here:
+	// (disclosure.Render(disclosure.AdvisoryPreview())), never re-typed here:
 	// a golden that hard-codes the wording is a second copy of the
 	// vocabulary, which is the defect ac-1 exists to close.
 	wantPreview := `feature: spec/stale-decline
 status: accepted-pending-build
-` + disclosure.Render(advisoryPreviewDisclosure()) + `
+` + disclosure.Render(disclosure.AdvisoryPreview()) + `
 
 AC    STATUS   EVIDENCE                                IMPLEMENTING STORIES                                    TEXT
 ac-1  pending  attestation:absent; static:pass         spec/borrower-update-mobile                             every branch that classifies a decline as stale routes its consequence through the outbox — no direct call to notification-svc or payments-gw
@@ -685,44 +685,11 @@ func TestCmdMatrix_RefForms(t *testing.T) {
 	})
 }
 
-// TestAdvisoryPreviewDisclosure pins the disclosure VALUE both matrix rungs
-// construct for `--preview` — its source, its (absent) scope, its derived id
-// and its fixed severity — mirroring internal/disclosure's own constructor
-// tests and cmd/verdi's sync tool-pin precedent
-// (TestToolPinCarrierAbsentDisclosure). The banner is about the FOLD, not
-// about one artifact, so the scope is empty by construction and the id is the
-// bare source.
-func TestAdvisoryPreviewDisclosure(t *testing.T) {
-	d := advisoryPreviewDisclosure()
-	if d.Source != advisoryPreviewSource {
-		t.Errorf("Source = %q, want %q", d.Source, advisoryPreviewSource)
-	}
-	if d.Scope != "" {
-		t.Errorf("Scope = %q, want empty (the banner is about the whole fold, not one artifact)", d.Scope)
-	}
-	if d.ID != advisoryPreviewSource {
-		t.Errorf("ID = %q, want the bare source %q", d.ID, advisoryPreviewSource)
-	}
-	if d.Severity != disclosure.SeverityDisclosedUnproven {
-		t.Errorf("Severity = %q, want %q", d.Severity, disclosure.SeverityDisclosedUnproven)
-	}
-	if d.Text != advisoryPreviewText {
-		t.Errorf("Text = %q, want %q", d.Text, advisoryPreviewText)
-	}
-	// Negative path — the defect this replaced was a banner that spoke its own
-	// severity word ("PREVIEW:") instead of the shared one. The text must name
-	// the observed fact and its consequence and never restate the severity:
-	// Render supplies that one word (spec/disclosure-legibility#ac-1).
-	if strings.Contains(d.Text, disclosure.SeverityDisclosedUnproven) {
-		t.Errorf("Text = %q states the severity itself; Render already supplies it", d.Text)
-	}
-	if strings.Contains(d.Text, "PREVIEW") {
-		t.Errorf("Text = %q still carries the hand-authored PREVIEW marker", d.Text)
-	}
-	if !disclosure.IsRendered(disclosure.Render(d)) {
-		t.Errorf("Render(%+v) is not recognized as a disclosure line", d)
-	}
-}
+// The disclosure VALUE `--preview` constructs is pinned by
+// internal/disclosure's own TestAdvisoryPreview — the constructor (and its
+// value test) hoisted out of this package when internal/workbench's matrix
+// page became the family's second producing package. What stays here is
+// what only this package can prove: that both rungs RENDER it.
 
 // TestMatrixPreviewBanner_RendersThroughTheSeam exercises BOTH producing call
 // sites — printMatrix (story rung) and printFeatureMatrix (feature rung) —
@@ -735,7 +702,7 @@ func TestAdvisoryPreviewDisclosure(t *testing.T) {
 // Negative path: without --preview neither rung emits any disclosure line, so
 // the banner never becomes background noise.
 func TestMatrixPreviewBanner_RendersThroughTheSeam(t *testing.T) {
-	want := disclosure.Render(advisoryPreviewDisclosure())
+	want := disclosure.Render(disclosure.AdvisoryPreview())
 
 	hasLine := func(out string) bool {
 		for _, line := range strings.Split(out, "\n") {
