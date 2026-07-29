@@ -11,7 +11,7 @@
 > (FEATURE_SPEC `escrow-autopay`, stories `borrower-update-*`;
 > ADR_NAME → `0001-outbox-events`, a ledgered deviation — the ADR the
 > fixture feature actually exempts, shared with the board's ref-card
-> tests via provisionv2.go). V1-P8's added dex behavior beyond the
+> tests via provision_board.go). V1-P8's added dex behavior beyond the
 > contract (the by-story axis and the ADR page's exemptions link) is
 > covered by `tests/18-dex-by-story.spec.ts`. **This directory is now
 > empty of specs**, satisfying the V1-P9 audit precondition below.
