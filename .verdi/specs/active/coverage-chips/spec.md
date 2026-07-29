@@ -4,7 +4,7 @@ kind: spec
 title: "Coverage Chips"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-R54-3
 problem: { text: "which acceptance criteria the declared stubs cover was knowable only by reading frontmatter by hand: the wall showed no computed answer, and nothing structural prevented coverage from being asserted as prose rather than derived from declarations", anchor: "#problem" }
 outcome: { text: "every feature acceptance criterion wears a computed coverage chip — covered by N stubs, or no stub — derived mechanically from declared frontmatter alone, with the feature document staying downward-blind: only stubs enter it, and coverage is always computed at render, never declared or persisted", anchor: "#outcome" }
@@ -20,6 +20,7 @@ decisions:
 constraints:
   - { id: co-1, text: "coverage computes from declared frontmatter only (parent co-2) — the chip renderer's inputs are the loaded feature spec's acceptance criteria and stubs, nothing else", anchor: "#co-1" }
   - { id: co-2, text: "no network in any test: chips are exercised by Go unit tests over fixture projections and hermetic Playwright specs, all under make verify", anchor: "#co-2" }
+frozen: { at: 2026-07-28, commit: ef6760fcdbc2ccc9a32bb4871508c200dc08e768, stub_matched: true }
 ---
 # Coverage Chips
 
