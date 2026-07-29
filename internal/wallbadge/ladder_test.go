@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/lint"
 )
@@ -285,30 +286,40 @@ func TestPendingSupersessionBadge_ImplementsNoFeature(t *testing.T) {
 // TestPendingSupersessionBadge_NilLoaderDisclosesUnproven is ac-3's
 // disclosed-unproven outcome: no forge configured (nil loader) on a story
 // that DOES implement a feature renders a disclosure — never a badge,
-// never silence.
+// never silence. The line is EXACTLY the shared seam's rendering of the
+// no-forge cause (spec/disclosure-legibility#ac-1: one vocabulary — the
+// gate's reader recognizes the wall's line), so the expectation is
+// derived from the seam, never a second hand-authored copy.
 func TestPendingSupersessionBadge_NilLoaderDisclosesUnproven(t *testing.T) {
-	got, disclosure, err := PendingSupersessionBadge(context.Background(), nil, implementsLink("spec/parent-feature#ac-1"), nil)
+	got, disc, err := PendingSupersessionBadge(context.Background(), nil, implementsLink("spec/parent-feature#ac-1"), nil)
 	if err != nil {
 		t.Fatalf("PendingSupersessionBadge: %v", err)
 	}
 	if got != nil {
 		t.Fatalf("got a badge %+v, want none (unproven never badges)", got)
 	}
-	if disclosure == "" {
-		t.Fatal("got no disclosure, want one naming the unproven state")
+	if want := disclosure.Render(disclosure.PendingSupersessionNoForge()); disc != want {
+		t.Fatalf("disclosure = %q, want the seam-rendered line %q", disc, want)
+	}
+	if !disclosure.IsRendered(disc) {
+		t.Fatalf("disclosure %q is not recognized by disclosure.IsRendered", disc)
 	}
 }
 
 // TestPendingSupersessionBadge_LoaderNotOkDisclosesUnproven mirrors the
 // nil-loader case for a configured-but-unable-to-enumerate loader (e.g.
-// no default branch resolved) — same disclosed-unproven contract.
+// no default branch resolved) — same disclosed-unproven contract, same
+// seam vocabulary, cause named in the text.
 func TestPendingSupersessionBadge_LoaderNotOkDisclosesUnproven(t *testing.T) {
-	got, disclosure, err := PendingSupersessionBadge(context.Background(), fakeSupersessionLoader{ok: false}, implementsLink("spec/parent-feature#ac-1"), nil)
+	got, disc, err := PendingSupersessionBadge(context.Background(), fakeSupersessionLoader{ok: false}, implementsLink("spec/parent-feature#ac-1"), nil)
 	if err != nil {
 		t.Fatalf("PendingSupersessionBadge: %v", err)
 	}
-	if got != nil || disclosure == "" {
-		t.Fatalf("got (%+v, %q), want (nil, non-empty disclosure)", got, disclosure)
+	if got != nil {
+		t.Fatalf("got a badge %+v, want none (unproven never badges)", got)
+	}
+	if want := disclosure.Render(disclosure.PendingSupersessionNoDefaultBranch()); disc != want {
+		t.Fatalf("disclosure = %q, want the seam-rendered line %q", disc, want)
 	}
 }
 

@@ -19,7 +19,11 @@ type BoardBadges struct {
 	// and every VL finding that declared a spec-level locus (ac-2).
 	CaseFile []DerivationRecord
 	// Disclosures are ladder outcomes that could not be proven (ac-3's
-	// disclosed-unproven case) — never a badge, never silence.
+	// disclosed-unproven case) — never a badge, never silence. Each entry
+	// is a line the shared internal/disclosure seam rendered
+	// (disclosure.Render at the compute's decision point), so it already
+	// speaks the one disclosed-unproven vocabulary and is recognized by
+	// disclosure.IsRendered.
 	Disclosures []string
 	// EvidenceSlots is, per STORY acceptance-criterion id, the
 	// fold-derived record state of each DECLARED evidence kind in the

@@ -262,7 +262,7 @@ func TestAttachBadges_PendingSupersessionDisclosedUnproven(t *testing.T) {
 	}
 	found := false
 	for _, n := range proj.CaseFileDisclosures {
-		if strings.Contains(n, "pending-supersession is disclosed-unproven") {
+		if strings.Contains(n, "disclosed-unproven [gate:pending-supersession]") {
 			found = true
 		}
 	}
@@ -302,7 +302,7 @@ func TestAttachBadges_SameAcrossPageFragmentAndLoadProjection(t *testing.T) {
 		t.Fatalf("GET board fragment = %d\n%s", fragRec.Code, fragRec.Body.String())
 	}
 	for _, body := range []string{pageRec.Body.String(), fragRec.Body.String()} {
-		if !strings.Contains(body, "pending-supersession is disclosed-unproven") {
+		if !strings.Contains(body, "disclosed-unproven [gate:pending-supersession]") {
 			t.Errorf("surface missing the pending-supersession disclosure notice:\n%s", body)
 		}
 	}
@@ -313,7 +313,7 @@ func TestAttachBadges_SameAcrossPageFragmentAndLoadProjection(t *testing.T) {
 	}
 	foundDisclosure := false
 	for _, n := range direct.CaseFileDisclosures {
-		if strings.Contains(n, "pending-supersession is disclosed-unproven") {
+		if strings.Contains(n, "disclosed-unproven [gate:pending-supersession]") {
 			foundDisclosure = true
 		}
 	}

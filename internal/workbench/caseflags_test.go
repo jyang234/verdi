@@ -19,6 +19,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardlayout"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/wallbadge"
@@ -190,7 +191,7 @@ func TestCaseFileDisclosure_UnprovenIsALineNeverAStamp(t *testing.T) {
 	if !strings.Contains(header, `data-testid="case-file-disclosure"`) {
 		t.Fatalf("case-file lockup carries no disclosure line:\n%s", header)
 	}
-	if !strings.Contains(header, "pending-supersession is disclosed-unproven") {
+	if !strings.Contains(header, "disclosed-unproven [gate:pending-supersession]") {
 		t.Errorf("the disclosure line does not name the unproven state:\n%s", header)
 	}
 	// The line speaks the board's notice vocabulary (dc-4).
@@ -203,7 +204,7 @@ func TestCaseFileDisclosure_UnprovenIsALineNeverAStamp(t *testing.T) {
 	}
 	// The disclosure lives on the case file, not in the generic top-of-
 	// board notice chrome.
-	if i := strings.Index(html, "pending-supersession is disclosed-unproven"); i >= 0 {
+	if i := strings.Index(html, "disclosed-unproven [gate:pending-supersession]"); i >= 0 {
 		if j := strings.Index(html, `class="board-placards case-file"`); j < 0 || i < j {
 			t.Errorf("the disclosure renders before the case-file lockup (in the generic chrome), want it on the case file itself")
 		}
@@ -362,7 +363,7 @@ func TestRenderCaseDisclosures_NoHeaderFallsBackToNotices(t *testing.T) {
 		Spec:                "bare-wall",
 		Mode:                modeReadOnly,
 		Class:               "story",
-		CaseFileDisclosures: []string{"pending-supersession is disclosed-unproven: no forge is configured to enumerate open MRs"},
+		CaseFileDisclosures: []string{disclosure.Render(disclosure.PendingSupersessionNoForge())},
 	}
 	html := renderBoardRegion(p, &boardGitState{})
 	if strings.Contains(html, "board-placards") {
