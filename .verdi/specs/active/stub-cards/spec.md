@@ -4,7 +4,7 @@ kind: spec
 title: "Stub Cards"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: draft
 story: jira:VERDI-R54-2
 problem: { text: "declared stubs were frontmatter-only — invisible on the wall — so the one place scoping is decided rendered no trace of the decomposition it had decided, and the coverage claims stubs carry had no projection a reader could follow", anchor: "#problem" }
 outcome: { text: "declared stubs render as first-class scoping cards in a kind-locked stubs zone with their coverage yarn projected, positionable like object cards (the round-5.5 ratification), and sealed against every mutation the spec register forbids", anchor: "#outcome" }
@@ -19,7 +19,6 @@ decisions:
   - { id: dc-2, text: "stored stub positions are the round-5.5 ratification (08-revision-notes: stub:<slug> layout keys, VL-018 extended), which resolved the parent dc-6's computed-only deferral on the owner's demand signal — this story's ac-3 binds to the ratified state, not the deferred one", anchor: "#dc-2" }
 constraints:
   - { id: co-1, text: "no network in any test: rendering, yarn projection, positions, and refusals are exercised by Go unit tests over fixture projections and hermetic Playwright specs over provisioned stores, all under make verify", anchor: "#co-1" }
-frozen: { at: 2026-07-28, commit: e3890b123ab1deed0371dd9997a1dcbbe423b7cf }
 ---
 # Stub Cards
 
