@@ -26,6 +26,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/model"
@@ -315,7 +316,12 @@ func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evid
 	// superseded story rendered inside a feature's fold.
 	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(string(spec.Class), string(spec.Status)))
 	if preview {
-		fmt.Fprintln(w, "PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)")
+		// The SAME constructor the story rung uses (matrix.go's
+		// advisoryPreviewDisclosure), rendered through the same seam — one
+		// state, one vocabulary, at both rungs. This line was a hand-authored
+		// duplicate of matrix.go's own banner string before
+		// spec/disclosure-legibility#ac-1's migration.
+		fmt.Fprintln(w, disclosure.Render(advisoryPreviewDisclosure()))
 	}
 	fmt.Fprintln(w)
 

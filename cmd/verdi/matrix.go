@@ -48,6 +48,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
@@ -208,14 +209,45 @@ func obligationCellsFor(root, specName string, acs []artifact.AcceptanceCriterio
 	return cells, nil
 }
 
+// The `--preview` advisory-fold disclosure. It lives here, beside its
+// producers, exactly as sync.go's toolPinCarrierAbsentDisclosure and
+// close.go's own single-file disclosures do: only the RENDERING is shared
+// (internal/disclosure's New/Render). It has TWO producers — printMatrix
+// (story rung) and printFeatureMatrix (feature rung, featurematrix.go) —
+// but both live in this same package, so CLAUDE.md's shared-internal rule
+// does not apply; only a family with producers in two or more PACKAGES (the
+// review-feed one) needs its constructor hoisted into the seam package
+// itself (disclosure/reviewfeed.go's own placement note).
+const (
+	advisoryPreviewSource = "matrix:advisory-preview"
+	// The text names the observed fact and its consequence, and NEVER its
+	// own severity: disclosure.Render supplies the one vocabulary word
+	// (spec/disclosure-legibility#ac-1). The pre-seam banner opened with a
+	// hand-authored "PREVIEW:" marker instead — a second vocabulary for a
+	// disclosed-unproven state, invisible to disclosure.IsRendered and to
+	// every disclosure consumer (judged-ac-1-vocabulary-coverage).
+	advisoryPreviewText = "this fold included advisory (source: local) evidence alongside authoritative (source: ci) evidence, so the statuses below are not the merge gate's answer — local evidence is never authoritative (04/03)"
+)
+
+// advisoryPreviewDisclosure is the structured value `--preview` constructs
+// at its existing decision point, so the printed banner IS that value
+// rendered — never a second, hand-aligned copy of it, and never two copies
+// that can drift between the story and feature rungs. The scope is empty:
+// the disclosure is about the FOLD as a whole, not about any one artifact in
+// the table below it (the checkout-wide form).
+func advisoryPreviewDisclosure() disclosure.Disclosure {
+	return disclosure.New(advisoryPreviewSource, "", advisoryPreviewText)
+}
+
 // printMatrix renders result as a per-AC table plus the story eligibility
 // line. status is the resolved spec's own frontmatter `status` (ac-2,
 // feature-supersession-state): printed unconditionally so a superseded (or
 // any other) terminal state is legible on this surface directly — 03
 // §rung 3's "everywhere without consulting backlinks" property — rather
 // than only inferable by opening the raw spec or chasing a
-// `superseded-by` backlink. preview only controls the banner — Fold
-// already decided what's in scope.
+// `superseded-by` backlink. preview only controls whether
+// advisoryPreviewDisclosure is rendered through the shared
+// internal/disclosure seam — Fold already decided what's in scope.
 //
 // obligationCells is spec/obligation-wall ac-1's addition: each AC's
 // pre-rendered OBLIGATION column entry (obligationCellsFor), keyed by AC
@@ -232,7 +264,10 @@ func printMatrix(w io.Writer, result evidence.StoryResult, status artifact.Statu
 	fmt.Fprintf(w, "spec:  %s\n", result.SpecRef)
 	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(class, string(status)))
 	if preview {
-		fmt.Fprintln(w, "PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)")
+		// Bare Render output, unindented and unprefixed, so
+		// disclosure.IsRendered recognizes the line and a disclosure consumer
+		// can count it (ac-1's recognizer half).
+		fmt.Fprintln(w, disclosure.Render(advisoryPreviewDisclosure()))
 	}
 	fmt.Fprintln(w)
 
