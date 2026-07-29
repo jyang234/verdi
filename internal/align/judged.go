@@ -139,6 +139,43 @@ func absentResult(required bool, failure *JudgeFailure) (*JudgedResult, error) {
 // (same stage/exit/cmd/stderr) renders identical text, which is what lets
 // identity.go's content-hash identity preserve a human's disposition
 // across an unchanged repeat failure.
+//
+// DELIBERATELY NOT routed through internal/disclosure (spec/disclosure-
+// legibility#ac-1's vocabulary migration, which DID move the sweep report's
+// own fixed advisory line — diagram_render.go's DiagramSweepDisclosure). Do
+// not "fix" this to call disclosure.Render; three reasons, each load-bearing:
+//
+//  1. Text is an IDENTITY input. Identity is sha256(Kind, ID, Text)
+//     (identity.go, frozen by spec/finding-identity). Rewording this text
+//     re-keys every dispositioned judged-coverage-absent finding in every
+//     LIVING deviation report: the exact-identity carry misses, and
+//     ReconcileJudged (reaffirm.go) correctly treats it as a REWORDED judged
+//     finding — disposition dropped, a Candidate pre-filled, and the prior
+//     persisted into not-resurfaced, which is budget-counted and needs a
+//     human's exit ramp. That machinery would then be asserting "the ruling's
+//     content changed, re-confirm it", a claim that is FALSE here: nothing
+//     about the judge's coverage moved, only verdi's own rendering. A
+//     confidently-wrong signal is the one outcome CLAUDE.md forbids outright.
+//
+//  2. It would buy no recognition. A finding's text is not an emitted line —
+//     render.go wraps it as "- **<id>** [<disposition>]: <text>", a grammar
+//     disclosure.IsRendered rejects by construction (the seam's own doc:
+//     "an indented, hand-built ... line is NOT a disclosure"). Routing the
+//     text through Render would nest one vocabulary inside another and leave
+//     the report line just as uncountable as before.
+//
+//  3. The finding-shaped precedent points the other way. internal/lint keeps
+//     Finding.Message as the bare fact and maps to the seam at the RENDER
+//     boundary (finding.go's Finding.Disclosure()). The analogous move for
+//     align would be a Finding->Disclosure mapping wherever this state is
+//     PRINTED, not a rewrite of the persisted text — and the deviation
+//     report's finding-line grammar is spec-pinned (03 §Alignment report), so
+//     that is a spec-level question, not an implementation choice.
+//
+// The same reasoning covers the two siblings that mirror this function,
+// decision_judge.go's decisionAbsenceFinding and diagram_judge.go's
+// diagramAbsenceFinding: all three stay in the finding channel, together, so
+// no two of them speak different vocabularies for one state.
 func absenceFinding(f *JudgeFailure) artifact.Finding {
 	text := fmt.Sprintf("judged coverage absent: %s", f.Detail)
 	if f.Stage != StageNotConfigured {
