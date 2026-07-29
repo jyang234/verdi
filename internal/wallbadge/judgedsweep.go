@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -69,7 +70,9 @@ type CoversResolver interface {
 // computation); a record when the report decodes; a non-empty disclosure
 // — never a chip, never silence — when a report EXISTS but cannot be
 // strict-decoded (three-valued honesty: an unreadable receipt is
-// disclosed, not skipped).
+// disclosed, not skipped). The disclosure is the shared seam's rendered
+// line (disclosure.Render over judgedSweepUnreadable), so it reads in the
+// one vocabulary spec/disclosure-legibility#ac-1 binds every surface to.
 func JudgedSweepBadge(ctx context.Context, root, specName, specRevision string, fm *artifact.SpecFrontmatter, resolver CoversResolver) (*DerivationRecord, string, error) {
 	reportRelPath := store.DecisionConflictReportRelPath(store.ZoneActive, specName)
 	specRelPath := store.ActiveSpecRelPath(specName)
@@ -84,11 +87,11 @@ func JudgedSweepBadge(ctx context.Context, root, specName, specRevision string, 
 
 	fmBytes, _, err := artifact.SplitFrontmatter(data)
 	if err != nil {
-		return nil, fmt.Sprintf("judged findings are disclosed-unproven: %s: %v", reportRelPath, err), nil
+		return nil, disclosure.Render(judgedSweepUnreadable(reportRelPath, fmt.Sprintf("%v", err))), nil
 	}
 	report, err := artifact.DecodeDecisionConflict(fmBytes)
 	if err != nil {
-		return nil, fmt.Sprintf("judged findings are disclosed-unproven: %s failed to decode: %v", reportRelPath, err), nil
+		return nil, disclosure.Render(judgedSweepUnreadable(reportRelPath, fmt.Sprintf("failed to decode: %v", err))), nil
 	}
 
 	rec := &DerivationRecord{
@@ -109,6 +112,23 @@ func JudgedSweepBadge(ctx context.Context, root, specName, specRevision string, 
 		Disclosures: judgedSweepDisclosures(ctx, report, fm, specRelPath, specRevision, resolver),
 	}
 	return rec, "", nil
+}
+
+// judgedSweepUnreadable is the chip's disclosed-unproven state — a
+// decision-conflict report EXISTS but cannot be strict-decoded — as a
+// structured seam value constructed at the decision point, so the
+// returned line IS that value rendered, never a hand-authored word order
+// (the pre-seam lines opened "judged findings are disclosed-unproven:",
+// which disclosure.IsRendered rejected — judged-ac-1-vocabulary-coverage).
+// The constructor lives beside its producer because this package is the
+// state's ONLY producer (contrast internal/disclosure's reviewfeed.go,
+// whose family spans packages). The source is JudgedSweepSource — the
+// chip's own dc-2 id, reused per the seam's "each producer's own existing
+// id" rule (one state = one source, whether it proves into a chip or
+// discloses); the scope is the unreadable report itself; the cause rides
+// the text.
+func judgedSweepUnreadable(reportRelPath, cause string) disclosure.Disclosure {
+	return disclosure.New(JudgedSweepSource, reportRelPath, cause)
 }
 
 // judgedSweepLabel is the chip's short text: the judged-finding count —

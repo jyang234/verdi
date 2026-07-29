@@ -19,6 +19,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/decisionsweep"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
@@ -129,7 +130,12 @@ func readDeviationCovers(root, reportRelPath string) (string, error) {
 // flags it; a non-empty disclosure — never a record, never silence, per
 // ac-3's three-valued outcome — when loader is nil (no forge configured)
 // or a candidate load reports ok=false (open MRs could not be
-// enumerated, e.g. no default branch resolved). mdl is accepted for
+// enumerated, e.g. no default branch resolved). The disclosure is the
+// shared seam's rendered line (disclosure.Render over the
+// internal/disclosure pending-supersession constructors, source
+// gate:pending-supersession — the closure gate's own id for this same
+// condition), so it reads in the one vocabulary
+// spec/disclosure-legibility#ac-1 binds every surface to. mdl is accepted for
 // symmetry with the model-aware badge pipeline but is NOT consulted for
 // the flag's display — the label is fixed (finding
 // judged-ladder-flags-share-state-namespace; see the Label site below).
@@ -139,7 +145,7 @@ func PendingSupersessionBadge(ctx context.Context, loader SupersessionCandidateL
 		return nil, "", nil
 	}
 	if loader == nil {
-		return nil, "pending-supersession is disclosed-unproven: no forge is configured to enumerate open MRs", nil
+		return nil, disclosure.Render(disclosure.PendingSupersessionNoForge()), nil
 	}
 
 	featureNames := make([]string, 0, len(byFeature))
@@ -157,7 +163,7 @@ func PendingSupersessionBadge(ctx context.Context, loader SupersessionCandidateL
 			return nil, "", fmt.Errorf("wallbadge: pending-supersession: loading candidates for %s: %w", featureName, err)
 		}
 		if !ok {
-			return nil, "pending-supersession is disclosed-unproven: open MRs could not be enumerated (no default branch resolved)", nil
+			return nil, disclosure.Render(disclosure.PendingSupersessionNoDefaultBranch()), nil
 		}
 		r := evidence.PendingSupersession(evidence.PendingSupersessionInput{ObjectIDs: byFeature[featureName], Candidates: candidates})
 		if r.Flagged {

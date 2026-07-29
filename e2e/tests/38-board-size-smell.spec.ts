@@ -158,7 +158,12 @@ test.describe("case-file flags: disclosed-unproven is a line, never a stamp", ()
     await page.goto(boardPath(SHOWCASE.EMPTY_SPEC));
     const line = page.getByTestId("case-file-disclosure");
     await expect(line).toBeVisible();
-    await expect(line).toContainText("pending-supersession is disclosed-unproven");
+    // The line is the shared disclosure seam's rendering of the state —
+    // "disclosed-unproven [gate:pending-supersession]: <cause>" — so the
+    // spec pins the vocabulary word and the source id (the stable tokens),
+    // exactly what a reader who learned the seam recognizes.
+    await expect(line).toContainText("disclosed-unproven");
+    await expect(line).toContainText("[gate:pending-supersession]");
     // The line sits INSIDE the case-file lockup and speaks the board's
     // notice vocabulary (the disclosed board-notice voice).
     await expect(

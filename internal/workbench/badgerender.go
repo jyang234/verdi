@@ -62,7 +62,13 @@ func writeCaseTopline(b *strings.Builder, p *BoardProjection) {
 // the board's notice vocabulary (the board-notice voice, role="status"),
 // rendered on the case-file lockup itself — never a stamp (unproven is
 // never dressed as a verdict) and never silence. A disclosure-free wall
-// writes nothing.
+// writes nothing. Each string arrives ALREADY seam-rendered — the
+// compute layer produced it with disclosure.Render at its decision point
+// (internal/wallbadge's ladder and judged-sweep computes) — and is
+// written verbatim (escaped only), so the drawer line is byte-identical
+// to every other surface's rendering of the same state and this renderer
+// never re-derives or re-parses the seam grammar
+// (spec/disclosure-legibility#ac-1/ac-2).
 func writeCaseDisclosures(b *strings.Builder, p *BoardProjection) {
 	for _, d := range p.CaseFileDisclosures {
 		b.WriteString(`<p class="board-notice case-disclosure" data-testid="case-file-disclosure" role="status">` + stdhtml.EscapeString(d) + `</p>`)

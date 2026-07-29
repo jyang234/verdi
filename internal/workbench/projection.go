@@ -407,7 +407,10 @@ type BoardProjection struct {
 	// banners about the SERVING context (an unreachable review feed, an
 	// assumed default branch); these are spec-level truths that belong on
 	// the case file, exactly where the stamps they stand in for would
-	// hang. Same I/O-enrichment tier as CaseFileBadges (badges.go).
+	// hang. Same I/O-enrichment tier as CaseFileBadges (badges.go). Each
+	// entry is a seam-rendered line (internal/disclosure's Render, e.g.
+	// "disclosed-unproven [gate:pending-supersession]: ..."), carried
+	// verbatim to every surface — the page, the fragment, and get_board.
 	CaseFileDisclosures []string `json:"case_file_disclosures,omitempty"`
 	// words is the render-side class-word display vocabulary
 	// (vocabulary.go), set by applyModelVocabulary. Unexported on

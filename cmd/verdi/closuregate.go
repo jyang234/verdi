@@ -291,8 +291,12 @@ func checkPendingSupersessionCondition(ctx context.Context, f forge.Forge, defau
 		return gateCondition{
 			Name:      name,
 			Disclosed: true,
-			Source:    "gate:pending-supersession",
-			Reason:    "no forge configured/reachable, so open supersession MRs cannot be enumerated (not read as 'no pending MRs' — constitution 2/10)",
+			// The shared seam constant, not a local literal: the wall
+			// badge (internal/wallbadge's ladder) discloses this same
+			// condition under the same source id — one home for the id
+			// keeps the two surfaces from drifting apart.
+			Source: disclosure.SourcePendingSupersession,
+			Reason: "no forge configured/reachable, so open supersession MRs cannot be enumerated (not read as 'no pending MRs' — constitution 2/10)",
 		}, nil
 	}
 

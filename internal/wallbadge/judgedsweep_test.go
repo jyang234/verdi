@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 )
 
 // fakeResolver is a canned CoversResolver: it records the commit/relPath
@@ -114,15 +115,25 @@ func TestJudgedSweepBadge_UndecodableReport_DisclosedNeverSilent(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := writeSweepStore(t, tc.content)
-			rec, disclosure, err := JudgedSweepBadge(context.Background(), root, sweepSpecName, wallRevision, sweepSpecFM(), &fakeResolver{})
+			rec, disc, err := JudgedSweepBadge(context.Background(), root, sweepSpecName, wallRevision, sweepSpecFM(), &fakeResolver{})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if rec != nil {
 				t.Errorf("an unreadable report must never chip, got %+v", rec)
 			}
-			if !strings.Contains(disclosure, "judged findings are disclosed-unproven") {
-				t.Errorf("want a disclosed-unproven disclosure, got %q", disclosure)
+			// The line speaks the shared seam vocabulary
+			// (spec/disclosure-legibility#ac-1): the chip's own source id,
+			// the report scoped, the cause in the text — recognized by
+			// disclosure.IsRendered, never a hand-authored word order.
+			if !disclosure.IsRendered(disc) {
+				t.Errorf("disclosure %q is not recognized by disclosure.IsRendered", disc)
+			}
+			if !strings.Contains(disc, "["+JudgedSweepSource+"]") {
+				t.Errorf("disclosure %q does not carry the chip's source id %q", disc, JudgedSweepSource)
+			}
+			if !strings.Contains(disc, ".verdi/specs/active/sweep-fixture/decision-conflict-report.md") {
+				t.Errorf("disclosure %q does not scope the unreadable report", disc)
 			}
 		})
 	}
