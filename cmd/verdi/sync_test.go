@@ -11,6 +11,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	forgepkg "github.com/jyang234/verdi/internal/forge"
@@ -659,8 +660,25 @@ func TestRunSync_CIFetch_ToolPin(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (a pre-carrier bundle is never refused); stderr=%s", code, stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "disclosed-unproven") {
-			t.Errorf("stdout = %q, want the disclosed-unproven tool-pin notice (ac-4: never a silent skip)", stdout.String())
+		// The expectation is DERIVED from the seam, never a second copy of the
+		// notice's wording: the line sync prints must be exactly what
+		// disclosure.Render makes of the disclosure this call site constructs
+		// (spec/disclosure-seam-v2 ac-1, judged-sync-toolpin-disclosure-outside-seam).
+		// A hand-authored line that merely says "disclosed-unproven" in prose
+		// passed the pre-fix assertion here while being invisible to every
+		// disclosure consumer — hence the equality, not a substring probe.
+		want := disclosure.Render(toolPinCarrierAbsentDisclosure())
+		found := false
+		for _, line := range strings.Split(stdout.String(), "\n") {
+			if line == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("stdout = %q, want the seam-rendered tool-pin notice %q (ac-4: never a silent skip)", stdout.String(), want)
+		}
+		if !disclosure.IsRendered(want) {
+			t.Errorf("%q is not recognized by disclosure.IsRendered: no disclosure consumer could count it", want)
 		}
 	})
 
@@ -673,6 +691,61 @@ func TestRunSync_CIFetch_ToolPin(t *testing.T) {
 			t.Errorf("stderr = %q, want the failing file named", stderr.String())
 		}
 	})
+}
+
+// TestToolPinCarrierAbsentDisclosure pins the disclosure VALUE the absent-
+// carrier state constructs — its source, its (absent) scope, its derived id
+// and its fixed severity — mirroring internal/disclosure's own constructor
+// tests. The state names no single artifact (nothing in the fetched tree is
+// the missing carrier), so the scope is empty by construction and the id is
+// the bare source.
+func TestToolPinCarrierAbsentDisclosure(t *testing.T) {
+	d := toolPinCarrierAbsentDisclosure()
+	if d.Source != toolPinCarrierAbsentSource {
+		t.Errorf("Source = %q, want %q", d.Source, toolPinCarrierAbsentSource)
+	}
+	if d.Scope != "" {
+		t.Errorf("Scope = %q, want empty (the disclosure is about the intake, not one artifact)", d.Scope)
+	}
+	if d.ID != toolPinCarrierAbsentSource {
+		t.Errorf("ID = %q, want the bare source %q", d.ID, toolPinCarrierAbsentSource)
+	}
+	if d.Severity != disclosure.SeverityDisclosedUnproven {
+		t.Errorf("Severity = %q, want %q", d.Severity, disclosure.SeverityDisclosedUnproven)
+	}
+	if d.Text != toolPinCarrierAbsentText {
+		t.Errorf("Text = %q, want %q", d.Text, toolPinCarrierAbsentText)
+	}
+	// Negative path — the defect this replaced: the text must not declare its
+	// own severity in prose. Render supplies the one vocabulary word; a text
+	// that restates it is the hand-authored lookalike coming back.
+	if strings.Contains(d.Text, disclosure.SeverityDisclosedUnproven) {
+		t.Errorf("Text = %q states the severity itself; Render already supplies it", d.Text)
+	}
+	if !disclosure.IsRendered(disclosure.Render(d)) {
+		t.Errorf("Render(%+v) is not recognized as a disclosure line", d)
+	}
+}
+
+// TestCheckFetchedToolPin_AbsentCarrierRendersThroughTheSeam exercises the
+// producing call site directly: a fetched tree with no toolchain.json
+// anywhere prints exactly one line, exactly the seam's rendering of the
+// absent-carrier disclosure, and returns nil (never a refusal). A tree that
+// DOES carry a matching pin prints nothing — the negative path that keeps
+// the notice from becoming background noise.
+func TestCheckFetchedToolPin_AbsentCarrierRendersThroughTheSeam(t *testing.T) {
+	var buf bytes.Buffer
+	tree := forgepkg.DerivedTree{"spec--stale-decline/" + testCommit + "/verdicts.json": []byte("{}\n")}
+	// root is unused on this path: the manifest is read only when a carrier
+	// is present, so tool-less intake works even in a store without one.
+	if err := checkFetchedToolPin(t.TempDir(), tree, &buf); err != nil {
+		t.Fatalf("checkFetchedToolPin: %v (an absent carrier is disclosed, never refused)", err)
+	}
+	want := disclosure.Render(disclosure.New("sync:tool-pin-carrier-absent", "",
+		"the fetched bundle carries no toolchain.json (a pre-carrier bundle, or its producer ran no upstream tool), so the I-4 tool-pin check could not run for this intake")) + "\n"
+	if got := buf.String(); got != want {
+		t.Errorf("checkFetchedToolPin output = %q, want the shared seam's rendering %q", got, want)
+	}
 }
 
 // TestRunSync_CIFetch_ReachableByReaderFold is the true-closure keying
