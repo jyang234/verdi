@@ -12,6 +12,7 @@ package main
 // and body below is bound by e2e/tests/fixtures.ts — change them together.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -110,7 +111,7 @@ const cannedDiagramVerification = `{
 // matching one for the good twin, a fixed corrupted one for the other).
 // Returns the canned verification report's file path for the serve
 // subprocess's env (VERDI_DIAGRAM_VERIFICATION).
-func provisionDiagrams(scratch, storeRoot string) (verificationPath string, err error) {
+func provisionDiagrams(ctx context.Context, scratch, storeRoot string) (verificationPath string, err error) {
 	writeFiles := func(files map[string]string) error {
 		for rel, content := range files {
 			path := filepath.Join(storeRoot, rel)
@@ -131,13 +132,13 @@ func provisionDiagrams(scratch, storeRoot string) (verificationPath string, err 
 	}); err != nil {
 		return "", err
 	}
-	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "add", "-A"); err != nil {
 		return "", err
 	}
-	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: diagram editor fixtures (base + proposals)"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: diagram editor fixtures (base + proposals)"); err != nil {
 		return "", err
 	}
-	baseCommit, err := gitOutput(storeRoot, "rev-parse", "HEAD")
+	baseCommit, err := gitOutput(ctx, storeRoot, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -175,13 +176,13 @@ derived_from: { ref: diagram/` + diagramBaseName + `@` + baseCommit + `, digest:
 	}); err != nil {
 		return "", err
 	}
-	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "add", "-A"); err != nil {
 		return "", err
 	}
-	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: derived diagram proposals pinning the base"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: derived diagram proposals pinning the base"); err != nil {
 		return "", err
 	}
-	if err := runGit(storeRoot, nil, "push", "--quiet"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "push", "--quiet"); err != nil {
 		return "", err
 	}
 

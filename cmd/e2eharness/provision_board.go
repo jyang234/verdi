@@ -9,6 +9,7 @@ package main
 // body below is bound by e2e/tests-v1/fixtures.ts — change them together.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -671,28 +672,28 @@ const cannedReviewFeed = `{
 // the exempted ADR, and the canned review feed file. It runs AFTER the dex
 // site is built, so the static site keeps reflecting main. Returns the feed
 // file's path for the serve subprocess's env.
-func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
+func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath string, err error) {
 	// The board's commit affordance uses the checkout's own identity.
-	if err := runGit(storeRoot, nil, "config", "user.name", "verdi-e2e"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "config", "user.name", "verdi-e2e"); err != nil {
 		return "", err
 	}
-	if err := runGit(storeRoot, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
 		return "", err
 	}
-	if err := runGit(storeRoot, nil, "config", "commit.gpgsign", "false"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "config", "commit.gpgsign", "false"); err != nil {
 		return "", err
 	}
 
 	// A bare local origin makes "Commit & push" a real round-trip with no
 	// network.
 	originDir := filepath.Join(scratch, "origin.git")
-	if err := runGit("", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+	if err := runGit(ctx, "", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
 		return "", fmt.Errorf("git init --bare: %w", err)
 	}
-	if err := runGit(storeRoot, nil, "remote", "add", "origin", originDir); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "remote", "add", "origin", originDir); err != nil {
 		return "", err
 	}
-	if err := runGit(storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
 		return "", err
 	}
 	// origin/HEAD is the default-branch resolution gitx.DefaultBranch (and
@@ -700,7 +701,7 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 	// never sets it, so pin it to main explicitly (spec/directory-home's
 	// harness obligation — without it the whole-store directory would
 	// honestly render an empty default-branch walk).
-	if err := runGit(storeRoot, nil, "remote", "set-head", "origin", "main"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "remote", "set-head", "origin", "main"); err != nil {
 		return "", err
 	}
 
@@ -709,14 +710,14 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 	// sha-shaped and honest; a made-up sha would be a lie the fixtures
 	// don't need to tell). Resolved BEFORE the design branch is cut, so
 	// the sha is main's.
-	mainSHA, err := gitOutput(storeRoot, "rev-parse", "HEAD")
+	mainSHA, err := gitOutput(ctx, storeRoot, "rev-parse", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("resolving main HEAD for the sealed badge fixture: %w", err)
 	}
 
 	// The design branch: both draft specs (draft never lands on main —
 	// VL-004); the ADR dc-1 exempts is the corpus's own adr/0001-outbox-events.
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", designBranch); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", "-b", designBranch); err != nil {
 		return "", err
 	}
 	// ADR_REF's target (adr/0001-outbox-events, V1-P8's fixtures.ts
@@ -760,10 +761,10 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 			return "", fmt.Errorf("writing %s: %w", rel, err)
 		}
 	}
-	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "add", "-A"); err != nil {
 		return "", err
 	}
-	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: refi-decline-flow + stale-decline-notices fixtures"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: refi-decline-flow + stale-decline-notices fixtures"); err != nil {
 		return "", err
 	}
 
@@ -775,7 +776,7 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 	// genuinely drifted. Committing (rather than leaving the tree dirty)
 	// keeps the git affordance's uncommitted-changes indicator honest for
 	// the other board specs.
-	coversSHA, err := gitOutput(storeRoot, "rev-parse", "HEAD")
+	coversSHA, err := gitOutput(ctx, storeRoot, "rev-parse", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("resolving the design fixture commit for sweep covers: %w", err)
 	}
@@ -795,14 +796,14 @@ func provisionBoard(scratch, storeRoot string) (feedPath string, err error) {
 			return "", fmt.Errorf("writing %s: %w", rel, err)
 		}
 	}
-	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "add", "-A"); err != nil {
 		return "", err
 	}
-	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: judged-sweep report fixtures (fresh/stale/partial)"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: judged-sweep report fixtures (fresh/stale/partial)"); err != nil {
 		return "", err
 	}
 
-	if err := runGit(storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", designBranch); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", designBranch); err != nil {
 		return "", err
 	}
 

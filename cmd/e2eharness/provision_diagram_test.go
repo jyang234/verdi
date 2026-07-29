@@ -24,35 +24,35 @@ func TestProvisionDiagrams(t *testing.T) {
 	}
 	scratch := t.TempDir()
 	storeRoot := filepath.Join(scratch, "store")
-	if err := runGit("", nil, "init", "--quiet", "--initial-branch=main", storeRoot); err != nil {
+	if err := runGit(t.Context(), "", nil, "init", "--quiet", "--initial-branch=main", storeRoot); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "--allow-empty", "-m", "seed"); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "commit", "--quiet", "--no-verify", "--allow-empty", "-m", "seed"); err != nil {
 		t.Fatalf("git commit: %v", err)
 	}
 	// provisionDiagrams pushes; give it a local origin like the harness's.
 	origin := filepath.Join(scratch, "origin.git")
-	if err := runGit("", nil, "init", "--bare", "--quiet", "--initial-branch=main", origin); err != nil {
+	if err := runGit(t.Context(), "", nil, "init", "--bare", "--quiet", "--initial-branch=main", origin); err != nil {
 		t.Fatalf("git init --bare: %v", err)
 	}
-	if err := runGit(storeRoot, nil, "remote", "add", "origin", origin); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "remote", "add", "origin", origin); err != nil {
 		t.Fatal(err)
 	}
-	if err := runGit(storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
 		t.Fatal(err)
 	}
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", "design/editor"); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "checkout", "--quiet", "-b", "design/editor"); err != nil {
 		t.Fatal(err)
 	}
-	if err := runGit(storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", "design/editor"); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", "design/editor"); err != nil {
 		t.Fatal(err)
 	}
 
-	verificationPath, err := provisionDiagrams(scratch, storeRoot)
+	verificationPath, err := provisionDiagrams(t.Context(), scratch, storeRoot)
 	if err != nil {
 		t.Fatalf("provisionDiagrams: %v", err)
 	}
-	if _, err := gitOutput(storeRoot, "cat-file", "-e", "HEAD:.verdi/diagrams/"+diagramDerivedName+".mermaid"); err != nil {
+	if _, err := gitOutput(t.Context(), storeRoot, "cat-file", "-e", "HEAD:.verdi/diagrams/"+diagramDerivedName+".mermaid"); err != nil {
 		t.Fatalf("derived proposal not committed: %v", err)
 	}
 	if verificationPath == "" {
@@ -65,14 +65,14 @@ func TestProvisionDiagrams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	derivedRaw, err := gitOutput(storeRoot, "show", "HEAD:.verdi/diagrams/"+diagramDerivedName+".mermaid")
+	derivedRaw, err := gitOutput(t.Context(), storeRoot, "show", "HEAD:.verdi/diagrams/"+diagramDerivedName+".mermaid")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(derivedRaw, "source_digest: "+sourceDigest) {
 		t.Fatalf("derived fixture does not pin the real base source_digest %s:\n%s", sourceDigest, derivedRaw)
 	}
-	corruptRaw, err := gitOutput(storeRoot, "show", "HEAD:.verdi/diagrams/"+diagramCorruptName+".mermaid")
+	corruptRaw, err := gitOutput(t.Context(), storeRoot, "show", "HEAD:.verdi/diagrams/"+diagramCorruptName+".mermaid")
 	if err != nil {
 		t.Fatal(err)
 	}

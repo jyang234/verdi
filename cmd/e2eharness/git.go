@@ -19,6 +19,7 @@ package main
 // needs to shell out to git belongs here.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -32,11 +33,14 @@ var deterministicGitEnv = []string{
 	"GIT_COMMITTER_NAME=verdi-e2e", "GIT_COMMITTER_EMAIL=e2e@verdi.invalid", "GIT_COMMITTER_DATE=1704067200 +0000",
 }
 
-// runGit runs git in dir, carrying deterministicGitEnv plus any extraEnv on
-// top of the ambient environment. On failure the error wraps the command's
-// combined output.
-func runGit(dir string, extraEnv []string, args ...string) error {
-	cmd := exec.Command("git", args...)
+// runGit runs git in dir under ctx, carrying deterministicGitEnv plus any
+// extraEnv on top of the ambient environment. On failure the error wraps
+// the command's combined output. ctx is honoured for real (CommandContext):
+// an already-cancelled ctx refuses before git is spawned, and a cancellation
+// mid-run kills the child — the seam main.go's interrupt handling relies on
+// to unwind provisioning instead of leaking a git process.
+func runGit(ctx context.Context, dir string, extraEnv []string, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(append(os.Environ(), deterministicGitEnv...), extraEnv...)
 	out, err := cmd.CombinedOutput()
@@ -46,12 +50,13 @@ func runGit(dir string, extraEnv []string, args ...string) error {
 	return nil
 }
 
-// gitOutput runs git in dir and returns its trimmed stdout — the query
-// twin of runGit (same env pinning), for provisioning steps that need a
-// value back (e.g. the store HEAD sha the sealed badge fixture's frozen
-// stamp pins). On failure the error wraps stderr.
-func gitOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+// gitOutput runs git in dir under ctx and returns its trimmed stdout — the
+// query twin of runGit (same env pinning, same ctx honouring), for
+// provisioning steps that need a value back (e.g. the store HEAD sha the
+// sealed badge fixture's frozen stamp pins) and for the loopback inspection
+// routes, which pass their request's ctx. On failure the error wraps stderr.
+func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), deterministicGitEnv...)
 	var stderr strings.Builder

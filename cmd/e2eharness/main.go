@@ -71,9 +71,15 @@ func run() error {
 	defer func() { _ = os.RemoveAll(scratch) }()
 
 	// Signal handling installs before build/provisioning touches the
-	// scratch dir: an interrupt from here on cancels ctx, which every
-	// exec/HTTP call below observes, instead of killing the process
-	// outright and skipping the deferred RemoveAll above.
+	// scratch dir: an interrupt from here on cancels ctx, instead of
+	// killing the process outright and skipping the deferred RemoveAll
+	// above. Every exec and HTTP call reached from here observes that ctx:
+	// the go-build and `verdi serve` subprocesses (exec.CommandContext
+	// below), the healthz poll, every git invocation through git.go's
+	// runGit/gitOutput seam and provision_showcase_draft.go's gitShowBytes
+	// — which is why each provisionX takes ctx as its first parameter — and
+	// the control/inspection servers' handlers, whose request contexts
+	// descend from this one via their BaseContext below.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -83,7 +89,7 @@ func run() error {
 	}
 
 	storeRoot := filepath.Join(scratch, "store")
-	if err := provisionStore(moduleRoot, storeRoot); err != nil {
+	if err := provisionStore(ctx, moduleRoot, storeRoot); err != nil {
 		return fmt.Errorf("provisioning scratch store: %w", err)
 	}
 
@@ -105,7 +111,7 @@ func run() error {
 	// so the static site keeps reflecting main while `verdi serve`'s
 	// working tree sits on the design branch (authoring mode's branch
 	// state — 05 §Workbench "Two modes").
-	feedPath, err := provisionBoard(scratch, storeRoot)
+	feedPath, err := provisionBoard(ctx, scratch, storeRoot)
 	if err != nil {
 		return fmt.Errorf("provisioning v1 board fixtures: %w", err)
 	}
@@ -113,7 +119,7 @@ func run() error {
 	// The diagram editor's fixtures (spec/board-editor) land on the same
 	// design branch provisionBoard just checked out, plus the canned
 	// verification report the rail consumes through its dc-4 port.
-	verificationPath, err := provisionDiagrams(scratch, storeRoot)
+	verificationPath, err := provisionDiagrams(ctx, scratch, storeRoot)
 	if err != nil {
 		return fmt.Errorf("provisioning diagram editor fixtures: %w", err)
 	}
@@ -124,21 +130,21 @@ func run() error {
 	// the dangling-implements-target story. Lands on the same design
 	// branch provisionBoard/provisionDiagrams just used, restoring it
 	// when done.
-	if err := provisionFamilyBoardLinks(storeRoot); err != nil {
+	if err := provisionFamilyBoardLinks(ctx, storeRoot); err != nil {
 		return fmt.Errorf("provisioning family-board-links fixtures: %w", err)
 	}
 
 	// The directory-home ref fixtures (local-only / remote-only / empty /
 	// doomed design branches) — after the board fixtures, restoring the
 	// board suite's serving checkout when done.
-	if err := provisionDirectory(storeRoot); err != nil {
+	if err := provisionDirectory(ctx, storeRoot); err != nil {
 		return fmt.Errorf("provisioning directory fixtures: %w", err)
 	}
 
 	// The draft-boards branch fixtures (spec/draft-boards; see
 	// provision_draftboards.go) — cut from main AFTER the dex build like
 	// the board fixtures above, restoring the serving checkout when done.
-	if err := provisionDraftBoards(storeRoot); err != nil {
+	if err := provisionDraftBoards(ctx, storeRoot); err != nil {
 		return fmt.Errorf("provisioning draft-boards fixtures: %w", err)
 	}
 
@@ -147,7 +153,7 @@ func run() error {
 	// stage (see provision_showcase_draft.go). Runs last among the branch
 	// provisioners; it pre-cuts and seeds its worktree and restores the
 	// serving checkout to designBranch when done.
-	if err := provisionShowcaseDraft(storeRoot); err != nil {
+	if err := provisionShowcaseDraft(ctx, storeRoot); err != nil {
 		return fmt.Errorf("provisioning showcase draft fixtures: %w", err)
 	}
 
@@ -162,8 +168,16 @@ func run() error {
 	// The control server (control.go): the hermetic open-MR feed the
 	// directory home consults per render, plus the outage and
 	// delete-branch toggles the directory e2e drives — loopback only.
+	// BaseContext roots every control request's ctx in run()'s ctx, so the
+	// git calls its handlers make (delete-branch; the lazily-provisioned
+	// empty-glance and vocab fixture stores) are cancelled by an interrupt
+	// too — not just the provisioning done inline above.
 	ctrl := newControlServer(storeRoot, moduleRoot)
-	ctrlSrv := &http.Server{Addr: controlAddr, Handler: ctrl.handler()}
+	ctrlSrv := &http.Server{
+		Addr:        controlAddr,
+		Handler:     ctrl.handler(),
+		BaseContext: func(net.Listener) context.Context { return ctx },
+	}
 	ctrlLn, err := net.Listen("tcp", controlAddr)
 	if err != nil {
 		return fmt.Errorf("binding control server: %w", err)
@@ -174,7 +188,11 @@ func run() error {
 	// The read-only inspection server (inspect.go): the suite's window
 	// into the serving checkout's git state and the managed worktrees'
 	// files (spec/draft-boards ac-2's isolation and clean-checkout proof).
-	inspectSrv := &http.Server{Addr: inspectAddr, Handler: inspectHandler(storeRoot)}
+	inspectSrv := &http.Server{
+		Addr:        inspectAddr,
+		Handler:     inspectHandler(storeRoot),
+		BaseContext: func(net.Listener) context.Context { return ctx },
+	}
 	inspectLn, err := net.Listen("tcp", inspectAddr)
 	if err != nil {
 		return fmt.Errorf("binding inspection server: %w", err)

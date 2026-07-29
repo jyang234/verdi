@@ -42,6 +42,7 @@ package main
 // together.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -339,8 +340,8 @@ Branch-only, beside its parent.
 // (already checked out at this point), then cuts flInstantiatedChildName's
 // own design branch from main, commits its scaffolded story there, and
 // restores designBranch.
-func provisionFamilyBoardLinks(storeRoot string) error {
-	commit, err := gitOutput(storeRoot, "rev-parse", "HEAD")
+func provisionFamilyBoardLinks(ctx context.Context, storeRoot string) error {
+	commit, err := gitOutput(ctx, storeRoot, "rev-parse", "HEAD")
 	if err != nil {
 		return fmt.Errorf("resolving HEAD for family-board-links fixtures: %w", err)
 	}
@@ -361,10 +362,10 @@ func provisionFamilyBoardLinks(storeRoot string) error {
 			return fmt.Errorf("writing %s: %w", rel, err)
 		}
 	}
-	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "add", "-A"); err != nil {
 		return err
 	}
-	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: family-board-links fixtures (archived-match, archived-parent, dangling implements target)"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: family-board-links fixtures (archived-match, archived-parent, dangling implements target)"); err != nil {
 		return err
 	}
 
@@ -372,7 +373,7 @@ func provisionFamilyBoardLinks(storeRoot string) error {
 	// branch): cut from main, exactly like provisionDraftBoards' own
 	// fixture branches, so its tree still carries the corpus.
 	branch := "design/" + flInstantiatedChildName
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", branch, "main"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", "-b", branch, "main"); err != nil {
 		return fmt.Errorf("cutting %s: %w", branch, err)
 	}
 	instPath := filepath.Join(storeRoot, ".verdi", "specs", "active", flInstantiatedChildName, "spec.md")
@@ -382,10 +383,10 @@ func provisionFamilyBoardLinks(storeRoot string) error {
 	if err := os.WriteFile(instPath, []byte(flInstantiatedChildSpec), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", flInstantiatedChildName, err)
 	}
-	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "add", "-A"); err != nil {
 		return err
 	}
-	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: "+branch+" family-board-links fixture (instantiated, not yet landed)"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: "+branch+" family-board-links fixture (instantiated, not yet landed)"); err != nil {
 		return err
 	}
 
@@ -393,10 +394,10 @@ func provisionFamilyBoardLinks(storeRoot string) error {
 	// onto flPairBranch (cut from main, exactly like the branch above), so
 	// the serving checkout's tree carries neither — the branch-only family
 	// whose boards must link to each other under /b/, never root-relative.
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", flPairBranch, "main"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", "-b", flPairBranch, "main"); err != nil {
 		return fmt.Errorf("cutting %s: %w", flPairBranch, err)
 	}
-	pairCommit, err := gitOutput(storeRoot, "rev-parse", "main")
+	pairCommit, err := gitOutput(ctx, storeRoot, "rev-parse", "main")
 	if err != nil {
 		return fmt.Errorf("resolving main for the pair-branch fixture: %w", err)
 	}
@@ -413,15 +414,15 @@ func provisionFamilyBoardLinks(storeRoot string) error {
 			return fmt.Errorf("writing %s: %w", rel, err)
 		}
 	}
-	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "add", "-A"); err != nil {
 		return err
 	}
-	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: "+flPairBranch+" family pair fixture (branch-only feature + implementing story, ADJ-70)"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: "+flPairBranch+" family pair fixture (branch-only feature + implementing story, ADJ-70)"); err != nil {
 		return err
 	}
 
 	// Restore the board suite's serving checkout.
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", designBranch); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", designBranch); err != nil {
 		return fmt.Errorf("restoring %s: %w", designBranch, err)
 	}
 	return nil

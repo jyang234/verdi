@@ -20,6 +20,7 @@ package main
 // the board suite's authoring-mode fixture — is untouched.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,7 +60,7 @@ links:
 }
 
 // provisionDirectory authors the directory fixture branches above.
-func provisionDirectory(storeRoot string) error {
+func provisionDirectory(ctx context.Context, storeRoot string) error {
 	drafts := []struct{ name, story string }{
 		{dirLocalDraftName, "jira:LOAN-2301"},
 		{dirRemoteDraftName, "jira:LOAN-2302"},
@@ -67,7 +68,7 @@ func provisionDirectory(storeRoot string) error {
 	}
 	for _, d := range drafts {
 		branch := "design/" + d.name
-		if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", branch, "main"); err != nil {
+		if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", "-b", branch, "main"); err != nil {
 			return fmt.Errorf("cutting %s: %w", branch, err)
 		}
 		rel := filepath.Join(".verdi", "specs", "active", d.name, "spec.md")
@@ -78,32 +79,32 @@ func provisionDirectory(storeRoot string) error {
 		if err := os.WriteFile(path, []byte(directoryDraftSpec(d.name, d.story)), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", rel, err)
 		}
-		if err := runGit(storeRoot, nil, "add", rel); err != nil {
+		if err := runGit(ctx, storeRoot, nil, "add", rel); err != nil {
 			return err
 		}
-		if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: "+d.name+" directory fixture"); err != nil {
+		if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: "+d.name+" directory fixture"); err != nil {
 			return err
 		}
 	}
 
 	// The remote-only shape: push (creating the remote-tracking ref), then
 	// delete the local branch once we are off it.
-	if err := runGit(storeRoot, nil, "push", "--quiet", "origin", "design/"+dirRemoteDraftName); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "push", "--quiet", "origin", "design/"+dirRemoteDraftName); err != nil {
 		return err
 	}
 
 	// The empty-branch shape (ac-3): a branch cut from main that never
 	// received a draft spec — a plain ref creation, no checkout needed.
-	if err := runGit(storeRoot, nil, "branch", "design/"+dirEmptyBranchName, "main"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "branch", "design/"+dirEmptyBranchName, "main"); err != nil {
 		return err
 	}
 
 	// Restore the board suite's serving checkout, then drop the local half
 	// of the remote-only fixture.
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", designBranch); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", designBranch); err != nil {
 		return err
 	}
-	if err := runGit(storeRoot, nil, "branch", "-D", "design/"+dirRemoteDraftName); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "branch", "-D", "design/"+dirRemoteDraftName); err != nil {
 		return err
 	}
 	return nil
