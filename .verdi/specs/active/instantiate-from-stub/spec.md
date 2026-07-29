@@ -4,7 +4,7 @@ kind: spec
 title: "Instantiate From Stub"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: draft
 story: jira:VERDI-R54-5
 problem: { text: "turning a declared stub into its story was manual copying: the operator hand-invented the spec directory, frontmatter, and implements edges the stub's declaration already determined — the paved road the fast path depends on did not exist as a road", anchor: "#problem" }
 outcome: { text: "a stub instantiates its story on the paved road: a pre-filled scaffold — title, story-ref prompt, implements edges to the stub's acceptance criteria — slug-bound to its stub with no new provenance record, spike stubs instantiating the spike variant, from either the board action or the CLI through one shared core", anchor: "#outcome" }
@@ -19,7 +19,6 @@ decisions:
   - { id: dc-2, text: "the stub-to-story binding is the ratified slug equality (parent dc-3), never a new provenance link — the scaffold writes implements edges to the parent's acceptance criteria and nothing else into the link graph", anchor: "#dc-2" }
 constraints:
   - { id: co-1, text: "no network in any test: the shared core, both surfaces, the parity assertion, and every refusal are exercised by fixturegit-backed unit tests and hermetic Playwright specs, all under make verify", anchor: "#co-1" }
-frozen: { at: 2026-07-28, commit: 3466590a25b3c655f4fb4d385b3dd50f08a6b62e }
 ---
 # Instantiate From Stub
 
