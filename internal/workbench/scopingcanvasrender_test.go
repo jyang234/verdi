@@ -537,10 +537,23 @@ func TestScopingCanvas_ProtoStickyLandsInStubBand(t *testing.T) {
 }
 
 // The two committed fixtures that already declare stubs — the corpus's
-// escrow-autopay (also driven end-to-end by e2e/tests/31) and
-// this repo's own live-store disclosure-legibility — render their stub
-// cards for free; assert them verbatim so the committed record and the
-// wall never drift apart silently.
+// escrow-autopay (also driven end-to-end by e2e/tests/31) and a snapshot of
+// this repo's own spec/disclosure-legibility — render their stub cards for
+// free; assert them verbatim so the committed record and the wall never
+// drift apart silently.
+//
+// testdata/disclosure-legibility-spec.md is a byte snapshot of this repo's
+// own .verdi store spec/disclosure-legibility spec.md, taken at 6b1a0ca
+// (2026-07-29). It is a snapshot rather than a live-store path because a
+// test must not couple to a spec's lifecycle position: closure MOVES a
+// spec's directory (specs/active/<slug>/ → specs/archive/<slug>/), which is
+// every spec's designed destiny, so a live-store path breaks the day the
+// spec it names closes — as this case did when PR #243 archived
+// disclosure-legibility. Snapshotted from the post-archive
+// specs/archive/disclosure-legibility/spec.md; those bytes differ from the
+// pre-archive ones the test previously consumed only in the freeze's own
+// stamp (status: accepted-pending-build → status: closed). The stub
+// declarations under test are unchanged.
 func TestScopingCanvas_CommittedFixturesRenderStubCards(t *testing.T) {
 	cases := []struct {
 		name, path string
@@ -554,8 +567,8 @@ func TestScopingCanvas_CommittedFixturesRenderStubCards(t *testing.T) {
 			},
 		},
 		{
-			name:  "disclosure-legibility (the live store)",
-			path:  "../../.verdi/specs/active/disclosure-legibility/spec.md",
+			name:  "disclosure-legibility (snapshot of this repo's own store)",
+			path:  "testdata/disclosure-legibility-spec.md",
 			slugs: []string{"disclosure-seam", "disclosures-panel"},
 		},
 	}
