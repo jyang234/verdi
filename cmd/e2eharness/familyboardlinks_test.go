@@ -16,16 +16,16 @@ import (
 func TestProvisionFamilyBoardLinks_PairBranch(t *testing.T) {
 	storeRoot := newDraftBoardsTestStore(t)
 
-	if err := provisionFamilyBoardLinks(storeRoot); err != nil {
+	if err := provisionFamilyBoardLinks(t.Context(), storeRoot); err != nil {
 		t.Fatalf("provisionFamilyBoardLinks: %v", err)
 	}
 
-	if err := runGit(storeRoot, nil, "rev-parse", "--verify", "refs/heads/"+flPairBranch); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "rev-parse", "--verify", "refs/heads/"+flPairBranch); err != nil {
 		t.Fatalf("pair branch %s missing: %v", flPairBranch, err)
 	}
 	for _, name := range []string{flPairFeatureName, flPairStoryName} {
 		rel := ".verdi/specs/active/" + name + "/spec.md"
-		if err := runGit(storeRoot, nil, "cat-file", "-e", flPairBranch+":"+rel); err != nil {
+		if err := runGit(t.Context(), storeRoot, nil, "cat-file", "-e", flPairBranch+":"+rel); err != nil {
 			t.Errorf("%s missing from %s's tree: %v", rel, flPairBranch, err)
 		}
 		if _, err := os.Stat(filepath.Join(storeRoot, filepath.FromSlash(rel))); !os.IsNotExist(err) {
@@ -45,7 +45,7 @@ func TestProvisionFamilyBoardLinks_PairBranch(t *testing.T) {
 // TestProvisionFamilyBoardLinks_Negative_NoRepo: a store that is not a git
 // repository fails loudly rather than half-provisioning.
 func TestProvisionFamilyBoardLinks_Negative_NoRepo(t *testing.T) {
-	if err := provisionFamilyBoardLinks(t.TempDir()); err == nil {
+	if err := provisionFamilyBoardLinks(t.Context(), t.TempDir()); err == nil {
 		t.Fatal("provisionFamilyBoardLinks over a non-repo: got nil error")
 	}
 }

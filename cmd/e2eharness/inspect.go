@@ -36,12 +36,12 @@ func inspectHandler(storeRoot string) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		branch, err := gitOutput(storeRoot, "rev-parse", "--abbrev-ref", "HEAD")
+		branch, err := gitOutput(r.Context(), storeRoot, "rev-parse", "--abbrev-ref", "HEAD")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		porcelain, err := gitOutput(storeRoot, "status", "--porcelain")
+		porcelain, err := gitOutput(r.Context(), storeRoot, "status", "--porcelain")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

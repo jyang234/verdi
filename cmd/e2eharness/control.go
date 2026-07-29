@@ -105,7 +105,7 @@ func (c *controlServer) deleteBranch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "only design/* branches may be deleted", http.StatusBadRequest)
 		return
 	}
-	if err := runGit(c.storeRoot, nil, "branch", "-D", branch); err != nil {
+	if err := runGit(r.Context(), c.storeRoot, nil, "branch", "-D", branch); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

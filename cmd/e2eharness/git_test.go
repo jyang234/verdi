@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -16,10 +19,10 @@ func TestRunGitPinsDeterministicEnv(t *testing.T) {
 	}
 	dir := t.TempDir()
 
-	if err := runGit(dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := runGit(t.Context(), dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	if err := runGit(dir, nil, "commit", "--quiet", "--no-verify", "--allow-empty", "-m", "test commit"); err != nil {
+	if err := runGit(t.Context(), dir, nil, "commit", "--quiet", "--no-verify", "--allow-empty", "-m", "test commit"); err != nil {
 		t.Fatalf("git commit: %v", err)
 	}
 
@@ -44,7 +47,7 @@ func TestRunGitWrapsFailure(t *testing.T) {
 	}
 	dir := filepath.Join(t.TempDir(), "does-not-exist")
 
-	err := runGit(dir, nil, "init")
+	err := runGit(t.Context(), dir, nil, "init")
 	if err == nil {
 		t.Fatal("expected error running git in a nonexistent dir, got nil")
 	}
@@ -58,22 +61,65 @@ func TestGitOutput(t *testing.T) {
 		t.Skip("git not found on PATH")
 	}
 	dir := t.TempDir()
-	if err := runGit(dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := runGit(t.Context(), dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
 
-	if _, err := gitOutput(dir, "rev-parse", "HEAD"); err == nil {
+	if _, err := gitOutput(t.Context(), dir, "rev-parse", "HEAD"); err == nil {
 		t.Fatal("expected error rev-parsing HEAD in an empty repo, got nil")
 	}
 
-	if err := runGit(dir, nil, "commit", "--quiet", "--no-verify", "--allow-empty", "-m", "test commit"); err != nil {
+	if err := runGit(t.Context(), dir, nil, "commit", "--quiet", "--no-verify", "--allow-empty", "-m", "test commit"); err != nil {
 		t.Fatalf("git commit: %v", err)
 	}
-	sha, err := gitOutput(dir, "rev-parse", "HEAD")
+	sha, err := gitOutput(t.Context(), dir, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatalf("gitOutput rev-parse: %v", err)
 	}
 	if len(sha) != 40 || strings.ContainsAny(sha, " \n") {
 		t.Fatalf("gitOutput returned %q, want a trimmed 40-hex sha", sha)
+	}
+}
+
+// TestGitSeamObservesCanceledContext is the witness for the claim main.go's
+// signal handling makes — that an interrupt's ctx cancellation reaches every
+// exec call below it. Each of the three git entry points is handed an
+// ALREADY-cancelled ctx over a perfectly healthy repository: a bare
+// exec.Command would happily run git anyway and return nil, so a nil error
+// here is exactly the regression (an unthreaded ctx) this pins. Local git
+// only — no network.
+func TestGitSeamObservesCanceledContext(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+	dir := t.TempDir()
+	if err := runGit(t.Context(), dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(t.Context(), dir, nil, "add", "-A"); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGit(t.Context(), dir, nil, "commit", "--quiet", "--no-verify", "-m", "seed"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	sha, err := gitOutput(t.Context(), dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("gitOutput rev-parse: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if err := runGit(ctx, dir, nil, "rev-parse", "HEAD"); !errors.Is(err, context.Canceled) {
+		t.Errorf("runGit under a canceled ctx = %v, want context.Canceled", err)
+	}
+	if _, err := gitOutput(ctx, dir, "rev-parse", "HEAD"); !errors.Is(err, context.Canceled) {
+		t.Errorf("gitOutput under a canceled ctx = %v, want context.Canceled", err)
+	}
+	if _, err := gitShowBytes(ctx, dir, sha, "f.txt"); !errors.Is(err, context.Canceled) {
+		t.Errorf("gitShowBytes under a canceled ctx = %v, want context.Canceled", err)
 	}
 }

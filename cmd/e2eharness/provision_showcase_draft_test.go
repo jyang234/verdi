@@ -152,18 +152,18 @@ func newShowcaseDraftTestStore(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", ".gitignore"), []byte("data/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := gitInitAndCommit(storeRoot); err != nil {
+	if err := gitInitAndCommit(t.Context(), storeRoot); err != nil {
 		t.Fatalf("git init/commit: %v", err)
 	}
-	if err := runGit(storeRoot, nil, "config", "user.name", "verdi-e2e"); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "config", "user.name", "verdi-e2e"); err != nil {
 		t.Fatal(err)
 	}
-	if err := runGit(storeRoot, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
 		t.Fatal(err)
 	}
 	// The board suite's serving branch must exist for the provisioner's
 	// closing checkout to land on it (provisionBoard cuts it in the harness).
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", designBranch); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "checkout", "--quiet", "-b", designBranch); err != nil {
 		t.Fatal(err)
 	}
 	return storeRoot
@@ -175,14 +175,14 @@ func newShowcaseDraftTestStore(t *testing.T) string {
 func TestProvisionShowcaseDraft_Happy(t *testing.T) {
 	storeRoot := newShowcaseDraftTestStore(t)
 
-	if err := provisionShowcaseDraft(storeRoot); err != nil {
+	if err := provisionShowcaseDraft(t.Context(), storeRoot); err != nil {
 		t.Fatalf("provisionShowcaseDraft: %v", err)
 	}
 
-	if err := runGit(storeRoot, nil, "rev-parse", "--verify", "refs/heads/"+showcaseDraftBranch); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "rev-parse", "--verify", "refs/heads/"+showcaseDraftBranch); err != nil {
 		t.Errorf("draft branch %s was not created: %v", showcaseDraftBranch, err)
 	}
-	head, err := gitOutput(storeRoot, "rev-parse", "--abbrev-ref", "HEAD")
+	head, err := gitOutput(t.Context(), storeRoot, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestProvisionShowcaseDraft_Happy(t *testing.T) {
 // TestProvisionShowcaseDraft_Negative_NoRepo proves the provisioner fails
 // loudly against a directory that is not a git repository.
 func TestProvisionShowcaseDraft_Negative_NoRepo(t *testing.T) {
-	if err := provisionShowcaseDraft(t.TempDir()); err == nil {
+	if err := provisionShowcaseDraft(t.Context(), t.TempDir()); err == nil {
 		t.Fatal("provisionShowcaseDraft over a non-repo: got nil error")
 	}
 }
@@ -232,15 +232,15 @@ func TestGitShowBytes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "d.mermaid"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := gitInitAndCommit(dir); err != nil {
+	if err := gitInitAndCommit(t.Context(), dir); err != nil {
 		t.Fatal(err)
 	}
-	sha, err := gitOutput(dir, "rev-parse", "HEAD")
+	sha, err := gitOutput(t.Context(), dir, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := gitShowBytes(dir, sha, "d.mermaid")
+	got, err := gitShowBytes(t.Context(), dir, sha, "d.mermaid")
 	if err != nil {
 		t.Fatalf("gitShowBytes: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestGitShowBytes(t *testing.T) {
 		t.Errorf("gitShowBytes = %q, want byte-exact %q (trailing newline preserved)", got, content)
 	}
 
-	if _, err := gitShowBytes(dir, sha, "no-such-file"); err == nil {
+	if _, err := gitShowBytes(t.Context(), dir, sha, "no-such-file"); err == nil {
 		t.Fatal("gitShowBytes on an absent path: got nil error")
 	}
 }

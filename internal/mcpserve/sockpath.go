@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/jyang234/verdi/internal/atomicfile"
 )
 
 // maxSockPathLen is the conservative usable length for a unix domain
@@ -64,30 +66,17 @@ func SocketPath(root string) (string, error) {
 // data/ if needed. This is the legible, cat-able record of where the
 // socket actually is — I-29's other half, since the socket itself no
 // longer lives at the spec-literal store-relative path.
+//
+// The temp-then-rename is internal/atomicfile's, not a private copy: this
+// file predated atomicfile's extraction (spec/shared-homes ac-3) and kept
+// its own hand-rolled MkdirAll+CreateTemp+Rename — including that idiom's
+// missing fsync — until the sweep reached it. 0o600 preserves the mode
+// os.CreateTemp gave the pointer file before the migration, and matches
+// the mutable zone's other atomicfile callers (boardio, boardlayout).
 func WritePointerFile(root, sockPath string) error {
-	dataDir := filepath.Join(root, ".verdi", "data")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	target := filepath.Join(root, ".verdi", "data", "serve.path")
+	if err := atomicfile.Write(target, []byte(sockPath+"\n"), 0o600); err != nil {
 		return fmt.Errorf("mcpserve: WritePointerFile: %w", err)
-	}
-	target := filepath.Join(dataDir, "serve.path")
-
-	tmp, err := os.CreateTemp(dataDir, ".serve.path.tmp-*")
-	if err != nil {
-		return fmt.Errorf("mcpserve: WritePointerFile: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, werr := tmp.WriteString(sockPath + "\n"); werr != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("mcpserve: WritePointerFile: %w", werr)
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("mcpserve: WritePointerFile: %w", cerr)
-	}
-	if rerr := os.Rename(tmpName, target); rerr != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("mcpserve: WritePointerFile: %w", rerr)
 	}
 	return nil
 }

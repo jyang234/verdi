@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -25,7 +26,7 @@ import (
 // store with other verdi verbs sees a legible one) and arrives with the
 // rest of the committed zone via the copyTree call below — this function no
 // longer writes it itself.
-func provisionStore(moduleRoot, storeRoot string) error {
+func provisionStore(ctx context.Context, moduleRoot, storeRoot string) error {
 	if err := os.MkdirAll(storeRoot, 0o755); err != nil {
 		return err
 	}
@@ -138,7 +139,7 @@ func provisionStore(moduleRoot, storeRoot string) error {
 		return fmt.Errorf("copying .gitattributes: %w", err)
 	}
 
-	if err := gitInitAndCommit(storeRoot); err != nil {
+	if err := gitInitAndCommit(ctx, storeRoot); err != nil {
 		return fmt.Errorf("git init/commit: %w", err)
 	}
 
@@ -221,14 +222,14 @@ const proposalDiagram = "---\n" +
 	"  decline --> audit\n" +
 	"  audit --> notify\n"
 
-func gitInitAndCommit(dir string) error {
-	if err := runGit(dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+func gitInitAndCommit(ctx context.Context, dir string) error {
+	if err := runGit(ctx, dir, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
 		return err
 	}
-	if err := runGit(dir, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, dir, nil, "add", "-A"); err != nil {
 		return err
 	}
-	return runGit(dir, nil, "commit", "--quiet", "--no-verify", "-m", "e2e scratch store: seeded from examples/showcase")
+	return runGit(ctx, dir, nil, "commit", "--quiet", "--no-verify", "-m", "e2e scratch store: seeded from examples/showcase")
 }
 
 // copyTree recursively copies every regular file under src to dst. A

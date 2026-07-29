@@ -25,13 +25,13 @@ func newDraftBoardsTestStore(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", ".gitignore"), []byte("data/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := gitInitAndCommit(storeRoot); err != nil {
+	if err := gitInitAndCommit(t.Context(), storeRoot); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	if err := runGit(storeRoot, nil, "config", "user.name", "verdi-e2e"); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "config", "user.name", "verdi-e2e"); err != nil {
 		t.Fatal(err)
 	}
-	if err := runGit(storeRoot, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
 		t.Fatal(err)
 	}
 	// D6-31 (fixturegit.go's own discipline): never let this repo spawn a
@@ -39,20 +39,20 @@ func newDraftBoardsTestStore(t *testing.T) string {
 	// .git/objects when t.TempDir cleanup walks the tree, failing the test
 	// with "TempDir RemoveAll cleanup: ... directory not empty" on slower
 	// disks (observed in CI on the many-commit family-links provisioner).
-	if err := runGit(storeRoot, nil, "config", "gc.autoDetach", "false"); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "config", "gc.autoDetach", "false"); err != nil {
 		t.Fatal(err)
 	}
-	if err := runGit(storeRoot, nil, "config", "maintenance.auto", "false"); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "config", "maintenance.auto", "false"); err != nil {
 		t.Fatal(err)
 	}
 	origin := filepath.Join(scratch, "origin.git")
-	if err := runGit("", nil, "init", "--bare", "--quiet", "--initial-branch=main", origin); err != nil {
+	if err := runGit(t.Context(), "", nil, "init", "--bare", "--quiet", "--initial-branch=main", origin); err != nil {
 		t.Fatal(err)
 	}
-	if err := runGit(storeRoot, nil, "remote", "add", "origin", origin); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "remote", "add", "origin", origin); err != nil {
 		t.Fatal(err)
 	}
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", designBranch); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "checkout", "--quiet", "-b", designBranch); err != nil {
 		t.Fatal(err)
 	}
 	return storeRoot
@@ -64,19 +64,19 @@ func newDraftBoardsTestStore(t *testing.T) string {
 func TestProvisionDraftBoards_Happy(t *testing.T) {
 	storeRoot := newDraftBoardsTestStore(t)
 
-	if err := provisionDraftBoards(storeRoot); err != nil {
+	if err := provisionDraftBoards(t.Context(), storeRoot); err != nil {
 		t.Fatalf("provisionDraftBoards: %v", err)
 	}
 
 	for _, branch := range []string{"design/" + dbTabAName, "design/" + dbTabBName, dbSameSpecBranch} {
-		if err := runGit(storeRoot, nil, "rev-parse", "--verify", "refs/heads/"+branch); err != nil {
+		if err := runGit(t.Context(), storeRoot, nil, "rev-parse", "--verify", "refs/heads/"+branch); err != nil {
 			t.Errorf("local branch %s missing: %v", branch, err)
 		}
 	}
-	if err := runGit(storeRoot, nil, "rev-parse", "--verify", "refs/heads/design/"+dbSealedRemoteName); err == nil {
+	if err := runGit(t.Context(), storeRoot, nil, "rev-parse", "--verify", "refs/heads/design/"+dbSealedRemoteName); err == nil {
 		t.Error("sealed-remote branch still has a local ref; it must be remote-tracking only")
 	}
-	if err := runGit(storeRoot, nil, "rev-parse", "--verify", "refs/remotes/origin/design/"+dbSealedRemoteName); err != nil {
+	if err := runGit(t.Context(), storeRoot, nil, "rev-parse", "--verify", "refs/remotes/origin/design/"+dbSealedRemoteName); err != nil {
 		t.Errorf("sealed-remote remote-tracking ref missing: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestProvisionDraftBoards_Happy(t *testing.T) {
 // TestProvisionDraftBoards_Negative: a store that is not a git repository
 // fails loudly rather than half-provisioning.
 func TestProvisionDraftBoards_Negative_NoRepo(t *testing.T) {
-	if err := provisionDraftBoards(t.TempDir()); err == nil {
+	if err := provisionDraftBoards(t.Context(), t.TempDir()); err == nil {
 		t.Fatal("provisionDraftBoards over a non-repo: got nil error")
 	}
 }

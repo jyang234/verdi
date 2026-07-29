@@ -32,6 +32,7 @@ package main
 // untouched.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -164,7 +165,7 @@ func showcaseDraftAnnotations(specCommit string) string {
 // provisionShowcaseDraft authors the payoff-quote-portal live draft on its
 // own design branch, then pre-cuts and seeds the branch's managed worktree
 // so its authoring board renders under /b/ with its open-question stickies.
-func provisionShowcaseDraft(storeRoot string) error {
+func provisionShowcaseDraft(ctx context.Context, storeRoot string) error {
 	// The pin commit and the base diagram bytes come from main, where the
 	// corpus base lives — resolved before the branch is cut. The bytes are
 	// read from the PINNED commit itself (git show <mainSHA>:<path>), never
@@ -172,11 +173,11 @@ func provisionShowcaseDraft(storeRoot string) error {
 	// (diagrambase.Recover, via gitx.Show) will read them back: the digests
 	// are pinned-commit-derived by construction, not by the accident of an
 	// untouched checkout.
-	mainSHA, err := gitOutput(storeRoot, "rev-parse", "main")
+	mainSHA, err := gitOutput(ctx, storeRoot, "rev-parse", "main")
 	if err != nil {
 		return fmt.Errorf("resolving main HEAD for the proposal's base pin: %w", err)
 	}
-	baseRaw, err := gitShowBytes(storeRoot, mainSHA, ".verdi/diagrams/"+showcaseDraftBaseDiagram+".mermaid")
+	baseRaw, err := gitShowBytes(ctx, storeRoot, mainSHA, ".verdi/diagrams/"+showcaseDraftBaseDiagram+".mermaid")
 	if err != nil {
 		return fmt.Errorf("reading base diagram %s at %s: %w", showcaseDraftBaseDiagram, mainSHA, err)
 	}
@@ -189,7 +190,7 @@ func provisionShowcaseDraft(storeRoot string) error {
 	digest := "sha256:" + hex.EncodeToString(sum[:])
 
 	// Author the committed branch artifacts (spec + proposal diagram).
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", showcaseDraftBranch, "main"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", "-b", showcaseDraftBranch, "main"); err != nil {
 		return fmt.Errorf("cutting %s: %w", showcaseDraftBranch, err)
 	}
 	files := map[string]string{
@@ -205,22 +206,22 @@ func provisionShowcaseDraft(storeRoot string) error {
 			return fmt.Errorf("writing %s: %w", rel, err)
 		}
 	}
-	if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "add", "-A"); err != nil {
 		return err
 	}
-	if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: payoff-quote-portal live draft (showcase)"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: payoff-quote-portal live draft (showcase)"); err != nil {
 		return err
 	}
 	// The fixture commit the stickies' target refs pin (a real commit on
 	// this branch — the spec revision they annotate).
-	specCommit, err := gitOutput(storeRoot, "rev-parse", "HEAD")
+	specCommit, err := gitOutput(ctx, storeRoot, "rev-parse", "HEAD")
 	if err != nil {
 		return fmt.Errorf("resolving the showcase-draft fixture commit: %w", err)
 	}
 
 	// Restore the serving checkout before touching worktrees: the branch
 	// must not be checked out at the serving root for `git worktree add`.
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", designBranch); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", designBranch); err != nil {
 		return fmt.Errorf("restoring %s: %w", designBranch, err)
 	}
 
@@ -228,7 +229,7 @@ func provisionShowcaseDraft(storeRoot string) error {
 	// path (design/<name> -> .verdi/data/worktrees/<name>/), inside the
 	// gitignored data zone. Serve-time EnsureWorktree reuses it.
 	worktree := filepath.Join(storeRoot, ".verdi", "data", "worktrees", showcaseDraftName)
-	if err := runGit(storeRoot, nil, "worktree", "add", "--quiet", worktree, showcaseDraftBranch); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "worktree", "add", "--quiet", worktree, showcaseDraftBranch); err != nil {
 		return fmt.Errorf("pre-cutting %s worktree: %w", showcaseDraftBranch, err)
 	}
 
@@ -247,11 +248,14 @@ func provisionShowcaseDraft(storeRoot string) error {
 // gitShowBytes returns the RAW bytes of path at commit (`git show
 // <commit>:<path>`) — the byte-exact sibling of gitOutput, which trims
 // trailing whitespace and so would corrupt a content digest over file
-// bytes ending in a newline. This is the same read the digest's real
-// consumer performs (diagrambase.Recover via gitx.Show at the pinned
-// commit), so what is digested here is what will be verified there.
-func gitShowBytes(dir, commit, path string) ([]byte, error) {
-	cmd := exec.Command("git", "show", commit+":"+path)
+// bytes ending in a newline. That trimming is the whole reason this is not
+// a gitOutput call: it is the one documented departure from git.go's seam,
+// and it keeps the seam's env pinning and ctx honouring. This is the same
+// read the digest's real consumer performs (diagrambase.Recover via
+// gitx.Show at the pinned commit), so what is digested here is what will be
+// verified there.
+func gitShowBytes(ctx context.Context, dir, commit, path string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", "show", commit+":"+path)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), deterministicGitEnv...)
 	var stderr strings.Builder

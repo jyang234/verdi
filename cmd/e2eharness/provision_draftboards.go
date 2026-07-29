@@ -21,6 +21,7 @@ package main
 // committed .verdi/.gitignore that keeps the data zone untracked).
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -120,7 +121,7 @@ Prose.
 // carrying its files as one committed layer, pushes the sealed-remote
 // branch to the local bare origin and deletes its local branch, then
 // restores the serving checkout to designBranch.
-func provisionDraftBoards(storeRoot string) error {
+func provisionDraftBoards(ctx context.Context, storeRoot string) error {
 	type fixture struct {
 		branch string
 		files  map[string]string
@@ -142,7 +143,7 @@ func provisionDraftBoards(storeRoot string) error {
 	}
 
 	for _, f := range fixtures {
-		if err := runGit(storeRoot, nil, "checkout", "--quiet", "-b", f.branch, "main"); err != nil {
+		if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", "-b", f.branch, "main"); err != nil {
 			return fmt.Errorf("cutting %s: %w", f.branch, err)
 		}
 		for rel, content := range f.files {
@@ -154,29 +155,29 @@ func provisionDraftBoards(storeRoot string) error {
 				return fmt.Errorf("writing %s: %w", rel, err)
 			}
 		}
-		if err := runGit(storeRoot, nil, "add", "-A"); err != nil {
+		if err := runGit(ctx, storeRoot, nil, "add", "-A"); err != nil {
 			return err
 		}
-		if err := runGit(storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: "+f.branch+" draft-boards fixture"); err != nil {
+		if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "design: "+f.branch+" draft-boards fixture"); err != nil {
 			return err
 		}
 		if f.remote {
-			if err := runGit(storeRoot, nil, "push", "--quiet", "origin", f.branch); err != nil {
+			if err := runGit(ctx, storeRoot, nil, "push", "--quiet", "origin", f.branch); err != nil {
 				return err
 			}
 			// Step off before deleting: a branch cannot be deleted while
 			// checked out.
-			if err := runGit(storeRoot, nil, "checkout", "--quiet", "main"); err != nil {
+			if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", "main"); err != nil {
 				return err
 			}
-			if err := runGit(storeRoot, nil, "branch", "--quiet", "-D", f.branch); err != nil {
+			if err := runGit(ctx, storeRoot, nil, "branch", "--quiet", "-D", f.branch); err != nil {
 				return err
 			}
 		}
 	}
 
 	// Restore the board suite's serving branch state.
-	if err := runGit(storeRoot, nil, "checkout", "--quiet", designBranch); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", designBranch); err != nil {
 		return fmt.Errorf("restoring %s: %w", designBranch, err)
 	}
 	return nil

@@ -1,15 +1,25 @@
 package main
 
 // The single git-invocation seam (file-topics ac-4): every scratch-store git
-// call — the corpus seed commit, the bare local origin init, and the design
-// branch's fixture commit — used to run through its own hand-typed closure,
-// and only one of the three pinned deterministic dates. runGit replaces all
-// three so every commit e2eharness produces has a fixed SHA (nothing here
-// asserts a specific hash — this is determinism-for-its-own-sake, matching
-// the guarantee internal/fixturegit gives the Go test suites, at
-// test-harness weight rather than fixturegit's golden-SHA machinery).
+// call in this package goes through runGit (command) or gitOutput (query)
+// — the corpus seed commit, the bare local origin init, the design branch's
+// fixture commit, and every provisioner's reads. Each used to run through
+// its own hand-typed closure carrying its own env, and only one of them
+// pinned the deterministic dates; the seam is why every commit e2eharness
+// produces now has a fixed SHA (nothing here asserts a specific hash — this
+// is determinism-for-its-own-sake, matching the guarantee
+// internal/fixturegit gives the Go test suites, at test-harness weight
+// rather than fixturegit's golden-SHA machinery).
+//
+// The seam has drifted once and been repaired: provision_diagram.go grew a
+// near-identical runGitOut after this file shipped, and it has been folded
+// back into gitOutput. There is exactly ONE deliberate exception, and it
+// documents its own reason: provision_showcase_draft.go's gitShowBytes,
+// which must return RAW bytes where gitOutput trims. Anything else that
+// needs to shell out to git belongs here.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,11 +33,14 @@ var deterministicGitEnv = []string{
 	"GIT_COMMITTER_NAME=verdi-e2e", "GIT_COMMITTER_EMAIL=e2e@verdi.invalid", "GIT_COMMITTER_DATE=1704067200 +0000",
 }
 
-// runGit runs git in dir, carrying deterministicGitEnv plus any extraEnv on
-// top of the ambient environment. On failure the error wraps the command's
-// combined output.
-func runGit(dir string, extraEnv []string, args ...string) error {
-	cmd := exec.Command("git", args...)
+// runGit runs git in dir under ctx, carrying deterministicGitEnv plus any
+// extraEnv on top of the ambient environment. On failure the error wraps
+// the command's combined output. ctx is honoured for real (CommandContext):
+// an already-cancelled ctx refuses before git is spawned, and a cancellation
+// mid-run kills the child — the seam main.go's interrupt handling relies on
+// to unwind provisioning instead of leaking a git process.
+func runGit(ctx context.Context, dir string, extraEnv []string, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(append(os.Environ(), deterministicGitEnv...), extraEnv...)
 	out, err := cmd.CombinedOutput()
@@ -37,12 +50,13 @@ func runGit(dir string, extraEnv []string, args ...string) error {
 	return nil
 }
 
-// gitOutput runs git in dir and returns its trimmed stdout — the query
-// twin of runGit (same env pinning), for provisioning steps that need a
-// value back (e.g. the store HEAD sha the sealed badge fixture's frozen
-// stamp pins). On failure the error wraps stderr.
-func gitOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+// gitOutput runs git in dir under ctx and returns its trimmed stdout — the
+// query twin of runGit (same env pinning, same ctx honouring), for
+// provisioning steps that need a value back (e.g. the store HEAD sha the
+// sealed badge fixture's frozen stamp pins) and for the loopback inspection
+// routes, which pass their request's ctx. On failure the error wraps stderr.
+func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), deterministicGitEnv...)
 	var stderr strings.Builder

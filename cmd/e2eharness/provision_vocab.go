@@ -35,6 +35,7 @@ package main
 // type menu's STICKY_TYPES labels and the proto-yarn dialog/refusal
 // copy (judged-client-js-prose-has-no-browser-proof).
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -202,7 +203,7 @@ func (f *vocabFixture) handler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	url, err := f.ensureStarted()
+	url, err := f.ensureStarted(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -214,14 +215,14 @@ func (f *vocabFixture) handler(w http.ResponseWriter, r *http.Request) {
 // ensureStarted provisions the vocab-rename store and starts the isolated
 // workbench instance over it on first call, returning its URL on every
 // call thereafter, unchanged.
-func (f *vocabFixture) ensureStarted() (string, error) {
+func (f *vocabFixture) ensureStarted(ctx context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.url != "" {
 		return f.url, nil
 	}
 
-	root, err := provisionVocabStore(f.moduleRoot)
+	root, err := provisionVocabStore(ctx, f.moduleRoot)
 	if err != nil {
 		return "", err
 	}
@@ -268,7 +269,7 @@ func (f *vocabFixture) showHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "path must be a store-relative, traversal-free path", http.StatusBadRequest)
 		return
 	}
-	out, err := gitOutput(root, "show", ref+":"+rel)
+	out, err := gitOutput(r.Context(), root, "show", ref+":"+rel)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -284,7 +285,7 @@ func (f *vocabFixture) showHandler(w http.ResponseWriter, r *http.Request) {
 // (provisionEmptyStore's own load-bearing origin setup, mirrored), so
 // refindex's real default-branch walk lists vocab-probe in the home
 // directory rather than short-circuiting on the no-remote path.
-func provisionVocabStore(moduleRoot string) (string, error) {
+func provisionVocabStore(ctx context.Context, moduleRoot string) (string, error) {
 	tmp, err := os.MkdirTemp("", "verdi-e2e-vocab-*")
 	if err != nil {
 		return "", err
@@ -323,7 +324,7 @@ func provisionVocabStore(moduleRoot string) (string, error) {
 		}
 	}
 
-	if err := runGit(root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := runGit(ctx, root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
 		return "", err
 	}
 	// Repo-LOCAL identity (provision_board.go's exact precedent): the
@@ -335,28 +336,28 @@ func provisionVocabStore(moduleRoot string) (string, error) {
 	// commit-minting action while a developer laptop's well-formed
 	// auto-ident quietly passes — the exact local-green/CI-red gap this
 	// fixture shipped with.
-	if err := runGit(root, nil, "config", "user.name", "verdi-e2e"); err != nil {
+	if err := runGit(ctx, root, nil, "config", "user.name", "verdi-e2e"); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
+	if err := runGit(ctx, root, nil, "config", "user.email", "e2e@verdi.invalid"); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, root, nil, "add", "-A"); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "commit", "--quiet", "--no-verify", "-m", "vocab-rename store: manifest, model.yaml, one accepted feature"); err != nil {
+	if err := runGit(ctx, root, nil, "commit", "--quiet", "--no-verify", "-m", "vocab-rename store: manifest, model.yaml, one accepted feature"); err != nil {
 		return "", err
 	}
-	if err := runGit("", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+	if err := runGit(ctx, "", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "remote", "add", "origin", originDir); err != nil {
+	if err := runGit(ctx, root, nil, "remote", "add", "origin", originDir); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
+	if err := runGit(ctx, root, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "remote", "set-head", "origin", "main"); err != nil {
+	if err := runGit(ctx, root, nil, "remote", "set-head", "origin", "main"); err != nil {
 		return "", err
 	}
 
@@ -365,7 +366,7 @@ func provisionVocabStore(moduleRoot string) (string, error) {
 	// provisionBoard cites) and the checkout LEFT on the branch, so
 	// boardspec.go's mode switch (status draft + branch != default) serves
 	// /board/spec/vocab-draft in authoring mode.
-	if err := runGit(root, nil, "checkout", "--quiet", "-b", vocabDraftBranch); err != nil {
+	if err := runGit(ctx, root, nil, "checkout", "--quiet", "-b", vocabDraftBranch); err != nil {
 		return "", err
 	}
 	draftDir := filepath.Join(root, ".verdi", "specs", "active", "vocab-draft")
@@ -375,13 +376,13 @@ func provisionVocabStore(moduleRoot string) (string, error) {
 	if err := os.WriteFile(filepath.Join(draftDir, "spec.md"), []byte(vocabDraftSpec), 0o644); err != nil {
 		return "", fmt.Errorf("writing vocab-draft spec: %w", err)
 	}
-	if err := runGit(root, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, root, nil, "add", "-A"); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "commit", "--quiet", "--no-verify", "-m", "design: vocab-draft authoring fixture"); err != nil {
+	if err := runGit(ctx, root, nil, "commit", "--quiet", "--no-verify", "-m", "design: vocab-draft authoring fixture"); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "push", "--quiet", "--set-upstream", "origin", vocabDraftBranch); err != nil {
+	if err := runGit(ctx, root, nil, "push", "--quiet", "--set-upstream", "origin", vocabDraftBranch); err != nil {
 		return "", err
 	}
 

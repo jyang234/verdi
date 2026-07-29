@@ -26,6 +26,7 @@ package main
 // port, discovered via the control server's /empty-glance-fixture endpoint
 // (control.go), started lazily on first request and reused thereafter.
 import (
+	"context"
 	"net"
 	"net/http"
 	"os"
@@ -52,7 +53,7 @@ func (f *emptyGlanceFixture) handler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	url, err := f.ensureStarted()
+	url, err := f.ensureStarted(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -66,14 +67,14 @@ func (f *emptyGlanceFixture) handler(w http.ResponseWriter, r *http.Request) {
 // call thereafter, unchanged. The handler is the production
 // workbench.NewHandler (HomeDeps' zero value), so GET / drives the REAL
 // refindex.ComputeIndex over the store — no canned index (co-1; ADJ-40).
-func (f *emptyGlanceFixture) ensureStarted() (string, error) {
+func (f *emptyGlanceFixture) ensureStarted(ctx context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.url != "" {
 		return f.url, nil
 	}
 
-	root, err := provisionEmptyStore()
+	root, err := provisionEmptyStore(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -110,7 +111,7 @@ const emptyStoreManifest = "schema: verdi.layout/v1\n"
 // empty result would prove only the no-remote degradation — not an empty
 // store genuinely walked to zero entries. This mirrors the main harness
 // store's own origin setup (provision_board.go).
-func provisionEmptyStore() (string, error) {
+func provisionEmptyStore(ctx context.Context) (string, error) {
 	tmp, err := os.MkdirTemp("", "verdi-e2e-empty-glance-*")
 	if err != nil {
 		return "", err
@@ -128,28 +129,28 @@ func provisionEmptyStore() (string, error) {
 	// git init on main + the single manifest commit — the same
 	// deterministic-env, no-verify posture every other scratch store here
 	// uses (git.go).
-	if err := runGit(root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+	if err := runGit(ctx, root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "add", "-A"); err != nil {
+	if err := runGit(ctx, root, nil, "add", "-A"); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "commit", "--quiet", "--no-verify", "-m", "empty store: verdi.yaml only, zero specs"); err != nil {
+	if err := runGit(ctx, root, nil, "commit", "--quiet", "--no-verify", "-m", "empty store: verdi.yaml only, zero specs"); err != nil {
 		return "", err
 	}
 
 	// A bare local origin whose HEAD names main, so gitx.DefaultBranch
 	// resolves "main" and refindex's default-branch walk runs for real.
-	if err := runGit("", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
+	if err := runGit(ctx, "", nil, "init", "--bare", "--quiet", "--initial-branch=main", originDir); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "remote", "add", "origin", originDir); err != nil {
+	if err := runGit(ctx, root, nil, "remote", "add", "origin", originDir); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
+	if err := runGit(ctx, root, nil, "push", "--quiet", "--set-upstream", "origin", "main"); err != nil {
 		return "", err
 	}
-	if err := runGit(root, nil, "remote", "set-head", "origin", "main"); err != nil {
+	if err := runGit(ctx, root, nil, "remote", "set-head", "origin", "main"); err != nil {
 		return "", err
 	}
 
