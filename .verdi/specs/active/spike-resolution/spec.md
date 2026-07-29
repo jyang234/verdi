@@ -4,7 +4,7 @@ kind: spec
 title: "Spike Resolution"
 owners: [platform-team]
 class: story
-status: draft
+status: accepted-pending-build
 story: jira:VERDI-R54-4
 problem: { text: "a spike answering open questions had no attribution home anywhere: which question a spike resolves lived in prose or memory, could not survive into the spec register, and gave the wall nothing to render when the claim was made — the only moment a duplicate claim is actionable", anchor: "#problem" }
 outcome: { text: "a spike sticky's yarn to open questions is the resolution attribution; graduation mints a spike-flagged stub carrying the question ids it resolves under the round-5.4 fail-closed grammar; one spike answering many questions is normal, and a question claimed by multiple spikes renders a soft smell — an observation, never a rule", anchor: "#outcome" }
@@ -19,6 +19,7 @@ decisions:
   - { id: dc-2, text: "attribution graduates into the stub itself (parent dc-2) — a spike-flagged stub carrying the oq-ids, one flag-discriminated list (parent dc-4) — and the multi-claim smell is the owner's cardinality ruling ratified in round 5.4: a norm-level observation, never an error", anchor: "#dc-2" }
 constraints:
   - { id: co-1, text: "no network in any test: attribution, graduation, the smell, and the fail-closed grammar are exercised by artifact decode tests, the VL-006 sibling-check fixtures, workbench render tests, and hermetic Playwright specs, all under make verify", anchor: "#co-1" }
+frozen: { at: 2026-07-28, commit: f650a05d4ed07ef52c30e17c9ae7984feaeef7b5 }
 ---
 # Spike Resolution
 
