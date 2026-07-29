@@ -15,7 +15,7 @@
 //
 //   SHOWCASE — a showcased-capability fixture: committed examples/showcase
 //     corpus content, the refi-decline-flow design-branch happy-path family
-//     (provisionv2.go / provision_board.go's board-v2 fixtures), the
+//     (provision_board.go's board-v2 fixtures), the
 //     payoff-quote-portal live-draft showcase, or any other directory/dex/
 //     board HAPPY-PATH demonstration of a real capability — what a README
 //     reader or a dogfooding tour would be shown.
@@ -121,7 +121,7 @@
 // ---------------------------------------------------------------------------
 //
 // BINDING NOTE (V1-P6, amended V1-P8): the workbench constants below are
-// FINAL — they are provisioned verbatim by cmd/e2eharness/provisionv2.go
+// FINAL — they are provisioned verbatim by cmd/e2eharness/provision_board.go
 // (a draft spec on a design branch cannot live in the committed
 // examples/showcase tree, VL-004, so the harness authors the board fixtures
 // onto a scratch design branch at startup; see tests-v1/README.md
@@ -130,7 +130,7 @@
 // testdata/dexoverlay). One V1-P6 constant moved with them: ADR_NAME —
 // shared by the board's ref-card tests and the dex exemption-page test —
 // now names the ADR the v2 fixture feature's dc-1 actually exempts
-// (adr/0001-outbox-events, real on main), and provisionv2.go's design
+// (adr/0001-outbox-events, real on main), and provision_board.go's design
 // spec exempts the same one; recorded as a V1-P8 ledger deviation.
 
 import { resolvePorts } from "../ports";
@@ -286,13 +286,13 @@ export const SHOWCASE = {
   // A draft spec on the design branch with the two required attributes and
   // NO declared objects — the newcomer's first board. Its board opens in
   // authoring mode and must render the teaching empty-wall state, never a
-  // void (provisioned by cmd/e2eharness/provisionv2.go).
+  // void (provisioned by cmd/e2eharness/provision_board.go).
   EMPTY_SPEC: "income-verification",
 
   // EMPTY_SPEC is class: story — the harness's one story-class board
   // fixture (every other board fixture is a feature) — and this is its
   // `story:` tracker ref, which the case-file class tag wears as
-  // "story · <tracker-ref>" (provisioned by cmd/e2eharness/provisionv2.go).
+  // "story · <tracker-ref>" (provisioned by cmd/e2eharness/provision_board.go).
   EMPTY_SPEC_STORY_REF: "jira:LOAN-2201",
 
   // -------------------------------------------------------------------------
@@ -304,7 +304,7 @@ export const SHOWCASE = {
   // sticky's yarn dropped on a story AC). Distinct from EMPTY_SPEC, which is
   // deliberately object-less; this one carries the AC targets (the non-AC
   // decision card OBLIGATION_STORY_NON_AC's invalid-drop refusal is an EDGE
-  // fixture — see below). Provisioned by cmd/e2eharness/provisionv2.go.
+  // fixture — see below). Provisioned by cmd/e2eharness/provision_board.go.
   OBLIGATION_STORY_SPEC: "refi-decline-audit",
   OBLIGATION_STORY_AC: "ac-1",
 
@@ -319,7 +319,7 @@ export const SHOWCASE = {
   // "no obligation" badge (static). Distinct from OBLIGATION_STORY_SPEC, whose
   // obligation the graduate journey authors at runtime; this one is pre-authored
   // so the card renders it without any interaction. Provisioned by
-  // cmd/e2eharness/provisionv2.go.
+  // cmd/e2eharness/provision_board.go.
   OBLIGATION_WALL_SPEC: "refi-decline-replay",
   OBLIGATION_WALL_AC: "ac-1",
   OBLIGATION_WALL_PRESENT_KIND: "behavioral",
@@ -397,7 +397,7 @@ export const SHOWCASE = {
   // Workbench (scoping canvas, spec/scoping-canvas) — the stubs band
   // -------------------------------------------------------------------------
 
-  // DESIGN_SPEC's one open question (provisioned by provisionv2.go): the
+  // DESIGN_SPEC's one open question (provisioned by provision_board.go): the
   // spike proto-sticky's resolution-yarn target.
   OQ_ID: "oq-1",
 

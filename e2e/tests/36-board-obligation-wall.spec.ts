@@ -11,7 +11,7 @@ import { SHOWCASE, boardPath } from "./fixtures";
 // The fixture wall's ac-1 declares two kinds (behavioral, static) with a
 // COMMITTED obligation for behavioral only, so one card proves both halves.
 // The obligation file is provisioned onto the design branch by
-// cmd/e2eharness/provisionv2.go — a hermetic wall on disk, no network.
+// cmd/e2eharness/provision_board.go — a hermetic wall on disk, no network.
 
 test.describe("obligation wall: a story AC card reads out its obligations", () => {
   test("the card shows an authored obligation's demand and discloses a kind with none", async ({

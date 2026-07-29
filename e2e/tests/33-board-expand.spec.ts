@@ -23,7 +23,7 @@ import { expectAutosaved } from "./helpers";
 //      so gets no affordance at all. When the headline ALSO clamps, the
 //      fade+⋯ still layers on top of the dog-ear.
 //
-// The fixtures (cmd/e2eharness/provisionv2.go): SHOWCASE.DESIGN_SPEC
+// The fixtures (cmd/e2eharness/provision_board.go): SHOWCASE.DESIGN_SPEC
 // (refi-decline-flow) carries a deliberately long problem headline that
 // overflows the three-line clamp with an EMPTY `## Problem` body (the
 // no-body → headline-fallback path) and a short outcome headline with a
