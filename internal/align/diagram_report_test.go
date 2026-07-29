@@ -198,7 +198,7 @@ func TestGenerateDiagramSweep_DisclosureLineAlwaysPresent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GenerateDiagramSweep: %v", err)
 		}
-		if !strings.Contains(string(report.Markdown), DiagramSweepDisclosureLine) {
+		if !strings.Contains(string(report.Markdown), DiagramSweepDisclosureLine()) {
 			t.Fatalf("rendered report does not carry the fixed disclosure line verbatim:\n%s", report.Markdown)
 		}
 	})
@@ -211,7 +211,7 @@ func TestGenerateDiagramSweep_DisclosureLineAlwaysPresent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GenerateDiagramSweep: %v", err)
 		}
-		if !strings.Contains(string(report.Markdown), DiagramSweepDisclosureLine) {
+		if !strings.Contains(string(report.Markdown), DiagramSweepDisclosureLine()) {
 			t.Fatalf("rendered report does not carry the fixed disclosure line verbatim:\n%s", report.Markdown)
 		}
 	})

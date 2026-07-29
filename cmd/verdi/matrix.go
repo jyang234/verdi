@@ -48,6 +48,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
@@ -208,14 +209,24 @@ func obligationCellsFor(root, specName string, acs []artifact.AcceptanceCriterio
 	return cells, nil
 }
 
+// The `--preview` advisory-fold disclosure is disclosure.AdvisoryPreview —
+// hoisted into the seam package itself (disclosure/advisorypreview.go) when
+// internal/workbench's matrix page became its second producing PACKAGE,
+// exactly the threshold disclosure/reviewfeed.go's placement note cites. It
+// briefly lived here, beside the two same-package rungs (printMatrix and
+// featurematrix.go's printFeatureMatrix), the way sync.go's
+// toolPinCarrierAbsentDisclosure still does for its genuinely single-package
+// state.
+
 // printMatrix renders result as a per-AC table plus the story eligibility
 // line. status is the resolved spec's own frontmatter `status` (ac-2,
 // feature-supersession-state): printed unconditionally so a superseded (or
 // any other) terminal state is legible on this surface directly — 03
 // §rung 3's "everywhere without consulting backlinks" property — rather
 // than only inferable by opening the raw spec or chasing a
-// `superseded-by` backlink. preview only controls the banner — Fold
-// already decided what's in scope.
+// `superseded-by` backlink. preview only controls whether
+// disclosure.AdvisoryPreview is rendered through the shared
+// internal/disclosure seam — Fold already decided what's in scope.
 //
 // obligationCells is spec/obligation-wall ac-1's addition: each AC's
 // pre-rendered OBLIGATION column entry (obligationCellsFor), keyed by AC
@@ -232,7 +243,10 @@ func printMatrix(w io.Writer, result evidence.StoryResult, status artifact.Statu
 	fmt.Fprintf(w, "spec:  %s\n", result.SpecRef)
 	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(class, string(status)))
 	if preview {
-		fmt.Fprintln(w, "PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)")
+		// Bare Render output, unindented and unprefixed, so
+		// disclosure.IsRendered recognizes the line and a disclosure consumer
+		// can count it (ac-1's recognizer half).
+		fmt.Fprintln(w, disclosure.Render(disclosure.AdvisoryPreview()))
 	}
 	fmt.Fprintln(w)
 

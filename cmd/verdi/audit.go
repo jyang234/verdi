@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/jyang234/verdi/internal/decisionsweep"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/residue"
@@ -145,6 +146,14 @@ func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThre
 		fmt.Fprintf(stdout, "(no %s with a waiver to audit)\n", mdl.DisplayClassPlural("story"))
 	}
 	for _, e := range result.WaiverStale {
+		// WAIVER-STALE is the VERDICT half of ac-3 ("flags a story whose
+		// active count exceeds a configured threshold ... contributing to the
+		// same FLAGGED/exit-1 outcome"), not a disclosure: it sets flagged and
+		// exits 1. A verdict failure is reported through its own channel and
+		// is never routed through internal/disclosure (the seam's own severity
+		// reasoning — SeverityDisclosedUnproven is the ONLY severity it
+		// carries, and violated is deliberately not one of them). It stays a
+		// plain status word, exactly like the SPEC-STALE line above it.
 		status := "ok"
 		if e.Flagged {
 			status = "WAIVER-STALE"
@@ -155,11 +164,20 @@ func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThre
 			expiry := "no expiry"
 			if w.Expiry != "" {
 				expiry = "expires " + w.Expiry
-				if w.Lapsed {
-					expiry += " (LAPSED)"
-				}
 			}
 			fmt.Fprintf(stdout, "  - %s: status %s, %s\n", w.ACID, w.Status, expiry)
+			// The DISCLOSURE half of ac-3 ("discloses whether an active-status
+			// waiver's recorded expiry has already lapsed"). Rendered as a
+			// bare, flush-left seam line — never appended to the indented row
+			// above — because disclosure.IsRendered recognizes exactly
+			// Render's image: an indented or hand-decorated line is not a
+			// disclosure and no consumer could count it. The condition is
+			// unchanged from the pre-seam "(LAPSED)" marker (w.Lapsed, decided
+			// once at the invocation's boundary `now`), so nothing about which
+			// waivers are disclosed moves here — only the vocabulary.
+			if w.Lapsed {
+				fmt.Fprintln(stdout, disclosure.Render(lapsedWaiverDisclosure(w)))
+			}
 		}
 	}
 
@@ -177,6 +195,39 @@ func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThre
 	}
 	fmt.Fprintln(stdout, "audit: CLEAN")
 	return 0
+}
+
+// The lapsed-waiver disclosure. It lives here, beside its one producer (the
+// waiver-audit loop in runAudit), exactly as sync.go's
+// toolPinCarrierAbsentDisclosure and close.go's own single-file disclosures
+// do: only the RENDERING is shared (internal/disclosure's New/Render), and
+// only a family with producers in two or more packages — the review-feed
+// one — needs its constructor hoisted into the seam package itself
+// (CLAUDE.md's shared-internal rule, disclosure/reviewfeed.go's placement
+// note).
+const lapsedWaiverSource = "audit:waiver-lapsed"
+
+// lapsedWaiverDisclosure is the structured value the lapsed-waiver state
+// constructs at its existing decision point, so the printed line IS that
+// value rendered — never a second, hand-aligned copy of it. It is a pure
+// function of the already-computed row: the lapse itself was decided against
+// the invocation's single boundary `now` (cmdAudit), so nothing here reads
+// the clock and two renderings of the same row are byte-identical.
+//
+// The scope is the waiver's own store-relative path: unlike the checkout-
+// wide disclosures (sync's absent tool-pin carrier, matrix's advisory
+// preview), this one IS about one artifact, and the path identifies it
+// uniquely across every story in the store.
+//
+// The text names the observed fact and its consequence, and NEVER its own
+// severity — disclosure.Render supplies the one vocabulary word
+// (spec/disclosure-legibility#ac-1). The pre-seam line appended a
+// hand-authored "(LAPSED)" marker to the row instead: a second vocabulary
+// for a disclosed-unproven state, invisible to disclosure.IsRendered
+// (judged-ac-1-vocabulary-coverage).
+func lapsedWaiverDisclosure(w decisionsweep.WaiverAuditRow) disclosure.Disclosure {
+	text := fmt.Sprintf("the recorded expiry %s has passed as of this audit, so this waiver no longer counts toward the active total above and %s reverts to pending — the evidence it stood in for is not proven", w.Expiry, w.ACID)
+	return disclosure.New(lapsedWaiverSource, w.Path, text)
 }
 
 // runClosureHygieneSection renders `== Closure hygiene audit ==`: AC-1's

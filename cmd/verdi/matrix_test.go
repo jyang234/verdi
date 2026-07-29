@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
@@ -290,12 +293,17 @@ func TestCmdMatrix_Preview_DiffersExactlyByAdvisoryRecords(t *testing.T) {
 	// Public-rollout-plan Task 1.4 flips jira:LOAN-1482 (spec/stale-decline)
 	// from the story fold to the feature fold — see TestCmdMatrix_Golden's
 	// doc comment for why. The preview/authoritative diff this test proves
-	// (exactly ac-3's row differs, plus the PREVIEW banner) still holds
-	// under the feature fold; only the column shape and ac-3's specific
-	// before/after values changed.
+	// (exactly ac-3's row differs, plus the advisory-preview disclosure)
+	// still holds under the feature fold; only the column shape and ac-3's
+	// specific before/after values changed.
+	//
+	// The banner line is INTERPOLATED from the seam
+	// (disclosure.Render(disclosure.AdvisoryPreview())), never re-typed here:
+	// a golden that hard-codes the wording is a second copy of the
+	// vocabulary, which is the defect ac-1 exists to close.
 	wantPreview := `feature: spec/stale-decline
 status: accepted-pending-build
-PREVIEW: advisory (source: local) evidence included alongside authoritative (source: ci)
+` + disclosure.Render(disclosure.AdvisoryPreview()) + `
 
 AC    STATUS   EVIDENCE                                IMPLEMENTING STORIES                                    TEXT
 ac-1  pending  attestation:absent; static:pass         spec/borrower-update-mobile                             every branch that classifies a decline as stale routes its consequence through the outbox — no direct call to notification-svc or payments-gw
@@ -315,8 +323,8 @@ stub_reconciliation.blocked: true
 		t.Fatalf("preview output mismatch:\n--- got ---\n%s\n--- want ---\n%s", preview.String(), wantPreview)
 	}
 
-	// The only content difference between the two runs is the PREVIEW
-	// banner line and ac-3's row (no-signal -> pending under the old
+	// The only content difference between the two runs is the advisory-
+	// preview disclosure line and ac-3's row (no-signal -> pending under the old
 	// story fold; attestation:absent -> attestation:absent;
 	// behavioral:abstain under the feature fold Task 1.4 moved
 	// spec/stale-decline to — see TestCmdMatrix_Golden's doc comment).
@@ -329,13 +337,17 @@ stub_reconciliation.blocked: true
 	previewLines := strings.Split(strings.TrimRight(preview.String(), "\n"), "\n")
 	previewLinesNoBanner := make([]string, 0, len(previewLines))
 	for _, l := range previewLines {
-		if strings.HasPrefix(l, "PREVIEW:") {
+		// Recognized through the seam's own predicate, not a locally
+		// reconstructed prefix: disclosure.IsRendered IS the recognizer half
+		// of the one vocabulary (spec/disclosure-legibility#ac-1), so this
+		// consumer and Render change together.
+		if disclosure.IsRendered(l) {
 			continue
 		}
 		previewLinesNoBanner = append(previewLinesNoBanner, l)
 	}
 	if len(authLines) != len(previewLinesNoBanner) {
-		t.Fatalf("line count differs beyond the PREVIEW banner: authoritative=%d preview=%d", len(authLines), len(previewLinesNoBanner))
+		t.Fatalf("line count differs beyond the advisory-preview disclosure: authoritative=%d preview=%d", len(authLines), len(previewLinesNoBanner))
 	}
 	sawAC3Diff := false
 	for i := range authLines {
@@ -669,6 +681,62 @@ func TestCmdMatrix_RefForms(t *testing.T) {
 		// comment), so its header is the feature-fold's own form.
 		if !strings.HasPrefix(stdout.String(), "feature: spec/stale-decline\nstatus: accepted-pending-build\n") {
 			t.Fatalf("spec-ref output header mismatch:\n%s", stdout.String())
+		}
+	})
+}
+
+// The disclosure VALUE `--preview` constructs is pinned by
+// internal/disclosure's own TestAdvisoryPreview — the constructor (and its
+// value test) hoisted out of this package when internal/workbench's matrix
+// page became the family's second producing package. What stays here is
+// what only this package can prove: that both rungs RENDER it.
+
+// TestMatrixPreviewBanner_RendersThroughTheSeam exercises BOTH producing call
+// sites — printMatrix (story rung) and printFeatureMatrix (feature rung) —
+// against the seam's own rendering of the disclosure they construct. The
+// pre-fix banner was a hand-authored string duplicated across the two files,
+// so ONE state read in a vocabulary no disclosure consumer could recognize or
+// count (judged-ac-1-vocabulary-coverage). The expectation is DERIVED from the
+// seam, never a second copy of the wording.
+//
+// Negative path: without --preview neither rung emits any disclosure line, so
+// the banner never becomes background noise.
+func TestMatrixPreviewBanner_RendersThroughTheSeam(t *testing.T) {
+	want := disclosure.Render(disclosure.AdvisoryPreview())
+
+	hasLine := func(out string) bool {
+		for _, line := range strings.Split(out, "\n") {
+			if line == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("story rung", func(t *testing.T) {
+		var on, off bytes.Buffer
+		result := evidence.StoryResult{Story: "jira:LOAN-1", SpecRef: "spec/x"}
+		printMatrix(&on, result, artifact.Status("accepted-pending-build"), "story", nil, true, nil)
+		printMatrix(&off, result, artifact.Status("accepted-pending-build"), "story", nil, false, nil)
+		if !hasLine(on.String()) {
+			t.Errorf("printMatrix(--preview) = %q, want the seam-rendered banner %q", on.String(), want)
+		}
+		if hasLine(off.String()) {
+			t.Errorf("printMatrix(no --preview) = %q, want no disclosure line at all", off.String())
+		}
+	})
+
+	t.Run("feature rung", func(t *testing.T) {
+		var on, off bytes.Buffer
+		spec := &artifact.SpecFrontmatter{Class: artifact.ClassFeature, Status: artifact.Status("accepted-pending-build")}
+		result := evidence.FeatureResult{SpecRef: "spec/f"}
+		printFeatureMatrix(&on, spec, result, evidence.StubReconciliation{}, nil, nil, true, nil)
+		printFeatureMatrix(&off, spec, result, evidence.StubReconciliation{}, nil, nil, false, nil)
+		if !hasLine(on.String()) {
+			t.Errorf("printFeatureMatrix(--preview) = %q, want the seam-rendered banner %q", on.String(), want)
+		}
+		if hasLine(off.String()) {
+			t.Errorf("printFeatureMatrix(no --preview) = %q, want no disclosure line at all", off.String())
 		}
 	})
 }
