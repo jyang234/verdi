@@ -4,7 +4,7 @@ kind: spec
 title: "Coverage Chips"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-R54-3
 problem: { text: "which acceptance criteria the declared stubs cover was knowable only by reading frontmatter by hand: the wall showed no computed answer, and nothing structural prevented coverage from being asserted as prose rather than derived from declarations", anchor: "#problem" }
 outcome: { text: "every feature acceptance criterion wears a computed coverage chip — covered by N stubs, or no stub — derived mechanically from declared frontmatter alone, with the feature document staying downward-blind: only stubs enter it, and coverage is always computed at render, never declared or persisted", anchor: "#outcome" }
