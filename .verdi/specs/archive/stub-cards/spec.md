@@ -4,7 +4,7 @@ kind: spec
 title: "Stub Cards"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-R54-2
 problem: { text: "declared stubs were frontmatter-only — invisible on the wall — so the one place scoping is decided rendered no trace of the decomposition it had decided, and the coverage claims stubs carry had no projection a reader could follow", anchor: "#problem" }
 outcome: { text: "declared stubs render as first-class scoping cards in a kind-locked stubs zone with their coverage yarn projected, positionable like object cards (the round-5.5 ratification), and sealed against every mutation the spec register forbids", anchor: "#outcome" }
