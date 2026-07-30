@@ -1171,6 +1171,74 @@ bindings:
       - "spec/public-showcase#ac-1"
       - "spec/public-showcase#ac-2"
       - "spec/public-showcase#ac-3"
+      # spec/scoping-canvas family (the R4-I-87 retro-decomposition: five
+      # stories minted through --from-stub over behavior that shipped in
+      # rounds 5.4/5.5 with e2e coverage). Behavioral legs, all under make
+      # verify (unit suites in the ordinary test gate; the 30/31/32
+      # Playwright specs under the e2e gate):
+      # spec/story-stickies ac-1 <- internal/artifact's story/spike
+      # annotation decode suite (TestDecodeAnnotation_StoryAndSpike +
+      # _Negative: feature-class walls only) and e2e 31's picker-placement
+      # spec; ac-2 <- the workbench graduation actions
+      # (actionStickyGraduate/actionStubGraduate paths) and e2e 32's
+      # "story sticky → coverage yarn → graduation typesets the stub in
+      # place"; ac-3 <- e2e 32's zero-yarn refusal and illegal-pair
+      # refusal specs.
+      - "spec/story-stickies#ac-1"
+      - "spec/story-stickies#ac-2"
+      - "spec/story-stickies#ac-3"
+      # spec/stub-cards ac-1 <- internal/workbench's scoping-canvas render
+      # suite (TestScopingCanvas_StubCardsRender, _StubZoneLabelClassAware)
+      # and e2e 30's committed-corpus stub-card spec; ac-2 <-
+      # _ScopingYarnChips, _YarnKeyScopingEntries,
+      # _ScopingEdgesCarryNoAffordances and e2e 32's covers/resolves yarn
+      # + key specs; ac-3 <- _StubViewPositions (the round-5.5 stub:<slug>
+      # keys) and e2e 30's drag-persists, trash-refusal, and
+      # read-only-refusal specs.
+      - "spec/stub-cards#ac-1"
+      - "spec/stub-cards#ac-2"
+      - "spec/stub-cards#ac-3"
+      # spec/coverage-chips ac-1/ac-2 <- TestScopingCanvas_
+      # CoverageChipsAndSmell (the exact "no stub"/"covered by N stubs"
+      # chip text over declared frontmatter, counts changing only when
+      # declarations change) and the board e2e suite's chip assertions;
+      # ac-3 is static-only and has no entry here.
+      - "spec/coverage-chips#ac-1"
+      - "spec/coverage-chips#ac-2"
+      # spec/spike-resolution ac-1 <- e2e 32's "spike stickies →
+      # resolution yarn → spike stubs" spec, the graduation action tests,
+      # and the artifact spike-annotation decode cases; ac-2 <- the smell
+      # rendering in _CoverageChipsAndSmell and e2e 32's two-claims spec;
+      # ac-3 <- the artifact negative-decode cases (resolves requires the
+      # flag; spike stub declares no acceptance_criteria) and VL-006's
+      # spike-stub fixtures (TestVL006_SpikeStubResolvesRefs).
+      - "spec/spike-resolution#ac-1"
+      - "spec/spike-resolution#ac-2"
+      - "spec/spike-resolution#ac-3"
+      # spec/instantiate-from-stub ac-1 <- internal/stubinstantiate's
+      # TestInstantiate_Plain and e2e 31's instantiate specs
+      # (consequence-first ordering, serving wall never moves); ac-2 <-
+      # TestInstantiate_Spike and cmd/verdi's
+      # TestRunDesignStartFromStub_Spike; ac-3 <- the CLI/board
+      # output-equality parity assertion (designfromstub_test.go),
+      # TestInstantiate_Negative + TestSealedFeatureWallGuard, and e2e
+      # 31's second-instantiate refusal.
+      - "spec/instantiate-from-stub#ac-1"
+      - "spec/instantiate-from-stub#ac-2"
+      - "spec/instantiate-from-stub#ac-3"
+      # spec/scoping-canvas FEATURE ACs (grandfathered pre-attestation-rule
+      # freeze, 2026-07-12: ac-2..ac-6 declare [behavioral], ac-7 [static]
+      # — no attestation kind, so the outcome floor reads these
+      # pass-records, the public-showcase precedent). Each binds the same
+      # evidence its implementing story binds just above: ac-2 <-
+      # story-stickies, ac-3 <- stub-cards, ac-4 <- coverage-chips'
+      # chip suites, ac-5 <- spike-resolution, ac-6 <-
+      # instantiate-from-stub; ac-7 is static-only (below).
+      - "spec/scoping-canvas#ac-2"
+      - "spec/scoping-canvas#ac-3"
+      - "spec/scoping-canvas#ac-4"
+      - "spec/scoping-canvas#ac-5"
+      - "spec/scoping-canvas#ac-6"
       # spec/creation-surfaces FEATURE outcome ACs (extensibility Phase 2,
       # Task 9: this design series authors the feature spec + these
       # bindings together, the X-9/#143 convention spec/ritual-integrity's
@@ -1812,6 +1880,24 @@ bindings:
       # ac-1's three-axis inventory + Makefile named-gate statics.
       - "spec/public-showcase#ac-1"
       - "spec/public-showcase#ac-2"
+      # spec/scoping-canvas family static legs. spec/coverage-chips ac-2
+      # (mechanical computation: the chip renderer's inputs are visibly
+      # limited to the loaded spec's declared acceptance criteria and
+      # stubs — no LLM, position, or proximity input in
+      # boardspecrender.go's chip path) and ac-3 (downward-blind: no
+      # write path in the chip renderer; the board write API's
+      # strict-decoded request schema admits no coverage field);
+      # spec/spike-resolution ac-3's static half (the strict-decoded
+      # spike-stub grammar in internal/artifact: resolves requires
+      # spike: true, spike stubs declare no acceptance_criteria, fail
+      # closed); spec/scoping-canvas FEATURE ac-7 (only stubs enter the
+      # feature document; coverage computed at render, never declared or
+      # persisted — the same statics as coverage-chips ac-3). All compile,
+      # vet, lint, and lint-store clean under make verify.
+      - "spec/coverage-chips#ac-2"
+      - "spec/coverage-chips#ac-3"
+      - "spec/spike-resolution#ac-3"
+      - "spec/scoping-canvas#ac-7"
       # spec/closure-ergonomics family static legs (closure-groundwork
       # task): spec/attest-helper is the only story of the four declaring
       # the static kind on every AC.
