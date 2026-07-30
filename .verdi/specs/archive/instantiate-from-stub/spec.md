@@ -4,7 +4,7 @@ kind: spec
 title: "Instantiate From Stub"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-R54-5
 problem: { text: "turning a declared stub into its story was manual copying: the operator hand-invented the spec directory, frontmatter, and implements edges the stub's declaration already determined — the paved road the fast path depends on did not exist as a road", anchor: "#problem" }
 outcome: { text: "a stub instantiates its story on the paved road: a pre-filled scaffold — title, story-ref prompt, implements edges to the stub's acceptance criteria — slug-bound to its stub with no new provenance record, spike stubs instantiating the spike variant, from either the board action or the CLI through one shared core", anchor: "#outcome" }
