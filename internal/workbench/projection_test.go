@@ -60,65 +60,39 @@ Prose.
 Prose.
 `
 
-// dupEntryStubFixtureSpec is a feature-class spec whose hand-authored
-// stubs repeat an id WITHIN one entry list (`acceptance_criteria: [ac-1,
-// ac-1]`, `resolves: [oq-1, oq-1]`) alongside ids claimed once each by two
-// DISTINCT stubs (ac-2, oq-2). Both duplicate forms decode (no schema rule
-// forbids them), validate (Stub.Validate checks entry SYNTAX only) and lint
-// clean (VL-006 checks MEMBERSHIP only), so the frontmatter surface the
-// projection is a pure function of really can carry them. The counts are
-// per-STUB: a repeated id inside one stub is still one covering stub, while
-// two distinct stubs on one id still count 2 — dedup must collapse the
-// former without flattening the latter.
-const dupEntryStubFixtureSpec = `---
-id: spec/dup-entry-stubs
-kind: spec
-class: feature
-title: "Duplicate stub entries"
-status: draft
-owners: [platform-team]
-problem: { text: "p", anchor: "#problem" }
-outcome: { text: "o", anchor: "#outcome" }
-acceptance_criteria:
-  - { id: ac-1, text: "one stub, listed twice", evidence: [attestation], anchor: "#ac-1" }
-  - { id: ac-2, text: "two distinct stubs", evidence: [attestation], anchor: "#ac-2" }
-open_questions:
-  - { id: oq-1, text: "one spike, listed twice", anchor: "#oq-1" }
-  - { id: oq-2, text: "two distinct spikes", anchor: "#oq-2" }
-stubs:
-  - { slug: plain-dup, acceptance_criteria: [ac-1, ac-1] }
-  - { slug: plain-a, acceptance_criteria: [ac-2] }
-  - { slug: plain-b, acceptance_criteria: [ac-2] }
-  - { slug: spike-dup, spike: true, resolves: [oq-1, oq-1] }
-  - { slug: spike-a, spike: true, resolves: [oq-2] }
-  - { slug: spike-b, spike: true, resolves: [oq-2] }
----
-# Duplicate stub entries
-
-## Problem
-
-Prose.
-
-## Outcome
-
-Prose.
-
-## ac-1
-
-Prose.
-
-## ac-2
-
-Prose.
-
-## oq-1
-
-Prose.
-
-## oq-2
-
-Prose.
-`
+// dupEntryStubFrontmatter is a feature-class wall whose stubs repeat an id
+// WITHIN one entry list (`acceptance_criteria: [ac-1, ac-1]`, `resolves:
+// [oq-1, oq-1]`) alongside ids each claimed once by two DISTINCT stubs
+// (ac-2, oq-2). Built as an in-memory literal ON PURPOSE: artifact.Stub.
+// Validate now REFUSES a duplicate entry, so this shape can no longer be
+// decoded from frontmatter — and the projection's per-stub dedup is exactly
+// the defense-in-depth that keeps the computed count honest for a value that
+// reached it another way (a literal like this one, or a spec decoded before
+// the refusal landed). The counts are per-STUB: a repeated id inside one stub
+// is still one covering stub, while two distinct stubs on one id still count
+// 2 — dedup must collapse the former without flattening the latter.
+func dupEntryStubFrontmatter() *artifact.SpecFrontmatter {
+	return &artifact.SpecFrontmatter{
+		Base:  artifact.Base{Title: "Duplicate stub entries"},
+		Class: artifact.ClassFeature,
+		AcceptanceCriteria: []artifact.AcceptanceCriterion{
+			{ID: "ac-1", Text: "one stub, listed twice", Anchor: "#ac-1"},
+			{ID: "ac-2", Text: "two distinct stubs", Anchor: "#ac-2"},
+		},
+		OpenQuestions: []artifact.OpenQuestion{
+			{ID: "oq-1", Text: "one spike, listed twice", Anchor: "#oq-1"},
+			{ID: "oq-2", Text: "two distinct spikes", Anchor: "#oq-2"},
+		},
+		Stubs: []artifact.Stub{
+			{Slug: "plain-dup", AcceptanceCriteria: []string{"ac-1", "ac-1"}},
+			{Slug: "plain-a", AcceptanceCriteria: []string{"ac-2"}},
+			{Slug: "plain-b", AcceptanceCriteria: []string{"ac-2"}},
+			{Slug: "spike-dup", Spike: true, Resolves: []string{"oq-1", "oq-1"}},
+			{Slug: "spike-a", Spike: true, Resolves: []string{"oq-2"}},
+			{Slug: "spike-b", Spike: true, Resolves: []string{"oq-2"}},
+		},
+	}
+}
 
 func mustDecodeSpecForTest(t *testing.T, y string) *artifact.SpecFrontmatter {
 	t.Helper()
@@ -188,8 +162,7 @@ func TestBuildProjection_StubViewsAndCoverage(t *testing.T) {
 // raise the >1 multi-claim smell on a question exactly one spike claims: a
 // confidently-wrong computed claim over legal frontmatter.
 func TestBuildProjection_CoverageCountsDistinctStubs(t *testing.T) {
-	fm := mustDecodeSpecForTest(t, dupEntryStubFixtureSpec)
-	p, err := buildProjection("dup-entry-stubs", fm, nil, nil, nil, nil, modeReadOnly)
+	p, err := buildProjection("dup-entry-stubs", dupEntryStubFrontmatter(), nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}

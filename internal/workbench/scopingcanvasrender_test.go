@@ -293,15 +293,14 @@ func TestScopingCanvas_CoverageChipsAndSmell(t *testing.T) {
 }
 
 // The rendered chips say how many DISTINCT stubs cover an AC / claim a
-// question, so a hand-authored stub repeating an id in one entry list
-// ("acceptance_criteria: [ac-1, ac-1]" — legal frontmatter: syntax-checked
-// on decode, membership-checked by VL-006, duplicate-blind in both) reads
-// "covered by 1 stub" and raises no multi-claim smell. Sibling of
+// question, so a stub repeating an id in one entry list reads "covered by 1
+// stub" and raises no multi-claim smell. artifact.Stub.Validate refuses that
+// shape on decode now, so the fixture is an in-memory literal and this test
+// pins the render-side half of the defense-in-depth. Sibling of
 // TestScopingCanvas_CoverageChipsAndSmell, which covers the same chip
 // vocabulary over the duplicate-free fixture.
 func TestScopingCanvas_CoverageChipsCountDistinctStubs(t *testing.T) {
-	fm := mustDecodeSpecForTest(t, dupEntryStubFixtureSpec)
-	p, err := buildProjection("dup-entry-stubs", fm, nil, nil, nil, nil, modeReadOnly)
+	p, err := buildProjection("dup-entry-stubs", dupEntryStubFrontmatter(), nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -323,8 +322,10 @@ func TestScopingCanvas_CoverageChipsCountDistinctStubs(t *testing.T) {
 	if strings.Contains(body, `data-testid="oq-claims-oq-1"`) {
 		t.Error("oq-1 wears a multi-claim badge, but exactly one spike claims it")
 	}
-	if strings.Contains(body, `>covered by 2 stubs</span><`) && !strings.Contains(body, `data-testid="coverage-ac-2" data-coverage="2"`) {
-		t.Error("a coverage chip counts entries rather than stubs")
+	// The entry-counting bug's exact rendering, named so a regression fails
+	// on the symptom a reader would recognize: ac-1 has one covering stub.
+	if strings.Contains(body, `data-testid="coverage-ac-1" data-coverage="2"`) {
+		t.Error("ac-1's chip counts entries (2) rather than covering stubs (1)")
 	}
 }
 
