@@ -4,7 +4,7 @@ kind: spec
 title: "Spike Resolution"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-R54-4
 problem: { text: "a spike answering open questions had no attribution home anywhere: which question a spike resolves lived in prose or memory, could not survive into the spec register, and gave the wall nothing to render when the claim was made — the only moment a duplicate claim is actionable", anchor: "#problem" }
 outcome: { text: "a spike sticky's yarn to open questions is the resolution attribution; graduation mints a spike-flagged stub carrying the question ids it resolves under the round-5.4 fail-closed grammar; one spike answering many questions is normal, and a question claimed by multiple spikes renders a soft smell — an observation, never a rule", anchor: "#outcome" }
