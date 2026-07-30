@@ -4,7 +4,7 @@ kind: spec
 title: "Story Stickies"
 owners: [platform-team]
 class: story
-status: accepted-pending-build
+status: closed
 story: jira:VERDI-R54-1
 problem: { text: "scoping-canvas dc-1 makes stickies the stub authoring surface, but before this slice a story-shaped claim had no typed home on the wall: stubs could only be hand-edited into feature frontmatter, and an untyped note's yarn to an acceptance criterion carried no machine-readable coverage meaning", anchor: "#problem" }
 outcome: { text: "a story proto-sticky parks handwritten in the stubs band of a feature wall, its yarn to acceptance criteria is the coverage claim, and graduation mints the declared stub — the yarn becoming the stub's acceptance_criteria list — typeset in place, with empty or illegal claims refused legibly", anchor: "#outcome" }
