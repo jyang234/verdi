@@ -1024,6 +1024,34 @@ func TestLegalEdgeTypes(t *testing.T) {
 	}
 }
 
+// TestProtoYarnTargetKind pins dc-5's type-directed yarn table — the one
+// rule the picker (routeProtoYarn) and the server (checkProtoYarnLegal)
+// share — on both poles: the two proto-sticky types name their single
+// legal target kind, every other sticky type is untyped (no rule, so the
+// untyped relates vocabulary stays open).
+func TestProtoYarnTargetKind(t *testing.T) {
+	tests := []struct {
+		stickyType string
+		want       string
+		wantTyped  bool
+	}{
+		{"story", "acceptance-criterion", true},
+		{"spike", "open-question", true},
+		{"comment", "", false},
+		{"question", "", false},
+		{"decision-needed", "", false},
+		{"relates", "", false},
+		{"", "", false},
+		{"Story", "", false}, // enum values are exact; unknown fails closed
+	}
+	for _, tc := range tests {
+		got, typed := protoYarnTargetKind(tc.stickyType)
+		if got != tc.want || typed != tc.wantTyped {
+			t.Errorf("protoYarnTargetKind(%q) = (%q, %v), want (%q, %v)", tc.stickyType, got, typed, tc.want, tc.wantTyped)
+		}
+	}
+}
+
 // erroringFeed is a CommentFeed whose call always fails — the
 // configured-but-unreachable forge from the failure side (I-2).
 type erroringFeed struct{}

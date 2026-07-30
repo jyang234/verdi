@@ -924,6 +924,12 @@
   // ceremony: a legal drop confirms what the thread means and mints the
   // untyped relates record directly; an illegal pair gets the picker's
   // plain-language refusal (the endpoint pair IS the claim).
+  //
+  // ONE SEMANTICS, TWO ENFORCEMENT POINTS: this refusal is the fast path
+  // only. The same two rules are re-applied server-side on the relates
+  // write — checkProtoYarnLegal in boardspecapi.go, over the shared
+  // protoYarnTargetKind table in edgetypes.go — because the server never
+  // trusts the menu. Change the rule here and change it there.
 
   function protoRefusal(fromLabel, toLabel, message) {
     pending = null;

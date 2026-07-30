@@ -54,6 +54,35 @@ func legalEdgeTypes(sourceKind, targetKind string) []string {
 	return nil
 }
 
+// protoYarnTargetKind is the one table behind the scoping canvas's
+// type-directed attribution yarn (spec/scoping-canvas dc-5): a story
+// proto-sticky's thread claims COVERAGE, so it ties only to an acceptance
+// criterion; a spike proto-sticky's claims an ANSWER, so it ties only to
+// an open question. Each pair therefore has exactly one reading, which is
+// why the thread needs no type picker.
+//
+// Reports (wanted object kind, true) for the story/spike proto-sticky
+// annotation types and ("", false) for every other sticky type — a
+// comment/question/decision-needed sticky's untyped relates thread
+// carries no type-directed meaning, and dc-5 leaves that vocabulary open.
+//
+// ONE SEMANTICS, TWO ENFORCEMENT POINTS: routeProtoYarn in
+// assets/boardspec.js applies these same two rules as the picker's fast
+// path (its `wantKind`), and checkProtoYarnLegal (boardspecapi.go)
+// re-applies them on the relates write — because the server never trusts
+// the menu (checkEdgeLegal's posture). Change one and change the other.
+func protoYarnTargetKind(stickyType string) (string, bool) {
+	// vocab:identity — the annotation TYPE enum values and the object
+	// kinds are wire ids, never display prose.
+	switch artifact.AnnotationType(stickyType) {
+	case artifact.AnnotationStory:
+		return string(boardlayout.ZoneAC), true
+	case artifact.AnnotationSpike:
+		return string(boardlayout.ZoneOpenQuestion), true
+	}
+	return "", false
+}
+
 // gateBearing reports whether an edge type requires the explicit
 // confirmation step (05 §Workbench: "a menu misclick must not summon an
 // org-wide supersession flow").
