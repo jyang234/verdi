@@ -577,6 +577,14 @@ func (s *boardSpecServer) actionStubGraduate(name string, proj *BoardProjection,
 		return fmt.Errorf("sticky %q is a %s, not a story or spike proto-sticky; stub-graduate does not apply", req.ID, sticky.Type)
 	}
 
+	// The attribution threads this sticky's stub is built from, filtered to
+	// the kind dc-5 lets this sticky type tie to. Every thread minted since
+	// checkProtoYarnLegal landed is already type-checked at the write (the
+	// relates action refuses a crossed pair outright), so for new stores
+	// this filter never drops anything. It STAYS because a store written
+	// before that check may still hold a crossed thread, and folding an
+	// open question into a stub's acceptance_criteria (or the mirror) would
+	// be a silently wrong declaration — fail closed on the old data instead.
 	wantPrefix, noun := "ac-", "acceptance criteria"
 	if spike {
 		wantPrefix, noun = "oq-", "open questions"
@@ -906,11 +914,66 @@ func (s *boardSpecServer) relatesTarget(ctx context.Context, name string, proj *
 	return &artifact.Target{Ref: pinned}, nil
 }
 
+// checkProtoYarnLegal re-checks the scoping canvas's type-directed
+// attribution rule (spec/scoping-canvas dc-5) server-side, exactly as
+// checkEdgeLegal re-checks the type picker's table: the drag handler can
+// only OFFER what this function permits, but the server never trusts the
+// menu. Without it a direct API caller could mint a story-sticky→open-
+// question (or spike-sticky→acceptance-criterion) thread that
+// stub-graduate's prefix filter then silently ignores, leaving a dead
+// thread in the annotation stream that nothing ever reviews.
+//
+// The rule itself lives in ONE place — protoYarnTargetKind (edgetypes.go)
+// — shared with the client's routeProtoYarn (assets/boardspec.js), which
+// applies the same two rules as the picker's fast path.
+//
+// Only a pair with a story/spike proto-sticky ENDPOINT is type-checked:
+// every other untyped relates thread keeps the open vocabulary dc-5 gives
+// it. The check is symmetric in the endpoints — the drag handler only ever
+// posts the sticky as `from`, but a direct caller may swap them and
+// actionStubGraduate reads a thread in either direction.
+func (s *boardSpecServer) checkProtoYarnLegal(proj *BoardProjection, from, to string) error {
+	kinds := declaredKindsOf(proj)
+	stickyTypes := make(map[string]string, len(proj.Stickies))
+	for _, st := range proj.Stickies {
+		stickyTypes[st.ID] = st.Type
+	}
+	for _, pair := range [][2]string{{from, to}, {to, from}} {
+		sticky, target := pair[0], pair[1]
+		want, typed := protoYarnTargetKind(stickyTypes[sticky])
+		if !typed || kinds[target] == want {
+			continue
+		}
+		// The refusal is the server-side voice of routeProtoYarn's own
+		// wording: name the thread's one meaning, then — when the pair is
+		// merely CROSSED (a story sticky aimed at an open question, or the
+		// mirror) — redirect to the sticky type that thought wants to be.
+		// The class words are display prose and resolve (L-M13a(6)); the
+		// endpoint ids and object kinds stay bare identity.
+		claim, plural, singular := "claims coverage", "acceptance criteria", "acceptance criterion"
+		crossKind, crossType, crossVerb := string(boardlayout.ZoneOpenQuestion), "spike", "answers open questions"
+		if want == string(boardlayout.ZoneOpenQuestion) {
+			claim, plural, singular = "claims an answer", "open questions", "open question"
+			crossKind, crossType, crossVerb = string(boardlayout.ZoneAC), "story", "delivers an acceptance criterion"
+		}
+		msg := fmt.Sprintf("%s sticky's thread %s — it ties only to %s, and %q is not a declared %s on this wall",
+			model.Indefinite(s.model.DisplayClass(stickyTypes[sticky])), claim, plural, target, singular)
+		if kinds[target] == crossKind {
+			msg += fmt.Sprintf(". If this thought %s, it wants to be %s sticky instead", crossVerb, model.Indefinite(s.model.DisplayClass(crossType)))
+		}
+		return fmt.Errorf("%s (spec/scoping-canvas dc-5)", msg)
+	}
+	return nil
+}
+
 // actionRelates: the scratch tier's untyped thread — annotation layer,
 // never the document (02 §Record schemas: type relates).
 func (s *boardSpecServer) actionRelates(ctx context.Context, name string, proj *BoardProjection, req boardAPIRequest) error {
 	if req.From == "" || req.To == "" {
 		return fmt.Errorf("relates requires from and to")
+	}
+	if err := s.checkProtoYarnLegal(proj, req.From, req.To); err != nil {
+		return err
 	}
 	a, err := newAnnotation(artifact.AnnotationRelates, "relates: "+req.From+" ~ "+req.To)
 	if err != nil {

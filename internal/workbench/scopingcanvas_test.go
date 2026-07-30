@@ -271,6 +271,125 @@ func TestBoardSpec_StubGraduate_Spike(t *testing.T) {
 	}
 }
 
+// relatesThreadCount counts the untyped relates records in the stream —
+// the fail-closed witness for a refused proto-yarn pair: a refusal must
+// leave NO thread behind (a dead thread the prefix filter later ignores
+// is exactly the defect this rule closes).
+func relatesThreadCount(t *testing.T, root string) int {
+	t.Helper()
+	annotations, err := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, a := range annotations {
+		if a.Type == artifact.AnnotationRelates {
+			n++
+		}
+	}
+	return n
+}
+
+// TestBoardSpec_ProtoYarn_TypeRefusal_ServerSide proves dc-5's
+// type-directed attribution rule is enforced SERVER-side, not only by the
+// picker: a direct API caller cannot mint a story-sticky→open-question or
+// a spike-sticky→acceptance-criterion thread, so stub-graduate's prefix
+// filter can never be handed a mismatched thread to silently drop. The
+// legal pairs, and the untyped relates vocabulary for every other sticky
+// type, are untouched (dc-5 keeps them open).
+func TestBoardSpec_ProtoYarn_TypeRefusal_ServerSide(t *testing.T) {
+	t.Run("story sticky to open question is refused", func(t *testing.T) {
+		root := newScopingWallFixture(t)
+		h := NewHandler(root)
+		stickyID := createSticky(t, h, root, scopingWallName, "story", "Borrower self serve update")
+		rec := postBoardAPI(t, h, scopingWallName, "relates", `{"from":"`+stickyID+`","to":"oq-1"}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("relates(story sticky → oq-1) = %d, want 400\n%s", rec.Code, rec.Body.String())
+		}
+		if body := rec.Body.String(); !strings.Contains(body, "ties only to acceptance criteria") {
+			t.Errorf("refusal %q does not name the reason (ties only to acceptance criteria)", body)
+		}
+		if n := relatesThreadCount(t, root); n != 0 {
+			t.Errorf("relates threads = %d, want 0 — the refusal must not persist a dead thread", n)
+		}
+	})
+
+	t.Run("spike sticky to acceptance criterion is refused", func(t *testing.T) {
+		root := newScopingWallFixture(t)
+		h := NewHandler(root)
+		stickyID := createSticky(t, h, root, scopingWallName, "spike", "Retry strategy")
+		rec := postBoardAPI(t, h, scopingWallName, "relates", `{"from":"`+stickyID+`","to":"ac-1"}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("relates(spike sticky → ac-1) = %d, want 400\n%s", rec.Code, rec.Body.String())
+		}
+		if body := rec.Body.String(); !strings.Contains(body, "ties only to open questions") {
+			t.Errorf("refusal %q does not name the reason (ties only to open questions)", body)
+		}
+		if n := relatesThreadCount(t, root); n != 0 {
+			t.Errorf("relates threads = %d, want 0 — the refusal must not persist a dead thread", n)
+		}
+	})
+
+	// The endpoint order is not the rule: the picker only ever posts the
+	// sticky as `from`, but an API caller may swap them, and stub-graduate
+	// reads a thread in EITHER direction — so the pair check is symmetric.
+	t.Run("reversed endpoints are refused too", func(t *testing.T) {
+		root := newScopingWallFixture(t)
+		h := NewHandler(root)
+		stickyID := createSticky(t, h, root, scopingWallName, "story", "Borrower self serve update")
+		rec := postBoardAPI(t, h, scopingWallName, "relates", `{"from":"oq-1","to":"`+stickyID+`"}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("relates(oq-1 → story sticky) = %d, want 400\n%s", rec.Code, rec.Body.String())
+		}
+		if n := relatesThreadCount(t, root); n != 0 {
+			t.Errorf("relates threads = %d, want 0", n)
+		}
+	})
+
+	t.Run("legal story pair still accepted", func(t *testing.T) {
+		root := newScopingWallFixture(t)
+		h := NewHandler(root)
+		stickyID := createSticky(t, h, root, scopingWallName, "story", "Borrower self serve update")
+		if rec := postBoardAPI(t, h, scopingWallName, "relates", `{"from":"`+stickyID+`","to":"ac-1"}`); rec.Code != http.StatusOK {
+			t.Fatalf("relates(story sticky → ac-1) = %d, want 200\n%s", rec.Code, rec.Body.String())
+		}
+		if n := relatesThreadCount(t, root); n != 1 {
+			t.Errorf("relates threads = %d, want 1", n)
+		}
+	})
+
+	t.Run("legal spike pair still accepted", func(t *testing.T) {
+		root := newScopingWallFixture(t)
+		h := NewHandler(root)
+		stickyID := createSticky(t, h, root, scopingWallName, "spike", "Retry strategy")
+		if rec := postBoardAPI(t, h, scopingWallName, "relates", `{"from":"`+stickyID+`","to":"oq-1"}`); rec.Code != http.StatusOK {
+			t.Fatalf("relates(spike sticky → oq-1) = %d, want 200\n%s", rec.Code, rec.Body.String())
+		}
+		if n := relatesThreadCount(t, root); n != 1 {
+			t.Errorf("relates threads = %d, want 1", n)
+		}
+	})
+
+	// dc-5 leaves the UNTYPED relates vocabulary open: only a story/spike
+	// proto-sticky endpoint carries the type-directed meaning, so an
+	// ordinary sticky — and a plain object-to-object thread — keeps every
+	// endpoint pair it had before.
+	t.Run("ordinary sticky relates untouched", func(t *testing.T) {
+		root := newScopingWallFixture(t)
+		h := NewHandler(root)
+		stickyID := createSticky(t, h, root, scopingWallName, "comment", "just a thought")
+		if rec := postBoardAPI(t, h, scopingWallName, "relates", `{"from":"`+stickyID+`","to":"oq-1"}`); rec.Code != http.StatusOK {
+			t.Fatalf("relates(comment sticky → oq-1) = %d, want 200\n%s", rec.Code, rec.Body.String())
+		}
+		if rec := postBoardAPI(t, h, scopingWallName, "relates", `{"from":"ac-1","to":"oq-1"}`); rec.Code != http.StatusOK {
+			t.Fatalf("relates(ac-1 → oq-1) = %d, want 200\n%s", rec.Code, rec.Body.String())
+		}
+		if n := relatesThreadCount(t, root); n != 2 {
+			t.Errorf("relates threads = %d, want 2", n)
+		}
+	})
+}
+
 // TestBoardSpec_StubGraduate_Negative covers stub-graduate's fail-closed
 // paths: a missing sticky, a non-proto-sticky type, zero attribution
 // threads, and a slug collision.
