@@ -371,6 +371,17 @@ type BoardProjection struct {
 	// frontmatter alone (co-2: "no LLM, no position, no inference from
 	// proximity"); keyed maps are populated for every declared AC/OQ, so
 	// an absent key never has to be told apart from a real zero.
+	//
+	// Both counts tally DISTINCT STUBS, not list entries: an id repeated
+	// within one stub's `acceptance_criteria`/`resolves` is counted once
+	// for that stub, so the chip's "covered by N stubs" and the >1
+	// multi-claim smell can never overstate how many stubs actually
+	// declared the id. artifact.Stub.Validate now refuses duplicate
+	// entries outright, so this dedup is defense-in-depth for any
+	// already-decoded value (an in-memory literal, a value decoded before
+	// that rule landed) — keep BOTH halves: the refusal is the fail-closed
+	// gate on new frontmatter, this is the guarantee the computed count is
+	// never confidently wrong regardless of how the value arrived.
 	StubViews  []StubView     `json:"stub_views,omitempty"`
 	ACCoverage map[string]int `json:"ac_coverage,omitempty"`
 	OQClaims   map[string]int `json:"oq_claims,omitempty"`
@@ -446,7 +457,10 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte,
 
 	// StubViews/ACCoverage/OQClaims: the scoping canvas's pure-frontmatter
 	// projection (co-2). Keyed for every declared AC/OQ up front so "no
-	// stub"/"unclaimed" is an explicit 0, not a missing key.
+	// stub"/"unclaimed" is an explicit 0, not a missing key. Each count is
+	// per STUB, not per entry — see the field docs: a stub repeating an id
+	// in its own list still counts once, so "covered by N stubs" and the
+	// >1 multi-claim smell never overstate the declaring stubs.
 	p.ACCoverage = make(map[string]int, len(fm.AcceptanceCriteria))
 	for _, ac := range fm.AcceptanceCriteria {
 		p.ACCoverage[ac.ID] = 0
@@ -459,13 +473,25 @@ func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte,
 		p.StubViews = append(p.StubViews, StubView{
 			Slug: st.Slug, Spike: st.Spike, Resolves: st.Resolves, AcceptanceCriteria: st.AcceptanceCriteria,
 		})
+		// counted is scoped to THIS stub: it collapses a repeated id inside
+		// one entry list without flattening two distinct stubs that each
+		// declare the same id (which legitimately count 2).
+		counted := make(map[string]bool)
 		if st.Spike {
 			for _, oqID := range st.Resolves {
+				if counted[oqID] {
+					continue
+				}
+				counted[oqID] = true
 				p.OQClaims[oqID]++
 			}
 			continue
 		}
 		for _, acID := range st.AcceptanceCriteria {
+			if counted[acID] {
+				continue
+			}
+			counted[acID] = true
 			p.ACCoverage[acID]++
 		}
 	}

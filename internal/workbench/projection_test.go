@@ -60,6 +60,66 @@ Prose.
 Prose.
 `
 
+// dupEntryStubFixtureSpec is a feature-class spec whose hand-authored
+// stubs repeat an id WITHIN one entry list (`acceptance_criteria: [ac-1,
+// ac-1]`, `resolves: [oq-1, oq-1]`) alongside ids claimed once each by two
+// DISTINCT stubs (ac-2, oq-2). Both duplicate forms decode (no schema rule
+// forbids them), validate (Stub.Validate checks entry SYNTAX only) and lint
+// clean (VL-006 checks MEMBERSHIP only), so the frontmatter surface the
+// projection is a pure function of really can carry them. The counts are
+// per-STUB: a repeated id inside one stub is still one covering stub, while
+// two distinct stubs on one id still count 2 — dedup must collapse the
+// former without flattening the latter.
+const dupEntryStubFixtureSpec = `---
+id: spec/dup-entry-stubs
+kind: spec
+class: feature
+title: "Duplicate stub entries"
+status: draft
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "one stub, listed twice", evidence: [attestation], anchor: "#ac-1" }
+  - { id: ac-2, text: "two distinct stubs", evidence: [attestation], anchor: "#ac-2" }
+open_questions:
+  - { id: oq-1, text: "one spike, listed twice", anchor: "#oq-1" }
+  - { id: oq-2, text: "two distinct spikes", anchor: "#oq-2" }
+stubs:
+  - { slug: plain-dup, acceptance_criteria: [ac-1, ac-1] }
+  - { slug: plain-a, acceptance_criteria: [ac-2] }
+  - { slug: plain-b, acceptance_criteria: [ac-2] }
+  - { slug: spike-dup, spike: true, resolves: [oq-1, oq-1] }
+  - { slug: spike-a, spike: true, resolves: [oq-2] }
+  - { slug: spike-b, spike: true, resolves: [oq-2] }
+---
+# Duplicate stub entries
+
+## Problem
+
+Prose.
+
+## Outcome
+
+Prose.
+
+## ac-1
+
+Prose.
+
+## ac-2
+
+Prose.
+
+## oq-1
+
+Prose.
+
+## oq-2
+
+Prose.
+`
+
 func mustDecodeSpecForTest(t *testing.T, y string) *artifact.SpecFrontmatter {
 	t.Helper()
 	fm, body, err := artifact.SplitFrontmatter([]byte(y))
@@ -116,6 +176,39 @@ func TestBuildProjection_StubViewsAndCoverage(t *testing.T) {
 	}
 	if got := p.OQClaims["oq-2"]; got != 0 {
 		t.Errorf("OQClaims[oq-2] = %d, want 0", got)
+	}
+}
+
+// TestBuildProjection_CoverageCountsDistinctStubs proves the coverage and
+// claim counts tally DISTINCT DECLARATIONS, not list entries: a stub that
+// names the same AC twice covers it once, a spike that names the same open
+// question twice claims it once, and dedup is scoped to the single stub — two
+// distinct stubs on one id still count 2. Counting entries would render
+// "covered by 2 stubs" where exactly one stub covers the criterion, and would
+// raise the >1 multi-claim smell on a question exactly one spike claims: a
+// confidently-wrong computed claim over legal frontmatter.
+func TestBuildProjection_CoverageCountsDistinctStubs(t *testing.T) {
+	fm := mustDecodeSpecForTest(t, dupEntryStubFixtureSpec)
+	p, err := buildProjection("dup-entry-stubs", fm, nil, nil, nil, nil, modeReadOnly)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		count map[string]int
+		id    string
+		want  int
+	}{
+		{"duplicated ac entry counts one covering stub", p.ACCoverage, "ac-1", 1},
+		{"two distinct stubs on one ac still count two", p.ACCoverage, "ac-2", 2},
+		{"duplicated resolves entry counts one claiming spike", p.OQClaims, "oq-1", 1},
+		{"two distinct spikes on one question still count two", p.OQClaims, "oq-2", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.count[tc.id]; got != tc.want {
+				t.Errorf("count[%s] = %d, want %d", tc.id, got, tc.want)
+			}
+		})
 	}
 }
 
