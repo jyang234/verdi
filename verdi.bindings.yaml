@@ -1178,22 +1178,22 @@ bindings:
       # Playwright specs under the e2e gate):
       # spec/story-stickies ac-1 <- internal/artifact's story/spike
       # annotation decode suite (TestDecodeAnnotation_StoryAndSpike +
-      # _Negative: feature-class walls only) and e2e 31's picker-placement
+      # _Negative: feature-class walls only) and e2e 30's picker-placement
       # spec; ac-2 <- the workbench graduation actions
-      # (actionStickyGraduate/actionStubGraduate paths) and e2e 32's
+      # (actionStickyGraduate/actionStubGraduate paths) and e2e 30's
       # "story sticky → coverage yarn → graduation typesets the stub in
-      # place"; ac-3 <- e2e 32's zero-yarn refusal and illegal-pair
+      # place"; ac-3 <- e2e 30's zero-yarn refusal and illegal-pair
       # refusal specs.
       - "spec/story-stickies#ac-1"
       - "spec/story-stickies#ac-2"
       - "spec/story-stickies#ac-3"
       # spec/stub-cards ac-1 <- internal/workbench's scoping-canvas render
       # suite (TestScopingCanvas_StubCardsRender, _StubZoneLabelClassAware)
-      # and e2e 30's committed-corpus stub-card spec; ac-2 <-
+      # and e2e 31's committed-corpus stub-card spec; ac-2 <-
       # _ScopingYarnChips, _YarnKeyScopingEntries,
       # _ScopingEdgesCarryNoAffordances and e2e 32's covers/resolves yarn
       # + key specs; ac-3 <- _StubViewPositions (the round-5.5 stub:<slug>
-      # keys) and e2e 30's drag-persists, trash-refusal, and
+      # keys) and e2e 32's drag-persists, trash-refusal, and
       # read-only-refusal specs.
       - "spec/stub-cards#ac-1"
       - "spec/stub-cards#ac-2"
@@ -1205,10 +1205,10 @@ bindings:
       # ac-3 is static-only and has no entry here.
       - "spec/coverage-chips#ac-1"
       - "spec/coverage-chips#ac-2"
-      # spec/spike-resolution ac-1 <- e2e 32's "spike stickies →
+      # spec/spike-resolution ac-1 <- e2e 30's "spike stickies →
       # resolution yarn → spike stubs" spec, the graduation action tests,
       # and the artifact spike-annotation decode cases; ac-2 <- the smell
-      # rendering in _CoverageChipsAndSmell and e2e 32's two-claims spec;
+      # rendering in _CoverageChipsAndSmell and e2e 30's two-claims spec;
       # ac-3 <- the artifact negative-decode cases (resolves requires the
       # flag; spike stub declares no acceptance_criteria) and VL-006's
       # spike-stub fixtures (TestVL006_SpikeStubResolvesRefs).
