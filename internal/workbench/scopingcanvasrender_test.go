@@ -292,6 +292,43 @@ func TestScopingCanvas_CoverageChipsAndSmell(t *testing.T) {
 	}
 }
 
+// The rendered chips say how many DISTINCT stubs cover an AC / claim a
+// question, so a stub repeating an id in one entry list reads "covered by 1
+// stub" and raises no multi-claim smell. artifact.Stub.Validate refuses that
+// shape on decode now, so the fixture is an in-memory literal and this test
+// pins the render-side half of the defense-in-depth. Sibling of
+// TestScopingCanvas_CoverageChipsAndSmell, which covers the same chip
+// vocabulary over the duplicate-free fixture.
+func TestScopingCanvas_CoverageChipsCountDistinctStubs(t *testing.T) {
+	p, err := buildProjection("dup-entry-stubs", dupEntryStubFrontmatter(), nil, nil, nil, nil, modeReadOnly)
+	if err != nil {
+		t.Fatalf("buildProjection: %v", err)
+	}
+	body := renderBoardRegion(p, &boardGitState{})
+
+	for _, want := range []string{
+		`data-testid="coverage-ac-1" data-coverage="1"`,
+		`>covered by 1 stub<`,
+		`data-testid="coverage-ac-2" data-coverage="2"`,
+		`>covered by 2 stubs<`,
+		`data-testid="oq-claims-oq-2" data-claims="2"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("coverage chips missing %q", want)
+		}
+	}
+	// One spike claims oq-1 (listed twice) — one claim is the norm, so no
+	// smell badge at all.
+	if strings.Contains(body, `data-testid="oq-claims-oq-1"`) {
+		t.Error("oq-1 wears a multi-claim badge, but exactly one spike claims it")
+	}
+	// The entry-counting bug's exact rendering, named so a regression fails
+	// on the symptom a reader would recognize: ac-1 has one covering stub.
+	if strings.Contains(body, `data-testid="coverage-ac-1" data-coverage="2"`) {
+		t.Error("ac-1's chip counts entries (2) rather than covering stubs (1)")
+	}
+}
+
 // The stubs band label is class-aware: a feature-class authoring wall
 // gets the empty invitation; a story wall never files stubs and gets no
 // band label at all (dc-6's band is the feature's scoping surface).

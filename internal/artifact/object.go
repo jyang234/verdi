@@ -145,7 +145,13 @@ type Stub struct {
 // (the two blocks are mutually exclusive by construction of the switch
 // below, but Resolves is checked unconditionally first so a non-spike stub
 // carrying a stray `resolves:` fails closed rather than being silently
-// ignored).
+// ignored). Within whichever list applies, entries must be UNIQUE: a
+// repeated id is refused the way spec.go refuses duplicated ac/oq/
+// constraint/decision ids and duplicated stub slugs — one id surface, one
+// posture. A second mention adds no declaration and only misleads any
+// consumer that counts entries (the scoping canvas's coverage chip and
+// multi-claim smell), so it is a refusal here rather than a silent collapse
+// downstream.
 func (s Stub) Validate() error {
 	if !simpleNameRe.MatchString(s.Slug) {
 		return fmt.Errorf("artifact: stub slug %q must be kebab-case", s.Slug)
@@ -162,21 +168,32 @@ func (s Stub) Validate() error {
 			// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 			return fmt.Errorf("artifact: spike stub %s must not declare acceptance_criteria (02 §Kind registry, DC-4)", s.Slug)
 		}
+		seenOQ := make(map[string]bool, len(s.Resolves))
 		for _, id := range s.Resolves {
 			if !oqIDRe.MatchString(id) {
 				// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 				return fmt.Errorf("artifact: spike stub %s: resolves entry %q is not a valid oq-<slug> id", s.Slug, id)
 			}
+			if seenOQ[id] {
+				// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
+				return fmt.Errorf("artifact: spike stub %s: resolves entry %q is duplicated", s.Slug, id)
+			}
+			seenOQ[id] = true
 		}
 		return nil
 	}
 	if len(s.AcceptanceCriteria) == 0 {
 		return fmt.Errorf("artifact: stub %s declares no acceptance criteria", s.Slug)
 	}
+	seenAC := make(map[string]bool, len(s.AcceptanceCriteria))
 	for _, id := range s.AcceptanceCriteria {
 		if !acIDRe.MatchString(id) {
 			return fmt.Errorf("artifact: stub %s: acceptance_criteria entry %q is not a valid ac-<slug> id", s.Slug, id)
 		}
+		if seenAC[id] {
+			return fmt.Errorf("artifact: stub %s: acceptance_criteria entry %q is duplicated", s.Slug, id)
+		}
+		seenAC[id] = true
 	}
 	return nil
 }

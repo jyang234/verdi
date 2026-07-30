@@ -107,6 +107,12 @@ func TestStub_Validate_Negative(t *testing.T) {
 		{Slug: "Not-Kebab", AcceptanceCriteria: []string{"ac-1"}},
 		{Slug: "borrower-update-api", AcceptanceCriteria: nil},
 		{Slug: "borrower-update-api", AcceptanceCriteria: []string{"bad-id"}},
+		// A repeated entry is refused, not deduped: every other id surface
+		// in this package rejects duplicates (spec.go's ac/oq/constraint/
+		// decision ids and stub slugs), and a stub naming one AC twice
+		// says nothing a single entry doesn't — it only misleads whoever
+		// counts entries.
+		{Slug: "borrower-update-api", AcceptanceCriteria: []string{"ac-1", "ac-1"}},
 	}
 	for i, s := range cases {
 		if err := s.Validate(); err == nil {
@@ -135,6 +141,7 @@ func TestSpikeStub_Validate_Negative(t *testing.T) {
 		"spike with acceptance_criteria":     {Slug: "retry-strategy-spike", Spike: true, Resolves: []string{"oq-1"}, AcceptanceCriteria: []string{"ac-1"}},
 		"spike resolves entry not oq-shaped": {Slug: "retry-strategy-spike", Spike: true, Resolves: []string{"bad-id"}},
 		"spike resolves entry is an ac id":   {Slug: "retry-strategy-spike", Spike: true, Resolves: []string{"ac-1"}},
+		"spike resolves entry duplicated":    {Slug: "retry-strategy-spike", Spike: true, Resolves: []string{"oq-1", "oq-1"}},
 	}
 	for name, s := range cases {
 		t.Run(name, func(t *testing.T) {
