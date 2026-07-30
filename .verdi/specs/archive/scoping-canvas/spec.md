@@ -4,7 +4,7 @@ kind: spec
 title: "Scoping Canvas"
 owners: [platform-team]
 class: feature
-status: accepted-pending-build
+status: closed
 problem: { text: "scoping is decided once, at the feature, but the wall gives scoping no surface: stubs are frontmatter-only — invisible on the board and not board-authorable — AC coverage is uncomputed on the wall, spike-to-question attribution has no home anywhere, and instantiating a story from a stub is manual copying", anchor: problem }
 outcome: { text: "the feature wall is a scoping canvas: story and spike stickies graduate into stubs, yarn attributes coverage and question-resolution, every AC wears its computed coverage, and a stub instantiates its story on the paved road", anchor: outcome }
 acceptance_criteria:
