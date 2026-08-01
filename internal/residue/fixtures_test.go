@@ -113,17 +113,26 @@ func closedArchiveStorySpecMD(name, featureRef string) string {
 
 // supersessorSpecMD renders a minimal, valid, already-accepted class:
 // feature successor spec.md carrying the two signals internal/specstate's
-// own corpus scan requires before treating a spec as a REAL successor
-// (internal/specstate/resolve.go's scanSuccessors, and
+// own corpus scan requires before treating a spec as a REAL, Git-derived
+// successor (internal/specstate/resolve.go's scanSuccessors, and
 // internal/specstate/resolve_test.go's own validSuccessorSpec fixture): a
 // `links: {type: supersedes}` edge to predecessorName plus a validated
 // `supersession:` block. Task 6a's residue migration made "effectively
-// superseded" git-derived (activespecs.go's effectiveStates, routed through
-// specstate) rather than a bare self-reported `status: superseded` field —
-// a predecessor's own status field is no longer sufficient on its own; a
-// fixture proving dc-2's superseded-exclusion now needs a REAL successor
-// like this one for the predecessor to actually resolve to
-// specstate.Superseded.
+// superseded" route through specstate (activespecs.go's effectiveStates)
+// rather than a raw `FM.Status == "superseded"` string comparison read
+// directly off the predecessor's own frontmatter.
+//
+// Note (fix-round-2, Finding 5): specstate's own legacy-terminal
+// compatibility fallback (resolve.go's fix-round-1 finding 1) means a
+// predecessor's bare, self-reported `status: superseded` — once its exact
+// bytes are proven reachable and landed — CAN still resolve to
+// specstate.Superseded on its own, with a compatibility disclosure, even
+// with NO successor spec present at all; a real successor is no longer
+// strictly required to prove supersession. This fixture still uses one
+// deliberately: it's the STRONGER, positively-corpus-proven signal
+// (checked first, ahead of the legacy fallback, and carrying no
+// compatibility disclosure), so a test built on it characterizes the
+// primary path rather than the legacy escape hatch.
 func supersessorSpecMD(name, predecessorName string) string {
 	return `---
 id: spec/` + name + `

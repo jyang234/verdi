@@ -211,10 +211,16 @@ func TestScan_AC1_GREEN(t *testing.T) {
 // — a close/<name> branch archiving a superseded-named spec, and a
 // superseded feature with every stub realized, must BOTH stay silent. Each
 // predecessor carries a REAL, validated successor (supersessorSpecMD) —
-// Task 6a's effective-state migration made "superseded" git-derived
-// (a validated successor spec elsewhere in the corpus), so a bare
-// self-reported `status: superseded` with no successor no longer proves
-// the predecessor superseded on its own (specstate/resolve.go).
+// Task 6a's effective-state migration made "superseded" route through
+// specstate (a corpus-provable successor spec elsewhere is the PRIMARY
+// signal, checked first). Note (fix-round-2, Finding 5): specstate's own
+// legacy-terminal compatibility fallback means a bare, self-reported
+// `status: superseded` with no successor at all CAN still independently
+// resolve to Superseded once its exact bytes are proven reachable and
+// landed (resolve.go's fix-round-1 finding 1) — a real successor is not
+// strictly required any more. This fixture keeps one anyway: it proves
+// dc-2's exclusion against the STRONGER, primary corpus-proven path,
+// never relying on the secondary legacy fallback to make the point.
 func TestScan_AC1_DC2_SupersededNeverCheckedEvenWhenOtherwiseShaped(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
