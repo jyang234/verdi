@@ -223,6 +223,40 @@ func TestProjector_ResolveMany(t *testing.T) {
 		}
 	})
 
+	// fix-round-2 (Finding 4): a landed, exact, active-zone candidate whose
+	// OWN frontmatter fails to decode must project Unproven with a
+	// disclosure naming the failure — never silently AcceptedPendingBuild,
+	// even though its (unreadable) legacy status field might have said
+	// superseded or closed. Single-candidate (non-batched) proof,
+	// mirroring TestProjector_ResolveMany_Batching's own batched sibling
+	// subtest below.
+	t.Run("active exact bytes, own content fails to decode: unproven, fail-closed", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+		path := ".verdi/specs/active/broken-solo/spec.md"
+		content := []byte("---\nid: spec/broken-solo\nkind: spec\nclass: feature\nunknown_field: true\n---\nbody\n")
+
+		p := newProjector(stubGit{
+			blobAt: exactBlobAt(path, fakeOID),
+			show:   exactShow(path, content),
+			fpbl:   exactLanding(path, fakeOID, fakeLanding),
+			lsTree: onlyPath(path),
+		})
+
+		result, err := p.Resolve(ctx, repo.Dir, Candidate{Path: path, Content: content})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if result.State != Unproven || result.Relation != RelationUnproven {
+			t.Fatalf("Resolve = %+v, want Unproven/unproven (fail-closed: this candidate's own decode failure must block its own verdict)", result)
+		}
+		if len(result.Disclosures) != 1 || !strings.Contains(result.Disclosures[0], path) || !strings.Contains(result.Disclosures[0], "failed to decode") {
+			t.Fatalf("Resolve disclosures = %v, want exactly one naming %s as the decode witness", result.Disclosures, path)
+		}
+		if result.Baseline != nil {
+			t.Fatalf("Resolve: want nil baseline for an unproven result, got %+v", result.Baseline)
+		}
+	})
+
 	t.Run("active exact predecessor named by a valid landed successor: superseded, exact", func(t *testing.T) {
 		repo := buildResolvableRepo(t)
 		predecessorPath := ".verdi/specs/active/old-feature/spec.md"
@@ -420,7 +454,17 @@ body
 	t.Run("malformed default-branch successor prevents a complete supersession scan: unproven + decode disclosure, unproven", func(t *testing.T) {
 		repo := buildResolvableRepo(t)
 		predecessorPath := ".verdi/specs/active/old-feature/spec.md"
-		predecessorContent := []byte("---\nid: spec/old-feature\n---\nbody\n")
+		// fix-round-2 (Finding 4): must decode CLEANLY on its own — this
+		// subtest characterizes the OTHER (malformedPath) corpus entry's
+		// decode failure blocking the predecessor's supersession proof, not
+		// the predecessor's own content. Before Finding 4's fix this content
+		// was missing `kind: spec` (itself undecodable) and it went
+		// unnoticed only because resolveOne never checked a candidate's own
+		// corpus.failures entry at all; now it does, so a predecessor whose
+		// own bytes don't decode would short-circuit to a ONE-disclosure
+		// Unproven (its own failure) before ever reaching the multi-witness
+		// scan-incompleteness path this subtest means to exercise.
+		predecessorContent := []byte("---\nid: spec/old-feature\nkind: spec\nclass: feature\ntitle: Old Feature\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n---\nbody\n")
 		malformedPath := ".verdi/specs/active/broken-successor/spec.md"
 		malformedContent := []byte("---\nid: spec/broken-successor\nkind: spec\nclass: feature\nunknown_field: true\n---\nbody\n")
 
@@ -598,7 +642,7 @@ body
 		}
 	})
 
-	t.Run("a batched candidate's own malformed bytes still block OTHER candidates' supersession scans, but never its own", func(t *testing.T) {
+	t.Run("a batched candidate's own malformed bytes block OTHER candidates' supersession scans, AND its own verdict (fix-round-2 Finding 4)", func(t *testing.T) {
 		repo := buildResolvableRepo(t)
 		malformedPath := ".verdi/specs/active/broken-thing/spec.md"
 		malformedContent := []byte("---\nid: spec/broken-thing\nkind: spec\nclass: feature\nunknown_field: true\n---\nbody\n")
@@ -678,10 +722,18 @@ body
 			t.Fatalf("ResolveMany[otherPath] disclosures = %v, want one naming %s as the decode witness", results[0].Disclosures, malformedPath)
 		}
 
-		// malformedPath's own resolution is NOT blocked by its own decode
-		// failure (self-exclusion) — it resolves accepted-pending-build.
-		if results[1].State != AcceptedPendingBuild || results[1].Relation != RelationExact {
-			t.Fatalf("ResolveMany[malformedPath] = %+v, want AcceptedPendingBuild/exact (self-exclusion: its own decode failure must not block its own verdict)", results[1])
+		// malformedPath's own resolution: fix-round-2 Finding 4 — its own
+		// decode failure is NOT self-excluded the way the SUPERSESSION
+		// lookup is (a spec cannot supersede itself, but it very much CAN
+		// fail to prove its own state): it must project Unproven too,
+		// naming ITS OWN path as the decode witness, never silently
+		// AcceptedPendingBuild just because probeLegacyStatus's tolerant
+		// read would have swallowed the same failure.
+		if results[1].State != Unproven || results[1].Relation != RelationUnproven {
+			t.Fatalf("ResolveMany[malformedPath] = %+v, want Unproven/unproven (fail-closed: its own decode failure must block its own verdict)", results[1])
+		}
+		if len(results[1].Disclosures) != 1 || !strings.Contains(results[1].Disclosures[0], malformedPath) || !strings.Contains(results[1].Disclosures[0], "failed to decode") {
+			t.Fatalf("ResolveMany[malformedPath] disclosures = %v, want exactly one naming %s as its own decode witness", results[1].Disclosures, malformedPath)
 		}
 	})
 

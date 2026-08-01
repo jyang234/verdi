@@ -357,6 +357,26 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 		return Result{State: Superseded, Relation: RelationExact, Baseline: baseline}, nil
 	}
 
+	// fix-round-2 (Finding 4): THIS candidate's own bytes were ALSO
+	// strict-decoded by the successor-corpus scan just above
+	// (scanSuccessors decodes every active-zone spec.md unconditionally,
+	// candidate paths included — fix-round-1 finding 1's own "no exclusion
+	// at scan time") — reuse that witness directly rather than re-decoding.
+	// Checked here, AFTER the successor-corpus proof above (which needs
+	// none of this candidate's own content, so an externally,
+	// positively-proven Superseded verdict still wins regardless of
+	// whether this candidate's own bytes happen to decode) but BEFORE the
+	// legacy-status read below (whose own probeLegacyStatus is tolerant
+	// and would otherwise silently swallow this exact failure): a landed,
+	// exact, active-zone spec whose frontmatter fails to decode must
+	// project Unproven with a disclosure naming the failure, never
+	// silently fall through to AcceptedPendingBuild just because its
+	// legacy field (which might have said superseded or closed) couldn't
+	// be read.
+	if failMsg, malformed := corpus.failures[c.Path]; malformed {
+		return Result{State: Unproven, Relation: RelationUnproven, Disclosures: []string{failMsg}}, nil
+	}
+
 	// fix-round-1 finding 1 (Task 5 review): a legacy EXPLICIT terminal
 	// status — superseded or closed — is itself Git-derived-compatible
 	// evidence once these exact bytes are proven reachable and landed: the
@@ -457,13 +477,26 @@ func legacyTerminalStatusDisclosure(path, legacyStatus string, projected State) 
 // validateFeature/validateStory's empty-value tolerance), so a statusless
 // spec decodes here too — its Status simply reads back as "", which
 // migrationDisclosures' own `!= "draft"` check already treats as "no
-// legacy draft compatibility question." Any decode failure that DOES
-// still occur (a genuinely malformed spec, an unknown top-level field, an
-// unknown class) is read as "no legacy status available" rather than
-// propagated: status is used here only to produce an optional
-// compatibility disclosure, never to gate the git-derived verdict itself,
-// so a decode failure here must never block or alter the state this
-// package already proved from Git alone.
+// legacy draft compatibility question."
+//
+// fix-round-2 (Finding 4): the legacy status field DOES now gate the
+// verdict for an active-zone candidate — resolveOne's own legacy-terminal
+// branch (fix-round-1 finding 1) reads it directly to project Superseded
+// or Closed, so the OLD claim this comment made ("used here only to
+// produce an optional compatibility disclosure, never to gate the
+// git-derived verdict itself... must never block or alter the state") no
+// longer holds in general. What stays true, narrower than before: THIS
+// function's own tolerant swallow-on-decode-failure ("" on any error) is
+// safe only because resolveOne no longer reaches it blind for a candidate
+// whose own content is malformed — it checks corpus.failures[c.Path] (the
+// SAME strict decode the successor-corpus scan already performed) first,
+// and projects Unproven with a disclosure before either of this
+// function's two remaining callers (resolveOne's own legacy-terminal
+// check, and migrationDisclosures) ever runs on unreadable content. Both
+// are reached only once that same corpus.failures lookup has already come
+// back empty for c.Path, so this function's error-swallowing branch is
+// dead in that call path today — never a live fail-open gap — and stays
+// tolerant here only as this function's own defensive posture.
 func probeLegacyStatus(content []byte) string {
 	rawFM, _, splitErr := artifact.SplitFrontmatter(content)
 	if splitErr != nil {
