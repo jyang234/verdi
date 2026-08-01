@@ -101,6 +101,22 @@ func findPatternB(ctx context.Context, root, defaultTip string, specs []activeSp
 // but undecodable: a disclosed operational error, never a silent false or a
 // guessed third path — an author would want to know the archived spec.md is
 // broken, not have it read as "not yet realized".
+//
+// Disposition (specalign's lifecycle-decision source audit, Task 6c,
+// fix round 1 finding 4 — this function's OWN copy of findPatternB's doc
+// comment above, so a reader of this function alone sees the full
+// rationale without having to scroll up): decoded.Status == "closed"
+// below is left reading its own literal status: field, deliberately NOT
+// migrated onto effective/specstate — specstate's own archive-zone
+// Closed determination is purely zone-and-reachability based (it never
+// decodes the candidate's content at all for an archive-zone path), so
+// routing this specific check through it would silently drop this
+// function's existing malformed-archive-spec hard-error behavior
+// (TestArchiveSpecClosedAt_Negative: "present at the ref but malformed
+// is a real error") — an author would want to know a broken archived
+// spec.md exists, not have it silently read as realized. See
+// patternb_test.go and this story's task-6a report for the full
+// disposition.
 func archiveSpecClosedAt(ctx context.Context, root, ref, slug string) (bool, error) {
 	relPath := store.SpecRelPath(store.ZoneArchive, slug)
 	present, err := archiveExistsAt(ctx, root, ref, slug)

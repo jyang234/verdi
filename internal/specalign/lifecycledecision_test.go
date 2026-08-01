@@ -9,50 +9,120 @@
 // caller's control flow depends on) made directly off the persisted
 // frontmatter field, rather than off specstate's projected Result.
 //
+// FIX ROUND 1 REWRITE (task-6c re-review findings 2/3): the original
+// version gated detection on PROVING a compared value's raw provenance
+// (a chain back to artifact.DecodeSpec or an artifact.Status-typed
+// declaration). The reviewer's own probe table proved that gate blind to
+// several real reintroduction shapes — a nested selector (`s.FM.Status`,
+// the exact form internal/residue/activespecs.go's own doc comment
+// names as the shape the Task 6a migration removed), a switch on a
+// nested selector, a range-loop variable's later `.Status` access, a
+// map-range VALUE (as opposed to an indexed lookup), a `string(...)`-cast
+// launder, and a comparand resolving through a same-file constant rather
+// than a bare literal. The controller's decision: INVERT to fail-closed.
+// The scanner no longer tries to prove a compared value IS raw before
+// flagging it; it flags every `.Status` selector (any depth, any base
+// type) used in a comparison/switch against one of the four persisted
+// literals — or a same-file constant equal to one — and any value
+// provably DERIVED from such a selector in the same function (a
+// `string(...)` cast, a direct alias, or a map/slice-of-artifact.Status
+// index/range value). What used to be a type-provenance GATE is now only
+// used to widen that derivation tracking (container/param typing); it is
+// never used to silently exempt a hit. Every real display consumer this
+// broadening now (correctly, per the reviewer) catches is handled by an
+// explicit, rationale-carrying allowlist entry instead — see
+// lifecycleDecisionAllowlist below.
+//
 // Mechanical detection, mirroring vocabprose_test.go's own established
 // idiom (single-file go/ast parse, per-file mechanical rules, disclosed
 // limits rather than an adversarial-proof claim):
 //
-//   - The scanner tracks, per function declaration, a small provenance
-//     table seeded from parameter/receiver/local-var TYPES: a value typed
-//     artifact.Status, or a *artifact.SpecFrontmatter/artifact.
-//     SpecFrontmatter value's own .Status selector, or a value indexed out
-//     of a map/slice whose element type is artifact.Status, or the direct
-//     result of an artifact.DecodeSpec(...) call's .Status selector, are
-//     all "raw" — the exact wire type spec frontmatter decodes to, before
-//     any specstate resolution touches it.
-//   - A raw-typed value compared (==, !=) against, or switched with a case
-//     naming, one of the four persisted feature/story lifecycle values —
-//     draft, accepted-pending-build, closed, superseded (internal/
-//     specstate's own ArtifactStatus() enumerates exactly these four) — is
-//     a violation: a decision made off the raw field.
-//   - This is deliberately narrower than "every use of a field named
-//     Status": a downstream projection struct (internal/workbench's
-//     BoardProjection.Status, internal/dex's listItem.Status, internal/
-//     lint's Document.Status, ...) is typed plain `string`, populated from
-//     specstate's own resolved Result (or, for internal/lint, from an
-//     explicit `string(fmv.Status)` cast at the ONE decode site,
-//     internal/lint/walk.go) — never itself typed artifact.Status — so
-//     comparisons against it are consuming an already-resolved value, not
-//     deciding off the raw one, and are correctly not flagged. This is the
-//     load-bearing distinction the whole audit turns on (see
-//     TestScanLifecycleDecisions_Classifier's "display consumer" case).
-//   - Component-class values ("active"), and every other kind's own status
-//     vocabulary (diagram: proposed/accepted; ADR: accepted/superseded;
-//     conflict: superseded/dismissed; annotation, waiver, evidence, ...)
-//     are excluded by the same four-value literal set: "superseded" is
-//     the only literal the feature/story set shares with another kind's
-//     vocabulary (ADR, conflict), and every one of those lives inside
-//     internal/artifact itself (the schema-validation package, allowed
-//     wholesale below), so the shared literal never produces a false hit
-//     on a different kind's decision elsewhere in the tree.
-//   - Disclosed limits, same posture as vocabprose_test.go: single-
-//     function-body scope (no cross-function/interprocedural tracing); an
-//     aliased `artifact` import, or a value laundered through an
-//     intermediate helper this scanner doesn't recognize (e.g. a wrapper
-//     around DecodeSpec), would evade it. A ratchet against regression at
-//     the sites this migration actually touched, not an adversarial-proof
-//     gate.
+//   - FLAGGABLE (the thing being compared): any *ast.SelectorExpr whose
+//     field name is exactly "Status", at ANY nesting depth and off ANY
+//     base expression (s.Status, s.FM.Status, req.spec.Status, ...) —
+//     unconditionally, never gated on the base's declared/inferred type.
+//     Also flaggable: a same-function local identifier the scanner can
+//     show, via simple sequential env tracking (mirroring the file's
+//     prior version), was assigned directly from a flaggable expression,
+//     from `string(<flaggable expression>)`, from indexing a
+//     map/slice-of-artifact.Status, or from ranging over one (the VALUE
+//     variable, not the key) — plus, unchanged from before, a function
+//     parameter/receiver/local var explicitly typed artifact.Status
+//     (refindex/status.go's mapStatusGroup(status artifact.Status)
+//     shape, where the flaggable value is the bare parameter, no
+//     selector at all).
+//   - TARGET (what it's compared against): one of the four persisted
+//     feature/story lifecycle literals — draft, accepted-pending-build,
+//     closed, superseded — spelled either as a bare string literal, OR
+//     as a same-FILE constant identifier (`const X = "closed"` or
+//     `const X SomeType = "closed"`) whose own declared value resolves
+//     to one of those four strings. Cross-package/qualified constants
+//     (`pkg.SomeConst`) are NOT resolved — a disclosed limit, below.
+//   - A comparison (==, !=) or switch case naming a TARGET against a
+//     FLAGGABLE operand is a violation.
+//   - internal/artifact (schema-compatibility validation) and internal/
+//     specstate (the projection itself) are excluded WHOLESALE (skip
+//     directories, never itemized) — the brief's own first two named
+//     exceptions.
+//   - Every other hit is either a NAMED allowlist entry (below) or a
+//     reported violation. Allowlist entries come in two shapes (fix
+//     round 1 finding 3): LINE-EXACT (file + line), reserved for the
+//     TEMPORARY accept.go/supersede.go legacy-mutation entries where
+//     precision is deliberately the point (their removal — the next
+//     task's own retirement of the legacy gate — must visibly SHRINK the
+//     table, never silently widen it via a stale function-scope match);
+//     and FUNCTION-SCOPED (file + function/method name), used for every
+//     other adjudicated exception — a legitimately-total mapping
+//     function (mapStatusGroup) or a display/render function (the
+//     board's own status-gated affordance checks, lint's status-in-path
+//     validators) whose own internal line numbers shift on any ordinary,
+//     unrelated edit; pinning those to an exact line makes the audit a
+//     permanent tripwire on code nobody actually regressed. A
+//     function-scoped entry is stale (and reported, same as a line-exact
+//     one) when its named function no longer contains ANY flagged site —
+//     never silently kept once its own reason for existing has moved or
+//     been removed.
+//
+// Disclosed limits (this scanner is a ratchet against regression at the
+// sites this migration actually touched, never an adversarial-proof
+// gate — same posture as vocabprose_test.go's own file doc comment):
+//
+//   - CROSS-FUNCTION AND CROSS-PACKAGE LAUNDERS remain entirely
+//     invisible: a `.Status` selector's value passed as a plain string
+//     ARGUMENT into another function — in another file, another package,
+//     or both — where the actual comparison happens is never traced.
+//     This is exactly fix round 1 finding 1's own shape:
+//     cmd/verdi/designfromstub.go passed `string(spec.Status)` as an
+//     argument to internal/stubinstantiate.Instantiate, which itself
+//     passes it on to SealedFeatureWallGuard's `status string` parameter,
+//     which is where `status != "accepted-pending-build"` actually lived
+//     — three function calls and a package boundary away from the
+//     selector. No single-file scanner can trace that without a whole-
+//     program call graph, which this audit deliberately does not build
+//     (CLAUDE.md: no new dependencies — a real interprocedural analysis
+//     would need golang.org/x/tools/go/{ssa,callgraph}, not stdlib
+//     go/ast). This is WHY finding 1's fix is a CODE change (resolving
+//     the effective status at the CLI call site, mirroring the board's
+//     own already-correct call site) rather than a scanner enhancement:
+//     the scanner cannot see that class of defect and a future one just
+//     like it would again need a human (or a routed review finding) to
+//     catch, not this audit.
+//   - Same-file scope for BOTH the env-derivation tracking (a shadowed
+//     re-declaration of the same name inside a nested block is not
+//     modeled distinctly from its outer binding) and the constant table
+//     (a constant declared in a DIFFERENT file of the same package is
+//     invisible here, since this scanner walks and parses one file at a
+//     time, mirroring vocabprose_test.go's own per-file architecture).
+//   - Qualified (cross-package) constant comparands, e.g. `pkg.
+//     SomeStatusConst`, are never resolved to their underlying string —
+//     only a bare identifier looked up in the SAME file's own const
+//     table.
+//   - An aliased `artifact` import defeats the artifact.Status/
+//     map[...]artifact.Status TYPE recognition this scanner still uses
+//     for parameter/var/container seeding (though, per the fail-closed
+//     inversion above, that recognition now only WIDENS what gets
+//     flagged — a base selector like `x.Status` is caught regardless of
+//     whether `x`'s own type was ever recognized at all).
 package specalign
 
 import (
@@ -81,37 +151,42 @@ var lifecycleStatusLiterals = map[string]bool{
 	"superseded":             true,
 }
 
-// lifecycleRawKind classifies an identifier's provenance within one
-// function body's local table (lifecycleRawNone is the zero value: no
-// recognized raw provenance, never flagged).
-type lifecycleRawKind int
+// lifecycleFlag classifies an identifier's DERIVATION within one function
+// body's local table (lifecycleFlagNone is the zero value: no recognized
+// derivation, never itself flaggable — though a bare *ast.SelectorExpr
+// named Status is ALWAYS flaggable regardless of this table; see the file
+// doc comment's fail-closed inversion).
+type lifecycleFlag int
 
 const (
-	lifecycleRawNone lifecycleRawKind = iota
-	// lifecycleRawSpec: a *artifact.SpecFrontmatter (or artifact.
-	// SpecFrontmatter) value — its own .Status selector is the raw wire
-	// field.
-	lifecycleRawSpec
-	// lifecycleRawStatus: an artifact.Status-typed value itself (a bare
-	// identifier, e.g. a function parameter or a map/slice element).
-	lifecycleRawStatus
-	// lifecycleRawStatusContainer: a map or slice whose element type is
-	// artifact.Status — indexing it produces a lifecycleRawStatus value.
-	lifecycleRawStatusContainer
+	lifecycleFlagNone lifecycleFlag = iota
+	// lifecycleFlagStatus: this identifier's value was derived from a
+	// flaggable Status expression (a direct alias, a string(...) cast, or
+	// an index/range value out of a map/slice-of-artifact.Status), or is
+	// itself explicitly typed artifact.Status (a parameter/var).
+	lifecycleFlagStatus
+	// lifecycleFlagContainer: this identifier is a map or slice whose
+	// element type is artifact.Status — indexing or ranging over it
+	// produces a lifecycleFlagStatus value.
+	lifecycleFlagContainer
 )
 
 // lifecycleViolation is one raw feature/story lifecycle-status decision
-// site: a comparison or switch case, at its own source line, naming one
-// of lifecycleStatusLiterals against a raw-typed value.
+// site: a comparison or switch case, at its own source line and enclosing
+// function, naming one of lifecycleStatusLiterals (bare or const-
+// resolved) against a flaggable Status expression.
 type lifecycleViolation struct {
 	File     string // module-root-relative, slash-separated
 	Line     int
+	Func     string   // enclosing function/method name (FuncDecl.Name.Name)
 	Literals []string // the offending literal(s) this line names, sorted
 	Snippet  string   // the enclosing line's trimmed source text, for the report
 }
 
 // isArtifactStatusType reports whether t is exactly the artifact.Status
-// selector type.
+// selector type — used only to SEED param/var/container derivation
+// tracking (widening what counts as flaggable), never to gate a bare
+// Status selector (fix round 1's own inversion).
 func isArtifactStatusType(t ast.Expr) bool {
 	sel, ok := t.(*ast.SelectorExpr)
 	if !ok {
@@ -119,20 +194,6 @@ func isArtifactStatusType(t ast.Expr) bool {
 	}
 	id, ok := sel.X.(*ast.Ident)
 	return ok && id.Name == "artifact" && sel.Sel.Name == "Status"
-}
-
-// isSpecFrontmatterType reports whether t is artifact.SpecFrontmatter or
-// *artifact.SpecFrontmatter.
-func isSpecFrontmatterType(t ast.Expr) bool {
-	if star, ok := t.(*ast.StarExpr); ok {
-		t = star.X
-	}
-	sel, ok := t.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	id, ok := sel.X.(*ast.Ident)
-	return ok && id.Name == "artifact" && sel.Sel.Name == "SpecFrontmatter"
 }
 
 // isStatusContainerType reports whether t is map[K]artifact.Status or
@@ -147,37 +208,22 @@ func isStatusContainerType(t ast.Expr) bool {
 	return false
 }
 
-// isDecodeSpecCall reports whether call is a call to artifact.DecodeSpec —
-// the one decoder whose result's own .Status field is the raw feature/
-// story wire value (every other kind's Decode* function produces a
-// DIFFERENT kind's status vocabulary, out of this audit's scope by
-// construction — see the file doc comment's literal-set argument).
-func isDecodeSpecCall(call *ast.CallExpr) bool {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	pkg, ok := sel.X.(*ast.Ident)
-	return ok && pkg.Name == "artifact" && sel.Sel.Name == "DecodeSpec"
-}
-
-// lifecycleFuncEnv is one function body's provenance table: identifier
-// name -> lifecycleRawKind, seeded from parameter/receiver types and
-// updated, in source order, as assignments and var declarations are
-// walked (ast.Inspect's pre-order traversal visits a block's statements in
-// source order, which is sufficient for the straight-line code every real
-// site in this tree uses — see the file doc comment's disclosed limits).
-type lifecycleFuncEnv map[string]lifecycleRawKind
+// lifecycleFuncEnv is one function body's derivation table: identifier
+// name -> lifecycleFlag, seeded from parameter/receiver/local-var types
+// and updated, in source order, as assignments/declarations/range
+// statements are walked (ast.Inspect's pre-order traversal visits a
+// block's statements in source order, sufficient for the straight-line
+// code every real site in this tree uses — see the file doc comment's
+// disclosed limits).
+type lifecycleFuncEnv map[string]lifecycleFlag
 
 func (env lifecycleFuncEnv) seedFromType(names []*ast.Ident, typ ast.Expr) {
-	var k lifecycleRawKind
+	var k lifecycleFlag
 	switch {
 	case isArtifactStatusType(typ):
-		k = lifecycleRawStatus
-	case isSpecFrontmatterType(typ):
-		k = lifecycleRawSpec
+		k = lifecycleFlagStatus
 	case isStatusContainerType(typ):
-		k = lifecycleRawStatusContainer
+		k = lifecycleFlagContainer
 	default:
 		return
 	}
@@ -188,45 +234,115 @@ func (env lifecycleFuncEnv) seedFromType(names []*ast.Ident, typ ast.Expr) {
 	}
 }
 
-// kindOf classifies expr's raw provenance against env's current table.
-func (env lifecycleFuncEnv) kindOf(expr ast.Expr) lifecycleRawKind {
+// isFlaggable reports whether expr is a FLAGGABLE Status expression: any
+// `.Status` selector at any depth (unconditional — the fail-closed
+// inversion's own core rule), a same-function identifier this env has
+// derived as lifecycleFlagStatus, a `string(<flaggable>)` cast, an index
+// into a lifecycleFlagContainer, or a parenthesized flaggable expression.
+func (env lifecycleFuncEnv) isFlaggable(expr ast.Expr) bool {
 	switch v := expr.(type) {
-	case *ast.Ident:
-		return env[v.Name]
 	case *ast.SelectorExpr:
-		if v.Sel.Name != "Status" {
-			return lifecycleRawNone
-		}
-		if base, ok := v.X.(*ast.Ident); ok && env[base.Name] == lifecycleRawSpec {
-			return lifecycleRawStatus
-		}
-		return lifecycleRawNone
+		return v.Sel.Name == "Status"
+	case *ast.Ident:
+		return env[v.Name] == lifecycleFlagStatus
 	case *ast.IndexExpr:
-		if base, ok := v.X.(*ast.Ident); ok && env[base.Name] == lifecycleRawStatusContainer {
-			return lifecycleRawStatus
+		if base, ok := v.X.(*ast.Ident); ok {
+			return env[base.Name] == lifecycleFlagContainer
 		}
-		return lifecycleRawNone
+		return false
 	case *ast.CallExpr:
-		if isDecodeSpecCall(v) {
-			return lifecycleRawSpec
+		if id, ok := v.Fun.(*ast.Ident); ok && id.Name == "string" && len(v.Args) == 1 {
+			return env.isFlaggable(v.Args[0])
 		}
-		return lifecycleRawNone
+		return false
+	case *ast.ParenExpr:
+		return env.isFlaggable(v.X)
 	}
-	return lifecycleRawNone
+	return false
 }
 
-// stringLiteralValue returns lit's unquoted string value and whether it is
-// a member of lifecycleStatusLiterals.
-func stringLiteralValue(expr ast.Expr) (string, bool) {
-	bl, ok := expr.(*ast.BasicLit)
-	if !ok || bl.Kind != token.STRING {
+// isContainerExpr reports whether expr is a map/slice-of-artifact.Status
+// value: a lifecycleFlagContainer identifier, or an inline composite
+// literal of that type (a range statement's own source expression may be
+// either shape).
+func (env lifecycleFuncEnv) isContainerExpr(expr ast.Expr) bool {
+	switch v := expr.(type) {
+	case *ast.Ident:
+		return env[v.Name] == lifecycleFlagContainer
+	case *ast.CompositeLit:
+		return v.Type != nil && isStatusContainerType(v.Type)
+	case *ast.ParenExpr:
+		return env.isContainerExpr(v.X)
+	}
+	return false
+}
+
+// resolveTargetInSet resolves expr to a lifecycleStatusLiterals member,
+// either directly (a bare string literal) or through consts (a same-file
+// constant declaration whose own value is that literal — the "package-
+// const comparands" shape). Returns ("", false) for anything else,
+// INCLUDING a literal or constant that resolves fine but names a value
+// outside the four-member set (a different kind's own vocabulary word,
+// or a component-only value like "active") — that is what keeps this
+// scanner from flagging every kind's own status vocabulary, not any
+// provenance gate.
+func resolveTargetInSet(expr ast.Expr, consts map[string]string) (string, bool) {
+	var s string
+	switch v := expr.(type) {
+	case *ast.BasicLit:
+		if v.Kind != token.STRING {
+			return "", false
+		}
+		unquoted, err := strconv.Unquote(v.Value)
+		if err != nil {
+			return "", false
+		}
+		s = unquoted
+	case *ast.Ident:
+		resolved, ok := consts[v.Name]
+		if !ok {
+			return "", false
+		}
+		s = resolved
+	default:
 		return "", false
 	}
-	s, err := strconv.Unquote(bl.Value)
-	if err != nil {
+	if !lifecycleStatusLiterals[s] {
 		return "", false
 	}
-	return s, lifecycleStatusLiterals[s]
+	return s, true
+}
+
+// fileConstTable collects every same-file, string-VALUED top-level const
+// declaration (`const X = "y"` or `const X SomeType = "y"`, singly or
+// inside a `const ( ... )` block) into name -> value, for
+// resolveTargetInSet's "package-const comparands" case. Deliberately
+// same-file only (the file doc comment's own disclosed limit) — this
+// scanner parses and walks one file at a time.
+func fileConstTable(f *ast.File) map[string]string {
+	consts := map[string]string{}
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok || len(vs.Names) != len(vs.Values) {
+				continue
+			}
+			for i, name := range vs.Names {
+				bl, ok := vs.Values[i].(*ast.BasicLit)
+				if !ok || bl.Kind != token.STRING {
+					continue
+				}
+				if s, err := strconv.Unquote(bl.Value); err == nil {
+					consts[name.Name] = s
+				}
+			}
+		}
+	}
+	return consts
 }
 
 // lineSnippet returns lines[n-1] trimmed, "" if out of range.
@@ -239,7 +355,7 @@ func lineSnippet(lines []string, n int) string {
 
 // scanLifecycleDecisionsInFunc walks one function declaration's body for
 // raw feature/story lifecycle-status decisions, updating env as it goes.
-func scanLifecycleDecisionsInFunc(rel string, fset *token.FileSet, fn *ast.FuncDecl, lines []string) []lifecycleViolation {
+func scanLifecycleDecisionsInFunc(rel string, fset *token.FileSet, fn *ast.FuncDecl, consts map[string]string, lines []string) []lifecycleViolation {
 	env := lifecycleFuncEnv{}
 	if fn.Recv != nil {
 		for _, f := range fn.Recv.List {
@@ -254,11 +370,15 @@ func scanLifecycleDecisionsInFunc(rel string, fset *token.FileSet, fn *ast.FuncD
 	if fn.Body == nil {
 		return nil
 	}
+	funcName := ""
+	if fn.Name != nil {
+		funcName = fn.Name.Name
+	}
 
 	var out []lifecycleViolation
 	record := func(pos token.Pos, literals []string) {
 		p := fset.Position(pos)
-		out = append(out, lifecycleViolation{File: rel, Line: p.Line, Literals: literals, Snippet: lineSnippet(lines, p.Line)})
+		out = append(out, lifecycleViolation{File: rel, Line: p.Line, Func: funcName, Literals: literals, Snippet: lineSnippet(lines, p.Line)})
 	}
 
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -271,12 +391,11 @@ func scanLifecycleDecisionsInFunc(rel string, fset *token.FileSet, fn *ast.FuncD
 			if !ok || id.Name == "_" {
 				return true
 			}
-			if k := env.kindOf(v.Rhs[0]); k != lifecycleRawNone {
-				env[id.Name] = k
-				return true
-			}
-			if cl, ok := v.Rhs[0].(*ast.CompositeLit); ok && cl.Type != nil && isStatusContainerType(cl.Type) {
-				env[id.Name] = lifecycleRawStatusContainer
+			switch {
+			case env.isFlaggable(v.Rhs[0]):
+				env[id.Name] = lifecycleFlagStatus
+			case env.isContainerExpr(v.Rhs[0]):
+				env[id.Name] = lifecycleFlagContainer
 			}
 		case *ast.DeclStmt:
 			gd, ok := v.Decl.(*ast.GenDecl)
@@ -288,21 +407,27 @@ func scanLifecycleDecisionsInFunc(rel string, fset *token.FileSet, fn *ast.FuncD
 					env.seedFromType(vs.Names, vs.Type)
 				}
 			}
+		case *ast.RangeStmt:
+			if v.Value != nil && env.isContainerExpr(v.X) {
+				if id, ok := v.Value.(*ast.Ident); ok && id.Name != "_" {
+					env[id.Name] = lifecycleFlagStatus
+				}
+			}
 		case *ast.BinaryExpr:
 			if v.Op != token.EQL && v.Op != token.NEQ {
 				return true
 			}
-			if env.kindOf(v.X) == lifecycleRawStatus {
-				if lit, inSet := stringLiteralValue(v.Y); inSet {
+			if env.isFlaggable(v.X) {
+				if lit, inSet := resolveTargetInSet(v.Y, consts); inSet {
 					record(v.Pos(), []string{lit})
 				}
-			} else if env.kindOf(v.Y) == lifecycleRawStatus {
-				if lit, inSet := stringLiteralValue(v.X); inSet {
+			} else if env.isFlaggable(v.Y) {
+				if lit, inSet := resolveTargetInSet(v.X, consts); inSet {
 					record(v.Pos(), []string{lit})
 				}
 			}
 		case *ast.SwitchStmt:
-			if v.Tag == nil || env.kindOf(v.Tag) != lifecycleRawStatus || v.Body == nil {
+			if v.Tag == nil || !env.isFlaggable(v.Tag) || v.Body == nil {
 				return true
 			}
 			for _, stmt := range v.Body.List {
@@ -312,7 +437,7 @@ func scanLifecycleDecisionsInFunc(rel string, fset *token.FileSet, fn *ast.FuncD
 				}
 				var hits []string
 				for _, ce := range cc.List {
-					if lit, inSet := stringLiteralValue(ce); inSet {
+					if lit, inSet := resolveTargetInSet(ce, consts); inSet {
 						hits = append(hits, lit)
 					}
 				}
@@ -337,6 +462,7 @@ func scanLifecycleDecisions(rel string, src []byte) ([]lifecycleViolation, error
 		return nil, fmt.Errorf("parsing %s: %w", rel, err)
 	}
 	lines := strings.Split(string(src), "\n")
+	consts := fileConstTable(f)
 
 	byLine := map[int]*lifecycleViolation{}
 	var order []int
@@ -345,7 +471,7 @@ func scanLifecycleDecisions(rel string, src []byte) ([]lifecycleViolation, error
 		if !ok {
 			continue
 		}
-		for _, v := range scanLifecycleDecisionsInFunc(rel, fset, fn, lines) {
+		for _, v := range scanLifecycleDecisionsInFunc(rel, fset, fn, consts, lines) {
 			if existing, ok := byLine[v.Line]; ok {
 				existing.Literals = mergeSortedUnique(existing.Literals, v.Literals)
 				continue
@@ -383,21 +509,38 @@ func mergeSortedUnique(existing, add []string) []string {
 // lifecycleAllowEntry is one adjudicated exception to the audit: a raw
 // feature/story lifecycle-status decision this repo's own review process
 // has already looked at and, for the stated reason, decided to keep.
-// Matched by EXACT (File, Line): a future edit that moves the decision to
-// a different line re-reds the audit, forcing a conscious re-adjudication
-// rather than a silent carry-forward.
+// Exactly one of Line/Func is set (fix round 1 finding 3): Line (with
+// Func == "") is LINE-EXACT — reserved for the TEMPORARY accept.go/
+// supersede.go entries, where line-level precision is deliberately the
+// point (their scheduled removal must visibly SHRINK this table). Func
+// (with Line == 0) is FUNCTION-SCOPED — every other entry: a legitimately-
+// total mapping function, or a display/render function, whose own
+// internal line numbers are expected to move on ordinary, unrelated
+// edits; pinning those to a line would make the audit a permanent
+// tripwire on code nobody actually regressed.
 type lifecycleAllowEntry struct {
 	File      string
-	Line      int
+	Line      int    // line-exact match; 0 means "use Func instead"
+	Func      string // function-scoped match; "" means "use Line instead"
 	Rationale string
+}
+
+// matches reports whether v is covered by e.
+func (e lifecycleAllowEntry) matches(v lifecycleViolation) bool {
+	if e.File != v.File {
+		return false
+	}
+	if e.Func != "" {
+		return e.Func == v.Func
+	}
+	return e.Line == v.Line
 }
 
 // lifecycleDecisionAllowlist is the Task 6 brief step 5's own named
 // allowlist: every raw feature/story lifecycle-status decision this audit
-// finds outside internal/artifact and internal/specstate (both allowed
-// wholesale below, never itemized), each with its own adjudicated reason.
-// Task 6c report §"the complete allowlist with rationale per entry" mirrors
-// this table.
+// finds outside internal/artifact and internal/specstate, each with its
+// own adjudicated reason. Task 6c report §"the complete allowlist with
+// rationale per entry" mirrors this table.
 var lifecycleDecisionAllowlist = []lifecycleAllowEntry{
 	// cmd/verdi/accept.go and cmd/verdi/supersede.go: the legacy mutation
 	// paths that physically WRITE the status: draft -> accepted-pending-
@@ -407,7 +550,10 @@ var lifecycleDecisionAllowlist = []lifecycleAllowEntry{
 	// not already accepted-pending-build). TEMPORARY: retired by the NEXT
 	// task (the task-6c brief: "the legacy gate... the NEXT task
 	// retires"), at which point these entries are deleted — this list
-	// SHRINKS, never grows, as that retirement lands.
+	// SHRINKS, never grows, as that retirement lands. LINE-EXACT
+	// (fix round 1 finding 3): precision is the point here — these
+	// specific lines are what the next task removes, not "however many
+	// lines accept.go/supersede.go happen to have this week".
 	{File: "cmd/verdi/accept.go", Line: 131, Rationale: "legacy accept mutation path: refuses a non-draft spec before flipping it; TEMPORARY, removed with the next task's accept.go retirement"},
 	{File: "cmd/verdi/accept.go", Line: 276, Rationale: "legacy accept mutation path: self-validates the just-written flip landed accepted-pending-build; TEMPORARY, removed with the next task's accept.go retirement"},
 	{File: "cmd/verdi/supersede.go", Line: 143, Rationale: "legacy supersede mutation path: idempotent already-superseded short-circuit; TEMPORARY, removed with the next task's supersede.go retirement"},
@@ -416,23 +562,31 @@ var lifecycleDecisionAllowlist = []lifecycleAllowEntry{
 
 	// internal/residue/patternb.go archiveSpecClosedAt: a deliberately
 	// preserved raw `status: closed` read, NOT migrated onto specstate —
-	// see the disposition comment on archiveSpecClosedAt itself (patternb.
-	// go lines ~39-49): routing this specific check through specstate
-	// would silently drop archiveSpecClosedAt's own malformed-archive
-	// hard-error behavior (TestArchiveSpecClosedAt_Negative), which an
-	// author would want disclosed, not silently reclassified as "not yet
-	// realized". TestLifecycleDecisionAllowlist_PatternBDispositionComment
-	// below independently verifies that in-file comment still exists.
-	{File: "internal/residue/patternb.go", Line: 125, Rationale: "archiveSpecClosedAt: raw status: closed read preserved deliberately for malformed-archive hard-error detection; disposition recorded in-file on the function"},
+	// see the disposition comment on archiveSpecClosedAt itself
+	// (patternb.go, its own doc comment's final paragraph, added fix
+	// round 1 finding 4 — findPatternB's doc comment above it carries the
+	// original rationale too, but archiveSpecClosedAt now carries its own
+	// copy so a reader of this function alone sees it): routing this
+	// specific check through specstate would silently drop
+	// archiveSpecClosedAt's own malformed-archive hard-error behavior
+	// (TestArchiveSpecClosedAt_Negative), which an author would want
+	// disclosed, not silently reclassified as "not yet realized".
+	// FUNCTION-SCOPED: archiveSpecClosedAt is short and single-purpose,
+	// but scoping it by function rather than line is still strictly safer
+	// (fix round 1 finding 3's own uniform rule) and
+	// TestLifecycleDecisionAllowlist_PatternBDispositionComment below
+	// independently verifies the disposition text is still present.
+	{File: "internal/residue/patternb.go", Func: "archiveSpecClosedAt", Rationale: "archiveSpecClosedAt: raw status: closed read preserved deliberately for malformed-archive hard-error detection; disposition recorded in the function's own doc comment"},
 
-	// cmd/verdi/blastradius.go:112: the rung-4 quorum label's own display
-	// filter — "affected in-flight or closed stories" governs only which
-	// AC-2 cascade rows get PRINTED under the two-code-owner label; it
-	// blocks nothing (the file's own doc comment: "this file computes and
-	// PRINTS the quorum label only; nothing here blocks acceptance").
-	// Adjudicated deferred at Task 6c's own re-review rather than migrated
-	// in this pass — display-scoped.
-	{File: "cmd/verdi/blastradius.go", Line: 112, Rationale: "rung-4 quorum label display filter only (never blocks acceptance); adjudicated deferred, display-scoped"},
+	// cmd/verdi/blastradius.go computeBlastRadius: the rung-4 quorum
+	// label's own display filter — "affected in-flight or closed stories"
+	// governs only which AC-2 cascade rows get PRINTED under the
+	// two-code-owner label; it blocks nothing (the file's own doc
+	// comment: "this file computes and PRINTS the quorum label only;
+	// nothing here blocks acceptance"). Adjudicated deferred at Task 6c's
+	// own re-review rather than migrated in this pass — display-scoped.
+	// FUNCTION-SCOPED (fix round 1 finding 3's uniform rule).
+	{File: "cmd/verdi/blastradius.go", Func: "computeBlastRadius", Rationale: "rung-4 quorum label display filter only (never blocks acceptance); adjudicated deferred, display-scoped"},
 
 	// internal/refindex/status.go mapStatusGroup: COMPONENT-class status
 	// logic, not a feature/story decision — Task 6a narrowed this
@@ -442,20 +596,64 @@ var lifecycleDecisionAllowlist = []lifecycleAllowEntry{
 	// every artifact.Status value) but are never reached by a feature/story
 	// spec in production. See the function's own doc comment for the full
 	// disposition. The Task 6 brief itself names this exact file as the
-	// "do not flag component handling" example.
-	{File: "internal/refindex/status.go", Line: 30, Rationale: "mapStatusGroup: component-class status mapping, Task 6a narrowed to component-only callers (see in-file doc comment)"},
-	{File: "internal/refindex/status.go", Line: 32, Rationale: "mapStatusGroup: component-class status mapping, Task 6a narrowed to component-only callers (see in-file doc comment)"},
-	{File: "internal/refindex/status.go", Line: 36, Rationale: "mapStatusGroup: component-class status mapping, Task 6a narrowed to component-only callers (see in-file doc comment)"},
-}
+	// "do not flag component handling" example. FUNCTION-SCOPED (fix
+	// round 1 finding 3): this function is a legitimately-TOTAL mapping
+	// over every artifact.Status value by charter — line-exact pins here
+	// were themselves finding 3's own defect (a permanent tripwire on any
+	// innocent edit to the function).
+	{File: "internal/refindex/status.go", Func: "mapStatusGroup", Rationale: "mapStatusGroup: component-class status mapping, Task 6a narrowed to component-only callers (see in-file doc comment); legitimately-total over every artifact.Status value by charter"},
 
-// lifecycleAllowed reports whether (file, line) is on the named allowlist.
-func lifecycleAllowed(file string, line int) (bool, string) {
-	for _, e := range lifecycleDecisionAllowlist {
-		if e.File == file && e.Line == line {
-			return true, e.Rationale
-		}
-	}
-	return false, ""
+	// internal/workbench/boardspec.go loadBoard: proj.Status here is
+	// EFFECTIVE state already resolved through specstate two lines
+	// earlier in this SAME function (`string(st.ArtifactStatus())`,
+	// boardspec.go's own board-mode/status-resolution block) and fed into
+	// buildProjection as a plain value — a downstream DISPLAY consumer of
+	// an already-migrated value, gating whether the creation-form fields
+	// get attached, never a raw persisted-field read. Verified by hand
+	// (task-6c fix round 1 report): loadBoard's own resolveState call
+	// (boardspec.go, a few lines above) is the ONLY specstate resolution
+	// in this function; proj.Status traces to its return value, not to
+	// raw frontmatter. FUNCTION-SCOPED.
+	{File: "internal/workbench/boardspec.go", Func: "loadBoard", Rationale: "proj.Status is EFFECTIVE state (string(st.ArtifactStatus())) resolved earlier in this same function via specstate; gates whether the creation-form fields are attached — display/affordance consumption of an already-migrated value, not a raw decision"},
+
+	// internal/workbench/boardspecrender.go renderBoardRegion and
+	// renderBoardDialogs: p.Status is BoardProjection.Status — declared
+	// `Status string` (board.go), populated by buildProjection from the
+	// effective status boardspec.go's loadBoard passes in (see the
+	// loadBoard entry above) — never re-decoded here. Both functions are
+	// pure HTML renderers (no I/O, no git, no artifact.DecodeSpec call
+	// anywhere in this file) gating a card's Instantiate affordance and
+	// the confirmation dialog's own attachment on the ALREADY-RESOLVED
+	// projection field — display/affordance consumption, not a raw
+	// decision. FUNCTION-SCOPED (two entries: the affordance gate and the
+	// dialog-attachment gate are two separate functions).
+	{File: "internal/workbench/boardspecrender.go", Func: "renderBoardRegion", Rationale: "p.Status is BoardProjection.Status, populated upstream from specstate's ArtifactStatus() (see boardspec.go's loadBoard entry above); gates the stub card's Instantiate affordance — pure HTML rendering, no re-decode"},
+	{File: "internal/workbench/boardspecrender.go", Func: "renderBoardDialogs", Rationale: "p.Status is BoardProjection.Status, populated upstream from specstate's ArtifactStatus() (see boardspec.go's loadBoard entry above); gates whether the stub-instantiate confirmation dialog is attached — pure HTML rendering, no re-decode"},
+
+	// internal/lint/vl002.go checkSpecPath: d.Status is lint.Document.
+	// Status — declared `Status string` (document.go), populated by
+	// walk.go's decodeDocument via an explicit `string(fmv.Status)` cast
+	// at the ONE decode site (never re-decoded per-rule). VL-002 is a
+	// STRUCTURAL self-consistency check — does a spec's OWN claimed
+	// status agree with which directory (active/ vs archive/) it
+	// physically lives in — not an acceptance decision: it never asks
+	// "is this spec accepted", only "does this file's location match
+	// what it says about itself", the same self-consistency register
+	// internal/artifact's own schema validation occupies, just
+	// implemented as a lint rule instead. FUNCTION-SCOPED.
+	{File: "internal/lint/vl002.go", Func: "checkSpecPath", Rationale: "d.Status is lint.Document.Status (plain string, cast from raw frontmatter at the one decode site in walk.go); VL-002 validates path/status self-consistency of the artifact's OWN claim, never an acceptance decision — the same register internal/artifact's schema validation occupies"},
+
+	// internal/lint/vl004.go (vl004).Check: d.Status != "draft" is a
+	// PRE-FILTER identifying which documents carry the LEGACY "draft"
+	// claim worth cross-checking against Git — VL-004's own charter (its
+	// file doc comment: "this rule's own job narrows to exactly one
+	// thing: when a legacy status: draft document's exact bytes are
+	// ALREADY reachable from the configured default branch, disclose the
+	// compatibility reading"). The actual VERDICT is decided entirely by
+	// the specstate.Result switch a few lines below this filter (result.
+	// State), never by d.Status again — verified by reading the whole
+	// function (task-6c fix round 1 report). FUNCTION-SCOPED.
+	{File: "internal/lint/vl004.go", Func: "Check", Rationale: "d.Status != \"draft\" is a pre-filter selecting which documents get the legacy-compatibility check; the actual verdict is decided by specstate.Result.State a few lines below, never by d.Status again — VL-004's own documented charter"},
 }
 
 // lifecycleDecisionSkipDir reports directories the audit deliberately does
@@ -488,7 +686,7 @@ func lifecycleDecisionSkipDir(root, path string) bool {
 func TestLifecycleDecisionSourceAudit(t *testing.T) {
 	root := verdiRepoRoot
 
-	seen := map[string]bool{} // "file:line" allowlist entries actually hit this run
+	seenEntry := map[int]bool{} // index into lifecycleDecisionAllowlist actually hit this run
 	var unlisted []string
 
 	for _, tree := range []string{"cmd", "internal"} {
@@ -519,11 +717,18 @@ func TestLifecycleDecisionSourceAudit(t *testing.T) {
 				return serr
 			}
 			for _, v := range violations {
-				if ok, _ := lifecycleAllowed(v.File, v.Line); ok {
-					seen[fmt.Sprintf("%s:%d", v.File, v.Line)] = true
+				matchedIdx := -1
+				for i, e := range lifecycleDecisionAllowlist {
+					if e.matches(v) {
+						matchedIdx = i
+						break
+					}
+				}
+				if matchedIdx >= 0 {
+					seenEntry[matchedIdx] = true
 					continue
 				}
-				unlisted = append(unlisted, fmt.Sprintf("%s:%d: raw feature/story lifecycle decision on %v — %q — not on lifecycleDecisionAllowlist; route through internal/specstate's projected Result instead of the persisted status: field, or add a named, rationale-carrying allowlist entry if this is a genuinely adjudicated exception", v.File, v.Line, v.Literals, v.Snippet))
+				unlisted = append(unlisted, fmt.Sprintf("%s:%d: raw feature/story lifecycle decision in func %s on %v — %q — not on lifecycleDecisionAllowlist; route through internal/specstate's projected Result instead of the persisted status: field, or add a named, rationale-carrying allowlist entry if this is a genuinely adjudicated exception", v.File, v.Line, v.Func, v.Literals, v.Snippet))
 			}
 			return nil
 		})
@@ -537,26 +742,34 @@ func TestLifecycleDecisionSourceAudit(t *testing.T) {
 		t.Error(msg)
 	}
 
-	// A stale allowlist entry (its file:line no longer produces a
-	// violation — the decision moved, was removed, or was migrated onto
-	// specstate) must not silently carry forward: it would let the SAME
-	// file:line slot be reused by an unrelated future decision without
-	// anyone re-adjudicating it. Report every entry not hit this run.
-	for _, e := range lifecycleDecisionAllowlist {
-		key := fmt.Sprintf("%s:%d", e.File, e.Line)
-		if !seen[key] {
-			t.Errorf("lifecycleDecisionAllowlist entry %s no longer matches a raw decision at that line (rationale: %q) — the allowlist is now stale here: remove the entry (this list must shrink, never silently drift)", key, e.Rationale)
+	// A stale allowlist entry — line-exact whose line no longer produces a
+	// violation, or function-scoped whose named function no longer
+	// contains ANY flagged site (fix round 1 finding 3's own staleness
+	// rule) — must not silently carry forward: it would let the SAME
+	// line/function slot be reused by an unrelated future decision
+	// without anyone re-adjudicating it. Report every entry not hit this
+	// run.
+	for i, e := range lifecycleDecisionAllowlist {
+		if !seenEntry[i] {
+			loc := fmt.Sprintf("line %d", e.Line)
+			if e.Func != "" {
+				loc = "func " + e.Func
+			}
+			t.Errorf("lifecycleDecisionAllowlist entry %s:%s no longer matches a raw decision (rationale: %q) — the allowlist is now stale here: remove the entry (this list must shrink, never silently drift)", e.File, loc, e.Rationale)
 		}
 	}
 }
 
 // TestLifecycleDecisionAllowlist_PatternBDispositionComment independently
-// verifies internal/residue/patternb.go still carries archiveSpecClosedAt's
-// disposition comment (the task-6c brief's own instruction: "verify that
-// in-file disposition comment still exists and reference it") — the
-// allowlist entry above ASSERTS that comment's continued presence; this
-// test PROVES it, so a future edit that quietly deletes the comment while
-// leaving the raw read in place still fails loud, not just silently.
+// verifies internal/residue/patternb.go's archiveSpecClosedAt still
+// carries its own disposition comment (fix round 1 finding 4: the prior
+// version of this test pointed at "patternb.go lines ~39-49", which is
+// actually findPatternB's doc comment, not archiveSpecClosedAt's own —
+// archiveSpecClosedAt now carries its own copy of the disposition, added
+// in the same fix round) — the allowlist entry above ASSERTS that
+// comment's continued presence; this test PROVES it, so a future edit
+// that quietly deletes the comment while leaving the raw read in place
+// still fails loud, not just silently.
 func TestLifecycleDecisionAllowlist_PatternBDispositionComment(t *testing.T) {
 	path := filepath.Join(verdiRepoRoot, "internal", "residue", "patternb.go")
 	src, err := os.ReadFile(path)
@@ -572,20 +785,54 @@ func TestLifecycleDecisionAllowlist_PatternBDispositionComment(t *testing.T) {
 			t.Errorf("%s no longer contains %q — archiveSpecClosedAt's disposition comment (the reason its raw status: closed read is allowlisted) appears to have been removed or reworded; re-verify the disposition still holds and update lifecycleDecisionAllowlist's rationale to match", path, want)
 		}
 	}
+	// archiveSpecClosedAt's OWN doc comment block (not findPatternB's,
+	// its neighbor above) must carry the phrases — the actual fix round 1
+	// finding 4 assertion, not just "somewhere in the file".
+	idx := strings.Index(string(src), "func archiveSpecClosedAt(")
+	if idx < 0 {
+		t.Fatalf("%s: archiveSpecClosedAt function not found", path)
+	}
+	// Its doc comment is the contiguous "//" block immediately above —
+	// findPatternB's own doc comment ends with a blank (non-"//") line
+	// before archiveSpecClosedAt's begins, so walking backward from idx
+	// to the nearest non-"//"-prefixed line isolates it.
+	before := string(src)[:idx]
+	lines := strings.Split(strings.TrimRight(before, "\n"), "\n")
+	var ownComment []string
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(trimmed, "//") {
+			break
+		}
+		ownComment = append([]string{trimmed}, ownComment...)
+	}
+	// Joined with a SPACE, not a newline, and comment markers stripped: a
+	// phrase this check looks for may legitimately word-wrap across two
+	// "//" lines in the source (as "deliberately NOT" / "migrated onto"
+	// does here) — a newline-joined comparison would falsely miss it.
+	var normalized []string
+	for _, l := range ownComment {
+		normalized = append(normalized, strings.TrimSpace(strings.TrimPrefix(l, "//")))
+	}
+	ownText := strings.Join(normalized, " ")
+	for _, want := range []string{"deliberately NOT migrated onto", "hard-error behavior"} {
+		if !strings.Contains(ownText, want) {
+			t.Errorf("archiveSpecClosedAt's OWN doc comment (immediately above its func line) does not contain %q — it must carry its own copy of the disposition, not rely on findPatternB's neighboring comment (fix round 1 finding 4); own comment:\n%s", want, ownText)
+		}
+	}
 }
 
 // TestScanLifecycleDecisions_Classifier is the scanner's own happy/
 // negative table, proving both failure modes the audit exists for
-// (mirroring TestScanVocabProse_Classifier's precedent): a raw DecodeSpec-
-// derived .Status comparison and a raw artifact.Status-typed switch both
-// RED with the correct file:line; a downstream DISPLAY consumer (a plain
-// string Status field on some other struct — the shape every migrated
-// workbench/refindex/dex projection now has) comparing the identical
-// literal stays GREEN, proving the audit distinguishes decisions from
-// display rather than merely pattern-matching on the field name "Status";
-// a raw artifact.Status compared against a literal OUTSIDE the feature/
-// story set (component's "active", a different kind's own vocabulary) also
-// stays GREEN.
+// (mirroring TestScanVocabProse_Classifier's precedent): a bare `.Status`
+// selector comparison and an artifact.Status-typed switch both RED with
+// the correct file:line; a downstream DISPLAY consumer stays GREEN only
+// when explicitly outside the four-literal target set (component's
+// "active") or genuinely untyped/unrelated — proving the scanner
+// distinguishes TARGETS, not provenance, per the fail-closed inversion.
+// Every row through "package-const comparand" mirrors one row of the
+// task-6c fix round 1 reviewer's own probe table — each MISSED row is
+// now CAUGHT.
 func TestScanLifecycleDecisions_Classifier(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -636,7 +883,87 @@ func f(m map[string]artifact.Status, k string) bool {
 			wantLines: []int{5},
 		},
 		{
-			name: "GREEN: a display projection's plain string Status field, identical literal",
+			name: "RED (reviewer probe): nested selector s.FM.Status",
+			src: `package p
+type spec struct{ Status string }
+type wrapper struct{ FM *spec }
+func f(s wrapper) bool {
+	return s.FM.Status != "accepted-pending-build"
+}
+`,
+			wantLines: []int{5},
+		},
+		{
+			name: "RED (reviewer probe): switch on nested selector",
+			src: `package p
+type spec struct{ Status string }
+type wrapper struct{ FM *spec }
+func f(s wrapper) string {
+	switch s.FM.Status {
+	case "closed":
+		return "terminal"
+	}
+	return "other"
+}
+`,
+			wantLines: []int{6}, // the case clause's own line, not the switch statement's
+		},
+		{
+			name: "RED (reviewer probe): range-variable provenance, .Status used after the range",
+			src: `package p
+import "github.com/jyang234/verdi/internal/artifact"
+func f(specs []artifact.SpecFrontmatter) int {
+	n := 0
+	for _, fm := range specs {
+		if fm.Status == "accepted-pending-build" {
+			n++
+		}
+	}
+	return n
+}
+`,
+			wantLines: []int{6},
+		},
+		{
+			name: "RED (reviewer probe): map[string]artifact.Status RANGE value (not indexed)",
+			src: `package p
+import "github.com/jyang234/verdi/internal/artifact"
+func f(m map[string]artifact.Status) int {
+	n := 0
+	for _, st := range m {
+		if st == "closed" {
+			n++
+		}
+	}
+	return n
+}
+`,
+			wantLines: []int{6},
+		},
+		{
+			name: "RED (reviewer probe): string(...)-cast launder",
+			src: `package p
+import "github.com/jyang234/verdi/internal/artifact"
+func f(fm *artifact.SpecFrontmatter) bool {
+	s := string(fm.Status)
+	return s == "draft"
+}
+`,
+			wantLines: []int{5},
+		},
+		{
+			name: "RED (reviewer probe): package-const comparand",
+			src: `package p
+import "github.com/jyang234/verdi/internal/artifact"
+const wantAccepted = "accepted-pending-build"
+func f(fm *artifact.SpecFrontmatter) bool {
+	return fm.Status == wantAccepted
+}
+`,
+			wantLines: []int{5},
+		},
+		{
+			name: "now caught by design: a display projection's plain string Status field, identical literal (the fail-closed inversion has no free pass by field type — the reviewer's own point)",
 			src: `package p
 type BoardProjection struct {
 	Status string
@@ -645,7 +972,7 @@ func instantiable(p *BoardProjection) bool {
 	return p.Status == "accepted-pending-build"
 }
 `,
-			wantLines: nil,
+			wantLines: []int{6},
 		},
 		{
 			name: "GREEN: artifact.Status compared to a non-feature/story literal (component-only value)",
@@ -672,10 +999,21 @@ func f(fm []byte) bool {
 			wantLines: nil,
 		},
 		{
-			name: "GREEN: a plain string parameter (already-resolved, laundered by the caller)",
+			name: "GREEN: a plain string parameter with no local Status derivation at all (finding 1's own cross-function shape: this scanner cannot and does not see it — the code fix is what closes it)",
 			src: `package p
 func guard(status string) bool {
 	return status != "accepted-pending-build"
+}
+`,
+			wantLines: nil,
+		},
+		{
+			name: "GREEN: a same-file const NOT in the four-literal set never matches",
+			src: `package p
+import "github.com/jyang234/verdi/internal/artifact"
+const wantActive = "active"
+func f(fm *artifact.SpecFrontmatter) bool {
+	return fm.Status == wantActive
 }
 `,
 			wantLines: nil,
@@ -698,6 +1036,38 @@ func guard(status string) bool {
 				if gotLines[i] != ln {
 					t.Fatalf("scanLifecycleDecisions violation[%d] line = %d, want %d (full: %+v)", i, gotLines[i], ln, got)
 				}
+			}
+		})
+	}
+}
+
+// TestLifecycleAllowEntry_Matches is the allowlist-matching predicate's
+// own happy/negative unit table (fix round 1 finding 3's new function-
+// scoped shape): a line-exact entry matches only its exact line in its
+// exact file; a function-scoped entry matches ANY violation in its named
+// function regardless of line, and never matches a same-named function in
+// a DIFFERENT file, nor a different function in its own file.
+func TestLifecycleAllowEntry_Matches(t *testing.T) {
+	lineExact := lifecycleAllowEntry{File: "cmd/verdi/accept.go", Line: 131}
+	funcScoped := lifecycleAllowEntry{File: "internal/refindex/status.go", Func: "mapStatusGroup"}
+
+	tests := []struct {
+		name  string
+		entry lifecycleAllowEntry
+		v     lifecycleViolation
+		want  bool
+	}{
+		{"line-exact: exact file+line matches", lineExact, lifecycleViolation{File: "cmd/verdi/accept.go", Line: 131, Func: "runAccept"}, true},
+		{"line-exact: same file, different line does not match", lineExact, lifecycleViolation{File: "cmd/verdi/accept.go", Line: 132, Func: "runAccept"}, false},
+		{"line-exact: same line, different file does not match", lineExact, lifecycleViolation{File: "cmd/verdi/supersede.go", Line: 131, Func: "runAccept"}, false},
+		{"func-scoped: same file+func matches regardless of line", funcScoped, lifecycleViolation{File: "internal/refindex/status.go", Line: 999, Func: "mapStatusGroup"}, true},
+		{"func-scoped: same file, different func does not match", funcScoped, lifecycleViolation{File: "internal/refindex/status.go", Line: 30, Func: "effectiveStatusGroup"}, false},
+		{"func-scoped: same func name, different file does not match", funcScoped, lifecycleViolation{File: "internal/other/status.go", Line: 30, Func: "mapStatusGroup"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.entry.matches(tt.v); got != tt.want {
+				t.Errorf("matches() = %v, want %v", got, tt.want)
 			}
 		})
 	}
