@@ -264,6 +264,93 @@ func TestRunGcReclaimUnmanaged_NoEligibleOrKeptItems_StillPrintsScope(t *testing
 	}
 }
 
+// TestRunGcReclaimUnmanaged_UnprovenSpecs_RefusesWholeRun is the Task 6c
+// re-review's routed fix (cmd/verdi/gc.go:126 previously consumed
+// residue.Scan and silently ignored Result.UnprovenSpecs, computing and
+// applying a reclamation plan over a scan that could contain unproven
+// candidates — the same silent-pass class audit.go's own Finding 1 closed
+// for `verdi audit`, here on a STATE-CHANGING verb). Mirrors
+// TestRunGcReclaimUnmanaged_UnresolvableDefaultBranch_RefusesWholeRun's own
+// shape (both apply=false and apply=true refuse identically, exit 2,
+// nothing mutated), but — unlike that silent "assert nothing" refusal —
+// this one PRINTS the per-spec disclosures to stdout first (audit.go's own
+// unprovenSpecDisclosure/disclosure.Render rendering convention, reused
+// verbatim, same package) before refusing, so an operator sees exactly
+// which spec(s) could not be proven.
+func TestRunGcReclaimUnmanaged_UnprovenSpecs_RefusesWholeRun(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/.gitignore":                     "data/\n",
+			".verdi/specs/active/ch-widget/spec.md": closureHygieneFixtureStorySpecMD,
+			".verdi/specs/active/malformed/spec.md": "---\nid: spec/malformed\nkind: spec\nclass: feature\nunknown_field: true\n---\nbody\n",
+		},
+		Message: "seed one valid, already-accepted story alongside one malformed spec (ch-widget's own supersession-completeness proof is blocked by the malformed sibling, per audit_closurehygiene_test.go's identical fixture)",
+	}})
+
+	for _, apply := range []bool{false, true} {
+		var stdout, stderr bytes.Buffer
+		got := runGcReclaimUnmanaged(context.Background(), repo.Dir, "main", apply, &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("apply=%v: runGcReclaimUnmanaged = %d, want 2 (refuse before computing/applying any plan over an unproven scan); stdout=%s stderr=%s", apply, got, stdout.String(), stderr.String())
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "spec/ch-widget") {
+			t.Errorf("apply=%v: stdout missing the unproven spec named (spec/ch-widget):\n%s", apply, out)
+		}
+		if !strings.Contains(out, "disclosed-unproven") {
+			t.Errorf("apply=%v: stdout missing the shared disclosure vocabulary (internal/disclosure.Render), want the audit's own rendering convention reused:\n%s", apply, out)
+		}
+		if strings.Contains(out, "eligible:") || strings.Contains(out, "kept:") || strings.Contains(out, "reclaimed:") {
+			t.Errorf("apply=%v: stdout unexpectedly contains a plan row — no plan may be computed or applied over an unproven scan:\n%s", apply, out)
+		}
+		if !strings.Contains(strings.ToLower(stderr.String()), "unproven") {
+			t.Errorf("apply=%v: stderr = %q, want it to name the refusal as due to an unproven spec", apply, stderr.String())
+		}
+	}
+}
+
+// TestRunGcReclaimUnmanaged_ZeroUnprovenSpecs_UnchangedBehavior pins the
+// Task 6c fix's own negative path: gcReclaimFixture's corpus carries no
+// specs at all (both fixture branches are plain files, no .verdi/specs/),
+// so residue.Scan's UnprovenSpecs is always empty there — dry-run and
+// --apply must behave EXACTLY as
+// TestRunGcReclaimUnmanaged_DryRun_PrintsPlanAndScope and
+// TestRunGcReclaimUnmanaged_Apply_ReclaimsEligible_KeepsUnchanged already
+// proved, unchanged by this fix. This test exists so a future regression
+// that over-broadens the new guard (e.g. refusing on ANY residue.Scan
+// result, not just a genuinely unproven one) is caught here, not just by
+// the two pre-existing tests continuing to pass.
+func TestRunGcReclaimUnmanaged_ZeroUnprovenSpecs_UnchangedBehavior(t *testing.T) {
+	root, eligibleBranch, eligibleWTPath, unmergedBranch := gcReclaimFixture(t)
+	ctx := context.Background()
+
+	var stdout, stderr bytes.Buffer
+	got := runGcReclaimUnmanaged(ctx, root, "main", false, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("dry-run with zero unproven specs: got %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "eligible:") || !strings.Contains(out, eligibleBranch) {
+		t.Errorf("stdout missing the eligible line for %s (zero-unproven path must be unaffected):\n%s", eligibleBranch, out)
+	}
+	if !strings.Contains(out, "kept:") || !strings.Contains(out, unmergedBranch) {
+		t.Errorf("stdout missing the kept line for %s (zero-unproven path must be unaffected):\n%s", unmergedBranch, out)
+	}
+
+	var applyStdout, applyStderr bytes.Buffer
+	got = runGcReclaimUnmanaged(ctx, root, "main", true, &applyStdout, &applyStderr)
+	if got != 0 {
+		t.Fatalf("--apply with zero unproven specs: got %d, want 0; stdout=%s stderr=%s", got, applyStdout.String(), applyStderr.String())
+	}
+	if !strings.Contains(applyStdout.String(), "reclaimed:") || !strings.Contains(applyStdout.String(), eligibleBranch) {
+		t.Errorf("apply stdout missing the reclaimed line for %s (zero-unproven path must be unaffected):\n%s", eligibleBranch, applyStdout.String())
+	}
+	if _, err := os.Stat(eligibleWTPath); !os.IsNotExist(err) {
+		t.Fatalf("eligible worktree still on disk after --apply (zero-unproven path must be unaffected): err=%v", err)
+	}
+}
+
 // runGitCmd (git in dir, process's inherited environment, t.Fatalf on a
 // non-zero exit) is gc_test.go's own helper, reused here unchanged
 // (package main, one definition).
