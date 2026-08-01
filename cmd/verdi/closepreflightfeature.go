@@ -22,6 +22,7 @@ import (
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -53,7 +54,7 @@ func runFeaturePreflightGate(ctx context.Context, root string, spec *artifact.Sp
 	if err != nil {
 		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}
-	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec)
+	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec, specstate.NewProjector())
 	if err != nil {
 		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
 	}

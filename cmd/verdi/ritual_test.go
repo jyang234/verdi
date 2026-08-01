@@ -36,6 +36,7 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/provider"
 	providerfake "github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -270,7 +271,7 @@ func TestRoundFourRitual_FullLoop(t *testing.T) {
 	// --- 7. verdi build start spec/stale-decline-story: succeeds only against accepted-pending-build ---
 	stdout.Reset()
 	stderr.Reset()
-	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", buildDeps, &stdout, &stderr); got != 0 {
+	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", specstate.NewProjector(), buildDeps, &stdout, &stderr); got != 0 {
 		t.Fatalf("build start (story) = %d, want 0; stderr=%s", got, stderr.String())
 	}
 	branch, err := gitx.CurrentBranch(ctx, repo.Dir)
@@ -361,7 +362,7 @@ x
 	// its successor via the supersedes chain (D-12).
 	stdout.Reset()
 	stderr.Reset()
-	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", buildDeps, &stdout, &stderr); got != 1 {
+	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", specstate.NewProjector(), buildDeps, &stdout, &stderr); got != 1 {
 		t.Fatalf("build start (superseded v1) = %d, want 1 (refused); stderr=%s", got, stderr.String())
 	}
 	if !contains(stderr.String(), "superseded by spec/stale-decline-story-v2") {
@@ -446,7 +447,7 @@ x
 	// check, not a re-check of an existing branch). ---
 	stdout.Reset()
 	stderr.Reset()
-	got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story-v2", buildDeps, &stdout, &stderr)
+	got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story-v2", specstate.NewProjector(), buildDeps, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("build start (story v2, pre-reaffirmation) = %d, want 1 (refused); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -463,7 +464,7 @@ x
 
 	stdout.Reset()
 	stderr.Reset()
-	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story-v2", buildDeps, &stdout, &stderr); got != 0 {
+	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story-v2", specstate.NewProjector(), buildDeps, &stdout, &stderr); got != 0 {
 		t.Fatalf("build start (story v2, post-reaffirmation) = %d, want 0; stderr=%s", got, stderr.String())
 	}
 	branch, err = gitx.CurrentBranch(ctx, repo.Dir)

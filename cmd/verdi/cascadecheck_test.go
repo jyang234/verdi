@@ -10,6 +10,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -285,11 +286,12 @@ frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }
 	t.Cleanup(func() {
 		_ = os.Chmod(specPath, 0o644)
 	})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 
 	ctx := context.Background()
 	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
 	var stdout, stderr bytes.Buffer
-	got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", deps, &stdout, &stderr)
+	got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", specstate.NewProjector(), deps, &stdout, &stderr)
 	if got != 2 {
 		t.Fatalf("runBuildStart(unreadable superseding-spec scan) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -354,6 +356,7 @@ y
 		},
 		Message: "scaffold + cascade-stale story",
 	}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	checkoutBranch(t, repo.Dir, "feature/stale-decline")
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
@@ -361,7 +364,7 @@ y
 
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
-	got := runGate(ctx, repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
+	got := runGate(ctx, repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runGate (cascade-stale, no reaffirmation) = %d, want 1; stdout=%s", got, stdout.String())
 	}
@@ -378,7 +381,7 @@ y
 
 	stdout.Reset()
 	stderr.Reset()
-	got = runGate(ctx, repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
+	got = runGate(ctx, repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runGate (cascade-stale, reaffirmed) = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -60,6 +61,14 @@ func buildGateRepo(t *testing.T, mainStatus string) *fixturegit.Repo {
 		},
 	})
 	checkoutBranch(t, repo.Dir, "feature/stale-decline")
+	// The real, git-backed projector resolves the default branch through
+	// its own precedence chain (CI_DEFAULT_BRANCH, then origin/HEAD, then
+	// the D6-6 local fallback) rather than trusting a caller-passed ref —
+	// fixturegit repos carry no origin remote, so every gate test that
+	// needs condition 1 to actually resolve pins it here. Tests that need
+	// the OPPOSITE (an unresolvable default branch) override this back to
+	// "" after calling buildGateRepo.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return repo
 }
 
@@ -70,6 +79,32 @@ func checkoutBranch(t *testing.T, dir, name string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git checkout -b %s: %v\n%s", name, err, out)
 	}
+}
+
+// commitAllOnCurrentBranch stages every working-tree change and commits it
+// on whatever branch dir currently has checked out, returning the new
+// HEAD sha — the test-local git plumbing TestGate_Condition1_FailsAlone
+// needs to build a build branch whose spec.md content is absent from, or
+// diverges from, the default branch (never git-committed on main itself).
+func commitAllOnCurrentBranch(t *testing.T, dir, message string) string {
+	t.Helper()
+	add := exec.Command("git", "add", "-A")
+	add.Dir = dir
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	commit := exec.Command("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", message)
+	commit.Dir = dir
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	rev := exec.Command("git", "rev-parse", "HEAD")
+	rev.Dir = dir
+	out, err := rev.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // writeGateReport writes deviation-report.md directly to the working tree
@@ -158,7 +193,7 @@ func TestGate_Condition2_QuarantinedFail_DisclosedNotSilentFlip(t *testing.T) {
 	writeGateRecordAt(t, repo.Dir, gone, "fail", "adverseFailWitness")
 
 	var stdout, stderr bytes.Buffer
-	runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
+	runGate(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
 	out := stdout.String()
 	// The flip: condition 2 PASSES (ac-1 evidenced, not violated).
 	assertConditionPasses(t, out, 2)
@@ -179,21 +214,127 @@ func mustResolveBuildSpec(t *testing.T, root string) *artifact.SpecFrontmatter {
 	return spec
 }
 
-// TestGate_Condition1_FailsAlone proves condition 1 (spec status on the
-// default branch) fails independently while 2 and 3 hold.
+// gateSpecMDDiverged renders the stale-decline spec with different bytes
+// than gateSpecMD's own output — used to build a build branch whose
+// spec.md content DIVERGES from whatever the default branch holds at the
+// same path (specstate.RelationDiverged), as opposed to the "absent" case
+// below (specstate.RelationNew, the default branch never had the path at
+// all).
+func gateSpecMDDiverged() string {
+	return `---
+id: spec/stale-decline
+kind: spec
+class: feature
+title: "Stale decline"
+owners: [platform-team]
+story: jira:LOAN-1482
+impacts: [loansvc]
+acceptance_criteria:
+  - { id: ac-2, text: "a locally-edited AC, never landed on the default branch", evidence: [static] }
+---
+# body
+`
+}
+
+// TestGate_Condition1_FailsAlone proves condition 1 (the build-head spec's
+// effective, Git-derived state) fails independently — while 2 and 3 hold —
+// for both ways a build branch's spec can fail to be accepted: absent from
+// the default branch entirely (specstate.Proposed/RelationNew), and
+// present on the default branch but with different bytes than the build
+// branch's own copy (specstate.Proposed/RelationDiverged). Replaces the
+// pre-Task-5 fixture (a persisted `status: draft` spec whose bytes were
+// nonetheless the exact, landed default-branch content) — under Git-derived
+// state that fixture is now indistinguishable from an ordinary accepted
+// spec (the persisted status word carries no authority once its exact
+// bytes have landed), so it can no longer exercise this condition's FAIL
+// path at all.
 func TestGate_Condition1_FailsAlone(t *testing.T) {
-	repo := buildGateRepo(t, "draft")
+	cases := map[string]struct {
+		mainFiles map[string]string
+		branchMD  string
+	}{
+		"absent from the default branch": {
+			mainFiles: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: gitlab\n"},
+			branchMD:  gateSpecMD("accepted-pending-build"),
+		},
+		"diverged from the default branch": {
+			mainFiles: map[string]string{
+				".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: gitlab\n",
+				".verdi/specs/active/stale-decline/spec.md": gateSpecMD("accepted-pending-build"),
+			},
+			branchMD: gateSpecMDDiverged(),
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: tc.mainFiles, Message: "scaffold"}})
+			t.Setenv("CI_DEFAULT_BRANCH", "main")
+			checkoutBranch(t, repo.Dir, "feature/stale-decline")
+			writeTestFile(t, filepath.Join(repo.Dir, ".verdi", "specs", "active", "stale-decline", "spec.md"), []byte(tc.branchMD))
+			head := commitAllOnCurrentBranch(t, repo.Dir, "diverge on the build branch")
+
+			spec := mustResolveBuildSpec(t, repo.Dir)
+			writeGateReport(t, repo.Dir, head, dispositionedFindingYAML)
+
+			var stdout, stderr bytes.Buffer
+			got := runGate(context.Background(), repo.Dir, spec, head, specstate.NewProjector(), nil, &stdout, &stderr)
+			if got != 1 {
+				t.Fatalf("runGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+			}
+			assertConditionFails(t, stdout.String(), 1)
+			assertConditionPasses(t, stdout.String(), 2)
+			assertConditionPasses(t, stdout.String(), 3)
+			if !strings.Contains(stdout.String(), "effective state is") {
+				t.Fatalf("stdout = %q, want condition 1's reason to name the effective state", stdout.String())
+			}
+		})
+	}
+}
+
+// TestGate_Condition1_StatuslessExactDefaultBranch_Passes proves a
+// statusless spec whose exact bytes have already landed on the default
+// branch is accepted-pending-build (Task 4's compatibility reading) for
+// condition 1 too — the same Git-derived reading buildstart_test.go proves
+// for `verdi build start`.
+func TestGate_Condition1_StatuslessExactDefaultBranch_Passes(t *testing.T) {
+	statuslessMD := `---
+id: spec/stale-decline
+kind: spec
+class: feature
+title: "Stale decline"
+owners: [platform-team]
+story: jira:LOAN-1482
+impacts: [loansvc]
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+---
+# body
+`
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: gitlab\n",
+				".verdi/specs/active/stale-decline/spec.md": statuslessMD,
+			},
+			Message: "scaffold + statusless landed spec",
+		},
+	})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	checkoutBranch(t, repo.Dir, "feature/stale-decline")
+
 	spec := mustResolveBuildSpec(t, repo.Dir)
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
-	if got != 1 {
-		t.Fatalf("runGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runGate(statusless, landed) = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
-	assertConditionFails(t, stdout.String(), 1)
-	assertConditionPasses(t, stdout.String(), 2)
-	assertConditionPasses(t, stdout.String(), 3)
+	out := stdout.String()
+	assertConditionPasses(t, out, 1)
+	if !strings.Contains(out, "landed: blob ") || !strings.Contains(out, "at commit ") {
+		t.Fatalf("stdout = %q, want condition 1's PASS to name the landed blob and commit (Baseline.Blob/LandingCommit)", out)
+	}
 }
 
 // TestGate_Condition2_FailsAlone proves condition 2 (no AC violated at
@@ -205,7 +346,7 @@ func TestGate_Condition2_FailsAlone(t *testing.T) {
 	writeGateViolatingRecord(t, repo.Dir, repo.Head)
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("runGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -234,7 +375,7 @@ func TestGate_Condition3_FailsAlone(t *testing.T) {
 			setup(t, repo.Dir, repo.Head)
 
 			var stdout, stderr bytes.Buffer
-			got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
+			got := runGate(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
 			if got != 1 {
 				t.Fatalf("runGate = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 			}
@@ -256,7 +397,7 @@ func TestGate_AbsenceFindingMustBeDispositioned(t *testing.T) {
 		writeGateReport(t, repo.Dir, repo.Head, undispositionedAbsenceFindingYAML)
 
 		var stdout, stderr bytes.Buffer
-		got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
+		got := runGate(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
 		if got != 1 {
 			t.Fatalf("runGate = %d, want 1; stdout=%s", got, stdout.String())
 		}
@@ -272,7 +413,7 @@ func TestGate_AbsenceFindingMustBeDispositioned(t *testing.T) {
 		writeGateReport(t, repo.Dir, repo.Head, dispositionedAbsenceFindingYAML)
 
 		var stdout, stderr bytes.Buffer
-		got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
+		got := runGate(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
 		if got != 0 {
 			t.Fatalf("runGate = %d, want 0; stdout=%s", got, stdout.String())
 		}
@@ -286,7 +427,7 @@ func TestGate_AllHold(t *testing.T) {
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runGate = %d, want 0; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -298,32 +439,39 @@ func TestGate_AllHold(t *testing.T) {
 	}
 }
 
-// TestGate_UnknownDefaultBranch_FailsClosed proves condition 1 fails
-// closed (never silently passes) when the default branch cannot be
-// determined at all — I-14's "otherwise, can't prove it". D6-6: the
-// failure message must also be a LEGIBLE refusal — naming every source
-// resolveDefaultBranch tries (including the D6-6 local-fallback step, not
-// just the two GitLab-CI-centric ones) and the `git remote set-head`
-// remedy — since this is exactly the message a fresh GitHub checkout hits
-// today, and the original wording only mentioned CI_DEFAULT_BRANCH and
-// origin/HEAD.
-func TestGate_UnknownDefaultBranch_FailsClosed(t *testing.T) {
+// TestGate_UnresolvableDefaultBranch_FailsOperationally proves condition 1
+// fails OPERATIONALLY (exit 2) — never a silent pass, and never rendered as
+// a decided [FAIL] verdict — when the default branch cannot be determined
+// at all: specstate collapses "no default branch resolvable" and "ancestry/
+// supersession proof incomplete" into the SAME Unproven state (I-14's
+// "otherwise, can't prove it"), and this task's activation contract reads
+// EVERY Unproven verdict as operational, uniformly, rather than special-
+// casing this one sub-cause back to a verdict failure the way the
+// pre-Task-5 direct-git-read implementation did. The disclosure is
+// specstate's own shared message (internal/specstate/resolve.go's
+// unresolvedDefaultBranchResult) — the one every consumer (lint, this CLI,
+// the workbench) now shares, rather than a gate-specific D6-6 remedy string
+// duplicated at this call site.
+func TestGate_UnresolvableDefaultBranch_FailsOperationally(t *testing.T) {
 	repo := buildGateRepo(t, "accepted-pending-build")
 	spec := mustResolveBuildSpec(t, repo.Dir)
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+	// buildGateRepo already pinned CI_DEFAULT_BRANCH=main; override back to
+	// unresolved (no origin remote exists in a fixturegit repo either, so
+	// clearing the env var alone is sufficient to make ResolveDefaultBranch
+	// fail entirely).
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "", nil, &stdout, &stderr)
-	if got != 1 {
-		t.Fatalf("runGate(unknown default branch) = %d, want 1", got)
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runGate(unresolvable default branch) = %d, want 2 (operational); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
-	assertConditionFails(t, stdout.String(), 1)
-
-	out := stdout.String()
-	for _, want := range []string{"CI_DEFAULT_BRANCH", "git remote HEAD", "origin/main", "origin/master", "git remote set-head origin"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("stdout = %q, want it to mention %q (D6-6: name every source tried plus the remedy)", out, want)
-		}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want no condition lines printed for an operational short-circuit", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "no default branch could be resolved") {
+		t.Fatalf("stderr = %q, want it to carry specstate's own missing-default-branch disclosure", stderr.String())
 	}
 }
 
@@ -381,6 +529,7 @@ func TestGate_SpikeBranch_EvidenceExempt(t *testing.T) {
 			Message: "scaffold + spike spec",
 		},
 	})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	checkoutBranch(t, repo.Dir, "feature/enum-spike")
 
 	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/enum-spike")
@@ -404,7 +553,7 @@ digest: sha256:%s
 	}
 
 	var stdout, stderr bytes.Buffer
-	got := runGate(context.Background(), repo.Dir, spec, repo.Head, "main", nil, &stdout, &stderr)
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runGate(spike) = %d, want 0 (evidence-exempt, not inoperable); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}

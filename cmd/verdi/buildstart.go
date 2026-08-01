@@ -26,10 +26,30 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 	"github.com/jyang234/verdi/internal/upstream"
 )
+
+// specStateResolver is the internal/specstate.Projector consumption surface
+// this package's activation/eligibility decisions need — Resolve for a
+// single candidate (build start, gate) and ResolveMany for a batch (feature
+// archive's cross-level ruling gather, feature matrix's implementing-story
+// classification: one Git-derived-state resolution per call, not one per
+// candidate, so a batch consumer never triggers an O(specs²) scan). 04
+// §port pattern: define the interface at the consumer, accept interfaces,
+// return structs — the same shape internal/lint's own SpecStateResolver
+// already established for its rules, widened here by the one extra method
+// this package's batch consumers need. Production always wires the real,
+// git-backed specstate.NewProjector() (every cmd* constructor in this
+// package); the interface exists so a test can substitute a fake driving a
+// specstate.Result shape real git cannot practically reconstruct (mirroring
+// internal/lint's own rationale for the identical seam).
+type specStateResolver interface {
+	Resolve(ctx context.Context, root string, candidate specstate.Candidate) (specstate.Result, error)
+	ResolveMany(ctx context.Context, root string, candidates []specstate.Candidate) ([]specstate.Result, error)
+}
 
 // runBuildVerb dispatches `verdi build <subcommand>`. There is exactly one
 // subcommand, `start` (05 §CLI); anything else is a usage error.
@@ -76,21 +96,27 @@ func cmdBuildStart(args []string, stdout, stderr io.Writer) int {
 	}
 	deps := syncDeps{Runner: runner, GoTest: realGoTestRunner{}, Stdout: stdout, Stderr: stderr, Model: cfg.Model}
 
-	return runBuildStart(ctx, root, storyArg, deps, stdout, stderr)
+	return runBuildStart(ctx, root, storyArg, specstate.NewProjector(), deps, stdout, stderr)
 }
 
-// runBuildStart is the testable core: given an already-resolved root and
-// injected deps, run the whole build-start ritual and return the exit
-// code. It refuses (exit 1, a verdict failure per CLAUDE.md's 0/1/2
-// contract — a business precondition, not an operational problem) before
-// touching git at all when the resolved spec is not accepted-pending-build
-// or carries an unresolved rung-4 cascade block, so a refused build start
-// leaves the repo exactly as it found it. A resolved ref that is a
-// round-four birds-eye feature spec (class: feature, carrying problem/
-// outcome — matrix.go's own two-conjunct discriminator) is an operational
-// error (exit 2): a feature spec has no code of its own to build against —
-// only its implementing stories do.
-func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, stdout, stderr io.Writer) int {
+// runBuildStart is the testable core: given an already-resolved root, a
+// specStateResolver (production: specstate.NewProjector(); tests: real,
+// fixturegit-backed, or a fake for shapes real git cannot practically
+// reconstruct), and injected deps, run the whole build-start ritual and
+// return the exit code. It refuses (exit 1, a verdict failure per
+// CLAUDE.md's 0/1/2 contract — a business precondition, not an operational
+// problem) before touching git at all when the resolved spec's Git-derived
+// effective state is not AcceptedPendingBuild, or carries an unresolved
+// rung-4 cascade block, so a refused build start leaves the repo exactly as
+// it found it. An effective state that cannot be proven (specstate.Unproven
+// — no default branch resolvable, or ancestry/supersession proof
+// incomplete) is operational (exit 2): build start cannot honestly decide
+// the precondition, so it must not guess either way. A resolved ref that is
+// a round-four birds-eye feature spec (class: feature, carrying problem/
+// outcome — matrix.go's own two-conjunct discriminator) is likewise an
+// operational error (exit 2): a feature spec has no code of its own to
+// build against — only its implementing stories do.
+func runBuildStart(ctx context.Context, root, storyArg string, resolver specStateResolver, deps syncDeps, stdout, stderr io.Writer) int {
 	spec, err := resolveBuildTarget(root, storyArg, deps.Model)
 	if err != nil {
 		fmt.Fprintln(stderr, "build start:", err)
@@ -108,14 +134,46 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 			model.Indefinite(storyWord), featureWord)
 		return 2
 	}
-	// A superseded spec is never re-buildable (D-12): report the successor
-	// found via the incoming supersedes chain so the operator is pointed at
-	// the spec they should build instead, rather than the generic
-	// wrong-status message below. The state WORD resolves through the
-	// model (the same DisplayState chain the wrong-status refusal below
-	// already used — this trio was the finding's pinned inconsistency);
-	// the comparison stays on the bare id.
-	if spec.Status == "superseded" {
+
+	specRef, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		fmt.Fprintln(stderr, "build start: internal error: resolved spec has an invalid id:", err)
+		return 2
+	}
+
+	// The acceptance precondition (03 §Gates condition 1's local half) is
+	// now Git-derived (internal/specstate), never the persisted status
+	// field alone: read the resolved spec's own bytes once (the exact
+	// content resolveBuildTarget's storyresolve.Resolve/LoadActiveSpec
+	// chain already decoded from), and ask the shared projector what Git
+	// says about them — a statusless spec that has landed on the default
+	// branch is accepted-pending-build exactly like an explicitly-flagged
+	// one (Task 4's compatibility reading), and a spec whose bytes have
+	// merely been hand-edited locally to CLAIM acceptance without actually
+	// landing is caught by the exact-byte comparison (RelationDiverged),
+	// same "never trust the working tree" property the old direct
+	// status-field read only achieved for the STATUS FIELD specifically.
+	relPath := store.ActiveSpecRelPath(specRef.Name)
+	content, err := os.ReadFile(store.ActiveSpecPath(root, specRef.Name))
+	if err != nil {
+		fmt.Fprintln(stderr, "build start:", err)
+		return 2
+	}
+	result, err := resolver.Resolve(ctx, root, specstate.Candidate{Path: relPath, Content: content})
+	if err != nil {
+		fmt.Fprintln(stderr, "build start:", err)
+		return 2
+	}
+	switch result.State {
+	case specstate.AcceptedPendingBuild:
+		// proceed
+	case specstate.Superseded:
+		// A superseded spec is never re-buildable (D-12): report the
+		// successor found via the incoming supersedes chain so the
+		// operator is pointed at the spec they should build instead,
+		// rather than the generic wrong-state message below. The state
+		// WORD resolves through the model (L-M13(1)); the comparison
+		// above and s.ID stay bare ids.
 		supersededWord := deps.Model.DisplayState(string(spec.Class), "superseded")
 		if s, ferr := findSupersedingSpec(root, spec.ID); ferr == nil && s != nil {
 			fmt.Fprintf(stderr, "build start: refused: %s is %s by %s; build the successor, not the %s predecessor (03 §The amendment ladder)\n", spec.ID, supersededWord, s.ID, supersededWord)
@@ -123,14 +181,20 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 			fmt.Fprintf(stderr, "build start: refused: %s is %s; %s spec is never re-buildable (03 §The amendment ladder)\n", spec.ID, supersededWord, model.Indefinite(supersededWord))
 		}
 		return 1
-	}
-	if spec.Status != "accepted-pending-build" {
-		// Display resolution only (spec/vocabulary-surfaces ac-1): the
-		// comparison above and the branch name below stay on bare ids.
-		fmt.Fprintf(stderr, "build start: %s status is %q, not %s; a build may only reference an accepted spec (03 §Gates)\n", spec.ID,
-			deps.Model.DisplayState(string(spec.Class), string(spec.Status)),
+	case specstate.Closed:
+		closedWord := deps.Model.DisplayState(string(spec.Class), "closed")
+		fmt.Fprintf(stderr, "build start: refused: %s is already %s; a build may only reference an accepted spec pending build (03 §Gates)\n", spec.ID, closedWord)
+		return 1
+	case specstate.Proposed:
+		// vocab:identity — the fixed refusal phrase a caller may key on
+		// ("proposal has not landed"); the class/state words around it
+		// still resolve (L-M13(1)).
+		fmt.Fprintf(stderr, "build start: refused: %s's proposal has not landed on the default branch yet (not yet %s); a build may only reference an accepted spec (03 §Gates)\n", spec.ID,
 			deps.Model.DisplayState(string(spec.Class), "accepted-pending-build"))
 		return 1
+	default: // specstate.Unproven
+		fmt.Fprintf(stderr, "build start: %s cannot be proven accepted: %s\n", spec.ID, strings.Join(result.Disclosures, "; "))
+		return 2
 	}
 
 	if ok, reason, cerr := checkCascadeReaffirmation(root, spec); cerr != nil {
@@ -141,11 +205,6 @@ func runBuildStart(ctx context.Context, root, storyArg string, deps syncDeps, st
 		return 1
 	}
 
-	specRef, err := artifact.ParseRef(spec.ID)
-	if err != nil {
-		fmt.Fprintln(stderr, "build start: internal error: resolved spec has an invalid id:", err)
-		return 2
-	}
 	branch := "feature/" + specRef.Name
 
 	commit, err := gitx.RevParse(ctx, root, "HEAD")

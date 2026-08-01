@@ -27,6 +27,25 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
+// diverge rewrites path's on-disk copy so its bytes no longer match
+// whatever was committed at that same path — the Git-derived
+// (internal/specstate) shape of "still under review, never landed", used
+// where a fixture's ORIGINAL literal `status: draft` field is no longer,
+// on its own, sufficient to keep a spec whose exact bytes happen to be the
+// committed default-branch content from reading as accepted-pending-build
+// (Task 4's compatibility reading: exact landed bytes are accepted
+// regardless of a stale legacy status word).
+func diverge(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("diverge: reading %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, append(data, []byte("<!-- still under review, diverged from the committed default-branch copy -->\n")...), 0o644); err != nil {
+		t.Fatalf("diverge: writing %s: %v", path, err)
+	}
+}
+
 // vocabModelYAML reads the real vocab-rename fixture out of
 // internal/model/testdata — the single source of the rename set.
 func vocabModelYAML(t *testing.T) string {
@@ -84,6 +103,17 @@ func runVerdi(t *testing.T, bin, dir string, args ...string) (int, string, strin
 func TestVocabularyCLI_RenamedStateLabels(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := buildVocabRenameRepo(t, "pred-story", predStoryAcceptedMD, "succ-story", succStorySupersedesMD)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	// some-feature's committed bytes are landed on main by construction
+	// (buildVocabRenameRepo's own single commit); under Git-derived state
+	// (internal/specstate, Task 5) that alone would already read as
+	// accepted-pending-build regardless of its persisted `status: draft`
+	// word (Task 4's compatibility reading applies to ANY exact-bytes-
+	// landed spec, not only ones an operator remembered to flip). Step 3
+	// below specifically wants build start to see it as still under
+	// review, so its working-tree copy is diverged from what actually
+	// landed — never re-committed.
+	diverge(t, filepath.Join(repo.Dir, ".verdi", "specs", "active", "some-feature", "spec.md"))
 
 	// 1. accept the draft successor: its own verdict line resolves both
 	// states ("status: draft -> Ready to build"), and the predecessor's
@@ -115,14 +145,15 @@ func TestVocabularyCLI_RenamedStateLabels(t *testing.T) {
 		t.Fatalf("accept refusal stderr = %q, want the fully-resolved refusal sentence %q", stderr, want)
 	}
 
-	// 3. build start's status-mismatch refusal names the wanted state
-	// through the model (some-feature is still draft).
+	// 3. build start's not-yet-landed refusal names the wanted state
+	// through the model (some-feature has not landed on the default
+	// branch — the Git-derived reading of "still draft", Task 5).
 	code, _, stderr = runVerdi(t, bin, repo.Dir, "build", "start", "spec/some-feature")
 	if code != 1 {
-		t.Fatalf("build start (draft spec) = %d, want 1; stderr=%s", code, stderr)
+		t.Fatalf("build start (unlanded spec) = %d, want 1; stderr=%s", code, stderr)
 	}
-	if !contains(stderr, `status is "draft", not Ready to build`) {
-		t.Fatalf("build start refusal stderr = %q, want the renamed wanted-state %q", stderr, `status is "draft", not Ready to build`)
+	if !contains(stderr, "proposal has not landed") || !contains(stderr, "not yet Ready to build") {
+		t.Fatalf("build start refusal stderr = %q, want the renamed wanted-state and the not-landed refusal", stderr)
 	}
 
 	// 4. build start's success line resolves the accepted state.

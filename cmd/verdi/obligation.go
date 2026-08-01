@@ -29,7 +29,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
-	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -56,15 +56,24 @@ import (
 //
 // A package var so a test can inject the operational-merge-base-failure case a
 // clean fixture repo cannot deterministically produce; production resolves the
-// default branch exactly as lint.BuildContext does (lint.ResolveDefaultBranch),
-// so the hermetic case stays byte-identical, then discriminates the merge-base
-// outcome via gitx.MergeBaseCommit.
+// default branch through the shared internal/specstate machinery every other
+// Git-derived-state consumer in this package now routes through (Task 5) —
+// specstate.ResolveDefaultBranch, not the bare-name lint.ResolveDefaultBranch
+// compatibility wrapper — so the merge-base computation below always runs
+// against a git-RESOLVABLE ref (Branch.Ref: a local branch name when one is
+// checked out, otherwise "origin/<name>"), never a bare name that silently
+// fails to resolve on a fresh checkout carrying only an origin/<name>
+// remote-tracking ref and no local branch of that name (the same gap
+// specstate.Branch's two-field shape exists to close, gate.go's condition 1
+// closed identically). The hermetic "no default branch at all" case stays
+// byte-identical; this discriminates only the merge-base COMPUTATION once a
+// branch resolves.
 var obligationFrozenProbeBase = func(ctx context.Context, root string) (base string, operationalFailure bool, err error) {
-	defaultBranch := lint.ResolveDefaultBranch(ctx, root)
-	if defaultBranch == "" {
+	branch, ok := specstate.ResolveDefaultBranch(ctx, root)
+	if !ok {
 		return "", false, nil
 	}
-	base, found, err := gitx.MergeBaseCommit(ctx, root, "HEAD", defaultBranch)
+	base, found, err := gitx.MergeBaseCommit(ctx, root, "HEAD", branch.Ref)
 	if err != nil {
 		return "", true, err
 	}

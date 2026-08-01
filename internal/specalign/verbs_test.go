@@ -53,6 +53,15 @@
 // resolving a store root or reading any file — falls straight into the
 // plain default case, the same safety property board/waivers already rely
 // on there.
+//
+// Task 5 (merge-signaled spec acceptance): `spec` is a brand-new verb —
+// dispatch.go's verbPhase gains a `spec` key (phase 21) in the same change
+// this inV0 addition rides. `verdi spec state SPEC_REF` is read-only (no
+// status flip, no stamp write, no commit, no forge call), but a bare
+// `verdi spec` (no "state" subcommand) still fails on usage parsing alone
+// (runSpecVerb, cmd/verdi/specstate.go) before resolving a store root or
+// reading any file — falls straight into the plain default case, the same
+// safety property model/board/waivers already rely on there.
 package specalign
 
 import "testing"
@@ -67,7 +76,7 @@ func TestV0CLIVerbInventory(t *testing.T) {
 	inV0 := []string{
 		"lint", "design", "accept", "feature", "build", "align", "sync",
 		"serve", "mcp", "matrix", "rollup", "dex", "gate", "board", "audit",
-		"close", "gc", "attest", "disposition", "model",
+		"close", "gc", "attest", "disposition", "model", "spec",
 	}
 	// PLAN.md §5 scope discipline, verbatim (as amended: `close`/`gc`
 	// graduated to real, round 6): "Explicitly out of v0 (not stubbed —

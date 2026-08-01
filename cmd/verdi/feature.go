@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
 )
@@ -69,5 +70,5 @@ func cmdFeatureStart(args []string, stdout, stderr io.Writer) int {
 func runFeatureStart(ctx context.Context, root, storyArg string, deps syncDeps, stdout, stderr io.Writer) int {
 	// vocab:identity — CLI verb name / usage grammar (identity)
 	fmt.Fprintln(stderr, "feature start: deprecated (R4-I-6) — use `verdi build start <story-spec | story-ref>` instead; proceeding")
-	return runBuildStart(ctx, root, storyArg, deps, stdout, stderr)
+	return runBuildStart(ctx, root, storyArg, specstate.NewProjector(), deps, stdout, stderr)
 }
