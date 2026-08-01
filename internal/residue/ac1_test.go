@@ -27,6 +27,7 @@ func TestScan_AC1_PatternA_RED(t *testing.T) {
 		Message: "seed the active, accepted-pending-build widget story",
 	}})
 	root := repo.Dir
+	setDefaultBranchSymref(t, root, "main")
 
 	cutCloseBranch(t, root, "widget")
 	wantTip := runCloseRitualArchiveCommit(t, root, "widget", "close: archive spec/widget (jira:VERDI-1)")
@@ -81,6 +82,7 @@ func TestScan_AC1_PatternB_RED(t *testing.T) {
 		},
 		Message: "seed a stub-complete, unclosed feature (spec/code-health's own witness shape)",
 	}})
+	setDefaultBranchSymref(t, repo.Dir, "main")
 
 	got, err := Scan(context.Background(), repo.Dir, "main")
 	if err != nil {
@@ -124,6 +126,7 @@ func TestScan_AC1_PatternB_RequiresMergedNotJustOnDisk(t *testing.T) {
 		Message: "a feature and its one still-open stub story, both active on main",
 	}})
 	root := repo.Dir
+	setDefaultBranchSymref(t, root, "main")
 	ctx := context.Background()
 
 	// Strand the stub's closure on an unmerged close/solo-stub branch, left
@@ -185,6 +188,7 @@ func TestScan_AC1_GREEN(t *testing.T) {
 		},
 		Message: "every spec's status consistent with git reality",
 	}})
+	setDefaultBranchSymref(t, repo.Dir, "main")
 
 	got, err := Scan(context.Background(), repo.Dir, "main")
 	if err != nil {
@@ -205,18 +209,26 @@ func TestScan_AC1_GREEN(t *testing.T) {
 // dc-2's exclusion holds even when a superseded spec would OTHERWISE match
 // pattern (a)'s or (b)'s conditions were the exclusion not applied first
 // — a close/<name> branch archiving a superseded-named spec, and a
-// superseded feature with every stub realized, must BOTH stay silent.
+// superseded feature with every stub realized, must BOTH stay silent. Each
+// predecessor carries a REAL, validated successor (supersessorSpecMD) —
+// Task 6a's effective-state migration made "superseded" git-derived
+// (a validated successor spec elsewhere in the corpus), so a bare
+// self-reported `status: superseded` with no successor no longer proves
+// the predecessor superseded on its own (specstate/resolve.go).
 func TestScan_AC1_DC2_SupersededNeverCheckedEvenWhenOtherwiseShaped(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                              "data/\n",
 			".verdi/specs/active/superseded-story/spec.md":   storySpecMD("superseded-story", "superseded", "feature-x"),
+			".verdi/specs/active/story-successor/spec.md":    supersessorSpecMD("story-successor", "superseded-story"),
 			".verdi/specs/archive/realized-one/spec.md":      closedArchiveStorySpecMD("realized-one", "superseded-feature"),
 			".verdi/specs/active/superseded-feature/spec.md": featureSpecMD("superseded-feature", "superseded", "realized-one"),
+			".verdi/specs/active/feature-successor/spec.md":  supersessorSpecMD("feature-successor", "superseded-feature"),
 		},
 		Message: "two superseded specs that would otherwise match pattern (a)/(b)",
 	}})
 	root := repo.Dir
+	setDefaultBranchSymref(t, root, "main")
 
 	// superseded-story's own close/<name> branch, tip archived — would be
 	// pattern (a)-shaped if status: superseded were not excluded first.

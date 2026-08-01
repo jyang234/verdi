@@ -1,16 +1,20 @@
 package residue
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/jyang234/verdi/internal/specstate"
+)
 
 // PatternA is AC-1 pattern (a)'s finding: a stranded closure ritual — an
-// active-zone spec still status: accepted-pending-build whose own
-// close/<name> branch already performed the archive move on its own tip,
-// but never landed (unmerged into the default branch). Class is the
-// spec's own declared class ("feature" or "story" — pattern (a) applies
-// to either), carried so a renderer can resolve the accepted-pending-build
-// state word through the operating model's display chain
-// (model.Model.DisplayState(class, id), spec/vocabulary-surfaces) rather
-// than print the bare wire value as prose.
+// active-zone spec still EFFECTIVELY accepted-pending-build (specstate.
+// AcceptedPendingBuild) whose own close/<name> branch already performed the
+// archive move on its own tip, but never landed (unmerged into the default
+// branch). Class is the spec's own declared class ("feature" or "story" —
+// pattern (a) applies to either), carried so a renderer can resolve the
+// accepted-pending-build state word through the operating model's display
+// chain (model.Model.DisplayState(class, id), spec/vocabulary-surfaces)
+// rather than print the bare wire value as prose.
 type PatternA struct {
 	SpecName string // "<name>"
 	Branch   string // "close/<name>"
@@ -20,23 +24,24 @@ type PatternA struct {
 
 // findPatternA derives AC-1 pattern (a)'s findings from closeBranches (the
 // same shared pass AC-2 classifies from — one implementation feeds both, an
-// engineering choice so the two cannot drift), activeStatus (name -> raw
-// status string), and activeClass (name -> raw class string) — both built
-// from the active-zone spec set with dc-2's superseded-exclusion already
-// applied by the caller before this runs. It fires for a close/<name>
-// branch whose own tip already contains archive/<name> where <name> is
-// STILL an active-zone spec at status: accepted-pending-build. Those are,
-// as this code decomposes it, pattern (a)'s three conditions: the branch
-// exists (it is IN closeBranches at all), it is unmerged (closeBranches
-// already excludes merged branches), and its own tip already archived
-// <name>.
-func findPatternA(closeBranches []CloseBranch, activeStatus, activeClass map[string]string) []PatternA {
+// engineering choice so the two cannot drift), effective (name ->
+// specstate.State, activespecs.go's effectiveStates producer output), and
+// activeClass (name -> raw class string) — both built from the active-zone
+// spec set with dc-2's superseded-exclusion already applied by the caller
+// before this runs. It fires for a close/<name> branch whose own tip
+// already contains archive/<name> where <name> is STILL an active-zone
+// spec at EFFECTIVE state accepted-pending-build. Those are, as this code
+// decomposes it, pattern (a)'s three conditions: the branch exists (it is
+// IN closeBranches at all), it is unmerged (closeBranches already excludes
+// merged branches), and its own tip already archived <name>. A pure fold:
+// no ctx, no Git — every Git read already happened building effective.
+func findPatternA(closeBranches []CloseBranch, effective map[string]specstate.State, activeClass map[string]string) []PatternA {
 	var out []PatternA
 	for _, cb := range closeBranches {
 		if !cb.ArchivedOnOwnTip {
 			continue
 		}
-		if activeStatus[cb.Name] != "accepted-pending-build" {
+		if effective[cb.Name] != specstate.AcceptedPendingBuild {
 			continue
 		}
 		out = append(out, PatternA{SpecName: cb.Name, Branch: cb.Branch, Tip: cb.Tip, Class: activeClass[cb.Name]})

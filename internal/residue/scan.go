@@ -76,7 +76,15 @@ func Scan(ctx context.Context, root, defaultBranchRef string) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	// dc-2: status: superseded is excluded BEFORE either AC-1 pattern's
+	// effective is the ONE default-corpus-scanning batch resolution every
+	// decision below routes through (activespecs.go's effectiveStates
+	// producer — Task 6a) — a SINGLE specstate.ResolveMany call over every
+	// active-zone spec, never one call per spec.
+	effective, err := effectiveStates(ctx, root, specs)
+	if err != nil {
+		return nil, err
+	}
+	// dc-2: EFFECTIVELY-superseded is excluded BEFORE either AC-1 pattern's
 	// logic runs — a check that happens first, not a state that merely
 	// happens never to match either pattern's own conditions — and,
 	// per dc-2's own "AC-1/AC-2" grouping, before AC-2's own close/*
@@ -84,14 +92,14 @@ func Scan(ctx context.Context, root, defaultBranchRef string) (*Result, error) {
 	// argument): a leftover close/<name> branch for a name that has since
 	// become superseded (a route that never archives at all) is stale,
 	// not an actionable ritual-incomplete/superseded-elsewhere finding.
-	nonSuperseded := excludeSuperseded(specs)
+	nonSuperseded := excludeSuperseded(specs, effective)
 
-	closeBranches, err := scanCloseBranches(ctx, root, defaultTip, supersededNames(specs))
+	closeBranches, err := scanCloseBranches(ctx, root, defaultTip, supersededNames(specs, effective))
 	if err != nil {
 		return nil, err
 	}
-	patternA := findPatternA(closeBranches, activeStatusByName(nonSuperseded), activeClassByName(nonSuperseded))
-	patternB, err := findPatternB(ctx, root, defaultTip, nonSuperseded)
+	patternA := findPatternA(closeBranches, effective, activeClassByName(nonSuperseded))
+	patternB, err := findPatternB(ctx, root, defaultTip, nonSuperseded, effective)
 	if err != nil {
 		return nil, err
 	}

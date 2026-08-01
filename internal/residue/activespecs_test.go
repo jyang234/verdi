@@ -1,11 +1,13 @@
 package residue
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 func TestWalkActiveSpecs_Happy(t *testing.T) {
@@ -71,26 +73,101 @@ func TestWalkActiveSpecs_Negative_ToleratesMalformedSpec(t *testing.T) {
 	}
 }
 
+// TestExcludeSuperseded is a pure-fold unit test (dc-2's obligation
+// per activespecs.go's own doc comment): excludeSuperseded takes no ctx and
+// touches no Git — every case hand-builds the effective map an upstream
+// caller (Scan, via effectiveStates) would have produced.
 func TestExcludeSuperseded(t *testing.T) {
 	in := []activeSpec{
 		{Name: "a", FM: mustDecodeSpecFM(t, featureSpecMD("a", "accepted-pending-build"))},
 		{Name: "b", FM: mustDecodeSpecFM(t, featureSpecMD("b", "superseded"))},
 	}
-	out := excludeSuperseded(in)
+	effective := map[string]specstate.State{
+		"a": specstate.AcceptedPendingBuild,
+		"b": specstate.Superseded,
+	}
+	out := excludeSuperseded(in, effective)
 	if len(out) != 1 || out[0].Name != "a" {
 		t.Fatalf("excludeSuperseded = %+v, want only %q kept", out, "a")
 	}
 }
 
-func TestActiveStatusByName(t *testing.T) {
-	specs := []activeSpec{
-		{Name: "a", FM: mustDecodeSpecFM(t, featureSpecMD("a", "accepted-pending-build"))},
-		{Name: "b", FM: mustDecodeSpecFM(t, featureSpecMD("b", "draft"))},
+// TestExcludeSuperseded_Negative_MissingFromEffective proves a name absent
+// from the effective map (should never happen in production — Scan always
+// builds effective from the exact same specs slice — but a defensive unit
+// case) fails closed: the zero specstate.State ("") is not
+// specstate.Superseded, so the spec is KEPT, never silently dropped.
+func TestExcludeSuperseded_Negative_MissingFromEffective(t *testing.T) {
+	in := []activeSpec{{Name: "a", FM: mustDecodeSpecFM(t, featureSpecMD("a", "accepted-pending-build"))}}
+	out := excludeSuperseded(in, map[string]specstate.State{})
+	if len(out) != 1 || out[0].Name != "a" {
+		t.Fatalf("excludeSuperseded(no effective entry) = %+v, want %q kept (fail closed: never assume superseded)", out, "a")
 	}
-	got := activeStatusByName(specs)
-	want := map[string]string{"a": "accepted-pending-build", "b": "draft"}
-	if len(got) != len(want) || got["a"] != want["a"] || got["b"] != want["b"] {
-		t.Fatalf("activeStatusByName = %+v, want %+v", got, want)
+}
+
+// TestSupersededNames mirrors TestExcludeSuperseded for the AC-2 exclusion
+// lookup: also a pure fold over an effective map.
+func TestSupersededNames(t *testing.T) {
+	in := []activeSpec{
+		{Name: "a", FM: mustDecodeSpecFM(t, featureSpecMD("a", "accepted-pending-build"))},
+		{Name: "b", FM: mustDecodeSpecFM(t, featureSpecMD("b", "superseded"))},
+	}
+	effective := map[string]specstate.State{
+		"a": specstate.AcceptedPendingBuild,
+		"b": specstate.Superseded,
+	}
+	got := supersededNames(in, effective)
+	if len(got) != 1 || !got["b"] {
+		t.Fatalf("supersededNames = %+v, want only %q", got, "b")
+	}
+}
+
+// TestEffectiveStates_Happy is effectiveStates' own fixturegit-backed
+// integration proof (the map PRODUCER, Task 6a's own port to
+// internal/specstate): an exact, already-committed, STATUSLESS active-zone
+// spec resolves to specstate.AcceptedPendingBuild — never silently excluded
+// the way a raw `FM.Status != "accepted-pending-build"` comparison would
+// exclude an empty status. Proven across more than one spec in a single
+// repo/call, so a reviewer can see effectiveStates hands every candidate to
+// ONE ResolveMany call rather than looping Resolve per spec.
+func TestEffectiveStates_Happy(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/.gitignore":                    "data/\n",
+			".verdi/specs/active/scaffold/spec.md": featureSpecMD("scaffold", ""), // statusless
+			".verdi/specs/active/widget/spec.md":   storySpecMD("widget", "accepted-pending-build", "scaffold"),
+		},
+		Message: "seed a statusless feature and an explicitly accepted story",
+	}})
+	setDefaultBranchSymref(t, repo.Dir, "main")
+
+	specs, err := walkActiveSpecs(repo.Dir)
+	if err != nil {
+		t.Fatalf("walkActiveSpecs: %v", err)
+	}
+
+	got, err := effectiveStates(context.Background(), repo.Dir, specs)
+	if err != nil {
+		t.Fatalf("effectiveStates: %v", err)
+	}
+	if got["scaffold"] != specstate.AcceptedPendingBuild {
+		t.Errorf("effectiveStates[scaffold] (statusless) = %q, want %q", got["scaffold"], specstate.AcceptedPendingBuild)
+	}
+	if got["widget"] != specstate.AcceptedPendingBuild {
+		t.Errorf("effectiveStates[widget] = %q, want %q", got["widget"], specstate.AcceptedPendingBuild)
+	}
+}
+
+// TestEffectiveStates_Empty proves the zero-spec case short-circuits to an
+// empty, non-nil map without calling specstate (and therefore without
+// needing a resolvable default branch) at all.
+func TestEffectiveStates_Empty(t *testing.T) {
+	got, err := effectiveStates(context.Background(), t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("effectiveStates(no specs): unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("effectiveStates(no specs) = %+v, want empty", got)
 	}
 }
 
