@@ -185,16 +185,33 @@ func runAudit(ctx context.Context, root string, exemptsThreshold, deviationsThre
 	// independent pass appended to the same run — co-2: the two sections
 	// above, and their own exit-code contributions, are byte-for-byte
 	// unchanged by this addition).
-	if rc := runClosureHygieneSection(ctx, root, defaultBranchRef, mdl, stdout, stderr, &flagged); rc != 0 {
+	var hasUnproven bool
+	if rc := runClosureHygieneSection(ctx, root, defaultBranchRef, mdl, stdout, stderr, &flagged, &hasUnproven); rc != 0 {
 		return rc
 	}
 
-	if flagged {
+	// Finding 1 (fix round): a PROVEN violation always wins — flagged still
+	// means exit 1 regardless of any unproven spec elsewhere in the same
+	// run. Failing that, an unproven spec (the closure-hygiene section's
+	// own corpus-scan could not fully verify one or more candidates) is NOT
+	// honestly "CLEAN" — nothing was proven wrong, but nothing was proven
+	// right either (constitution 2/10's three-valued honesty: proven /
+	// violated / disclosed-as-unproven). Reported as operational per
+	// CLAUDE.md's fixed 0/1/2 exit contract (0 clean, 1 verdict, 2
+	// operational) — the audit process itself could not fully complete its
+	// verification pass, even though it printed a full report and never
+	// aborted early the way a hard residue.Scan error does.
+	switch {
+	case flagged:
 		fmt.Fprintln(stdout, "audit: FLAGGED")
 		return 1
+	case hasUnproven:
+		fmt.Fprintln(stdout, "audit: UNPROVEN")
+		return 2
+	default:
+		fmt.Fprintln(stdout, "audit: CLEAN")
+		return 0
 	}
-	fmt.Fprintln(stdout, "audit: CLEAN")
-	return 0
 }
 
 // The lapsed-waiver disclosure. It lives here, beside its one producer (the
@@ -230,23 +247,49 @@ func lapsedWaiverDisclosure(w decisionsweep.WaiverAuditRow) disclosure.Disclosur
 	return disclosure.New(lapsedWaiverSource, w.Path, text)
 }
 
+// unprovenSpecSource is unprovenSpecDisclosure's producer id (Finding 1,
+// fix round): the closure-hygiene section's own distinct disclosure family,
+// alongside audit:waiver-lapsed above — one id per producer, never reused
+// across an unrelated disclosure shape.
+const unprovenSpecSource = "audit:closure-hygiene-unproven"
+
+// unprovenSpecDisclosure is the structured value the closure-hygiene
+// section constructs at its existing decision point (mirrors
+// lapsedWaiverDisclosure's identical shape/placement): the printed line IS
+// this value rendered, never a second hand-formatted string. Scope is the
+// spec's own ref, so the disclosure identifies exactly which candidate
+// internal/specstate could not prove; Text carries every one of
+// specstate's own witness lines the spec's Result.Disclosures already
+// computed (activespecs.go's unprovenSpecs — never re-derived here).
+func unprovenSpecDisclosure(u residue.UnprovenSpec) disclosure.Disclosure {
+	return disclosure.New(unprovenSpecSource, "spec/"+u.Name, strings.Join(u.Disclosures, "; "))
+}
+
 // runClosureHygieneSection renders `== Closure hygiene audit ==`: AC-1's
 // two status-vs-git-reality patterns, AC-2's close/<name> classification,
-// and AC-3's read-only merged-branch/worktree survey. Returns 2 (and
-// leaves *flagged untouched) on an internal/residue.Scan operational
-// error; otherwise always returns 0.
+// AC-3's read-only merged-branch/worktree survey, and (Finding 1, fix
+// round) every active-zone spec internal/specstate could not prove an
+// effective state for. Returns 2 (and leaves *flagged/*hasUnproven
+// untouched) on an internal/residue.Scan operational error; otherwise
+// always returns 0 — hasUnproven is a DISCLOSURE signal, not this
+// function's own return-code channel, so runAudit can still print the rest
+// of its own trailer/exit-code logic around it (unlike a genuine Scan
+// error, which aborts the whole run with no trailer at all).
 //
-// The exit-code verdict is routed through res.Flagged()
-// (internal/residue.Result.Flagged) — the single predicate dc-3 already
-// defines (only an AC-1 pattern (a) finding or an AC-2 ritual-incomplete
-// classification flags; pattern (b), AC-3's survey, and an unresolved
-// default branch never do) — rather than recomputed inline across the
-// render loops below, which are then pure disclosure. This mirrors
-// internal/decisionsweep's own routing of its spec-stale flag through one
-// shared computation (audit.go: 05 §Lenses' anti-hairball law, "computed
-// the same way — no separate logic path"), so the audit's exit code can
-// never drift from the predicate internal/residue's own tests cover.
-func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string, mdl *model.Model, stdout, stderr io.Writer, flagged *bool) int {
+// The FLAGGED verdict is routed through res.Flagged() (internal/residue.
+// Result.Flagged) — the single predicate dc-3 already defines (only an
+// AC-1 pattern (a) finding or an AC-2 ritual-incomplete classification
+// flags; pattern (b), AC-3's survey, an unresolved default branch, and
+// (deliberately, dc-3 unchanged by Finding 1) an unproven spec never do)
+// — rather than recomputed inline across the render loops below, which are
+// then pure disclosure. This mirrors internal/decisionsweep's own routing
+// of its spec-stale flag through one shared computation (audit.go: 05
+// §Lenses' anti-hairball law, "computed the same way — no separate logic
+// path"), so the audit's exit code can never drift from the predicate
+// internal/residue's own tests cover. hasUnproven is set independently,
+// straight off res.UnprovenSpecs, for runAudit's own distinct (never
+// CLEAN, never conflated with a proven FLAGGED verdict) reporting.
+func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string, mdl *model.Model, stdout, stderr io.Writer, flagged, hasUnproven *bool) int {
 	res, err := residue.Scan(ctx, root, defaultBranchRef)
 	if err != nil {
 		fmt.Fprintln(stderr, "audit:", err)
@@ -257,6 +300,9 @@ func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string
 	// because Flagged() is false on the unresolved-default-branch zero Result.
 	if res.Flagged() {
 		*flagged = true
+	}
+	if len(res.UnprovenSpecs) > 0 {
+		*hasUnproven = true
 	}
 
 	fmt.Fprintln(stdout, "== Closure hygiene audit ==")
@@ -285,6 +331,12 @@ func runClosureHygieneSection(ctx context.Context, root, defaultBranchRef string
 	}
 	for _, cb := range res.CloseBranches {
 		fmt.Fprintf(stdout, "%s: %s (tip %s)\n", cb.Branch, cb.Class, cb.Tip)
+	}
+	// Finding 1: every spec internal/specstate could not prove an effective
+	// state for, named and disclosed — never silently absent regardless of
+	// whether AC-1/AC-2 found anything else to report above.
+	for _, u := range res.UnprovenSpecs {
+		fmt.Fprintln(stdout, disclosure.Render(unprovenSpecDisclosure(u)))
 	}
 
 	if len(res.MergedBranches) == 0 {
