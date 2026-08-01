@@ -52,6 +52,19 @@ func newDraftBoardsTestStore(t *testing.T) string {
 	if err := runGit(t.Context(), storeRoot, nil, "remote", "add", "origin", origin); err != nil {
 		t.Fatal(err)
 	}
+	// Mirror provisionBoard's TWO main commits (the corpus seed, then the
+	// "main: landed sealed-wall fixtures" commit): provisionFamilyBoardLinks
+	// cuts its instantiated-child branch from main~1 — the pre-landing tip
+	// — which must therefore exist in this minimal store too.
+	if err := os.WriteFile(filepath.Join(storeRoot, ".verdi", "landed-marker.md"), []byte("landed sealed-wall fixtures (test analogue)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(t.Context(), storeRoot, nil, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(t.Context(), storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "main: landed sealed-wall fixtures (test analogue)"); err != nil {
+		t.Fatal(err)
+	}
 	if err := runGit(t.Context(), storeRoot, nil, "checkout", "--quiet", "-b", designBranch); err != nil {
 		t.Fatal(err)
 	}

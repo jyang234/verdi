@@ -346,8 +346,12 @@ func provisionFamilyBoardLinks(ctx context.Context, storeRoot string) error {
 		return fmt.Errorf("resolving HEAD for family-board-links fixtures: %w", err)
 	}
 
+	// flParentName's spec is NOT written here: its accepted-pending-build
+	// state is GIT-DERIVED now (merge-signaled acceptance — exact bytes
+	// reachable from the default branch), so provisionBoard lands it on
+	// main (mainFixtures) before the design branch is cut; it rides into
+	// this checkout's tree from there.
 	files := map[string]string{
-		filepath.Join(".verdi", "specs", "active", flParentName, "spec.md"):          flParentSpec(commit),
 		filepath.Join(".verdi", "specs", "archive", flArchivedChildName, "spec.md"):  flArchivedChildSpec(commit),
 		filepath.Join(".verdi", "specs", "active", flDanglingStoryName, "spec.md"):   flDanglingStorySpec,
 		filepath.Join(".verdi", "specs", "archive", flArchivedParentName, "spec.md"): flArchivedParentSpec(commit),
@@ -370,10 +374,15 @@ func provisionFamilyBoardLinks(ctx context.Context, storeRoot string) error {
 	}
 
 	// The instantiated-but-unlanded stub (AC-3's ref-present in-between
-	// branch): cut from main, exactly like provisionDraftBoards' own
-	// fixture branches, so its tree still carries the corpus.
+	// branch): cut from main~1 — the corpus tip BEFORE provisionBoard's
+	// "main: landed sealed-wall fixtures" commit — so its tree still
+	// carries the corpus but NOT flParentName's landed spec. 44-branch-
+	// family-links' ADJ-70 inverse case needs an implements target that is
+	// genuinely absent from this branch's tree (the unresolved-notice
+	// disclosure path); cutting from the current main tip would resolve
+	// the target and silently hollow that journey out.
 	branch := "design/" + flInstantiatedChildName
-	if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", "-b", branch, "main"); err != nil {
+	if err := runGit(ctx, storeRoot, nil, "checkout", "--quiet", "-b", branch, "main~1"); err != nil {
 		return fmt.Errorf("cutting %s: %w", branch, err)
 	}
 	instPath := filepath.Join(storeRoot, ".verdi", "specs", "active", flInstantiatedChildName, "spec.md")

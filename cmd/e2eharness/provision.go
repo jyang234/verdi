@@ -184,6 +184,13 @@ const mermaidDemoSpec = "---\n" +
 // (internal/artifact/status.go's specComponentStatuses) — closed requires
 // a frozen stamp (requireFrozen), fabricated here with a well-formed but
 // non-real commit sha, exactly as a scratch-only fixture may.
+//
+// MERGE-SIGNALED ACCEPTANCE MIGRATION NOTE: the persisted status: closed
+// field is now a STALE self-report — closure is provable only at the
+// archive path, so this entry's git-derived EFFECTIVE state (and every
+// surface's rendering of it) is accepted-pending-build. The fixture is
+// kept deliberately: 43-home-status-glance asserts exactly that migration
+// truth (a stale terminal field no longer counterfeits terminal state).
 const closedAwaitingArchiveName = "rate-table-sunset"
 
 const closedAwaitingArchiveSpec = "---\n" +

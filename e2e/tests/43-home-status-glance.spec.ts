@@ -95,7 +95,14 @@ test("the glance groups every fixture entry into its correct bucket, badged and 
     [ACCEPTED_SPEC, "in-flight"],
     [ACTIVE_SPEC, "settling"],
     [TERMINAL_SPEC, "settling"],
-    [EDGE.DIR_CLOSED_AWAITING_ARCHIVE, "settling"],
+    // Merge-signaled acceptance migration: a stale persisted
+    // `status: closed` on an active-zone spec no longer counterfeits
+    // terminal state — closure is provable only at the archive path, so
+    // this entry's git-derived effective state is accepted-pending-build
+    // and it renders in-flight. (The close verb archives atomically now;
+    // the old "closed awaiting archive" window is no longer a state the
+    // model can hold.)
+    [EDGE.DIR_CLOSED_AWAITING_ARCHIVE, "in-flight"],
   ] as const) {
     await expect(glanceEntry(page, name)).toHaveCount(1);
     await expect(glanceGroup(page, group).getByTestId(glanceEntryTestId(name))).toBeVisible();
@@ -112,9 +119,12 @@ test("the glance groups every fixture entry into its correct bucket, badged and 
   ).toHaveText("accepted-pending-build");
   await expect(glanceEntry(page, ACTIVE_SPEC).locator(".badge-active")).toHaveText("active");
   await expect(glanceEntry(page, TERMINAL_SPEC).locator(".badge-superseded")).toHaveText("superseded");
+  // Merge-signaled acceptance: the badge speaks the EFFECTIVE state
+  // (git-derived), not the stale persisted field — see the bucket note
+  // above.
   await expect(
-    glanceEntry(page, EDGE.DIR_CLOSED_AWAITING_ARCHIVE).locator(".badge-closed"),
-  ).toHaveText("closed");
+    glanceEntry(page, EDGE.DIR_CLOSED_AWAITING_ARCHIVE).locator(".badge-accepted-pending-build"),
+  ).toHaveText("accepted-pending-build");
 
   // (d) link grammar per dc-3: the unprefixed default-branch board
   // address...
