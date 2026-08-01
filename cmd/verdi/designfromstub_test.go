@@ -58,6 +58,16 @@ const fromStubFeatureName = "fromstub-feature"
 
 func buildFromStubRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
+	// stub-instantiate's own accepted-pending-build gate now routes through
+	// the real, git-backed specstate.Projector (Task 6, the 6b twin of
+	// internal/workbench's own fixture migration), which resolves the
+	// default branch through its own precedence chain rather than trusting
+	// anything the caller passes; this fixturegit repo carries no origin
+	// remote, so every test built from it needs this pinned for
+	// fromstub-feature's active-zone reachability to actually resolve
+	// AcceptedPendingBuild (mirrors cmd/verdi/closefeature_test.go's
+	// buildCloseFeatureRepo, the same fixture-migration shape).
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/specs/active/" + fromStubFeatureName + "/spec.md": fromStubFeatureSpec,
