@@ -14,9 +14,19 @@ import (
 // statuslessSpecPath and statuslessSpecContent are the fixture spec this
 // file lands by three different Git integration strategies: no `status:`
 // line at all (the design's "The schema permits new active specifications
-// to omit the persisted status field" — Task 3 must already tolerate that
-// shape end to end, ahead of the sibling task that formally makes the
-// artifact schema accept it).
+// to omit the persisted status field"). Ahead of the sibling task that
+// formally makes internal/artifact's schema accept an omitted status,
+// this package only tolerates a STATUSLESS CANDIDATE'S OWN bytes — its own
+// path is always excluded from its own supersession-corpus decode
+// (resolve.go's per-candidate self-exclusion). It does NOT yet tolerate a
+// statusless spec anywhere ELSE in the default-branch active corpus: that
+// unrelated spec still fails internal/artifact.DecodeSpec during the
+// corpus scan, and the current, correct, fail-closed behavior is Unproven
+// with a decode-witness disclosure — proven by
+// TestProjector_UnrelatedStatuslessCorpusSpec_Integration below, not
+// end-to-end tolerance. The sibling schema task flips that unrelated case
+// to a clean scan (and, transitively, AcceptedPendingBuild here) once it
+// lands.
 const statuslessSpecPath = ".verdi/specs/active/statusless-feature/spec.md"
 
 const statuslessSpecContent = `---
@@ -161,6 +171,68 @@ func TestProjector_MergeStrategies_Integration(t *testing.T) {
 		landings[strategySquash] == landings[strategyRebase] ||
 		landings[strategyMerge] == landings[strategyRebase] {
 		t.Fatalf("expected three distinct strategy-specific landing commits, got %+v", landings)
+	}
+}
+
+// TestProjector_UnrelatedStatuslessCorpusSpec_Integration proves fix-round-1
+// finding 3's documented current behavior over REAL git (no fakes): a
+// default branch carrying the (schema-valid) candidate PLUS one wholly
+// unrelated statusless active spec resolves the candidate as Unproven,
+// naming the unrelated spec's path as the decode witness — never a silent
+// AcceptedPendingBuild. This is the correct, fail-closed posture ahead of
+// the sibling schema task; that task's own landing is what should flip
+// this exact test to AcceptedPendingBuild.
+func TestProjector_UnrelatedStatuslessCorpusSpec_Integration(t *testing.T) {
+	ctx := context.Background()
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"base.txt": "base\n"}, Message: "root"},
+	})
+
+	candidatePath := ".verdi/specs/active/payments/spec.md"
+	candidateContent := []byte(`---
+id: spec/payments
+kind: spec
+class: feature
+title: Payments
+owners: [platform]
+status: accepted-pending-build
+frozen: { at: "2024-01-01", commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+acceptance_criteria:
+  - { id: ac-1, text: works, evidence: [static] }
+---
+body
+`)
+	unrelatedPath := ".verdi/specs/active/statusless-feature/spec.md"
+
+	runGitForTest(t, repo.Dir, "checkout", "--quiet", "main")
+	if err := os.MkdirAll(filepath.Join(repo.Dir, filepath.FromSlash(filepath.Dir(candidatePath))), 0o755); err != nil {
+		t.Fatalf("mkdir for candidate spec: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, filepath.FromSlash(candidatePath)), candidateContent, 0o644); err != nil {
+		t.Fatalf("write candidate spec: %v", err)
+	}
+	writeStatuslessSpecFile(t, repo.Dir) // the unrelated statusless spec, at unrelatedPath
+	runGitForTest(t, repo.Dir, "add", "-A")
+	runGitForTest(t, repo.Dir, "commit", "--quiet", "--no-verify", "-m", "add payments plus an unrelated statusless spec")
+
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	p := NewProjector()
+	result, err := p.Resolve(ctx, repo.Dir, Candidate{Path: candidatePath, Content: candidateContent})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if result.State != Unproven || result.Relation != RelationUnproven {
+		t.Fatalf("Resolve = %+v, want Unproven/unproven (an unrelated statusless corpus spec must still block the scan today)", result)
+	}
+	foundWitness := false
+	for _, d := range result.Disclosures {
+		if strings.Contains(d, unrelatedPath) && strings.Contains(d, "failed to decode") {
+			foundWitness = true
+		}
+	}
+	if !foundWitness {
+		t.Fatalf("Resolve disclosures = %v, want one naming %s as the decode witness", result.Disclosures, unrelatedPath)
 	}
 }
 

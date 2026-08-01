@@ -92,9 +92,12 @@ type Candidate struct {
 }
 
 // Result is one candidate's projected effective state. Disclosures is
-// always sorted for deterministic output; it is non-empty exactly when
-// State could not be fully proven, or when a legacy artifact needed a
-// compatibility note.
+// always deterministic for identical inputs — never wall-clock- or
+// randomness-dependent — but not always a single flat alphabetical sort:
+// a scan-incompleteness result puts one summary line first, followed by
+// every decode-witness message in sorted order. It is non-empty exactly
+// when State could not be fully proven, or when a legacy artifact needed
+// a compatibility note.
 type Result struct {
 	State       State     `json:"state"`
 	Relation    Relation  `json:"relation"`

@@ -2,6 +2,7 @@ package specstate
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -284,7 +285,10 @@ body
 			blobAt: exactBlobAt(path, fakeOID),
 			show:   exactShow(path, content),
 			fpbl:   exactLanding(path, fakeOID, fakeLanding),
-			lsTree: onlyPath(), // archive-zone candidates never need the active corpus
+			// lsTree left unset: archive-zone candidates never need the
+			// active corpus, so a stray LsTree call must panic — the same
+			// proof-by-unset-stub pattern the diverged case above uses for
+			// FirstParentBlobLanding.
 		})
 
 		result, err := p.Resolve(ctx, repo.Dir, Candidate{Path: path, Content: content})
@@ -395,6 +399,293 @@ body
 		}
 		if result.Baseline != nil {
 			t.Fatalf("Resolve: want nil baseline, got %+v", result.Baseline)
+		}
+	})
+}
+
+// validSuccessorSpec builds a schema-valid feature spec's bytes: accepted,
+// frozen, carrying a `links: {type: supersedes}` edge to predecessorName
+// plus a validated `supersession:` block — the two signals scanSuccessors
+// requires before treating a spec as a real successor.
+func validSuccessorSpec(name, predecessorName string) []byte {
+	return []byte(`---
+id: spec/` + name + `
+kind: spec
+class: feature
+title: ` + name + `
+owners: [platform]
+status: accepted-pending-build
+frozen: { at: "2024-01-01", commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+acceptance_criteria:
+  - { id: ac-1, text: works, evidence: [static] }
+links:
+  - { type: supersedes, ref: spec/` + predecessorName + `}
+supersession:
+  added: [ac-1]
+---
+body
+`)
+}
+
+// TestProjector_ResolveMany_Batching proves ResolveMany's batching
+// contract directly (fix-round-1 findings 1 and 2): per-candidate self-
+// exclusion from the shared corpus scan, never batch-wide exclusion, and
+// exactly one corpus scan per ResolveMany call regardless of how many
+// candidates are in the batch.
+func TestProjector_ResolveMany_Batching(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("predecessor and successor batched together both resolve correctly, agreeing with single Resolve calls", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+		predecessorPath := ".verdi/specs/active/old-feature/spec.md"
+		// Schema-valid: with finding 1's fix, the corpus scan now decodes
+		// EVERY active-zone path unconditionally (no scan-time exclusion),
+		// so the predecessor's own bytes must decode cleanly too — only
+		// its OWN evaluation self-excludes its own path from the corpus's
+		// failure/successor lookups, not the scan itself.
+		predecessorContent := []byte(`---
+id: spec/old-feature
+kind: spec
+class: feature
+title: Old Feature
+owners: [platform]
+status: accepted-pending-build
+frozen: { at: "2024-01-01", commit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb }
+acceptance_criteria:
+  - { id: ac-1, text: works, evidence: [static] }
+---
+body
+`)
+		successorPath := ".verdi/specs/active/new-feature/spec.md"
+		successorContent := validSuccessorSpec("new-feature", "old-feature")
+
+		const predOID = "1111111111111111111111111111111111aaaa"
+		const succOID = "2222222222222222222222222222222222bbbb"
+		const predLanding = "3333333333333333333333333333333333cccc"
+		const succLanding = "4444444444444444444444444444444444dddd"
+
+		content := map[string][]byte{predecessorPath: predecessorContent, successorPath: successorContent}
+		oid := map[string]string{predecessorPath: predOID, successorPath: succOID}
+		landing := map[string]string{predecessorPath: predLanding, successorPath: succLanding}
+
+		newStub := func() stubGit {
+			return stubGit{
+				show: func(ctx context.Context, dir, commit, path string) ([]byte, error) {
+					b, ok := content[path]
+					if !ok {
+						t.Fatalf("unexpected Show(%s)", path)
+					}
+					return b, nil
+				},
+				blobAt: func(ctx context.Context, dir, ref, path string) (string, bool, error) {
+					o, ok := oid[path]
+					if !ok {
+						return "", false, nil
+					}
+					return o, true, nil
+				},
+				fpbl: func(ctx context.Context, dir, ref, path, o string) (string, bool, error) {
+					l, ok := landing[path]
+					if !ok || oid[path] != o {
+						t.Fatalf("unexpected FirstParentBlobLanding(%s, %s)", path, o)
+					}
+					return l, true, nil
+				},
+				lsTree: onlyPath(predecessorPath, successorPath),
+			}
+		}
+
+		p := newProjector(newStub())
+		results, err := p.ResolveMany(ctx, repo.Dir, []Candidate{
+			{Path: predecessorPath, Content: predecessorContent},
+			{Path: successorPath, Content: successorContent},
+		})
+		if err != nil {
+			t.Fatalf("ResolveMany: %v", err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("ResolveMany returned %d results, want 2", len(results))
+		}
+		if results[0].State != Superseded || results[0].Relation != RelationExact {
+			t.Fatalf("ResolveMany predecessor result = %+v, want Superseded/exact", results[0])
+		}
+		if results[1].State != AcceptedPendingBuild || results[1].Relation != RelationExact {
+			t.Fatalf("ResolveMany successor result = %+v, want AcceptedPendingBuild/exact", results[1])
+		}
+
+		// A fresh Projector per single-candidate Resolve call (a stub
+		// panics on out-of-scope calls, and a single-candidate call must
+		// still see the OTHER path during its own corpus scan).
+		p2 := newProjector(newStub())
+		singlePred, err := p2.Resolve(ctx, repo.Dir, Candidate{Path: predecessorPath, Content: predecessorContent})
+		if err != nil {
+			t.Fatalf("Resolve(predecessor): %v", err)
+		}
+		if singlePred.State != results[0].State || singlePred.Relation != results[0].Relation {
+			t.Fatalf("Resolve(predecessor) = %+v, disagrees with ResolveMany's %+v", singlePred, results[0])
+		}
+
+		p3 := newProjector(newStub())
+		singleSucc, err := p3.Resolve(ctx, repo.Dir, Candidate{Path: successorPath, Content: successorContent})
+		if err != nil {
+			t.Fatalf("Resolve(successor): %v", err)
+		}
+		if singleSucc.State != results[1].State || singleSucc.Relation != results[1].Relation {
+			t.Fatalf("Resolve(successor) = %+v, disagrees with ResolveMany's %+v", singleSucc, results[1])
+		}
+	})
+
+	t.Run("a batched candidate's own malformed bytes still block OTHER candidates' supersession scans, but never its own", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+		malformedPath := ".verdi/specs/active/broken-thing/spec.md"
+		malformedContent := []byte("---\nid: spec/broken-thing\nkind: spec\nclass: feature\nunknown_field: true\n---\nbody\n")
+		otherPath := ".verdi/specs/active/predecessor-b/spec.md"
+		// Schema-valid (see the sibling subtest's identical note): only
+		// malformedPath's own bytes are meant to fail decode here.
+		otherContent := []byte(`---
+id: spec/predecessor-b
+kind: spec
+class: feature
+title: Predecessor B
+owners: [platform]
+status: accepted-pending-build
+frozen: { at: "2024-01-01", commit: cccccccccccccccccccccccccccccccccccccccc }
+acceptance_criteria:
+  - { id: ac-1, text: works, evidence: [static] }
+---
+body
+`)
+
+		const malformedOID = "5555555555555555555555555555555555eeee"
+		const otherOID = "6666666666666666666666666666666666ffff"
+		const malformedLanding = "7777777777777777777777777777777777aaaa"
+		const otherLanding = "8888888888888888888888888888888888bbbb"
+
+		content := map[string][]byte{malformedPath: malformedContent, otherPath: otherContent}
+		oid := map[string]string{malformedPath: malformedOID, otherPath: otherOID}
+		landing := map[string]string{malformedPath: malformedLanding, otherPath: otherLanding}
+
+		p := newProjector(stubGit{
+			show: func(ctx context.Context, dir, commit, path string) ([]byte, error) {
+				b, ok := content[path]
+				if !ok {
+					t.Fatalf("unexpected Show(%s)", path)
+				}
+				return b, nil
+			},
+			blobAt: func(ctx context.Context, dir, ref, path string) (string, bool, error) {
+				o, ok := oid[path]
+				if !ok {
+					return "", false, nil
+				}
+				return o, true, nil
+			},
+			fpbl: func(ctx context.Context, dir, ref, path, o string) (string, bool, error) {
+				l, ok := landing[path]
+				if !ok || oid[path] != o {
+					t.Fatalf("unexpected FirstParentBlobLanding(%s, %s)", path, o)
+				}
+				return l, true, nil
+			},
+			lsTree: onlyPath(malformedPath, otherPath),
+		})
+
+		results, err := p.ResolveMany(ctx, repo.Dir, []Candidate{
+			{Path: otherPath, Content: otherContent},
+			{Path: malformedPath, Content: malformedContent},
+		})
+		if err != nil {
+			t.Fatalf("ResolveMany: %v", err)
+		}
+
+		// otherPath: unrelated to malformedPath's supersedes graph, but the
+		// scan can't rule out that the UNREADABLE malformedPath declares
+		// `supersedes: spec/predecessor-b` — so otherPath must be unproven,
+		// naming malformedPath as the decode witness.
+		if results[0].State != Unproven || results[0].Relation != RelationUnproven {
+			t.Fatalf("ResolveMany[otherPath] = %+v, want Unproven/unproven (blocked by malformedPath's own decode failure)", results[0])
+		}
+		foundWitness := false
+		for _, d := range results[0].Disclosures {
+			if strings.Contains(d, malformedPath) && strings.Contains(d, "failed to decode") {
+				foundWitness = true
+			}
+		}
+		if !foundWitness {
+			t.Fatalf("ResolveMany[otherPath] disclosures = %v, want one naming %s as the decode witness", results[0].Disclosures, malformedPath)
+		}
+
+		// malformedPath's own resolution is NOT blocked by its own decode
+		// failure (self-exclusion) — it resolves accepted-pending-build.
+		if results[1].State != AcceptedPendingBuild || results[1].Relation != RelationExact {
+			t.Fatalf("ResolveMany[malformedPath] = %+v, want AcceptedPendingBuild/exact (self-exclusion: its own decode failure must not block its own verdict)", results[1])
+		}
+	})
+
+	t.Run("corpus is scanned exactly once per ResolveMany call, regardless of batch size", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+
+		const numCandidates = 12
+		candidates := make([]Candidate, numCandidates)
+		candidateContent := map[string][]byte{}
+		for i := 0; i < numCandidates; i++ {
+			path := fmt.Sprintf(".verdi/specs/active/predecessor-%02d/spec.md", i)
+			body := []byte(fmt.Sprintf("---\nid: spec/predecessor-%02d\nkind: spec\nclass: feature\ntitle: P%02d\nowners: [platform]\n---\nbody\n", i, i))
+			candidates[i] = Candidate{Path: path, Content: body}
+			candidateContent[path] = body
+		}
+
+		// Two corpus-only specs, NOT among the batch's own candidates —
+		// scanSuccessors must decode each exactly once, never once per
+		// candidate.
+		otherPaths := []string{
+			".verdi/specs/active/other-a/spec.md",
+			".verdi/specs/active/other-b/spec.md",
+		}
+		otherContent := []byte("---\nid: spec/other\nkind: spec\nclass: feature\ntitle: Other\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n---\nbody\n")
+
+		var lsTreeCalls int
+		showCounts := map[string]int{}
+		var allPaths []string
+		allPaths = append(allPaths, otherPaths...)
+		for _, c := range candidates {
+			allPaths = append(allPaths, c.Path)
+		}
+
+		p := newProjector(stubGit{
+			lsTree: func(ctx context.Context, dir, ref, prefix string) ([]string, error) {
+				lsTreeCalls++
+				return allPaths, nil
+			},
+			show: func(ctx context.Context, dir, commit, path string) ([]byte, error) {
+				showCounts[path]++
+				if b, ok := candidateContent[path]; ok {
+					return b, nil
+				}
+				return otherContent, nil
+			},
+			blobAt: func(ctx context.Context, dir, ref, path string) (string, bool, error) {
+				return fakeOID, true, nil
+			},
+			fpbl: func(ctx context.Context, dir, ref, path, oid string) (string, bool, error) {
+				return fakeLanding, true, nil
+			},
+		})
+
+		results, err := p.ResolveMany(ctx, repo.Dir, candidates)
+		if err != nil {
+			t.Fatalf("ResolveMany: %v", err)
+		}
+		if len(results) != numCandidates {
+			t.Fatalf("ResolveMany returned %d results, want %d", len(results), numCandidates)
+		}
+		if lsTreeCalls != 1 {
+			t.Fatalf("LsTree called %d times, want exactly 1 per ResolveMany call", lsTreeCalls)
+		}
+		for _, path := range otherPaths {
+			if showCounts[path] != 1 {
+				t.Fatalf("Show(%s) called %d times, want exactly 1 (the corpus scan must decode each successor once, never once per candidate)", path, showCounts[path])
+			}
 		}
 	})
 }

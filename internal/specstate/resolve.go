@@ -101,9 +101,14 @@ func parseCandidatePath(path string) (zone, string, error) {
 }
 
 // successorCorpus is the default-branch active-zone spec corpus, decoded
-// at most once per ResolveMany call. supersedesBy maps a predecessor
-// spec's bare name to every default-branch path that carries BOTH a
-// links: {type: supersedes} edge to that predecessor AND a validated
+// at most once per ResolveMany call, over EVERY active-zone spec.md path
+// with no exclusion at scan time (fix-round-1 finding 1: batch-wide
+// exclusion at scan time hid a landed successor whenever it happened to
+// also be one of the SAME call's own candidates, and silently dropped a
+// malformed candidate's own decode failure from ever becoming a witness
+// for any OTHER candidate). supersedesBy maps a predecessor spec's bare
+// name to every default-branch path that carries BOTH a links:
+// {type: supersedes} edge to that predecessor AND a validated
 // supersession: block (the brief's two-signal requirement — this
 // package does not additionally cross-check the supersession block's
 // carried/amended/removed buckets against the predecessor's own object
@@ -111,40 +116,64 @@ func parseCandidatePath(path string) (zone, string, error) {
 // decode time, and completeness against a specific predecessor's objects
 // is a lint-layer concern, not this package's).
 //
-// failures lists every corpus path that failed strict decode, sorted. A
-// non-empty failures list means the scan is INCOMPLETE: one of those
-// unreadable specs might be the very successor a candidate needs ruled
-// out before it can be reported accepted, so any candidate that would
-// otherwise resolve accepted-pending-build from a clean scan instead
-// resolves unproven, naming every decode witness (CLAUDE.md three-valued
-// honesty: silence is never a pass).
+// failures maps every corpus path that failed strict decode to a
+// human-readable witness message, keyed by path so a per-candidate lookup
+// (supersessorsFor/failuresExcluding below) can exclude EXACTLY that one
+// candidate's own path — self-exclusion applied at lookup time, never at
+// scan time, so a candidate's own decode failure never blocks its own
+// verdict while still blocking every OTHER candidate's (a spec can never
+// supersede itself, but it can very much be the undetected successor of
+// something else in the same batch).
 type successorCorpus struct {
 	supersedesBy map[string][]string
-	failures     []string
+	failures     map[string]string
 }
 
-// scanSuccessors reads and strict-decodes the default branch's active-zone
-// spec corpus exactly once, skipping every path in excluded — a spec
-// never supersedes itself, so a ResolveMany call's own candidate paths
-// are excluded from the decode set: a candidate's own decodability never
-// determines whether it itself is superseded, and (today, ahead of the
-// sibling task that makes a persisted status optional) a statusless
-// active candidate would otherwise fail this package's own corpus decode
-// step for a reason that has nothing to do with supersession.
-func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branch, excluded map[string]bool) (*successorCorpus, error) {
+// supersessorsFor returns the sorted default-branch paths that validly
+// name candidateName as their predecessor, excluding any entry whose own
+// path equals candidatePath (defensive: a spec cannot supersede itself,
+// even if malformed data somehow declared it).
+func (c *successorCorpus) supersessorsFor(candidatePath, candidateName string) []string {
+	var out []string
+	for _, p := range c.supersedesBy[candidateName] {
+		if p == candidatePath {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// failuresExcluding returns every decode-witness message EXCEPT
+// candidatePath's own (self-exclusion at lookup time — see successorCorpus's
+// doc comment), sorted for deterministic output.
+func (c *successorCorpus) failuresExcluding(candidatePath string) []string {
+	var out []string
+	for path, msg := range c.failures {
+		if path == candidatePath {
+			continue
+		}
+		out = append(out, msg)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// scanSuccessors reads and strict-decodes EVERY spec.md path under the
+// default branch's active zone, unconditionally — no candidate path is
+// excluded at scan time (fix-round-1 finding 1; see successorCorpus's doc
+// comment for why exclusion belongs at lookup time instead).
+func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branch) (*successorCorpus, error) {
 	paths, err := p.git.LsTree(ctx, root, branch.Ref, activeZonePrefix)
 	if err != nil {
 		return nil, fmt.Errorf("specstate: scanning default-branch active specs: %w", err)
 	}
 	sort.Strings(paths)
 
-	corpus := &successorCorpus{supersedesBy: map[string][]string{}}
+	corpus := &successorCorpus{supersedesBy: map[string][]string{}, failures: map[string]string{}}
 	for _, path := range paths {
 		if !strings.HasSuffix(path, "/spec.md") {
 			continue // the corpus scan cares only about spec.md leaves
-		}
-		if excluded[path] {
-			continue
 		}
 
 		content, err := p.git.Show(ctx, root, branch.Ref, path)
@@ -154,7 +183,7 @@ func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branc
 
 		fm, decodeErr := artifact.DecodeSpec(content)
 		if decodeErr != nil {
-			corpus.failures = append(corpus.failures, fmt.Sprintf("default-branch spec %s failed to decode: %v", path, decodeErr))
+			corpus.failures[path] = fmt.Sprintf("default-branch spec %s failed to decode: %v", path, decodeErr)
 			continue
 		}
 		if fm.Supersession == nil {
@@ -172,7 +201,6 @@ func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branc
 		}
 	}
 
-	sort.Strings(corpus.failures)
 	for name := range corpus.supersedesBy {
 		sort.Strings(corpus.supersedesBy[name])
 	}
@@ -199,15 +227,10 @@ func (p Projector) ResolveMany(ctx context.Context, root string, candidates []Ca
 		return results, nil
 	}
 
-	excluded := make(map[string]bool, len(candidates))
-	for _, c := range candidates {
-		excluded[c.Path] = true
-	}
-
 	var corpus *successorCorpus
 	getCorpus := func() (*successorCorpus, error) {
 		if corpus == nil {
-			built, err := p.scanSuccessors(ctx, root, branch, excluded)
+			built, err := p.scanSuccessors(ctx, root, branch)
 			if err != nil {
 				return nil, err
 			}
@@ -306,22 +329,24 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 
 	// Active zone, exact bytes reachable from default, landing proven:
 	// check supersession before falling back to the (now purely
-	// informational) legacy status field.
+	// informational) legacy status field. Both lookups apply THIS
+	// candidate's own self-exclusion at lookup time (fix-round-1 finding
+	// 1) — the shared corpus itself was scanned with no exclusion at all.
 	corpus, err := getCorpus()
 	if err != nil {
 		return Result{}, err
 	}
-	if successors := corpus.supersedesBy[name]; len(successors) > 0 {
+	if successors := corpus.supersessorsFor(c.Path, name); len(successors) > 0 {
 		return Result{State: Superseded, Relation: RelationExact, Baseline: baseline}, nil
 	}
-	if len(corpus.failures) > 0 {
-		disclosures := make([]string, 0, len(corpus.failures)+1)
+	if failures := corpus.failuresExcluding(c.Path); len(failures) > 0 {
+		disclosures := make([]string, 0, len(failures)+1)
 		disclosures = append(disclosures, fmt.Sprintf(
 			// vocab:identity — machinery diagnostic naming the lifecycle state this scan could not rule out
 			"specstate: %s cannot be proven not-superseded — the default-branch active-spec scan is incomplete",
 			c.Path,
 		))
-		disclosures = append(disclosures, corpus.failures...)
+		disclosures = append(disclosures, failures...)
 		return Result{State: Unproven, Relation: RelationUnproven, Disclosures: disclosures}, nil
 	}
 
