@@ -397,14 +397,19 @@ func migrationDisclosures(path string, content []byte) []string {
 // status: field through internal/artifact.DecodeSpec — this package's
 // only sanctioned YAML decode seam (CLAUDE.md: "YAML via the single
 // internal/artifact seam"; internal/specalign's import-seam witness
-// enforces that no other package imports gopkg.in/yaml.v3 directly). Any
-// decode failure — including a spec that omits status entirely, which
-// internal/artifact.DecodeSpec cannot yet accept ahead of the sibling task
-// in this same plan that makes the field optional — is read as "no legacy
-// status available" rather than propagated: status is used here only to
-// produce an optional compatibility disclosure, never to gate the
-// git-derived verdict itself, so a decode failure here must never block
-// or alter the state this package already proved from Git alone.
+// enforces that no other package imports gopkg.in/yaml.v3 directly).
+// internal/artifact.DecodeSpec now accepts an omitted status on the
+// feature/story classes (Task 4: spec.go's `status,omitempty` plus
+// validateFeature/validateStory's empty-value tolerance), so a statusless
+// spec decodes here too — its Status simply reads back as "", which
+// migrationDisclosures' own `!= "draft"` check already treats as "no
+// legacy draft compatibility question." Any decode failure that DOES
+// still occur (a genuinely malformed spec, an unknown top-level field, an
+// unknown class) is read as "no legacy status available" rather than
+// propagated: status is used here only to produce an optional
+// compatibility disclosure, never to gate the git-derived verdict itself,
+// so a decode failure here must never block or alter the state this
+// package already proved from Git alone.
 func probeLegacyStatus(content []byte) string {
 	rawFM, _, splitErr := artifact.SplitFrontmatter(content)
 	if splitErr != nil {

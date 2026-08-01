@@ -35,7 +35,20 @@ import (
 // constitution 2 — "cannot be proven" must never read as "passed"). A
 // disclosure naming the missing proof is the fix; a plain local run with
 // no CI signal at all still stays silent, matching every other git-aware
-// rule's "can't prove it, don't guess" posture (VL-010's own DiffBase=="".
+// rule's "can't prove it, don't guess" posture (VL-010's own DiffBase=="").
+//
+// The SAME "never a silent pass" posture applies once specstate is
+// actually consulted, per doc, below: specstate.Result.State ==
+// specstate.Unproven is exactly the same "cannot be proven" shape as an
+// unresolvable default branch, just discovered one level deeper (a
+// provable default branch whose reachability/supersession proof for THIS
+// path still fails — e.g. no first-parent landing commit provable, or the
+// default-branch active-spec corpus scan is itself incomplete). Falling
+// through silently there would be the identical fail-open gap the
+// unresolvable-default-branch fix above closes, just moved one call
+// deeper — Check's per-document switch below handles it explicitly,
+// alongside every other reachable specstate.State, so no state is ever
+// dropped without a deliberate, commented reason.
 type vl004 struct{}
 
 func (vl004) ID() string { return "VL-004" }
@@ -75,8 +88,47 @@ func (vl004) Check(in *RunInput) []Finding {
 			findings = append(findings, Finding{Rule: "VL-004", Path: d.RelPath, Message: fmt.Sprintf("resolving Git-derived state for %s: %v", d.RelPath, err)})
 			continue
 		}
-		if result.State == specstate.AcceptedPendingBuild && len(result.Disclosures) > 0 {
+
+		// Every reachable specstate.State is handled explicitly below —
+		// none may fall through silently (fix-round-1 finding 1: an
+		// Unproven verdict is exactly as much a "cannot be proven, never a
+		// silent pass" case as the unresolvable-default-branch guard
+		// above, just discovered one level deeper).
+		switch result.State {
+		case specstate.AcceptedPendingBuild:
+			// The compatibility case this rule exists for: exact bytes
+			// already reachable from default, legacy draft. Disclosures
+			// is non-empty here exactly when migrationDisclosures fired
+			// (probeLegacyStatus read "draft" on this same content) — the
+			// guard is defensive, not a second decision.
+			if len(result.Disclosures) > 0 {
+				findings = append(findings, Finding{Rule: "VL-004", Path: d.RelPath, Severity: SeverityDisclosure, Message: strings.Join(result.Disclosures, "; ")})
+			}
+		case specstate.Unproven:
+			// Reachability or supersession-completeness could not be
+			// proven for this exact path (no provable first-parent
+			// landing commit, or an incomplete default-branch active-spec
+			// scan) — never a silent pass. Disclose the missing proof
+			// specstate itself names.
 			findings = append(findings, Finding{Rule: "VL-004", Path: d.RelPath, Severity: SeverityDisclosure, Message: strings.Join(result.Disclosures, "; ")})
+		case specstate.Proposed:
+			// Recorded accepted reading (fix-round-1 finding 1's own
+			// scope): the default branch either doesn't have this path at
+			// all (RelationNew — a live proposal still under review) or
+			// holds different bytes at it (RelationDiverged — a proposal
+			// whose reviewed head has moved past what's on default). Both
+			// are ordinary, unremarkable proposal states, not a
+			// compatibility question about an ALREADY-LANDED draft; this
+			// rule's own job (its doc comment above) is narrowly that one
+			// compatibility question, so neither needs a finding.
+		case specstate.Superseded, specstate.Closed:
+			// A legacy `status: draft` document whose exact bytes
+			// specstate nonetheless proves reachable at a computed
+			// TERMINAL state (a later successor names it as predecessor,
+			// or it sits in the archive zone) is not a live "is this
+			// really still a draft" compatibility question either — its
+			// Git-derived state is already unambiguous and further along
+			// than "merge-accepted." Nothing to disclose.
 		}
 	}
 	return findings

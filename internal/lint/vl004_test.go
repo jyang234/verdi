@@ -1,9 +1,12 @@
 package lint
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // vl004DraftOverlay is the shared testdata/violations/VL-004 fixture: a
@@ -160,6 +163,181 @@ func TestVL004_UnresolvableDefaultBranch_SilentOutsideCI(t *testing.T) {
 		if f.Rule == "VL-004" {
 			t.Fatalf("VL-004 fired outside CI with an unresolvable default branch: %s", f.String())
 		}
+	}
+}
+
+// fakeStateResolver is a test-only SpecStateResolver (engine.go) that
+// returns a fixed Result/error regardless of its arguments — the seam
+// fix-round-1 finding 1 exists for: driving a specstate.Result shape
+// (a provably-unreachable first-parent landing) that specstate's own
+// gitReader-level fakes can reach but real git cannot practically
+// reconstruct through ordinary repository operations (see
+// SpecStateResolver's own doc comment in engine.go).
+type fakeStateResolver struct {
+	result specstate.Result
+	err    error
+}
+
+func (f fakeStateResolver) Resolve(ctx context.Context, root string, candidate specstate.Candidate) (specstate.Result, error) {
+	return f.result, f.err
+}
+
+// vl004DraftFixtureDir builds a minimal, real (no-git-needed) overlay
+// directory carrying exactly one legacy `status: draft` feature spec at
+// .verdi/specs/active/vl-004-unproven/spec.md, and returns a *RunInput
+// wired with fakeResolver in place of a real specstate.Projector — the
+// direct-construction path (bypassing Engine.Run/runLint entirely) that
+// lets a test drive vl004.Check with an arbitrary specstate.Result.
+func vl004FakeRunInput(t *testing.T, ctx Context, fakeResolver SpecStateResolver) *RunInput {
+	t.Helper()
+	const draftSpec = `---
+id: spec/vl-004-unproven
+kind: spec
+class: feature
+title: "VL-004: unproven compatibility question"
+status: draft
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+---
+# VL-004: unproven compatibility question
+`
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-004-unproven", "spec.md"), draftSpec)
+
+	snap, err := BuildSnapshot(dir, Options{})
+	if err != nil {
+		t.Fatalf("BuildSnapshot: %v", err)
+	}
+	return &RunInput{Ctx: context.Background(), Root: dir, Snapshot: snap, LintCtx: ctx, Opts: Options{}, Projector: fakeResolver}
+}
+
+// TestVL004_UnprovenResult_Discloses is fix-round-1 finding 1's own test:
+// specstate.Result.State == Unproven must never fall through silently —
+// both of specstate's documented "cannot be proven" shapes (resolve.go's
+// "no first-parent landing commit could be proven" and "the default-
+// branch active-spec scan is incomplete") become exactly one
+// SeverityDisclosure finding, carrying specstate's own Disclosures
+// verbatim, never a silent pass.
+func TestVL004_UnprovenResult_Discloses(t *testing.T) {
+	boundary := Context{DefaultBranch: "main", CurrentBranch: "main"}
+
+	cases := []struct {
+		name   string
+		result specstate.Result
+	}{
+		{
+			name: "bytes match the default branch but no first-parent landing commit could be proven",
+			result: specstate.Result{
+				State:    specstate.Unproven,
+				Relation: specstate.RelationUnproven,
+				Disclosures: []string{
+					"specstate: .verdi/specs/active/vl-004-unproven/spec.md matches the default branch's bytes (blob deadbeef) but no first-parent landing commit could be proven on main",
+				},
+			},
+		},
+		{
+			name: "the default-branch active-spec successor scan is incomplete",
+			result: specstate.Result{
+				State:    specstate.Unproven,
+				Relation: specstate.RelationUnproven,
+				Disclosures: []string{
+					"specstate: .verdi/specs/active/vl-004-unproven/spec.md cannot be proven not-superseded — the default-branch active-spec scan is incomplete",
+					"default-branch spec .verdi/specs/active/broken-successor/spec.md failed to decode: artifact: strict decode: unknown field",
+				},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := vl004FakeRunInput(t, boundary, fakeStateResolver{result: tc.result})
+			findings := (vl004{}).Check(in)
+			if len(findings) != 1 {
+				t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+			}
+			f := findings[0]
+			if f.Rule != "VL-004" || f.Path != ".verdi/specs/active/vl-004-unproven/spec.md" {
+				t.Fatalf("finding = %+v, want VL-004 on the unproven spec", f)
+			}
+			if f.Severity != SeverityDisclosure {
+				t.Fatalf("finding severity = %v, want SeverityDisclosure (an Unproven verdict is a disclosure, never a violation)", f.Severity)
+			}
+			for _, d := range tc.result.Disclosures {
+				if !strings.Contains(f.Message, d) {
+					t.Fatalf("finding message = %q, does not carry specstate's own disclosure %q", f.Message, d)
+				}
+			}
+		})
+	}
+}
+
+// vl004UnprovenSuccessorScanBase is a real, decodable, legacy `status:
+// draft` feature spec — the SAME shape TestVL004_LegacyDraftAlreadyOnDefault_Discloses
+// uses — landed onto the default branch alongside a malformed sibling
+// spec.md under the SAME active zone, real git, no fake: specstate's own
+// scanSuccessors decode-failure shape (resolve.go's "the default-branch
+// active-spec scan is incomplete") IS reconstructible through ordinary
+// repository operations, unlike the first-parent-landing shape above.
+const vl004UnprovenSuccessorScanBase = `---
+id: spec/vl-004-unproven-scan
+kind: spec
+class: feature
+title: "VL-004: unproven via incomplete successor scan"
+status: draft
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+---
+# VL-004: unproven via incomplete successor scan
+`
+
+// vl004MalformedSibling is a spec.md that fails artifact.DecodeSpec
+// outright (an unknown top-level field) — sitting under the SAME
+// .verdi/specs/active/ zone specstate's scanSuccessors sweeps
+// unconditionally when it needs a supersession answer for ANY active-zone
+// candidate, blocking the scan for every candidate in the same corpus.
+const vl004MalformedSibling = `---
+id: spec/vl-004-broken-successor
+kind: spec
+class: feature
+title: "VL-004: malformed sibling"
+owners: [platform-team]
+bogus_field: nope
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+---
+# VL-004: malformed sibling
+`
+
+// TestVL004_SuccessorScanIncomplete_DisclosesViaRealGit is the fixture
+// (real git) counterpart to TestVL004_UnprovenResult_Discloses's second
+// table case: proves the SAME behavior end to end, through Engine.Run and
+// a real specstate.Projector, not just at the vl004.Check unit level.
+func TestVL004_SuccessorScanIncomplete_DisclosesViaRealGit(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-004-unproven-scan", "spec.md"), vl004UnprovenSuccessorScanBase)
+	writeTestFile(t, filepath.Join(dir, ".verdi", "specs", "active", "vl-004-broken-successor", "spec.md"), vl004MalformedSibling)
+
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := buildLintRepo(t, dir)
+
+	findings := runLint(t, repo.Dir, Context{DefaultBranch: "main", CurrentBranch: "main"}, Options{})
+
+	var got *Finding
+	for i := range findings {
+		if findings[i].Rule == "VL-004" && findings[i].Path == ".verdi/specs/active/vl-004-unproven-scan/spec.md" {
+			got = &findings[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("no VL-004 finding for the scan-blocked draft spec:\n%s", findingsString(findings))
+	}
+	if got.Severity != SeverityDisclosure {
+		t.Fatalf("finding severity = %v, want SeverityDisclosure", got.Severity)
+	}
+	if !strings.Contains(got.Message, "cannot be proven not-superseded") || !strings.Contains(got.Message, "vl-004-broken-successor") {
+		t.Fatalf("finding message = %q, want it to name the incomplete scan and its decode-failure witness", got.Message)
 	}
 }
 
