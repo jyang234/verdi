@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -34,6 +35,41 @@ func copyV2FeatureFixture(t *testing.T, repoDir string, relDirs ...string) {
 		src := filepath.Join(v2FixtureRoot, rel)
 		dst := filepath.Join(repoDir, ".verdi", rel)
 		copyTree(t, src, dst)
+	}
+}
+
+// v2FeatureFixturePaths are the exact .verdi-relative dirs
+// copyV2FeatureFixture's own call sites always pass, in order — factored
+// out so commitV2FeatureFixture can `git add` precisely these paths
+// (never a blanket `-A`, which would also stage buildCorpusRepo's own
+// uncommitted derived/ tree).
+var v2FeatureFixturePaths = []string{
+	".verdi/specs/active/escrow-autopay",
+	".verdi/specs/active/borrower-update-api",
+	".verdi/specs/active/borrower-update-mobile",
+	".verdi/specs/active/borrower-update-mobile-spike",
+	".verdi/attestations/escrow-autopay",
+}
+
+// commitV2FeatureFixture lands the v2 feature fixture's own paths
+// (v2FeatureFixturePaths) as a real git commit on repoDir's current
+// branch — needed wherever a test wants internal/specstate's Git-derived
+// state (Task 5) to actually resolve one of these candidates as landed,
+// rather than the fixture's usual uncommitted-disk-copy shape (which
+// resolves Proposed/RelationNew, fine for tests that don't care about a
+// specific story's terminal state).
+func commitV2FeatureFixture(t *testing.T, repoDir, message string) {
+	t.Helper()
+	args := append([]string{"add"}, v2FeatureFixturePaths...)
+	add := exec.Command("git", args...)
+	add.Dir = repoDir
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("git add %v: %v\n%s", v2FeatureFixturePaths, err, out)
+	}
+	commit := exec.Command("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", message)
+	commit.Dir = repoDir
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
 	}
 }
 
@@ -163,6 +199,15 @@ func TestCmdMatrix_FeatureRef_Golden(t *testing.T) {
 		"specs/active/borrower-update-mobile-spike",
 		"attestations/escrow-autopay",
 	)
+	// discoverImplementingStories' Git-derived effective-state resolution
+	// (Task 5) now refuses OPERATIONALLY (fix-round-1 finding 2) if the
+	// default branch itself cannot be resolved at all — fixturegit repos
+	// carry no origin remote, so this is required regardless of whether
+	// any individual candidate here is actually landed (the v2 fixture
+	// files above are copied to disk, uncommitted, on purpose — they
+	// still resolve cleanly to Proposed, not Unproven, once the default
+	// branch itself resolves).
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
@@ -206,6 +251,10 @@ func TestCmdMatrix_FeatureRef_Negative_DanglingBinding(t *testing.T) {
 		"specs/active/borrower-update-mobile-spike",
 		"attestations/escrow-autopay",
 	)
+	// See TestCmdMatrix_FeatureRef_Golden's identical note (fix-round-1
+	// finding 2): the default branch must resolve for discoverImplementing
+	// Stories to reach ANY per-candidate classification at all.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 
 	derivedDir := filepath.Join(repo.Dir, ".verdi", "data", "derived", "spec--escrow-autopay", repo.Head)
 	if err := os.MkdirAll(derivedDir, 0o755); err != nil {
@@ -289,6 +338,7 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 		},
 		Message: "feature + already-closed implementing story in archive",
 	}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
@@ -298,6 +348,74 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 	}
 	if !bytesContains(stdout.Bytes(), "spec/matrix-closed-story") {
 		t.Fatalf("stdout = %q, want it to list the closed implementing story spec/matrix-closed-story", stdout.String())
+	}
+}
+
+// TestDiscoverImplementingStories_UnresolvableDefaultBranch_OperationalError
+// is fix-round-1 finding 2's proof for the feature-matrix consumer: when
+// the default branch cannot be resolved at all, every implementing
+// story's effective state is Unproven — this must refuse operationally
+// (exit 2), naming the affected ref and the projector's own disclosure,
+// never silently collapse to "not closed, not superseded" and render an
+// ordinary-looking matrix.
+func TestDiscoverImplementingStories_UnresolvableDefaultBranch_OperationalError(t *testing.T) {
+	const featureSpecMD = `---
+id: spec/matrix-unproven-fixture
+kind: spec
+class: feature
+title: "Matrix unproven fixture"
+owners: [platform-team]
+status: accepted-pending-build
+problem: { text: "x", anchor: problem }
+outcome: { text: "y", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "the fixture outcome holds", evidence: [attestation] }
+frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
+---
+# body
+`
+	const storySpecMD = `---
+id: spec/matrix-unproven-story
+kind: spec
+class: story
+title: "Matrix unproven story"
+owners: [platform-team]
+status: accepted-pending-build
+story: jira:MATRIX-UNPROVEN-1
+problem: { text: "x", anchor: problem }
+outcome: { text: "y", anchor: outcome }
+links:
+  - { type: implements, ref: "spec/matrix-unproven-fixture#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "the story's own obligation holds", evidence: [attestation] }
+frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
+---
+# body
+`
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/matrix-unproven-fixture/spec.md": featureSpecMD,
+			".verdi/specs/active/matrix-unproven-story/spec.md":   storySpecMD,
+		},
+		Message: "feature + implementing story, no default branch resolvable",
+	}})
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runMatrixForTest(t, []string{"spec/matrix-unproven-fixture"}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdMatrix(unresolvable default branch) = %d, want 2 (operational); stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on an operational error", stdout.String())
+	}
+	if !bytesContains(stderr.Bytes(), "spec/matrix-unproven-story") {
+		t.Fatalf("stderr = %q, want it to name the affected implementing story", stderr.String())
+	}
+	if !bytesContains(stderr.Bytes(), "no default branch could be resolved") {
+		t.Fatalf("stderr = %q, want it to carry specstate's own disclosure", stderr.String())
 	}
 }
 
@@ -341,6 +459,19 @@ func TestCmdMatrix_FeatureRef_SupersededStoryRendersTerminalMarker(t *testing.T)
 	if err := os.WriteFile(mobilePath, flipped, 0o644); err != nil {
 		t.Fatalf("writing flipped mobile spec: %v", err)
 	}
+	// Land the v2 fixture (fix-round-1 finding 1): the projector's own
+	// legacy-terminal-status compatibility read only fires for a candidate
+	// whose EXACT bytes are proven reachable from the default branch — an
+	// uncommitted disk-only copy (this fixture's usual shape, matching how
+	// derived/ data is planted) would resolve Proposed/RelationNew, never
+	// Superseded. Mobile's own predecessor bytes are otherwise UNCHANGED
+	// from the golden fixture (the brief's "unchanged superseded
+	// predecessors" shape) — only its status line differs, and only the
+	// successor's own supersedes edge would normally carry that signal;
+	// this fixture has no such successor spec at all, so the legacy
+	// status-field compatibility path is exactly what's under test here.
+	commitV2FeatureFixture(t, repo.Dir, "land the v2 fixture, mobile pre-flipped to superseded")
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer

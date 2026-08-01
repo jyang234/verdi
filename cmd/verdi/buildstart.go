@@ -51,6 +51,31 @@ type specStateResolver interface {
 	ResolveMany(ctx context.Context, root string, candidates []specstate.Candidate) ([]specstate.Result, error)
 }
 
+// unresolvableDefaultBranchMessage restores the D6-6 legible refusal
+// (fix-round-1 finding 4) for the specific Unproven cause every operator
+// hits most often — the default branch could not be resolved AT ALL — by
+// independently re-checking specstate.ResolveDefaultBranch and, if it
+// fails, naming every source the resolution chain tries (CI_DEFAULT_BRANCH,
+// configured git remote HEAD, the unambiguous local origin/main-or-master
+// fallback) plus the `git remote set-head` remedy, exactly as the
+// pre-Task-5 gate.go message did. Returns "" when the default branch DOES
+// resolve — meaning this Unproven verdict has some OTHER cause (an
+// incomplete successor-corpus scan, or an unprovable first-parent landing),
+// which the caller reports via specstate's own per-candidate disclosures
+// instead; this message is never a substitute for those, only an addition
+// for the one cause that has a concrete, actionable remedy.
+func unresolvableDefaultBranchMessage(ctx context.Context, root string) string {
+	if _, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
+		return ""
+	}
+	// D6-6: name every source resolveDefaultBranchName tries — not just the
+	// two GitLab-CI-centric ones — plus the remedy, since this is exactly
+	// the message a fresh GitHub checkout hits (GitHub Actions sets no
+	// CI_DEFAULT_BRANCH, and actions/checkout never runs `git remote
+	// set-head`, so origin/HEAD is unconfigured too).
+	return "cannot determine the default branch (no CI_DEFAULT_BRANCH, no configured git remote HEAD, and no single unambiguous local origin/main or origin/master ref) — failing closed; run `git remote set-head origin <branch>` to configure it"
+}
+
 // runBuildVerb dispatches `verdi build <subcommand>`. There is exactly one
 // subcommand, `start` (05 §CLI); anything else is a usage error.
 func runBuildVerb(args []string, stdout, stderr io.Writer) int {
@@ -193,6 +218,10 @@ func runBuildStart(ctx context.Context, root, storyArg string, resolver specStat
 			deps.Model.DisplayState(string(spec.Class), "accepted-pending-build"))
 		return 1
 	default: // specstate.Unproven
+		if msg := unresolvableDefaultBranchMessage(ctx, root); msg != "" {
+			fmt.Fprintf(stderr, "build start: %s\n", msg)
+			return 2
+		}
 		fmt.Fprintf(stderr, "build start: %s cannot be proven accepted: %s\n", spec.ID, strings.Join(result.Disclosures, "; "))
 		return 2
 	}

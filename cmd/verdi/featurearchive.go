@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
@@ -44,15 +45,22 @@ import (
 // the old legacy `status: superseded` field on an archived spec, if one ever
 // existed, is no longer authority.
 //
-// Resilience: an archive whose spec.md is absent or does not decode, that does
-// not implement this feature, or whose effective state cannot be CONFIRMED
-// Closed (Proposed/Superseded/Unproven — e.g. this archive-zone copy has not
-// actually landed, or diverges from what the default branch holds there) is
-// not a confirmable implementing story of featureName and is skipped — this
-// advisory pre-fill never couples a feature align to an unrelated or unproven
-// archive's health. A CONFIRMED implementing story whose deviation-report.md
-// fails to DECODE is this feature's own concern and is surfaced as an
-// operational error (never silently treated as "no rulings").
+// Resilience: an archive whose spec.md is absent or does not decode, that
+// does not implement this feature, or whose effective state is proven
+// Proposed or Superseded (e.g. this archive-zone copy has not actually
+// landed, or diverges from what the default branch holds there) is not a
+// confirmable implementing story of featureName and is skipped — this
+// advisory pre-fill never couples a feature align to an unrelated archive's
+// health. A CONFIRMED implementing story whose deviation-report.md fails to
+// DECODE is this feature's own concern and is surfaced as an operational
+// error (never silently treated as "no rulings").
+//
+// Unproven is NEVER folded into "skip" (fix-round-1 finding 2): an
+// unresolvable default branch or an incomplete successor-corpus scan means
+// this candidate's closed-ness cannot honestly be decided at all, so
+// silently treating it the same as a proven Proposed/Superseded exclusion
+// would misclassify it — this refuses operationally instead, naming the
+// affected ref(s) and carrying the projector's own disclosures.
 func gatherArchivedRulings(ctx context.Context, root, featureName string, resolver specStateResolver) ([]align.ArchivedRuling, error) {
 	specPaths, err := filepath.Glob(store.ArchiveSpecPath(root, "*"))
 	if err != nil {
@@ -87,6 +95,14 @@ func gatherArchivedRulings(ctx context.Context, root, featureName string, resolv
 
 	var out []align.ArchivedRuling
 	for i, ic := range implementing {
+		// fix-round-1 finding 2: an Unproven result must never be folded
+		// into the ordinary "not closed" skip path — it means closed-ness
+		// could not be decided at all, so this refuses operationally
+		// rather than silently misclassifying it.
+		if results[i].State == specstate.Unproven {
+			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+			return nil, fmt.Errorf("align: effective state for archived implementing story spec/%s cannot be proven: %s", ic.name, strings.Join(results[i].Disclosures, "; "))
+		}
 		if results[i].State != specstate.Closed {
 			continue // not confirmed closed via Git — see this function's resilience note
 		}

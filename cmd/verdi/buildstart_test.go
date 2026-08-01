@@ -265,11 +265,73 @@ func TestRunBuildStart_Superseded_RefusesAsVerdict(t *testing.T) {
 	}
 }
 
+// legacySupersededStoryMD is a class: story predecessor carrying an
+// EXPLICIT legacy `status: superseded` field whose successor has already
+// closed (moved to the archive zone) — the disclosure-seam live-witness
+// shape (fix-round-1 finding 1): a class: story spec can never carry a
+// validated supersession: block (internal/artifact's validateStory
+// rejects it), so specstate's own two-signal successor-corpus proof can
+// never independently confirm a story-level (rung-3) supersession; the
+// legacy status field is the only signal that exists for it.
+const legacySupersededStoryMD = `---
+id: spec/disclosure-seam
+kind: spec
+class: story
+status: superseded
+title: "Disclosure seam"
+owners: [platform-team]
+story: jira:DS-1
+problem: { text: "x", anchor: problem }
+outcome: { text: "y", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+links:
+  - { type: implements, ref: "spec/some-feature#ac-1" }
+frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }
+---
+# body
+`
+
+// TestRunBuildStart_LegacySupersededExactLanded_RefusesAsVerdict is
+// fix-round-1 finding 1's build-start proof: a story predecessor whose
+// exact bytes are landed and carry an EXPLICIT legacy `status: superseded`
+// field, whose successor is NOT visible to the active-zone-only
+// successor-corpus scan (already closed to the archive zone — the live
+// disclosure-seam witness), still refuses as a verdict (exit 1) — the
+// projector's own legacy-terminal-status compatibility read, not a
+// silent proceed into AcceptedPendingBuild.
+func TestRunBuildStart_LegacySupersededExactLanded_RefusesAsVerdict(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                           phase7ManifestYAML,
+				".verdi/specs/active/disclosure-seam/spec.md": legacySupersededStoryMD,
+			},
+			Message: "init store with a landed, legacy-superseded story predecessor",
+		},
+	})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	ctx := context.Background()
+	deps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+
+	var stdout, stderr bytes.Buffer
+	got := runBuildStart(ctx, repo.Dir, "spec/disclosure-seam", specstate.NewProjector(), deps, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("runBuildStart(legacy superseded, exact landed) = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "superseded") {
+		t.Fatalf("stderr = %q, want it to name the superseded refusal", stderr.String())
+	}
+}
+
 // TestRunBuildStart_UnresolvableDefaultBranch_OperationalError proves that
 // when the default branch itself cannot be resolved at all, build start
 // cannot honestly decide the acceptance precondition and refuses
-// operationally (exit 2) rather than guessing either way — the disclosure
-// specstate itself produces rides stderr.
+// operationally (exit 2) rather than guessing either way. fix-round-1
+// finding 4: the message restores the pre-Task-5 D6-6 legible refusal
+// (every source tried, plus the `git remote set-head` remedy), not just a
+// terser generic disclosure.
 func TestRunBuildStart_UnresolvableDefaultBranch_OperationalError(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
@@ -290,8 +352,11 @@ func TestRunBuildStart_UnresolvableDefaultBranch_OperationalError(t *testing.T) 
 	if got != 2 {
 		t.Fatalf("runBuildStart(unresolvable default branch) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "no default branch could be resolved") {
-		t.Fatalf("stderr = %q, want it to carry specstate's own missing-default-branch disclosure", stderr.String())
+	out := stderr.String()
+	for _, want := range []string{"CI_DEFAULT_BRANCH", "git remote HEAD", "origin/main", "origin/master", "git remote set-head origin"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stderr = %q, want it to mention %q (D6-6: name every source tried plus the remedy)", out, want)
+		}
 	}
 }
 

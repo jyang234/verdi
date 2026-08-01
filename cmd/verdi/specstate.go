@@ -11,6 +11,17 @@
 //
 // Kept in its own file per the lint.go/sync.go/matrix.go/dex.go/attest.go/
 // obligation.go convention.
+//
+// Baseline shape note (fix-round-1 finding 6): a RelationDiverged result
+// (the local candidate's own bytes differ from what the default branch
+// holds at the same path) carries a PARTIAL Baseline — Path and Blob (the
+// default branch's own object id at that path) are always populated, but
+// Commit is always the empty string. This is not a bug to normalize away:
+// specstate.resolveOne deliberately never computes a first-parent landing
+// commit for a diverged candidate (the landing proof only makes sense once
+// bytes are proven EXACT), so an empty commit here is itself the honest
+// witness that this candidate has diverged from whatever landed — never a
+// placeholder for a value this verb forgot to fill in.
 package main
 
 import (

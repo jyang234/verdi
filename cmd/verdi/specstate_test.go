@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -148,6 +149,56 @@ func TestCmdSpecState_Proposed_BaselineNull(t *testing.T) {
 	}
 	if got2.State != specstate.Proposed {
 		t.Fatalf("state = %q, want proposed", got2.State)
+	}
+}
+
+// TestCmdSpecState_Diverged_PartialBaseline is fix-round-1 finding 6's
+// proof: a candidate whose local bytes DIVERGE from the default branch's
+// own landed content at the same path is Proposed/diverged with a PARTIAL
+// baseline — Path and Blob (the default branch's own object id) are
+// populated, but Commit is always "" (no landing commit is ever computed
+// for a diverged candidate — see this file's own doc comment). This is
+// the honest witness of divergence, not a value this verb forgot to fill
+// in, so it is never normalized away.
+func TestCmdSpecState_Diverged_PartialBaseline(t *testing.T) {
+	repo := buildSpecStateRepo(t, map[string]string{".verdi/specs/active/payments/spec.md": specStateExactPaymentsMD})
+
+	// Diverge the working-tree copy from what actually landed — never
+	// re-committed.
+	divergedPath := repo.Dir + "/.verdi/specs/active/payments/spec.md"
+	diverged := append([]byte(specStateExactPaymentsMD), []byte("<!-- local, uncommitted edit -->\n")...)
+	if err := os.WriteFile(divergedPath, diverged, 0o644); err != nil {
+		t.Fatalf("diverging payments spec.md: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := cmdSpecState([]string{"spec/payments"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdSpecState(diverged) = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	line := strings.TrimRight(stdout.String(), "\n")
+
+	var got2 specstate.Result
+	if err := json.Unmarshal([]byte(line), &got2); err != nil {
+		t.Fatalf("decoding stdout as JSON: %v\nstdout=%s", err, stdout.String())
+	}
+	if got2.State != specstate.Proposed || got2.Relation != specstate.RelationDiverged {
+		t.Fatalf("spec state = %+v, want Proposed/diverged", got2)
+	}
+	if got2.Baseline == nil {
+		t.Fatalf("Baseline = nil, want a partial baseline (Path/Blob populated, Commit empty)")
+	}
+	if got2.Baseline.Path != ".verdi/specs/active/payments/spec.md" {
+		t.Fatalf("Baseline.Path = %q, want the candidate's own path", got2.Baseline.Path)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(got2.Baseline.Blob) {
+		t.Fatalf("Baseline.Blob = %q, want a full git object id (the default branch's own landed blob)", got2.Baseline.Blob)
+	}
+	if got2.Baseline.LandingCommit != "" {
+		t.Fatalf("Baseline.LandingCommit = %q, want empty — a diverged candidate never has a computed landing commit", got2.Baseline.LandingCommit)
+	}
+	if !strings.Contains(line, `"commit":""`) {
+		t.Fatalf("stdout = %q, want the wire-form baseline to carry an explicit empty commit field, never omit or null it", line)
 	}
 }
 

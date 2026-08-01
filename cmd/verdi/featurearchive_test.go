@@ -125,6 +125,37 @@ func TestGatherArchivedRulings_IncludesNotResurfacedRulings(t *testing.T) {
 	}
 }
 
+// TestGatherArchivedRulings_UnresolvableDefaultBranch_OperationalError is
+// fix-round-1 finding 2's proof: when the default branch cannot be
+// resolved at all, every archived implementing story's effective state is
+// Unproven — gatherArchivedRulings must refuse operationally (an error,
+// never []nil rulings), naming the affected ref and carrying the
+// projector's own disclosure, rather than silently treating "cannot be
+// decided" the same as "proven not closed".
+func TestGatherArchivedRulings_UnresolvableDefaultBranch_OperationalError(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                       "schema: verdi.layout/v1\nforge: gitlab\n",
+				".verdi/specs/archive/impl-story/spec.md": archivedStorySpecMD("impl-story", "spec/my-feature#ac-1"),
+			},
+			Message: "land one archived, implementing story, no default branch resolvable",
+		},
+	})
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+
+	_, err := gatherArchivedRulings(context.Background(), repo.Dir, "my-feature", specstate.NewProjector())
+	if err == nil {
+		t.Fatal("gatherArchivedRulings(unresolvable default branch) = nil error, want an operational error naming the unproven candidate")
+	}
+	if !strings.Contains(err.Error(), "spec/impl-story") {
+		t.Fatalf("err = %q, want it to name spec/impl-story", err.Error())
+	}
+	if !strings.Contains(err.Error(), "no default branch could be resolved") {
+		t.Fatalf("err = %q, want it to carry specstate's own disclosure", err.Error())
+	}
+}
+
 // TestRunDisposition_ConfirmsArchivedCandidate_StampsCarriedFrom is item 2's
 // end-to-end confirmation proof (ledger L-N14 companion): a feature report whose
 // align pre-filled a CROSS-LEVEL candidate (the fresh feature finding is

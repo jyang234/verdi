@@ -337,6 +337,63 @@ acceptance_criteria:
 	}
 }
 
+// TestGate_Condition1_LegacySupersededExactLanded_FailsAsVerdict is
+// fix-round-1 finding 1's gate proof: a build-branch spec whose exact
+// bytes are landed and carry an EXPLICIT legacy `status: superseded`
+// field, whose successor is not visible to the active-zone-only
+// successor-corpus scan (the live disclosure-seam witness shape), still
+// FAILS condition 1 as a verdict — never a silent PASS into
+// AcceptedPendingBuild.
+func TestGate_Condition1_LegacySupersededExactLanded_FailsAsVerdict(t *testing.T) {
+	legacySupersededMD := `---
+id: spec/disclosure-seam
+kind: spec
+class: story
+status: superseded
+title: "Disclosure seam"
+owners: [platform-team]
+story: jira:DS-1
+problem: { text: "x", anchor: problem }
+outcome: { text: "y", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+links:
+  - { type: implements, ref: "spec/some-feature#ac-1" }
+frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
+---
+# body
+`
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                           "schema: verdi.layout/v1\nforge: gitlab\n",
+				".verdi/specs/active/disclosure-seam/spec.md": legacySupersededMD,
+			},
+			Message: "scaffold + landed, legacy-superseded story",
+		},
+	})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	checkoutBranch(t, repo.Dir, "feature/disclosure-seam")
+
+	// mustResolveBuildSpec hardcodes "feature/stale-decline" (this file's
+	// other fixtures' shared spec name); resolve this branch's own spec
+	// directly instead.
+	spec, err := storyresolve.ResolveBuildSpec(repo.Dir, "feature/disclosure-seam")
+	if err != nil {
+		t.Fatalf("ResolveBuildSpec: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runGate(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("runGate(legacy superseded, exact landed) = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	assertConditionFails(t, stdout.String(), 1)
+	if !strings.Contains(stdout.String(), "superseded") {
+		t.Fatalf("stdout = %q, want condition 1's reason to name the superseded state", stdout.String())
+	}
+}
+
 // TestGate_Condition2_FailsAlone proves condition 2 (no AC violated at
 // head) fails independently while 1 and 3 hold.
 func TestGate_Condition2_FailsAlone(t *testing.T) {
@@ -447,11 +504,14 @@ func TestGate_AllHold(t *testing.T) {
 // "otherwise, can't prove it"), and this task's activation contract reads
 // EVERY Unproven verdict as operational, uniformly, rather than special-
 // casing this one sub-cause back to a verdict failure the way the
-// pre-Task-5 direct-git-read implementation did. The disclosure is
-// specstate's own shared message (internal/specstate/resolve.go's
-// unresolvedDefaultBranchResult) — the one every consumer (lint, this CLI,
-// the workbench) now shares, rather than a gate-specific D6-6 remedy string
-// duplicated at this call site.
+// pre-Task-5 direct-git-read implementation did.
+//
+// fix-round-1 finding 4: the message itself restores the pre-Task-5 D6-6
+// legible refusal (every source resolveDefaultBranchName tries, plus the
+// `git remote set-head` remedy) via unresolvableDefaultBranchMessage's own
+// independent re-check — never just specstate's terser generic disclosure
+// alone — since THIS specific Unproven cause (no default branch at all) is
+// the one with the well-known, actionable remedy.
 func TestGate_UnresolvableDefaultBranch_FailsOperationally(t *testing.T) {
 	repo := buildGateRepo(t, "accepted-pending-build")
 	spec := mustResolveBuildSpec(t, repo.Dir)
@@ -470,8 +530,11 @@ func TestGate_UnresolvableDefaultBranch_FailsOperationally(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want no condition lines printed for an operational short-circuit", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "no default branch could be resolved") {
-		t.Fatalf("stderr = %q, want it to carry specstate's own missing-default-branch disclosure", stderr.String())
+	out := stderr.String()
+	for _, want := range []string{"CI_DEFAULT_BRANCH", "git remote HEAD", "origin/main", "origin/master", "git remote set-head origin"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stderr = %q, want it to mention %q (D6-6: name every source tried plus the remedy)", out, want)
+		}
 	}
 }
 

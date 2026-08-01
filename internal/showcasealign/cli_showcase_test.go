@@ -772,3 +772,61 @@ func TestCLIShowcaseWaive(t *testing.T) {
 		t.Fatalf("reaffirmed waiver missing the new rationale's log entry:\n%s", reaffirmedContent)
 	}
 }
+
+// TestCLIShowcaseSpecState (cli:spec, Task 5 — merge-signaled spec
+// acceptance) drives `verdi spec state` against the REAL, already-landed
+// spec/stale-decline feature from examples/showcase (the same spec
+// README.md's own worked example points `verdi matrix` at): with
+// CI_DEFAULT_BRANCH=main set — the provisioned showcase store's own git
+// reconstruction is a single-branch history literally named "main"
+// (fixturegit's own --initial-branch=main convention, TestCLIShowcase
+// ObligationAuthor's identical rationale above) — the exact, committed
+// spec.md content is genuinely reachable from the default branch by
+// construction, so this proves the read-only Git-derived-state projection
+// resolves accepted-pending-build/exact against real showcase content,
+// never a synthetic fixture, and mutates nothing.
+func TestCLIShowcaseSpecState(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := provisionShowcaseStore(t)
+	ctx := context.Background()
+
+	headBefore, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("test setup: gitx.RevParse(HEAD): %v", err)
+	}
+	// provisionShowcaseStore's own fixture is NOT git-clean by construction
+	// (the mutable/derived zones it plants are working-tree-only, per
+	// buildShowcaseRepo's own doc comment) — so the mutation proof compares
+	// StatusDirty's answer BEFORE and AFTER, never asserts absolute
+	// cleanliness.
+	dirtyBefore, err := gitx.StatusDirty(ctx, root)
+	if err != nil {
+		t.Fatalf("test setup: gitx.StatusDirty: %v", err)
+	}
+
+	stdout, stderr, code := runBinary(t, root, "spec", "state", "spec/stale-decline")
+	if code != 0 {
+		t.Fatalf("verdi spec state against the real showcase store: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"state":"accepted-pending-build"`) || !strings.Contains(stdout, `"relation":"exact"`) {
+		t.Fatalf("stdout = %q, want state:accepted-pending-build/relation:exact for the real, already-landed showcase spec", stdout)
+	}
+	if !strings.Contains(stdout, `".verdi/specs/active/stale-decline/spec.md"`) {
+		t.Fatalf("stdout = %q, want the baseline to name the real spec path", stdout)
+	}
+
+	headAfter, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("gitx.RevParse(HEAD) after: %v", err)
+	}
+	if headBefore != headAfter {
+		t.Fatalf("HEAD changed: before=%s after=%s — spec state must never mutate the repository", headBefore, headAfter)
+	}
+	dirtyAfter, err := gitx.StatusDirty(ctx, root)
+	if err != nil {
+		t.Fatalf("gitx.StatusDirty after: %v", err)
+	}
+	if dirtyAfter != dirtyBefore {
+		t.Fatalf("working-tree dirty state changed (before=%v after=%v) — spec state must never mutate the working tree", dirtyBefore, dirtyAfter)
+	}
+}

@@ -48,6 +48,16 @@ func buildCorpusRepo(t *testing.T) *fixturegit.Repo {
 		layers = append(layers, fixturegit.Layer{Files: layerFiles, Message: fmt.Sprintf("layer %d", n)})
 	}
 	repo := fixturegit.Build(t, layers)
+	// discoverImplementingStories' Git-derived effective-state resolution
+	// (Task 5) resolves the default branch through its own precedence
+	// chain (CI_DEFAULT_BRANCH, then origin/HEAD, then the D6-6 local
+	// fallback) rather than trusting anything the caller passes;
+	// fixturegit repos carry no origin remote, so every test built from
+	// this shared corpus needs this pinned for any feature-level matrix
+	// fold (discoverImplementingStories) to resolve implementing stories'
+	// closed/superseded state instead of refusing operationally
+	// (fix-round-1 finding 2).
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 
 	// verdi.yaml is not part of the corpus's own committed-zone fixture
 	// (examples/showcase predates it needing one); write a minimal one

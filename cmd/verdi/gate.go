@@ -43,6 +43,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -289,6 +290,9 @@ func checkAcceptedOnDefaultBranch(ctx context.Context, root string, spec *artifa
 		}
 		return gateCondition{Name: name, OK: true, Extra: extra}, nil
 	case specstate.Unproven:
+		if msg := unresolvableDefaultBranchMessage(ctx, root); msg != "" {
+			return gateCondition{}, errors.New(msg)
+		}
 		return gateCondition{}, fmt.Errorf("effective state for %s cannot be proven: %s", relPath, strings.Join(result.Disclosures, "; "))
 	default: // Proposed, Superseded, Closed
 		return gateCondition{Name: name, Reason: fmt.Sprintf("spec/%s effective state is %s, want %s", specRef.Name,

@@ -219,9 +219,9 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return nil, nil, nil, fmt.Errorf("matrix: resolving Git-derived state for implementing stories of spec/%s: %w", featureName, err)
 	}
-	stateByRef := make(map[string]specstate.State, len(order))
+	resultByRef := make(map[string]specstate.Result, len(order))
 	for i, storyRef := range order {
-		stateByRef[storyRef] = results[i].State
+		resultByRef[storyRef] = results[i]
 	}
 
 	var flat []implementingStoryEdges
@@ -231,36 +231,45 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 		storySpec := loaded[storyRef].spec
 		acIDs := acsByStory[storyRef]
 		sort.Strings(acIDs)
+		result := resultByRef[storyRef]
 
-		// Superseded (D-16/L-N12) stays the legacy persisted status-field
-		// signal, deliberately NOT routed through the projector: a
-		// class: story spec can never carry a validated `supersession:`
-		// block (internal/artifact's validateStory rejects impacts/context/
-		// declares/stubs/supersession/dispositions on the story class
-		// outright), so specstate's two-signal successor proof — a
-		// links: supersedes edge PLUS a validated supersession: block on
-		// the successor — can never be satisfied by an implementing
-		// story's successor. specstate.Superseded therefore proves only
-		// FEATURE-level (rung-4) supersession, never STORY-level (rung-3);
-		// this status-field read is the only signal that currently exists
-		// for the story-level case this loop actually needs (disclosed
-		// limitation — not a Task 5 invention, and not silently papered
-		// over: a future round would need to give rung-3 supersession its
-		// own Git-derived proof before this can migrate too).
-		if storySpec.Status == artifact.Status("superseded") {
+		// fix-round-1 finding 2: an Unproven effective state (no default
+		// branch resolvable, or an incomplete successor-corpus scan) must
+		// never be silently folded into "not superseded, not closed" —
+		// that would misclassify every affected candidate as an ordinary
+		// open story. Refuse operationally instead, naming the ref and the
+		// projector's own disclosures.
+		if result.State == specstate.Unproven {
+			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+			return nil, nil, nil, fmt.Errorf("matrix: implementing story %s effective state cannot be proven: %s", storyRef, strings.Join(result.Disclosures, "; "))
+		}
+
+		// Superseded is now fully Git-derived (fix-round-1 finding 1
+		// collapsed the projector's own legacy-terminal-status
+		// compatibility read into this: a class: story predecessor can
+		// never carry a validated `supersession:` block, so the
+		// two-signal successor-corpus proof alone could never confirm
+		// STORY-level (rung-3) supersession — internal/specstate now also
+		// consults the candidate's own persisted `status: superseded`
+		// field as a fallback when the corpus scan finds no successor,
+		// exactly the legacy shape the OLD accept ritual's predecessor
+		// flip leaves behind). This loop no longer re-checks the raw field
+		// itself (the design's "Command behavior" forbids a consumer
+		// re-deriving what the projector already proved).
+		if result.State == specstate.Superseded {
 			for _, acID := range acIDs {
 				supersededByAC[acID] = append(supersededByAC[acID], storyRef)
 			}
 			continue
 		}
 
-		// Closed IS fully Git-derived (Task 5): archive-zone reachability
-		// is class-agnostic (resolveOne's archive-zone branch returns
-		// Closed unconditionally once the exact bytes are proven landed
-		// there, never consulting the successor corpus at all), so a
-		// statusless closed story is classified correctly here exactly
-		// like an explicitly-flagged one (Task 4's compatibility reading).
-		closed := stateByRef[storyRef] == specstate.Closed
+		// Closed is fully Git-derived and class-agnostic (resolveOne's
+		// archive-zone branch returns Closed unconditionally once the
+		// exact bytes are proven landed there, never consulting the
+		// successor corpus at all), so a statusless closed story is
+		// classified correctly here exactly like an explicitly-flagged
+		// one (Task 4's compatibility reading).
+		closed := result.State == specstate.Closed
 		folded, err := foldImplementingStory(ctx, root, commit, storySpec)
 		if err != nil {
 			return nil, nil, nil, err
