@@ -181,7 +181,24 @@ func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branc
 			return nil, fmt.Errorf("specstate: reading default-branch spec %s: %w", path, err)
 		}
 
-		fm, decodeErr := artifact.DecodeSpec(content)
+		// artifact.DecodeSpec's documented input is frontmatter-only bytes
+		// (every other call site in the module splits first — internal/
+		// lint/walk.go's decodeDocument, internal/index's own walk, this
+		// same file's probeLegacyStatus below): content here is a FULL
+		// markdown file (opening/closing "---" delimiters plus the body).
+		// Handing that straight to DecodeSpec used to make the underlying
+		// yaml.v3 parser treat the body as a second, trailing YAML
+		// document in the same stream — fine for a trivial one-line body,
+		// but a real body (markdown headings, prose, backticks) routinely
+		// fails to parse as YAML at all, surfacing as a spurious decode
+		// failure for a document that is perfectly valid frontmatter.
+		// SplitFrontmatter first, exactly like every other caller.
+		rawFM, _, splitErr := artifact.SplitFrontmatter(content)
+		if splitErr != nil {
+			corpus.failures[path] = fmt.Sprintf("default-branch spec %s failed to decode: %v", path, splitErr)
+			continue
+		}
+		fm, decodeErr := artifact.DecodeSpec(rawFM)
 		if decodeErr != nil {
 			corpus.failures[path] = fmt.Sprintf("default-branch spec %s failed to decode: %v", path, decodeErr)
 			continue
@@ -389,7 +406,11 @@ func migrationDisclosures(path string, content []byte) []string {
 // git-derived verdict itself, so a decode failure here must never block
 // or alter the state this package already proved from Git alone.
 func probeLegacyStatus(content []byte) string {
-	fm, err := artifact.DecodeSpec(content)
+	rawFM, _, splitErr := artifact.SplitFrontmatter(content)
+	if splitErr != nil {
+		return ""
+	}
+	fm, err := artifact.DecodeSpec(rawFM)
 	if err != nil {
 		return ""
 	}

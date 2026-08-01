@@ -14,19 +14,19 @@ import (
 // statuslessSpecPath and statuslessSpecContent are the fixture spec this
 // file lands by three different Git integration strategies: no `status:`
 // line at all (the design's "The schema permits new active specifications
-// to omit the persisted status field"). Ahead of the sibling task that
-// formally makes internal/artifact's schema accept an omitted status,
-// this package only tolerates a STATUSLESS CANDIDATE'S OWN bytes — its own
-// path is always excluded from its own supersession-corpus decode
-// (resolve.go's per-candidate self-exclusion). It does NOT yet tolerate a
-// statusless spec anywhere ELSE in the default-branch active corpus: that
-// unrelated spec still fails internal/artifact.DecodeSpec during the
-// corpus scan, and the current, correct, fail-closed behavior is Unproven
-// with a decode-witness disclosure — proven by
-// TestProjector_UnrelatedStatuslessCorpusSpec_Integration below, not
-// end-to-end tolerance. The sibling schema task flips that unrelated case
-// to a clean scan (and, transitively, AcceptedPendingBuild here) once it
-// lands.
+// to omit the persisted status field"). internal/artifact's schema now
+// accepts an omitted status on the feature/story classes (Task 4:
+// spec.go's `status,omitempty` plus validateFeature/validateStory's
+// empty-value tolerance), so this fixture is a genuinely complete,
+// decodable feature spec — carrying a real acceptance_criteria entry,
+// not just a bare title/owners frontmatter — and decodes cleanly BOTH as
+// a candidate's own bytes AND as an unrelated document sitting elsewhere
+// in the default-branch active corpus during a supersession scan
+// (resolve.go's scanSuccessors).
+// TestProjector_UnrelatedStatuslessCorpusSpec_Integration below now
+// proves the latter resolves cleanly to AcceptedPendingBuild, where it
+// previously (pre-Task-4, when status was still required) proved the
+// fail-closed Unproven/decode-witness posture instead.
 const statuslessSpecPath = ".verdi/specs/active/statusless-feature/spec.md"
 
 const statuslessSpecContent = `---
@@ -35,6 +35,8 @@ kind: spec
 class: feature
 title: Statusless Feature
 owners: [platform]
+acceptance_criteria:
+  - { id: ac-1, text: works, evidence: [static] }
 ---
 
 Body.
@@ -174,14 +176,23 @@ func TestProjector_MergeStrategies_Integration(t *testing.T) {
 	}
 }
 
-// TestProjector_UnrelatedStatuslessCorpusSpec_Integration proves fix-round-1
-// finding 3's documented current behavior over REAL git (no fakes): a
-// default branch carrying the (schema-valid) candidate PLUS one wholly
-// unrelated statusless active spec resolves the candidate as Unproven,
-// naming the unrelated spec's path as the decode witness — never a silent
-// AcceptedPendingBuild. This is the correct, fail-closed posture ahead of
-// the sibling schema task; that task's own landing is what should flip
-// this exact test to AcceptedPendingBuild.
+// TestProjector_UnrelatedStatuslessCorpusSpec_Integration proves the
+// now-current behavior over REAL git (no fakes): a default branch
+// carrying the (schema-valid) candidate PLUS one wholly unrelated
+// statusless active spec resolves the candidate as AcceptedPendingBuild —
+// the unrelated statusless spec decodes cleanly during the supersession
+// scan (Task 4 made status optional on the feature/story classes) and so
+// is never a decode witness at all. Before Task 4 (when status was still
+// a required field), this same fixture shape proved the opposite,
+// fail-closed posture: the unrelated spec's decode failure made the scan
+// incomplete and forced the candidate to Unproven — fix-round-1 finding
+// 3's documented, correct-at-the-time behavior. That decode-failure path
+// is unreachable from this fixture now; VL-020/other rules' own decode-
+// failure disclosures cover the same "an incomplete scan must never look
+// like a clean pass" property for content that still fails for OTHER
+// reasons (a genuinely malformed spec), proven elsewhere in this package
+// (TestProjector_ResolveMany's "malformed default-branch successor"
+// case).
 func TestProjector_UnrelatedStatuslessCorpusSpec_Integration(t *testing.T) {
 	ctx := context.Background()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
@@ -222,17 +233,21 @@ body
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if result.State != Unproven || result.Relation != RelationUnproven {
-		t.Fatalf("Resolve = %+v, want Unproven/unproven (an unrelated statusless corpus spec must still block the scan today)", result)
+	if result.State != AcceptedPendingBuild || result.Relation != RelationExact {
+		t.Fatalf("Resolve = %+v, want AcceptedPendingBuild/exact (an unrelated statusless corpus spec, now schema-valid, must never block the scan)", result)
 	}
-	foundWitness := false
+	if result.Baseline == nil || result.Baseline.Blob == "" || result.Baseline.LandingCommit == "" {
+		t.Fatalf("Resolve: incomplete baseline %+v", result.Baseline)
+	}
 	for _, d := range result.Disclosures {
-		if strings.Contains(d, unrelatedPath) && strings.Contains(d, "failed to decode") {
-			foundWitness = true
+		if strings.Contains(d, unrelatedPath) {
+			t.Fatalf("Resolve disclosures = %v, must not name %s as a decode witness (it decodes cleanly now)", result.Disclosures, unrelatedPath)
 		}
 	}
-	if !foundWitness {
-		t.Fatalf("Resolve disclosures = %v, want one naming %s as the decode witness", result.Disclosures, unrelatedPath)
+	// The candidate's own status is accepted-pending-build, not legacy
+	// draft, so no migration-compatibility disclosure fires either.
+	if len(result.Disclosures) != 0 {
+		t.Fatalf("Resolve.Disclosures = %v, want none", result.Disclosures)
 	}
 }
 
