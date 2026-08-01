@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // CIEnv is the generic CI environment signal this package reads directly:
@@ -38,63 +38,24 @@ func ReadCIEnv() CIEnv {
 	return e
 }
 
-// ResolveDefaultBranch is the "which branch is the default" resolution
-// this package's own buildLintContext caller and cmd/verdi/gate.go's
-// resolveDefaultBranch both already implemented independently (small,
-// same-package duplication each of those doc comments calls out as
-// deliberate): CI_DEFAULT_BRANCH env var first, else the configured
-// remote's HEAD symbolic ref, else (D6-6) the hermetic local
-// origin/main-or-master fallback (fallbackDefaultBranch), else ""
-// (unknown, never guessed). Exported (V1-P7) so a THIRD, cross-package
-// copy — internal/mcpserve's review population, which needs the same
-// resolution to find a design branch's open MR — shares this one
-// definition instead of duplicating it again (CLAUDE.md: anything used by
-// two or more packages lives in a shared internal/ package). D6-6: this
-// is the ONE seam every verb that needs "what is the default branch"
-// shares (gate, close, gc, lint itself via BuildContext, the mcpserve
-// tools, wallbadge via BuildContext) — the fallback added here therefore
-// fixes the same "fresh GitHub checkout" friction for all of them at once,
-// not gate alone.
+// ResolveDefaultBranch is the compatibility wrapper over
+// internal/specstate.ResolveDefaultBranch, which now owns the "which
+// branch is the default" resolution algorithm this function used to
+// implement directly (moved there so spec-acceptance state derivation and
+// every other consumer of "what is the default branch" — gate, close, gc,
+// lint itself via BuildContext, the mcpserve tools, wallbadge — share the
+// ONE definition, CLAUDE.md: "anything used by two or more packages lives
+// in a shared internal/ package"). It keeps this package's existing
+// short-name contract: callers that only ever compared DefaultBranch as a
+// short branch-name string (e.g. against CurrentBranch or TargetBranch)
+// keep compiling and behaving identically, receiving Branch.Name and
+// never Branch.Ref. New callers that need a ref they can pass to git
+// directly (merge-base, ls-tree, ...) should call
+// specstate.ResolveDefaultBranch themselves for Branch.Ref instead.
 func ResolveDefaultBranch(ctx context.Context, root string) string {
-	if env := ReadCIEnv(); env.DefaultBranch != "" {
-		return env.DefaultBranch
-	}
-	if branch, err := gitx.DefaultBranch(ctx, root); err == nil && branch != "" {
-		return branch
-	}
-	return fallbackDefaultBranch(ctx, root)
-}
-
-// fallbackDefaultBranch is D6-6's hermetic local-plumbing fallback,
-// consulted only when neither an explicit CI_DEFAULT_BRANCH env var nor a
-// configured origin/HEAD symbolic ref resolves the default branch — the
-// common shape of a freshly checked-out GitHub Actions repository: GitHub
-// Actions sets no CI_DEFAULT_BRANCH, and actions/checkout's shallow,
-// specific-ref fetch never runs `git remote set-head`, so origin/HEAD is
-// never configured either. Probes the two conventional default-branch
-// names as LOCAL remote-tracking refs only — refs/remotes/origin/main and
-// refs/remotes/origin/master — via gitx.HasRemoteTrackingBranch; NO
-// network call (never `git ls-remote`). Exactly one present resolves to
-// it; both present is ambiguous (refuse rather than guess — a real repo
-// should not carry both, and guessing wrong would silently point gate,
-// close, etc. at the wrong branch); neither present is unknown. Every one
-// of these outcomes but the single-match case returns "" — the same
-// "can't prove it" value every other unresolvable case on this seam
-// already returns (I-14's fail-closed, never-guess posture).
-func fallbackDefaultBranch(ctx context.Context, root string) string {
-	hasMain, mainErr := gitx.HasRemoteTrackingBranch(ctx, root, "origin", "main")
-	hasMaster, masterErr := gitx.HasRemoteTrackingBranch(ctx, root, "origin", "master")
-	if mainErr != nil || masterErr != nil {
+	branch, ok := specstate.ResolveDefaultBranch(ctx, root)
+	if !ok {
 		return ""
 	}
-	switch {
-	case hasMain && hasMaster:
-		return "" // ambiguous — refuse rather than guess
-	case hasMain:
-		return "main"
-	case hasMaster:
-		return "master"
-	default:
-		return ""
-	}
+	return branch.Name
 }

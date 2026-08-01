@@ -65,6 +65,15 @@ func TestResolveDefaultBranch(t *testing.T) {
 		fabricateRemoteRef(t, repo.Dir, "main", repo.Head)
 		fabricateRemoteRef(t, repo.Dir, "master", repo.Head)
 		setSymbolicRef(t, repo.Dir, "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
+		// specstate.ResolveDefaultBranch (which this wrapper now delegates
+		// to) additionally requires the env-named branch to resolve to a
+		// real ref before reporting success — fabricate a local
+		// "release-line" branch so this test still isolates the concern it
+		// names (env precedence over disagreeing refs), not that stricter
+		// resolvability requirement (covered by
+		// internal/specstate/defaultbranch_test.go's own "a named branch
+		// whose ref cannot resolve returns false" case).
+		fabricateLocalBranch(t, repo.Dir, "release-line", repo.Head)
 		t.Setenv("CI_DEFAULT_BRANCH", "release-line")
 
 		if got := ResolveDefaultBranch(ctx, repo.Dir); got != "release-line" {
@@ -149,6 +158,18 @@ func fabricateRemoteRef(t *testing.T, dir, branch, commit string) {
 	t.Helper()
 	if err := gitx.UpdateRef(context.Background(), dir, "refs/remotes/origin/"+branch, commit); err != nil {
 		t.Fatalf("seeding refs/remotes/origin/%s: %v", branch, err)
+	}
+}
+
+// fabricateLocalBranch seeds a LOCAL branch ref (refs/heads/<branch>) at
+// commit directly, without checking it out — modeling "CI_DEFAULT_BRANCH
+// names some other branch that does exist locally", the shape
+// specstate.ResolveDefaultBranch now requires before it will trust a
+// resolved name (internal/specstate/defaultbranch.go's resolveBranchRef).
+func fabricateLocalBranch(t *testing.T, dir, branch, commit string) {
+	t.Helper()
+	if err := gitx.UpdateRef(context.Background(), dir, "refs/heads/"+branch, commit); err != nil {
+		t.Fatalf("seeding refs/heads/%s: %v", branch, err)
 	}
 }
 

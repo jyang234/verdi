@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // Context carries the git- and CI-derived facts the git-aware rules need
@@ -54,11 +55,14 @@ func (c Context) EnforceDraftGate() bool {
 }
 
 // BuildContext derives Context from git and CI environment signals per
-// I-14: CurrentBranch via symbolic-ref; DefaultBranch via a CI-declared
-// default branch or the configured remote's HEAD (ResolveDefaultBranch);
-// DiffBase via merge-base(HEAD, DefaultBranch) when DefaultBranch is
-// known. Every git/CI lookup failure degrades to "unknown" rather than
-// aborting — the git-aware rules already treat an unknown field as
+// I-14: CurrentBranch via symbolic-ref; DefaultBranch via
+// specstate.ResolveDefaultBranch's Branch.Name; DiffBase via
+// merge-base(HEAD, Branch.Ref) when the default branch is known — Ref,
+// never Name, is what is actually passed to `git merge-base`, since Ref
+// is the field specstate guarantees is git-resolvable (a bare short name
+// like "master" can fail to resolve locally when only a remote-tracking
+// ref exists). Every git/CI lookup failure degrades to "unknown" rather
+// than aborting — the git-aware rules already treat an unknown field as
 // "can't prove it, don't enforce" (three-valued honesty, constitution 2).
 //
 // Lifted from cmd/verdi/lint.go's buildLintContext (verbatim behavior) so
@@ -77,10 +81,10 @@ func BuildContext(ctx context.Context, root string) Context {
 		lctx.CurrentBranch = branch
 	}
 
-	lctx.DefaultBranch = ResolveDefaultBranch(ctx, root)
+	if branch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
+		lctx.DefaultBranch = branch.Name
 
-	if lctx.DefaultBranch != "" {
-		if base, err := gitx.MergeBase(ctx, root, "HEAD", lctx.DefaultBranch); err == nil {
+		if base, err := gitx.MergeBase(ctx, root, "HEAD", branch.Ref); err == nil {
 			lctx.DiffBase = base
 		}
 	}
