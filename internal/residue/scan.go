@@ -30,6 +30,19 @@ type Result struct {
 	MergedBranches []string // AC-3(a), sorted
 
 	Worktrees []Worktree // AC-3(b), sorted by path, primary excluded
+
+	// UnprovenSpecs names every active-zone spec whose effective lifecycle
+	// state (internal/specstate) could not be proven, each carrying its own
+	// Disclosures (Finding 1, fix round: previously this state simply
+	// vanished — an Unproven verdict satisfies neither excludeSuperseded's
+	// negative filter nor findPatternA/B's own accepted-pending-build gate,
+	// so without this field a corpus containing even one undecodable spec
+	// silently produced an empty, "clean-looking" report). Sorted by name
+	// (activespecs.go's unprovenSpecs — a single pass over the
+	// already-sorted, unfiltered active-spec set). Never itself a Flagged()
+	// contributor (dc-3's own predicate is unchanged) — a caller (verdi
+	// audit) decides its own distinct, non-CLEAN reporting for this case.
+	UnprovenSpecs []UnprovenSpec
 }
 
 // Flagged reports whether r contains an exit-1-worthy finding (dc-3): any
@@ -121,5 +134,10 @@ func Scan(ctx context.Context, root, defaultBranchRef string) (*Result, error) {
 		CloseBranches:         closeBranches,
 		MergedBranches:        merged,
 		Worktrees:             worktrees,
+		// Finding 1: built from the UNFILTERED specs set (mirroring
+		// supersededNames' own reasoning) so an unproven spec is reported
+		// regardless of whether it would otherwise have been excluded from
+		// AC-1's own two patterns.
+		UnprovenSpecs: unprovenSpecs(specs, effective),
 	}, nil
 }

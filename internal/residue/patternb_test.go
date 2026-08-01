@@ -16,10 +16,10 @@ import (
 // findPatternB's own pure-fold logic (stub realization, class filter,
 // empty-stubs guard), not effectiveStates' git-derived resolution, which
 // TestEffectiveStates_Happy (activespecs_test.go) proves separately.
-func allAcceptedPendingBuild(specs []activeSpec) map[string]specstate.State {
-	m := make(map[string]specstate.State, len(specs))
+func allAcceptedPendingBuild(specs []activeSpec) map[string]specstate.Result {
+	m := make(map[string]specstate.Result, len(specs))
 	for _, s := range specs {
-		m[s.Name] = specstate.AcceptedPendingBuild
+		m[s.Name] = specstate.Result{State: specstate.AcceptedPendingBuild}
 	}
 	return m
 }

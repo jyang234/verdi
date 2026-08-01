@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -82,9 +83,9 @@ func TestExcludeSuperseded(t *testing.T) {
 		{Name: "a", FM: mustDecodeSpecFM(t, featureSpecMD("a", "accepted-pending-build"))},
 		{Name: "b", FM: mustDecodeSpecFM(t, featureSpecMD("b", "superseded"))},
 	}
-	effective := map[string]specstate.State{
-		"a": specstate.AcceptedPendingBuild,
-		"b": specstate.Superseded,
+	effective := map[string]specstate.Result{
+		"a": {State: specstate.AcceptedPendingBuild},
+		"b": {State: specstate.Superseded},
 	}
 	out := excludeSuperseded(in, effective)
 	if len(out) != 1 || out[0].Name != "a" {
@@ -95,11 +96,11 @@ func TestExcludeSuperseded(t *testing.T) {
 // TestExcludeSuperseded_Negative_MissingFromEffective proves a name absent
 // from the effective map (should never happen in production — Scan always
 // builds effective from the exact same specs slice — but a defensive unit
-// case) fails closed: the zero specstate.State ("") is not
+// case) fails closed: the zero specstate.Result's zero State ("") is not
 // specstate.Superseded, so the spec is KEPT, never silently dropped.
 func TestExcludeSuperseded_Negative_MissingFromEffective(t *testing.T) {
 	in := []activeSpec{{Name: "a", FM: mustDecodeSpecFM(t, featureSpecMD("a", "accepted-pending-build"))}}
-	out := excludeSuperseded(in, map[string]specstate.State{})
+	out := excludeSuperseded(in, map[string]specstate.Result{})
 	if len(out) != 1 || out[0].Name != "a" {
 		t.Fatalf("excludeSuperseded(no effective entry) = %+v, want %q kept (fail closed: never assume superseded)", out, "a")
 	}
@@ -112,13 +113,46 @@ func TestSupersededNames(t *testing.T) {
 		{Name: "a", FM: mustDecodeSpecFM(t, featureSpecMD("a", "accepted-pending-build"))},
 		{Name: "b", FM: mustDecodeSpecFM(t, featureSpecMD("b", "superseded"))},
 	}
-	effective := map[string]specstate.State{
-		"a": specstate.AcceptedPendingBuild,
-		"b": specstate.Superseded,
+	effective := map[string]specstate.Result{
+		"a": {State: specstate.AcceptedPendingBuild},
+		"b": {State: specstate.Superseded},
 	}
 	got := supersededNames(in, effective)
 	if len(got) != 1 || !got["b"] {
 		t.Fatalf("supersededNames = %+v, want only %q", got, "b")
+	}
+}
+
+// TestUnprovenSpecs is unprovenSpecs' own pure-fold unit test: only the
+// Unproven-state entry is reported, carrying its own Disclosures; an
+// AcceptedPendingBuild entry contributes nothing.
+func TestUnprovenSpecs(t *testing.T) {
+	in := []activeSpec{
+		{Name: "a", FM: mustDecodeSpecFM(t, featureSpecMD("a", "accepted-pending-build"))},
+		{Name: "b", FM: mustDecodeSpecFM(t, featureSpecMD("b", "accepted-pending-build"))},
+	}
+	effective := map[string]specstate.Result{
+		"a": {State: specstate.AcceptedPendingBuild},
+		"b": {State: specstate.Unproven, Disclosures: []string{"witness one", "witness two"}},
+	}
+	got := unprovenSpecs(in, effective)
+	if len(got) != 1 || got[0].Name != "b" {
+		t.Fatalf("unprovenSpecs = %+v, want exactly one entry naming %q", got, "b")
+	}
+	if len(got[0].Disclosures) != 2 || got[0].Disclosures[0] != "witness one" || got[0].Disclosures[1] != "witness two" {
+		t.Fatalf("unprovenSpecs[0].Disclosures = %v, want the Result's own Disclosures carried through unchanged", got[0].Disclosures)
+	}
+}
+
+// TestUnprovenSpecs_Negative_NoneUnproven proves a corpus with no Unproven
+// entries reports none — never a spurious empty-but-non-nil confusion at
+// the call site (scan.go assigns this directly to Result.UnprovenSpecs).
+func TestUnprovenSpecs_Negative_NoneUnproven(t *testing.T) {
+	in := []activeSpec{{Name: "a", FM: mustDecodeSpecFM(t, featureSpecMD("a", "accepted-pending-build"))}}
+	effective := map[string]specstate.Result{"a": {State: specstate.AcceptedPendingBuild}}
+	got := unprovenSpecs(in, effective)
+	if len(got) != 0 {
+		t.Fatalf("unprovenSpecs = %+v, want empty", got)
 	}
 }
 
@@ -150,11 +184,43 @@ func TestEffectiveStates_Happy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("effectiveStates: %v", err)
 	}
-	if got["scaffold"] != specstate.AcceptedPendingBuild {
-		t.Errorf("effectiveStates[scaffold] (statusless) = %q, want %q", got["scaffold"], specstate.AcceptedPendingBuild)
+	if got["scaffold"].State != specstate.AcceptedPendingBuild {
+		t.Errorf("effectiveStates[scaffold] (statusless) = %q, want %q", got["scaffold"].State, specstate.AcceptedPendingBuild)
 	}
-	if got["widget"] != specstate.AcceptedPendingBuild {
-		t.Errorf("effectiveStates[widget] = %q, want %q", got["widget"], specstate.AcceptedPendingBuild)
+	if got["widget"].State != specstate.AcceptedPendingBuild {
+		t.Errorf("effectiveStates[widget] = %q, want %q", got["widget"].State, specstate.AcceptedPendingBuild)
+	}
+}
+
+// TestEffectiveStates_Negative_ShortResolverResult proves Finding 3's own
+// guard: a resolveManyFn implementation returning fewer results than
+// candidates surfaces as a real Go error, never a silent index-out-of-range
+// panic or a truncated map — the identical defensive shape
+// internal/refindex.ComputeIndex's own two batch sites already carry.
+// resolveManyFn is swapped for the duration of this test only (t.Cleanup
+// restores it) — the real specstate.Projector can never be made to violate
+// its own len(results) == len(candidates) contract, so this is the only
+// way to exercise the guard at all.
+func TestEffectiveStates_Negative_ShortResolverResult(t *testing.T) {
+	original := resolveManyFn
+	resolveManyFn = func(ctx context.Context, root string, candidates []specstate.Candidate) ([]specstate.Result, error) {
+		if len(candidates) == 0 {
+			return nil, nil
+		}
+		return []specstate.Result{{State: specstate.AcceptedPendingBuild}}, nil // always exactly one
+	}
+	t.Cleanup(func() { resolveManyFn = original })
+
+	specs := []activeSpec{
+		{Name: "a", Content: []byte("a")},
+		{Name: "b", Content: []byte("b")},
+	}
+	_, err := effectiveStates(context.Background(), t.TempDir(), specs)
+	if err == nil {
+		t.Fatal("effectiveStates: want an error when the resolver returns fewer results than candidates, got nil")
+	}
+	if !strings.Contains(err.Error(), "resolver returned") {
+		t.Fatalf("effectiveStates error = %q, want it to name the resolver's short result count", err.Error())
 	}
 }
 

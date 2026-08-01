@@ -51,13 +51,13 @@ type PatternB struct {
 // A feature declaring no stubs has nothing to reconcile and never fires —
 // pattern (b) names a "stub-COMPLETE" feature, which presupposes a
 // non-empty stub set to be complete.
-func findPatternB(ctx context.Context, root, defaultTip string, specs []activeSpec, effective map[string]specstate.State) ([]PatternB, error) {
+func findPatternB(ctx context.Context, root, defaultTip string, specs []activeSpec, effective map[string]specstate.Result) ([]PatternB, error) {
 	var out []PatternB
 	for _, s := range specs {
 		if s.FM.Class != artifact.ClassFeature {
 			continue
 		}
-		if effective[s.Name] != specstate.AcceptedPendingBuild {
+		if effective[s.Name].State != specstate.AcceptedPendingBuild {
 			continue
 		}
 		if len(s.FM.Stubs) == 0 {
