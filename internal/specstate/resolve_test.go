@@ -276,6 +276,69 @@ body
 		}
 	})
 
+	// fix-round-1 finding 1: an active-zone candidate whose exact bytes are
+	// landed but whose Git-derived successor proof finds NOTHING (no
+	// active-zone spec validly names it as a predecessor) must still read
+	// its own legacy EXPLICIT terminal status — the disclosure-seam live
+	// witness shape: a story-class predecessor whose successor has
+	// already been closed (moved to the archive zone, invisible to the
+	// active-zone-only successor scan) so the corpus can never
+	// independently confirm it.
+	t.Run("active exact bytes, legacy superseded with no corpus-provable successor: superseded + compatibility disclosure, exact", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+		path := ".verdi/specs/active/disclosure-seam/spec.md"
+		content := []byte("---\nid: spec/disclosure-seam\nkind: spec\nclass: story\nstatus: superseded\ntitle: Disclosure seam\nowners: [platform]\nstory: jira:DS-1\nproblem: { text: x, anchor: problem }\noutcome: { text: y, anchor: outcome }\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\nlinks:\n  - { type: implements, ref: \"spec/some-feature#ac-1\" }\nfrozen: { at: \"2024-01-01\", commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }\n---\nbody\n")
+
+		p := newProjector(stubGit{
+			blobAt: exactBlobAt(path, fakeOID),
+			show:   exactShow(path, content),
+			fpbl:   exactLanding(path, fakeOID, fakeLanding),
+			// The corpus scan finds only this candidate itself — no
+			// successor anywhere in the active zone (its successor already
+			// moved to archive, per the live disclosure-seam witness).
+			lsTree: onlyPath(path),
+		})
+
+		result, err := p.Resolve(ctx, repo.Dir, Candidate{Path: path, Content: content})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if result.State != Superseded || result.Relation != RelationExact {
+			t.Fatalf("Resolve = %+v, want Superseded/exact (legacy status compatibility read)", result)
+		}
+		wantBaseline := &Baseline{Path: path, Blob: fakeOID, LandingCommit: fakeLanding}
+		if result.Baseline == nil || *result.Baseline != *wantBaseline {
+			t.Fatalf("Resolve baseline = %+v, want %+v", result.Baseline, wantBaseline)
+		}
+		if len(result.Disclosures) != 1 {
+			t.Fatalf("Resolve: want exactly one legacy-terminal-status compatibility disclosure, got %v", result.Disclosures)
+		}
+	})
+
+	t.Run("active exact bytes, legacy closed with no corpus-provable successor: closed + compatibility disclosure, exact", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+		path := ".verdi/specs/active/legacy-closed-in-place/spec.md"
+		content := []byte("---\nid: spec/legacy-closed-in-place\nkind: spec\nclass: feature\nstatus: closed\ntitle: Legacy closed in place\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\nfrozen: { at: \"2024-01-01\", commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }\n---\nbody\n")
+
+		p := newProjector(stubGit{
+			blobAt: exactBlobAt(path, fakeOID),
+			show:   exactShow(path, content),
+			fpbl:   exactLanding(path, fakeOID, fakeLanding),
+			lsTree: onlyPath(path),
+		})
+
+		result, err := p.Resolve(ctx, repo.Dir, Candidate{Path: path, Content: content})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if result.State != Closed || result.Relation != RelationExact {
+			t.Fatalf("Resolve = %+v, want Closed/exact (legacy status compatibility read, still active zone)", result)
+		}
+		if len(result.Disclosures) != 1 {
+			t.Fatalf("Resolve: want exactly one legacy-terminal-status compatibility disclosure, got %v", result.Disclosures)
+		}
+	})
+
 	t.Run("archive exact bytes: closed, exact", func(t *testing.T) {
 		repo := buildResolvableRepo(t)
 		path := ".verdi/specs/archive/legacy-thing/spec.md"

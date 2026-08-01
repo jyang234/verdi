@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -286,6 +287,46 @@ func TestCmdObligationAuthor_HermeticNoDefaultBranch_Proceeds(t *testing.T) {
 	}
 	if _, err := os.Stat(obligationPathFor(repo.Dir, "ac-1", "static")); err != nil {
 		t.Fatalf("expected a scaffold to be written under the hermetic posture: %v", err)
+	}
+}
+
+// TestObligationFrozenProbeBase_ResolvedNameUnresolvableRef_RefusesOperationally
+// is fix-round-1 finding 3's proof, over the REAL (uninjected)
+// obligationFrozenProbeBase: a default branch NAME resolves
+// (CI_DEFAULT_BRANCH=main is configured) but no local branch and no
+// origin/main remote-tracking ref exists for it (main configured but
+// never fetched — the shape a shallow/partial clone leaves behind). This
+// is NOT the hermetic "no signal at all" case (TestCmdObligationAuthor_
+// HermeticNoDefaultBranch_Proceeds, which injects the fake result
+// directly); it must refuse operationally, naming the branch and the
+// fetch remedy, exactly like judged-frozen-check-fail-open's other two
+// discriminated cases.
+func TestObligationFrozenProbeBase_ResolvedNameUnresolvableRef_RefusesOperationally(t *testing.T) {
+	repo := buildObligationAuthorRepo(t, nil)
+	// fixturegit always inits with a LOCAL branch literally named "main";
+	// rename it away so neither a local "main" branch nor an
+	// origin/main remote-tracking ref exists (fixturegit repos carry no
+	// origin remote at all) — CI_DEFAULT_BRANCH=main then names a branch
+	// that resolves to no ref whatsoever.
+	rename := exec.Command("git", "branch", "-m", "main", "not-main")
+	rename.Dir = repo.Dir
+	if out, err := rename.CombinedOutput(); err != nil {
+		t.Fatalf("git branch -m main not-main: %v\n%s", err, out)
+	}
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	base, operationalFailure, err := obligationFrozenProbeBase(context.Background(), repo.Dir)
+	if !operationalFailure {
+		t.Fatalf("obligationFrozenProbeBase(resolved name, unresolvable ref) = (%q, %v, %v), want operationalFailure=true", base, operationalFailure, err)
+	}
+	if base != "" {
+		t.Fatalf("base = %q, want empty on an operational failure", base)
+	}
+	if err == nil {
+		t.Fatal("err = nil, want an error naming the branch and the fetch remedy")
+	}
+	if !strings.Contains(err.Error(), "main") || !strings.Contains(err.Error(), "fetch") {
+		t.Fatalf("err = %q, want it to name the branch %q and a fetch remedy", err.Error(), "main")
 	}
 }
 

@@ -282,3 +282,105 @@ func TestProjector_UnmergedBranch_Integration(t *testing.T) {
 		t.Fatalf("Resolve(unmerged): want nil baseline, got %+v", result.Baseline)
 	}
 }
+
+// legacySupersededStoryContent is a class: story predecessor carrying an
+// EXPLICIT legacy `status: superseded` field — the shape the pre-Task-4
+// accept ritual's predecessor-flip mutation leaves behind (cmd/verdi/
+// accept.go, untouched by this fix) and that a class: story spec's
+// successor can never independently confirm through this package's own
+// two-signal proof (internal/artifact's validateStory rejects a
+// supersession: block on any story-class spec outright, so
+// scanSuccessors' `fm.Supersession != nil` gate can never admit a story
+// successor at all).
+const legacySupersededStoryContent = `---
+id: spec/disclosure-seam
+kind: spec
+class: story
+status: superseded
+title: Disclosure seam
+owners: [platform]
+story: jira:DS-1
+problem: { text: x, anchor: problem }
+outcome: { text: y, anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: works, evidence: [static] }
+links:
+  - { type: implements, ref: "spec/some-feature#ac-1" }
+frozen: { at: "2024-01-01", commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+---
+body
+`
+
+// TestProjector_LegacySupersededStory_SuccessorAlreadyArchived_Integration
+// is fix-round-1 finding 1's live-witness integration proof, over REAL git
+// (no fakes): a story predecessor whose exact bytes are landed and carry an
+// EXPLICIT legacy `status: superseded` field, whose successor has ALREADY
+// been closed and moved to the archive zone — invisible to scanSuccessors'
+// active-zone-only LsTree walk, so the corpus-based proof finds nothing —
+// still resolves Superseded, not AcceptedPendingBuild, from the legacy
+// field alone (compatibility disclosure carried). Mirrors this repo's own
+// live .verdi/specs/active/disclosure-seam/spec.md shape exactly.
+func TestProjector_LegacySupersededStory_SuccessorAlreadyArchived_Integration(t *testing.T) {
+	ctx := context.Background()
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"base.txt": "base\n"}, Message: "root"},
+	})
+
+	predecessorPath := ".verdi/specs/active/disclosure-seam/spec.md"
+	writeFileForTest(t, repo.Dir, predecessorPath, legacySupersededStoryContent)
+	// The successor already closed — archive zone, not active — so the
+	// active-zone-only corpus scan can never see it as a validating
+	// successor, however it's shaped.
+	successorArchivedPath := ".verdi/specs/archive/disclosure-seam-v2/spec.md"
+	writeFileForTest(t, repo.Dir, successorArchivedPath, `---
+id: spec/disclosure-seam-v2
+kind: spec
+class: story
+status: closed
+title: Disclosure seam v2
+owners: [platform]
+story: jira:DS-1
+problem: { text: x, anchor: problem }
+outcome: { text: y, anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: works, evidence: [static] }
+links:
+  - { type: implements, ref: "spec/some-feature#ac-1" }
+  - { type: supersedes, ref: spec/disclosure-seam }
+frozen: { at: "2024-01-01", commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+---
+body
+`)
+	runGitForTest(t, repo.Dir, "add", "-A")
+	runGitForTest(t, repo.Dir, "commit", "--quiet", "--no-verify", "-m", "land the legacy-superseded predecessor and its already-closed successor")
+
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	p := NewProjector()
+	result, err := p.Resolve(ctx, repo.Dir, Candidate{Path: predecessorPath, Content: []byte(legacySupersededStoryContent)})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if result.State != Superseded || result.Relation != RelationExact {
+		t.Fatalf("Resolve = %+v, want Superseded/exact (legacy status compatibility read; the corpus scan alone cannot see the archived successor)", result)
+	}
+	if result.Baseline == nil || result.Baseline.Blob == "" || result.Baseline.LandingCommit == "" {
+		t.Fatalf("Resolve: incomplete baseline %+v", result.Baseline)
+	}
+	if len(result.Disclosures) != 1 {
+		t.Fatalf("Resolve.Disclosures = %v, want exactly one legacy-terminal-status compatibility disclosure", result.Disclosures)
+	}
+}
+
+// writeFileForTest writes content at dir/relPath (slash-form), creating
+// parent directories as needed.
+func writeFileForTest(t *testing.T, dir, relPath, content string) {
+	t.Helper()
+	full := filepath.Join(dir, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir for %s: %v", relPath, err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", relPath, err)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/jyang234/verdi/internal/forge"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
 	"github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -596,6 +597,12 @@ func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 	ctx := context.Background()
+	// verdi build start's and verdi gate's acceptance preconditions now
+	// route through the real, git-backed specstate.Projector (Task 5),
+	// which resolves the default branch through its own precedence chain
+	// rather than trusting a caller-passed ref; fixturegit repos carry no
+	// origin remote, so this is needed for both step 2 and step 3 below.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 
 	fakeForge := forgefake.New()
 	fakeForge.SeedOpenMR("main", forge.OpenMR{ID: "42", SourceBranch: "supersede-loan-mgmt", Title: "supersede loan-mgmt"})
@@ -620,7 +627,7 @@ func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 	buildDeps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
 	fresh := freshClosureGateRepoForBuildStart(t)
 	var bstdout, bstderr bytes.Buffer
-	got := runBuildStart(context.Background(), fresh.Dir, "spec/stale-decline", buildDeps, &bstdout, &bstderr)
+	got := runBuildStart(context.Background(), fresh.Dir, "spec/stale-decline", specstate.NewProjector(), buildDeps, &bstdout, &bstderr)
 	if got != 0 {
 		t.Fatalf("runBuildStart (pending-supersession only, not merged) = %d, want 0; stderr=%s", got, bstderr.String())
 	}
@@ -628,7 +635,7 @@ func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 	// 3. verdi gate is NOT blocked either, for the same reason (condition 4
 	// only ever consults local, merged specs/active/ — cascadecheck.go).
 	var gstdout, gstderr bytes.Buffer
-	gotGate := runGate(ctx, repo.Dir, spec, repo.Head, "main", nil, &gstdout, &gstderr)
+	gotGate := runGate(ctx, repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, &gstdout, &gstderr)
 	if gotGate != 0 {
 		t.Fatalf("runGate (pending-supersession only, not merged) = %d, want 0; stdout=%s stderr=%s", gotGate, gstdout.String(), gstderr.String())
 	}

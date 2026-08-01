@@ -345,10 +345,10 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 	}
 
 	// Active zone, exact bytes reachable from default, landing proven:
-	// check supersession before falling back to the (now purely
-	// informational) legacy status field. Both lookups apply THIS
-	// candidate's own self-exclusion at lookup time (fix-round-1 finding
-	// 1) — the shared corpus itself was scanned with no exclusion at all.
+	// check supersession before falling back to the legacy status field.
+	// Both lookups apply THIS candidate's own self-exclusion at lookup
+	// time (fix-round-1 finding 1) — the shared corpus itself was scanned
+	// with no exclusion at all.
 	corpus, err := getCorpus()
 	if err != nil {
 		return Result{}, err
@@ -356,6 +356,43 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 	if successors := corpus.supersessorsFor(c.Path, name); len(successors) > 0 {
 		return Result{State: Superseded, Relation: RelationExact, Baseline: baseline}, nil
 	}
+
+	// fix-round-1 finding 1 (Task 5 review): a legacy EXPLICIT terminal
+	// status — superseded or closed — is itself Git-derived-compatible
+	// evidence once these exact bytes are proven reachable and landed: the
+	// design's "Artifact compatibility" section preserves a legacy
+	// terminal artifact's EXISTING meaning rather than silently
+	// re-deriving a weaker one, and "Command behavior" forbids a consumer
+	// re-checking the raw field itself — so this projection has to be the
+	// one place that reads it. This is exactly the shape a rung-3
+	// (story-level) supersession leaves behind: the OLD accept ritual
+	// flips the predecessor's OWN status field to superseded as a real,
+	// landed commit, but the successor a class: story predecessor is
+	// bound to can never carry a validated supersession: block (internal/
+	// artifact's validateStory rejects it outright), so the two-signal
+	// successor-corpus proof above can NEVER independently confirm story-
+	// level supersession — without this fallback, a landed, legacy-
+	// superseded story predecessor would silently read as
+	// AcceptedPendingBuild and every consumer that migrated onto this
+	// projector would proceed as though it were still buildable. Checked
+	// BEFORE the incomplete-scan Unproven case below: an explicit terminal
+	// status is a direct, self-contained statement about THIS candidate
+	// that does not depend on the corpus scan being complete to be
+	// believed (unlike the corpus's own NEGATIVE "no successor found"
+	// inference, which does).
+	if legacy := probeLegacyStatus(c.Content); legacy == "superseded" || legacy == "closed" {
+		state := Superseded
+		if legacy == "closed" {
+			state = Closed
+		}
+		return Result{
+			State:       state,
+			Relation:    RelationExact,
+			Baseline:    baseline,
+			Disclosures: legacyTerminalStatusDisclosure(c.Path, legacy, state),
+		}, nil
+	}
+
 	if failures := corpus.failuresExcluding(c.Path); len(failures) > 0 {
 		disclosures := make([]string, 0, len(failures)+1)
 		disclosures = append(disclosures, fmt.Sprintf(
@@ -390,6 +427,23 @@ func migrationDisclosures(path string, content []byte) []string {
 		// vocab:identity — machinery diagnostic naming the legacy field value and the state it is reported as instead
 		"specstate: %s carries legacy status: draft, but its exact bytes are already reachable from the default branch — reported accepted-pending-build with this migration disclosure, never as an active draft",
 		path,
+	)}
+}
+
+// legacyTerminalStatusDisclosure returns the compatibility disclosure the
+// design's "Artifact compatibility" section requires whenever a legacy
+// EXPLICIT terminal status (superseded or closed) is the sole basis for an
+// ACTIVE-zone candidate's projected state — reached only when no Git-
+// derived successor proof (a validated links: supersedes + supersession:
+// pair) independently confirmed it (resolveOne checks the corpus first).
+// Mirrors migrationDisclosures' identical "the legacy field was the
+// deciding signal, name it" shape for the draft/accepted-pending-build
+// case, one level further along the lifecycle.
+func legacyTerminalStatusDisclosure(path, legacyStatus string, projected State) []string {
+	return []string{fmt.Sprintf(
+		// vocab:identity — machinery diagnostic naming the legacy field value and the state it is reported as instead
+		"specstate: %s carries legacy status: %s with exact bytes reachable from the default branch, but no Git-derived successor could independently confirm it — reported %s from the legacy field alone (compatibility reading)",
+		path, legacyStatus, projected,
 	)}
 }
 

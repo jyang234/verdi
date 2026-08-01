@@ -25,11 +25,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
-	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -56,15 +57,76 @@ import (
 //
 // A package var so a test can inject the operational-merge-base-failure case a
 // clean fixture repo cannot deterministically produce; production resolves the
-// default branch exactly as lint.BuildContext does (lint.ResolveDefaultBranch),
-// so the hermetic case stays byte-identical, then discriminates the merge-base
-// outcome via gitx.MergeBaseCommit.
+// default branch through the shared internal/specstate machinery every other
+// Git-derived-state consumer in this package now routes through (Task 5) —
+// specstate.ResolveDefaultBranch, not the bare-name lint.ResolveDefaultBranch
+// compatibility wrapper — so the merge-base computation below always runs
+// against a git-RESOLVABLE ref (Branch.Ref: a local branch name when one is
+// checked out, otherwise "origin/<name>"), never a bare name that silently
+// fails to resolve on a fresh checkout carrying only an origin/<name>
+// remote-tracking ref and no local branch of that name (the same gap
+// specstate.Branch's two-field shape exists to close, gate.go's condition 1
+// closed identically). The hermetic "no default branch at all" case stays
+// byte-identical; this discriminates only the merge-base COMPUTATION once a
+// branch resolves.
+//
+// fix-round-1 finding 3: specstate.ResolveDefaultBranch's single boolean
+// collapses TWO different "not ok" shapes that this probe's own three-way
+// discrimination must NOT conflate — judged-frozen-check-fail-open exists
+// precisely to keep them apart:
+//
+//   - no default-branch NAME resolves at all (no CI_DEFAULT_BRANCH, no
+//     configured origin/HEAD, no unambiguous local origin/main or
+//     origin/master) — genuinely no signal to act on; the disclosed
+//     hermetic "can't prove frozen, proceed" posture (§Ac 5), unchanged.
+//   - a NAME resolves (e.g. CI_DEFAULT_BRANCH=main is configured) but
+//     specstate's own further check — a local branch of that name, else
+//     an origin/<name> remote-tracking ref — finds NEITHER (main
+//     configured but never fetched, the shape a shallow/partial clone
+//     leaves behind): this is NOT "no signal at all"; a default branch IS
+//     configured, so silently falling through to the hermetic proceed
+//     posture would be the exact fail-open gap this seam exists to close.
+//     Refuses operationally instead, naming the branch and the fetch
+//     remedy — mirroring the pre-Task-5 behavior, where the bare name was
+//     handed straight to gitx.MergeBaseCommit and git's own "unknown
+//     revision" error surfaced as this same operational refusal.
+//
+// The name-only half is re-derived here from exactly the two
+// ref-resolution-INDEPENDENT sources specstate.ResolveDefaultBranch's own
+// name resolution consults first (defaultbranch.go's
+// resolveDefaultBranchName, unexported — this fix's own scope forbids
+// widening specstate's public API to reach it directly, so the two
+// cheap, already-exported primitives it is built from are re-read here
+// instead): the CI_DEFAULT_BRANCH environment variable, then
+// gitx.DefaultBranch (the configured remote's origin/HEAD symbolic ref).
+// The THIRD source, the D6-6 local origin/main-or-master fallback, is
+// deliberately NOT re-checked here: that fallback only ever names a
+// branch AFTER confirming its own origin/<name> remote-tracking ref
+// exists (gitx.HasRemoteTrackingBranch), so whenever it would find a
+// name, specstate.ResolveDefaultBranch's ref-resolution succeeds too and
+// this whole branch is unreachable — the fallback's name and ref
+// resolution are inseparable, unlike the first two sources.
 var obligationFrozenProbeBase = func(ctx context.Context, root string) (base string, operationalFailure bool, err error) {
-	defaultBranch := lint.ResolveDefaultBranch(ctx, root)
-	if defaultBranch == "" {
-		return "", false, nil
+	branch, ok := specstate.ResolveDefaultBranch(ctx, root)
+	if !ok {
+		name := os.Getenv("CI_DEFAULT_BRANCH")
+		if name == "" {
+			if b, derr := gitx.DefaultBranch(ctx, root); derr == nil && b != "" {
+				name = b
+			}
+		}
+		if name == "" {
+			// No default-branch signal at all: the disclosed hermetic
+			// "can't prove frozen, proceed" posture (§Ac 5), byte-identical
+			// to before.
+			return "", false, nil
+		}
+		// A name resolved but neither a local branch nor an origin/<name>
+		// remote-tracking ref exists for it — refuse rather than silently
+		// proceed as though nothing were configured.
+		return "", true, fmt.Errorf("default branch %q is configured but not git-resolvable (no local branch and no origin/%s remote-tracking ref) — fetch it (e.g. `git fetch origin %s`) before authoring/regenerating an obligation", name, name, name)
 	}
-	base, found, err := gitx.MergeBaseCommit(ctx, root, "HEAD", defaultBranch)
+	base, found, err := gitx.MergeBaseCommit(ctx, root, "HEAD", branch.Ref)
 	if err != nil {
 		return "", true, err
 	}

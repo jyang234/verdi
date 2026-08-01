@@ -231,6 +231,15 @@ func buildCloseFeatureRepo(t *testing.T, opts closeFeatureFixtureOpts) *fixtureg
 	t.Helper()
 	scaffoldSHA := featureCloseScaffoldSHA(t)
 
+	// discoverImplementingStories' "closed" classification now routes
+	// through the real, git-backed specstate.Projector (Task 5), which
+	// resolves the default branch through its own precedence chain rather
+	// than trusting anything the caller passes; this fixturegit repo
+	// carries no origin remote, so every test built from it needs this
+	// pinned for fixture-story-one/-two's archive-zone reachability to
+	// actually resolve Closed.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
 	story2Dir := storyDirFor(opts.Story2Status)
 	return fixturegit.Build(t, []fixturegit.Layer{
 		featureCloseScaffoldLayer,

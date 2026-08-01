@@ -560,6 +560,14 @@ func TestRunClose_RefusesUndispositionedFindings(t *testing.T) {
 // close.go's dispatch is wired to it.
 func TestRunClose_FeatureClass_DispatchesToFeatureClosure(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
+	// discoverImplementingStories' Git-derived effective-state resolution
+	// (Task 5) now refuses OPERATIONALLY when the default branch cannot be
+	// resolved at all (fix-round-1 finding 2) — this is the one close_test.go
+	// case that reaches feature closure (runFeatureClosureGate ->
+	// discoverImplementingStories), so it alone needs this pinned;
+	// buildCloseFixtureRepo stays untouched for its other 26 story-scoped
+	// callers, none of which reach this code path.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	ctx := context.Background()
 	deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
 

@@ -43,6 +43,7 @@ import (
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -72,7 +73,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
-	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec)
+	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec, specstate.NewProjector())
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
