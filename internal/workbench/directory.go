@@ -84,8 +84,13 @@ func (h HomeDeps) resolve(root string) HomeDeps {
 	}
 	if h.Index == nil {
 		git := h.Git
+		// The effective-state resolver rides beside the ref plumbing: the
+		// production seam over specstate.NewProjector, constructed HERE (the
+		// I/O layer) and passed in — refindex batches its ResolveMany calls
+		// internally, so the directory never triggers a per-entry corpus scan.
+		resolver := refindex.NewStateResolver()
 		h.Index = func(ctx context.Context) ([]refindex.Entry, error) {
-			return refindex.ComputeIndex(ctx, root, git)
+			return refindex.ComputeIndex(ctx, root, git, resolver)
 		}
 	}
 	if h.Model == nil {
