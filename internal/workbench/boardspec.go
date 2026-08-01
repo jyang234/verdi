@@ -24,8 +24,20 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
+	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wallbadge"
 )
+
+// StateResolver is the board loader's effective-lifecycle-state port
+// (04 §port pattern: defined at the consumer): the served spec's mode and
+// display status derive from specstate's git-derived verdict, never from a
+// persisted status: field (merge-signaled acceptance — a feature/story may
+// omit status entirely). specstate.Projector satisfies it; package tests
+// may inject a fake to characterize the mode mapping without git.
+type StateResolver interface {
+	Resolve(ctx context.Context, root string, candidate specstate.Candidate) (specstate.Result, error)
+}
 
 // Deps carries the workbench's injected collaborators (04 §port
 // pattern: interfaces defined at the consumer, wired by the caller).
@@ -111,6 +123,13 @@ type boardSpecServer struct {
 	// constitution 2/10). Empty means either no forge is configured (silent
 	// not-under-review is legitimate) or a live feed is wired.
 	reviewUnavailable string
+
+	// state resolves the served spec's effective lifecycle state (the
+	// StateResolver port above). nil means production: specstate's real
+	// projector, constructed lazily per load — the same posture the other
+	// nil-meaning-production fields here take. Package tests inject fakes
+	// to characterize the mode mapping for every state without git.
+	state StateResolver
 
 	// fixedBranch, when non-empty, marks this instance as a per-branch
 	// draft board (spec/draft-boards): it serves exactly one branch's
@@ -223,23 +242,45 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 		return nil, nil, "", err
 	}
 
+	// The spec's effective lifecycle state (merge-signaled acceptance),
+	// resolved HERE — the I/O loader — and passed inward as plain values:
+	// buildProjection stays a pure function and never executes Git. The
+	// candidate is the working tree's exact bytes at the spec's canonical
+	// store path, compared against what the default branch holds.
+	st, err := s.resolveState(ctx, name, raw)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("workbench: resolving effective state for %s: %w", name, err)
+	}
+
+	// Mode is keyed by EFFECTIVE state plus branch state, never by a
+	// persisted status: field (a feature/story may omit one entirely):
+	// a PROPOSED spec on a design branch is the live authoring wall;
+	// everything else fails closed to the sealed read-only document —
+	// accepted-pending-build (exact on default), superseded, closed, and
+	// unproven alike (an unprovable state is never editable; its
+	// disclosures surface as board notices below rather than silence).
 	mode := modeReadOnly
 	switch {
 	case underReview:
 		// A spec with an open spec-MR: the board is a mirror of the MR
 		// (05 §Workbench "Review").
 		mode = modeReview
-	case fm.Status == "draft" && git.Branch != "" && git.Branch != git.DefaultBranch:
+	case st.State == specstate.Proposed && git.Branch != "" && git.Branch != git.DefaultBranch:
 		mode = modeAuthoring
 	}
 	if mode != modeReview {
 		comments = nil // the feed is a review-mode input only
 	}
 
-	proj, err := buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode)
+	proj, err := buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode, string(st.ArtifactStatus()))
 	if err != nil {
 		return nil, nil, "", err
 	}
+	// The state resolution's own disclosures (an unproven default branch,
+	// an incomplete corpus scan, a legacy-status migration note) render in
+	// the board chrome — never silently swallowed (three-valued honesty:
+	// unproven is disclosed, not dressed as either mode's certainty).
+	proj.Notices = append(proj.Notices, st.Disclosures...)
 	// Display vocabulary (spec/vocabulary-surfaces ac-2): resolved-model
 	// enrichment on the I/O layer, exactly like attachObligations below —
 	// the pure projector stays model-free.
@@ -377,6 +418,19 @@ func LoadProjection(ctx context.Context, root, name string, feed CommentFeed, re
 	s := &boardSpecServer{root: root, feed: feed, reviewUnavailable: reviewUnavailable, supersession: superseLoader}
 	proj, _, reviewNotice, err = s.loadBoard(ctx, name)
 	return proj, reviewNotice, err
+}
+
+// resolveState projects the served spec's effective lifecycle state
+// through the StateResolver port: the working tree's exact bytes at the
+// spec's canonical active-zone path, classified against the default
+// branch. nil s.state means production (specstate's real projector) —
+// the same nil-is-production posture the struct's other fields take.
+func (s *boardSpecServer) resolveState(ctx context.Context, name string, raw []byte) (specstate.Result, error) {
+	resolver := s.state
+	if resolver == nil {
+		resolver = specstate.NewProjector()
+	}
+	return resolver.Resolve(ctx, s.root, specstate.Candidate{Path: store.ActiveSpecRelPath(name), Content: raw})
 }
 
 // gitState queries the working tree's branch and dirtiness. When the

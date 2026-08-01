@@ -316,13 +316,16 @@ type BoardProjection struct {
 	Spec  string        `json:"spec"`
 	Title string        `json:"title"`
 	Mode  boardModeKind `json:"mode"`
-	// Status is the spec's own frontmatter status (02 §Kind registry) —
-	// additive (R4 board polish, spec/scoping-canvas): stub-instantiate
-	// gates on a feature wall's status being accepted-pending-build, which
-	// Mode alone cannot distinguish from any other read-only reason (an
-	// authoring board's status is always "draft", by Mode's own
-	// construction, so Status only adds information off the authoring
-	// path).
+	// Status is the spec's EFFECTIVE lifecycle status in the legacy display
+	// vocabulary (merge-signaled acceptance: specstate.Result.ArtifactStatus,
+	// resolved from Git reachability at the I/O loader and passed into
+	// buildProjection — never the persisted frontmatter field, which a
+	// feature/story may omit entirely). Additive (R4 board polish,
+	// spec/scoping-canvas): stub-instantiate gates on a feature wall's
+	// status being accepted-pending-build, which Mode alone cannot
+	// distinguish from any other read-only reason (an authoring board's
+	// status is always "draft", by Mode's own construction, so Status only
+	// adds information off the authoring path).
 	Status string `json:"status,omitempty"`
 	// Class identity (02 §Kind registry): which kind of wall this is —
 	// a feature (outcome ACs + stubs, downward-blind) or a story (the
@@ -441,9 +444,16 @@ type BoardProjection struct {
 // so ProblemBodyHTML/OutcomeBodyHTML both stay empty) — every caller that
 // builds a projection from a bare in-memory SpecFrontmatter literal
 // (rather than a parsed document) passes nil.
-func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind) (*BoardProjection, error) {
+//
+// status is the spec's EFFECTIVE lifecycle status in the legacy display
+// vocabulary (specstate.Result.ArtifactStatus at the I/O loader —
+// merge-signaled acceptance: derived from Git reachability, never read
+// from a persisted status: field, which a feature/story may omit
+// entirely). It arrives as a plain value so this function stays a pure
+// projection of its inputs: no Git execution, no clock, no randomness.
+func buildProjection(specName string, fm *artifact.SpecFrontmatter, body []byte, stored map[string]artifact.Position, annotations []*artifact.Annotation, comments []MRComment, mode boardModeKind, status string) (*BoardProjection, error) {
 	p := &BoardProjection{
-		Spec: specName, Title: fm.Title, Mode: mode, Status: string(fm.Status),
+		Spec: specName, Title: fm.Title, Mode: mode, Status: status,
 		Class: string(fm.Class), StoryRef: fm.Story, Spike: fm.Spike,
 	}
 	if fm.Problem != nil {

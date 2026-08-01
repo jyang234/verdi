@@ -28,7 +28,7 @@ func TestBadgeAttachment_StaticEvidence(t *testing.T) {
 	if n := strings.Count(src, "attachBadges("); n != 1 {
 		t.Errorf("boardspec.go calls attachBadges %d times, want exactly 1 (the one attachment point, dc-1)", n)
 	}
-	buildIdx := strings.Index(src, "buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode)")
+	buildIdx := strings.Index(src, "buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode, string(st.ArtifactStatus()))")
 	obligIdx := strings.Index(src, "attachObligations(proj, s.root, name, fm)")
 	badgeIdx := strings.Index(src, "attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession, s.model)")
 	if buildIdx < 0 || obligIdx < 0 || badgeIdx < 0 {

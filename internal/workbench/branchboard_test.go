@@ -213,6 +213,10 @@ func newBranchBoardFixture(t *testing.T) string {
 	runGitBB(t, root, "push", "--quiet", "origin", "design/remote-only")
 	runGitBB(t, root, "branch", "-D", "design/remote-only")
 
+	// The drafts' PROPOSED state (and so each branch board's authoring
+	// mode) is git-derived now: the default branch must be provable.
+	setDefaultBranchSymref(t, root)
+
 	return root
 }
 

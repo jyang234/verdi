@@ -11,7 +11,6 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
-	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
@@ -61,17 +60,11 @@ Outbox as the audit source.
 
 func newObligationBoardFixture(t *testing.T) string {
 	t.Helper()
-	repo := fixturegit.Build(t, []fixturegit.Layer{{
-		Files: map[string]string{
+	return buildAuthoringFixture(t, "design/"+obligationBoardName,
+		map[string]string{".verdi/.gitignore": "data/\n"},
+		map[string]string{
 			".verdi/specs/active/" + obligationBoardName + "/spec.md": obligationBoardSpec,
-			".verdi/.gitignore": "data/\n",
-		},
-		Message: "seed obligation board fixture",
-	}})
-	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/"+obligationBoardName); err != nil {
-		t.Fatalf("checkout design branch: %v", err)
-	}
-	return repo.Dir
+		})
 }
 
 // stickyIDOnBoard creates a comment sticky and returns its minted id.

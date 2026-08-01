@@ -2,15 +2,69 @@ package workbench
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/gitx"
 )
+
+// setDefaultBranchSymref points refs/remotes/origin/HEAD at origin/main so
+// the default branch is PROVABLE in a fixture repo (specstate's resolution
+// and gitx.DefaultBranch both read this symref) — the same helper
+// internal/refindex's and internal/residue's fixtures carry.
+func setDefaultBranchSymref(t *testing.T, dir string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("setting origin/HEAD symref: %v\n%s", err, out)
+	}
+}
+
+// commitFilesOnBranch cuts branch at the current HEAD, writes files, and
+// commits them there, leaving the branch checked out — the merge-signaled
+// authoring shape: the committed bytes are NOT reachable from main.
+func commitFilesOnBranch(t *testing.T, dir, branch string, files map[string]string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := gitx.CheckoutNewBranch(ctx, dir, branch); err != nil {
+		t.Fatalf("checkout %s: %v", branch, err)
+	}
+	for rel, content := range files {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := gitx.AddAll(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.CreateCommit(ctx, dir, "fixture: "+branch); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// buildAuthoringFixture builds the authoring-board fixture shape every
+// board test shares under merge-signaled acceptance: mainFiles land on a
+// PROVABLE default branch (origin/HEAD pinned at origin/main), then
+// draftFiles are authored as a commit on branch — proposed content, not
+// reachable from main, so the board serves it in authoring mode.
+func buildAuthoringFixture(t *testing.T, branch string, mainFiles, draftFiles map[string]string) string {
+	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: mainFiles, Message: "seed fixture (main)"}})
+	setDefaultBranchSymref(t, repo.Dir)
+	commitFilesOnBranch(t, repo.Dir, branch, draftFiles)
+	return repo.Dir
+}
 
 // corpusDir is examples/showcase relative to this package — the same
 // committed, deterministic fixture internal/dex, internal/index, and

@@ -120,7 +120,7 @@ func obligationCard(t *testing.T, proj *BoardProjection, id string) cardView {
 func TestObligationWall_StoryACCardRendersObligations(t *testing.T) {
 	root := obligationStoreWithBehavioral(t)
 	fm := mustDecodeSpecForTest(t, obligationWallStorySpec)
-	proj, err := buildProjection("refi-decline-replay", fm, nil, nil, nil, nil, modeReadOnly)
+	proj, err := buildProjectionFM("refi-decline-replay", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestObligationWall_StoryACCardRendersObligations(t *testing.T) {
 func TestAttachObligations_LoadsDeclaredKinds(t *testing.T) {
 	root := obligationStoreWithBehavioral(t)
 	fm := mustDecodeSpecForTest(t, obligationWallStorySpec)
-	proj, err := buildProjection("refi-decline-replay", fm, nil, nil, nil, nil, modeReadOnly)
+	proj, err := buildProjectionFM("refi-decline-replay", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestAttachObligations_LoadsDeclaredKinds(t *testing.T) {
 // feature/story split.
 func TestAttachObligations_NoOpOffStoryClass(t *testing.T) {
 	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec) // class: feature
-	proj, err := buildProjection("scoping-fixture", fm, nil, nil, nil, nil, modeReadOnly)
+	proj, err := buildProjectionFM("scoping-fixture", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestAttachObligations_StoryACWithoutDeclaredKinds(t *testing.T) {
 			{ID: "ac-1", Text: "declares no evidence kind"},
 		},
 	}
-	proj, err := buildProjection("s", fm, nil, nil, nil, nil, modeReadOnly)
+	proj, err := buildProjectionFM("s", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -277,7 +277,7 @@ broken
 		t.Fatalf("write obligation: %v", err)
 	}
 	fm := mustDecodeSpecForTest(t, obligationWallStorySpec)
-	proj, err := buildProjection("refi-decline-replay", fm, nil, nil, nil, nil, modeReadOnly)
+	proj, err := buildProjectionFM("refi-decline-replay", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}

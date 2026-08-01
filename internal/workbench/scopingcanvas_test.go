@@ -59,17 +59,11 @@ const scopingWallName = "scoping-wall"
 
 func newScopingWallFixture(t *testing.T) string {
 	t.Helper()
-	repo := fixturegit.Build(t, []fixturegit.Layer{{
-		Files: map[string]string{
+	return buildAuthoringFixture(t, "design/"+scopingWallName,
+		map[string]string{".verdi/.gitignore": "data/\n"},
+		map[string]string{
 			".verdi/specs/active/" + scopingWallName + "/spec.md": scopingWallSpec,
-			".verdi/.gitignore": "data/\n",
-		},
-		Message: "seed scoping wall fixture",
-	}})
-	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/"+scopingWallName); err != nil {
-		t.Fatalf("checkout design branch: %v", err)
-	}
-	return repo.Dir
+		})
 }
 
 // storyWallSpec is a draft story-class wall — story/spike proto-stickies
@@ -103,17 +97,11 @@ const storyWallName = "scoping-story-wall"
 
 func newStoryWallFixture(t *testing.T) string {
 	t.Helper()
-	repo := fixturegit.Build(t, []fixturegit.Layer{{
-		Files: map[string]string{
+	return buildAuthoringFixture(t, "design/"+storyWallName,
+		map[string]string{".verdi/.gitignore": "data/\n"},
+		map[string]string{
 			".verdi/specs/active/" + storyWallName + "/spec.md": storyWallSpec,
-			".verdi/.gitignore": "data/\n",
-		},
-		Message: "seed story wall fixture",
-	}})
-	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/"+storyWallName); err != nil {
-		t.Fatalf("checkout design branch: %v", err)
-	}
-	return repo.Dir
+		})
 }
 
 // TestBoardSpec_StickyTypes_StoryAndSpike proves story/spike stickies are
@@ -492,7 +480,7 @@ const scopingAcceptedName = "scoping-accepted"
 
 func newScopingAcceptedFixture(t *testing.T) *fixturegit.Repo {
 	t.Helper()
-	return fixturegit.Build(t, []fixturegit.Layer{{
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/specs/active/" + scopingAcceptedName + "/spec.md": scopingAcceptedSpec,
 			".verdi/.gitignore": "data/\n",
@@ -506,6 +494,11 @@ func newScopingAcceptedFixture(t *testing.T) *fixturegit.Repo {
 		},
 		Message: "seed scoping accepted fixture",
 	}})
+	// The sealed wall's accepted-pending-build state is now GIT-DERIVED
+	// (merge-signaled acceptance: exact bytes reachable from the default
+	// branch), so the default branch must be provable in the fixture.
+	setDefaultBranchSymref(t, repo.Dir)
+	return repo
 }
 
 // TestBoardSpec_StubInstantiate_Plain proves stub-instantiate scaffolds a

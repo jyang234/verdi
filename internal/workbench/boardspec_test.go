@@ -18,6 +18,7 @@ import (
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // The board-fixture spec: a draft feature on a design branch — the v1
@@ -118,24 +119,217 @@ frozen: { at: 2026-03-02, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 Every downstream call spends from a shared retry budget.
 `
 
-// newBoardFixture builds a fixture repo with the draft spec, checked out
-// on a design branch (authoring mode's branch state).
+// boardFixtureSpecSeed is main's landed revision of the same spec — one
+// body line differs from boardFixtureSpec, so the design branch's draft
+// provably DIVERGES from the default branch (specstate: proposed) while a
+// checkout of main itself still serves the spec (exact-on-default:
+// read-only). Mirrors how a real draft relates to its landed predecessor.
+var boardFixtureSpecSeed = strings.Replace(boardFixtureSpec, "## dc-2\n\nProse.\n", "## dc-2\n\nSeed prose.\n", 1)
+
+// newBoardFixture builds a fixture repo with the draft spec authored on a
+// design branch (authoring mode's state under merge-signaled acceptance:
+// the draft's bytes are NOT reachable from the provable default branch —
+// main holds only the seed revision it diverged from).
 func newBoardFixture(t *testing.T) string {
 	t.Helper()
-	repo := fixturegit.Build(t, []fixturegit.Layer{{
-		Files: map[string]string{
+	return buildAuthoringFixture(t, "design/"+boardFixtureName,
+		map[string]string{
+			".verdi/specs/active/" + boardFixtureName + "/spec.md": boardFixtureSpecSeed,
+			".verdi/adr/0001-outbox-events.md":                     boardFixtureADR,
+			".verdi/adr/0007-retry-budget.md":                      boardFixtureADR2,
+			".verdi/.gitignore":                                    "data/\n",
+		},
+		map[string]string{
 			".verdi/specs/active/" + boardFixtureName + "/spec.md":     boardFixtureSpec,
 			".verdi/specs/active/" + boardFixtureName + "/layout.json": boardFixtureLayout,
-			".verdi/adr/0001-outbox-events.md":                         boardFixtureADR,
-			".verdi/adr/0007-retry-budget.md":                          boardFixtureADR2,
-			".verdi/.gitignore":                                        "data/\n",
-		},
-		Message: "seed board fixture",
-	}})
-	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/"+boardFixtureName); err != nil {
-		t.Fatalf("checkout design branch: %v", err)
+		})
+}
+
+// statuslessFixtureSpec is boardFixtureSpec with its status: line omitted —
+// the only shape the CLI's design-start scaffold emits now (merge-signaled
+// acceptance: lifecycle state is derived from Git, never persisted).
+var statuslessFixtureSpec = strings.Replace(boardFixtureSpec, "status: draft\n", "", 1)
+
+// newStatuslessBoardFixture builds the merge-signaled acceptance fixture:
+// a STATUSLESS spec either committed only on its design branch (proposed —
+// not reachable from main) or landed on main itself (exact-on-default).
+// The default branch is provable in both shapes (origin/HEAD symref).
+func newStatuslessBoardFixture(t *testing.T, onDesignBranch bool) string {
+	t.Helper()
+	mainFiles := map[string]string{
+		".verdi/adr/0001-outbox-events.md": boardFixtureADR,
+		".verdi/.gitignore":                "data/\n",
 	}
+	specFiles := map[string]string{
+		".verdi/specs/active/" + boardFixtureName + "/spec.md":     statuslessFixtureSpec,
+		".verdi/specs/active/" + boardFixtureName + "/layout.json": boardFixtureLayout,
+	}
+	if onDesignBranch {
+		return buildAuthoringFixture(t, "design/"+boardFixtureName, mainFiles, specFiles)
+	}
+	for rel, content := range specFiles {
+		mainFiles[rel] = content
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: mainFiles, Message: "seed statusless fixture"}})
+	setDefaultBranchSymref(t, repo.Dir)
 	return repo.Dir
+}
+
+// The step-3 acceptance pair (merge-signaled spec acceptance): the SAME
+// statusless spec is an authoring board on its unmerged design branch and
+// a read-only board once its exact bytes are reachable from the default
+// branch — mode keyed by EFFECTIVE state, never by a persisted status:
+// field (which the CLI no longer writes at all).
+func TestBoardSpec_Statusless_DesignBranch_Authoring(t *testing.T) {
+	root := newStatuslessBoardFixture(t, true)
+	h := NewHandler(root)
+
+	rec := getBoard(t, h, boardFixtureName)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET statusless board = %d, want 200\n%s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `data-board-mode="authoring"`) {
+		t.Errorf("statusless spec on its design branch is not an authoring board:\n%s", body)
+	}
+
+	// The advertised design-start → serve → board-edit flow: a sticky
+	// lands (mutable tier) and a spec edit lands (working tree).
+	rec = postBoardAPI(t, h, boardFixtureName, "sticky", `{"text":"statusless authoring works","type":"comment"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sticky on statusless authoring board = %d, want 200\n%s", rec.Code, rec.Body.String())
+	}
+	rec = postBoardAPI(t, h, boardFixtureName, "edit-text", `{"id":"ac-1","text":"a declined applicant sees the current reason [statusless]"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edit-text on statusless authoring board = %d, want 200\n%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBoardSpec_Statusless_ExactOnDefault_ReadOnly(t *testing.T) {
+	root := newStatuslessBoardFixture(t, false)
+	h := NewHandler(root)
+
+	rec := getBoard(t, h, boardFixtureName)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET statusless board = %d, want 200\n%s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `data-board-mode="readonly"`) {
+		t.Errorf("statusless spec exact on the default branch is not read-only:\n%s", body)
+	}
+	rec = postBoardAPI(t, h, boardFixtureName, "edit-text", `{"id":"ac-1","text":"x"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("edit-text on exact-on-default statusless board = %d, want 403\n%s", rec.Code, rec.Body.String())
+	}
+}
+
+// fakeStateResolver drives loadBoard's mode mapping without git — the
+// StateResolver port's package-test double.
+type fakeStateResolver struct {
+	result specstate.Result
+	err    error
+}
+
+func (f fakeStateResolver) Resolve(context.Context, string, specstate.Candidate) (specstate.Result, error) {
+	return f.result, f.err
+}
+
+// TestLoadBoard_ModeByEffectiveState characterizes the full mode map over
+// every specstate state (merge-signaled acceptance): PROPOSED on a design
+// branch is the only authoring shape; accepted-pending-build, superseded,
+// closed, and unproven all fail closed to read-only — and unproven's
+// disclosures surface as board notices, never silence.
+func TestLoadBoard_ModeByEffectiveState(t *testing.T) {
+	root := newBoardFixture(t) // checked out on design/refi-test
+	ctx := context.Background()
+
+	unprovenDisclosure := "specstate: no default branch could be resolved for " + root
+	tests := []struct {
+		name       string
+		result     specstate.Result
+		wantMode   boardModeKind
+		wantStatus string
+		wantNotice string
+	}{
+		{"proposed on design branch is authoring", specstate.Result{State: specstate.Proposed, Relation: specstate.RelationNew}, modeAuthoring, "draft", ""},
+		{"accepted-pending-build is read-only", specstate.Result{State: specstate.AcceptedPendingBuild, Relation: specstate.RelationExact}, modeReadOnly, "accepted-pending-build", ""},
+		{"superseded is read-only", specstate.Result{State: specstate.Superseded, Relation: specstate.RelationExact}, modeReadOnly, "superseded", ""},
+		{"closed is read-only", specstate.Result{State: specstate.Closed, Relation: specstate.RelationExact}, modeReadOnly, "closed", ""},
+		{"unproven fails closed and discloses", specstate.Result{State: specstate.Unproven, Relation: specstate.RelationUnproven, Disclosures: []string{unprovenDisclosure}}, modeReadOnly, "unproven", unprovenDisclosure},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &boardSpecServer{root: root, state: fakeStateResolver{result: tc.result}}
+			proj, _, _, err := s.loadBoard(ctx, boardFixtureName)
+			if err != nil {
+				t.Fatalf("loadBoard: %v", err)
+			}
+			if proj.Mode != tc.wantMode {
+				t.Errorf("Mode = %q, want %q", proj.Mode, tc.wantMode)
+			}
+			if proj.Status != tc.wantStatus {
+				t.Errorf("Status = %q, want %q", proj.Status, tc.wantStatus)
+			}
+			if tc.wantNotice != "" {
+				found := false
+				for _, n := range proj.Notices {
+					if n == tc.wantNotice {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("Notices = %q, want them to carry %q", proj.Notices, tc.wantNotice)
+				}
+			}
+		})
+	}
+
+	// Negative: PROPOSED alone is not enough — on the default branch
+	// itself (a dirty edit on main, say) the board stays read-only.
+	if err := gitx.Checkout(ctx, root, "main"); err != nil {
+		t.Fatal(err)
+	}
+	s := &boardSpecServer{root: root, state: fakeStateResolver{result: specstate.Result{State: specstate.Proposed, Relation: specstate.RelationDiverged}}}
+	proj, _, _, err := s.loadBoard(ctx, boardFixtureName)
+	if err != nil {
+		t.Fatalf("loadBoard on main: %v", err)
+	}
+	if proj.Mode != modeReadOnly {
+		t.Errorf("proposed content ON the default branch renders %q, want readonly", proj.Mode)
+	}
+
+	// Negative: a resolver failure is an operational error, never a
+	// silently guessed mode.
+	s = &boardSpecServer{root: root, state: fakeStateResolver{err: fmt.Errorf("boom")}}
+	if _, _, _, err := s.loadBoard(ctx, boardFixtureName); err == nil {
+		t.Fatal("loadBoard with a failing resolver returned no error")
+	}
+}
+
+// The vocabulary half of the step-3 acceptance: the projection's Status is
+// the EFFECTIVE status (specstate's ArtifactStatus projection), so a
+// statusless spec displays "draft" while proposed and
+// "accepted-pending-build" once its exact bytes land on the default branch.
+func TestLoadProjection_Statusless_EffectiveStatusVocabulary(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name           string
+		onDesignBranch bool
+		wantStatus     string
+	}{
+		{"proposed on design branch displays draft", true, "draft"},
+		{"exact on default displays accepted-pending-build", false, "accepted-pending-build"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newStatuslessBoardFixture(t, tc.onDesignBranch)
+			proj, _, err := LoadProjection(ctx, root, boardFixtureName, nil, "", nil)
+			if err != nil {
+				t.Fatalf("LoadProjection: %v", err)
+			}
+			if proj.Status != tc.wantStatus {
+				t.Errorf("Status = %q, want %q (effective state, never the persisted field)", proj.Status, tc.wantStatus)
+			}
+		})
+	}
 }
 
 func getBoard(t *testing.T, h http.Handler, name string) *httptest.ResponseRecorder {
@@ -1131,16 +1325,39 @@ func TestBoard_NoForge_Silent(t *testing.T) {
 	}
 }
 
-// TestBoard_DefaultBranchAssumed_Disclosed proves M-4: a repo with no
-// origin/HEAD configured (the fixture's state) discloses the assumed "main"
-// default rather than keying authoring mode off it silently.
+// TestBoard_DefaultBranchAssumed_Disclosed proves M-4 plus the
+// merge-signaled fail-closed posture: a repo with NO origin/HEAD (and no
+// other default-branch witness) discloses the assumed "main" default AND —
+// because the spec's effective state is then UNPROVEN — renders read-only
+// with specstate's own missing-witness disclosure, never an authoring
+// board keyed off a guess.
 func TestBoard_DefaultBranchAssumed_Disclosed(t *testing.T) {
-	root := newBoardFixture(t)
-	h := NewHandler(root)
+	// The pre-symref fixture shape on purpose: draft committed on main,
+	// design branch cut, origin/HEAD never configured.
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/active/" + boardFixtureName + "/spec.md": boardFixtureSpec,
+			".verdi/adr/0001-outbox-events.md":                     boardFixtureADR,
+			".verdi/.gitignore":                                    "data/\n",
+		},
+		Message: "seed board fixture",
+	}})
+	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/"+boardFixtureName); err != nil {
+		t.Fatalf("checkout design branch: %v", err)
+	}
+	h := NewHandler(repo.Dir)
 
 	body := getBoard(t, h, boardFixtureName).Body.String()
 	if !strings.Contains(body, `data-testid="board-notice"`) || !strings.Contains(body, "default branch could not be resolved") {
 		t.Errorf("assumed default branch not disclosed on the board:\n%s", body)
+	}
+	// Unproven fails closed to read-only, and the missing witness is
+	// disclosed in the chrome, never silently rendered as either mode.
+	if !strings.Contains(body, `data-board-mode="readonly"`) {
+		t.Errorf("board with an unprovable default branch is not read-only:\n%s", body)
+	}
+	if !strings.Contains(body, "no default branch could be resolved") {
+		t.Errorf("unproven state's disclosure missing from the board chrome:\n%s", body)
 	}
 }
 

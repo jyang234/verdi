@@ -15,9 +15,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/jyang234/verdi/internal/fixturegit"
-	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // stubDragSpec is a draft feature-class wall (authoring mode) already
@@ -65,17 +62,11 @@ const stubDragName = "stub-drag"
 
 func newStubDragFixture(t *testing.T) string {
 	t.Helper()
-	repo := fixturegit.Build(t, []fixturegit.Layer{{
-		Files: map[string]string{
+	return buildAuthoringFixture(t, "design/"+stubDragName,
+		map[string]string{".verdi/.gitignore": "data/\n"},
+		map[string]string{
 			".verdi/specs/active/" + stubDragName + "/spec.md": stubDragSpec,
-			".verdi/.gitignore": "data/\n",
-		},
-		Message: "seed stub drag fixture",
-	}})
-	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/"+stubDragName); err != nil {
-		t.Fatalf("checkout design branch: %v", err)
-	}
-	return repo.Dir
+		})
 }
 
 func stubDragLayoutPath(root string) string {
