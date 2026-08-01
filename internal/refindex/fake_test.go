@@ -452,6 +452,79 @@ func TestComputeIndex_Fake_50Specs_OneDefaultCorpusScan(t *testing.T) {
 	}
 }
 
+// shortResolver returns fewer results than it was handed candidates — a
+// StateResolver implementation contract violation (Finding 3, task-6a
+// fix round: ComputeIndex's own length guards at both batch sites were
+// previously untested). A real specstate.Projector never does this; this
+// fake exists purely to exercise the defensive guard.
+func shortResolver() *fakeStateResolver {
+	return &fakeStateResolver{resolveManyFn: func(_ context.Context, _ string, candidates []specstate.Candidate) ([]specstate.Result, error) {
+		if len(candidates) == 0 {
+			return nil, nil
+		}
+		return []specstate.Result{{State: specstate.AcceptedPendingBuild}}, nil // always exactly one, regardless of len(candidates)
+	}}
+}
+
+// TestComputeIndex_Fake_DefaultBranchBatch_ShortResolverResult_IsOperationalError
+// proves the default-branch walk's own length guard: a resolver
+// implementation that returns fewer results than candidates surfaces as a
+// real Go error, never a silent index-out-of-range panic or a truncated
+// result set.
+func TestComputeIndex_Fake_DefaultBranchBatch_ShortResolverResult_IsOperationalError(t *testing.T) {
+	f := &fakeGitRunner{
+		defaultBranchFn: func(context.Context, string) (string, error) { return "main", nil },
+		localDesignFn:   func(context.Context, string) ([]string, error) { return nil, nil },
+		remoteDesignFn:  func(context.Context, string) ([]string, error) { return nil, nil },
+		listTreeFn: func(ctx context.Context, dir, ref, path string) ([]string, error) {
+			if path == ".verdi/specs/active" {
+				return []string{
+					".verdi/specs/active/fake-story-a/spec.md",
+					".verdi/specs/active/fake-story-b/spec.md",
+				}, nil
+			}
+			return nil, nil
+		},
+		showFn: func(ctx context.Context, dir, ref, path string) ([]byte, error) {
+			return []byte(fakeStatuslessStorySpec), nil
+		},
+	}
+
+	_, err := ComputeIndex(context.Background(), "/fake", f, shortResolver())
+	if err == nil {
+		t.Fatal("ComputeIndex: want an error when the resolver returns fewer results than candidates, got nil")
+	}
+	if !strings.Contains(err.Error(), "resolver returned") {
+		t.Fatalf("ComputeIndex error = %q, want it to name the resolver's short result count", err.Error())
+	}
+}
+
+// TestComputeIndex_Fake_DesignBranchBatch_ShortResolverResult_IsOperationalError
+// is the design-branch walk's own identical length-guard proof.
+func TestComputeIndex_Fake_DesignBranchBatch_ShortResolverResult_IsOperationalError(t *testing.T) {
+	f := &fakeGitRunner{
+		defaultBranchFn: func(context.Context, string) (string, error) { return "", nil },
+		localDesignFn: func(context.Context, string) ([]string, error) {
+			return []string{"design/one", "design/two"}, nil
+		},
+		remoteDesignFn: func(context.Context, string) ([]string, error) { return nil, nil },
+		listTreeFn: func(ctx context.Context, dir, ref, path string) ([]string, error) {
+			return []string{path}, nil
+		},
+		showFn: func(ctx context.Context, dir, ref, path string) ([]byte, error) {
+			return []byte(fakeStatuslessStorySpec), nil
+		},
+	}
+
+	_, err := ComputeIndex(context.Background(), "/fake", f, shortResolver())
+	if err == nil {
+		t.Fatal("ComputeIndex: want an error when the resolver returns fewer results than design-branch candidates, got nil")
+	}
+	if !strings.Contains(err.Error(), "resolver returned") {
+		t.Fatalf("ComputeIndex error = %q, want it to name the resolver's short result count", err.Error())
+	}
+}
+
 // forbiddenMethodName matches a method name shaped like a checkout/switch/
 // generic-escape-hatch capability — ac-5's static guarantee must hold at
 // the GitRunner interface's method set itself, not merely "the current
