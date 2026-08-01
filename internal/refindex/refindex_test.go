@@ -45,9 +45,10 @@ func TestComputeIndex_OneEntryPerSpecOrDraft_MergedBranchExcluded(t *testing.T) 
 	runGit(t, repo.Dir, "merge", "--quiet", "--ff-only", "design/epsilon")
 
 	deps := NewGitRunner()
+	resolver := NewStateResolver()
 	ctx := context.Background()
 
-	got, err := ComputeIndex(ctx, repo.Dir, deps)
+	got, err := ComputeIndex(ctx, repo.Dir, deps, resolver)
 	if err != nil {
 		t.Fatalf("ComputeIndex: %v", err)
 	}
@@ -67,7 +68,7 @@ func TestComputeIndex_OneEntryPerSpecOrDraft_MergedBranchExcluded(t *testing.T) 
 	}
 
 	// Determinism: an unmodified second call returns byte-identical output.
-	got2, err := ComputeIndex(ctx, repo.Dir, deps)
+	got2, err := ComputeIndex(ctx, repo.Dir, deps, resolver)
 	if err != nil {
 		t.Fatalf("ComputeIndex (second call): %v", err)
 	}
@@ -110,7 +111,7 @@ func TestComputeIndex_Sources(t *testing.T) {
 	checkoutExisting(t, repo.Dir, "main")
 	createRemoteDesignRef(t, repo.Dir, "both", bothSHA)
 
-	got, err := ComputeIndex(context.Background(), repo.Dir, NewGitRunner())
+	got, err := ComputeIndex(context.Background(), repo.Dir, NewGitRunner(), NewStateResolver())
 	if err != nil {
 		t.Fatalf("ComputeIndex: %v", err)
 	}
@@ -156,9 +157,10 @@ func TestComputeIndex_StatusGroups(t *testing.T) {
 	checkoutExisting(t, repo.Dir, "main")
 
 	deps := NewGitRunner()
+	resolver := NewStateResolver()
 	ctx := context.Background()
 
-	got, err := ComputeIndex(ctx, repo.Dir, deps)
+	got, err := ComputeIndex(ctx, repo.Dir, deps, resolver)
 	if err != nil {
 		t.Fatalf("ComputeIndex: %v", err)
 	}
@@ -179,7 +181,7 @@ func TestComputeIndex_StatusGroups(t *testing.T) {
 		}
 	}
 
-	got2, err := ComputeIndex(ctx, repo.Dir, deps)
+	got2, err := ComputeIndex(ctx, repo.Dir, deps, resolver)
 	if err != nil {
 		t.Fatalf("ComputeIndex (second call): %v", err)
 	}
@@ -212,7 +214,7 @@ func TestComputeIndex_DisclosedNoDraftSpec(t *testing.T) {
 	setDefaultBranchSymref(t, repo.Dir, "main")
 	runGit(t, repo.Dir, "branch", "design/empty-draft") // cut, no checkout, no new commit
 
-	got, err := ComputeIndex(context.Background(), repo.Dir, NewGitRunner())
+	got, err := ComputeIndex(context.Background(), repo.Dir, NewGitRunner(), NewStateResolver())
 	if err != nil {
 		t.Fatalf("ComputeIndex: unexpected error: %v", err)
 	}
@@ -265,7 +267,7 @@ func TestComputeIndex_Zone(t *testing.T) {
 	// yet the zone must still resolve, unconditionally, to ZoneActive.
 	runGit(t, repo.Dir, "branch", "design/no-spec-yet")
 
-	got, err := ComputeIndex(context.Background(), repo.Dir, NewGitRunner())
+	got, err := ComputeIndex(context.Background(), repo.Dir, NewGitRunner(), NewStateResolver())
 	if err != nil {
 		t.Fatalf("ComputeIndex: %v", err)
 	}
@@ -316,7 +318,7 @@ func TestComputeIndex_NeverMovesHEAD(t *testing.T) {
 	beforeStatus := runGit(t, repo.Dir, "status", "--porcelain")
 	beforeHash := hashWorkingTree(t, repo.Dir)
 
-	if _, err := ComputeIndex(context.Background(), repo.Dir, NewGitRunner()); err != nil {
+	if _, err := ComputeIndex(context.Background(), repo.Dir, NewGitRunner(), NewStateResolver()); err != nil {
 		t.Fatalf("ComputeIndex: %v", err)
 	}
 

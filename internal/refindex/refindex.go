@@ -8,6 +8,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -26,19 +27,30 @@ const (
 // never execs a checkout-mutating git command: every read goes through deps
 // (dc-2's git-runner port), whose method set exposes none (ac-5).
 //
+// resolver is Task 6a's own consumer-defined port (port.go's StateResolver):
+// every class: feature/story entry's StatusGroup and SpecStatus route
+// through it — internal/specstate, "the ONE place every later consumer...
+// routes lifecycle decisions through" — rather than trusting a persisted
+// `status:` field alone. Component-class entries are untouched (they keep
+// mapStatusGroup's raw-field read; see status.go). Both the default-branch
+// walk and the design-branch walk each collect their OWN feature/story
+// candidates and resolve them in a SINGLE ResolveMany batch call apiece —
+// never one Resolve call per entry (Step 1's own "a 50-spec fake records
+// ONE default-corpus scan, not 50").
+//
 // The returned slice is sorted by Ref, so two calls against identical ref
 // state return byte-identical output (ac-1, ac-2, ac-3's determinism
 // requirement) — never an incidental artifact of map iteration order.
-func ComputeIndex(ctx context.Context, root string, deps GitRunner) ([]Entry, error) {
+func ComputeIndex(ctx context.Context, root string, deps GitRunner, resolver StateResolver) ([]Entry, error) {
 	var entries []Entry
 
-	defaultEntries, err := computeDefaultBranchEntries(ctx, root, deps)
+	defaultEntries, err := computeDefaultBranchEntries(ctx, root, deps, resolver)
 	if err != nil {
 		return nil, fmt.Errorf("refindex: default-branch walk: %w", err)
 	}
 	entries = append(entries, defaultEntries...)
 
-	designEntries, err := computeDesignBranchEntries(ctx, root, deps)
+	designEntries, err := computeDesignBranchEntries(ctx, root, deps, resolver)
 	if err != nil {
 		return nil, fmt.Errorf("refindex: design-branch walk: %w", err)
 	}
@@ -48,12 +60,29 @@ func ComputeIndex(ctx context.Context, root string, deps GitRunner) ([]Entry, er
 	return entries, nil
 }
 
+// pendingDefaultEntry is a class: feature/story default-branch entry whose
+// StatusGroup/SpecStatus/Disclosed await the walk's single batched
+// resolver.ResolveMany call (Task 6a) — index-paired with the parallel
+// candidates slice computeDefaultBranchEntries builds alongside it.
+type pendingDefaultEntry struct {
+	ref  string
+	zone Zone
+}
+
 // computeDefaultBranchEntries walks the default branch's own tree (dc-4) —
 // never the working tree (co-1) — under .verdi/specs/active/ and
-// .verdi/specs/archive/, reading each spec.md's frontmatter status through
-// the same internal/artifact strict-decode seam every other spec read in
-// this store uses.
-func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunner) ([]Entry, error) {
+// .verdi/specs/archive/, reading each spec.md's frontmatter through the
+// same internal/artifact strict-decode seam every other spec read in this
+// store uses. A component-class entry's StatusGroup still comes from its
+// own raw frontmatter status (mapStatusGroup, status.go — component status
+// is display-only, persisted, never git-derived). Every OTHER class
+// (feature/story) instead becomes a pendingDefaultEntry, collected into ONE
+// specstate.Candidate batch and resolved through resolver.ResolveMany in a
+// SINGLE call once the walk finishes (Task 6a) — never one Resolve call per
+// spec — so effectiveStatusGroup can assign its StatusGroup/SpecStatus from
+// the git-derived Result rather than a persisted `status:` field a
+// statusless scaffold would otherwise omit entirely.
+func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunner, resolver StateResolver) ([]Entry, error) {
 	defaultBranch, err := deps.DefaultBranch(ctx, root)
 	if err != nil {
 		return nil, err
@@ -68,6 +97,9 @@ func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunne
 	}
 
 	var entries []Entry
+	var pending []pendingDefaultEntry
+	var candidates []specstate.Candidate
+
 	for _, zone := range []string{specsActiveZone, specsArchiveZone} {
 		prefix := ".verdi/specs/" + zone
 		paths, err := deps.ListTree(ctx, root, defaultBranch, prefix)
@@ -91,24 +123,54 @@ func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunne
 			if err != nil {
 				return nil, fmt.Errorf("%s at %s: %w", p, defaultBranch, err)
 			}
-			group, err := mapStatusGroup(spec.Status)
-			if err != nil {
-				return nil, fmt.Errorf("%s at %s: %w", p, defaultBranch, err)
+
+			ref := "spec/" + name
+			if spec.Class == artifact.ClassComponent {
+				group, err := mapStatusGroup(spec.Status)
+				if err != nil {
+					return nil, fmt.Errorf("%s at %s: %w", p, defaultBranch, err)
+				}
+				entries = append(entries, Entry{
+					Ref:         ref,
+					Source:      SourceDefault,
+					StatusGroup: group,
+					SpecStatus:  string(spec.Status),
+					// Zone is WHERE this iteration of the two-zone loop above
+					// found the entry (spec/home-status-glance dc-2) — zone
+					// and specsActiveZone/specsArchiveZone share the exact
+					// "active"/"archive" string values by construction, so
+					// this is a direct cast, never a second vocabulary.
+					Zone: Zone(zone),
+				})
+				continue
 			}
+
+			pending = append(pending, pendingDefaultEntry{ref: ref, zone: Zone(zone)})
+			candidates = append(candidates, specstate.Candidate{Path: p, Content: content})
+		}
+	}
+
+	if len(pending) > 0 {
+		results, err := resolver.ResolveMany(ctx, root, candidates)
+		if err != nil {
+			return nil, fmt.Errorf("resolving effective spec state on %s: %w", defaultBranch, err)
+		}
+		if len(results) != len(pending) {
+			return nil, fmt.Errorf("refindex: resolver returned %d results for %d candidates", len(results), len(pending))
+		}
+		for i, pe := range pending {
+			group, disclosed := effectiveStatusGroup(pe.ref, results[i])
 			entries = append(entries, Entry{
-				Ref:         "spec/" + name,
+				Ref:         pe.ref,
 				Source:      SourceDefault,
 				StatusGroup: group,
-				SpecStatus:  string(spec.Status),
-				// Zone is WHERE this iteration of the two-zone loop above
-				// found the entry (spec/home-status-glance dc-2) — zone and
-				// specsActiveZone/specsArchiveZone share the exact "active"/
-				// "archive" string values by construction, so this is a
-				// direct cast, never a second vocabulary.
-				Zone: Zone(zone),
+				SpecStatus:  string(results[i].ArtifactStatus()),
+				Disclosed:   disclosed,
+				Zone:        pe.zone,
 			})
 		}
 	}
+
 	return entries, nil
 }
 
@@ -129,11 +191,21 @@ func specNameFromPath(path, prefix string) (name string, ok bool) {
 	return parts[0], true
 }
 
+// pendingDesignEntry is an ORDINARY (non-degraded) design-branch entry
+// whose StatusGroup is unconditionally StatusGroupDraftsInProgress (ac-3 —
+// unchanged by Task 6a) but whose SpecStatus awaits the walk's single
+// batched resolver.ResolveMany call, index-paired with the parallel
+// candidates slice computeDesignBranchEntries builds alongside it.
+type pendingDesignEntry struct {
+	ref    string
+	source Source
+}
+
 // computeDesignBranchEntries enumerates every UNMERGED design branch's
 // draft (ac-1, dc-5), local refs/heads/design/* and remote-tracking
 // refs/remotes/origin/design/* alike (ac-2), through the one shared
 // merge-by-name path below — never two independently-maintained loops.
-func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner) ([]Entry, error) {
+func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner, resolver StateResolver) ([]Entry, error) {
 	local, err := deps.LocalDesignBranches(ctx, root)
 	if err != nil {
 		return nil, err
@@ -157,6 +229,8 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 	sort.Strings(names)
 
 	var entries []Entry
+	var pending []pendingDesignEntry
+	var candidates []specstate.Candidate
 	for _, name := range names {
 		src := sources[name]
 		// The revision used to read this branch's content and test its
@@ -229,12 +303,46 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 			}
 		}
 
-		entry, err := computeOrdinaryDesignEntry(ctx, root, deps, ref, src, revision, specPath)
+		candidate, err := readOrdinaryDesignCandidate(ctx, root, deps, revision, specPath)
 		if err != nil {
 			return nil, err
 		}
-		entries = append(entries, entry)
+		pending = append(pending, pendingDesignEntry{ref: ref, source: src})
+		candidates = append(candidates, candidate)
 	}
+
+	if len(pending) > 0 {
+		// A design-branch candidate's content is virtually never reachable
+		// (byte-exact) on the default branch — by construction it was read
+		// from an UNMERGED branch — so this batch typically resolves every
+		// candidate to specstate.Proposed (ArtifactStatus "draft") without
+		// ever touching the successor corpus scan at all. Still ONE
+		// ResolveMany call regardless, mirroring the default-branch walk's
+		// own batching discipline (Task 6a, Step 1's "not 50" obligation).
+		results, err := resolver.ResolveMany(ctx, root, candidates)
+		if err != nil {
+			return nil, fmt.Errorf("resolving effective spec state for design-branch drafts: %w", err)
+		}
+		if len(results) != len(pending) {
+			return nil, fmt.Errorf("refindex: resolver returned %d results for %d design-branch candidates", len(results), len(pending))
+		}
+		for i, pe := range pending {
+			entries = append(entries, Entry{
+				Ref:    pe.ref,
+				Source: pe.source,
+				// Unconditional per ac-3: a design-branch entry's
+				// StatusGroup is never derived from its own content,
+				// readable or not — including its resolver-derived state.
+				StatusGroup: StatusGroupDraftsInProgress,
+				SpecStatus:  string(results[i].ArtifactStatus()),
+				// Unconditional per the Zone type's own doc comment:
+				// specPath (the caller's existence probe, above) is always
+				// under the active zone for a design-branch entry.
+				Zone: ZoneActive,
+			})
+		}
+	}
+
 	return entries, nil
 }
 
@@ -257,35 +365,27 @@ func mergeDesignSources(local, remote []string) map[string]Source {
 	return sources
 }
 
-// computeOrdinaryDesignEntry builds one ordinary (non-degraded) design-branch
-// Entry for a branch whose caller has already confirmed specPath exists at
-// revision (computeDesignBranchEntries's ListTree probe) — reading its
-// frontmatter status through the same internal/artifact strict-decode seam
-// every other spec read in this store uses.
-func computeOrdinaryDesignEntry(ctx context.Context, root string, deps GitRunner, ref string, src Source, revision, specPath string) (Entry, error) {
+// readOrdinaryDesignCandidate reads and validates one ordinary
+// (non-degraded) design-branch draft's content for a branch whose caller
+// has already confirmed specPath exists at revision
+// (computeDesignBranchEntries's ListTree probe), returning it as a
+// specstate.Candidate for the walk's single batched resolver.ResolveMany
+// call. Strict-decoding through the same internal/artifact seam every
+// other spec read in this store uses still runs here (never skipped) so a
+// genuinely malformed draft still surfaces as an operational error exactly
+// as before Task 6a — only the DECODED value's raw status field is no
+// longer read; SpecStatus now comes from the resolver's Result instead.
+func readOrdinaryDesignCandidate(ctx context.Context, root string, deps GitRunner, revision, specPath string) (specstate.Candidate, error) {
 	content, err := deps.Show(ctx, root, revision, specPath)
 	if err != nil {
-		return Entry{}, err
+		return specstate.Candidate{}, err
 	}
 	fm, _, err := artifact.SplitFrontmatter(content)
 	if err != nil {
-		return Entry{}, fmt.Errorf("%s at %s: %w", specPath, revision, err)
+		return specstate.Candidate{}, fmt.Errorf("%s at %s: %w", specPath, revision, err)
 	}
-	spec, err := artifact.DecodeSpec(fm)
-	if err != nil {
-		return Entry{}, fmt.Errorf("%s at %s: %w", specPath, revision, err)
+	if _, err := artifact.DecodeSpec(fm); err != nil {
+		return specstate.Candidate{}, fmt.Errorf("%s at %s: %w", specPath, revision, err)
 	}
-
-	return Entry{
-		Ref:    ref,
-		Source: src,
-		// Unconditional per ac-3: a design-branch entry's StatusGroup is
-		// never derived from its own content, readable or not.
-		StatusGroup: StatusGroupDraftsInProgress,
-		SpecStatus:  string(spec.Status),
-		// Unconditional per the Zone type's own doc comment: specPath
-		// (the caller's existence probe, above) is always under the
-		// active zone for a design-branch entry.
-		Zone: ZoneActive,
-	}, nil
+	return specstate.Candidate{Path: specPath, Content: content}, nil
 }
