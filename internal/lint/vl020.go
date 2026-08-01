@@ -42,9 +42,21 @@ import (
 // STORY ACs only ... note that this feature's OWN ACs, being feature ACs,
 // therefore carry no obligations").
 //
-// Timing (co-2 / evidence-obligations co-2): "a draft story with an
-// un-obligated kind is not refused for that reason; the refusal is reserved
-// for the accept / activation path" — d.Status == "draft" is tolerated.
+// Timing (Task 4, "Move readiness checks to the PR boundary" — the
+// evolution of co-2 / evidence-obligations co-2's original "a draft story
+// with an un-obligated kind is not refused for that reason; the refusal
+// is reserved for the accept / activation path"): status is now optional
+// on the story class (merge-signaled acceptance design, "Artifact
+// compatibility"), so a persisted `status: draft` field is no longer a
+// reliable signal of "still being authored" — this rule instead gates on
+// Context.TargetsDefaultBoundary, the SAME default-branch PR-boundary
+// gate VL-004 already keyed on (I-14): a story is freely editable, with
+// no obligation check at all, everywhere OFF that boundary (an ordinary
+// design-branch lint, still under review, whatever its persisted status);
+// missing obligations refuse only when this run IS the default-branch
+// boundary itself — linting the default branch, or a CI run/PR targeting
+// it — since that is the moment merge-signaled acceptance treats as the
+// activation decision.
 //
 // Disclosed reading (CLAUDE.md provenance discipline: recorded here rather
 // than silently resolved): this is NOT literally vl006.go's own runtime
@@ -71,6 +83,10 @@ type vl020 struct{}
 func (vl020) ID() string { return "VL-020" }
 
 func (vl020) Check(in *RunInput) []Finding {
+	if !in.LintCtx.TargetsDefaultBoundary() {
+		return nil // Task 4: readiness checks apply at the PR boundary, never to ordinary editing off it
+	}
+
 	existingObligations := make(map[string]bool)
 	for _, d := range in.Snapshot.Docs {
 		if d.Kind == "obligation" {
@@ -85,9 +101,6 @@ func (vl020) Check(in *RunInput) []Finding {
 		}
 		if d.Spec.Class != artifact.ClassStory {
 			continue // dc-3: feature (and component) ACs never require an obligation
-		}
-		if d.Status == "draft" {
-			continue // co-2: authoring is never blocked; the gate is at activation
 		}
 
 		specName := path.Base(specDirOf(d))

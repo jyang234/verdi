@@ -5,7 +5,6 @@ title: {{printf "%q" .Title}}
 owners: {{safe .Owners}}
 class: feature{{if .StoryRef}}
 story: {{safe .StoryRef}}{{end}}
-status: draft
 problem: { text: {{printf "%q" .Problem}}, anchor: problem }
 outcome: { text: {{printf "%q" .Outcome}}, anchor: outcome }
 acceptance_criteria:

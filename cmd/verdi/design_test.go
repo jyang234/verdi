@@ -46,8 +46,11 @@ func TestRunDesignStart_Happy(t *testing.T) {
 	}
 
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
-	if spec.Status != "draft" {
-		t.Fatalf("spec.Status = %q, want draft", spec.Status)
+	// The scaffold no longer persists a status: line (merge-signaled
+	// acceptance design, "Artifact compatibility"): a fresh proposal's
+	// state is entirely Git-derived until it merges.
+	if spec.Status != "" {
+		t.Fatalf("spec.Status = %q, want empty (status is Git-derived, no longer persisted by the scaffold)", spec.Status)
 	}
 	if spec.Story != "jira:LOAN-1482" {
 		t.Fatalf("spec.Story = %q, want jira:LOAN-1482", spec.Story)

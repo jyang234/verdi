@@ -494,12 +494,16 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	regenerateBaseline(ctx, root, headCommit, spec, syncDeps{Runner: deps.Runner, GoTest: deps.GoTest, Stdout: stdout, Stderr: stderr}, "design start", stderr)
 
 	fmt.Fprintf(stdout, "design start: created branch %s\n", branch)
-	// L-M13(1) classification: "(kind: %s, status: draft)" ECHOES the
-	// scaffold's literal frontmatter — the --kind enum value and the
-	// status: field value just written to disk — identity, bare (unlike
-	// accept's transition VERDICT, which resolves display state words).
-	// vocab:identity — echo of the scaffolded frontmatter (field names + enum values)
-	fmt.Fprintf(stdout, "design start: scaffolded %s (kind: %s, status: draft)\n", specRef.String(), kind)
+	// L-M13(1) classification: "(kind: %s, state: proposed (derived until
+	// merge))" echoes the scaffold's shape — the --kind enum value is a
+	// literal frontmatter echo (identity, bare); "state: proposed (derived
+	// until merge)" is NOT a frontmatter echo (the scaffold no longer
+	// persists a status: line at all, merge-signaled acceptance design,
+	// "Artifact compatibility") — it names the Git-derived lifecycle state
+	// (internal/specstate) this freshly-scaffolded, unmerged revision
+	// currently has, replacing the retired literal "status: draft" line.
+	// vocab:identity — echo of the scaffolded frontmatter's kind; state wording names the Git-derived lifecycle vocabulary
+	fmt.Fprintf(stdout, "design start: scaffolded %s (kind: %s, state: proposed (derived until merge))\n", specRef.String(), kind)
 	fmt.Fprintf(stdout, "design start: board: http://%s/board/spec/%s (run `verdi serve` from this checkout)\n", defaultWorkbenchAddr, name)
 	return 0
 }

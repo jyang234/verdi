@@ -245,15 +245,24 @@ func TestStory_RealStatements(t *testing.T) {
 	}
 }
 
-// legacyFeature and legacyStory are BYTE-FOR-BYTE copies of the retired
-// fmt.Sprintf/strings.Builder bodies designscaffold.go's Feature/Story
-// carried before spec/scaffold-templates ac-1 replaced them with template
-// rendering — kept here, ONLY in this test file (never in designscaffold.go
-// itself, per the ac-1 obligation's "the retired bodies are deleted from
-// designscaffold.go"), as the independent reference TestByteForByte
-// pins the new template path against. Do not "clean these up" into calling
-// the new Render path — that would make the pin test compare a function
-// against itself.
+// legacyFeature and legacyStory were originally BYTE-FOR-BYTE copies of
+// the retired fmt.Sprintf/strings.Builder bodies designscaffold.go's
+// Feature/Story carried before spec/scaffold-templates ac-1 replaced them
+// with template rendering — kept here, ONLY in this test file (never in
+// designscaffold.go itself, per the ac-1 obligation's "the retired bodies
+// are deleted from designscaffold.go"), as the independent reference
+// TestByteForByte pins the new template path against. Do not "clean these
+// up" into calling the new Render path — that would make the pin test
+// compare a function against itself.
+//
+// The merge-signaled acceptance design's schema-compatibility task
+// (docs/superpowers/specs/2026-08-01-merge-signals-spec-acceptance-
+// design.md, "Artifact compatibility") removed the canonical templates'
+// persisted `status: draft` line — a fresh proposal's state is now
+// Git-derived, never written to disk — so both reference bodies below
+// drop that one line too, keeping this file's byte-pin meaningful
+// (the new templates' ACTUAL current output) rather than pinning bytes
+// the templates no longer produce.
 
 func legacyFeature(specRef, storyRef, title string) string {
 	storyLine := ""
@@ -266,7 +275,6 @@ kind: spec
 title: %q
 owners: [unassigned]
 class: feature%s
-status: draft
 problem: { text: "TODO: replace with the real problem statement before accept", anchor: problem }
 outcome: { text: "TODO: replace with the real outcome statement before accept", anchor: outcome }
 acceptance_criteria:
@@ -298,7 +306,6 @@ kind: spec
 title: %q
 owners: [unassigned]
 class: story
-status: draft
 story: %s
 `, specRef, title, storyRef)
 	if spike {

@@ -383,6 +383,167 @@ func TestVL010_NoDiffBase_Silent(t *testing.T) {
 	}
 }
 
+// vl010UnstampedFeatureSpec is a complete, valid, STATUSLESS feature spec
+// with no `frozen:` stamp at all — the shape a merge-signaled proposal now
+// has once it lands on the default branch (the design's "Artifact
+// compatibility": "new merge-accepted artifacts ... do not require a
+// content-changing frozen stamp"). baseProtected's second signal (Task 4's
+// immutability keystone) must protect it anyway: any strict-decoded
+// feature/story spec at the diff base is protected, stamped or not.
+const vl010UnstampedFeatureSpec = `---
+id: spec/vl-010-unstamped-feature
+kind: spec
+class: feature
+title: "VL-010: unstamped accepted feature"
+owners: [platform-team]
+story: jira:LOAN-0020
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+---
+# VL-010: unstamped accepted feature
+`
+
+// TestVL010_UnstampedFeatureModifiedAtBase_Fails proves the keystone: a
+// feature spec at the diff base with NO frozen stamp and NO persisted
+// status is still protected — modifying it fails VL-010 exactly like a
+// legacy frozen-stamped spec would.
+func TestVL010_UnstampedFeatureModifiedAtBase_Fails(t *testing.T) {
+	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-unstamped-feature/spec.md", vl010UnstampedFeatureSpec)
+	repo := buildLintRepo(t, beforeDir)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	after := strings.Replace(vl010UnstampedFeatureSpec, `title: "VL-010: unstamped accepted feature"`, `title: "VL-010: unstamped accepted feature EDITED"`, 1)
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-unstamped-feature", "spec.md")
+	writeTestFile(t, specPath, after)
+	commitAll(t, repo.Dir, "edit unstamped feature at the diff base")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	onlyRule(t, findings, "VL-010")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	if findings[0].Path != ".verdi/specs/active/vl-010-unstamped-feature/spec.md" {
+		t.Fatalf("finding path = %q, want the unstamped feature spec", findings[0].Path)
+	}
+}
+
+// TestVL010_UnstampedFeatureDeletedAtBase_Fails is the deletion
+// complement: 02's "ANY diff touching a frozen [or Git-derived-accepted]
+// file fails" covers removal exactly like modification.
+func TestVL010_UnstampedFeatureDeletedAtBase_Fails(t *testing.T) {
+	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-unstamped-feature/spec.md", vl010UnstampedFeatureSpec)
+	repo := buildLintRepo(t, beforeDir)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-unstamped-feature", "spec.md")
+	mustRemove(t, specPath)
+	commitAll(t, repo.Dir, "delete unstamped feature at the diff base")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	onlyRule(t, findings, "VL-010")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	if findings[0].Path != ".verdi/specs/active/vl-010-unstamped-feature/spec.md" {
+		t.Fatalf("finding path = %q, want the unstamped feature spec", findings[0].Path)
+	}
+}
+
+// TestVL010_NewUnstampedFeaturePath_Succeeds proves adding a brand-new,
+// unstamped, statusless feature spec (never existing at the diff base at
+// all) never trips VL-010 — the keystone protects existing baselines, not
+// new proposals (added files are out of this rule's scope by
+// construction, matching every added-file case already proven elsewhere).
+func TestVL010_NewUnstampedFeaturePath_Succeeds(t *testing.T) {
+	repo := buildLintRepo(t)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	const newSpec = `---
+id: spec/vl-010-new-unstamped-feature
+kind: spec
+class: feature
+title: "VL-010: new unstamped feature"
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+---
+# VL-010: new unstamped feature
+`
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-new-unstamped-feature", "spec.md")
+	writeTestFile(t, specPath, newSpec)
+	commitAll(t, repo.Dir, "add new unstamped feature")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-010" {
+			t.Fatalf("VL-010 fired on a brand-new unstamped feature path: %s", f.String())
+		}
+	}
+}
+
+// vl010UnstampedComponentSpec is a valid, unfrozen component spec — the
+// pre-Task-4 "component specs are authored-living and never frozen"
+// behavior (01 §Temporal classes) must be entirely unaffected by
+// baseProtected's new feature/story signal.
+const vl010UnstampedComponentSpec = `---
+id: spec/vl-010-unstamped-component
+kind: spec
+class: component
+title: "VL-010: unstamped component"
+status: active
+owners: [platform-team]
+---
+# VL-010: unstamped component
+`
+
+// TestVL010_UnstampedComponentModified_StillAllowed is the regression
+// guard: an unfrozen component spec at the diff base remains freely
+// editable — baseProtected's second signal is scoped to feature/story
+// only, exactly as its own doc comment promises.
+func TestVL010_UnstampedComponentModified_StillAllowed(t *testing.T) {
+	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-unstamped-component/spec.md", vl010UnstampedComponentSpec)
+	repo := buildLintRepo(t, beforeDir)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	after := strings.Replace(vl010UnstampedComponentSpec, `title: "VL-010: unstamped component"`, `title: "VL-010: unstamped component EDITED"`, 1)
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-unstamped-component", "spec.md")
+	writeTestFile(t, specPath, after)
+	commitAll(t, repo.Dir, "edit unstamped component at the diff base")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-010" {
+			t.Fatalf("VL-010 fired on an unstamped component spec: %s", f.String())
+		}
+	}
+}
+
+// TestVL010_StatuslessFeaturePureArchiveMoveAllowed proves the
+// active-to-archive closure exception (isActiveArchiveMove + e.Pure())
+// still admits a statusless feature/story: a byte-identical move requires
+// no status-only-flip exception at all (that machinery exists for a
+// CONTENT-changing status flip; a pure rename carries none), so it is
+// allowed exactly like a legacy frozen spec's pure rename, unaffected by
+// baseProtected's new signal.
+func TestVL010_StatuslessFeaturePureArchiveMoveAllowed(t *testing.T) {
+	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-unstamped-feature/spec.md", vl010UnstampedFeatureSpec)
+	repo := buildLintRepo(t, beforeDir)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	activePath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-unstamped-feature", "spec.md")
+	archivePath := filepath.Join(repo.Dir, ".verdi", "specs", "archive", "vl-010-unstamped-feature", "spec.md")
+	mustRemove(t, activePath)
+	writeTestFile(t, archivePath, vl010UnstampedFeatureSpec)
+	commitAll(t, repo.Dir, "byte-identical archive move of a statusless feature")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-010" {
+			t.Fatalf("VL-010 fired on a byte-identical active->archive move of a statusless feature: %s", f.String())
+		}
+	}
+}
+
 // TestVL010_PureActiveArchiveRenameAllowed proves the one legal diff shape
 // on a frozen file: a pure rename moving a spec directory from
 // specs/active/ to specs/archive/, content unchanged.

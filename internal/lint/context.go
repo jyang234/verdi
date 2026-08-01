@@ -35,13 +35,20 @@ type Context struct {
 	InCI bool
 }
 
-// EnforceDraftGate reports whether VL-004 must be enforced as a finding
-// (true) rather than merely warned about (false), per I-14: "VL-004
+// TargetsDefaultBoundary reports whether this lint run sits AT the
+// default-branch PR boundary — linting the default branch itself, or a
+// change/PR targeting it in CI — the single gate every readiness check
+// that used to key off a persisted status field now shares (Task 4,
+// "Move readiness checks to the PR boundary": VL-020's obligation
+// completeness, VL-004's legacy-draft compatibility disclosure). Renamed
+// from EnforceDraftGate, whose I-14 meaning it keeps verbatim ("VL-004
 // enforced when linting the default branch or a change targeting it;
-// otherwise a warning, not a finding." An unknown DefaultBranch can never
-// enforce — three-valued honesty (constitution 2): lint cannot prove it is
-// looking at the default branch, so it does not claim to.
-func (c Context) EnforceDraftGate() bool {
+// otherwise a warning, not a finding") — merge-signaled acceptance widens
+// the boundary's readership beyond VL-004 alone, so the name no longer
+// names one rule. An unknown DefaultBranch can never report true — three-
+// valued honesty (constitution 2): lint cannot prove it is looking at the
+// default branch, so it does not claim to.
+func (c Context) TargetsDefaultBoundary() bool {
 	if c.DefaultBranch == "" {
 		return false
 	}

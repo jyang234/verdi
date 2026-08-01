@@ -10,6 +10,17 @@ type Status string
 var (
 	// specFeatureStatuses is the feature- and story-class status enum
 	// (02 §Kind registry, as amended for round 5's terminal `superseded`).
+	// As of the merge-signaled acceptance design (docs/superpowers/specs/
+	// 2026-08-01-merge-signals-spec-acceptance-design.md), this enum only
+	// governs an EXPLICIT status value on those two classes — spec.go's
+	// validateFeature/validateStory both tolerate an entirely omitted
+	// status ("") first, since a feature/story's authoritative
+	// proposed-versus-accepted state is Git-derived (internal/specstate),
+	// never read from this persisted field alone. Deliberately not adding
+	// "" as a member here: doing so would let a truly unknown/typo'd
+	// status slip through this map's membership test, and would corrupt
+	// SpecFeatureStatuses()'s exported enum-parity accessor below (internal/
+	// model's schema-parity proof) with a value that is not a real status.
 	// `superseded` is a terminal status a predecessor spec reaches when its
 	// successor is accepted (03 §The amendment ladder): `verdi accept` of a
 	// spec carrying a `supersedes` edge flips the predecessor's status-only

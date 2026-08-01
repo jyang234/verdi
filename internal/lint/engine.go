@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -27,6 +28,17 @@ type RunInput struct {
 	// in finding prose (ledger L-M13a(6) work order); no rule DECISION
 	// ever reads it.
 	Model *model.Model
+	// Projector is the shared internal/specstate projector every
+	// git-derived-state rule resolves candidates through (Task 4:
+	// VL-004's legacy-draft compatibility disclosure) — constructed ONCE
+	// per Run call, here, rather than once per rule/per document, so a
+	// full lint pass never builds more than the one real-git-backed
+	// Projector NewProjector already returns cheaply (Projector itself is
+	// stateless per call; ResolveMany's own per-call successor-corpus
+	// memoization is unaffected by sharing the value). Rules consume
+	// specstate.Projector.Resolve/specstate.Result — never reimplement
+	// reachability (CLAUDE.md, PLAN.md file-ownership map).
+	Projector specstate.Projector
 }
 
 // Rule is one VL-xxx check.
@@ -71,7 +83,7 @@ func (e *Engine) Run(ctx context.Context, root string, lctx Context, opts Option
 		mdl = cfg.Model
 	}
 
-	in := &RunInput{Ctx: ctx, Root: root, Snapshot: snap, LintCtx: lctx, Opts: opts, Model: mdl}
+	in := &RunInput{Ctx: ctx, Root: root, Snapshot: snap, LintCtx: lctx, Opts: opts, Model: mdl, Projector: specstate.NewProjector()}
 
 	var findings []Finding
 	for _, r := range e.rules {

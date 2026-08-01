@@ -190,9 +190,23 @@ func (d Disposition) Validate() error {
 // still decode (A8). ClassStory has no such legacy and requires them
 // unconditionally in validateStory — see that function.
 type SpecFrontmatter struct {
-	Base               `yaml:",inline"`
-	Class              SpecClass             `yaml:"class"`
-	Status             Status                `yaml:"status"`
+	Base  `yaml:",inline"`
+	Class SpecClass `yaml:"class"`
+	// Status is REQUIRED for the component class (validateComponent still
+	// checks specComponentStatuses unconditionally) but OPTIONAL for the
+	// feature and story classes as of the merge-signaled acceptance design
+	// (docs/superpowers/specs/2026-08-01-merge-signals-spec-acceptance-
+	// design.md, "Artifact compatibility": "The schema permits new active
+	// specifications to omit the persisted status field"): a feature/story's
+	// proposed-versus-accepted state is Git-derived (internal/specstate),
+	// never read from this field alone. `omitempty` so a newly-scaffolded,
+	// statusless proposal's frontmatter carries no status: line at all;
+	// validateFeature/validateStory both tolerate the empty value before
+	// checking the legacy enum, so a persisted legacy value (draft,
+	// accepted-pending-build, closed, superseded) still decodes and keeps
+	// its existing meaning (A8: grandfathered artifacts are never
+	// invalidated by a schema loosening).
+	Status             Status                `yaml:"status,omitempty"`
 	Story              string                `yaml:"story,omitempty"`
 	Spike              bool                  `yaml:"spike,omitempty"`
 	Problem            *Attribute            `yaml:"problem,omitempty"`
@@ -311,7 +325,12 @@ func (fm SpecFrontmatter) Validate() error {
 }
 
 func (fm SpecFrontmatter) validateFeature() error {
-	if !specFeatureStatuses[fm.Status] {
+	// An omitted status (fm.Status == "") is legal on the feature class as
+	// of the merge-signaled acceptance design: proposed-versus-accepted
+	// state is Git-derived, not persisted. An EXPLICIT value, legacy or
+	// fresh, still has to be one of the known statuses — unknown enum
+	// values fail closed exactly as before.
+	if fm.Status != "" && !specFeatureStatuses[fm.Status] {
 		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: feature spec status %q is not a known status", fm.Status)
 	}
@@ -390,7 +409,10 @@ func (fm SpecFrontmatter) validateFeature() error {
 // so Problem, Outcome, and Story are all required unconditionally here,
 // with no grandfathering tension.
 func (fm SpecFrontmatter) validateStory() error {
-	if !specFeatureStatuses[fm.Status] {
+	// See validateFeature's identical comment: an omitted status is legal
+	// on the story class too (same shared lifecycle, 02 §Kind registry) —
+	// only an EXPLICIT, unknown value fails closed.
+	if fm.Status != "" && !specFeatureStatuses[fm.Status] {
 		// vocab:identity — strict-decode/schema diagnostic speaking class/field ids
 		return fmt.Errorf("artifact: story spec status %q is not a known status (same lifecycle as feature, 02 §Kind registry)", fm.Status)
 	}

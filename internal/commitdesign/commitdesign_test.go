@@ -252,8 +252,12 @@ func TestRun_Happy(t *testing.T) {
 	if spec.Story != "jira:LOAN-1482" {
 		t.Errorf("spec.Story = %q", spec.Story)
 	}
-	if spec.Status != "draft" {
-		t.Errorf("spec.Status = %q, want draft", spec.Status)
+	// The canonical commitdesign.md template no longer persists a status:
+	// line (merge-signaled acceptance design, "Artifact compatibility"):
+	// a freshly scaffolded proposal's state is Git-derived, never written
+	// to disk.
+	if spec.Status != "" {
+		t.Errorf("spec.Status = %q, want empty (status is Git-derived, no longer persisted by the scaffold)", spec.Status)
 	}
 	if len(spec.Context) != 1 || spec.Context[0] != "spec/other@"+repo.Head {
 		t.Errorf("spec.Context = %+v, want the board's one pin", spec.Context)

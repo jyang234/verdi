@@ -104,7 +104,7 @@ func (vl010) Check(in *RunInput) []Finding {
 			continue
 		}
 
-		frozen, err := baseFrozen(in.Ctx, in.Root, in.LintCtx.DiffBase, basePath)
+		protected, err := baseProtected(in.Ctx, in.Root, in.LintCtx.DiffBase, basePath)
 		if err != nil {
 			// The diff named this path as changed on the base side, so its
 			// base content must be readable; a failure here is operational,
@@ -112,7 +112,7 @@ func (vl010) Check(in *RunInput) []Finding {
 			findings = append(findings, Finding{Rule: "VL-010", Path: basePath, Message: fmt.Sprintf("reading base-side content of %s at %s: %v", basePath, in.LintCtx.DiffBase, err)})
 			continue
 		}
-		if !frozen {
+		if !protected {
 			continue
 		}
 
@@ -150,25 +150,60 @@ func (vl010) Check(in *RunInput) []Finding {
 	return findings
 }
 
-// baseFrozen reports whether the file at basePath carried a `frozen:` stamp
-// as it existed at diffBase — the base side of the diff. It reads the
-// historical content via `git show` and probes only the frontmatter's
-// `frozen:` key through artifact.ProbeFrozen, the deliberately-tolerant
-// historical-content probe (see its doc for why strict decode would be
-// wrong here). Anything ProbeFrozen cannot probe at all — a non-markdown
-// file, absent or unparseable frontmatter — reads as "not frozen": a
-// non-artifact file cannot carry a stamp. Only the `git show` failure is an
-// error: the diff itself named this path as existing on the base side.
-func baseFrozen(ctx context.Context, root, diffBase, basePath string) (bool, error) {
+// baseProtected reports whether the file at basePath is IMMUTABLE as it
+// existed at diffBase — the base side of the diff — under either of two
+// independent signals (Task 4, the merge-signaled acceptance design's
+// immutability keystone):
+//
+//  1. A `frozen:` stamp (the legacy signal, unchanged, renamed from
+//     baseFrozen): probed tolerantly through artifact.ProbeFrozen, reading
+//     ONLY the frontmatter's `frozen:` key (see its own doc for why strict
+//     decode would be wrong for HISTORICAL content).
+//  2. A strict-decoded feature or story spec — REGARDLESS of any frozen
+//     stamp, or of a persisted status at all. Acceptance is now Git-derived
+//     (internal/specstate): a feature/story spec.md that strict-decodes
+//     cleanly at the diff base — the base being, by construction, either
+//     the default branch tip or an ancestor of it — is an artifact this
+//     store already treats as merge-accepted, whether or not it happens to
+//     carry a frozen: stamp (new merge-accepted artifacts need none, per
+//     the design's "Artifact compatibility": "do not require a
+//     content-changing frozen stamp"). Without this second signal, a
+//     statusless, unstamped feature/story that already landed on the
+//     default branch could be freely edited or deleted by a later diff —
+//     exactly the immutability gap this rule exists to close.
+//
+// A component spec strict-decoding cleanly is deliberately NOT protected
+// by signal 2: component specs are "authored-living and never frozen" (01
+// §Temporal classes; artifact/spec.go's validateComponent) — their only
+// immutability signal remains an explicit frozen: stamp (signal 1),
+// exactly as before Task 4.
+//
+// Anything neither ProbeFrozen nor DecodeSpec can make sense of — a
+// non-markdown file, unparseable frontmatter, a non-spec artifact, a spec
+// that fails strict validation — reads as "not protected": VL-010 governs
+// frozen artifacts and Git-derived feature/story acceptance, not every
+// file in the store. Only the `git show` failure is an error: the diff
+// itself named this path as existing on the base side.
+func baseProtected(ctx context.Context, root, diffBase, basePath string) (bool, error) {
 	content, err := gitx.Show(ctx, root, diffBase, basePath)
 	if err != nil {
 		return false, err
 	}
-	frozen, err := artifact.ProbeFrozen(content)
-	if err != nil {
-		return false, nil // not a probeable markdown artifact ⇒ not frozen
+	if frozen, probeErr := artifact.ProbeFrozen(content); probeErr == nil && frozen != nil {
+		return true, nil
 	}
-	return frozen != nil, nil
+	// artifact.DecodeSpec expects frontmatter-only bytes (every real call
+	// site splits first — internal/lint/walk.go's decodeDocument,
+	// internal/specstate/resolve.go's own scanSuccessors); content here is
+	// the FULL historical file (frontmatter delimiters plus body).
+	if rawFM, _, splitErr := artifact.SplitFrontmatter(content); splitErr == nil {
+		if fm, decodeErr := artifact.DecodeSpec(rawFM); decodeErr == nil {
+			if fm.Class == artifact.ClassFeature || fm.Class == artifact.ClassStory {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // isStatusOnlySupersededFlip reports whether the change to path between

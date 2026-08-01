@@ -16,8 +16,14 @@ import (
 // handled — pins present, dispositions present (their absence legs ride
 // the package's existing Run fixtures, which exercise empty boards).
 // History: the pin originally proved the titleCase -> HumanizeName swap
-// (spec/shared-homes ac-5); it now also proves the L-M12 switch changed
-// nothing for a store without an override.
+// (spec/shared-homes ac-5); it then also proved the L-M12 switch changed
+// nothing for a store without an override. The merge-signaled acceptance
+// design's schema-compatibility task (docs/superpowers/specs/2026-08-01-
+// merge-signals-spec-acceptance-design.md, "Artifact compatibility")
+// removed the template's persisted `status: draft` line — a fresh
+// proposal's state is Git-derived, never written to disk — so the `want`
+// literal below drops that one line to match; every other byte is still
+// pinned exactly as before.
 func TestScaffoldSpec_BytePin(t *testing.T) {
 	pins := []artifact.Pin{
 		{Ref: "adr/0001-outbox", X: 10, Y: 20},
@@ -42,7 +48,6 @@ kind: spec
 title: "Code Health Two"
 owners: [unassigned]
 class: feature
-status: draft
 story: jira:VERDI-1
 context:
   - adr/0001-outbox
