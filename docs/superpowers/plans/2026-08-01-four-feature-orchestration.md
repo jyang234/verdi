@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - The binding system semantics remain `docs/design/specs/00..05-*.md`; `docs/design/specs/08-revision-notes.md` remains the ratification history.
-- The four documents indexed here are draft design authority until the human owner completes their applicable document-review and Verdi acceptance rituals.
+- The four documents indexed here are draft design authority until the human owner completes document review and merges their canonical proposals under the ratified acceptance lifecycle.
 - Never edit frozen artifacts or binding system specs directly. Ratified semantic changes follow the existing amendment flow.
 - Never import `verdi-go` packages. Execute its pinned CLIs and strict-decode their JSON outputs.
 - Preserve three-valued honesty: proven, violated with a witness, or explicitly disclosed as unproven. Missing context, identity, forge state, evidence, or review is never a pass.
@@ -24,6 +24,8 @@
 - Claude Code never accepts a specification, approves a pull request, merges a branch, authors a human attestation or waiver, or dispositions a judgment-bearing finding.
 - Codex reviews are read-only. Codex does not repair its own findings; accepted findings return to Claude Code and receive a fresh Codex re-review.
 - Only the human owner may approve the final merge.
+- One authoritative human decision occurs once: for a solo operator, merging a reviewed specification pull request is acceptance. No separate `verdi accept`, `/accept`, status edit, or confirmation may repeat that decision. Deterministic sealing and lifecycle projection follow the [merge-signaled acceptance design](../specs/2026-08-01-merge-signals-spec-acceptance-design.md).
+- Every focused plan inventories its human ceremonies and removes or automates any action that does not carry distinct substantive judgment, an exceptional override, or demonstrated irreversible-risk protection.
 - Until a successor build contract explicitly relocates it, unresolved semantic ambiguities are recorded in `PLAN.md` section 7 and block implementation rather than being silently resolved.
 - This specification-index pull request does not override the workspace's current v0-only build instructions. Wave 0 must make the successor scope and invention-ledger location repository-visible before any runtime implementation begins.
 
@@ -73,7 +75,7 @@ This pull request indexes and sequences the four specifications. It does not:
 
 The branch is independently reversible by reverting its documentation commit. Later units remain separately reversible because each owns one focused pull request and must state its compatibility and rollback posture before review.
 
-Because this umbrella review contains active artifacts with `status: draft`, it is not mergeable as submitted. Keep it as a draft design-review pull request. Wave 0 must choose and execute a lifecycle-compliant landing path—separate acceptance pull requests or an explicitly ratified combined ritual—before any draft artifact reaches the default branch. The orchestration index may land with that ratification or in its own documentation pull request.
+Because the incumbent lifecycle rejects active artifacts with `status: draft`, keep this umbrella pull request as a design-review vehicle until the [merge-signaled acceptance design](../specs/2026-08-01-merge-signals-spec-acceptance-design.md) is ratified and its stable required merge gate is live. After that prerequisite lands, merging the reviewed canonical proposals is their acceptance; no preparatory acceptance command or status-only commit is permitted.
 
 ## Specification index
 
@@ -125,16 +127,19 @@ Each feature establishes one typed application core before CLI, MCP, or workbenc
 ### Wave 0 — Ratify authority and planning boundaries
 
 - [ ] Review all four documents together for contradictions, missing cross-links, and scope overlap.
+- [ ] Ratify merge-signaled specification acceptance: proposal during review, merge as the solo operator's single acceptance ceremony, and Git-derived effective state afterward.
+- [ ] Deliver and require one stable merge gate before any canonical proposal lands; retire `VL-004`'s rejection of a proposal merely because its pull request targets the default branch.
+- [ ] Inventory every human ceremony in the successor lifecycle and classify it as substantive judgment, existing forge authorization, deterministic materialization, exceptional override, or removable acknowledgement.
 - [ ] Ratify this index as the successor orchestration authority for the four features and update the workspace/repository instructions to name it.
 - [ ] Establish a repository-visible successor invention ledger or explicitly retain `PLAN.md` section 7 with a portable access path for every implementation worktree.
 - [ ] Promote ASD and CSE into canonical draft feature artifacts without losing reviewed decisions or adding new semantics.
-- [ ] Accept all four feature specifications through the existing human-governed lifecycle.
+- [ ] Merge all four reviewed canonical feature specifications through the ratified merge-signaled lifecycle; their merges are acceptance and require no second human action.
 - [ ] Ratify `governance-principal-kernel` as shared prerequisite work.
 - [ ] Ratify the reusable worktree/isolation boundary between CI and CSE.
 - [ ] Ratify the ASD provenance-sidecar classification consumed by the CI context compiler.
 - [ ] Record any new invention in `PLAN.md` section 7 with its spec citation and smallest reversible choice.
 
-**Exit gate:** Four accepted canonical feature specifications, resolved cross-feature conflicts, accepted stubs, and no unowned shared schema.
+**Exit gate:** Merge-signaled acceptance and its required gate are live; four canonical feature specifications are accepted by reviewed merge; all retained human ceremonies carry distinct judgment or safety purpose; cross-feature conflicts and shared schema ownership are resolved.
 
 ### Wave 1 — Shared authority foundation, solo
 
