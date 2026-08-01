@@ -399,7 +399,8 @@ type BoardProjection struct {
 	CreateFields []designscaffold.Field `json:"-"`
 	// Notices are disclosed-unavailable banners rendered in the board
 	// chrome in EVERY mode (I-1(b)/I-2/M-4): a configured-but-unreachable
-	// review feed, or an assumed default branch. Not a projection of the
+	// review feed, or an unresolvable default branch (the honest unproven
+	// story plus its remedy — never an assumed one). Not a projection of the
 	// four inputs — a render-time disclosure the loader attaches, so the
 	// board never renders as if a skipped input were simply absent
 	// (constitution 2/10: silence is never a pass).
@@ -419,7 +420,7 @@ type BoardProjection struct {
 	// (unproven is never dressed as a verdict in either direction) and
 	// never silence. Kept apart from Notices — those are board-chrome
 	// banners about the SERVING context (an unreachable review feed, an
-	// assumed default branch); these are spec-level truths that belong on
+	// unresolvable default branch); these are spec-level truths that belong on
 	// the case file, exactly where the stamps they stand in for would
 	// hang. Same I/O-enrichment tier as CaseFileBadges (badges.go). Each
 	// entry is a seam-rendered line (internal/disclosure's Render, e.g.

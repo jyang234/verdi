@@ -433,27 +433,41 @@ func (s *boardSpecServer) resolveState(ctx context.Context, name string, raw []b
 	return resolver.Resolve(ctx, s.root, specstate.Candidate{Path: store.ActiveSpecRelPath(name), Content: raw})
 }
 
-// gitState queries the working tree's branch and dirtiness. When the
-// default branch cannot be resolved (no origin/HEAD configured) it falls
-// back to "main" — the board needs a non-empty "are we on a design branch"
-// signal to key authoring-vs-read-only mode — but the assumption is
-// DISCLOSED, never silent (M-4): the returned notice names it, since a
-// repo whose real default is e.g. "master" would otherwise misread a
-// checkout literally on "main" as the default branch and deny authoring
-// mode. The notice feeds the board's rendered chrome at the call site.
+// unresolvedDefaultBranchNotice is the board chrome's ONE story for a
+// repository whose default branch cannot be resolved (fix round 2,
+// finding 3): what was tried — specstate.ResolveDefaultBranch's D6-6
+// precedence chain, the same resolution the effective-state projection
+// itself uses, so the notice and the (unproven, read-only) render can
+// never contradict each other — plus the remedy. Deliberately NO assumed
+// fallback and no new configuration key: purely-local fail-closed
+// behavior is design-mandated; the remedy is to make the default branch
+// provable, never to guess one.
+const unresolvedDefaultBranchNotice = "default branch could not be resolved: CI_DEFAULT_BRANCH is unset, origin/HEAD is not configured, and neither refs/remotes/origin/main nor refs/remotes/origin/master alone identifies it — the spec's effective lifecycle state is unproven and the board renders read-only. Remedy: set CI_DEFAULT_BRANCH, or run `git remote set-head origin <branch>` to configure origin/HEAD"
+
+// gitState queries the working tree's branch and dirtiness. The default
+// branch comes from specstate.ResolveDefaultBranch — the ONE shared
+// resolution (CI_DEFAULT_BRANCH, then origin/HEAD, then the D6-6
+// remote-tracking fallback) the effective-state projection also routes
+// through, so the git panel and the projected lifecycle state always
+// tell the same story. When it cannot resolve, DefaultBranch stays empty
+// and the returned notice carries the honest unproven story plus its
+// remedy (unresolvedDefaultBranchNotice) — never an assumed "main"
+// beside a read-only render (M-4 as amended by fix round 2, finding 3:
+// one consistent story, not two contradictory ones). Mode selection
+// stays fail-closed either way: with no provable default branch,
+// specstate projects Unproven and loadBoard's switch never reaches the
+// authoring case.
 func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string, error) {
 	branch, err := gitx.CurrentBranch(ctx, s.root)
 	if err != nil {
 		return nil, "", err
 	}
-	def, err := gitx.DefaultBranch(ctx, s.root)
-	if err != nil {
-		return nil, "", err
-	}
+	def := ""
 	notice := ""
-	if def == "" {
-		def = "main"
-		notice = `default branch could not be resolved (no origin/HEAD configured); assuming "main" — authoring-mode detection may be wrong if this repo's real default differs`
+	if resolved, ok := specstate.ResolveDefaultBranch(ctx, s.root); ok {
+		def = resolved.Name
+	} else {
+		notice = unresolvedDefaultBranchNotice
 	}
 	dirty, err := gitx.StatusDirty(ctx, s.root)
 	if err != nil {

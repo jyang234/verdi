@@ -95,14 +95,13 @@ test("the glance groups every fixture entry into its correct bucket, badged and 
     [ACCEPTED_SPEC, "in-flight"],
     [ACTIVE_SPEC, "settling"],
     [TERMINAL_SPEC, "settling"],
-    // Merge-signaled acceptance migration: a stale persisted
-    // `status: closed` on an active-zone spec no longer counterfeits
-    // terminal state — closure is provable only at the archive path, so
-    // this entry's git-derived effective state is accepted-pending-build
-    // and it renders in-flight. (The close verb archives atomically now;
-    // the old "closed awaiting archive" window is no longer a state the
-    // model can hold.)
-    [EDGE.DIR_CLOSED_AWAITING_ARCHIVE, "in-flight"],
+    // Merge-signaled acceptance, legacy-compatibility reading (Task 6
+    // fix round 2, finding 4): a LANDED spec carrying a legacy explicit
+    // `status: closed` projects Closed — the projector's compatibility
+    // rows preserve a legacy terminal artifact's existing meaning (with
+    // a disclosure) rather than silently re-deriving a weaker state —
+    // so the closed-awaiting-archive shape still settles here.
+    [EDGE.DIR_CLOSED_AWAITING_ARCHIVE, "settling"],
   ] as const) {
     await expect(glanceEntry(page, name)).toHaveCount(1);
     await expect(glanceGroup(page, group).getByTestId(glanceEntryTestId(name))).toBeVisible();
@@ -119,12 +118,12 @@ test("the glance groups every fixture entry into its correct bucket, badged and 
   ).toHaveText("accepted-pending-build");
   await expect(glanceEntry(page, ACTIVE_SPEC).locator(".badge-active")).toHaveText("active");
   await expect(glanceEntry(page, TERMINAL_SPEC).locator(".badge-superseded")).toHaveText("superseded");
-  // Merge-signaled acceptance: the badge speaks the EFFECTIVE state
-  // (git-derived), not the stale persisted field — see the bucket note
-  // above.
+  // The badge speaks the EFFECTIVE state — which, under the projector's
+  // legacy-compatibility rows, honors the landed explicit terminal field
+  // (see the bucket note above).
   await expect(
-    glanceEntry(page, EDGE.DIR_CLOSED_AWAITING_ARCHIVE).locator(".badge-accepted-pending-build"),
-  ).toHaveText("accepted-pending-build");
+    glanceEntry(page, EDGE.DIR_CLOSED_AWAITING_ARCHIVE).locator(".badge-closed"),
+  ).toHaveText("closed");
 
   // (d) link grammar per dc-3: the unprefixed default-branch board
   // address...

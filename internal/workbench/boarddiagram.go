@@ -181,7 +181,14 @@ func (s *boardDiagramServer) loadDiagram(ctx context.Context, name string) (*dia
 	}
 	v.Git, v.GitNotice = git, notice
 	v.Mode = modeReadOnly
-	if fm.Status == "proposed" && git.Branch != "" && git.Branch != git.DefaultBranch {
+	// Authoring needs a PROVABLE "not the default branch" signal: with no
+	// resolvable default branch (DefaultBranch "" — gitState's honest
+	// unproven story, fix round 2, finding 3) the editor fails closed to
+	// read-only rather than treating every branch as not-default. Diagram
+	// proposals are class: proposal artifacts whose status field is their
+	// own authored state (outside specstate's spec-path grammar), so the
+	// branch comparison is the whole gate here.
+	if fm.Status == "proposed" && git.Branch != "" && git.DefaultBranch != "" && git.Branch != git.DefaultBranch {
 		v.Mode = modeAuthoring
 	}
 	return v, nil

@@ -1325,13 +1325,15 @@ func TestBoard_NoForge_Silent(t *testing.T) {
 	}
 }
 
-// TestBoard_DefaultBranchAssumed_Disclosed proves M-4 plus the
-// merge-signaled fail-closed posture: a repo with NO origin/HEAD (and no
-// other default-branch witness) discloses the assumed "main" default AND —
-// because the spec's effective state is then UNPROVEN — renders read-only
-// with specstate's own missing-witness disclosure, never an authoring
-// board keyed off a guess.
-func TestBoard_DefaultBranchAssumed_Disclosed(t *testing.T) {
+// TestBoard_DefaultBranchUnresolved_HonestStoryAndRemedy (fix round 2,
+// finding 3 — supersedes the old assumed-"main" disclosure): a repo with
+// NO resolvable default branch (no CI_DEFAULT_BRANCH, no origin/HEAD, no
+// D6-6 remote-tracking fallback) renders ONE consistent story — the spec's
+// effective state is unproven, the board fails closed to read-only, and
+// the chrome discloses what was tried plus the remedy. The old
+// contradictory second story ("assuming main" while everything renders
+// read-only anyway) must be gone.
+func TestBoard_DefaultBranchUnresolved_HonestStoryAndRemedy(t *testing.T) {
 	// The pre-symref fixture shape on purpose: draft committed on main,
 	// design branch cut, origin/HEAD never configured.
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
@@ -1348,8 +1350,21 @@ func TestBoard_DefaultBranchAssumed_Disclosed(t *testing.T) {
 	h := NewHandler(repo.Dir)
 
 	body := getBoard(t, h, boardFixtureName).Body.String()
-	if !strings.Contains(body, `data-testid="board-notice"`) || !strings.Contains(body, "default branch could not be resolved") {
-		t.Errorf("assumed default branch not disclosed on the board:\n%s", body)
+	// The honest story: what was tried (the D6-6 chain) and the remedy.
+	for _, want := range []string{
+		`data-testid="board-notice"`,
+		"default branch could not be resolved",
+		"CI_DEFAULT_BRANCH",
+		"origin/HEAD",
+		"git remote set-head origin",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("unresolved-default-branch notice missing %q:\n%s", want, body)
+		}
+	}
+	// The contradictory assumed-main claim is gone from this path.
+	if strings.Contains(body, `assuming "main"`) {
+		t.Errorf("board still claims an assumed \"main\" default beside the unproven story:\n%s", body)
 	}
 	// Unproven fails closed to read-only, and the missing witness is
 	// disclosed in the chrome, never silently rendered as either mode.
@@ -1358,6 +1373,38 @@ func TestBoard_DefaultBranchAssumed_Disclosed(t *testing.T) {
 	}
 	if !strings.Contains(body, "no default branch could be resolved") {
 		t.Errorf("unproven state's disclosure missing from the board chrome:\n%s", body)
+	}
+}
+
+// TestBoardSpec_ActiveZoneLegacySuperseded_BadgeAndDisclosure (fix round
+// 2, finding 2): an ACTIVE-zone spec whose landed bytes carry a legacy
+// explicit `status: superseded` projects Superseded WITH a compatibility
+// disclosure (the merged projector's legacy-terminal rows) — the board
+// header wears the terminal badge, the wall is the sealed read-only
+// record, and the compatibility disclosure surfaces as a board notice.
+func TestBoardSpec_ActiveZoneLegacySuperseded_BadgeAndDisclosure(t *testing.T) {
+	legacySuperseded := strings.Replace(boardFixtureSpec, "status: draft\n",
+		"status: superseded\nfrozen: { at: 2026-03-01, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }\n", 1)
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/active/" + boardFixtureName + "/spec.md": legacySuperseded,
+			".verdi/adr/0001-outbox-events.md":                     boardFixtureADR,
+			".verdi/.gitignore":                                    "data/\n",
+		},
+		Message: "seed legacy-superseded fixture",
+	}})
+	setDefaultBranchSymref(t, repo.Dir)
+	h := NewHandler(repo.Dir)
+
+	body := getBoard(t, h, boardFixtureName).Body.String()
+	if !strings.Contains(body, `data-board-mode="readonly"`) {
+		t.Errorf("legacy-superseded active-zone board is not read-only:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="board-status-badge"`) || !strings.Contains(body, `badge-superseded`) {
+		t.Errorf("board head missing the superseded status badge:\n%s", body)
+	}
+	if !strings.Contains(body, "compatibility reading") {
+		t.Errorf("legacy-terminal compatibility disclosure not surfaced in the board chrome:\n%s", body)
 	}
 }
 

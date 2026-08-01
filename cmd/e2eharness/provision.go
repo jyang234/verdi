@@ -185,12 +185,14 @@ const mermaidDemoSpec = "---\n" +
 // a frozen stamp (requireFrozen), fabricated here with a well-formed but
 // non-real commit sha, exactly as a scratch-only fixture may.
 //
-// MERGE-SIGNALED ACCEPTANCE MIGRATION NOTE: the persisted status: closed
-// field is now a STALE self-report — closure is provable only at the
-// archive path, so this entry's git-derived EFFECTIVE state (and every
-// surface's rendering of it) is accepted-pending-build. The fixture is
-// kept deliberately: 43-home-status-glance asserts exactly that migration
-// truth (a stale terminal field no longer counterfeits terminal state).
+// MERGE-SIGNALED ACCEPTANCE NOTE (fix round 2, finding 4): this spec's
+// exact bytes are LANDED on main, and the projector's legacy-terminal
+// compatibility rows preserve a landed explicit `status: closed` field's
+// existing meaning — the entry's git-derived EFFECTIVE state is Closed,
+// carried WITH a compatibility disclosure (specstate's
+// legacyTerminalStatusDisclosure), never silently re-derived as a weaker
+// accepted-pending-build. 43-home-status-glance asserts exactly that:
+// the closed-awaiting-archive shape settles with its closed badge.
 const closedAwaitingArchiveName = "rate-table-sunset"
 
 const closedAwaitingArchiveSpec = "---\n" +

@@ -93,6 +93,13 @@ func TestGlanceEligibleEntries(t *testing.T) {
 		{"an ordinary design-branch entry is eligible", refindex.Entry{Ref: "spec/c", Source: refindex.SourceLocal, Zone: refindex.ZoneActive}, true},
 		{"a disclosed design-branch entry is excluded regardless of zone (dc-1)", refindex.Entry{Ref: "spec/d", Source: refindex.SourceLocal, Zone: refindex.ZoneActive, Disclosed: &disclosed}, false},
 		{"an entry with an unset/unrecognized zone fails closed (excluded)", refindex.Entry{Ref: "spec/e", Source: refindex.SourceDefault}, false},
+		// Fix round 2, finding 1: an UNPROVEN default entry carries a
+		// Disclosure AND content (SpecStatus "unproven") — dc-1's
+		// exclusion rationale ("no content to badge or link") does not
+		// apply, so the glance INCLUDES it under an honest unproven
+		// presentation rather than silently dropping every default row
+		// whenever one corpus spec is malformed.
+		{"an unproven default entry (disclosed, with content) is INCLUDED", refindex.Entry{Ref: "spec/f", Source: refindex.SourceDefault, Zone: refindex.ZoneActive, SpecStatus: "unproven", Disclosed: &disclosed}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -102,6 +109,51 @@ func TestGlanceEligibleEntries(t *testing.T) {
 				t.Fatalf("eligible = %v, want %v (entries: %+v)", gotIn, tt.want, got)
 			}
 		})
+	}
+}
+
+// TestWriteGlanceSection_UnprovenDefaultEntry_HonestPresentation (fix
+// round 2, finding 1): an unproven default-branch entry renders IN the
+// glance — on-the-desk (its refindex StatusGroup), title-linked, wearing
+// the unproven badge and its disclosure text — never silently dropped
+// from the leading section while the exhaustive Directory below still
+// shows it.
+func TestWriteGlanceSection_UnprovenDefaultEntry_HonestPresentation(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "murky-scope", "feature", "draft", "")
+	d := disclosure.New("refindex:unproven-spec-state", "spec/murky-scope",
+		"specstate: no default branch could be resolved for the store")
+	entries := []refindex.Entry{{
+		Ref:         "spec/murky-scope",
+		Source:      refindex.SourceDefault,
+		StatusGroup: refindex.StatusGroupDraftsInProgress,
+		SpecStatus:  "unproven",
+		Disclosed:   &d,
+		Zone:        refindex.ZoneActive,
+	}}
+	code, body := getHome(t, root, HomeDeps{Index: cannedIndex(entries, nil), Git: fakeHomeGit{}})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", code, body)
+	}
+
+	glance := glanceSectionHTML(t, body)
+	if !strings.Contains(glance, `data-testid="glance-entry-murky-scope"`) {
+		t.Fatalf("unproven default entry dropped from the glance; got: %s", glance)
+	}
+	grp := glanceGroupBlock(t, body, "on-the-desk")
+	if !strings.Contains(grp, `data-testid="glance-entry-murky-scope"`) {
+		t.Errorf("unproven entry not under on-the-desk; got: %s", grp)
+	}
+	block := glanceEntryBlock(t, glance, "murky-scope")
+	for _, want := range []string{
+		`href="/a/spec/murky-scope"`,
+		`<span class="badge badge-unproven">unproven</span>`,
+		"disclosed-unproven",
+		"no default branch could be resolved",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("glance unproven entry missing %q; got: %s", want, block)
+		}
 	}
 }
 

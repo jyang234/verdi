@@ -3,6 +3,9 @@ package mcpserve
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -29,17 +32,42 @@ acceptance_criteria:
 `
 
 // buildReviewFixture builds a fixturegit repo with a single draft spec
-// (spec/loan-update, declaring ac-2) and checks out design/loan-update —
+// (spec/loan-update, declaring ac-2) authored on design/loan-update —
 // review population only ever applies on a design branch (05 §Review
-// stickies and forge round-trip).
+// stickies and forge round-trip). The merge-signaled authoring shape
+// (Task 6 fix round 2, finding 5 — the same migration internal/
+// workbench's own fixtures got): the default branch is PROVABLE
+// (origin/HEAD symref) and the draft's bytes are NOT reachable from it
+// (committed only on the design branch), so the board projects
+// specstate.Proposed and renders the authoring wall. The old shape (spec
+// committed on main, branch cut with no divergence, no symref) now
+// honestly projects Unproven → read-only.
 func buildReviewFixture(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
-		Files:   map[string]string{".verdi/specs/active/loan-update/spec.md": reviewSpecMD},
-		Message: "draft spec",
+		Files:   map[string]string{".verdi/.gitignore": "data/\n"},
+		Message: "seed main",
 	}})
-	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/loan-update"); err != nil {
+	ctx := context.Background()
+	cmd := exec.Command("git", "-C", repo.Dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("setting origin/HEAD symref: %v\n%s", err, out)
+	}
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "design/loan-update"); err != nil {
 		t.Fatalf("CheckoutNewBranch: %v", err)
+	}
+	dir := filepath.Join(repo.Dir, ".verdi", "specs", "active", "loan-update")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "spec.md"), []byte(reviewSpecMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitx.AddAll(ctx, repo.Dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "design: loan-update draft"); err != nil {
+		t.Fatal(err)
 	}
 	return repo
 }
