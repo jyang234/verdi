@@ -44,7 +44,12 @@ func buildSpecStateRepo(t *testing.T, files map[string]string) *fixturegit.Repo 
 // over the shared internal/specstate.Projector: a statusless exact
 // default-branch spec resolves accepted-pending-build/exact, changes
 // neither HEAD nor `git status --porcelain`, and emits exactly one
-// canonical JSON line naming a full Git baseline identity.
+// canonical JSON line naming a full Git baseline identity — the Git-
+// derived "freezing" half of merge-signaled acceptance (Task 7 retires
+// accept's own content-changing frozen stamp for new artifacts; this is
+// its replacement witness).
+//
+// guide-claim: 7.1-accept-freeze-obligations
 func TestCmdSpecState_ExactAcceptedPendingBuild(t *testing.T) {
 	repo := buildSpecStateRepo(t, map[string]string{".verdi/specs/active/payments/spec.md": specStateExactPaymentsMD})
 

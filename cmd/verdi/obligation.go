@@ -26,10 +26,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -136,14 +138,30 @@ var obligationFrozenProbeBase = func(ctx context.Context, root string) (base str
 	return base, false, nil
 }
 
-// runObligationVerb dispatches `verdi obligation <subcommand>`. There is
-// exactly one subcommand, `author` — anything else is a usage error.
+// obligationVerbUsage is the shared usage line for both `verdi obligation`
+// subcommands.
+const obligationVerbUsage = "usage: verdi obligation <author <story-ref> <ac-id> <kind> | scaffold <story-ref>>"
+
+// runObligationVerb dispatches `verdi obligation <subcommand>`: `author`
+// (spec/obligation-seam ac-5, pre-freeze single-pair authoring/
+// regeneration) and `scaffold` (Task 7, docs/superpowers/specs/2026-08-01-
+// merge-signals-spec-acceptance-design.md — the pre-review, idempotent,
+// batch-creation surface that replaces accept's retired freeze-moment
+// backstop). Anything else is a usage error.
 func runObligationVerb(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "author" {
-		fmt.Fprintln(stderr, "usage: verdi obligation author <story-ref> <ac-id> <kind>")
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, obligationVerbUsage)
 		return 2
 	}
-	return cmdObligationAuthor(args[1:], stdout, stderr)
+	switch args[0] {
+	case "author":
+		return cmdObligationAuthor(args[1:], stdout, stderr)
+	case "scaffold":
+		return cmdObligationScaffold(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, obligationVerbUsage)
+		return 2
+	}
 }
 
 // cmdObligationAuthor is `verdi obligation author`'s real entry point: it
@@ -343,4 +361,235 @@ const obligationAuthorScaffoldBody = "%s\n" +
 // wraps in frontmatter.
 func renderObligationAuthorScaffoldBody(storyRefArg, acID string, kind artifact.EvidenceKind) string {
 	return fmt.Sprintf(obligationAuthorScaffoldBody, evidence.UnauthoredObligationMarker, storyRefArg, kind, acID, storyRefArg, acID, kind)
+}
+
+// cmdObligationScaffold is `verdi obligation scaffold <story-ref>`'s real
+// entry point (Task 7, docs/superpowers/specs/2026-08-01-merge-signals-
+// spec-acceptance-design.md "Command behavior": "Obligation scaffolding
+// that is mechanically derivable from declared acceptance criteria moves
+// into proposal validation or an idempotent generation step before
+// review"). Resolves the store root/manifest/model and wires the real
+// specstate.Projector before delegating to runObligationScaffold.
+func cmdObligationScaffold(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: verdi obligation scaffold <story-ref>")
+		return 2
+	}
+	storyRefArg := args[0]
+
+	root, err := store.FindRoot(".")
+	if err != nil {
+		fmt.Fprintln(stderr, "obligation scaffold:", err)
+		return 2
+	}
+	cfg, err := store.Open(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "obligation scaffold:", err)
+		return 2
+	}
+
+	ctx := context.Background()
+	return runObligationScaffold(ctx, root, storyRefArg, specstate.NewProjector(), cfg.Model, stdout, stderr)
+}
+
+// runObligationScaffold is the testable core: given an already-resolved
+// store root and a specStateResolver (production: specstate.NewProjector();
+// tests: a fake, mirroring buildstart.go's own seam), resolve storyRefArg to
+// a story-class spec (reusing buildstart.go's resolveBuildTarget — the same
+// story-ref/spec-ref resolution `verdi build start` already established,
+// I-41's binding pointer: resolve acceptance through the specstate
+// projector, never raw status or a merge-base approximation), refuse
+// (exit 1, a verdict failure) if that spec's Git-derived effective state is
+// anything other than Proposed (spec/obligation-seam's whole point is
+// PRE-REVIEW preparation — an already-accepted, superseded, or closed spec
+// has nothing left to prepare; a post-merge write here would be exactly the
+// deterministic-duplicate-bookkeeping ceremony the design's audit rule
+// prohibits), refuse (exit 2, operational) if that state cannot be proven,
+// and otherwise scaffold every missing declared (ac, kind) obligation,
+// reporting each pair as either newly created or already present so a
+// second run's "zero created" result is legible rather than silent.
+func runObligationScaffold(ctx context.Context, root, storyRefArg string, resolver specStateResolver, mdl *model.Model, stdout, stderr io.Writer) int {
+	spec, err := resolveBuildTarget(root, storyRefArg, mdl)
+	if err != nil {
+		fmt.Fprintln(stderr, "obligation scaffold:", err)
+		return 2
+	}
+	if spec.Class != artifact.ClassStory {
+		// Display resolution (L-M13(1)): the class word and its agreeing
+		// article resolve; spec.ID stays identity.
+		storyWord := mdl.DisplayClass("story")
+		fmt.Fprintf(stderr, "obligation scaffold: %s is not %s spec; obligations are declared only on story specs (dc-3)\n", spec.ID, model.Indefinite(storyWord))
+		return 2
+	}
+
+	specRef, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		fmt.Fprintln(stderr, "obligation scaffold: internal error: resolved spec has an invalid id:", err)
+		return 2
+	}
+	specName := specRef.Name
+
+	relPath := store.ActiveSpecRelPath(specName)
+	content, err := os.ReadFile(store.ActiveSpecPath(root, specName))
+	if err != nil {
+		fmt.Fprintln(stderr, "obligation scaffold:", err)
+		return 2
+	}
+	result, err := resolver.Resolve(ctx, root, specstate.Candidate{Path: relPath, Content: content})
+	if err != nil {
+		fmt.Fprintln(stderr, "obligation scaffold:", err)
+		return 2
+	}
+	switch result.State {
+	case specstate.Proposed:
+		// proceed: still under review — pre-merge preparation is exactly
+		// this verb's job.
+	case specstate.Unproven:
+		fmt.Fprintf(stderr, "obligation scaffold: %s cannot be proven still-proposed: %s\n", spec.ID, strings.Join(result.Disclosures, "; "))
+		return 2
+	default: // AcceptedPendingBuild, Superseded, Closed
+		fmt.Fprintf(stderr, "obligation scaffold: refused: %s is already %s; obligation scaffolding is pre-review preparation only, never a post-merge mutation (I-41)\n", spec.ID, result.State)
+		return 1
+	}
+
+	// Enumerate every declared (ac, kind) pair up front, in declaration
+	// order, so the report below can distinguish "created this run" from
+	// "already present" even for a pair scaffoldMissingObligations itself
+	// silently skips (O-3/O-3b).
+	type pair struct {
+		acID string
+		kind artifact.EvidenceKind
+	}
+	var pairs []pair
+	for _, ac := range spec.AcceptanceCriteria {
+		for _, kind := range ac.Evidence {
+			pairs = append(pairs, pair{ac.ID, kind})
+		}
+	}
+
+	created, err := scaffoldMissingObligations(ctx, root, specName, spec, operatorOwner())
+	if err != nil {
+		fmt.Fprintln(stderr, "obligation scaffold:", err)
+		return 2
+	}
+	createdSet := make(map[string]bool, len(created))
+	for _, p := range created {
+		createdSet[p] = true
+	}
+	for _, p := range pairs {
+		path := store.ObligationPath(root, specName, p.acID, string(p.kind))
+		if createdSet[path] {
+			fmt.Fprintf(stdout, "obligation scaffold: %s %s: created %s\n", p.acID, p.kind, path)
+		} else {
+			fmt.Fprintf(stdout, "obligation scaffold: %s %s: already present %s\n", p.acID, p.kind, path)
+		}
+	}
+	return 0
+}
+
+// scaffoldMissingObligations is `verdi obligation scaffold`'s own creation
+// core (spec/obligation-seam O-1/O-2/O-3/O-3b/O-4/O-6, moved here from the
+// retired accept-time backstop by Task 7): for a story-class spec, it
+// scaffolds a stub obligation for every declared (ac, kind) pair with no
+// decodable obligation of that kind yet at the EXACT convention path
+// (internal/evidence.ObligationKindAt — the same convention-path predicate
+// VL-020 itself applies, O-3b), stamping every stub frozen with the
+// CURRENT HEAD's own commit and committer date (resolved lazily, only once
+// there is actually something to write — never a pre-baked
+// acceptance-time stamp: proposal obligations are reviewable content, not
+// falsely frozen at a pre-merge commit) and owner (the caller passes
+// operatorOwner(), O-6). It never overwrites: a pair whose own convention
+// path already holds a decodable obligation of that kind is skipped
+// outright (O-3). created lists exactly the paths newly written this call,
+// in declaration order, for the caller to report — created is returned
+// even when err != nil, so a failure partway through scaffolding still
+// reports what was written so far.
+//
+// Coverage is keyed on the EXACT path .verdi/obligations/<spec>/<acID>--<kind>.md
+// (judged-coverage-predicate-forkind-keying), never decoded for_kind scanned
+// over every <acID>--*.md: a decodable obligation misfiled under ANOTHER kind's
+// filename neither counts as covering the kind its filename names (the reverse
+// direction — else the real convention path is left unscaffolded and VL-020
+// reds the frozen story post-merge) nor is silently overwritten (the clobber
+// direction). path/id agreement stays VL-011's business at lint time.
+//
+// Two write-side arms are deliberately stricter than VL-020's existence-only
+// check and can only ever refuse where VL-020 would pass: a present-but-
+// undecodable file AT a declared pair's convention path (malformed) and a
+// decodable obligation occupying that path whose for_kind disagrees with the
+// filename (the clobber case) both refuse rather than paper over or
+// overwrite — a real, if rare, tree state this verb will not guess about.
+//
+// spec is the caller's already-decoded, PRE-merge spec — its own
+// AcceptanceCriteria/Class fields are all this needs; it is never mutated.
+func scaffoldMissingObligations(ctx context.Context, root, specName string, spec *artifact.SpecFrontmatter, owner string) (created []string, err error) {
+	if spec.Class != artifact.ClassStory {
+		return nil, nil // dc-3: feature (and component) ACs never carry obligations
+	}
+	specRef := "spec/" + specName
+
+	var frozen artifact.Frozen
+	frozenComputed := false
+
+	for _, ac := range spec.AcceptanceCriteria {
+		for _, kind := range ac.Evidence {
+			path := store.ObligationPath(root, specName, ac.ID, string(kind))
+
+			// Coverage is keyed on the EXACT convention path (VL-020's own
+			// predicate) and the obligation there decoding AND declaring the
+			// kind its filename names — never decoded for_kind scanned over
+			// every <acID>--*.md file (judged-coverage-predicate-forkind-keying).
+			forKind, present, kerr := evidence.ObligationKindAt(path)
+			if kerr != nil {
+				// present-but-undecodable AT the convention path (malformed):
+				// refuse rather than clobber it or count it as coverage — a
+				// deliberately stricter-than-VL-020 arm that can only refuse
+				// where VL-020's existence-only check would pass.
+				return created, fmt.Errorf("existing obligation at %s is present but does not decode; refusing to overwrite or ignore it — reconcile it by hand or via VL-011/VL-001: %w", path, kerr)
+			}
+			if present && forKind == kind {
+				continue // O-3/O-3b: a decodable obligation of this kind already sits at its own convention path
+			}
+
+			// Not covered. The occupied-path stat guard (clobber direction):
+			// if anything already occupies this exact convention path — a
+			// decodable obligation whose for_kind disagrees with the
+			// filename — refuse rather than clobber the hand-authored file.
+			if _, statErr := os.Stat(path); statErr == nil {
+				return created, fmt.Errorf("obligation already present at %s but not recognized as covering %s %s evidence — the file's own for_kind disagrees with its filename, a conflicted state to reconcile by hand or via VL-011; refusing to overwrite it", path, ac.ID, kind)
+			} else if !os.IsNotExist(statErr) {
+				return created, fmt.Errorf("checking obligation path %s: %w", path, statErr)
+			}
+
+			if !frozenComputed {
+				head, herr := gitx.RevParse(ctx, root, "HEAD")
+				if herr != nil {
+					return created, fmt.Errorf("scaffolding obligations: resolving HEAD: %w", herr)
+				}
+				at, aerr := gitx.CommitDateOnly(ctx, root, head)
+				if aerr != nil {
+					return created, fmt.Errorf("scaffolding obligations: resolving HEAD's committer date: %w", aerr)
+				}
+				frozen = artifact.NewFrozen(at, head)
+				frozenComputed = true
+			}
+
+			id := fmt.Sprintf("obligation/%s--%s--%s", specName, ac.ID, kind)
+			title := fmt.Sprintf("scaffolded obligation: %s %s evidence", ac.ID, kind)
+			content := evidence.RenderObligation(evidence.ObligationInput{
+				ID:          id,
+				Title:       title,
+				ForKind:     kind,
+				VerifiesRef: specRef,
+				Body:        backstopObligationBody(specRef, ac.ID, kind, ac.Text),
+				Owners:      []string{owner},
+				Frozen:      frozen,
+			})
+			if werr := evidence.WriteObligationFile(path, content); werr != nil {
+				return created, fmt.Errorf("scaffolding obligation for %s %s: %w", ac.ID, kind, werr)
+			}
+			created = append(created, path)
+		}
+	}
+	return created, nil
 }

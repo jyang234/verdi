@@ -11,6 +11,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // buildObligationAuthorRepo builds a one-layer fixturegit repo carrying
@@ -381,6 +382,259 @@ func TestRunObligationVerb_Usage(t *testing.T) {
 	}
 }
 
+func TestCmdObligationScaffold_UsageNegative(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if got := cmdObligationScaffold(nil, &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdObligationScaffold(no args) = %d, want 2", got)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if got := cmdObligationScaffold([]string{"a", "b"}, &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdObligationScaffold(two args) = %d, want 2", got)
+	}
+}
+
+func TestRunObligationVerb_DispatchesScaffold(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var stdout, stderr bytes.Buffer
+	got := runObligationVerb([]string{"scaffold", "spec/x"}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runObligationVerb([scaffold spec/x]) outside a store = %d, want 2 (operational)", got)
+	}
+	if contains(stderr.String(), "usage") {
+		t.Fatalf("stderr = %q, want a real store-root error, not the usage message", stderr.String())
+	}
+}
+
+// --- `verdi obligation scaffold` (Task 7, docs/superpowers/specs/2026-08-
+// 01-merge-signals-spec-acceptance-design.md): the pre-review, idempotent,
+// batch-creation surface that replaces accept's retired freeze-moment
+// backstop. Step 3's brief: for a story declaring static and behavioral
+// evidence on ac-1, prove it creates both convention paths, a second run
+// creates zero and reports both as present, an existing authored file is
+// byte-identical after the run, unknown story/AC/kind fails closed, and an
+// accepted story refuses mutation.
+
+// fakeScaffoldResolver is a specStateResolver test double for
+// runObligationScaffold, mirroring buildstart_test.go's own seam: it
+// returns a fixed Result for every candidate, letting these tests drive
+// the Proposed/Accepted/Unproven branches without needing a real default
+// branch to land bytes on.
+type fakeScaffoldResolver struct {
+	result specstate.Result
+	err    error
+}
+
+func (f fakeScaffoldResolver) Resolve(ctx context.Context, root string, candidate specstate.Candidate) (specstate.Result, error) {
+	return f.result, f.err
+}
+
+func (f fakeScaffoldResolver) ResolveMany(ctx context.Context, root string, candidates []specstate.Candidate) ([]specstate.Result, error) {
+	results := make([]specstate.Result, len(candidates))
+	for i := range candidates {
+		results[i] = f.result
+	}
+	return results, f.err
+}
+
+var proposedResolver = fakeScaffoldResolver{result: specstate.Result{State: specstate.Proposed, Relation: specstate.RelationDiverged}}
+
+// TestRunObligationScaffold_Happy is step 3's core proof: a story
+// declaring static and behavioral evidence on ac-1 (obligationSeamStoryCleanMD
+// also declares ac-2/behavioral) creates every missing convention path,
+// owned by the operator, carrying the disclosure line.
+//
+// guide-claim: 7.1-accept-freeze-obligations
+func TestRunObligationScaffold_Happy(t *testing.T) {
+	t.Setenv("USER", "test-operator")
+	repo := buildObligationSeamStoryRepo(t, nil)
+	ctx := context.Background()
+
+	var stdout, stderr bytes.Buffer
+	if got := runObligationScaffold(ctx, repo.Dir, "spec/widget-story", proposedResolver, phase7Model(t), &stdout, &stderr); got != 0 {
+		t.Fatalf("runObligationScaffold = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	for _, tc := range []struct{ acID, kind string }{
+		{"ac-1", "static"},
+		{"ac-2", "behavioral"},
+	} {
+		path := obligationPathFor(repo.Dir, tc.acID, tc.kind)
+		ob, body := readObligation(t, path)
+		if ob.ForKind != artifact.EvidenceKind(tc.kind) {
+			t.Errorf("%s: for_kind = %q, want %q", path, ob.ForKind, tc.kind)
+		}
+		if len(ob.Owners) != 1 || ob.Owners[0] != "test-operator" {
+			t.Errorf("%s: owners = %v, want [test-operator] (O-6)", path, ob.Owners)
+		}
+		if ob.Frozen == nil || ob.Frozen.Commit == "" {
+			t.Errorf("%s: frozen = %+v, want a resolved HEAD stamp", path, ob.Frozen)
+		}
+		if !contains(string(body), obligationBackstopDisclosureLine()) {
+			t.Errorf("%s: body does not carry the disclosure line verbatim:\n%s", path, body)
+		}
+		if !contains(stdout.String(), "created "+path) {
+			t.Errorf("stdout = %q, want it to report %s as created", stdout.String(), path)
+		}
+	}
+}
+
+// TestRunObligationScaffold_SecondRunIsIdempotent proves step 3's "a
+// second run creates zero and reports both as present": re-running against
+// the same story after the first scaffold writes nothing new and reports
+// every pair as already present.
+func TestRunObligationScaffold_SecondRunIsIdempotent(t *testing.T) {
+	repo := buildObligationSeamStoryRepo(t, nil)
+	ctx := context.Background()
+
+	var stdout1, stderr1 bytes.Buffer
+	if got := runObligationScaffold(ctx, repo.Dir, "spec/widget-story", proposedResolver, phase7Model(t), &stdout1, &stderr1); got != 0 {
+		t.Fatalf("first run = %d, want 0; stderr=%s", got, stderr1.String())
+	}
+	firstStatic, err := os.ReadFile(obligationPathFor(repo.Dir, "ac-1", "static"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBehavioral, err := os.ReadFile(obligationPathFor(repo.Dir, "ac-2", "behavioral"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout2, stderr2 bytes.Buffer
+	if got := runObligationScaffold(ctx, repo.Dir, "spec/widget-story", proposedResolver, phase7Model(t), &stdout2, &stderr2); got != 0 {
+		t.Fatalf("second run = %d, want 0; stderr=%s", got, stderr2.String())
+	}
+	if !contains(stdout2.String(), "ac-1 static: already present") || !contains(stdout2.String(), "ac-2 behavioral: already present") {
+		t.Fatalf("second run stdout = %q, want both pairs reported already present", stdout2.String())
+	}
+	if contains(stdout2.String(), "created") {
+		t.Fatalf("second run stdout = %q, want zero pairs reported created", stdout2.String())
+	}
+
+	secondStatic, err := os.ReadFile(obligationPathFor(repo.Dir, "ac-1", "static"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBehavioral, err := os.ReadFile(obligationPathFor(repo.Dir, "ac-2", "behavioral"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstStatic, secondStatic) || !bytes.Equal(firstBehavioral, secondBehavioral) {
+		t.Fatal("the second run rewrote an already-scaffolded obligation")
+	}
+}
+
+// TestRunObligationScaffold_NeverOverwritesAnAuthoredFile proves an
+// existing, hand-authored obligation is byte-identical after the run and
+// only the still-missing pair is scaffolded.
+func TestRunObligationScaffold_NeverOverwritesAnAuthoredFile(t *testing.T) {
+	repo := buildObligationSeamStoryRepo(t, map[string]string{
+		".verdi/obligations/widget-story/ac-1--static.md": preExistingAc1StaticMD,
+	})
+	ctx := context.Background()
+
+	var stdout, stderr bytes.Buffer
+	if got := runObligationScaffold(ctx, repo.Dir, "spec/widget-story", proposedResolver, phase7Model(t), &stdout, &stderr); got != 0 {
+		t.Fatalf("runObligationScaffold = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	got, err := os.ReadFile(obligationPathFor(repo.Dir, "ac-1", "static"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != preExistingAc1StaticMD {
+		t.Fatalf("pre-existing obligation was modified:\n--- got ---\n%s\n--- want (byte-identical) ---\n%s", got, preExistingAc1StaticMD)
+	}
+	if !contains(stdout.String(), "ac-1 static: already present") {
+		t.Fatalf("stdout = %q, want ac-1/static reported already present", stdout.String())
+	}
+	if _, err := os.Stat(obligationPathFor(repo.Dir, "ac-2", "behavioral")); err != nil {
+		t.Fatalf("the still-missing pair was not scaffolded: %v", err)
+	}
+}
+
+// TestRunObligationScaffold_UnknownStoryFailsClosed proves an unresolvable
+// story ref fails closed (operational, exit 2) rather than silently doing
+// nothing.
+func TestRunObligationScaffold_UnknownStoryFailsClosed(t *testing.T) {
+	repo := buildObligationSeamStoryRepo(t, nil)
+	ctx := context.Background()
+
+	var stdout, stderr bytes.Buffer
+	got := runObligationScaffold(ctx, repo.Dir, "jira:NO-SUCH-STORY", proposedResolver, phase7Model(t), &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runObligationScaffold(unknown story) = %d, want 2; stderr=%s", got, stderr.String())
+	}
+}
+
+// TestRunObligationScaffold_NonStorySpecFailsClosed proves a feature-class
+// target (no ac/kind obligations ever apply, dc-3) fails closed rather
+// than silently no-op'ing.
+func TestRunObligationScaffold_NonStorySpecFailsClosed(t *testing.T) {
+	repo := buildObligationSeamStoryRepo(t, nil)
+	ctx := context.Background()
+
+	var stdout, stderr bytes.Buffer
+	got := runObligationScaffold(ctx, repo.Dir, "spec/some-feature", proposedResolver, phase7Model(t), &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runObligationScaffold(feature spec) = %d, want 2; stderr=%s", got, stderr.String())
+	}
+	if !contains(stderr.String(), "story") {
+		t.Fatalf("stderr = %q, want it to name the story-only restriction", stderr.String())
+	}
+}
+
+// TestRunObligationScaffold_AcceptedStoryRefusesMutation is I-41's own
+// proof: a story whose Git-derived effective state is anything other than
+// Proposed refuses (a verdict failure, exit 1) — obligation scaffolding is
+// pre-review preparation only, resolved through the specStateResolver seam
+// (buildstart.go's established pattern), never through raw status or a
+// merge-base approximation. Table-drives every non-Proposed state.
+func TestRunObligationScaffold_AcceptedStoryRefusesMutation(t *testing.T) {
+	cases := []struct {
+		name  string
+		state specstate.State
+	}{
+		{"accepted-pending-build", specstate.AcceptedPendingBuild},
+		{"superseded", specstate.Superseded},
+		{"closed", specstate.Closed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildObligationSeamStoryRepo(t, nil)
+			ctx := context.Background()
+			resolver := fakeScaffoldResolver{result: specstate.Result{State: tc.state, Relation: specstate.RelationExact}}
+
+			var stdout, stderr bytes.Buffer
+			got := runObligationScaffold(ctx, repo.Dir, "spec/widget-story", resolver, phase7Model(t), &stdout, &stderr)
+			if got != 1 {
+				t.Fatalf("runObligationScaffold(%s story) = %d, want 1 (verdict refusal); stderr=%s", tc.name, got, stderr.String())
+			}
+			if _, err := os.Stat(obligationPathFor(repo.Dir, "ac-1", "static")); !os.IsNotExist(err) {
+				t.Errorf("an already-%s story must not be mutated: err=%v", tc.name, err)
+			}
+		})
+	}
+}
+
+// TestRunObligationScaffold_UnprovenRefusesOperationally proves an
+// unprovable Git-derived state (no default branch resolvable, ...) refuses
+// operationally (exit 2) rather than guessing either way.
+func TestRunObligationScaffold_UnprovenRefusesOperationally(t *testing.T) {
+	repo := buildObligationSeamStoryRepo(t, nil)
+	ctx := context.Background()
+	resolver := fakeScaffoldResolver{result: specstate.Result{State: specstate.Unproven, Relation: specstate.RelationUnproven, Disclosures: []string{"no default branch could be resolved"}}}
+
+	var stdout, stderr bytes.Buffer
+	got := runObligationScaffold(ctx, repo.Dir, "spec/widget-story", resolver, phase7Model(t), &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runObligationScaffold(unproven) = %d, want 2; stderr=%s", got, stderr.String())
+	}
+	if _, err := os.Stat(obligationPathFor(repo.Dir, "ac-1", "static")); !os.IsNotExist(err) {
+		t.Errorf("an unproven story must not be mutated: err=%v", err)
+	}
+}
+
 func TestCmdObligationAuthor_UsageNegative(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if got := cmdObligationAuthor(nil, &stdout, &stderr); got != 2 {
@@ -438,10 +692,18 @@ func TestRun_ObligationDispatchesToRealVerb(t *testing.T) {
 //
 // Mutation-witnessed during development: a scratch cmd/verdi file carrying a
 // hand-rolled fmt.Sprintf obligation render trips clause (1) (then removed).
+//
+// Task 7 (docs/superpowers/specs/2026-08-01-merge-signals-spec-acceptance-
+// design.md) moves scaffoldMissingObligations — the freeze-moment
+// backstop's own render/write call — out of acceptobligation.go into
+// obligation.go alongside `verdi obligation author`'s own call; the
+// allowlist below shrinks to the one remaining call site accordingly.
+// acceptobligation.go still exists (owner resolution, disclosure/body
+// rendering helpers both callers share) but no longer calls the seam
+// itself.
 func TestObligationRender_SingleSharedSeam_PackageWide(t *testing.T) {
 	renderSeamCallSites := map[string]bool{
-		"obligation.go":       true,
-		"acceptobligation.go": true,
+		"obligation.go": true,
 	}
 
 	entries, err := os.ReadDir(".")

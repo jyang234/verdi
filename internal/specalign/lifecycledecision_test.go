@@ -542,23 +542,19 @@ func (e lifecycleAllowEntry) matches(v lifecycleViolation) bool {
 // own adjudicated reason. Task 6c report §"the complete allowlist with
 // rationale per entry" mirrors this table.
 var lifecycleDecisionAllowlist = []lifecycleAllowEntry{
-	// cmd/verdi/accept.go and cmd/verdi/supersede.go: the legacy mutation
-	// paths that physically WRITE the status: draft -> accepted-pending-
-	// build (and, supersede.go, accepted-pending-build -> superseded)
-	// flip, gated on reading the SAME raw field they are about to flip
-	// (accept refuses a non-draft spec; supersede refuses a predecessor
-	// not already accepted-pending-build). TEMPORARY: retired by the NEXT
-	// task (the task-6c brief: "the legacy gate... the NEXT task
-	// retires"), at which point these entries are deleted — this list
-	// SHRINKS, never grows, as that retirement lands. LINE-EXACT
-	// (fix round 1 finding 3): precision is the point here — these
-	// specific lines are what the next task removes, not "however many
-	// lines accept.go/supersede.go happen to have this week".
-	{File: "cmd/verdi/accept.go", Line: 131, Rationale: "legacy accept mutation path: refuses a non-draft spec before flipping it; TEMPORARY, removed with the next task's accept.go retirement"},
-	{File: "cmd/verdi/accept.go", Line: 276, Rationale: "legacy accept mutation path: self-validates the just-written flip landed accepted-pending-build; TEMPORARY, removed with the next task's accept.go retirement"},
-	{File: "cmd/verdi/supersede.go", Line: 143, Rationale: "legacy supersede mutation path: idempotent already-superseded short-circuit; TEMPORARY, removed with the next task's supersede.go retirement"},
-	{File: "cmd/verdi/supersede.go", Line: 146, Rationale: "legacy supersede mutation path: refuses a predecessor not already accepted-pending-build before flipping it; TEMPORARY, removed with the next task's supersede.go retirement"},
-	{File: "cmd/verdi/supersede.go", Line: 180, Rationale: "legacy supersede mutation path: self-validates the just-written flip landed superseded; TEMPORARY, removed with the next task's supersede.go retirement"},
+	// cmd/verdi/accept.go's legacy mutation path (the status: draft ->
+	// accepted-pending-build flip, gated on reading that same raw field)
+	// and cmd/verdi/supersede.go (the accepted-pending-build -> superseded
+	// predecessor flip, invoked FROM WITHIN accept's own ritual — supersede.go
+	// had no independent entry point) carried the five TEMPORARY line-exact
+	// entries this table used to hold here. Task 7 (docs/superpowers/specs/
+	// 2026-08-01-merge-signals-spec-acceptance-design.md) retires both in
+	// the same commit — supersede.go's predecessor flip was never reachable
+	// except through accept's own ritual, so the two retirements are one
+	// atomic behavior change, not two — so all five raw decisions are gone
+	// from the source, not merely re-routed, removed here rather than left
+	// dangling (BINDING: never left dangling, never widened by a stale
+	// match).
 
 	// internal/residue/patternb.go archiveSpecClosedAt: a deliberately
 	// preserved raw `status: closed` read, NOT migrated onto specstate —

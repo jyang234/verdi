@@ -11,12 +11,9 @@ import (
 )
 
 // The status-line regexes below recognize a frontmatter status line and,
-// specifically, the base/head sides of VL-010's two status-only exceptions on
-// an otherwise-frozen spec:
+// specifically, the base/head sides of VL-010's one remaining status-only
+// exception on an otherwise-frozen spec:
 //
-//   - Round-5 supersession (D-12): a diff that touches an otherwise-frozen
-//     spec IN PLACE on ONLY its status line, flipping it to `superseded`, is
-//     legal (the accept ritual's predecessor flip, cmd/verdi/accept.go).
 //   - Round-6 closure (D6-11): a spec.md moving specs/active→specs/archive
 //     while its status line flips `accepted-pending-build`→`closed` and
 //     nothing else changes is legal (the close ritual's archive step,
@@ -24,9 +21,22 @@ import (
 //     transition). The move is no longer the byte-identical R100 rename the
 //     pure-rename exception covers, so this narrower exception admits it.
 //
-// Both reuse one line-diff core (statusOnlyFlip): exactly one changed line,
-// that line a status line matching the expected base pattern, its head
-// counterpart matching the expected terminal status.
+// A second exception used to admit round-5 supersession (D-12): a diff that
+// touches an otherwise-frozen spec IN PLACE on ONLY its status line,
+// flipping it to `superseded` (the accept ritual's predecessor flip,
+// cmd/verdi/accept.go's now-deleted supersede.go). Task 7 (docs/
+// superpowers/specs/2026-08-01-merge-signals-spec-acceptance-design.md)
+// deletes that mutation entirely — supersession is now derived purely from
+// Git reachability (internal/specstate), never written to a predecessor's
+// own bytes — so this exception was removed along with its sole
+// production writer: a status-only edit to `superseded` is now an
+// ordinary, illegal frozen-file modification like any other, admitted by
+// no exception at all.
+//
+// The remaining exception reuses one line-diff core (statusOnlyFlip):
+// exactly one changed line, that line a status line matching the expected
+// base pattern, its head counterpart matching the expected terminal
+// status.
 // rootStorePrefix is the slash-path prefix of every artifact in the root
 // store's own .verdi/ tree. VL-010's diff sweep is scoped to it so a
 // whole-repo git diff never treats a nested/fixture store's frozen-stamped
@@ -35,9 +45,7 @@ import (
 const rootStorePrefix = ".verdi/"
 
 var (
-	anyStatusLineRe             = regexp.MustCompile(`^status:\s*"?[a-z][a-z-]*"?\s*$`)
 	acceptedPendingStatusLineRe = regexp.MustCompile(`^status:\s*"?accepted-pending-build"?\s*$`)
-	supersededStatusLineRe      = regexp.MustCompile(`^status:\s*"?superseded"?\s*$`)
 	closedStatusLineRe          = regexp.MustCompile(`^status:\s*"?closed"?\s*$`)
 )
 
@@ -118,14 +126,11 @@ func (vl010) Check(in *RunInput) []Finding {
 
 		switch e.Status {
 		case "M":
-			// Round-5 exception (D-12): a status-only edit flipping the spec
-			// to `superseded` is legal on an otherwise-frozen spec (the accept
-			// ritual's predecessor flip). Verified by diffing the base/head
-			// content and requiring exactly one changed line — the status line
-			// — now reading `superseded`.
-			if ok, cerr := isStatusOnlySupersededFlip(in.Ctx, in.Root, in.LintCtx.DiffBase, e.Path); cerr == nil && ok {
-				continue
-			}
+			// No exception remains for an in-place modification (Task 7
+			// deletes the round-5 D-12 status-only-superseded-flip exception
+			// along with its sole production writer, cmd/verdi's now-deleted
+			// supersede.go): ANY modification to a frozen file — including a
+			// status-only edit — is an illegal frozen-file modification now.
 			findings = append(findings, Finding{Rule: "VL-010", Path: e.Path, Message: fmt.Sprintf("frozen file modified between %s and HEAD", in.LintCtx.DiffBase)})
 		case "D":
 			findings = append(findings, Finding{Rule: "VL-010", Path: e.Path, Message: fmt.Sprintf("frozen file deleted between %s and HEAD", in.LintCtx.DiffBase)})
@@ -204,24 +209,6 @@ func baseProtected(ctx context.Context, root, diffBase, basePath string) (bool, 
 		}
 	}
 	return false, nil
-}
-
-// isStatusOnlySupersededFlip reports whether the change to path between
-// diffBase and HEAD is exactly a status-line flip to `superseded` and
-// nothing else (D-12) — the round-5 in-place supersession exception (path
-// unchanged on both sides). Any read failure is surfaced as an error so the
-// caller can fall through to the ordinary frozen-modification finding rather
-// than silently admitting the diff.
-func isStatusOnlySupersededFlip(ctx context.Context, root, diffBase, path string) (bool, error) {
-	baseContent, err := gitx.Show(ctx, root, diffBase, path)
-	if err != nil {
-		return false, err
-	}
-	headContent, err := gitx.Show(ctx, root, "HEAD", path)
-	if err != nil {
-		return false, err
-	}
-	return statusOnlyFlip(baseContent, headContent, anyStatusLineRe, supersededStatusLineRe), nil
 }
 
 // isStatusOnlyClosedArchiveFlip reports whether the rename oldPath→newPath
