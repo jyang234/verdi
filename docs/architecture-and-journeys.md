@@ -39,15 +39,17 @@ the `verdi-evidence` artifact; a local run stamps `source: local` and only ever
 previews (D6-10). Gates and the closure ritual fold **authoritative** (`source: ci`)
 records only. The upstream analysis toolchain (flowmap/groundwork) is executed as
 pinned CLIs and its JSON strictly decoded — never linked as a library. Five
-workflows carry it: `merge-gate.yml` (the one required pull-request check — the
-full gate, unconditionally, on every PR), `verify.yml` (the same full gate on
+workflows carry it: `merge-gate.yml` (the one pull-request check, and the
+context designated as the branch ruleset's required one — the full gate,
+unconditionally, on every PR), `verify.yml` (the same full gate on
 pushes touching code paths, then evidence production), `spec-gate.yml` (the fast
 lint/readiness check on pushes touching spec- and doc-only paths), `pages.yml`
 (the dex, published on every push to main), and `runtime-probe.yml` (the
 scheduled runtime-evidence probe). Only `merge-gate.yml` sees pull requests, and
 it carries no path, branch, or type filter: a path-filtered required check can
-never report on a PR outside its paths, so no PR can be silently ungated and none
-can deadlock waiting for a context that will never arrive.
+never report on a PR outside its paths, so once the ruleset requires context
+`merge-gate` no PR can be silently ungated and none can deadlock waiting for a
+context that will never arrive.
 
 ```mermaid
 flowchart TD
@@ -239,16 +241,18 @@ attributes the load-bearing ones to the component that embodies them.
    naming its successor, and refuses unresolved rung-4 cascade flags.
 2. **Implement.** On every pull request — no path filter, no exceptions —
    `merge-gate.yml` runs the full `make verify`, builds the binary, and
-   self-lints the store. That single check, context `merge-gate`, is the one the
-   branch ruleset requires, so no PR is ever silently ungated and none waits on a
-   context that will never report. On pushes the work splits by path: a push
-   touching code paths runs `verify.yml` — the same full `make verify`, then, in
-   the same job and strictly after it passes, `verdi sync --produce` assembles
-   the evidence bundle stamped `source: ci` and uploads it as the
-   `verdi-evidence` artifact — while a push touching only spec/doc paths rides
-   `spec-gate.yml`'s fast check (build + lint + spec-align). Evidence production
-   stays push-only on purpose: it must follow a `make verify` that already gated
-   the same commit, never a second independent run.
+   self-lints the store. That single check reports on every PR unconditionally,
+   and its context, `merge-gate`, is the stable name designated for the branch
+   ruleset's required-status rule; once the owner activates that rule, no PR is
+   ever silently ungated and none waits on a context that will never report. On
+   pushes the work splits by path: a push touching code paths runs `verify.yml`
+   — the same full `make verify`, then, in the same job and strictly after it
+   passes, `verdi sync --produce` assembles the evidence bundle stamped
+   `source: ci` and uploads it as the `verdi-evidence` artifact — while a push
+   touching only spec/doc paths rides `spec-gate.yml`'s fast check (build + lint
+   + spec-align). Evidence production stays push-only on purpose: it must follow
+   a `make verify` that already gated the same commit, never a second
+   independent run.
 3. **`verdi sync`** pulls the per-(git-ref, commit) bundle into `derived/`,
    preserving its per-spec keys so the fold can actually read it (D6-9);
    `--or-regen` rebuilds locally as advisory (`source: local`) when no pipeline
@@ -370,11 +374,12 @@ attributes the load-bearing ones to the component that embodies them.
 > **Always on, underneath:** every MR runs the same one gate — `merge-gate.yml`,
 > unconditional on every pull request (build, vet, lint, race tests, fixture
 > ratchets, store self-lint, spec-align, Playwright e2e — 182 tests), the single
-> required check. Pushes keep their own split: `verify.yml` on code paths (that
-> same full gate, plus the evidence bundle), `spec-gate.yml` on spec/doc-only
-> paths — and `verdi lint` covers VL-001…VL-022. Still deliberately absent, honestly
-> declining at the CLI: `waivers` audit, `verify-artifact`, and the portfolio
-> lens. `close`, `gc`, and `audit` — deferred in v0 — are real now.
+> check designated as required. Pushes keep their own split: `verify.yml` on
+> code paths (that same full gate, plus the evidence bundle), `spec-gate.yml`
+> on spec/doc-only paths — and `verdi lint` covers VL-001…VL-022. Still
+> deliberately absent, honestly declining at the CLI: `waivers` audit,
+> `verify-artifact`, and the portfolio lens. `close`, `gc`, and `audit` —
+> deferred in v0 — are real now.
 
 ---
 
@@ -443,11 +448,12 @@ flowchart LR
 
 Diamonds are gates that can refuse: `build start` refuses non-accepted and
 superseded specs, the spec MR is guarded by lint and `merge-gate.yml` — the one
-required check, which every MR gets whether it touches specs, code, or both —
-`verdi gate` holds implementation MRs to four conditions, and the closure gate
-holds `verdi close` to authoritative evidence and governance conditions. Closure is
-deliberately resumable rather than automatic: preparation stops for human
-judgment and repeats whenever repository state advances.
+check every MR gets whether it touches specs, code, or both, and the context
+designated as required — `verdi gate` holds implementation MRs to four
+conditions, and the closure gate holds `verdi close` to authoritative evidence
+and governance conditions. Closure is deliberately resumable rather than
+automatic: preparation stops for human judgment and repeats whenever repository
+state advances.
 
 ```mermaid
 flowchart LR
@@ -468,7 +474,7 @@ flowchart LR
         MATRIX["verdi matrix<br/><i>the fold + stub table</i>"]
         ALIGN["verdi align<br/><i>computed + diagram alignment<br/>+ judged</i>"]
         GATE{"verdi gate<br/>4 conditions"}
-        PRGATE{"merge-gate.yml<br/><i>the one required check ·<br/>every PR, no path filter ·<br/>full make verify + self-lint</i>"}
+        PRGATE{"merge-gate.yml<br/><i>the designated required check ·<br/>every PR, no path filter ·<br/>full make verify + self-lint</i>"}
         BS --> IMPL --> EVJOB --> SYNC --> MATRIX --> ALIGN --> GATE --> PRGATE
     end
 
