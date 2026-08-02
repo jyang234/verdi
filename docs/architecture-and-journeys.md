@@ -439,9 +439,10 @@ flowchart LR
     subgraph design ["1 · DESIGN"]
         DS["verdi design start<br/>--kind feature|story"]
         WALL["the wall<br/><i>projection: board edits are<br/>spec edits · receipts ambient</i>"]
-        ACCEPT["verdi accept<br/><i>freeze @ final commit ·<br/>stub-match fast path</i>"]
+        OBLIG["verdi obligation scaffold<br/><i>pre-review, idempotent ·<br/>never authority</i>"]
+        ACCEPT["verdi accept<br/><i>retired: notice only ·<br/>merging the spec MR IS acceptance</i>"]
         SPECMR{"spec MR<br/>VL-001…022 · spec-gate.yml"}
-        DS --> WALL --> ACCEPT --> SPECMR
+        DS --> WALL --> OBLIG --> ACCEPT --> SPECMR
     end
 
     subgraph build ["2 · BUILD"]

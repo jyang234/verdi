@@ -311,6 +311,7 @@ func TestRoundFourRitual_FullLoop(t *testing.T) {
 	if result := resolveCandidate(t, ctx, repo.Dir, "stale-decline-story"); result.State != specstate.AcceptedPendingBuild {
 		t.Fatalf("Resolve(stale-decline-story) after merge = %+v, want AcceptedPendingBuild", result)
 	}
+	_, predV1RawBeforeRung3 := readSpec(t, repo.Dir, "stale-decline-story")
 
 	// --- 7. verdi build start spec/stale-decline-story: succeeds only against a landed, accepted spec ---
 	checkoutMain(t, ctx, repo.Dir)
@@ -382,7 +383,9 @@ x
 	if predV1.Status != "" && predV1.Status != "draft" {
 		t.Fatalf("predecessor v1 status = %q — must never be mutated by a merge (no writer exists anymore)", predV1.Status)
 	}
-	_ = predV1Raw
+	if !bytes.Equal(predV1RawBeforeRung3, predV1Raw) {
+		t.Fatalf("predecessor v1's bytes changed across its successor's merge — supersession must be derived, never written:\n--- before ---\n%s\n--- after ---\n%s", predV1RawBeforeRung3, predV1Raw)
+	}
 
 	if result := resolveCandidate(t, ctx, repo.Dir, "stale-decline-story-v2"); result.State != specstate.AcceptedPendingBuild {
 		t.Fatalf("Resolve(stale-decline-story-v2) = %+v, want AcceptedPendingBuild", result)
