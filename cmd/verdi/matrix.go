@@ -52,6 +52,7 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -106,6 +107,19 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// Final fix wave I2: the `status:` line speaks the spec's EFFECTIVE
+	// lifecycle state — resolved ONCE here through the projector and
+	// passed through to both rungs' printers (neither re-resolves). The
+	// raw persisted field printed a BLANK line for a statusless,
+	// merge-accepted spec; the effective state is what every other surface
+	// already speaks. matrix still reports, never gates: an Unproven state
+	// prints as its honest "unproven" word rather than refusing.
+	effectiveStatus, err := effectiveMatrixStatus(ctx, root, spec)
+	if err != nil {
+		fmt.Fprintln(stderr, "matrix:", err)
+		return 2
+	}
+
 	// Only a round-four REAL feature spec renders through the feature fold;
 	// everything else folds at the story level below. A round-four real
 	// feature is exactly `class: feature` AND carrying problem/outcome
@@ -121,7 +135,7 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 	//     keeps it on the story path.
 	// See featurematrix.go's doc comment for the grandfathering preserved.
 	if spec.Class == artifact.ClassFeature && spec.Problem != nil {
-		if err := cmdMatrixFeature(ctx, root, commit, spec, preview, mdl, stdout); err != nil {
+		if err := cmdMatrixFeature(ctx, root, commit, spec, effectiveStatus, preview, mdl, stdout); err != nil {
 			fmt.Fprintln(stderr, "matrix:", err)
 			return 2
 		}
@@ -157,8 +171,35 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	printMatrix(stdout, result, spec.Status, string(spec.Class), mdl, preview, obligationCells)
+	printMatrix(stdout, result, effectiveStatus, string(spec.Class), mdl, preview, obligationCells)
 	return 0
+}
+
+// effectiveMatrixStatus resolves the matrix target's Git-derived effective
+// lifecycle state ONCE (final fix wave I2), in the legacy artifact.Status
+// display vocabulary (specstate.Result.ArtifactStatus — Unproven prints as
+// the literal "unproven", never dressed as a proven value). The spec's own
+// bytes are re-read via loadSpecBytesWithZone (featurematrix.go) because a
+// matrix target may legitimately live in EITHER zone — an archived, closed
+// story is directly addressable here.
+func effectiveMatrixStatus(ctx context.Context, root string, spec *artifact.SpecFrontmatter) (artifact.Status, error) {
+	name, err := specDirName(spec.ID)
+	if err != nil {
+		return "", err
+	}
+	_, relPath, content, err := loadSpecBytesWithZone(root, name)
+	if err != nil {
+		return "", err
+	}
+	if content == nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+		return "", fmt.Errorf("resolved spec %s not found in specs/active/ or specs/archive/", spec.ID)
+	}
+	result, err := specstate.NewProjector().Resolve(ctx, root, specstate.Candidate{Path: relPath, Content: content})
+	if err != nil {
+		return "", err
+	}
+	return result.ArtifactStatus(), nil
 }
 
 // specDirName returns the <name> segment of a spec ref "spec/<name>" — the
@@ -219,9 +260,11 @@ func obligationCellsFor(root, specName string, acs []artifact.AcceptanceCriterio
 // state.
 
 // printMatrix renders result as a per-AC table plus the story eligibility
-// line. status is the resolved spec's own frontmatter `status` (ac-2,
-// feature-supersession-state): printed unconditionally so a superseded (or
-// any other) terminal state is legible on this surface directly — 03
+// line. status is the resolved spec's EFFECTIVE lifecycle state (final fix
+// wave I2: the caller's one effectiveMatrixStatus resolution, never the
+// raw persisted field — which is legitimately BLANK on a statusless,
+// merge-accepted spec): printed unconditionally so a superseded (or any
+// other) terminal state is legible on this surface directly — 03
 // §rung 3's "everywhere without consulting backlinks" property — rather
 // than only inferable by opening the raw spec or chasing a
 // `superseded-by` backlink. preview only controls whether

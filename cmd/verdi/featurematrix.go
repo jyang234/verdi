@@ -39,7 +39,7 @@ import (
 // resolved round-four feature spec: per-AC status, frozen stubs paired
 // with the computed live `implements` mapping under the acceptance-time-
 // plan banner, and stub reconciliation state (05 §Lenses).
-func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, preview bool, mdl *model.Model, stdout io.Writer) error {
+func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, effectiveStatus artifact.Status, preview bool, mdl *model.Model, stdout io.Writer) error {
 	ref, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		return fmt.Errorf("matrix: %w", err)
@@ -92,7 +92,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 		return fmt.Errorf("matrix: %w", err)
 	}
 
-	printFeatureMatrix(stdout, spec, result, reconciliation, stories, supersededByAC, preview, mdl)
+	printFeatureMatrix(stdout, spec, effectiveStatus, result, reconciliation, stories, supersededByAC, preview, mdl)
 	return nil
 }
 
@@ -383,20 +383,23 @@ func foldImplementingStory(ctx context.Context, root, commit string, storySpec *
 // its ref instead of silently vanishing from the row it used to occupy —
 // legible without consulting a `superseded-by` backlink (03 §rung 3), with
 // no change to the eligibility math computed above.
-func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededByAC map[string][]string, preview bool, mdl *model.Model) {
+func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, effectiveStatus artifact.Status, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededByAC map[string][]string, preview bool, mdl *model.Model) {
 	// L-M13(1) classification: the "feature:"/"status:" line KEYS and the
 	// trailing feature.violated/stub_reconciliation.blocked lines are
 	// verdict/field KEYS — identity, bare. State/class words spoken as
 	// VALUES or table prose below resolve through mdl (nil-safe).
 	fmt.Fprintf(w, "feature: %s\n", result.SpecRef)
-	// ac-2 (feature-supersession-state): the feature's own frontmatter
-	// `status`, printed unconditionally so a superseded FEATURE's terminal
-	// state is legible on this surface directly — the feature-rung mirror of
-	// printMatrix's own status line, satisfying ac-2's "every surface ... at
-	// both the story and feature rungs" (03 §rung 3, "without consulting
-	// backlinks") for a feature you point `verdi matrix` at, not only for a
-	// superseded story rendered inside a feature's fold.
-	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(string(spec.Class), string(spec.Status)))
+	// ac-2 (feature-supersession-state), as amended by final fix wave I2:
+	// the feature's EFFECTIVE lifecycle state (the caller's one
+	// effectiveMatrixStatus resolution — the raw persisted field is
+	// legitimately BLANK on a statusless, merge-accepted feature), printed
+	// unconditionally so a superseded FEATURE's terminal state is legible
+	// on this surface directly — the feature-rung mirror of printMatrix's
+	// own status line, satisfying ac-2's "every surface ... at both the
+	// story and feature rungs" (03 §rung 3, "without consulting
+	// backlinks") for a feature you point `verdi matrix` at, not only for
+	// a superseded story rendered inside a feature's fold.
+	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(string(spec.Class), string(effectiveStatus)))
 	if preview {
 		// The SAME constructor the story rung and the workbench matrix page
 		// use (disclosure.AdvisoryPreview), rendered through the same seam —

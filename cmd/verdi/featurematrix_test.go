@@ -216,8 +216,15 @@ func TestCmdMatrix_FeatureRef_Golden(t *testing.T) {
 		t.Fatalf("cmdMatrix exit = %d, want 0; stderr=%q", got, stderr.String())
 	}
 
+	// The status line speaks the EFFECTIVE state (final fix wave I2): the
+	// v2 fixture files are copied to disk UNCOMMITTED on purpose (see the
+	// CI_DEFAULT_BRANCH note above), so the projector honestly resolves
+	// Proposed — displayed in the legacy vocabulary as "draft" — even
+	// though the raw persisted field CLAIMS accepted-pending-build. The
+	// raw field lying about acceptance is exactly what effective-state
+	// printing exists to stop.
 	want := `feature: spec/escrow-autopay
-status: accepted-pending-build
+status: draft
 
 AC    STATUS     EVIDENCE             IMPLEMENTING STORIES         TEXT
 ac-1  no-signal  attestation:present  -                            an autopay mandate is created against a submitted application's escrow account, tied to the payment method already on file
@@ -509,9 +516,13 @@ stub_reconciliation.blocked: true
 // keep it a focused rendering unit test: the only claim is the status line.
 func TestPrintFeatureMatrix_SupersededFeatureStatusLine(t *testing.T) {
 	var buf bytes.Buffer
-	spec := &artifact.SpecFrontmatter{Status: artifact.Status("superseded")}
+	// The status the caller resolved (I2: effectiveMatrixStatus — a landed
+	// legacy `status: superseded` projects Superseded via the projector's
+	// compatibility reading, so the effective value here matches the raw
+	// one this test used to pass through the spec literal).
+	spec := &artifact.SpecFrontmatter{}
 	result := evidence.FeatureResult{SpecRef: "spec/legacy-feature"}
-	printFeatureMatrix(&buf, spec, result, evidence.StubReconciliation{}, nil, nil, false, nil)
+	printFeatureMatrix(&buf, spec, artifact.Status("superseded"), result, evidence.StubReconciliation{}, nil, nil, false, nil)
 
 	if !strings.Contains(buf.String(), "\nstatus: superseded\n") {
 		t.Fatalf("feature matrix must render the feature's own superseded status line; got:\n%s", buf.String())
