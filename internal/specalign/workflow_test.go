@@ -106,12 +106,25 @@ type workflowJob struct {
 }
 
 // workflowStep models one step of a job: either an `uses:` action reference
-// (optionally parameterized by `with:`) or a `run:` shell command.
+// (optionally parameterized by `with:`) or a `run:` shell command, plus Keys:
+// the step mapping's COMPLETE raw key set, sorted.
+//
+// Keys is the whitelist net one level below workflowJob.Keys, and it exists
+// because a clean job mapping is not enough: the SAME bypasses GitHub offers
+// at job level are offered again per step. `continue-on-error: true` on the
+// `make verify` step makes the job (and so the required context) green over a
+// failing gate; `if: false` (or any always-false expression) skips the step
+// while the job still succeeds; `env:`/`shell:`/`working-directory:` can each
+// change what the command actually executes. Asserting each step's key set is
+// a subset of a tiny per-shape whitelist — {uses, with, name} for an action
+// step, {run, name} for a command step — closes all of those and every future
+// sibling at once, exactly as the job-level net does.
 type workflowStep struct {
 	Name string
 	Uses string
 	With map[string]string
 	Run  string
+	Keys []string
 }
 
 // workflowDoc is the top-level shape of a GitHub Actions workflow file, as
@@ -321,6 +334,7 @@ func decodeStep(v interface{}) workflowStep {
 		return workflowStep{}
 	}
 	var step workflowStep
+	step.Keys = sortedKeys(m)
 	if name, ok := asStringVal(m["name"]); ok {
 		step.Name = name
 	}
@@ -363,6 +377,56 @@ func findRunStep(steps []workflowStep, substr string) *workflowStep {
 		}
 	}
 	return nil
+}
+
+// findExactRunSteps returns the index of every step whose Run, trimmed of
+// surrounding whitespace, EQUALS cmd.
+//
+// Exact equality, not findRunStep's substring containment, is the point: a
+// substring match accepts `make verify || true`, `make verify &`, `#make
+// verify`, or `make verify --dry-run` as proof that the gate runs, when each
+// of those lets the step (and the required context) succeed without the gate
+// having passed. Whitespace is trimmed because a YAML block scalar (`run: |`)
+// carries a trailing newline the author never typed; nothing inside the
+// command is normalized.
+//
+// Returns every match, not the first, so callers can also refuse a duplicate:
+// two `make verify` steps would make "which one is the gate" ambiguous, and
+// the ordering assertions below have no meaning against an ambiguous index.
+func findExactRunSteps(steps []workflowStep, cmd string) []int {
+	var out []int
+	for i := range steps {
+		if strings.TrimSpace(steps[i].Run) == cmd {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// runCommands returns the trimmed command of every `run:` step, for failure
+// messages: when an exact-match lookup finds nothing, what the file actually
+// says is the one thing a reader needs.
+func runCommands(steps []workflowStep) []string {
+	var out []string
+	for i := range steps {
+		if cmd := strings.TrimSpace(steps[i].Run); cmd != "" {
+			out = append(out, cmd)
+		}
+	}
+	return out
+}
+
+// keysOutside returns the members of keys not present in allowed, sorted —
+// i.e. exactly what a whitelist assertion should name in its failure message.
+func keysOutside(keys, allowed []string) []string {
+	var extra []string
+	for _, k := range keys {
+		if !slices.Contains(allowed, k) {
+			extra = append(extra, k)
+		}
+	}
+	slices.Sort(extra)
+	return extra
 }
 
 // findCacheStep returns the first actions/cache step whose `with: path:`
@@ -556,8 +620,16 @@ func jobKeys(jobs map[string]workflowJob) []string {
 // TestMergeGateStepsProvenSequence proves merge-gate.yml's steps are the
 // brief's required, proven sequence copied from verify.yml: checkout with
 // full history, pinned Go/Node/golangci-lint, `make verify`, build the
-// binary, and self-lint it. Table-driven per assertion so a regression in
-// any one step names exactly which.
+// binary, and self-lint it. One subtest per assertion so a regression in any
+// one step names exactly which.
+//
+// The setup steps (checkout/setup-go/setup-node/golangci-lint) are asserted
+// loosely — by `uses:` prefix, by `with:` value, by substring for the
+// legitimately multi-line linter install. The three gate commands are
+// asserted STRICTLY (exact text, order, finality) and every step's key set is
+// whitelisted, because those are the assertions a bypass has to get past:
+// a mis-pinned Go version makes the gate wrong, but `continue-on-error:
+// true`, `if: false`, or `make verify || true` makes it a lie.
 func TestMergeGateStepsProvenSequence(t *testing.T) {
 	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
 	job, ok := doc.Jobs["merge-gate"]
@@ -612,21 +684,81 @@ func TestMergeGateStepsProvenSequence(t *testing.T) {
 		}
 	})
 
-	t.Run("runs make verify", func(t *testing.T) {
-		if findRunStep(steps, "make verify") == nil {
-			t.Errorf("no run step invoking `make verify` found")
+	// The step-level whitelist net. TestMergeGateSingleUnnamedJob closes the
+	// job-level bypasses; this closes the identical family one level down,
+	// where they are just as fatal: `continue-on-error: true` on the `make
+	// verify` step reports the required context green over a failing gate,
+	// and `if: <anything false>` skips the gate while the job still
+	// succeeds. Both are pure key additions no assertion about `run:` text
+	// could ever see, so the net — not a growing list of named negatives —
+	// is what catches them, along with `timeout-minutes`, `env`, `shell`,
+	// `working-directory`, `id`, and whatever GitHub adds next.
+	//
+	// Whitelisted by SHAPE: an action step may carry {uses, with, name}, a
+	// command step {run, name}. Widening either set is a deliberate act that
+	// must be argued for right here.
+	t.Run("every step carries only whitelisted keys", func(t *testing.T) {
+		usesAllowed := []string{"name", "uses", "with"}
+		runAllowed := []string{"name", "run"}
+		for i, step := range steps {
+			hasUses := slices.Contains(step.Keys, "uses")
+			hasRun := slices.Contains(step.Keys, "run")
+			switch {
+			case hasUses == hasRun:
+				t.Errorf("step %d (name %q): must carry exactly one of `uses:` or `run:`, got keys %v", i, step.Name, step.Keys)
+			case hasUses:
+				if extra := keysOutside(step.Keys, usesAllowed); len(extra) != 0 {
+					t.Errorf("step %d (uses %q): key(s) %v are not whitelisted — an action step may declare only %v (if/continue-on-error/env/shell/working-directory/timeout-minutes can each make the required %q context skip, go green over a failure, or run something other than the gate)", i, step.Uses, extra, usesAllowed, "merge-gate")
+				}
+			case hasRun:
+				if extra := keysOutside(step.Keys, runAllowed); len(extra) != 0 {
+					t.Errorf("step %d (run %q): key(s) %v are not whitelisted — a command step may declare only %v (if/continue-on-error/env/shell/working-directory/timeout-minutes can each make the required %q context skip, go green over a failure, or run something other than the gate)", i, strings.TrimSpace(step.Run), extra, runAllowed, "merge-gate")
+				}
+			}
 		}
 	})
 
-	t.Run("builds the verdi binary", func(t *testing.T) {
-		if findRunStep(steps, "go build -o .build/verdi ./cmd/verdi") == nil {
-			t.Errorf("no run step invoking `go build -o .build/verdi ./cmd/verdi` found")
+	// The three commands that ARE the gate, asserted by exact equality and
+	// in order, occupying the job's last three steps.
+	//
+	// Exact equality (not substring containment) is what refuses `make
+	// verify || true` — a one-token edit that keeps every substring
+	// assertion green while guaranteeing the step exits 0 whatever the gate
+	// says. Order and finality matter too: the self-lint must run the binary
+	// this commit just built, the build must follow a gate that already
+	// passed, and nothing may run after the lint (a later step is another
+	// place for a bypass to hide, and the brief's proven sequence ends
+	// here). Together with the whitelist above, the tail of this job is
+	// pinned to exactly three unconditional, un-suffixed commands.
+	t.Run("the gate commands are exact, ordered, and final", func(t *testing.T) {
+		want := []string{
+			"make verify",
+			"go build -o .build/verdi ./cmd/verdi",
+			"./.build/verdi lint",
 		}
-	})
 
-	t.Run("runs the built binary's lint verb", func(t *testing.T) {
-		if findRunStep(steps, "./.build/verdi lint") == nil {
-			t.Errorf("no run step invoking `./.build/verdi lint` found")
+		idx := make([]int, len(want))
+		for i, cmd := range want {
+			matches := findExactRunSteps(steps, cmd)
+			if len(matches) != 1 {
+				t.Fatalf("expected exactly one run step whose command is exactly %q, found %d (substring lookalikes such as `%s || true` do NOT count — the gate must be unconditional); decoded run steps: %v", cmd, len(matches), cmd, runCommands(steps))
+			}
+			idx[i] = matches[0]
+		}
+
+		for i := 1; i < len(idx); i++ {
+			if idx[i-1] >= idx[i] {
+				t.Errorf("run step %q (index %d) must come strictly before %q (index %d)", want[i-1], idx[i-1], want[i], idx[i])
+			}
+		}
+
+		if len(steps) < len(want) {
+			t.Fatalf("job has %d steps, fewer than the %d required gate commands", len(steps), len(want))
+		}
+		for i, cmd := range want {
+			if got := len(steps) - len(want) + i; idx[i] != got {
+				t.Errorf("run step %q is at index %d, want %d — these three must be the FINAL steps of the job, in this order (nothing runs after the self-lint)", cmd, idx[i], got)
+			}
 		}
 	})
 
