@@ -1,0 +1,83 @@
+# Task 8 (spec/merge-signaled-acceptance): THE one stable pull-request gate.
+# The ratified merge-signals design's enforcement boundary — the single
+# required status check the branch ruleset points at (context
+# "merge-gate", once step 6 of that plan's rollout activates it; see the
+# plan's own task list — that activation is deliberately NOT this file's
+# job).
+#
+# Always-present by design, on purpose, with NO paths/branches filter:
+# spec-gate.yml's earlier head comment named the exact deadlock a
+# path-filtered required check creates — "a path-filtered required check
+# can never report on a PR outside its paths", which for a solo operator
+# who can't also satisfy a required-approval quorum is a hard deadlock, not
+# a corner case. verify.yml and spec-gate.yml are BOTH path-filtered (code
+# paths vs spec/doc paths respectively), which is exactly why neither of
+# them can be the required check: any PR touching neither path set would
+# never get a check to satisfy, and a PR touching only one path set would
+# leave the other's context permanently missing/pending. This workflow
+# fixes that by running on every single pull_request, unconditionally — no
+# changed-file classifier, no third-party path-filter action, no
+# conditional job, no `if:` skip logic, no concurrency-cancellation
+# cleverness. Any of those could make the required context disappear or
+# turn ambiguous for some PR shape; the whole point of this file is to be
+# the one context that is NEVER ambiguous about whether it will report.
+#
+# Steps below are copied from verify.yml's own proven sequence (job name
+# convention included: workflow name `merge-gate`, job key `merge-gate`,
+# no job-level `name:` override, so the check context GitHub reports is
+# exactly "merge-gate" — the same pattern verify.yml itself uses). This is
+# deliberately the full gate (`make verify` + a self-lint of the built
+# binary), not a lighter subset, so the required check actually proves what
+# it claims to prove for every PR shape, code or spec/doc alike.
+#
+# Evidence production/upload is deliberately NOT copied here. That stays
+# verify.yml's push-only duty (see verify.yml's own head comment on why
+# evidence must be produced strictly after a make-verify run that already
+# gated the SAME commit on push, never a second independent PR-triggered
+# run of it) — this workflow exists to gate merges, not to produce or
+# upload the "verdi-evidence" artifact.
+name: merge-gate
+
+on:
+  pull_request: {}
+
+jobs:
+  merge-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # Caches ~/.npm keyed on e2e/package-lock.json — actions/setup-node's
+          # built-in npm cache, cheaper than hand-rolling actions/cache for
+          # the same thing. Does NOT cache the downloaded Playwright browser
+          # binaries themselves (~/.cache/ms-playwright); add an
+          # actions/cache step keyed on e2e/package-lock.json's hash over
+          # that path if `npx playwright install` becomes a measurable chunk
+          # of CI time — skipped for now since this is the wave-7 wiring
+          # pass, not a CI-performance pass.
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      # golangci-lint gate: cache then install the pinned linter (must match
+      # Makefile's GOLANGCI_LINT_VERSION) so `make verify`'s lint step runs
+      # the real linter. The cache key pins the version, so a hit restores the
+      # exact binary and the install is a no-op; a miss builds it once.
+      - name: Cache golangci-lint
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: golangci-lint-${{ runner.os }}-v2.5.0
+      - name: Install golangci-lint (pinned)
+        run: |
+          test -x "$(go env GOPATH)/bin/golangci-lint" || \
+            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - run: make verify
+      - run: go build -o .build/verdi ./cmd/verdi
+      - run: ./.build/verdi lint

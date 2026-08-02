@@ -7,9 +7,12 @@
 # (no CI environment), which is enough to prove the binary and the store
 # both lint clean. Running it again here, in the real GitHub Actions
 # environment, additionally exercises I-14's CI-context lint baselines
-# (VL-004's default-branch gate, VL-010's diff base) against a real
-# GITHUB_BASE_REF value on pull_request events, which a local run has no
-# way to supply.
+# (VL-004's default-branch gate, VL-010's diff base) in a real GitHub
+# Actions environment. Task 8 (spec/merge-signaled-acceptance) removed this
+# job's own `pull_request` trigger — it is push-only now — so exercising
+# those baselines against a real GITHUB_BASE_REF value on pull_request
+# events is merge-gate.yml's job, not this one's; this job still runs the
+# same step on push for parity/evidence purposes even without a base ref.
 #
 # Wave 7: `make verify` now ends with `make e2e` (Playwright), which is a
 # HARD FAILURE without Node — CLAUDE.md's testing regime made e2e a merge
@@ -25,9 +28,17 @@
 # Makefile's GOLANGCI_LINT_VERSION.
 #
 # Phase 4 (spec-only vs code CI differentiation): path-filtered to code
-# paths only — a spec/doc-only PR touches none of these and gets
-# spec-gate.yml's fast check instead, never full `make verify`; a PR
-# touching both gets both workflows, since this filter still matches.
+# paths only. Originally this filter routed PRs too (a spec/doc-only PR got
+# spec-gate.yml's fast check instead, a code PR got this one, a PR touching
+# both got both workflows). Task 8 (spec/merge-signaled-acceptance) removed
+# this job's `pull_request` trigger entirely: PRs are now gated exclusively
+# by merge-gate.yml, which runs unconditionally on every PR with no path
+# filter at all (a path-filtered required check can never report on a PR
+# outside its paths — see merge-gate.yml's own head comment). This filter
+# now governs push-only evidence routing: a push touching only these code
+# paths triggers this job's full `make verify` + evidence-bundle production;
+# a push touching only spec/doc paths gets spec-gate.yml's push-side check
+# instead.
 #
 # Round 6 (spec/close-verb ac-3, dc-1): this job now ALSO does what the
 # formerly-separate verdi-evidence.yml workflow did (produce + upload the
@@ -65,17 +76,6 @@ name: verify
 
 on:
   push:
-    paths:
-      - "**.go"
-      - "go.mod"
-      - "go.sum"
-      - "Makefile"
-      - "e2e/**"
-      - ".github/workflows/**"
-      - "testdata/**"
-      - "scripts/**"
-      - "verdi.bindings.yaml"
-  pull_request:
     paths:
       - "**.go"
       - "go.mod"
