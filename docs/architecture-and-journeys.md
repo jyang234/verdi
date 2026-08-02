@@ -38,18 +38,23 @@ real: CI's `verdi sync --produce` stamps its bundle `source: ci` and uploads it 
 the `verdi-evidence` artifact; a local run stamps `source: local` and only ever
 previews (D6-10). Gates and the closure ritual fold **authoritative** (`source: ci`)
 records only. The upstream analysis toolchain (flowmap/groundwork) is executed as
-pinned CLIs and its JSON strictly decoded — never linked as a library. Four
-workflows carry it: `verify.yml` (the full gate on code paths, then evidence
-production), `spec-gate.yml` (the fast lint/readiness gate on spec- and doc-only
-changes, so no PR is ever silently ungated), `pages.yml` (the dex, published on
-every push to main), and `runtime-probe.yml` (the scheduled runtime-evidence probe).
+pinned CLIs and its JSON strictly decoded — never linked as a library. Five
+workflows carry it: `merge-gate.yml` (the one required pull-request check — the
+full gate, unconditionally, on every PR), `verify.yml` (the same full gate on
+pushes touching code paths, then evidence production), `spec-gate.yml` (the fast
+lint/readiness check on pushes touching spec- and doc-only paths), `pages.yml`
+(the dex, published on every push to main), and `runtime-probe.yml` (the
+scheduled runtime-evidence probe). Only `merge-gate.yml` sees pull requests, and
+it carries no path, branch, or type filter: a path-filtered required check can
+never report on a PR outside its paths, so no PR can be silently ungated and none
+can deadlock waiting for a context that will never arrive.
 
 ```mermaid
 flowchart TD
     subgraph actors [" "]
         DEV["Designer / Developer"]
         AGENT["Coding agent"]
-        CI["CI — verify · spec-gate<br/>pages · runtime-probe"]
+        CI["CI — merge-gate (every PR)<br/>verify · spec-gate (push)<br/>pages · runtime-probe"]
         READER["Reader"]
         PM["PM"]
     end
@@ -232,11 +237,18 @@ attributes the load-bearing ones to the component that embodies them.
 1. **`verdi build start <story-spec>`** (R4-I-6; `feature start` survives one
    release as an alias) refuses a non-accepted spec, refuses a superseded story
    naming its successor, and refuses unresolved rung-4 cascade flags.
-2. **Implement.** On every push, `verify.yml` runs the full `make verify`, then —
-   in the same job, strictly after it passes — `verdi sync --produce` assembles
+2. **Implement.** On every pull request — no path filter, no exceptions —
+   `merge-gate.yml` runs the full `make verify`, builds the binary, and
+   self-lints the store. That single check, context `merge-gate`, is the one the
+   branch ruleset requires, so no PR is ever silently ungated and none waits on a
+   context that will never report. On pushes the work splits by path: a push
+   touching code paths runs `verify.yml` — the same full `make verify`, then, in
+   the same job and strictly after it passes, `verdi sync --produce` assembles
    the evidence bundle stamped `source: ci` and uploads it as the
-   `verdi-evidence` artifact. Spec- and doc-only changes ride `spec-gate.yml`
-   instead (build + lint + spec-align), so no PR is ever silently ungated.
+   `verdi-evidence` artifact — while a push touching only spec/doc paths rides
+   `spec-gate.yml`'s fast check (build + lint + spec-align). Evidence production
+   stays push-only on purpose: it must follow a `make verify` that already gated
+   the same commit, never a second independent run.
 3. **`verdi sync`** pulls the per-(git-ref, commit) bundle into `derived/`,
    preserving its per-spec keys so the fold can actually read it (D6-9);
    `--or-regen` rebuilds locally as advisory (`source: local`) when no pipeline
@@ -355,10 +367,12 @@ attributes the load-bearing ones to the component that embodies them.
 3. **Copy-reference** yields the pinned form (`adr/0012@3e91ab2`) for context
    manifests and board pins; search and the what-changed feed close the loop.
 
-> **Always on, underneath:** every MR runs its gate — `verify.yml` on code paths
-> (build, vet, lint, race tests, fixture ratchets, store self-lint, spec-align,
-> Playwright e2e — 182 tests), `spec-gate.yml` on spec/doc-only paths — and
-> `verdi lint` covers VL-001…VL-022. Still deliberately absent, honestly
+> **Always on, underneath:** every MR runs the same one gate — `merge-gate.yml`,
+> unconditional on every pull request (build, vet, lint, race tests, fixture
+> ratchets, store self-lint, spec-align, Playwright e2e — 182 tests), the single
+> required check. Pushes keep their own split: `verify.yml` on code paths (that
+> same full gate, plus the evidence bundle), `spec-gate.yml` on spec/doc-only
+> paths — and `verdi lint` covers VL-001…VL-022. Still deliberately absent, honestly
 > declining at the CLI: `waivers` audit, `verify-artifact`, and the portfolio
 > lens. `close`, `gc`, and `audit` — deferred in v0 — are real now.
 
@@ -428,9 +442,10 @@ flowchart LR
 ## 5. The lifecycle, end to end
 
 Diamonds are gates that can refuse: `build start` refuses non-accepted and
-superseded specs, the spec MR is guarded by lint and `spec-gate.yml`, `verdi gate`
-holds implementation MRs to four conditions, and the closure gate holds `verdi
-close` to authoritative evidence and governance conditions. Closure is
+superseded specs, the spec MR is guarded by lint and `merge-gate.yml` — the one
+required check, which every MR gets whether it touches specs, code, or both —
+`verdi gate` holds implementation MRs to four conditions, and the closure gate
+holds `verdi close` to authoritative evidence and governance conditions. Closure is
 deliberately resumable rather than automatic: preparation stops for human
 judgment and repeats whenever repository state advances.
 
@@ -441,19 +456,20 @@ flowchart LR
         WALL["the wall<br/><i>projection: board edits are<br/>spec edits · receipts ambient</i>"]
         OBLIG["verdi obligation scaffold<br/><i>pre-review, idempotent ·<br/>never authority</i>"]
         ACCEPT["verdi accept<br/><i>retired: notice only ·<br/>merging the spec MR IS acceptance</i>"]
-        SPECMR{"spec MR<br/>VL-001…022 · spec-gate.yml"}
+        SPECMR{"spec MR<br/>VL-001…022 · merge-gate.yml"}
         DS --> WALL --> OBLIG --> ACCEPT --> SPECMR
     end
 
     subgraph build ["2 · BUILD"]
         BS{"verdi build start<br/><i>refuses non-accepted,<br/>superseded, cascade-stale</i>"}
         IMPL["implement<br/><i>code + tests</i>"]
-        EVJOB["CI verify.yml<br/><i>make verify → sync --produce →<br/>verdi-evidence, source: ci</i>"]
+        EVJOB["CI verify.yml (push, code paths)<br/><i>make verify → sync --produce →<br/>verdi-evidence, source: ci</i>"]
         SYNC["verdi sync<br/><i>bundle → derived/</i>"]
         MATRIX["verdi matrix<br/><i>the fold + stub table</i>"]
         ALIGN["verdi align<br/><i>computed + diagram alignment<br/>+ judged</i>"]
         GATE{"verdi gate<br/>4 conditions"}
-        BS --> IMPL --> EVJOB --> SYNC --> MATRIX --> ALIGN --> GATE
+        PRGATE{"merge-gate.yml<br/><i>the one required check ·<br/>every PR, no path filter ·<br/>full make verify + self-lint</i>"}
+        BS --> IMPL --> EVJOB --> SYNC --> MATRIX --> ALIGN --> GATE --> PRGATE
     end
 
     subgraph ship ["3 · SHIP & CLOSE"]
@@ -479,7 +495,7 @@ flowchart LR
     end
 
     SPECMR -- "merge = acceptance" --> BS
-    GATE -- pass --> MERGE
+    PRGATE -- pass --> MERGE
 ```
 
 **Fold-status legend** (the per-AC verdicts `matrix`, `rollup`, the gate, and the
