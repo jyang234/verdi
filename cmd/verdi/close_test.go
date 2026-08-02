@@ -72,6 +72,11 @@ bindings:
 // not-eligible paths can share this one builder.
 func buildCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
+	// The C1 pre-closure precondition resolves the target's effective state
+	// through the real, git-backed specstate projector; this fixturegit repo
+	// has no origin remote, so the default branch is pinned here exactly as
+	// buildCloseFeatureRepo already documents for its own fixtures.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: github\n",
