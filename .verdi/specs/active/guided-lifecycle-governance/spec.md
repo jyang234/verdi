@@ -4,7 +4,6 @@ kind: spec
 title: "Guided Lifecycle and Governance"
 owners: [platform-team]
 class: feature
-status: draft
 problem:
   text: "Verdi's deterministic lifecycle is coherent for trained operators but not self-orienting for first-time or occasional users: state, blockers, authority, ownership, safe next actions, evidence quality, human-record governance, and partial-operation recovery remain fragmented across commands, Git state, forge state, reports, and conventions that users must mentally orchestrate."
   anchor: problem

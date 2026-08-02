@@ -4,7 +4,6 @@ kind: spec
 title: "Context Integrity and Constitutional Execution"
 owners: [platform-team]
 class: feature
-status: draft
 problem:
   text: "Verdi governs accepted design and evidence, but it cannot yet prove which project instructions, ambient harness configuration, memories, repository data, or capabilities shaped an agent run; project decisions remain prose without a canonical constitution or deterministic conflict boundary, so an apparently conformant build may be context-poisoned, irreproducible, or faithful to hidden instructions instead of the accepted specification."
   anchor: problem
