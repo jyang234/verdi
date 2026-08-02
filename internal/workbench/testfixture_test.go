@@ -15,12 +15,46 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
+// ciEnvVars is every variable internal/lint's ReadCIEnv consults:
+// GitLab's CI_DEFAULT_BRANCH/CI_MERGE_REQUEST_TARGET_BRANCH_NAME, GitHub
+// Actions' GITHUB_BASE_REF, and each forge's own "am I in CI" marker.
+var ciEnvVars = []string{
+	"CI",
+	"GITHUB_ACTIONS",
+	"GITHUB_BASE_REF",
+	"CI_DEFAULT_BRANCH",
+	"CI_MERGE_REQUEST_TARGET_BRANCH_NAME",
+}
+
+// neutralizeCIEnv clears ciEnvVars for the duration of the test, so a
+// fixture's default-branch/lifecycle resolution answers to the fixture
+// store alone and never to ambient runner state. Without it a GitHub
+// Actions pull_request job (CI=true, GITHUB_ACTIONS=true,
+// GITHUB_BASE_REF=main) leaks into every fixture built here: the fixture
+// has no origin and so no resolvable default branch, and VL-004 then
+// correctly discloses "this run targets \"main\" in CI, but no default
+// branch could be resolved" — a true claim about the runner, not about
+// the fixture, which the disclosures view faithfully renders. t.Setenv
+// makes callers non-parallel; this suite uses no t.Parallel and must keep
+// it that way.
+func neutralizeCIEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range ciEnvVars {
+		t.Setenv(key, "")
+	}
+}
+
 // setDefaultBranchSymref points refs/remotes/origin/HEAD at origin/main so
 // the default branch is PROVABLE in a fixture repo (specstate's resolution
 // and gitx.DefaultBranch both read this symref) — the same helper
-// internal/refindex's and internal/residue's fixtures carry.
+// internal/refindex's and internal/residue's fixtures carry. It also
+// neutralizes the CI environment: CI_DEFAULT_BRANCH outranks the symref,
+// so a runner declaring a different default (a GitLab job on a "master"
+// repo, say) would silently override the very fact this helper exists to
+// establish and flip every authoring fixture to read-only.
 func setDefaultBranchSymref(t *testing.T, dir string) {
 	t.Helper()
+	neutralizeCIEnv(t)
 	cmd := exec.Command("git", "-C", dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("setting origin/HEAD symref: %v\n%s", err, out)
@@ -61,7 +95,7 @@ func commitFilesOnBranch(t *testing.T, dir, branch string, files map[string]stri
 func buildAuthoringFixture(t *testing.T, branch string, mainFiles, draftFiles map[string]string) string {
 	t.Helper()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: mainFiles, Message: "seed fixture (main)"}})
-	setDefaultBranchSymref(t, repo.Dir)
+	setDefaultBranchSymref(t, repo.Dir) // also neutralizes the CI environment
 	commitFilesOnBranch(t, repo.Dir, branch, draftFiles)
 	return repo.Dir
 }
@@ -132,6 +166,7 @@ func parseCorpusLayers(t *testing.T) (order []int, files map[int][]string) {
 // .verdi/, matching 01 §Directory layout.
 func buildWorkbenchFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
+	neutralizeCIEnv(t)
 	order, files := parseCorpusLayers(t)
 
 	var layers []fixturegit.Layer

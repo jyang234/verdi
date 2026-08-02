@@ -14,9 +14,13 @@ import (
 // disclosuresFixtureStore writes a minimal bare store (no mutable zone)
 // with one new-class spec, so the lint engine's VL-017 disclosed-unproven
 // notice is a live, real disclosure for the enumeration to find — the
-// same fixture shape internal/disclosureview's own tests pin.
+// same fixture shape internal/disclosureview's own tests pin. The store
+// has no git origin, so the CI environment is neutralized here too: the
+// enumeration under test must see only this store's own disclosures, not
+// a VL-004 CI-targeting notice inherited from the runner.
 func disclosuresFixtureStore(t *testing.T) string {
 	t.Helper()
+	neutralizeCIEnv(t)
 	root := t.TempDir()
 	specDir := filepath.Join(root, ".verdi", "specs", "active", "panel-fixture")
 	if err := os.MkdirAll(specDir, 0o755); err != nil {

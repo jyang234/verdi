@@ -1389,6 +1389,11 @@ func TestBoard_NoForge_Silent(t *testing.T) {
 // contradictory second story ("assuming main" while everything renders
 // read-only anyway) must be gone.
 func TestBoard_DefaultBranchUnresolved_HonestStoryAndRemedy(t *testing.T) {
+	// "No CI_DEFAULT_BRANCH" is half this test's premise, so establish it
+	// rather than inherit it: a runner that exports CI_DEFAULT_BRANCH
+	// would otherwise make the default branch resolvable and dissolve the
+	// case under test.
+	neutralizeCIEnv(t)
 	// The pre-symref fixture shape on purpose: draft committed on main,
 	// design branch cut, origin/HEAD never configured.
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
