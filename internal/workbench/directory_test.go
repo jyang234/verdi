@@ -243,6 +243,120 @@ func TestRenderHome_DisclosedEntry_IsNoticeNotLink(t *testing.T) {
 	}
 }
 
+// TestRenderHome_UnprovenDefaultEntry_KeepsIdentityAndLinks (Task 6 fix
+// round 2, finding 1): an UNPROVEN default-branch entry — Source default,
+// SpecStatus "unproven", Disclosed non-nil (refindex's unproven-spec-state
+// shape) — keeps its whole identity: title, corpus link, an "unproven"
+// status treatment, its disclosure text, and its (read-only) board link.
+// It must never collapse into the bare "design branch with no draft spec"
+// notice shape, which strips every affordance off the row — and, since
+// one malformed corpus spec makes EVERY default entry unproven, off the
+// whole directory at once.
+func TestRenderHome_UnprovenDefaultEntry_KeepsIdentityAndLinks(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "murky-scope", "feature", "draft", "jira:X-9")
+	d := disclosure.New("refindex:unproven-spec-state", "spec/murky-scope",
+		"specstate: no default branch could be resolved for the store")
+	entries := []refindex.Entry{{
+		Ref:         "spec/murky-scope",
+		Source:      refindex.SourceDefault,
+		StatusGroup: refindex.StatusGroupDraftsInProgress,
+		SpecStatus:  "unproven",
+		Disclosed:   &d,
+		Zone:        refindex.ZoneActive,
+	}}
+	_, body := getHome(t, root, HomeDeps{Index: cannedIndex(entries, nil), Git: fakeHomeGit{}})
+
+	block := entryBlock(t, body, "murky-scope")
+	for _, want := range []string{
+		`href="/a/spec/murky-scope"`,                         // identity: the corpus link…
+		"Title of murky-scope",                               // …and the working-tree title
+		`<span class="badge badge-unproven">unproven</span>`, // honest status treatment
+		`href="/board/spec/murky-scope"`,                     // the read-only board still serves
+		"disclosed-unproven",                                 // the disclosure, in the shared vocabulary
+		"no default branch could be resolved",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("unproven default entry missing %q; got: %s", want, block)
+		}
+	}
+	// And it must NOT be the no-draft-spec notice: that shape renders the
+	// bare ref with no anchor at all.
+	if !strings.Contains(block, "<a ") {
+		t.Errorf("unproven default entry rendered as the bare notice shape (no links); got: %s", block)
+	}
+}
+
+// TestRenderHome_ActiveZoneLegacyTerminal_BadgeAndBoardLink (fix round 2,
+// finding 2): an ACTIVE-zone entry projecting a terminal state (the merged
+// projector's legacy-compatibility rows: exact+superseded → Superseded) is
+// a combination the directory has never seen before — it must render under
+// the Terminal group with its terminal badge AND its board link (the
+// active-zone working tree still serves the read-only board), never
+// misrender under an archive-zone assumption.
+func TestRenderHome_ActiveZoneLegacyTerminal_BadgeAndBoardLink(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "legacy-superseded", "feature", "superseded", "")
+	entries := []refindex.Entry{{
+		Ref:         "spec/legacy-superseded",
+		Source:      refindex.SourceDefault,
+		StatusGroup: refindex.StatusGroupTerminal,
+		SpecStatus:  "superseded",
+		Zone:        refindex.ZoneActive,
+	}}
+	_, body := getHome(t, root, HomeDeps{Index: cannedIndex(entries, nil), Git: fakeHomeGit{}})
+
+	block := entryBlock(t, body, "legacy-superseded")
+	for _, want := range []string{
+		`<span class="badge badge-superseded">superseded</span>`,
+		`href="/a/spec/legacy-superseded"`,
+		`href="/board/spec/legacy-superseded"`,
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("active-zone terminal entry missing %q; got: %s", want, block)
+		}
+	}
+	// Grouped under Terminal (the only entry, so ordering suffices).
+	if strings.Index(body, `data-testid="dir-group-terminal"`) > strings.Index(body, `data-testid="dir-entry-legacy-superseded"`) {
+		t.Errorf("active-zone terminal entry not rendered under the terminal group")
+	}
+}
+
+// TestRenderHome_ProvenTerminalEntry_CompatibilityNoteBesideBadge (final
+// fix wave I5): a PROVEN default-branch entry carrying the projector's
+// compatibility disclosure (refindex's spec-state-compatibility shape — a
+// legacy-terminal spec whose state was honored from the persisted field
+// alone) renders that disclosure BESIDE its badge and links, through the
+// same writeDefaultEntry path the unproven entry already uses — extended,
+// never forked.
+func TestRenderHome_ProvenTerminalEntry_CompatibilityNoteBesideBadge(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "legacy-closed-in-place", "feature", "closed", "")
+	d := disclosure.New("refindex:spec-state-compatibility", "spec/legacy-closed-in-place",
+		"specstate: legacy status: closed honored from the persisted field alone (compatibility reading)")
+	entries := []refindex.Entry{{
+		Ref:         "spec/legacy-closed-in-place",
+		Source:      refindex.SourceDefault,
+		StatusGroup: refindex.StatusGroupTerminal,
+		SpecStatus:  "closed",
+		Disclosed:   &d,
+		Zone:        refindex.ZoneActive,
+	}}
+	_, body := getHome(t, root, HomeDeps{Index: cannedIndex(entries, nil), Git: fakeHomeGit{}})
+
+	block := entryBlock(t, body, "legacy-closed-in-place")
+	for _, want := range []string{
+		`<span class="badge badge-closed">closed</span>`, // the proven badge…
+		`class="dir-disclosed"`,                          // …with the compatibility note beside it
+		"compatibility reading",
+		`href="/a/spec/legacy-closed-in-place"`, // full identity kept
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("proven terminal entry missing %q; got: %s", want, block)
+		}
+	}
+}
+
 // TestRenderHome_InReviewChip is ac-2's chip half: the branch the forge
 // reports an open MR for — and only that one — is chipped in review, and
 // the second source is disclosed on the page.

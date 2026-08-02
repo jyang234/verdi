@@ -84,8 +84,13 @@ func (h HomeDeps) resolve(root string) HomeDeps {
 	}
 	if h.Index == nil {
 		git := h.Git
+		// The effective-state resolver rides beside the ref plumbing: the
+		// production seam over specstate.NewProjector, constructed HERE (the
+		// I/O layer) and passed in — refindex batches its ResolveMany calls
+		// internally, so the directory never triggers a per-entry corpus scan.
+		resolver := refindex.NewStateResolver()
 		h.Index = func(ctx context.Context) ([]refindex.Entry, error) {
-			return refindex.ComputeIndex(ctx, root, git)
+			return refindex.ComputeIndex(ctx, root, git, resolver)
 		}
 	}
 	if h.Model == nil {
@@ -241,9 +246,22 @@ func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inRev
 	buf.WriteString(`">`)
 
 	switch {
+	// A DEFAULT-BRANCH entry keeps its full identity even when its
+	// effective lifecycle state is unproven (Task 6 fix round 2, finding
+	// 1): content DOES exist at this entry's ref — title, corpus link, an
+	// honest unproven status treatment, and the read-only board link all
+	// still hold — so a Disclosure here rides BESIDE the ordinary render
+	// (writeDefaultEntry appends it), never replaces it. Collapsing it
+	// into the bare notice shape below would strip every affordance off
+	// the row — and one malformed corpus spec makes EVERY default entry
+	// unproven at once.
+	case e.Source == refindex.SourceDefault:
+		writeDefaultEntry(buf, root, e, name, mdl)
+
 	case e.Disclosed != nil:
 		// ac-3: a design branch with no draft spec is a notice entry — it
-		// names the branch and states the absence, and carries no link.
+		// names the branch and states the absence, and carries no link
+		// (there is genuinely no content to title or address).
 		buf.WriteString(`<span class="dir-ref">`)
 		buf.WriteString(stdhtml.EscapeString(e.Ref))
 		buf.WriteString(`</span> `)
@@ -251,9 +269,6 @@ func writeDirectoryEntry(buf *bytes.Buffer, root string, e refindex.Entry, inRev
 		buf.WriteString(` <span class="dir-disclosed">`)
 		buf.WriteString(stdhtml.EscapeString(disclosure.Render(*e.Disclosed)))
 		buf.WriteString(`</span>`)
-
-	case e.Source == refindex.SourceDefault:
-		writeDefaultEntry(buf, root, e, name, mdl)
 
 	default:
 		writeDesignEntry(buf, e, name, inReview, mdl)
@@ -299,6 +314,15 @@ func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name st
 			buf.WriteString(stdhtml.EscapeString(verdictHref(story)))
 			buf.WriteString(`">verdict</a>`)
 		}
+	}
+
+	if e.Disclosed != nil {
+		// An unproven default-branch entry's disclosure rides beside the
+		// full identity render, in the shared disclosure vocabulary —
+		// never a replacement for it (fix round 2, finding 1).
+		buf.WriteString(` <span class="dir-disclosed">`)
+		buf.WriteString(stdhtml.EscapeString(disclosure.Render(*e.Disclosed)))
+		buf.WriteString(`</span>`)
 	}
 }
 

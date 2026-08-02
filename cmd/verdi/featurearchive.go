@@ -9,65 +9,112 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
 // gatherArchivedRulings collects, for the feature featureName, the dispositioned
-// judged rulings of its CLOSED, non-superseded implementing stories' ARCHIVED
-// deviation reports (findings: + not-resurfaced:), each tagged with its source
-// archive ref — the cross-level reaffirmation source align.ReconcileJudged
-// consults (ledger L-N14 companion).
+// judged rulings of its CLOSED implementing stories' ARCHIVED deviation reports
+// (findings: + not-resurfaced:), each tagged with its source archive ref — the
+// cross-level reaffirmation source align.ReconcileJudged consults (ledger L-N14
+// companion).
 //
 // Scope matches the feature-close budget's own AdditionalSets exactly (the closed
 // implementing stories' archives), so a candidate's seated backing always has a
 // matching archive to collapse against in the union — never a budget inflation
 // from an unrelated archive. The filter is: an archived spec that declares an
-// `implements` edge into featureName AND is not superseded (L-N12 excludes a
-// superseded story's deviations from the budget, so its rulings must not become
-// carry candidates either). The archive zone holds only closed/superseded specs,
-// so this yields precisely the closed implementing stories.
+// `implements` edge into featureName AND whose Git-derived effective state
+// (internal/specstate, resolved for every archive-zone candidate in ONE
+// ResolveMany call rather than once per spec — Task 5) is CONFIRMED Closed. A
+// superseded predecessor is excluded structurally, not by an in-loop status
+// check (L-N12's original concern): specstate.Superseded applies only to an
+// ACTIVE-zone candidate reachable via a validated successor's supersedes edge
+// (resolve.go's resolveOne branches on zone BEFORE ever consulting the
+// successor corpus for an archive-zone path) — a spec this glob ever sees at
+// all already sits in the archive zone, so it can never resolve Superseded;
+// the old legacy `status: superseded` field on an archived spec, if one ever
+// existed, is no longer authority.
 //
-// Resilience: an archive whose spec.md is absent or does not decode, or that does
-// not implement this feature or is superseded, is not a confirmable implementing
-// story of featureName and is skipped — this advisory pre-fill never couples a
-// feature align to an unrelated archive's health. A CONFIRMED implementing story
-// whose deviation-report.md fails to DECODE is this feature's own concern and is
-// surfaced as an operational error (never silently treated as "no rulings").
-func gatherArchivedRulings(root, featureName string) ([]align.ArchivedRuling, error) {
+// Resilience: an archive whose spec.md is absent or does not decode, that
+// does not implement this feature, or whose effective state is proven
+// Proposed or Superseded (e.g. this archive-zone copy has not actually
+// landed, or diverges from what the default branch holds there) is not a
+// confirmable implementing story of featureName and is skipped — this
+// advisory pre-fill never couples a feature align to an unrelated archive's
+// health. A CONFIRMED implementing story whose deviation-report.md fails to
+// DECODE is this feature's own concern and is surfaced as an operational
+// error (never silently treated as "no rulings").
+//
+// Unproven is NEVER folded into "skip" (fix-round-1 finding 2): an
+// unresolvable default branch or an incomplete successor-corpus scan means
+// this candidate's closed-ness cannot honestly be decided at all, so
+// silently treating it the same as a proven Proposed/Superseded exclusion
+// would misclassify it — this refuses operationally instead, naming the
+// affected ref(s) and carrying the projector's own disclosures.
+func gatherArchivedRulings(ctx context.Context, root, featureName string, resolver specStateResolver) ([]align.ArchivedRuling, error) {
 	specPaths, err := filepath.Glob(store.ArchiveSpecPath(root, "*"))
 	if err != nil {
 		return nil, fmt.Errorf("align: gathering archived rulings: %w", err)
 	}
-	var out []align.ArchivedRuling
+	sort.Strings(specPaths) // deterministic candidate order feeding the batch resolve below
+
+	type archivedCandidate struct {
+		name string
+		spec *artifact.SpecFrontmatter
+	}
+	var implementing []archivedCandidate
+	var candidates []specstate.Candidate
 	for _, specPath := range specPaths {
-		spec := loadArchivedSpecIfDecodes(specPath)
+		content, spec := loadArchivedSpecIfDecodes(specPath)
 		if spec == nil {
 			continue
-		}
-		if spec.Status == artifact.Status("superseded") {
-			continue // L-N12: a superseded story's rulings are excluded from the budget
 		}
 		if len(evidence.ImplementsByFeature(spec.Links)[featureName]) == 0 {
 			continue // does not implement this feature
 		}
 		name := filepath.Base(filepath.Dir(specPath))
-		report, err := loadDeviationReportIfExists(store.DeviationReportPath(root, store.ZoneArchive, name))
+		implementing = append(implementing, archivedCandidate{name: name, spec: spec})
+		candidates = append(candidates, specstate.Candidate{Path: store.SpecRelPath(store.ZoneArchive, name), Content: content})
+	}
+
+	results, err := resolver.ResolveMany(ctx, root, candidates)
+	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+		return nil, fmt.Errorf("align: resolving Git-derived state for archived implementing stories of spec/%s: %w", featureName, err)
+	}
+
+	var out []align.ArchivedRuling
+	for i, ic := range implementing {
+		// fix-round-1 finding 2: an Unproven result must never be folded
+		// into the ordinary "not closed" skip path — it means closed-ness
+		// could not be decided at all, so this refuses operationally
+		// rather than silently misclassifying it.
+		if results[i].State == specstate.Unproven {
+			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+			return nil, fmt.Errorf("align: effective state for archived implementing story spec/%s cannot be proven: %s", ic.name, strings.Join(results[i].Disclosures, "; "))
+		}
+		if results[i].State != specstate.Closed {
+			continue // not confirmed closed via Git — see this function's resilience note
+		}
+		report, err := loadDeviationReportIfExists(store.DeviationReportPath(root, store.ZoneArchive, ic.name))
 		if err != nil {
 			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
-			return nil, fmt.Errorf("align: gathering archived rulings for implementing story spec/%s: %w", name, err)
+			return nil, fmt.Errorf("align: gathering archived rulings for implementing story spec/%s: %w", ic.name, err)
 		}
 		if report == nil {
 			continue // an implementing story that never produced a report
 		}
-		source := "spec/" + name
+		source := "spec/" + ic.name
 		for _, set := range [][]artifact.Finding{report.Findings, report.NotResurfaced} {
 			for _, f := range set {
 				if f.Kind == artifact.FindingJudged && f.Dispositioned() {
@@ -87,23 +134,25 @@ func gatherArchivedRulings(root, featureName string) ([]align.ArchivedRuling, er
 	return out, nil
 }
 
-// loadArchivedSpecIfDecodes reads and decodes an archived spec.md, returning nil
-// when it is absent or does not decode — this advisory cross-level pre-fill
-// (L-N14) skips an archive it cannot confirm as an implementing story rather than
-// coupling a feature align to an unrelated archive's health (see
-// gatherArchivedRulings' resilience note).
-func loadArchivedSpecIfDecodes(specPath string) *artifact.SpecFrontmatter {
+// loadArchivedSpecIfDecodes reads and decodes an archived spec.md, returning
+// its raw bytes alongside the decoded frontmatter (the exact content a
+// specstate.Candidate needs), or (nil, nil) when it is absent or does not
+// decode — this advisory cross-level pre-fill (L-N14) skips an archive it
+// cannot confirm as an implementing story rather than coupling a feature
+// align to an unrelated archive's health (see gatherArchivedRulings'
+// resilience note).
+func loadArchivedSpecIfDecodes(specPath string) ([]byte, *artifact.SpecFrontmatter) {
 	data, err := os.ReadFile(specPath)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	fm, _, err := artifact.SplitFrontmatter(data)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	spec, err := artifact.DecodeSpec(fm)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return spec
+	return data, spec
 }

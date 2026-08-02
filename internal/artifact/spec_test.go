@@ -414,6 +414,71 @@ func TestDecodeSpec_Story_Happy(t *testing.T) {
 	}
 }
 
+// --- status optional on feature/story (merge-signaled acceptance design,
+// docs/superpowers/specs/2026-08-01-merge-signals-spec-acceptance-
+// design.md, "Artifact compatibility") ---
+
+// TestDecodeSpec_StatusOptional_Feature proves a feature spec with no
+// status: line at all decodes cleanly and Status reads as the empty
+// string — the exact shape a fresh, Git-derived proposal now scaffolds.
+func TestDecodeSpec_StatusOptional_Feature(t *testing.T) {
+	fm, err := DecodeSpec([]byte("id: spec/payments\nkind: spec\nclass: feature\ntitle: Payments\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n"))
+	if err != nil || fm.Status != "" {
+		t.Fatalf("statusless feature = (%+v, %v)", fm, err)
+	}
+}
+
+// TestDecodeSpec_StatusOptional_Story is the story-class positive
+// complement: no status: line, but every other story-required field
+// present (problem/outcome/story ref/an implements edge).
+func TestDecodeSpec_StatusOptional_Story(t *testing.T) {
+	const y = `
+id: spec/loan-update-api
+kind: spec
+class: story
+title: "Loan update API"
+owners: [platform-team]
+problem: { text: "the update API has no PUT route", anchor: "#problem" }
+outcome: { text: "PUT returns 200", anchor: "#outcome" }
+story: jira:LOAN-1482
+links:
+  - { type: implements, ref: "spec/loan-update#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "PUT returns 200", evidence: [static], anchor: "#ac-1" }
+`
+	fm, err := DecodeSpec([]byte(y))
+	if err != nil || fm.Status != "" {
+		t.Fatalf("statusless story = (%+v, %v)", fm, err)
+	}
+}
+
+// TestDecodeSpec_StatusOptional_Negative keeps the schema's other status
+// grammar exactly where it was: a COMPONENT spec still requires an
+// explicit status (never Git-derived — component specs are
+// authored-living, 01 §Temporal classes), an EXPLICIT unknown status on
+// any class still fails closed, and a legacy accepted/superseded/closed
+// feature or story without its required frozen stamp still fails —
+// status: draft's own omitempty tag change must never loosen any of
+// these.
+func TestDecodeSpec_StatusOptional_Negative(t *testing.T) {
+	cases := map[string]string{
+		"statusless component fails":                     "id: spec/foo\nkind: spec\nclass: component\ntitle: Foo\nowners: [x]\n",
+		"explicit unknown status on a feature fails":     "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: bogus\nowners: [x]\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\n",
+		"explicit unknown status on a component fails":   "id: spec/foo\nkind: spec\nclass: component\ntitle: Foo\nstatus: bogus\nowners: [x]\n",
+		"legacy accepted feature without frozen fails":   "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: accepted-pending-build\nowners: [x]\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\n",
+		"legacy closed feature without frozen fails":     "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: closed\nowners: [x]\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\n",
+		"legacy superseded feature without frozen fails": "id: spec/foo\nkind: spec\nclass: feature\ntitle: Foo\nstatus: superseded\nowners: [x]\nacceptance_criteria:\n  - { id: ac-1, text: a, evidence: [static] }\n",
+		"legacy accepted story without frozen fails":     "id: spec/foo\nkind: spec\nclass: story\ntitle: Foo\nstatus: accepted-pending-build\nowners: [x]\nproblem: { text: p, anchor: \"#problem\" }\noutcome: { text: o, anchor: \"#outcome\" }\nstory: jira:LOAN-1\nlinks:\n  - { type: implements, ref: \"spec/loan-update#ac-1\" }\n",
+	}
+	for name, y := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeSpec([]byte(y)); err == nil {
+				t.Fatalf("DecodeSpec(%s): want error, got nil", name)
+			}
+		})
+	}
+}
+
 // TestDecodeSpec_SupersededStatus proves round-5's terminal `superseded`
 // status (02 §Kind registry, as amended): valid on both the story and
 // feature classes, and — being a post-acceptance status — requiring the

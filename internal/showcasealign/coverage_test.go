@@ -196,6 +196,14 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// --reaffirm round-trips preserving the original log entry.
 	"cli:waive": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:spec (merge-signaled spec acceptance, Task 5): added alongside
+	// the new verb itself — TestCLIShowcaseSpecState (cli_showcase_test.go)
+	// drives `verdi spec state` against the real, already-landed
+	// spec/stale-decline feature from examples/showcase, proving the
+	// read-only Git-derived-state projection resolves accepted-pending-
+	// build/exact against real showcase content, never a synthetic fixture.
+	"cli:spec": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec

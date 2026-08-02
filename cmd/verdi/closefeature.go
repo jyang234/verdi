@@ -43,6 +43,7 @@ import (
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -64,6 +65,16 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 
+	// C1: the effective-state precondition, shared verbatim with the story
+	// rung (closePrecondition, close.go) — only an effective
+	// AcceptedPendingBuild feature may begin the ritual, and the archive
+	// step's status handling (legacy flip vs pure rename) is decided HERE,
+	// before the gate and before every mutation.
+	statusMode, rc := closePrecondition(ctx, root, spec, specRef, deps.State, deps.Model, stderr)
+	if rc != 0 {
+		return rc
+	}
+
 	// Discover implementing stories the same way `verdi matrix <feature>`
 	// does (featurematrix.go) — the index's computed backlink inversion,
 	// story-folded once each.
@@ -72,7 +83,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
-	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec)
+	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, head, ix, specRef.Name, spec, specstate.NewProjector())
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
@@ -158,27 +169,32 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 
-	// Flip status accepted-pending-build -> closed as part of the archive
-	// step, then move the whole directory — byte-for-byte identical to the
-	// story path (02 §Kind registry's "... -> closed(archive)" transition
-	// applies to both spec classes alike; flipSpecStatusToClosed and
-	// store.ArchiveMove are both already class-agnostic, consumed
-	// unchanged). board.json, the grandfathered 4th quartet member (03
+	// The archive step's status handling, per the PRE-MUTATION decision
+	// (closePrecondition — C1, byte-for-byte the story path's own logic):
+	// a legacy statused feature flips accepted-pending-build -> closed
+	// before the directory rename (02 §Kind registry's "... -> closed
+	// (archive)" transition; VL-010's D6-11 exception); a statusless,
+	// merge-accepted feature moves by pure rename with no invented status
+	// line. board.json, the grandfathered 4th quartet member (03
 	// §Alignment report), needs no special handling here: if the active
 	// spec directory already carries one (a pre-R4 artifact frozen back at
 	// accept time under the retired commit-to-design ritual), ArchiveMove's
 	// bare directory rename carries it along for free; if absent — the
 	// common case for any round-four spec, since `verdi board commit` is
 	// retired (05 §Workbench) — there is simply nothing to move, no error.
-	if err := flipSpecStatusToClosed(root, specRef.Name); err != nil {
-		fmt.Fprintln(stderr, "close:", err)
-		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedRollup, stderr)
-		return 2
+	reached := freezeReachedRollup
+	if statusMode == closureFlipLegacyStatus {
+		if err := flipSpecStatusToClosed(root, specRef.Name); err != nil {
+			fmt.Fprintln(stderr, "close:", err)
+			reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedRollup, stderr)
+			return 2
+		}
+		reached = freezeReachedFlip
 	}
 
 	if err := store.ArchiveMove(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
-		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedFlip, stderr)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, reached, stderr)
 		return 2
 	}
 

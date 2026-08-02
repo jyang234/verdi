@@ -7,7 +7,22 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/specstate"
 )
+
+// allAcceptedPendingBuild hand-builds the effective map findPatternB now
+// consumes (activespecs.go's effectiveStates producer output), marking
+// every spec accepted-pending-build — these unit tests exercise
+// findPatternB's own pure-fold logic (stub realization, class filter,
+// empty-stubs guard), not effectiveStates' git-derived resolution, which
+// TestEffectiveStates_Happy (activespecs_test.go) proves separately.
+func allAcceptedPendingBuild(specs []activeSpec) map[string]specstate.Result {
+	m := make(map[string]specstate.Result, len(specs))
+	for _, s := range specs {
+		m[s.Name] = specstate.Result{State: specstate.AcceptedPendingBuild}
+	}
+	return m
+}
 
 func TestArchiveSpecClosedAt_Happy(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
@@ -103,7 +118,7 @@ func TestFindPatternB_Happy(t *testing.T) {
 		t.Fatalf("walkActiveSpecs: %v", err)
 	}
 
-	got, err := findPatternB(context.Background(), repo.Dir, repo.Head, specs)
+	got, err := findPatternB(context.Background(), repo.Dir, repo.Head, specs, allAcceptedPendingBuild(specs))
 	if err != nil {
 		t.Fatalf("findPatternB: %v", err)
 	}
@@ -135,7 +150,7 @@ func TestFindPatternB_Negative(t *testing.T) {
 		if err != nil {
 			t.Fatalf("walkActiveSpecs: %v", err)
 		}
-		got, err := findPatternB(ctx, repo.Dir, repo.Head, specs)
+		got, err := findPatternB(ctx, repo.Dir, repo.Head, specs, allAcceptedPendingBuild(specs))
 		if err != nil {
 			t.Fatalf("findPatternB: %v", err)
 		}
@@ -157,7 +172,7 @@ func TestFindPatternB_Negative(t *testing.T) {
 		if err != nil {
 			t.Fatalf("walkActiveSpecs: %v", err)
 		}
-		got, err := findPatternB(ctx, repo.Dir, repo.Head, specs)
+		got, err := findPatternB(ctx, repo.Dir, repo.Head, specs, allAcceptedPendingBuild(specs))
 		if err != nil {
 			t.Fatalf("findPatternB: %v", err)
 		}
@@ -178,7 +193,7 @@ func TestFindPatternB_Negative(t *testing.T) {
 		if err != nil {
 			t.Fatalf("walkActiveSpecs: %v", err)
 		}
-		got, err := findPatternB(ctx, repo.Dir, repo.Head, specs)
+		got, err := findPatternB(ctx, repo.Dir, repo.Head, specs, allAcceptedPendingBuild(specs))
 		if err != nil {
 			t.Fatalf("findPatternB: %v", err)
 		}
@@ -199,7 +214,7 @@ func TestFindPatternB_Negative(t *testing.T) {
 		if err != nil {
 			t.Fatalf("walkActiveSpecs: %v", err)
 		}
-		got, err := findPatternB(ctx, repo.Dir, repo.Head, specs)
+		got, err := findPatternB(ctx, repo.Dir, repo.Head, specs, allAcceptedPendingBuild(specs))
 		if err != nil {
 			t.Fatalf("findPatternB: %v", err)
 		}
@@ -207,4 +222,43 @@ func TestFindPatternB_Negative(t *testing.T) {
 			t.Fatalf("findPatternB = %+v, want empty (class: story, never a candidate)", got)
 		}
 	})
+}
+
+// TestScan_AC1_PatternB_StatuslessFeature is Task 6a's own regression
+// witness for the defect the effective-state migration fixes: a class:
+// feature spec with NO status: field at all (Task 4's live scaffold —
+// legal, and per the merge-signaled design "proposed-versus-accepted state
+// is Git-derived, not persisted") whose exact bytes are already committed
+// on the default branch is EFFECTIVELY accepted-pending-build
+// (specstate.AcceptedPendingBuild), and — once every declared stub is
+// realized by a closed, merged story — pattern (b) must fire for it.
+//
+// Before this migration, findPatternB's raw `s.FM.Status !=
+// "accepted-pending-build"` comparison would have excluded a statusless
+// feature unconditionally (FM.Status == "" never equals the literal
+// string), silently dropping this exact case. This test exercises the
+// full Scan() path (producer effectiveStates + the findPatternB fold
+// together), not findPatternB in isolation, so it proves the wiring, not
+// just the fold.
+func TestScan_AC1_PatternB_StatuslessFeature(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/.gitignore":                            "data/\n",
+			".verdi/specs/archive/forge-transport/spec.md": closedArchiveStorySpecMD("forge-transport", "code-health"),
+			".verdi/specs/active/code-health/spec.md":      featureSpecMD("code-health", "", "forge-transport"), // statusless
+		},
+		Message: "seed a statusless, stub-complete feature",
+	}})
+	setDefaultBranchSymref(t, repo.Dir, "main")
+
+	got, err := Scan(context.Background(), repo.Dir, "main")
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(got.PatternB) != 1 || got.PatternB[0].SpecName != "code-health" {
+		t.Fatalf("Scan.PatternB = %+v, want exactly 1 (code-health) — a statusless-but-committed feature must be treated as effectively accepted-pending-build", got.PatternB)
+	}
+	if got.Flagged() {
+		t.Fatal("Scan.Flagged() = true, want false (dc-3: pattern (b) alone never flags)")
+	}
 }

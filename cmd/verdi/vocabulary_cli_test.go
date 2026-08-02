@@ -21,11 +21,29 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
+
+// diverge rewrites path's on-disk copy so its bytes no longer match
+// whatever was committed at that same path — the Git-derived
+// (internal/specstate) shape of "still under review, never landed", used
+// where a fixture's ORIGINAL literal `status: draft` field is no longer,
+// on its own, sufficient to keep a spec whose exact bytes happen to be the
+// committed default-branch content from reading as accepted-pending-build
+// (Task 4's compatibility reading: exact landed bytes are accepted
+// regardless of a stale legacy status word).
+func diverge(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("diverge: reading %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, append(data, []byte("<!-- still under review, diverged from the committed default-branch copy -->\n")...), 0o644); err != nil {
+		t.Fatalf("diverge: writing %s: %v", path, err)
+	}
+}
 
 // vocabModelYAML reads the real vocab-rename fixture out of
 // internal/model/testdata — the single source of the rename set.
@@ -77,108 +95,59 @@ func runVerdi(t *testing.T, bin, dir string, args ...string) (int, string, strin
 	return code, stdout.String(), stderr.String()
 }
 
-// TestVocabularyCLI_RenamedStateLabels drives accept (both its own flip
-// line and its refusal), the flipped-predecessor confirmation, and build
-// start's status-mismatch refusal plus its success line over the
-// vocab-rename store: every state word prints as its renamed label.
+// TestVocabularyCLI_RenamedStateLabels drives build start's status-mismatch
+// refusal plus its success line over the vocab-rename store: every state
+// word prints as its renamed label. Task 7 retires accept's own mutation
+// (and therefore its vocabulary-routed flip/refusal lines, and supersede.go's
+// flipped-predecessor confirmation) — acceptance is now merge-signaled, so
+// this test drives the store's ALREADY-landed bytes directly rather than
+// accepting anything first.
 func TestVocabularyCLI_RenamedStateLabels(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := buildVocabRenameRepo(t, "pred-story", predStoryAcceptedMD, "succ-story", succStorySupersedesMD)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	// succ-story's committed bytes are landed on main by construction
+	// (buildVocabRenameRepo's own single commit); under Git-derived state
+	// (internal/specstate) that alone reads as accepted-pending-build
+	// regardless of its persisted `status: draft` word (Task 4's
+	// compatibility reading applies to ANY exact-bytes-landed spec — no
+	// separate acceptance ceremony is needed or exists anymore). Step 2
+	// below specifically wants build start to see some-feature as still
+	// under review, so its working-tree copy is diverged from what
+	// actually landed — never re-committed.
+	diverge(t, filepath.Join(repo.Dir, ".verdi", "specs", "active", "some-feature", "spec.md"))
 
-	// 1. accept the draft successor: its own verdict line resolves both
-	// states ("status: draft -> Ready to build"), and the predecessor's
-	// flip confirmation resolves its from/to pair.
-	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "accept", "spec/succ-story")
+	// 1. accept prints the fixed retirement notice for ANY spec ref — it no
+	// longer resolves or routes any vocabulary at all (Task 7: informational
+	// only, never an acceptance claim).
+	code, stdout, _ := runVerdi(t, bin, repo.Dir, "accept", "spec/succ-story")
 	if code != 0 {
-		t.Fatalf("accept spec/succ-story = %d, want 0; stderr=%s\nstdout=%s", code, stderr, stdout)
+		t.Fatalf("accept spec/succ-story = %d, want 0", code)
 	}
-	if !contains(stdout, "status: draft -> Ready to build") {
-		t.Fatalf("accept stdout = %q, want the renamed accept confirmation %q", stdout, "status: draft -> Ready to build")
-	}
-	if !contains(stdout, "(status: Ready to build -> superseded") {
-		t.Fatalf("accept stdout = %q, want the renamed flipped-predecessor confirmation %q", stdout, "(status: Ready to build -> superseded")
+	if !contains(stdout, acceptRetiredNotice) {
+		t.Fatalf("accept stdout = %q, want the retirement notice", stdout)
 	}
 
-	// 2. accept refuses a non-draft spec, printing its CURRENT status
-	// through the model.
-	code, _, stderr = runVerdi(t, bin, repo.Dir, "accept", "spec/succ-story")
+	// 2. build start's not-yet-landed refusal names the wanted state
+	// through the model (some-feature has not landed on the default
+	// branch — the Git-derived reading of "still draft").
+	code, _, stderr := runVerdi(t, bin, repo.Dir, "build", "start", "spec/some-feature")
 	if code != 1 {
-		t.Fatalf("accept(already accepted) = %d, want 1; stderr=%s", code, stderr)
+		t.Fatalf("build start (unlanded spec) = %d, want 1; stderr=%s", code, stderr)
 	}
-	// The FULLY-resolved refusal sentence: the current status, the wanted
-	// state, AND the trailing "only a <draft> spec" all resolve through the
-	// model (judged-ac4-draft-prose-leak). draft carries no rename in this
-	// fixture, so it renders "draft" with the agreeing article "a" — the
-	// focused TestVocabularyCLI_AcceptRefusalResolvesDraftWord below exercises
-	// a store that DOES rename draft, witnessing the routing.
-	if want := `status is "Ready to build", not draft; only a draft spec can be accepted`; !contains(stderr, want) {
-		t.Fatalf("accept refusal stderr = %q, want the fully-resolved refusal sentence %q", stderr, want)
+	if !contains(stderr, "proposal has not landed") || !contains(stderr, "not yet Ready to build") {
+		t.Fatalf("build start refusal stderr = %q, want the renamed wanted-state and the not-landed refusal", stderr)
 	}
 
-	// 3. build start's status-mismatch refusal names the wanted state
-	// through the model (some-feature is still draft).
-	code, _, stderr = runVerdi(t, bin, repo.Dir, "build", "start", "spec/some-feature")
-	if code != 1 {
-		t.Fatalf("build start (draft spec) = %d, want 1; stderr=%s", code, stderr)
-	}
-	if !contains(stderr, `status is "draft", not Ready to build`) {
-		t.Fatalf("build start refusal stderr = %q, want the renamed wanted-state %q", stderr, `status is "draft", not Ready to build`)
-	}
-
-	// 4. build start's success line resolves the accepted state.
+	// 3. build start's success line resolves the accepted state — succ-story
+	// is accepted purely because its bytes are already landed on main, no
+	// `verdi accept` call involved at all.
 	code, stdout, stderr = runVerdi(t, bin, repo.Dir, "build", "start", "spec/succ-story")
 	if code != 0 {
 		t.Fatalf("build start spec/succ-story = %d, want 0; stderr=%s", code, stderr)
 	}
 	if !contains(stdout, "(status: Ready to build)") {
 		t.Fatalf("build start stdout = %q, want the renamed success suffix %q", stdout, "(status: Ready to build)")
-	}
-}
-
-// TestVocabularyCLI_AcceptRefusalResolvesDraftWord is judged-ac4-draft-prose-
-// leak's guard: accept's non-draft refusal routes its TRAILING state word
-// ("only a draft spec can be accepted") through the model exactly like the two
-// resolved words beside it, its article agreeing via model.Article. The shared
-// vocab-rename fixture does not rename `draft`, so the sibling test above cannot
-// witness the routing (draft renders "draft" either way); this store DOES rename
-// draft — to the vowel-initial "Idea", so the article visibly becomes "an" — and
-// so is what actually distinguishes the routed word from a re-hard-coded one.
-func TestVocabularyCLI_AcceptRefusalResolvesDraftWord(t *testing.T) {
-	bin := buildVerdiBinary(t)
-
-	// Reuse the shared vocab-rename fixture as the base — never edited here, it
-	// has a large cross-package + e2e blast radius — injecting one extra states
-	// rename in memory so DisplayState(draft) != "draft" for this store alone.
-	renamedModel := strings.Replace(vocabModelYAML(t),
-		"    accepted-pending-build: \"Ready to build\"\n",
-		"    accepted-pending-build: \"Ready to build\"\n    draft: \"Idea\"\n", 1)
-	if !contains(renamedModel, `draft: "Idea"`) {
-		t.Fatal("test setup: failed to inject the draft rename into the vocab-rename base fixture")
-	}
-
-	repo := fixturegit.Build(t, []fixturegit.Layer{
-		{
-			Files: map[string]string{
-				".verdi/verdi.yaml":                        phase7ManifestYAML,
-				".verdi/model.yaml":                        renamedModel,
-				".verdi/specs/active/some-feature/spec.md": someFeatureMD,
-				".verdi/specs/active/pred-story/spec.md":   predStoryAcceptedMD,
-			},
-			Message: "init store with an accepted story + a draft-renaming model",
-		},
-	})
-
-	// pred-story is accepted-pending-build, so accept refuses it (exit 1) at
-	// the status check.
-	code, _, stderr := runVerdi(t, bin, repo.Dir, "accept", "spec/pred-story")
-	if code != 1 {
-		t.Fatalf("accept (accepted-pending-build spec) = %d, want 1; stderr=%s", code, stderr)
-	}
-	// The fully-resolved refusal sentence: current status "Ready to build",
-	// wanted-state "Idea", AND the trailing "only an Idea spec" — model.Article
-	// turning "a" into "an" before the vowel-initial rename.
-	if want := `status is "Ready to build", not Idea; only an Idea spec can be accepted`; !contains(stderr, want) {
-		t.Fatalf("accept refusal stderr = %q, want the fully-resolved sentence with the routed draft word %q", stderr, want)
 	}
 }
 
@@ -227,21 +196,5 @@ func TestVocabularyCLI_RenamedClassWordRefusals(t *testing.T) {
 	want := "is an Initiative spec (birds-eye, outcome-level); build start operates on a Workstream spec that implements it, not the Initiative itself"
 	if !contains(stderr, want) {
 		t.Fatalf("build start refusal stderr = %q, want the renamed class words with agreeing articles %q", stderr, want)
-	}
-}
-
-// TestVocabularyCLI_UnflippedPredecessorDisclosure covers supersede.go's
-// left-unflipped disclosure: a closed predecessor's status line and the
-// legal-transition notation both resolve through the model.
-func TestVocabularyCLI_UnflippedPredecessorDisclosure(t *testing.T) {
-	bin := buildVerdiBinary(t)
-	repo := buildVocabRenameRepo(t, "pred-feature", predFeatureClosedMD, "succ-feature", succFeatureWholeSpecSupersedesMD)
-
-	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "accept", "spec/succ-feature")
-	if code != 0 {
-		t.Fatalf("accept spec/succ-feature = %d, want 0; stderr=%s\nstdout=%s", code, stderr, stdout)
-	}
-	if !contains(stdout, `not Ready to build; left unflipped (only Ready to build->superseded is a legal ritual transition`) {
-		t.Fatalf("accept stdout = %q, want the renamed left-unflipped disclosure", stdout)
 	}
 }

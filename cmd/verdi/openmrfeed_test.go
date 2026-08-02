@@ -7,23 +7,41 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/forge/fake"
 	"github.com/jyang234/verdi/internal/refindex"
 	"github.com/jyang234/verdi/internal/workbench"
 )
 
+// resolvableDefaultBranchRoot builds a minimal fixturegit repo (local
+// branch "main", no remote) so CI_DEFAULT_BRANCH="main" resolves to a
+// real, git-resolvable ref (internal/specstate.ResolveDefaultBranch — the
+// resolver internal/lint.ResolveDefaultBranch now delegates to — requires
+// the named branch to actually resolve, not just be named; a bare
+// t.TempDir() is not a git repository at all and no longer resolves).
+// Shared by this file, reviewfeed_test.go, and supersessionfeed_test.go
+// (all package main, all needing the same hermetic "give me a resolvable
+// default branch" root).
+func resolvableDefaultBranchRoot(t *testing.T) string {
+	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"seed.txt": "seed\n"}, Message: "seed"},
+	})
+	return repo.Dir
+}
+
 // TestForgeOpenMRs_ListsSourceBranches drives the real adapter over the
 // hermetic forge fake: every open MR targeting the resolved default branch
 // contributes its source branch, sorted.
 func TestForgeOpenMRs_ListsSourceBranches(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main") // hermetic default-branch resolution (no git remote)
+	t.Setenv("CI_DEFAULT_BRANCH", "main") // named branch must still resolve to a real local ref (internal/specstate)
 
 	f := fake.New()
 	f.SeedOpenMR("main", forge.OpenMR{ID: "2", SourceBranch: "design/zeta", Title: "Zeta"})
 	f.SeedOpenMR("main", forge.OpenMR{ID: "1", SourceBranch: "design/alpha", Title: "Alpha"})
 
-	got, err := newForgeOpenMRs(f, t.TempDir()).OpenMRSourceBranches(context.Background())
+	got, err := newForgeOpenMRs(f, resolvableDefaultBranchRoot(t)).OpenMRSourceBranches(context.Background())
 	if err != nil {
 		t.Fatalf("OpenMRSourceBranches: %v", err)
 	}

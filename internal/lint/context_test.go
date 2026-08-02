@@ -2,7 +2,7 @@ package lint
 
 import "testing"
 
-func TestContext_EnforceDraftGate(t *testing.T) {
+func TestContext_TargetsDefaultBoundary(t *testing.T) {
 	cases := []struct {
 		name string
 		ctx  Context
@@ -17,8 +17,8 @@ func TestContext_EnforceDraftGate(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.ctx.EnforceDraftGate(); got != tc.want {
-				t.Fatalf("EnforceDraftGate() = %v, want %v (ctx=%+v)", got, tc.want, tc.ctx)
+			if got := tc.ctx.TargetsDefaultBoundary(); got != tc.want {
+				t.Fatalf("TargetsDefaultBoundary() = %v, want %v (ctx=%+v)", got, tc.want, tc.ctx)
 			}
 		})
 	}

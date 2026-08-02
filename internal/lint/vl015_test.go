@@ -2,6 +2,7 @@ package lint
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -239,6 +240,151 @@ func TestVL015_TableDriven(t *testing.T) {
 			onlyRule(t, findings, tc.wantRule)
 			if len(findings) != 1 {
 				t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+			}
+		})
+	}
+}
+
+// vl015RateLockYAML is a second, otherwise-unrelated predecessor spec the
+// predecessor-cardinality rows point their EXTRA supersedes edge at, so the
+// edge resolves (no VL-003 dangling-ref storm) and the only thing under
+// test is the cardinality of whole-spec supersedes edges themselves.
+const vl015RateLockYAML = `---
+id: spec/rate-lock
+kind: spec
+class: feature
+title: "Rate lock (VL-015 second-predecessor fixture)"
+status: draft
+owners: [platform-team]
+problem: { text: "borrowers lose a good quoted rate the moment they pause", anchor: "#problem" }
+outcome: { text: "borrowers can lock a quoted rate and finish later", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-9, text: "a borrower can lock a quoted rate for a fixed window", evidence: [static, attestation], anchor: "#ac-9" }
+---
+# Rate lock (VL-015 second-predecessor fixture)
+
+## Problem
+
+Borrowers lose a good quoted rate the moment they pause the application.
+
+## Outcome
+
+Borrowers can lock a quoted rate and finish later.
+
+## AC-9
+
+A borrower can lock a quoted rate for a fixed window.
+`
+
+// buildVL015LinksRepo is buildVL015Repo with the superseding revision's
+// links: block rewritten wholesale (and spec/rate-lock added to the store
+// so a second whole-spec edge resolves).
+func buildVL015LinksRepo(t *testing.T, linksBody string) *fixturegit.Repo {
+	t.Helper()
+
+	layer1 := fixturegit.Layer{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                         setupManifestYAML,
+			".gitattributes":                            setupGitAttributes,
+			".verdi/specs/active/loan-workflow/spec.md": vl015LoanWorkflowV1DraftYAML,
+		},
+		Message: "vl015 layer 1: loan-workflow v1 draft",
+	}
+	repo1 := fixturegit.Build(t, []fixturegit.Layer{layer1})
+	shaA := repo1.Head
+
+	v2 := fmt.Sprintf(vl015LoanWorkflowV2Tmpl, vl015PredecessorCO1Text, `  carried: [co-1]
+  amended: [ { id: ac-1, note: "tightened the visibility threshold" } ]
+  amended_advisory: []
+  removed: [ { id: ac-2, note: "moved to a separate reporting feature" } ]
+  added: [ac-3]`)
+	const templateLinks = "links:\n  - { type: supersedes, ref: spec/loan-workflow }\n"
+	if !strings.Contains(v2, templateLinks) {
+		t.Fatal("test setup: vl015LoanWorkflowV2Tmpl's links: block no longer matches — this helper cannot rewrite it")
+	}
+	v2 = strings.Replace(v2, templateLinks, linksBody, 1)
+
+	layer2 := fixturegit.Layer{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                            setupManifestYAML,
+			".gitattributes":                               setupGitAttributes,
+			".verdi/specs/active/loan-workflow/spec.md":    fmt.Sprintf(vl015LoanWorkflowV1FrozenTmpl, shaA),
+			".verdi/specs/active/rate-lock/spec.md":        vl015RateLockYAML,
+			".verdi/specs/active/loan-workflow-v2/spec.md": v2,
+		},
+		Message: "vl015 layer 2: loan-workflow v1 frozen + loan-workflow-v2 + rate-lock",
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{layer1, layer2})
+	provisionMutableZone(t, repo.Dir)
+	return repo
+}
+
+// TestVL015_PredecessorCardinality proves the lint surface of the
+// exactly-one-whole-spec-predecessor invariant: a supersession: manifest is
+// ABOUT one named predecessor's objects, so a revision carrying two
+// whole-spec supersedes edges (the P1 defect: the ONE manifest was credited
+// to BOTH) is reported, not silently validated against whichever edge came
+// first. A fragment supersedes edge alongside the single whole-spec one is
+// a decision-level override and must stay clean.
+func TestVL015_PredecessorCardinality(t *testing.T) {
+	cases := []struct {
+		name      string
+		linksBody string
+		wantVL015 bool
+	}{
+		{
+			name:      "exactly one whole-spec predecessor: clean",
+			linksBody: "links:\n  - { type: supersedes, ref: spec/loan-workflow }\n",
+			wantVL015: false,
+		},
+		{
+			name: "one whole-spec predecessor plus a fragment override edge: clean",
+			linksBody: "links:\n" +
+				"  - { type: supersedes, ref: spec/loan-workflow }\n" +
+				"  - { type: supersedes, ref: \"spec/rate-lock#ac-9\" }\n",
+			wantVL015: false,
+		},
+		{
+			name: "TWO whole-spec predecessors: reported",
+			linksBody: "links:\n" +
+				"  - { type: supersedes, ref: spec/loan-workflow }\n" +
+				"  - { type: supersedes, ref: spec/rate-lock }\n",
+			wantVL015: true,
+		},
+		{
+			name:      "NO whole-spec predecessor, only a fragment edge: reported",
+			linksBody: "links:\n  - { type: supersedes, ref: \"spec/rate-lock#ac-9\" }\n",
+			wantVL015: true,
+		},
+		{
+			name:      "no supersedes edge at all: reported",
+			linksBody: "",
+			wantVL015: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildVL015LinksRepo(t, tc.linksBody)
+			findings := runLint(t, repo.Dir, Context{}, Options{})
+
+			var vl015 []Finding
+			for _, f := range findings {
+				if f.Rule == "VL-015" {
+					vl015 = append(vl015, f)
+				}
+			}
+			if !tc.wantVL015 {
+				if len(vl015) != 0 {
+					t.Fatalf("VL-015 fired on a legal predecessor shape:\n%s", findingsString(vl015))
+				}
+				return
+			}
+			if len(vl015) == 0 {
+				t.Fatalf("no VL-015 finding, want one naming the whole-spec predecessor cardinality violation.\nall findings:\n%s", findingsString(findings))
+			}
+			if !strings.Contains(vl015[0].Message, "exactly one") {
+				t.Fatalf("VL-015 message = %q, want it to state the exactly-one-whole-spec-predecessor rule", vl015[0].Message)
 			}
 		})
 	}

@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -27,6 +28,38 @@ type RunInput struct {
 	// in finding prose (ledger L-M13a(6) work order); no rule DECISION
 	// ever reads it.
 	Model *model.Model
+	// Projector is the shared git-derived-state resolver every rule that
+	// needs one resolves candidates through (Task 4: VL-004's legacy-draft
+	// compatibility disclosure) — constructed ONCE per Run call, here,
+	// rather than once per rule/per document, so a full lint pass never
+	// builds more than the one real-git-backed Projector NewProjector
+	// already returns cheaply (Projector itself is stateless per call;
+	// ResolveMany's own per-call successor-corpus memoization is
+	// unaffected by sharing the value). Rules consume
+	// SpecStateResolver.Resolve/specstate.Result — never reimplement
+	// reachability (CLAUDE.md, PLAN.md file-ownership map).
+	Projector SpecStateResolver
+}
+
+// SpecStateResolver is the internal/specstate.Projector consumption
+// surface every git-derived-state rule needs, narrowed to exactly Resolve
+// (04 §port pattern: define the interface at the consumer, accept
+// interfaces, return structs). specstate.Projector satisfies this
+// structurally with no adapter — Run wires the real, git-backed
+// specstate.NewProjector() below unconditionally; no other production
+// value is ever assigned. The interface exists ONLY so a rule's own test
+// can substitute a fake implementing this one method, driving a
+// specstate.Result shape that specstate's own gitReader-level fakes can
+// reach (internal/specstate/resolve_test.go) but that real git cannot
+// practically reconstruct through ordinary repository operations — e.g. a
+// blob whose bytes match the default branch but whose first-parent
+// landing commit cannot be proven (specstate/resolve.go's own
+// "no first-parent landing commit could be proven" branch: BlobAt and
+// FirstParentBlobLanding walk the exact same ref, so a real repository's
+// tip commit always self-proves its own landing; only a stubbed
+// FirstParentBlobLanding can force the mismatch).
+type SpecStateResolver interface {
+	Resolve(ctx context.Context, root string, candidate specstate.Candidate) (specstate.Result, error)
 }
 
 // Rule is one VL-xxx check.
@@ -71,7 +104,7 @@ func (e *Engine) Run(ctx context.Context, root string, lctx Context, opts Option
 		mdl = cfg.Model
 	}
 
-	in := &RunInput{Ctx: ctx, Root: root, Snapshot: snap, LintCtx: lctx, Opts: opts, Model: mdl}
+	in := &RunInput{Ctx: ctx, Root: root, Snapshot: snap, LintCtx: lctx, Opts: opts, Model: mdl, Projector: specstate.NewProjector()}
 
 	var findings []Finding
 	for _, r := range e.rules {

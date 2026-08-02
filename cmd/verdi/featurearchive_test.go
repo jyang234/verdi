@@ -2,25 +2,30 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// archivedStorySpecMD renders a minimal, valid archived (closed) story spec that
-// implements featureRef (e.g. "spec/my-feature#ac-1"). status/frozen make it a
-// legal archive-zone spec that DecodeSpec accepts.
-func archivedStorySpecMD(name, featureRef, status string) string {
+// archivedStorySpecMD renders a minimal, valid, STATUSLESS archived story
+// spec that implements featureRef (e.g. "spec/my-feature#ac-1") — Task 4's
+// compatibility grammar (a statusless story is exactly as closeable as an
+// explicitly-flagged one), landed via fixturegit rather than carrying a
+// legacy status:/frozen: pair a Git-derived "closed" reading no longer
+// needs.
+func archivedStorySpecMD(name, featureRef string) string {
 	return `---
 id: spec/` + name + `
 kind: spec
 class: story
 title: "` + name + `"
 owners: [platform-team]
-status: ` + status + `
 story: jira:` + strings.ToUpper(name) + `-1
 problem: { text: "x", anchor: problem }
 outcome: { text: "y", anchor: outcome }
@@ -28,39 +33,60 @@ links:
   - { type: implements, ref: "` + featureRef + `" }
 acceptance_criteria:
   - { id: ac-1, text: "the story's own obligation holds", evidence: [attestation] }
-frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 ---
 # body
 `
 }
 
-// TestGatherArchivedRulings_ScopesToImplementingNonSuperseded proves the L-N14
-// companion gathering reads exactly the CLOSED, non-superseded implementing
-// stories' archived rulings — the same set the feature-close budget unions — so a
-// seated candidate backing always has a matching archive to collapse against
-// (never a budget inflation): a story implementing a DIFFERENT feature and a
-// SUPERSEDED implementing story (L-N12) are both excluded, and a story with no
-// archived report contributes nothing.
-func TestGatherArchivedRulings_ScopesToImplementingNonSuperseded(t *testing.T) {
-	root := t.TempDir()
+// TestGatherArchivedRulings_ScopesToClosedImplementing proves the L-N14
+// companion gathering reads exactly the CONFIRMED-CLOSED (Git-derived,
+// internal/specstate) implementing stories' archived rulings — the same
+// set the feature-close budget unions — so a seated candidate backing
+// always has a matching archive to collapse against (never a budget
+// inflation): a story implementing a DIFFERENT feature, a story with no
+// archived report, and an archive-zone copy that never actually LANDED on
+// the default branch at that path are all excluded.
+//
+// Replaces the pre-Task-5 fixture's explicit `status: superseded` exclusion
+// case: under Git-derived state an archive-zone candidate can never resolve
+// Superseded at all (gatherArchivedRulings' own doc comment) — resolveOne
+// branches on zone before ever consulting the successor corpus for an
+// archive-zone path, so a genuinely-superseded predecessor simply never
+// leaves the active zone to be seen by this glob in the first place. The
+// unlanded-story case below is the Git-derived shape that actually can
+// occur and must still be excluded: a local archive/ copy this store has
+// not proven reachable from the default branch.
+func TestGatherArchivedRulings_ScopesToClosedImplementing(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                           "schema: verdi.layout/v1\nforge: gitlab\n",
+				".verdi/specs/archive/impl-story/spec.md":     archivedStorySpecMD("impl-story", "spec/my-feature#ac-1"),
+				".verdi/specs/archive/other-story/spec.md":    archivedStorySpecMD("other-story", "spec/other-feature#ac-1"),
+				".verdi/specs/archive/noreport-story/spec.md": archivedStorySpecMD("noreport-story", "spec/my-feature#ac-1"),
+			},
+			Message: "land three closed, archived stories",
+		},
+	})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 
-	writeTestFile(t, store.ArchiveSpecPath(root, "impl-story"), []byte(archivedStorySpecMD("impl-story", "spec/my-feature#ac-1", "closed")))
-	writeTestFile(t, store.ArchiveSpecPath(root, "other-story"), []byte(archivedStorySpecMD("other-story", "spec/other-feature#ac-1", "closed")))
-	writeTestFile(t, store.ArchiveSpecPath(root, "superseded-story"), []byte(archivedStorySpecMD("superseded-story", "spec/my-feature#ac-1", "superseded")))
-	writeTestFile(t, store.ArchiveSpecPath(root, "noreport-story"), []byte(archivedStorySpecMD("noreport-story", "spec/my-feature#ac-1", "closed")))
+	// Present on disk under specs/archive/ (the glob finds and decodes it),
+	// but never committed — never reachable from the default branch at this
+	// path, so specstate resolves it Proposed/RelationNew, not Closed.
+	writeTestFile(t, store.ArchiveSpecPath(repo.Dir, "unlanded-story"), []byte(archivedStorySpecMD("unlanded-story", "spec/my-feature#ac-1")))
 
 	// Each story WITH a report carries a dispositioned judged ruling; noreport-story
 	// deliberately has none.
-	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "impl-story", "  - { id: judged-impl, kind: judged, text: impl ruling, disposition: accepted-deviation, note: n }\n", "")
-	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "other-story", "  - { id: judged-other, kind: judged, text: other ruling, disposition: accepted-deviation, note: n }\n", "")
-	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "superseded-story", "  - { id: judged-super, kind: judged, text: super ruling, disposition: accepted-deviation, note: n }\n", "")
+	writeFeatureStaleDeviationReport(t, repo.Dir, store.ZoneArchive, "impl-story", "  - { id: judged-impl, kind: judged, text: impl ruling, disposition: accepted-deviation, note: n }\n", "")
+	writeFeatureStaleDeviationReport(t, repo.Dir, store.ZoneArchive, "other-story", "  - { id: judged-other, kind: judged, text: other ruling, disposition: accepted-deviation, note: n }\n", "")
+	writeFeatureStaleDeviationReport(t, repo.Dir, store.ZoneArchive, "unlanded-story", "  - { id: judged-unlanded, kind: judged, text: unlanded ruling, disposition: accepted-deviation, note: n }\n", "")
 
-	rulings, err := gatherArchivedRulings(root, "my-feature")
+	rulings, err := gatherArchivedRulings(context.Background(), repo.Dir, "my-feature", specstate.NewProjector())
 	if err != nil {
 		t.Fatalf("gatherArchivedRulings: %v", err)
 	}
 	if len(rulings) != 1 {
-		t.Fatalf("gatherArchivedRulings returned %d rulings, want exactly 1 (only the closed, implementing, non-superseded story with a report): %+v", len(rulings), rulings)
+		t.Fatalf("gatherArchivedRulings returned %d rulings, want exactly 1 (only the confirmed-closed, implementing story with a report): %+v", len(rulings), rulings)
 	}
 	if rulings[0].Finding.ID != "judged-impl" || rulings[0].Source != "spec/impl-story" {
 		t.Fatalf("ruling = %+v, want judged-impl sourced from spec/impl-story", rulings[0])
@@ -72,13 +98,21 @@ func TestGatherArchivedRulings_ScopesToImplementingNonSuperseded(t *testing.T) {
 // not-resurfaced: section — both are dispositioned judged rulings the budget
 // counts, so both are valid cross-level carry candidates.
 func TestGatherArchivedRulings_IncludesNotResurfacedRulings(t *testing.T) {
-	root := t.TempDir()
-	writeTestFile(t, store.ArchiveSpecPath(root, "impl-story"), []byte(archivedStorySpecMD("impl-story", "spec/my-feature#ac-1", "closed")))
-	writeFeatureStaleDeviationReport(t, root, store.ZoneArchive, "impl-story",
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                       "schema: verdi.layout/v1\nforge: gitlab\n",
+				".verdi/specs/archive/impl-story/spec.md": archivedStorySpecMD("impl-story", "spec/my-feature#ac-1"),
+			},
+			Message: "land one closed, archived, implementing story",
+		},
+	})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	writeFeatureStaleDeviationReport(t, repo.Dir, store.ZoneArchive, "impl-story",
 		"  - { id: judged-live, kind: judged, text: live ruling, disposition: accepted-deviation, note: n }\n",
 		"  - { id: judged-persisted, kind: judged, text: persisted ruling, disposition: accepted-deviation, note: n }\n")
 
-	rulings, err := gatherArchivedRulings(root, "my-feature")
+	rulings, err := gatherArchivedRulings(context.Background(), repo.Dir, "my-feature", specstate.NewProjector())
 	if err != nil {
 		t.Fatalf("gatherArchivedRulings: %v", err)
 	}
@@ -88,6 +122,37 @@ func TestGatherArchivedRulings_IncludesNotResurfacedRulings(t *testing.T) {
 	}
 	if !got["judged-live"] || !got["judged-persisted"] {
 		t.Fatalf("gathered ids = %v, want both the findings: and not-resurfaced: rulings", got)
+	}
+}
+
+// TestGatherArchivedRulings_UnresolvableDefaultBranch_OperationalError is
+// fix-round-1 finding 2's proof: when the default branch cannot be
+// resolved at all, every archived implementing story's effective state is
+// Unproven — gatherArchivedRulings must refuse operationally (an error,
+// never []nil rulings), naming the affected ref and carrying the
+// projector's own disclosure, rather than silently treating "cannot be
+// decided" the same as "proven not closed".
+func TestGatherArchivedRulings_UnresolvableDefaultBranch_OperationalError(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                       "schema: verdi.layout/v1\nforge: gitlab\n",
+				".verdi/specs/archive/impl-story/spec.md": archivedStorySpecMD("impl-story", "spec/my-feature#ac-1"),
+			},
+			Message: "land one archived, implementing story, no default branch resolvable",
+		},
+	})
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+
+	_, err := gatherArchivedRulings(context.Background(), repo.Dir, "my-feature", specstate.NewProjector())
+	if err == nil {
+		t.Fatal("gatherArchivedRulings(unresolvable default branch) = nil error, want an operational error naming the unproven candidate")
+	}
+	if !strings.Contains(err.Error(), "spec/impl-story") {
+		t.Fatalf("err = %q, want it to name spec/impl-story", err.Error())
+	}
+	if !strings.Contains(err.Error(), "no default branch could be resolved") {
+		t.Fatalf("err = %q, want it to carry specstate's own disclosure", err.Error())
 	}
 }
 

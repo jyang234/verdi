@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // GitRunner is the ref-scoped git plumbing ComputeIndex depends on (dc-2,
@@ -97,4 +98,42 @@ func (gitxRunner) ListTree(ctx context.Context, dir, ref, path string) ([]string
 
 func (gitxRunner) IsAncestor(ctx context.Context, dir, ancestor, ref string) (bool, error) {
 	return gitx.IsAncestor(ctx, dir, ancestor, ref)
+}
+
+// StateResolver is the consumer-defined port (dc-2, the 04 §port pattern)
+// ComputeIndex resolves each feature/story entry's git-derived effective
+// lifecycle state through — internal/specstate.Projector's own exported
+// method set, narrowed to exactly what ComputeIndex needs, so refindex
+// depends on an interface it defines, never specstate.Projector's concrete
+// type directly. "No adapter reimplements reachability" (specstate's own
+// package doc): ComputeIndex never re-derives accepted/superseded/closed
+// from a raw `status:` field itself — every such decision routes through
+// this port. ResolveMany is the batch entry point ComputeIndex actually
+// uses (Step 2: "resolves the collected candidates as one batch") so a
+// corpus-sized default-branch walk triggers ONE default-corpus scan, never
+// one per candidate; Resolve is included for interface completeness and
+// direct single-candidate use (e.g. a future caller, or a resolver's own
+// tests) but ComputeIndex itself never calls it.
+type StateResolver interface {
+	Resolve(ctx context.Context, root string, candidate specstate.Candidate) (specstate.Result, error)
+	ResolveMany(ctx context.Context, root string, candidates []specstate.Candidate) ([]specstate.Result, error)
+}
+
+// specstateResolver adapts specstate.Projector to StateResolver — the
+// production implementation (dc-2), mirroring gitxRunner's identical role
+// for GitRunner.
+type specstateResolver struct{ p specstate.Projector }
+
+// NewStateResolver returns the production StateResolver: a thin adapter
+// over specstate.NewProjector(), the ONE place lifecycle state is derived
+// (specstate's own package doc). ComputeIndex's real callers construct this
+// exactly once per call, alongside NewGitRunner().
+func NewStateResolver() StateResolver { return specstateResolver{p: specstate.NewProjector()} }
+
+func (r specstateResolver) Resolve(ctx context.Context, root string, candidate specstate.Candidate) (specstate.Result, error) {
+	return r.p.Resolve(ctx, root, candidate)
+}
+
+func (r specstateResolver) ResolveMany(ctx context.Context, root string, candidates []specstate.Candidate) ([]specstate.Result, error) {
+	return r.p.ResolveMany(ctx, root, candidates)
 }

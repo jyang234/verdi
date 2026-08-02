@@ -1,6 +1,10 @@
 package residue
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/jyang234/verdi/internal/specstate"
+)
 
 func TestFindPatternA_Happy(t *testing.T) {
 	closeBranches := []CloseBranch{
@@ -8,10 +12,10 @@ func TestFindPatternA_Happy(t *testing.T) {
 		{Name: "already-done", Branch: "close/already-done", Tip: "sha-already-done", ArchivedOnOwnTip: true, Class: SupersededElsewhere},
 		{Name: "fresh", Branch: "close/fresh", Tip: "sha-fresh", ArchivedOnOwnTip: false, Class: RitualIncomplete},
 	}
-	activeStatus := map[string]string{
-		"widget":       "accepted-pending-build",
-		"already-done": "accepted-pending-build", // still active per THIS lookup, but archived-elsewhere per Class
-		"fresh":        "accepted-pending-build",
+	effective := map[string]specstate.Result{
+		"widget":       {State: specstate.AcceptedPendingBuild},
+		"already-done": {State: specstate.AcceptedPendingBuild}, // still active per THIS lookup, but archived-elsewhere per Class
+		"fresh":        {State: specstate.AcceptedPendingBuild},
 	}
 	activeClass := map[string]string{
 		"widget":       "story",
@@ -19,7 +23,7 @@ func TestFindPatternA_Happy(t *testing.T) {
 		"fresh":        "story",
 	}
 
-	got := findPatternA(closeBranches, activeStatus, activeClass)
+	got := findPatternA(closeBranches, effective, activeClass)
 	if len(got) != 2 {
 		t.Fatalf("findPatternA = %+v, want exactly 2 (widget and already-done — both ArchivedOnOwnTip)", got)
 	}
@@ -41,28 +45,32 @@ func TestFindPatternA_Negative_NotArchivedOnOwnTip(t *testing.T) {
 	closeBranches := []CloseBranch{
 		{Name: "fresh", Branch: "close/fresh", Tip: "sha", ArchivedOnOwnTip: false, Class: RitualIncomplete},
 	}
-	activeStatus := map[string]string{"fresh": "accepted-pending-build"}
+	effective := map[string]specstate.Result{"fresh": {State: specstate.AcceptedPendingBuild}}
 
-	got := findPatternA(closeBranches, activeStatus, nil)
+	got := findPatternA(closeBranches, effective, nil)
 	if len(got) != 0 {
 		t.Fatalf("findPatternA = %+v, want empty (never archived on its own tip)", got)
 	}
 }
 
+// TestFindPatternA_Negative_SpecNotActivePendingBuild proves every OTHER
+// specstate.State (never a raw legacy status string) excludes pattern (a),
+// including the zero value (a name absent from effective entirely — fail
+// closed, never assumed accepted).
 func TestFindPatternA_Negative_SpecNotActivePendingBuild(t *testing.T) {
-	cases := []string{"", "draft", "closed", "superseded"}
-	for _, status := range cases {
-		t.Run(status, func(t *testing.T) {
+	cases := []specstate.State{"", specstate.Proposed, specstate.Closed, specstate.Superseded, specstate.Unproven}
+	for _, state := range cases {
+		t.Run(string(state), func(t *testing.T) {
 			closeBranches := []CloseBranch{
 				{Name: "widget", Branch: "close/widget", Tip: "sha", ArchivedOnOwnTip: true, Class: RitualIncomplete},
 			}
-			activeStatus := map[string]string{}
-			if status != "" {
-				activeStatus["widget"] = status
+			effective := map[string]specstate.Result{}
+			if state != "" {
+				effective["widget"] = specstate.Result{State: state}
 			}
-			got := findPatternA(closeBranches, activeStatus, nil)
+			got := findPatternA(closeBranches, effective, nil)
 			if len(got) != 0 {
-				t.Fatalf("findPatternA(status=%q) = %+v, want empty (not accepted-pending-build)", status, got)
+				t.Fatalf("findPatternA(state=%q) = %+v, want empty (not accepted-pending-build)", state, got)
 			}
 		})
 	}

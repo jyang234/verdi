@@ -96,6 +96,7 @@ import (
 	"context"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -251,8 +252,24 @@ func TestCLIShowcaseCoverage(t *testing.T) {
 		}
 	})
 
-	t.Run("design_start_then_accept", func(t *testing.T) {
+	// design_start_then_merge_signals_acceptance is design_start_then_accept's
+	// Task 7 replacement (docs/superpowers/specs/2026-08-01-merge-signals-
+	// spec-acceptance-design.md): `verdi accept` is retired from the
+	// ordinary workflow — it performs no mutation at all anymore, so this
+	// showcase demonstrates the REAL new acceptance ceremony instead of a
+	// hollowed-out assertion on the old one. It proves, against the real
+	// showcase store: (1) a freshly designed spec is proposed — its exact
+	// bytes are not yet reachable from the default branch, per `verdi spec
+	// state`'s own read-only Git-derived projection; (2) `verdi accept`
+	// against it performs NO mutation whatsoever and prints the
+	// compatibility retirement notice; (3) merging its design branch into
+	// the default branch — the one authoritative acceptance ceremony now —
+	// is what makes `verdi spec state` report it accepted-pending-build,
+	// with no follow-up command or commit required.
+	t.Run("design_start_then_merge_signals_acceptance", func(t *testing.T) {
 		root := provisionShowcaseStore(t)
+		t.Setenv("CI_DEFAULT_BRANCH", "main")
+		ctx := context.Background()
 
 		// --defer-statements (spec/cli-creation ac-1, ledger L-N7): this
 		// harness's runBinary subprocess has no attached terminal, and
@@ -269,23 +286,53 @@ func TestCLIShowcaseCoverage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reading freshly designed spec: %v", err)
 		}
-		if !strings.Contains(string(draft), "status: draft") {
-			t.Fatalf("freshly designed spec is not status: draft:\n%s", draft)
+
+		// 1. Proposed: the design branch was never merged, so `verdi spec
+		// state` reports the spec as still under review.
+		stateOut, stateErr, stateCode := runBinary(t, root, "spec", "state", "spec/showcase-lifecycle-check")
+		if stateCode != 0 {
+			t.Fatalf("verdi spec state (proposed): exit %d\nstdout:\n%s\nstderr:\n%s", stateCode, stateOut, stateErr)
+		}
+		if !strings.Contains(stateOut, `"state":"proposed"`) {
+			t.Fatalf("verdi spec state (proposed) stdout = %q, want state proposed", stateOut)
 		}
 
-		stdout2, stderr2, code2 := runBinary(t, root, "accept", "spec/showcase-lifecycle-check")
-		if code2 != 0 {
-			t.Fatalf("verdi accept: exit %d\nstdout:\n%s\nstderr:\n%s", code2, stdout2, stderr2)
+		// 2. `verdi accept` is retired: it performs no mutation and prints
+		// the compatibility notice, regardless of the spec's own state.
+		acceptOut, acceptErr, acceptCode := runBinary(t, root, "accept", "spec/showcase-lifecycle-check")
+		if acceptCode != 0 {
+			t.Fatalf("verdi accept: exit %d\nstdout:\n%s\nstderr:\n%s", acceptCode, acceptOut, acceptErr)
 		}
-		accepted, err := os.ReadFile(specPath)
+		if !strings.Contains(acceptOut, "accept is retired: merge the reviewed specification pull request into the configured default branch to accept this exact revision") {
+			t.Fatalf("verdi accept stdout = %q, want the merge-signaled retirement notice", acceptOut)
+		}
+		untouched, err := os.ReadFile(specPath)
 		if err != nil {
-			t.Fatalf("reading accepted spec: %v", err)
+			t.Fatalf("reading spec after accept: %v", err)
 		}
-		if !strings.Contains(string(accepted), "status: accepted-pending-build") {
-			t.Fatalf("accepted spec did not flip to accepted-pending-build:\n%s", accepted)
+		if string(untouched) != string(draft) {
+			t.Fatalf("verdi accept mutated the spec's bytes:\n--- before ---\n%s\n--- after ---\n%s", draft, untouched)
 		}
-		if !strings.Contains(string(accepted), "frozen: {") {
-			t.Fatalf("accepted spec missing its frozen stamp:\n%s", accepted)
+
+		// 3. The real acceptance ceremony: merge the design branch into the
+		// default branch (test-local raw git — gitx/specstate expose no
+		// production merge API, a repository-authority action verdi never
+		// automates).
+		if err := gitx.CheckoutExisting(ctx, root, "main"); err != nil {
+			t.Fatalf("checkout main: %v", err)
+		}
+		merge := exec.Command("git", "merge", "--no-ff", "--no-edit", "design/showcase-lifecycle-check")
+		merge.Dir = root
+		if out, err := merge.CombinedOutput(); err != nil {
+			t.Fatalf("git merge design/showcase-lifecycle-check: %v\n%s", err, out)
+		}
+
+		stateOut2, stateErr2, stateCode2 := runBinary(t, root, "spec", "state", "spec/showcase-lifecycle-check")
+		if stateCode2 != 0 {
+			t.Fatalf("verdi spec state (accepted): exit %d\nstdout:\n%s\nstderr:\n%s", stateCode2, stateOut2, stateErr2)
+		}
+		if !strings.Contains(stateOut2, `"state":"accepted-pending-build"`) {
+			t.Fatalf("verdi spec state (accepted) stdout = %q, want state accepted-pending-build — the merge, not any command, is what accepted it", stateOut2)
 		}
 	})
 
@@ -331,6 +378,14 @@ func TestCLIShowcaseCoverage(t *testing.T) {
 	})
 
 	t.Run("close", func(t *testing.T) {
+		// close's C1 pre-closure precondition resolves the target's
+		// Git-derived effective state, which needs a resolvable default
+		// branch — pinned here exactly as TestCLIShowcaseObligationAuthor/
+		// TestCLIShowcaseSpecState already pin it (a test-fixture-only
+		// compensation: provisionShowcaseStore's fixturegit reconstruction
+		// deliberately carries no origin remote; a real clone resolves this
+		// with no special configuration).
+		t.Setenv("CI_DEFAULT_BRANCH", "main")
 		root := provisionShowcaseStore(t)
 		stdout, stderr, code := runBinary(t, root, "close", "spec/borrower-update-api", "--force-local")
 		if code != 1 {
@@ -770,5 +825,63 @@ func TestCLIShowcaseWaive(t *testing.T) {
 	}
 	if !strings.Contains(string(reaffirmedContent), "still no live evidence pipeline") {
 		t.Fatalf("reaffirmed waiver missing the new rationale's log entry:\n%s", reaffirmedContent)
+	}
+}
+
+// TestCLIShowcaseSpecState (cli:spec, Task 5 — merge-signaled spec
+// acceptance) drives `verdi spec state` against the REAL, already-landed
+// spec/stale-decline feature from examples/showcase (the same spec
+// README.md's own worked example points `verdi matrix` at): with
+// CI_DEFAULT_BRANCH=main set — the provisioned showcase store's own git
+// reconstruction is a single-branch history literally named "main"
+// (fixturegit's own --initial-branch=main convention, TestCLIShowcase
+// ObligationAuthor's identical rationale above) — the exact, committed
+// spec.md content is genuinely reachable from the default branch by
+// construction, so this proves the read-only Git-derived-state projection
+// resolves accepted-pending-build/exact against real showcase content,
+// never a synthetic fixture, and mutates nothing.
+func TestCLIShowcaseSpecState(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := provisionShowcaseStore(t)
+	ctx := context.Background()
+
+	headBefore, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("test setup: gitx.RevParse(HEAD): %v", err)
+	}
+	// provisionShowcaseStore's own fixture is NOT git-clean by construction
+	// (the mutable/derived zones it plants are working-tree-only, per
+	// buildShowcaseRepo's own doc comment) — so the mutation proof compares
+	// StatusDirty's answer BEFORE and AFTER, never asserts absolute
+	// cleanliness.
+	dirtyBefore, err := gitx.StatusDirty(ctx, root)
+	if err != nil {
+		t.Fatalf("test setup: gitx.StatusDirty: %v", err)
+	}
+
+	stdout, stderr, code := runBinary(t, root, "spec", "state", "spec/stale-decline")
+	if code != 0 {
+		t.Fatalf("verdi spec state against the real showcase store: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"state":"accepted-pending-build"`) || !strings.Contains(stdout, `"relation":"exact"`) {
+		t.Fatalf("stdout = %q, want state:accepted-pending-build/relation:exact for the real, already-landed showcase spec", stdout)
+	}
+	if !strings.Contains(stdout, `".verdi/specs/active/stale-decline/spec.md"`) {
+		t.Fatalf("stdout = %q, want the baseline to name the real spec path", stdout)
+	}
+
+	headAfter, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("gitx.RevParse(HEAD) after: %v", err)
+	}
+	if headBefore != headAfter {
+		t.Fatalf("HEAD changed: before=%s after=%s — spec state must never mutate the repository", headBefore, headAfter)
+	}
+	dirtyAfter, err := gitx.StatusDirty(ctx, root)
+	if err != nil {
+		t.Fatalf("gitx.StatusDirty after: %v", err)
+	}
+	if dirtyAfter != dirtyBefore {
+		t.Fatalf("working-tree dirty state changed (before=%v after=%v) — spec state must never mutate the working tree", dirtyBefore, dirtyAfter)
 	}
 }

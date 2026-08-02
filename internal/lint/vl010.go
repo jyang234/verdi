@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"regexp"
@@ -11,12 +12,9 @@ import (
 )
 
 // The status-line regexes below recognize a frontmatter status line and,
-// specifically, the base/head sides of VL-010's two status-only exceptions on
-// an otherwise-frozen spec:
+// specifically, the base/head sides of VL-010's one remaining status-only
+// exception on an otherwise-frozen spec:
 //
-//   - Round-5 supersession (D-12): a diff that touches an otherwise-frozen
-//     spec IN PLACE on ONLY its status line, flipping it to `superseded`, is
-//     legal (the accept ritual's predecessor flip, cmd/verdi/accept.go).
 //   - Round-6 closure (D6-11): a spec.md moving specs/active→specs/archive
 //     while its status line flips `accepted-pending-build`→`closed` and
 //     nothing else changes is legal (the close ritual's archive step,
@@ -24,9 +22,25 @@ import (
 //     transition). The move is no longer the byte-identical R100 rename the
 //     pure-rename exception covers, so this narrower exception admits it.
 //
-// Both reuse one line-diff core (statusOnlyFlip): exactly one changed line,
-// that line a status line matching the expected base pattern, its head
-// counterpart matching the expected terminal status.
+// A second exception used to admit round-5 supersession (D-12): a diff that
+// touches an otherwise-frozen spec IN PLACE on ONLY its status line,
+// flipping it to `superseded` (the accept ritual's predecessor flip,
+// cmd/verdi/accept.go's now-deleted supersede.go). Task 7 (docs/
+// superpowers/specs/2026-08-01-merge-signals-spec-acceptance-design.md)
+// deletes that mutation entirely — supersession is now derived purely from
+// Git reachability (internal/specstate), never written to a predecessor's
+// own bytes — so this exception was removed along with its sole
+// production writer: a status-only edit to `superseded` is now an
+// ordinary, illegal frozen-file modification like any other, admitted by
+// no exception at all.
+//
+// The remaining exception reuses one line-diff core (statusOnlyFlip):
+// exactly one changed line, that line INSIDE the frontmatter block on both
+// sides, matching the expected base pattern there, its head counterpart
+// matching the expected terminal status. The regexes below are line-shaped,
+// so the frontmatter requirement is load-bearing: without it a status-shaped
+// line in the markdown BODY would let an edit to prose pass as a legal
+// closure flip.
 // rootStorePrefix is the slash-path prefix of every artifact in the root
 // store's own .verdi/ tree. VL-010's diff sweep is scoped to it so a
 // whole-repo git diff never treats a nested/fixture store's frozen-stamped
@@ -35,9 +49,7 @@ import (
 const rootStorePrefix = ".verdi/"
 
 var (
-	anyStatusLineRe             = regexp.MustCompile(`^status:\s*"?[a-z][a-z-]*"?\s*$`)
 	acceptedPendingStatusLineRe = regexp.MustCompile(`^status:\s*"?accepted-pending-build"?\s*$`)
-	supersededStatusLineRe      = regexp.MustCompile(`^status:\s*"?superseded"?\s*$`)
 	closedStatusLineRe          = regexp.MustCompile(`^status:\s*"?closed"?\s*$`)
 )
 
@@ -104,7 +116,7 @@ func (vl010) Check(in *RunInput) []Finding {
 			continue
 		}
 
-		frozen, err := baseFrozen(in.Ctx, in.Root, in.LintCtx.DiffBase, basePath)
+		protected, err := baseProtected(in.Ctx, in.Root, in.LintCtx.DiffBase, basePath)
 		if err != nil {
 			// The diff named this path as changed on the base side, so its
 			// base content must be readable; a failure here is operational,
@@ -112,20 +124,17 @@ func (vl010) Check(in *RunInput) []Finding {
 			findings = append(findings, Finding{Rule: "VL-010", Path: basePath, Message: fmt.Sprintf("reading base-side content of %s at %s: %v", basePath, in.LintCtx.DiffBase, err)})
 			continue
 		}
-		if !frozen {
+		if !protected {
 			continue
 		}
 
 		switch e.Status {
 		case "M":
-			// Round-5 exception (D-12): a status-only edit flipping the spec
-			// to `superseded` is legal on an otherwise-frozen spec (the accept
-			// ritual's predecessor flip). Verified by diffing the base/head
-			// content and requiring exactly one changed line — the status line
-			// — now reading `superseded`.
-			if ok, cerr := isStatusOnlySupersededFlip(in.Ctx, in.Root, in.LintCtx.DiffBase, e.Path); cerr == nil && ok {
-				continue
-			}
+			// No exception remains for an in-place modification (Task 7
+			// deletes the round-5 D-12 status-only-superseded-flip exception
+			// along with its sole production writer, cmd/verdi's now-deleted
+			// supersede.go): ANY modification to a frozen file — including a
+			// status-only edit — is an illegal frozen-file modification now.
 			findings = append(findings, Finding{Rule: "VL-010", Path: e.Path, Message: fmt.Sprintf("frozen file modified between %s and HEAD", in.LintCtx.DiffBase)})
 		case "D":
 			findings = append(findings, Finding{Rule: "VL-010", Path: e.Path, Message: fmt.Sprintf("frozen file deleted between %s and HEAD", in.LintCtx.DiffBase)})
@@ -150,43 +159,60 @@ func (vl010) Check(in *RunInput) []Finding {
 	return findings
 }
 
-// baseFrozen reports whether the file at basePath carried a `frozen:` stamp
-// as it existed at diffBase — the base side of the diff. It reads the
-// historical content via `git show` and probes only the frontmatter's
-// `frozen:` key through artifact.ProbeFrozen, the deliberately-tolerant
-// historical-content probe (see its doc for why strict decode would be
-// wrong here). Anything ProbeFrozen cannot probe at all — a non-markdown
-// file, absent or unparseable frontmatter — reads as "not frozen": a
-// non-artifact file cannot carry a stamp. Only the `git show` failure is an
-// error: the diff itself named this path as existing on the base side.
-func baseFrozen(ctx context.Context, root, diffBase, basePath string) (bool, error) {
+// baseProtected reports whether the file at basePath is IMMUTABLE as it
+// existed at diffBase — the base side of the diff — under either of two
+// independent signals (Task 4, the merge-signaled acceptance design's
+// immutability keystone):
+//
+//  1. A `frozen:` stamp (the legacy signal, unchanged, renamed from
+//     baseFrozen): probed tolerantly through artifact.ProbeFrozen, reading
+//     ONLY the frontmatter's `frozen:` key (see its own doc for why strict
+//     decode would be wrong for HISTORICAL content).
+//  2. A strict-decoded feature or story spec — REGARDLESS of any frozen
+//     stamp, or of a persisted status at all. Acceptance is now Git-derived
+//     (internal/specstate): a feature/story spec.md that strict-decodes
+//     cleanly at the diff base — the base being, by construction, either
+//     the default branch tip or an ancestor of it — is an artifact this
+//     store already treats as merge-accepted, whether or not it happens to
+//     carry a frozen: stamp (new merge-accepted artifacts need none, per
+//     the design's "Artifact compatibility": "do not require a
+//     content-changing frozen stamp"). Without this second signal, a
+//     statusless, unstamped feature/story that already landed on the
+//     default branch could be freely edited or deleted by a later diff —
+//     exactly the immutability gap this rule exists to close.
+//
+// A component spec strict-decoding cleanly is deliberately NOT protected
+// by signal 2: component specs are "authored-living and never frozen" (01
+// §Temporal classes; artifact/spec.go's validateComponent) — their only
+// immutability signal remains an explicit frozen: stamp (signal 1),
+// exactly as before Task 4.
+//
+// Anything neither ProbeFrozen nor DecodeSpec can make sense of — a
+// non-markdown file, unparseable frontmatter, a non-spec artifact, a spec
+// that fails strict validation — reads as "not protected": VL-010 governs
+// frozen artifacts and Git-derived feature/story acceptance, not every
+// file in the store. Only the `git show` failure is an error: the diff
+// itself named this path as existing on the base side.
+func baseProtected(ctx context.Context, root, diffBase, basePath string) (bool, error) {
 	content, err := gitx.Show(ctx, root, diffBase, basePath)
 	if err != nil {
 		return false, err
 	}
-	frozen, err := artifact.ProbeFrozen(content)
-	if err != nil {
-		return false, nil // not a probeable markdown artifact ⇒ not frozen
+	if frozen, probeErr := artifact.ProbeFrozen(content); probeErr == nil && frozen != nil {
+		return true, nil
 	}
-	return frozen != nil, nil
-}
-
-// isStatusOnlySupersededFlip reports whether the change to path between
-// diffBase and HEAD is exactly a status-line flip to `superseded` and
-// nothing else (D-12) — the round-5 in-place supersession exception (path
-// unchanged on both sides). Any read failure is surfaced as an error so the
-// caller can fall through to the ordinary frozen-modification finding rather
-// than silently admitting the diff.
-func isStatusOnlySupersededFlip(ctx context.Context, root, diffBase, path string) (bool, error) {
-	baseContent, err := gitx.Show(ctx, root, diffBase, path)
-	if err != nil {
-		return false, err
+	// artifact.DecodeSpec expects frontmatter-only bytes (every real call
+	// site splits first — internal/lint/walk.go's decodeDocument,
+	// internal/specstate/resolve.go's own scanSuccessors); content here is
+	// the FULL historical file (frontmatter delimiters plus body).
+	if rawFM, _, splitErr := artifact.SplitFrontmatter(content); splitErr == nil {
+		if fm, decodeErr := artifact.DecodeSpec(rawFM); decodeErr == nil {
+			if fm.Class == artifact.ClassFeature || fm.Class == artifact.ClassStory {
+				return true, nil
+			}
+		}
 	}
-	headContent, err := gitx.Show(ctx, root, "HEAD", path)
-	if err != nil {
-		return false, err
-	}
-	return statusOnlyFlip(baseContent, headContent, anyStatusLineRe, supersededStatusLineRe), nil
+	return false, nil
 }
 
 // isStatusOnlyClosedArchiveFlip reports whether the rename oldPath→newPath
@@ -210,9 +236,17 @@ func isStatusOnlyClosedArchiveFlip(ctx context.Context, root, diffBase, oldPath,
 // statusOnlyFlip is the shared core of VL-010's two status-only exceptions
 // (D-12 superseded, D6-11 closed): it compares baseContent and headContent
 // line by line and returns true only when precisely one line differs, that
-// line matches baseStatusRe on the base, and its head counterpart matches
-// headStatusRe. Everything else must be byte-identical — the flip is the sole
-// admissible content change on an otherwise-frozen spec.
+// line lies INSIDE the frontmatter block on both sides, it matches
+// baseStatusRe on the base, and its head counterpart matches headStatusRe.
+// Everything else must be byte-identical — the flip is the sole admissible
+// content change on an otherwise-frozen spec.
+//
+// The frontmatter requirement is what keeps the exception about the status
+// FIELD: the recognizers are line-shaped, so a status-shaped line in the
+// markdown BODY (prose quoting the legacy field, an unfenced example) would
+// otherwise let an edit to that prose pass as a legal closure flip — an
+// ordinary, illegal mutation of a frozen artifact wearing the exception's
+// clothes.
 func statusOnlyFlip(baseContent, headContent []byte, baseStatusRe, headStatusRe *regexp.Regexp) bool {
 	baseLines := strings.Split(string(baseContent), "\n")
 	headLines := strings.Split(string(headContent), "\n")
@@ -232,7 +266,29 @@ func statusOnlyFlip(baseContent, headContent []byte, baseStatusRe, headStatusRe 
 	if diffIdx == -1 {
 		return false
 	}
+	if !lineInFrontmatter(baseContent, diffIdx) || !lineInFrontmatter(headContent, diffIdx) {
+		return false
+	}
 	return baseStatusRe.MatchString(baseLines[diffIdx]) && headStatusRe.MatchString(headLines[diffIdx])
+}
+
+// lineInFrontmatter reports whether the zero-based line index i falls inside
+// doc's YAML frontmatter block — the lines BETWEEN the delimiters, both
+// delimiter lines themselves excluded. The block is located through the one
+// frontmatter seam (artifact.FrontmatterRange) rather than by re-deriving
+// the delimiter rule here.
+//
+// A document with no readable frontmatter block, and an empty block (the
+// delimiters adjacent), hold no such line at all: both read false, which is
+// the fail-closed answer for a rule deciding whether a mutation is excused.
+func lineInFrontmatter(doc []byte, i int) bool {
+	start, end, err := artifact.FrontmatterRange(doc)
+	if err != nil || end <= start {
+		return false
+	}
+	first := bytes.Count(doc[:start], []byte("\n"))           // the line after the opening delimiter
+	last := first + bytes.Count(doc[start:end], []byte("\n")) // inclusive: the line before the closing one
+	return i >= first && i <= last
 }
 
 // isActiveArchiveMove reports whether oldPath -> newPath is a spec

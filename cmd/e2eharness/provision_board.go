@@ -64,7 +64,55 @@ const (
 	// neither (the empty slot that badges). The no-derived-tree calm
 	// state is proven on replaySpecName's wall, which has none.
 	slotWallSpecName = "decline-slot-wall"
+
+	// The statusless lifecycle pair (merge-signaled spec acceptance): the
+	// CLI's scaffold writes NO status: field at all — lifecycle state is
+	// derived from Git reachability, never a persisted field. The draft
+	// instance exists ONLY on the design branch (effective state proposed:
+	// the live authoring wall); the sealed instance's exact bytes are
+	// landed on main (effective state accepted-pending-build: the sealed
+	// read-only record). Same statusless document shape in both.
+	statuslessDraftSpecName  = "decline-statusless-draft"
+	statuslessSealedSpecName = "decline-statusless-sealed"
 )
+
+// statuslessSpec is one statusless-lifecycle fixture instance: a valid
+// feature spec whose frontmatter carries no status: line — the ONLY shape
+// `verdi design start` scaffolds now. Board mode and the displayed status
+// vocabulary must come entirely from Git-derived effective state.
+func statuslessSpec(name string) string {
+	return `---
+id: spec/` + name + `
+kind: spec
+class: feature
+title: "Statusless lifecycle fixture (` + name + `)"
+owners: [platform-team]
+problem: { text: "lifecycle state persisted in frontmatter drifts from git truth", anchor: "#problem" }
+outcome: { text: "the board keys mode and status off git-derived state alone", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a statusless draft on its design branch is board-editable", evidence: [behavioral], anchor: "#ac-1" }
+decisions:
+  - { id: dc-1, text: "derive lifecycle state from default-branch reachability", anchor: "#dc-1" }
+---
+# Statusless lifecycle fixture (` + name + `)
+
+## Problem
+
+Prose.
+
+## Outcome
+
+Prose.
+
+## ac-1
+
+Prose.
+
+## dc-1
+
+Prose.
+`
+}
 
 // designSpec is DESIGN_SPEC: the object model fixtures.ts binds (3 ACs,
 // 1 constraint, dc-1 carrying the declared exempts edge to ADR_REF, dc-2
@@ -708,11 +756,51 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 	// The sealed badge fixture freezes at the store's own main tip — a
 	// real commit in this scratch repo's history (frozen.commit must be
 	// sha-shaped and honest; a made-up sha would be a lie the fixtures
-	// don't need to tell). Resolved BEFORE the design branch is cut, so
-	// the sha is main's.
+	// don't need to tell). Resolved BEFORE the landed-fixture commit and
+	// the design branch cut, so the sha is a real main ancestor.
 	mainSHA, err := gitOutput(ctx, storeRoot, "rev-parse", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("resolving main HEAD for the sealed badge fixture: %w", err)
+	}
+
+	// LANDED (main) fixtures — merge-signaled acceptance: a wall is sealed
+	// read-only because its exact bytes are reachable from the default
+	// branch, never because of a persisted status: field. Both sealed
+	// walls therefore land on main itself (and ride into the design
+	// branch's tree when it is cut below):
+	//   - the sealed badge wall (spec/badge-computes ac-5's read-only
+	//     instance — formerly keyed off its accepted-pending-build status
+	//     alone, which no longer seals anything by itself);
+	//   - the statusless sealed instance (the CLI's statusless scaffold
+	//     shape, landed — displayed accepted-pending-build).
+	mainFixtures := map[string]string{
+		filepath.Join(".verdi", "specs", "active", badgeSealedSpecName, "spec.md"):      badgeSpec(badgeSealedSpecName, "accepted-pending-build", "frozen: { at: 2024-01-01, commit: "+mainSHA+" }\n"),
+		filepath.Join(".verdi", "specs", "active", statuslessSealedSpecName, "spec.md"): statuslessSpec(statuslessSealedSpecName),
+		// The family-board-links parent wall (provision_familyboardlinks.go's
+		// fixture family): its stub-instantiate affordances require an
+		// accepted-pending-build wall, which is a LANDED wall now — so it
+		// lands here, not in that provisioner's design-branch commit.
+		filepath.Join(".verdi", "specs", "active", flParentName, "spec.md"): flParentSpec(mainSHA),
+	}
+	for rel, content := range mainFixtures {
+		path := filepath.Join(storeRoot, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return "", fmt.Errorf("creating %s: %w", filepath.Dir(rel), err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return "", fmt.Errorf("writing %s: %w", rel, err)
+		}
+	}
+	if err := runGit(ctx, storeRoot, nil, "add", "-A"); err != nil {
+		return "", err
+	}
+	if err := runGit(ctx, storeRoot, nil, "commit", "--quiet", "--no-verify", "-m", "main: landed sealed-wall fixtures"); err != nil {
+		return "", err
+	}
+	// Keep origin/main in step with the local main tip (the bare origin
+	// was pushed before this commit existed).
+	if err := runGit(ctx, storeRoot, nil, "push", "--quiet", "origin", "main"); err != nil {
+		return "", err
 	}
 
 	// The design branch: both draft specs (draft never lands on main —
@@ -736,11 +824,16 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 		// tree is written UNTRACKED below (data/ is gitignored, VL-013).
 		filepath.Join(".verdi", "specs", "active", slotWallSpecName, "spec.md"): slotWallSpec,
 		filepath.Join(".verdi", "attestations", "jira-loan-2204", "ac-1.md"):    slotWallAttestation(mainSHA),
-		// The three wall-badge fixtures (spec/badge-computes ac-5): one per
-		// board mode, same badge-triggering state.
+		// Two of the three wall-badge fixtures (spec/badge-computes ac-5):
+		// the authoring and review instances, same badge-triggering state.
+		// The sealed instance is a LANDED fixture (mainFixtures above) —
+		// read-only is git-derived now, not a status-field property.
 		filepath.Join(".verdi", "specs", "active", badgeWallSpecName, "spec.md"):   badgeSpec(badgeWallSpecName, "draft", ""),
 		filepath.Join(".verdi", "specs", "active", badgeReviewSpecName, "spec.md"): badgeSpec(badgeReviewSpecName, "draft", ""),
-		filepath.Join(".verdi", "specs", "active", badgeSealedSpecName, "spec.md"): badgeSpec(badgeSealedSpecName, "accepted-pending-build", "frozen: { at: 2024-01-01, commit: "+mainSHA+" }\n"),
+		// The statusless DRAFT instance (merge-signaled acceptance): the
+		// scaffold shape the CLI emits, existing only on this branch —
+		// effective state proposed, the live authoring wall.
+		filepath.Join(".verdi", "specs", "active", statuslessDraftSpecName, "spec.md"): statuslessSpec(statuslessDraftSpecName),
 		// The size-smell pair (spec/case-file-flags): same wall, one AC
 		// count over dc-1's estimate and one under it.
 		filepath.Join(".verdi", "specs", "active", sizeSmellWallSpecName, "spec.md"): acCountSpec(sizeSmellWallSpecName, sizeSmellACCount),
@@ -804,6 +897,16 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 	}
 
 	if err := runGit(ctx, storeRoot, nil, "push", "--quiet", "--set-upstream", "origin", designBranch); err != nil {
+		return "", err
+	}
+
+	// A namesake design branch for the statusless draft: the whole-store
+	// directory names a design entry after its branch's namesake spec, so
+	// the statusless draft earns its own directory row — chipped "draft"
+	// purely from git-derived effective state (its bytes are not reachable
+	// from main; no status field exists anywhere on disk). Cut at the
+	// design branch's tip; no checkout moves.
+	if err := runGit(ctx, storeRoot, nil, "branch", "design/"+statuslessDraftSpecName); err != nil {
 		return "", err
 	}
 

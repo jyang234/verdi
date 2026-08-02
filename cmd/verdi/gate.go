@@ -43,6 +43,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -55,6 +56,7 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -111,7 +113,7 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	return runGate(ctx, root, spec, head, resolveDefaultBranch(ctx, root), cfg.Model, stdout, stderr)
+	return runGate(ctx, root, spec, head, specstate.NewProjector(), cfg.Model, stdout, stderr)
 }
 
 // resolveDefaultBranch delegates to internal/lint.ResolveDefaultBranch
@@ -159,20 +161,24 @@ type gateCondition struct {
 }
 
 // runGate is the testable core: given an already-resolved root, the
-// build-head spec (resolved from the working tree — condition 1 still
-// reads the default branch's OWN copy of it via git, never trusting the
-// working tree's status field), the build head commit, and a resolved
-// default-branch ref (branch name or "" if unknown — condition 1 then
-// fails closed), evaluates all three conditions independently, prints each
-// with its reason, and returns the exit code.
-func runGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head, defaultBranchRef string, mdl *model.Model, stdout, stderr io.Writer) int {
+// build-head spec (resolved from the working tree), the build head commit,
+// and a specStateResolver (production: specstate.NewProjector(); tests:
+// real, fixturegit-backed, or a fake for shapes real git cannot practically
+// reconstruct — condition 1 routes entirely through it, never trusting the
+// working tree's status field), evaluates all four conditions independently,
+// prints each with its reason, and returns the exit code.
+func runGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string, resolver specStateResolver, mdl *model.Model, stdout, stderr io.Writer) int {
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate: internal error: resolved spec has an invalid id:", err)
 		return 2
 	}
 
-	cond1 := checkAcceptedOnDefaultBranch(ctx, root, specRef.Name, defaultBranchRef, string(spec.Class), mdl)
+	cond1, err := checkAcceptedOnDefaultBranch(ctx, root, spec, resolver, mdl)
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
+		return 2
+	}
 
 	cond2, err := checkNoACViolated(ctx, root, spec, head, mdl)
 	if err != nil {
@@ -232,53 +238,67 @@ func reportGateConditions(stdout io.Writer, conds []gateCondition) int {
 	return 1
 }
 
-// checkAcceptedOnDefaultBranch is condition 1: the story's spec exists on
-// the default branch with status accepted-pending-build. Read via
-// gitx.Show at the default branch's current tip — never the working tree,
-// which a build branch must never be trusted to self-report (03 §Gates:
-// "builds reference accepted designs only").
-// class and mdl resolve the condition's display STATE words (L-M13(1),
-// nil-safe): the required accepted-pending-build in the name/reason and
-// the decoded current status. The status COMPARISON below and the
-// git-read machinery stay on bare ids.
-func checkAcceptedOnDefaultBranch(ctx context.Context, root, specName, defaultBranchRef, class string, mdl *model.Model) gateCondition {
+// checkAcceptedOnDefaultBranch is condition 1: the build-head spec's
+// exact bytes are AcceptedPendingBuild per the shared Git-derived
+// effective-state projector (internal/specstate) — never the persisted
+// status field, and never trusted merely because the working tree carries
+// it (03 §Gates: "builds reference accepted designs only"). Reads the
+// resolved spec's own bytes ONCE from the working tree (the same content
+// storyresolve.ResolveBuildSpec already decoded from) and asks the
+// resolver what Git says about them: PASS only when those EXACT bytes are
+// proven reachable, landed, and not superseded/closed on the default
+// branch — a build branch whose local spec.md has drifted even slightly
+// from what actually landed fails this exactly like one that never landed
+// at all (specstate.RelationDiverged), a strictly stronger property than
+// the old status-field-only read achieved.
+//
+// mdl resolves the condition's display STATE words (L-M13(1), nil-safe);
+// the state COMPARISON stays on specstate's own bare State values.
+//
+// A specstate.Unproven verdict (no default branch resolvable, or
+// ancestry/supersession proof incomplete) is returned as an error, not a
+// failed condition: the gate cannot honestly decide this precondition, so
+// runGate refuses operationally (exit 2) rather than rendering a [FAIL]
+// line that would misrepresent an undecidable case as a decided one.
+func checkAcceptedOnDefaultBranch(ctx context.Context, root string, spec *artifact.SpecFrontmatter, resolver specStateResolver, mdl *model.Model) (gateCondition, error) {
+	class := string(spec.Class)
 	name := "1. spec " + mdl.DisplayState(class, "accepted-pending-build") + " on the default branch"
-	if defaultBranchRef == "" {
-		// D6-6: name every source resolveDefaultBranch tries — not just
-		// the two GitLab-CI-centric ones — plus the remedy, since this is
-		// exactly the message a fresh GitHub checkout hits (GitHub Actions
-		// sets no CI_DEFAULT_BRANCH, and actions/checkout never runs `git
-		// remote set-head`, so origin/HEAD is unconfigured too; a repo
-		// whose default branch is named something other than main/master,
-		// or one that ambiguously carries both, still fails closed here —
-		// a legible refusal, never a silent guess).
-		return gateCondition{Name: name, Reason: "cannot determine the default branch (no CI_DEFAULT_BRANCH, no configured git remote HEAD, and no single unambiguous local origin/main or origin/master ref) — failing closed; run `git remote set-head origin <branch>` to configure it"}
+
+	specRef, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		return gateCondition{}, fmt.Errorf("resolved spec has an invalid id: %w", err)
+	}
+	relPath := store.ActiveSpecRelPath(specRef.Name)
+	content, err := os.ReadFile(store.ActiveSpecPath(root, specRef.Name))
+	if err != nil {
+		return gateCondition{}, fmt.Errorf("reading %s: %w", relPath, err)
+	}
+	result, err := resolver.Resolve(ctx, root, specstate.Candidate{Path: relPath, Content: content})
+	if err != nil {
+		return gateCondition{}, fmt.Errorf("resolving effective state for %s: %w", relPath, err)
 	}
 
-	tip, err := gitx.RevParse(ctx, root, defaultBranchRef)
-	if err != nil {
-		return gateCondition{Name: name, Reason: fmt.Sprintf("resolving default branch %q: %v", defaultBranchRef, err)}
+	switch result.State {
+	case specstate.AcceptedPendingBuild:
+		var extra []string
+		if result.Baseline != nil {
+			// The exact accepted revision, auditable without consulting
+			// the forge: the landed blob and the first-parent default-
+			// branch commit that landed it (the design's "Authority and
+			// derived state" baseline identity).
+			extra = []string{fmt.Sprintf("       landed: blob %s at commit %s", result.Baseline.Blob, result.Baseline.LandingCommit)}
+		}
+		return gateCondition{Name: name, OK: true, Extra: extra}, nil
+	case specstate.Unproven:
+		if msg := unresolvableDefaultBranchMessage(ctx, root); msg != "" {
+			return gateCondition{}, errors.New(msg)
+		}
+		return gateCondition{}, fmt.Errorf("effective state for %s cannot be proven: %s", relPath, strings.Join(result.Disclosures, "; "))
+	default: // Proposed, Superseded, Closed
+		return gateCondition{Name: name, Reason: fmt.Sprintf("spec/%s effective state is %s, want %s", specRef.Name,
+			mdl.DisplayState(class, string(result.State)),
+			mdl.DisplayState(class, "accepted-pending-build"))}, nil
 	}
-
-	relPath := store.ActiveSpecRelPath(specName)
-	raw, err := gitx.Show(ctx, root, tip, relPath)
-	if err != nil {
-		return gateCondition{Name: name, Reason: fmt.Sprintf("spec/%s not found on default branch %s at %s: %v", specName, defaultBranchRef, tip, err)}
-	}
-	fm, _, err := artifact.SplitFrontmatter(raw)
-	if err != nil {
-		return gateCondition{Name: name, Reason: fmt.Sprintf("spec/%s on default branch: %v", specName, err)}
-	}
-	decoded, err := artifact.DecodeSpec(fm)
-	if err != nil {
-		return gateCondition{Name: name, Reason: fmt.Sprintf("spec/%s on default branch failed to decode: %v", specName, err)}
-	}
-	if decoded.Status != "accepted-pending-build" {
-		return gateCondition{Name: name, Reason: fmt.Sprintf("spec/%s status on default branch %s is %q, want %s", specName, defaultBranchRef,
-			mdl.DisplayState(class, string(decoded.Status)),
-			mdl.DisplayState(class, "accepted-pending-build"))}
-	}
-	return gateCondition{Name: name, OK: true}
 }
 
 // checkNoACViolated is condition 2: no AC is violated at head, per the

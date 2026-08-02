@@ -95,6 +95,12 @@ test("the glance groups every fixture entry into its correct bucket, badged and 
     [ACCEPTED_SPEC, "in-flight"],
     [ACTIVE_SPEC, "settling"],
     [TERMINAL_SPEC, "settling"],
+    // Merge-signaled acceptance, legacy-compatibility reading (Task 6
+    // fix round 2, finding 4): a LANDED spec carrying a legacy explicit
+    // `status: closed` projects Closed — the projector's compatibility
+    // rows preserve a legacy terminal artifact's existing meaning (with
+    // a disclosure) rather than silently re-deriving a weaker state —
+    // so the closed-awaiting-archive shape still settles here.
     [EDGE.DIR_CLOSED_AWAITING_ARCHIVE, "settling"],
   ] as const) {
     await expect(glanceEntry(page, name)).toHaveCount(1);
@@ -112,9 +118,24 @@ test("the glance groups every fixture entry into its correct bucket, badged and 
   ).toHaveText("accepted-pending-build");
   await expect(glanceEntry(page, ACTIVE_SPEC).locator(".badge-active")).toHaveText("active");
   await expect(glanceEntry(page, TERMINAL_SPEC).locator(".badge-superseded")).toHaveText("superseded");
+  // The badge speaks the EFFECTIVE state — which, under the projector's
+  // legacy-compatibility rows, honors the landed explicit terminal field
+  // (see the bucket note above).
   await expect(
     glanceEntry(page, EDGE.DIR_CLOSED_AWAITING_ARCHIVE).locator(".badge-closed"),
   ).toHaveText("closed");
+
+  // (c2, final fix wave I5) the projector's legacy-compatibility reading
+  // is DISCLOSED beside the proven badge, in the shared disclosure
+  // vocabulary — the closed-awaiting-archive spec's state was honored
+  // from its persisted legacy field alone, and that compatibility note
+  // must reach the browser, never be stripped by the index seam.
+  await expect(
+    glanceEntry(page, EDGE.DIR_CLOSED_AWAITING_ARCHIVE).locator(".dir-disclosed"),
+  ).toContainText("compatibility reading");
+  // A clean legacy-accepted entry carries no such note (the disclosure is
+  // the projector's own, never a blanket decoration).
+  await expect(glanceEntry(page, ACCEPTED_SPEC).locator(".dir-disclosed")).toHaveCount(0);
 
   // (d) link grammar per dc-3: the unprefixed default-branch board
   // address...
@@ -207,6 +228,13 @@ test("every pre-existing directory section and link survives unchanged alongside
   await expect(page.getByTestId(dirEntryTestId(ARCHIVED_SPEC)).locator(".badge-closed")).toHaveText(
     "closed",
   );
+
+  // Final fix wave I5: the exhaustive Directory entry carries the SAME
+  // compatibility note beside its badge as the glance card above — one
+  // disclosure, both surfaces, never stripped on a proven state.
+  await expect(
+    page.getByTestId(dirEntryTestId(EDGE.DIR_CLOSED_AWAITING_ARCHIVE)).locator(".dir-disclosed"),
+  ).toContainText("compatibility reading");
 
   // A case 37-directory-home.spec.ts already covers end to end, re-proven
   // unchanged here: the disclosed no-draft-spec notice entry (ac-3's

@@ -53,6 +53,29 @@
 // resolving a store root or reading any file — falls straight into the
 // plain default case, the same safety property board/waivers already rely
 // on there.
+//
+// Task 5 (merge-signaled spec acceptance): `spec` is a brand-new verb —
+// dispatch.go's verbPhase gains a `spec` key (phase 21) in the same change
+// this inV0 addition rides. `verdi spec state SPEC_REF` is read-only (no
+// status flip, no stamp write, no commit, no forge call), but a bare
+// `verdi spec` (no "state" subcommand) still fails on usage parsing alone
+// (runSpecVerb, cmd/verdi/specstate.go) before resolving a store root or
+// reading any file — falls straight into the plain default case, the same
+// safety property model/board/waivers already rely on there.
+//
+// Task 7 (docs/superpowers/specs/2026-08-01-merge-signals-spec-acceptance-
+// design.md): `obligation` (extensibility phase 2, `verdi obligation
+// author`, cmd/verdi/obligation.go) was already a real, dispatched verb —
+// its own absence from inV0 here was a pre-existing inventory gap this
+// task closes while it is already touching this file for the new
+// `obligation scaffold` subcommand (the pre-review, idempotent batch-
+// creation surface that replaces accept's retired freeze-moment
+// obligation backstop). A bare `verdi obligation` (no subcommand) fails on
+// usage parsing alone (runObligationVerb) before resolving a store root or
+// reading any file, falling straight into the plain default case; the
+// v1-argument-shape variant `obligation scaffold <story-ref>` (bare, no
+// store root) is proven separately in TestV1CLIVerbForms below, mirroring
+// design start's own kind-variant proofs.
 package specalign
 
 import "testing"
@@ -67,7 +90,7 @@ func TestV0CLIVerbInventory(t *testing.T) {
 	inV0 := []string{
 		"lint", "design", "accept", "feature", "build", "align", "sync",
 		"serve", "mcp", "matrix", "rollup", "dex", "gate", "board", "audit",
-		"close", "gc", "attest", "disposition", "model",
+		"close", "gc", "attest", "disposition", "model", "spec", "obligation",
 	}
 	// PLAN.md §5 scope discipline, verbatim (as amended: `close`/`gc`
 	// graduated to real, round 6): "Explicitly out of v0 (not stubbed —
@@ -169,6 +192,20 @@ func TestV1CLIVerbForms(t *testing.T) {
 		assertNotOutOfV0(t, "design", stderr)
 		if code != 2 {
 			t.Errorf("verdi design start --kind story (no store root): exit = %d, want 2 (operational error)", code)
+		}
+	})
+
+	// Task 7: `obligation scaffold <story-ref>` (the pre-review batch-
+	// creation surface replacing accept's retired freeze-moment backstop)
+	// dispatches to the real implementation, never "not implemented" —
+	// proven from a rootless tempdir so a missing store root fails fast
+	// (exit 2, operational) rather than risking any mutation, the same
+	// safety property every other subcommand-shape proof here relies on.
+	t.Run("obligation_scaffold", func(t *testing.T) {
+		_, stderr, code := runBinary(t, t.TempDir(), "obligation", "scaffold", "spec/specalign-probe-story")
+		assertNotOutOfV0(t, "obligation", stderr)
+		if code != 2 {
+			t.Errorf("verdi obligation scaffold (no store root): exit = %d, want 2 (operational error)", code)
 		}
 	})
 }

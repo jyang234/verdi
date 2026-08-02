@@ -43,6 +43,12 @@ bogus_field: nope
 
 func buildMinimalStore(t *testing.T, files map[string]string) *fixturegit.Repo {
 	t.Helper()
+	// The fixture repo has no origin, so an ambient CI environment (a
+	// pull_request runner's CI/GITHUB_ACTIONS/GITHUB_BASE_REF) would make
+	// VL-004 truthfully disclose the RUNNER's unresolvable target branch on
+	// this clean store. Tests that exercise CI on purpose set their own
+	// values after building the fixture.
+	clearCIEnv(t)
 	all := map[string]string{
 		".verdi/verdi.yaml": lintTestManifest,
 		".gitattributes":    lintTestGitattributes,

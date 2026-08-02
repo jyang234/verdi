@@ -3,23 +3,57 @@
 // feature-first cascade; §The amendment ladder rungs 3 and 4).
 //
 // Script: design start --kind feature (with an optional epic ref) -> edit
-// -> accept -> design start --kind story (stub-matched) -> accept (stamps
-// stub_matched: true) -> build start succeeds only once accepted -> ONE
+// -> merge into main (merge-signaled acceptance) -> design start --kind
+// story -> merge -> build start succeeds only once merge-accepted -> ONE
 // rung-3 event (story supersession: file a conflict, author story-spec v2,
-// accept it, re-point the build branch) -> ONE rung-4 event (feature
-// supersession: file a conflict, supersede with a supersession: block,
-// verify the computed blast-radius quorum disclosure, verify a stale story
-// is refused by build start until re-affirmed, then succeeds once it is).
+// merge it) -> ONE rung-4 event (feature supersession: file a conflict,
+// supersede with a supersession: block, merge it, verify the derived
+// Superseded state, verify a stale story is refused by build start until
+// re-affirmed, then succeeds once it is).
+//
+// Task 7 (docs/superpowers/specs/2026-08-01-merge-signals-spec-acceptance-
+// design.md) retires `verdi accept`'s mutation entirely: acceptance is now
+// merge-signaled, so every step that used to call runAccept now performs a
+// real (test-local, raw-git) merge into the default branch instead —
+// mirroring internal/specstate/resolve_integration_test.go's own
+// buildLandedSpecRepo convention, since gitx/specstate expose no
+// production merge API (a repository-authority action, never something
+// verdi automates). Two consequences, both deliberate and disclosed rather
+// than worked around:
+//
+//   - R4-I-12's stub-match computation and the rung-4 blast-radius quorum
+//     disclosure were BOTH computed and printed exclusively inside accept's
+//     own ritual (accept.go's old runAccept, stubmatch.go, blastradius.go).
+//     Neither has any other production caller — deleting accept's
+//     mutation makes both currently unreachable in production. Relocating
+//     them into the pre-merge gate is explicit FUTURE work (the design's
+//     "Rollout sequence" step 8: "Apply the ceremony audit to closure,
+//     supersession, build start, ... before their implementation begins"),
+//     out of this task's scope — this script no longer asserts on either.
+//   - I-40 (invention ledger, open owner question): a story-class spec can
+//     never carry a `supersession:` block (internal/artifact's
+//     validateStory rejects it outright), so internal/specstate's two-
+//     signal successor-corpus proof can NEVER independently confirm
+//     story-level (rung-3) supersession, and supersede.go — the only
+//     writer of a legacy `status: superseded` story flip — is deleted by
+//     this same task. The projector now records the one-signal supersedes
+//     link the successor DOES carry (final fix wave I4) and projects the
+//     story predecessor DISCLOSED-UNPROVEN — naming the claiming successor
+//     and the missing supersession proof — rather than either silently
+//     accepting it as still-buildable or inventing a mechanism to call it
+//     Superseded (BINDING per the task brief: "do NOT invent a new
+//     story-supersession mechanism"). Build start on such a predecessor
+//     exits 2 (cannot honestly decide the precondition). Rung-4
+//     (feature-class predecessor/successor) has no such gap — a feature
+//     CAN carry `supersession:`, so its derived-Superseded proof below is
+//     real and positive, exercised through the full CLI/build-branch
+//     workflow (supersedepredecessor_test.go proves the same derivation
+//     at a more unit-scoped level).
 //
 // A round-four class: feature spec is birds-eye and implementation-blind
-// (03 §The feature fold) and is never itself buildable — this supersedes
-// v0's single-level model, where "feature start" built directly against a
-// class: feature spec. The pre-round-four ritual test this file used to
-// carry (design start a class: feature spec, then feature start it
-// directly) is no longer a legal round-four sequence: `verdi build
-// start`/the `feature start` alias now REFUSE a class: feature spec
-// outright (buildstart.go) — a deliberate behavior change, not a
-// regression, and exactly what 03's two-level model requires.
+// (03 §The feature fold) and is never itself buildable — `verdi build
+// start`/the `feature start` alias REFUSE a class: feature spec outright
+// (buildstart.go).
 package main
 
 import (
@@ -27,6 +61,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -36,16 +71,14 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/provider"
 	providerfake "github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
 // seedRitualProvider seeds titles for both tracker refs the round-four
 // loop below uses: the feature's optional epic ref, and the story's ref
 // (title "Stale Decline" — store.RefSlug("Stale Decline") == "stale-decline",
-// the stub slug editFeatureStub below plants on the feature, so the
-// story's design-start scaffold, whose title comes straight from this
-// provider, drives R4-I-12's RefSlug(title)-equals-stub-slug condition
-// without any further editing of the story's own title).
+// the slug editFeatureStub below plants on the feature's stub).
 func seedRitualProvider(t *testing.T) *providerfake.Provider {
 	t.Helper()
 	p := providerfake.New()
@@ -56,9 +89,7 @@ func seedRitualProvider(t *testing.T) *providerfake.Provider {
 
 // editSpecField does a regex find-and-replace against one spec.md's
 // frontmatter and commits the edit — the test's stand-in for the ordinary
-// design-branch content editing every scaffold's TODOs expect (design.go's
-// scaffolds are deliberately minimal placeholders; ritual_test.go's own
-// injectImpacts established this pattern pre-round-four).
+// design-branch content editing every scaffold's TODOs expect.
 func editSpecField(t *testing.T, ctx context.Context, root, name string, re *regexp.Regexp, replacement, commitMsg string) {
 	t.Helper()
 	path := filepath.Join(root, ".verdi", "specs", "active", name, "spec.md")
@@ -91,10 +122,12 @@ func editSpecField(t *testing.T, ctx context.Context, root, name string, re *reg
 	}
 }
 
-// fileConflict writes .verdi/conflicts/<name>.md and commits it — 03
-// §Challenging closed decisions step 1, "this is also the rung-3/4
-// blocker record": both rungs below open by filing a conflict here, with
-// the build discovery as witness.
+// fileConflict writes .verdi/conflicts/<name>.md and commits it directly
+// on whatever branch is currently checked out — 03 §Challenging closed
+// decisions step 1, "this is also the rung-3/4 blocker record". Conflict
+// records are never git-ref-resolved by any check this script exercises,
+// so which branch carries the commit is immaterial to every assertion
+// below; matching the pre-Task-7 script's own low-ceremony convention.
 func fileConflict(t *testing.T, ctx context.Context, root, name, challengesRef, witness string) {
 	t.Helper()
 	content := fmt.Sprintf(`---
@@ -124,11 +157,12 @@ links:
 	}
 }
 
-// writeDraftSpec cuts a design branch and writes content verbatim as a new
+// writeDraftSpec cuts a design branch (from whatever is currently checked
+// out — callers checkout main first) and writes content verbatim as a new
 // spec — used for the two rung-3/rung-4 superseding revisions, which carry
 // supersession: blocks and multi-entry links: no scaffold function
 // produces (design.go's scaffolds are the ordinary, no-supersession
-// first-acceptance shape).
+// first-proposal shape).
 func writeDraftSpec(t *testing.T, ctx context.Context, root, name, content string) {
 	t.Helper()
 	branch := "design/" + name
@@ -191,27 +225,57 @@ frozen: { at: 2024-06-01, commit: 0000000000000000000000000000000000000c }
 	}
 }
 
+// checkoutMain returns to the default branch — every merge-signaled
+// "acceptance" step below lands its design branch here, and every design/
+// build branch this script cuts must start from main's current tip so the
+// resulting history is a realistic, linear sequence of landed proposals.
+func checkoutMain(t *testing.T, ctx context.Context, root string) {
+	t.Helper()
+	if err := gitx.CheckoutExisting(ctx, root, "main"); err != nil {
+		t.Fatalf("checkout main: %v", err)
+	}
+}
+
+// mergeIntoMain simulates a real specification (or code) pull request
+// landing on the default branch — the merge-signaled design's own
+// acceptance ceremony (docs/superpowers/specs/2026-08-01-merge-signals-
+// spec-acceptance-design.md): checks out main and merges branch with
+// --no-ff, mirroring internal/specstate/resolve_integration_test.go's own
+// buildLandedSpecRepo. gitx/specstate expose no production merge API — a
+// repository-authority action verdi never automates — so only this
+// test-local raw git invocation performs it, never accept.go or any other
+// production code path.
+func mergeIntoMain(t *testing.T, ctx context.Context, root, branch string) {
+	t.Helper()
+	checkoutMain(t, ctx, root)
+	cmd := exec.Command("git", "merge", "--no-ff", "--no-edit", branch)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git merge --no-ff %s: %v\n%s", branch, err, out)
+	}
+}
+
 var stubSlugRe = regexp.MustCompile(`slug: todo-replace-stub-slug`)
 var storyImplementsPlaceholderRe = regexp.MustCompile(`links:\n  - \{ type: implements, ref: "spec/todo-replace-feature-name#ac-1" \}\n`)
 
 // TestRoundFourRitual_FullLoop drives 03 §Lifecycle's whole feature-first
-// cascade end to end: feature design/accept, stub-matched story
-// design/accept/build, one rung-3 story supersession, and one rung-4
-// feature supersession with its computed blast-radius quorum disclosure
-// and re-affirmation enforcement.
+// cascade end to end under the merge-signaled design: feature design/
+// merge, story design/merge/build, one rung-3 story supersession (I-40's
+// disclosed gap: the predecessor's Git-derived state cannot follow, proven
+// honestly rather than invented around), and one rung-4 feature
+// supersession with its derived Superseded state and re-affirmation
+// enforcement.
 func TestRoundFourRitual_FullLoop(t *testing.T) {
 	repo := buildPhase7Repo(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	prov := seedRitualProvider(t)
 	designDepsV := designDeps{Provider: prov, Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 	buildDeps := syncDeps{Runner: nil, GoTest: fakeGoTest{}, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	projector := specstate.NewProjector()
 
 	// --- 1. verdi design start jira:LOAN-1483 --kind feature --name loan-mgmt ---
-	// (an epic/objective ref stands in for 02 §Kind registry's own
-	// okr:LOAN-Q3 example: no provider models an "okr" scheme, matching
-	// R4-I-23(b)'s own precedent of removing that exact literal from the
-	// v2 fixture rather than inventing an OKR provider type.)
 	var stdout, stderr bytes.Buffer
 	if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1483", "loan-mgmt", manifest, phase7Model(t), designDepsV, &stdout, &stderr); got != 0 {
 		t.Fatalf("design start (feature) = %d, want 0; stderr=%s", got, stderr.String())
@@ -224,15 +288,10 @@ func TestRoundFourRitual_FullLoop(t *testing.T) {
 	// --- 2. edit: point the scaffolded stub at the story we're about to design ---
 	editSpecField(t, ctx, repo.Dir, "loan-mgmt", stubSlugRe, "slug: stale-decline", "edit: point stub at stale-decline")
 
-	// --- 3. verdi accept spec/loan-mgmt ---
-	stdout.Reset()
-	stderr.Reset()
-	if got := runAccept(ctx, repo.Dir, "spec/loan-mgmt", &stdout, &stderr); got != 0 {
-		t.Fatalf("accept (feature) = %d, want 0; stderr=%s", got, stderr.String())
-	}
-	feature, _ = readSpec(t, repo.Dir, "loan-mgmt")
-	if feature.Status != "accepted-pending-build" {
-		t.Fatalf("feature.Status = %q, want accepted-pending-build", feature.Status)
+	// --- 3. merge spec/loan-mgmt's design branch into main: THIS is acceptance now ---
+	mergeIntoMain(t, ctx, repo.Dir, "design/loan-mgmt")
+	if result := resolveCandidate(t, ctx, repo.Dir, "loan-mgmt"); result.State != specstate.AcceptedPendingBuild {
+		t.Fatalf("Resolve(loan-mgmt) after merge = %+v, want AcceptedPendingBuild", result)
 	}
 
 	// --- 4. verdi design start jira:LOAN-1482 --kind story --name stale-decline-story ---
@@ -250,27 +309,18 @@ func TestRoundFourRitual_FullLoop(t *testing.T) {
 	editSpecField(t, ctx, repo.Dir, "stale-decline-story", storyImplementsPlaceholderRe,
 		"links:\n  - { type: implements, ref: \"spec/loan-mgmt#ac-1\" }\n", "edit: implement loan-mgmt#ac-1")
 
-	// --- 6. verdi accept spec/stale-decline-story: stub-matched fast path ---
-	stdout.Reset()
-	stderr.Reset()
-	if got := runAccept(ctx, repo.Dir, "spec/stale-decline-story", &stdout, &stderr); got != 0 {
-		t.Fatalf("accept (story) = %d, want 0; stderr=%s", got, stderr.String())
+	// --- 6. merge spec/stale-decline-story's design branch into main ---
+	mergeIntoMain(t, ctx, repo.Dir, "design/stale-decline-story")
+	if result := resolveCandidate(t, ctx, repo.Dir, "stale-decline-story"); result.State != specstate.AcceptedPendingBuild {
+		t.Fatalf("Resolve(stale-decline-story) after merge = %+v, want AcceptedPendingBuild", result)
 	}
-	if !contains(stdout.String(), "stub-matched") {
-		t.Fatalf("accept stdout = %q, want a stub-matched disclosure", stdout.String())
-	}
-	story, _ = readSpec(t, repo.Dir, "stale-decline-story")
-	if story.Status != "accepted-pending-build" {
-		t.Fatalf("story.Status = %q, want accepted-pending-build", story.Status)
-	}
-	if story.Frozen == nil || !story.Frozen.StubMatched {
-		t.Fatalf("story.Frozen.StubMatched = %v, want true (R4-I-12)", story.Frozen)
-	}
+	_, predV1RawBeforeRung3 := readSpec(t, repo.Dir, "stale-decline-story")
 
-	// --- 7. verdi build start spec/stale-decline-story: succeeds only against accepted-pending-build ---
+	// --- 7. verdi build start spec/stale-decline-story: succeeds only against a landed, accepted spec ---
+	checkoutMain(t, ctx, repo.Dir)
 	stdout.Reset()
 	stderr.Reset()
-	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", buildDeps, &stdout, &stderr); got != 0 {
+	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", projector, buildDeps, &stdout, &stderr); got != 0 {
 		t.Fatalf("build start (story) = %d, want 0; stderr=%s", got, stderr.String())
 	}
 	branch, err := gitx.CurrentBranch(ctx, repo.Dir)
@@ -281,28 +331,21 @@ func TestRoundFourRitual_FullLoop(t *testing.T) {
 		t.Fatalf("branch after build start = %q, want feature/stale-decline-story", branch)
 	}
 
-	// verdi feature start (the deprecation alias) prints the new form and
-	// proceeds rather than erroring — proven directly against
-	// runFeatureStart/runBuildStart's shared precondition set in
-	// feature_test.go; not re-proven here to keep this script's single
-	// linear branch history unambiguous (a second alias-driven build-start
-	// call here would collide with the branch feature/stale-decline-story
-	// this step already cut).
-
 	// ================= Rung 3: story supersession =================
+
+	checkoutMain(t, ctx, repo.Dir)
 
 	// --- 8. file a conflict: the story's own approach was wrong ---
 	fileConflict(t, ctx, repo.Dir, "story-approach-wrong", "spec/stale-decline-story",
 		"discovered during build: the API contract in stale-decline-story is wrong; feature ACs unaffected")
 
-	// --- 9. author story-spec v2 (supersedes v1) on a design branch ---
+	// --- 9. author story-spec v2 (supersedes v1) on a design branch cut from main ---
 	storyV2 := `---
 id: spec/stale-decline-story-v2
 kind: spec
 title: "Stale Decline"
 owners: [platform-team]
 class: story
-status: draft
 story: jira:LOAN-1482
 problem: { text: "borrowers see stale decline data", anchor: problem }
 outcome: { text: "borrowers see current decline data", anchor: outcome }
@@ -323,52 +366,57 @@ x
 `
 	writeDraftSpec(t, ctx, repo.Dir, "stale-decline-story-v2", storyV2)
 
-	// --- 10. accept it: R4-I-12's stub-match is re-computed and HOLDS. The
-	// implements-set/title-slug halves resolve to the SAME stub (the feature
-	// mapping is unchanged, 03's own words), and v2's only supersedes edge is
-	// the rung-3 chain edge to its own predecessor STORY spec
-	// (spec/stale-decline-story, class story) — which, per the W3-adjudicated
-	// exception (03 §The amendment ladder rung 3: "the stub-matched fast path
-	// applies when the feature mapping is unchanged"), does NOT disqualify.
-	// So v2 stays on the fast path: this IS the rung-3 fast path in action.
+	// --- 10. merge spec/stale-decline-story-v2's design branch into main ---
+	mergeIntoMain(t, ctx, repo.Dir, "design/stale-decline-story-v2")
+
+	predV1Result := resolveCandidate(t, ctx, repo.Dir, "stale-decline-story")
+	// I-40's gap, now DISCLOSED at the projection (final fix wave I4): a
+	// story-class spec can never carry a `supersession:` block, so
+	// internal/specstate's two-signal successor-corpus proof can never
+	// independently confirm story-level supersession, and there is no
+	// more writer of a legacy `status: superseded` flip (supersede.go is
+	// deleted). The predecessor's Git-derived state is therefore UNPROVEN
+	// with a disclosure naming the one-signal successor and the missing
+	// proof — never silently AcceptedPendingBuild (a reviewed, merged
+	// successor's claim is not nothing), and never an invented Superseded
+	// (one signal is not proof). Three-valued honesty, proven here.
+	if predV1Result.State != specstate.Unproven {
+		t.Fatalf("Resolve(stale-decline-story) after its successor merged = %+v, want Unproven (I-40's gap is disclosed, never silent)", predV1Result)
+	}
+	wantDisclosed := false
+	for _, d := range predV1Result.Disclosures {
+		if strings.Contains(d, "stale-decline-story-v2") && strings.Contains(d, "supersession") {
+			wantDisclosed = true
+		}
+	}
+	if !wantDisclosed {
+		t.Fatalf("Resolve(stale-decline-story) disclosures = %v, want one naming the one-signal successor stale-decline-story-v2 and the missing supersession proof", predV1Result.Disclosures)
+	}
+	// Build start on the disclosed-unproven predecessor exits 2: it cannot
+	// honestly decide the acceptance precondition either way.
 	stdout.Reset()
 	stderr.Reset()
-	if got := runAccept(ctx, repo.Dir, "spec/stale-decline-story-v2", &stdout, &stderr); got != 0 {
-		t.Fatalf("accept (story v2) = %d, want 0; stderr=%s", got, stderr.String())
+	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", projector, buildDeps, &stdout, &stderr); got != 2 {
+		t.Fatalf("build start (disclosed-unproven predecessor) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
-	if !contains(stdout.String(), "stub-matched") || contains(stdout.String(), "not stub-matched") {
-		t.Fatalf("accept (story v2) stdout = %q, want a stub-matched disclosure (rung-3 chain edge to a predecessor story is exempt)", stdout.String())
+	if !contains(stderr.String(), "cannot be proven accepted") || !contains(stderr.String(), "stale-decline-story-v2") {
+		t.Fatalf("stderr = %q, want the unproven refusal carrying the projector's own successor-naming disclosure", stderr.String())
 	}
-	storyV2Spec, _ := readSpec(t, repo.Dir, "stale-decline-story-v2")
-	if storyV2Spec.Frozen == nil || !storyV2Spec.Frozen.StubMatched {
-		t.Fatalf("story v2 Frozen = %+v, want stub_matched true (its only supersedes edge is the exempt rung-3 chain edge)", storyV2Spec.Frozen)
+	predV1, predV1Raw := readSpec(t, repo.Dir, "stale-decline-story")
+	if predV1.Status != "" && predV1.Status != "draft" {
+		t.Fatalf("predecessor v1 status = %q — must never be mutated by a merge (no writer exists anymore)", predV1.Status)
+	}
+	if !bytes.Equal(predV1RawBeforeRung3, predV1Raw) {
+		t.Fatalf("predecessor v1's bytes changed across its successor's merge — supersession must be derived, never written:\n--- before ---\n%s\n--- after ---\n%s", predV1RawBeforeRung3, predV1Raw)
 	}
 
-	// --- D-12: accepting v2 also flipped its predecessor v1's status to
-	// `superseded` in the SAME ritual (status-only edit, frozen stamp
-	// preserved, still in specs/active/), and the accept stdout disclosed it.
-	predV1, _ := readSpec(t, repo.Dir, "stale-decline-story")
-	if predV1.Status != "superseded" {
-		t.Fatalf("predecessor v1 status = %q, want superseded (accept of its successor must flip it, D-12)", predV1.Status)
-	}
-	if predV1.Frozen == nil {
-		t.Fatal("predecessor v1 must keep its frozen stamp across the superseded flip (status-only edit)")
-	}
-	if !contains(stdout.String(), "superseded by spec/stale-decline-story-v2") {
-		t.Fatalf("accept (story v2) stdout = %q, want a disclosed predecessor-superseded line", stdout.String())
-	}
-	// The superseded predecessor is now refused as a build target, naming
-	// its successor via the supersedes chain (D-12).
-	stdout.Reset()
-	stderr.Reset()
-	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", buildDeps, &stdout, &stderr); got != 1 {
-		t.Fatalf("build start (superseded v1) = %d, want 1 (refused); stderr=%s", got, stderr.String())
-	}
-	if !contains(stderr.String(), "superseded by spec/stale-decline-story-v2") {
-		t.Fatalf("build start (superseded v1) stderr = %q, want it to name the successor via the supersedes chain", stderr.String())
+	if result := resolveCandidate(t, ctx, repo.Dir, "stale-decline-story-v2"); result.State != specstate.AcceptedPendingBuild {
+		t.Fatalf("Resolve(stale-decline-story-v2) = %+v, want AcceptedPendingBuild", result)
 	}
 
 	// ================= Rung 4: feature supersession =================
+
+	checkoutMain(t, ctx, repo.Dir)
 
 	// --- 11. file a conflict: a feature AC itself was wrong for everyone ---
 	fileConflict(t, ctx, repo.Dir, "feature-ac-wrong", "spec/loan-mgmt",
@@ -381,7 +429,6 @@ kind: spec
 title: "Loan management Q3"
 owners: [platform-team]
 class: feature
-status: draft
 story: jira:LOAN-1483
 problem: { text: "borrowers cannot see their loan status accurately", anchor: problem }
 outcome: { text: "borrowers see accurate, current loan status", anchor: outcome }
@@ -404,49 +451,37 @@ x
 `
 	writeDraftSpec(t, ctx, repo.Dir, "loan-mgmt-v2", featureV2)
 
-	// --- 13. accept it: verdi computes and discloses the blast-radius quorum ---
-	stdout.Reset()
-	stderr.Reset()
-	if got := runAccept(ctx, repo.Dir, "spec/loan-mgmt-v2", &stdout, &stderr); got != 0 {
-		t.Fatalf("accept (feature v2) = %d, want 0; stderr=%s", got, stderr.String())
-	}
-	if !contains(stdout.String(), "computed quorum: two-code-owner") {
-		t.Fatalf("accept (feature v2) stdout = %q, want a computed two-code-owner quorum disclosure (both stale-decline-story and its v2 are still in-flight, implementing the amended ac-1)", stdout.String())
-	}
-	if contains(stdout.String(), "verdi behavior") == false {
-		t.Fatalf("accept (feature v2) stdout = %q, want the disclosed 'never verdi behavior' approval-count non-enforcement note", stdout.String())
-	}
-	featureV2Spec, _ := readSpec(t, repo.Dir, "loan-mgmt-v2")
-	v2Commit := featureV2Spec.Frozen.Commit
+	// --- 13. merge spec/loan-mgmt-v2's design branch into main: derived supersession fires ---
+	mergeIntoMain(t, ctx, repo.Dir, "design/loan-mgmt-v2")
 
-	// --- ac-1 (feature-supersession-state, round 6): accepting loan-mgmt-v2
-	// — which carries a WHOLE-SPEC supersedes edge to its feature
-	// predecessor spec/loan-mgmt — also flipped that predecessor's status to
-	// `superseded` in the SAME ritual, mirroring D-12's story-rung flip
-	// above exactly (status-only edit, frozen stamp preserved, stays in
-	// specs/active/). This is orthogonal to the rung-4 cascade/blast-radius
-	// machinery just verified above (the computed quorum, the
-	// re-affirmation enforcement below): a statement about the predecessor
-	// FEATURE's own terminal lifecycle, not its downstream stories'
-	// verdicts.
-	predFeatureV1, _ := readSpec(t, repo.Dir, "loan-mgmt")
-	if predFeatureV1.Status != "superseded" {
-		t.Fatalf("predecessor feature v1 (loan-mgmt) status = %q, want superseded (accept of its successor must flip it, ac-1)", predFeatureV1.Status)
+	predFeatureResult := resolveCandidate(t, ctx, repo.Dir, "loan-mgmt")
+	if predFeatureResult.State != specstate.Superseded {
+		t.Fatalf("Resolve(loan-mgmt) after loan-mgmt-v2 merged = %+v, want Superseded (feature-class supersession IS Git-derivable, unlike story-class — I-40)", predFeatureResult)
 	}
-	if predFeatureV1.Frozen == nil {
-		t.Fatal("predecessor feature v1 (loan-mgmt) must keep its frozen stamp across the superseded flip (status-only edit)")
+	_, predFeatureRawAfter := readSpec(t, repo.Dir, "loan-mgmt")
+	if predFeatureRawAfter == nil {
+		t.Fatal("predecessor feature spec unreadable after merge")
 	}
-	if !contains(stdout.String(), "superseded by spec/loan-mgmt-v2") {
-		t.Fatalf("accept (feature v2) stdout = %q, want a disclosed predecessor-superseded line for the feature flip too", stdout.String())
+
+	loanMgmtV2Spec, _ := readSpec(t, repo.Dir, "loan-mgmt-v2")
+	v2Commit := loanMgmtV2Spec.Frozen
+	if v2Commit != nil {
+		t.Fatalf("loan-mgmt-v2 carries a frozen stamp %+v — new merge-accepted artifacts need none (design's Artifact compatibility section)", v2Commit)
+	}
+	v2Landing := resolveCandidate(t, ctx, repo.Dir, "loan-mgmt-v2")
+	if v2Landing.Baseline == nil || v2Landing.Baseline.LandingCommit == "" {
+		t.Fatalf("Resolve(loan-mgmt-v2) = %+v, want a resolved Git-derived landing commit", v2Landing)
 	}
 
 	// --- 14. verify a stale story is refused by verdi build start until a
-	// re-affirmation record exists (story v2 has not been built yet — its
-	// build branch was never cut, so this is build start's own precondition
-	// check, not a re-check of an existing branch). ---
+	// re-affirmation record exists (its build branch was already cut in
+	// step 7's PREDECESSOR proof, not for THIS spec — feature/
+	// stale-decline-story-v2 has never been cut, so this is build start's
+	// own precondition check, not a re-check of an existing branch). ---
+	checkoutMain(t, ctx, repo.Dir)
 	stdout.Reset()
 	stderr.Reset()
-	got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story-v2", buildDeps, &stdout, &stderr)
+	got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story-v2", projector, buildDeps, &stdout, &stderr)
 	if got != 1 {
 		t.Fatalf("build start (story v2, pre-reaffirmation) = %d, want 1 (refused); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
@@ -459,11 +494,11 @@ x
 
 	// --- 15. add the re-affirmation record and verify build start now succeeds ---
 	writeReaffirmation(t, ctx, repo.Dir, store.RefSlug("jira:LOAN-1482"), "ac-1",
-		fmt.Sprintf("spec/loan-mgmt-v2@%s#ac-1", v2Commit))
+		fmt.Sprintf("spec/loan-mgmt-v2@%s#ac-1", v2Landing.Baseline.LandingCommit))
 
 	stdout.Reset()
 	stderr.Reset()
-	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story-v2", buildDeps, &stdout, &stderr); got != 0 {
+	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story-v2", projector, buildDeps, &stdout, &stderr); got != 0 {
 		t.Fatalf("build start (story v2, post-reaffirmation) = %d, want 0; stderr=%s", got, stderr.String())
 	}
 	branch, err = gitx.CurrentBranch(ctx, repo.Dir)
@@ -471,6 +506,6 @@ x
 		t.Fatal(err)
 	}
 	if branch != "feature/stale-decline-story-v2" {
-		t.Fatalf("branch after build start (v2) = %q, want feature/stale-decline-story-v2 (re-pointed build branch)", branch)
+		t.Fatalf("branch after build start (v2) = %q, want feature/stale-decline-story-v2", branch)
 	}
 }

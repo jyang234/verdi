@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/workbench"
 )
 
@@ -58,6 +60,16 @@ const fromStubFeatureName = "fromstub-feature"
 
 func buildFromStubRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
+	// stub-instantiate's own accepted-pending-build gate now routes through
+	// the real, git-backed specstate.Projector (Task 6, the 6b twin of
+	// internal/workbench's own fixture migration), which resolves the
+	// default branch through its own precedence chain rather than trusting
+	// anything the caller passes; this fixturegit repo carries no origin
+	// remote, so every test built from it needs this pinned for
+	// fromstub-feature's active-zone reachability to actually resolve
+	// AcceptedPendingBuild (mirrors cmd/verdi/closefeature_test.go's
+	// buildCloseFeatureRepo, the same fixture-migration shape).
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/specs/active/" + fromStubFeatureName + "/spec.md": fromStubFeatureSpec,
@@ -81,7 +93,7 @@ func TestRunDesignStartFromStub_Plain(t *testing.T) {
 	}
 
 	var stdout, stderr strings.Builder
-	got := runDesignStartFromStub(ctx, repo.Dir, fromStubFeatureName, "fromstub-story", model.Canonical(), &stdout, &stderr)
+	got := runDesignStartFromStub(ctx, repo.Dir, fromStubFeatureName, "fromstub-story", specstate.NewProjector(), model.Canonical(), &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStartFromStub = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -136,7 +148,7 @@ func TestRunDesignStartFromStub_Spike(t *testing.T) {
 	ctx := context.Background()
 
 	var stdout, stderr strings.Builder
-	got := runDesignStartFromStub(ctx, repo.Dir, fromStubFeatureName, "fromstub-spike", model.Canonical(), &stdout, &stderr)
+	got := runDesignStartFromStub(ctx, repo.Dir, fromStubFeatureName, "fromstub-spike", specstate.NewProjector(), model.Canonical(), &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStartFromStub = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -175,7 +187,7 @@ func TestRunDesignStartFromStub_Negative(t *testing.T) {
 	t.Run("unknown slug", func(t *testing.T) {
 		repo := buildFromStubRepo(t)
 		var stdout, stderr strings.Builder
-		got := runDesignStartFromStub(context.Background(), repo.Dir, fromStubFeatureName, "no-such-stub", model.Canonical(), &stdout, &stderr)
+		got := runDesignStartFromStub(context.Background(), repo.Dir, fromStubFeatureName, "no-such-stub", specstate.NewProjector(), model.Canonical(), &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStartFromStub(unknown slug) = %d, want 2", got)
 		}
@@ -187,7 +199,7 @@ func TestRunDesignStartFromStub_Negative(t *testing.T) {
 	t.Run("unknown feature", func(t *testing.T) {
 		repo := buildFromStubRepo(t)
 		var stdout, stderr strings.Builder
-		got := runDesignStartFromStub(context.Background(), repo.Dir, "no-such-feature", "fromstub-story", model.Canonical(), &stdout, &stderr)
+		got := runDesignStartFromStub(context.Background(), repo.Dir, "no-such-feature", "fromstub-story", specstate.NewProjector(), model.Canonical(), &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStartFromStub(unknown feature) = %d, want 2", got)
 		}
@@ -200,7 +212,7 @@ func TestRunDesignStartFromStub_Negative(t *testing.T) {
 			t.Fatalf("pre-creating the branch: %v", err)
 		}
 		var stdout, stderr strings.Builder
-		got := runDesignStartFromStub(ctx, repo.Dir, fromStubFeatureName, "fromstub-story", model.Canonical(), &stdout, &stderr)
+		got := runDesignStartFromStub(ctx, repo.Dir, fromStubFeatureName, "fromstub-story", specstate.NewProjector(), model.Canonical(), &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStartFromStub(branch exists) = %d, want 2", got)
 		}
@@ -282,7 +294,7 @@ func TestDesignStartFromStub_ParityWithBoardAction(t *testing.T) {
 	}
 
 	var stdout, stderr strings.Builder
-	if got := runDesignStartFromStub(context.Background(), cliRepo.Dir, fromStubFeatureName, "fromstub-story", model.Canonical(), &stdout, &stderr); got != 0 {
+	if got := runDesignStartFromStub(context.Background(), cliRepo.Dir, fromStubFeatureName, "fromstub-story", specstate.NewProjector(), model.Canonical(), &stdout, &stderr); got != 0 {
 		t.Fatalf("runDesignStartFromStub = %d, want 0; stderr=%s", got, stderr.String())
 	}
 
@@ -297,5 +309,132 @@ func TestDesignStartFromStub_ParityWithBoardAction(t *testing.T) {
 	}
 	if string(boardBlob) != string(cliBlob) {
 		t.Fatalf("board and CLI --from-stub rendered different content:\nboard:\n%s\ncli:\n%s", boardBlob, cliBlob)
+	}
+}
+
+// statuslessFromStubFeatureSpec is fromStubFeatureSpec's STATUSLESS twin
+// (Task 4's compatibility grammar: feature/story specs may omit status:) —
+// Finding 1's own RED fixture: before the fix, this file passed
+// string(spec.Status) == "" straight into stubinstantiate's guard, which
+// always refused a statusless feature regardless of Git reality, breaking
+// parity with the board (internal/workbench/boardspecapi.go's
+// actionStubInstantiate, which resolves proj.Status through specstate and
+// so already allowed this exact shape).
+const statuslessFromStubFeatureSpec = `---
+id: spec/fromstub-feature
+kind: spec
+class: feature
+title: "Fromstub Feature"
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "ac one", evidence: [attestation], anchor: "#ac-1" }
+open_questions:
+  - { id: oq-1, text: "oq one", anchor: "#oq-1" }
+stubs:
+  - { slug: fromstub-story, acceptance_criteria: [ac-1] }
+  - { slug: fromstub-spike, spike: true, resolves: [oq-1] }
+---
+# Fromstub Feature
+
+## Problem
+
+Prose.
+
+## Outcome
+
+Prose.
+
+## ac-1
+
+Prose.
+
+## oq-1
+
+Prose.
+`
+
+// TestRunDesignStartFromStub_StatuslessExactDefaultBranch_Starts is
+// Finding 1's own fix-round-1 RED-first proof: a statusless feature whose
+// exact bytes are already reachable from the default branch (Task 4's
+// compatibility reading, internal/specstate's own "merge IS acceptance")
+// must instantiate successfully via `--from-stub` — parity with the
+// board's identical statusless-accepted case, which already worked
+// because internal/workbench routes through specstate. Before the fix,
+// this refused (spec.Status == "" != "accepted-pending-build").
+func TestRunDesignStartFromStub_StatuslessExactDefaultBranch_Starts(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/active/" + fromStubFeatureName + "/spec.md": statuslessFromStubFeatureSpec,
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
+		},
+		Message: "seed a statusless, landed --from-stub fixture",
+	}})
+	ctx := context.Background()
+
+	var stdout, stderr strings.Builder
+	got := runDesignStartFromStub(ctx, repo.Dir, fromStubFeatureName, "fromstub-story", specstate.NewProjector(), model.Canonical(), &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runDesignStartFromStub(statusless, landed on default) = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	if !contains(stdout.String(), "design/fromstub-story") {
+		t.Fatalf("stdout = %q, want it to name the new branch", stdout.String())
+	}
+	blob, err := gitx.Show(ctx, repo.Dir, "design/fromstub-story", ".verdi/specs/active/fromstub-story/spec.md")
+	if err != nil {
+		t.Fatalf("Show new spec: %v", err)
+	}
+	fm, _, err := artifact.SplitFrontmatter(blob)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v", err)
+	}
+	var foundImplements bool
+	for _, l := range spec.Links {
+		if l.Type == artifact.LinkImplements && l.Ref == "spec/"+fromStubFeatureName+"#ac-1" {
+			foundImplements = true
+		}
+	}
+	if !foundImplements {
+		t.Fatalf("links = %+v, want an implements edge to spec/%s#ac-1", spec.Links, fromStubFeatureName)
+	}
+}
+
+// TestRunDesignStartFromStub_StatuslessUnmergedProposal_StillRefuses is
+// Finding 1's own negative-path pin: an identical STATUSLESS feature whose
+// path does not exist AT ALL on the default branch (a fresh local
+// proposal, working-tree content only, never committed anywhere) must
+// still refuse — proving the fix routes through Git-derived reachability
+// (specstate.Candidate.Content is exact-byte compared against what the
+// default branch holds, never trusted on its own — specstate/state.go's
+// own contract) rather than merely accepting every statusless feature
+// unconditionally. Mirrors buildstart_test.go's own
+// TestRunBuildStart_UnmergedProposal_RefusesAsVerdict fixture shape:
+// content on disk, no corresponding commit on the resolved default
+// branch, so specstate resolves RelationNew -> Proposed, never
+// AcceptedPendingBuild.
+func TestRunDesignStartFromStub_StatuslessUnmergedProposal_StillRefuses(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
+		Message: "store root, no fromstub-feature on main yet",
+	}})
+	specDir := repo.Dir + "/.verdi/specs/active/" + fromStubFeatureName
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specDir+"/spec.md", []byte(statuslessFromStubFeatureSpec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr strings.Builder
+	got := runDesignStartFromStub(context.Background(), repo.Dir, fromStubFeatureName, "fromstub-story", specstate.NewProjector(), model.Canonical(), &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runDesignStartFromStub(statusless, UNMERGED, never committed) = %d, want 2 (still refused); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
 }

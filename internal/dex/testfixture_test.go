@@ -12,6 +12,35 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
+// ciEnvVars is every variable internal/lint's ReadCIEnv consults:
+// GitLab's CI_DEFAULT_BRANCH/CI_MERGE_REQUEST_TARGET_BRANCH_NAME, GitHub
+// Actions' GITHUB_BASE_REF, and each forge's own "am I in CI" marker.
+var ciEnvVars = []string{
+	"CI",
+	"GITHUB_ACTIONS",
+	"GITHUB_BASE_REF",
+	"CI_DEFAULT_BRANCH",
+	"CI_MERGE_REQUEST_TARGET_BRANCH_NAME",
+}
+
+// neutralizeCIEnv clears ciEnvVars for the duration of the test, so a
+// fixture's default-branch/lifecycle resolution answers to the fixture
+// repo alone and never to ambient runner state. Without it a GitHub
+// Actions pull_request job (CI=true, GITHUB_ACTIONS=true,
+// GITHUB_BASE_REF=main) leaks into every fixture built here: the fixture
+// repo has no origin and so no resolvable default branch, and VL-004
+// then correctly discloses "this run targets \"main\" in CI, but no
+// default branch could be resolved" — a true claim about the runner, not
+// about the fixture, which the disclosures pages faithfully render.
+// t.Setenv makes callers non-parallel; this suite uses no t.Parallel and
+// must keep it that way.
+func neutralizeCIEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range ciEnvVars {
+		t.Setenv(key, "")
+	}
+}
+
 // corpusDir and svcfixDir are examples/showcase and testdata/svcfix relative
 // to this package — the same committed, deterministic fixtures
 // internal/corpus and internal/index already build on (PLAN.md §4).
@@ -123,6 +152,7 @@ func readTreeFiles(t *testing.T, dir, destPrefix string) map[string]string {
 // feature-lens/ladder/by-story pages have their fixtures.
 func buildDexFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
+	neutralizeCIEnv(t)
 	order, files := parseCorpusLayers(t)
 
 	var layers []fixturegit.Layer

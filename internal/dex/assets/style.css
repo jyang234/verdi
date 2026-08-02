@@ -331,6 +331,10 @@ blockquote {
 .badge-accepted, .badge-accepted-pending-build { color: var(--st-evidenced); border-color: var(--st-evidenced); background: var(--st-evidenced-tint); }
 .badge-superseded, .badge-closed { color: var(--st-nosignal); border-color: var(--rule); background: var(--st-nosignal-tint); }
 .badge-open { color: var(--frozen); border-color: var(--frozen); background: var(--frozen-tint); }
+/* unproven: the effective lifecycle state could not be derived from git —
+   the disclosed-unproven severity treatment (pending amber, dashed edge:
+   attention, not a verdict), matching the disclosures view's own aliases */
+.badge-unproven { color: var(--disclosed); border-color: var(--disclosed); border-style: dashed; background: var(--disclosed-tint); }
 
 /* the temporal stamp — the signature element: every page carries its
    class's color, and the text itself never changes (temporal honesty) */

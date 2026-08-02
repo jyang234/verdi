@@ -30,6 +30,19 @@ type Result struct {
 	MergedBranches []string // AC-3(a), sorted
 
 	Worktrees []Worktree // AC-3(b), sorted by path, primary excluded
+
+	// UnprovenSpecs names every active-zone spec whose effective lifecycle
+	// state (internal/specstate) could not be proven, each carrying its own
+	// Disclosures (Finding 1, fix round: previously this state simply
+	// vanished — an Unproven verdict satisfies neither excludeSuperseded's
+	// negative filter nor findPatternA/B's own accepted-pending-build gate,
+	// so without this field a corpus containing even one undecodable spec
+	// silently produced an empty, "clean-looking" report). Sorted by name
+	// (activespecs.go's unprovenSpecs — a single pass over the
+	// already-sorted, unfiltered active-spec set). Never itself a Flagged()
+	// contributor (dc-3's own predicate is unchanged) — a caller (verdi
+	// audit) decides its own distinct, non-CLEAN reporting for this case.
+	UnprovenSpecs []UnprovenSpec
 }
 
 // Flagged reports whether r contains an exit-1-worthy finding (dc-3): any
@@ -76,7 +89,15 @@ func Scan(ctx context.Context, root, defaultBranchRef string) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	// dc-2: status: superseded is excluded BEFORE either AC-1 pattern's
+	// effective is the ONE default-corpus-scanning batch resolution every
+	// decision below routes through (activespecs.go's effectiveStates
+	// producer — Task 6a) — a SINGLE specstate.ResolveMany call over every
+	// active-zone spec, never one call per spec.
+	effective, err := effectiveStates(ctx, root, specs)
+	if err != nil {
+		return nil, err
+	}
+	// dc-2: EFFECTIVELY-superseded is excluded BEFORE either AC-1 pattern's
 	// logic runs — a check that happens first, not a state that merely
 	// happens never to match either pattern's own conditions — and,
 	// per dc-2's own "AC-1/AC-2" grouping, before AC-2's own close/*
@@ -84,14 +105,14 @@ func Scan(ctx context.Context, root, defaultBranchRef string) (*Result, error) {
 	// argument): a leftover close/<name> branch for a name that has since
 	// become superseded (a route that never archives at all) is stale,
 	// not an actionable ritual-incomplete/superseded-elsewhere finding.
-	nonSuperseded := excludeSuperseded(specs)
+	nonSuperseded := excludeSuperseded(specs, effective)
 
-	closeBranches, err := scanCloseBranches(ctx, root, defaultTip, supersededNames(specs))
+	closeBranches, err := scanCloseBranches(ctx, root, defaultTip, supersededNames(specs, effective))
 	if err != nil {
 		return nil, err
 	}
-	patternA := findPatternA(closeBranches, activeStatusByName(nonSuperseded), activeClassByName(nonSuperseded))
-	patternB, err := findPatternB(ctx, root, defaultTip, nonSuperseded)
+	patternA := findPatternA(closeBranches, effective, activeClassByName(nonSuperseded))
+	patternB, err := findPatternB(ctx, root, defaultTip, nonSuperseded, effective)
 	if err != nil {
 		return nil, err
 	}
@@ -113,5 +134,10 @@ func Scan(ctx context.Context, root, defaultBranchRef string) (*Result, error) {
 		CloseBranches:         closeBranches,
 		MergedBranches:        merged,
 		Worktrees:             worktrees,
+		// Finding 1: built from the UNFILTERED specs set (mirroring
+		// supersededNames' own reasoning) so an unproven spec is reported
+		// regardless of whether it would otherwise have been excluded from
+		// AC-1's own two patterns.
+		UnprovenSpecs: unprovenSpecs(specs, effective),
 	}, nil
 }

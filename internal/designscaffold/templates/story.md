@@ -4,7 +4,6 @@ kind: spec
 title: {{printf "%q" .Title}}
 owners: {{safe .Owners}}
 class: story
-status: draft
 story: {{safe .StoryRef}}
 {{if .Spike}}spike: true
 {{end}}problem: { text: {{printf "%q" .Problem}}, anchor: problem }

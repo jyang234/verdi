@@ -5,9 +5,24 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/forge/fake"
 )
+
+// resolvableDefaultBranchRoot builds a minimal fixturegit repo (local
+// branch "main", no remote) so CI_DEFAULT_BRANCH="main" resolves to a
+// real, git-resolvable ref (internal/specstate.ResolveDefaultBranch — the
+// resolver internal/lint.ResolveDefaultBranch now delegates to — requires
+// the named branch to actually resolve, not just be named; a bare
+// t.TempDir() is not a git repository at all and no longer resolves).
+func resolvableDefaultBranchRoot(t *testing.T) string {
+	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"seed.txt": "seed\n"}, Message: "seed"},
+	})
+	return repo.Dir
+}
 
 const supersessionFeedCandidateSpecMD = `---
 id: spec/loan-workflow-v2
@@ -39,7 +54,7 @@ const supersessionFeedCandidatePath = ".verdi/specs/active/loan-workflow-v2/spec
 func newBackendSupersessionLoaderForTest(t *testing.T, f forge.Forge) backendSupersessionLoader {
 	t.Helper()
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	return backendSupersessionLoader{f: f, root: t.TempDir()}
+	return backendSupersessionLoader{f: f, root: resolvableDefaultBranchRoot(t)}
 }
 
 // TestBackendSupersessionLoader_LoadsConfirmedCandidates proves get_board's
@@ -92,7 +107,7 @@ func (erroringSupersessionForge) ListOpenMRs(ctx context.Context, targetBranch s
 // forge failure surfaces as an error, never silently as ok=false.
 func TestBackendSupersessionLoader_TransportErrorPropagates(t *testing.T) {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	loader := backendSupersessionLoader{f: erroringSupersessionForge{fake.New()}, root: t.TempDir()}
+	loader := backendSupersessionLoader{f: erroringSupersessionForge{fake.New()}, root: resolvableDefaultBranchRoot(t)}
 	_, _, err := loader.LoadCandidates(context.Background(), "spec/loan-workflow", supersessionFeedCandidatePath)
 	if err == nil {
 		t.Fatal("got nil error, want the transport failure to propagate")

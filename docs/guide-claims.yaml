@@ -132,10 +132,11 @@ rows:
 
   - id: 7.1-accept-freeze-obligations
     section: "7.1"
-    capability: "`verdi accept`, freezing, committed per-AC obligation files"
+    capability: "Merge-signaled spec acceptance (Git-derived freezing via internal/specstate) and pre-review `verdi obligation scaffold`"
     status: EXISTS
     witnesses:
-      - name: TestRunAccept_Happy
+      - name: TestCmdSpecState_ExactAcceptedPendingBuild
+      - name: TestRunObligationScaffold_Happy
 
   - id: 7.2-ci-evidence-bundles
     section: "7.2"

@@ -43,7 +43,7 @@ acceptance_criteria:
 // well-formed story that still correctly declares class: story.
 func newScopingAcceptedFixtureWithClassMismatchStoryOverride(t *testing.T) *fixturegit.Repo {
 	t.Helper()
-	return fixturegit.Build(t, []fixturegit.Layer{{
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/specs/active/" + scopingAcceptedName + "/spec.md": scopingAcceptedSpec,
 			".verdi/.gitignore":         "data/\n",
@@ -52,6 +52,10 @@ func newScopingAcceptedFixtureWithClassMismatchStoryOverride(t *testing.T) *fixt
 		},
 		Message: "seed scoping accepted fixture with a class-mismatched story.md template override",
 	}})
+	// The wall's accepted-pending-build state is git-derived now — the
+	// default branch must be provable (see newScopingAcceptedFixture).
+	setDefaultBranchSymref(t, repo.Dir)
+	return repo
 }
 
 // TestBoardSpec_StubInstantiate_ClassMismatch_Refused is K1's own driven
@@ -136,7 +140,7 @@ TODO: design notes.
 // instantiate-override-path-unproven).
 func newScopingAcceptedFixtureWithStoryOverride(t *testing.T) *fixturegit.Repo {
 	t.Helper()
-	return fixturegit.Build(t, []fixturegit.Layer{{
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/specs/active/" + scopingAcceptedName + "/spec.md": scopingAcceptedSpec,
 			".verdi/.gitignore":         "data/\n",
@@ -145,6 +149,10 @@ func newScopingAcceptedFixtureWithStoryOverride(t *testing.T) *fixturegit.Repo {
 		},
 		Message: "seed scoping accepted fixture with a story.md template override",
 	}})
+	// The wall's accepted-pending-build state is git-derived now — the
+	// default branch must be provable (see newScopingAcceptedFixture).
+	setDefaultBranchSymref(t, repo.Dir)
+	return repo
 }
 
 // TestBoardSpec_StubInstantiate_StoreTemplateOverride proves the workbench

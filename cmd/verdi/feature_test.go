@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os/exec"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -52,7 +53,7 @@ x
 
 func buildFeatureAliasRepo(t *testing.T, status string) *fixturegit.Repo {
 	t.Helper()
-	return fixturegit.Build(t, []fixturegit.Layer{
+	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
 				".verdi/verdi.yaml":                         phase7ManifestYAML,
@@ -61,13 +62,45 @@ func buildFeatureAliasRepo(t *testing.T, status string) *fixturegit.Repo {
 			Message: "init store with story spec at " + status,
 		},
 	})
+	// The build-start acceptance precondition now routes through
+	// internal/specstate's real, git-backed projector (Task 5), which
+	// resolves the default branch through its own precedence chain rather
+	// than trusting any caller-passed ref; fixturegit repos carry no origin
+	// remote, so every test here that needs the precondition to actually
+	// resolve pins it.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	return repo
 }
 
-// TestRunFeatureStart_RefusesDraft proves feature start refuses (exit 1) a
-// spec still in draft, and never mutates the repo (no branch switch, no
-// commit) when it does.
-func TestRunFeatureStart_RefusesDraft(t *testing.T) {
-	repo := buildFeatureAliasRepo(t, "draft")
+// TestRunFeatureStart_RefusesUnlandedProposal proves feature start refuses
+// (exit 1) a story whose proposal has never landed on the default branch,
+// and never mutates the repo (no branch switch, no commit) when it does.
+// Replaces the pre-Task-5 "status: draft" fixture: under Git-derived state
+// a `status: draft` document whose exact bytes are already the default
+// branch's own committed content is accepted-pending-build regardless of
+// that persisted word (Task 4's compatibility reading), so that fixture no
+// longer exercises a refusal at all — this test now builds the genuine
+// negative case, a story that exists only on an unmerged branch.
+func TestRunFeatureStart_RefusesUnlandedProposal(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files:   map[string]string{".verdi/verdi.yaml": phase7ManifestYAML},
+			Message: "init store, no spec on main",
+		},
+	})
+	checkoutBranch(t, repo.Dir, "design/stale-decline")
+	writeTestFile(t, repo.Dir+"/.verdi/specs/active/stale-decline/spec.md", []byte(featureAliasStorySpecMD("accepted-pending-build")))
+	add := exec.Command("git", "add", "-A")
+	add.Dir = repo.Dir
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	commit := exec.Command("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "propose stale-decline")
+	commit.Dir = repo.Dir
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	ctx := context.Background()
 
 	before, err := gitx.CurrentBranch(ctx, repo.Dir)
@@ -79,9 +112,9 @@ func TestRunFeatureStart_RefusesDraft(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	got := runFeatureStart(ctx, repo.Dir, "jira:LOAN-1482", deps, &stdout, &stderr)
 	if got != 1 {
-		t.Fatalf("runFeatureStart(draft spec) = %d, want 1; stderr=%s", got, stderr.String())
+		t.Fatalf("runFeatureStart(unlanded proposal) = %d, want 1; stderr=%s", got, stderr.String())
 	}
-	if !contains(stderr.String(), "not accepted-pending-build") {
+	if !contains(stderr.String(), "proposal has not landed") {
 		t.Fatalf("stderr = %q, want it to name the refusal", stderr.String())
 	}
 	if !contains(stderr.String(), "deprecated") {

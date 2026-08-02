@@ -110,10 +110,22 @@ func checkSpecPath(d *Document, ref artifact.Ref) []Finding {
 		statusDir = "archive"
 	}
 
+	// wantStatusDir is "archive" for a feature/story spec in either of two
+	// shapes: an EXPLICIT legacy `status: closed` (unchanged from before
+	// Task 4), or — status now being optional on these two classes (merge-
+	// signaled acceptance design, "Artifact compatibility") — a STATUSLESS
+	// spec that already sits in the archive zone: its own directory IS the
+	// closure signal (zone-derived "closed-by-zone", mirroring internal/
+	// specstate's own archive-zone => Closed reading), so it is never
+	// flagged as though it belonged back under active/. A statusless spec
+	// under active/ is untouched either way (falls through to the "active"
+	// default below, matching an ordinary in-review proposal).
+	isFeatureOrStory := d.Spec != nil && (d.Spec.Class == artifact.ClassFeature || d.Spec.Class == artifact.ClassStory)
 	wantStatusDir := "active"
-	if d.Spec != nil &&
-		(d.Spec.Class == artifact.ClassFeature || d.Spec.Class == artifact.ClassStory) &&
-		d.Status == "closed" {
+	switch {
+	case isFeatureOrStory && d.Status == "closed":
+		wantStatusDir = "archive"
+	case isFeatureOrStory && d.Status == "" && statusDir == "archive":
 		wantStatusDir = "archive"
 	}
 	if statusDir != wantStatusDir {

@@ -251,7 +251,7 @@ func TestAttributeBodyHTML(t *testing.T) {
 // projection's new fields.
 func TestBuildProjection_AttributeBodyHTML(t *testing.T) {
 	fm, body := mustSplitAndDecode(t, placardBodyFixtureSpec)
-	p, err := buildProjection("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
+	p, err := buildProjectionFM("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestBuildProjection_AttributeBodyHTML(t *testing.T) {
 
 	// Determinism: rebuilding the projection from the same inputs
 	// reproduces byte-identical HTML.
-	again, err := buildProjection("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
+	again, err := buildProjectionFM("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection (again): %v", err)
 	}
@@ -308,7 +308,7 @@ func TestBuildProjection_MixedCaseAnchor_PlacardBodyNotDropped(t *testing.T) {
 		t.Fatalf("premise broken: mixed-case anchors must resolve green post-ac-1, got: %v", err)
 	}
 
-	p, err := buildProjection("placard-body-mixedcase", fm, body, nil, nil, nil, modeReadOnly)
+	p, err := buildProjectionFM("placard-body-mixedcase", fm, body, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestBuildProjection_AttributeBodyHTML_MissingSectionIsEmpty(t *testing.T) {
 		t.Fatal("test fixture setup broken: expected the Outcome section removed, Problem section intact")
 	}
 	fm, body := mustSplitAndDecode(t, noOutcomeSpec)
-	p, err := buildProjection("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
+	p, err := buildProjectionFM("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestBuildProjection_AttributeBodyHTML_MissingSectionIsEmpty(t *testing.T) {
 // own visible headline text.
 func TestRenderBoardRegion_PlacardFullHiddenElements(t *testing.T) {
 	fm, body := mustSplitAndDecode(t, placardBodyFixtureSpec)
-	p, err := buildProjection("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
+	p, err := buildProjectionFM("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestRenderBoardRegion_PlacardFullHiddenElements(t *testing.T) {
 
 	// Determinism: rebuilding the projection and re-rendering from the
 	// same four inputs reproduces byte-identical output.
-	again, err := buildProjection("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
+	again, err := buildProjectionFM("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection (again): %v", err)
 	}
@@ -405,7 +405,7 @@ func TestRenderBoardRegion_PlacardFullHiddenElements(t *testing.T) {
 func TestRenderBoardRegion_PlacardFullOmittedWhenSectionMissing(t *testing.T) {
 	noOutcomeSpec := strings.Replace(placardBodyFixtureSpec, placardBodyFixtureOutcomeSection, "", 1)
 	fm, body := mustSplitAndDecode(t, noOutcomeSpec)
-	p, err := buildProjection("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
+	p, err := buildProjectionFM("placard-body-fixture", fm, body, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}

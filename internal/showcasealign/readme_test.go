@@ -51,6 +51,19 @@ func TestReadmeExamplesFresh(t *testing.T) {
 	if len(blocks) == 0 {
 		t.Fatal("README has no <!-- showcase-verify --> blocks; the quick start must be verified against the showcase store (spec/public-showcase ac-3, design §3)")
 	}
+	// A feature-level `verdi matrix`'s implementing-story classification
+	// (cmd/verdi/featurematrix.go's discoverImplementingStories, Task 5)
+	// now resolves Git-derived effective state, which needs a resolvable
+	// default branch — a real clone (the "cd examples/showcase" half this
+	// test's own doc comment says must reproduce identically) has an
+	// origin remote and resolves this without any special configuration;
+	// provisionShowcaseStore's fixturegit reconstruction deliberately
+	// carries no origin remote (the same convention every other
+	// git-backed test fixture in this repo follows), so this pins it the
+	// same way TestCLIShowcaseObligationAuthor/TestCLIShowcaseSpecState do
+	// — a test-fixture-only compensation, not a behavior change a real
+	// checkout would ever need.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	store := provisionShowcaseStore(t)
 	for _, b := range blocks {
 		cmd := strings.Join(b.argv, " ")

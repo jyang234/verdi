@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -30,15 +31,15 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
-	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
 // cmdMatrixFeature renders the feature fold (03 §The feature fold) for a
 // resolved round-four feature spec: per-AC status, frozen stubs paired
 // with the computed live `implements` mapping under the acceptance-time-
 // plan banner, and stub reconciliation state (05 §Lenses).
-func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, preview bool, mdl *model.Model, stdout io.Writer) error {
+func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.SpecFrontmatter, effectiveStatus artifact.Status, preview bool, mdl *model.Model, stdout io.Writer) error {
 	ref, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		return fmt.Errorf("matrix: %w", err)
@@ -50,7 +51,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 		return fmt.Errorf("matrix: building index: %w", err)
 	}
 
-	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, commit, ix, featureName, spec)
+	stories, storiesByAC, supersededByAC, err := discoverImplementingStories(ctx, root, commit, ix, featureName, spec, specstate.NewProjector())
 	if err != nil {
 		return err
 	}
@@ -91,7 +92,7 @@ func cmdMatrixFeature(ctx context.Context, root, commit string, spec *artifact.S
 		return fmt.Errorf("matrix: %w", err)
 	}
 
-	printFeatureMatrix(stdout, spec, result, reconciliation, stories, supersededByAC, preview, mdl)
+	printFeatureMatrix(stdout, spec, effectiveStatus, result, reconciliation, stories, supersededByAC, preview, mdl)
 	return nil
 }
 
@@ -157,7 +158,7 @@ type implementingStoryEdges struct {
 // implementing story, by their own admission — see
 // TestCmdMatrix_FeatureRef_Golden's doc comment), since LoadSpec checks
 // active first.
-func discoverImplementingStories(ctx context.Context, root, commit string, ix *index.Index, featureName string, spec *artifact.SpecFrontmatter) ([]implementingStoryEdges, map[string][]evidence.ImplementingStory, map[string][]string, error) {
+func discoverImplementingStories(ctx context.Context, root, commit string, ix *index.Index, featureName string, spec *artifact.SpecFrontmatter, resolver specStateResolver) ([]implementingStoryEdges, map[string][]evidence.ImplementingStory, map[string][]string, error) {
 	// acsByStory accumulates every feature AC id each story ref
 	// implements, deduped and in first-seen order per story.
 	order := make([]string, 0)
@@ -182,20 +183,26 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 	}
 	sort.Strings(order) // deterministic regardless of AC declaration order feeding discovery
 
-	var flat []implementingStoryEdges
-	byAC := make(map[string][]evidence.ImplementingStory)
-	supersededByAC := make(map[string][]string)
+	// Load every implementing story's spec + zone-relative path + raw bytes
+	// ONCE (loadSpecBytesWithZone, not LoadActiveSpec — an implementing
+	// story discovered via the index's backlink inversion may already have
+	// closed and moved to specs/archive/, see this function's doc comment's
+	// "Defect fix" note), then resolve their Git-derived effective state in
+	// ONE ResolveMany call (Task 5) rather than once per story — a batch
+	// consumer must never trigger an O(specs²) corpus scan.
+	type loadedStory struct {
+		spec    *artifact.SpecFrontmatter
+		relPath string
+	}
+	loaded := make(map[string]loadedStory, len(order))
+	var candidates []specstate.Candidate
 	for _, storyRef := range order {
 		storyName, err := artifact.ParseRef(storyRef)
 		if err != nil {
 			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 			return nil, nil, nil, fmt.Errorf("matrix: implementing story ref %q: %w", storyRef, err)
 		}
-		// storyresolve.LoadSpec (not LoadActiveSpec): an implementing story
-		// discovered via the index's backlink inversion may already have
-		// closed and moved to specs/archive/ — see this function's doc
-		// comment's "Defect fix" note.
-		storySpec, err := storyresolve.LoadSpec(root, storyName.Name)
+		storySpec, relPath, content, err := loadSpecBytesWithZone(root, storyName.Name)
 		if err != nil {
 			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 			return nil, nil, nil, fmt.Errorf("matrix: loading implementing story %s: %w", storyRef, err)
@@ -204,18 +211,65 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 			return nil, nil, nil, fmt.Errorf("matrix: implementing story %s not found in specs/active/ or specs/archive/", storyRef)
 		}
+		loaded[storyRef] = loadedStory{spec: storySpec, relPath: relPath}
+		candidates = append(candidates, specstate.Candidate{Path: relPath, Content: content})
+	}
+	results, err := resolver.ResolveMany(ctx, root, candidates)
+	if err != nil {
+		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+		return nil, nil, nil, fmt.Errorf("matrix: resolving Git-derived state for implementing stories of spec/%s: %w", featureName, err)
+	}
+	resultByRef := make(map[string]specstate.Result, len(order))
+	for i, storyRef := range order {
+		resultByRef[storyRef] = results[i]
+	}
 
+	var flat []implementingStoryEdges
+	byAC := make(map[string][]evidence.ImplementingStory)
+	supersededByAC := make(map[string][]string)
+	for _, storyRef := range order {
+		storySpec := loaded[storyRef].spec
 		acIDs := acsByStory[storyRef]
 		sort.Strings(acIDs)
+		result := resultByRef[storyRef]
 
-		if storySpec.Status == artifact.Status("superseded") {
+		// fix-round-1 finding 2: an Unproven effective state (no default
+		// branch resolvable, or an incomplete successor-corpus scan) must
+		// never be silently folded into "not superseded, not closed" —
+		// that would misclassify every affected candidate as an ordinary
+		// open story. Refuse operationally instead, naming the ref and the
+		// projector's own disclosures.
+		if result.State == specstate.Unproven {
+			// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
+			return nil, nil, nil, fmt.Errorf("matrix: implementing story %s effective state cannot be proven: %s", storyRef, strings.Join(result.Disclosures, "; "))
+		}
+
+		// Superseded is now fully Git-derived (fix-round-1 finding 1
+		// collapsed the projector's own legacy-terminal-status
+		// compatibility read into this: a class: story predecessor can
+		// never carry a validated `supersession:` block, so the
+		// two-signal successor-corpus proof alone could never confirm
+		// STORY-level (rung-3) supersession — internal/specstate now also
+		// consults the candidate's own persisted `status: superseded`
+		// field as a fallback when the corpus scan finds no successor,
+		// exactly the legacy shape the OLD accept ritual's predecessor
+		// flip leaves behind). This loop no longer re-checks the raw field
+		// itself (the design's "Command behavior" forbids a consumer
+		// re-deriving what the projector already proved).
+		if result.State == specstate.Superseded {
 			for _, acID := range acIDs {
 				supersededByAC[acID] = append(supersededByAC[acID], storyRef)
 			}
 			continue
 		}
 
-		closed := storySpec.Status == artifact.Status("closed")
+		// Closed is fully Git-derived and class-agnostic (resolveOne's
+		// archive-zone branch returns Closed unconditionally once the
+		// exact bytes are proven landed there, never consulting the
+		// successor corpus at all), so a statusless closed story is
+		// classified correctly here exactly like an explicitly-flagged
+		// one (Task 4's compatibility reading).
+		closed := result.State == specstate.Closed
 		folded, err := foldImplementingStory(ctx, root, commit, storySpec)
 		if err != nil {
 			return nil, nil, nil, err
@@ -234,6 +288,34 @@ func discoverImplementingStories(ctx context.Context, root, commit string, ix *i
 		}
 	}
 	return flat, byAC, supersededByAC, nil
+}
+
+// loadSpecBytesWithZone reads and strict-decodes name's spec.md from
+// specs/active/, then specs/archive/ (active preferred — the same zone
+// order storyresolve.LoadSpec uses, generalized here to also return the
+// zone-relative path and raw bytes a specstate.Candidate needs), returning
+// (nil, "", nil, nil) when neither zone has it.
+func loadSpecBytesWithZone(root, name string) (spec *artifact.SpecFrontmatter, relPath string, content []byte, err error) {
+	for _, zone := range []string{store.ZoneActive, store.ZoneArchive} {
+		path := store.SpecPath(root, zone, name)
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			if os.IsNotExist(rerr) {
+				continue
+			}
+			return nil, "", nil, fmt.Errorf("reading %s: %w", path, rerr)
+		}
+		fm, _, serr := artifact.SplitFrontmatter(data)
+		if serr != nil {
+			return nil, "", nil, fmt.Errorf("%s: %w", path, serr)
+		}
+		decoded, derr := artifact.DecodeSpec(fm)
+		if derr != nil {
+			return nil, "", nil, fmt.Errorf("%s: %w", path, derr)
+		}
+		return decoded, store.SpecRelPath(zone, name), data, nil
+	}
+	return nil, "", nil, nil
 }
 
 // supersededStoryRefs flattens discoverImplementingStories' AC-keyed superseded
@@ -301,20 +383,23 @@ func foldImplementingStory(ctx context.Context, root, commit string, storySpec *
 // its ref instead of silently vanishing from the row it used to occupy —
 // legible without consulting a `superseded-by` backlink (03 §rung 3), with
 // no change to the eligibility math computed above.
-func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededByAC map[string][]string, preview bool, mdl *model.Model) {
+func printFeatureMatrix(w io.Writer, spec *artifact.SpecFrontmatter, effectiveStatus artifact.Status, result evidence.FeatureResult, reconciliation evidence.StubReconciliation, stories []implementingStoryEdges, supersededByAC map[string][]string, preview bool, mdl *model.Model) {
 	// L-M13(1) classification: the "feature:"/"status:" line KEYS and the
 	// trailing feature.violated/stub_reconciliation.blocked lines are
 	// verdict/field KEYS — identity, bare. State/class words spoken as
 	// VALUES or table prose below resolve through mdl (nil-safe).
 	fmt.Fprintf(w, "feature: %s\n", result.SpecRef)
-	// ac-2 (feature-supersession-state): the feature's own frontmatter
-	// `status`, printed unconditionally so a superseded FEATURE's terminal
-	// state is legible on this surface directly — the feature-rung mirror of
-	// printMatrix's own status line, satisfying ac-2's "every surface ... at
-	// both the story and feature rungs" (03 §rung 3, "without consulting
-	// backlinks") for a feature you point `verdi matrix` at, not only for a
-	// superseded story rendered inside a feature's fold.
-	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(string(spec.Class), string(spec.Status)))
+	// ac-2 (feature-supersession-state), as amended by final fix wave I2:
+	// the feature's EFFECTIVE lifecycle state (the caller's one
+	// effectiveMatrixStatus resolution — the raw persisted field is
+	// legitimately BLANK on a statusless, merge-accepted feature), printed
+	// unconditionally so a superseded FEATURE's terminal state is legible
+	// on this surface directly — the feature-rung mirror of printMatrix's
+	// own status line, satisfying ac-2's "every surface ... at both the
+	// story and feature rungs" (03 §rung 3, "without consulting
+	// backlinks") for a feature you point `verdi matrix` at, not only for
+	// a superseded story rendered inside a feature's fold.
+	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(string(spec.Class), string(effectiveStatus)))
 	if preview {
 		// The SAME constructor the story rung and the workbench matrix page
 		// use (disclosure.AdvisoryPreview), rendered through the same seam —

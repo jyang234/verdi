@@ -93,6 +93,10 @@ func newDiagramFixture(t *testing.T) (root string, baseCommit string) {
 		},
 		Message: "seed diagram fixtures",
 	}})
+	// The editor's authoring gate requires a PROVABLE default branch now
+	// (fail closed when unresolvable — fix round 2, finding 3), so this
+	// fixture pins origin/HEAD like every other authoring fixture.
+	setDefaultBranchSymref(t, repo.Dir)
 	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/diagrams"); err != nil {
 		t.Fatalf("checkout design branch: %v", err)
 	}

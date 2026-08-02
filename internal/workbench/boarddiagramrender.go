@@ -144,7 +144,7 @@ func renderDiagramEditorRegion(v *diagramEditorView) string {
 	authoring := v.Mode == modeAuthoring
 
 	// Disclosed notices first, in every mode (constitution 2/10): an
-	// assumed default branch, and — the ops half of ac-2 — the
+	// unresolvable default branch, and — the ops half of ac-2 — the
 	// disclosed-unavailable state for structural operations. The code
 	// pane below stays fully live either way.
 	b.WriteString(`<div class="board-notices">`)

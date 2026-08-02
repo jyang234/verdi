@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+// vl020Boundary is the default-branch PR-boundary Context every
+// enforcement-path VL-020 test below runs under (Task 4: VL-020 now
+// gates entirely on Context.TargetsDefaultBoundary, not on a persisted
+// status field) — linting the default branch itself is the simplest of
+// TargetsDefaultBoundary's two true shapes (the other, a CI run/PR
+// targeting it, is proven separately by
+// TestVL020_MissingObligation_CITargetingDefault_Fires).
+var vl020Boundary = Context{DefaultBranch: "main", CurrentBranch: "main"}
+
 // vl020StoryMD is a minimal, otherwise-lint-clean STORY spec declaring one
 // real acceptance criterion (ac-1, evidence: [behavioral]), mirroring
 // vl019_test.go's own vl019StorySpecMD template (problem/outcome, a story:
@@ -164,7 +173,7 @@ func TestVL020_ObligationExistence_TableDriven(t *testing.T) {
 			}
 
 			repo := buildLintRepo(t, dir)
-			findings := runLint(t, repo.Dir, Context{}, Options{})
+			findings := runLint(t, repo.Dir, vl020Boundary, Options{})
 
 			if !tc.wantFire {
 				for _, f := range findings {
@@ -229,11 +238,13 @@ Placeholder.
 `
 
 // TestVL020_FeatureACNoObligation_Clean proves dc-3's scoping: a FEATURE
-// AC's declared kind never requires an obligation.
+// AC's declared kind never requires an obligation — even AT the
+// default-branch boundary, where a story's own missing obligation would
+// refuse.
 func TestVL020_FeatureACNoObligation_Clean(t *testing.T) {
 	dir := adHocOverlayDir(t, ".verdi/specs/active/vl-020-feature/spec.md", vl020FeatureMD)
 	repo := buildLintRepo(t, dir)
-	findings := runLint(t, repo.Dir, Context{}, Options{})
+	findings := runLint(t, repo.Dir, vl020Boundary, Options{})
 	for _, f := range findings {
 		if f.Rule == "VL-020" {
 			t.Fatalf("VL-020 fired on a feature AC (obligations are story-only, dc-3): %s", f.String())
@@ -273,18 +284,62 @@ Placeholder outcome.
 Placeholder.
 `
 
-// TestVL020_DraftStoryUnobligatedKind_Tolerated is the VL-006
+// TestVL020_DraftStoryUnobligatedKind_Tolerated was originally the VL-006
 // activation-timing case mirrored (co-2 / spec/evidence-obligations co-2):
 // "a draft story with an un-obligated kind is not refused for that reason;
-// the refusal is reserved for the accept / activation path."
+// the refusal is reserved for the accept / activation path." Task 4 moved
+// that same "authoring is never blocked" guarantee off the persisted
+// status field and onto the default-branch PR boundary instead (status is
+// now optional and no longer a reliable "still being authored" signal) —
+// this fixture still carries a legacy status: draft line (a legal value,
+// unaffected by the schema loosening) and is now tolerated because this
+// run is OFF the boundary (bare Context{}), not because of its status.
+// TestVL020_MissingObligation_OffBoundary_Tolerated below proves the same
+// direction with a STATUSLESS story, isolating the boundary as the sole
+// variable.
 func TestVL020_DraftStoryUnobligatedKind_Tolerated(t *testing.T) {
 	dir := adHocOverlayDir(t, ".verdi/specs/active/vl-020-draft/spec.md", vl020DraftStoryMD)
 	repo := buildLintRepo(t, dir)
 	findings := runLint(t, repo.Dir, Context{}, Options{})
 	for _, f := range findings {
 		if f.Rule == "VL-020" {
-			t.Fatalf("VL-020 fired on a draft story (authoring must never be blocked, co-2): %s", f.String())
+			t.Fatalf("VL-020 fired off the default-branch boundary: %s", f.String())
 		}
+	}
+}
+
+// TestVL020_MissingObligation_OffBoundary_Tolerated is Task 4's own "both
+// directions" pair, first half: a STORY with a missing obligation and NO
+// persisted status at all (status is optional now) is never refused when
+// this lint run is off the default-branch boundary — an ordinary,
+// still-under-review design branch. Isolates the boundary as the sole
+// variable (vl020StoryMD/TestVL020_ObligationExistence_TableDriven's own
+// "no obligation" case proves the same fixture DOES refuse once the
+// boundary is on).
+func TestVL020_MissingObligation_OffBoundary_Tolerated(t *testing.T) {
+	dir := adHocOverlayDir(t, ".verdi/specs/active/vl-020-story/spec.md", vl020StoryMD)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-020" {
+			t.Fatalf("VL-020 fired off the default-branch boundary: %s", f.String())
+		}
+	}
+}
+
+// TestVL020_MissingObligation_CITargetingDefault_Fires is Task 4's "both
+// directions" pair, second half: the SAME missing-obligation story
+// refuses when CI is targeting the default branch — TargetsDefaultBoundary's
+// other true shape (InCI + a matching TargetBranch), not merely
+// CurrentBranch == DefaultBranch, mirroring VL-004's own two-signal
+// coverage.
+func TestVL020_MissingObligation_CITargetingDefault_Fires(t *testing.T) {
+	dir := adHocOverlayDir(t, ".verdi/specs/active/vl-020-story/spec.md", vl020StoryMD)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{DefaultBranch: "main", CurrentBranch: "feature/x", TargetBranch: "main", InCI: true}, Options{})
+	onlyRule(t, findings, "VL-020")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
 	}
 }
 
@@ -331,7 +386,7 @@ Placeholder.
 func TestVL020_ClosedStoryMissingObligation_StillRefuses(t *testing.T) {
 	dir := adHocOverlayDir(t, ".verdi/specs/archive/vl-020-closed/spec.md", vl020ClosedStoryMD)
 	repo := buildLintRepo(t, dir)
-	findings := runLint(t, repo.Dir, Context{}, Options{})
+	findings := runLint(t, repo.Dir, vl020Boundary, Options{})
 	onlyRule(t, findings, "VL-020")
 	if len(findings) != 1 {
 		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
@@ -383,13 +438,14 @@ Placeholder.
 
 // TestVL020_BaselineExemptSpec_Tolerated pins obligationGateBaseline's own
 // behavior: a story spec whose directory name is one of its named entries
-// is tolerated even though it is non-draft and has no obligation — the
-// disclosed, one-time, pre-existing-corpus exemption (see the map's doc
-// comment in vl020.go).
+// is tolerated even AT the default-branch boundary, where an ordinary
+// story with no obligation would otherwise refuse — the disclosed,
+// one-time, pre-existing-corpus exemption (see the map's doc comment in
+// vl020.go).
 func TestVL020_BaselineExemptSpec_Tolerated(t *testing.T) {
 	dir := adHocOverlayDir(t, ".verdi/specs/active/disclosures-panel/spec.md", vl020BaselineStandInMD)
 	repo := buildLintRepo(t, dir)
-	findings := runLint(t, repo.Dir, Context{}, Options{})
+	findings := runLint(t, repo.Dir, vl020Boundary, Options{})
 	for _, f := range findings {
 		if f.Rule == "VL-020" {
 			t.Fatalf("VL-020 fired on a baseline-exempt spec name: %s", f.String())
@@ -399,7 +455,9 @@ func TestVL020_BaselineExemptSpec_Tolerated(t *testing.T) {
 
 // TestVL020_DecodeErrorDoc_NeverFiresOrPanics mirrors VL-006's own guard: a
 // document that fails decode has d.Spec == nil, so the per-AC loop must
-// never run (and must never panic) against it.
+// never run (and must never panic) against it — proven AT the boundary, so
+// this guard is exercised under the same condition that would otherwise
+// enforce.
 func TestVL020_DecodeErrorDoc_NeverFiresOrPanics(t *testing.T) {
 	const decodeErr = `---
 id: spec/vl-020-decode-err
@@ -416,7 +474,7 @@ acceptance_criteria:
 `
 	dir := adHocOverlayDir(t, ".verdi/specs/active/vl-020-decode-err/spec.md", decodeErr)
 	repo := buildLintRepo(t, dir)
-	findings := runLint(t, repo.Dir, Context{}, Options{})
+	findings := runLint(t, repo.Dir, vl020Boundary, Options{})
 	for _, f := range findings {
 		if f.Rule == "VL-020" {
 			t.Fatalf("VL-020 fired on a decode-error doc: %s", f.String())
@@ -427,7 +485,8 @@ acceptance_criteria:
 // TestVL020_GrandfatheredArchivedDoc_NeverFires mirrors VL-006/VL-019's own
 // guard: a grandfathered (archived, GrandfatherArchive on) doc with an
 // un-obligated kind is skipped, the same guard line every other rule here
-// sits behind.
+// sits behind — proven AT the boundary, so this guard is exercised under
+// the same condition that would otherwise enforce.
 func TestVL020_GrandfatheredArchivedDoc_NeverFires(t *testing.T) {
 	const archived = `---
 id: spec/vl-020-grandfathered
@@ -461,7 +520,7 @@ Placeholder.
 `
 	dir := adHocOverlayDir(t, ".verdi/specs/archive/vl-020-grandfathered/spec.md", archived)
 	repo := buildLintRepo(t, dir)
-	findings := runLint(t, repo.Dir, Context{}, Options{GrandfatherArchive: true})
+	findings := runLint(t, repo.Dir, vl020Boundary, Options{GrandfatherArchive: true})
 	for _, f := range findings {
 		if f.Rule == "VL-020" {
 			t.Fatalf("VL-020 fired on a grandfathered archived doc: %s", f.String())

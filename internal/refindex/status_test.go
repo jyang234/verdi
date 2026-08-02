@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 func TestMapStatusGroup_Happy(t *testing.T) {
@@ -42,4 +43,103 @@ func TestMapStatusGroup_Negative_FailsClosed(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestEffectiveStatusGroup_Happy is a pure-function unit test (no ctx, no
+// git, no fake needed) of Task 6a's own class: feature/story mapping:
+// AcceptedPendingBuild lands in the accepted bucket; Superseded and Closed
+// both land in Terminal. A CLEAN proven result (no projector disclosures)
+// carries no Disclosure; a proven result carrying the projector's own
+// compatibility notes (a legacy-terminal or legacy-draft reading) carries
+// them forward under the compatibility source id (final fix wave I5) —
+// never stripped.
+func TestEffectiveStatusGroup_Happy(t *testing.T) {
+	cases := []struct {
+		state specstate.State
+		want  StatusGroup
+	}{
+		{specstate.AcceptedPendingBuild, StatusGroupAcceptedPendingBuild},
+		{specstate.Superseded, StatusGroupTerminal},
+		{specstate.Closed, StatusGroupTerminal},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.state)+" clean", func(t *testing.T) {
+			got, disclosed := effectiveStatusGroup("spec/x", specstate.Result{State: tc.state})
+			if got != tc.want {
+				t.Fatalf("effectiveStatusGroup(%q) = %q, want %q", tc.state, got, tc.want)
+			}
+			if disclosed != nil {
+				t.Fatalf("effectiveStatusGroup(%q) Disclosed = %+v, want nil for a clean proven result", tc.state, disclosed)
+			}
+		})
+		t.Run(string(tc.state)+" with compatibility disclosures", func(t *testing.T) {
+			got, disclosed := effectiveStatusGroup("spec/x", specstate.Result{
+				State:       tc.state,
+				Disclosures: []string{"legacy compatibility note", "second note"},
+			})
+			if got != tc.want {
+				t.Fatalf("effectiveStatusGroup(%q) = %q, want %q (disclosures never change the bucket)", tc.state, got, tc.want)
+			}
+			if disclosed == nil {
+				t.Fatal("Disclosed = nil, want the projector's compatibility disclosures carried forward (I5)")
+			}
+			if disclosed.Source != "refindex:spec-state-compatibility" {
+				t.Errorf("Disclosed.Source = %q, want refindex:spec-state-compatibility (distinct from the unproven id)", disclosed.Source)
+			}
+			if disclosed.Scope != "spec/x" {
+				t.Errorf("Disclosed.Scope = %q, want %q", disclosed.Scope, "spec/x")
+			}
+			if disclosed.Text != "legacy compatibility note; second note" {
+				t.Errorf("Disclosed.Text = %q, want both notes joined", disclosed.Text)
+			}
+		})
+	}
+}
+
+// TestEffectiveStatusGroup_Negative_UnprovenNeverAccepted proves an
+// Unproven Result (and, defensively, a Proposed one — never actually
+// reachable in production, since a default-branch candidate's content is
+// always read FROM that same branch, but the switch must not fail open on
+// it either) lands in DraftsInProgress — never the accepted group — and
+// carries a Disclosure whose text embeds specstate's own witness message
+// when one is present, or a fallback when Disclosures is empty.
+func TestEffectiveStatusGroup_Negative_UnprovenNeverAccepted(t *testing.T) {
+	t.Run("unproven with witnesses", func(t *testing.T) {
+		got, disclosed := effectiveStatusGroup("spec/x", specstate.Result{
+			State:       specstate.Unproven,
+			Disclosures: []string{"first witness", "second witness"},
+		})
+		if got == StatusGroupAcceptedPendingBuild {
+			t.Fatalf("effectiveStatusGroup(Unproven) = %q, want anything but the accepted group", got)
+		}
+		if got != StatusGroupDraftsInProgress {
+			t.Errorf("effectiveStatusGroup(Unproven) = %q, want %q", got, StatusGroupDraftsInProgress)
+		}
+		if disclosed == nil {
+			t.Fatal("Disclosed = nil, want a populated disclosure")
+		}
+		if disclosed.Scope != "spec/x" {
+			t.Errorf("Disclosed.Scope = %q, want %q", disclosed.Scope, "spec/x")
+		}
+		if disclosed.Text != "first witness; second witness" {
+			t.Errorf("Disclosed.Text = %q, want both witnesses joined", disclosed.Text)
+		}
+	})
+
+	t.Run("unproven with no witnesses still discloses", func(t *testing.T) {
+		_, disclosed := effectiveStatusGroup("spec/x", specstate.Result{State: specstate.Unproven})
+		if disclosed == nil {
+			t.Fatal("Disclosed = nil, want a populated fallback disclosure even with no specstate witnesses")
+		}
+	})
+
+	t.Run("proposed defensively never accepted either", func(t *testing.T) {
+		got, disclosed := effectiveStatusGroup("spec/x", specstate.Result{State: specstate.Proposed})
+		if got == StatusGroupAcceptedPendingBuild {
+			t.Fatalf("effectiveStatusGroup(Proposed) = %q, want anything but the accepted group", got)
+		}
+		if disclosed == nil {
+			t.Fatal("Disclosed = nil, want a populated disclosure")
+		}
+	})
 }

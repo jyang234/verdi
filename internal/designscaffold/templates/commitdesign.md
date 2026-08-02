@@ -4,7 +4,6 @@ kind: spec
 title: {{printf "%q" .Title}}
 owners: {{safe .Owners}}
 class: feature
-status: draft
 story: {{safe .StoryRef}}
 {{if .Pins}}context:
 {{range .Pins}}  - {{.Ref}}

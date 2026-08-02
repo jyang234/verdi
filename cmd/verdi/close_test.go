@@ -72,6 +72,11 @@ bindings:
 // not-eligible paths can share this one builder.
 func buildCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
+	// The C1 pre-closure precondition resolves the target's effective state
+	// through the real, git-backed specstate projector; this fixturegit repo
+	// has no origin remote, so the default branch is pinned here exactly as
+	// buildCloseFeatureRepo already documents for its own fixtures.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: github\n",
@@ -560,6 +565,14 @@ func TestRunClose_RefusesUndispositionedFindings(t *testing.T) {
 // close.go's dispatch is wired to it.
 func TestRunClose_FeatureClass_DispatchesToFeatureClosure(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
+	// discoverImplementingStories' Git-derived effective-state resolution
+	// (Task 5) now refuses OPERATIONALLY when the default branch cannot be
+	// resolved at all (fix-round-1 finding 2) — this is the one close_test.go
+	// case that reaches feature closure (runFeatureClosureGate ->
+	// discoverImplementingStories), so it alone needs this pinned;
+	// buildCloseFixtureRepo stays untouched for its other 26 story-scoped
+	// callers, none of which reach this code path.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	ctx := context.Background()
 	deps := closeDeps{Forge: forgefake.New(), Registry: fake.New(), Runner: upstream.NewFakeRunner()}
 

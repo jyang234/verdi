@@ -90,14 +90,25 @@ type Entry struct {
 	// degraded) is unconditionally StatusGroupDraftsInProgress (ac-3) —
 	// never derived from that branch's content, readable or not.
 	StatusGroup StatusGroup
-	// SpecStatus is the raw frontmatter status field, where a spec was
-	// readable at this entry's ref; empty otherwise (dc-3). Always empty
-	// for a Disclosed (degraded) entry, since there was no content to read.
+	// SpecStatus is the legacy per-kind display vocabulary for this entry,
+	// where a spec was readable at this entry's ref; empty otherwise (dc-3).
+	// For a class: component entry it is the raw frontmatter status field
+	// (status.go's mapStatusGroup — component status is display-only,
+	// persisted, never git-derived). For a class: feature/story entry
+	// (Task 6a) it is instead the resolver's specstate.Result.
+	// ArtifactStatus() — a git-derived projection, never a trusted raw
+	// `status:` read, so a statusless scaffold still renders a legible
+	// value ("accepted-pending-build" once landed, "draft" while still
+	// unmerged) rather than an empty string. Always empty for a Disclosed
+	// (degraded) design-branch entry, since there was no content to read.
 	SpecStatus string
-	// Disclosed is non-nil only for a degraded entry whose content could
-	// not be read at all (ac-4's no-draft-spec case) — never used for an
-	// ordinary remote-only or default-branch entry, whose content is
-	// present, just sourced from a particular place (dc-3).
+	// Disclosed is non-nil for a degraded entry whose content could not be
+	// read at all (ac-4's no-draft-spec case), AND (Task 6a) for a class:
+	// feature/story entry whose resolver Result carries State
+	// specstate.Unproven — content WAS present and readable there, but its
+	// effective lifecycle state could not be proven (the default branch, or
+	// a required ancestry witness, was unresolvable). Never set for an
+	// ordinarily-proven entry, component or feature/story alike.
 	Disclosed *disclosure.Disclosure
 	// Zone names which default-branch zone this entry's content was read
 	// from — see the Zone type's own doc comment. Always populated by

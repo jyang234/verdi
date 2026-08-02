@@ -19,7 +19,6 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
-	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
@@ -258,19 +257,15 @@ const trashFixtureLayout = `{
 
 func newTrashFixture(t *testing.T) string {
 	t.Helper()
-	repo := fixturegit.Build(t, []fixturegit.Layer{{
-		Files: map[string]string{
+	return buildAuthoringFixture(t, "design/"+boardFixtureName,
+		map[string]string{
+			".verdi/adr/0001-outbox-events.md": boardFixtureADR,
+			".verdi/.gitignore":                "data/\n",
+		},
+		map[string]string{
 			".verdi/specs/active/" + boardFixtureName + "/spec.md":     trashFixtureSpec,
 			".verdi/specs/active/" + boardFixtureName + "/layout.json": trashFixtureLayout,
-			".verdi/adr/0001-outbox-events.md":                         boardFixtureADR,
-			".verdi/.gitignore":                                        "data/\n",
-		},
-		Message: "seed trash fixture",
-	}})
-	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/"+boardFixtureName); err != nil {
-		t.Fatalf("checkout design branch: %v", err)
-	}
-	return repo.Dir
+		})
 }
 
 func TestBoardSpec_RefTrash(t *testing.T) {
@@ -366,17 +361,10 @@ Prose.
 
 Prose.
 `
-	repo := fixturegit.Build(t, []fixturegit.Layer{{
-		Files: map[string]string{
-			".verdi/specs/active/refi-story/spec.md": storySpec,
-			".verdi/.gitignore":                      "data/\n",
-		},
-		Message: "seed story fixture",
-	}})
-	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/refi-story"); err != nil {
-		t.Fatal(err)
-	}
-	h := NewHandler(repo.Dir)
+	root := buildAuthoringFixture(t, "design/refi-story",
+		map[string]string{".verdi/.gitignore": "data/\n"},
+		map[string]string{".verdi/specs/active/refi-story/spec.md": storySpec})
+	h := NewHandler(root)
 
 	rec := postBoardAPI(t, h, "refi-story", "ref-trash", `{"ref":"spec/escrow-autopay#ac-1"}`)
 	if rec.Code != http.StatusBadRequest {
@@ -387,7 +375,7 @@ Prose.
 	}
 
 	// Unknown refs fail closed.
-	root := newBoardFixture(t)
+	root = newBoardFixture(t)
 	h2 := NewHandler(root)
 	rec = postBoardAPI(t, h2, boardFixtureName, "ref-trash", `{"ref":"adr/not-on-this-wall"}`)
 	if rec.Code != http.StatusBadRequest {
@@ -518,17 +506,11 @@ Prose.
 
 func newTrashStubFixture(t *testing.T) string {
 	t.Helper()
-	repo := fixturegit.Build(t, []fixturegit.Layer{{
-		Files: map[string]string{
+	return buildAuthoringFixture(t, "design/"+boardFixtureName,
+		map[string]string{".verdi/.gitignore": "data/\n"},
+		map[string]string{
 			".verdi/specs/active/" + boardFixtureName + "/spec.md": trashStubFixtureSpec,
-			".verdi/.gitignore": "data/\n",
-		},
-		Message: "seed stub trash fixture",
-	}})
-	if err := gitx.CheckoutNewBranch(context.Background(), repo.Dir, "design/"+boardFixtureName); err != nil {
-		t.Fatalf("checkout design branch: %v", err)
-	}
-	return repo.Dir
+		})
 }
 
 // TestBoardSpec_ObjectTrash_StubClaimsAC proves object-trash refuses to
@@ -614,10 +596,13 @@ func TestBoardSpec_PinActionsAreAuthoringOnly(t *testing.T) {
 	root := newBoardFixture(t)
 	// On the default branch the same draft renders read-only (05
 	// §Workbench: authoring is keyed to a design branch) — the mode every
-	// new write affordance must 403 in.
+	// new write affordance must 403 in. The draft is dropped UNCOMMITTED
+	// into main's working tree (the fixture's committed draft lives only
+	// on the design branch — I6's RelationNew authoring shape).
 	if err := gitx.Checkout(context.Background(), root, "main"); err != nil {
 		t.Fatal(err)
 	}
+	writeWorkingTreeSpec(t, root, boardFixtureName, boardFixtureSpec)
 	h := NewHandler(root)
 	for action, body := range map[string]string{
 		"pin":          `{"ref":"adr/0007-retry-budget"}`,

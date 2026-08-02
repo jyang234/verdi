@@ -139,3 +139,44 @@ func TestVL002_AcceptedPendingUnderArchive_Fires(t *testing.T) {
 		t.Fatalf("got %d VL-002 findings, want 1 (accepted-pending-build belongs under specs/active/, not archive/):\n%s", n, findingsString(findings))
 	}
 }
+
+// statuslessStorySpec is closedStorySpec with its status: line removed
+// entirely (status is optional on the story class as of Task 4) rather
+// than merely blanked — every other field, including the absence of a
+// frozen: block, is unchanged.
+var statuslessStorySpec = strings.Replace(closedStorySpec, "status: closed\n", "", 1)
+
+// TestVL002_StatuslessSpecUnderArchive_ClosedByZone_Clean proves Task 4's
+// VL-002 direction: a feature/story spec with NO persisted status at all,
+// sitting under specs/archive/, is treated as closed-by-zone — its own
+// directory location is read as the closure signal (mirroring internal/
+// specstate's own archive-zone-implies-Closed reading) — and is never
+// flagged as though it belonged back under specs/active/.
+func TestVL002_StatuslessSpecUnderArchive_ClosedByZone_Clean(t *testing.T) {
+	if statuslessStorySpec == closedStorySpec {
+		t.Fatal("statuslessStorySpec fixture setup: status: closed line was not found/removed")
+	}
+	dir := adHocOverlayDir(t, ".verdi/specs/archive/vl-002-closed-story/spec.md", statuslessStorySpec)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-002" {
+			t.Fatalf("VL-002 fired on a statusless spec correctly archived (closed-by-zone): %s", f.String())
+		}
+	}
+}
+
+// TestVL002_StatuslessSpecUnderActive_Clean is the positive complement: a
+// statusless spec under specs/active/ (an ordinary in-review proposal,
+// never yet closed) is unaffected — VL-002's status-in-path check still
+// reads it as belonging under active/, matching where it already sits.
+func TestVL002_StatuslessSpecUnderActive_Clean(t *testing.T) {
+	dir := adHocOverlayDir(t, ".verdi/specs/active/vl-002-closed-story/spec.md", statuslessStorySpec)
+	repo := buildLintRepo(t, dir)
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-002" {
+			t.Fatalf("VL-002 fired on a statusless spec correctly left under active/: %s", f.String())
+		}
+	}
+}

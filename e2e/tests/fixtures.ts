@@ -65,6 +65,7 @@
 // |   BADGE_DECISION, BADGE_STUB_SLUG                                  |          | |
 // | SIZE_SMELL_SPEC, SIZE_FIT_SPEC, SIZE_SMELL_ESTIMATE,               | EDGE     | size-smell (rule-explicit) |
 // |   SIZE_SMELL_REFERENCE                                             |          | |
+// | STATUSLESS_DRAFT_SPEC, STATUSLESS_SEALED_SPEC                      | EDGE     | statusless-lifecycle rigs (merge-signaled acceptance migration) |
 // | SWEEP_FRESH_SPEC, SWEEP_STALE_SPEC, SWEEP_PARTIAL_SPEC,            | EDGE     | decline-sweep-* (rule-explicit) |
 // |   SWEEP_MISSING_DECISION                                           |          | |
 // | PIN_ADR, PIN_DIAGRAM, PIN_TRASH_ADR                                | SHOWCASE | real corpus artifacts; pin/peek/drag/trash happy-path journeys (the trash's "pure pin" tier, not a stress case) |
@@ -607,6 +608,20 @@ export const EDGE = {
   // assertions (constants disclosed by name and value, dc-1).
   SIZE_SMELL_ESTIMATE: 920,
   SIZE_SMELL_REFERENCE: 900,
+
+  // -------------------------------------------------------------------------
+  // Workbench (statusless lifecycle, merge-signaled spec acceptance)
+  // -------------------------------------------------------------------------
+
+  // The statusless pair (cmd/e2eharness/provision_board.go, statuslessSpec):
+  // the CLI's scaffold writes NO status: field — board mode and displayed
+  // status derive from Git reachability alone. The DRAFT instance exists
+  // only on the design branch (effective state proposed → authoring); the
+  // SEALED instance's exact bytes are landed on main (effective state
+  // accepted-pending-build → read-only). Mid-migration lifecycle rigs, so
+  // zoned EDGE.
+  STATUSLESS_DRAFT_SPEC: "decline-statusless-draft",
+  STATUSLESS_SEALED_SPEC: "decline-statusless-sealed",
 
   // -------------------------------------------------------------------------
   // Workbench (derivation drawer, spec/derivation-drawer ac-3)

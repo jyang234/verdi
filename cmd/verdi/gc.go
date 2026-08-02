@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/reclaim"
@@ -130,6 +131,28 @@ func runGcReclaimUnmanaged(ctx context.Context, root, defaultBranchRef string, a
 	}
 	if !res.DefaultBranchResolved {
 		fmt.Fprintln(stderr, "gc: --reclaim-unmanaged: default branch could not be resolved; refusing to compute a plan rather than assert one it cannot compute")
+		return 2
+	}
+	// Task 6c re-review: residue.Scan's UnprovenSpecs (Finding 1's own
+	// channel, internal/residue/scan.go) names every active-zone spec whose
+	// effective lifecycle state internal/specstate could not prove — the
+	// SAME "cannot be proven, never a silent pass" fact `verdi audit`
+	// discloses (audit.go's runClosureHygieneSection, hasUnproven). audit
+	// only REPORTS, so it can afford to disclose and keep going; this verb
+	// can MUTATE the checkout (--apply), so it refuses the WHOLE run before
+	// computing or applying any plan — dry-run and --apply alike, exactly
+	// mirroring the DefaultBranchResolved refusal immediately above — rather
+	// than silently basing a reclamation decision on a scan it knows is
+	// incomplete. Each unproven spec's own disclosure is still printed
+	// (audit.go's unprovenSpecDisclosure/disclosure.Render convention,
+	// reused verbatim — same package, one rendering, never a second
+	// hand-formatted copy), so an operator sees exactly which spec(s)
+	// blocked the run, not just a bare refusal.
+	if len(res.UnprovenSpecs) > 0 {
+		for _, u := range res.UnprovenSpecs {
+			fmt.Fprintln(stdout, disclosure.Render(unprovenSpecDisclosure(u)))
+		}
+		fmt.Fprintln(stderr, "gc: --reclaim-unmanaged: one or more active-zone specs have an unproven effective lifecycle state; refusing to compute or apply a reclamation plan over an incomplete scan")
 		return 2
 	}
 

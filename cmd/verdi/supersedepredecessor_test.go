@@ -1,9 +1,25 @@
-// Tests for supersedePredecessors/flipPredecessorToSuperseded (accept.go):
-// the D-12 rung-3 story-predecessor flip, and its round-6 ac-1
-// (feature-supersession-state) extension to feature-class predecessors via
-// a WHOLE-SPEC supersedes edge. Kept in its own file per this package's
-// one-file-per-topic convention (accept_test.go covers the base accept
-// ritual; this file covers the predecessor-flip mechanism specifically).
+// Fixtures and tests for predecessor supersession under the merge-signaled
+// design (docs/superpowers/specs/2026-08-01-merge-signals-spec-acceptance-
+// design.md). Task 7 deletes cmd/verdi/supersede.go — the legacy
+// accept-time predecessor status-flip mutation (D-12, extended by round 6's
+// ac-1 feature-supersession-state) — since supersession is now derived
+// entirely from Git reachability: a validly landed successor (a `links:
+// {type: supersedes}` edge PLUS a validated `supersession:` block, both on
+// the default branch) makes internal/specstate.Projector.Resolve report the
+// predecessor Superseded, without ever touching the predecessor's own
+// bytes. I-40 (open owner question, invention ledger): story-class specs
+// cannot carry a `supersession:` block (feature-only field — internal/
+// artifact's validateStory rejects it outright), so Git-derived
+// supersession proof exists only for feature-class predecessor/successor
+// pairs; deleting supersede.go removes the only writer of a story-class
+// legacy `status: superseded` flip, and this file invents no replacement
+// mechanism for it (disclosed, not silently worked around).
+//
+// The fixture bodies below (predecessor/successor spec.md content) are
+// kept unchanged from the pre-Task-7 shape and reused across this package
+// (accept_test.go's non-mutation characterization, vocabulary_cli_test.go's
+// vocab-rename CLI proofs) — only the BEHAVIORAL tests that used to drive
+// them through the now-deleted flip functions are rewritten here.
 package main
 
 import (
@@ -14,13 +30,8 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
-	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 )
-
-// Fixture spec bodies, planted directly (no design-start scaffold needed —
-// mirrors accept_test.go's own buildAcceptNegativeRepo/alreadyAcceptedSpecMD
-// minimal style), since these tests drive the flip mechanism directly
-// through runAccept rather than the scaffold ritual.
 
 const predFeatureAcceptedMD = `---
 id: spec/pred-feature
@@ -29,43 +40,6 @@ title: "Predecessor feature"
 owners: [platform-team]
 class: feature
 status: accepted-pending-build
-story: jira:LOAN-3001
-acceptance_criteria:
-  - { id: ac-1, text: "v1 obligation", evidence: [static] }
-frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
----
-# Predecessor feature
-`
-
-// predFeatureClosedMD is deliberately left under specs/active/ (rather than
-// moved to specs/archive/, which VL-002 would otherwise require of a real
-// closed feature/story spec) so this fixture directly exercises
-// flipPredecessorToSuperseded's own status guard — dc-2's
-// closed-is-not-flipped rule — rather than the separate "predecessor absent
-// from active/" no-op path a fully VL-002-compliant repo would hit instead
-// (disclosed judgment call: the guard itself is what dc-2 is about).
-const predFeatureClosedMD = `---
-id: spec/pred-feature
-kind: spec
-title: "Predecessor feature"
-owners: [platform-team]
-class: feature
-status: closed
-story: jira:LOAN-3001
-acceptance_criteria:
-  - { id: ac-1, text: "v1 obligation", evidence: [static] }
-frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
----
-# Predecessor feature
-`
-
-const predFeatureSupersededMD = `---
-id: spec/pred-feature
-kind: spec
-title: "Predecessor feature"
-owners: [platform-team]
-class: feature
-status: superseded
 story: jira:LOAN-3001
 acceptance_criteria:
   - { id: ac-1, text: "v1 obligation", evidence: [static] }
@@ -92,9 +66,10 @@ links:
 
 // succFeatureFragmentSupersedesMD carries an OBJECT-FRAGMENT supersedes edge
 // (#ac-1) rather than a whole-spec one — a decision-level override shape (03
-// §Decision-conflict gate's rung-2 machinery), never the rung-3/feature
-// chain edge wholeSpecSupersedesTarget identifies — so it must NOT trigger a
-// feature-predecessor flip.
+// §Decision-conflict gate's rung-2 machinery) — and no `supersession:` block
+// at all, so it must never derive a predecessor flip under either the old
+// mechanism or the new specstate two-signal proof (fm.Supersession == nil is
+// scanSuccessors' own first, unconditional exclusion).
 const succFeatureFragmentSupersedesMD = `---
 id: spec/succ-feature
 kind: spec
@@ -107,6 +82,29 @@ acceptance_criteria:
   - { id: ac-1, text: "v2 obligation, corrected", evidence: [static] }
 links:
   - { type: supersedes, ref: "spec/pred-feature#ac-1" }
+---
+# Successor feature
+`
+
+// succFeatureWithValidSupersessionMD is the two-signal shape
+// internal/specstate/resolve.go's scanSuccessors actually requires to
+// derive a predecessor's Superseded state: a whole-spec `links: {type:
+// supersedes}` edge PLUS a validated `supersession:` block (feature-only,
+// I-40) — the shape a real, reviewed successor pull request carries.
+const succFeatureWithValidSupersessionMD = `---
+id: spec/succ-feature
+kind: spec
+title: "Successor feature"
+owners: [platform-team]
+class: feature
+story: jira:LOAN-3002
+acceptance_criteria:
+  - { id: ac-1, text: "v2 obligation, corrected", evidence: [static] }
+links:
+  - { type: supersedes, ref: "spec/pred-feature" }
+supersession:
+  amended:
+    - { id: ac-1, note: "AC text corrected" }
 ---
 # Successor feature
 `
@@ -130,13 +128,35 @@ frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
 # Predecessor story
 `
 
-// succStorySupersedesMD is the rung-3 story-to-story chain edge D-12
-// shipped: a whole-spec supersedes edge to a STORY-class predecessor. The
-// story class is always "new-class" (vl006.go's isNewClassSpec), so — now
-// that accept.go's D6-23 gate lints the spec it is about to freeze — its
-// problem/outcome/ac-1 anchors must actually resolve against the body
-// below, not just decode; the ## Problem/## Outcome/## AC-1 headings exist
-// for exactly that.
+// predStoryLegacySupersededMD is predStoryAcceptedMD's compatibility
+// twin: a legacy, EXPLICIT `status: superseded` story predecessor — the
+// shape the OLD accept ritual's story-rung flip (D-12, before this task)
+// left behind, and the only shape a story predecessor's Superseded state
+// can ever carry now that supersede.go's writer is gone (I-40: story-class
+// specs cannot carry a `supersession:` block, so Git-derived two-signal
+// proof can never independently confirm story-level supersession).
+// internal/specstate's own compatibility fallback (probeLegacyStatus)
+// reads this explicit field directly once these exact bytes are proven
+// landed — preserved, not reinvented, by the test below.
+const predStoryLegacySupersededMD = `---
+id: spec/pred-story
+kind: spec
+title: "Predecessor story"
+owners: [platform-team]
+class: story
+status: superseded
+story: jira:LOAN-4001
+problem: { text: "borrowers see stale data", anchor: problem }
+outcome: { text: "borrowers see current data", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "v1 obligation", evidence: [static] }
+links:
+  - { type: implements, ref: "spec/some-feature#ac-1" }
+frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
+---
+# Predecessor story
+`
+
 const succStorySupersedesMD = `---
 id: spec/succ-story
 kind: spec
@@ -170,12 +190,8 @@ v2 obligation, corrected.
 
 // someFeatureMD is the implements-edge target both predStoryAcceptedMD and
 // succStorySupersedesMD name (spec/some-feature#ac-1) — a plain v0-shaped
-// feature spec (no problem/outcome/stubs, so isNewClassSpec is false and no
-// anchor is required of its own ac-1) whose only job is to exist and
-// declare ac-1, so that link actually resolves (VL-003) rather than
-// dangling. buildPredecessorFlipRepo below always includes it: harmless for
-// the feature-predecessor tests (which never reference it), required for
-// the story-predecessor ones (which do).
+// feature spec (no problem/outcome/stubs) whose only job is to exist and
+// declare ac-1, so that link resolves (VL-003) rather than dangling.
 const someFeatureMD = `---
 id: spec/some-feature
 kind: spec
@@ -191,9 +207,8 @@ acceptance_criteria:
 
 // buildPredecessorFlipRepo builds a minimal one-layer fixturegit repo
 // carrying exactly the two named spec.md bodies under specs/active/, plus
-// the shared someFeatureMD implements-edge target — no design-start
-// scaffold, since these tests drive runAccept directly against hand-written
-// frontmatter (mirroring accept_test.go's own buildAcceptNegativeRepo).
+// the shared someFeatureMD implements-edge target — hand-written
+// frontmatter, no design-start scaffold.
 func buildPredecessorFlipRepo(t *testing.T, predName, predMD, succName, succMD string) *fixturegit.Repo {
 	t.Helper()
 	return fixturegit.Build(t, []fixturegit.Layer{
@@ -209,135 +224,125 @@ func buildPredecessorFlipRepo(t *testing.T, predName, predMD, succName, succMD s
 	})
 }
 
-// TestFlipPredecessorToSuperseded_FeatureHappyPath is ac-1's core proof:
-// accepting a feature v2 that carries a WHOLE-SPEC supersedes edge to a
-// feature predecessor (accepted-pending-build, frozen) flips that
-// predecessor's status to superseded, in the SAME acceptance commit, staying
-// in specs/active/ with its frozen stamp and every other byte unchanged.
-func TestFlipPredecessorToSuperseded_FeatureHappyPath(t *testing.T) {
-	repo := buildPredecessorFlipRepo(t, "pred-feature", predFeatureAcceptedMD, "succ-feature", succFeatureWholeSpecSupersedesMD)
+// resolveCandidate is a small helper wrapping specstate.NewProjector().Resolve
+// for a spec at the given active-zone name, reading its current on-disk
+// bytes as the candidate content — the CLI's own read-then-resolve pattern
+// (buildstart.go's runBuildStart, obligation.go's runObligationScaffold).
+func resolveCandidate(t *testing.T, ctx context.Context, root, name string) specstate.Result {
+	t.Helper()
+	relPath := ".verdi/specs/active/" + name + "/spec.md"
+	content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+	if err != nil {
+		t.Fatalf("reading %s: %v", relPath, err)
+	}
+	result, err := specstate.NewProjector().Resolve(ctx, root, specstate.Candidate{Path: relPath, Content: content})
+	if err != nil {
+		t.Fatalf("Resolve(%s): %v", name, err)
+	}
+	return result
+}
+
+// TestDerivedSupersession_FeaturePredecessor is Step 5's core proof: a
+// successor landed on the default branch, carrying both a whole-spec
+// `links: {type: supersedes}` edge and a validated `supersession:` block,
+// derives the predecessor's Superseded state through
+// internal/specstate.Projector.Resolve — without the predecessor's own
+// bytes ever changing. Mirrors D-12/ac-1's old accept-time flip's OUTCOME
+// (predecessor reads as superseded once its successor is accepted) while
+// removing the mutation that used to produce it.
+func TestDerivedSupersession_FeaturePredecessor(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                        phase7ManifestYAML,
+				".verdi/specs/active/pred-feature/spec.md": predFeatureAcceptedMD,
+				".verdi/specs/active/succ-feature/spec.md": succFeatureWithValidSupersessionMD,
+			},
+			Message: "predecessor + validly superseding successor, both landed on the default branch",
+		},
+	})
 	ctx := context.Background()
 
-	beforeHead, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	predPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "pred-feature", "spec.md")
+	before, err := os.ReadFile(predPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, predRawBefore := readSpec(t, repo.Dir, "pred-feature")
 
-	var stdout, stderr bytes.Buffer
-	if got := runAccept(ctx, repo.Dir, "spec/succ-feature", &stdout, &stderr); got != 0 {
-		t.Fatalf("runAccept(succ-feature) = %d, want 0; stderr=%s", got, stderr.String())
-	}
-
-	predAfter, predRawAfter := readSpec(t, repo.Dir, "pred-feature")
-	if predAfter.Status != "superseded" {
-		t.Fatalf("predecessor status = %q, want superseded", predAfter.Status)
-	}
-	if predAfter.Frozen == nil || predAfter.Frozen.Commit != "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" || predAfter.Frozen.At != "2026-01-01" {
-		t.Fatalf("predecessor frozen stamp changed across the flip: %+v", predAfter.Frozen)
-	}
-	wantRaw := bytes.Replace(predRawBefore, []byte("status: accepted-pending-build"), []byte("status: superseded"), 1)
-	if bytes.Equal(wantRaw, predRawBefore) {
-		t.Fatal("test setup: predecessor fixture did not carry the expected status line to flip")
-	}
-	if !bytes.Equal(predRawAfter, wantRaw) {
-		t.Fatalf("predecessor content diverged beyond the single status line:\n--- got ---\n%s\n--- want ---\n%s", predRawAfter, wantRaw)
-	}
-	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "pred-feature", "spec.md")); err != nil {
-		t.Fatalf("predecessor must remain at specs/active/: %v", err)
-	}
-	if !contains(stdout.String(), "superseded by spec/succ-feature") {
-		t.Fatalf("stdout = %q, want a disclosed predecessor-superseded line", stdout.String())
+	result := resolveCandidate(t, ctx, repo.Dir, "pred-feature")
+	if result.State != specstate.Superseded {
+		t.Fatalf("Resolve(predecessor) = %+v, want Superseded", result)
 	}
 
-	// Same acceptance commit: exactly one new commit was created (its sole
-	// parent is the pre-accept HEAD), and its diff touches both spec.md
-	// files — the successor's own flip and the predecessor's flip land
-	// together.
-	afterHead, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	after, err := os.ReadFile(predPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if afterHead == beforeHead {
-		t.Fatal("accept did not create a new commit")
+	if !bytes.Equal(before, after) {
+		t.Fatalf("predecessor bytes changed merely by resolving the successor's state — supersession must be derived, never written:\n--- before ---\n%s\n--- after ---\n%s", before, after)
 	}
-	parent, err := gitx.RevParse(ctx, repo.Dir, "HEAD^")
-	if err != nil {
-		t.Fatalf("RevParse(HEAD^): %v", err)
-	}
-	if parent != beforeHead {
-		t.Fatalf("accept created more than one commit: HEAD^ = %q, want the pre-accept HEAD %q", parent, beforeHead)
-	}
-	entries, err := gitx.DiffNameStatus(ctx, repo.Dir, beforeHead, afterHead)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var touchedPred, touchedSucc bool
-	for _, e := range entries {
-		switch e.Path {
-		case ".verdi/specs/active/pred-feature/spec.md":
-			touchedPred = true
-		case ".verdi/specs/active/succ-feature/spec.md":
-			touchedSucc = true
-		}
-	}
-	if !touchedPred || !touchedSucc {
-		t.Fatalf("the single acceptance commit must touch both spec.md files: entries=%+v", entries)
+
+	// The successor's own bytes are equally untouched — deriving state is
+	// read-only for both sides of the pair.
+	succResult := resolveCandidate(t, ctx, repo.Dir, "succ-feature")
+	if succResult.State != specstate.AcceptedPendingBuild {
+		t.Fatalf("Resolve(successor) = %+v, want AcceptedPendingBuild", succResult)
 	}
 }
 
-// TestFlipPredecessorToSuperseded_Negative table-drives the guard cases:
-// dc-2's deliberately deferred closed predecessor, idempotence on an
-// already-superseded predecessor, and an object-fragment supersedes edge
-// (never a whole-spec chain edge) not triggering a feature flip at all —
-// each leaves the predecessor's status exactly where it started.
-func TestFlipPredecessorToSuperseded_Negative(t *testing.T) {
-	cases := []struct {
-		name       string
-		predMD     string
-		succMD     string
-		wantStatus string
-	}{
-		{"closed feature predecessor is not flipped (dc-2)", predFeatureClosedMD, succFeatureWholeSpecSupersedesMD, "closed"},
-		{"already-superseded feature predecessor is idempotent", predFeatureSupersededMD, succFeatureWholeSpecSupersedesMD, "superseded"},
-		{"object-fragment supersedes does not trigger a feature flip", predFeatureAcceptedMD, succFeatureFragmentSupersedesMD, "accepted-pending-build"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			repo := buildPredecessorFlipRepo(t, "pred-feature", tc.predMD, "succ-feature", tc.succMD)
-			ctx := context.Background()
+// TestDerivedSupersession_ObjectFragmentEdgeDoesNotSupersede is the
+// negative complement: a successor whose supersedes edge is an
+// object-fragment (a decision-level override, never a chain edge) and
+// which carries no `supersession:` block at all must NOT derive the
+// predecessor's Superseded state — it stays AcceptedPendingBuild.
+func TestDerivedSupersession_ObjectFragmentEdgeDoesNotSupersede(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                        phase7ManifestYAML,
+				".verdi/specs/active/pred-feature/spec.md": predFeatureAcceptedMD,
+				".verdi/specs/active/succ-feature/spec.md": succFeatureFragmentSupersedesMD,
+			},
+			Message: "predecessor + a successor carrying only a decision-level fragment edge",
+		},
+	})
+	ctx := context.Background()
 
-			var stdout, stderr bytes.Buffer
-			if got := runAccept(ctx, repo.Dir, "spec/succ-feature", &stdout, &stderr); got != 0 {
-				t.Fatalf("runAccept(succ-feature) = %d, want 0; stderr=%s", got, stderr.String())
-			}
-			predAfter, _ := readSpec(t, repo.Dir, "pred-feature")
-			if string(predAfter.Status) != tc.wantStatus {
-				t.Fatalf("predecessor status = %q, want %q", predAfter.Status, tc.wantStatus)
-			}
-		})
+	result := resolveCandidate(t, ctx, repo.Dir, "pred-feature")
+	if result.State != specstate.AcceptedPendingBuild {
+		t.Fatalf("Resolve(predecessor) = %+v, want AcceptedPendingBuild (a fragment edge with no supersession: block must never derive supersession)", result)
 	}
 }
 
-// TestFlipPredecessorToSuperseded_StoryRegression proves the rung-3
-// story-predecessor flip D-12 shipped (supersedePredecessors' original
-// behavior, exercised here through the shared flipPredecessorToSuperseded
-// helper the ac-1 refactor extracted) is unchanged by ac-1's feature-rung
-// extension: accepting a story v2 that supersedes a story v1 still flips v1
-// to superseded exactly as before.
-func TestFlipPredecessorToSuperseded_StoryRegression(t *testing.T) {
-	repo := buildPredecessorFlipRepo(t, "pred-story", predStoryAcceptedMD, "succ-story", succStorySupersedesMD)
+// TestDerivedSupersession_LegacySupersededStoryPreserved is Step 5's
+// compatibility guard: a story predecessor that already carries the legacy,
+// explicit `status: superseded` field (the shape supersede.go's now-deleted
+// story-rung flip used to leave behind) still projects Superseded once its
+// exact bytes are proven landed — internal/specstate's own compatibility
+// fallback (resolve.go's probeLegacyStatus branch), preserved rather than
+// reinvented: I-40 forbids inventing any NEW story-supersession mechanism,
+// since a story spec can never carry a `supersession:` block.
+func TestDerivedSupersession_LegacySupersededStoryPreserved(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                        phase7ManifestYAML,
+				".verdi/specs/active/some-feature/spec.md": someFeatureMD,
+				".verdi/specs/active/pred-story/spec.md":   predStoryLegacySupersededMD,
+			},
+			Message: "legacy-superseded story predecessor, landed on the default branch",
+		},
+	})
 	ctx := context.Background()
 
-	var stdout, stderr bytes.Buffer
-	if got := runAccept(ctx, repo.Dir, "spec/succ-story", &stdout, &stderr); got != 0 {
-		t.Fatalf("runAccept(succ-story) = %d, want 0; stderr=%s", got, stderr.String())
+	result := resolveCandidate(t, ctx, repo.Dir, "pred-story")
+	if result.State != specstate.Superseded {
+		t.Fatalf("Resolve(legacy-superseded story) = %+v, want Superseded (compatibility reading)", result)
 	}
-	predAfter, _ := readSpec(t, repo.Dir, "pred-story")
-	if predAfter.Status != "superseded" {
-		t.Fatalf("predecessor story status = %q, want superseded (must not regress D-12's story flip)", predAfter.Status)
-	}
-	if !contains(stdout.String(), "superseded by spec/succ-story") {
-		t.Fatalf("stdout = %q, want a disclosed predecessor-superseded line", stdout.String())
+	if len(result.Disclosures) == 0 {
+		t.Fatal("want a compatibility disclosure naming the legacy field as the deciding signal")
 	}
 }

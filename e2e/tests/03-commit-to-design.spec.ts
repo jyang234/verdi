@@ -31,7 +31,10 @@ test("commit-to-design from the board produces the three artifacts", async ({ pa
   await page.goto(`/a/spec/${specName}`);
   await expect(page.locator(".page-header h1")).toBeVisible();
   await expect(page.locator(".metadata-card")).toContainText(storyRef);
-  await expect(page.locator(".metadata-card")).toContainText("draft");
+  // Merge-signaled acceptance: the scaffold persists NO status field —
+  // lifecycle state is git-derived — so the metadata card carries no
+  // Status row at all (it used to read "draft" here).
+  await expect(page.locator(".metadata-card")).not.toContainText("Status");
   const table = page.locator("table.dispositions-table");
   await expect(table).toBeVisible();
   const rows = table.locator("tbody tr");

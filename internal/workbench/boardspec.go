@@ -24,8 +24,20 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
+	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wallbadge"
 )
+
+// StateResolver is the board loader's effective-lifecycle-state port
+// (04 §port pattern: defined at the consumer): the served spec's mode and
+// display status derive from specstate's git-derived verdict, never from a
+// persisted status: field (merge-signaled acceptance — a feature/story may
+// omit status entirely). specstate.Projector satisfies it; package tests
+// may inject a fake to characterize the mode mapping without git.
+type StateResolver interface {
+	Resolve(ctx context.Context, root string, candidate specstate.Candidate) (specstate.Result, error)
+}
 
 // Deps carries the workbench's injected collaborators (04 §port
 // pattern: interfaces defined at the consumer, wired by the caller).
@@ -111,6 +123,13 @@ type boardSpecServer struct {
 	// constitution 2/10). Empty means either no forge is configured (silent
 	// not-under-review is legitimate) or a live feed is wired.
 	reviewUnavailable string
+
+	// state resolves the served spec's effective lifecycle state (the
+	// StateResolver port above). nil means production: specstate's real
+	// projector, constructed lazily per load — the same posture the other
+	// nil-meaning-production fields here take. Package tests inject fakes
+	// to characterize the mode mapping for every state without git.
+	state StateResolver
 
 	// fixedBranch, when non-empty, marks this instance as a per-branch
 	// draft board (spec/draft-boards): it serves exactly one branch's
@@ -223,22 +242,58 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 		return nil, nil, "", err
 	}
 
+	// The spec's effective lifecycle state (merge-signaled acceptance),
+	// resolved HERE — the I/O loader — and passed inward as plain values:
+	// buildProjection stays a pure function and never executes Git. The
+	// candidate is the working tree's exact bytes at the spec's canonical
+	// store path, compared against what the default branch holds.
+	st, err := s.resolveState(ctx, name, raw)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("workbench: resolving effective state for %s: %w", name, err)
+	}
+
+	// Mode is keyed by EFFECTIVE state plus branch state, never by a
+	// persisted status: field (a feature/story may omit one entirely):
+	// a NEW PROPOSED spec on a design branch is the live authoring wall;
+	// everything else fails closed to the sealed read-only document —
+	// accepted-pending-build (exact on default), superseded, closed, and
+	// unproven alike (an unprovable state is never editable; its
+	// disclosures surface as board notices below rather than silence).
+	// Relation==RelationNew is load-bearing (final fix wave I6): a
+	// DIVERGED candidate also resolves Proposed, but its bytes are a
+	// modified ACCEPTED revision — a frozen legacy spec hand-edited in the
+	// working tree — which VL-010 refuses at merge; opening an editable
+	// authoring wall over it invites edits no merge can legally accept, so
+	// it renders read-only with a divergence notice instead (below).
 	mode := modeReadOnly
 	switch {
 	case underReview:
 		// A spec with an open spec-MR: the board is a mirror of the MR
 		// (05 §Workbench "Review").
 		mode = modeReview
-	case fm.Status == "draft" && git.Branch != "" && git.Branch != git.DefaultBranch:
+	case st.State == specstate.Proposed && st.Relation == specstate.RelationNew && git.Branch != "" && git.Branch != git.DefaultBranch:
 		mode = modeAuthoring
 	}
 	if mode != modeReview {
 		comments = nil // the feed is a review-mode input only
 	}
 
-	proj, err := buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode)
+	proj, err := buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode, string(st.ArtifactStatus()))
 	if err != nil {
 		return nil, nil, "", err
+	}
+	// The state resolution's own disclosures (an unproven default branch,
+	// an incomplete corpus scan, a legacy-status migration note) render in
+	// the board chrome — never silently swallowed (three-valued honesty:
+	// unproven is disclosed, not dressed as either mode's certainty).
+	proj.Notices = append(proj.Notices, st.Disclosures...)
+	// A diverged candidate's read-only render names WHY it is not the
+	// authoring wall (I6): the working tree holds a modified accepted
+	// revision, which VL-010 refuses — silence here would read as an
+	// inexplicably sealed board.
+	if st.State == specstate.Proposed && st.Relation == specstate.RelationDiverged {
+		proj.Notices = append(proj.Notices, fmt.Sprintf(
+			"spec/%s's working-tree bytes diverge from the accepted revision on the default branch — a modified accepted revision (VL-010 refuses it at merge); the board renders read-only. Start a new proposal (a successor spec) instead of editing the accepted revision in place", name))
 	}
 	// Display vocabulary (spec/vocabulary-surfaces ac-2): resolved-model
 	// enrichment on the I/O layer, exactly like attachObligations below —
@@ -379,27 +434,54 @@ func LoadProjection(ctx context.Context, root, name string, feed CommentFeed, re
 	return proj, reviewNotice, err
 }
 
-// gitState queries the working tree's branch and dirtiness. When the
-// default branch cannot be resolved (no origin/HEAD configured) it falls
-// back to "main" — the board needs a non-empty "are we on a design branch"
-// signal to key authoring-vs-read-only mode — but the assumption is
-// DISCLOSED, never silent (M-4): the returned notice names it, since a
-// repo whose real default is e.g. "master" would otherwise misread a
-// checkout literally on "main" as the default branch and deny authoring
-// mode. The notice feeds the board's rendered chrome at the call site.
+// resolveState projects the served spec's effective lifecycle state
+// through the StateResolver port: the working tree's exact bytes at the
+// spec's canonical active-zone path, classified against the default
+// branch. nil s.state means production (specstate's real projector) —
+// the same nil-is-production posture the struct's other fields take.
+func (s *boardSpecServer) resolveState(ctx context.Context, name string, raw []byte) (specstate.Result, error) {
+	resolver := s.state
+	if resolver == nil {
+		resolver = specstate.NewProjector()
+	}
+	return resolver.Resolve(ctx, s.root, specstate.Candidate{Path: store.ActiveSpecRelPath(name), Content: raw})
+}
+
+// unresolvedDefaultBranchNotice is the board chrome's ONE story for a
+// repository whose default branch cannot be resolved (fix round 2,
+// finding 3): what was tried — specstate.ResolveDefaultBranch's D6-6
+// precedence chain, the same resolution the effective-state projection
+// itself uses, so the notice and the (unproven, read-only) render can
+// never contradict each other — plus the remedy. Deliberately NO assumed
+// fallback and no new configuration key: purely-local fail-closed
+// behavior is design-mandated; the remedy is to make the default branch
+// provable, never to guess one.
+const unresolvedDefaultBranchNotice = "default branch could not be resolved: CI_DEFAULT_BRANCH is unset, origin/HEAD is not configured, and neither refs/remotes/origin/main nor refs/remotes/origin/master alone identifies it — the spec's effective lifecycle state is unproven and the board renders read-only. Remedy: set CI_DEFAULT_BRANCH, or run `git remote set-head origin <branch>` to configure origin/HEAD"
+
+// gitState queries the working tree's branch and dirtiness. The default
+// branch comes from specstate.ResolveDefaultBranch — the ONE shared
+// resolution (CI_DEFAULT_BRANCH, then origin/HEAD, then the D6-6
+// remote-tracking fallback) the effective-state projection also routes
+// through, so the git panel and the projected lifecycle state always
+// tell the same story. When it cannot resolve, DefaultBranch stays empty
+// and the returned notice carries the honest unproven story plus its
+// remedy (unresolvedDefaultBranchNotice) — never an assumed "main"
+// beside a read-only render (M-4 as amended by fix round 2, finding 3:
+// one consistent story, not two contradictory ones). Mode selection
+// stays fail-closed either way: with no provable default branch,
+// specstate projects Unproven and loadBoard's switch never reaches the
+// authoring case.
 func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string, error) {
 	branch, err := gitx.CurrentBranch(ctx, s.root)
 	if err != nil {
 		return nil, "", err
 	}
-	def, err := gitx.DefaultBranch(ctx, s.root)
-	if err != nil {
-		return nil, "", err
-	}
+	def := ""
 	notice := ""
-	if def == "" {
-		def = "main"
-		notice = `default branch could not be resolved (no origin/HEAD configured); assuming "main" — authoring-mode detection may be wrong if this repo's real default differs`
+	if resolved, ok := specstate.ResolveDefaultBranch(ctx, s.root); ok {
+		def = resolved.Name
+	} else {
+		notice = unresolvedDefaultBranchNotice
 	}
 	dirty, err := gitx.StatusDirty(ctx, s.root)
 	if err != nil {

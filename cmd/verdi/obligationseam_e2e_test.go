@@ -1,15 +1,15 @@
 // Built-binary end-to-end tests for spec/obligation-seam's two behavioral
-// surfaces (ac-1..ac-3's accept backstop, ac-5's `verdi obligation
-// author`): both execute the REAL compiled verdi binary as a real OS
-// process against a real, local fixturegit repository — never a
-// package-internal call standing in for it (mirroring model_test.go's own
-// buildVerdiBinary-driven style, the established convention for this
-// package's CLI-behavioral-path proofs). The obligation-author frozen
-// case in particular exercises the FULL production default-branch/
-// merge-base resolution (internal/lint.BuildContext -> gitx.DefaultBranch/
-// MergeBase), not the injected-diffBase shortcut obligation_test.go's
-// in-process tests use — the one path only a real subprocess can prove
-// end to end.
+// surfaces (ac-1's PRE-REVIEW `verdi obligation scaffold` — Task 7's
+// replacement for accept's retired freeze-moment backstop — and ac-5's
+// `verdi obligation author`): both execute the REAL compiled verdi binary
+// as a real OS process against a real, local fixturegit repository — never
+// a package-internal call standing in for it (mirroring model_test.go's
+// own buildVerdiBinary-driven style, the established convention for this
+// package's CLI-behavioral-path proofs). The obligation-author frozen case
+// in particular exercises the FULL production default-branch/merge-base
+// resolution (internal/lint.BuildContext -> gitx.DefaultBranch/MergeBase),
+// not the injected-diffBase shortcut obligation_test.go's in-process tests
+// use — the one path only a real subprocess can prove end to end.
 package main
 
 import (
@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // runVerdiBinary execs bin with args, cwd=dir, optional extra environment
@@ -44,17 +45,32 @@ func runVerdiBinary(t *testing.T, bin, dir string, extraEnv []string, args ...st
 	return outBuf.String(), errBuf.String(), 0
 }
 
-// TestObligationSeamE2E_AcceptScaffoldsMissingObligations is ac-1's
-// built-binary proof: `verdi accept` against a draft story with two
-// missing (ac, kind) pairs, run as a real subprocess, exits 0 and leaves
-// both obligations decodable on disk.
-func TestObligationSeamE2E_AcceptScaffoldsMissingObligations(t *testing.T) {
+// TestObligationSeamE2E_ScaffoldsMissingObligations is ac-1's built-binary
+// proof, updated by Task 7 for `verdi obligation scaffold` — the pre-review
+// replacement for accept's retired freeze-moment backstop: against a draft
+// story with two missing (ac, kind) pairs, proposed on its own design
+// branch and never merged (obligation scaffold refuses an already-landed
+// spec, I-41), run as a real subprocess, it exits 0 and leaves both
+// obligations decodable on disk.
+func TestObligationSeamE2E_ScaffoldsMissingObligations(t *testing.T) {
 	bin := buildVerdiBinary(t)
-	repo := buildObligationSeamStoryRepo(t, nil)
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                        phase7ManifestYAML,
+				".gitattributes":                           phase7GitAttributes,
+				".verdi/specs/active/some-feature/spec.md": someFeatureMD,
+			},
+			Message: "init store",
+		},
+	})
+	checkoutBranch(t, repo.Dir, "design/widget-story")
+	writeTestFile(t, filepath.Join(repo.Dir, ".verdi", "specs", "active", "widget-story", "spec.md"), []byte(obligationSeamStoryCleanMD))
+	commitAllOnCurrentBranch(t, repo.Dir, "propose widget-story")
 
-	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, nil, "accept", "spec/widget-story")
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "obligation", "scaffold", "spec/widget-story")
 	if code != 0 {
-		t.Fatalf("verdi accept exit = %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+		t.Fatalf("verdi obligation scaffold exit = %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
 
 	for _, p := range []string{

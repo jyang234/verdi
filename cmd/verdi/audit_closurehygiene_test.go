@@ -38,6 +38,47 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 # Closure hygiene widget
 `
 
+// closureHygieneFixtureFeatureWithExempts renders a minimal, valid, active-
+// zone class: feature spec.md at status: draft carrying one decision
+// object with an exempts link against adrRef — Finding 2's own fixture
+// fix (fix round): componentSpecWithExempts' ORIGINAL class: component
+// shape (audit_test.go) puts a `decisions:` block on a component spec,
+// which internal/artifact.validateComponent rejects outright ("component
+// spec must not carry feature/story-only fields") — DecodeSpec has always
+// strict-decode-failed it. Before this story's migration nothing walked
+// this corpus through internal/specstate's own strict corpus scan
+// (internal/residue.effectiveStates → specstate.scanSuccessors, which
+// decodes every active-zone spec.md unconditionally), so the invalid
+// shape went unnoticed; now it does, and a genuinely malformed spec here
+// poisons an UNRELATED spec's (ch-widget's) own supersession-completeness
+// proof. class: feature is a legal home for decisions: (validateComponent
+// alone forbids it), so this fixture keeps componentSpecWithExempts'
+// exact exemption-scanning shape and intent (this test's own "crosses the
+// threshold AND coexists with a closure-hygiene finding" purpose) while
+// actually decoding — deliberately NOT a change to componentSpecWithExempts
+// itself (audit_test.go's TestAudit_ExemptionThresholdEndToEnd has no
+// closure-hygiene fixture alongside it, so it never exercises
+// specstate's corpus scan against these specs at all, and stays green
+// unmodified).
+func closureHygieneFixtureFeatureWithExempts(name, decisionID, adrRef, reason string) string {
+	return `---
+id: spec/` + name + `
+kind: spec
+class: feature
+title: "` + name + `"
+status: draft
+owners: [platform-team]
+problem: { text: "x", anchor: "#problem" }
+outcome: { text: "y", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "the fixture outcome holds", evidence: [static, attestation] }
+decisions:
+  - { id: ` + decisionID + `, text: "some decision", anchor: "#` + decisionID + `", links: [ { type: exempts, ref: ` + adrRef + `, note: "` + reason + `" } ] }
+---
+body
+`
+}
+
 // TestRunAudit_ClosureHygieneSection_AppearsAndCoexists is the wiring
 // proof dc-1 requires of cmd/verdi/audit.go itself (distinct from
 // internal/residue's own unit-level obligation proofs): a fixture that
@@ -48,15 +89,24 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 // (co-2: byte-for-byte unchanged by this addition), and that the run
 // exits 1 for the closure-hygiene finding.
 func TestRunAudit_ClosureHygieneSection_AppearsAndCoexists(t *testing.T) {
+	// residue.effectiveStates now routes every closure-hygiene decision
+	// through internal/specstate, which resolves the default branch through
+	// its own precedence chain rather than trusting anything the caller
+	// passes (Finding 2, fix round) — this fixturegit repo carries no
+	// origin remote, so CI_DEFAULT_BRANCH is the hermetic pin every other
+	// cmd/verdi fixture builder needing the same resolution already uses
+	// (e.g. closefeature_test.go's buildCloseFeatureRepo).
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
 				".verdi/verdi.yaml":                     "schema: verdi.layout/v1\naudit:\n  exempts_conflict_threshold: 3\n  deviations_stale_threshold: 3\n",
 				".verdi/.gitignore":                     "data/\n",
 				".verdi/adr/retry-policy.md":            adrMD("retry-policy", "accepted"),
-				".verdi/specs/active/spec-a/spec.md":    componentSpecWithExempts("spec-a", "dc-1", "adr/retry-policy", "reason A"),
-				".verdi/specs/active/spec-b/spec.md":    componentSpecWithExempts("spec-b", "dc-1", "adr/retry-policy", "reason B"),
-				".verdi/specs/active/spec-c/spec.md":    componentSpecWithExempts("spec-c", "dc-1", "adr/retry-policy", "reason C"),
+				".verdi/specs/active/spec-a/spec.md":    closureHygieneFixtureFeatureWithExempts("spec-a", "dc-1", "adr/retry-policy", "reason A"),
+				".verdi/specs/active/spec-b/spec.md":    closureHygieneFixtureFeatureWithExempts("spec-b", "dc-1", "adr/retry-policy", "reason B"),
+				".verdi/specs/active/spec-c/spec.md":    closureHygieneFixtureFeatureWithExempts("spec-c", "dc-1", "adr/retry-policy", "reason C"),
 				".verdi/specs/active/ch-widget/spec.md": closureHygieneFixtureStorySpecMD,
 			},
 			Message: "seed an exemption-threshold-crossing corpus alongside an in-flight story",
@@ -137,6 +187,7 @@ func TestRunAudit_ClosureHygieneSection_AppearsAndCoexists(t *testing.T) {
 // for any of the three sections to find prints every section's own
 // "clean" disclosure and exits 0.
 func TestRunAudit_ClosureHygieneSection_Clean(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main") // Finding 2: see AppearsAndCoexists' identical note
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                     "data/\n",
@@ -203,6 +254,7 @@ func TestRunAudit_ClosureHygieneSection_UnresolvableDefaultBranch(t *testing.T) 
 // scanWorktrees propagated the `git status` failure as an operational error
 // and `verdi audit` exited 2, killing all three sections' reports.
 func TestRunAudit_ClosureHygieneSection_StaleWorktreeDisclosedNotAborted(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main") // Finding 2: see AppearsAndCoexists' identical note
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                     "data/\n",
@@ -265,6 +317,7 @@ func TestRunAudit_ClosureHygieneSection_StaleWorktreeDisclosedNotAborted(t *test
 // unclosed feature, with nothing else in the corpus, is reported but
 // leaves the run CLEAN.
 func TestRunAudit_ClosureHygieneSection_PatternB_NeverFlagsAlone(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main") // Finding 2: see AppearsAndCoexists' identical note
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                        "data/\n",
@@ -321,6 +374,7 @@ frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
 // internal/residue.Result.Flagged routes and audit.go defers to (no separate
 // inline logic path).
 func TestRunAudit_ClosureHygieneSection_RitualIncompleteFlagsAlone(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main") // Finding 2: see AppearsAndCoexists' identical note
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/.gitignore":                     "data/\n",
@@ -372,5 +426,63 @@ func TestRunAudit_ClosureHygieneSection_RitualIncompleteFlagsAlone(t *testing.T)
 	}
 	if !strings.Contains(out, "audit: FLAGGED") {
 		t.Errorf("stdout missing the audit: FLAGGED trailer:\n%s", out)
+	}
+}
+
+// TestRunAudit_ClosureHygieneSection_MalformedCorpusSpec_DisclosedNeverClean
+// is Finding 1's own RED-first witness (the defect: internal/residue kept
+// only each candidate's specstate.State, discarding Disclosures, and had no
+// per-spec unproven channel at all — so a single undecodable spec anywhere
+// in the default-branch active corpus silently made EVERY other candidate
+// Unproven, every closure-hygiene finding vanished, and `verdi audit`
+// printed CLEAN) and Finding 2's own "keep a variant asserting the new
+// disclosure behavior" ask, in one fixture: a perfectly valid,
+// already-accepted story (ch-widget) sits alongside a genuinely malformed
+// spec elsewhere in the SAME active-zone corpus. ch-widget's own
+// supersession-completeness proof is blocked by the malformed spec's
+// decode failure, so ch-widget itself becomes Unproven — asserted named,
+// with its own disclosure naming the malformed spec as the decode witness,
+// and the run NEVER reports CLEAN (a distinct, non-zero "audit: UNPROVEN"
+// trailer instead — Finding 1's own "operational/disclosed, not CLEAN"
+// resolution).
+func TestRunAudit_ClosureHygieneSection_MalformedCorpusSpec_DisclosedNeverClean(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main") // Finding 2: see AppearsAndCoexists' identical note
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/.gitignore":                     "data/\n",
+			".verdi/specs/active/ch-widget/spec.md": closureHygieneFixtureStorySpecMD,
+			".verdi/specs/active/malformed/spec.md": "---\nid: spec/malformed\nkind: spec\nclass: feature\nunknown_field: true\n---\nbody\n",
+		},
+		Message: "seed one valid, already-accepted story alongside one malformed spec",
+	}})
+
+	var stdout, stderr bytes.Buffer
+	got := runAudit(context.Background(), repo.Dir, 3, 3, 3, "main", auditTestNow, nil, &stdout, &stderr)
+	out := stdout.String()
+
+	// Never CLEAN — the whole point of Finding 1's fix.
+	if strings.Contains(out, "audit: CLEAN") {
+		t.Fatalf("stdout contains audit: CLEAN despite an unproven spec in the corpus (Finding 1's own defect — must never silently report clean):\n%s", out)
+	}
+	if got == 0 {
+		t.Fatalf("runAudit = 0 (CLEAN), want a non-zero, distinctly-reported outcome when a candidate is unproven; stdout=%s stderr=%s", out, stderr.String())
+	}
+	if !strings.Contains(out, "audit: UNPROVEN") {
+		t.Errorf("stdout missing the audit: UNPROVEN trailer:\n%s", out)
+	}
+	if got != 2 {
+		t.Errorf("runAudit = %d, want 2 (operational/disclosed, per CLAUDE.md's 0/1/2 exit contract — nothing was proven wrong, but nothing was proven right either)", got)
+	}
+
+	// ch-widget itself is named, with a disclosure witnessing the
+	// malformed spec as the reason its own state could not be proven.
+	if !strings.Contains(out, "spec/ch-widget") {
+		t.Errorf("stdout missing spec/ch-widget as the unproven entry:\n%s", out)
+	}
+	if !strings.Contains(out, "malformed") || !strings.Contains(out, "failed to decode") {
+		t.Errorf("stdout missing the malformed spec named as the decode witness:\n%s", out)
+	}
+	if !strings.Contains(out, "disclosed-unproven") {
+		t.Errorf("stdout missing the shared disclosure vocabulary (internal/disclosure.Render):\n%s", out)
 	}
 }

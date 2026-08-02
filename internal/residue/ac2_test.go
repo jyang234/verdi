@@ -26,6 +26,7 @@ func TestScan_AC2_RitualIncompleteAndSupersededElsewhere(t *testing.T) {
 		Message: "seed alpha and beta stories",
 	}})
 	root := repo.Dir
+	setDefaultBranchSymref(t, root, "main")
 
 	// close/alpha: cut, but NEVER runs the archive move — ritual-incomplete.
 	cutCloseBranch(t, root, "alpha")
@@ -126,6 +127,7 @@ func TestScan_AC2_MergedCloseBranchNeverClassified(t *testing.T) {
 		Message: "seed gamma story",
 	}})
 	root := repo.Dir
+	setDefaultBranchSymref(t, root, "main")
 	ctx := context.Background()
 
 	cutCloseBranch(t, root, "gamma")

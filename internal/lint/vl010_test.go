@@ -7,9 +7,10 @@ import (
 )
 
 // vl010SupersededBaseSpec is a frozen, accepted-pending-build feature spec
-// used by the round-5 status-only-flip exception tests (D-12). Feature class
-// (grandfathered — no problem/outcome required) keeps the fixture minimal so
-// no unrelated rule fires alongside VL-010.
+// used by TestVL010_StatusOnlySupersededFlipRefused (the round-5 D-12
+// exception's removal proof, Task 7). Feature class (grandfathered — no
+// problem/outcome required) keeps the fixture minimal so no unrelated rule
+// fires alongside VL-010.
 const vl010SupersededBaseSpec = `---
 id: spec/vl-010-superseded
 kind: spec
@@ -25,51 +26,48 @@ frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 # VL-010: superseded flip
 `
 
-// TestVL010_StatusOnlySupersededFlipAllowed proves round-5's second legal
-// diff shape on a frozen file (D-12): a status-line-only edit flipping the
-// spec to `superseded` (the accept ritual's predecessor flip), with nothing
-// else changed.
-func TestVL010_StatusOnlySupersededFlipAllowed(t *testing.T) {
-	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-superseded/spec.md", vl010SupersededBaseSpec)
-	repo := buildLintRepo(t, beforeDir)
-	beforeCommit := repo.Heads[len(repo.Heads)-1]
-
-	after := strings.Replace(vl010SupersededBaseSpec, "status: accepted-pending-build", "status: superseded", 1)
-	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-superseded", "spec.md")
-	writeTestFile(t, specPath, after)
-	commitAll(t, repo.Dir, "supersede flip")
-
-	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
-	for _, f := range findings {
-		if f.Rule == "VL-010" {
-			t.Fatalf("VL-010 fired on a status-only superseded flip: %s", f.String())
-		}
+// TestVL010_StatusOnlySupersededFlipRefused proves round-5's D-12
+// status-only superseded-flip exception was deliberately REMOVED once its
+// sole production writer (cmd/verdi's old accept ritual, cmd/verdi's now-
+// deleted supersede.go) was retired (Task 7, docs/superpowers/specs/
+// 2026-08-01-merge-signals-spec-acceptance-design.md): supersession is now
+// derived entirely from Git reachability (internal/specstate) — a
+// predecessor's own frozen bytes are NEVER mutated, not even a
+// status-only edit to `superseded`. VL-010 now refuses this shape exactly
+// like any other frozen-file modification, for both a story-class and a
+// feature-class predecessor (VL-010 is class-agnostic, never inspecting
+// `class:`).
+func TestVL010_StatusOnlySupersededFlipRefused(t *testing.T) {
+	cases := []struct {
+		name     string
+		specName string
+		baseMD   string
+	}{
+		{"story predecessor", "vl-010-superseded", vl010SupersededBaseSpec},
+		{"feature predecessor", "vl-010-feature-predecessor", vl010FeaturePredecessorBaseSpec},
 	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			beforeDir := adHocOverlayDir(t, ".verdi/specs/active/"+tc.specName+"/spec.md", tc.baseMD)
+			repo := buildLintRepo(t, beforeDir)
+			beforeCommit := repo.Heads[len(repo.Heads)-1]
 
-// TestVL010_SupersededFlipWithOtherEditStillFails proves the exception is
-// strictly status-line-only: a diff that flips to superseded AND edits any
-// other line is still an illegal frozen modification.
-func TestVL010_SupersededFlipWithOtherEditStillFails(t *testing.T) {
-	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-superseded/spec.md", vl010SupersededBaseSpec)
-	repo := buildLintRepo(t, beforeDir)
-	beforeCommit := repo.Heads[len(repo.Heads)-1]
+			after := strings.Replace(tc.baseMD, "status: accepted-pending-build", "status: superseded", 1)
+			specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", tc.specName, "spec.md")
+			writeTestFile(t, specPath, after)
+			commitAll(t, repo.Dir, "supersede flip")
 
-	after := strings.Replace(vl010SupersededBaseSpec, "status: accepted-pending-build", "status: superseded", 1)
-	after = strings.Replace(after, `title: "VL-010: superseded flip"`, `title: "VL-010: superseded flip EDITED"`, 1)
-	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-superseded", "spec.md")
-	writeTestFile(t, specPath, after)
-	commitAll(t, repo.Dir, "supersede flip plus edit")
-
-	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
-	var sawVL010 bool
-	for _, f := range findings {
-		if f.Rule == "VL-010" {
-			sawVL010 = true
-		}
-	}
-	if !sawVL010 {
-		t.Fatalf("VL-010 did not fire on a frozen file edited beyond its status line:\n%s", findingsString(findings))
+			findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+			var sawVL010 bool
+			for _, f := range findings {
+				if f.Rule == "VL-010" {
+					sawVL010 = true
+				}
+			}
+			if !sawVL010 {
+				t.Fatalf("VL-010 did not fire on a status-only superseded flip — the D-12 exception must be gone: %s", findingsString(findings))
+			}
+		})
 	}
 }
 
@@ -146,12 +144,8 @@ func TestVL010_FrozenStampStrippedAndEdited(t *testing.T) {
 // shape (frozen, accepted-pending-build, class: feature) but is named and
 // scoped explicitly for round 6's ac-1 (feature-supersession-state): this
 // rule is class-agnostic (it diffs raw frontmatter lines and never inspects
-// `class:`), so the SAME exception TestVL010_StatusOnlySupersededFlipAllowed
-// already proves for the rung-3 story flip also, unmodified, admits ac-1's
-// feature-predecessor flip (accept.go's flipPredecessorToSuperseded, shared
-// by both call sites). This fixture/test pair exists to make that
-// class-agnostic coverage explicit and traceable to ac-1, not because VL-010
-// needed any change.
+// `class:`), so TestVL010_StatusOnlySupersededFlipRefused's table above
+// proves the SAME refusal for both a story and a feature predecessor.
 const vl010FeaturePredecessorBaseSpec = `---
 id: spec/vl-010-feature-predecessor
 kind: spec
@@ -166,31 +160,6 @@ frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
 ---
 # VL-010: feature predecessor superseded flip
 `
-
-// TestVL010_FeaturePredecessorSupersededFlipAllowed proves ac-1's
-// (feature-supersession-state) own diff shape — accept.go's
-// flipPredecessorToSuperseded status-only-flipping a FEATURE-class
-// predecessor to `superseded` — is admitted by the SAME D-12 exception
-// TestVL010_StatusOnlySupersededFlipAllowed proves for a story predecessor:
-// VL-010 never inspects `class:`, so no rule change was needed here, only
-// this explicit proof.
-func TestVL010_FeaturePredecessorSupersededFlipAllowed(t *testing.T) {
-	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-feature-predecessor/spec.md", vl010FeaturePredecessorBaseSpec)
-	repo := buildLintRepo(t, beforeDir)
-	beforeCommit := repo.Heads[len(repo.Heads)-1]
-
-	after := strings.Replace(vl010FeaturePredecessorBaseSpec, "status: accepted-pending-build", "status: superseded", 1)
-	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-feature-predecessor", "spec.md")
-	writeTestFile(t, specPath, after)
-	commitAll(t, repo.Dir, "supersede feature predecessor flip (ac-1)")
-
-	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
-	for _, f := range findings {
-		if f.Rule == "VL-010" {
-			t.Fatalf("VL-010 fired on a status-only feature-predecessor superseded flip (ac-1): %s", f.String())
-		}
-	}
-}
 
 // vl010ClosedMoveBaseSpec is a frozen, accepted-pending-build spec used by
 // round-6's closed-flip-within-archive-move exception tests (D6-11). Feature
@@ -297,6 +266,143 @@ func TestVL010_ArchiveMoveFlipToNonClosedStatusStillFails(t *testing.T) {
 	}
 }
 
+// vl010BodyStatusLineBaseSpec is a frozen, accepted-pending-build spec whose
+// BODY quotes the legacy status field verbatim, unfenced, on a line of its
+// own — the exact byte shape acceptedPendingStatusLineRe matches. The
+// statusOnlyFlip exception must read that line as prose (it is outside the
+// frontmatter block), never as this spec's status field.
+const vl010BodyStatusLineBaseSpec = `---
+id: spec/vl-010-body-status-line
+kind: spec
+class: feature
+title: "VL-010: body status line"
+status: accepted-pending-build
+owners: [platform-team]
+story: jira:LOAN-0016
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
+---
+# VL-010: body status line
+
+This paragraph quotes the legacy field verbatim, on a line of its own:
+
+status: accepted-pending-build
+
+which is prose about the field, never this spec's own status.
+`
+
+// TestStatusOnlyFlip_FrontmatterScoped is the shared core's own unit table
+// (both status-only exceptions route through statusOnlyFlip): the single
+// differing line qualifies ONLY when it lies inside the frontmatter block of
+// both sides. A status-SHAPED line in the BODY is prose — flipping it is an
+// ordinary, illegal frozen-file mutation, admitted by no exception.
+func TestStatusOnlyFlip_FrontmatterScoped(t *testing.T) {
+	const fmHead = "---\nid: spec/x\nstatus: accepted-pending-build\nowners: [platform-team]\n---\n"
+	const bodyWithStatus = "# X\n\nstatus: accepted-pending-build\n\nprose\n"
+
+	for _, tc := range []struct {
+		name string
+		base string
+		head string
+		want bool
+	}{
+		{
+			name: "frontmatter status flip qualifies",
+			base: fmHead + bodyWithStatus,
+			head: strings.Replace(fmHead, "status: accepted-pending-build", "status: closed", 1) + bodyWithStatus,
+			want: true,
+		},
+		{
+			name: "body status-shaped line flip does not qualify",
+			base: fmHead + bodyWithStatus,
+			head: fmHead + strings.Replace(bodyWithStatus, "status: accepted-pending-build", "status: closed", 1),
+			want: false,
+		},
+		{
+			name: "closing delimiter line is not inside the frontmatter",
+			base: "---\nid: spec/x\n---\nstatus: accepted-pending-build\n",
+			head: "---\nid: spec/x\n---\nstatus: closed\n",
+			want: false,
+		},
+		{
+			name: "no frontmatter block at all",
+			base: "status: accepted-pending-build\nbody\n",
+			head: "status: closed\nbody\n",
+			want: false,
+		},
+		{
+			name: "non-status frontmatter line does not qualify",
+			base: fmHead + bodyWithStatus,
+			head: strings.Replace(fmHead, "id: spec/x", "id: spec/y", 1) + bodyWithStatus,
+			want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := statusOnlyFlip([]byte(tc.base), []byte(tc.head), acceptedPendingStatusLineRe, closedStatusLineRe)
+			if got != tc.want {
+				t.Fatalf("statusOnlyFlip = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestVL010_ArchiveMoveBodyStatusLineFlipRefused is the integration-shaped
+// half: an active→archive move whose ONLY changed line is a status-shaped
+// line in the BODY (the frontmatter is byte-identical on both sides) is an
+// illegal mutation of a frozen spec — the D6-11 exception covers the
+// frontmatter status FIELD only. The table's first case pins the legitimate
+// flip against the same body noise, so the scoping cannot be satisfied by
+// simply refusing everything.
+func TestVL010_ArchiveMoveBodyStatusLineFlipRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mutate    func(string) string
+		wantVL010 bool
+	}{
+		{
+			name: "frontmatter flip with a status-shaped body line is still admitted",
+			mutate: func(s string) string {
+				return strings.Replace(s, "status: accepted-pending-build", "status: closed", 1)
+			},
+			wantVL010: false,
+		},
+		{
+			name: "body-only status flip is refused",
+			mutate: func(s string) string {
+				// The LAST occurrence is the body's quoted line; the
+				// frontmatter field stays exactly as it was.
+				i := strings.LastIndex(s, "status: accepted-pending-build")
+				return s[:i] + "status: closed" + s[i+len("status: accepted-pending-build"):]
+			},
+			wantVL010: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-body-status-line/spec.md", vl010BodyStatusLineBaseSpec)
+			repo := buildLintRepo(t, beforeDir)
+			beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+			activePath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-body-status-line", "spec.md")
+			archivePath := filepath.Join(repo.Dir, ".verdi", "specs", "archive", "vl-010-body-status-line", "spec.md")
+			mustRemove(t, activePath)
+			writeTestFile(t, archivePath, tc.mutate(vl010BodyStatusLineBaseSpec))
+			commitAll(t, repo.Dir, "archive move of vl-010-body-status-line")
+
+			findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+			var sawVL010 bool
+			for _, f := range findings {
+				if f.Rule == "VL-010" {
+					sawVL010 = true
+				}
+			}
+			if sawVL010 != tc.wantVL010 {
+				t.Fatalf("VL-010 fired = %v, want %v:\n%s", sawVL010, tc.wantVL010, findingsString(findings))
+			}
+		})
+	}
+}
+
 // vl010NestedProbeADR is a minimal frozen ADR used by
 // TestVL010_OnlyRootStoreArtifactsSwept to prove VL-010's sweep is scoped to
 // the root store's own .verdi/ tree: the SAME frozen-then-modified diff shape
@@ -379,6 +485,167 @@ func TestVL010_NoDiffBase_Silent(t *testing.T) {
 	for _, f := range findings {
 		if f.Rule == "VL-010" {
 			t.Fatalf("VL-010 fired with no DiffBase: %s", f.String())
+		}
+	}
+}
+
+// vl010UnstampedFeatureSpec is a complete, valid, STATUSLESS feature spec
+// with no `frozen:` stamp at all — the shape a merge-signaled proposal now
+// has once it lands on the default branch (the design's "Artifact
+// compatibility": "new merge-accepted artifacts ... do not require a
+// content-changing frozen stamp"). baseProtected's second signal (Task 4's
+// immutability keystone) must protect it anyway: any strict-decoded
+// feature/story spec at the diff base is protected, stamped or not.
+const vl010UnstampedFeatureSpec = `---
+id: spec/vl-010-unstamped-feature
+kind: spec
+class: feature
+title: "VL-010: unstamped accepted feature"
+owners: [platform-team]
+story: jira:LOAN-0020
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+---
+# VL-010: unstamped accepted feature
+`
+
+// TestVL010_UnstampedFeatureModifiedAtBase_Fails proves the keystone: a
+// feature spec at the diff base with NO frozen stamp and NO persisted
+// status is still protected — modifying it fails VL-010 exactly like a
+// legacy frozen-stamped spec would.
+func TestVL010_UnstampedFeatureModifiedAtBase_Fails(t *testing.T) {
+	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-unstamped-feature/spec.md", vl010UnstampedFeatureSpec)
+	repo := buildLintRepo(t, beforeDir)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	after := strings.Replace(vl010UnstampedFeatureSpec, `title: "VL-010: unstamped accepted feature"`, `title: "VL-010: unstamped accepted feature EDITED"`, 1)
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-unstamped-feature", "spec.md")
+	writeTestFile(t, specPath, after)
+	commitAll(t, repo.Dir, "edit unstamped feature at the diff base")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	onlyRule(t, findings, "VL-010")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	if findings[0].Path != ".verdi/specs/active/vl-010-unstamped-feature/spec.md" {
+		t.Fatalf("finding path = %q, want the unstamped feature spec", findings[0].Path)
+	}
+}
+
+// TestVL010_UnstampedFeatureDeletedAtBase_Fails is the deletion
+// complement: 02's "ANY diff touching a frozen [or Git-derived-accepted]
+// file fails" covers removal exactly like modification.
+func TestVL010_UnstampedFeatureDeletedAtBase_Fails(t *testing.T) {
+	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-unstamped-feature/spec.md", vl010UnstampedFeatureSpec)
+	repo := buildLintRepo(t, beforeDir)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-unstamped-feature", "spec.md")
+	mustRemove(t, specPath)
+	commitAll(t, repo.Dir, "delete unstamped feature at the diff base")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	onlyRule(t, findings, "VL-010")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	if findings[0].Path != ".verdi/specs/active/vl-010-unstamped-feature/spec.md" {
+		t.Fatalf("finding path = %q, want the unstamped feature spec", findings[0].Path)
+	}
+}
+
+// TestVL010_NewUnstampedFeaturePath_Succeeds proves adding a brand-new,
+// unstamped, statusless feature spec (never existing at the diff base at
+// all) never trips VL-010 — the keystone protects existing baselines, not
+// new proposals (added files are out of this rule's scope by
+// construction, matching every added-file case already proven elsewhere).
+func TestVL010_NewUnstampedFeaturePath_Succeeds(t *testing.T) {
+	repo := buildLintRepo(t)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	const newSpec = `---
+id: spec/vl-010-new-unstamped-feature
+kind: spec
+class: feature
+title: "VL-010: new unstamped feature"
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+---
+# VL-010: new unstamped feature
+`
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-new-unstamped-feature", "spec.md")
+	writeTestFile(t, specPath, newSpec)
+	commitAll(t, repo.Dir, "add new unstamped feature")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-010" {
+			t.Fatalf("VL-010 fired on a brand-new unstamped feature path: %s", f.String())
+		}
+	}
+}
+
+// vl010UnstampedComponentSpec is a valid, unfrozen component spec — the
+// pre-Task-4 "component specs are authored-living and never frozen"
+// behavior (01 §Temporal classes) must be entirely unaffected by
+// baseProtected's new feature/story signal.
+const vl010UnstampedComponentSpec = `---
+id: spec/vl-010-unstamped-component
+kind: spec
+class: component
+title: "VL-010: unstamped component"
+status: active
+owners: [platform-team]
+---
+# VL-010: unstamped component
+`
+
+// TestVL010_UnstampedComponentModified_StillAllowed is the regression
+// guard: an unfrozen component spec at the diff base remains freely
+// editable — baseProtected's second signal is scoped to feature/story
+// only, exactly as its own doc comment promises.
+func TestVL010_UnstampedComponentModified_StillAllowed(t *testing.T) {
+	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-unstamped-component/spec.md", vl010UnstampedComponentSpec)
+	repo := buildLintRepo(t, beforeDir)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	after := strings.Replace(vl010UnstampedComponentSpec, `title: "VL-010: unstamped component"`, `title: "VL-010: unstamped component EDITED"`, 1)
+	specPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-unstamped-component", "spec.md")
+	writeTestFile(t, specPath, after)
+	commitAll(t, repo.Dir, "edit unstamped component at the diff base")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-010" {
+			t.Fatalf("VL-010 fired on an unstamped component spec: %s", f.String())
+		}
+	}
+}
+
+// TestVL010_StatuslessFeaturePureArchiveMoveAllowed proves the
+// active-to-archive closure exception (isActiveArchiveMove + e.Pure())
+// still admits a statusless feature/story: a byte-identical move requires
+// no status-only-flip exception at all (that machinery exists for a
+// CONTENT-changing status flip; a pure rename carries none), so it is
+// allowed exactly like a legacy frozen spec's pure rename, unaffected by
+// baseProtected's new signal.
+func TestVL010_StatuslessFeaturePureArchiveMoveAllowed(t *testing.T) {
+	beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-unstamped-feature/spec.md", vl010UnstampedFeatureSpec)
+	repo := buildLintRepo(t, beforeDir)
+	beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+	activePath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-unstamped-feature", "spec.md")
+	archivePath := filepath.Join(repo.Dir, ".verdi", "specs", "archive", "vl-010-unstamped-feature", "spec.md")
+	mustRemove(t, activePath)
+	writeTestFile(t, archivePath, vl010UnstampedFeatureSpec)
+	commitAll(t, repo.Dir, "byte-identical archive move of a statusless feature")
+
+	findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-010" {
+			t.Fatalf("VL-010 fired on a byte-identical active->archive move of a statusless feature: %s", f.String())
 		}
 	}
 }

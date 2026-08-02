@@ -95,6 +95,7 @@ import (
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -120,6 +121,13 @@ type closeDeps struct {
 	// this verb prints (L-M13(1)). nil (every pre-existing test literal)
 	// falls back to bare ids.
 	Model *model.Model
+	// State resolves the target spec's Git-derived effective lifecycle
+	// state for the pre-closure precondition (C1: only an effective
+	// AcceptedPendingBuild spec may begin the ritual, decided BEFORE any
+	// mutation). nil means production — specstate.NewProjector(), the same
+	// nil-is-production posture buildstart.go's wiring takes; tests may
+	// inject a fake for shapes real git cannot practically reconstruct.
+	State specStateResolver
 }
 
 // closeAddPaths and closeCreateCommit are the closure ritual's two post-
@@ -361,6 +369,127 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 	return runClose(ctx, root, storyArg, manifest, deps, stdout, stderr)
 }
 
+// closureStatusMode names how the archive step must treat the target
+// spec.md's persisted status line — decided from the spec's own bytes
+// BEFORE any mutation begins (C1: the old flow discovered a flip it could
+// not perform only AFTER the branch cut, the align freeze, and the rollup
+// write, leaving unrecoverable residue no retry could ever clear).
+type closureStatusMode int
+
+const (
+	// closureFlipLegacyStatus: the spec carries exactly one legacy
+	// `status: accepted-pending-build` line; the archive step rewrites it
+	// to `status: closed` (VL-010's round-6 status-only archive-flip
+	// exception, D6-11) — the pre-existing behavior, kept for every
+	// legacy statused spec.
+	closureFlipLegacyStatus closureStatusMode = iota
+	// closureRenamePure: the spec is statusless (merge-accepted, the
+	// design's Artifact compatibility shape); the archive move is a PURE
+	// rename — VL-002 reads an archive-zone statusless spec as
+	// closed-by-zone, and VL-010's pure-rename exception admits the move.
+	// No status line is ever invented.
+	closureRenamePure
+)
+
+// closePrecondition is C1's pre-mutation gate, shared by both rungs
+// (runClose and runCloseFeature — the freezeAlignDeps precedent: one
+// implementation, no drift). It resolves the target spec's effective
+// lifecycle state through the specstate projector — never the persisted
+// status: field alone — and decides the archive step's status handling,
+// BOTH before the branch cut or any other mutation:
+//
+//   - effective AcceptedPendingBuild: proceed, with the statusMode the
+//     archive step must use (legacy flip vs pure rename);
+//   - Proposed (new or diverged), Superseded, Closed: refuse as a VERDICT
+//     (exit 1) — there is nothing legal for close to do, and the refusal
+//     lands with zero residue;
+//   - Unproven: operational (exit 2) with the projector's own
+//     disclosures — close cannot honestly decide the precondition, so it
+//     must not guess either way (the same posture buildstart.go takes).
+//
+// Returns rc == 0 to proceed; any other rc is the exit code, the refusal
+// already printed on stderr.
+func closePrecondition(ctx context.Context, root string, spec *artifact.SpecFrontmatter, specRef artifact.Ref, resolver specStateResolver, mdl *model.Model, stderr io.Writer) (closureStatusMode, int) {
+	if resolver == nil {
+		resolver = specstate.NewProjector()
+	}
+	relPath := store.ActiveSpecRelPath(specRef.Name)
+	content, err := os.ReadFile(store.ActiveSpecPath(root, specRef.Name))
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 0, 2
+	}
+	result, err := resolver.Resolve(ctx, root, specstate.Candidate{Path: relPath, Content: content})
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 0, 2
+	}
+	// The state words below are display prose and resolve (L-M13(1));
+	// spec.ID stays identity.
+	class := string(spec.Class)
+	switch result.State {
+	case specstate.AcceptedPendingBuild:
+		// proceed
+	case specstate.Proposed:
+		if result.Relation == specstate.RelationDiverged {
+			// vocab:identity — CLI invocation grammar ("close operates" names the `verdi close` command, identity; matches closeExpiryResumeHint's marker)
+			fmt.Fprintf(stderr, "close: refused: %s's working-tree bytes diverge from the accepted revision on the default branch — a modified accepted revision (VL-010 refuses it); close operates on the accepted revision only\n", spec.ID)
+			return 0, 1
+		}
+		fmt.Fprintf(stderr, "close: refused: %s's proposal has not landed on the default branch yet (not yet %s); only an accepted spec pending build can be closed (02 §Kind registry)\n",
+			spec.ID, mdl.DisplayState(class, "accepted-pending-build"))
+		return 0, 1
+	case specstate.Superseded:
+		supersededWord := mdl.DisplayState(class, "superseded")
+		fmt.Fprintf(stderr, "close: refused: %s is %s; %s spec is never closed — its successor is (03 §The amendment ladder)\n",
+			spec.ID, supersededWord, model.Indefinite(supersededWord))
+		return 0, 1
+	case specstate.Closed:
+		fmt.Fprintf(stderr, "close: refused: %s is already %s\n", spec.ID, mdl.DisplayState(class, "closed"))
+		return 0, 1
+	default: // specstate.Unproven
+		fmt.Fprintf(stderr, "close: %s cannot be proven %s: %s\n",
+			spec.ID, mdl.DisplayState(class, "accepted-pending-build"), strings.Join(result.Disclosures, "; "))
+		return 0, 2
+	}
+
+	// The archive step's status handling, decided from the same bytes the
+	// projector just classified — n is a byte-shape question (which flip
+	// the archive move needs), never a second lifecycle decision (the
+	// verdict above already came from the projector alone).
+	//
+	// The count is scoped to the FRONTMATTER (artifact.FrontmatterRange, the
+	// one frontmatter seam): a status-SHAPED line in the markdown BODY —
+	// prose quoting the legacy field, an unfenced example — is body text,
+	// never this spec's status field, and must not steer a statusless
+	// (merge-accepted) spec onto the legacy-flip path, whose rewrite would
+	// then mutate that body line on an immutable, accepted artifact.
+	fmStart, fmEnd, err := artifact.FrontmatterRange(content)
+	if err != nil {
+		fmt.Fprintf(stderr, "close: %s: %v\n", relPath, err)
+		return 0, 2
+	}
+	switch n := len(closeAcceptedStatusLineRe.FindAll(content[fmStart:fmEnd], -1)); {
+	case n == 1:
+		return closureFlipLegacyStatus, 0
+	case n > 1:
+		// vocab:identity — frontmatter status-line machinery (field + enum value)
+		fmt.Fprintf(stderr, "close: %s: found %d status: accepted-pending-build lines, expected at most one; refusing before any mutation\n", relPath, n)
+		return 0, 2
+	}
+	if spec.Status == "" {
+		return closureRenamePure, 0
+	}
+	// A persisted status that is neither accepted-pending-build nor absent
+	// (e.g. a landed legacy `status: draft` the projector reads as
+	// accepted with a migration disclosure): the archive flip has no legal
+	// rewrite for it, and discovering that mid-mutation was exactly C1's
+	// defect — refuse operationally BEFORE anything moves.
+	// vocab:identity — frontmatter status-line machinery (field + enum value)
+	fmt.Fprintf(stderr, "close: %s carries persisted status %q, which the archive step cannot flip (expected a single status: accepted-pending-build line, or no status line at all); resolve the legacy field before closing\n", spec.ID, spec.Status)
+	return 0, 2
+}
+
 // runClose is the testable core: given an already-resolved root, a
 // story/spec argument, the decoded manifest, and injected deps, run the
 // whole closure ritual and return the exit code (CLAUDE.md: 0 clean,
@@ -378,6 +507,22 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	}
 	if spec.Class == artifact.ClassFeature {
 		return runCloseFeature(ctx, root, spec, manifest, deps, stdout, stderr)
+	}
+
+	specRef, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		fmt.Fprintln(stderr, "close: internal error: resolved spec has an invalid id:", err)
+		return 2
+	}
+
+	// C1: the effective-state precondition, BEFORE the gate and before
+	// every mutation — only an effective AcceptedPendingBuild spec may
+	// begin the ritual, and the archive step's status handling (legacy
+	// flip vs pure rename) is decided here, from the same bytes, never
+	// discovered mid-mutation.
+	statusMode, rc := closePrecondition(ctx, root, spec, specRef, deps.State, deps.Model, stderr)
+	if rc != 0 {
+		return rc
 	}
 
 	head, err := gitx.RevParse(ctx, root, "HEAD")
@@ -417,12 +562,6 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	// cut, so the disclosure survives any later operational failure.
 	if err := discloseUncommittedFoldRecords(ctx, root, head, storyFoldRecordPaths(store.RefSlug(spec.Story), fold.ACs), stdout); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
-		return 2
-	}
-
-	specRef, err := artifact.ParseRef(spec.ID)
-	if err != nil {
-		fmt.Fprintln(stderr, "close: internal error: resolved spec has an invalid id:", err)
 		return 2
 	}
 
@@ -485,22 +624,27 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		return 2
 	}
 
-	// Flip the spec's status accepted-pending-build → closed as part of the
-	// archive step (02 §Kind registry: story/feature specs transition
-	// "… → closed(archive)"). Done in the active-zone spec.md BEFORE
-	// ArchiveMove renames the whole target spec directory in one shot:
-	// spec.md moves with its sole status-line change and every other present
-	// file moves byte-identically — VL-010's round-6 status-only archive-flip
-	// exception (D6-11), not the pure-rename one, is what admits the move.
-	if err := flipSpecStatusToClosed(root, specRef.Name); err != nil {
-		fmt.Fprintln(stderr, "close:", err)
-		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedRollup, stderr)
-		return 2
+	// The archive step's status handling, per the PRE-MUTATION decision
+	// (closePrecondition, C1). A LEGACY statused spec flips its sole
+	// `status: accepted-pending-build` line to closed in the active-zone
+	// spec.md BEFORE ArchiveMove renames the whole directory in one shot —
+	// VL-010's round-6 status-only archive-flip exception (D6-11). A
+	// STATUSLESS (merge-accepted) spec skips the rewrite entirely: the
+	// move is a pure rename — VL-002 reads an archive-zone statusless spec
+	// as closed-by-zone, and VL-010's pure-rename exception admits it.
+	reached := freezeReachedRollup
+	if statusMode == closureFlipLegacyStatus {
+		if err := flipSpecStatusToClosed(root, specRef.Name); err != nil {
+			fmt.Fprintln(stderr, "close:", err)
+			reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedRollup, stderr)
+			return 2
+		}
+		reached = freezeReachedFlip
 	}
 
 	if err := store.ArchiveMove(root, specRef.Name); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
-		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedFlip, stderr)
+		reportUncommittedFreezeResidue(specRef.Name, closureBranch, reached, stderr)
 		return 2
 	}
 
@@ -1007,28 +1151,50 @@ func foldStory(ctx context.Context, root string, spec *artifact.SpecFrontmatter,
 // own predecessor flip — a raw, status-line-only ReplaceAll so the archived
 // spec.md differs from its active original on exactly that one line, keeping
 // VL-010's status-only archive-flip exception (D6-11) cleanly satisfiable.
+//
+// It is applied ONLY to a document's frontmatter bytes (both here and in
+// closePrecondition, through artifact.FrontmatterRange): the pattern is
+// deliberately line-shaped, so over a whole document it also matches BODY
+// prose that quotes the legacy field — text the archive step must neither
+// count as a status field nor ever rewrite.
 var closeAcceptedStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?accepted-pending-build"?\s*$`)
 
 // flipSpecStatusToClosed rewrites the active-zone spec.md's status line from
 // accepted-pending-build to closed (02 §Kind registry's "… → closed(archive)"
 // transition), preserving every other byte — including the `frozen:` stamp: a
-// closed spec is a post-acceptance, frozen artifact, exactly as a superseded
-// one is (cmd/verdi/accept.go's predecessor flip). It insists on exactly one
-// matching line so a spec whose status is not the expected pre-closure value
-// (already closed, or malformed) is a loud internal error, never a silent
-// no-op or a double flip.
+// closed spec is a post-acceptance, frozen artifact. Called ONLY for the
+// closureFlipLegacyStatus mode closePrecondition decided BEFORE any mutation
+// (C1) — a statusless, merge-accepted spec never reaches this function; its
+// archive move is a pure rename. The exactly-one insistence is kept as
+// defense in depth: the precondition already proved this shape pre-mutation,
+// so a mismatch here means the file changed underneath the ritual — a loud
+// internal error, never a silent no-op or a double flip.
 func flipSpecStatusToClosed(root, name string) error {
 	specPath := store.ActiveSpecPath(root, name)
 	raw, err := os.ReadFile(specPath)
 	if err != nil {
 		return fmt.Errorf("close: reading %s to flip status to closed: %w", specPath, err)
 	}
-	if n := len(closeAcceptedStatusLineRe.FindAll(raw, -1)); n != 1 {
+	// Both the count and the rewrite are confined to the FRONTMATTER byte
+	// range: doc[:start] (the opening delimiter), the closing delimiter, and
+	// the whole body are spliced back byte-for-byte, so a status-SHAPED line
+	// in the body — prose quoting the legacy field — is never counted as a
+	// second status field and never rewritten.
+	fmStart, fmEnd, err := artifact.FrontmatterRange(raw)
+	if err != nil {
+		return fmt.Errorf("close: locating %s's frontmatter to flip status to closed: %w", specPath, err)
+	}
+	fm := raw[fmStart:fmEnd]
+	if n := len(closeAcceptedStatusLineRe.FindAll(fm, -1)); n != 1 {
 		// vocab:identity — frontmatter status-line machinery (field + enum value)
 		return fmt.Errorf("close: %s: expected exactly one status: accepted-pending-build line to flip to closed, found %d", specPath, n)
 	}
 	// vocab:identity — frontmatter status-line machinery (field + enum value)
-	newRaw := closeAcceptedStatusLineRe.ReplaceAll(raw, []byte("status: closed"))
+	newFm := closeAcceptedStatusLineRe.ReplaceAll(fm, []byte("status: closed"))
+	newRaw := make([]byte, 0, len(raw)-len(fm)+len(newFm))
+	newRaw = append(newRaw, raw[:fmStart]...)
+	newRaw = append(newRaw, newFm...)
+	newRaw = append(newRaw, raw[fmEnd:]...)
 	if err := os.WriteFile(specPath, newRaw, 0o644); err != nil {
 		return fmt.Errorf("close: writing %s after flipping status to closed: %w", specPath, err)
 	}

@@ -2,6 +2,7 @@ package residue
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -47,6 +48,50 @@ func TestScan_Negative_UnresolvableDefaultBranchRef_IsARealError(t *testing.T) {
 func TestScan_Negative_NotARepo(t *testing.T) {
 	if _, err := Scan(context.Background(), t.TempDir(), "main"); err == nil {
 		t.Fatal("Scan outside a repo: want error, got nil")
+	}
+}
+
+// TestScan_UnprovenSpec_NamedInResult is Finding 1's own residue-level RED
+// test (cmd/verdi/audit_closurehygiene_test.go proves the SAME defect at
+// the `verdi audit` reporting layer): a genuinely malformed spec anywhere
+// in the default-branch active corpus poisons the successor-corpus scan's
+// completeness proof for every OTHER active-zone spec, so a perfectly
+// valid, already-accepted spec (widget) becomes Unproven — before this
+// fix that verdict simply vanished (excludeSuperseded kept it,
+// findPatternA/B's own accepted-pending-build gate excluded it, and
+// nothing else ever looked at it again). Result.UnprovenSpecs must name
+// it, carrying specstate's own decode-witness disclosure.
+func TestScan_UnprovenSpec_NamedInResult(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/.gitignore":                     "data/\n",
+			".verdi/specs/active/widget/spec.md":    storySpecMD("widget", "accepted-pending-build", "feature-x"),
+			".verdi/specs/active/malformed/spec.md": "---\nid: spec/malformed\nkind: spec\nclass: feature\nunknown_field: true\n---\nbody\n",
+		},
+		Message: "seed one valid, already-accepted spec alongside one malformed spec",
+	}})
+	setDefaultBranchSymref(t, repo.Dir, "main")
+
+	got, err := Scan(context.Background(), repo.Dir, "main")
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(got.UnprovenSpecs) != 1 || got.UnprovenSpecs[0].Name != "widget" {
+		t.Fatalf("Scan.UnprovenSpecs = %+v, want exactly one entry naming %q", got.UnprovenSpecs, "widget")
+	}
+	found := false
+	for _, d := range got.UnprovenSpecs[0].Disclosures {
+		if strings.Contains(d, "malformed") && strings.Contains(d, "failed to decode") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Scan.UnprovenSpecs[0].Disclosures = %v, want one naming the malformed spec as the decode witness", got.UnprovenSpecs[0].Disclosures)
+	}
+	// dc-3's own Flagged predicate is unchanged by Finding 1 — an unproven
+	// spec is not itself a pattern (a)/(b) or ritual-incomplete finding.
+	if got.Flagged() {
+		t.Fatal("Scan.Flagged() = true, want false (an unproven spec alone is not a dc-3 finding; a caller reports it through its own distinct channel)")
 	}
 }
 

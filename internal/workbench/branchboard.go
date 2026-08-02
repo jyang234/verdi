@@ -39,6 +39,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wtmanager"
 )
@@ -251,10 +252,23 @@ func (b *branchBoards) loadSealed(ctx context.Context, branch, ref, name string)
 		}
 	}
 
-	proj, err := buildProjection(name, fm, bodyBytes, stored, nil, nil, modeReadOnly)
+	// The sealed render's display status is the ref content's EFFECTIVE
+	// state (merge-signaled acceptance), resolved here — the I/O layer —
+	// against the serving repository's own refs (b.root holds the ref this
+	// content was read from): a remote-only draft displays "draft", bytes
+	// already landed on the default branch display "accepted-pending-build",
+	// and an unprovable state is disclosed below rather than guessed. The
+	// mode stays the EXISTING modeReadOnly value regardless (dc-4).
+	st, err := specstate.NewProjector().Resolve(ctx, b.root, specstate.Candidate{Path: specPath, Content: raw})
+	if err != nil {
+		return nil, nil, fmt.Errorf("workbench: resolving effective state for %s at %s: %w", name, ref, err)
+	}
+
+	proj, err := buildProjection(name, fm, bodyBytes, stored, nil, nil, modeReadOnly, string(st.ArtifactStatus()))
 	if err != nil {
 		return nil, nil, err
 	}
+	proj.Notices = append(proj.Notices, st.Disclosures...)
 	// Display vocabulary (spec/vocabulary-surfaces ac-2): the sealed
 	// remote-ref render resolves the same store model the served
 	// instances carry.

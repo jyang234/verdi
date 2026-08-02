@@ -7,6 +7,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -19,11 +20,15 @@ type PatternB struct {
 }
 
 // findPatternB scans specs (dc-2's superseded exclusion already applied by
-// the caller) for class: feature status: accepted-pending-build specs whose
-// every declared stubs[] slug is realized by a closed, MERGED story —
-// AC-1(b)'s own words. Realization is evaluated against defaultTip, the
-// audited default-branch tip: .verdi/specs/archive/<slug>/spec.md present
-// AT defaultTip carrying status: closed, read via git plumbing (the same
+// the caller) for class: feature specs at EFFECTIVE state
+// accepted-pending-build (effective, activespecs.go's effectiveStates
+// producer output — no longer a raw `status:` field comparison, so a
+// statusless feature whose exact bytes already landed on the default
+// branch correctly participates here too) whose every declared stubs[]
+// slug is realized by a closed, MERGED story — AC-1(b)'s own words.
+// Realization is evaluated against defaultTip, the audited default-branch
+// tip: .verdi/specs/archive/<slug>/spec.md present AT defaultTip carrying
+// status: closed, read via git plumbing (archiveSpecClosedAt, the same
 // audited-ref mechanics AC-2 uses), never the working tree. So a stub whose
 // archive move rides only an unmerged close/<slug> branch is correctly NOT
 // counted as realized — the merged condition AC-1(b) names, which a
@@ -31,17 +36,28 @@ type PatternB struct {
 //
 // The feature spec itself is read from the active zone (walkActiveSpecs,
 // the working tree) like the rest of the scan; only the per-stub
-// realization check reads the audited ref. A feature declaring no stubs has
-// nothing to reconcile and never fires — pattern (b) names a
-// "stub-COMPLETE" feature, which presupposes a non-empty stub set to be
-// complete.
-func findPatternB(ctx context.Context, root, defaultTip string, specs []activeSpec) ([]PatternB, error) {
+// realization check reads the audited ref. archiveSpecClosedAt is left
+// reading its own literal status: field, deliberately NOT migrated onto
+// effective/specstate: specstate's own archive-zone Closed determination is
+// purely zone-and-reachability based (it never decodes the candidate's
+// content at all for an archive-zone path), so routing this specific check
+// through it would silently drop archiveSpecClosedAt's existing malformed-
+// archive-spec hard-error behavior (TestArchiveSpecClosedAt_Negative
+// "present at the ref but malformed is a real error") — an author would
+// want to know a broken archived spec.md exists, not have it silently read
+// as realized. See patternb_test.go and this story's task-6a report for the
+// full disposition.
+//
+// A feature declaring no stubs has nothing to reconcile and never fires —
+// pattern (b) names a "stub-COMPLETE" feature, which presupposes a
+// non-empty stub set to be complete.
+func findPatternB(ctx context.Context, root, defaultTip string, specs []activeSpec, effective map[string]specstate.Result) ([]PatternB, error) {
 	var out []PatternB
 	for _, s := range specs {
 		if s.FM.Class != artifact.ClassFeature {
 			continue
 		}
-		if s.FM.Status != "accepted-pending-build" {
+		if effective[s.Name].State != specstate.AcceptedPendingBuild {
 			continue
 		}
 		if len(s.FM.Stubs) == 0 {
@@ -85,6 +101,22 @@ func findPatternB(ctx context.Context, root, defaultTip string, specs []activeSp
 // but undecodable: a disclosed operational error, never a silent false or a
 // guessed third path — an author would want to know the archived spec.md is
 // broken, not have it read as "not yet realized".
+//
+// Disposition (specalign's lifecycle-decision source audit, Task 6c,
+// fix round 1 finding 4 — this function's OWN copy of findPatternB's doc
+// comment above, so a reader of this function alone sees the full
+// rationale without having to scroll up): decoded.Status == "closed"
+// below is left reading its own literal status: field, deliberately NOT
+// migrated onto effective/specstate — specstate's own archive-zone
+// Closed determination is purely zone-and-reachability based (it never
+// decodes the candidate's content at all for an archive-zone path), so
+// routing this specific check through it would silently drop this
+// function's existing malformed-archive-spec hard-error behavior
+// (TestArchiveSpecClosedAt_Negative: "present at the ref but malformed
+// is a real error") — an author would want to know a broken archived
+// spec.md exists, not have it silently read as realized. See
+// patternb_test.go and this story's task-6a report for the full
+// disposition.
 func archiveSpecClosedAt(ctx context.Context, root, ref, slug string) (bool, error) {
 	relPath := store.SpecRelPath(store.ZoneArchive, slug)
 	present, err := archiveExistsAt(ctx, root, ref, slug)

@@ -155,3 +155,32 @@ func TestBadgeSpecSealedRequiresFrozen(t *testing.T) {
 		t.Fatalf("DecodeSpec of an unfrozen sealed fixture: err = %v, want a frozen-stamp refusal", err)
 	}
 }
+
+// TestStatuslessSpecDecodes proves the statusless-lifecycle pair
+// (merge-signaled acceptance) is valid: each instance strict-decodes with
+// NO persisted status at all — the shape whose board mode and displayed
+// status must come entirely from git-derived effective state.
+func TestStatuslessSpecDecodes(t *testing.T) {
+	for _, name := range []string{statuslessDraftSpecName, statuslessSealedSpecName} {
+		t.Run(name, func(t *testing.T) {
+			doc := statuslessSpec(name)
+			fmBytes, _, err := artifact.SplitFrontmatter([]byte(doc))
+			if err != nil {
+				t.Fatalf("SplitFrontmatter: %v", err)
+			}
+			fm, err := artifact.DecodeSpec(fmBytes)
+			if err != nil {
+				t.Fatalf("DecodeSpec: %v", err)
+			}
+			if fm.ID != "spec/"+name {
+				t.Errorf("id = %q, want spec/%s", fm.ID, name)
+			}
+			if string(fm.Status) != "" {
+				t.Errorf("status = %q, want the field ABSENT (the statusless scaffold shape)", fm.Status)
+			}
+			if fm.Class != artifact.ClassFeature {
+				t.Errorf("class = %q, want feature", fm.Class)
+			}
+		})
+	}
+}

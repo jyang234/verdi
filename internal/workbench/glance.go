@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/refindex"
 )
@@ -116,7 +117,15 @@ func writeGlanceSection(buf *bytes.Buffer, root string, entries []refindex.Entry
 func glanceEligibleEntries(entries []refindex.Entry) []refindex.Entry {
 	var out []refindex.Entry
 	for _, e := range entries {
-		if e.Disclosed != nil {
+		// dc-1's exclusion rationale is "no content to badge or link" —
+		// which describes ONLY the degraded no-draft-spec design entry
+		// (Disclosed set, SpecStatus empty: nothing was readable at all).
+		// An UNPROVEN entry (fix round 2, finding 1) carries a Disclosure
+		// AND content (SpecStatus "unproven"): it stays IN the glance,
+		// under an honest unproven presentation, rather than vanishing
+		// from the leading section — one malformed corpus spec would
+		// otherwise silently empty the whole glance of default entries.
+		if e.Disclosed != nil && e.SpecStatus == "" {
 			continue
 		}
 		if e.Zone != refindex.ZoneActive {
@@ -211,6 +220,16 @@ func writeGlanceDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, n
 			buf.WriteString(stdhtml.EscapeString(verdictHref(story)))
 			buf.WriteString(`">verdict</a>`)
 		}
+	}
+
+	if e.Disclosed != nil {
+		// The unproven entry's honest presentation (fix round 2, finding
+		// 1): its disclosure rides beside the badge and links, in the
+		// same shared vocabulary (and CSS class) the exhaustive Directory
+		// section uses — never a silent drop from the glance.
+		buf.WriteString(` <span class="dir-disclosed">`)
+		buf.WriteString(stdhtml.EscapeString(disclosure.Render(*e.Disclosed)))
+		buf.WriteString(`</span>`)
 	}
 }
 

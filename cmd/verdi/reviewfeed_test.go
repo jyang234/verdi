@@ -9,12 +9,15 @@ import (
 )
 
 // newFeedForTest wires a forgeCommentFeed over the fake with a resolvable
-// default branch (CI_DEFAULT_BRANCH wins in lint.ResolveDefaultBranch, so
-// no git is touched — hermetic, CLAUDE.md: no network in any test).
+// default branch (CI_DEFAULT_BRANCH wins in lint.ResolveDefaultBranch,
+// which now delegates to internal/specstate.ResolveDefaultBranch — still
+// hermetic, CLAUDE.md: no network in any test, but the named branch must
+// resolve to a real local ref, hence resolvableDefaultBranchRoot's minimal
+// fixturegit repo rather than a bare t.TempDir()).
 func newFeedForTest(t *testing.T, f forge.Forge) *forgeCommentFeed {
 	t.Helper()
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	return newForgeCommentFeed(f, t.TempDir())
+	return newForgeCommentFeed(f, resolvableDefaultBranchRoot(t))
 }
 
 // TestForgeCommentFeed_JoinsCommentsAndResolution proves the adapter finds

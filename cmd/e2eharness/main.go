@@ -51,6 +51,10 @@ func main() {
 }
 
 func run() error {
+	if err := neutralizeCIEnv(); err != nil {
+		return err
+	}
+
 	p := resolvePorts(os.Getenv)
 	workbenchAddr, dexAddr, controlAddr, inspectAddr := p.workbench, p.dex, p.control, p.inspect
 
@@ -237,6 +241,49 @@ func run() error {
 	_ = serveCmd.Wait()
 	_ = dexSrv.Close()
 	_ = ctrlSrv.Close()
+	return nil
+}
+
+// ciEnvVars is every variable internal/lint's ReadCIEnv consults: GitLab's
+// CI_DEFAULT_BRANCH/CI_MERGE_REQUEST_TARGET_BRANCH_NAME, GitHub Actions'
+// GITHUB_BASE_REF, and each forge's own "am I in CI at all" marker.
+var ciEnvVars = []string{
+	"CI",
+	"GITHUB_ACTIONS",
+	"GITHUB_BASE_REF",
+	"CI_DEFAULT_BRANCH",
+	"CI_MERGE_REQUEST_TARGET_BRANCH_NAME",
+}
+
+// neutralizeCIEnv clears ciEnvVars from this process, establishing the
+// harness's intended environment instead of inheriting whatever CI identity
+// the runner happens to carry. The harness provisions a deterministic
+// scratch store of its own; the runner's CI identity is unrelated state
+// about a DIFFERENT repository, and lifecycle resolution here must answer to
+// the scratch store alone. Without this, a GitHub Actions pull_request job
+// (CI=true, GITHUB_ACTIONS=true, GITHUB_BASE_REF=main — set on
+// pull_request events but not on push, which is why push verify stayed
+// green) leaks into the fixture's pages: the scratch store has no origin and
+// so no resolvable default branch, VL-004 then correctly discloses "this run
+// targets \"main\" in CI, but no default branch could be resolved" — a true
+// claim about the RUNNER, not about the fixture — and the built dex site
+// faithfully renders it, breaking the honest-empty-state assertion in
+// e2e/tests/19-disclosures.spec.ts.
+//
+// This is the one seam for the whole harness: it runs before any store
+// provisioning, the in-process dex.Build, or any subprocess spawn, and every
+// subprocess env below is derived from os.Environ() after this point — so
+// the `verdi serve` workbench and every git invocation see the neutralized
+// environment too. Nothing in this package re-reads these variables
+// afterwards (the harness's only other env read is VERDI_E2E_PORT_BASE, and
+// the "CI" the fixtures speak of is evidence provenance written literally
+// into fixture artifacts, never read from the environment).
+func neutralizeCIEnv() error {
+	for _, key := range ciEnvVars {
+		if err := os.Unsetenv(key); err != nil {
+			return fmt.Errorf("clearing %s: %w", key, err)
+		}
+	}
 	return nil
 }
 

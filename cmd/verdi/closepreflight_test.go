@@ -73,6 +73,9 @@ y
 // this same base to produce exactly one defect class at a time.
 func buildPreflightFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
+	// Pin the projector's default-branch resolution for the C1 pre-closure
+	// precondition (no origin remote in a fixturegit repo).
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
 			".verdi/verdi.yaml":                             "schema: verdi.layout/v1\nforge: github\n",

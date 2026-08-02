@@ -10,12 +10,14 @@ import (
 )
 
 // newSupersessionLoaderForTest mirrors reviewfeed_test.go's
-// newFeedForTest: a resolvable default branch via CI_DEFAULT_BRANCH, so
-// no git is touched — hermetic (CLAUDE.md: no network in any test).
+// newFeedForTest: a resolvable default branch via CI_DEFAULT_BRANCH,
+// backed by resolvableDefaultBranchRoot's minimal fixturegit repo so the
+// named branch actually resolves (internal/specstate.ResolveDefaultBranch)
+// — still hermetic (CLAUDE.md: no network in any test).
 func newSupersessionLoaderForTest(t *testing.T, f forge.Forge) *forgeSupersessionLoader {
 	t.Helper()
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	return newForgeSupersessionLoader(f, t.TempDir())
+	return newForgeSupersessionLoader(f, resolvableDefaultBranchRoot(t))
 }
 
 const supersessionFeedCandidateSpecMD = `---
@@ -95,7 +97,7 @@ func (erroringSupersessionForge) ListOpenMRs(ctx context.Context, targetBranch s
 // forge failure surfaces as an error, never silently as ok=false.
 func TestForgeSupersessionLoader_TransportErrorPropagates(t *testing.T) {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	loader := newForgeSupersessionLoader(erroringSupersessionForge{fake.New()}, t.TempDir())
+	loader := newForgeSupersessionLoader(erroringSupersessionForge{fake.New()}, resolvableDefaultBranchRoot(t))
 	_, _, err := loader.LoadCandidates(context.Background(), "spec/loan-workflow", supersessionFeedCandidatePath)
 	if err == nil {
 		t.Fatal("got nil error, want the transport failure to propagate")

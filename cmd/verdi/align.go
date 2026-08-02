@@ -55,6 +55,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -369,7 +370,7 @@ func runAlignForSpec(ctx context.Context, root string, spec *artifact.SpecFrontm
 	// returned above) never pays for the archive walk nor fails on an unrelated
 	// archive's decode error it does not need.
 	if spec.Class == artifact.ClassFeature {
-		archivedRulings, err := gatherArchivedRulings(root, specRef.Name)
+		archivedRulings, err := gatherArchivedRulings(ctx, root, specRef.Name, specstate.NewProjector())
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 2

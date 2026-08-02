@@ -48,6 +48,16 @@ func buildCorpusRepo(t *testing.T) *fixturegit.Repo {
 		layers = append(layers, fixturegit.Layer{Files: layerFiles, Message: fmt.Sprintf("layer %d", n)})
 	}
 	repo := fixturegit.Build(t, layers)
+	// discoverImplementingStories' Git-derived effective-state resolution
+	// (Task 5) resolves the default branch through its own precedence
+	// chain (CI_DEFAULT_BRANCH, then origin/HEAD, then the D6-6 local
+	// fallback) rather than trusting anything the caller passes;
+	// fixturegit repos carry no origin remote, so every test built from
+	// this shared corpus needs this pinned for any feature-level matrix
+	// fold (discoverImplementingStories) to resolve implementing stories'
+	// closed/superseded state instead of refusing operationally
+	// (fix-round-1 finding 2).
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 
 	// verdi.yaml is not part of the corpus's own committed-zone fixture
 	// (examples/showcase predates it needing one); write a minimal one
@@ -246,9 +256,12 @@ func TestCmdMatrix_RoundFourStory_RendersStoryFold(t *testing.T) {
 		t.Fatalf("cmdMatrix(spec/borrower-update-api) = %d, want 0 (round-four story renders the story fold); stderr=%q", got, stderr.String())
 	}
 
+	// Effective state (I2): the fixture spec is copied to disk
+	// UNCOMMITTED, so the projector honestly resolves Proposed ("draft")
+	// regardless of the raw field's accepted-pending-build claim.
 	want := `story: jira:LOAN-1482
 spec:  spec/borrower-update-api
-status: accepted-pending-build
+status: draft
 
 AC    STATUS     EVIDENCE                      TEXT                                                         OBLIGATION
 ac-1  no-signal  static:none; behavioral:none  PUT /applications/:id/update returns 200 with the new state  static: (no obligation); behavioral: (no obligation)
@@ -263,6 +276,25 @@ story.eligible: false
 	// section instead — guard against regression explicitly.
 	if strings.Contains(stdout.String(), "feature:") || strings.Contains(stdout.String(), "stub_reconciliation") {
 		t.Fatalf("output routed through the feature fold, not the story fold:\n%s", stdout.String())
+	}
+}
+
+// TestCmdMatrix_StatusLine_Statusless is final fix wave I2's own proof: a
+// STATUSLESS, merge-accepted story (no persisted status: field at all —
+// the raw field printed a blank line here before this fix) prints its
+// EFFECTIVE state on the matrix's status: line.
+func TestCmdMatrix_StatusLine_Statusless(t *testing.T) {
+	repo := buildStatuslessCloseFixtureRepo(t) // pins CI_DEFAULT_BRANCH=main
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runMatrixForTest(t, []string{"spec/statusless-close"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdMatrix(statusless) = %d, want 0; stderr=%q", got, stderr.String())
+	}
+	want := "story: jira:SL-CLOSE-1\nspec:  spec/statusless-close\nstatus: accepted-pending-build\n"
+	if !strings.HasPrefix(stdout.String(), want) {
+		t.Fatalf("matrix output = %q, want it to start with %q (the EFFECTIVE state, never a blank raw field)", stdout.String(), want)
 	}
 }
 
@@ -413,6 +445,10 @@ func TestCmdMatrix_StatusLine_Superseded(t *testing.T) {
 			Message: "init store with a superseded spec",
 		},
 	})
+	// Pin the projector's default-branch resolution (I2: the status line
+	// is the EFFECTIVE state now; a landed legacy `status: superseded`
+	// projects Superseded via the compatibility reading).
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
@@ -499,6 +535,10 @@ func TestCmdMatrix_ObligationColumn(t *testing.T) {
 			Message: "init store with a partially-obligated story",
 		},
 	})
+	// Pin the projector's default-branch resolution (I2: the status line
+	// is the EFFECTIVE state; this landed legacy-accepted fixture then
+	// still prints accepted-pending-build).
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	t.Chdir(repo.Dir)
 
 	var stdout, stderr bytes.Buffer
@@ -728,10 +768,10 @@ func TestMatrixPreviewBanner_RendersThroughTheSeam(t *testing.T) {
 
 	t.Run("feature rung", func(t *testing.T) {
 		var on, off bytes.Buffer
-		spec := &artifact.SpecFrontmatter{Class: artifact.ClassFeature, Status: artifact.Status("accepted-pending-build")}
+		spec := &artifact.SpecFrontmatter{Class: artifact.ClassFeature}
 		result := evidence.FeatureResult{SpecRef: "spec/f"}
-		printFeatureMatrix(&on, spec, result, evidence.StubReconciliation{}, nil, nil, true, nil)
-		printFeatureMatrix(&off, spec, result, evidence.StubReconciliation{}, nil, nil, false, nil)
+		printFeatureMatrix(&on, spec, artifact.Status("accepted-pending-build"), result, evidence.StubReconciliation{}, nil, nil, true, nil)
+		printFeatureMatrix(&off, spec, artifact.Status("accepted-pending-build"), result, evidence.StubReconciliation{}, nil, nil, false, nil)
 		if !hasLine(on.String()) {
 			t.Errorf("printFeatureMatrix(--preview) = %q, want the seam-rendered banner %q", on.String(), want)
 		}
