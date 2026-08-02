@@ -7,9 +7,12 @@
 # (no CI environment), which is enough to prove the binary and the store
 # both lint clean. Running it again here, in the real GitHub Actions
 # environment, additionally exercises I-14's CI-context lint baselines
-# (VL-004's default-branch gate, VL-010's diff base) against a real
-# GITHUB_BASE_REF value on pull_request events, which a local run has no
-# way to supply.
+# (VL-004's default-branch gate, VL-010's diff base) in a real GitHub
+# Actions environment. Task 8 (spec/merge-signaled-acceptance) removed this
+# job's own `pull_request` trigger — it is push-only now — so exercising
+# those baselines against a real GITHUB_BASE_REF value on pull_request
+# events is merge-gate.yml's job, not this one's; this job still runs the
+# same step on push for parity/evidence purposes even without a base ref.
 #
 # Wave 7: `make verify` now ends with `make e2e` (Playwright), which is a
 # HARD FAILURE without Node — CLAUDE.md's testing regime made e2e a merge
@@ -19,15 +22,35 @@
 #
 # This job also installs golangci-lint at the Makefile's pin BEFORE `make
 # verify`, so its `make lint` step gates for real (the lint target hard-
-# fails when CI=true and the binary is absent). This is the only workflow
-# that runs `make verify`; pages.yml only builds the dex site (no lint), so
-# it needs no linter. golangci-lint's version must stay in lockstep with
-# Makefile's GOLANGCI_LINT_VERSION.
+# fails when CI=true and the binary is absent). pages.yml only builds the dex
+# site (no lint), so it needs no linter.
+#
+# LOCKSTEP WARNING — this is NOT the only workflow that runs `make verify`
+# any more. Task 8 (spec/merge-signaled-acceptance) added merge-gate.yml,
+# which runs the SAME setup sequence (checkout · setup-go · setup-node ·
+# cache + install golangci-lint) followed by the same `make verify` + build +
+# self-lint, unconditionally on every pull_request. Any change to that shared
+# sequence — a Go/Node version bump, the golangci-lint pin, a new cache or
+# setup step `make verify` depends on — must be applied to BOTH files in the
+# same commit, or PR runs and push runs stop gating the same thing.
+# internal/specalign/workflow_test.go's
+# TestGolangciLintPinIsLockstepWithMakefile enforces exactly one strand of
+# that by itself: the golangci-lint pin, across this file, merge-gate.yml,
+# and the Makefile's GOLANGCI_LINT_VERSION (the single source of truth).
+# The rest of the sequence is a review obligation, not an automated one.
 #
 # Phase 4 (spec-only vs code CI differentiation): path-filtered to code
-# paths only — a spec/doc-only PR touches none of these and gets
-# spec-gate.yml's fast check instead, never full `make verify`; a PR
-# touching both gets both workflows, since this filter still matches.
+# paths only. Originally this filter routed PRs too (a spec/doc-only PR got
+# spec-gate.yml's fast check instead, a code PR got this one, a PR touching
+# both got both workflows). Task 8 (spec/merge-signaled-acceptance) removed
+# this job's `pull_request` trigger entirely: PRs are now gated exclusively
+# by merge-gate.yml, which runs unconditionally on every PR with no path
+# filter at all (a path-filtered required check can never report on a PR
+# outside its paths — see merge-gate.yml's own head comment). This filter
+# now governs push-only evidence routing: a push touching only these code
+# paths triggers this job's full `make verify` + evidence-bundle production;
+# a push touching only spec/doc paths gets spec-gate.yml's push-side check
+# instead.
 #
 # Round 6 (spec/close-verb ac-3, dc-1): this job now ALSO does what the
 # formerly-separate verdi-evidence.yml workflow did (produce + upload the
@@ -65,17 +88,6 @@ name: verify
 
 on:
   push:
-    paths:
-      - "**.go"
-      - "go.mod"
-      - "go.sum"
-      - "Makefile"
-      - "e2e/**"
-      - ".github/workflows/**"
-      - "testdata/**"
-      - "scripts/**"
-      - "verdi.bindings.yaml"
-  pull_request:
     paths:
       - "**.go"
       - "go.mod"
