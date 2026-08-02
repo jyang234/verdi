@@ -66,15 +66,26 @@ func BlobAt(ctx context.Context, dir, ref, path string) (oid string, found bool,
 // merge's second parent (an unmerged or never-integrated side branch) is
 // excluded.
 //
-// It walks `git rev-list --first-parent --reverse ref` — oldest first —
-// comparing BlobAt(ctx, dir, commit, path) against oid at each commit, and
-// returns the EARLIEST commit in the FINAL contiguous run where the blob at
-// path equals oid. "Final" is what makes revert-and-readd honest: if some
-// later first-parent commit changes path away from oid (edited, deleted, or
-// reverted to different content) and a still-later commit brings oid back,
-// the run before that change is discarded and only the current run counts
-// — FirstParentBlobLanding reports the commit that landed today's
-// acceptance, never a historical first appearance that no longer holds.
+// The walk is oldest-first over `git rev-list --first-parent --reverse
+// ref -- path` — the SAME first-parent chain the semantics have always
+// been stated over, PATH-LIMITED so only the commits that actually
+// changed path relative to their (followed, first) parent are visited.
+// The blob at path is constant between two consecutive path-touching
+// commits, so comparing BlobAt(ctx, dir, commit, path) against oid at
+// exactly those touch commits reproduces the full-chain answer: the
+// EARLIEST commit in the FINAL contiguous run where the blob at path
+// equals oid is, by construction, the last touch that SET the blob to oid
+// with no later touch changing it away. "Final" is what makes
+// revert-and-readd honest: if some later first-parent commit changes path
+// away from oid (edited, deleted, or reverted to different content) and a
+// still-later commit brings oid back, the run before that change is
+// discarded and only the current run counts — FirstParentBlobLanding
+// reports the commit that landed today's acceptance, never a historical
+// first appearance that no longer holds. The path limit is a pure cost
+// optimization (one ls-tree per path touch instead of one per first-parent
+// commit — the workbench-home walk over a long history was measured in
+// minutes without it); the merge/squash/rebase/revert semantics are
+// unchanged and stay pinned by this package's own topology tests.
 //
 // oid never appearing on ref's first-parent chain — including a
 // well-formed but unknown oid — is not an error: it yields ("", false,
@@ -82,7 +93,7 @@ func BlobAt(ctx context.Context, dir, ref, path string) (oid string, found bool,
 // real operational error wrapping "gitx: FirstParentBlobLanding(REF:PATH@OID)"
 // context.
 func FirstParentBlobLanding(ctx context.Context, dir, ref, path, oid string) (commit string, found bool, err error) {
-	out, runErr := run(ctx, dir, "rev-list", "--first-parent", "--reverse", ref)
+	out, runErr := run(ctx, dir, "rev-list", "--first-parent", "--reverse", ref, "--", path)
 	if runErr != nil {
 		return "", false, fmt.Errorf("gitx: FirstParentBlobLanding(%s:%s@%s): %w", ref, path, oid, runErr)
 	}
@@ -94,7 +105,7 @@ func FirstParentBlobLanding(ctx context.Context, dir, ref, path, oid string) (co
 
 	var candidate string
 	for _, c := range strings.Split(trimmed, "\n") {
-		blobOID, present, blobErr := BlobAt(ctx, dir, c, path)
+		blobOID, present, blobErr := landingBlobAt(ctx, dir, c, path)
 		if blobErr != nil {
 			return "", false, fmt.Errorf("gitx: FirstParentBlobLanding(%s:%s@%s): %w", ref, path, oid, blobErr)
 		}
@@ -112,3 +123,10 @@ func FirstParentBlobLanding(ctx context.Context, dir, ref, path, oid string) (co
 	}
 	return candidate, true, nil
 }
+
+// landingBlobAt is FirstParentBlobLanding's BlobAt indirection — a package-
+// level seam so the walk-cost regression test can count exactly how many
+// per-commit tree lookups one landing walk performs (few path touches must
+// mean few lookups, regardless of total history length). Production is
+// always BlobAt itself; tests override and restore via defer.
+var landingBlobAt = BlobAt

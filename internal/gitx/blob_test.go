@@ -298,6 +298,57 @@ func TestFirstParentBlobLanding_Happy(t *testing.T) {
 	})
 }
 
+// TestFirstParentBlobLanding_WalkCostScalesWithPathTouches is the
+// path-limited walk's regression test (controller-authorized optimization):
+// a long first-parent history in which the target path is touched only a
+// handful of times must perform per-commit tree lookups ONLY at those
+// touch commits — never one per first-parent commit (the measured
+// 3.6s-per-candidate defect). Counted through the landingBlobAt seam;
+// correctness of the answer is asserted alongside the count so the
+// optimization can never trade the semantics away for the cost.
+func TestFirstParentBlobLanding_WalkCostScalesWithPathTouches(t *testing.T) {
+	ctx := context.Background()
+
+	// spec.md is touched exactly 3 times (v1, v2, back to v1's bytes) amid
+	// a long run of unrelated commits.
+	layers := []fixturegit.Layer{
+		{Files: map[string]string{"spec.md": "v1\n"}, Message: "add spec v1"},
+	}
+	for i := 0; i < 20; i++ {
+		layers = append(layers, fixturegit.Layer{
+			Files:   map[string]string{"noise.txt": strings.Repeat("x", i+1) + "\n"},
+			Message: "unrelated churn",
+		})
+	}
+	layers = append(layers, fixturegit.Layer{Files: map[string]string{"spec.md": "v2\n"}, Message: "change spec to v2"})
+	for i := 0; i < 20; i++ {
+		layers = append(layers, fixturegit.Layer{
+			Files:   map[string]string{"noise.txt": strings.Repeat("y", i+1) + "\n"},
+			Message: "more unrelated churn",
+		})
+	}
+	layers = append(layers, fixturegit.Layer{Files: map[string]string{"spec.md": "v1\n"}, Message: "restore spec to v1 bytes"})
+	repo := fixturegit.Build(t, layers)
+
+	calls := 0
+	orig := landingBlobAt
+	landingBlobAt = func(ctx context.Context, dir, ref, path string) (string, bool, error) {
+		calls++
+		return orig(ctx, dir, ref, path)
+	}
+	defer func() { landingBlobAt = orig }()
+
+	oid := blobOIDFor(t, ctx, repo.Dir, repo.Head, "spec.md")
+	landing, found, err := FirstParentBlobLanding(ctx, repo.Dir, repo.Head, "spec.md", oid)
+	// The final contiguous run starts at the restore commit — the head of
+	// this linear history — never the historical v1 add.
+	assertLanding(t, landing, found, err, repo.Head)
+
+	if calls != 3 {
+		t.Fatalf("landing walk performed %d per-commit tree lookups, want exactly 3 (one per path touch) for a %d-commit history", calls, len(layers))
+	}
+}
+
 // TestFirstParentBlobLanding_Negative proves an unknown (but well-formed)
 // OID is a proven absence, never an error, and an invalid ref is a real
 // operational error.
