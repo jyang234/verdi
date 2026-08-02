@@ -21,14 +21,20 @@ var (
 	// status slip through this map's membership test, and would corrupt
 	// SpecFeatureStatuses()'s exported enum-parity accessor below (internal/
 	// model's schema-parity proof) with a value that is not a real status.
-	// `superseded` is a terminal status a predecessor spec reaches when its
-	// successor is accepted (03 §The amendment ladder): `verdi accept` of a
-	// spec carrying a `supersedes` edge flips the predecessor's status-only
-	// line to `superseded` in the same ritual (cmd/verdi/accept.go), the
-	// sole legal writer of the accepted-pending-build→superseded transition
-	// (VL-004). A superseded spec keeps its `frozen:` stamp and stays in
-	// specs/active/ — it is never re-editable and never re-buildable
-	// (cmd/verdi/buildstart.go refuses it).
+	// `superseded` is a terminal state a predecessor spec reaches when a
+	// successor naming it lands on the default branch (03 §The amendment
+	// ladder). NO writer of that transition exists anymore: the old
+	// accept-ritual status flip (accept.go/supersede.go) is retired, and
+	// supersession is DERIVED — internal/specstate's successor-corpus
+	// proof (a landed successor carrying a supersedes edge plus a
+	// validated supersession: block) projects the predecessor Superseded
+	// without ever touching its bytes. An EXPLICIT persisted `superseded`
+	// value here is a legacy artifact the projector honors as a
+	// compatibility reading (with a disclosure) when the two-signal proof
+	// cannot independently confirm it. A superseded spec keeps its
+	// `frozen:` stamp (if it has one) and stays in specs/active/ — it is
+	// never re-editable and never re-buildable (cmd/verdi/buildstart.go
+	// refuses it on the projected state).
 	specFeatureStatuses = map[Status]bool{
 		"draft":                  true,
 		"accepted-pending-build": true,

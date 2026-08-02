@@ -26,9 +26,12 @@ type ImplementingStory struct {
 	// implements. A story with two implements edges into the same feature
 	// contributes one entry per AC id.
 	ACIDs []string
-	// Closed reports whether the story spec's own status is "closed" —
-	// the feature fold's "every implementing story is closed or
-	// eligible" bullet's first half.
+	// Closed reports whether the story's EFFECTIVE lifecycle state is
+	// closed — the caller resolves it through internal/specstate's
+	// Git-derived projection (archive-zone reachability, or a legacy
+	// terminal field's compatibility reading), never from the persisted
+	// status field alone. The feature fold's "every implementing story is
+	// closed or eligible" bullet's first half.
 	Closed bool
 	// Eligible is the story-level fold's Eligible (StoryResult.Eligible)
 	// — the second half of "closed or eligible". Meaningless once Closed

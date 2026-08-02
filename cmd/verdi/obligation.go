@@ -447,7 +447,10 @@ func runObligationScaffold(ctx context.Context, root, storyRefArg string, resolv
 		fmt.Fprintf(stderr, "obligation scaffold: %s cannot be proven still-proposed: %s\n", spec.ID, strings.Join(result.Disclosures, "; "))
 		return 2
 	default: // AcceptedPendingBuild, Superseded, Closed
-		fmt.Fprintf(stderr, "obligation scaffold: refused: %s is already %s; obligation scaffolding is pre-review preparation only, never a post-merge mutation (I-41)\n", spec.ID, result.State)
+		// The state word resolves through the model like every sibling
+		// refusal (L-M13(1)); spec.ID stays identity.
+		fmt.Fprintf(stderr, "obligation scaffold: refused: %s is already %s; obligation scaffolding is pre-review preparation only, never a post-merge mutation (I-41)\n", spec.ID,
+			mdl.DisplayState(string(spec.Class), string(result.State)))
 		return 1
 	}
 

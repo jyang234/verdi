@@ -4,18 +4,17 @@
 // D6-23 originally wired lintQuartetOrRefuse (acceptlint.go) into accept's
 // own ritual, refusing to freeze a quartet the store's own linter
 // rejected. Task 7 (docs/superpowers/specs/2026-08-01-merge-signals-spec-
-// acceptance-design.md) retires that ritual entirely — `verdi accept` no
-// longer lints, flips status, or writes a frozen stamp at all, so
-// lintQuartetOrRefuse has no production caller left in this build.
-// acceptlint.go's own quartet-scoping predicates are orthogonal, pure
-// helpers with no dependency on accept's retired mutation, so they and
-// their direct unit tests below are kept unchanged; lintQuartetOrRefuse
-// itself is left in place, unwired, pending the design's own rollout
-// sequence (step 8: "the required check ... verifies ... acceptance
-// criteria, obligations, stubs, and required sidecars" — the pre-merge
-// gate this quartet check belongs in next, out of this task's scope) —
-// disclosed in the phase report, not silently deleted or silently
-// re-wired.
+// acceptance-design.md) retired that ritual entirely — `verdi accept` no
+// longer lints, flips status, or writes a frozen stamp at all — and
+// lintQuartetOrRefuse itself is DELETED (this repo's policy: unused code
+// is deleted, not left unwired; golangci-lint's `unused` would flag it
+// regardless). Only acceptlint.go's pure quartet-scoping predicates
+// survive: they carry no dependency on accept's retired mutation, and
+// they are the reusable building block the design's rollout step 8 (the
+// pre-merge required check that "verifies ... acceptance criteria,
+// obligations, stubs, and required sidecars") would reach for when that
+// gate is built — out of this build's scope. These tests cover exactly
+// the surviving predicates.
 package main
 
 import (
