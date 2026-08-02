@@ -111,13 +111,17 @@ func parseCandidatePath(path string) (zone, string, error) {
 // dropped a malformed candidate's own decode failure from ever becoming a
 // witness for any OTHER candidate). supersedesBy maps a predecessor
 // spec's bare name to every default-branch path that carries BOTH a
-// links: {type: supersedes} edge to that predecessor AND a validated
-// supersession: block (the brief's two-signal requirement — this
+// WHOLE-SPEC links: {type: supersedes} edge to that predecessor AND a
+// validated supersession: block (the brief's two-signal requirement — this
 // package does not additionally cross-check the supersession block's
 // carried/amended/removed buckets against the predecessor's own object
 // ids; internal/artifact already validates the block's own shape at
 // decode time, and completeness against a specific predecessor's objects
-// is a lint-layer concern, not this package's).
+// is a lint-layer concern, not this package's). Exactly ONE whole-spec
+// predecessor per block is likewise internal/artifact's invariant (I-47,
+// validateSupersessionPredecessor): a successor claiming two collects a
+// decode failure below instead, so one manifest can never hand several
+// predecessors an unearned terminal state.
 //
 // linkOnlyBy maps a predecessor spec's bare name to every default-branch
 // path that names it via a links: {type: supersedes} edge WITHOUT a
@@ -234,30 +238,38 @@ func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branc
 			corpus.failures[path] = fmt.Sprintf("default-branch spec %s failed to decode: %v", path, decodeErr)
 			continue
 		}
-		for _, l := range fm.Links {
-			if l.Type != artifact.LinkSupersedes {
-				continue
-			}
-			ref, parseErr := artifact.ParseRef(l.Ref)
-			if parseErr != nil || ref.Kind != artifact.KindSpec {
-				continue
-			}
-			if fm.Supersession != nil {
-				// The two-signal successor shape: a supersedes edge plus a
-				// validated supersession: block — real, positive proof.
+		if fm.Supersession != nil {
+			// The two-signal successor shape: a WHOLE-SPEC supersedes edge
+			// plus a validated supersession: block — real, positive proof,
+			// and the only shape that earns a predecessor a terminal
+			// Superseded verdict.
+			//
+			// artifact.DecodeSpec above has already enforced I-47 (exactly
+			// one whole-spec, spec-kind predecessor per supersession: block,
+			// see validateSupersessionPredecessor), so this loop credits the
+			// block to exactly the one predecessor that earned it. A spec
+			// naming TWO predecessors from ONE manifest never reaches here
+			// at all: its decode fails above and it lands in corpus.failures,
+			// so every predecessor it named projects disclosed-unproven
+			// rather than collecting an unearned terminal state. The loop
+			// stays a loop (rather than indexing [0]) so a future loosening
+			// of that invariant degrades into over-reporting, never a silent
+			// panic. artifact.WholeSpecSupersedesRefs is also what excludes
+			// an OBJECT-FRAGMENT supersedes edge (spec/x#object) here: it is
+			// a decision-level override (03 §Challenging closed decisions'
+			// rung-2 machinery), never a claim to replace the whole spec.
+			for _, ref := range artifact.WholeSpecSupersedesRefs(fm.Links) {
 				corpus.supersedesBy[ref.Name] = append(corpus.supersedesBy[ref.Name], path)
-			} else if !ref.Fragment() {
-				// One WHOLE-SPEC signal only (the story-class shape, which
-				// can never carry the block): recorded, never discarded —
-				// the predecessor projects disclosed-unproven (fix wave
-				// I4). An OBJECT-FRAGMENT supersedes edge (spec/x#object)
-				// is excluded here on purpose: it is a decision-level
-				// override (03 §Challenging closed decisions' rung-2
-				// machinery), never a claim to replace the whole spec, so
-				// it neither proves nor un-proves the predecessor's own
-				// lifecycle state.
-				corpus.linkOnlyBy[ref.Name] = append(corpus.linkOnlyBy[ref.Name], path)
 			}
+			continue
+		}
+		// One WHOLE-SPEC signal only (the story-class shape, which can never
+		// carry the block — internal/artifact's validateStory rejects it
+		// outright): recorded, never discarded — the predecessor projects
+		// disclosed-unproven (fix wave I4). Fragment edges are excluded for
+		// the same reason as above.
+		for _, ref := range artifact.WholeSpecSupersedesRefs(fm.Links) {
+			corpus.linkOnlyBy[ref.Name] = append(corpus.linkOnlyBy[ref.Name], path)
 		}
 	}
 

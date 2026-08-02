@@ -689,6 +689,165 @@ body
 `)
 }
 
+// TestProjector_SupersessionPredecessorCardinality proves the corpus scan
+// credits a successor's single supersession: manifest to EXACTLY the one
+// whole-spec predecessor that earned it — never to every predecessor a
+// multi-supersedes successor happens to name, and never to a fragment
+// (decision-override) target.
+//
+// The multi-predecessor row is the P1 defect's own witness: the scan used
+// to loop every supersedes link and append the successor's path to
+// supersedesBy for each one, so a single manifest silently handed BOTH
+// predecessors a terminal Superseded verdict — an unearned terminal state
+// no manifest ever validated. internal/artifact now rejects that shape at
+// decode time, so the successor lands in corpus.failures instead and every
+// predecessor projects disclosed-unproven (three-valued honesty: the
+// witness names the malformed successor, never a silent pass).
+func TestProjector_SupersessionPredecessorCardinality(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("successor naming TWO predecessors supersedes NEITHER: both disclosed-unproven", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+		predAPath := ".verdi/specs/active/pred-a/spec.md"
+		predAContent := []byte("---\nid: spec/pred-a\nkind: spec\nclass: feature\ntitle: Pred A\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n---\nbody\n")
+		predBPath := ".verdi/specs/active/pred-b/spec.md"
+		predBContent := []byte("---\nid: spec/pred-b\nkind: spec\nclass: feature\ntitle: Pred B\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n---\nbody\n")
+		successorPath := ".verdi/specs/active/multi-succ/spec.md"
+		successorContent := []byte(`---
+id: spec/multi-succ
+kind: spec
+class: feature
+title: Multi Successor
+owners: [platform]
+status: accepted-pending-build
+frozen: { at: "2024-01-01", commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+acceptance_criteria:
+  - { id: ac-1, text: works, evidence: [static] }
+links:
+  - { type: supersedes, ref: spec/pred-a }
+  - { type: supersedes, ref: spec/pred-b }
+supersession:
+  added: [ac-1]
+---
+body
+`)
+
+		show := func(ctx context.Context, dir, commit, path string) ([]byte, error) {
+			switch path {
+			case predAPath:
+				return predAContent, nil
+			case predBPath:
+				return predBContent, nil
+			case successorPath:
+				return successorContent, nil
+			default:
+				t.Fatalf("unexpected Show(%s)", path)
+				return nil, nil
+			}
+		}
+
+		for _, tc := range []struct {
+			path    string
+			content []byte
+		}{{predAPath, predAContent}, {predBPath, predBContent}} {
+			p := newProjector(stubGit{
+				blobAt: exactBlobAt(tc.path, fakeOID),
+				show:   show,
+				fpbl:   exactLanding(tc.path, fakeOID, fakeLanding),
+				lsTree: underPrefix(predAPath, predBPath, successorPath),
+			})
+			result, err := p.Resolve(ctx, repo.Dir, Candidate{Path: tc.path, Content: tc.content})
+			if err != nil {
+				t.Fatalf("Resolve(%s): %v", tc.path, err)
+			}
+			if result.State == Superseded {
+				t.Fatalf("Resolve(%s) = %+v, want NOT Superseded: one supersession: manifest can only earn ONE predecessor a terminal state", tc.path, result)
+			}
+			if result.State != Unproven || result.Relation != RelationUnproven {
+				t.Fatalf("Resolve(%s) = %+v, want Unproven/unproven (the malformed successor is a decode-failure witness)", tc.path, result)
+			}
+			var named bool
+			for _, d := range result.Disclosures {
+				if strings.Contains(d, successorPath) {
+					named = true
+				}
+			}
+			if !named {
+				t.Fatalf("Resolve(%s) disclosures = %v, want one naming the malformed successor %s", tc.path, result.Disclosures, successorPath)
+			}
+		}
+	})
+
+	t.Run("successor with one whole-spec link plus a fragment link supersedes ONLY the whole-spec predecessor", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+		wholePath := ".verdi/specs/active/whole-pred/spec.md"
+		wholeContent := []byte("---\nid: spec/whole-pred\nkind: spec\nclass: feature\ntitle: Whole Pred\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n---\nbody\n")
+		fragPath := ".verdi/specs/active/frag-target/spec.md"
+		fragContent := []byte("---\nid: spec/frag-target\nkind: spec\nclass: feature\ntitle: Frag Target\nowners: [platform]\ndecisions:\n  - { id: dc-1, text: a decision, anchor: \"#dc-1\" }\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n---\nbody\n")
+		successorPath := ".verdi/specs/active/mixed-succ/spec.md"
+		successorContent := []byte(`---
+id: spec/mixed-succ
+kind: spec
+class: feature
+title: Mixed Successor
+owners: [platform]
+status: accepted-pending-build
+frozen: { at: "2024-01-01", commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa }
+acceptance_criteria:
+  - { id: ac-1, text: works, evidence: [static] }
+links:
+  - { type: supersedes, ref: spec/whole-pred }
+  - { type: supersedes, ref: "spec/frag-target#dc-1" }
+supersession:
+  added: [ac-1]
+---
+body
+`)
+
+		show := func(ctx context.Context, dir, commit, path string) ([]byte, error) {
+			switch path {
+			case wholePath:
+				return wholeContent, nil
+			case fragPath:
+				return fragContent, nil
+			case successorPath:
+				return successorContent, nil
+			default:
+				t.Fatalf("unexpected Show(%s)", path)
+				return nil, nil
+			}
+		}
+
+		p := newProjector(stubGit{
+			blobAt: exactBlobAt(wholePath, fakeOID),
+			show:   show,
+			fpbl:   exactLanding(wholePath, fakeOID, fakeLanding),
+			lsTree: underPrefix(wholePath, fragPath, successorPath),
+		})
+		whole, err := p.Resolve(ctx, repo.Dir, Candidate{Path: wholePath, Content: wholeContent})
+		if err != nil {
+			t.Fatalf("Resolve(whole): %v", err)
+		}
+		if whole.State != Superseded || whole.Relation != RelationExact {
+			t.Fatalf("Resolve(whole) = %+v, want Superseded/exact (it is the ONE whole-spec predecessor the manifest earns)", whole)
+		}
+
+		p2 := newProjector(stubGit{
+			blobAt: exactBlobAt(fragPath, fakeOID),
+			show:   show,
+			fpbl:   exactLanding(fragPath, fakeOID, fakeLanding),
+			lsTree: underPrefix(wholePath, fragPath, successorPath),
+		})
+		frag, err := p2.Resolve(ctx, repo.Dir, Candidate{Path: fragPath, Content: fragContent})
+		if err != nil {
+			t.Fatalf("Resolve(fragment target): %v", err)
+		}
+		if frag.State != AcceptedPendingBuild || len(frag.Disclosures) != 0 {
+			t.Fatalf("Resolve(fragment target) = %+v, want AcceptedPendingBuild with no disclosures (a fragment supersedes edge is a decision-level override, never a whole-spec supersession claim)", frag)
+		}
+	})
+}
+
 // TestProjector_ResolveMany_Batching proves ResolveMany's batching
 // contract directly (fix-round-1 findings 1 and 2): per-candidate self-
 // exclusion from the shared corpus scan, never batch-wide exclusion, and

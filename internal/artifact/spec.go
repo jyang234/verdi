@@ -396,6 +396,11 @@ func (fm SpecFrontmatter) validateFeature() error {
 		if err := fm.Supersession.Validate(); err != nil {
 			return fmt.Errorf("artifact: supersession: %w", err)
 		}
+		// The block only means anything against ONE named predecessor —
+		// see validateSupersessionPredecessor (I-47).
+		if err := fm.validateSupersessionPredecessor(); err != nil {
+			return err
+		}
 	}
 
 	frozenRequired := fm.Status == "accepted-pending-build" || fm.Status == "closed" || fm.Status == "superseded"

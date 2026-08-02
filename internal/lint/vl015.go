@@ -40,10 +40,31 @@ func (r vl015) Check(in *RunInput) []Finding {
 
 // checkOne runs VL-015 for one superseding revision d.
 func (vl015) checkOne(in *RunInput, d *Document) []Finding {
-	predRef := findSupersedesRef(d.Base.Links)
-	if predRef == "" {
-		return []Finding{{Rule: "VL-015", Path: d.RelPath, Message: "supersession: block is present but no supersedes link names the predecessor (02 §Kind registry, §Link taxonomy)"}}
+	// I-47 (PLAN.md §7): the manifest is a statement about ONE named
+	// predecessor's object set, so the revision must name exactly one
+	// whole-spec, spec-kind predecessor. Zero leaves the manifest
+	// un-anchored; two or more make it ambiguous — VL-015 used to validate
+	// against whichever supersedes link happened to come FIRST, silently
+	// leaving every other named predecessor an unchecked supersession claim
+	// (which internal/specstate then turned into an unearned terminal
+	// Superseded verdict). Reported and returned here rather than guessed
+	// past: with no determinate predecessor there is no object manifest to
+	// check completeness or byte-identity against.
+	//
+	// internal/artifact enforces the same invariant at decode time
+	// (validateSupersessionPredecessor) — that is the primary, fail-closed
+	// signal, and it is what internal/specstate relies on. lint carries its
+	// own copy of the CHECK (the design note in doc.go: every semantic rule
+	// is re-implemented against the raw decoded struct rather than by
+	// calling a kind's Validate()) but shares the DEFINITION of "whole-spec
+	// predecessor" through artifact.WholeSpecSupersedesRefs.
+	predRefs := artifact.WholeSpecSupersedesRefs(d.Base.Links)
+	if len(predRefs) != 1 {
+		return []Finding{{Rule: "VL-015", Path: d.RelPath, Message: fmt.Sprintf(
+			"supersession: block is present but the revision names %d whole-spec predecessors via links: {type: supersedes} — exactly one is required, since the manifest classifies exactly one predecessor's objects (02 §Lint rules VL-015, §Kind registry, §Link taxonomy; I-47). A fragment supersedes edge (spec/x#object-id) is a decision-level override and does not count",
+			len(predRefs))}}
 	}
+	predRef := predRefs[0].String()
 
 	predDocs, ok := in.Snapshot.ByRef[predRef]
 	if !ok || len(predDocs) == 0 || predDocs[0].Spec == nil {
@@ -120,22 +141,6 @@ func (vl015) checkOne(in *RunInput, d *Document) []Finding {
 	}
 
 	return findings
-}
-
-// findSupersedesRef returns the unpinned kind/name ref of the first
-// supersedes link in links, or "" if none.
-func findSupersedesRef(links []artifact.Link) string {
-	for _, l := range links {
-		if l.Type != artifact.LinkSupersedes {
-			continue
-		}
-		ref, err := artifact.ParseRef(l.Ref)
-		if err != nil {
-			continue
-		}
-		return artifact.Ref{Kind: ref.Kind, Name: ref.Name}.String()
-	}
-	return ""
 }
 
 // objectEntry is one frontmatter-declared object's cross-revision identity
