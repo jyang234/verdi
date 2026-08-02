@@ -4,7 +4,7 @@
 
 **Goal:** Ratify and deliver four related Verdi features without duplicating authority schemas, creating competing workflow state, or allowing implementation and review contexts to contaminate one another.
 
-**Architecture:** Git and GitHub pull requests are the durable coordination layer. Claude Code produces implementation branches and evidence; a fresh Codex context reviews each plan, story diff, and whole-feature result; the human owner alone accepts specifications and authorizes merges. Shared contracts land before feature-owned consumers, backend record shapes land before adapters, and all workbench presentation work is serialized after the underlying records stabilize.
+**Architecture:** Git and GitHub pull requests are the durable coordination layer. One local Claude Code lane retains work that depends on uncommitted state or local-only configuration; isolated Claude Code web lanes perform repository-contained planning and implementation from explicit base commits. FABLE is the producer-side chief architect and adjudicator, Sonnet and Opus perform delegated implementation, verification, and repair, a fresh Codex context independently reviews each plan and implementation result, and the human owner alone performs authoritative GitHub and lifecycle actions. Shared contracts land before feature-owned consumers, backend record shapes land before adapters, and all workbench presentation work is serialized after the underlying records stabilize.
 
 **Tech Stack:** Go, filesystem-backed Verdi artifacts, Git worktrees, GitHub pull requests, Claude Code implementation subagents, Codex independent review, hermetic Go tests, Playwright, `make verify`, and `go test -race ./...`.
 
@@ -21,6 +21,7 @@
 - Every behavior change follows TDD. Every function receives happy and negative unit coverage; integrations use hermetic fakes; browser-facing paths receive Playwright coverage.
 - No test uses the network. Every delivery unit closes with fresh `make verify` and `go test -race ./...` evidence.
 - Frontend implementation and fixes are assigned to a FABLE subagent. Non-frontend implementation is assigned to the Sonnet implementation subagent. Review findings and gate failures are repaired by the Opus fixer.
+- In every Claude Code execution session, FABLE remains the chief architect and final producer-side judge. FABLE dispatches the repository-defined implementation role, personally adjudicates every returned diff and evidence packet, and requests an independent Opus verification when a proof claim, authority boundary, or gate result is not adequately grounded.
 - Claude Code never accepts a specification, approves a pull request, merges a branch, authors a human attestation or waiver, or dispositions a judgment-bearing finding.
 - Codex reviews are read-only. Codex does not repair its own findings; accepted findings return to Claude Code and receive a fresh Codex re-review.
 - Only the human owner may approve the final merge.
@@ -37,12 +38,14 @@
 2. [Scope boundaries](#scope-boundaries)
 3. [Specification index](#specification-index)
 4. [Shared ownership boundaries](#shared-ownership-boundaries)
-5. [Delivery waves](#delivery-waves)
-6. [Per-unit pull request protocol](#per-unit-pull-request-protocol)
-7. [Claude-to-Codex handoff contract](#claude-to-codex-handoff-contract)
-8. [Review and merge gates](#review-and-merge-gates)
-9. [Stop conditions](#stop-conditions)
-10. [Completion ledger](#completion-ledger)
+5. [Execution surfaces and security](#execution-surfaces-and-security)
+6. [Ten-hour acceleration window](#ten-hour-acceleration-window)
+7. [Delivery waves](#delivery-waves)
+8. [Per-unit pull request protocol](#per-unit-pull-request-protocol)
+9. [Claude-to-Codex handoff contract](#claude-to-codex-handoff-contract)
+10. [Review and merge gates](#review-and-merge-gates)
+11. [Stop conditions](#stop-conditions)
+12. [Completion ledger](#completion-ledger)
 
 ## How to use this index
 
@@ -54,7 +57,7 @@ For each delivery unit:
 2. Create one isolated Git worktree and one branch for that unit.
 3. Write a focused plan under `docs/superpowers/plans/` with exact files, interfaces, failing tests, commands, and commits.
 4. Obtain a read-only Codex plan review before implementation.
-5. Let Claude Code execute the approved plan with the repository-defined model split.
+5. Let a FABLE-led Claude Code session execute the approved plan with the repository-defined model split. FABLE delegates the heavy work, reviews every result as it lands, and decides whether an Opus evidence verifier is required before declaring producer completion.
 6. Open a draft pull request and attach the handoff evidence defined below.
 7. Obtain a fresh Codex review, return findings to Claude Code, and repeat until the exact head commit is approved.
 8. Let the human owner merge only after required CI and governance checks pass.
@@ -121,6 +124,104 @@ ASD design provenance is committed, non-authoritative, and excluded from normal 
 ### Application core, transports, and presentation
 
 Each feature establishes one typed application core before CLI, MCP, or workbench adapters. Adapters never independently derive semantic state. All UI implementation waits until the relevant record schemas and core operations are approved, then runs serially under FABLE ownership.
+
+## Execution surfaces and security
+
+### Local lane
+
+Use one local Claude Code session for work that depends on uncommitted files, a local worktree, workspace-root instructions, or local-only agent configuration. The current Task 8 merge-gate work remains in this lane until its branch is committed, pushed, independently reviewed, and merged. Do not run a second session against the same worktree.
+
+The local lane may continue unattended for bounded repository work, but this plan does not use Claude Code Remote Control. No Claude process exposes a remotely controlled local shell, and no cloud session receives access to local GitHub credentials, SSH agents, unrelated MCP servers, sibling worktrees, or workspace-private files.
+
+### Claude Code web lanes
+
+Use Claude Code web for repository-contained units whose full authority, plan, and starting state are committed and reachable from GitHub. Each web session receives one branch, one delivery unit, and one explicit base SHA. A web session must not rely on:
+
+- uncommitted local changes;
+- the workspace-root `PLAN.md` unless the applicable entries are copied into a committed, repository-visible authority packet;
+- local `.claude/agents/` files or remembered model behavior;
+- credentials, MCP servers, fixtures, or tools absent from the repository; or
+- another Claude session's transcript or unpushed branch.
+
+Cloud branches may be prepared concurrently, but they become merge-eligible only after rebasing onto every merged prerequisite and rerunning their complete gates. A cloud session stops instead of inventing missing successor authority or silently substituting its own orchestration model.
+
+### Owner-only control plane
+
+The human owner alone performs actions whose result changes authority or repository enforcement:
+
+- merge a pull request or accept a specification by merge;
+- activate, weaken, remove, or repair a GitHub ruleset or required check;
+- approve a residual disclosure, waiver, attestation, or finding disposition;
+- authorize a release or integrated rollout; and
+- opt into any future remote-control mechanism.
+
+Claude Code may prepare exact commands, payloads, diffs, rollback instructions, and read-only verification evidence for these actions. It may not execute the mutation or interpret owner silence as approval.
+
+### Self-contained cloud dispatch packet
+
+Every cloud session starts with a packet containing all of the following:
+
+| Field | Required value |
+|---|---|
+| Role | `FABLE chief architect and final producer-side judge`; named Sonnet implementation and Opus verification/fix responsibilities |
+| Authority | Exact accepted spec paths, proposal or landing commits, applicable decisions, and repository-visible invention-ledger entries |
+| Git topology | Repository, base SHA, branch name, delivery-unit slug, and allowed worktree scope |
+| Ownership | Files and semantic seams the unit owns; overlapping files and authority actions it must not touch |
+| Plan | Focused plan path and commit, or a planning-only brief that explicitly forbids runtime implementation |
+| Gates | Exact targeted red/green commands, `make verify`, `go test -race ./... -count=1`, and required browser or CLI end-to-end commands |
+| Handoff | Exact head SHA, changed-file list, commit-to-task map, requirement coverage, observed command output, and three-valued disclosures |
+| Stop rules | Missing authority, stale base, shared-file collision, ambiguous semantics, unavailable evidence, failing gate, or requested owner-only action |
+
+No dispatch packet says "continue from prior context" or assumes access to a local conversation. If the packet cannot name a committed source for a requirement, the session is planning-only and must report the missing authority.
+
+## Ten-hour acceleration window
+
+The acceleration window spends Claude capacity on independent, durable outputs without violating dependency gates. Relative phases begin when the owner starts the window; elapsed times are targets rather than authority deadlines.
+
+### Phase A — protect the critical path and prepare successors
+
+Run these lanes concurrently:
+
+| Lane | Surface | Assignment | Output permitted before Task 8 lands |
+|---|---|---|---|
+| L0 | Local | Complete Task 8's workflow implementation and evidence under the existing FABLE-led workflow | One focused enforcement PR; no ruleset mutation |
+| W1 | Web | Read-only Task 9 readiness audit against PR #258 and the accepted merge-signaled design | Rebase/diff checklist and stop-condition report; no branch mutation based on an unmerged prerequisite |
+| W2 | Web | Prepare ASD canonical-promotion mapping | Planning packet mapping every reviewed design decision into one canonical proposal artifact; no runtime code |
+| W3 | Web | Prepare CSE canonical-promotion mapping | Planning packet mapping every reviewed design decision into one canonical proposal artifact; no runtime code |
+| W4 | Web, only if capacity remains | Cross-feature authority audit for `governance-principal-kernel`, shared isolation, and ASD provenance classification | Contradiction/ownership matrix only; no implementation plan approval or runtime code |
+
+Planning lanes may run in parallel because they own separate reports and make no lifecycle mutation. They must not edit this orchestration index or a shared registry. Keep no more than four planning-only cloud sessions active at once, reduce that count if subscription contention slows the critical L0 lane, and close a session as soon as its durable packet is pushed.
+
+### Phase B — land enforcement and normalize the four proposals
+
+1. Codex independently reviews Task 8's exact head.
+2. Claude Code repairs accepted findings and obtains exact-head re-review.
+3. The owner merges the Task 8 workflow PR.
+4. The owner reads the live ruleset, performs the narrowly reviewed mutation, proves the required `merge-gate` in both green and red directions, and records rollback evidence.
+5. Dispatch Task 9 to one web lane from the resulting `main`: rebase PR #258, remove only the two legacy `status: draft` fields, run all gates, and assemble its handoff.
+6. Codex reviews PR #258's exact head; Claude Code repairs findings; the owner merges once. That merge accepts the two canonical proposals and ratifies the two design authorities without a second acceptance ceremony.
+
+Task 9 may run in Claude Code web because its starting point, branch, authority, and expected mutations are GitHub-visible after Task 8. Its session must receive the local agent-role split explicitly in its dispatch packet.
+
+### Phase C — convert prepared work into mergeable Wave 0 units
+
+After Task 9 merges, revalidate W2, W3, and W4 against the actual landing commit. Then:
+
+1. Run ASD and CSE canonical-promotion units concurrently only if their changed-file inventories are disjoint and neither edits a shared index or schema registry.
+2. Give each unit its own Codex plan review, producer review, pull request, exact-head Codex implementation review, and owner merge.
+3. Incorporate the W4 ownership matrix into repository-visible successor authority and resolve every contradiction before approving the focused `governance-principal-kernel` plan.
+4. Draft the kernel plan from the fully accepted four-spec base. Do not begin kernel implementation until Wave 0's exit gate is satisfied.
+
+### Phase D — spend remaining capacity without outrunning authority
+
+If time remains after Wave 0:
+
+- start `governance-principal-kernel` implementation as the only shared-authority unit;
+- use spare web capacity for read-only AC-to-test matrices and file-ownership reconnaissance for the next eligible units;
+- do not begin `policy-authority`, ASD runtime, GLG runtime, CSE runtime, shared isolation, context compilation, or workbench code ahead of their merged prerequisites; and
+- end every active session with a pushed branch or committed planning packet, exact base/head SHAs, a clean-worktree statement, and explicit next gate. Unpushed chat conclusions are not progress.
+
+The implementation concurrency ceiling remains two. During the shared-kernel phase it is one because the kernel controls types and semantics consumed by both CI and GLG. Read-only analysis may use spare sessions, but it cannot grant Gate P or Gate I.
 
 ## Delivery waves
 
