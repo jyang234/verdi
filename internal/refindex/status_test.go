@@ -48,7 +48,11 @@ func TestMapStatusGroup_Negative_FailsClosed(t *testing.T) {
 // TestEffectiveStatusGroup_Happy is a pure-function unit test (no ctx, no
 // git, no fake needed) of Task 6a's own class: feature/story mapping:
 // AcceptedPendingBuild lands in the accepted bucket; Superseded and Closed
-// both land in Terminal; neither carries a Disclosure.
+// both land in Terminal. A CLEAN proven result (no projector disclosures)
+// carries no Disclosure; a proven result carrying the projector's own
+// compatibility notes (a legacy-terminal or legacy-draft reading) carries
+// them forward under the compatibility source id (final fix wave I5) —
+// never stripped.
 func TestEffectiveStatusGroup_Happy(t *testing.T) {
 	cases := []struct {
 		state specstate.State
@@ -59,13 +63,34 @@ func TestEffectiveStatusGroup_Happy(t *testing.T) {
 		{specstate.Closed, StatusGroupTerminal},
 	}
 	for _, tc := range cases {
-		t.Run(string(tc.state), func(t *testing.T) {
+		t.Run(string(tc.state)+" clean", func(t *testing.T) {
 			got, disclosed := effectiveStatusGroup("spec/x", specstate.Result{State: tc.state})
 			if got != tc.want {
 				t.Fatalf("effectiveStatusGroup(%q) = %q, want %q", tc.state, got, tc.want)
 			}
 			if disclosed != nil {
-				t.Fatalf("effectiveStatusGroup(%q) Disclosed = %+v, want nil", tc.state, disclosed)
+				t.Fatalf("effectiveStatusGroup(%q) Disclosed = %+v, want nil for a clean proven result", tc.state, disclosed)
+			}
+		})
+		t.Run(string(tc.state)+" with compatibility disclosures", func(t *testing.T) {
+			got, disclosed := effectiveStatusGroup("spec/x", specstate.Result{
+				State:       tc.state,
+				Disclosures: []string{"legacy compatibility note", "second note"},
+			})
+			if got != tc.want {
+				t.Fatalf("effectiveStatusGroup(%q) = %q, want %q (disclosures never change the bucket)", tc.state, got, tc.want)
+			}
+			if disclosed == nil {
+				t.Fatal("Disclosed = nil, want the projector's compatibility disclosures carried forward (I5)")
+			}
+			if disclosed.Source != "refindex:spec-state-compatibility" {
+				t.Errorf("Disclosed.Source = %q, want refindex:spec-state-compatibility (distinct from the unproven id)", disclosed.Source)
+			}
+			if disclosed.Scope != "spec/x" {
+				t.Errorf("Disclosed.Scope = %q, want %q", disclosed.Scope, "spec/x")
+			}
+			if disclosed.Text != "legacy compatibility note; second note" {
+				t.Errorf("Disclosed.Text = %q, want both notes joined", disclosed.Text)
 			}
 		})
 	}

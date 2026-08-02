@@ -55,12 +55,20 @@ func mapStatusGroup(status artifact.Status) (StatusGroup, error) {
 // DraftsInProgress, the safe "not yet certified accepted" bucket, carrying
 // a Disclosure: an unproven entry must never silently enter the accepted
 // group (Task 6 brief's own ac).
+//
+// A PROVEN state with non-empty Result.Disclosures — the projector's
+// compatibility notes (a legacy `status: draft` landed and reported
+// accepted, a legacy terminal status honored from the field alone) —
+// carries those disclosures too (final fix wave I5): the projector spoke
+// them for a reason, and this seam stripping them silenced the
+// compatibility story on every directory surface. Distinct source id, so
+// a reader can tell "unproven" from "proven, with a compatibility note".
 func effectiveStatusGroup(ref string, r specstate.Result) (StatusGroup, *disclosure.Disclosure) {
 	switch r.State {
 	case specstate.AcceptedPendingBuild:
-		return StatusGroupAcceptedPendingBuild, nil
+		return StatusGroupAcceptedPendingBuild, provenStateDisclosure(ref, r)
 	case specstate.Superseded, specstate.Closed:
-		return StatusGroupTerminal, nil
+		return StatusGroupTerminal, provenStateDisclosure(ref, r)
 	default: // specstate.Unproven, and defensively specstate.Proposed
 		text := "specstate could not prove this entry's effective lifecycle state"
 		if len(r.Disclosures) > 0 {
@@ -69,6 +77,17 @@ func effectiveStatusGroup(ref string, r specstate.Result) (StatusGroup, *disclos
 		d := disclosure.New("refindex:unproven-spec-state", ref, text)
 		return StatusGroupDraftsInProgress, &d
 	}
+}
+
+// provenStateDisclosure carries a proven state's own compatibility
+// disclosures forward (nil when the projector disclosed nothing — the
+// ordinary clean-spec case, unchanged).
+func provenStateDisclosure(ref string, r specstate.Result) *disclosure.Disclosure {
+	if len(r.Disclosures) == 0 {
+		return nil
+	}
+	d := disclosure.New("refindex:spec-state-compatibility", ref, joinDisclosures(r.Disclosures))
+	return &d
 }
 
 // joinDisclosures renders specstate's own (already sorted, already

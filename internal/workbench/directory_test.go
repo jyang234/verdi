@@ -322,6 +322,41 @@ func TestRenderHome_ActiveZoneLegacyTerminal_BadgeAndBoardLink(t *testing.T) {
 	}
 }
 
+// TestRenderHome_ProvenTerminalEntry_CompatibilityNoteBesideBadge (final
+// fix wave I5): a PROVEN default-branch entry carrying the projector's
+// compatibility disclosure (refindex's spec-state-compatibility shape — a
+// legacy-terminal spec whose state was honored from the persisted field
+// alone) renders that disclosure BESIDE its badge and links, through the
+// same writeDefaultEntry path the unproven entry already uses — extended,
+// never forked.
+func TestRenderHome_ProvenTerminalEntry_CompatibilityNoteBesideBadge(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "legacy-closed-in-place", "feature", "closed", "")
+	d := disclosure.New("refindex:spec-state-compatibility", "spec/legacy-closed-in-place",
+		"specstate: legacy status: closed honored from the persisted field alone (compatibility reading)")
+	entries := []refindex.Entry{{
+		Ref:         "spec/legacy-closed-in-place",
+		Source:      refindex.SourceDefault,
+		StatusGroup: refindex.StatusGroupTerminal,
+		SpecStatus:  "closed",
+		Disclosed:   &d,
+		Zone:        refindex.ZoneActive,
+	}}
+	_, body := getHome(t, root, HomeDeps{Index: cannedIndex(entries, nil), Git: fakeHomeGit{}})
+
+	block := entryBlock(t, body, "legacy-closed-in-place")
+	for _, want := range []string{
+		`<span class="badge badge-closed">closed</span>`, // the proven badge…
+		`class="dir-disclosed"`,                          // …with the compatibility note beside it
+		"compatibility reading",
+		`href="/a/spec/legacy-closed-in-place"`, // full identity kept
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("proven terminal entry missing %q; got: %s", want, block)
+		}
+	}
+}
+
 // TestRenderHome_InReviewChip is ac-2's chip half: the branch the forge
 // reports an open MR for — and only that one — is chipped in review, and
 // the second source is disclosed on the page.

@@ -157,6 +157,42 @@ func TestWriteGlanceSection_UnprovenDefaultEntry_HonestPresentation(t *testing.T
 	}
 }
 
+// TestWriteGlanceSection_ProvenTerminalEntry_CompatibilityNote (final fix
+// wave I5): the glance sibling of the directory's proven-compatibility
+// render — a proven terminal entry's compatibility disclosure rides beside
+// its badge on the glance card too, through the same shared
+// writeGlanceDefaultEntry path the unproven entry already uses.
+func TestWriteGlanceSection_ProvenTerminalEntry_CompatibilityNote(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "legacy-closed-in-place", "feature", "closed", "")
+	d := disclosure.New("refindex:spec-state-compatibility", "spec/legacy-closed-in-place",
+		"specstate: legacy status: closed honored from the persisted field alone (compatibility reading)")
+	entries := []refindex.Entry{{
+		Ref:         "spec/legacy-closed-in-place",
+		Source:      refindex.SourceDefault,
+		StatusGroup: refindex.StatusGroupTerminal,
+		SpecStatus:  "closed",
+		Disclosed:   &d,
+		Zone:        refindex.ZoneActive,
+	}}
+	code, body := getHome(t, root, HomeDeps{Index: cannedIndex(entries, nil), Git: fakeHomeGit{}})
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", code, body)
+	}
+
+	glance := glanceSectionHTML(t, body)
+	block := glanceEntryBlock(t, glance, "legacy-closed-in-place")
+	for _, want := range []string{
+		`<span class="badge badge-closed">closed</span>`,
+		`class="dir-disclosed"`,
+		"compatibility reading",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("glance proven terminal entry missing %q; got: %s", want, block)
+		}
+	}
+}
+
 // TestGlanceBuckets_TotalPartition proves ADJ-36's total-partition reading
 // directly against refindex's closed, four-value StatusGroup vocabulary:
 // every one of the four values lands in EXACTLY one bucket — never zero,
