@@ -128,11 +128,32 @@ type workflowStep struct {
 }
 
 // workflowDoc is the top-level shape of a GitHub Actions workflow file, as
-// far as this package needs it.
+// far as this package needs it, plus Keys: the document's COMPLETE raw
+// top-level key set, sorted.
+//
+// Keys is the whitelist net one level ABOVE workflowJob.Keys, and it exists
+// because a clean job mapping and clean steps are still not enough: GitHub
+// offers the same family of bypasses a third time, at document scope, where
+// they apply to every job and every step at once. A workflow-level
+//
+//	env:
+//	  MAKEFLAGS: -i
+//
+// is the sharpest one: `-i` makes GNU make ignore every failed recipe and
+// exit 0, so `make verify` reports success over failing unit, race, fixture,
+// and e2e verdicts and the required context goes green over a red gate —
+// while every assertion about triggers, jobs, steps, and `run:` text stays
+// perfectly satisfied, because nothing about them changed. `defaults: run:
+// shell:`/`working-directory:` redirect what the gate commands execute,
+// `concurrency: cancel-in-progress:` can cancel the required context out of
+// existence mid-run, and `permissions:` widens the token every step holds.
+// Asserting the top-level key set is exactly {jobs, name, on} closes all of
+// those and every future sibling in one assertion.
 type workflowDoc struct {
 	Name string
 	On   workflowTriggers
 	Jobs map[string]workflowJob
+	Keys []string
 }
 
 // asMap normalizes a decoded YAML mapping value (from
@@ -252,6 +273,7 @@ func decodeWorkflow(t *testing.T, path string) workflowDoc {
 	}
 
 	var doc workflowDoc
+	doc.Keys = sortedKeys(top)
 	if name, ok := asStringVal(top["name"]); ok {
 		doc.Name = name
 	}
@@ -539,6 +561,42 @@ func TestMergeGateWorkflowExists(t *testing.T) {
 	path := mergeGatePath(verdiRepoRoot)
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("expected %s to exist (Task 8: the always-present PR gate): %v", path, err)
+	}
+}
+
+// TestMergeGateTopLevelKeysAreWhitelisted is the outermost of this file's
+// three whitelist nets (document → job → step). It proves merge-gate.yml
+// declares exactly `name:`, `on:`, and `jobs:` at top level and nothing else.
+//
+// A whitelist rather than a list of named negatives, for the same reason the
+// job- and step-level nets are: the top level is where a single added key
+// changes the behaviour of every job and every step at once, invisibly to
+// every other assertion in this file. The concrete case that motivated it: a
+// workflow-level
+//
+//	env:
+//	  MAKEFLAGS: -i
+//
+// makes GNU make ignore failed recipes and exit 0, so the `run: make verify`
+// step this file pins by exact text still runs exactly `make verify` — and
+// still succeeds while unit, race, fixture, and e2e verdicts fail beneath it.
+// The required context would go green over a red gate with the workflow's
+// triggers, job shape, step shape, and command text all still perfect.
+// `defaults:` (run shell/working-directory), `concurrency:` (a
+// cancel-in-progress rule can cancel the required context out of existence),
+// and `permissions:` are the other siblings this one assertion closes,
+// together with whatever GitHub adds next.
+//
+// Widening this set is a deliberate act that must be argued for right here.
+// A future considered addition — `permissions: contents: read`, narrowing the
+// job token, is the plausible one — is legitimate, but it must be added to
+// this whitelist consciously and under review, not discovered green.
+func TestMergeGateTopLevelKeysAreWhitelisted(t *testing.T) {
+	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
+
+	wantTopKeys := []string{"jobs", "name", "on"}
+	if !slices.Equal(doc.Keys, wantTopKeys) {
+		t.Errorf("merge-gate.yml: the document must declare exactly the top-level keys %v and nothing else, got %v (extra: %v) — a workflow-level `env:` (e.g. MAKEFLAGS=-i, which makes make ignore failed recipes and exit 0), `defaults:`, `concurrency:`, or `permissions:` can each make the required %q context report green over a failing gate, run something other than the gate, or vanish mid-run, with every other assertion in this file still satisfied", wantTopKeys, doc.Keys, keysOutside(doc.Keys, wantTopKeys), "merge-gate")
 	}
 }
 
