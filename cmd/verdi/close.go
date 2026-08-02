@@ -457,7 +457,19 @@ func closePrecondition(ctx context.Context, root string, spec *artifact.SpecFron
 	// projector just classified — n is a byte-shape question (which flip
 	// the archive move needs), never a second lifecycle decision (the
 	// verdict above already came from the projector alone).
-	switch n := len(closeAcceptedStatusLineRe.FindAll(content, -1)); {
+	//
+	// The count is scoped to the FRONTMATTER (artifact.FrontmatterRange, the
+	// one frontmatter seam): a status-SHAPED line in the markdown BODY —
+	// prose quoting the legacy field, an unfenced example — is body text,
+	// never this spec's status field, and must not steer a statusless
+	// (merge-accepted) spec onto the legacy-flip path, whose rewrite would
+	// then mutate that body line on an immutable, accepted artifact.
+	fmStart, fmEnd, err := artifact.FrontmatterRange(content)
+	if err != nil {
+		fmt.Fprintf(stderr, "close: %s: %v\n", relPath, err)
+		return 0, 2
+	}
+	switch n := len(closeAcceptedStatusLineRe.FindAll(content[fmStart:fmEnd], -1)); {
 	case n == 1:
 		return closureFlipLegacyStatus, 0
 	case n > 1:
@@ -1139,6 +1151,12 @@ func foldStory(ctx context.Context, root string, spec *artifact.SpecFrontmatter,
 // own predecessor flip — a raw, status-line-only ReplaceAll so the archived
 // spec.md differs from its active original on exactly that one line, keeping
 // VL-010's status-only archive-flip exception (D6-11) cleanly satisfiable.
+//
+// It is applied ONLY to a document's frontmatter bytes (both here and in
+// closePrecondition, through artifact.FrontmatterRange): the pattern is
+// deliberately line-shaped, so over a whole document it also matches BODY
+// prose that quotes the legacy field — text the archive step must neither
+// count as a status field nor ever rewrite.
 var closeAcceptedStatusLineRe = regexp.MustCompile(`(?m)^status:\s*"?accepted-pending-build"?\s*$`)
 
 // flipSpecStatusToClosed rewrites the active-zone spec.md's status line from
@@ -1157,12 +1175,26 @@ func flipSpecStatusToClosed(root, name string) error {
 	if err != nil {
 		return fmt.Errorf("close: reading %s to flip status to closed: %w", specPath, err)
 	}
-	if n := len(closeAcceptedStatusLineRe.FindAll(raw, -1)); n != 1 {
+	// Both the count and the rewrite are confined to the FRONTMATTER byte
+	// range: doc[:start] (the opening delimiter), the closing delimiter, and
+	// the whole body are spliced back byte-for-byte, so a status-SHAPED line
+	// in the body — prose quoting the legacy field — is never counted as a
+	// second status field and never rewritten.
+	fmStart, fmEnd, err := artifact.FrontmatterRange(raw)
+	if err != nil {
+		return fmt.Errorf("close: locating %s's frontmatter to flip status to closed: %w", specPath, err)
+	}
+	fm := raw[fmStart:fmEnd]
+	if n := len(closeAcceptedStatusLineRe.FindAll(fm, -1)); n != 1 {
 		// vocab:identity — frontmatter status-line machinery (field + enum value)
 		return fmt.Errorf("close: %s: expected exactly one status: accepted-pending-build line to flip to closed, found %d", specPath, n)
 	}
 	// vocab:identity — frontmatter status-line machinery (field + enum value)
-	newRaw := closeAcceptedStatusLineRe.ReplaceAll(raw, []byte("status: closed"))
+	newFm := closeAcceptedStatusLineRe.ReplaceAll(fm, []byte("status: closed"))
+	newRaw := make([]byte, 0, len(raw)-len(fm)+len(newFm))
+	newRaw = append(newRaw, raw[:fmStart]...)
+	newRaw = append(newRaw, newFm...)
+	newRaw = append(newRaw, raw[fmEnd:]...)
 	if err := os.WriteFile(specPath, newRaw, 0o644); err != nil {
 		return fmt.Errorf("close: writing %s after flipping status to closed: %w", specPath, err)
 	}

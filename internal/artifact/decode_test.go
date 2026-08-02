@@ -36,6 +36,65 @@ func TestSplitFrontmatter_Negative(t *testing.T) {
 	}
 }
 
+// TestFrontmatterRange_Happy proves the range is exactly SplitFrontmatter's
+// own frontmatter slice, and that splicing an edit through it round-trips
+// every other byte — delimiters, body, and trailing newline alike — for the
+// document shapes an in-place frontmatter edit actually meets (CRLF
+// delimiters, an empty frontmatter block, a body that itself carries a
+// frontmatter-shaped line, and no trailing newline at all).
+func TestFrontmatterRange_Happy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		doc  string
+	}{
+		{"ordinary document", "---\nid: spec/foo\nstatus: draft\n---\n# Body\n\ntext\n"},
+		{"body carries a frontmatter-shaped line", "---\nstatus: draft\n---\n# Body\n\nstatus: draft\n"},
+		{"empty frontmatter block", "---\n---\nbody\n"},
+		{"no trailing newline", "---\nid: spec/foo\n---\nbody"},
+		{"no body at all", "---\nid: spec/foo\n---\n"},
+		{"CRLF delimiters", "---\r\nid: spec/foo\r\n---\r\nbody\r\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := []byte(tc.doc)
+			start, end, err := FrontmatterRange(doc)
+			if err != nil {
+				t.Fatalf("FrontmatterRange: %v", err)
+			}
+			fm, _, err := SplitFrontmatter(doc)
+			if err != nil {
+				t.Fatalf("SplitFrontmatter: %v", err)
+			}
+			if string(doc[start:end]) != string(fm) {
+				t.Fatalf("doc[%d:%d] = %q, want the split frontmatter %q", start, end, doc[start:end], fm)
+			}
+			// The identity splice reproduces the document byte for byte.
+			spliced := string(doc[:start]) + string(doc[start:end]) + string(doc[end:])
+			if spliced != tc.doc {
+				t.Fatalf("identity splice = %q, want %q", spliced, tc.doc)
+			}
+		})
+	}
+}
+
+// TestFrontmatterRange_Negative proves the range fails closed on exactly the
+// documents SplitFrontmatter itself refuses — a caller can never splice on a
+// guessed offset.
+func TestFrontmatterRange_Negative(t *testing.T) {
+	cases := map[string]string{
+		"no leading delimiter": "id: spec/foo\n---\nbody\n",
+		"no closing delimiter": "---\nid: spec/foo\nbody with no close\n",
+		"empty document":       "",
+		"delimiter only":       "---",
+	}
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := FrontmatterRange([]byte(doc)); err == nil {
+				t.Fatalf("FrontmatterRange(%q): want error, got nil", doc)
+			}
+		})
+	}
+}
+
 // TestProbeFrozen_Happy proves the tolerant historical-content probe reads
 // the `frozen:` key through frontmatter DecodeStrict would REJECT — an
 // unknown key (schema growth: base-side content may carry fields the

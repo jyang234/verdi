@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"regexp"
@@ -34,9 +35,12 @@ import (
 // no exception at all.
 //
 // The remaining exception reuses one line-diff core (statusOnlyFlip):
-// exactly one changed line, that line a status line matching the expected
-// base pattern, its head counterpart matching the expected terminal
-// status.
+// exactly one changed line, that line INSIDE the frontmatter block on both
+// sides, matching the expected base pattern there, its head counterpart
+// matching the expected terminal status. The regexes below are line-shaped,
+// so the frontmatter requirement is load-bearing: without it a status-shaped
+// line in the markdown BODY would let an edit to prose pass as a legal
+// closure flip.
 // rootStorePrefix is the slash-path prefix of every artifact in the root
 // store's own .verdi/ tree. VL-010's diff sweep is scoped to it so a
 // whole-repo git diff never treats a nested/fixture store's frozen-stamped
@@ -232,9 +236,17 @@ func isStatusOnlyClosedArchiveFlip(ctx context.Context, root, diffBase, oldPath,
 // statusOnlyFlip is the shared core of VL-010's two status-only exceptions
 // (D-12 superseded, D6-11 closed): it compares baseContent and headContent
 // line by line and returns true only when precisely one line differs, that
-// line matches baseStatusRe on the base, and its head counterpart matches
-// headStatusRe. Everything else must be byte-identical — the flip is the sole
-// admissible content change on an otherwise-frozen spec.
+// line lies INSIDE the frontmatter block on both sides, it matches
+// baseStatusRe on the base, and its head counterpart matches headStatusRe.
+// Everything else must be byte-identical — the flip is the sole admissible
+// content change on an otherwise-frozen spec.
+//
+// The frontmatter requirement is what keeps the exception about the status
+// FIELD: the recognizers are line-shaped, so a status-shaped line in the
+// markdown BODY (prose quoting the legacy field, an unfenced example) would
+// otherwise let an edit to that prose pass as a legal closure flip — an
+// ordinary, illegal mutation of a frozen artifact wearing the exception's
+// clothes.
 func statusOnlyFlip(baseContent, headContent []byte, baseStatusRe, headStatusRe *regexp.Regexp) bool {
 	baseLines := strings.Split(string(baseContent), "\n")
 	headLines := strings.Split(string(headContent), "\n")
@@ -254,7 +266,29 @@ func statusOnlyFlip(baseContent, headContent []byte, baseStatusRe, headStatusRe 
 	if diffIdx == -1 {
 		return false
 	}
+	if !lineInFrontmatter(baseContent, diffIdx) || !lineInFrontmatter(headContent, diffIdx) {
+		return false
+	}
 	return baseStatusRe.MatchString(baseLines[diffIdx]) && headStatusRe.MatchString(headLines[diffIdx])
+}
+
+// lineInFrontmatter reports whether the zero-based line index i falls inside
+// doc's YAML frontmatter block — the lines BETWEEN the delimiters, both
+// delimiter lines themselves excluded. The block is located through the one
+// frontmatter seam (artifact.FrontmatterRange) rather than by re-deriving
+// the delimiter rule here.
+//
+// A document with no readable frontmatter block, and an empty block (the
+// delimiters adjacent), hold no such line at all: both read false, which is
+// the fail-closed answer for a rule deciding whether a mutation is excused.
+func lineInFrontmatter(doc []byte, i int) bool {
+	start, end, err := artifact.FrontmatterRange(doc)
+	if err != nil || end <= start {
+		return false
+	}
+	first := bytes.Count(doc[:start], []byte("\n"))           // the line after the opening delimiter
+	last := first + bytes.Count(doc[start:end], []byte("\n")) // inclusive: the line before the closing one
+	return i >= first && i <= last
 }
 
 // isActiveArchiveMove reports whether oldPath -> newPath is a spec

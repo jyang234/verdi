@@ -53,6 +53,42 @@ func SplitFrontmatter(doc []byte) (frontmatter, body []byte, err error) {
 	return fm, rest, nil
 }
 
+// FrontmatterRange returns the byte range [start, end) that
+// SplitFrontmatter's frontmatter result occupies INSIDE doc — the bytes
+// between the opening and closing "---" delimiter lines, the delimiters
+// themselves excluded.
+//
+// It exists for the callers that must read or edit the frontmatter IN PLACE
+// and leave everything else byte-identical: match/replace within
+// doc[start:end], then splice doc[:start] + edited + doc[end:], and the
+// delimiter lines, the body, and every trailing newline survive untouched. A
+// caller that instead re-JOINS SplitFrontmatter's two results has to
+// re-invent the delimiter bytes, which cannot round-trip a document whose
+// delimiters or final newline are not the canonical shape.
+//
+// SplitFrontmatter's errors are returned unchanged, and the range is
+// self-checked against SplitFrontmatter's own frontmatter bytes, so a caller
+// can never splice on an offset this seam did not agree with.
+func FrontmatterRange(doc []byte) (start, end int, err error) {
+	fm, _, err := SplitFrontmatter(doc)
+	if err != nil {
+		return 0, 0, err
+	}
+	nl := bytes.IndexByte(doc, '\n')
+	if nl < 0 {
+		// Unreachable through SplitFrontmatter (it found a CLOSING delimiter
+		// on a LATER line, so doc carries at least one newline) — kept as a
+		// fail-closed guard rather than an unchecked index.
+		return 0, 0, fmt.Errorf("artifact: internal error: frontmatter opening delimiter has no line ending")
+	}
+	start = nl + 1
+	end = start + len(fm)
+	if end > len(doc) || !bytes.Equal(doc[start:end], fm) {
+		return 0, 0, fmt.Errorf("artifact: internal error: frontmatter byte range [%d,%d) does not match the split frontmatter", start, end)
+	}
+	return start, end, nil
+}
+
 // DecodeStrict decodes YAML frontmatter bytes into out, enforcing:
 //
 //   - KnownFields(true): any key in the document that out's type does not

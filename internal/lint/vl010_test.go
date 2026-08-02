@@ -266,6 +266,143 @@ func TestVL010_ArchiveMoveFlipToNonClosedStatusStillFails(t *testing.T) {
 	}
 }
 
+// vl010BodyStatusLineBaseSpec is a frozen, accepted-pending-build spec whose
+// BODY quotes the legacy status field verbatim, unfenced, on a line of its
+// own — the exact byte shape acceptedPendingStatusLineRe matches. The
+// statusOnlyFlip exception must read that line as prose (it is outside the
+// frontmatter block), never as this spec's status field.
+const vl010BodyStatusLineBaseSpec = `---
+id: spec/vl-010-body-status-line
+kind: spec
+class: feature
+title: "VL-010: body status line"
+status: accepted-pending-build
+owners: [platform-team]
+story: jira:LOAN-0016
+acceptance_criteria:
+  - { id: ac-1, text: "placeholder", evidence: [static] }
+frozen: { at: 2026-05-14, commit: 78e3161594fb31fdad17f2ea8a96b52f33dbf0f3 }
+---
+# VL-010: body status line
+
+This paragraph quotes the legacy field verbatim, on a line of its own:
+
+status: accepted-pending-build
+
+which is prose about the field, never this spec's own status.
+`
+
+// TestStatusOnlyFlip_FrontmatterScoped is the shared core's own unit table
+// (both status-only exceptions route through statusOnlyFlip): the single
+// differing line qualifies ONLY when it lies inside the frontmatter block of
+// both sides. A status-SHAPED line in the BODY is prose — flipping it is an
+// ordinary, illegal frozen-file mutation, admitted by no exception.
+func TestStatusOnlyFlip_FrontmatterScoped(t *testing.T) {
+	const fmHead = "---\nid: spec/x\nstatus: accepted-pending-build\nowners: [platform-team]\n---\n"
+	const bodyWithStatus = "# X\n\nstatus: accepted-pending-build\n\nprose\n"
+
+	for _, tc := range []struct {
+		name string
+		base string
+		head string
+		want bool
+	}{
+		{
+			name: "frontmatter status flip qualifies",
+			base: fmHead + bodyWithStatus,
+			head: strings.Replace(fmHead, "status: accepted-pending-build", "status: closed", 1) + bodyWithStatus,
+			want: true,
+		},
+		{
+			name: "body status-shaped line flip does not qualify",
+			base: fmHead + bodyWithStatus,
+			head: fmHead + strings.Replace(bodyWithStatus, "status: accepted-pending-build", "status: closed", 1),
+			want: false,
+		},
+		{
+			name: "closing delimiter line is not inside the frontmatter",
+			base: "---\nid: spec/x\n---\nstatus: accepted-pending-build\n",
+			head: "---\nid: spec/x\n---\nstatus: closed\n",
+			want: false,
+		},
+		{
+			name: "no frontmatter block at all",
+			base: "status: accepted-pending-build\nbody\n",
+			head: "status: closed\nbody\n",
+			want: false,
+		},
+		{
+			name: "non-status frontmatter line does not qualify",
+			base: fmHead + bodyWithStatus,
+			head: strings.Replace(fmHead, "id: spec/x", "id: spec/y", 1) + bodyWithStatus,
+			want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := statusOnlyFlip([]byte(tc.base), []byte(tc.head), acceptedPendingStatusLineRe, closedStatusLineRe)
+			if got != tc.want {
+				t.Fatalf("statusOnlyFlip = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestVL010_ArchiveMoveBodyStatusLineFlipRefused is the integration-shaped
+// half: an active→archive move whose ONLY changed line is a status-shaped
+// line in the BODY (the frontmatter is byte-identical on both sides) is an
+// illegal mutation of a frozen spec — the D6-11 exception covers the
+// frontmatter status FIELD only. The table's first case pins the legitimate
+// flip against the same body noise, so the scoping cannot be satisfied by
+// simply refusing everything.
+func TestVL010_ArchiveMoveBodyStatusLineFlipRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mutate    func(string) string
+		wantVL010 bool
+	}{
+		{
+			name: "frontmatter flip with a status-shaped body line is still admitted",
+			mutate: func(s string) string {
+				return strings.Replace(s, "status: accepted-pending-build", "status: closed", 1)
+			},
+			wantVL010: false,
+		},
+		{
+			name: "body-only status flip is refused",
+			mutate: func(s string) string {
+				// The LAST occurrence is the body's quoted line; the
+				// frontmatter field stays exactly as it was.
+				i := strings.LastIndex(s, "status: accepted-pending-build")
+				return s[:i] + "status: closed" + s[i+len("status: accepted-pending-build"):]
+			},
+			wantVL010: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			beforeDir := adHocOverlayDir(t, ".verdi/specs/active/vl-010-body-status-line/spec.md", vl010BodyStatusLineBaseSpec)
+			repo := buildLintRepo(t, beforeDir)
+			beforeCommit := repo.Heads[len(repo.Heads)-1]
+
+			activePath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "vl-010-body-status-line", "spec.md")
+			archivePath := filepath.Join(repo.Dir, ".verdi", "specs", "archive", "vl-010-body-status-line", "spec.md")
+			mustRemove(t, activePath)
+			writeTestFile(t, archivePath, tc.mutate(vl010BodyStatusLineBaseSpec))
+			commitAll(t, repo.Dir, "archive move of vl-010-body-status-line")
+
+			findings := runLint(t, repo.Dir, Context{DiffBase: beforeCommit}, Options{})
+			var sawVL010 bool
+			for _, f := range findings {
+				if f.Rule == "VL-010" {
+					sawVL010 = true
+				}
+			}
+			if sawVL010 != tc.wantVL010 {
+				t.Fatalf("VL-010 fired = %v, want %v:\n%s", sawVL010, tc.wantVL010, findingsString(findings))
+			}
+		})
+	}
+}
+
 // vl010NestedProbeADR is a minimal frozen ADR used by
 // TestVL010_OnlyRootStoreArtifactsSwept to prove VL-010's sweep is scoped to
 // the root store's own .verdi/ tree: the SAME frozen-then-modified diff shape
