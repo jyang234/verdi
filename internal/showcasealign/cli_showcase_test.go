@@ -378,6 +378,14 @@ func TestCLIShowcaseCoverage(t *testing.T) {
 	})
 
 	t.Run("close", func(t *testing.T) {
+		// close's C1 pre-closure precondition resolves the target's
+		// Git-derived effective state, which needs a resolvable default
+		// branch — pinned here exactly as TestCLIShowcaseObligationAuthor/
+		// TestCLIShowcaseSpecState already pin it (a test-fixture-only
+		// compensation: provisionShowcaseStore's fixturegit reconstruction
+		// deliberately carries no origin remote; a real clone resolves this
+		// with no special configuration).
+		t.Setenv("CI_DEFAULT_BRANCH", "main")
 		root := provisionShowcaseStore(t)
 		stdout, stderr, code := runBinary(t, root, "close", "spec/borrower-update-api", "--force-local")
 		if code != 1 {
