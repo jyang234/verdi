@@ -123,6 +123,44 @@
 //     inversion above, that recognition now only WIDENS what gets
 //     flagged — a base selector like `x.Status` is caught regardless of
 //     whether `x`'s own type was ever recognized at all).
+//   - REGEX/BYTE-SCAN DECISIONS are invisible to the AST comparison
+//     scanner entirely: a production regexp or byte pattern matching the
+//     persisted status LINE (`status:\s*"?accepted-pending-build`, or a
+//     bare "status: closed" write literal) decides lifecycle-shaped
+//     behavior with no `.Status` selector and no comparison operator
+//     anywhere. This is the EXACT shape that hid final fix wave C1:
+//     close.go's closeAcceptedStatusLineRe required exactly one
+//     `status: accepted-pending-build` line and broke mid-mutation for
+//     every statusless (merge-accepted) spec — never once tripping this
+//     audit. TestStatusLineBytePatternAudit below is the narrow,
+//     byte-level ratchet for that class: it flags any NEW production
+//     string literal that is a status-line regex (contains the
+//     `status:\s` regex fragment) or a bare status-line byte fragment
+//     (the whole literal, trimmed, IS `status: <terminal>` for one of
+//     accepted-pending-build/closed/superseded), outside its own
+//     annotated allowlist. Prose that merely MENTIONS a status value
+//     (disclosure texts, refusal messages) matches neither rule, which
+//     is what keeps that gate crisp rather than noisy.
+//   - LOWERCASE FIELD NAMES: only a selector spelled exactly `.Status`
+//     is flaggable. A struct that carries the same value under a
+//     lowercase (unexported) or differently-named field (`s.status`,
+//     `s.rawState`) — or a YAML/JSON map lookup like m["status"] —
+//     never trips the selector rule; only the derivation tracking (an
+//     assignment FROM a flaggable expression) could catch it, and only
+//     within one function.
+//   - RANGE-OVER-LITERAL-SLICE COMPARANDS: the TARGET side resolves only
+//     a bare string literal or a same-file constant. A comparand that
+//     arrives through a range variable over a literal slice
+//     (`for _, s := range []string{"closed", "superseded"} { if
+//     x.Status == s {...} }`) resolves to an *ast.Ident with no const
+//     entry, so the comparison is never recorded even though the
+//     flaggable side matched.
+//   - FUNCTION-LITERAL BODIES are walked only as statements INSIDE a
+//     declared function's own body (ast.Inspect descends into a closure
+//     literal, but with the ENCLOSING function's env — a closure's own
+//     parameters are never seeded). A package-level function literal
+//     (`var handler = func(...) {...}`) is not a *ast.FuncDecl at all
+//     and is skipped entirely.
 package specalign
 
 import (
@@ -132,6 +170,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -770,6 +809,152 @@ func TestLifecycleDecisionSourceAudit(t *testing.T) {
 				loc = "func " + e.Func
 			}
 			t.Errorf("lifecycleDecisionAllowlist entry %s:%s no longer matches a raw decision (rationale: %q) — the allowlist is now stale here: remove the entry (this list must shrink, never silently drift)", e.File, loc, e.Rationale)
+		}
+	}
+}
+
+// statusLineRegexFragment and statusLineByteFragmentRe are
+// TestStatusLineBytePatternAudit's two flag rules (the file doc comment's
+// regex/byte-scan disclosed limit, ratcheted):
+//
+//   - a literal containing the `status:\s` REGEX fragment is a pattern
+//     built to match the persisted status line (close.go's
+//     closeAcceptedStatusLineRe, vl010.go's frozen-diff recognizers — the
+//     C1-hiding shape);
+//   - a literal that IS, whole and trimmed, a bare terminal status-line
+//     byte fragment (`status: closed` etc.) is a write/compare fragment
+//     (close.go's flip replacement).
+//
+// Prose that merely mentions a status value (disclosure texts, refusal
+// messages) contains a real space after "status:" and never consists of
+// the bare line alone, so it matches neither rule — that asymmetry is
+// what makes this a crisp gate instead of a noisy one.
+const statusLineRegexFragment = `status:\s`
+
+var statusLineByteFragmentRe = regexp.MustCompile(`^status:\s*"?(accepted-pending-build|closed|superseded)"?$`)
+
+// statusLineBytePatternAllowlist names every production file whose
+// status-line regex/byte-pattern literals are adjudicated legitimate.
+// FILE-scoped (the literals inside these files exist for exactly one
+// documented mechanism apiece); a stale entry is reported exactly like
+// the decision audit's own.
+var statusLineBytePatternAllowlist = map[string]string{
+	// The legacy archive flip, made CONDITIONAL and pre-decided by final
+	// fix wave C1: closeAcceptedStatusLineRe + its "status: closed"
+	// replacement run only for a spec closePrecondition already proved
+	// carries exactly one legacy accepted status line; a statusless spec
+	// never reaches them (pure rename). The one legitimate remaining
+	// writer of a status-line byte edit.
+	"cmd/verdi/close.go": "closeAcceptedStatusLineRe + the status: closed replacement — the legacy archive flip, conditional on closePrecondition's pre-mutation decision (C1)",
+	// VL-010's frozen-diff recognizers: the D6-11 status-only
+	// archive-flip exception's own base/head line patterns — the lint
+	// rule that POLICES status-line edits needs to recognize them.
+	"internal/lint/vl010.go": "acceptedPendingStatusLineRe/closedStatusLineRe — VL-010's own frozen-diff status-only-flip recognizers (D6-11)",
+	// The DIAGRAM-proposal accept ritual (class: proposal — a different
+	// kind's own two-value proposed->accepted enum, spec/proposal-artifact,
+	// NOT the feature/story lifecycle this migration governs): the
+	// proposed->accepted flip is that ritual's ratified mechanism, its
+	// status field still authored and persisted. Caught by the
+	// regex-fragment rule only because the rule is value-agnostic on
+	// purpose (a NEW feature/story pattern must not slip through by
+	// spelling a fifth value).
+	"cmd/verdi/acceptdiagram.go": "proposedStatusLineRe — the diagram-proposal accept ritual's own proposed status-line recognizer (spec/proposal-artifact; a persisted, non-feature/story enum)",
+}
+
+// statusLineBytePatternSkipDir mirrors lifecycleDecisionSkipDir's
+// fixtures exclusion and additionally skips cmd/e2eharness: the e2e
+// FIXTURE-provisioning harness legitimately writes whole spec.md
+// documents (fixture content, the same register as testdata/), and its
+// concatenated fixture literals would otherwise trip the bare-fragment
+// rule. internal/artifact and internal/specstate are NOT skipped here —
+// unlike the decision audit, a byte-pattern reintroduction there would
+// be just as wrong (neither carries one today).
+func statusLineBytePatternSkipDir(path string) bool {
+	switch filepath.Base(path) {
+	case "testdata", "node_modules", "e2eharness":
+		return true
+	}
+	return false
+}
+
+// TestStatusLineBytePatternAudit is the byte-level half of the ratchet
+// (final fix wave I7): zero unlisted production string literals that are
+// status-line regexes or bare terminal status-line byte fragments — the
+// class of lifecycle-shaped decision the AST scanner above is blind to
+// (its own doc comment's regex/byte-scan disclosed limit, and the exact
+// shape that hid C1).
+func TestStatusLineBytePatternAudit(t *testing.T) {
+	root := verdiRepoRoot
+
+	seen := map[string]bool{}
+	var unlisted []string
+
+	for _, tree := range []string{"cmd", "internal"} {
+		err := filepath.Walk(filepath.Join(root, tree), func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				if statusLineBytePatternSkipDir(path) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			src, rerr := os.ReadFile(path)
+			if rerr != nil {
+				return rerr
+			}
+			rel, rerr := filepath.Rel(root, path)
+			if rerr != nil {
+				return rerr
+			}
+			rel = filepath.ToSlash(rel)
+
+			fset := token.NewFileSet()
+			f, perr := parser.ParseFile(fset, rel, src, 0)
+			if perr != nil {
+				return perr
+			}
+			ast.Inspect(f, func(n ast.Node) bool {
+				bl, ok := n.(*ast.BasicLit)
+				if !ok || bl.Kind != token.STRING {
+					return true
+				}
+				lit, uerr := strconv.Unquote(bl.Value)
+				if uerr != nil {
+					return true
+				}
+				isRegexFragment := strings.Contains(lit, statusLineRegexFragment)
+				isByteFragment := statusLineByteFragmentRe.MatchString(strings.TrimSpace(lit))
+				if !isRegexFragment && !isByteFragment {
+					return true
+				}
+				if _, ok := statusLineBytePatternAllowlist[rel]; ok {
+					seen[rel] = true
+					return true
+				}
+				p := fset.Position(bl.Pos())
+				unlisted = append(unlisted, fmt.Sprintf("%s:%d: production status-line regex/byte-pattern literal %q — the C1-hiding shape the AST decision audit cannot see; route the decision through internal/specstate (or, for a genuinely adjudicated mechanism, add an annotated statusLineBytePatternAllowlist entry)", rel, p.Line, lit))
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walking %s: %v", tree, err)
+		}
+	}
+
+	sort.Strings(unlisted)
+	for _, msg := range unlisted {
+		t.Error(msg)
+	}
+
+	for file, rationale := range statusLineBytePatternAllowlist {
+		if !seen[file] {
+			t.Errorf("statusLineBytePatternAllowlist entry %s no longer matches any status-line byte-pattern literal (rationale: %q) — stale: remove it (this list must shrink, never silently drift)", file, rationale)
 		}
 	}
 }
