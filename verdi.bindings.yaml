@@ -1287,25 +1287,40 @@ bindings:
       # story, plan Task 13, ledger L-N8 as adjudicated at Task 8/re-attacked
       # at the §12 addendum). BUILT, same branch as the design/accept commits
       # (matching spec/judge-ergonomics' own precedent's eventual landed
-      # shape). ac-1 <- cmd/verdi/acceptobligation_test.go's
-      # TestRunAccept_ScaffoldsMissingObligations_Happy (missing stubs
-      # appear, stamped the captured pre-flip HEAD, land inside the accept
-      # commit's own diff alongside the status flip) plus
-      # TestAccept_ScaffoldingPrecedesLintGateInSource (the O-1 ordering
-      # fact itself, source-pinned) plus
-      # TestObligationSeamE2E_AcceptScaffoldsMissingObligations
-      # (built-binary); ac-2 <-
-      # TestRunAccept_SkipsExistingObligations_NeverOverwrites (a
+      # shape). Task 7 (docs/superpowers/specs/2026-08-01-merge-signals-spec-
+      # acceptance-design.md) retires accept's own mutation and relocates
+      # this seam's creation core to the pre-review `verdi obligation
+      # scaffold <story-ref>` command (fix round 1, this witness block
+      # updated in the same fix — see the phase report's fix-round-1
+      # addendum for the full invention-ledger accounting). ac-1 <-
+      # cmd/verdi/obligation_test.go's TestRunObligationScaffold_Happy
+      # (missing pairs appear, stamped the current HEAD's own commit/date)
+      # plus cmd/verdi/acceptobligation_test.go's TestScaffoldMissingObligations
+      # (the creation core's own table-driven unit cases) plus
+      # cmd/verdi/obligationseam_e2e_test.go's
+      # TestObligationSeamE2E_ScaffoldsMissingObligations (built-binary); the
+      # O-1 preFlipHead-before-lint-gate ordering fact
+      # (TestAccept_ScaffoldingPrecedesLintGateInSource) is retired along
+      # with accept's own lint gate — scaffolding now runs pre-review, on a
+      # design branch, with no in-ritual lint gate to order against at all;
+      # ac-2 <- TestRunObligationScaffold_NeverOverwritesAnAuthoredFile (a
       # pre-existing obligation's bytes survive untouched) plus
-      # TestRunAccept_MalformedExistingObligation_RefusesOperationally (a
-      # present-but-undecodable file at the convention path refuses accept
-      # operationally rather than being silently treated as covered or
-      # silently clobbered) plus TestScaffoldMissingObligations' own
-      # table-driven unit cases; ac-3 <-
-      # TestRunAccept_UnrelatedRefusal_UnlinksNewlyScaffoldedObligations
-      # (newly-created stubs unlinked, pre-existing files and HEAD
-      # untouched, a subsequent `obligation author` retry unblocked) plus
-      # TestUnlinkScaffoldedObligations' own unit cases; ac-4 <-
+      # TestScaffoldMissingObligations' own malformed/misfiled-path unit
+      # cases (a present-but-undecodable file at the convention path refuses
+      # rather than being silently treated as covered or silently
+      # clobbered); ac-3 <- NARROWED, flagged for the controller (fix round
+      # 1 finding 2): the retired accept-time backstop's transactional
+      # rollback (unlinkScaffoldedObligations — unlink newly-created stubs,
+      # restore a pristine tree, on ANY refusal after scaffolding began) has
+      # no successor in `verdi obligation scaffold`; a mid-loop failure now
+      # leaves whatever was already written on disk, witnessed by
+      # TestRunObligationScaffold_PartialFailureLeavesResidue (CLI level)
+      # and TestScaffoldMissingObligations' own "malformed existing file...
+      # reporting whatever was created first" case (function level). This
+      # ac's own BUILT status is left unchanged here pending the
+      # controller's own review of the phase report's proposed
+      # invention-ledger wording — not silently downgraded or silently kept
+      # as if the original guarantee still held; ac-4 <-
       # internal/workbench/obligationauthor_test.go's existing suite
       # (TestBoardSpec_ObligationGraduate and siblings) passing completely
       # unmodified after the renderer moved behind the shared

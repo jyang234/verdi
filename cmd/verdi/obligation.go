@@ -168,8 +168,7 @@ func runObligationVerb(args []string, stdout, stderr io.Writer) int {
 // checks the argument shape, resolves the store root, computes the
 // merge-base diff base the frozen check needs (mirroring how
 // internal/lint/context.go's own BuildContext is the CLI's one seam for
-// this — acceptlint.go's lintQuartetOrRefuse uses the identical call), and
-// delegates to runObligationAuthor.
+// this), and delegates to runObligationAuthor.
 func cmdObligationAuthor(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 3 {
 		fmt.Fprintln(stderr, "usage: verdi obligation author <story-ref> <ac-id> <kind>")
@@ -493,17 +492,36 @@ func runObligationScaffold(ctx context.Context, root, storyRefArg string, resolv
 // scaffolds a stub obligation for every declared (ac, kind) pair with no
 // decodable obligation of that kind yet at the EXACT convention path
 // (internal/evidence.ObligationKindAt — the same convention-path predicate
-// VL-020 itself applies, O-3b), stamping every stub frozen with the
-// CURRENT HEAD's own commit and committer date (resolved lazily, only once
-// there is actually something to write — never a pre-baked
-// acceptance-time stamp: proposal obligations are reviewable content, not
-// falsely frozen at a pre-merge commit) and owner (the caller passes
-// operatorOwner(), O-6). It never overwrites: a pair whose own convention
-// path already holds a decodable obligation of that kind is skipped
-// outright (O-3). created lists exactly the paths newly written this call,
-// in declaration order, for the caller to report — created is returned
-// even when err != nil, so a failure partway through scaffolding still
-// reports what was written so far.
+// VL-020 itself applies, O-3b), stamping every stub with the CURRENT
+// HEAD's own commit and committer date (resolved lazily, only once there
+// is actually something to write) and owner (the caller passes
+// operatorOwner(), O-6). Fix round 1 correction: the shared
+// evidence.RenderObligation seam always emits a `frozen: { at, commit }`
+// block — every obligation is "frozen" in the schema's existing,
+// unconditional sense (DC-1: "existence is the record", the same
+// convention `verdi obligation author` already uses; this task does not
+// touch that seam). What changed from the retired accept-time backstop is
+// WHICH commit the stamp names: never a pre-baked, not-yet-created
+// acceptance commit computed ahead of a status flip that no longer
+// happens, only the ordinary current-HEAD "created at" stamp — a proposal
+// obligation's stamp names when it was scaffolded, not a claim that the
+// content itself is immutable or reviewed. It never overwrites: a pair
+// whose own convention path already holds a decodable obligation of that
+// kind is skipped outright (O-3). created lists exactly the paths newly
+// written this call, in declaration order, for the caller to report —
+// created is returned even when err != nil, so a failure partway through
+// scaffolding still reports what was written so far. Fix round 1 finding
+// 2 (spec/obligation-seam ac-3's own narrowed guarantee): unlike the
+// retired accept-time backstop, a failure partway through this loop does
+// NOT roll back or unlink whatever was already written — the caller
+// reports it via the returned created slice, but the files themselves stay
+// on disk. See docs/superpowers/sdd/2026-08-01-merge-signaled-spec-
+// acceptance-implementation/task-7-report.md's fix-round-1 addendum for
+// the invention-ledger wording and the deliberate reasoning (this is a
+// pre-review, untracked-by-git working-tree write; the design branch
+// itself — git diff/checkout — is the safety net, exactly like `verdi
+// obligation author`'s own existing regenerate posture, never a bespoke
+// rollback mechanism duplicated for a second, weaker transaction).
 //
 // Coverage is keyed on the EXACT path .verdi/obligations/<spec>/<acID>--<kind>.md
 // (judged-coverage-predicate-forkind-keying), never decoded for_kind scanned

@@ -635,6 +635,57 @@ func TestRunObligationScaffold_UnprovenRefusesOperationally(t *testing.T) {
 	}
 }
 
+// TestRunObligationScaffold_PartialFailureLeavesResidue is spec/
+// obligation-seam ac-3's OWN characterization under Task 7's narrowed
+// guarantee (fix round 1 finding 2 — see the invention-ledger addendum in
+// the phase report): unlike the retired accept-time backstop
+// (unlinkScaffoldedObligations, deleted with accept's own mutation), a
+// mid-loop failure does NOT roll back or unlink whatever this command
+// already wrote before hitting it. widget-story declares two pairs
+// (ac-1/static, ac-2/behavioral, declaration order); ac-2's convention
+// path is occupied by a present-but-undecodable file, so scaffolding
+// fails on the SECOND pair, after ac-1's has already been written — ac-1's
+// scaffold must survive the failure on disk, exactly as
+// scaffoldMissingObligations' own unit test already proves at the
+// function level (TestScaffoldMissingObligations, acceptobligation_test.go)
+// — this is the CLI-level companion proving `runObligationScaffold` itself
+// performs no cleanup on top of that. The design branch (git diff/
+// checkout) is the safety net now, not this command — the same posture
+// `verdi obligation author`'s own regenerate case already has.
+func TestRunObligationScaffold_PartialFailureLeavesResidue(t *testing.T) {
+	repo := buildObligationSeamStoryRepo(t, map[string]string{
+		".verdi/obligations/widget-story/ac-2--behavioral.md": malformedAc2BehavioralMD,
+	})
+	ctx := context.Background()
+
+	var stdout, stderr bytes.Buffer
+	got := runObligationScaffold(ctx, repo.Dir, "spec/widget-story", proposedResolver, phase7Model(t), &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runObligationScaffold(malformed existing obligation at ac-2) = %d, want 2; stderr=%s", got, stderr.String())
+	}
+	if !contains(stderr.String(), "ac-2") {
+		t.Errorf("stderr = %q, want it to name ac-2", stderr.String())
+	}
+
+	// ac-1's pair, scaffolded before the ac-2 failure, is NOT rolled back —
+	// if a rollback guarantee is ever reintroduced, this assertion (and
+	// spec/obligation-seam ac-3's own binding) must be updated together,
+	// never silently.
+	if _, err := os.Stat(obligationPathFor(repo.Dir, "ac-1", "static")); err != nil {
+		t.Fatalf("ac-1's scaffold did not survive the ac-2 failure (err=%v) — the narrowed, disclosed posture is that this command performs no rollback", err)
+	}
+
+	// The malformed file at ac-2 itself is untouched — refused, never
+	// clobbered (unchanged from before this task).
+	got2, err := os.ReadFile(obligationPathFor(repo.Dir, "ac-2", "behavioral"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got2) != malformedAc2BehavioralMD {
+		t.Fatalf("the malformed pre-existing file was modified:\n--- got ---\n%s\n--- want (byte-identical) ---\n%s", got2, malformedAc2BehavioralMD)
+	}
+}
+
 func TestCmdObligationAuthor_UsageNegative(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if got := cmdObligationAuthor(nil, &stdout, &stderr); got != 2 {
