@@ -36,16 +36,19 @@
 //     signal successor-corpus proof can NEVER independently confirm
 //     story-level (rung-3) supersession, and supersede.go — the only
 //     writer of a legacy `status: superseded` story flip — is deleted by
-//     this same task. A story predecessor superseded by a story successor
-//     therefore now stays projected AcceptedPendingBuild forever: a real,
-//     disclosed gap this script proves honestly rather than papering over
-//     with an invented mechanism (BINDING per the task brief: "do NOT
-//     invent a new story-supersession mechanism"). Rung-4 (feature-class
-//     predecessor/successor) has no such gap — a feature CAN carry
-//     `supersession:`, so its derived-Superseded proof below is real and
-//     positive, exercised through the full CLI/build-branch workflow
-//     (supersedepredecessor_test.go proves the same derivation at a more
-//     unit-scoped level).
+//     this same task. The projector now records the one-signal supersedes
+//     link the successor DOES carry (final fix wave I4) and projects the
+//     story predecessor DISCLOSED-UNPROVEN — naming the claiming successor
+//     and the missing supersession proof — rather than either silently
+//     accepting it as still-buildable or inventing a mechanism to call it
+//     Superseded (BINDING per the task brief: "do NOT invent a new
+//     story-supersession mechanism"). Build start on such a predecessor
+//     exits 2 (cannot honestly decide the precondition). Rung-4
+//     (feature-class predecessor/successor) has no such gap — a feature
+//     CAN carry `supersession:`, so its derived-Superseded proof below is
+//     real and positive, exercised through the full CLI/build-branch
+//     workflow (supersedepredecessor_test.go proves the same derivation
+//     at a more unit-scoped level).
 //
 // A round-four class: feature spec is birds-eye and implementation-blind
 // (03 §The feature fold) and is never itself buildable — `verdi build
@@ -367,17 +370,37 @@ x
 	mergeIntoMain(t, ctx, repo.Dir, "design/stale-decline-story-v2")
 
 	predV1Result := resolveCandidate(t, ctx, repo.Dir, "stale-decline-story")
-	// I-40's disclosed gap (invention ledger, open owner question): a
+	// I-40's gap, now DISCLOSED at the projection (final fix wave I4): a
 	// story-class spec can never carry a `supersession:` block, so
 	// internal/specstate's two-signal successor-corpus proof can never
 	// independently confirm story-level supersession, and there is no
 	// more writer of a legacy `status: superseded` flip (supersede.go is
-	// deleted). The predecessor's Git-derived state therefore stays
-	// AcceptedPendingBuild even though a real, reviewed, merged successor
-	// exists — a genuine, adjudicated limitation this test proves
-	// honestly rather than inventing a new mechanism to paper over.
-	if predV1Result.State != specstate.AcceptedPendingBuild {
-		t.Fatalf("Resolve(stale-decline-story) after its successor merged = %+v, want AcceptedPendingBuild (I-40's disclosed gap: story-class supersession cannot be Git-derived)", predV1Result)
+	// deleted). The predecessor's Git-derived state is therefore UNPROVEN
+	// with a disclosure naming the one-signal successor and the missing
+	// proof — never silently AcceptedPendingBuild (a reviewed, merged
+	// successor's claim is not nothing), and never an invented Superseded
+	// (one signal is not proof). Three-valued honesty, proven here.
+	if predV1Result.State != specstate.Unproven {
+		t.Fatalf("Resolve(stale-decline-story) after its successor merged = %+v, want Unproven (I-40's gap is disclosed, never silent)", predV1Result)
+	}
+	wantDisclosed := false
+	for _, d := range predV1Result.Disclosures {
+		if strings.Contains(d, "stale-decline-story-v2") && strings.Contains(d, "supersession") {
+			wantDisclosed = true
+		}
+	}
+	if !wantDisclosed {
+		t.Fatalf("Resolve(stale-decline-story) disclosures = %v, want one naming the one-signal successor stale-decline-story-v2 and the missing supersession proof", predV1Result.Disclosures)
+	}
+	// Build start on the disclosed-unproven predecessor exits 2: it cannot
+	// honestly decide the acceptance precondition either way.
+	stdout.Reset()
+	stderr.Reset()
+	if got := runBuildStart(ctx, repo.Dir, "spec/stale-decline-story", projector, buildDeps, &stdout, &stderr); got != 2 {
+		t.Fatalf("build start (disclosed-unproven predecessor) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !contains(stderr.String(), "cannot be proven accepted") || !contains(stderr.String(), "stale-decline-story-v2") {
+		t.Fatalf("stderr = %q, want the unproven refusal carrying the projector's own successor-naming disclosure", stderr.String())
 	}
 	predV1, predV1Raw := readSpec(t, repo.Dir, "stale-decline-story")
 	if predV1.Status != "" && predV1.Status != "draft" {

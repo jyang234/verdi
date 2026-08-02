@@ -310,6 +310,161 @@ body
 		}
 	})
 
+	// Final fix wave I3: design §Authority names archive records as
+	// authority — a successor that has itself CLOSED (moved to
+	// specs/archive/) still supersedes its predecessor. Before this fix the
+	// corpus scan globbed specs/active/ only, so archiving a successor
+	// silently reverted its predecessor to AcceptedPendingBuild. The lsTree
+	// stub here is PREFIX-FAITHFUL (underPrefix, not onlyPath) so the scan's
+	// own requested prefix decides what it sees — exactly what makes this
+	// row RED against an active-only scan.
+	t.Run("active exact predecessor whose ONLY valid successor lives in the archive zone: superseded, exact", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+		predecessorPath := ".verdi/specs/active/old-feature/spec.md"
+		predecessorContent := []byte("---\nid: spec/old-feature\nkind: spec\nclass: feature\ntitle: Old Feature\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n---\nbody\n")
+		successorPath := ".verdi/specs/archive/new-feature/spec.md"
+		successorContent := validSuccessorSpec("new-feature", "old-feature")
+
+		p := newProjector(stubGit{
+			blobAt: exactBlobAt(predecessorPath, fakeOID),
+			show: func(ctx context.Context, dir, commit, path string) ([]byte, error) {
+				switch path {
+				case predecessorPath:
+					return predecessorContent, nil
+				case successorPath:
+					return successorContent, nil
+				default:
+					t.Fatalf("unexpected Show(%s)", path)
+					return nil, nil
+				}
+			},
+			fpbl:   exactLanding(predecessorPath, fakeOID, fakeLanding),
+			lsTree: underPrefix(predecessorPath, successorPath),
+		})
+
+		result, err := p.Resolve(ctx, repo.Dir, Candidate{Path: predecessorPath, Content: predecessorContent})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if result.State != Superseded || result.Relation != RelationExact {
+			t.Fatalf("Resolve = %+v, want Superseded/exact (archive-zone successors are authority — design §Authority)", result)
+		}
+		wantBaseline := &Baseline{Path: predecessorPath, Blob: fakeOID, LandingCommit: fakeLanding}
+		if result.Baseline == nil || *result.Baseline != *wantBaseline {
+			t.Fatalf("Resolve baseline = %+v, want %+v", result.Baseline, wantBaseline)
+		}
+	})
+
+	// Final fix wave I4: a successor naming this predecessor via a
+	// links: supersedes edge WITHOUT a validatable supersession: block (the
+	// story-class shape, which can never carry the block) used to be
+	// silently DISCARDED, projecting the predecessor AcceptedPendingBuild
+	// as though no supersession claim existed at all. The honest shape is
+	// disclosed-unproven: no invented mechanism (never Superseded from one
+	// signal), no silent acceptance — the disclosure names the successor
+	// and the missing proof.
+	t.Run("active exact predecessor named by a supersedes link whose successor carries no supersession block: unproven + disclosure naming the successor", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+		predecessorPath := ".verdi/specs/active/story-v1/spec.md"
+		predecessorContent := []byte("---\nid: spec/story-v1\nkind: spec\nclass: story\ntitle: Story\nowners: [platform]\nstory: jira:S-1\nproblem: { text: x, anchor: problem }\noutcome: { text: y, anchor: outcome }\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\nlinks:\n  - { type: implements, ref: \"spec/some-feature#ac-1\" }\n---\nbody\n")
+		successorPath := ".verdi/specs/active/story-v2/spec.md"
+		// A story-class successor: internal/artifact's validateStory rejects
+		// a supersession: block outright, so this shape can never carry the
+		// second signal.
+		successorContent := []byte("---\nid: spec/story-v2\nkind: spec\nclass: story\ntitle: Story\nowners: [platform]\nstory: jira:S-1\nproblem: { text: x, anchor: problem }\noutcome: { text: y, anchor: outcome }\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\nlinks:\n  - { type: implements, ref: \"spec/some-feature#ac-1\" }\n  - { type: supersedes, ref: \"spec/story-v1\" }\n---\nbody\n")
+
+		p := newProjector(stubGit{
+			blobAt: exactBlobAt(predecessorPath, fakeOID),
+			show: func(ctx context.Context, dir, commit, path string) ([]byte, error) {
+				switch path {
+				case predecessorPath:
+					return predecessorContent, nil
+				case successorPath:
+					return successorContent, nil
+				default:
+					t.Fatalf("unexpected Show(%s)", path)
+					return nil, nil
+				}
+			},
+			fpbl:   exactLanding(predecessorPath, fakeOID, fakeLanding),
+			lsTree: underPrefix(predecessorPath, successorPath),
+		})
+
+		result, err := p.Resolve(ctx, repo.Dir, Candidate{Path: predecessorPath, Content: predecessorContent})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if result.State != Unproven || result.Relation != RelationUnproven {
+			t.Fatalf("Resolve = %+v, want Unproven/unproven (one-signal supersession is disclosed, never silently accepted or silently superseded)", result)
+		}
+		if len(result.Disclosures) != 1 || !strings.Contains(result.Disclosures[0], successorPath) || !strings.Contains(result.Disclosures[0], "supersession") {
+			t.Fatalf("Resolve disclosures = %v, want exactly one naming the one-signal successor %s and the missing supersession proof", result.Disclosures, successorPath)
+		}
+
+		// The successor's own resolution is unaffected: nothing names IT as
+		// a predecessor, and its own one-signal edge outbound never taints
+		// its own verdict.
+		p2 := newProjector(stubGit{
+			blobAt: exactBlobAt(successorPath, fakeOID),
+			show: func(ctx context.Context, dir, commit, path string) ([]byte, error) {
+				switch path {
+				case predecessorPath:
+					return predecessorContent, nil
+				case successorPath:
+					return successorContent, nil
+				default:
+					t.Fatalf("unexpected Show(%s)", path)
+					return nil, nil
+				}
+			},
+			fpbl:   exactLanding(successorPath, fakeOID, fakeLanding),
+			lsTree: underPrefix(predecessorPath, successorPath),
+		})
+		succ, err := p2.Resolve(ctx, repo.Dir, Candidate{Path: successorPath, Content: successorContent})
+		if err != nil {
+			t.Fatalf("Resolve(successor): %v", err)
+		}
+		if succ.State != AcceptedPendingBuild {
+			t.Fatalf("Resolve(successor) = %+v, want AcceptedPendingBuild", succ)
+		}
+	})
+
+	// I4's own negative: an OBJECT-FRAGMENT supersedes edge (spec/x#object)
+	// is a decision-level override, never a whole-spec supersession claim —
+	// it must neither supersede nor un-prove the predecessor.
+	t.Run("active exact predecessor named only by a FRAGMENT supersedes edge with no supersession block: accepted-pending-build", func(t *testing.T) {
+		repo := buildResolvableRepo(t)
+		predecessorPath := ".verdi/specs/active/frag-pred/spec.md"
+		predecessorContent := []byte("---\nid: spec/frag-pred\nkind: spec\nclass: feature\ntitle: Frag Pred\nowners: [platform]\nacceptance_criteria:\n  - { id: ac-1, text: works, evidence: [static] }\n---\nbody\n")
+		successorPath := ".verdi/specs/active/frag-succ/spec.md"
+		successorContent := []byte("---\nid: spec/frag-succ\nkind: spec\nclass: feature\ntitle: Frag Succ\nowners: [platform]\nstatus: draft\nacceptance_criteria:\n  - { id: ac-1, text: corrected, evidence: [static] }\nlinks:\n  - { type: supersedes, ref: \"spec/frag-pred#ac-1\" }\n---\nbody\n")
+
+		p := newProjector(stubGit{
+			blobAt: exactBlobAt(predecessorPath, fakeOID),
+			show: func(ctx context.Context, dir, commit, path string) ([]byte, error) {
+				switch path {
+				case predecessorPath:
+					return predecessorContent, nil
+				case successorPath:
+					return successorContent, nil
+				default:
+					t.Fatalf("unexpected Show(%s)", path)
+					return nil, nil
+				}
+			},
+			fpbl:   exactLanding(predecessorPath, fakeOID, fakeLanding),
+			lsTree: underPrefix(predecessorPath, successorPath),
+		})
+
+		result, err := p.Resolve(ctx, repo.Dir, Candidate{Path: predecessorPath, Content: predecessorContent})
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if result.State != AcceptedPendingBuild || len(result.Disclosures) != 0 {
+			t.Fatalf("Resolve = %+v, want AcceptedPendingBuild with no disclosures (a fragment edge is a decision override, not a supersession claim)", result)
+		}
+	})
+
 	// fix-round-1 finding 1: an active-zone candidate whose exact bytes are
 	// landed but whose Git-derived successor proof finds NOTHING (no
 	// active-zone spec validly names it as a predecessor) must still read
@@ -873,5 +1028,21 @@ func exactLanding(path, oid, landing string) func(context.Context, string, strin
 func onlyPath(paths ...string) func(context.Context, string, string, string) ([]string, error) {
 	return func(ctx context.Context, dir, ref, prefix string) ([]string, error) {
 		return paths, nil
+	}
+}
+
+// underPrefix is onlyPath's PREFIX-FAITHFUL sibling: it answers each LsTree
+// call with only the paths under the requested prefix, exactly as the real
+// `git ls-tree -r -- <prefix>` does — load-bearing for the archive-zone
+// successor rows, where WHAT the scan asks for decides what it can see.
+func underPrefix(paths ...string) func(context.Context, string, string, string) ([]string, error) {
+	return func(ctx context.Context, dir, ref, prefix string) ([]string, error) {
+		var out []string
+		for _, p := range paths {
+			if strings.HasPrefix(p, prefix+"/") {
+				out = append(out, p)
+			}
+		}
+		return out, nil
 	}
 }

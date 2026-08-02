@@ -67,11 +67,14 @@ func newProjector(g gitReader) Projector {
 	return Projector{git: g}
 }
 
-// activeZonePrefix is the store location scanSuccessors scans for
-// potential successors — only an active-zone spec can supersede another
-// (01 §Directory layout; a superseded spec itself "stays in specs/active/",
-// internal/artifact/status.go).
-const activeZonePrefix = ".verdi/specs/active"
+// specZonesPrefix is the store location scanSuccessors scans for
+// potential successors: BOTH zones under .verdi/specs/, in one recursive
+// LsTree call. The archive zone is included deliberately (final fix wave
+// I3; design §Authority names archive records as authority): a successor
+// that has itself CLOSED — moved to specs/archive/ — still supersedes its
+// predecessor, and an active-only scan silently reverted such a
+// predecessor to AcceptedPendingBuild the moment its successor archived.
+const specZonesPrefix = ".verdi/specs"
 
 // candidatePathPattern derives a candidate's zone and bare spec name from
 // its path: group 1 is "active" or "archive", group 2 is the kebab-case
@@ -100,21 +103,32 @@ func parseCandidatePath(path string) (zone, string, error) {
 	return zoneActive, m[2], nil
 }
 
-// successorCorpus is the default-branch active-zone spec corpus, decoded
-// at most once per ResolveMany call, over EVERY active-zone spec.md path
-// with no exclusion at scan time (fix-round-1 finding 1: batch-wide
-// exclusion at scan time hid a landed successor whenever it happened to
-// also be one of the SAME call's own candidates, and silently dropped a
-// malformed candidate's own decode failure from ever becoming a witness
-// for any OTHER candidate). supersedesBy maps a predecessor spec's bare
-// name to every default-branch path that carries BOTH a links:
-// {type: supersedes} edge to that predecessor AND a validated
+// successorCorpus is the default-branch spec corpus — BOTH zones, see
+// specZonesPrefix — decoded at most once per ResolveMany call, over EVERY
+// spec.md path with no exclusion at scan time (fix-round-1 finding 1:
+// batch-wide exclusion at scan time hid a landed successor whenever it
+// happened to also be one of the SAME call's own candidates, and silently
+// dropped a malformed candidate's own decode failure from ever becoming a
+// witness for any OTHER candidate). supersedesBy maps a predecessor
+// spec's bare name to every default-branch path that carries BOTH a
+// links: {type: supersedes} edge to that predecessor AND a validated
 // supersession: block (the brief's two-signal requirement — this
 // package does not additionally cross-check the supersession block's
 // carried/amended/removed buckets against the predecessor's own object
 // ids; internal/artifact already validates the block's own shape at
 // decode time, and completeness against a specific predecessor's objects
 // is a lint-layer concern, not this package's).
+//
+// linkOnlyBy maps a predecessor spec's bare name to every default-branch
+// path that names it via a links: {type: supersedes} edge WITHOUT a
+// validatable supersession: block — the story-class shape, which can
+// never carry the block (internal/artifact's validateStory rejects it
+// outright). One signal is not proof, so such a claim never projects
+// Superseded; but discarding it entirely (the pre-fix behavior) silently
+// accepted a predecessor a reviewed, merged successor claims to replace.
+// resolveOne projects the predecessor Unproven with a disclosure naming
+// the successor and the missing proof (final fix wave I4) — three-valued
+// honesty, no invented mechanism.
 //
 // failures maps every corpus path that failed strict decode to a
 // human-readable witness message, keyed by path so a per-candidate lookup
@@ -126,6 +140,7 @@ func parseCandidatePath(path string) (zone, string, error) {
 // something else in the same batch).
 type successorCorpus struct {
 	supersedesBy map[string][]string
+	linkOnlyBy   map[string][]string
 	failures     map[string]string
 }
 
@@ -136,6 +151,21 @@ type successorCorpus struct {
 func (c *successorCorpus) supersessorsFor(candidatePath, candidateName string) []string {
 	var out []string
 	for _, p := range c.supersedesBy[candidateName] {
+		if p == candidatePath {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// linkOnlySupersessorsFor returns the sorted default-branch paths that
+// name candidateName as their predecessor via a supersedes link alone —
+// no validatable supersession: block — with the same self-exclusion
+// supersessorsFor applies.
+func (c *successorCorpus) linkOnlySupersessorsFor(candidatePath, candidateName string) []string {
+	var out []string
+	for _, p := range c.linkOnlyBy[candidateName] {
 		if p == candidatePath {
 			continue
 		}
@@ -160,17 +190,18 @@ func (c *successorCorpus) failuresExcluding(candidatePath string) []string {
 }
 
 // scanSuccessors reads and strict-decodes EVERY spec.md path under the
-// default branch's active zone, unconditionally — no candidate path is
-// excluded at scan time (fix-round-1 finding 1; see successorCorpus's doc
-// comment for why exclusion belongs at lookup time instead).
+// default branch's two spec zones (specZonesPrefix — active AND archive,
+// final fix wave I3), unconditionally — no candidate path is excluded at
+// scan time (fix-round-1 finding 1; see successorCorpus's doc comment for
+// why exclusion belongs at lookup time instead).
 func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branch) (*successorCorpus, error) {
-	paths, err := p.git.LsTree(ctx, root, branch.Ref, activeZonePrefix)
+	paths, err := p.git.LsTree(ctx, root, branch.Ref, specZonesPrefix)
 	if err != nil {
-		return nil, fmt.Errorf("specstate: scanning default-branch active specs: %w", err)
+		return nil, fmt.Errorf("specstate: scanning default-branch specs: %w", err)
 	}
 	sort.Strings(paths)
 
-	corpus := &successorCorpus{supersedesBy: map[string][]string{}, failures: map[string]string{}}
+	corpus := &successorCorpus{supersedesBy: map[string][]string{}, linkOnlyBy: map[string][]string{}, failures: map[string]string{}}
 	for _, path := range paths {
 		if !strings.HasSuffix(path, "/spec.md") {
 			continue // the corpus scan cares only about spec.md leaves
@@ -203,9 +234,6 @@ func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branc
 			corpus.failures[path] = fmt.Sprintf("default-branch spec %s failed to decode: %v", path, decodeErr)
 			continue
 		}
-		if fm.Supersession == nil {
-			continue // no validated supersession: entry — never a successor
-		}
 		for _, l := range fm.Links {
 			if l.Type != artifact.LinkSupersedes {
 				continue
@@ -214,12 +242,30 @@ func (p Projector) scanSuccessors(ctx context.Context, root string, branch Branc
 			if parseErr != nil || ref.Kind != artifact.KindSpec {
 				continue
 			}
-			corpus.supersedesBy[ref.Name] = append(corpus.supersedesBy[ref.Name], path)
+			if fm.Supersession != nil {
+				// The two-signal successor shape: a supersedes edge plus a
+				// validated supersession: block — real, positive proof.
+				corpus.supersedesBy[ref.Name] = append(corpus.supersedesBy[ref.Name], path)
+			} else if !ref.Fragment() {
+				// One WHOLE-SPEC signal only (the story-class shape, which
+				// can never carry the block): recorded, never discarded —
+				// the predecessor projects disclosed-unproven (fix wave
+				// I4). An OBJECT-FRAGMENT supersedes edge (spec/x#object)
+				// is excluded here on purpose: it is a decision-level
+				// override (03 §Challenging closed decisions' rung-2
+				// machinery), never a claim to replace the whole spec, so
+				// it neither proves nor un-proves the predecessor's own
+				// lifecycle state.
+				corpus.linkOnlyBy[ref.Name] = append(corpus.linkOnlyBy[ref.Name], path)
+			}
 		}
 	}
 
 	for name := range corpus.supersedesBy {
 		sort.Strings(corpus.supersedesBy[name])
+	}
+	for name := range corpus.linkOnlyBy {
+		sort.Strings(corpus.linkOnlyBy[name])
 	}
 	return corpus, nil
 }
@@ -411,6 +457,30 @@ func (p Projector) resolveOne(ctx context.Context, root string, branch Branch, c
 			Baseline:    baseline,
 			Disclosures: legacyTerminalStatusDisclosure(c.Path, legacy, state),
 		}, nil
+	}
+
+	// Final fix wave I4: a successor names this predecessor via a
+	// links: supersedes edge but carries no validatable supersession:
+	// block — the story-class shape, which can never carry the block, so
+	// the two-signal proof above can never confirm it. One signal is not
+	// proof (never Superseded — no invented mechanism), but a reviewed,
+	// merged successor's claim is not nothing either (never silent
+	// AcceptedPendingBuild): the predecessor projects disclosed-unproven,
+	// naming each claiming successor and the missing proof. Checked AFTER
+	// the legacy-terminal read above — an explicit persisted terminal
+	// status is a positive, self-contained statement that still wins —
+	// and BEFORE the scan-incompleteness fallback below (this is a more
+	// specific witness than "the scan could not complete").
+	if linkOnly := corpus.linkOnlySupersessorsFor(c.Path, name); len(linkOnly) > 0 {
+		disclosures := make([]string, 0, len(linkOnly))
+		for _, succ := range linkOnly {
+			disclosures = append(disclosures, fmt.Sprintf(
+				// vocab:identity — machinery diagnostic naming the frontmatter link/block fields and the lifecycle states involved
+				"specstate: %s is named as a predecessor by %s via a links: supersedes edge, but that successor carries no validatable supersession: block — supersession cannot be proven from Git alone; reported unproven with this disclosure, never silently accepted-pending-build",
+				c.Path, succ,
+			))
+		}
+		return Result{State: Unproven, Relation: RelationUnproven, Disclosures: disclosures}, nil
 	}
 
 	if failures := corpus.failuresExcluding(c.Path); len(failures) > 0 {
