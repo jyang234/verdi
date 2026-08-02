@@ -48,41 +48,6 @@ frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
 # Predecessor feature
 `
 
-// predFeatureClosedMD is deliberately left under specs/active/ (rather than
-// moved to specs/archive/, which VL-002 would otherwise require of a real
-// closed feature/story spec) so a fixture built from it directly exercises
-// specstate's legacy-terminal-status fallback (resolve.go's probeLegacyStatus
-// branch) rather than the separate archive-zone Closed path.
-const predFeatureClosedMD = `---
-id: spec/pred-feature
-kind: spec
-title: "Predecessor feature"
-owners: [platform-team]
-class: feature
-status: closed
-story: jira:LOAN-3001
-acceptance_criteria:
-  - { id: ac-1, text: "v1 obligation", evidence: [static] }
-frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
----
-# Predecessor feature
-`
-
-const predFeatureSupersededMD = `---
-id: spec/pred-feature
-kind: spec
-title: "Predecessor feature"
-owners: [platform-team]
-class: feature
-status: superseded
-story: jira:LOAN-3001
-acceptance_criteria:
-  - { id: ac-1, text: "v1 obligation", evidence: [static] }
-frozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
----
-# Predecessor feature
-`
-
 const succFeatureWholeSpecSupersedesMD = `---
 id: spec/succ-feature
 kind: spec

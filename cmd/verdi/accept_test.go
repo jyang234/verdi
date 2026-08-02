@@ -7,31 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 )
-
-// scaffoldAndDesign builds a fresh Phase 7 repo and runs design start on
-// it (jira:LOAN-1482, --name stale-decline), returning the repo and the
-// design branch's commit right after the scaffold.
-func scaffoldAndDesign(t *testing.T) (repo *fixturegit.Repo, preFlipHead string) {
-	t.Helper()
-	repo = buildPhase7Repo(t)
-	ctx := context.Background()
-	manifest := phase7Manifest(t)
-	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
-
-	var stdout, stderr bytes.Buffer
-	if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", "stale-decline", manifest, phase7Model(t), deps, &stdout, &stderr); got != 0 {
-		t.Fatalf("runDesignStart = %d, want 0; stderr=%s", got, stderr.String())
-	}
-	head, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
-	if err != nil {
-		t.Fatalf("RevParse(HEAD): %v", err)
-	}
-	return repo, head
-}
 
 // TestRunAccept_NonMutation is Step 1's own characterization (docs/
 // superpowers/specs/2026-08-01-merge-signals-spec-acceptance-design.md,

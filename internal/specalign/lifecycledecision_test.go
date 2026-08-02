@@ -171,6 +171,26 @@ const (
 	lifecycleFlagContainer
 )
 
+// TestLifecycleFlagNone_IsTheZeroValue pins lifecycleFlagNone's own
+// contract (the doc comment above it): every unrecognized identifier in
+// the classifier's per-function env map reads back as lifecycleFlagNone
+// purely through Go's map zero-value semantics (env[name] on a missing
+// key) — the code never spells the identifier out at a call site, so
+// nothing else in this file exercises it directly. Fix round 1 (unrelated
+// to this file's own diff — golangci-lint's `unused` flags any symbol not
+// otherwise referenced, and this repo's policy is "unused code is
+// deleted, not silenced"): this test is the reference, proving the
+// zero-value contract rather than merely asserting it in prose.
+func TestLifecycleFlagNone_IsTheZeroValue(t *testing.T) {
+	var env map[string]lifecycleFlag
+	if got := env["unrecognized"]; got != lifecycleFlagNone {
+		t.Fatalf("env[missing] = %v, want lifecycleFlagNone (%v) — the classifier's own fail-closed default", got, lifecycleFlagNone)
+	}
+	if lifecycleFlagNone == lifecycleFlagStatus || lifecycleFlagNone == lifecycleFlagContainer {
+		t.Fatalf("lifecycleFlagNone (%v) must be distinct from every recognized flag (status=%v, container=%v)", lifecycleFlagNone, lifecycleFlagStatus, lifecycleFlagContainer)
+	}
+}
+
 // lifecycleViolation is one raw feature/story lifecycle-status decision
 // site: a comparison or switch case, at its own source line and enclosing
 // function, naming one of lifecycleStatusLiterals (bare or const-
@@ -574,15 +594,13 @@ var lifecycleDecisionAllowlist = []lifecycleAllowEntry{
 	// independently verifies the disposition text is still present.
 	{File: "internal/residue/patternb.go", Func: "archiveSpecClosedAt", Rationale: "archiveSpecClosedAt: raw status: closed read preserved deliberately for malformed-archive hard-error detection; disposition recorded in the function's own doc comment"},
 
-	// cmd/verdi/blastradius.go computeBlastRadius: the rung-4 quorum
-	// label's own display filter — "affected in-flight or closed stories"
-	// governs only which AC-2 cascade rows get PRINTED under the
-	// two-code-owner label; it blocks nothing (the file's own doc
-	// comment: "this file computes and PRINTS the quorum label only;
-	// nothing here blocks acceptance"). Adjudicated deferred at Task 6c's
-	// own re-review rather than migrated in this pass — display-scoped.
-	// FUNCTION-SCOPED (fix round 1 finding 3's uniform rule).
-	{File: "cmd/verdi/blastradius.go", Func: "computeBlastRadius", Rationale: "rung-4 quorum label display filter only (never blocks acceptance); adjudicated deferred, display-scoped"},
+	// cmd/verdi/blastradius.go computeBlastRadius: this entry's own raw
+	// decision is gone from the source — Fix round 1 (Task 7, docs/
+	// superpowers/specs/2026-08-01-merge-signals-spec-acceptance-design.md)
+	// deletes blastradius.go outright (golangci-lint's `unused`: its sole
+	// caller, accept.go's own retired ritual, no longer calls it, and no
+	// other production caller exists). Removed here in the same fix as the
+	// deletion, never left dangling.
 
 	// internal/refindex/status.go mapStatusGroup: COMPONENT-class status
 	// logic, not a feature/story decision — Task 6a narrowed this
