@@ -44,6 +44,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -65,18 +67,42 @@ type workflowTriggers struct {
 }
 
 // triggerFilter models the branches/paths narrowing a single trigger can
-// carry.
+// carry, plus Keys: the trigger body's COMPLETE raw key set, sorted.
+//
+// Keys is the whitelist net. Branches/Paths are two named ways to narrow a
+// trigger, but GitHub offers many more (`types:`, `paths-ignore:`,
+// `branches-ignore:`, `tags:`, `tags-ignore:`) and every one of them can
+// make a required check absent on some PR shape. Rather than growing one
+// negative assertion per narrowing keyword — a list that is only ever as
+// complete as the last person to read GitHub's docs — the callers below
+// assert Keys is EMPTY, which closes all of them plus anything GitHub adds
+// later, in one assertion. Keys is nil for the bare `pull_request:` form
+// (no body at all) and empty for the explicit `pull_request: {}` form; both
+// mean "the trigger fires, nothing narrows it".
 type triggerFilter struct {
 	Branches []string
 	Paths    []string
+	Keys     []string
 }
 
 // workflowJob is the subset of a job's fields this file asserts on: whether
 // it declares a `name:` override (job.Name != "" means the reported check
-// context would be that override, not the job key) and its step list.
+// context would be that override, not the job key), its step list, and
+// Keys: the job mapping's COMPLETE raw key set, sorted.
+//
+// Keys is the whitelist net, for the same reason triggerFilter.Keys is.
+// A required status check can be made absent, skipped, renamed, or
+// non-blocking by any of `name:` (renames the context), `if:` (a skipped
+// job does not satisfy a required context), `strategy: matrix:` (renames
+// it to "merge-gate (…)"), a job-level `uses:` (reusable workflow —
+// renames it to "merge-gate / <inner-job>"), and `continue-on-error:` (the
+// context reports green over a failing gate). Asserting the key set is
+// exactly {"runs-on", "steps"} closes all of those, and every future
+// sibling of them, at once.
 type workflowJob struct {
 	Name  string
 	Steps []workflowStep
+	Keys  []string
 }
 
 // workflowStep models one step of a job: either an `uses:` action reference
@@ -134,6 +160,19 @@ func normalizeKey(k interface{}) string {
 		return "off"
 	}
 	return fmt.Sprintf("%v", k)
+}
+
+// sortedKeys returns m's keys in sorted order — the raw key set a
+// whitelist assertion compares against. Sorted so both the comparison and
+// any failure message are deterministic regardless of Go's map iteration
+// order.
+func sortedKeys(m map[string]interface{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // asSlice normalizes a decoded YAML sequence value into []interface{}, or
@@ -228,9 +267,11 @@ func decodeTriggers(v interface{}) workflowTriggers {
 // decodeTriggerFilter handles all three shapes a trigger body can take: a
 // bare `pull_request:` with nothing under it (v is Go nil), the explicit
 // empty-mapping form `pull_request: {}` (v is an empty map), and a real
-// filter body (`branches:`/`paths:` lists) — all but the last decode to a
-// zero-value triggerFilter, which is exactly "the trigger fired, no filter
-// narrows it".
+// filter body (`branches:`/`paths:`/`types:`/… ) — the first two decode to
+// a zero-value triggerFilter, which is exactly "the trigger fired, no
+// filter narrows it". Keys carries the body's complete raw key set so a
+// caller can assert emptiness rather than enumerating narrowing keywords
+// one at a time (see triggerFilter's doc comment).
 func decodeTriggerFilter(v interface{}) triggerFilter {
 	m, ok := asMap(v)
 	if !ok {
@@ -239,6 +280,7 @@ func decodeTriggerFilter(v interface{}) triggerFilter {
 	return triggerFilter{
 		Branches: asStringSlice(m["branches"]),
 		Paths:    asStringSlice(m["paths"]),
+		Keys:     sortedKeys(m),
 	}
 }
 
@@ -260,6 +302,7 @@ func decodeJob(v interface{}) workflowJob {
 		return workflowJob{}
 	}
 	var job workflowJob
+	job.Keys = sortedKeys(m)
 	if name, ok := asStringVal(m["name"]); ok {
 		job.Name = name
 	}
@@ -322,8 +365,108 @@ func findRunStep(steps []workflowStep, substr string) *workflowStep {
 	return nil
 }
 
+// findCacheStep returns the first actions/cache step whose `with: path:`
+// mentions pathSubstr (e.g. "golangci-lint"), or nil if none matches. The
+// path is what disambiguates one cache step from another; matching on
+// `uses:` alone would pick whichever cache step happens to come first.
+func findCacheStep(steps []workflowStep, pathSubstr string) *workflowStep {
+	for i := range steps {
+		if !strings.HasPrefix(steps[i].Uses, "actions/cache@") {
+			continue
+		}
+		if strings.Contains(steps[i].With["path"], pathSubstr) {
+			return &steps[i]
+		}
+	}
+	return nil
+}
+
+// golangciPinRE extracts the Makefile's golangci-lint pin. The Makefile
+// spells it `GOLANGCI_LINT_VERSION ?= v2.5.0` (a conditional assignment);
+// the pattern also accepts a plain `=` so a future switch to an
+// unconditional assignment does not silently turn this gate off.
+var golangciPinRE = regexp.MustCompile(`(?m)^GOLANGCI_LINT_VERSION[ \t]*\??=[ \t]*(\S+)[ \t]*$`)
+
+// makefileGolangciPin reads the real Makefile (not a fixture) and returns
+// the value of GOLANGCI_LINT_VERSION.
+func makefileGolangciPin(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(verdiRepoRoot, "Makefile")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	m := golangciPinRE.FindSubmatch(raw)
+	if m == nil {
+		t.Fatalf("%s: no GOLANGCI_LINT_VERSION assignment found (pattern %q) — if the variable was renamed, this lockstep gate must be renamed with it, not deleted", path, golangciPinRE)
+	}
+	return string(m[1])
+}
+
 func mergeGatePath(root string) string {
 	return filepath.Join(root, ".github", "workflows", "merge-gate.yml")
+}
+
+func workflowPath(root, file string) string {
+	return filepath.Join(root, ".github", "workflows", file)
+}
+
+// TestGolangciLintPinIsLockstepWithMakefile closes the drift the Makefile's
+// own head comment and verify.yml's head comment both warn about in prose
+// and neither enforces: `make verify`'s lint step runs whatever
+// golangci-lint the workflow installed, so if the Makefile's pin is bumped
+// and the workflows are not, CI silently lints with the OLD linter while
+// every other test stays green. The Makefile is read as the single source
+// of truth and both the install step's `@<version>` AND the cache key's
+// `<version>` are asserted against it, in both workflows that carry the
+// pattern.
+//
+// verify.yml is asserted here but never modified by this task — it uses the
+// identical cache/install step pair, so covering it costs one table row.
+func TestGolangciLintPinIsLockstepWithMakefile(t *testing.T) {
+	pin := makefileGolangciPin(t)
+
+	// The plan's stated pin, asserted literally so a bump cannot happen by
+	// accident anywhere. A DELIBERATE Makefile bump updates this literal
+	// too — that is the point: the bump becomes one visible, reviewed edit
+	// here instead of silent divergence across three files.
+	if want := "v2.5.0"; pin != want {
+		t.Errorf("Makefile GOLANGCI_LINT_VERSION = %q, want %q (the plan's stated pin); if this bump is deliberate, update this literal in the same commit", pin, want)
+	}
+
+	tests := []struct {
+		name string
+		file string
+		job  string
+	}{
+		{"merge-gate.yml", "merge-gate.yml", "merge-gate"},
+		{"verify.yml", "verify.yml", "verify"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := decodeWorkflow(t, workflowPath(verdiRepoRoot, tt.file))
+			job, ok := doc.Jobs[tt.job]
+			if !ok {
+				t.Fatalf("%s: no %q job found", tt.name, tt.job)
+			}
+
+			install := findRunStep(job.Steps, "go install github.com/golangci/golangci-lint")
+			if install == nil {
+				t.Fatalf("%s: no run step installing golangci-lint found", tt.name)
+			}
+			if !strings.Contains(install.Run, "@"+pin) {
+				t.Errorf("%s: golangci-lint install step does not pin @%s (the Makefile's GOLANGCI_LINT_VERSION), got run: %q", tt.name, pin, install.Run)
+			}
+
+			cache := findCacheStep(job.Steps, "golangci-lint")
+			if cache == nil {
+				t.Fatalf("%s: no actions/cache step caching golangci-lint found", tt.name)
+			}
+			if key := cache.With["key"]; !strings.Contains(key, pin) {
+				t.Errorf("%s: golangci-lint cache key %q does not carry the Makefile's pin %s — a stale key would restore the wrong linter binary and make the install step a no-op", tt.name, key, pin)
+			}
+		})
+	}
 }
 
 // TestMergeGateWorkflowExists is the first, most basic red-phase assertion:
@@ -336,11 +479,18 @@ func TestMergeGateWorkflowExists(t *testing.T) {
 }
 
 // TestMergeGateTriggersOnEveryPullRequest proves the workflow triggers on
-// pull_request with NO paths filter and NO branches filter — the whole
-// point of Task 8's design: a path- or branch-filtered required check can
-// never report on a PR outside its filter (spec-gate.yml's own former
-// comment named this exact deadlock), so merge-gate.yml must be
-// unconditional.
+// pull_request with NOTHING narrowing it — the whole point of Task 8's
+// design: a path-, branch-, or type-filtered required check can never
+// report on a PR outside its filter (spec-gate.yml's own former comment
+// named this exact deadlock), so merge-gate.yml must be unconditional.
+//
+// Two layers, on purpose. The targeted paths/branches assertions come
+// first because they name the specific regression in their failure message
+// (they are the two filters the brief called out). The trigger-body key-set
+// assertion after them is the COMPLETENESS NET: it is a whitelist ("no keys
+// at all"), so it also closes `types:`, `paths-ignore:`, `branches-ignore:`,
+// `tags:`/`tags-ignore:`, and any future narrowing keyword GitHub invents —
+// none of which the targeted checks would ever see.
 func TestMergeGateTriggersOnEveryPullRequest(t *testing.T) {
 	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
 
@@ -353,6 +503,9 @@ func TestMergeGateTriggersOnEveryPullRequest(t *testing.T) {
 	if len(doc.On.PullRequest.Branches) != 0 {
 		t.Errorf("merge-gate.yml: pull_request trigger must have NO branches filter, got %v", doc.On.PullRequest.Branches)
 	}
+	if keys := doc.On.PullRequest.Keys; len(keys) != 0 {
+		t.Errorf("merge-gate.yml: the pull_request trigger body must be EMPTY — a bare `pull_request:` or `pull_request: {}` — so nothing can narrow when the required context reports; found key(s) %v", keys)
+	}
 }
 
 // TestMergeGateSingleUnnamedJob proves the workflow declares exactly one
@@ -361,6 +514,18 @@ func TestMergeGateTriggersOnEveryPullRequest(t *testing.T) {
 // context as exactly "merge-gate" (job key, no override), matching
 // verify.yml's own established workflow-name/job-key pattern (`name:
 // verify` + job key `verify`).
+//
+// Same two layers as the trigger test. The `name:`-override check is the
+// targeted one (it names the exact regression in its message); the job
+// key-set assertion after it is the COMPLETENESS NET. Because it is a
+// whitelist — the job may declare `runs-on` and `steps` and nothing else —
+// it closes, in one assertion, every other way a required context can be
+// made absent, skipped, renamed, or non-blocking: `if:` (a skipped job
+// never satisfies a required context), `strategy: matrix:` (context becomes
+// "merge-gate (…)"), a job-level `uses:` (context becomes
+// "merge-gate / <inner-job>"), `continue-on-error:` (green over a failing
+// gate), plus `container:`/`needs:`/`environment:` and any future sibling.
+// Widening this set is a deliberate act that must be argued for here.
 func TestMergeGateSingleUnnamedJob(t *testing.T) {
 	doc := decodeWorkflow(t, mergeGatePath(verdiRepoRoot))
 
@@ -373,6 +538,10 @@ func TestMergeGateSingleUnnamedJob(t *testing.T) {
 	}
 	if job.Name != "" {
 		t.Errorf("merge-gate.yml: job %q must not declare a `name:` override (it would change the reported check context away from the job key), got %q", "merge-gate", job.Name)
+	}
+	wantJobKeys := []string{"runs-on", "steps"}
+	if !slices.Equal(job.Keys, wantJobKeys) {
+		t.Errorf("merge-gate.yml: job %q must declare exactly the keys %v and nothing else (any of name/if/strategy/uses/continue-on-error would make the required %q context absent, skipped, renamed, or non-blocking), got %v", "merge-gate", wantJobKeys, "merge-gate", job.Keys)
 	}
 }
 
@@ -427,13 +596,19 @@ func TestMergeGateStepsProvenSequence(t *testing.T) {
 		}
 	})
 
-	t.Run("golangci-lint pinned to v2.5.0", func(t *testing.T) {
+	// The pin's VALUE is proven against the Makefile (the single source of
+	// truth) by TestGolangciLintPinIsLockstepWithMakefile, which also holds
+	// the one literal "v2.5.0" assertion; this subtest stays targeted at the
+	// step sequence — that an install step exists here at all and carries the
+	// pin.
+	t.Run("golangci-lint pinned to the Makefile's version", func(t *testing.T) {
 		step := findRunStep(steps, "golangci-lint")
 		if step == nil {
 			t.Fatalf("no run step mentioning golangci-lint found")
 		}
-		if !strings.Contains(step.Run, "@v2.5.0") {
-			t.Errorf("golangci-lint install step does not pin @v2.5.0, got run: %q", step.Run)
+		pin := makefileGolangciPin(t)
+		if !strings.Contains(step.Run, "@"+pin) {
+			t.Errorf("golangci-lint install step does not pin @%s, got run: %q", pin, step.Run)
 		}
 	})
 
@@ -477,8 +652,8 @@ func TestOldWorkflowsNoLongerDeclarePullRequest(t *testing.T) {
 		name string
 		path string
 	}{
-		{"verify.yml", filepath.Join(verdiRepoRoot, ".github", "workflows", "verify.yml")},
-		{"spec-gate.yml", filepath.Join(verdiRepoRoot, ".github", "workflows", "spec-gate.yml")},
+		{"verify.yml", workflowPath(verdiRepoRoot, "verify.yml")},
+		{"spec-gate.yml", workflowPath(verdiRepoRoot, "spec-gate.yml")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

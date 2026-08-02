@@ -1,9 +1,14 @@
 # spec-gate (Phase 4, spec-only vs code CI differentiation; owner
-# request mirroring the round-4 two-tier gate): the FAST push-side evidence
-# check for spec/doc-only changes. verify.yml is path-filtered to code
-# paths only, so a push that touches only `.verdi/specs/**`, `docs/**`, or
-# a bare `.md` file never triggers it — this workflow covers exactly that
-# case instead, so no push is ever silently uncovered. It intentionally
+# request mirroring the round-4 two-tier gate): the FAST push-side check
+# for spec/doc-only changes. It produces no evidence bundle and uploads no
+# artifact — evidence production is verify.yml's duty alone; this workflow
+# only checks. verify.yml is path-filtered to code paths only, so a push
+# that touches only `.verdi/specs/**`, `docs/**`, or a bare `.md` file
+# never triggers it — this workflow covers exactly that case instead, so a
+# spec/doc-only push still gets a check rather than none. (That is all the
+# two path filters guarantee between them: a push touching neither filter
+# set — say `examples/**` or `LICENSE` alone — triggers neither workflow.)
+# It intentionally
 # runs a light check only (build + `verdi lint` + `make spec-align`), never
 # the full `make verify` (no unit tests, no e2e) — that's the whole point
 # of the split: spec pushes gate on lint/readiness, code pushes pay the
