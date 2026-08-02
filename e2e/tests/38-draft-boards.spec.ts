@@ -133,11 +133,15 @@ test("two draft boards in two tabs: edits are isolated and the serving checkout 
   await tabB.close();
 });
 
-// AC-3: the mode law unchanged — the SAME spec renders as the sealed
-// read-only record at its unprefixed (serving checkout) address and as an
-// authoring wall at its design-branch /b/ address, both reachable in one
-// session, neither toggling the other.
-test("the same spec is sealed unprefixed and authoring under /b/, simultaneously", async ({
+// AC-3, as amended by final fix wave I6: modes are decided per instance
+// in one session, neither address toggling the other — but a DRAFT
+// EDITION whose bytes diverge from the spec's landed ACCEPTED revision is
+// a modified accepted revision (VL-010 refuses that diff at merge), so
+// its /b/ address now renders READ-ONLY with a notice naming the
+// divergence, never an editable authoring wall. Authoring is reserved for
+// a NEW proposal (Proposed/RelationNew — the shape every other test in
+// this file drives).
+test("the same spec is sealed unprefixed and read-only-with-divergence-notice under /b/", async ({
   page,
 }) => {
   await page.goto(boardPath(SHOWCASE.DB_SAME_SPEC));
@@ -147,10 +151,14 @@ test("the same spec is sealed unprefixed and authoring under /b/, simultaneously
   // No authoring affordances on the sealed record.
   await expect(page.getByRole("button", { name: "Add sticky" })).toHaveCount(0);
 
+  // The /b/ address renders the BRANCH's own content (the draft edition's
+  // bytes), read-only, with the divergence disclosed in the chrome (I6).
   await page.goto(branchBoardPath(SHOWCASE.DB_SAME_SPEC_BRANCH, SHOWCASE.DB_SAME_SPEC));
-  await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
+  await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "readonly");
   await expect(page.getByTestId("placard-outcome")).toContainText(SHOWCASE.DB_SAME_SPEC_DRAFT_SNIPPET);
-  await expect(page.getByRole("button", { name: "Add sticky" })).toBeVisible();
+  await expect(page.locator("body")).toContainText("diverge");
+  await expect(page.locator("body")).toContainText("read-only");
+  await expect(page.getByRole("button", { name: "Add sticky" })).toHaveCount(0);
 
   // Back at the unprefixed address: still the sealed record — two
   // simultaneous truths of one spec, not a toggle.

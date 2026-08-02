@@ -596,10 +596,13 @@ func TestBoardSpec_PinActionsAreAuthoringOnly(t *testing.T) {
 	root := newBoardFixture(t)
 	// On the default branch the same draft renders read-only (05
 	// §Workbench: authoring is keyed to a design branch) — the mode every
-	// new write affordance must 403 in.
+	// new write affordance must 403 in. The draft is dropped UNCOMMITTED
+	// into main's working tree (the fixture's committed draft lives only
+	// on the design branch — I6's RelationNew authoring shape).
 	if err := gitx.Checkout(context.Background(), root, "main"); err != nil {
 		t.Fatal(err)
 	}
+	writeWorkingTreeSpec(t, root, boardFixtureName, boardFixtureSpec)
 	h := NewHandler(root)
 	for action, body := range map[string]string{
 		"pin":          `{"ref":"adr/0007-retry-budget"}`,

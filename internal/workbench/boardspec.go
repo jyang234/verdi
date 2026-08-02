@@ -254,18 +254,24 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 
 	// Mode is keyed by EFFECTIVE state plus branch state, never by a
 	// persisted status: field (a feature/story may omit one entirely):
-	// a PROPOSED spec on a design branch is the live authoring wall;
+	// a NEW PROPOSED spec on a design branch is the live authoring wall;
 	// everything else fails closed to the sealed read-only document —
 	// accepted-pending-build (exact on default), superseded, closed, and
 	// unproven alike (an unprovable state is never editable; its
 	// disclosures surface as board notices below rather than silence).
+	// Relation==RelationNew is load-bearing (final fix wave I6): a
+	// DIVERGED candidate also resolves Proposed, but its bytes are a
+	// modified ACCEPTED revision — a frozen legacy spec hand-edited in the
+	// working tree — which VL-010 refuses at merge; opening an editable
+	// authoring wall over it invites edits no merge can legally accept, so
+	// it renders read-only with a divergence notice instead (below).
 	mode := modeReadOnly
 	switch {
 	case underReview:
 		// A spec with an open spec-MR: the board is a mirror of the MR
 		// (05 §Workbench "Review").
 		mode = modeReview
-	case st.State == specstate.Proposed && git.Branch != "" && git.Branch != git.DefaultBranch:
+	case st.State == specstate.Proposed && st.Relation == specstate.RelationNew && git.Branch != "" && git.Branch != git.DefaultBranch:
 		mode = modeAuthoring
 	}
 	if mode != modeReview {
@@ -281,6 +287,14 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// the board chrome — never silently swallowed (three-valued honesty:
 	// unproven is disclosed, not dressed as either mode's certainty).
 	proj.Notices = append(proj.Notices, st.Disclosures...)
+	// A diverged candidate's read-only render names WHY it is not the
+	// authoring wall (I6): the working tree holds a modified accepted
+	// revision, which VL-010 refuses — silence here would read as an
+	// inexplicably sealed board.
+	if st.State == specstate.Proposed && st.Relation == specstate.RelationDiverged {
+		proj.Notices = append(proj.Notices, fmt.Sprintf(
+			"spec/%s's working-tree bytes diverge from the accepted revision on the default branch — a modified accepted revision (VL-010 refuses it at merge); the board renders read-only. Start a new proposal (a successor spec) instead of editing the accepted revision in place", name))
+	}
 	// Display vocabulary (spec/vocabulary-surfaces ac-2): resolved-model
 	// enrichment on the I/O layer, exactly like attachObligations below —
 	// the pure projector stays model-free.

@@ -392,10 +392,16 @@ func TestBranchBoard_TwoBranches_EditIsolation(t *testing.T) {
 	assertServingCheckoutClean(t, root)
 }
 
-// TestBranchBoard_ModeLawPerInstance is ac-3's Go-level witness: the SAME
-// spec renders sealed read-only at its unprefixed (serving checkout)
-// address and as an authoring wall at its design-branch /b/ address, in
-// the same handler, with no new mode value anywhere.
+// TestBranchBoard_ModeLawPerInstance is ac-3's Go-level witness, as
+// amended by final fix wave I6: modes are decided PER INSTANCE in the one
+// handler, with no new mode value anywhere. The landed (frozen, accepted)
+// spec renders sealed read-only at its unprefixed address; its DRAFT
+// EDITION at the /b/ address — diverged bytes over the accepted revision,
+// the exact diff VL-010 refuses at merge — now ALSO renders read-only,
+// with a notice naming the divergence (I6: authoring requires
+// Proposed/RelationNew; a modified accepted revision is never an
+// authoring wall). The authoring half of the mode law is carried by
+// draft-a, a genuinely NEW proposal on the same branch.
 func TestBranchBoard_ModeLawPerInstance(t *testing.T) {
 	root := newBranchBoardFixture(t)
 	h := NewHandler(root)
@@ -411,21 +417,36 @@ func TestBranchBoard_ModeLawPerInstance(t *testing.T) {
 		t.Error("unprefixed render did not come from the serving checkout's tree")
 	}
 
-	authoring := bGet(t, h, "/b/design%2Ftwo-a/board/spec/landed-spec")
+	// The draft edition over the accepted revision: read-only, rendered
+	// from the design branch's own tree, with the divergence disclosed (I6).
+	diverged := bGet(t, h, "/b/design%2Ftwo-a/board/spec/landed-spec")
+	if diverged.Code != http.StatusOK {
+		t.Fatalf("prefixed landed-spec = %d\n%s", diverged.Code, diverged.Body.String())
+	}
+	if !strings.Contains(diverged.Body.String(), `data-board-mode="readonly"`) {
+		t.Error("draft edition over the accepted revision did not render read-only (I6: a modified accepted revision is never authorable)")
+	}
+	if !strings.Contains(diverged.Body.String(), "draft edition outcome text") {
+		t.Error("prefixed render did not come from the design branch's tree")
+	}
+	if !strings.Contains(diverged.Body.String(), "diverge") {
+		t.Error("diverged draft edition's read-only render carries no divergence notice")
+	}
+
+	// The authoring half of the mode law: a NEW proposal on the same
+	// branch is the live authoring wall, in the same handler.
+	authoring := bGet(t, h, "/b/design%2Ftwo-a/board/spec/draft-a")
 	if authoring.Code != http.StatusOK {
-		t.Fatalf("prefixed landed-spec = %d\n%s", authoring.Code, authoring.Body.String())
+		t.Fatalf("prefixed draft-a = %d\n%s", authoring.Code, authoring.Body.String())
 	}
 	if !strings.Contains(authoring.Body.String(), `data-board-mode="authoring"`) {
-		t.Error("draft edition at its /b/ address did not render authoring")
-	}
-	if !strings.Contains(authoring.Body.String(), "draft edition outcome text") {
-		t.Error("prefixed render did not come from the design branch's tree")
+		t.Error("the new proposal at its /b/ address did not render authoring")
 	}
 
 	// Both remain reachable in the same session — neither changed the other.
 	sealedAgain := bGet(t, h, "/board/spec/landed-spec")
 	if sealedAgain.Code != http.StatusOK || !strings.Contains(sealedAgain.Body.String(), `data-board-mode="readonly"`) {
-		t.Error("unprefixed sealed render changed after opening the /b/ authoring wall")
+		t.Error("unprefixed sealed render changed after opening the /b/ boards")
 	}
 
 	assertServingCheckoutClean(t, root)
