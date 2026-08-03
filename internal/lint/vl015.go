@@ -226,7 +226,9 @@ func readPredecessorManifestAt(in *RunInput, d *Document, predRef, predRelPath s
 // real git always self-proves its own landing once a terminal state is
 // reached, so an incomplete Baseline alongside a proven State is a shape
 // only a test fake can force — checked and failed closed anyway, never
-// assumed impossible). Anything else — a proposed (new or diverged)
+// assumed impossible); and that Baseline.Path is the predecessor's OWN
+// path, since a baseline for any other path is no witness for the bytes
+// this rule then reads. Anything else — a proposed (new or diverged)
 // predecessor, an unproven result, or an operational Resolve/ReadFile
 // failure — fails VL-015 closed with a finding naming the observed
 // state/relation and carrying every specstate.Disclosures entry verbatim
@@ -255,6 +257,23 @@ func resolveStatuslessPredecessorManifest(in *RunInput, d *Document, predRef str
 		return nil, &Finding{Rule: "VL-015", Path: d.RelPath, Message: statuslessBaselineMessage(predRef, "carries an incomplete accepted-baseline identity (path/blob/landing commit required)", result)}
 	}
 
+	// The baseline is only a witness FOR THIS PREDECESSOR if it is a
+	// baseline OF this predecessor's own path: the manifest is read at
+	// pred.RelPath, so a baseline proving some other spec's landing would
+	// silently authorize reading pred.RelPath at a commit nothing proved it
+	// landed in. Resolve is asked about Candidate{Path: pred.RelPath} and
+	// so always answers about that path — which is exactly why this is
+	// checked rather than assumed: an identity the rule depends on is
+	// proven here, not left to the resolver's good behavior.
+	if result.Baseline.Path != pred.RelPath {
+		return nil, &Finding{Rule: "VL-015", Path: d.RelPath, Message: statuslessBaselineMessage(predRef, fmt.Sprintf(
+			"resolved an accepted baseline for a DIFFERENT spec path (baseline path %s, predecessor path %s) — the manifest must be read at the predecessor's own path",
+			result.Baseline.Path, pred.RelPath), result)}
+	}
+
+	// pred.RelPath, not result.Baseline.Path: they are now PROVEN equal by
+	// the assertion above, and pred.RelPath reads as what it is — the
+	// document whose manifest this rule is checking.
 	return readPredecessorManifestAt(in, d, predRef, pred.RelPath, predecessorManifestSource{
 		commit: result.Baseline.LandingCommit,
 		label:  "its Git-derived accepted baseline's landing commit",
@@ -267,8 +286,17 @@ func resolveStatuslessPredecessorManifest(in *RunInput, d *Document, predRef str
 // condition (why), then appends every specstate.Disclosures entry verbatim
 // (joined "; ") when non-empty — the failure names the missing witness
 // specstate itself already produced, rather than re-deriving a vaguer one.
+//
+// A zero-value Relation renders as "unknown" rather than as an empty
+// "(relation )": specstate always sets one, so this is a fake-reachable
+// shape only, but a finding a human reads must never be ragged about what
+// it did and did not observe.
 func statuslessBaselineMessage(predRef, why string, result specstate.Result) string {
-	msg := fmt.Sprintf("predecessor %s has no frozen stamp and its Git-derived state is %s (relation %s), %s", predRef, result.State, result.Relation, why)
+	relation := string(result.Relation)
+	if relation == "" {
+		relation = "unknown"
+	}
+	msg := fmt.Sprintf("predecessor %s has no frozen stamp and its Git-derived state is %s (relation %s), %s", predRef, result.State, relation, why)
 	if len(result.Disclosures) > 0 {
 		msg += ": " + strings.Join(result.Disclosures, "; ")
 	}
