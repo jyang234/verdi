@@ -137,7 +137,7 @@ decisions:
     text: "the kernel owns implementation only: it does not own the lifecycle-wide governance contract, human-record kinds, profile-conditioned ceremony requirements, experiment measurement trust classes, context channel classification, forge transport, or specification lifecycle-state derivation, each of which stays with its already-named owning authority"
     anchor: dc-25
   - id: dc-26
-    text: "policy exemptions have one canonical artifact and one storage home — the Context Integrity constitution store's policy-exemption artifact; this feature owns the lifecycle-wide requirements governing every exemption — the AC-4 accountability kernel, escalation thresholds, expiry and review conditions, and profile-conditioned approval ceremony — and introduces no second exemption artifact kind, schema, or directory; its audit rollups and journey projections consume the canonical Context Integrity record"
+    text: "policy exemptions have one canonical artifact and one storage home — the Context Integrity constitution store's policy-exemption artifact; this feature owns the lifecycle-wide accountability requirements governing every exemption — the AC-4 accountability kernel and its escalation thresholds — while authorship, approval ceremony, separation-of-duties, and expiry or review conditions remain Context Integrity's dc-8 requirements, which this feature's audit rollups and journey projections consume; no second exemption artifact kind, schema, or directory is introduced by this feature"
     anchor: dc-26
 constraints:
   - id: co-1
@@ -730,17 +730,22 @@ wearing an infrastructure name.
 
 ## DC-26
 
-Exemption-record storage was the execution-workspace/store-layout plan's
-P-2 prerequisite (handle L-2b): its committed-path table carries Context
+Exemption-record storage was the execution-workspace/store-layout
+authority plan's P-2 prerequisite (handle L-2b;
+`docs/superpowers/plans/2026-08-03-execution-workspace-store-layout-authority.md`,
+owner-merged via PR #269): its committed-path table carries Context
 Integrity's exemption artifacts and this feature's AC-4 exemption records
 as two units approaching one concept — a two-units-one-path hazard. This
-decision settles it as one home: the exemption a person authors,
-approves, audits, and escalates under this feature's AC-4 requirements is
-the same Context Integrity artifact its policy machinery stores and
-enforces — never a parallel record of this feature's own. The DC-16
-custody split applies unchanged: requirements here, storage and
-enforcement in Context Integrity, with the committed path admitted
-through the ratified store-layout amendment flow rather than named here.
+decision settles it as one home: the exemption a person authors under
+Context Integrity's carried dc-8 ceremony — affected spec owners author,
+policy owners approve, under the declared separation-of-duties mode, with
+an expiry or review condition — is the same artifact this feature's AC-4
+kernel binds and its rollups audit, never a parallel record of this
+feature's own. The DC-17 subordination pattern applies to ceremony:
+dc-8's authoring and approval requirements stay where they are declared,
+this feature adds accountability and escalation around them, and the
+committed path is admitted through the ratified store-layout amendment
+flow rather than named here.
 
 ## CO-1
 

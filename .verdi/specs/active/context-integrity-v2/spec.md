@@ -119,7 +119,7 @@ decisions:
     text: "policy storage, inheritance, effective-policy resolution, and policy identity and digest are owned exclusively here: feature-specific governance configuration — including AI-assisted design assistance policy and comparative-experiment policy — is expressed as typed feature-specific payloads inside this single policy-authority system, and no feature-local fallback, competing hierarchy, or second policy interpretation is permitted"
     anchor: dc-23
   - id: dc-24
-    text: "the policy-exemption artifact's single home is this feature's constitution store: this feature owns its artifact schema, storage location, identity, digest, and effective-policy enforcement, while Guided Lifecycle and Governance owns the lifecycle-wide accountability, escalation, and ceremony requirements the artifact must satisfy; no feature may introduce a second exemption artifact kind or directory, and the committed storage path is admitted through the ratified verdi-store-layout amendment flow"
+    text: "the policy-exemption artifact's single home is this feature's constitution store: this feature owns its artifact schema, storage, identity, digest, and effective-policy enforcement, while Guided Lifecycle and Governance owns the lifecycle-wide accountability, escalation, and ceremony requirements the artifact must satisfy; no feature may introduce a second exemption artifact kind or directory, and the committed storage path is admitted through the ratified verdi-store-layout amendment flow"
     anchor: dc-24
 constraints:
   - id: co-1
