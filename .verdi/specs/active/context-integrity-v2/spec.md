@@ -118,6 +118,9 @@ decisions:
   - id: dc-23
     text: "policy storage, inheritance, effective-policy resolution, and policy identity and digest are owned exclusively here: feature-specific governance configuration — including AI-assisted design assistance policy and comparative-experiment policy — is expressed as typed feature-specific payloads inside this single policy-authority system, and no feature-local fallback, competing hierarchy, or second policy interpretation is permitted"
     anchor: dc-23
+  - id: dc-24
+    text: "the policy-exemption artifact's single home is this feature's constitution store: this feature owns its artifact schema, storage location, identity, digest, and effective-policy enforcement, while Guided Lifecycle and Governance owns the lifecycle-wide accountability, escalation, and ceremony requirements the artifact must satisfy; no feature may introduce a second exemption artifact kind or directory, and the committed storage path is admitted through the ratified verdi-store-layout amendment flow"
+    anchor: dc-24
 constraints:
   - id: co-1
     text: "every verdict preserves Verdi's three-valued honesty: proven, violated with witnesses, or explicitly disclosed as unproven; missing judge output, absent evidence, unknown scope, opaque context, or failed isolation is never a pass"
@@ -142,7 +145,7 @@ supersession:
   amended: []
   amended_advisory: []
   removed: []
-  added: [dc-20, dc-21, dc-22, dc-23]
+  added: [dc-20, dc-21, dc-22, dc-23, dc-24]
 ---
 # Context Integrity and Constitutional Execution (v2)
 
@@ -751,6 +754,19 @@ policy-authority system, under its one narrow-only inheritance semantic
 reintroduce the drift-capable duplication the audit's CX-5 row witnessed;
 none is permitted, and the context compiler classifies feature policy the
 same way it classifies every other constitution artifact.
+
+## DC-24
+
+The recording half of the P-2 exemption-home decision (handle L-2b;
+Guided Lifecycle and Governance DC-26 is the requirements half): one
+artifact, one home, this feature's constitution store. The exemption
+artifact already carries this feature's immutable kernel — identity,
+authority, scope, lifecycle, ownership, provenance (dc-3, dc-8); what P-2
+adds is exclusivity. Guided Lifecycle and Governance's
+accountable-human-records machinery consumes and audits this artifact
+rather than minting a sibling kind, and the committed storage path stays
+with the ratified verdi-store-layout amendment flow, not with either
+feature spec.
 
 ## CO-1
 

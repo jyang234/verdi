@@ -136,6 +136,9 @@ decisions:
   - id: dc-25
     text: "the kernel owns implementation only: it does not own the lifecycle-wide governance contract, human-record kinds, profile-conditioned ceremony requirements, experiment measurement trust classes, context channel classification, forge transport, or specification lifecycle-state derivation, each of which stays with its already-named owning authority"
     anchor: dc-25
+  - id: dc-26
+    text: "policy exemptions have one canonical artifact and one storage home — the Context Integrity constitution store's policy-exemption artifact; this feature owns the lifecycle-wide requirements governing every exemption — the AC-4 accountability kernel, escalation thresholds, expiry and review conditions, and profile-conditioned approval ceremony — and introduces no second exemption artifact kind, schema, or directory; its audit rollups and journey projections consume the canonical Context Integrity record"
+    anchor: dc-26
 constraints:
   - id: co-1
     text: "every journey, governance, readiness, recovery, and metric output preserves Verdi's proven, violated-with-witness, or disclosed-as-unproven honesty; missing forge state, identity, context verdicts, or mutable-zone data is never a silent pass"
@@ -163,7 +166,7 @@ supersession:
   amended: []
   amended_advisory: []
   removed: []
-  added: [dc-16, dc-17, dc-18, dc-19, dc-20, dc-21, dc-22, dc-23, dc-24, dc-25]
+  added: [dc-16, dc-17, dc-18, dc-19, dc-20, dc-21, dc-22, dc-23, dc-24, dc-25, dc-26]
 ---
 # Guided Lifecycle and Governance (v2)
 
@@ -724,6 +727,20 @@ forge transport stays with its existing component, and lifecycle-state
 derivation stays with the shared merge-signaled resolver. An
 implementation kernel that owned any of these would be a second authority
 wearing an infrastructure name.
+
+## DC-26
+
+Exemption-record storage was the execution-workspace/store-layout plan's
+P-2 prerequisite (handle L-2b): its committed-path table carries Context
+Integrity's exemption artifacts and this feature's AC-4 exemption records
+as two units approaching one concept — a two-units-one-path hazard. This
+decision settles it as one home: the exemption a person authors,
+approves, audits, and escalates under this feature's AC-4 requirements is
+the same Context Integrity artifact its policy machinery stores and
+enforces — never a parallel record of this feature's own. The DC-16
+custody split applies unchanged: requirements here, storage and
+enforcement in Context Integrity, with the committed path admitted
+through the ratified store-layout amendment flow rather than named here.
 
 ## CO-1
 
