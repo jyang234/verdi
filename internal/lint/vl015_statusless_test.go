@@ -227,6 +227,13 @@ func TestVL015_StatuslessPredecessor_ProvenBaseline_Clean(t *testing.T) {
 // COMMIT's original objects. A clean result here witnesses that the
 // manifest is read at the Git-derived landing commit, never from later
 // working-tree bytes.
+//
+// Disclosure: this drifted-bytes-with-a-proven-baseline shape is reachable
+// ONLY through the fake resolver seam and exists purely to witness the read
+// point — it is not a supported real-world green. Through the REAL
+// projector the drifted bytes would not match the default branch and would
+// project Proposed/RelationDiverged, which VL-015 fails closed on (see
+// TestVL015_StatuslessPredecessor_FailClosed's diverged case).
 func TestVL015_StatuslessPredecessor_ReadsLandingCommit_NotWorkingTree(t *testing.T) {
 	const driftedAfterLanding = "must not add new SYNCHRONOUS cross-service calls (later working-tree drift)"
 
@@ -263,10 +270,13 @@ func TestVL015_StatuslessPredecessor_CarriedByteDrift_Reports(t *testing.T) {
 // TestVL015_StatuslessPredecessor_FailClosed is the FAIL CLOSED / FAIL
 // CLOSED HONESTLY table: every shape the brief's acceptance condition rules
 // out — an unproven Git-derived state, a proven state with an incomplete
-// baseline, a proposed (new or diverged) predecessor, and a resolver
-// operational error — must produce exactly one VL-015 finding naming the
-// observed state/relation and carrying specstate's own Disclosures
-// (joined "; ") when present.
+// baseline, a proven state whose baseline names a DIFFERENT spec path than
+// the predecessor whose manifest is being read, a proposed (new or diverged)
+// predecessor, and a resolver operational error — must produce exactly one
+// VL-015 finding naming the observed state/relation and carrying specstate's
+// own Disclosures (joined "; ") when present. A Result whose Relation is the
+// zero value must still render a readable relation word, never a ragged
+// "(relation )".
 func TestVL015_StatuslessPredecessor_FailClosed(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -301,6 +311,30 @@ func TestVL015_StatuslessPredecessor_FailClosed(t *testing.T) {
 				Baseline: nil,
 			}},
 			want: []string{"accepted-pending-build", "incomplete"},
+		},
+		{
+			name: "unproven with a zero relation still names a relation word",
+			fakeResolver: fakeStateResolver{result: specstate.Result{
+				State:       specstate.Unproven,
+				Disclosures: []string{"no witness at all"},
+			}},
+			want: []string{"unproven", "relation unknown", "no witness at all"},
+		},
+		{
+			name: "proven state, complete baseline, but it names a DIFFERENT spec path",
+			fakeResolver: fakeStateResolver{result: specstate.Result{
+				State:    specstate.AcceptedPendingBuild,
+				Relation: specstate.RelationExact,
+				Baseline: &specstate.Baseline{
+					Path:          ".verdi/specs/active/some-other-spec/spec.md",
+					Blob:          "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+					LandingCommit: "0123456789abcdef0123456789abcdef01234567",
+				},
+			}},
+			want: []string{
+				".verdi/specs/active/some-other-spec/spec.md",
+				vl015StatuslessPredRelPath,
+			},
 		},
 		{
 			name: "proven state, incomplete baseline (missing landing commit)",
@@ -347,6 +381,134 @@ func TestVL015_StatuslessPredecessor_FailClosed(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			in := vl015StatuslessAdHocRunInput(t, tc.fakeResolver)
+			findings := (vl015{}).Check(in)
+			onlyRule(t, findings, "VL-015")
+			if len(findings) != 1 {
+				t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(findings[0].Message, want) {
+					t.Fatalf("finding message = %q, want it to contain %q", findings[0].Message, want)
+				}
+			}
+		})
+	}
+}
+
+// buildVL015StatuslessRepoWithLandingContent builds the same two-layer
+// history buildVL015StatuslessRepo builds, except layer 1 (the landing
+// commit) holds landingPredContent VERBATIM at the predecessor's path —
+// content that need not be a well-formed spec at all. Layer 2 (the working
+// tree BuildSnapshot reads) holds the normal, valid predecessor plus the
+// standard successor, so the ONLY unreadable bytes in the repository are the
+// ones at the landing commit: any read failure a case sees therefore
+// witnesses that VL-015 read the landing commit and nothing else.
+func buildVL015StatuslessRepoWithLandingContent(t *testing.T, landingPredContent string) (*fixturegit.Repo, string) {
+	t.Helper()
+
+	layer1 := fixturegit.Layer{
+		Files: map[string]string{
+			".verdi/verdi.yaml":        setupManifestYAML,
+			".gitattributes":           setupGitAttributes,
+			vl015StatuslessPredRelPath: landingPredContent,
+		},
+		Message: "vl015 statusless layer 1: loan-workflow-sl landed (unreadable bytes)",
+	}
+	repo1 := fixturegit.Build(t, []fixturegit.Layer{layer1})
+	landingSHA := repo1.Head
+
+	layer2 := fixturegit.Layer{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                               setupManifestYAML,
+			".gitattributes":                                  setupGitAttributes,
+			vl015StatuslessPredRelPath:                        fmt.Sprintf(vl015StatuslessPredTmpl, vl015StatuslessCO1Text),
+			".verdi/specs/active/loan-workflow-sl-v2/spec.md": fmt.Sprintf(vl015StatuslessSuccessorTmpl, vl015StatuslessCO1Text, vl015StatuslessSupersessionBody),
+		},
+		Message: "vl015 statusless layer 2: readable loan-workflow-sl + loan-workflow-sl-v2",
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{layer1, layer2})
+	provisionMutableZone(t, repo.Dir)
+	return repo, landingSHA
+}
+
+// TestVL015_StatuslessPredecessor_UnreadableBaseline_FailsClosed covers
+// readPredecessorManifestAt's three error branches — the git read itself
+// failing, the frontmatter not splitting, and the frontmatter not
+// strict-decoding — on the merge-signaled path, where the selected commit is
+// result.Baseline.LandingCommit.
+//
+// The first case is the direct witness of the READ POINT: the repository's
+// working tree and every real commit hold a perfectly readable predecessor,
+// and the only thing wrong is the landing commit the fake resolver names, so
+// the resulting finding can only come from a read at
+// Baseline.LandingCommit. The other two cases put the unreadable bytes AT
+// the landing commit while the working tree stays valid, which witnesses the
+// same read point from the other direction.
+func TestVL015_StatuslessPredecessor_UnreadableBaseline_FailsClosed(t *testing.T) {
+	// A well-formed but never-created 40-hex object id: Frozen/baseline
+	// shape checks pass, `git show` fails.
+	const missingSHA = "0123456789abcdef0123456789abcdef01234567"
+
+	const noFrontmatter = `# Loan workflow (VL-015 statusless fixture)
+
+This landing-commit revision carries no frontmatter fence at all.
+`
+
+	const unknownKey = `---
+id: spec/loan-workflow-sl
+kind: spec
+class: feature
+title: "Loan workflow (VL-015 statusless fixture)"
+owners: [platform-team]
+totally_unknown_key: "strict decoding must reject this"
+---
+# Loan workflow (VL-015 statusless fixture)
+`
+
+	cases := []struct {
+		name string
+		// setup returns the repo to lint and the landing commit the fake
+		// resolver's proven baseline will name.
+		setup func(t *testing.T) (*fixturegit.Repo, string)
+		want  []string
+	}{
+		{
+			name: "landing commit does not exist: the git read fails",
+			setup: func(t *testing.T) (*fixturegit.Repo, string) {
+				repo, _ := buildVL015StatuslessRepo(t, vl015StatuslessCO1Text, vl015StatuslessCO1Text, vl015StatuslessCO1Text, vl015StatuslessSupersessionBody)
+				return repo, missingSHA
+			},
+			want: []string{
+				"reading predecessor spec/loan-workflow-sl",
+				"at its Git-derived accepted baseline's landing commit " + missingSHA,
+			},
+		},
+		{
+			name: "landing commit content has no frontmatter to split",
+			setup: func(t *testing.T) (*fixturegit.Repo, string) {
+				return buildVL015StatuslessRepoWithLandingContent(t, noFrontmatter)
+			},
+			want: []string{
+				"predecessor spec/loan-workflow-sl frontmatter at its Git-derived accepted baseline's landing commit does not split",
+			},
+		},
+		{
+			name: "landing commit content does not strict-decode",
+			setup: func(t *testing.T) (*fixturegit.Repo, string) {
+				return buildVL015StatuslessRepoWithLandingContent(t, unknownKey)
+			},
+			want: []string{
+				"predecessor spec/loan-workflow-sl frontmatter at its Git-derived accepted baseline's landing commit does not decode",
+				"totally_unknown_key",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, landingSHA := tc.setup(t)
+			in := vl015FakeRunInput(t, repo, fakeStateResolver{result: vl015ProvenBaseline(specstate.AcceptedPendingBuild, landingSHA)})
+
 			findings := (vl015{}).Check(in)
 			onlyRule(t, findings, "VL-015")
 			if len(findings) != 1 {

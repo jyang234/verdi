@@ -390,6 +390,49 @@ func TestVL015_PredecessorCardinality(t *testing.T) {
 	}
 }
 
+// TestVL015_FrozenPredecessor_UnreadableFrozenCommit_FailsClosed is the
+// LEGACY path's own negative for readPredecessorManifestAt's git-read
+// branch: the frozen: stamp names a well-formed but never-created commit, so
+// the read fails and VL-015 says so, naming the frozen commit as the read
+// point it tried. The RunInput is deliberately wired with a NIL Projector —
+// a frozen predecessor must never reach the merge-signaled resolution path
+// at all, and a nil-panic here would say so loudly.
+func TestVL015_FrozenPredecessor_UnreadableFrozenCommit_FailsClosed(t *testing.T) {
+	// Well-formed 40-hex, never created: Frozen.Validate's shape check
+	// passes, `git show` fails.
+	const missingSHA = "0123456789abcdef0123456789abcdef01234567"
+
+	supersessionBody := `  carried: [co-1]
+  amended: [ { id: ac-1, note: "tightened the visibility threshold" } ]
+  amended_advisory: []
+  removed: [ { id: ac-2, note: "moved to a separate reporting feature" } ]
+  added: [ac-3]`
+
+	layer1 := fixturegit.Layer{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                            setupManifestYAML,
+			".gitattributes":                               setupGitAttributes,
+			".verdi/specs/active/loan-workflow/spec.md":    fmt.Sprintf(vl015LoanWorkflowV1FrozenTmpl, missingSHA),
+			".verdi/specs/active/loan-workflow-v2/spec.md": fmt.Sprintf(vl015LoanWorkflowV2Tmpl, vl015PredecessorCO1Text, supersessionBody),
+		},
+		Message: "vl015 frozen-unreadable layer 1: frozen stamp names a commit that does not exist",
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{layer1})
+	provisionMutableZone(t, repo.Dir)
+
+	in := vl015FakeRunInput(t, repo, nil)
+	findings := (vl015{}).Check(in)
+	onlyRule(t, findings, "VL-015")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	for _, want := range []string{"reading predecessor spec/loan-workflow", "at its frozen commit " + missingSHA} {
+		if !strings.Contains(findings[0].Message, want) {
+			t.Fatalf("finding message = %q, want it to contain %q", findings[0].Message, want)
+		}
+	}
+}
+
 // TestVL015_FrozenPredecessor_ReadsFrozenCommit_NotLaterEditedBytes proves
 // the LEGACY frozen.commit path — unchanged by the merge-signaled addition
 // — still reads the predecessor's manifest at ITS FROZEN COMMIT
