@@ -350,7 +350,7 @@ Every implementation pull request body includes these sections and concrete valu
 
 | Section | Required content |
 |---|---|
-| Authority | Accepted feature ref and frozen commit; delivery-unit slug; approved plan path and commit; full base and head SHAs |
+| Authority | Accepted feature ref and accepted baseline identity — spec path, blob OID, and first-parent landing commit; legacy frozen commit only when applicable; delivery-unit slug; approved plan path and commit; full base and head SHAs |
 | Requirement coverage | One row per applicable AC, decision, and constraint, naming its implementation seam and test or evidence artifact |
 | Verification | Commands and observed red/green results; complete `make verify` result; complete `go test -race ./...` result |
 | Disclosures | Proven claims with witnesses; violations with witnesses; unproven facts and authority effect; applicable `PLAN.md` section 7 entries or the literal value `none` |
