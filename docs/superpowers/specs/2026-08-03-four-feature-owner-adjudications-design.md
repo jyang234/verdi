@@ -30,10 +30,8 @@ document into the default branch is the single authority event that makes
 these twelve rulings effective repository authority. The Codex review of
 this record's pull request is technical approval only, performed under
 orchestration Gate C with its ratified scope; it informs but does not
-ratify. The owner's merge of the pull request carrying this document into
-the default branch is the single authority event. No follow-up
-`verdi accept` command, status edit, acknowledgement step, or confirmation
-repeats what the merge witnesses.
+ratify. No follow-up `verdi accept` command, status edit, acknowledgement
+step, or confirmation repeats what the merge witnesses.
 
 ## What this document does not do
 
@@ -178,8 +176,8 @@ but does not broaden the closed local-design-branch-only
 `worktree-manager` story. Policy decisions and feature proof semantics
 remain outside this component.
 
-Settles: CX-6 (reusable worktree/isolation boundary); CX-7 (environment-
-identity collection duplication).
+Settles: CX-6 (reusable worktree/isolation boundary); CX-7
+(environment-identity collection duplication).
 
 ### OD-7 — Capability terminology
 
