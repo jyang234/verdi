@@ -4,8 +4,10 @@
 > canonical-promotion delivery unit (four-feature orchestration, Wave 0,
 > lane W2). It authorizes no runtime code, no canonical-spec bytes, and no
 > lifecycle mutation. The promotion unit it describes may execute only
-> after this plan receives a read-only Codex review and its recorded
-> inventions are ratified through that review. Steps use checkbox
+> after a read-only Codex review of this plan reports technical approval
+> AND the owner has merged this planning pull request — Codex approval is
+> never ratification; the owner's merge is the authoritative act (§11
+> states which merge ratifies which invention). Steps use checkbox
 > (`- [ ]`) syntax for tracking.
 
 **Goal:** Map every reviewed decision of the ratified ASD design document
@@ -377,7 +379,10 @@ states: ASD introduces no profile or actor schema of its own; the
 delegating principal resolves through the shared kernel; the agent-actor
 discriminator is ASD-owned.
 **Implementation of the ASD core (Wave 2) is blocked until the kernel
-(Wave 1) merges.** Promotion itself is not blocked.
+(Wave 1) merges.** Promotion authoring is blocked until the W4
+cross-feature authority audit (PR #264) lands and settles the
+actor-treatment seam (§7 precondition 2); the kernel implementation
+itself need not precede promotion.
 
 ### 5.2 CI policy-authority scaffolds
 
@@ -390,7 +395,9 @@ The canonical artifact states this consumption obligation; ASD's
 `design_assistance` policy block is project policy expressed through the
 CI-owned policy model once that model lands. **ASD draft-creation
 implementation is blocked until `policy-authority` (Wave 1) merges.**
-Promotion itself is not blocked.
+Promotion authoring is blocked until the W4 audit (PR #264) settles
+policy-model ownership of `design_assistance` (§7 precondition 2); the
+policy-authority implementation itself need not precede promotion.
 
 ### 5.3 ASD provenance-sidecar classification
 
@@ -464,12 +471,28 @@ reason-code vocabulary belongs to the CI `context-compiler` plan.
 
 ## 7. Future implementation steps
 
-The promotion delivery unit. Preconditions: this plan Codex-APPROVED
-(Gate P) with §11 inventions ratified in that review; base = current
-`main` at execution time (revalidate against the actual landing commit if
-`main` has moved past `6d71fd7d`, per orchestration Phase C); §10 G-1
-(successor ledger) resolved by the owner at least to the extent of naming
-where the promotion unit's decision record durably lives.
+The promotion delivery unit. Preconditions — every one must hold before
+Task 1 authoring begins:
+
+1. **Gate P:** a read-only Codex review of this plan reports technical
+   approval on its exact head, and the owner has merged this planning PR
+   (the merge adopts §11's inventions as planning intent; Codex approval
+   alone ratifies nothing).
+2. **Corrected cross-feature authority:** the Wave-0 cross-feature
+   authority audit (lane W4, PR #264) has landed owner-merged and
+   repository-visible, and its decisions on actor treatment (shared
+   governance-principal kernel vs. ASD-owned discriminator), CI
+   policy-model ownership of `design_assistance`, the ASD
+   provenance-sidecar classification contract, and store-layout ownership
+   of the new sidecar path are incorporated — the canonical artifact's
+   relationship section must restate that corrected authority, not this
+   plan's provisional §5 reading.
+3. **Ledger decision:** §10 G-1 resolved by the owner at least to the
+   extent of naming where the promotion unit's decision record durably
+   lives.
+4. **Fresh base:** base = current `main` at execution time; revalidate
+   this plan against the actual landing commit if `main` has moved past
+   `6d71fd7d` (orchestration Phase C).
 
 ### Task 1: Author the canonical artifact
 
@@ -501,8 +524,10 @@ where the promotion unit's decision record durably lives.
       expected because promotion adds no verb and no MCP tool).
 - [ ] **Step 5: State projection.**
       `./.build/verdi spec state spec/ai-assisted-spec-design`
-      Expected: `proposed` (not reachable from the default branch), with
-      Git-derived baseline fields present. Capture output.
+      Expected: `state: proposed`, `relation: new`, `baseline: null` —
+      the path does not exist on the default branch yet, so no accepted
+      baseline identity exists (`internal/specstate` returns a nil
+      baseline for `RelationNew`). Capture output.
 - [ ] **Step 6: Mapping fidelity self-check.** Walk §4 row by row against
       the authored file; every "verbatim" row's body content must match
       the source bytes (frontmatter texts may differ only in YAML
@@ -541,16 +566,23 @@ where the promotion unit's decision record durably lives.
 - [ ] **Step 2:** Repair accepted findings (Opus fixer per the repository
       role split); every push invalidates the prior review; obtain fresh
       exact-head approval.
-- [ ] **Step 3:** Mark ready and hand to the owner. **The owner's merge is
-      acceptance**; no follow-up command, status flip, or commit occurs.
-      Post-merge, `verdi spec state spec/ai-assisted-spec-design` reports
-      `accepted-pending-build` — a read-only verification, not a ceremony.
+- [ ] **Step 3:** Stop after fresh exact-head Codex approval, leaving the
+      PR in **draft**, and hand off to the owner with the approval
+      evidence. The owner marks it ready and merges. **The owner's merge
+      is acceptance**; no follow-up command, status flip, or commit
+      occurs. Post-merge, `verdi spec state spec/ai-assisted-spec-design`
+      reports `accepted-pending-build` — a read-only verification, not a
+      ceremony.
 
-**Rollback posture:** the unit is one commit adding one file; revert the
-commit and the store returns byte-identical to its prior state. No runtime
-code, schema registry, workflow, or index is touched. If reverted after
-merge, the spec's Git-derived state ceases to be reachable-at-HEAD and the
-artifact leaves the active store with ordinary review of the revert.
+**Rollback posture:** two distinct regimes. **Before merge**, the unit is
+one commit adding one file: revert or abandon the branch and the store
+returns byte-identical to its prior state; no runtime code, schema
+registry, workflow, or index is touched. **After merge**, the artifact is
+accepted authority under the merge-signaled lifecycle, and an accepted
+path may only change through the existing amendment, supersession, or
+closure rules — or incident policy for an illegitimate landing. A plain
+revert of accepted bytes is itself a change to an accepted path and is
+not an available rollback mechanism.
 
 **Explicitly out of the unit:** any edit to the orchestration index, any
 runtime/test/workflow change, any obligation scaffolding (VL-020 exempts
@@ -570,7 +602,7 @@ protection.
 |---|---|---|---|
 | 1 | Acceptance of the canonical ASD artifact | authorization already expressed by PR review + merge | **Retain the merge only.** No `verdi accept`, status edit, ledger flip, or post-merge confirmation (merge-signaled design; precedent `6d71fd7d`) |
 | 2 | Codex plan review (this plan) and exact-head implementation review (promotion PR) | substantive judgment (independent review) | **Retain** — Gates P and C; distinct information, not a duplicate acknowledgement |
-| 3 | Ratification of §11 inventions (naming, AC grouping, evidence kinds, stubs, links) | substantive judgment | **Retain, folded into ceremony 2** — the plan review is the vehicle; no separate sign-off artifact is created |
+| 3 | Ratification of §11 inventions (naming, AC grouping, evidence kinds, stubs, links) | substantive judgment | **Retain as the owner's two merges** — this planning PR's merge adopts them as planning intent; the promotion PR's merge ratifies them as canonical semantics; Codex reviews inform both but ratify neither; no separate sign-off artifact is created |
 | 4 | Future ASD runtime: draft acceptance | authorization already expressed by merge | **Retained as merge-only in the artifact itself** (dc-15/ac-6: "no separate acceptance command, status edit, or confirmation repeats it") — the design already removed the duplicate |
 | 5 | Future ASD runtime: per-mutation agent-edit confirmation | informational acknowledgement | **Removed by the design** (dc-3: no confirmation theater for reversible draft edits); the plan adds none back |
 | 6 | Future ASD runtime: semantic review packet | deterministic materialization (a derived view) | **No retained ceremony** — the packet is derived, never marked-approved, never persisted (dc-15); reading it is part of ceremony 4's review, not a second act |
@@ -656,8 +688,10 @@ or deferred decisions that do not block this plan.
   "Relationship to …" sections, so carrying them preserves reviewed
   authority rather than adding semantics. Disclosed caveat: the index's
   own ratification as successor orchestration authority (Wave-0 checkbox,
-  orchestration line 234) is itself still open; this reading requires
-  Codex/owner confirmation at plan review.
+  orchestration line 234) is itself still open; this reading is checked
+  by the Codex plan review, superseded where the W4 audit (PR #264)
+  decides otherwise (§7 precondition 2), and ratified only by the owner's
+  merges (§11).
 - **G-3: evidence kinds and the outcome floor are additions.** The ASD
   design declares no evidence kinds for its success measures; VL-006
   mechanically requires every feature AC to declare kinds including
@@ -723,9 +757,15 @@ own words).
 ## 11. Decision record — inventions requiring ratification
 
 Interim repository-visible record for this unit (see G-1). Each entry:
-smallest reversible choice, alternatives considered, ratification vehicle
-= the Codex review of this plan plus the owner's merge of the promotion
-PR. None is decided silently; none is binding until ratified.
+smallest reversible choice with alternatives considered. Ratification is
+two owner merges, precisely allocated: Codex reviews provide technical
+approval only and ratify nothing; the owner's merge of THIS planning pull
+request adopts N-1..N-7 as approved planning intent (authorizing the
+promotion unit to author to this shape); the owner's merge of the LATER
+promotion pull request is the act that ratifies N-1..N-7 as canonical
+semantics, because that merge is the acceptance of the artifact embodying
+them. None is decided silently; none is binding as canonical authority
+until the promotion merge.
 
 - **N-1 — Canonical identity `spec/ai-assisted-spec-design`.**
   Alternatives: `spec/design-assistance` (shorter, but drops the
