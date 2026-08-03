@@ -379,10 +379,10 @@ states: ASD introduces no profile or actor schema of its own; the
 delegating principal resolves through the shared kernel; the agent-actor
 discriminator is ASD-owned.
 **Implementation of the ASD core (Wave 2) is blocked until the kernel
-(Wave 1) merges.** Promotion authoring is blocked until the W4
-cross-feature authority audit (PR #264) lands and settles the
-actor-treatment seam (§7 precondition 2); the kernel implementation
-itself need not precede promotion.
+(Wave 1) merges.** Promotion authoring is blocked until the owner
+adjudicates the W4 audit's actor-treatment decisions (OD-2/OD-3) and the
+resulting authority lands owner-merged (§7 precondition 2); the kernel
+implementation itself need not precede promotion.
 
 ### 5.2 CI policy-authority scaffolds
 
@@ -395,9 +395,10 @@ The canonical artifact states this consumption obligation; ASD's
 `design_assistance` policy block is project policy expressed through the
 CI-owned policy model once that model lands. **ASD draft-creation
 implementation is blocked until `policy-authority` (Wave 1) merges.**
-Promotion authoring is blocked until the W4 audit (PR #264) settles
-policy-model ownership of `design_assistance` (§7 precondition 2); the
-policy-authority implementation itself need not precede promotion.
+Promotion authoring is blocked until the owner's W4 adjudications on
+policy-model ownership of `design_assistance` land as owner-merged
+authority (§7 precondition 2); the policy-authority implementation
+itself need not precede promotion.
 
 ### 5.3 ASD provenance-sidecar classification
 
@@ -478,18 +479,25 @@ Task 1 authoring begins:
    approval on its exact head, and the owner has merged this planning PR
    (the merge adopts §11's inventions as planning intent; Codex approval
    alone ratifies nothing).
-2. **Corrected cross-feature authority:** the Wave-0 cross-feature
-   authority audit (lane W4, PR #264) has landed owner-merged and
-   repository-visible, and its decisions on actor treatment (shared
-   governance-principal kernel vs. ASD-owned discriminator), CI
-   policy-model ownership of `design_assistance`, the ASD
-   provenance-sidecar classification contract, and store-layout ownership
-   of the new sidecar path are incorporated — the canonical artifact's
-   relationship section must restate that corrected authority, not this
-   plan's provisional §5 reading.
+2. **Corrected cross-feature authority — three distinct facts, all
+   required:**
+   (a) the W4 audit packet (lane W4, PR #264) is merged — the packet is
+   a non-authoritative decision inventory, so its merge alone settles
+   and ratifies nothing;
+   (b) the owner has adjudicated the ASD-relevant owner decisions it
+   puts — at least OD-2 and OD-3 (kernel contract custody and ASD's
+   actor-upgrade timing), OD-5, OD-8 (the provenance-sidecar
+   classification), and OD-12 (store-layout amendment ownership for the
+   new sidecar path);
+   (c) those rulings and their resulting shared contracts and
+   store-layout authority have landed in repository-visible,
+   owner-merged authority PRs.
+   The canonical artifact's relationship section must restate that
+   landed authority — never proposals from the audit packet, and never
+   this plan's provisional §5 reading.
 3. **Ledger decision:** §10 G-1 resolved by the owner at least to the
    extent of naming where the promotion unit's decision record durably
-   lives.
+   lives (PR #264's OD-9 puts that choice to the owner).
 4. **Fresh base:** base = current `main` at execution time; revalidate
    this plan against the actual landing commit if `main` has moved past
    `6d71fd7d` (orchestration Phase C).
@@ -689,9 +697,9 @@ or deferred decisions that do not block this plan.
   authority rather than adding semantics. Disclosed caveat: the index's
   own ratification as successor orchestration authority (Wave-0 checkbox,
   orchestration line 234) is itself still open; this reading is checked
-  by the Codex plan review, superseded where the W4 audit (PR #264)
-  decides otherwise (§7 precondition 2), and ratified only by the owner's
-  merges (§11).
+  by the Codex plan review, superseded wherever the owner's adjudication
+  of the W4 audit's decisions lands otherwise (§7 precondition 2), and
+  ratified only by the owner's merges (§11).
 - **G-3: evidence kinds and the outcome floor are additions.** The ASD
   design declares no evidence kinds for its success measures; VL-006
   mechanically requires every feature AC to declare kinds including
