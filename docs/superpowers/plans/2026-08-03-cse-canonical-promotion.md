@@ -30,9 +30,9 @@ or disclosures, never silently resolved.
 frontmatter under `internal/artifact` (`verdi.artifact/v1` conventions), Git
 worktrees, GitHub draft PRs with the stable `merge-gate` check,
 `verdi lint` / `make lint-store` / `internal/specalign` as validation gates.
-The stable `merge-gate` check runs on every PR; its promotion to a
-ruleset-**required** status check is an owner-side activation that repository
-text at HEAD records as still outstanding (§10 G-6).
+The stable `merge-gate` check runs on every PR and is an active
+ruleset-required status check (verified live against ruleset `19021982`;
+§10 G-6).
 
 ## Global Constraints
 
@@ -207,7 +207,7 @@ acceptance_criteria:
     evidence: [static, behavioral, attestation]
     anchor: ac-5
   - id: ac-6
-    text: "project and organization policy constrain experiment paths, permitted evaluators and protocol versions, capabilities, resources, observation sizes, and trusted measurement sources, with a lower layer unable to weaken a higher one; candidates cannot modify protected comparison inputs; and mutation provenance records actor, operation, prior digest, resulting digest, and policy decision across every surface"
+    text: "project and organization policy constrain experiment paths, permitted evaluators and protocol versions, capabilities, resources, observation sizes, and trusted measurement sources, with a lower layer unable to weaken a higher one; candidates cannot modify protected comparison inputs; and mutation provenance records actor — an attribution record, never an authority decision — operation, prior digest, resulting digest, and policy decision across every experiment mutation surface: CLI, workbench, agent, and the direct Git-edit draft path"
     evidence: [static, behavioral, attestation]
     anchor: ac-6
   - id: ac-7
@@ -274,7 +274,7 @@ decisions:
     text: "an interrupted execution resumes only missing observations against unchanged registered inputs; existing observations are immutable; reruns have separate identities that are all shown, never silently filtered to the most favorable; and a result may be called reproduced only under an explicit registered reproduction rule"
     anchor: dc-15
   - id: dc-16
-    text: "ratification is a human response to one immutable result — select the recommendation, select another candidate with reason, reject all, declare the framing wrong, or request a new revision — authenticated by an adapter, never self-declared by a payload, and incorporated into the normal spike closure review rather than a redundant approval"
+    text: "ratification is a human response to one immutable result — select the recommendation, select another candidate with reason, reject all, declare the framing wrong, or request a new revision — authenticated by an adapter, never self-declared by a payload, with the ratification actor resolving to an authenticated principal through the shared governance-principal kernel and unproven authentication blocking ratification, and incorporated into the normal spike closure review rather than a redundant approval"
     anchor: dc-16
   - id: dc-17
     text: "experiment artifacts and captured patches live inside the spike's own spec directory as VL-016 already permits; a registered patch may describe ephemeral product-source changes applied only inside an isolated candidate workspace, and those changes are never committed on the spike branch, so VL-016 continues to fence the durable spike diff"
@@ -330,7 +330,7 @@ per the losslessness table in §5):
 | `## AC-1` … `## AC-7` | full normative detail per AC: AC-1 carries L195-341 (the experiment directory tree, the derived-state table, the VL-016 residence posture, exploration rule, the 12-element registration capture list, protected paths, the semantic review packet and lock, the complete `experiment.yaml` v1 example with its field-stability rule); AC-2 carries L404-434 (the eight-step evaluation order, no-tiebreaker rules, noise posture); AC-3 carries L343-402 plus the metric-primitive and aggregation vocabulary L647-660 (describe handshake declaration list, observation record example, three trust classes, append-only keying; the primitive/aggregation vocabulary shared with `## DC-10`); AC-4 carries L436-480 + L589-621 (workspace derivation, schedule, environment fingerprint list, network default, failure taxonomy, resume, rerun identity, retention lists, capsule manifest, cleanup ordering); AC-5 carries L482-558 + L560-587 (one typed core, agent may/may-not lists, normal agent context rule, the two human moments, ratification record semantics, spike-closure integration, no promotion); AC-6 carries L667-670 + L681-711 (project/organization policy layering, policy constraint list, abuse-resistance mechanics, overfit disclosure, Verdi-bench boundary); AC-7 carries L104-106 + L837-838 (dogfood success test) |
 | `## Caching example` | L713-768 carried verbatim as the illustrative worked example (candidates, workload mix, decision contract, normalized-result table, witness preservation, measurement attribution) |
 | `## Delivery sequence` | Rollout steps 1-7 (L825-856) mapped onto the stubs in the design's own step order, with the step-5 surface split into its CLI/agent and workbench halves: experiment-schemas → decision-engine → evaluator-observer → isolated-execution → experiment-adapters → experiment-workbench (its UI unit runs serialized in orchestration Wave 6) → experiment-policy → dogfood-comparison; plus the standard/elevated assurance profiles and the explicit v1 boundary (generic command evaluator and built-in process observer only, L662-679) |
-| `## Relationship to Context Integrity` | the shared worktree/isolation/capability boundary dependency, stated per §7 of this plan — named, not ratified |
+| `## Relationship to Context Integrity` | the shared worktree/isolation/capability boundary dependency, stated per §7 of this plan — named, not ratified; plus the packet-consumed actor rule and experiment-surface scope pin (§5 row 69) and the CX-11 context-boundary restatement (§5 row 41), each carried only as owner-adjudicated |
 | `## Relationship to Verdi-bench and the chronicle` | L48-51, L74-78, L708-711: ownership boundaries |
 | `## DC-1` … `## DC-19` | rationale prose per decision, carrying the source's own reasoning including the six rejected alternatives (L896-922), each attached to the DC it motivates (dc-1 ← embed-in-spike and external-system rejections; dc-4/dc-7 ← auto-select rejection; dc-9 ← promote-prototype rejection; dc-18 ← benchmark-grade rejection; dc-11 ← per-tool-integration rejection) |
 | `## CO-1` … `## CO-7` | constraint elaborations, with CO-7 carrying the full verification strategy L770-823 |
@@ -392,10 +392,10 @@ reason). Preservation evidence cites the source inventory item numbers
 | 38 | Human/agent interaction, L484-489 | one typed application core; direct Markdown/Git editing first-class but same validation and policy, no privileged path | `dc-11`, `ac-5`; `## AC-5` body | condensed | 90 |
 | 39 | Human/agent interaction, L491-519 | nine-stage journey diagram with actor annotations, two HUMAN REQUIRED stages | `## Experiment journey` | restructured (ASCII journey converted to the exemplars' mermaid form with stage-order and actor-annotation fidelity) | 91 |
 | 40 | Human/agent interaction, L521-540 | agent-may list (8 items); agent-may-not list (7 items) | `## AC-5` body | verbatim (both lists) | 92-93 |
-| 41 | Human/agent interaction, L542-546 | normal agent context contents; exploratory transcript excluded; excerpts non-authoritative and outside build context | `## AC-5` body | verbatim | 94; AMB-5 |
+| 41 | Human/agent interaction, L542-546 | normal agent context contents; exploratory transcript excluded; excerpts non-authoritative and outside build context | `## AC-5` body; framing restated in `## Relationship to Context Integrity` | verbatim + restated as CI-compiler classification requirements per the audit's CX-11/R-7 clause 3 (the enumeration binds what the CI context compiler must include and exclude for experiment phases, never a freestanding competing context definition) | 94; AMB-5 |
 | 42 | Human/agent interaction, L548-553 | the two required human moments are consequential, not ceremonial (lock = fairness; ratification = path decision) | `dc-7`, `dc-16`; §8 rows C1-C2 | condensed | 95-96 |
 | 43 | Human/agent interaction, L555-558 | PR review + owner merge remain implementation governance; no competing approval ceremony; no recreated Codex/Claude Code/Verdi-go integrations | `## AC-5` body; §8 row C4 | condensed | 97 |
-| 44 | Ratification/closure, L562-572 | `ratification.yaml` five-option vocabulary; names result digest, actor identity, disposition, reason; adapter authenticates actor, payload cannot self-declare human authority | `dc-16`; `## AC-5` body | verbatim (option list) | 98-99 |
+| 44 | Ratification/closure, L562-572 | `ratification.yaml` five-option vocabulary; names result digest, actor identity, disposition, reason; adapter authenticates actor, payload cannot self-declare human authority | `dc-16`; `## AC-5` body | verbatim (option list); the actor clause is additionally strengthened by the packet-sourced principal rule (row 69) | 98-99 |
 | 45 | Ratification/closure, L574-583 | no direct feature edit, no new resolution edge; ratified decision becomes the spike answer through existing acceptance/closure; `resolves` edge sole connection; `resolved-by` backlink on frozen features; incorporated into normal closure review, no redundant approval; no auto-close without human ratification | `dc-16`, `ac-5`; `## AC-5` body; §8 row C3 | condensed | 100-101 |
 | 46 | Ratification/closure, L585-587 | selection authorizes fresh implementation, never patch promotion | `dc-9` | condensed | 102 |
 | 47 | Retention, L591-609 | retained-for-all list (6 items); not-retained-for-rejected list (6 items) | `dc-8`; `## AC-4` body | verbatim (both lists) | 103-104 |
@@ -407,7 +407,7 @@ reason). Preservation evidence cites the source inventory item numbers
 | 53 | Extensibility, L662-665 | future adapters (Go bench, JMH, pytest, telemetry) are extension-boundary examples, not v1 commitments | `## DC-10` body; `## Delivery sequence` (v1 scope note) | verbatim | 112; AMB-3 disposition §10 |
 | 54 | Extensibility, L667-670 | project config selects permitted evaluators/capabilities; org policy narrows project; lower cannot weaken higher; capability inspection exposed | `ac-6`; `## AC-6` body | condensed | 113 |
 | 55 | Extensibility, L672-679 | no in-process plugins/imports/hooks/shell; adapters cannot ratify, resolve, change recommendation semantics, or self-promote trust; v1 ships only generic command evaluator + built-in process observer | `dc-10`; `## Delivery sequence` | condensed | 114-115 |
-| 56 | Policy/abuse, L683-696 | six-item policy constraint surface; argv execution, size limits, strict decode, undeclared-capability refusal, protected inputs; mutation provenance five-tuple across every surface | `ac-6`; `## AC-6` body | verbatim (lists) | 116-117 |
+| 56 | Policy/abuse, L683-696 | six-item policy constraint surface; argv execution, size limits, strict decode, undeclared-capability refusal, protected inputs; mutation provenance five-tuple across every surface | `ac-6`; `## AC-6` body | verbatim (lists) + scoped: the source's ambiguous "across every surface" is pinned to CSE's own experiment mutation surfaces per the authority audit (its CX-9/OD-4/R-7 — the audit's challenge review confirmed the narrow reading as the likely intent and asked the promotion to pin it) | 116-117 |
 | 57 | Policy/abuse, L698-706 | decision-gaming counters; overfit-to-visible-workload boundary; candidate diffs reviewable; multiple workload profiles | `## AC-6` body; `co-5` | condensed | 118-119 |
 | 58 | Policy/abuse, L708-711 | Verdi-bench owns adversarial machinery; high-trust decision evidence, not adversarially secure or universal proof | `dc-18`; `co-5` | condensed | 120 |
 | 59 | Caching example, L713-768 | worked example end to end (request path, three candidates, workload mix, six-clause decision contract, normalized-result table, witness preservation, fresh reimplementation, measurement attribution) | `## Caching example` | verbatim | 121-128 |
@@ -419,14 +419,16 @@ reason). Preservation evidence cites the source inventory item numbers
 | 65 | Accepted decisions, L881-894 | 11 accepted decisions | `dc-1, dc-3, dc-4, dc-7, dc-8, dc-9, dc-10, dc-18` and `ac-1/ac-2` texts (each decision named in the DC that carries it) | condensed | 158-168 |
 | 66 | Rejected alternatives, L896-922 | 6 rejected alternatives with rationale | `## DC-1`, `## DC-4`, `## DC-7`, `## DC-9`, `## DC-11`, `## DC-18` bodies (rationale prose) | verbatim (rationale carried into the owning DC section) | 169-174 |
 | 67 | Contents, L6-28 | the source's own table of contents | none | plan-only (navigation, non-normative; the artifact's navigation is its frontmatter anchors and body headings) | — |
-| 68 | Orchestration index §Worktree/isolation/capability mechanics (the one non-CSE source, by declared exception) | the three CI/CSE boundary-ownership bullets | `## Relationship to Context Integrity` | verbatim (three bullets, per §7 — named, never ratified) | §7; independent Opus verification (word-by-word check against the index) |
+| 68 | Orchestration index §Worktree/isolation/capability mechanics (non-CSE source, by declared exception) | the three CI/CSE boundary-ownership bullets | `## Relationship to Context Integrity` | verbatim (three bullets, per §7 — named, never ratified) | §7; independent Opus verification (word-by-word check against the index) |
+| 69 | Cross-feature authority audit packet §2 item 2 / OD-4 / R-7 (PR #264; non-CSE source, by declared exception; consumed only as owner-adjudicated) | the two-class actor rule: mutation-provenance actors are attribution records; `ratification.yaml` actors require authenticated kernel principals, unproven authentication blocks ratification; plus the experiment-surface scope pin (its CX-9). The packet's companion embed rule (kernel principal ID or explicit `unauthenticated` marker, never a bare string) is a disclosed deferral to the kernel's landing (§7) | `dc-16`, `ac-6`; `## Relationship to Context Integrity` | conditional consumption — final wording follows the owner-ratified packet, contingent on its R-5/OD-2 kernel sequencing (§7); §9 Task 1 Step 4 blocks authoring until adjudicated | §7 actor-rule and deferral paragraphs; packet CX-4/OD-4/§12 C1 |
 
 Coverage: rows 1-66 jointly cover inventory items 1-174 with no item
-unmapped and no item double-assigned; rows 67-68 account for the only two
-blocks outside that inventory (the source's navigation TOC, and the
-orchestration-index boundary bullets that feed the artifact's relationship
-section). The implementation unit re-verifies this claim mechanically (§9
-Task 3, step "losslessness audit").
+unmapped and no item double-assigned; rows 67-69 account for the only three
+blocks outside that inventory (the source's navigation TOC; the
+orchestration-index boundary bullets; and the authority-audit actor rule and
+scope pin consumed as owner-adjudicated cross-feature authority). The
+implementation unit re-verifies this claim mechanically (§9 Task 3, step
+"losslessness audit").
 
 ## Verdict and failure-state separation
 
@@ -485,9 +487,63 @@ semantics,
 define the shared seam's schema, or assign implementation ownership — all of
 that is the separate Wave 0 ratification, which remains a blocking
 prerequisite for the Wave 3 unit `CSE evaluator and isolated execution`
-(§10, gap G-2). If the Wave 0 ratification lands with different wording,
-the artifact's relationship section is updated in the promotion PR before
-review — never after acceptance.
+(§10, gap G-2).
+
+The concrete Wave 0 vehicle is now the cross-feature authority audit packet
+(PR #264, `docs/superpowers/plans/2026-08-03-cross-feature-authority-audit.md`),
+whose adjudicated rulings this promotion **consumes** — it decides none of
+them. The promotion unit's preflight (§9 Task 1 Step 4) blocks until the
+owner has adjudicated the rulings this artifact's text depends on:
+
+- **OD-6 — isolation-boundary vehicle** (extend the `spec/worktree-manager`
+  lineage via a ratified `verdi-store-layout` amendment plus a story, or a
+  new shared component spec);
+- **OD-12 — store-layout amendment ownership**: the experiment directory
+  tree the artifact carries from the design (dc-17) describes future store
+  content whose admission into `verdi-store-layout`'s committed-zone
+  enumeration is a separate ratified component-spec amendment — a named
+  dependency of the Wave 2+ implementation units, neither performed nor
+  preempted by the promotion;
+- **OD-7 — capability terminology**: CSE "capabilities" are execution
+  grants drawn from the shared grant vocabulary (distinct from ASD's
+  adapter-surface discovery), recorded in the promoted text once ratified;
+- **OD-4 — ratification-principal treatment and mutation-provenance
+  scope** (see the actor rule below);
+- **OD-11 — ratification transport** (merge-witnessed judgment, no separate
+  post-merge ratify ceremony), which shapes §8's C2/C3 rows;
+- **R-7 clause 3 — context-boundary restatement (its CX-11)**: the design's
+  "normal agent context" enumeration (L542-546) is carried not as a
+  freestanding context definition but as **requirements on the CI context
+  compiler's classification** for experiment phases — what it must include
+  (refined spike, locked experiment, applicable decisions and policy,
+  evaluator capabilities, resulting evidence) and exclude (the complete
+  exploratory transcript; supporting excerpts as non-authoritative) — so the
+  enumeration cannot drift once CI's compiler owns classification.
+
+**Actor rule consumed from the packet (§2 item 2, per its CX-4/OD-4/R-7):**
+CSE experiment **mutation-provenance actors are attribution records** —
+never authority decisions — while **`ratification.yaml` actors must resolve
+to authenticated principals through the shared governance-principal kernel,
+and unproven authentication blocks ratification**. The proposed `dc-16` and
+`ac-6` texts in §4 carry this rule; §5 row 69 records the packet as its
+source. If the owner-adjudicated packet lands with different wording, the
+artifact text follows the ratified wording — updated in the promotion PR
+before review, never after acceptance.
+
+Two disclosed deferrals ride with the actor rule, neither silently dropped:
+the packet's companion **embed rule** (every attribution record embeds a
+kernel canonical principal ID or an explicit `unauthenticated` marker —
+never a bare string presented as identity) is deferred to the
+governance-principal kernel's landing, since it depends on the kernel's
+not-yet-ratified ID representation; and the rule's final wording is
+**contingent on the packet's R-5 kernel ownership-contract ratification and
+OD-2 custody ruling** — until those land, `dc-16` names the kernel seam on
+the strength of the already-merged orchestration authority (one shared
+governance-profile/principal schema; neither feature may introduce a second
+actor type), and the packet rule rides as conditional wording. (The
+packet's R-7 states this contingency as "R-5/OD-3"; OD-3 is its
+ASD-scoped timing ruling, so this plan names the kernel-custody OD-2 as
+the CSE-relevant half — a disclosed substitution for review to confirm.)
 
 ## Human-ceremony inventory
 
@@ -523,10 +579,17 @@ P) and only from a fresh branch off the then-current `main` with every Wave
 this section runs in this lane.
 
 **Branch topology:** `main` (post-plan-merge) → `feature/cse-canonical-promotion`
-→ draft PR to `main`. Rollback posture: the unit lands exactly one new file
-(`.verdi/specs/active/comparative-spike-experiments/spec.md`); reverting its
-single commit fully reverses the unit with no runtime coupling and no data
-migration.
+→ draft PR to `main`. Rollback posture is phase-dependent, because the
+owner's merge **is acceptance** under the merge-signaled lifecycle:
+- **Before merge:** trivial — close the draft PR and delete the branch;
+  nothing has entered authority.
+- **After merge:** the artifact is an accepted canonical proposal. It is
+  not casually removable: reversal is a governed lifecycle action —
+  supersession or closure through the ratified amendment flow, decided and
+  authorized by the owner — never a plain `git revert` of accepted
+  authority. What the single-file shape does guarantee is containment: no
+  runtime coupling, no data migration, and no other artifact depends on it
+  until later delivery units land, so a governed reversal remains cheap.
 
 **Fixtures:** the unit adds no runtime code and therefore authors no new
 hermetic fixtures; its test surface is the store's own gates (`verdi lint`,
@@ -558,21 +621,32 @@ specified by the promoted artifact's `co-7`.
   present (verified during planning: `spec/worktree-manager` lives in the
   **archive** zone; VL-003 resolves refs against the whole committed zone,
   and both exemplars declare the identical edge).
-- [ ] **Step 4:** Verify the Wave 0 blockers are cleared: the repository
-  names a successor invention-ledger location (G-1) and the reusable
-  isolation boundary ratification (G-2) either has landed or is explicitly
-  still pending — pending is acceptable for authoring the artifact (the
-  relationship section names, never selects), but G-1 unresolved is a STOP
-  per the orchestration index's stop conditions.
-- [ ] **Step 5:** Verify the stable `merge-gate` check is an **active
-  required status check** on the default-branch ruleset (e.g. `gh api
-  repos/{owner}/{repo}/rulesets --jq '.[].id'` then inspect the
-  required-status rule, or `gh pr checks <any-open-pr> --required`). The
-  orchestration index requires the gate live **before any canonical
-  proposal lands** (§Scope boundaries; Wave 0). Repository text at this
-  plan's base commit records the activation as a still-outstanding
-  owner-only step (§10 G-6) — if it is still inactive, STOP before opening
-  the promotion PR for merge and report the outstanding owner action.
+- [ ] **Step 4:** Verify the Wave 0 authority prerequisites are cleared —
+  each unresolved one is a STOP, not a proceed-with-disclosure:
+  (a) the repository names a successor invention-ledger location (G-1,
+  packet OD-9/OD-10);
+  (b) the cross-feature authority audit packet (PR #264 lineage) is merged
+  with owner adjudication of the rulings this artifact consumes — OD-4
+  (ratification-principal treatment and mutation-provenance scope), OD-6
+  (isolation-boundary vehicle), OD-7 (capability terminology), OD-11
+  (ratification transport), OD-12 (store-layout amendment ownership) —
+  noting the actor rule's stated contingency on the packet's R-5 kernel
+  ownership-contract ratification and OD-2 custody ruling (§7's deferral
+  paragraph governs if those have not landed);
+  (c) §7's consumed wording — the actor rule, the surface-scope pin, the
+  boundary bullets, and §8's C2/C3 transport posture — is revalidated
+  against the ratified packet text and this plan is amended first if they
+  diverge. The full shared-seam *implementation* (the OD-6 store-layout
+  amendment itself) may still be pending — the artifact names, never
+  selects — but the owner rulings on wording the artifact carries must
+  exist before authoring.
+- [ ] **Step 5:** Re-confirm the stable `merge-gate` check remains an
+  **active required status check** on the default-branch ruleset
+  (read-only: `gh api repos/{owner}/{repo}/rulesets/19021982`). Verified
+  live during planning (§10 G-6): enforcement `active`, required status
+  check context `merge-gate`, strict policy. Expected: unchanged; if the
+  rule has been weakened or removed, STOP — the orchestration index
+  requires the gate live before any canonical proposal lands.
 - [ ] **Step 6:** `git worktree add` a fresh worktree on
   `feature/cse-canonical-promotion` from origin/main; `git status
   --porcelain` empty. Expected: clean.
@@ -600,12 +674,14 @@ verbatim (modulo any Codex-plan-review conditions) and whose body follows
   caching example, verification lists, the 13 non-goals, the six
   rejected-alternative rationales) and every heading resolving its
   frontmatter anchor.
-- [ ] **Step 3:** Confirm no new semantics: the artifact must contain no
-  normative statement without a §5 source row — the single declared
-  exception being `## Relationship to Context Integrity`, whose source is
-  the orchestration index's boundary bullets (§5 row 68, carried verbatim).
-  The two OQs carry AMB-1 and AMB-7 verbatim as open questions; no other
-  ambiguity is resolved in the artifact text.
+- [ ] **Step 3:** Confirm no new semantics beyond ratified authority: the
+  artifact must contain no normative statement without a §5 source row —
+  the two declared exceptions being `## Relationship to Context Integrity`
+  (the orchestration index's boundary bullets, §5 row 68, carried verbatim)
+  and the packet-sourced actor rule and surface-scope pin (§5 row 69,
+  carried only as owner-adjudicated). The two OQs carry AMB-1 and AMB-7
+  verbatim as open questions; no other ambiguity is resolved in the
+  artifact text.
 
 ### Task 3: Validate against the store gates
 
@@ -648,10 +724,11 @@ verbatim (modulo any Codex-plan-review conditions) and whose body follows
   (§10 carried forward, updated), Review scope (the single created file;
   revert boundary).
 - [ ] **Step 3:** Wait for the `merge-gate` check on the exact head
-  (it runs unconditionally on every PR). Expected: green. Confirm Task 1
-  Step 5's required-status activation finding still holds before the PR can
-  be merge-eligible. Do not mark ready; request Codex exact-head review;
-  the owner alone merges — and that merge **is** acceptance.
+  (it runs unconditionally on every PR and is ruleset-required). Expected:
+  green. Re-confirm Task 1 Step 5's active-ruleset reading still holds
+  before the PR can be merge-eligible. Do not mark ready; request Codex
+  exact-head review; the owner alone merges — and that merge **is**
+  acceptance.
 
 ## Three-valued disclosures and blocking authority gaps
 
@@ -677,6 +754,12 @@ verbatim (modulo any Codex-plan-review conditions) and whose body follows
   `depends-on` edge (witness: grep + exemplar frontmatter).
 - No CSE artifact currently exists under `.verdi/specs/` (witness: store
   directory listing).
+- Default-branch ruleset `19021982` is active and requires the
+  `merge-gate` status check with strict policy (witness: the Codex
+  reviewer's own verification, independently re-confirmed by this FABLE
+  planning lane's read-only `gh api repos/{owner}/{repo}/rulesets/19021982`
+  query through the owner-authenticated `gh` CLI during Codex round 1; see
+  G-6).
 
 **Violated:** none observed in this lane.
 
@@ -688,10 +771,16 @@ transitions:**
   resolved in the repository. The orchestration stop conditions forbid
   implementation while the ledger is unresolvable. AMB dispositions below
   that require ledger entries inherit this gap.
-- **G-2 (blocking for Wave 3 `CSE evaluator and isolated execution`, not
-  for authoring the proposal):** the reusable CI/CSE worktree/isolation/
-  capability boundary is unratified. This plan and the proposed artifact
-  name the boundary (§7) and select nothing.
+- **G-2 (blocking):** the reusable CI/CSE worktree/isolation/capability
+  boundary is unratified, and the cross-feature authority audit packet
+  (PR #264, open at this head) awaits owner adjudication of the rulings
+  this promotion consumes — OD-4 (ratification principals,
+  mutation-provenance scope), OD-6 (isolation-boundary vehicle), OD-7
+  (capability terminology), OD-11 (ratification transport), OD-12
+  (store-layout amendment ownership). The full boundary implementation
+  blocks Wave 3; the **owner rulings on wording this artifact carries
+  block the promotion unit's authoring** (§9 Task 1 Step 4). This plan and
+  the proposed artifact name the boundary (§7) and select nothing.
 - **G-3 (resolved during verification — retained for the record):** the
   `spec/worktree-manager` link target is proven to resolve (see the Proven
   list above); the material fact the implementation unit carries is that
@@ -707,18 +796,20 @@ transitions:**
   resolver lane). Validation in this lane is `git diff --check` plus the
   narrow `internal/specalign` suite; the implementation unit owes the full
   gates (§9 Task 4).
-- **G-6 (disclosure — a live blocker for any immediate canonical
-  landing; this plan itself lands no canonical proposal):** repository
-  text at this plan's base commit
-  states the `merge-gate` **required-status** rule is not yet activated:
-  `.github/workflows/merge-gate.yml`'s header says the ruleset points at
-  it "once step 6 of that plan's rollout activates it," and commit
-  `f3bcee02` records "activating the required-status rule is an
-  owner-performed step that follows this PR's merge, and `gh pr checks
-  --required` reports no required checks today." The orchestration index
-  requires the gate **live before any canonical proposal lands** — hence
-  §9 Task 1 Step 5's STOP. The live ruleset was not queried via API in
-  this lane; the check itself runs unconditionally on every PR either way.
+- **G-6 (proven-live; retained for the record):** the `merge-gate`
+  required-status rule **is active**. Witness: the Codex reviewer's own
+  verification, independently re-confirmed by this FABLE planning lane's
+  read-only API query of default-branch ruleset `19021982` through the
+  owner-authenticated `gh` CLI during Codex round 1 —
+  `enforcement: "active"`, rule `required_status_checks` with context
+  `merge-gate` and `strict_required_status_checks_policy: true`, plus
+  pull-request-required and review-thread-resolution rules. Repository
+  prose at the base commit (`merge-gate.yml`'s header; commit `f3bcee02`)
+  predates the owner's activation and describes the pre-activation state —
+  stale relative to the live forge, not evidence against it. The
+  orchestration prerequisite ("gate live before any canonical proposal
+  lands") is satisfied today; §9 Task 1 Step 5 remains a read-only
+  re-confirmation at execution time, STOPping only on regression.
 
 **Ambiguity dispositions (no silent resolution):**
 
