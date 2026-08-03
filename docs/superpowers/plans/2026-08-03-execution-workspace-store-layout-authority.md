@@ -45,7 +45,12 @@ are always recorded as repository-visible authority, never only in the
 non-authoritative 08 mirror. Round 4 (Codex focused re-review) integrated
 the ledger's `SI-<n>` namespace: L-* identifiers are plan-local handles
 only; the authority PRs materialize entries under newly allocated SI IDs
-that cite their L handles (§10 namespace rule).
+that cite their L handles (§10 namespace rule). Round 5 (Codex) assigned
+each prerequisite decision's SI entry to its deciding lane (GLG for
+L-2/P-1, the R-5 joint lane for L-2b/P-2 — PR-A cites, never re-records),
+made SI allocation concurrency-guarded with a reallocation STOP (§9.3-7),
+and rebased the PR onto current main (which also cleared the previously
+disclosed external fidelity drift — the R-5 mirror sync had landed).
 
 ## Global constraints
 
@@ -565,12 +570,19 @@ authority in their own lanes) before PR-A authoring begins:
   and OD-9's repository-visible recording rule.
 - **P-1 — GLG journey-event-receipt storage** (GLG unit): zone, path,
   retention, honoring row 7's constraints (immutability vs disposable
-  zones; the naming collision with CI's context receipts).
+  zones; the naming collision with CI's context receipts). The GLG lane's
+  own authority PR records the decision's `SI-<n>` ledger entry (citing
+  handle L-2); PR-A verifies that landed SI ID and cites it — it never
+  re-records or duplicates it.
 - **P-2 — exemption-record storage** (R-5/OD-2 joint GLG/CI
   kernel-contract lane): one home or two, resolving the row 5 / row 6
-  two-units-one-concept seam.
+  two-units-one-concept seam. The joint lane's authority PR records the
+  decision's `SI-<n>` entry (citing handle L-2b); PR-A verifies and cites
+  it, never re-records it.
 
-PR-A transcribes both decisions; it invents neither. If the owner instead
+PR-A transcribes both decisions; it invents neither, and it records SI
+entries only for its own inventions — a decision's ledger entry belongs to
+the lane that ratifies the decision. If the owner instead
 elects to narrow OD-12 (Codex round-2's named alternative), that is a new
 adjudication in the owner's voice, recorded like OD-1..OD-12 — this plan
 cannot grant it and does not assume it.
@@ -617,14 +629,17 @@ contains only the in-repo file):
 
 **Both PRs, unconditionally:**
 - Modify: `docs/superpowers/invention-ledger.md` — each PR materializes
-  ledger entries under the next available `SI-<n>` identifiers (the
-  ledger's authoritative namespace, established by its own SI-1): PR-A for
-  the entries corresponding to L-1, L-2/P-1, L-2b/P-2, L-11, L-12, L-13;
-  PR-B for those corresponding to L-3, L-5, L-6, L-7, L-8, L-14. Each SI
-  entry cites its plan-local L handle for traceability; L-* handles are
-  never written as ledger IDs. The ledger exists before PR-A by
-  prerequisite P-0 (§7.2), so there is no conditional branch and no
-  fallback recording surface.
+  ledger entries under newly allocated `SI-<n>` identifiers (the ledger's
+  authoritative namespace, established by its own SI-1; allocation per
+  §10's concurrency guard): PR-A for its own inventions and deferrals —
+  the entries corresponding to L-1, L-11, L-12, L-13; PR-B for those
+  corresponding to L-3, L-5, L-6, L-7, L-8, L-14. The P-1/P-2 decisions'
+  SI entries are recorded by their deciding lanes (§7.2); PR-A verifies
+  and cites those landed SI IDs, never re-records them. Each SI entry
+  cites its plan-local L handle for traceability; L-* handles are never
+  written as ledger IDs. The ledger exists before PR-A by prerequisite
+  P-0 (§7.2), so there is no conditional branch and no fallback recording
+  surface.
 
 **Neither PR touches:** any file under `internal/` or `cmd/`, any
 `testdata/`, `.gitattributes`, or `02-artifact-contract.md`.
@@ -676,15 +691,27 @@ STOP and report (no improvisation) if any of these holds:
    before PR-A rather than after.
 6. PR-A authoring begins before P-0, P-1, and P-2 have landed (§7.2), or
    PR-B authoring begins before PR-A is owner-merged.
+7. The ledger gains new SI entries between a PR's allocation and its
+   merge: STOP, rebase, reallocate the PR's SI IDs, and re-verify
+   uniqueness before merging (§10 namespace rule).
 
 ## 10. Unresolved semantics and inventions → successor ledger (post-OD-9)
 
 **Namespace rule:** the L-* identifiers below are plan-local handles,
 never successor-ledger IDs. The ledger's authoritative namespace is
 `SI-<n>` (established by the ledger's own SI-1 entry, PR #270). Each
-authority PR allocates the next available `SI-<n>` identifiers at
-authoring time and materializes its entries under them; each SI entry
-cites its corresponding L handle for traceability back to this plan.
+authority PR materializes its entries under newly allocated `SI-<n>`
+identifiers; each SI entry cites its corresponding L handle for
+traceability back to this plan. **Allocation is concurrency-guarded** —
+"next available" is not safe to compute once, since multiple active lanes
+append to one ledger: allocate against a freshly fetched and rebased
+`origin/main`; verify the chosen IDs are unique over every SI ID already
+present in the ledger (not merely greater than the last row); and if the
+ledger gains new SI entries between allocation and the PR's merge, STOP,
+rebase, reallocate, and re-verify uniqueness before merging (§9.3-7). An
+SI entry belongs to the lane that ratifies its content: PR-A and PR-B
+record entries only for their own inventions and deferrals; prerequisite
+decisions' entries are recorded by their deciding lanes and cited (§7.2).
 
 Owner: the lane that lands each authority PR materializes that PR's
 entries in the ledger, under newly allocated SI IDs, in the same reviewed
@@ -698,10 +725,12 @@ specific PR ratifies with disclosure.
 **Prerequisite decisions (block PR-A — §7.2):**
 - **L-2 / P-1** — GLG journey-event-receipt storage: zone, path,
   retention, and the naming collision with CI's canonical context
-  receipts: GLG unit. PR-A transcribes the decision.
+  receipts: GLG unit. The GLG lane records the SI entry; PR-A transcribes
+  the decision and cites that SI ID.
 - **L-2b / P-2** — exemption-record storage and the row 5 / row 6 seam
   (two units, one concept): the R-5/OD-2 joint GLG/CI kernel-contract
-  lane. PR-A transcribes the decision.
+  lane. The joint lane records the SI entry; PR-A transcribes the
+  decision and cites that SI ID.
 
 **Deferred to named owners (non-blocking):**
 - **L-1** — internal grammar of `.verdi/policy/` (file naming, frontmatter,
@@ -763,10 +792,10 @@ and `../docs/design/specs/08-revision-notes.md`.
 **Interfaces:** produces the amended layout PR-B and both promotions cite;
 consumes §4 of this plan verbatim plus the landed P-1/P-2 decisions.
 
-- [ ] Step 1: witness prerequisites — P-0 (OD-9 ledger owner-merged: `git log origin/main -- docs/superpowers/invention-ledger.md` shows its landing), P-1 (GLG receipt storage), and P-2 (exemption home) landed as owner-merged authority — STOP if any is missing (§9.3-6)
+- [ ] Step 1: witness prerequisites — P-0 (OD-9 ledger owner-merged: `git log origin/main -- docs/superpowers/invention-ledger.md` shows its landing), P-1 (GLG receipt storage), and P-2 (exemption home) landed as owner-merged authority **with their SI ledger entries recorded by their deciding lanes** — note both SI IDs for citation; STOP if any is missing (§9.3-6)
 - [ ] Step 2: verify full-workspace checkout (`ls ../docs/design/specs/01-store-layout.md`) — STOP if absent (§9.3-3)
 - [ ] Step 3: apply §4.1 block (without the `[SEV]` marker, plus the P-1/P-2 lines) and §4.2 prose to `.verdi/specs/active/verdi-store-layout/spec.md`
-- [ ] Step 4: synchronize the mirror — identical edit to `../docs/design/specs/01-store-layout.md`; add the §4.2 dated entry to `../docs/design/specs/08-revision-notes.md`; materialize ledger entries corresponding to L-1, L-2/P-1, L-2b/P-2, L-11, L-12, L-13 in `docs/superpowers/invention-ledger.md` under the next available `SI-<n>` IDs, each citing its L handle (§10 namespace rule; exists by P-0; in-repo PR bytes)
+- [ ] Step 4: synchronize the mirror — identical edit to `../docs/design/specs/01-store-layout.md`; add the §4.2 dated entry to `../docs/design/specs/08-revision-notes.md`; materialize ledger entries corresponding to L-1, L-11, L-12, L-13 in `docs/superpowers/invention-ledger.md` under freshly allocated `SI-<n>` IDs (allocate against fetched/rebased origin/main, verify uniqueness over all existing SI IDs — §10 concurrency guard), each citing its L handle; cite the P-1/P-2 SI IDs recorded by their deciding lanes (step 1) rather than re-recording them (in-repo PR bytes)
 - [ ] Step 5: run `make lint-store && make spec-align` — fidelity must RUN and pass; then full `make verify`
 - [ ] Step 6: `git diff --check`; commit the in-repo files (spec.md + SI ledger entries); compute post-edit sha256 of both mirror files and capture the workspace-side patch text; open draft PR citing OD-12 with the mirror patch + hashes attached to the description; STOP for Codex/owner review
 
@@ -779,6 +808,6 @@ relationship section restates as landed (prose-to-prose — no ac/dc anchors
 exist on component specs, §3).
 
 - [ ] Step 1: witness PR-A merged on origin/main (`git log origin/main -- .verdi/specs/active/verdi-store-layout/spec.md`), and confirm rows 8/14 were not severed (if severed, their follow-up amendment must merge first)
-- [ ] Step 2: verify §3's frontmatter block against `internal/artifact` (`validateBase`, `validateComponent`, schema-value acceptance); author spec.md per §3 (scope §3.1, reuse table §3.2, non-goals §3.3 with §6's landed quotes, gc slice §3.4 including the cross-slice exclusion and invocation-surface decision, shared seam §3.5 with the `execution-workspace enforcement` unit and its gap list as pending delivery, inventions L-3/L-5/L-6/L-7/L-8/L-14 disclosed in the spec and materialized in `docs/superpowers/invention-ledger.md` under the next available `SI-<n>` IDs, each citing its L handle — §10 namespace rule — in the same change)
+- [ ] Step 2: verify §3's frontmatter block against `internal/artifact` (`validateBase`, `validateComponent`, schema-value acceptance); author spec.md per §3 (scope §3.1, reuse table §3.2, non-goals §3.3 with §6's landed quotes, gc slice §3.4 including the cross-slice exclusion and invocation-surface decision, shared seam §3.5 with the `execution-workspace enforcement` unit and its gap list as pending delivery, inventions L-3/L-5/L-6/L-7/L-8/L-14 disclosed in the spec and materialized in `docs/superpowers/invention-ledger.md` under freshly allocated `SI-<n>` IDs per §10's concurrency guard, each citing its L handle, in the same change)
 - [ ] Step 3: run `make lint-store && make spec-align && make verify`
 - [ ] Step 4: `git diff --check`; commit; open draft PR citing OD-6; STOP for Codex/owner review
