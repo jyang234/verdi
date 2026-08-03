@@ -420,7 +420,7 @@ reason). Preservation evidence cites the source inventory item numbers
 | 66 | Rejected alternatives, L896-922 | 6 rejected alternatives with rationale | `## DC-1`, `## DC-4`, `## DC-7`, `## DC-9`, `## DC-11`, `## DC-18` bodies (rationale prose) | verbatim (rationale carried into the owning DC section) | 169-174 |
 | 67 | Contents, L6-28 | the source's own table of contents | none | plan-only (navigation, non-normative; the artifact's navigation is its frontmatter anchors and body headings) | — |
 | 68 | Orchestration index §Worktree/isolation/capability mechanics (non-CSE source, by declared exception) | the three CI/CSE boundary-ownership bullets | `## Relationship to Context Integrity` | verbatim (three bullets, per §7 — named, never ratified) | §7; independent Opus verification (word-by-word check against the index) |
-| 69 | Cross-feature authority audit packet §2 item 2 / OD-4 / R-7 (PR #264; non-CSE source, by declared exception; consumed only as owner-adjudicated) | the two-class actor rule: mutation-provenance actors are attribution records; `ratification.yaml` actors require authenticated kernel principals, unproven authentication blocks ratification; plus the experiment-surface scope pin (its CX-9). The packet's companion embed rule (kernel principal ID or explicit `unauthenticated` marker, never a bare string) is a disclosed deferral to the kernel's landing (§7) | `dc-16`, `ac-6`; `## Relationship to Context Integrity` | conditional consumption — final wording follows the owner-merged adjudication and authority PRs, never the packet alone; contingent on R-5/OD-4 sequencing per the merged R-7, with OD-2 as R-5's own vehicle/custody prerequisite (§7); §9 Task 1 Step 4 blocks authoring until adjudicated | §7 actor-rule and deferral paragraphs; packet CX-4/OD-4/§12 C1 |
+| 69 | Cross-feature authority audit packet §2 item 2 / OD-4 / R-7 (PR #264; non-CSE source, by declared exception; consumed only as owner-adjudicated) | the two-class actor rule: mutation-provenance actors are attribution records; `ratification.yaml` actors require authenticated kernel principals, unproven authentication blocks ratification; plus the experiment-surface scope pin (its CX-9). The packet's companion embed rule (kernel principal ID or explicit `unauthenticated` marker, never a bare string) is a disclosed deferral to the kernel's landing (§7) | `dc-16`, `ac-6`; `## Relationship to Context Integrity` | conditional consumption — final wording follows the owner-merged adjudication and authority PRs, never the packet alone; contingent on R-5/OD-4 sequencing per the merged R-7, with OD-2 as R-5's own vehicle/custody prerequisite (§7); §9 Task 1 Step 4 blocks authoring until the adjudication **and** the R-5/store-layout authority PRs have landed — only runtime implementation trails | §7 actor-rule and deferral paragraphs; packet CX-4/OD-4/§12 C1 |
 
 Coverage: rows 1-66 jointly cover inventory items 1-174 with no item
 unmapped and no item double-assigned; rows 67-69 account for the only three
@@ -498,8 +498,11 @@ it names, in repository-visible, owner-merged form; (3) the **resulting
 authoritative contracts land** as their own owner-merged authority PRs
 (the R-5 kernel ownership contract; the OD-6/OD-12 store-layout amendment).
 This promotion **consumes** the outcomes of (2) and (3) and decides none of
-them. The promotion unit's preflight (§9 Task 1 Step 4) blocks until the
-owner adjudication exists for the rulings this artifact's text depends on:
+them. Both are authoring prerequisites: the promotion unit's preflight (§9
+Task 1 Step 4) blocks until the owner adjudication **and** the resulting
+authority PRs have landed for the rulings this artifact's text depends on —
+only the runtime/shared-seam *implementation* may trail. The consumed
+rulings:
 
 - **OD-6 — isolation-boundary vehicle** (extend the `spec/worktree-manager`
   lineage via a ratified `verdi-store-layout` amendment plus a story, or a
@@ -507,9 +510,11 @@ owner adjudication exists for the rulings this artifact's text depends on:
 - **OD-12 — store-layout amendment ownership**: the experiment directory
   tree the artifact carries from the design (dc-17) describes future store
   content whose admission into `verdi-store-layout`'s committed-zone
-  enumeration is a separate ratified component-spec amendment — a named
-  dependency of the Wave 2+ implementation units, neither performed nor
-  preempted by the promotion;
+  enumeration is a separate ratified component-spec amendment. The
+  promotion neither performs nor preempts that amendment, but it **must
+  have landed as an owner-merged authority PR before authoring** (§9 Task
+  1 Step 4(d)); the Wave 2+ implementation units then depend on that same
+  landed amendment plus its implementation;
 - **OD-7 — capability terminology**: CSE "capabilities" are execution
   grants drawn from the shared grant vocabulary (distinct from ASD's
   adapter-surface discovery), recorded in the promoted text once ratified;
@@ -542,16 +547,20 @@ Two disclosed deferrals ride with the actor rule, neither silently dropped:
 the packet's companion **embed rule** (every attribution record embeds a
 kernel canonical principal ID or an explicit `unauthenticated` marker —
 never a bare string presented as identity) is deferred to the
-governance-principal kernel's landing, since it depends on the kernel's
-not-yet-ratified ID representation; and the rule's final wording is
+governance-principal kernel's Wave 1 implementation, since it depends on
+the kernel's concrete canonical principal-ID representation; and the
+rule's final wording is
 **contingent on R-5/OD-4 sequencing, exactly as the merged packet's R-7
 states it** ("OD-3 governs only ASD's actor-upgrade timing"). OD-2 — the
 vehicle and custody decision for R-5's kernel ownership contract — may be
 an additional prerequisite for R-5's landing, but it does not replace
-CSE's OD-4. Until the R-5 authority PR lands, `dc-16` names the kernel
-seam on the strength of the already-merged orchestration authority (one
-shared governance-profile/principal schema; neither feature may introduce
-a second actor type), and the packet rule rides as conditional wording.
+CSE's OD-4. The preflight makes the landed R-5 authority PR a hard
+authoring prerequisite (§9 Task 1 Step 4(d)), so `dc-16`'s final wording
+follows the landed contract — never conditional plan wording authored
+against unlanded authority. The embed rule above is therefore the one
+implementation-tracked deferral: its requirement is fixed by the landed
+authority, and it binds concretely when the Wave 1 kernel implementation
+delivers the canonical principal-ID representation.
 
 ## Human-ceremony inventory
 
@@ -642,19 +651,22 @@ specified by the promoted artifact's `co-7`.
   OD-4 (ratification-principal treatment and mutation-provenance scope),
   OD-6 (isolation-boundary vehicle), OD-7 (capability terminology), OD-11
   (ratification transport), OD-12 (store-layout amendment ownership);
-  (d) **authoritative contracts landed where the consumed wording depends
-  on them** — the R-5 kernel ownership contract (sequencing per the merged
-  R-7: R-5/OD-4, with OD-2 as R-5's own vehicle/custody decision) as its
-  own owner-merged authority PR; where an authority PR has not yet landed,
-  the artifact carries only wording grounded in already-merged authority
-  and §7's deferral paragraph governs. Then revalidate §7's consumed
-  wording — the actor rule, the surface-scope pin, the boundary bullets,
-  §8's C2/C3 transport posture — against those owner-merged authority
-  texts (never against the packet alone) and amend this plan first if they
-  diverge. The full shared-seam *implementation* (the OD-6/OD-12
-  store-layout amendment itself) may still be pending — the artifact
-  names, never selects — but the owner rulings on wording the artifact
-  carries must exist before authoring.
+  (d) **authoritative contracts landed** — both authority PRs the consumed
+  wording depends on have merged before any authoring begins: the **R-5
+  kernel ownership contract** (sequencing per the merged R-7: R-5/OD-4,
+  with OD-2 as R-5's own vehicle/custody decision) and the **store-layout
+  component-spec amendment** admitting the four features' new artifact
+  paths, including the CSE experiment tree (the OD-6/OD-12 vehicle,
+  through the ratified component-spec amendment flow) — each a
+  repository-visible, owner-merged authority PR. A missing authority PR is
+  a STOP; there is no authoring against unlanded authority. Only the
+  **runtime/shared-seam implementation** may remain pending — the
+  worktree-manager extension, isolation and capability enforcement code,
+  gc scope growth in code, the kernel resolver — which the artifact names
+  and never selects. Then revalidate §7's consumed wording — the actor
+  rule, the surface-scope pin, the boundary bullets, §8's C2/C3 transport
+  posture — against the landed authority texts (never against the packet
+  alone) and amend this plan first if they diverge.
 - [ ] **Step 5:** Re-confirm the stable `merge-gate` check remains an
   **active required status check** on the default-branch ruleset
   (read-only: `gh api repos/{owner}/{repo}/rulesets/19021982`). Verified
@@ -794,11 +806,12 @@ transitions:**
   (isolation-boundary vehicle), OD-7 (capability terminology), OD-11
   (ratification transport), OD-12 (store-layout amendment ownership) —
   and the authority PRs that would result from them (the R-5 kernel
-  ownership contract; the store-layout amendment) **remain pending**. The
-  full boundary implementation blocks Wave 3; the **owner rulings on
-  wording this artifact carries block the promotion unit's authoring**
-  (§9 Task 1 Step 4). This plan and the proposed artifact name the
-  boundary (§7) and select nothing.
+  ownership contract; the store-layout component-spec amendment) **remain
+  pending**. The **owner rulings and both authority PRs block the
+  promotion unit's authoring** (§9 Task 1 Step 4); only the
+  runtime/shared-seam implementation may trail, and that implementation
+  blocks Wave 3, not authoring. This plan and the proposed artifact name
+  the boundary (§7) and select nothing.
 - **G-3 (resolved during verification — retained for the record):** the
   `spec/worktree-manager` link target is proven to resolve (see the Proven
   list above); the material fact the implementation unit carries is that
