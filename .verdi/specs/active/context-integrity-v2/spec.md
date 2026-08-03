@@ -110,7 +110,7 @@ decisions:
     text: "governance-profile artifacts live in the constitution store as typed policy artifacts; the kernel owns their schema and profile-resolution behavior while this feature owns their storage, identity, digest, and recording, and kernel profile resolution remains a distinct operation from this feature's effective-policy resolution"
     anchor: dc-20
   - id: dc-21
-    text: "recording and enforcement of resolved profiles and principals for policy, context, execution, and receipt decisions is this feature's side of the shared kernel contract: manifests, approvals, receipts, and verdicts record principal identity only as kernel principal-resolution results or as advisory attribution records that embed a canonical kernel principal identifier or an explicit unauthenticated marker, and a required resolution left unproven blocks the authoritative decision it gates"
+    text: "recording and enforcement of resolved profiles and principals for policy, context, execution, and receipt decisions is this feature's side of the shared kernel contract: every manifest, approval, receipt, and verdict consumes kernel principal-resolution results as its only authoritative actor representation; an advisory attribution record of the class Guided Lifecycle and Governance DC-19 defines may accompany one as non-authoritative provenance but never satisfies an authoritative role, and a required resolution left unproven blocks the authoritative decision it gates"
     anchor: dc-21
   - id: dc-22
     text: "the same-principal and different-principal conflict operators and every other identity-family evaluation call the kernel authorization interpretation; this feature never reimplements trust-source evaluation, principal distinctness, or separation-of-duties semantics"
@@ -524,18 +524,17 @@ is joint and explicit (owner ruling OD-2, recorded in
 `docs/superpowers/specs/2026-08-03-four-feature-owner-adjudications-design.md`,
 materializing recommendation R-5 of
 `docs/superpowers/plans/2026-08-03-cross-feature-authority-audit.md` §2):
-Guided Lifecycle and Governance owns the lifecycle-wide requirements,
-delivered through its `lifecycle-governance` story; this feature records
-and enforces the resolved profile and principals for policy, context,
-execution, and receipt decisions (DC-21) and stores governance-profile
-artifacts in its constitution store as typed policy artifacts (owner
-ruling OD-1, DC-20); the governance-principal-kernel delivery unit
-implements the profile schema, principal resolver, trust-source
-evaluation, and authorization interpretation, and owns nothing else.
-Delivery planning may factor this kernel as prerequisite work, but neither
-feature may define a parallel profile or actor type, and an interim
-semantic change to the shared contract moves only by owner-ratified
-amendment to the affected specification.
+Guided Lifecycle and Governance owns the lifecycle-wide requirements;
+this feature records and enforces the resolved profile and principals
+for policy, context, execution, and receipt decisions (DC-21) and stores
+governance-profile artifacts in its constitution store as typed policy
+artifacts (owner ruling OD-1, DC-20); the governance-principal-kernel
+delivery unit implements the profile schema, principal resolver,
+trust-source evaluation, and authorization interpretation, and owns
+nothing else. Delivery planning may factor this kernel as prerequisite
+work, but neither feature may define a parallel profile or actor type,
+and an interim semantic change to the shared contract moves only by
+owner-ratified amendment to the affected specification(s).
 
 The journey may consume Context Integrity's repository, authority, conflict,
 manifest, receipt, and freshness facts as canonical operands. It cannot
@@ -712,21 +711,24 @@ meaning, suppress unresolved state, or weaken deterministic provenance.
 
 Owner ruling OD-1 places governance-profile artifacts in the constitution
 store rather than a kernel-owned silo: profiles are project authority, and
-this feature already owns the storage, identity, digest, drift, and
-recording discipline for authority artifacts. The kernel's profile
-resolution — deciding which profile applies and resolving its principals —
-is a different operation from this feature's effective-policy resolution
-over policies, overlays, and exemptions; conflating them was the boundary
-risk the audit's CX-1 row named, and the split here keeps each owner
-accountable for exactly one behavior.
+this feature's accepted text already owns the storage, identity, digest,
+drift, and recording discipline for authority artifacts. The kernel's
+profile resolution — deciding which profile applies and resolving its
+principals — is a different operation from this feature's effective-policy
+resolution over policies, overlays, and exemptions; conflating them was
+the boundary risk the audit's CX-1 row named, and the split here keeps
+each owner accountable for exactly one behavior.
 
 ## DC-21
 
 This is the recording-and-enforcement half of the custody rule Guided
-Lifecycle and Governance states as its DC-16: every manifest, approval,
-receipt, and verdict that names an actor carries either a kernel
-principal-resolution result or an advisory attribution record embedding a
-canonical kernel principal identifier or explicit unauthenticated marker.
+Lifecycle and Governance states as its DC-16. Authoritative actor
+identity in a manifest, approval, receipt, or verdict is exclusively a
+kernel principal-resolution result. An advisory attribution record — the
+class Guided Lifecycle and Governance DC-19 defines, embedding a
+canonical kernel principal identifier or an explicit unauthenticated
+marker — may travel alongside as non-authoritative provenance, but it
+never occupies an authoritative role, whatever marker it carries.
 Enforcement follows the three-valued posture: a required resolution that
 is unproven blocks the authoritative decision it gates — it is never
 downgraded to a warning or silently satisfied.
