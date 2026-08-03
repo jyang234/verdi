@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - The binding system semantics remain `docs/design/specs/00..05-*.md`; `docs/design/specs/08-revision-notes.md` remains the ratification history.
-- The four documents indexed here are draft design authority until the human owner completes document review and merges their canonical proposals under the ratified acceptance lifecycle.
+- The owner's merge of this pull request ratifies the four documents indexed here: the two canonical proposals become accepted pending build under the merge-signaled acceptance lifecycle, and the two design documents become ratified design authority that is not yet canonical lifecycle authority.
 - Never edit frozen artifacts or binding system specs directly. Ratified semantic changes follow the existing amendment flow.
 - Never import `verdi-go` packages. Execute its pinned CLIs and strict-decode their JSON outputs.
 - Preserve three-valued honesty: proven, violated with a witness, or explicitly disclosed as unproven. Missing context, identity, forge state, evidence, or review is never a pass.
@@ -68,7 +68,7 @@ At most two implementation units may be active concurrently. Parallel units must
 
 This pull request indexes and sequences the four specifications. It does not:
 
-- accept or freeze any specification;
+- perform any acceptance action in its own bytes: no acceptance command, status field, or frozen stamp is written; the owner's merge is what accepts the two canonical proposals;
 - promote ASD or CSE into canonical Verdi artifacts;
 - change runtime code, schemas, CLI or MCP inventories, workbench assets, tests, dependencies, or CI;
 - choose package names, Go interfaces, migrations, configuration keys, performance budgets, or rollout defaults for later implementation plans;
@@ -78,16 +78,16 @@ This pull request indexes and sequences the four specifications. It does not:
 
 The branch is independently reversible by reverting its documentation commit. Later units remain separately reversible because each owns one focused pull request and must state its compatibility and rollback posture before review.
 
-Because the incumbent lifecycle rejects active artifacts with `status: draft`, keep this umbrella pull request as a design-review vehicle until the [merge-signaled acceptance design](../specs/2026-08-01-merge-signals-spec-acceptance-design.md) is ratified and its stable required merge gate is live. After that prerequisite lands, merging the reviewed canonical proposals is their acceptance; no preparatory acceptance command or status-only commit is permitted.
+Keep this umbrella pull request as a design-review vehicle until the [merge-signaled acceptance design](../specs/2026-08-01-merge-signals-spec-acceptance-design.md) is ratified and its stable required merge gate is live. After that prerequisite lands, merging the reviewed canonical proposals is their acceptance; no preparatory acceptance command or status-only commit is permitted.
 
 ## Specification index
 
 | Key | Specification | Current authority posture | Delivery units named by the specification | Entry gate |
 |---|---|---|---|---|
-| GLG | [Guided Lifecycle and Governance](../../../.verdi/specs/active/guided-lifecycle-governance/spec.md) | Canonical Verdi feature artifact, `status: draft` | `journey-projection`, `obligation-quality`, `lifecycle-governance`, `accountable-human-records`, `committed-authority`, `continuous-readiness`, `lifecycle-recovery`, `journey-metrics` | Human review and Verdi acceptance of the draft |
-| CI | [Context Integrity and Constitutional Execution](../../../.verdi/specs/active/context-integrity/spec.md) | Canonical Verdi feature artifact, `status: draft` | `policy-authority`, `context-compiler`, `policy-conflict-gate`, `sealed-codex-execution`, `context-receipts-review`, `constitution-workbench` | Human review and Verdi acceptance of the draft |
-| ASD | [AI-assisted spec design](../specs/2026-07-30-ai-assisted-spec-design.md) | Design document approved in session and awaiting document review; not yet a canonical Verdi feature artifact | Draft-mutation core, structured CLI, workbench migration, bounded context and capabilities, proposal-only dogfood, draft-write, review/provenance views, Codex/Claude conformance | Document review, promotion to a canonical feature artifact, and Verdi acceptance |
-| CSE | [Comparative spike experiments](../specs/2026-07-30-comparative-spike-experiments-design.md) | Design document approved in session and awaiting document review; not yet a canonical Verdi feature artifact | Experiment schemas, decision engine, evaluator/observer, isolated execution and resume, CLI/workbench/agent adapters, policy, dogfood comparison | Document review, promotion to a canonical feature artifact, and Verdi acceptance |
+| GLG | [Guided Lifecycle and Governance](../../../.verdi/specs/active/guided-lifecycle-governance/spec.md) | Statusless canonical Verdi feature artifact whose lifecycle state `verdi spec state` derives: proposed while this pull request is open, accepted pending build once the owner's merge lands on the default branch | `journey-projection`, `obligation-quality`, `lifecycle-governance`, `accountable-human-records`, `committed-authority`, `continuous-readiness`, `lifecycle-recovery`, `journey-metrics` | Profile-required exact-head review and the owner's merge of this pull request |
+| CI | [Context Integrity and Constitutional Execution](../../../.verdi/specs/active/context-integrity/spec.md) | Statusless canonical Verdi feature artifact whose lifecycle state `verdi spec state` derives: proposed while this pull request is open, accepted pending build once the owner's merge lands on the default branch | `policy-authority`, `context-compiler`, `policy-conflict-gate`, `sealed-codex-execution`, `context-receipts-review`, `constitution-workbench` | Profile-required exact-head review and the owner's merge of this pull request |
+| ASD | [AI-assisted spec design](../specs/2026-07-30-ai-assisted-spec-design.md) | Design document that the owner's merge of this pull request ratifies as design authority; not a canonical Verdi feature artifact until its sequenced canonical-promotion unit merges | Draft-mutation core, structured CLI, workbench migration, bounded context and capabilities, proposal-only dogfood, draft-write, review/provenance views, Codex/Claude conformance | Profile-required exact-head review and the owner's merge of this pull request; canonical promotion is later scoped work accepted by the merge of its own reviewed pull request |
+| CSE | [Comparative spike experiments](../specs/2026-07-30-comparative-spike-experiments-design.md) | Design document that the owner's merge of this pull request ratifies as design authority; not a canonical Verdi feature artifact until its sequenced canonical-promotion unit merges | Experiment schemas, decision engine, evaluator/observer, isolated execution and resume, CLI/workbench/agent adapters, policy, dogfood comparison | Profile-required exact-head review and the owner's merge of this pull request; canonical promotion is later scoped work accepted by the merge of its own reviewed pull request |
 
 No implementation plan may treat the two design documents as accepted lifecycle authority. Their promotion must preserve their reviewed decisions, constraints, non-goals, and rollout ordering in canonical artifact form.
 
@@ -233,7 +233,7 @@ The implementation concurrency ceiling remains two. During the shared-kernel pha
 - [ ] Inventory every human ceremony in the successor lifecycle and classify it as substantive judgment, existing forge authorization, deterministic materialization, exceptional override, or removable acknowledgement.
 - [ ] Ratify this index as the successor orchestration authority for the four features and update the workspace/repository instructions to name it.
 - [ ] Establish a repository-visible successor invention ledger or explicitly retain `PLAN.md` section 7 with a portable access path for every implementation worktree.
-- [ ] Promote ASD and CSE into canonical draft feature artifacts without losing reviewed decisions or adding new semantics.
+- [ ] Promote ASD and CSE into canonical feature proposal artifacts without losing reviewed decisions or adding new semantics.
 - [ ] Merge all four reviewed canonical feature specifications through the ratified merge-signaled lifecycle; their merges are acceptance and require no second human action.
 - [ ] Ratify `governance-principal-kernel` as shared prerequisite work.
 - [ ] Ratify the reusable worktree/isolation boundary between CI and CSE.
@@ -413,32 +413,32 @@ An agent stops and reports a blocking witness when any of these conditions holds
 
 ## Completion ledger
 
-Update this table only with links to merged pull requests and fresh evidence. A blank result means not started, not passed.
+This table enumerates the waves and their delivery units. It carries no status columns and records no progress. Completion is derived at read time from Git and GitHub facts: the merged pull requests that name a delivery unit, the exact-head Codex review evidence on those heads, their required check runs, and `verdi spec state` for the specifications involved. Never hand-edit this ledger to record plan review, implementation, review, or merge progress; a hand-maintained copy of that state would duplicate bookkeeping, contradict the derived facts, and collide with concurrent work on one shared file.
 
-| Wave | Delivery unit | Plan review | Implementation PR | Codex review | Human merge |
-|---|---|---|---|---|---|
-| 0 | Four-spec ratification and cross-feature decisions |  |  |  |  |
-| 1 | `governance-principal-kernel` |  |  |  |  |
-| 1 | CI `policy-authority` |  |  |  |  |
-| 2 | ASD draft-mutation core and CLI |  |  |  |  |
-| 2 | GLG `journey-projection` |  |  |  |  |
-| 2 | GLG `obligation-quality` |  |  |  |  |
-| 2 | CSE schemas and decision engine |  |  |  |  |
-| 3 | CI `context-compiler` |  |  |  |  |
-| 3 | CI `policy-conflict-gate` |  |  |  |  |
-| 3 | CSE evaluator and isolated execution |  |  |  |  |
-| 4 | CI `sealed-codex-execution` |  |  |  |  |
-| 4 | CI `context-receipts-review` |  |  |  |  |
-| 4 | GLG `lifecycle-governance` |  |  |  |  |
-| 4 | GLG `accountable-human-records` |  |  |  |  |
-| 4 | GLG `committed-authority` |  |  |  |  |
-| 5 | ASD adapters and review/provenance paths |  |  |  |  |
-| 5 | CSE adapters, ratification, and retention |  |  |  |  |
-| 5 | GLG `continuous-readiness` |  |  |  |  |
-| 5 | GLG `lifecycle-recovery` |  |  |  |  |
-| 5 | GLG `journey-metrics` |  |  |  |  |
-| 6 | ASD workbench |  |  |  |  |
-| 6 | CI `constitution-workbench` |  |  |  |  |
-| 6 | GLG workbench journeys |  |  |  |  |
-| 6 | CSE workbench |  |  |  |  |
-| 7 | Integrated dogfood and whole-branch approval |  |  |  |  |
+| Wave | Delivery unit |
+|---|---|
+| 0 | Four-spec ratification and cross-feature decisions |
+| 1 | `governance-principal-kernel` |
+| 1 | CI `policy-authority` |
+| 2 | ASD draft-mutation core and CLI |
+| 2 | GLG `journey-projection` |
+| 2 | GLG `obligation-quality` |
+| 2 | CSE schemas and decision engine |
+| 3 | CI `context-compiler` |
+| 3 | CI `policy-conflict-gate` |
+| 3 | CSE evaluator and isolated execution |
+| 4 | CI `sealed-codex-execution` |
+| 4 | CI `context-receipts-review` |
+| 4 | GLG `lifecycle-governance` |
+| 4 | GLG `accountable-human-records` |
+| 4 | GLG `committed-authority` |
+| 5 | ASD adapters and review/provenance paths |
+| 5 | CSE adapters, ratification, and retention |
+| 5 | GLG `continuous-readiness` |
+| 5 | GLG `lifecycle-recovery` |
+| 5 | GLG `journey-metrics` |
+| 6 | ASD workbench |
+| 6 | CI `constitution-workbench` |
+| 6 | GLG workbench journeys |
+| 6 | CSE workbench |
+| 7 | Integrated dogfood and whole-branch approval |

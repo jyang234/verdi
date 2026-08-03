@@ -1,7 +1,7 @@
 # AI-assisted spec design
 
 Date: 2026-07-30
-Status: approved in design session; awaiting document review
+Status: Design document ratified as design authority by the owner's merge of its pull request; not canonical Verdi lifecycle authority until its sequenced canonical-promotion unit merges
 
 ## Contents
 
@@ -416,9 +416,11 @@ The packet contains:
 - material validation warnings or policy disclosures.
 
 The packet does not ask the reviewer to certify that they read every token or
-understand the model's reasoning. A human reviews this concise semantic view,
-runs the existing acceptance ritual, and uses the normal PR approval. Those
-are sufficient; extra checkboxes would create review theater without adding a
+understand the model's reasoning. A human reviews this concise semantic view;
+the profile-required review of the exact proposed head authorizes merge, and
+the owner's merge of that pull request is the single decision that accepts the
+specification. No separate acceptance command, status edit, or confirmation
+repeats it, and extra checkboxes would create review theater without adding a
 counterweight.
 
 The agent may prepare or explain the packet but cannot mark it approved,

@@ -1,7 +1,7 @@
 # Comparative spike experiments
 
 Date: 2026-07-30
-Status: approved in design session; awaiting document review
+Status: Design document ratified as design authority by the owner's merge of its pull request; not canonical Verdi lifecycle authority until its sequenced canonical-promotion unit merges
 
 ## Contents
 
@@ -552,9 +552,10 @@ The two required human moments are consequential rather than ceremonial:
 2. ratification confirms that the resulting recommendation should determine
    the feature's chosen path.
 
-The normal pull-request approval remains the implementation governance gate.
-Verdi adds no competing approval ceremony and does not recreate Codex,
-Claude Code, or Verdi-go integrations.
+The profile-required pull-request review and the owner's merge of that pull
+request remain the implementation governance gate. Verdi adds no competing
+approval ceremony and does not recreate Codex, Claude Code, or Verdi-go
+integrations.
 
 ## Ratification and existing spike closure
 
