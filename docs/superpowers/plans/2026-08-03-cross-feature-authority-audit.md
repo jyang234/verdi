@@ -898,9 +898,9 @@ by this lane.
 - **R-7 (inside the CSE promotion unit).** Make the experiment-surface scope
   of "mutation provenance" explicit (CX-9); adopt the kernel attribution rule
   for mutation-provenance actors and the authenticated-principal requirement
-  for `ratification.yaml` actors (§2 item 2; contingent on R-5/OD-3
-  sequencing); restate the experiment context boundary as CI-compiler
-  requirements (CX-11).
+  for `ratification.yaml` actors (§2 item 2; contingent on R-5/OD-4
+  sequencing — OD-3 governs only ASD's actor-upgrade timing); restate the
+  experiment context boundary as CI-compiler requirements (CX-11).
 - **R-8 (separate session — noted only).** The default-branch resolver defect
   is owned elsewhere. Architectural implication recorded here: acceptance
   derivation (`internal/specstate`), kernel trust decisions, and the merge gate
@@ -936,7 +936,7 @@ graph TD
   W4 --> ASDP["ASD canonical promotion (W2 mapping; carries R-6)"]
   W4 --> CSEP["CSE canonical promotion (W3 mapping; carries R-7)"]
   KERN -.->|attribution rule, OD-3| ASDP
-  KERN -.->|attribution rule| CSEP
+  KERN -.->|attribution + ratification principal, OD-4| CSEP
   STORE --> ASDP
   STORE --> CSEP
   GATE["merge-gate required in live ruleset (owner-only; forge state)"] -.-> ASDP
@@ -954,8 +954,10 @@ ASD/CSE promotions may run concurrently only with disjoint changed-file
 inventories and no shared-registry edits (orchestration Phase C rule 1) —
 which, per CX-17/CX-19, requires the store-layout and inventory arbitration
 decisions first. The kernel contract ratification (R-5) is not fully
-independent of the promotions: the attribution rule (§2 item 2) feeds both
-promoted texts, sequenced by owner decision OD-3.
+independent of the promotions: §2 item 2 feeds both promoted texts, with the
+ASD attribution adoption sequenced by owner decision OD-3 and the CSE
+mutation-attribution and ratification-principal adoption sequenced by owner
+decision OD-4 (matching the graph edges above).
 
 ### Wave 0 exit checklist (status at the audited commit, three-valued)
 
@@ -1172,3 +1174,11 @@ revision; per the review protocol, the new head requires a fresh Codex review.
 | C2 | P1 | §4's receipts bullet gave every explicit sidecar inclusion "its approval," inventing a human-approval ceremony for a non-authoritative view ASD lets a person or agent request; CI requires human approval only across an authority/capability/declared-scope boundary (CI AC-2, lines 313–315) | Accepted — §4 now records a policy evaluation for every expansion and attaches human approval only where CI's existing boundary rule demands it |
 | C3 | P1 | OD-5 offered ASD `design_assistance` a feature-local-policy option that the merged orchestration authority already forbids ("may not create a competing template or policy model", lines 104–106) | Accepted — OD-5 narrowed: ASD's consumption of CI's policy seam is settled authority; only representation/storage remains open for ASD; the CSE nesting choice is framed separately, where it genuinely is open |
 | C4 | P2 | OD-13 asked the owner to decide scaffold-seam reconciliation ownership the orchestration authority already assigns (CI owns kernel+renderer; ASD consumes) | Accepted — OD-13 withdrawn; replaced by settled constraint R-10 (CI's plan defines the shared extension contract; ASD's plan maps model descriptors onto it). Open owner decisions are now OD-1..OD-12 |
+
+**Round 2** (against head `9411169d`, which resolved all four round-1
+findings): one P1 — the round-1 C1 repair left CSE's attribution and
+ratification-principal adoption contingent on R-5/OD-3, but OD-3 governs only
+ASD's actor-upgrade timing; CSE's corresponding authority is OD-4, and the §8
+dependency prose contradicted the graph beside it. Accepted — R-7 now
+sequences on R-5/OD-4, the §8 prose and graph edge name OD-3 for ASD and OD-4
+for CSE, and this note is the correction's record.
