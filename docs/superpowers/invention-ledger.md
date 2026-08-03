@@ -97,17 +97,23 @@ implementation lanes recording ambiguities that arise under those rulings.
 
 ## Coverage and citation resolution at import
 
-Verified mechanically at import; the commands and full outputs are in this
-file's pull request:
+Verified mechanically at import; the commands and summarized results are
+in this file's pull request body, and the exact gate logs are available
+through that pull request's GitHub check runs:
 
 - Source-to-ledger coverage: all 49 `PLAN.md` §7 entries and all 87
   `PLAN-V1.md` §7 entries are present below, byte-exact (imported-block
   digest match against the source ranges).
 - Citation resolution: every committed citation of an invention ID
-  (pattern `\b(R4-I-[0-9]+|I-[0-9]+|P2-RT-[0-9]+)\b`) at base commit
-  `ea097f6a` — 86 unique IDs, 1011 occurrences on 868 citation-bearing
-  lines — resolves to an entry in this ledger; zero unresolved, zero
-  conflicts.
+  (pattern `\b(R4-I-[0-9]+|I-[0-9]+|P2-RT-[0-9]+)\b`, Unicode-aware
+  word boundaries) at base commit `ea097f6a` — 86 unique IDs, 1015
+  occurrences on 868 citation-bearing lines across 334 files — resolves
+  to an entry in this ledger; zero unresolved, zero conflicts. A
+  byte-oriented `git grep -oE` of the same pattern reports 1011: its
+  byte-level word boundary drops the four range-form citations that
+  abut a Unicode ellipsis ("I-1…", "R4-I-1…" in
+  `docs/architecture-and-journeys.md` lines 5 and 110), all four of
+  which resolve to existing entries.
 - One ID-shaped string inside the imported history itself is not an
   entry ID: entry R4-I-56's text reads "REVERSES R4-I-48: … exercising
   I-48's own recorded reversal path" (source `PLAN-V1.md` line 881),
