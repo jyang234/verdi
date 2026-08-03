@@ -189,8 +189,11 @@ unowned seams and eight drift-capable duplicate definitions.**
   distinction.
 - **Consumers:** ASD provenance readers and review packets; CSE ratification
   consumers (spike closure); any future GLG audit rollup ingesting either.
-- **Resolution needed:** §2 item 2's two-class rule, adopted by the ASD and
-  CSE canonical-promotion units. Owner decisions OD-3, OD-4.
+- **Resolution needed:** §2 item 2's two-class rule — ASD actors and CSE
+  mutation-provenance actors are attribution records; CSE `ratification.yaml`
+  actors require authenticated kernel principals, with unproven authentication
+  blocking ratification — adopted by the ASD and CSE canonical-promotion
+  units. Owner decisions OD-3, OD-4.
 
 ### CX-5 — Policy-inheritance mechanisms — DUPLICATE
 
@@ -211,11 +214,11 @@ unowned seams and eight drift-capable duplicate definitions.**
   natural home; ASD and CSE define theirs independently.
 - **Consumers:** ASD capability discovery and mutation gating; CSE evaluator
   and experiment-path policy; CI conflict gate.
-- **Resolution needed:** owner decision OD-5 — whether `design_assistance` and
-  the CSE experiment policy become typed policy artifacts under CI's
-  policy-authority kernel (recommended) or remain feature-local configuration
-  that the CI compiler classifies as project authority. Either way, exactly one
-  inheritance semantic should be ratified.
+- **Resolution needed:** for ASD, consuming CI's policy seam is already
+  ratified (orchestration lines 104–106 forbid a competing policy model);
+  only representation/storage remains open. For CSE, the nesting choice is
+  genuinely open. Both narrowed questions are owner decision OD-5; exactly one
+  inheritance semantic is ratified either way.
 
 ### CX-6 — Reusable worktree/isolation boundary — GAP
 
@@ -459,8 +462,10 @@ own five named shared-ownership boundaries, absent from the draft matrix.)*
   CI `policy-authority` (Wave 1); ASD draft-mutation core (Wave 2).
 - **Resolution needed:** the ASD promotion restates its mutation core as a
   consumer of the CI scaffold seam per the plan's boundary text (fold into
-  R-6); the kernel-vs-descriptor extension-port relationship is owner decision
-  material for the two focused plans (OD-13).
+  R-6); the kernel-vs-descriptor extension-port relationship is settled
+  constraint material — CI's plan defines the shared extension contract, ASD's
+  plan maps model descriptors onto it (R-10; ownership already assigned by
+  orchestration lines 104–106).
 
 ### CX-17 — Committed store-layout ownership for new artifact kinds — GAP
 
@@ -578,10 +583,18 @@ things and nothing else:
      resolver; the only representation a governed transition, approval,
      receipt, or authority decision may consume.
    - *Attribution records* (advisory): ASD mutation/sidecar actors and CSE
-     ratification actors record who authored bytes. Each must embed either a
-     kernel canonical principal ID (when the adapter authenticated one) or an
-     explicit `unauthenticated` marker — never a bare string presented as
-     identity, and never a second resolution algorithm.
+     mutation-provenance actors record who authored bytes. Each must embed
+     either a kernel canonical principal ID (when the adapter authenticated
+     one) or an explicit `unauthenticated` marker — never a bare string
+     presented as identity, and never a second resolution algorithm.
+   - **CSE `ratification.yaml` actors are principal-resolution class, not
+     attribution** (Codex round 1, §12 C1): ratification is consequential
+     human judgment (§6 H-13), and CSE's own text requires adapter
+     authentication — "An adapter authenticates the actor; a payload cannot
+     self-declare human authority" (CSE line 571). A ratification actor must
+     resolve to an authenticated kernel principal; unproven authentication
+     blocks ratification rather than degrading to an `unauthenticated`
+     attribution marker.
 3. **Trust-source resolution.** The kernel resolver is the only component that
    evaluates forge identity, signed commits, CODEOWNERS/ownership data, and
    identity-provider assertions, and the only place the non-authoritative-input
@@ -723,8 +736,13 @@ authority in the ASD canonical-promotion unit and to bind the CI
 - **Receipts.** Every manifest (and therefore every receipt binding it) proves
   the classification: the excluded-ledger row carries the sidecar path, digest,
   and reason code; an explicit inclusion appears in the expansion ledger with
-  its approval. A receipt whose manifest neither lists the sidecar as excluded
-  nor as expanded, while the spec directory contains one, is incomplete.
+  its recorded policy evaluation. Human approval attaches only when the
+  inclusion crosses an authority, capability, or declared-scope boundary —
+  CI's existing rule (CI AC-2, lines 313–315), not a new ceremony: ASD permits
+  a person **or agent** to request this non-authoritative view (ASD
+  lines 289–291), and an in-scope request acquires no approval step. A receipt
+  whose manifest neither lists the sidecar as excluded nor as expanded, while
+  the spec directory contains one, is incomplete.
 - **Fail-closed cases.** (a) Unknown sidecar schema version → the candidate
   cannot be classified → strict decoding fails closed (CI co-2 admits no phase
   or profile scoping), and compilation blocks with the decode witness.
@@ -879,8 +897,10 @@ by this lane.
   lines 122–123).
 - **R-7 (inside the CSE promotion unit).** Make the experiment-surface scope
   of "mutation provenance" explicit (CX-9); adopt the kernel attribution rule
-  for ratification actors (contingent on R-5/OD-3 sequencing); restate the
-  experiment context boundary as CI-compiler requirements (CX-11).
+  for mutation-provenance actors and the authenticated-principal requirement
+  for `ratification.yaml` actors (§2 item 2; contingent on R-5/OD-3
+  sequencing); restate the experiment context boundary as CI-compiler
+  requirements (CX-11).
 - **R-8 (separate session — noted only).** The default-branch resolver defect
   is owned elsewhere. Architectural implication recorded here: acceptance
   derivation (`internal/specstate`), kernel trust decisions, and the merge gate
@@ -892,6 +912,13 @@ by this lane.
   its lifecycle-state operand to the shared Git-aware resolver
   (`internal/specstate`); it must not reimplement reachability (MSA line 69;
   CX-18).
+- **R-10 (constraints for the Wave 1 CI `policy-authority` and Wave 2 ASD
+  core plans).** Scaffold-seam ownership is already assigned by the merged
+  orchestration authority (lines 104–106): CI `policy-authority` owns the
+  shared kernel and renderer and therefore **defines the shared extension
+  contract**; the ASD plan **maps its model descriptors onto that contract**,
+  may add typed draft operations, and may not create a competing template or
+  policy model (CX-16). This is a settled constraint, not an owner decision.
 
 ---
 
@@ -971,12 +998,23 @@ packet deliberately does not resolve them.
   must then break or grandfather.)
 - **OD-4 — CSE provenance-scope pinning.** Confirm that the CSE promotion
   makes the experiment-surface scope of its mutation-provenance sentence
-  explicit (the likely intended reading, per CX-9) and adopts the kernel
-  attribution rule for ratification actors.
-- **OD-5 — Policy nesting.** Do ASD `design_assistance` and CSE experiment
-  policy become typed policy artifacts under CI `policy-authority`
-  (recommended), or remain feature-local configuration that the compiler
-  classifies as project authority? One inheritance semantic either way.
+  explicit (the likely intended reading, per CX-9), adopts the kernel
+  attribution rule for mutation-provenance actors, and requires
+  `ratification.yaml` actors to resolve to authenticated kernel principals —
+  unproven authentication blocks ratification (§2 item 2).
+- **OD-5 — Policy representation and storage.** For ASD, consuming CI's
+  policy seam is **already ratified authority, not an open choice**: the
+  merged orchestration authority forbids ASD "a competing template or policy
+  model" (lines 104–106), so `design_assistance` must express its semantics
+  through CI `policy-authority`'s typed policy artifacts and single
+  inheritance semantic. The only open question for ASD is the narrower one:
+  the concrete representation and storage of `design_assistance` within that
+  seam (typed-artifact shape, location, migration of the schema ASD
+  lines 485–506 sketch). CSE experiment/organization policy is decided
+  separately: CSE defers to an external policy hierarchy (~lines 667–670)
+  without a matching ratified consumption clause, so there the owner genuinely
+  chooses between typed CI policy artifacts (recommended) and feature-local
+  configuration the compiler classifies as project authority.
 - **OD-6 — Isolation-boundary vehicle.** Extend the
   `spec/worktree-manager` lineage via a ratified `verdi-store-layout`
   amendment plus a story (growing `verdi gc`'s disclosed scope), or create a
@@ -1008,10 +1046,6 @@ packet deliberately does not resolve them.
   policy artifacts, GLG human records/receipts): one early shared amendment
   through the ratified component-spec flow, or per-unit amendments serialized
   with explicit ownership (CX-17).
-- **OD-13 — Scaffold-seam extension ports.** Direct the CI `policy-authority`
-  and ASD core focused plans to define the relationship between CI's
-  model-typed extension kernel and ASD's model descriptors as one seam
-  (CX-16), and name which plan owns the reconciliation.
 
 ---
 
@@ -1098,7 +1132,7 @@ to Codex and owner review):
 | # | Sev. | Finding (abridged) | FABLE ruling | Disposition |
 |---|---|---|---|---|
 | 1 | Important | CX-2 is not a CONTRADICTION: CI 506–508 / GLG 440–442 ("Delivery planning may factor th[e] kernel as prerequisite work") authorize the Wave 1 schedule; the residue is a custody GAP | **Accepted** — the draft omitted the resolving sentence | CX-2 reclassified GAP; counts corrected |
-| 2 | Important | CX-4 is not a CONTRADICTION: GLG dc-7/CI DC-17 scope to authoritative roles ASD's actor never occupies; ASD/CSE already forbid self-declared authority; the residue is an unowned distinction | **Accepted** | CX-4 reclassified GAP; row rewritten with the closed-subject-list witness |
+| 2 | Important | CX-4 is not a CONTRADICTION: GLG dc-7/CI DC-17 scope to authoritative roles ASD's actor never occupies; ASD/CSE already forbid self-declared authority; the residue is an unowned distinction | **Accepted** | CX-4 reclassified GAP; row rewritten with the closed-subject-list witness (record-class split further refined in §12 C1) |
 | 3 | Important | CX-11 is not a CONTRADICTION: ASD 461–466 explicitly defers the compiler track; CSE's text is experiment-scoped | **Accepted** | CX-11 reclassified DUPLICATE; deferral text now quoted |
 | 4 | Important | §2's "joint requirement authority" custody rule reallocates ownership CI 503–506 and orchestration line 100 assign to GLG | **Accepted** — the draft changed accepted text without disclosure | §2 re-grounded: GLG remains requirement owner; custody rule rewritten |
 | 5 | Important | R-3/R-4 mutually inconsistent (CI names `CLAUDE.md` beside `AGENTS.md`); R-4's "instantly blocking" claim contradicted by CI dc-15's opt-in, launch-scoped drift rule | **Accepted** | R-3 gains the projection disclosure; R-4's rationale rewritten to the import-burden argument |
@@ -1109,11 +1143,11 @@ to Codex and owner review):
 | 10 | Minor | §2 misattributed the "one schema and one implementation seam" quote to GLG AC-3 (it is in the Relationship section) | **Accepted** | Attribution corrected; AC-3's actual sentence quoted where used |
 | 11 | Minor | Two quotes truncated past material qualifiers (CI's "for policy, context, execution, and receipt decisions"; MSA's "when forge evidence is available") | **Accepted** | Full clauses restored at every use |
 | 12 | Minor | §4 fail-closed case (a) invented an advisory-phase relaxation CI co-2 does not permit | **Accepted** | Carve-out removed; strict decode fails closed unconditionally |
-| 13 | Minor | CX-9/OD-4 over-read CSE's "across every surface" as a program-wide claim; in context "surface" means the feature's own adapters | **Partially accepted** — the experiment-scoped reading is the likely intent, but the phrase remains ambiguous in a document that will become canonical; pinning it at promotion is still warranted | CX-9 rewritten to present the narrow reading as likely and the ambiguity as the issue; OD-4 reduced to scope-pinning; the "program-wide audit schema" option withdrawn |
+| 13 | Minor | CX-9/OD-4 over-read CSE's "across every surface" as a program-wide claim; in context "surface" means the feature's own adapters | **Partially accepted** — the experiment-scoped reading is the likely intent, but the phrase remains ambiguous in a document that will become canonical; pinning it at promotion is still warranted | CX-9 rewritten to present the narrow reading as likely and the ambiguity as the issue; OD-4 reduced to scope-pinning; the "program-wide audit schema" option withdrawn (OD-4's actor clause further refined in §12 C1) |
 | 14 | Minor | H-18 classed retired bookkeeping RA; the committed report's "deterministic duplicate bookkeeping" maps to DM | **Accepted** | H-18 reclassified DM (duplicate), disposition unchanged |
 | 15 | Minor | §8 prose ("kernel ratification independent of the promotions") contradicted OD-3 and R-7 | **Accepted** | Prose and graph corrected: attribution rule feeds both promotions, sequenced by OD-3 |
 | 16 | Minor | §Method claimed in past tense a challenge review whose section was an empty placeholder | **Accepted** — an unwitnessed claim under the packet's own discipline | Method rewritten; this section is the witness |
-| A | Important | Missing seam: human-artifact scaffold/renderer boundary — one of the plan's five named shared-ownership boundaries, absent from the matrix | **Accepted** | Added as CX-16 (GAP); folded into R-6, OD-13 |
+| A | Important | Missing seam: human-artifact scaffold/renderer boundary — one of the plan's five named shared-ownership boundaries, absent from the matrix | **Accepted** | Added as CX-16 (GAP); folded into R-6 and, after Codex round 1 (§12 C4), the settled constraint R-10 |
 | B | Important | Missing seam: active `verdi-store-layout` committed-zone enumeration vs. the new artifact paths all four features add | **Accepted** | Added as CX-17 (GAP); OD-12; §4 marked contingent |
 | C | Important | Missing seam: effective-lifecycle-state derivation — MSA's shared resolver vs. GLG's journey derivation (CSE's ladder is feature-internal) | **Accepted**, with the CSE half recorded as aligned per its own no-second-lifecycle-status text | Added as CX-18 (DUPLICATE); R-9 |
 | D | Minor | Missing seam: CLI-verb/MCP-tool inventory arbitration across concurrent units | **Accepted** | Added as CX-19 (GAP); folded into R-3 |
@@ -1123,3 +1157,18 @@ contradictions, eight unowned seams, eight drift-capable duplicates — is
 *post-challenge*; the draft's harsher headline did not survive scrutiny, and
 recording that correction visibly is itself part of this packet's evidence
 discipline.
+
+---
+
+## 12. Codex independent review — round 1 findings and dispositions
+
+A fresh Codex context reviewed PR #264's initial head (`65f71331`) read-only
+and requested changes. All four findings were accepted and repaired in this
+revision; per the review protocol, the new head requires a fresh Codex review.
+
+| # | Sev. | Finding (abridged) | Disposition |
+|---|---|---|---|
+| C1 | P1 | CSE's `ratification.yaml` actor was misclassified as an advisory attribution record permitted to carry `unauthenticated`; CSE's own text makes ratification consequential human judgment with adapter-authenticated actors (CSE line 571) | Accepted — §2 item 2 now splits the classes: CSE mutation-provenance actors are attribution; ratification actors require authenticated kernel principals, and unproven authentication blocks ratification. CX-4, OD-4, and R-7 corrected; §11 rows 2 and 13 cross-referenced |
+| C2 | P1 | §4's receipts bullet gave every explicit sidecar inclusion "its approval," inventing a human-approval ceremony for a non-authoritative view ASD lets a person or agent request; CI requires human approval only across an authority/capability/declared-scope boundary (CI AC-2, lines 313–315) | Accepted — §4 now records a policy evaluation for every expansion and attaches human approval only where CI's existing boundary rule demands it |
+| C3 | P1 | OD-5 offered ASD `design_assistance` a feature-local-policy option that the merged orchestration authority already forbids ("may not create a competing template or policy model", lines 104–106) | Accepted — OD-5 narrowed: ASD's consumption of CI's policy seam is settled authority; only representation/storage remains open for ASD; the CSE nesting choice is framed separately, where it genuinely is open |
+| C4 | P2 | OD-13 asked the owner to decide scaffold-seam reconciliation ownership the orchestration authority already assigns (CI owns kernel+renderer; ASD consumes) | Accepted — OD-13 withdrawn; replaced by settled constraint R-10 (CI's plan defines the shared extension contract; ASD's plan maps model descriptors onto it). Open owner decisions are now OD-1..OD-12 |
