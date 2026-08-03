@@ -2,7 +2,7 @@
 id: conflict/governance-principal-kernel-contract-unowned
 kind: conflict
 title: "The shared governance-principal kernel contract is delimited by neither spec that requires it"
-status: open
+status: superseded
 owners: [platform-team]
 links:
   - { type: challenges, ref: spec/guided-lifecycle-governance }
