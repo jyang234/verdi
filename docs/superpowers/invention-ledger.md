@@ -86,12 +86,13 @@ imported v0/v1 history.
 
 | # | Decision | Spec/authority citation | Options considered | Chosen (smallest reversible) | State |
 |---|---|---|---|---|---|
+| SI-1 | Successor-entry ID namespace: OD-9 and audit §5 name the successor section but no ID scheme for its entries | OD-9 (`docs/superpowers/specs/2026-08-03-four-feature-owner-adjudications-design.md`); audit §5 Option A item 1 | (a) continue `I-*` (blurs successor provenance into the frozen v0 history); (b) extend `R4-I-*` (ties new entries to the closed round-4 realignment); (c) a fresh `SI-<n>` namespace | (c) — disjoint from both imported namespaces, so successor provenance stays mechanically separable; one rename away from any future ratified scheme | Resolved by this entry, recorded in the import PR |
 
-No successor entry exists yet; this table is disclosed empty at import
-time. The four-feature program's owner decisions OD-1..OD-12 are recorded
-in the adjudication record
+SI-1 is this ledger's own first entry, recording the one structural
+choice the import itself had to make. The four-feature program's owner
+decisions OD-1..OD-12 are recorded in the adjudication record
 (`docs/superpowers/specs/2026-08-03-four-feature-owner-adjudications-design.md`)
-and are not duplicated here; the first `SI-*` entries are expected from
+and are not duplicated here; further `SI-*` entries are expected from
 implementation lanes recording ambiguities that arise under those rulings.
 
 ## Coverage and citation resolution at import
