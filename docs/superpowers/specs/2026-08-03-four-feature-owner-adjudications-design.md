@@ -252,9 +252,13 @@ artifact under its merged plan, the following must hold:
 
 - this adjudication record must be owner-merged;
 - the R-5 joint GLG/CI kernel contract (OD-2) must be owner-merged;
-- the shared store-layout/component authority — the OD-12 amendment landed
-  through the ratified `verdi-store-layout` component-spec flow — must be
-  owner-merged;
+- the OD-12 store-layout amendment, landed through the ratified
+  `verdi-store-layout` component-spec flow, must be owner-merged before
+  either promotion;
+- the OD-6 `execution-workspace` component specification must be
+  owner-merged before the CSE promotion — its ruling created new component
+  authority, not merely runtime work, and the CSE artifact's relationship
+  section must restate it as landed; it does not block the ASD promotion;
 - the successor ledger decision (OD-9) must be materialized;
 - each promotion must consume landed authority — the amendments and
   contracts as merged — never proposals from the audit packet, which itself
