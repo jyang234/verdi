@@ -3,7 +3,7 @@ id: conflict/governance-principal-kernel-contract-unowned
 kind: conflict
 title: "The shared governance-principal kernel contract is delimited by neither spec that requires it"
 status: superseded
-frozen: { at: 2026-08-03, commit: f1a2f8bfd50d135269e531d38fc241c6a1f07438 }
+frozen: { at: 2026-08-03, commit: ded1106f18379245b5208ecedefaabcce33fa3dd }
 owners: [platform-team]
 links:
   - { type: challenges, ref: spec/guided-lifecycle-governance }
