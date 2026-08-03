@@ -251,6 +251,48 @@ body
 	}
 }
 
+// TestProjector_StaleLocalMain_UsesRemoteDefault_Integration reproduces the
+// architect-confirmed production defect end-to-end over REAL git: a
+// retained linked worktree whose local refs/heads/main is stale (still at
+// the pre-landing "advance main" commit) must not make a landed spec
+// project as Proposed just because a same-named local branch exists.
+// origin/HEAD -> origin/main names the CURRENT merge commit, and that is
+// the ref ancestry must run against.
+func TestProjector_StaleLocalMain_UsesRemoteDefault_Integration(t *testing.T) {
+	ctx := context.Background()
+	repo := buildLandedSpecRepo(t, strategyMerge)
+	mergeCommit := repo.Head
+	staleMain := strings.TrimSpace(runGitForTest(t, repo.Dir, "rev-parse", "HEAD^1"))
+
+	renameCurrentBranch(t, repo.Dir, "work") // no checked-out "main" to interfere
+	fabricateLocalBranch(t, repo.Dir, "main", staleMain)
+	fabricateRemoteRef(t, repo.Dir, "main", mergeCommit)
+	setSymbolicRef(t, repo.Dir, "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+
+	// Confirm the fixture actually models the defect: the stale local main
+	// must not carry the landed spec blob at all.
+	tree := runGitForTest(t, repo.Dir, "ls-tree", "-r", "--name-only", staleMain)
+	if strings.Contains(tree, statuslessSpecPath) {
+		t.Fatalf("fixture setup: stale local main %s already contains %s; defect not modeled", staleMain, statuslessSpecPath)
+	}
+
+	p := NewProjector()
+	result, err := p.Resolve(ctx, repo.Dir, Candidate{
+		Path:    statuslessSpecPath,
+		Content: []byte(statuslessSpecContent),
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if result.State != AcceptedPendingBuild || result.Relation != RelationExact {
+		t.Fatalf("Resolve = %+v, want AcceptedPendingBuild/exact (a stale local main must not shadow the current origin/main)", result)
+	}
+	if result.Baseline == nil || result.Baseline.Blob == "" || result.Baseline.LandingCommit == "" {
+		t.Fatalf("Resolve: incomplete baseline %+v", result.Baseline)
+	}
+}
+
 // TestProjector_UnmergedBranch_Integration proves a design branch that
 // never lands on the default branch stays Proposed.
 func TestProjector_UnmergedBranch_Integration(t *testing.T) {

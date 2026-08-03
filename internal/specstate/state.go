@@ -59,11 +59,12 @@ const (
 // name (e.g. "main") — for display and for legacy short-name comparisons
 // (the internal/lint.ResolveDefaultBranch compatibility wrapper returns
 // exactly this field). Ref is the git-resolvable ref this package's own
-// Show/BlobAt/FirstParentBlobLanding/LsTree calls use — a local branch
-// name when a matching local branch exists, otherwise an
-// "origin/<name>" remote-tracking ref. The two differ whenever the
-// process has never checked the default branch out locally (see
-// defaultbranch.go).
+// Show/BlobAt/FirstParentBlobLanding/LsTree calls use — an
+// "origin/<name>" remote-tracking ref when one exists, otherwise the
+// local branch name. The two differ whenever that remote-tracking ref
+// exists: remote-tracking wins because local checkout state (e.g. a
+// retained linked worktree's stale refs/heads/<name>) is not acceptance
+// truth (see defaultbranch.go).
 type Branch struct {
 	Name string
 	Ref  string

@@ -28,13 +28,20 @@ import (
 // unproven" rule means every caller of this package needs a ref it can
 // actually pass to git, not just a string a caller might guess is a
 // branch. So once a name is chosen, ResolveDefaultBranch additionally
-// requires it to resolve to a real ref before reporting success: a local
-// branch of that name if one is checked out, otherwise its
-// "origin/<name>" remote-tracking ref, otherwise ("", false, unresolved)
-// — never a bare name a later git command might fail to resolve. Local
-// convenience never substitutes a branch named "main" unless that
-// resolution is the explicit, visible D6-6 fallback above; there is no
-// silent secondary guess.
+// requires it to resolve to a real ref before reporting success: its
+// "origin/<name>" remote-tracking ref when one exists, otherwise a local
+// branch of that name, otherwise ("", false, unresolved) — never a bare
+// name a later git command might fail to resolve. The design's own words
+// are explicit that "local checkout state" is not acceptance truth and
+// "Local convenience must not silently substitute a branch named `main`":
+// a retained linked worktree can carry a same-named LOCAL branch that is
+// stale (last updated whenever that worktree was created or last synced),
+// while the remote-tracking ref reflects the current fetch. Preferring
+// the remote-tracking ref when both exist means ancestry always runs
+// against the current default branch, never a stale local shadow; the
+// local branch is consulted only as the genuine fallback, when no
+// remote-tracking ref for that name exists at all (e.g. CI checkouts with
+// no "origin" remote configured).
 func ResolveDefaultBranch(ctx context.Context, root string) (Branch, bool) {
 	name, ok := resolveDefaultBranchName(ctx, root)
 	if !ok {
@@ -88,26 +95,34 @@ func fallbackDefaultBranchName(ctx context.Context, root string) (string, bool) 
 	}
 }
 
-// resolveBranchRef picks a git-resolvable ref for name: the local branch
-// of that name if one is checked out, otherwise its "origin/<name>"
-// remote-tracking ref, otherwise unresolved — a named branch (however it
-// was discovered) that resolves nowhere at all is never reported as
-// success.
+// resolveBranchRef picks a git-resolvable ref for name: its "origin/<name>"
+// remote-tracking ref when one exists, otherwise the local branch of that
+// name when one exists, otherwise unresolved — a named branch
+// (however it was discovered) that resolves nowhere at all is never
+// reported as success. Remote-tracking wins over local when both exist: a
+// local checkout (in particular a retained linked worktree's own
+// refs/heads/<name>) can be stale relative to the fetched remote, and
+// "the committed specification bytes and Git history are authoritative"
+// — never local checkout state — so ancestry must run against the ref
+// that reflects the current remote default when one is available. The
+// local branch remains the fallback for the genuine case where no
+// remote-tracking ref exists at all (no "origin" remote configured, or
+// the branch was never fetched from it).
 func resolveBranchRef(ctx context.Context, root, name string) (string, bool) {
-	hasLocal, err := gitx.HasLocalBranch(ctx, root, name)
-	if err != nil {
-		return "", false
-	}
-	if hasLocal {
-		return name, true
-	}
-
 	hasRemote, err := gitx.HasRemoteTrackingBranch(ctx, root, "origin", name)
 	if err != nil {
 		return "", false
 	}
 	if hasRemote {
 		return "origin/" + name, true
+	}
+
+	hasLocal, err := gitx.HasLocalBranch(ctx, root, name)
+	if err != nil {
+		return "", false
+	}
+	if hasLocal {
+		return name, true
 	}
 
 	return "", false
