@@ -389,3 +389,112 @@ func TestVL015_PredecessorCardinality(t *testing.T) {
 		})
 	}
 }
+
+// TestVL015_FrozenPredecessor_UnreadableFrozenCommit_FailsClosed is the
+// LEGACY path's own negative for readPredecessorManifestAt's git-read
+// branch: the frozen: stamp names a well-formed but never-created commit, so
+// the read fails and VL-015 says so, naming the frozen commit as the read
+// point it tried. The RunInput is deliberately wired with a NIL Projector —
+// a frozen predecessor must never reach the merge-signaled resolution path
+// at all, and a nil-panic here would say so loudly.
+func TestVL015_FrozenPredecessor_UnreadableFrozenCommit_FailsClosed(t *testing.T) {
+	// Well-formed 40-hex, never created: Frozen.Validate's shape check
+	// passes, `git show` fails.
+	const missingSHA = "0123456789abcdef0123456789abcdef01234567"
+
+	supersessionBody := `  carried: [co-1]
+  amended: [ { id: ac-1, note: "tightened the visibility threshold" } ]
+  amended_advisory: []
+  removed: [ { id: ac-2, note: "moved to a separate reporting feature" } ]
+  added: [ac-3]`
+
+	layer1 := fixturegit.Layer{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                            setupManifestYAML,
+			".gitattributes":                               setupGitAttributes,
+			".verdi/specs/active/loan-workflow/spec.md":    fmt.Sprintf(vl015LoanWorkflowV1FrozenTmpl, missingSHA),
+			".verdi/specs/active/loan-workflow-v2/spec.md": fmt.Sprintf(vl015LoanWorkflowV2Tmpl, vl015PredecessorCO1Text, supersessionBody),
+		},
+		Message: "vl015 frozen-unreadable layer 1: frozen stamp names a commit that does not exist",
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{layer1})
+	provisionMutableZone(t, repo.Dir)
+
+	in := vl015FakeRunInput(t, repo, nil)
+	findings := (vl015{}).Check(in)
+	onlyRule(t, findings, "VL-015")
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1:\n%s", len(findings), findingsString(findings))
+	}
+	for _, want := range []string{"reading predecessor spec/loan-workflow", "at its frozen commit " + missingSHA} {
+		if !strings.Contains(findings[0].Message, want) {
+			t.Fatalf("finding message = %q, want it to contain %q", findings[0].Message, want)
+		}
+	}
+}
+
+// TestVL015_FrozenPredecessor_ReadsFrozenCommit_NotLaterEditedBytes proves
+// the LEGACY frozen.commit path — unchanged by the merge-signaled addition
+// — still reads the predecessor's manifest at ITS FROZEN COMMIT
+// specifically, never whatever bytes the predecessor file happens to carry
+// now: a third layer edits the already-frozen predecessor's own committed
+// text (without touching its frozen: stamp — mechanically possible even
+// though never legitimate in practice) after freezing, and the successor's
+// ORIGINAL-text carried claim (matching the frozen commit, not the later
+// edit) still reads clean. A regression that started reading the
+// predecessor's current committed bytes instead of frozen.commit would red
+// this on the drifted text.
+func TestVL015_FrozenPredecessor_ReadsFrozenCommit_NotLaterEditedBytes(t *testing.T) {
+	layer1 := fixturegit.Layer{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                         setupManifestYAML,
+			".gitattributes":                            setupGitAttributes,
+			".verdi/specs/active/loan-workflow/spec.md": vl015LoanWorkflowV1DraftYAML,
+		},
+		Message: "vl015 frozen-read layer 1: loan-workflow v1 draft",
+	}
+	repo1 := fixturegit.Build(t, []fixturegit.Layer{layer1})
+	shaA := repo1.Head
+
+	supersessionBody := `  carried: [co-1]
+  amended: [ { id: ac-1, note: "tightened the visibility threshold" } ]
+  amended_advisory: []
+  removed: [ { id: ac-2, note: "moved to a separate reporting feature" } ]
+  added: [ac-3]`
+
+	layer2 := fixturegit.Layer{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                            setupManifestYAML,
+			".gitattributes":                               setupGitAttributes,
+			".verdi/specs/active/loan-workflow/spec.md":    fmt.Sprintf(vl015LoanWorkflowV1FrozenTmpl, shaA),
+			".verdi/specs/active/loan-workflow-v2/spec.md": fmt.Sprintf(vl015LoanWorkflowV2Tmpl, vl015PredecessorCO1Text, supersessionBody),
+		},
+		Message: "vl015 frozen-read layer 2: loan-workflow v1 frozen + loan-workflow-v2",
+	}
+
+	frozenAtLayer2 := fmt.Sprintf(vl015LoanWorkflowV1FrozenTmpl, shaA)
+	if !strings.Contains(frozenAtLayer2, vl015PredecessorCO1Text) {
+		t.Fatal("test setup: frozen predecessor template's co-1 text no longer matches vl015PredecessorCO1Text — cannot inject post-freeze drift")
+	}
+	driftedAfterFreeze := strings.Replace(frozenAtLayer2, vl015PredecessorCO1Text, "must not add new SYNCHRONOUS cross-service calls (edited after freeze)", 1)
+
+	layer3 := fixturegit.Layer{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                            setupManifestYAML,
+			".gitattributes":                               setupGitAttributes,
+			".verdi/specs/active/loan-workflow/spec.md":    driftedAfterFreeze,
+			".verdi/specs/active/loan-workflow-v2/spec.md": fmt.Sprintf(vl015LoanWorkflowV2Tmpl, vl015PredecessorCO1Text, supersessionBody),
+		},
+		Message: "vl015 frozen-read layer 3: edit the frozen predecessor's own bytes post-freeze",
+	}
+
+	repo := fixturegit.Build(t, []fixturegit.Layer{layer1, layer2, layer3})
+	provisionMutableZone(t, repo.Dir)
+
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	for _, f := range findings {
+		if f.Rule == "VL-015" {
+			t.Fatalf("VL-015 fired even though the successor's carried claim matches the FROZEN COMMIT's original text (the predecessor file's own committed bytes drifted AFTER freezing, which the frozen.commit read must be immune to): %s", f.String())
+		}
+	}
+}
