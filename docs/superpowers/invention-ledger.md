@@ -104,8 +104,17 @@ file's pull request:
   digest match against the source ranges).
 - Citation resolution: every committed citation of an invention ID
   (pattern `\b(R4-I-[0-9]+|I-[0-9]+|P2-RT-[0-9]+)\b`) at base commit
-  `ea097f6a` — 86 unique IDs across 868 occurrences — resolves to an
-  entry in this ledger; zero unresolved, zero conflicts.
+  `ea097f6a` — 86 unique IDs, 1011 occurrences on 868 citation-bearing
+  lines — resolves to an entry in this ledger; zero unresolved, zero
+  conflicts.
+- One ID-shaped string inside the imported history itself is not an
+  entry ID: entry R4-I-56's text reads "REVERSES R4-I-48: … exercising
+  I-48's own recorded reversal path" (source `PLAN-V1.md` line 881),
+  where the bare `I-48` is the source author's informal shorthand for
+  R4-I-48, named in full earlier in the same sentence; no `I-48` entry
+  exists in either source. The shorthand is preserved byte-exact and
+  disclosed here: it is an intra-entry shorthand cross-reference to
+  R4-I-48, not a dangling citation and not a conflict.
 
 ---
 
