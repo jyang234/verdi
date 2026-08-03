@@ -107,7 +107,7 @@ decisions:
     text: "when Context Integrity is available, the journey consumes its canonical repository, authority, profile, conflict, manifest, receipt, and freshness operands; it never recompiles context or reimplements those verdicts, and absence is disclosed according to the active governance profile"
     anchor: dc-15
   - id: dc-16
-    text: "the shared governance-principal kernel contract has joint custody: this feature owns the lifecycle-wide requirements, Context Integrity owns recording and enforcement of resolved profiles and principals for policy, context, execution, and receipt decisions, and the governance-principal-kernel delivery unit owns only the implementation; an interim change to the shared contract's semantics requires an owner-ratified amendment to the affected feature specification and is never made unilaterally by a kernel implementation plan"
+    text: "the shared governance-principal kernel contract has joint custody: this feature owns the lifecycle-wide requirements, Context Integrity owns recording and enforcement of resolved profiles and principals for policy, context, execution, and receipt decisions, and the governance-principal-kernel delivery unit owns only the implementation; an interim change to the shared contract's semantics requires an owner-ratified amendment to the affected specification(s) and is never made unilaterally by a kernel implementation plan"
     anchor: dc-16
   - id: dc-17
     text: "one strict-decoded governance-profile schema with one closed class vocabulary — solo, team, high-assurance, experimental — serves the whole lifecycle; the kernel owns that schema and profile-resolution behavior, the field families remain those AC-3 names, and unknown profile fields, classes, or enum values fail closed"
@@ -125,13 +125,13 @@ decisions:
     text: "a comparative-experiment ratification actor is principal-resolution class, not attribution: it must resolve to an authenticated kernel principal, and unproven authentication blocks ratification rather than degrading to an unauthenticated attribution marker"
     anchor: dc-21
   - id: dc-22
-    text: "one kernel trust-source resolver is the only component that evaluates forge identity, signed commits, ownership data such as CODEOWNERS, and identity-provider assertions, and the only place the closed non-authoritative-input list — process-local usernames, display strings, agent-authored identity fields — is enumerated"
+    text: "one kernel trust-source resolver is the only component that evaluates forge identity, signed commits, ownership data such as CODEOWNERS, and identity-provider assertions, and the single implementation site of the closed non-authoritative-input list the feature specs state (DC-7, AC-3; Context Integrity DC-17, AC-1) — process-local usernames, display strings, agent-authored identity fields"
     anchor: dc-22
   - id: dc-23
     text: "one kernel authorization interpreter applies the authentication-versus-authorization split, role authorization, same-principal and different-principal distinctness, separation-of-duties modes, and solo-profile role collapse with disclosure; every surface that evaluates those questions calls this interpretation rather than reimplementing it"
     anchor: dc-23
   - id: dc-24
-    text: "duplicate governance machinery is a merge blocker for every later plan and promotion: no second profile enum or profile-shaped schema participating in authority decisions, no second actor or principal type consumed by a governed transition, no second trust-source resolver, no second authorization interpreter, and no feature-local interpretation of policy authority may be introduced"
+    text: "duplicate governance machinery is a merge blocker for every later plan and promotion: no second profile enum or profile-shaped schema participating in authority decisions, no second actor or principal type consumed by a governed transition, no second trust-source resolver, and no second authorization interpreter may be introduced"
     anchor: dc-24
   - id: dc-25
     text: "the kernel owns implementation only: it does not own the lifecycle-wide governance contract, human-record kinds, profile-conditioned ceremony requirements, experiment measurement trust classes, context channel classification, forge transport, or specification lifecycle-state derivation, each of which stays with its already-named owning authority"
@@ -479,18 +479,18 @@ is joint and explicit (owner ruling OD-2, recorded in
 `docs/superpowers/specs/2026-08-03-four-feature-owner-adjudications-design.md`,
 materializing recommendation R-5 of
 `docs/superpowers/plans/2026-08-03-cross-feature-authority-audit.md` §2):
-this feature owns the lifecycle-wide requirements (DC-16 through DC-25),
-delivered through its `lifecycle-governance` story; Context Integrity
-records and enforces the resolved profile and principals for policy,
-context, execution, and receipt decisions, and stores governance-profile
-artifacts in its constitution store as typed policy artifacts (owner
-ruling OD-1); the governance-principal-kernel delivery unit implements the
-profile schema, principal resolver, trust-source evaluation, and
-authorization interpretation, and owns nothing else. Delivery planning may
-factor that kernel as prerequisite work, but neither feature may ship an
-independent profile or actor type that can drift from the other, and an
-interim semantic change to the shared contract moves only by
-owner-ratified amendment to the affected specification.
+this feature owns the lifecycle-wide requirements, delivered through its
+`lifecycle-governance` story; Context Integrity records and enforces the
+resolved profile and principals for policy, context, execution, and
+receipt decisions, and stores governance-profile artifacts in its
+constitution store as typed policy artifacts (owner ruling OD-1); the
+governance-principal-kernel delivery unit implements the profile schema,
+principal resolver, trust-source evaluation, and authorization
+interpretation, and owns nothing else. Delivery planning may factor that
+kernel as prerequisite work, but neither feature may ship an independent
+profile or actor type that can drift from the other, and an interim
+semantic change to the shared contract moves only by owner-ratified
+amendment to the affected specification(s).
 
 ## Delivery sequence
 
@@ -636,7 +636,11 @@ The class vocabulary is closed; unknown fields, classes, and enum values
 fail closed under the shared strict-decode posture. Storage of profile
 artifacts belongs to Context Integrity's constitution store (owner ruling
 OD-1); schema custody and storage custody are different things, and this
-spec claims only the former for the kernel.
+spec claims only the former for the kernel. The two carried class
+descriptions in this spec's AC-3 and Context Integrity's AC-1 remain in
+their frozen texts; they are readings of the one kernel-owned schema
+this decision names, subordinate to it, and neither may drift into a
+parallel definition.
 
 ## DC-18
 
@@ -645,8 +649,8 @@ authenticated, violated-with-witness, or unproven — never a silent pass.
 Because only the kernel resolver may produce the representation, a
 governed transition can never be satisfied by an actor record whose
 resolution path is untraceable, and the merge-signaled acceptance seam's
-effective-merger resolution consumes the same representation when forge
-evidence is available.
+effective-merger resolution will consume the same representation when
+forge evidence is available.
 
 ## DC-19
 
@@ -677,10 +681,13 @@ never the attribution class's unauthenticated fallback.
 ## DC-22
 
 The trust-source and non-authoritative-input lists were stated twice
-(audit CX-3). One resolver owning both closed lists makes drift
-impossible rather than merely forbidden; DC-7's rule that process-local
-usernames, display metadata, and agent assertions never satisfy an
-authoritative role is now enforced at a single implementation seam.
+(audit CX-3). One resolver owning both closed lists will make drift
+structurally impossible rather than merely forbidden; DC-7's rule that
+process-local usernames, display metadata, and agent assertions never
+satisfy an authoritative role is to be enforced at a single
+implementation seam once the kernel delivery unit ships it. No kernel
+implementation exists at this amendment's landing; this decision is a
+requirement on that future implementation, never evidence of it.
 
 ## DC-23
 
@@ -694,12 +701,17 @@ be a prohibited duplicate under DC-24.
 
 ## DC-24
 
-The prohibited-duplicates list is the audit §2 merge-blocker list in
-requirement form. Known at-risk surfaces the audit names — AI-assisted
+The prohibited-duplicates list restates the audit §2 merge-blocker list
+in requirement form. Known at-risk surfaces the audit names — AI-assisted
 design actor schemas and review policy, comparative-experiment
-ratification authentication and policy narrowing, Context Integrity's
-conflict identity family, this feature's escalation role requirements —
-must each consume the kernel when promoted or planned.
+ratification authentication, Context Integrity's conflict identity
+family, this feature's escalation role requirements — must each consume
+the kernel where they touch profile, principal, trust-source, or
+authorization semantics. Feature policy is not among the kernel's
+surfaces: AI-assisted-design and comparative-experiment policy narrowing
+consumes Context Integrity's single policy-authority system instead
+(owner ruling OD-5, Context Integrity DC-23), whose custody rule also
+prohibits feature-local policy interpretation.
 
 ## DC-25
 
