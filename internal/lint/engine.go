@@ -32,14 +32,13 @@ type RunInput struct {
 	// needs one resolves candidates through (Task 4: VL-004's legacy-draft
 	// compatibility disclosure; also VL-015's merge-signaled predecessor
 	// baseline read, for a predecessor carrying no frozen: stamp) —
-	// constructed ONCE per Run call, here,
-	// rather than once per rule/per document, so a full lint pass never
-	// builds more than the one real-git-backed Projector NewProjector
-	// already returns cheaply (Projector itself is stateless per call;
-	// ResolveMany's own per-call successor-corpus memoization is
-	// unaffected by sharing the value). Rules consume
-	// SpecStateResolver.Resolve/specstate.Result — never reimplement
-	// reachability (CLAUDE.md, PLAN.md file-ownership map).
+	// constructed ONCE per Run call, here, rather than once per rule/per
+	// document, so a full lint pass never builds more than the one
+	// real-git-backed Projector NewProjector already returns cheaply
+	// (Projector itself is stateless per call; ResolveMany's own per-call
+	// successor-corpus memoization is unaffected by sharing the value).
+	// Rules consume SpecStateResolver.Resolve/specstate.Result — never
+	// reimplement reachability (CLAUDE.md, PLAN.md file-ownership map).
 	Projector SpecStateResolver
 }
 
