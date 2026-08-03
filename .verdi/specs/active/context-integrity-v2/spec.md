@@ -762,14 +762,14 @@ Guided Lifecycle and Governance DC-26 is the
 accountability-and-escalation half): one artifact, one home, this
 feature's constitution store. The exemption artifact already carries this
 feature's immutable kernel — identity, authority, scope, lifecycle,
-ownership, provenance (dc-3) — and its dc-8 ceremony: authorship by
-affected spec owners, approval by policy owners under the declared
-separation-of-duties mode, and an expiry or review condition. What P-2
-adds is exclusivity: Guided Lifecycle and Governance binds its AC-4
-accountability kernel and escalation around this artifact and audits it
-rather than minting a sibling kind, and the committed storage path stays
-with the ratified verdi-store-layout amendment flow, not with either
-feature spec.
+ownership, provenance (dc-4; stored per dc-3) — and its dc-8 ceremony:
+authorship by affected spec owners, approval by policy owners under the
+declared separation-of-duties mode, and an expiry or review condition.
+What P-2 adds is exclusivity: Guided Lifecycle and Governance binds its
+AC-4 accountability kernel and escalation around this artifact and audits
+it rather than minting a sibling kind, and the committed storage path
+stays with the ratified verdi-store-layout amendment flow, not with
+either feature spec.
 
 ## CO-1
 
