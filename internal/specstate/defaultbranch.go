@@ -97,7 +97,7 @@ func fallbackDefaultBranchName(ctx context.Context, root string) (string, bool) 
 
 // resolveBranchRef picks a git-resolvable ref for name: its "origin/<name>"
 // remote-tracking ref when one exists, otherwise the local branch of that
-// name if one is checked out, otherwise unresolved — a named branch
+// name when one exists, otherwise unresolved — a named branch
 // (however it was discovered) that resolves nowhere at all is never
 // reported as success. Remote-tracking wins over local when both exist: a
 // local checkout (in particular a retained linked worktree's own
