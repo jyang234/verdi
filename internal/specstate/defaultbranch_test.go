@@ -86,6 +86,40 @@ func TestResolveDefaultBranch(t *testing.T) {
 		}
 	})
 
+	t.Run("stale local main does not shadow current origin/main", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{
+			{Files: map[string]string{"a.txt": "hello\n"}, Message: "layer 1"},
+			{Files: map[string]string{"b.txt": "world\n"}, Message: "layer 2"},
+		})
+		renameCurrentBranch(t, repo.Dir, "work") // no checked-out "main" to interfere
+		fabricateLocalBranch(t, repo.Dir, "main", repo.Heads[0])
+		fabricateRemoteRef(t, repo.Dir, "main", repo.Head)
+		setSymbolicRef(t, repo.Dir, "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+		t.Setenv("CI_DEFAULT_BRANCH", "")
+
+		got, ok := ResolveDefaultBranch(ctx, repo.Dir)
+		want := Branch{Name: "main", Ref: "origin/main"}
+		if !ok || got != want {
+			t.Fatalf("ResolveDefaultBranch = (%+v, %v), want (%+v, true) (a stale local main must never shadow the current origin/main)", got, ok, want)
+		}
+	})
+
+	t.Run("CI_DEFAULT_BRANCH names a branch that is both stale-local and current-remote prefers the remote ref", func(t *testing.T) {
+		repo := fixturegit.Build(t, []fixturegit.Layer{
+			{Files: map[string]string{"a.txt": "hello\n"}, Message: "layer 1"},
+			{Files: map[string]string{"b.txt": "world\n"}, Message: "layer 2"},
+		})
+		fabricateLocalBranch(t, repo.Dir, "release-line", repo.Heads[0])
+		fabricateRemoteRef(t, repo.Dir, "release-line", repo.Head)
+		t.Setenv("CI_DEFAULT_BRANCH", "release-line")
+
+		got, ok := ResolveDefaultBranch(ctx, repo.Dir)
+		want := Branch{Name: "release-line", Ref: "origin/release-line"}
+		if !ok || got != want {
+			t.Fatalf("ResolveDefaultBranch = (%+v, %v), want (%+v, true) (CI_DEFAULT_BRANCH still wins the NAME; ref selection is remote-first)", got, ok, want)
+		}
+	})
+
 	t.Run("remote-only origin/main (no local main) gives {main, origin/main}", func(t *testing.T) {
 		repo := buildBranchRepo(t)
 		renameCurrentBranch(t, repo.Dir, "trunk") // no local branch literally named "main"
