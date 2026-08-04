@@ -99,9 +99,10 @@ idempotent recovery it gives, is invention SI-17, disclosed. Every step runs
 under the workspace's `.lock` (a per-operation hold, never an idle-lifetime
 one):
 
-The machine branches on DIRECTORY EXISTENCE first, so every reachable
-combination of `{directory, .request, .released, .lock}` reaches exactly one
-outcome. The lock is held CONTINUOUSLY across steps 1 through 6, so no other
+After the lock is acquired and both paths are typed, the machine branches on
+the UNIT PATH first, so every reachable combination of
+`{directory, .request, .released, .lock}` reaches exactly one outcome. The
+lock is held CONTINUOUSLY across steps 1 through 6, so no other
 mutator can interleave a materialization — and every other mutator of a unit
 acquires the same lock: the RELEASE operation (below) and the gc reclaim
 alike.
@@ -118,7 +119,7 @@ human attention, the step-3b posture applied one level up:
    NON-BLOCKING, so nobody waits: an acquisition that fails — a live holder,
    or any other acquisition failure such as an undecodable lock body — is an
    OPERATIONAL ERROR for this request, disclosed and retryable;
-2. workspace DIRECTORY ABSENT — any siblings present (`.request`,
+2. NOTHING AT ALL at the unit path — any siblings present (`.request`,
    `.released`) are orphaned metadata from a partial reclaim or from
    tampering, describing content that no longer exists: each is deleted by a
    plain unlink under the lock, one disclosed line, and materialization
@@ -144,7 +145,11 @@ human attention, the step-3b posture applied one level up:
       This is the materialization mirror of gc's keep-malformed rank, so a
       malformed marker is a decided state on both paths, not a gap;
 4. directory present and `.released` absent — branch on `.request`:
-   1. present and DECODABLE — byte-compare the full request identity.
+   1. present as a REGULAR FILE and DECODABLE — the request path is typed
+      with lstat like the others, and a non-regular object there is treated
+      as UNDECODABLE (outcome b below), so the lstat discipline is uniform
+      across all three sibling paths and mints no new state. Byte-compare
+      the full request identity.
       Equal: the sidecar is the completion witness, the materialization is
       complete, so this is idempotent reuse; return. Different: a hard error
       naming both requests, never a silent merge — the RefSlug collision
@@ -257,14 +262,14 @@ component's state space needs (`decideReclaim` and `internal/reclaim`'s
 compile-time-exhaustive `KeptReason` enum are the named precedents), never
 `--force` (`gitx.WorktreeRemove` deliberately omits it — git's own
 dirty-tree refusal stays a second, independent guard), one disclosed result
-line per unit. The ordered outcome set is reclaim-orphaned,
-keep-not-eligible, keep-malformed, keep-dirty, keep-locked, reclaim,
-plus the disclosed partial outcome of a failed reclaim step (§GC slice
-states the same membership and order, with its predicates); a reclaim
-deletes the completion witness first, in fixed order — `.request`, then the
-workspace directory, then `.released`, then `.lock` — with any per-step
-failure disclosed on that unit alone while the sweep continues. A later
-invocation resolves any survivor.
+line per unit. The ordered outcome set is reclaim-orphaned, keep-malformed,
+keep-not-eligible, keep-dirty, keep-locked, reclaim, plus the disclosed
+partial outcome of a failed reclaim step (§GC slice states the same
+membership and order, with its predicates); a reclaim deletes the completion
+witness first, in fixed order — `.request`, then the unit path, then
+`.released`, then `.lock`, that last deletion being the holder's own release
+of the unit lock — with any per-step failure disclosed on that unit alone
+while the sweep continues. A later invocation resolves any survivor.
 
 Keep dirty, locked, ambiguous, or unverifiably eligible workspaces — a
 predicate that cannot verify eligibility keeps, the same corrective posture
@@ -308,7 +313,7 @@ not rewrite the decision."
 
 Decision semantics: scan `data/execution/`; decide per unit among a TOTAL
 outcome set of seven result kinds — the six ranked outcomes
-reclaim-orphaned, keep-not-eligible, keep-malformed, keep-dirty,
+reclaim-orphaned, keep-malformed, keep-not-eligible, keep-dirty,
 keep-locked, and reclaim, plus the disclosed PARTIAL outcome of a reclaim
 step that failed — all defined below; reads never delete — explicit
 `verdi gc` is the only deleter (worktree-manager dc-4's non-forcing
@@ -392,32 +397,47 @@ the lock file at materialization step 1, and the directory only appears at
 step 5 — so it classifies rank 0 by shape but is keep-locked in fact, and
 its lock is never deleted out from under its live holder. A lone `.lock`
 whose holder is STALE is taken over by `filelock.Acquire`'s own stale-lock
-detection and then deleted, disclosed as reclaim-orphaned.
+detection, and its deletion is that holder's release — the same single
+operation rank 0 names — disclosed as reclaim-orphaned.
 
-The per-unit decision is TOTAL and ORDERED — extending
+Every path this list examines — the unit path, the marker path, the request
+path — is typed with LSTAT, never a following stat; symlinks are never
+followed, so a symlink is always a non-regular object and never a directory.
+The per-unit decision is then TOTAL and ORDERED — extending
 `wtmanager.decideReclaim`'s total ordered shape with the ranks this
-component's state space needs — exactly one disclosed reason per unit:
+component's state space needs — exactly one disclosed reason per unit.
+MALFORMATION IS TESTED BEFORE ELIGIBILITY, so a malformed unit path is never
+disclosed as the ordinary not-yet-released case:
 
-0. NOTHING at the unit path (siblings only) — reclaim-orphaned: the
-   siblings are deleted under the acquired lock, one disclosed line;
-1. NOTHING AT ALL at the marker path (lstat) — keep-not-eligible;
-2. a NON-DIRECTORY object at the workspace path, or a NON-REGULAR object at
-   the marker path (lstat semantics throughout; symlinks never followed) —
-   keep-malformed, its own disclosed reason, fail-closed, so a human can
-   tell "not yet released" apart from "something is wrong at one of this
-   unit's paths";
+0. NOTHING AT ALL at the unit path (siblings only) — reclaim-orphaned: the
+   siblings are deleted under the acquired lock, one disclosed line, and
+   deleting the unit's `.lock` IS this holder's release of that lock — one
+   operation, never an unlink followed by a release, so no gap exists in
+   which a concurrent `Acquire`'s fresh lock could be removed underneath it;
+1. a NON-DIRECTORY object at the unit path, or a NON-REGULAR object at the
+   marker path — keep-malformed, its own disclosed reason, fail-closed, so a
+   human can tell "not yet released" apart from "something is wrong at one
+   of this unit's paths";
+2. NOTHING AT ALL at the marker path — keep-not-eligible;
 3. uncommitted changes (`gitx.StatusDirty`) — keep-dirty;
 4. the unit's lock CANNOT BE ACQUIRED — a live holder, or any other
    acquisition failure such as an undecodable lock body — keep-locked, the
    disclosure naming which case, fail-closed;
 5. otherwise — reclaim, under the acquired lock, in the order below.
 
+A PREDICATE THAT CANNOT BE EVALUATED — a `gitx.StatusDirty` error, an lstat
+failure — KEEPS, fail-closed, disclosed under the rank whose predicate
+failed, the disclosure naming the check that failed. This mints no new
+reason kind: an unevaluable predicate is a keep at its own rank, never a
+silent fall-through to a later one.
+
 A reclaim deletes the COMPLETION WITNESS FIRST, in this FIXED ORDER:
-`.request`, then the workspace directory, then `.released`, then `.lock` —
-and that final `.lock` deletion IS this holder's release of the unit lock,
-one operation rather than an unlink following a release, so nothing is
+`.request`, then the unit path, then `.released`, then `.lock` — and that
+final `.lock` deletion IS this holder's release of the unit lock, one
+operation rather than an unlink following a release, so nothing is
 double-unlinked and no gap exists in which a concurrent `Acquire` could win
 a fresh lock only to have it removed underneath.
+
 Deleting the witness first means every partial failure degrades into a
 state this spec has already defined, and the landings are these: a failure
 at the DIRECTORY step leaves the directory with its marker still present
