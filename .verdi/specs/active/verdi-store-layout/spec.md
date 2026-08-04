@@ -222,7 +222,13 @@ Notes:
   retention, and no ratified `verdi gc` scope. Appends are the store's D3
   single writer's alone; a process executing a registered action gains no
   independent write authority and never acquires the writer lock to emit a
-  receipt (GLG v3 dc-27; SI-5).
+  receipt (GLG v3 dc-27; SI-5). Unlike everything else under `data/`, a
+  journey event receipt records an attempt that final Git state cannot
+  reconstruct — it is neither rebuildable (Principle 1's rebuild rule does
+  not cover it) nor one developer's working state; losing the working area
+  is therefore not a non-event for this root: whole-checkout disposal is a
+  disclosed coverage event under GLG AC-8's incompleteness clause, never a
+  silent loss and never a silent pass (GLG v3 dc-27; SI-5).
 - Lifecycle of `data/execution/<workspace-id>/`: per-run and disposable by
   declared lifecycle, reclaimed only by `verdi gc`'s execution slice —
   stated explicitly because the zones table's Derived/Mutable rows do not
