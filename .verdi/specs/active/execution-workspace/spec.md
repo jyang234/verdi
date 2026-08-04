@@ -54,6 +54,11 @@ touches the serving checkout's branch, index, or working tree
 `ErrBranchCheckedOut` pattern generalized to a fresh commit or patch target
 rather than a branch name).
 
+Either shape's FIRST materialization also writes the immutable
+request-identity sidecar `data/execution/<workspace-id>.request`; a request
+landing on an already-existing `<workspace-id>` is verified against that
+sidecar before any reuse (§Workspace naming).
+
 ## Workspace naming
 
 This is invention SI-10 (plan handle L-3), disclosed in §Inventions
@@ -70,6 +75,25 @@ colliding after slugging are a hard error naming both, never a silent merge
 (the RefSlug collision rule, applied unchanged). No wall clock, no
 randomness — the id is recomputable from the request alone, matching this
 store's deterministic-output discipline for generated identifiers.
+
+The truncated hexes appear ONLY in the path, for legibility; IDENTITY IS
+ALWAYS THE FULL DIGESTS. Truncation alone would let two distinct requests
+alias one directory and one lock, so at first materialization the component
+atomically writes (temp-then-rename, the store's D3 atomic-write idiom) an
+immutable request-identity sidecar, `data/execution/<workspace-id>.request`:
+canonical JSON — sorted keys, trailing newline, this store's canonical-JSON
+discipline — recording the consumer run identity, the FULL 40-hex commit SHA
+(exact or base), and, for the base-plus-patch shape, the FULL 64-hex sha256
+of the canonical patch bytes. The sidecar is written once and never edited
+in place.
+
+Reuse rule: any request mapping to an already-existing `<workspace-id>` MUST
+verify its full request identity byte-for-byte against that sidecar before
+reusing the path. Equal — idempotent reuse of the existing workspace.
+Different — a hard error naming both requests, never a silent merge: the
+RefSlug collision rule extended from the slug level to the full request
+identity. A missing or undecodable sidecar at an existing path is an
+OPERATIONAL ERROR, never silent reuse.
 
 ## Isolation-control application
 
@@ -146,7 +170,11 @@ total ordered outcome shape; `internal/reclaim`'s compile-time-exhaustive
 `KeptReason` enum are the named precedents), never `--force`
 (`gitx.WorktreeRemove` deliberately omits it — git's own dirty-tree refusal
 stays a second, independent guard), one disclosed result line per
-workspace.
+workspace. The ordered outcome set is keep-not-eligible, keep-dirty,
+keep-locked, reclaim (§GC slice states the same order and its predicates);
+a reclaim removes the worktree first, then deletes the workspace's
+`.request`, `.released`, and `.lock` siblings, leaving no orphaned sidecar
+behind a removed workspace.
 
 Keep dirty, locked, ambiguous, or unverifiably eligible workspaces — a
 predicate that cannot verify eligibility keeps, the same corrective posture
@@ -197,10 +225,46 @@ authority). One disclosed line per workspace.
 
 Eligibility is RUN-scoped, not branch-deletion-scoped: worktree-manager's
 "deleted" signal is deliberately local-design-branch-only (its dc-3) and is
-not silently transferred to execution workspaces; an execution workspace's
-eligibility derives from its run's declared lifecycle (the consuming
-feature marks it released), and an eligibility that cannot be verified
-keeps.
+not silently transferred to execution workspaces. An execution workspace's
+eligibility derives instead from its run's declared lifecycle, recorded by
+the release contract below — invention SI-16, disclosed.
+
+The component exposes a RELEASE operation; the consuming feature invokes it
+when its own lifecycle permits cleanup (features own WHEN — the CSE
+cleanup-ordering clause quoted above). Release is durably recorded as a
+marker file whose EXISTENCE IS THE RECORD: the sibling
+`data/execution/<workspace-id>.released`, written atomically
+temp-then-rename (the store's D3 atomic-write idiom). The marker is an
+operational FACT — never a proof, never a verdict, never a ratification.
+Writing it requires the consuming feature's own lifecycle to have already
+produced whatever durable record its authority demands — for CSE, the
+durably recorded human decision — a record this component never inspects
+and never interprets.
+
+The execution slice's decision is TOTAL and ORDERED, mirroring
+`wtmanager.decideReclaim`'s shape, exactly one reason per workspace:
+
+1. no readable `.released` marker — keep-not-eligible;
+2. uncommitted changes (`gitx.StatusDirty`) — keep-dirty;
+3. a live lock (`filelock.Peek`) — keep-locked;
+4. otherwise — reclaim: the worktree is removed first
+   (`gitx.WorktreeRemove`, never `--force`), then the workspace's siblings
+   (`.request`, `.released`, `.lock`) are deleted.
+
+Any marker state the slice cannot read or decode KEEPS, fail-closed: an
+eligibility that cannot be verified is never reclaimed.
+
+Whole-checkout disposal loses the markers together with the workspaces they
+describe — a non-event for this root, which the landed store-layout
+lifecycle note already declares "per-run and disposable by declared
+lifecycle" (unlike `data/journey/`, whose own note makes the same loss a
+disclosed coverage event).
+
+Sibling naming under `data/execution/` rides this component's naming
+authority over the admitted root — the landed layout's own tree comment,
+"naming owned by spec/execution-workspace". A follow-up store-layout
+enumeration line naming `.request` and `.released` explicitly remains
+available to a later amendment if the owner wants one.
 
 Invocation surface — invention SI-11 (handle L-5), disclosed: the execution
 slice joins BARE `verdi gc`, alongside the existing managed-worktree slice.
@@ -302,9 +366,9 @@ This naming is invention SI-15 (handle L-14), disclosed.
 Pending runtime gaps — this spec ships no runtime code; only the
 runtime/shared-seam implementation may remain pending: detached-SHA
 worktree creation; patch application; isolation-profile construction; grant
-decoding/enforcement; fingerprint collection; execution workspace naming;
-the execution gc slice; the managed-root exclusion from
-residue/reclaim.
+decoding/enforcement; fingerprint collection; execution workspace naming and
+its request-identity/release sidecars; the execution gc slice; the
+managed-root exclusion from residue/reclaim.
 
 CI and CSE consume this seam. They retain only feature policy, proof and
 receipt semantics, isolation/authority claims, and their own integration
@@ -317,7 +381,7 @@ mechanics, which OD-6 assigns here.
 
 ## Inventions disclosed
 
-This specification's owner merge ratifies six inventions, none of which was
+This specification's owner merge ratifies seven inventions, none of which was
 settled by OD-6 or OD-7, each recorded in the successor invention ledger
 (`docs/superpowers/invention-ledger.md`) in the same reviewed change:
 
@@ -329,6 +393,9 @@ settled by OD-6 or OD-7, each recorded in the successor invention ledger
   this spec has no `docs/design/specs/` origin file, a precedent no landed
   text sanctions or forbids (handle L-8)
 - SI-15 — the enforcement unit name and single-package shape (handle L-14)
+- SI-16 — the durable release signal for the execution gc slice (no plan
+  handle: raised as a P1 by the owner-gate review of this PR, after the
+  governing plan's handle list was written)
 
 Until each is amended by later ratification it stands as recorded here;
 each L-* value is a plan-local traceability handle, never a ledger ID.
