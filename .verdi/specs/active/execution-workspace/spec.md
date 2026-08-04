@@ -82,12 +82,12 @@ grounded on both consumer sides:
 - CI dc-10 (`.verdi/specs/active/context-integrity-v2/spec.md`, verbatim):
   "authoritative launch fails when isolation cannot be proven; Verdi may
   offer a visibly new advisory run, but no adapter or harness may silently
-  reinterpret the failed launch as authoritative."
+  reinterpret the failed launch as authoritative".
 - CSE's operational-error clause (`docs/superpowers/specs/2026-07-30-comparative-spike-experiments-design.md`
-  §Execution, verbatim): "An evaluator crash, malformed response,
-  protected-input mismatch, missing round, environment mismatch, or
-  unavailable required isolation control invalidates the run and returns an
-  operational error."
+  §Execution, isolation, and recovery, verbatim): "An evaluator crash,
+  malformed response, protected-input mismatch, missing round, environment
+  mismatch, or unavailable required isolation control invalidates the run
+  and returns an operational error."
 
 A missing required control must never be silently reinterpreted as
 authoritative execution.
@@ -99,7 +99,8 @@ vocabulary; the vocabulary's CONTENTS are not fixed by any landed authority
 and are this spec's invention SI-12 (handle L-6). Proposed contents — six
 kinds: network, path-read scopes, path-write scopes, process execution,
 resource ceilings, and timeouts. Unknown grant kinds fail closed (fail-closed
-decoding is landed store discipline — constitution #5, strict decode).
+decoding is landed store discipline — `spec/verdi-index` §Constitution
+item 5, strict decode).
 
 Enforcement means: the workspace is constructed with exactly the granted
 controls, and the component reports which grants it could and could not
@@ -125,6 +126,12 @@ digests, among the fields CSE's own schema demands as a superset — and CI
 ac-2's manifest identity fields, its "adapter version, accepted authority,
 repository state, declared scope, and capability grant" that compile into
 the canonical context manifest).
+
+Two fields CSE's own fingerprint enumeration additionally demands — network
+policy and resource allocation — are not collected twice: they reach CSE as
+this component's grant-application operational facts (§Execution-grant
+enforcement's could-and-could-not-apply report) and are embedded by CSE's
+feature-owned superset schema, never by a second collection path.
 
 Output is canonical and sorted. COLLECTION IS SHARED; SCHEMAS ARE NOT: CSE's
 fingerprint schema and CI's manifest fields embed the output as
@@ -158,8 +165,8 @@ not repeat.
 | `filelock.Acquire/Release/Peek` | `data/execution/<workspace-id>.lock` ownership | generic path-keyed lock; per-operation hold only |
 | `gitx.StatusDirty` | dirty check before any destructive op | none needed |
 | `gitx.WorktreeRemove` | cleanup | never `--force` |
-| `wtmanager.WorktreesRoot`/`WorktreePath` | addressing (not cutting) managed worktrees when a design-branch worktree is the materialization source | pure path assemblers, exported for exactly this |
-| `wtmanager.EnsureWorktree` | **not reused for execution workspaces** | its contract is local design branches with `design/<name>`↔`<name>` naming, and stays that way — the closed contract, verbatim |
+| `wtmanager.WorktreesRoot`/`WorktreePath` | addressing (not cutting) managed worktrees when a design-branch worktree is the materialization source | pure path assemblers; addressing only, never cutting or reclaiming |
+| `wtmanager.EnsureWorktree` | **not reused for execution workspaces** | its contract is local design branches with `design/<name>`↔`<name>` naming, and stays that way — the closed contract, unchanged |
 
 `wtmanager.EnsureWorktree` is NOT reused for execution workspaces. Its
 contract is the closed local-design-branch-only contract
@@ -177,9 +184,9 @@ landed amendment grew scope to `data/execution/`); this spec owns HOW the
 execution slice decides and WHICH invocation surface selects it; feature
 units own WHEN cleanup is requested — quote CSE verbatim
 (`docs/superpowers/specs/2026-07-30-comparative-spike-experiments-design.md`
-§Retention): "Cleanup runs only after the human decision is durably
-recorded. A cleanup failure is operational and disclosed; it does not
-rewrite the decision."
+§Retention and reproducibility): "Cleanup runs only after the human decision
+is durably recorded. A cleanup failure is operational and disclosed; it does
+not rewrite the decision."
 
 Decision semantics: scan `data/execution/`; decide per workspace among a
 TOTAL outcome set that must include keep-not-eligible, keep-dirty,
@@ -196,12 +203,26 @@ feature marks it released), and an eligibility that cannot be verified
 keeps.
 
 Invocation surface — invention SI-11 (handle L-5), disclosed: the execution
-slice joins BARE `verdi gc`, alongside the existing managed-worktree slice;
-`verdi gc --reclaim-unmanaged` remains its own mutually-exclusive mode per
-gc-reclaim dc-1, untouched. Rationale: both bare-mode slices reclaim only
-roots verdi itself materialized (managed roots), both are fail-closed
-keep-by-default with per-item disclosure, so adding the execution slice
-does not change bare gc's mutating-or-not character — the property dc-1's
+slice joins BARE `verdi gc`, alongside the existing managed-worktree slice.
+What is preserved untouched is gc-reclaim dc-1's per-invocation MODE
+exclusivity: bare `verdi gc` and `verdi gc --reclaim-unmanaged` remain
+mutually exclusive modes, never combined in one run, and
+`--reclaim-unmanaged` keeps its own unmanaged-only slice. What this decision
+GROWS is the bare mode's slice set. dc-1's wording that "bare verdi gc
+(unchanged) runs only the existing managed-worktree slice", and ac-3's
+requirement that the scope-disclosure line "grows to name both slices as a
+closed pair on every invocation", were written when the managed-worktree
+slice was the bare mode's only slice; this decision adds a second one, so
+the bare mode's slice set gains the execution slice and the disclosure grows
+from a closed pair to a closed triple — grown, never replaced and never
+narrowed, the same incremental-delivery posture worktree-manager dc-5
+already establishes for slices landing behind this same verb ("incremental
+delivery of an already-ratified … verb, not a redefinition").
+
+Rationale: both bare-mode slices reclaim only roots verdi itself
+materialized (managed roots), both are fail-closed keep-by-default with
+per-item disclosure, so adding the execution slice does not change
+bare gc's mutating-or-not character — the property dc-1's
 mode exclusivity exists to protect; smallest reversible option (no new flag
 or mode; a later amendment can still split out a dedicated flag). The
 scope-disclosure line grows to name the execution slice as run or not-run
@@ -228,11 +249,12 @@ seam below). No slice's sweep may claim another slice's root.
   refused; exit status; timeout — never a proof, never a verdict, and never
   a reclassification of a run's meaning. CSE's own failure taxonomy
   (`docs/superpowers/specs/2026-07-30-comparative-spike-experiments-design.md`
-  §Execution, "Failures retain their meaning"): a correctness or safety
-  failure is a valid candidate verdict with a witness; a candidate crash or
-  timeout is a candidate result if the harness and workload remained
-  healthy; an evaluator crash, malformed response, protected-input
-  mismatch, missing round, environment mismatch, or unavailable required
+  §Execution, isolation, and recovery, "Failures retain their meaning"): a
+  correctness or safety failure is a valid candidate verdict with a witness;
+  a candidate crash or timeout is a candidate result if the harness and
+  workload remained healthy; an evaluator crash, malformed response,
+  protected-input mismatch, missing round, environment mismatch, or
+  unavailable required
   isolation control invalidates the run and returns an operational error;
   excessive variance, a practical tie, conflicting bounds, or no eligible
   candidate yields disclosed-unproven. CI's conflict verdicts (CI ac-3:
@@ -244,9 +266,10 @@ seam below). No slice's sweep may claim another slice's root.
   §Worktree, isolation, and capability mechanics, verbatim; CI dc-2 is the
   in-spec grounding — "Verdi certifies a project-sealed context, not an
   unknowable whole-harness context…"); CSE owns registered-environment-
-  policy-honored / weaker-isolation-disclosed (CSE design §Execution: "An
-  experiment that declares network access may run only when policy permits
-  and must disclose its weaker isolation in the result").
+  policy-honored / weaker-isolation-disclosed (CSE design §Execution,
+  isolation, and recovery: "An experiment that declares network access may
+  run only when policy permits and must disclose its weaker isolation in the
+  result").
 - Proof types stay separate — quote the landed orchestration plan verbatim
   (`docs/superpowers/plans/2026-08-01-four-feature-orchestration.md`
   §Worktree, isolation, and capability mechanics): "Shared Git/worktree
@@ -270,7 +293,7 @@ seam below). No slice's sweep may claim another slice's root.
 ## Implementation seam
 
 One shared implementation seam, owned by the execution-workspace unit — the
-future Wave-1 unit named `execution-workspace enforcement` (owner:
+future implementation unit named `execution-workspace enforcement` (owner:
 platform-team), implementing this component's mechanics ONCE, in one shared
 internal package beside `internal/wtmanager`, `internal/gitx`,
 `internal/filelock` (the exact Go package name is that unit's decision).
