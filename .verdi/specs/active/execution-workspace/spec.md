@@ -27,10 +27,11 @@ story.
 
 Its workspaces live under `data/execution/<workspace-id>/` with sibling
 `data/execution/<workspace-id>.lock` — admitted by the landed
-`verdi-store-layout` amendment (OD-12, the ride-along rows §Directory layout
-and the `data/execution/` lifecycle note admit per that authority's own
-severability rule), which this spec consumes as landed authority, not as a
-proposal it re-argues.
+`verdi-store-layout` amendment (OD-12): its §Directory layout rows and its
+`data/execution/` lifecycle note, which rode along inside the committed-zone
+amendment under the governing plan's severability rule as ratified by that
+amendment's owner merge (ledger SI-8). This spec consumes the amended
+layout as landed authority, not as a proposal it re-argues.
 
 Consumers are CI and CSE only. ASD is not a consumer (see Non-goals).
 
