@@ -19,7 +19,7 @@ here.
 
 CLI verbs: 05 §CLI's table plus invented `gate` (I-7), `board` (I-20), and `audit` (R4-I-10) are real verbs; `close` (round 6, spec/close-verb) and `gc` (round 6, spec/worktree-manager — managed-worktree reclamation) are real too; only `waivers`/`verify-artifact` remain recognized but out of scope.
 
-## Successor authorities (four-feature program)
+## Successor authorities
 
 - Orchestration for the four-feature program is
   `docs/superpowers/plans/2026-08-01-four-feature-orchestration.md`; scoped
