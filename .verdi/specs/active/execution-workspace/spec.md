@@ -54,10 +54,12 @@ touches the serving checkout's branch, index, or working tree
 `ErrBranchCheckedOut` pattern generalized to a fresh commit or patch target
 rather than a branch name).
 
-Either shape's FIRST materialization also writes the immutable
-request-identity sidecar `data/execution/<workspace-id>.request`; a request
-landing on an already-existing `<workspace-id>` is verified against that
-sidecar before any reuse (§Workspace naming).
+Either shape's first materialization writes the immutable request-identity
+sidecar `data/execution/<workspace-id>.request` LAST, after the worktree
+exists, so that the sidecar is the materialization's COMPLETION WITNESS; a
+request landing on an already-existing `<workspace-id>` is verified against
+that sidecar before any reuse, and a directory without one is incomplete
+residue to be rebuilt (§Workspace naming's ordered state machine).
 
 ## Workspace naming
 
@@ -87,13 +89,37 @@ discipline — recording the consumer run identity, the FULL 40-hex commit SHA
 of the canonical patch bytes. The sidecar is written once and never edited
 in place.
 
-Reuse rule: any request mapping to an already-existing `<workspace-id>` MUST
-verify its full request identity byte-for-byte against that sidecar before
-reusing the path. Equal — idempotent reuse of the existing workspace.
-Different — a hard error naming both requests, never a silent merge: the
-RefSlug collision rule extended from the slug level to the full request
-identity. A missing or undecodable sidecar at an existing path is an
-OPERATIONAL ERROR, never silent reuse.
+Worktree creation and the sidecar write are NOT jointly atomic — no
+primitive spans `git worktree add` and a rename — so `.request` is written
+LAST and is thereby the COMPLETION WITNESS: its presence means a
+materialization finished and returned to a consumer; its absence beside an
+existing directory means one did not. This ordered state machine, and the
+idempotent recovery it gives, is invention SI-17, disclosed. Every step runs
+under the workspace's `.lock` (a per-operation hold, never an idle-lifetime
+one):
+
+1. acquire `data/execution/<workspace-id>.lock`;
+2. `.request` present and decodable — byte-compare the full request
+   identity. Equal: the sidecar is the completion witness, the
+   materialization is complete, so this is idempotent reuse; return.
+   Different: a hard error naming both requests, never a silent merge — the
+   RefSlug collision rule extended from the slug level to the full request
+   identity;
+3. `.request` present but UNDECODABLE — an operational error; the workspace
+   is KEPT for human attention, never silently reused and never silently
+   deleted;
+4. workspace directory present WITHOUT `.request` — incomplete residue of a
+   crashed attempt that never returned to any consumer; it is removed under
+   the lock and re-materialized fresh, never reused as-is (the
+   never-silent-reuse rule is preserved by REBUILDING rather than by
+   trusting what a crash left behind);
+5. materialize the worktree (either request shape);
+6. write `.request` temp-then-rename — the atomic completion witness — and
+   release the lock.
+
+A crash between steps 5 and 6 therefore lands in state 4 on the next
+identity-equal request: self-healing, with no permanently wedged
+`<workspace-id>`.
 
 ## Isolation-control application
 
@@ -172,9 +198,11 @@ total ordered outcome shape; `internal/reclaim`'s compile-time-exhaustive
 stays a second, independent guard), one disclosed result line per
 workspace. The ordered outcome set is keep-not-eligible, keep-dirty,
 keep-locked, reclaim (§GC slice states the same order and its predicates);
-a reclaim removes the worktree first, then deletes the workspace's
-`.request`, `.released`, and `.lock` siblings, leaving no orphaned sidecar
-behind a removed workspace.
+a reclaim deletes in fixed order — the workspace directory first, then the
+`.request`, `.released`, and `.lock` siblings — with any per-step failure
+disclosed on that item alone while the sweep continues, and siblings left
+beside no workspace directory deleted as orphaned metadata on a later
+invocation, so no sidecar outlives the workspace it described.
 
 Keep dirty, locked, ambiguous, or unverifiably eligible workspaces — a
 predicate that cannot verify eligibility keeps, the same corrective posture
@@ -218,10 +246,11 @@ not rewrite the decision."
 
 Decision semantics: scan `data/execution/`; decide per workspace among a
 TOTAL outcome set that must include keep-not-eligible, keep-dirty,
-keep-locked (via `filelock.Peek`), and reclaim; reads never delete —
-explicit `verdi gc` is the only deleter (worktree-manager dc-4's
-non-forcing discipline; `workbench-directory` dc-4's reclamation-signal
-authority). One disclosed line per workspace.
+keep-locked (via `filelock.Peek`), and reclaim, and that numbers among its
+members the disclosed PARTIAL outcome and the ORPHANED-SIDECAR outcome
+defined below; reads never delete — explicit `verdi gc` is the only deleter
+(worktree-manager dc-4's non-forcing discipline; `workbench-directory`
+dc-4's reclamation-signal authority). One disclosed line per workspace.
 
 Eligibility is RUN-scoped, not branch-deletion-scoped: worktree-manager's
 "deleted" signal is deliberately local-design-branch-only (its dc-3) and is
@@ -231,28 +260,51 @@ the release contract below — invention SI-16, disclosed.
 
 The component exposes a RELEASE operation; the consuming feature invokes it
 when its own lifecycle permits cleanup (features own WHEN — the CSE
-cleanup-ordering clause quoted above). Release is durably recorded as a
-marker file whose EXISTENCE IS THE RECORD: the sibling
-`data/execution/<workspace-id>.released`, written atomically
-temp-then-rename (the store's D3 atomic-write idiom). The marker is an
-operational FACT — never a proof, never a verdict, never a ratification.
-Writing it requires the consuming feature's own lifecycle to have already
-produced whatever durable record its authority demands — for CSE, the
-durably recorded human decision — a record this component never inspects
-and never interprets.
+cleanup-ordering clause quoted above). Release is durably recorded by the
+sibling `data/execution/<workspace-id>.released`, defined normatively as a
+ZERO-BYTE REGULAR FILE created with `O_CREATE|O_EXCL` — this store's own
+write-once primitive, the idiom D3 already gives `data/writer.lock`.
+Release is IDEMPOTENT: `EEXIST` means already released and SUCCEEDS. The
+EXISTENCE OF A REGULAR FILE at that path is the ENTIRE record; content is
+ignored, so a nonempty file at the path still witnesses release — the
+record is existence, not bytes, and there is nothing to decode. The marker
+is an operational FACT — never a proof, never a verdict, never a
+ratification. Creating it requires the consuming feature's own lifecycle to
+have already produced whatever durable record its authority demands — for
+CSE, the durably recorded human decision — a record this component never
+inspects and never interprets.
+
+Release may be invoked for an ABANDONED run regardless of how complete its
+materialization is: abandonment is the consuming feature's own lifecycle
+decision, not a judgment this component makes. gc then decides dirty,
+locked, or reclaim as usual, and a partial worktree whose cleanliness
+cannot be proven KEEPS, disclosed — this store's kept-until-a-human-
+resolves posture.
 
 The execution slice's decision is TOTAL and ORDERED, mirroring
 `wtmanager.decideReclaim`'s shape, exactly one reason per workspace:
 
-1. no readable `.released` marker — keep-not-eligible;
+1. no `.released` regular file — keep-not-eligible;
 2. uncommitted changes (`gitx.StatusDirty`) — keep-dirty;
 3. a live lock (`filelock.Peek`) — keep-locked;
-4. otherwise — reclaim: the worktree is removed first
-   (`gitx.WorktreeRemove`, never `--force`), then the workspace's siblings
-   (`.request`, `.released`, `.lock`) are deleted.
+4. otherwise — reclaim (deletion order and partial outcomes below).
 
-Any marker state the slice cannot read or decode KEEPS, fail-closed: an
-eligibility that cannot be verified is never reclaimed.
+Any filesystem object at the marker path OTHER THAN a regular file — a
+directory, a symlink, anything else — KEEPS, fail-closed and disclosed: an
+eligibility that cannot be established is never reclaimed.
+
+A reclaim deletes in FIXED ORDER: the workspace directory first, then the
+`.request`, `.released`, and `.lock` siblings. A failure at any step is
+disclosed on that item alone and the sweep continues to the next workspace,
+the partial outcome named as its own disclosed line rather than folded into
+a generic failure bucket — gc-reclaim's own per-item partial-outcome idiom
+(its ac-2, a per-item refusal disclosed while the sweep continues; its
+dc-4, a partial outcome printed as a line distinct from both full success
+and a row kept before anything was touched). A later invocation RESOLVES
+partials rather than inheriting them: siblings present with NO workspace
+directory are orphaned metadata describing nothing, so the execution slice
+deletes them on one disclosed line — nothing is lost, because the workspace
+content they described is already gone.
 
 Whole-checkout disposal loses the markers together with the workspaces they
 describe — a non-event for this root, which the landed store-layout
@@ -367,8 +419,8 @@ Pending runtime gaps — this spec ships no runtime code; only the
 runtime/shared-seam implementation may remain pending: detached-SHA
 worktree creation; patch application; isolation-profile construction; grant
 decoding/enforcement; fingerprint collection; execution workspace naming and
-its request-identity/release sidecars; the execution gc slice; the
-managed-root exclusion from residue/reclaim.
+its request-identity/release sidecars and their partial-state recovery; the
+execution gc slice; the managed-root exclusion from residue/reclaim.
 
 CI and CSE consume this seam. They retain only feature policy, proof and
 receipt semantics, isolation/authority claims, and their own integration
@@ -381,7 +433,7 @@ mechanics, which OD-6 assigns here.
 
 ## Inventions disclosed
 
-This specification's owner merge ratifies seven inventions, none of which was
+This specification's owner merge ratifies eight inventions, none of which was
 settled by OD-6 or OD-7, each recorded in the successor invention ledger
 (`docs/superpowers/invention-ledger.md`) in the same reviewed change:
 
@@ -396,6 +448,10 @@ settled by OD-6 or OD-7, each recorded in the successor invention ledger
 - SI-16 — the durable release signal for the execution gc slice (no plan
   handle: raised as a P1 by the owner-gate review of this PR, after the
   governing plan's handle list was written)
+- SI-17 — the ordered materialization/cleanup state machine and its
+  idempotent recovery (no plan handle: raised as a P1 by the owner-gate
+  round-3 review of this PR, after the governing plan's handle list was
+  written)
 
 Until each is amended by later ratification it stands as recorded here;
 each L-* value is a plan-local traceability handle, never a ledger ID.
