@@ -104,14 +104,29 @@ combination of `{directory, .request, .released, .lock}` reaches exactly one
 outcome. The lock is held CONTINUOUSLY across steps 1 through 6, so no other
 mutator can interleave a materialization — and every other mutator of a unit
 acquires the same lock: the RELEASE operation (below) and the gc reclaim
-alike:
+alike.
 
-1. acquire `data/execution/<workspace-id>.lock`;
+BOTH PATHS ARE EXAMINED WITH LSTAT, never a following stat: at the marker
+path as already stated, and at the UNIT PATH itself, so that "directory
+present" means a REAL DIRECTORY. Without that, a symlink planted at
+`<workspace-id>` would read as a present directory and a reclaim could
+delete through it into its target. Any object at the unit path that is not a
+real directory is an OPERATIONAL ERROR on this path — the unit is kept for
+human attention, the step-3b posture applied one level up:
+
+1. acquire `data/execution/<workspace-id>.lock`. `filelock.Acquire` is
+   NON-BLOCKING, so nobody waits: an acquisition that fails — a live holder,
+   or any other acquisition failure such as an undecodable lock body — is an
+   OPERATIONAL ERROR for this request, disclosed and retryable;
 2. workspace DIRECTORY ABSENT — any siblings present (`.request`,
-   `.released`, stale lock debris) are orphaned metadata from a partial
-   reclaim or from tampering, describing content that no longer exists: they
-   are deleted under the lock, one disclosed line, and materialization
-   proceeds fresh at step 5. Release state does not survive the workspace it
+   `.released`) are orphaned metadata from a partial reclaim or from
+   tampering, describing content that no longer exists: each is deleted by a
+   plain unlink under the lock, one disclosed line, and materialization
+   proceeds fresh at step 5. An unexpected object kind at a sibling path, or
+   a failed unlink, is an operational error for this request, disclosed and
+   retryable — the same posture step 4c takes for a failed removal. The unit
+   lock is not among these siblings: it is this operation's own, released
+   normally at the end. Release state does not survive the workspace it
    described: an orphaned marker describes nothing, so it is deleted with
    the other orphans rather than making the id permanently unusable;
 3. directory present AND anything at all at the marker path (lstat
@@ -126,8 +141,8 @@ alike:
    2. a NON-REGULAR object — a directory, a symlink, anything else — an
       OPERATIONAL ERROR: the workspace is kept for human attention, never
       treated as released and never fallen through to the `.request` branch.
-      This is the materialization mirror of gc's keep-malformed-marker rank,
-      so a malformed marker is a decided state on both paths, not a gap;
+      This is the materialization mirror of gc's keep-malformed rank, so a
+      malformed marker is a decided state on both paths, not a gap;
 4. directory present and `.released` absent — branch on `.request`:
    1. present and DECODABLE — byte-compare the full request identity.
       Equal: the sidecar is the completion witness, the materialization is
@@ -153,15 +168,18 @@ alike:
       removal is an operational error for THIS request, disclosed and
       retryable; the retry re-enters this same step, so the id is never
       permanently wedged;
-5. materialize the worktree (either request shape);
+5. materialize the worktree (either request shape). A materialization that
+   FAILS is an operational error for this request, disclosed; any partial
+   directory it leaves behind carries no witness, so it is exactly the 4c
+   residue the next identity-equal attempt removes and rebuilds;
 6. write `.request` temp-then-rename — the atomic completion witness —
    and release the lock.
 
-A crash between steps 5 and 6 therefore lands in state 4c on the next
-identity-equal request: self-healing, with no permanently wedged
-`<workspace-id>`. That is the only landing state 4c has; the other partial
-states this store can reach are named where they arise — §GC slice's
-reclaim ordering below.
+State 4c therefore has two producers, both self-healing on the next
+identity-equal request, with no permanently wedged `<workspace-id>`: a
+step-5 materialization failure, and a crash between steps 5 and 6. The
+other partial states this store can reach are named where they arise —
+§GC slice's reclaim ordering below.
 
 ## Isolation-control application
 
@@ -240,7 +258,7 @@ compile-time-exhaustive `KeptReason` enum are the named precedents), never
 `--force` (`gitx.WorktreeRemove` deliberately omits it — git's own
 dirty-tree refusal stays a second, independent guard), one disclosed result
 line per unit. The ordered outcome set is reclaim-orphaned,
-keep-not-eligible, keep-malformed-marker, keep-dirty, keep-locked, reclaim,
+keep-not-eligible, keep-malformed, keep-dirty, keep-locked, reclaim,
 plus the disclosed partial outcome of a failed reclaim step (§GC slice
 states the same membership and order, with its predicates); a reclaim
 deletes the completion witness first, in fixed order — `.request`, then the
@@ -290,7 +308,7 @@ not rewrite the decision."
 
 Decision semantics: scan `data/execution/`; decide per unit among a TOTAL
 outcome set of seven result kinds — the six ranked outcomes
-reclaim-orphaned, keep-not-eligible, keep-malformed-marker, keep-dirty,
+reclaim-orphaned, keep-not-eligible, keep-malformed, keep-dirty,
 keep-locked, and reclaim, plus the disclosed PARTIAL outcome of a reclaim
 step that failed — all defined below; reads never delete — explicit
 `verdi gc` is the only deleter (worktree-manager dc-4's non-forcing
@@ -320,17 +338,21 @@ creating the marker and holds it only for that operation, the same
 per-operation discipline materialization and the gc reclaim follow: release
 therefore CANNOT LAND INSIDE A MATERIALIZATION, because both hold the unit
 lock and materialization holds it continuously across its steps 1 through 6.
+Acquisition is non-blocking here too: a release whose acquisition fails — a
+live holder, or any other acquisition failure such as an undecodable lock
+body — is an OPERATIONAL ERROR for that invocation, disclosed and
+retryable, never a wait and never a marker created outside the lock.
 Without that gate a release could slip between materialization's worktree
 creation and its completion witness, minting a released-yet-returned
 workspace the next bare `verdi gc` would reclaim under a live consumer. The
-EXISTENCE OF A REGULAR FILE at that path is
-the ENTIRE record; content is ignored, so a nonempty file at the path still
-witnesses release — the record is existence, not bytes, and there is
-nothing to decode. The marker is an operational FACT — never a proof, never
-a verdict, never a ratification. Creating it requires the consuming
-feature's own lifecycle to have already produced whatever durable record its
-authority demands — for CSE, the durably recorded human decision — a record
-this component never inspects and never interprets.
+EXISTENCE OF A REGULAR FILE at that path is the ENTIRE record; content is
+ignored, so a nonempty file at the path still witnesses release — the record
+is existence, not bytes, and there is nothing to decode. The marker is an
+operational FACT — never a proof, never a verdict, never a ratification.
+Creating it requires the consuming feature's own lifecycle to have already
+produced whatever durable record its authority demands — for CSE, the
+durably recorded human decision — a record this component never inspects and
+never interprets.
 
 Release may be invoked for an ABANDONED run regardless of how complete its
 materialization is: abandonment is the consuming feature's own lifecycle
@@ -354,7 +376,14 @@ The decision has TWO LAYERS, and they must not be conflated: RANKS CLASSIFY
 ACQUIRED UNIT LOCK, and a lock that cannot be acquired converts any
 would-be mutating outcome into keep-locked. Both mutating outcomes, rank 0
 and rank 5, are gated this way; the gate is not itself a rank, because a
-rank below a mutating outcome could never protect it.
+rank below a mutating outcome could never protect it. The decision is
+RE-DERIVED under the acquired lock immediately before mutating; a decision
+that no longer holds under the lock is re-decided, never applied —
+classification is ADVISORY until re-established inside the gate. This binds
+both mutating outcomes here and materialization's own step-2 orphan
+deletion, so a two-pass implementation can never apply a classification the
+world has since invalidated: without it, a stale rank 0 could delete a
+completed workspace's `.request` and degrade a live unit to state 4c.
 
 That gate is load-bearing for a case the ranks alone would misread: a unit
 consisting SOLELY of a `.lock` held by a LIVE process is a materialization
@@ -369,14 +398,14 @@ The per-unit decision is TOTAL and ORDERED — extending
 `wtmanager.decideReclaim`'s total ordered shape with the ranks this
 component's state space needs — exactly one disclosed reason per unit:
 
-0. no workspace directory (siblings only) — reclaim-orphaned: the siblings
-   are deleted under the acquired lock, one disclosed line;
-1. no `.released` regular file — keep-not-eligible;
-2. a non-regular filesystem object at the marker path — a directory, a
-   symlink (lstat semantics; never followed), anything else —
-   keep-malformed-marker, its own disclosed reason, fail-closed, so a human
-   can tell "not yet released" apart from "something is wrong at the marker
-   path";
+0. NOTHING at the unit path (siblings only) — reclaim-orphaned: the
+   siblings are deleted under the acquired lock, one disclosed line;
+1. NOTHING AT ALL at the marker path (lstat) — keep-not-eligible;
+2. a NON-DIRECTORY object at the workspace path, or a NON-REGULAR object at
+   the marker path (lstat semantics throughout; symlinks never followed) —
+   keep-malformed, its own disclosed reason, fail-closed, so a human can
+   tell "not yet released" apart from "something is wrong at one of this
+   unit's paths";
 3. uncommitted changes (`gitx.StatusDirty`) — keep-dirty;
 4. the unit's lock CANNOT BE ACQUIRED — a live holder, or any other
    acquisition failure such as an undecodable lock body — keep-locked, the
@@ -384,7 +413,11 @@ component's state space needs — exactly one disclosed reason per unit:
 5. otherwise — reclaim, under the acquired lock, in the order below.
 
 A reclaim deletes the COMPLETION WITNESS FIRST, in this FIXED ORDER:
-`.request`, then the workspace directory, then `.released`, then `.lock`.
+`.request`, then the workspace directory, then `.released`, then `.lock` —
+and that final `.lock` deletion IS this holder's release of the unit lock,
+one operation rather than an unlink following a release, so nothing is
+double-unlinked and no gap exists in which a concurrent `Acquire` could win
+a fresh lock only to have it removed underneath.
 Deleting the witness first means every partial failure degrades into a
 state this spec has already defined, and the landings are these: a failure
 at the DIRECTORY step leaves the directory with its marker still present
