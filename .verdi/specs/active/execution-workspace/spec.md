@@ -101,22 +101,33 @@ one):
 
 The machine branches on DIRECTORY EXISTENCE first, so every reachable
 combination of `{directory, .request, .released, .lock}` reaches exactly one
-outcome:
+outcome. The lock is held CONTINUOUSLY across steps 1 through 6, so no other
+mutator can interleave a materialization — and every other mutator of a unit
+acquires the same lock: the RELEASE operation (below) and the gc reclaim
+alike:
 
 1. acquire `data/execution/<workspace-id>.lock`;
 2. workspace DIRECTORY ABSENT — any siblings present (`.request`,
    `.released`, stale lock debris) are orphaned metadata from a partial
    reclaim or from tampering, describing content that no longer exists: they
    are deleted under the lock, one disclosed line, and materialization
-   proceeds fresh at step 5;
-3. directory present AND `.released` present as a regular file (lstat
-   semantics) — the id is RELEASED, which is TERMINAL for this workspace's
-   lifecycle: a hard error naming the released id. A released workspace
-   awaits gc reclamation and is NEVER re-materialized or reused while its
-   marker survives; once a complete reclaim has removed every trace, the
-   same deterministic id is legitimately fresh for a new request. This
-   closes the hazard of a released-but-reused workspace being reclaimed out
-   from under a live consumer;
+   proceeds fresh at step 5. Release state does not survive the workspace it
+   described: an orphaned marker describes nothing, so it is deleted with
+   the other orphans rather than making the id permanently unusable;
+3. directory present AND anything at all at the marker path (lstat
+   semantics; symlinks never followed) — branch on what that object is:
+   1. a REGULAR FILE — the RELEASED WORKSPACE is TERMINAL for this
+      lifecycle: a hard error naming the released id. A released workspace
+      awaits gc reclamation and is NEVER re-materialized or reused while its
+      marker survives BESIDE ITS DIRECTORY; once a complete reclaim has
+      removed every trace, the same deterministic id is legitimately fresh
+      for a new request. This closes the hazard of a released-but-reused
+      workspace being reclaimed out from under a live consumer;
+   2. a NON-REGULAR object — a directory, a symlink, anything else — an
+      OPERATIONAL ERROR: the workspace is kept for human attention, never
+      treated as released and never fallen through to the `.request` branch.
+      This is the materialization mirror of gc's keep-malformed-marker rank,
+      so a malformed marker is a decided state on both paths, not a gap;
 4. directory present and `.released` absent — branch on `.request`:
    1. present and DECODABLE — byte-compare the full request identity.
       Equal: the sidecar is the completion witness, the materialization is
@@ -148,7 +159,9 @@ outcome:
 
 A crash between steps 5 and 6 therefore lands in state 4c on the next
 identity-equal request: self-healing, with no permanently wedged
-`<workspace-id>`.
+`<workspace-id>`. That is the only landing state 4c has; the other partial
+states this store can reach are named where they arise — §GC slice's
+reclaim ordering below.
 
 ## Isolation-control application
 
@@ -249,7 +262,7 @@ not repeat.
 
 | Primitive | Reused for | Limit preserved |
 |---|---|---|
-| `filelock.Acquire/Release/Peek` | `data/execution/<workspace-id>.lock` ownership: materialization and the gc reclaim both ACQUIRE it before mutating (never merely Peek, which would leave a check-then-act race); Peek remains available for read-only reporting | generic path-keyed lock; per-operation hold only |
+| `filelock.Acquire/Release/Peek` | `data/execution/<workspace-id>.lock` ownership: all three mutators — materialization, release, and the gc reclaim — ACQUIRE it before mutating (never merely Peek, which would leave a check-then-act race); Peek remains available for read-only reporting | generic path-keyed lock; per-operation hold only |
 | `gitx.StatusDirty` | dirty check before any destructive op | none needed |
 | `gitx.WorktreeRemove` | cleanup | never `--force` |
 | `wtmanager.WorktreesRoot`/`WorktreePath` | addressing (not cutting) managed worktrees when a design-branch worktree is the materialization source | pure path assemblers; addressing only, never cutting or reclaiming |
@@ -302,7 +315,15 @@ IDEMPOTENT, but qualified: it succeeds when `O_CREATE|O_EXCL` creates the
 marker, and on `EEXIST` when the existing object IS a regular file;
 `EEXIST` against a directory, a symlink, or any other non-regular object is
 an OPERATIONAL ERROR — a consumer is never told that a wedged marker path
-was a successful release. The EXISTENCE OF A REGULAR FILE at that path is
+was a successful release. Release ACQUIRES the unit's `.lock` before
+creating the marker and holds it only for that operation, the same
+per-operation discipline materialization and the gc reclaim follow: release
+therefore CANNOT LAND INSIDE A MATERIALIZATION, because both hold the unit
+lock and materialization holds it continuously across its steps 1 through 6.
+Without that gate a release could slip between materialization's worktree
+creation and its completion witness, minting a released-yet-returned
+workspace the next bare `verdi gc` would reclaim under a live consumer. The
+EXISTENCE OF A REGULAR FILE at that path is
 the ENTIRE record; content is ignored, so a nonempty file at the path still
 witnesses release — the record is existence, not bytes, and there is
 nothing to decode. The marker is an operational FACT — never a proof, never
@@ -323,17 +344,33 @@ as a directory or as any sibling — so a partial state is a first-class
 decision unit rather than invisible residue.
 
 Locking is ACQUISITION, not inspection: before any mutation the slice
-ATTEMPTS TO ACQUIRE the unit's `.lock` and holds it for the reclaim only
+ATTEMPTS TO ACQUIRE the unit's `.lock` and holds it for that operation only
 (the per-operation discipline), rather than merely peeking. This closes the
 check-then-act race in which gc could delete a workspace another process is
 mid-materialization inside.
+
+The decision has TWO LAYERS, and they must not be conflated: RANKS CLASSIFY
+— they only read state — while MUTATION AT ANY RANK HAPPENS ONLY UNDER THE
+ACQUIRED UNIT LOCK, and a lock that cannot be acquired converts any
+would-be mutating outcome into keep-locked. Both mutating outcomes, rank 0
+and rank 5, are gated this way; the gate is not itself a rank, because a
+rank below a mutating outcome could never protect it.
+
+That gate is load-bearing for a case the ranks alone would misread: a unit
+consisting SOLELY of a `.lock` held by a LIVE process is a materialization
+in flight whose directory does not yet exist — `filelock.Acquire` creates
+the lock file at materialization step 1, and the directory only appears at
+step 5 — so it classifies rank 0 by shape but is keep-locked in fact, and
+its lock is never deleted out from under its live holder. A lone `.lock`
+whose holder is STALE is taken over by `filelock.Acquire`'s own stale-lock
+detection and then deleted, disclosed as reclaim-orphaned.
 
 The per-unit decision is TOTAL and ORDERED — extending
 `wtmanager.decideReclaim`'s total ordered shape with the ranks this
 component's state space needs — exactly one disclosed reason per unit:
 
 0. no workspace directory (siblings only) — reclaim-orphaned: the siblings
-   are deleted, one disclosed line;
+   are deleted under the acquired lock, one disclosed line;
 1. no `.released` regular file — keep-not-eligible;
 2. a non-regular filesystem object at the marker path — a directory, a
    symlink (lstat semantics; never followed), anything else —
@@ -341,17 +378,24 @@ component's state space needs — exactly one disclosed reason per unit:
    can tell "not yet released" apart from "something is wrong at the marker
    path";
 3. uncommitted changes (`gitx.StatusDirty`) — keep-dirty;
-4. lock acquisition fails against a live holder — keep-locked;
+4. the unit's lock CANNOT BE ACQUIRED — a live holder, or any other
+   acquisition failure such as an undecodable lock body — keep-locked, the
+   disclosure naming which case, fail-closed;
 5. otherwise — reclaim, under the acquired lock, in the order below.
 
 A reclaim deletes the COMPLETION WITNESS FIRST, in this FIXED ORDER:
 `.request`, then the workspace directory, then `.released`, then `.lock`.
 Deleting the witness first means every partial failure degrades into a
-state this spec has already defined — a surviving directory without
-`.request` is exactly the incomplete-residue state the materialization
-machine rebuilds (step 4c), and surviving siblings without a directory are
-orphaned metadata (outcome 0) — so RECLAIM IS RE-ENTRANT: a later
-invocation re-decides the same unit and finishes the job. Any step's
+state this spec has already defined, and the landings are these: a failure
+at the DIRECTORY step leaves the directory with its marker still present
+(the marker is deleted third), which materialization reads as
+released-terminal (step 3a) and which gc re-decides at rank 5 and
+re-reclaims; a failure at the `.released` or `.lock` step leaves siblings
+with no directory, which is rank 0's orphaned metadata; and step 4c — a
+directory with neither marker nor witness — is reached by the
+crash-between-materialization-steps-5-and-6 case, not by a reclaim partial.
+So RECLAIM IS RE-ENTRANT: a later invocation re-decides the same unit and
+finishes the job. Any step's
 failure is that unit's disclosed PARTIAL outcome, named on its own line
 rather than folded into a generic failure bucket, and the sweep continues
 to the next unit — gc-reclaim's own per-item partial-outcome idiom (its
