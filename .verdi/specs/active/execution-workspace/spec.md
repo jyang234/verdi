@@ -99,13 +99,41 @@ idempotent recovery it gives, is invention SI-17, disclosed. Every step runs
 under the workspace's `.lock` (a per-operation hold, never an idle-lifetime
 one):
 
-After the lock is acquired and both paths are typed, the machine branches on
+After the lock is acquired and every path is typed, the machine branches on
 the UNIT PATH first, so every reachable combination of
-`{directory, .request, .released, .lock}` reaches exactly one outcome. The
-lock is held CONTINUOUSLY across steps 1 through 6, so no other
-mutator can interleave a materialization — and every other mutator of a unit
-acquires the same lock: the RELEASE operation (below) and the gc reclaim
-alike.
+`{unit path, .request, .request.staging, .released, .lock, registry entry}`
+reaches exactly one outcome. The lock is held CONTINUOUSLY across steps 1
+through 6, so no other mutator can interleave a materialization — and every
+other mutator of a unit acquires the same lock: the RELEASE operation
+(below) and the gc reclaim alike.
+
+GIT'S WORKTREE REGISTRY IS PART OF A UNIT'S STATE. A registration naming a
+unit path that no longer holds a real directory is STALE ADMINISTRATIVE
+RESIDUE. Both absent-unit branches — materialization step 2 and gc rank 0 —
+reconcile it under the unit lock (`git worktree prune`) before proceeding,
+so a crash or failure between a directory removal and its prune SELF-HEALS
+on the next attempt rather than wedging the deterministic id at
+`git worktree add`, which stock Git refuses for a path it still has
+registered ("missing but already registered") since this component never
+passes `-f`. Prune is repository-wide by Git's own semantics and drops only
+registrations whose worktree paths are missing — administrative garbage on
+any slice, never content and never a live worktree. A prune failure is an
+operational error for that request, disclosed and retryable, on the
+materialization side, and that unit's disclosed partial on the gc side.
+
+The `.request` write is the only temp-then-rename artifact this component
+has (`.released` needs no staging: it is `O_EXCL`-created and zero-byte), and
+its temporary MUST be staged inside the OWNING UNIT'S SIBLING NAMESPACE, at
+exactly `data/execution/<workspace-id>.request.staging`, written and then
+renamed under the unit lock. A generic same-directory helper temporary
+outside this namespace is NON-CONFORMING: it would place crash residue
+outside the unit grammar, where nothing could classify it. `.request.staging`
+is therefore one of the unit's sibling forms. It is never read and never a
+witness, so crash residue is classified rather than ambiguous: both
+absent-unit branches delete it with the other orphaned metadata; a
+`.staging` surviving beside a COMPLETE `.request` is equally residue and is
+deleted the same way; and a reclaim deletes it immediately before
+`.request`.
 
 BOTH PATHS ARE EXAMINED WITH LSTAT, never a following stat: at the marker
 path as already stated, and at the UNIT PATH itself, so that "directory
@@ -120,16 +148,19 @@ human attention, the step-3b posture applied one level up:
    or any other acquisition failure such as an undecodable lock body — is an
    OPERATIONAL ERROR for this request, disclosed and retryable;
 2. NOTHING AT ALL at the unit path — any siblings present (`.request`,
-   `.released`) are orphaned metadata from a partial reclaim or from
-   tampering, describing content that no longer exists: each is deleted by a
-   plain unlink under the lock, one disclosed line, and materialization
-   proceeds fresh at step 5. An unexpected object kind at a sibling path, or
-   a failed unlink, is an operational error for this request, disclosed and
-   retryable — the same posture step 4c takes for a failed removal. The unit
-   lock is not among these siblings: it is this operation's own, released
-   normally at the end. Release state does not survive the workspace it
-   described: an orphaned marker describes nothing, so it is deleted with
-   the other orphans rather than making the id permanently unusable;
+   `.request.staging`, `.released`) are orphaned metadata from a partial
+   reclaim, a crashed write, or tampering, describing content that no longer
+   exists: each is deleted by a plain unlink under the lock, one disclosed
+   line. The registry is then reconciled under the same lock
+   (`git worktree prune`), clearing any stale registration for this unit
+   path, and materialization proceeds fresh at step 5. An unexpected object
+   kind at a sibling path, a failed unlink, or a failed prune is an
+   operational error for this request, disclosed and retryable — the same
+   posture step 4c takes for a failed removal. The unit lock is not among
+   these siblings: it is this operation's own, released normally at the end.
+   Release state does not survive the workspace it described: an orphaned
+   marker describes nothing, so it is deleted with the other orphans rather
+   than making the id permanently unusable;
 3. directory present AND anything at all at the marker path (lstat
    semantics; symlinks never followed) — branch on what that object is:
    1. a REGULAR FILE — the RELEASED WORKSPACE is TERMINAL for this
@@ -172,13 +203,17 @@ human attention, the step-3b posture applied one level up:
       received this directory, so there is no such work to protect. A failed
       removal is an operational error for THIS request, disclosed and
       retryable; the retry re-enters this same step, so the id is never
-      permanently wedged;
+      permanently wedged. A PARTIAL of this pair — the removal done, the
+      prune failed or the process crashed between them — leaves no unit path
+      but a surviving registration, which is exactly step 2's absent-unit
+      state: the retry lands there and re-prunes, so the pair is
+      self-healing rather than a wedge;
 5. materialize the worktree (either request shape). A materialization that
    FAILS is an operational error for this request, disclosed; any partial
    directory it leaves behind carries no witness, so it is exactly the 4c
    residue the next identity-equal attempt removes and rebuilds;
-6. write `.request` temp-then-rename — the atomic completion witness —
-   and release the lock.
+6. write `.request` by staging `.request.staging` and renaming it into place
+   — the atomic completion witness — and release the lock.
 
 State 4c therefore has two producers, both self-healing on the next
 identity-equal request, with no permanently wedged `<workspace-id>`: a
@@ -266,10 +301,11 @@ line per unit. The ordered outcome set is reclaim-orphaned, keep-malformed,
 keep-not-eligible, keep-dirty, keep-locked, reclaim, plus the disclosed
 partial outcome of a failed reclaim step (§GC slice states the same
 membership and order, with its predicates); a reclaim deletes the completion
-witness first, in fixed order — `.request`, then the unit path, then
-`.released`, then `.lock`, that last deletion being the holder's own release
-of the unit lock — with any per-step failure disclosed on that unit alone
-while the sweep continues. A later invocation resolves any survivor.
+witness first, in fixed order — `.request.staging`, then `.request`, then
+the unit path, then `.released`, then `.lock`, that last deletion being the
+holder's own release of the unit lock — with any per-step failure disclosed
+on that unit alone while the sweep continues. A later invocation resolves
+any survivor.
 
 Keep dirty, locked, ambiguous, or unverifiably eligible workspaces — a
 predicate that cannot verify eligibility keeps, the same corrective posture
@@ -366,9 +402,16 @@ decision below as usual, and a partial worktree whose cleanliness cannot be
 proven KEEPS, disclosed — this store's kept-until-a-human-resolves posture.
 
 The SCAN UNIT is the `<workspace-id>` itself: the slice enumerates every
-distinct `<workspace-id>` appearing under `data/execution/` in ANY form —
-as a directory or as any sibling — so a partial state is a first-class
-decision unit rather than invisible residue.
+distinct `<workspace-id>` appearing under `data/execution/` in ANY form of
+the unit grammar — the unit path itself, or any of its siblings `.request`,
+`.request.staging`, `.released`, `.lock` — so a partial state is a
+first-class decision unit rather than invisible residue.
+
+Any entry under `data/execution/` matching NO unit grammar at all is
+DISCLOSED AND KEPT: unclassified, held for human attention. The slice never
+deletes what it cannot classify. This is a SCAN-LEVEL disclosure, not a
+per-unit outcome — such an entry names no unit, so it takes no unit lock
+and joins no rank.
 
 Locking is ACQUISITION, not inspection: before any mutation the slice
 ATTEMPTS TO ACQUIRE the unit's `.lock` and holds it for that operation only
@@ -401,8 +444,9 @@ detection, and its deletion is that holder's release — the same single
 operation rank 0 names — disclosed as reclaim-orphaned.
 
 Every path this list examines — the unit path, the marker path, the request
-path — is typed with LSTAT, never a following stat; symlinks are never
-followed, so a symlink is always a non-regular object and never a directory.
+path, the staging path — is typed with LSTAT, never a following stat;
+symlinks are never followed, so a symlink is always a non-regular object and
+never a directory.
 The per-unit decision is then TOTAL and ORDERED — extending
 `wtmanager.decideReclaim`'s total ordered shape with the ranks this
 component's state space needs — exactly one disclosed reason per unit.
@@ -410,10 +454,13 @@ MALFORMATION IS TESTED BEFORE ELIGIBILITY, so a malformed unit path is never
 disclosed as the ordinary not-yet-released case:
 
 0. NOTHING AT ALL at the unit path (siblings only) — reclaim-orphaned: the
-   siblings are deleted under the acquired lock, one disclosed line, and
-   deleting the unit's `.lock` IS this holder's release of that lock — one
-   operation, never an unlink followed by a release, so no gap exists in
-   which a concurrent `Acquire`'s fresh lock could be removed underneath it;
+   siblings are deleted under the acquired lock and the registry is
+   reconciled under it too (`git worktree prune`, clearing any stale
+   registration for this unit path), one disclosed line; deleting the unit's
+   `.lock` IS this holder's release of that lock — one operation, never an
+   unlink followed by a release, so no gap exists in which a concurrent
+   `Acquire`'s fresh lock could be removed underneath it. A failed prune is
+   this unit's disclosed partial outcome;
 1. a NON-DIRECTORY object at the unit path, or a NON-REGULAR object at the
    marker path — keep-malformed, its own disclosed reason, fail-closed, so a
    human can tell "not yet released" apart from "something is wrong at one
@@ -429,14 +476,18 @@ A PREDICATE THAT CANNOT BE EVALUATED — a `gitx.StatusDirty` error, an lstat
 failure — KEEPS, fail-closed, disclosed under the rank whose predicate
 failed, the disclosure naming the check that failed. This mints no new
 reason kind: an unevaluable predicate is a keep at its own rank, never a
-silent fall-through to a later one.
+silent fall-through to a later one. At RANK 0, whose only own kind is the
+mutating reclaim-orphaned, the keep kind is KEEP-MALFORMED — the unit's
+state cannot be established, which is the same cannot-tell disclosure class
+— never reclaim-orphaned. So an lstat failure at the unit path keeps as
+malformed rather than being read as absence and driving a deletion.
 
 A reclaim deletes the COMPLETION WITNESS FIRST, in this FIXED ORDER:
-`.request`, then the unit path, then `.released`, then `.lock` — and that
-final `.lock` deletion IS this holder's release of the unit lock, one
-operation rather than an unlink following a release, so nothing is
-double-unlinked and no gap exists in which a concurrent `Acquire` could win
-a fresh lock only to have it removed underneath.
+`.request.staging`, then `.request`, then the unit path, then `.released`,
+then `.lock` — and that final `.lock` deletion IS this holder's release of
+the unit lock, one operation rather than an unlink following a release, so
+nothing is double-unlinked and no gap exists in which a concurrent `Acquire`
+could win a fresh lock only to have it removed underneath.
 
 Deleting the witness first means every partial failure degrades into a
 state this spec has already defined, and the landings are these: a failure
