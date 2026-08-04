@@ -140,7 +140,7 @@ decisions:
     text: "policy exemptions have one canonical artifact and one storage home — the Context Integrity constitution store's policy-exemption artifact; this feature owns the lifecycle-wide accountability requirements governing every exemption — the AC-4 accountability kernel and its escalation thresholds — while authorship, approval ceremony, separation-of-duties, and expiry or review conditions remain Context Integrity's dc-8 requirements, which this feature's audit rollups and journey projections consume; no second exemption artifact kind, schema, or directory is introduced by this feature"
     anchor: dc-26
   - id: dc-27
-    text: "AC-8's immutable journey event receipts live in a new, individually-ratified data-zone root `data/journey/` — per-checkout, no committed path, no ratified gc scope. Exact grammar: one append-only, strict-decoded JSON-line stream per target ref at `data/journey/event-receipts/<ref-slug>.jsonl` (schema verdi.journey-event-receipt/v1); records are never edited or rewritten in place. Writer: only the local verdi process executing the registered action, under the store's single-writer discipline; a context whose write posture excludes the journey root emits nothing, disclosed as unknown coverage, never silent loss. Reader: journey-metrics derivation and AC-4 audit rollups only — gates, transitions, recovery, and lifecycle-state derivation never consume receipts (dc-14 unchanged). The receipt is authority-adjacent (it carries authority posture, principal ids, forge witness) but never itself mints authority, and its path is never bare `receipts`: it is namespaced apart from Context Integrity's context receipts, this feature's own ac-5 authoritative transition receipts, and CSE's experiment recommendations. Durable sharing is only by committing a derived rollup citing source-event digests — never by syncing the stream (zones graduation rule)."
+    text: "AC-8's immutable journey event receipts live in a new, individually-ratified data-zone root `data/journey/` — per-checkout, no committed path, no ratified gc scope. Exact grammar: one append-only, strict-decoded JSON-line stream per target ref at `data/journey/event-receipts/<ref-slug>.jsonl` (schema verdi.journey-event-receipt/v1); records are never edited or rewritten in place. Writer: only the store's D3 single writer for the checkout — `verdi serve`, or `verdi mcp` when it holds the writer lock standalone per D3 — may append to `data/journey/`; a process executing a registered action gains no independent write authority over the journey root and never acquires the writer lock to emit a receipt. When an action completes without an authority-preserving handoff to the D3 writer, its receipt is simply not emitted and the gap is disclosed as unknown coverage under AC-8's incompleteness clause — never a silent loss, never a second writer; the same non-emission rule covers any context whose declared write posture excludes the journey root. Handoff transport is future runtime work for the journey-metrics story; this decision fixes only who holds append authority. Reader: journey-metrics derivation and AC-4 audit rollups only — gates, transitions, recovery, and lifecycle-state derivation never consume receipts (dc-14 unchanged). The receipt is authority-adjacent (it carries authority posture, principal ids, forge witness) but never itself mints authority, and its path is never bare `receipts`: it is namespaced apart from Context Integrity's context receipts, this feature's own ac-5 authoritative transition receipts, and CSE's experiment recommendations. Durable sharing is only by committing a derived rollup citing source-event digests — never by syncing the stream (zones graduation rule)."
     anchor: dc-27
 constraints:
   - id: co-1
@@ -778,13 +778,29 @@ three-row zones table. Its lifecycle is stated here, not inherited:
 per-checkout, append-only, unbounded retention, no ratified `verdi gc`
 scope (plan §5 anticipates exactly this: "any path P-1 places outside
 `data/` roots gc is ratified for"); whole-checkout disposal is a disclosed
-coverage event, never a silent pass (co-1). D3's "CI writes only
-commit-scoped derived paths" stays verbatim and untouched — it is honored
-by non-emission, not by relocating receipts into `derived/`: a CI (or
-any) execution context whose declared write posture does not include the
-journey root simply emits no receipt for that run, and the resulting gap
-is disclosed as unknown coverage under AC-8's own incompleteness clause,
-never inferred as zero activity.
+coverage event, never a silent pass (co-1).
+
+Writer authority stays exactly where store-layout D3 already puts it, and
+this decision adds no writer. D3 admits exactly one writer process per
+checkout, enforced by `data/writer.lock`: `verdi serve` is the writer, and
+`verdi mcp` serves standalone only in the case D3 itself names — when it
+acquires that lock because no serve is running. Appends to `data/journey/`
+are that writer's alone. A process executing a registered action gains no
+independent write authority over the journey root and never acquires the
+writer lock to emit a receipt; an action-scoped second writer is precisely
+the incompatible implementation this decision forecloses. When an action
+completes without an authority-preserving handoff to the D3 writer, its
+receipt is simply not emitted — the gap is disclosed as unknown coverage
+under AC-8's own incompleteness clause, never inferred as zero activity,
+never a silent loss, and never repaired by writing around the lock. The
+same rule is what keeps CI in bounds: D3's "CI writes only commit-scoped
+derived paths" stays verbatim and untouched — it is honored by
+non-emission, not by relocating receipts into `derived/`: a CI (or any)
+execution context whose declared write posture does not include the
+journey root simply emits no receipt for that run. What transport carries
+an action's receipt to the D3 writer, and whether such a handoff exists at
+all for a given surface, is runtime work for the journey-metrics story;
+this decision fixes only who holds append authority.
 
 Naming keeps the word "receipt" — erasing it would conflate the immutable
 per-action record with non-authoritative outcome-event telemetry, which
