@@ -2,7 +2,8 @@
 id: conflict/journey-event-receipt-storage-unspecified
 kind: conflict
 title: "GLG v2 AC-8's immutable journey event receipts have no ratified storage home"
-status: open
+status: superseded
+frozen: { at: 2026-08-03, commit: 9afc82de67ba4dcc9100eeb2cdb18978c8f246b3 }
 owners: [platform-team]
 links:
   - { type: challenges, ref: spec/guided-lifecycle-governance-v2 }
