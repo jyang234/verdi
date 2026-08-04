@@ -48,12 +48,16 @@ Principles inherited from verdi-go and binding here:
       spec.md
       layout.json                  # board coordinate sidecar, schema verdi.boardlayout/v1 (R4-I-5)
       board.json                   # frozen at commit-to-design (feature class only)
+    active/<name>/design-provenance.jsonl   # ASD sidecar: append-only, non-authoritative (OD-8)
+    active/<spike>/experiments/<experiment-id>/   # CSE experiment tree; follows spike to archive
     archive/<name>/                # closed feature specs move here whole
       spec.md
       layout.json
       board.json
       rollup.json                  # frozen at closure
       deviation-report.md          # frozen at closure
+    archive/<name>/design-provenance.jsonl
+    archive/<spike>/experiments/<experiment-id>/
   adr/<name>.md
   diagrams/<name>.mermaid          # authored diagrams only; generated views are never committed
   attestations/<story-slug>/<ac-id>.md   # <story-slug> = RefSlug(scheme-prefixed story ref)
@@ -61,6 +65,8 @@ Principles inherited from verdi-go and binding here:
   reaffirmations/<story-slug>/<object-id>.md   # rung-4 re-affirmation records; one per (story, amended object)
   conflicts/<name>.md              # challenges to closed decisions (evidence-model spec)
   bin/                             # committed shims: verdi-mcp, groundwork-mcp (surfaces spec)
+  policy/                          # CI constitution/policy/overlay/exemption artifacts;
+                                   #   internal grammar owned by spec/policy-authority
   data/                            # working area — gitignored, per-checkout
     writer.lock                    # single-writer enforcement (D3)
     serve.path                     # pointer file naming the real socket path (D3); the
@@ -81,6 +87,9 @@ Principles inherited from verdi-go and binding here:
                                     #   valid until their branch dies
     cache/
       index-<layout-version>-<tree-hash>
+    execution/<workspace-id>/      # execution-workspace runs (OD-6); naming owned by spec/execution-workspace
+    execution/<workspace-id>.lock
+    journey/event-receipts/<ref-slug>.jsonl   # GLG journey event receipts (GLG v3 dc-27; SI-5): append-only, D3 writer only
 ```
 
 Notes:
@@ -170,6 +179,62 @@ Notes:
   under a module's own `testdata/` (needed to exercise discovery itself) is
   never mistaken for a live corpus service, matching the Go toolchain's own
   testdata invisibility convention.
+- ASD sidecar: `design-provenance.jsonl` is committed but non-authoritative
+  by its own schema posture (`verdi.design-provenance/v1`, append-only,
+  content-addressed entries); it follows its spec from active to archive,
+  and CI context compilation excludes it under the fixed reason code
+  `design-provenance-sidecar` (OD-8; ASD design §Provenance and supporting
+  excerpts).
+- CSE experiment tree: each locked comparison is an immutable child
+  experiment at `specs/{active,archive}/<spike>/experiments/<experiment-id>/`,
+  containing — transcribed verbatim from the CSE design's §Architecture and
+  artifact lifecycle — `experiment.yaml`, `candidates/` (e.g.
+  `baseline.patch`, `candidate-a.patch`, `candidate-b.patch`),
+  `observations.jsonl`, `result.json`, `recommendation.md`,
+  `ratification.yaml`, and `selected/capsule-manifest.json`. Observation,
+  result, ratification, and selected-capsule artifacts appear only as the
+  lifecycle reaches those states; the experiment directory follows its
+  parent spike from active to archive. Additional durable support files may
+  live only under configured non-product `spike_paths` — a restatement of
+  the existing manifest key, not a redefinition.
+- `policy/`: the committed top-level home for Context Integrity's
+  constitution, policy, overlay, and exemption artifacts. Its internal
+  grammar (file naming, frontmatter, kind rows) is owned by CI's
+  `policy-authority` unit and is deferred (SI-6); this amendment is the D1
+  enumeration change admitting the entry. Until the `policy-authority` unit
+  lands the matching `knownTopLevelEntries` lint addition, creating
+  `.verdi/policy/` on disk fails VL-007 — fail-closed in the safe
+  direction, disclosed; the lint-enumeration change is assigned to the
+  `policy-authority` unit by name.
+- GLG human records: of GLG ac-4's five kinds, attestations, waivers,
+  deviation reports, and semantic dispositions already have homes in this
+  layout (attestations/, waivers/, archive deviation-report.md, spec
+  frontmatter dispositions). Exemption records have exactly one canonical
+  artifact and one storage home — the CI constitution store's
+  policy-exemption artifact under `policy/` (SI-4; GLG v2 dc-26; CI v2
+  dc-24); no second exemption artifact kind or directory exists.
+- GLG journey event receipts: `data/journey/` is a new individually-ratified
+  data-zone root (joining `worktrees/`, `cache/`, `writer.lock`,
+  `serve.path` among paths ratified individually rather than by the zones
+  table): per-checkout, append-only, strict-decoded JSON-line streams at
+  `data/journey/event-receipts/<ref-slug>.jsonl` (schema
+  `verdi.journey-event-receipt/v1`), no committed path, unbounded
+  retention, and no ratified `verdi gc` scope. Appends are the store's D3
+  single writer's alone; a process executing a registered action gains no
+  independent write authority and never acquires the writer lock to emit a
+  receipt (GLG v3 dc-27; SI-5). Unlike everything else under `data/`, a
+  journey event receipt records an attempt that final Git state cannot
+  reconstruct — it is neither rebuildable (Principle 1's rebuild rule does
+  not cover it) nor one developer's working state; losing the working area
+  is therefore not a non-event for this root: whole-checkout disposal is a
+  disclosed coverage event under GLG AC-8's incompleteness clause, never a
+  silent loss and never a silent pass (GLG v3 dc-27; SI-5).
+- Lifecycle of `data/execution/<workspace-id>/`: per-run and disposable by
+  declared lifecycle, reclaimed only by `verdi gc`'s execution slice —
+  stated explicitly because the zones table's Derived/Mutable rows do not
+  cover it; it joins `worktrees/` among the individually-ratified `data/`
+  paths. Its lock sibling `data/execution/<workspace-id>.lock` is held only
+  for the duration of a single mutating operation.
 
 ## Store manifest: `verdi.yaml`
 
@@ -344,6 +409,18 @@ a byte-deterministic pure function of the tree.
   checkout — reads never delete without that opt-in; every run names
   verbatim what it did and did not touch.
 - never touches the committed zone or `mutable/`.
+
+`verdi gc`'s ratified scope now covers three root families: managed
+design-branch worktrees (worktree-manager dc-4; workbench-directory dc-4/dc-5
+reclamation signals), unmanaged residue (gc-reclaim dc-1/dc-2), and execution
+workspaces under `data/execution/` — scope only; the execution slice's
+decision semantics and invocation surface are owned by
+`spec/execution-workspace`, the component named by OD-6. `data/execution/`
+is a managed root, excluded from the unmanaged-residue sweep. Fail-closed
+throughout: keep on dirty, keep on locked, keep on ambiguous; never forced.
+The two existing modes' per-invocation mutual exclusivity (gc-reclaim dc-1)
+is restated untouched; no new invocation surface is ratified here.
+`data/journey/` carries no ratified gc scope (GLG v3 dc-27; SI-5).
 
 ## Scale envelope and non-goals
 
