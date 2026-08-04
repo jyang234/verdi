@@ -128,12 +128,21 @@ exactly `data/execution/<workspace-id>.request.staging`, written and then
 renamed under the unit lock. A generic same-directory helper temporary
 outside this namespace is NON-CONFORMING: it would place crash residue
 outside the unit grammar, where nothing could classify it. `.request.staging`
-is therefore one of the unit's sibling forms. It is never read and never a
-witness, so crash residue is classified rather than ambiguous: both
-absent-unit branches delete it with the other orphaned metadata; a
-`.staging` surviving beside a COMPLETE `.request` is equally residue and is
-deleted the same way; and a reclaim deletes it immediately before
-`.request`.
+is therefore one of the unit's sibling forms.
+
+The staging write TRUNCATES any existing file at the staging path. Staging
+residue is never load-bearing — it is never read and never a witness — so
+overwriting it is always safe, and an EXCLUSIVE-CREATE staging write is
+NON-CONFORMING for exactly the wedge it would cause: a crash during step 6
+leaves a `.staging` behind, and an exclusive create would then fail against
+that residue on every later attempt, forever.
+
+Crash residue is therefore classified rather than ambiguous, and it is
+disposed of at three sites: both absent-unit branches delete it with the
+other orphaned metadata; step 4c's removal unlinks it alongside the
+directory; and a `.staging` surviving beside a COMPLETE `.request` is
+equally residue, left for the next reclaim, whose fixed order deletes it
+immediately before `.request`.
 
 BOTH PATHS ARE EXAMINED WITH LSTAT, never a following stat: at the marker
 path as already stated, and at the UNIT PATH itself, so that "directory
@@ -141,7 +150,11 @@ present" means a REAL DIRECTORY. Without that, a symlink planted at
 `<workspace-id>` would read as a present directory and a reclaim could
 delete through it into its target. Any object at the unit path that is not a
 real directory is an OPERATIONAL ERROR on this path — the unit is kept for
-human attention, the step-3b posture applied one level up:
+human attention, the step-3b posture applied one level up. An LSTAT FAILURE
+at the unit path — anything other than a clean not-found — is likewise an
+OPERATIONAL ERROR for this request, never read as absence, so it can never
+route into step 2's sibling deletion: the materialization mirror of gc's
+rank-0 keep-malformed rule:
 
 1. acquire `data/execution/<workspace-id>.lock`. `filelock.Acquire` is
    NON-BLOCKING, so nobody waits: an acquisition that fails — a live holder,
@@ -184,7 +197,10 @@ human attention, the step-3b posture applied one level up:
       Equal: the sidecar is the completion witness, the materialization is
       complete, so this is idempotent reuse; return. Different: a hard error
       naming both requests, never a silent merge — the RefSlug collision
-      rule extended from the slug level to the full request identity;
+      rule extended from the slug level to the full request identity. A
+      stale `.request.staging` beside the complete `.request` is IGNORED
+      here — never read, never a witness — and is removed by the next
+      reclaim (the disposal sentence above);
    2. present but UNDECODABLE — an operational error; the workspace is KEPT
       for human attention, never silently reused and never silently deleted
       BY THIS PATH. The promise is scoped deliberately: a valid release
@@ -195,7 +211,8 @@ human attention, the step-3b posture applied one level up:
       to any consumer: removed under the lock and re-materialized, never
       reused as-is (the never-silent-reuse rule preserved by REBUILDING
       rather than by trusting what a crash left behind). The removal
-      primitive is named: direct filesystem removal of the directory plus
+      primitive is named: direct filesystem removal of the directory, an
+      unlink of any `.request.staging` residue beside it, plus
       `git worktree prune` for any stale administrative entry —
       deliberately NOT `gitx.WorktreeRemove` and NOT any `--force`. The
       never-force rule exists to protect consumer-visible work, and
@@ -619,7 +636,9 @@ This naming is invention SI-15 (handle L-14), disclosed.
 
 Pending runtime gaps — this spec ships no runtime code; only the
 runtime/shared-seam implementation may remain pending: detached-SHA
-worktree creation; patch application; isolation-profile construction; grant
+worktree creation; patch application; a `git worktree prune` wrapper (no
+prune primitive exists in `internal/gitx` today, and both absent-unit
+branches now require one); isolation-profile construction; grant
 decoding/enforcement; fingerprint collection; execution workspace naming and
 its request-identity/release sidecars and their partial-state recovery; the
 execution gc slice; the managed-root exclusion from residue/reclaim.
