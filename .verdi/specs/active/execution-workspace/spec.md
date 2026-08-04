@@ -130,12 +130,16 @@ outside this namespace is NON-CONFORMING: it would place crash residue
 outside the unit grammar, where nothing could classify it. `.request.staging`
 is therefore one of the unit's sibling forms.
 
-The staging write TRUNCATES any existing file at the staging path. Staging
-residue is never load-bearing — it is never read and never a witness — so
-overwriting it is always safe, and an EXCLUSIVE-CREATE staging write is
-NON-CONFORMING for exactly the wedge it would cause: a crash during step 6
-leaves a `.staging` behind, and an exclusive create would then fail against
-that residue on every later attempt, forever.
+The staging write TRUNCATES any existing REGULAR FILE at the staging path,
+which is lstat-typed like every other path this component touches; a
+NON-REGULAR object there — a symlink, a directory, anything else — is an
+OPERATIONAL ERROR for the request, never followed and never written through.
+Staging residue is never load-bearing — it is never read and never a witness
+— so overwriting a regular file there is always safe, and an
+EXCLUSIVE-CREATE staging write is NON-CONFORMING for exactly the wedge it
+would cause: a crash during step 6 leaves a `.staging` behind, and an
+exclusive create would then fail against that residue on every later
+attempt, forever.
 
 Crash residue is therefore classified rather than ambiguous, and it is
 disposed of at three sites: both absent-unit branches delete it with the
