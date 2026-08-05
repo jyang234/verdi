@@ -17,6 +17,34 @@ here.
 - `make e2e` — the Playwright suite (e2e/) alone.
 - `make tidy` — `go mod tidy`.
 
+## Change-lane routing
+
+- Apply Superpowers workflows proportionally. Before invoking one, determine
+  whether its extra stages will materially improve correctness, expose a
+  consequential unknown, or reduce implementation risk. Use the smallest
+  useful workflow. Do not manufacture a design document, implementation plan,
+  review chain, or subagent handoff for an already-decided mechanical edit.
+  Each workflow artifact must carry useful decisions or evidence; otherwise it
+  is ceremony and must be omitted. Direct user and system requirements still
+  apply.
+- **Spec-only authority work is controller-authored.** If a change is limited
+  to specifications, plans, authority records, and the invention ledger, the
+  main controller writes and repairs it directly. Do not launch an
+  implementation or fixer agent to copy, synthesize, or reword Markdown.
+- Use Claude implementers for implementation-heavy changes where a separate
+  Codex review is useful: runtime code, schemas, tooling, tests, workflows, or
+  UI. Split mixed authority/runtime changes unless they are genuinely
+  inseparable.
+- Review a spec-only authority change once as a consolidated exact-head diff.
+  A blocking finding must cite binding authority, show a reachable conforming
+  state and its concrete incorrect result, and remain inside the declared
+  threat model. Wording preferences, out-of-model interference, and optional
+  hardening are non-blocking.
+- The controller authors the exact correction for every accepted spec-only
+  finding. Perform one closure check after that correction. Do not start an
+  automatic third review round; return any later concern to the controller for
+  explicit adjudication.
+
 CLI verbs: 05 §CLI's table plus invented `gate` (I-7), `board` (I-20), and `audit` (R4-I-10) are real verbs; `close` (round 6, spec/close-verb) and `gc` (round 6, spec/worktree-manager — managed-worktree reclamation) are real too; only `waivers`/`verify-artifact` remain recognized but out of scope.
 
 ## Successor authorities
