@@ -109,17 +109,43 @@ other mutator of a unit acquires the same lock: the RELEASE operation
 
 GIT'S WORKTREE REGISTRY IS PART OF A UNIT'S STATE. A registration naming a
 unit path that no longer holds a real directory is STALE ADMINISTRATIVE
-RESIDUE. Both absent-unit branches — materialization step 2 and gc rank 0 —
-reconcile it under the unit lock (`git worktree prune`) before proceeding,
-so a crash or failure between a directory removal and its prune SELF-HEALS
-on the next attempt rather than wedging the deterministic id at
-`git worktree add`, which stock Git refuses for a path it still has
-registered ("missing but already registered") since this component never
-passes `-f`. Prune is repository-wide by Git's own semantics and drops only
-registrations whose worktree paths are missing — administrative garbage on
-any slice, never content and never a live worktree. A prune failure is an
-operational error for that request, disclosed and retryable, on the
-materialization side, and that unit's disclosed partial on the gc side.
+RESIDUE, and it must be cleared, or `git worktree add` will refuse that path
+forever ("missing but already registered") since this component never passes
+`-f`. Both absent-unit branches — materialization step 2 and gc rank 0 —
+RECONCILE THE REGISTRY FOR A UNIT under that unit's lock before proceeding.
+
+Git offers NO TARGETED PRUNE, and bare `git worktree prune` is neither
+target-specific nor trustworthy on its own: stock Git SKIPS a locked missing
+registration and still exits 0, so a zero exit does not prove this unit's
+registration is gone; and it WILL remove a registration whose directory
+still exists with content when that directory's `.git` linkage is broken, so
+a repo-wide prune can mutate another slice's administrative state. The
+reconciliation is therefore VERIFIED and SCOPED, in three parts:
+
+1. SCOPE FENCE — before any mutation, inspect what a prune would remove
+   (`git worktree prune --dry-run -v`). If ANY candidate's path lies OUTSIDE
+   `data/execution/`, the reconciliation REFUSES: an operational error on
+   the materialization side, that unit's disclosed partial on gc's,
+   fail-closed and disclosed. This is the cross-slice exclusion applied to
+   ADMINISTRATIVE state — a broken `.git` link under `data/worktrees/` is
+   that slice's problem to resolve, never this component's to prune.
+2. MUTATE — only with an all-in-scope dry-run may the prune run.
+3. VERIFIED POSTCONDITION — success is established by `gitx.WorktreeList`
+   showing NO registration naming this unit path afterwards, NEVER by
+   prune's exit status. A surviving registration is an operational error
+   (materialization) or that unit's disclosed partial (gc); the unit is
+   KEPT, and the outcome is never reported as reconciled.
+
+A HUMAN-LOCKED registration naming a unit path is outside the states this
+component produces (nothing here locks a worktree). Its outcome is that
+same disclosed, retryable REFUSAL — never a silent wedge, and never a false
+success on Git's zero exit.
+
+Because success is defined by that verified postcondition rather than by a
+command's exit code, the crash windows still SELF-HEAL: a crash or failure
+between a directory removal and its reconciliation leaves the next attempt
+to re-run the identical verified reconciliation, which either establishes
+the postcondition or refuses and discloses.
 
 The `.request` write is the only temp-then-rename artifact this component
 has (`.released` needs no staging: it is `O_EXCL`-created and zero-byte), and
@@ -168,10 +194,11 @@ rank-0 keep-malformed rule:
    `.request.staging`, `.released`) are orphaned metadata from a partial
    reclaim, a crashed write, or tampering, describing content that no longer
    exists: each is deleted by a plain unlink under the lock, one disclosed
-   line. The registry is then reconciled under the same lock
-   (`git worktree prune`), clearing any stale registration for this unit
-   path, and materialization proceeds fresh at step 5. An unexpected object
-   kind at a sibling path, a failed unlink, or a failed prune is an
+   line. The registry is then RECONCILED FOR THIS UNIT under the same lock
+   (the verified, scoped operation above), clearing any stale registration
+   naming this unit path, and materialization proceeds fresh at step 5. An
+   unexpected object kind at a sibling path, a failed unlink, or a
+   reconciliation that refuses or cannot establish its postcondition is an
    operational error for this request, disclosed and retryable — the same
    posture step 4c takes for a failed removal. The unit lock is not among
    these siblings: it is this operation's own, released normally at the end.
@@ -217,7 +244,7 @@ rank-0 keep-malformed rule:
       rather than by trusting what a crash left behind). The removal
       primitive is named: direct filesystem removal of the directory, an
       unlink of any `.request.staging` residue beside it, plus
-      `git worktree prune` for any stale administrative entry —
+      the verified, scoped registry reconciliation for this unit —
       deliberately NOT `gitx.WorktreeRemove` and NOT any `--force`. The
       never-force rule exists to protect consumer-visible work, and
       `.request`'s absence is the mechanical proof that no consumer ever
@@ -225,10 +252,11 @@ rank-0 keep-malformed rule:
       removal is an operational error for THIS request, disclosed and
       retryable; the retry re-enters this same step, so the id is never
       permanently wedged. A PARTIAL of this pair — the removal done, the
-      prune failed or the process crashed between them — leaves no unit path
-      but a surviving registration, which is exactly step 2's absent-unit
-      state: the retry lands there and re-prunes, so the pair is
-      self-healing rather than a wedge;
+      reconciliation refused or unverified or the process crashed between
+      them — leaves no unit path but a surviving registration, which is
+      exactly step 2's absent-unit state: the retry lands there and re-runs
+      the same verified reconciliation, so the pair is self-healing rather
+      than a wedge;
 5. materialize the worktree (either request shape). A materialization that
    FAILS is an operational error for this request, disclosed; any partial
    directory it leaves behind carries no witness, so it is exactly the 4c
@@ -344,6 +372,7 @@ not repeat.
 |---|---|---|
 | `filelock.Acquire/Release/Peek` | `data/execution/<workspace-id>.lock` ownership: all three mutators — materialization, release, and the gc reclaim — ACQUIRE it before mutating (never merely Peek, which would leave a check-then-act race); Peek remains available for read-only reporting | generic path-keyed lock; per-operation hold only |
 | `gitx.StatusDirty` | dirty check before any destructive op | none needed |
+| `gitx.WorktreeList` | the gc scan set's registry half (registrations resolving under `data/execution/`), and the registry reconciliation's verified postcondition | read-only — one `git worktree list --porcelain` call; never `add`, `remove`, or `prune` |
 | `gitx.WorktreeRemove` | cleanup | never `--force` |
 | `wtmanager.WorktreesRoot`/`WorktreePath` | addressing (not cutting) managed worktrees when a design-branch worktree is the materialization source | pure path assemblers; addressing only, never cutting or reclaiming |
 | `wtmanager.EnsureWorktree` | **not reused for execution workspaces** | its contract is local design branches with `design/<name>`↔`<name>` naming, and stays that way — the closed contract, unchanged |
@@ -422,11 +451,16 @@ decision, not a judgment this component makes. gc then applies the ordered
 decision below as usual, and a partial worktree whose cleanliness cannot be
 proven KEEPS, disclosed — this store's kept-until-a-human-resolves posture.
 
-The SCAN UNIT is the `<workspace-id>` itself: the slice enumerates every
-distinct `<workspace-id>` appearing under `data/execution/` in ANY form of
-the unit grammar — the unit path itself, or any of its siblings `.request`,
-`.request.staging`, `.released`, `.lock` — so a partial state is a
-first-class decision unit rather than invisible residue.
+The SCAN UNIT is the `<workspace-id>` itself, and the scan set is the UNION
+of two sources: (a) filesystem grammar entries under `data/execution/` — the
+unit path itself, or any of its siblings `.request`, `.request.staging`,
+`.released`, `.lock` — and (b) GIT WORKTREE REGISTRATIONS whose recorded
+paths resolve under `data/execution/`, read through the existing read-only
+`gitx.WorktreeList` seam. A partial state is thereby a first-class decision
+unit rather than invisible residue, and so is a REGISTRY-ONLY unit — a
+surviving registration with nothing left on disk, which the filesystem alone
+could never surface. Such a unit classifies at rank 0, where its action is
+the registry reconciliation, one disclosed line.
 
 Any entry under `data/execution/` matching NO unit grammar at all is
 DISCLOSED AND KEPT: unclassified, held for human attention. The slice never
@@ -474,14 +508,17 @@ component's state space needs — exactly one disclosed reason per unit.
 MALFORMATION IS TESTED BEFORE ELIGIBILITY, so a malformed unit path is never
 disclosed as the ordinary not-yet-released case:
 
-0. NOTHING AT ALL at the unit path (siblings only) — reclaim-orphaned: the
-   siblings are deleted under the acquired lock and the registry is
-   reconciled under it too (`git worktree prune`, clearing any stale
-   registration for this unit path), one disclosed line; deleting the unit's
-   `.lock` IS this holder's release of that lock — one operation, never an
-   unlink followed by a release, so no gap exists in which a concurrent
-   `Acquire`'s fresh lock could be removed underneath it. A failed prune is
-   this unit's disclosed partial outcome;
+0. NOTHING AT ALL at the unit path (siblings only, or NOTHING ON DISK AT ALL
+   for a registry-only unit) — reclaim-orphaned: any siblings are deleted
+   under the acquired lock and the registry is RECONCILED FOR THIS UNIT
+   under it too (the verified, scoped operation above), one disclosed line;
+   deleting the unit's `.lock` IS this holder's release of that lock — one
+   operation, never an unlink followed by a release, so no gap exists in
+   which a concurrent `Acquire`'s fresh lock could be removed underneath it.
+   For a registry-only unit the reconciliation IS the whole action. A
+   reconciliation that refuses on the scope fence, or whose postcondition
+   cannot be established, is this unit's disclosed partial outcome — never
+   a reported success;
 1. a NON-DIRECTORY object at the unit path, or a NON-REGULAR object at the
    marker path — keep-malformed, its own disclosed reason, fail-closed, so a
    human can tell "not yet released" apart from "something is wrong at one
@@ -640,9 +677,11 @@ This naming is invention SI-15 (handle L-14), disclosed.
 
 Pending runtime gaps — this spec ships no runtime code; only the
 runtime/shared-seam implementation may remain pending: detached-SHA
-worktree creation; patch application; a `git worktree prune` wrapper (no
-prune primitive exists in `internal/gitx` today, and both absent-unit
-branches now require one); isolation-profile construction; grant
+worktree creation; patch application; a verified, scoped
+registry-reconciliation primitive (dry-run scope fence, then prune, then a
+`gitx.WorktreeList` postcondition — no targeted prune exists in Git, and
+`internal/gitx` has no prune primitive at all today); isolation-profile
+construction; grant
 decoding/enforcement; fingerprint collection; execution workspace naming and
 its request-identity/release sidecars and their partial-state recovery; the
 execution gc slice; the managed-root exclusion from residue/reclaim.
