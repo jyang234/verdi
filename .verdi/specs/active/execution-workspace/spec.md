@@ -149,13 +149,15 @@ unit's lock:
    that canonical comparison: if git's LOCK MARKER (`worktrees/<id>/locked`)
    is present, REFUSE (below) without touching the entry. Otherwise CLAIM
    the entry with ONE ATOMIC RENAME of its `gitdir` record to
-   `gitdir.reconciling`. The claim is the serialization the deletion
-   requires: git enumerates, locks, moves, repairs, and prunes worktrees
-   only through entries with a readable `gitdir`, so from the instant of
-   the rename NO GIT OPERATION can list, lock, or repoint this entry — the
-   unit lock serializes only this component, and git's own tools honor no
-   lock of ours, so the claim is what carries the proven condition through
-   to the deletion.
+   `gitdir.reconciling`. The claim is a COMPONENT-PROTOCOL claim and crash
+   marker, not a universal serialization: within the component's own
+   protocol — where the unit lock serializes every component operation —
+   it carries the proven condition from step 3's check through to the
+   deletion, and a NEWLY STARTED path-based git operation cannot resolve
+   the entry while the record is aside. It does not bind git itself: git's
+   prune enumerates administrative entries directly and handles a missing
+   `gitdir` on its own terms, and a git process that resolved the entry
+   BEFORE the rename may still act on it afterward.
 4. RE-VERIFY under the claim: re-read the aside record (the same bytes,
    renamed) and re-check the lock marker, catching one that landed in the
    instant between step 3's check and its rename. If a marker appeared,
@@ -169,18 +171,20 @@ unit's lock:
 NO REPO-WIDE MUTATION EVER RUNS, so the cross-slice exclusion holds BY
 CONSTRUCTION rather than by inspection: the only registration this component
 can delete is one whose resolved path lies under `data/execution/`, names
-the unit being reconciled, and is held under an atomic claim from proof
-through deletion. There is no fence, no dry-run, and NO WINDOW — nothing is
-examined and then acted on at a distance, and nothing is deleted on a
-condition a git operation could have invalidated after it was checked. A
-crash between claim and deletion leaves the crashed-claim state, which
-resolves through its aside record, FAILS the postcondition — disclosed,
-never a false success — and is finished by the next reconciliation, which
-re-claims (a claim already held is simply held) and completes. Raw writes
-into `$GIT_COMMON_DIR/worktrees/<id>/` that bypass git entirely are
-hand-editing of internals, outside every fence git itself offers — git's
-own prune carries the identical exposure — and outside the tamper tier this
-specification defends.
+the unit being reconciled, and is held under the claim from proof through
+deletion. There is no fence and no dry-run — nothing is examined and then
+acted on at a distance — and WITHIN THE COMPONENT PROTOCOL nothing is
+deleted on a condition invalidated after it was checked. A crash between
+claim and deletion leaves the crashed-claim state, which resolves through
+its aside record, FAILS the postcondition — disclosed, never a false
+success — and is finished by the next reconciliation, which re-claims (a
+claim already held is simply held) and completes. CONCURRENT EXTERNAL GIT
+ADMINISTRATION — a human or CI running `git worktree lock`, `move`,
+`repair`, or `prune` against this store while a reconciliation is mid-
+flight — like raw hand-edits inside `$GIT_COMMON_DIR/worktrees/<id>/`, is
+OUTSIDE THE TIER THIS SPECIFICATION DEFENDS: git's own tools offer no
+fence against it either (its prune carries the identical exposure), and no
+component protocol can serialize a tool that honors none of its locks.
 
 Safety grounding: every legitimate creator of a `data/execution/`
 registration is this component operating under the unit lock, so no
