@@ -447,7 +447,10 @@ and the reported total.
 - A focused plan names exact files and interfaces after assessing the current base commit.
 - Every spec requirement maps to a task and test.
 - The plan contains no unresolved placeholders, speculative abstractions, or undeclared dependencies.
-- Codex issues `APPROVED` or all conditions are incorporated and re-reviewed.
+- The independent cross-model reviewer selected by Gate C's authorship rule
+  issues `APPROVED`. If corrections are needed, the author may make at most one
+  correction pass and the same reviewer performs one closure check; no further
+  review round follows.
 
 ### Gate I — Producer complete
 
