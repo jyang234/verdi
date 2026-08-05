@@ -141,19 +141,46 @@ unit's lock:
    components resolved (`/tmp` versus `/private/tmp` being the everyday
    case), so string inequality between two spellings of one location can
    neither exempt an entry from deletion nor vacuously satisfy the
-   postcondition below.
-3. DELETE exactly those entries whose resolved worktree path IS THIS UNIT'S
-   PATH under that canonical comparison, by removing that entry's
-   administrative directory `$GIT_COMMON_DIR/worktrees/<id>/` — the same
-   per-entry removal `git worktree prune` performs internally, scoped to a
-   single entry this component can PROVE is its own.
+   postcondition below. An entry whose `gitdir` is absent but whose
+   `gitdir.reconciling` aside record is present is a CRASHED CLAIM of a
+   prior reconciliation — a state only this component creates, step 3 below
+   — and resolves through that aside record.
+3. For each entry whose resolved worktree path IS THIS UNIT'S PATH under
+   that canonical comparison: if git's LOCK MARKER (`worktrees/<id>/locked`)
+   is present, REFUSE (below) without touching the entry. Otherwise CLAIM
+   the entry with ONE ATOMIC RENAME of its `gitdir` record to
+   `gitdir.reconciling`. The claim is the serialization the deletion
+   requires: git enumerates, locks, moves, repairs, and prunes worktrees
+   only through entries with a readable `gitdir`, so from the instant of
+   the rename NO GIT OPERATION can list, lock, or repoint this entry — the
+   unit lock serializes only this component, and git's own tools honor no
+   lock of ours, so the claim is what carries the proven condition through
+   to the deletion.
+4. RE-VERIFY under the claim: re-read the aside record (the same bytes,
+   renamed) and re-check the lock marker, catching one that landed in the
+   instant between step 3's check and its rename. If a marker appeared,
+   RESTORE — rename the record back, returning the entry byte-identical to
+   its pre-claim state — and REFUSE, disclosed.
+5. DELETE the claimed entry's administrative directory
+   `$GIT_COMMON_DIR/worktrees/<id>/` — the same per-entry removal
+   `git worktree prune` performs internally, scoped to a single entry this
+   component has PROVEN, and holds CLAIMED, as its own.
 
 NO REPO-WIDE MUTATION EVER RUNS, so the cross-slice exclusion holds BY
 CONSTRUCTION rather than by inspection: the only registration this component
-can delete is one whose resolved path lies under `data/execution/` and names
-the unit being reconciled. There is no fence, no dry-run, and NO WINDOW —
-nothing is examined and then acted on at a distance, because the resolution
-and the removal are per entry.
+can delete is one whose resolved path lies under `data/execution/`, names
+the unit being reconciled, and is held under an atomic claim from proof
+through deletion. There is no fence, no dry-run, and NO WINDOW — nothing is
+examined and then acted on at a distance, and nothing is deleted on a
+condition a git operation could have invalidated after it was checked. A
+crash between claim and deletion leaves the crashed-claim state, which
+resolves through its aside record, FAILS the postcondition — disclosed,
+never a false success — and is finished by the next reconciliation, which
+re-claims (a claim already held is simply held) and completes. Raw writes
+into `$GIT_COMMON_DIR/worktrees/<id>/` that bypass git entirely are
+hand-editing of internals, outside every fence git itself offers — git's
+own prune carries the identical exposure — and outside the tamper tier this
+specification defends.
 
 Safety grounding: every legitimate creator of a `data/execution/`
 registration is this component operating under the unit lock, so no
@@ -166,18 +193,25 @@ on gc's, kept for human attention, honoring `git worktree lock`'s documented
 protection. A human-locked registration is outside the states this component
 produces (nothing here locks a worktree), so its outcome is a disclosed
 refusal — never a silent wedge and never a false success — and the
-disclosure NAMES THE HUMAN REMEDY: `git worktree unlock`, or, for an entry a
-human judges dead, `git worktree prune --expire`. This matters because a
-hard kill during `git worktree add` can leave an `initializing`-locked entry
-that ONLY A HUMAN may clear: that state is fail-closed and disclosed with a
-named remedy rather than self-healing, and it is the one case the
+disclosure NAMES THE HUMAN REMEDY, as a tested sequence rather than
+alternatives: `git worktree unlock <path>` followed by this component's own
+retry (the reconciliation then proceeds normally); or, for a human
+preferring git-only cleanup, `git worktree unlock <path>` followed by
+`git worktree prune --expire=now`. Unlock always comes first — prune skips
+a still-locked entry whatever its expiry argument, and `--expire` without a
+value is not even a valid invocation — so prune is never presented as an
+alternative to unlock. This matters because a hard kill during
+`git worktree add` can leave an `initializing`-locked entry that ONLY A
+HUMAN may clear: that state is fail-closed and disclosed with a named
+remedy rather than self-healing, and it is the one case the
 no-permanently-wedged claims below do not cover on their own.
 
 POSTCONDITION, unchanged in spirit: success is established by RE-ENUMERATION
-— through the SAME parent-of-`gitdir`, canonicalized resolution, so a
-misresolving implementation cannot "verify" its own blindness — showing no
-administrative entry resolving to this unit path, never by a command's exit
-status. A surviving entry is an operational error
+— through the SAME parent-of-`gitdir`, canonicalized resolution, aside
+records included, so a misresolving implementation cannot "verify" its own
+blindness and a crashed claim cannot hide from its own postcondition —
+showing no administrative entry resolving to this unit path, never by a
+command's exit status. A surviving entry is an operational error
 (materialization) or that unit's disclosed partial (gc); the unit is KEPT,
 and the outcome is never reported as reconciled. Because success is that
 postcondition rather than an exit code, the crash windows still SELF-HEAL: a
@@ -503,7 +537,8 @@ of two sources: (a) filesystem grammar entries under `data/execution/` — the
 unit path itself, or any of its siblings `.request`, `.request.staging`,
 `.released`, `.lock` — and (b) the SAME ADMINISTRATIVE ENUMERATION the
 reconciliation uses: every entry under `$GIT_COMMON_DIR/worktrees/`, with
-each entry's own `gitdir` record resolved to a path. That enumeration is a
+each entry's own `gitdir` record — or, for a crashed claim, its
+`gitdir.reconciling` aside record — resolved to a path. That enumeration is a
 superset of the LINKED registrations `gitx.WorktreeList` reports — it omits
 entries whose `gitdir` record is missing or unreadable, precisely the ones a
 list-only scan would leave undisclosed. (`worktree list` also reports the
@@ -748,10 +783,11 @@ Pending runtime gaps — this spec ships no runtime code; only the
 runtime/shared-seam implementation may remain pending: detached-SHA
 worktree creation; patch application; a target-specific
 registry-reconciliation primitive
-(administrative-directory enumeration, per-entry `gitdir` resolution,
-removal of exactly the entries proven to name the unit path, lock-marker
-refusal, re-enumeration postcondition — Git exposes no targeted prune, so
-the primitive performs prune's per-entry removal itself); isolation-profile
+(administrative-directory enumeration, per-entry `gitdir` resolution, the
+atomic `gitdir`-aside claim carrying the proven condition through deletion,
+removal of exactly the claimed entries, lock-marker refusal, re-enumeration
+postcondition — Git exposes no targeted prune, so the primitive performs
+prune's per-entry removal itself); isolation-profile
 construction; grant
 decoding/enforcement; fingerprint collection; execution workspace naming and
 its request-identity/release sidecars and their partial-state recovery; the
