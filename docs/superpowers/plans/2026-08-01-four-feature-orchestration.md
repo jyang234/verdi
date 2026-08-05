@@ -1,12 +1,29 @@
 # Four-Feature Orchestration Plan
 
-> **For agentic workers:** This file is the sequencing index, not a license to implement directly. Before changing runtime code, create and obtain review of a focused implementation plan for the named delivery unit. Use `superpowers:subagent-driven-development` to execute approved plans task by task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** This file is the sequencing index, not a license to
+> implement directly. Before changing runtime code, use a focused
+> implementation plan only when the unit's complexity materially benefits
+> from one. Execute an approved multi-step plan with the smallest useful
+> workflow. Spec-only authority work follows the direct-authoring and review
+> rules below; do not create ceremonial plans or handoffs for mechanical
+> edits. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ratify and deliver four related Verdi features without duplicating authority schemas, creating competing workflow state, or allowing implementation and review contexts to contaminate one another.
 
-**Architecture:** Git and GitHub pull requests are the durable coordination layer. One local Claude Code lane retains work that depends on uncommitted state or local-only configuration; isolated Claude Code web lanes perform repository-contained planning and implementation from explicit base commits. FABLE is the producer-side chief architect and adjudicator, Sonnet and Opus perform delegated implementation, verification, and repair, a fresh Codex context independently reviews each plan and implementation result, and the human owner alone performs authoritative GitHub and lifecycle actions. Shared contracts land before feature-owned consumers, backend record shapes land before adapters, and all workbench presentation work is serialized after the underlying records stabilize.
+**Architecture:** Git and GitHub pull requests are the durable coordination
+layer. Implementation-heavy work uses isolated Claude Code lanes from explicit
+base commits: FABLE owns frontend production, while Sonnet and Opus perform
+delegated non-frontend implementation and repair. The main agent adjudicates
+their work and the human owner alone performs authoritative merge and lifecycle
+actions. Spec-only authority is authored and repaired directly by the main
+agent; substantial authoring receives one read-only cross-model exact-head
+challenge. Shared contracts land before feature-owned consumers, backend
+record shapes land before adapters, and all workbench presentation work is
+serialized after the underlying records stabilize.
 
-**Tech Stack:** Go, filesystem-backed Verdi artifacts, Git worktrees, GitHub pull requests, Claude Code implementation subagents, Codex independent review, hermetic Go tests, Playwright, `make verify`, and `go test -race ./...`.
+**Tech Stack:** Go, filesystem-backed Verdi artifacts, Git worktrees, GitHub
+pull requests, Claude Code implementation subagents, cross-model independent
+review, hermetic Go tests, Playwright, `make verify`, and `go test -race ./...`.
 
 ## Global Constraints
 
@@ -20,10 +37,36 @@
 - Canonical outputs are deterministically sorted, digest-bound, and free of incidental wall-clock or random values except declared provenance stamps.
 - Every behavior change follows TDD. Every function receives happy and negative unit coverage; integrations use hermetic fakes; browser-facing paths receive Playwright coverage.
 - No test uses the network. Every delivery unit closes with fresh `make verify` and `go test -race ./...` evidence.
-- Frontend implementation and fixes are assigned to a FABLE subagent. Non-frontend implementation is assigned to the Sonnet implementation subagent. Review findings and gate failures are repaired by the Opus fixer.
-- In every Claude Code execution session, FABLE remains the chief architect and final producer-side judge. FABLE dispatches the repository-defined implementation role, personally adjudicates every returned diff and evidence packet, and requests an independent Opus verification when a proof claim, authority boundary, or gate result is not adequately grounded.
+- Frontend implementation and fixes are assigned to a FABLE subagent.
+  Implementation-heavy non-frontend work is assigned to Sonnet, with Opus
+  repairing accepted implementation findings and gate failures. These
+  production assignments do not apply to spec-only authority work.
+- In every implementation-heavy Claude Code execution session, FABLE remains
+  the chief architect and final producer-side judge. FABLE dispatches the
+  repository-defined implementation role, personally adjudicates every
+  returned diff and evidence packet, and requests an independent Opus
+  verification when a proof claim, authority boundary, or gate result is not
+  adequately grounded.
 - Claude Code never accepts a specification, approves a pull request, merges a branch, authors a human attestation or waiver, or dispositions a judgment-bearing finding.
-- Codex reviews are read-only. Codex does not repair its own findings; accepted findings return to Claude Code and receive a fresh Codex re-review.
+- Spec-only authority work is authored and repaired directly by the main
+  agent. Mechanical specification or documentation edits may remain
+  single-agent. Substantial spec-only authoring receives exactly one
+  independent read-only cross-model review of the consolidated exact head:
+  Claude reviews Codex-authored work, and Codex reviews Claude-authored work.
+  The authoring agent adjudicates every finding and authors every accepted
+  correction; the same reviewer performs one closure check after at most one
+  correction pass. No automatic third round or reviewer/fixer chain follows.
+  Claude's read-only role is a narrow reviewer exception, not permission to
+  produce or repair specification authority.
+- A blocking spec-only finding must cite binding authority, exhibit a reachable
+  conforming state, identify its concrete incorrect result, and stay inside
+  the declared threat model. Wording preferences, out-of-model interference,
+  and optional hardening are non-blocking.
+- Every canonical promotion includes a source-coverage/losslessness witness
+  mapping all source authority to its destination, naming transformations or
+  intentional omissions, and reporting the coverage total.
+- The main agent retains responsibility for authority interpretation, finding
+  adjudication, verification, and final handoff for every lane.
 - Only the human owner may approve the final merge.
 - One authoritative human decision occurs once: for a solo operator, merging a reviewed specification pull request is acceptance. No separate `verdi accept`, `/accept`, status edit, or confirmation may repeat that decision. Deterministic sealing and lifecycle projection follow the [merge-signaled acceptance design](../specs/2026-08-01-merge-signals-spec-acceptance-design.md).
 - Every focused plan inventories its human ceremonies and removes or automates any action that does not carry distinct substantive judgment, an exceptional override, or demonstrated irreversible-risk protection.
@@ -42,7 +85,7 @@
 6. [Ten-hour acceleration window](#ten-hour-acceleration-window)
 7. [Delivery waves](#delivery-waves)
 8. [Per-unit pull request protocol](#per-unit-pull-request-protocol)
-9. [Claude-to-Codex handoff contract](#claude-to-codex-handoff-contract)
+9. [Producer-to-reviewer handoff contract](#producer-to-reviewer-handoff-contract)
 10. [Review and merge gates](#review-and-merge-gates)
 11. [Stop conditions](#stop-conditions)
 12. [Completion ledger](#completion-ledger)
@@ -53,13 +96,23 @@ This document answers which contract lands before another contract, which work m
 
 For each delivery unit:
 
-1. Start from the current default branch after every listed dependency has merged.
-2. Create one isolated Git worktree and one branch for that unit.
-3. Write a focused plan under `docs/superpowers/plans/` with exact files, interfaces, failing tests, commands, and commits.
-4. Obtain a read-only Codex plan review before implementation.
-5. Let a FABLE-led Claude Code session execute the approved plan with the repository-defined model split. FABLE delegates the heavy work, reviews every result as it lands, and decides whether an Opus evidence verifier is required before declaring producer completion.
-6. Open a draft pull request and attach the handoff evidence defined below.
-7. Obtain a fresh Codex review, return findings to Claude Code, and repeat until the exact head commit is approved.
+1. Start from the current default branch after every listed dependency has
+   merged, then create one isolated Git worktree and one branch.
+2. Classify the unit before selecting a workflow. An already-decided
+   mechanical specification or documentation edit may remain single-agent and
+   needs no design document, implementation plan, or independent review chain.
+3. For substantial spec-only authority, the main agent authors and repairs the
+   work directly. A canonical promotion also carries the required
+   source-coverage/losslessness witness and its coverage total.
+4. For implementation-heavy work, write a focused plan only when it materially
+   improves correctness or reduces risk, then let the repository-defined
+   Claude Code role execute it. Preserve FABLE ownership of frontend work.
+5. Open a draft pull request and attach the applicable handoff evidence below.
+6. Substantial spec-only work receives exactly one independent cross-model
+   exact-head review, at most one author correction pass, and one closure check.
+   Implementation-heavy work receives its applicable independent Codex review.
+7. The main agent adjudicates every finding, verifies the exact head, and
+   produces the final handoff.
 8. Let the human owner merge only after required CI and governance checks pass.
 
 At most two implementation units may be active concurrently. Parallel units must have merged prerequisites, disjoint semantic ownership, and no planned edits to the same shared package, schema registry, `Makefile`, workbench assets, or Playwright path. When any of those conditions is false, serialize the units.
@@ -176,7 +229,11 @@ No dispatch packet says "continue from prior context" or assumes access to a loc
 
 ## Ten-hour acceleration window
 
-The acceleration window spends Claude capacity on independent, durable outputs without violating dependency gates. Relative phases begin when the owner starts the window; elapsed times are targets rather than authority deadlines.
+The acceleration window spent Claude capacity on independent, durable outputs
+without violating dependency gates. Phases A and B below preserve the
+historical assignments that produced the current authority; they do not
+override the live global routing rules for future work. Relative phase times
+were targets rather than authority deadlines.
 
 ### Phase A — protect the critical path and prepare successors
 
@@ -208,7 +265,10 @@ Task 9 may run in Claude Code web because its starting point, branch, authority,
 After Task 9 merges, revalidate W2, W3, and W4 against the actual landing commit. Then:
 
 1. Run ASD and CSE canonical-promotion units concurrently only if their changed-file inventories are disjoint and neither edits a shared index or schema registry.
-2. Give each unit its own Codex plan review, producer review, pull request, exact-head Codex implementation review, and owner merge.
+2. Give each unit its own pull request and owner merge. The main agent directly
+   authors each substantial canonical promotion, includes its complete
+   source-coverage/losslessness witness, and obtains one independent
+   cross-model exact-head review under the global spec-only rule.
 3. Incorporate the W4 ownership matrix into repository-visible successor authority and resolve every contradiction before approving the focused `governance-principal-kernel` plan.
 4. Draft the kernel plan from the fully accepted four-spec base. Do not begin kernel implementation until Wave 0's exit gate is satisfied.
 
@@ -340,13 +400,19 @@ current main after dependencies
 
 Do not build all four features on long-lived branches and merge them at the end. Merge approved prerequisites serially so later plans assess the real repository state. Rebase or recreate an unstarted branch after each dependency merge; never resolve semantic conflicts by choosing whichever branch version applies cleanly.
 
-The pull request remains draft until Claude Code has completed producer-side review and attached fresh gate evidence. Codex review is requested against an exact head commit. Any pushed fix invalidates the prior approval and requires another review of the new head.
+The pull request remains draft until its author has completed the applicable
+producer-side review or direct-author verification and attached fresh gate
+evidence.
+Independent review is requested against an exact head commit. A pushed
+spec-only correction invalidates the initial review and permits the one closure
+check defined above; it does not begin a repeated review chain.
 
 The branch must contain only its declared delivery unit. Generated data under `.verdi/data/`, exploratory prototypes, local profiles, `.DS_Store`, transcripts, and reviewer scratch files never enter the commit.
 
-## Claude-to-Codex handoff contract
+## Producer-to-reviewer handoff contract
 
-Every implementation pull request body includes these sections and concrete values from the actual branch:
+Every reviewed delivery-unit pull request body includes these sections and
+concrete values from the actual branch:
 
 | Section | Required content |
 |---|---|
@@ -356,9 +422,15 @@ Every implementation pull request body includes these sections and concrete valu
 | Disclosures | Proven claims with witnesses; violations with witnesses; unproven facts and authority effect; applicable `PLAN.md` section 7 entries or the literal value `none` |
 | Review scope | Complete changed-file list; explicit exclusions; revert boundary or backward-compatibility posture |
 
-Claude Code fills every field before requesting review. Missing rows or evidence remain unproven and keep the pull request in draft.
+The authoring agent fills every applicable field before requesting review.
+Missing rows or evidence remain unproven and keep the pull request in draft.
 
-Codex receives only the accepted specifications, approved plan, PR diff, handoff record, canonical evidence, and applicable repository instructions. It does not receive the Claude Code implementation transcript or hidden reasoning.
+The independent reviewer receives only the accepted specifications, any
+applicable approved plan, PR diff, handoff record, canonical evidence, and
+repository instructions. The reviewer does not receive the author's transcript
+or hidden reasoning. For a canonical promotion, Requirement coverage includes
+the source-coverage/losslessness witness, its transformations and omissions,
+and the reported total.
 
 ## Review and merge gates
 
@@ -370,28 +442,42 @@ Codex receives only the accepted specifications, approved plan, PR diff, handoff
 
 ### Gate P — Plan approved
 
+- This gate applies only when a focused plan materially benefits the unit; a
+  mechanical specification or documentation edit does not require one.
 - A focused plan names exact files and interfaces after assessing the current base commit.
 - Every spec requirement maps to a task and test.
 - The plan contains no unresolved placeholders, speculative abstractions, or undeclared dependencies.
-- Codex issues `APPROVED` or all conditions are incorporated and re-reviewed.
+- The independent cross-model reviewer selected by Gate C's authorship rule
+  issues `APPROVED`. If corrections are needed, the author may make at most one
+  correction pass and the same reviewer performs one closure check; no further
+  review round follows.
 
 ### Gate I — Producer complete
 
+- This gate applies to implementation-heavy work, not spec-only authority.
 - Claude Code's implementer and internal reviewer have completed their loop.
 - The branch contains small, intentional commits and no unrelated changes.
 - The handoff packet contains fresh command evidence and three-valued disclosures.
 
 ### Gate C — Independent review approved
 
-- A fresh Codex context reviews the exact head read-only.
-- Codex verifies spec fidelity, regression risk, strict decoding, determinism, authority boundaries, failure classification, tests, and provenance.
-- Claude Code fixes accepted findings; Codex re-reviews the new head.
+- Implementation-heavy work receives a fresh read-only Codex review of the
+  exact head; its Claude Code producer repairs accepted findings.
+- Substantial spec-only work receives exactly one read-only cross-model review
+  of the exact head: Claude reviews Codex-authored work, and Codex reviews
+  Claude-authored work. The author adjudicates and repairs accepted findings,
+  and the same reviewer performs one closure check after at most one correction
+  pass. No automatic third round follows.
+- The independent reviewer verifies spec fidelity, regression risk, strict
+  decoding, determinism, authority boundaries, failure classification, tests,
+  provenance, and—when applicable—the canonical-promotion losslessness
+  witness.
 - No Critical or Important finding remains. Minor findings are fixed or explicitly dispositioned by the human owner.
 
 ### Gate H — Human merge authorized
 
 - Required CI checks pass on the approved head.
-- Codex approval remains fresh for that head.
+- The applicable independent review remains fresh for that head.
 - The human owner accepts any residual disclosed uncertainty and performs or authorizes the merge.
 
 GitHub review is the durable conversation and audit trail. MCP surfaces may expose typed Verdi context and domain operations, but they do not replace commits, review threads, CI status, or human merge authority.
@@ -408,12 +494,20 @@ An agent stops and reports a blocking witness when any of these conditions holds
 - The working tree contains unrelated user changes or generated/private data that cannot be safely separated.
 - A test requires network access, unverifiable identity, missing managed-runner trust, or unavailable isolation and the active posture does not permit an honest advisory result.
 - `make verify` or `go test -race ./...` fails.
-- Codex review evidence is stale against the current head.
+- Required independent-review evidence is stale against the current head.
 - The requested action would accept, approve, attest, waive, disposition, or merge on behalf of the human owner.
 
 ## Completion ledger
 
-This table enumerates the waves and their delivery units. It carries no status columns and records no progress. Completion is derived at read time from Git and GitHub facts: the merged pull requests that name a delivery unit, the exact-head Codex review evidence on those heads, their required check runs, and `verdi spec state` for the specifications involved. Never hand-edit this ledger to record plan review, implementation, review, or merge progress; a hand-maintained copy of that state would duplicate bookkeeping, contradict the derived facts, and collide with concurrent work on one shared file.
+This table enumerates the waves and their delivery units. It carries no status
+columns and records no progress. Completion is derived at read time from Git
+and GitHub facts: the merged pull requests that name a delivery unit, the
+applicable exact-head independent-review evidence on those heads, their
+required check runs, and `verdi spec state` for the specifications involved.
+Never hand-edit this ledger to record plan review, implementation, review, or
+merge progress; a hand-maintained copy of that state would duplicate
+bookkeeping, contradict the derived facts, and collide with concurrent work on
+one shared file.
 
 | Wave | Delivery unit |
 |---|---|

@@ -29,21 +29,31 @@ here.
   apply.
 - **Spec-only authority work is controller-authored.** If a change is limited
   to specifications, plans, authority records, and the invention ledger, the
-  main controller writes and repairs it directly. Do not launch an
-  implementation or fixer agent to copy, synthesize, or reword Markdown.
+  main controller writes and repairs it directly. Do not launch a Claude
+  producer or fixer to copy, synthesize, or reword Markdown. Mechanical
+  specification or documentation edits may remain single-agent.
 - Use Claude implementers for implementation-heavy changes where a separate
   Codex review is useful: runtime code, schemas, tooling, tests, workflows, or
   UI. Split mixed authority/runtime changes unless they are genuinely
-  inseparable.
-- Review a spec-only authority change once as a consolidated exact-head diff.
-  A blocking finding must cite binding authority, show a reachable conforming
-  state and its concrete incorrect result, and remain inside the declared
-  threat model. Wording preferences, out-of-model interference, and optional
-  hardening are non-blocking.
-- The controller authors the exact correction for every accepted spec-only
-  finding. Perform one closure check after that correction. Do not start an
-  automatic third review round; return any later concern to the controller for
-  explicit adjudication.
+  inseparable. Claude's permitted read-only review of Codex-authored
+  substantial specifications is a narrow exception to this implementation
+  assignment; it does not authorize Claude specification production or repair.
+- Substantial spec-only authoring receives exactly one independent cross-model
+  review of the consolidated exact head: Claude reviews Codex-authored work,
+  and Codex reviews Claude-authored work. The reviewer is read-only and
+  supplies the fresh challenge. The authoring controller retains authority
+  interpretation, adjudicates every finding, authors every accepted
+  correction, runs verification, and produces the final handoff.
+- After at most one author correction pass, the same independent reviewer
+  performs one closure check. Do not start an automatic third review round or
+  a reviewer/fixer chain. A blocking finding must cite binding authority, show
+  a reachable conforming state and its concrete incorrect result, and remain
+  inside the declared threat model. Wording preferences, out-of-model
+  interference, and optional hardening are non-blocking; any later concern
+  returns to the controller for explicit adjudication.
+- Every canonical promotion includes a source-coverage/losslessness witness
+  that maps all source authority to its destination, names each transformation
+  or intentional omission, and reports the coverage total.
 
 CLI verbs: 05 §CLI's table plus invented `gate` (I-7), `board` (I-20), and `audit` (R4-I-10) are real verbs; `close` (round 6, spec/close-verb) and `gc` (round 6, spec/worktree-manager — managed-worktree reclamation) are real too; only `waivers`/`verify-artifact` remain recognized but out of scope.
 

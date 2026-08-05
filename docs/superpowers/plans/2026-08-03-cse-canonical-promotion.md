@@ -4,8 +4,9 @@
 > authority lane "Promote CSE into a canonical feature proposal artifact." It
 > authors no runtime code, no schemas, and no canonical spec bytes itself. The
 > controller executes §9 directly after the authority prerequisites are met;
-> this spec-only lane is not dispatched to a Claude producer or fixer. Steps
-> use checkbox (`- [ ]`) syntax for tracking.
+> this spec-only lane is not dispatched to a Claude producer or fixer. One
+> independent Claude reviewer challenges the controller-authored promotion's
+> exact head read-only. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Map every reviewed decision of the Comparative Spike Experiments
 (CSE) design into one canonical Verdi feature proposal artifact —
@@ -53,9 +54,11 @@ ruleset-required status check (verified live against ruleset `19021982`;
   with a witness, or disclosed as unproven. Silence is never a pass.
 - Exit contract `0` clean / `1` verdict / `2` operational is preserved
   verbatim in the promoted text.
-- Only the human owner merges. The controller authors and reviews this
-  spec-only promotion directly; Claude is reserved for later
-  implementation-heavy CSE delivery units.
+- Only the human owner merges. The controller authors, adjudicates, repairs,
+  and verifies this spec-only promotion directly. Claude is reserved for
+  later implementation-heavy CSE delivery units except for the one permitted
+  read-only cross-model exact-head review of this controller-authored
+  substantial specification.
 
 ---
 
@@ -112,14 +115,15 @@ FABLE independently read the full source and adjudicated the inventory.
 Seven ambiguities were flagged (AMB-1..AMB-7, dispositioned in §10); none is
 resolved silently in the proposed canonical text.
 
-The losslessness table in §5 is the durable form of that inventory: it maps
-every source block (covering all 174 items; coverage 174/174) to a canonical
-destination with its transformation named. The item-numbered inventory
-itself is session working evidence — this unit deliberately creates exactly
-one file, so it is not committed; the committed, auditable witness is §5's
-line-anchored table, independently re-walked by Opus verification and
-mechanically re-verified by the promotion lane (§9 Task 3). Any future
-edit to the promotion content must keep that table exhaustive.
+The losslessness table in §5 is the required source-coverage/losslessness
+witness. It maps every source block (covering all 174 items; coverage
+**174/174**) to a canonical destination, names every transformation or
+intentional omission, and explains added promotion-only structure. The
+item-numbered inventory itself is session working evidence — this unit
+deliberately creates exactly one file, so it is not committed; the committed,
+auditable witness is §5's line-anchored table, historically re-walked by Opus
+verification and mechanically re-verified by the promotion lane (§9 Task 3).
+Any future edit to the promotion content must keep that table exhaustive.
 
 ## Canonical artifact path and identity
 
@@ -578,7 +582,7 @@ materialization / exceptional override / removable acknowledgement).
 | C6 | Confirming the desired outcome when templates prefill defaults (L853-856) | substantive judgment | **Retain** — Verdi may populate mechanical defaults, but a human confirms what the experiment is intended to prove. |
 | C7 | Registration-packet derivation, execution, recommendation rendering, capsule sealing, cleanup (L270-274, L509, L611-621) | deterministic materialization | **Automate** — no human shepherding; cleanup runs only after the ratification record is durable. |
 | C8 | Exploratory workspace create/discard (L244-249) | removable acknowledgement | **Removed by design** — exploration is unceremonied and non-evidentiary; nothing to acknowledge. |
-| C9 | Consolidated Codex exact-head review of the promotion PR | not a human ceremony — an agent review required by orchestration Gate C, listed for completeness and deliberately outside the five-class human taxonomy | **Retain** — one consolidated exact-head review; Codex authors exact corrections for accepted findings and performs one closure check. No Claude producer/fixer loop and no automatic third round. |
+| C9 | Independent Claude exact-head review of the controller-authored promotion PR | not a human ceremony — the cross-model agent review required by orchestration Gate C, listed for completeness and deliberately outside the five-class human taxonomy | **Retain** — one read-only exact-head review; the controller adjudicates findings and authors accepted corrections, then the same reviewer performs one closure check after at most one correction pass. No Claude producer/fixer loop, automatic third round, or reviewer/fixer chain. |
 
 Duplicated acknowledgements eliminated (net): no second acceptance ceremony
 for the canonical artifact (C5), no re-approval of an already-ratified
@@ -752,10 +756,13 @@ and whose body follows §4's outline, with every §5 destination populated.
 - [ ] **Step 3:** Wait for the `merge-gate` check on the exact head
   (it runs unconditionally on every PR and is ruleset-required). Expected:
   green. Re-confirm Task 1 Step 5's active-ruleset reading still holds
-  before the PR can be merge-eligible. Do not mark ready. Perform one
-  consolidated Codex exact-head review. Codex authors exact corrections for
-  accepted findings, then performs one closure check; no automatic third
-  round follows. The owner alone merges — and that merge **is** acceptance.
+  before the PR can be merge-eligible. Do not mark ready. Request one
+  independent read-only Claude review of the exact head. Claude verifies the
+  required §5 source-coverage/losslessness witness and its 174/174 total. The
+  controller adjudicates every finding and directly authors accepted
+  corrections; after at most one correction pass, the same reviewer performs
+  one closure check. No automatic third round or reviewer/fixer chain follows.
+  The owner alone merges — and that merge **is** acceptance.
 
 ## Three-valued disclosures and blocking authority gaps
 

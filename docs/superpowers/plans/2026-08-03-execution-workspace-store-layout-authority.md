@@ -1,5 +1,13 @@
 # Execution-Workspace + Store-Layout Authority Materialization Plan
 
+> **Workflow-status note (2026-08-05):** PR-A and PR-B authoring and their
+> recorded review rounds were executed under the former workflow. The role and
+> review steps below are retained as historical provenance; they do not govern
+> future spec-only production or repair. Any later authority correction follows
+> the current workspace `AGENTS.md` and repository `CLAUDE.md`: the main agent
+> authors and adjudicates directly, with the ratified proportional cross-model
+> review rule when the change is substantial.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use
