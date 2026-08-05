@@ -7,8 +7,10 @@
 > after a read-only Codex review of this plan reports technical approval
 > AND the owner has merged this planning pull request — Codex approval is
 > never ratification; the owner's merge is the authoritative act (§11
-> states which merge ratifies which invention). Steps use checkbox
-> (`- [ ]`) syntax for tracking.
+> states which merge ratifies which invention). The controller directly
+> authors and repairs the future spec-only promotion; one independent Claude
+> reviewer challenges its exact head read-only. Steps use checkbox (`- [ ]`)
+> syntax for tracking.
 
 **Goal:** Map every reviewed decision of the ratified ASD design document
 into one canonical Verdi feature proposal artifact, losslessly, and define
@@ -349,14 +351,17 @@ context; its normative home remains the binding 00–05 specs),
 | NG-5..NG-14 | Out of scope 755–767 | `## Non-goals` | verbatim | ten items reproduced unchanged, plus NG-1's v1 core exclusions |
 | D-29..D-36 (rejected alternatives) | 769–819 | DC bodies (dc-15, dc-6, dc-1, dc-3, dc-2, dc-8, dc-8, dc-7) | verbatim | each rejection and its rationale carried into the DC body of the decision it motivates |
 
-**Coverage check:** all 166 inventoried elements (37 D, 12 SM, 4 T, 53 C,
-14 S, 5 INV, 8 R, 14 NG, 13 B, 3 P, 3 Q — Appendix A is the inventory)
-appear in exactly one row above; no element maps to "dropped". The only content in the proposed artifact that
-does not originate in the ASD design is: the depends-on link set (N-5),
-the relationship section carrying the orchestration index's imposed
-ownership rules (§5), the evidence-kind declarations (N-3), and the
-`attestation` outcome floor (mechanical VL-006 requirement) — each is
-recorded as an invention or an imposed-authority carry-over, never silent.
+**Required source-coverage/losslessness witness:** the table above maps all
+166 inventoried source-authority elements (37 D, 12 SM, 4 T, 53 C, 14 S,
+5 INV, 8 R, 14 NG, 13 B, 3 P, 3 Q — Appendix A is the inventory) to their
+destinations, names every transformation, and records every intentional
+omission. Coverage is **166/166**; no element maps to "dropped". The only
+content in the proposed artifact that does not originate in the ASD design is:
+the depends-on link set (N-5), the relationship section carrying the
+orchestration index's imposed ownership rules (§5), the evidence-kind
+declarations (N-3), and the `attestation` outcome floor (mechanical VL-006
+requirement) — each is recorded as an invention or an imposed-authority
+carry-over, never silent.
 
 ## 5. Cross-feature dependencies
 
@@ -565,22 +570,24 @@ Task 1 authoring begins:
 - [ ] **Step 4:** Wait for the required `merge-gate` check on the exact
       head. Expected: pass.
 
-### Task 3: Codex checkpoint and owner merge
+### Task 3: Independent Claude checkpoint and owner merge
 
-- [ ] **Step 1:** Request read-only Codex review of the exact head
-      (Gate C). Codex verifies §4 losslessness row-by-row, convention
-      fidelity against the two precedent artifacts, and the §11 invention
-      list.
-- [ ] **Step 2:** Repair accepted findings (Opus fixer per the repository
-      role split); every push invalidates the prior review; obtain fresh
-      exact-head approval.
-- [ ] **Step 3:** Stop after fresh exact-head Codex approval, leaving the
-      PR in **draft**, and hand off to the owner with the approval
-      evidence. The owner marks it ready and merges. **The owner's merge
-      is acceptance**; no follow-up command, status flip, or commit
-      occurs. Post-merge, `verdi spec state spec/ai-assisted-spec-design`
-      reports `accepted-pending-build` — a read-only verification, not a
-      ceremony.
+- [ ] **Step 1:** Request one independent read-only Claude review of the exact
+      head (Gate C). Claude verifies §4's required 166/166 losslessness witness
+      row-by-row, convention fidelity against the two precedent artifacts, and
+      the §11 invention list. A blocking finding must cite binding authority,
+      exhibit a reachable conforming state, identify a concrete incorrect
+      result, and remain inside the declared threat model.
+- [ ] **Step 2:** The controller adjudicates every finding and directly authors
+      accepted corrections. After at most one correction pass, request one
+      closure check from the same independent reviewer. No Claude producer or
+      fixer, automatic third round, or reviewer/fixer chain follows.
+- [ ] **Step 3:** Stop after the exact-head review is closed, leaving the PR in
+      **draft**, and hand off to the owner with the review evidence. The owner
+      marks it ready and merges. **The owner's merge is acceptance**; no
+      follow-up command, status flip, or commit occurs. Post-merge, `verdi spec
+      state spec/ai-assisted-spec-design` reports `accepted-pending-build` — a
+      read-only verification, not a ceremony.
 
 **Rollback posture:** two distinct regimes. **Before merge**, the unit is
 one commit adding one file: revert or abandon the branch and the store
@@ -609,8 +616,8 @@ protection.
 | # | Ceremony | Class | Disposition |
 |---|---|---|---|
 | 1 | Acceptance of the canonical ASD artifact | authorization already expressed by PR review + merge | **Retain the merge only.** No `verdi accept`, status edit, ledger flip, or post-merge confirmation (merge-signaled design; precedent `6d71fd7d`) |
-| 2 | Codex plan review (this plan) and exact-head implementation review (promotion PR) | substantive judgment (independent review) | **Retain** — Gates P and C; distinct information, not a duplicate acknowledgement |
-| 3 | Ratification of §11 inventions (naming, AC grouping, evidence kinds, stubs, links) | substantive judgment | **Retain as the owner's two merges** — this planning PR's merge adopts them as planning intent; the promotion PR's merge ratifies them as canonical semantics; Codex reviews inform both but ratify neither; no separate sign-off artifact is created |
+| 2 | Historical Codex plan review (this plan) and future independent Claude exact-head review (promotion PR) | substantive judgment (independent review) | **Retain** — Gate P established the plan baseline; Gate C supplies one fresh cross-model challenge of the controller-authored promotion, followed by at most one correction and one closure check |
+| 3 | Ratification of §11 inventions (naming, AC grouping, evidence kinds, stubs, links) | substantive judgment | **Retain as the owner's two merges** — this planning PR's merge adopts them as planning intent; the promotion PR's merge ratifies them as canonical semantics; independent agent reviews inform both but ratify neither; no separate sign-off artifact is created |
 | 4 | Future ASD runtime: draft acceptance | authorization already expressed by merge | **Retained as merge-only in the artifact itself** (dc-15/ac-6: "no separate acceptance command, status edit, or confirmation repeats it") — the design already removed the duplicate |
 | 5 | Future ASD runtime: per-mutation agent-edit confirmation | informational acknowledgement | **Removed by the design** (dc-3: no confirmation theater for reversible draft edits); the plan adds none back |
 | 6 | Future ASD runtime: semantic review packet | deterministic materialization (a derived view) | **No retained ceremony** — the packet is derived, never marked-approved, never persisted (dc-15); reading it is part of ceremony 4's review, not a second act |
@@ -619,11 +626,12 @@ protection.
 | 9 | Future ASD runtime: `design_assistance` policy changes | authorization already expressed by normal ratification (PR review/merge) | **Retain the existing flow only**; a policy change is an ordinary reviewed change producing a new policy digest (co-6); no additional acknowledgement |
 | 10 | Future ASD runtime: excerpt redaction/removal | exceptional override (data hygiene) | **Retain as an ordinary reviewed edit** — excerpts are removable/redactable by design (co-5); no new ceremony invented |
 
-Net: the promotion unit itself contains exactly one human authorization
-act — the owner's merge — plus two independent read-only Codex reviews
-(plan and exact head). Every other human interaction in the ASD
-lifecycle either already carries distinct judgment in the design or was
-already removed by it; this plan introduces zero new ceremonies.
+Net: the promotion unit itself contains exactly one human authorization act —
+the owner's merge — plus the historical read-only Codex plan review and one
+future independent read-only Claude exact-head review of the Codex-authored
+promotion. Every other human interaction in the ASD lifecycle either already
+carries distinct judgment in the design or was already removed by it; this
+plan introduces zero new ceremonies.
 
 ## 9. Three-valued disclosure
 
@@ -664,8 +672,9 @@ already removed by it; this plan introduces zero new ceremonies.
 - **"No new semantics" compliance of the §11 inventions** (AC grouping,
   evidence kinds, stub granularity, link set, imposed-authority
   relationship prose) is asserted with §4 as evidence but is only proven
-  by the independent Codex review and owner ratification — until then it
-  is a disclosed-unproven claim.
+  by the historical independent Codex plan review, the future independent
+  Claude exact-head review, and owner ratification — until then it is a
+  disclosed-unproven claim.
 - **GitHub check results for this planning PR** are unproven until the
   required checks complete on the pushed head (reported in the handoff).
 - **CSE disjointness at execution time** (Phase C precondition) can only
@@ -766,14 +775,14 @@ own words).
 
 Interim repository-visible record for this unit (see G-1). Each entry:
 smallest reversible choice with alternatives considered. Ratification is
-two owner merges, precisely allocated: Codex reviews provide technical
-approval only and ratify nothing; the owner's merge of THIS planning pull
-request adopts N-1..N-7 as approved planning intent (authorizing the
-promotion unit to author to this shape); the owner's merge of the LATER
+two owner merges, precisely allocated: independent agent reviews provide
+technical challenge only and ratify nothing; the owner's merge of THIS
+planning pull request adopts N-1..N-7 as approved planning intent (authorizing
+the promotion unit to author to this shape); the owner's merge of the LATER
 promotion pull request is the act that ratifies N-1..N-7 as canonical
 semantics, because that merge is the acceptance of the artifact embodying
-them. None is decided silently; none is binding as canonical authority
-until the promotion merge.
+them. None is decided silently; none is binding as canonical authority until
+the promotion merge.
 
 - **N-1 — Canonical identity `spec/ai-assisted-spec-design`.**
   Alternatives: `spec/design-assistance` (shorter, but drops the
