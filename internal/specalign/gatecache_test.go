@@ -85,7 +85,7 @@ func fileBuildsCmdVerdiBinary(src string) (bool, error) {
 // the module-relative directories (slash-separated) of every package whose
 // tests build+exec the cmd/verdi binary — EXCEPT cmd/verdi itself, whose
 // in-package exec tests are cache-honest (their buildID covers cmd/verdi's
-// sources). vendor/.git/node_modules are skipped.
+// sources). Directories excluded from `go list ./...` are skipped.
 func detectCrossBinaryTestPkgs(t *testing.T, root string) []string {
 	t.Helper()
 	seen := map[string]bool{}
@@ -95,8 +95,7 @@ func detectCrossBinaryTestPkgs(t *testing.T, root string) []string {
 			return err
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case "vendor", ".git", "node_modules":
+			if guideClaimCorpusSkipDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -243,6 +242,39 @@ func f() string { return "./cmd/verdi" }`,
 				t.Errorf("fileBuildsCmdVerdiBinary = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestGateCacheHonesty_DetectorMatchesGoDirectoryScope protects the boundary
+// that failed when local Git worktrees lived under .claude/worktrees: raw
+// filesystem walks must ignore the same dot, underscore, and testdata
+// directories that `go list ./...` excludes.
+func TestGateCacheHonesty_DetectorMatchesGoDirectoryScope(t *testing.T) {
+	root := t.TempDir()
+	src := `package p
+import "os/exec"
+func f() { _ = exec.Command("go", "build", "./cmd/verdi") }
+`
+	write := func(rel string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	write("internal/live/live_test.go")
+	write(".claude/worktrees/nested/internal/hidden/hidden_test.go")
+	write("_scratch/internal/hidden/hidden_test.go")
+	write("testdata/internal/hidden/hidden_test.go")
+
+	got := detectCrossBinaryTestPkgs(t, root)
+	want := []string{"internal/live"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("detectCrossBinaryTestPkgs() = %v, want %v", got, want)
 	}
 }
 

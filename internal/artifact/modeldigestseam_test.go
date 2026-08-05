@@ -40,6 +40,17 @@ var modelDigestMintSites = []string{
 	"internal/align/diagram_report.go",
 }
 
+// moduleSourceWalkSkipsDir reports the directory classes the Go tool excludes
+// from ./... package discovery. Module-wide source witnesses must use the same
+// boundary so ignored scratch trees and nested worktrees are not counted as
+// production packages in the containing checkout.
+func moduleSourceWalkSkipsDir(name string) bool {
+	if name == "vendor" || name == "testdata" || name == "node_modules" {
+		return true
+	}
+	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
+}
+
 // TestProvenanceMintSites_RouteThroughStampProvenance proves each
 // enumerated mint site (a) calls artifact.StampProvenance somewhere in its
 // source, and (b) never sets Model: inline inside its own
@@ -138,8 +149,7 @@ func TestProvenanceMintSites_ExactlyFour(t *testing.T) {
 			return err
 		}
 		if info.IsDir() {
-			switch info.Name() {
-			case ".git", "node_modules":
+			if moduleSourceWalkSkipsDir(info.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -244,8 +254,7 @@ func TestNoStrayProvenanceModelAssignment(t *testing.T) {
 			return err
 		}
 		if info.IsDir() {
-			switch info.Name() {
-			case ".git", "node_modules":
+			if moduleSourceWalkSkipsDir(info.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
