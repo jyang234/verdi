@@ -102,11 +102,12 @@ one):
 After the lock is acquired and every path is typed, the machine branches on
 the UNIT PATH first, so every reachable combination of
 `{unit path, .request, .request.staging, .released, .lock, registry entry}`
-reaches exactly one outcome — with one state deliberately outside the
-per-unit outcome set: an administrative entry whose `gitdir` record cannot
-be resolved to a path names no unit, so it is a disclosed SCAN-LEVEL state
-(§GC slice), exactly like a grammar-external filesystem entry, and is never
-deleted. The lock is held CONTINUOUSLY across steps 1 through 6, so no other
+reaches exactly one outcome — with one class deliberately outside the
+per-unit outcome set: an administrative entry that names no unit, whether
+because its `gitdir` record cannot be resolved or because it resolves to a
+non-unit path, is a disclosed SCAN-LEVEL state (§GC slice), exactly like a
+grammar-external filesystem entry, and is never deleted. The lock is held
+CONTINUOUSLY across steps 1 through 6, so no other
 mutator can interleave a materialization — and every other mutator of a unit
 acquires the same lock: the RELEASE operation (below) and the gc reclaim
 alike.
@@ -133,12 +134,19 @@ unit's lock:
 
 1. ENUMERATE the administrative directory `$GIT_COMMON_DIR/worktrees/`
    DIRECTLY — every entry, whether or not `git worktree list` reports it.
-2. RESOLVE each entry's own `gitdir` record to a filesystem path.
-3. DELETE exactly those entries whose resolved path IS THIS UNIT'S PATH, by
-   removing that entry's administrative directory
-   `$GIT_COMMON_DIR/worktrees/<id>/` — the same per-entry removal
-   `git worktree prune` performs internally, scoped to a single entry this
-   component can PROVE is its own.
+2. RESOLVE each entry's own `gitdir` record to a filesystem path. That
+   record names `<worktree>/.git`, NOT `<worktree>`, so the entry's worktree
+   path is that record's PARENT. Both sides of every comparison are then
+   CANONICALIZED the way git canonicalizes them, with symlinked path
+   components resolved (`/tmp` versus `/private/tmp` being the everyday
+   case), so string inequality between two spellings of one location can
+   neither exempt an entry from deletion nor vacuously satisfy the
+   postcondition below.
+3. DELETE exactly those entries whose resolved worktree path IS THIS UNIT'S
+   PATH under that canonical comparison, by removing that entry's
+   administrative directory `$GIT_COMMON_DIR/worktrees/<id>/` — the same
+   per-entry removal `git worktree prune` performs internally, scoped to a
+   single entry this component can PROVE is its own.
 
 NO REPO-WIDE MUTATION EVER RUNS, so the cross-slice exclusion holds BY
 CONSTRUCTION rather than by inspection: the only registration this component
@@ -156,12 +164,20 @@ second, independent guard. An entry carrying git's LOCK MARKER
 operational error on the materialization side, that unit's disclosed partial
 on gc's, kept for human attention, honoring `git worktree lock`'s documented
 protection. A human-locked registration is outside the states this component
-produces (nothing here locks a worktree), so its outcome is a disclosed,
-retryable refusal — never a silent wedge and never a false success.
+produces (nothing here locks a worktree), so its outcome is a disclosed
+refusal — never a silent wedge and never a false success — and the
+disclosure NAMES THE HUMAN REMEDY: `git worktree unlock`, or, for an entry a
+human judges dead, `git worktree prune --expire`. This matters because a
+hard kill during `git worktree add` can leave an `initializing`-locked entry
+that ONLY A HUMAN may clear: that state is fail-closed and disclosed with a
+named remedy rather than self-healing, and it is the one case the
+no-permanently-wedged claims below do not cover on their own.
 
 POSTCONDITION, unchanged in spirit: success is established by RE-ENUMERATION
-showing no administrative entry resolving to this unit path — never by a
-command's exit status. A surviving entry is an operational error
+— through the SAME parent-of-`gitdir`, canonicalized resolution, so a
+misresolving implementation cannot "verify" its own blindness — showing no
+administrative entry resolving to this unit path, never by a command's exit
+status. A surviving entry is an operational error
 (materialization) or that unit's disclosed partial (gc); the unit is KEPT,
 and the outcome is never reported as reconciled. Because success is that
 postcondition rather than an exit code, the crash windows still SELF-HEAL: a
@@ -295,9 +311,11 @@ rank-0 keep-malformed rule:
 
 State 4c therefore has two producers, both self-healing on the next
 identity-equal request, with no permanently wedged `<workspace-id>`: a
-step-5 materialization failure, and a crash between steps 5 and 6. The
-other partial states this store can reach are named where they arise —
-§GC slice's reclaim ordering below.
+step-5 materialization failure, and a crash between steps 5 and 6. The one
+state that is NOT self-healing is the human-locked administrative entry
+above — fail-closed, disclosed, and cleared by the named human remedy rather
+than by a retry. The other partial states this store can reach are named
+where they arise — §GC slice's reclaim ordering below.
 
 ## Isolation-control application
 
@@ -401,7 +419,7 @@ not repeat.
 |---|---|---|
 | `filelock.Acquire/Release/Peek` | `data/execution/<workspace-id>.lock` ownership: all three mutators — materialization, release, and the gc reclaim — ACQUIRE it before mutating (never merely Peek, which would leave a check-then-act race); Peek remains available for read-only reporting | generic path-keyed lock; per-operation hold only |
 | `gitx.StatusDirty` | dirty check before any destructive op | none needed |
-| `gitx.WorktreeList` | corroborating the administrative enumeration that drives the scan set's registry half and the reconciliation postcondition — a subset view, since it omits entries whose `gitdir` record is missing or unreadable | read-only — one `git worktree list --porcelain` call; never `add`, `remove`, or `prune`, and never the sole source for either the scan or the postcondition |
+| `gitx.WorktreeList` | corroborating the administrative enumeration that drives the scan set's registry half and the reconciliation postcondition — a partial view of the linked registrations, since it omits entries whose `gitdir` record is missing or unreadable (and reports the main worktree, which has no administrative entry and is never an execution unit) | read-only — one `git worktree list --porcelain` call; never `add`, `remove`, or `prune`, and never the sole source for either the scan or the postcondition |
 | `gitx.WorktreeRemove` | cleanup | never `--force` |
 | `wtmanager.WorktreesRoot`/`WorktreePath` | addressing (not cutting) managed worktrees when a design-branch worktree is the materialization source | pure path assemblers; addressing only, never cutting or reclaiming |
 | `wtmanager.EnsureWorktree` | **not reused for execution workspaces** | its contract is local design branches with `design/<name>`↔`<name>` naming, and stays that way — the closed contract, unchanged |
@@ -486,16 +504,22 @@ unit path itself, or any of its siblings `.request`, `.request.staging`,
 `.released`, `.lock` — and (b) the SAME ADMINISTRATIVE ENUMERATION the
 reconciliation uses: every entry under `$GIT_COMMON_DIR/worktrees/`, with
 each entry's own `gitdir` record resolved to a path. That enumeration is a
-strict SUPERSET of `gitx.WorktreeList`, which omits entries whose `gitdir`
-record is missing or unreadable — precisely the entries a list-only scan
-would leave undisclosed.
+superset of the LINKED registrations `gitx.WorktreeList` reports — it omits
+entries whose `gitdir` record is missing or unreadable, precisely the ones a
+list-only scan would leave undisclosed. (`worktree list` also reports the
+MAIN worktree, which has no administrative entry at all and can never be an
+execution unit.)
 
-Each administrative entry classifies three ways: one resolving UNDER
-`data/execution/` puts its unit in the scan set; one resolving OUTSIDE is
-another slice's, never touched and not a unit here; and one that CANNOT BE
-RESOLVED is a SCAN-LEVEL DISCLOSURE — "unclassified administrative entry,
-kept for human attention" — never deleted, because an entry that cannot be
-proven in scope is never ours to remove. That disclosure joins the
+Each administrative entry classifies as follows: one whose resolved path is
+a UNIT PATH under `data/execution/` puts that unit in the scan set; one
+resolving OUTSIDE `data/execution/` is another slice's, never touched and
+not a unit here; one resolving UNDER `data/execution/` but to a NON-UNIT
+path — a nested location, a sibling form, anything that names no
+`<workspace-id>` — is provably not another slice's yet still names no unit,
+so it is disclosed and kept; and one that CANNOT BE RESOLVED is likewise
+kept, because an entry that cannot be proven in scope is never ours to
+remove. Those last two are one SCAN-LEVEL DISCLOSURE — "unclassified
+administrative entry, kept for human attention" — never deleted, joining the
 grammar-external rule below: both are scan-level states, outside the
 per-unit outcome set, taking no unit lock and joining no rank.
 
