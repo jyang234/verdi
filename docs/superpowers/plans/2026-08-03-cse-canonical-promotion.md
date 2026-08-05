@@ -1,17 +1,16 @@
-# CSE Canonical-Promotion Implementation Plan
+# CSE Canonical-Promotion Authority Plan
 
-> **For agentic workers:** This is a **planning-only packet** for the Wave 0
-> delivery unit "Promote CSE into a canonical feature proposal artifact." It
+> **For the controller:** This is a **planning-only packet** for the Wave 0
+> authority lane "Promote CSE into a canonical feature proposal artifact." It
 > authors no runtime code, no schemas, and no canonical spec bytes itself. The
-> later implementation unit that executes §9's tasks MUST use
-> `superpowers:subagent-driven-development` task by task, after this plan has
-> received its read-only Codex plan review. Steps use checkbox (`- [ ]`)
-> syntax for tracking.
+> controller executes §9 directly after the authority prerequisites are met;
+> this spec-only lane is not dispatched to a Claude producer or fixer. Steps
+> use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Map every reviewed decision of the Comparative Spike Experiments
 (CSE) design into one canonical Verdi feature proposal artifact —
 losslessly, without adding new semantics — and specify exactly how the
-future implementation unit authors, validates, and lands that artifact under
+controller authors, validates, and lands that artifact under
 the merge-signaled acceptance lifecycle.
 
 **Architecture:** The CSE design document
@@ -54,8 +53,9 @@ ruleset-required status check (verified live against ruleset `19021982`;
   with a witness, or disclosed as unproven. Silence is never a pass.
 - Exit contract `0` clean / `1` verdict / `2` operational is preserved
   verbatim in the promoted text.
-- Only the human owner merges; Claude Code never accepts, approves, or marks
-  ready. Codex plan review precedes the implementation unit (Gate P).
+- Only the human owner merges. The controller authors and reviews this
+  spec-only promotion directly; Claude is reserved for later
+  implementation-heavy CSE delivery units.
 
 ---
 
@@ -69,7 +69,7 @@ ruleset-required status check (verified live against ruleset `19021982`;
 6. [Verdict and failure-state separation](#verdict-and-failure-state-separation)
 7. [Shared worktree, isolation, and capability boundary](#shared-worktree-isolation-and-capability-boundary)
 8. [Human-ceremony inventory](#human-ceremony-inventory)
-9. [Implementation tasks for the promotion unit](#implementation-tasks-for-the-promotion-unit)
+9. [Authority tasks for the promotion lane](#authority-tasks-for-the-promotion-lane)
 10. [Three-valued disclosures and blocking authority gaps](#three-valued-disclosures-and-blocking-authority-gaps)
 11. [Experimental evidence and CI authoritative proof](#experimental-evidence-and-ci-authoritative-proof)
 
@@ -118,7 +118,7 @@ destination with its transformation named. The item-numbered inventory
 itself is session working evidence — this unit deliberately creates exactly
 one file, so it is not committed; the committed, auditable witness is §5's
 line-anchored table, independently re-walked by Opus verification and
-mechanically re-verified by the implementation unit (§9 Task 3). Any future
+mechanically re-verified by the promotion lane (§9 Task 3). Any future
 edit to the promotion content must keep that table exhaustive.
 
 ## Canonical artifact path and identity
@@ -167,7 +167,7 @@ Justification against repository conventions:
 The complete proposed frontmatter follows. Object `text` values are the
 promotion's condensed normative statements; each is anchored to a body
 section that carries the source's full detail (the losslessness table binds
-each to its source lines). The implementation unit authors exactly this
+each to its source lines). The controller authors exactly this
 structure; wording-level polish during authoring is permitted only where the
 losslessness table's transformation column already names the source it must
 preserve.
@@ -348,7 +348,7 @@ authority rather than restating it (no new bytes of semantics);
 **oq-carry**: preserved as a declared open question, unresolved;
 **plan-only**: consumed by this plan, not carried into the artifact (with
 reason). Preservation evidence cites the source inventory item numbers
-(1-174) plus the verification the implementation unit runs (§9 Task 3).
+(1-174) plus the verification the promotion lane runs (§9 Task 3).
 
 | # | Source anchor (section, lines) | Content | Canonical destination | Transformation | Preservation evidence (inventory items) |
 |---|---|---|---|---|---|
@@ -427,7 +427,7 @@ unmapped and no item double-assigned; rows 67-69 account for the only three
 blocks outside that inventory (the source's navigation TOC; the
 orchestration-index boundary bullets; and the authority-audit actor rule and
 scope pin consumed as owner-adjudicated cross-feature authority). The
-implementation unit re-verifies this claim mechanically (§9 Task 3, step
+promotion lane re-verifies this claim mechanically (§9 Task 3, step
 "losslessness audit").
 
 ## Verdict and failure-state separation
@@ -578,7 +578,7 @@ materialization / exceptional override / removable acknowledgement).
 | C6 | Confirming the desired outcome when templates prefill defaults (L853-856) | substantive judgment | **Retain** — Verdi may populate mechanical defaults, but a human confirms what the experiment is intended to prove. |
 | C7 | Registration-packet derivation, execution, recommendation rendering, capsule sealing, cleanup (L270-274, L509, L611-621) | deterministic materialization | **Automate** — no human shepherding; cleanup runs only after the ratification record is durable. |
 | C8 | Exploratory workspace create/discard (L244-249) | removable acknowledgement | **Removed by design** — exploration is unceremonied and non-evidentiary; nothing to acknowledge. |
-| C9 | Codex plan review of this packet; Codex exact-head review of the promotion PR | not a human ceremony — an agent review required by orchestration Gates P/C, listed for completeness and deliberately outside the five-class human taxonomy | **Retain** — read-only, fresh-context, exact-head; findings return to Claude Code, never self-repaired by Codex. |
+| C9 | Consolidated Codex exact-head review of the promotion PR | not a human ceremony — an agent review required by orchestration Gate C, listed for completeness and deliberately outside the five-class human taxonomy | **Retain** — one consolidated exact-head review; Codex authors exact corrections for accepted findings and performs one closure check. No Claude producer/fixer loop and no automatic third round. |
 
 Duplicated acknowledgements eliminated (net): no second acceptance ceremony
 for the canonical artifact (C5), no re-approval of an already-ratified
@@ -588,12 +588,11 @@ Every retained ceremony carries distinct substantive judgment or is an
 existing forge authorization — satisfying the orchestration index's
 per-plan ceremony requirement.
 
-## Implementation tasks for the promotion unit
+## Authority tasks for the promotion lane
 
-These tasks execute **after** this plan passes read-only Codex review (Gate
-P) and only from a fresh branch off the then-current `main` with every Wave
-0 prerequisite below satisfied. Planning-lane scope ends here; nothing in
-this section runs in this lane.
+The controller executes these tasks directly, only from a fresh branch off
+the then-current `main` with every Wave 0 prerequisite below satisfied. This
+is spec-only authority work: no Claude producer or fixer is launched.
 
 **Branch topology:** `main` (post-plan-merge) → `feature/cse-canonical-promotion`
 → draft PR to `main`. Rollback posture is phase-dependent, because the
@@ -684,8 +683,8 @@ specified by the promoted artifact's `co-7`.
 - Create: `.verdi/specs/active/comparative-spike-experiments/spec.md`
 
 **Interfaces:** Produces the artifact whose frontmatter is §4's block
-verbatim (modulo any Codex-plan-review conditions) and whose body follows
-§4's outline, with every §5 destination populated.
+verbatim (modulo any authority changes discovered by the freshness checks)
+and whose body follows §4's outline, with every §5 destination populated.
 
 - [ ] **Step 1:** Write the frontmatter exactly as §4 specifies: 7 ACs
   (each with `evidence` including `attestation` — the outcome floor VL-006
@@ -744,7 +743,7 @@ verbatim (modulo any Codex-plan-review conditions) and whose body follows
   requires node/npm present — a missing toolchain HARD-FAILS and is an
   environment defect to fix, not skip).
 - [ ] **Step 2:** Push `feature/cse-canonical-promotion`; open a **draft**
-  PR to `main` whose body carries the Claude-to-Codex handoff contract:
+  PR to `main` whose body carries the authority-review contract:
   Authority (design blob OID, landing commit, this plan's path and commit,
   base/head SHAs), Requirement coverage (one row per AC/DC/CO/OQ naming its
   §5 source rows), Verification (observed command output), Disclosures
@@ -753,9 +752,10 @@ verbatim (modulo any Codex-plan-review conditions) and whose body follows
 - [ ] **Step 3:** Wait for the `merge-gate` check on the exact head
   (it runs unconditionally on every PR and is ruleset-required). Expected:
   green. Re-confirm Task 1 Step 5's active-ruleset reading still holds
-  before the PR can be merge-eligible. Do not mark ready; request Codex
-  exact-head review; the owner alone merges — and that merge **is**
-  acceptance.
+  before the PR can be merge-eligible. Do not mark ready. Perform one
+  consolidated Codex exact-head review. Codex authors exact corrections for
+  accepted findings, then performs one closure check; no automatic third
+  round follows. The owner alone merges — and that merge **is** acceptance.
 
 ## Three-valued disclosures and blocking authority gaps
 
@@ -793,10 +793,10 @@ verbatim (modulo any Codex-plan-review conditions) and whose body follows
 **Disclosed as unproven, and authority gaps (G-*) that block later
 transitions:**
 
-- **G-1 (blocking for the implementation unit, not this plan):** the
+- **G-1 (blocking for the promotion lane, not this plan):** the
   successor invention-ledger location is a Wave 0 item not yet visibly
   resolved in the repository. The orchestration stop conditions forbid
-  implementation while the ledger is unresolvable. AMB dispositions below
+  promotion while the ledger is unresolvable. AMB dispositions below
   that require ledger entries inherit this gap.
 - **G-2 (blocking):** the reusable CI/CSE worktree/isolation/capability
   boundary is unratified. The cross-feature authority audit packet
@@ -814,9 +814,9 @@ transitions:**
   the boundary (§7) and select nothing.
 - **G-3 (resolved during verification — retained for the record):** the
   `spec/worktree-manager` link target is proven to resolve (see the Proven
-  list above); the material fact the implementation unit carries is that
+  list above); the material fact the promotion lane carries is that
   the target sits in the **archive** zone, not `active/`. §9 Task 1 Step 3
-  re-verifies at implementation time.
+  re-verifies at authoring time.
 - **G-4 (disclosure):** the repository tracks no `AGENTS.md`; the
   workspace-root `AGENTS.md` (outside this Git repository) and the
   repository `CLAUDE.md` were read as the applicable committed
@@ -825,7 +825,7 @@ transitions:**
 - **G-5 (unproven in this lane):** full `make verify` was not run here by
   explicit dispatch instruction (planning-only; avoid competing with the
   resolver lane). Validation in this lane is `git diff --check` plus the
-  narrow `internal/specalign` suite; the implementation unit owes the full
+  narrow `internal/specalign` suite; the promotion lane owes the full
   gates (§9 Task 4).
 - **G-6 (proven-live; retained for the record):** the `merge-gate`
   required-status rule **is active**. Witness: the Codex reviewer's own
