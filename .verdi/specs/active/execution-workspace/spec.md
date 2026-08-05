@@ -123,12 +123,24 @@ a repo-wide prune can mutate another slice's administrative state. The
 reconciliation is therefore VERIFIED and SCOPED, in three parts:
 
 1. SCOPE FENCE — before any mutation, inspect what a prune would remove
-   (`git worktree prune --dry-run -v`). If ANY candidate's path lies OUTSIDE
-   `data/execution/`, the reconciliation REFUSES: an operational error on
-   the materialization side, that unit's disclosed partial on gc's,
-   fail-closed and disclosed. This is the cross-slice exclusion applied to
-   ADMINISTRATIVE state — a broken `.git` link under `data/worktrees/` is
-   that slice's problem to resolve, never this component's to prune.
+   (`git worktree prune --dry-run -v`). That report names candidates by
+   ADMINISTRATIVE ID (`Removing worktrees/<id>: …`), not by path, so each
+   candidate MUST FIRST BE RESOLVED TO A FILESYSTEM PATH before the fence
+   decides: via the registry read where the entry is listed, or via the
+   candidate's own administrative record
+   (`$GIT_COMMON_DIR/worktrees/<id>/gitdir`) where it is not — the
+   `gitdir file does not exist` class is reported by the dry-run yet omitted
+   entirely from `git worktree list --porcelain`, so neither source alone
+   can resolve every candidate. If ANY candidate's
+   resolved path lies OUTSIDE `data/execution/`, OR CANNOT BE RESOLVED AT
+   ALL, the reconciliation REFUSES: an operational error on the
+   materialization side, that unit's disclosed partial on gc's, fail-closed
+   and disclosed. The unresolvable case is this fence's own instance of the
+   unevaluable-predicate rule stated for the ranks below — a predicate that
+   cannot be evaluated keeps, fail-closed and disclosed, never guesses. This
+   is the cross-slice exclusion applied to ADMINISTRATIVE state — a broken
+   `.git` link under `data/worktrees/` is that slice's problem to resolve,
+   never this component's to prune.
 2. MUTATE — only with an all-in-scope dry-run may the prune run.
 3. VERIFIED POSTCONDITION — success is established by `gitx.WorktreeList`
    showing NO registration naming this unit path afterwards, NEVER by
@@ -140,6 +152,15 @@ A HUMAN-LOCKED registration naming a unit path is outside the states this
 component produces (nothing here locks a worktree). Its outcome is that
 same disclosed, retryable REFUSAL — never a silent wedge, and never a false
 success on Git's zero exit.
+
+The FENCE-TO-PRUNE WINDOW IS NOT ATOMIC, and this spec does not pretend
+otherwise: Git offers no combined dry-run-and-prune, so a candidate
+appearing after the fence and before the prune is removed unseen. The
+realistic occupant of that window is another slice's already-missing-path
+registration — benign administrative garbage — and the harmful class
+requires external corruption landing inside it; an implementation may
+tighten the gap with a pre/post `gitx.WorktreeList` comparison that
+discloses any out-of-scope registration which disappeared.
 
 Because success is defined by that verified postcondition rather than by a
 command's exit code, the crash windows still SELF-HEAL: a crash or failure
@@ -515,7 +536,9 @@ disclosed as the ordinary not-yet-released case:
    deleting the unit's `.lock` IS this holder's release of that lock — one
    operation, never an unlink followed by a release, so no gap exists in
    which a concurrent `Acquire`'s fresh lock could be removed underneath it.
-   For a registry-only unit the reconciliation IS the whole action. A
+   For a registry-only unit the reconciliation IS the whole action — plus
+   the release-by-deletion of the `.lock` its own acquisition created, as
+   above. A
    reconciliation that refuses on the scope fence, or whose postcondition
    cannot be established, is this unit's disclosed partial outcome — never
    a reported success;
