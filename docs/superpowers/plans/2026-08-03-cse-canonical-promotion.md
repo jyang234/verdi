@@ -119,10 +119,12 @@ The losslessness table in §5 is the required source-coverage/losslessness
 witness. It maps every source block (covering all 174 items; coverage
 **174/174**) to a canonical destination, names every transformation or
 intentional omission, and explains added promotion-only structure. The
-item-numbered inventory itself is session working evidence — this unit
-deliberately creates exactly one file, so it is not committed; the committed,
-auditable witness is §5's line-anchored table, historically re-walked by Opus
-verification and mechanically re-verified by the promotion lane (§9 Task 3).
+item-numbered inventory itself is session working evidence, so it is not
+committed as a third artifact. The committed, auditable witness is §5's
+line-anchored table alongside the canonical artifact and this plan's
+authority-freshness correction; that witness was historically re-walked by
+Opus verification and is mechanically re-verified by the promotion lane (§9
+Task 3).
 Any future edit to the promotion content must keep that table exhaustive.
 
 ## Canonical artifact path and identity
@@ -211,7 +213,7 @@ acceptance_criteria:
     evidence: [static, behavioral, attestation]
     anchor: ac-5
   - id: ac-6
-    text: "project and organization policy constrain experiment paths, permitted evaluators and protocol versions, capabilities, resources, observation sizes, and trusted measurement sources, with a lower layer unable to weaken a higher one; candidates cannot modify protected comparison inputs; and mutation provenance records actor — an attribution record, never an authority decision — operation, prior digest, resulting digest, and policy decision across every experiment mutation surface: CLI, workbench, agent, and the direct Git-edit draft path"
+    text: "project and organization policy constrain experiment paths, permitted evaluators and protocol versions, capabilities, resources, observation sizes, and trusted measurement sources, with a lower layer unable to weaken a higher one; candidates cannot modify protected comparison inputs; and mutation provenance across every experiment mutation surface — CLI, workbench, agent, and the direct Git-edit draft path — records operation, prior digest, resulting digest, policy decision, and an attribution actor that embeds either a kernel canonical principal identifier or an explicit unauthenticated marker, never a bare string and never an authority decision"
     evidence: [static, behavioral, attestation]
     anchor: ac-6
   - id: ac-7
@@ -231,6 +233,8 @@ links:
   - { type: depends-on, ref: spec/verdi-artifact-contract }
   - { type: depends-on, ref: spec/verdi-evidence-model }
   - { type: depends-on, ref: spec/worktree-manager }
+  - { type: depends-on, ref: spec/execution-workspace }
+  - { type: depends-on, ref: spec/context-integrity-v2 }
 decisions:
   - id: dc-1
     text: "each locked comparison is an immutable child experiment under an existing spike — subordinate evidence used to choose and justify the spike's answer, never a new spec kind, edge vocabulary, evidence kind, or alternate closure path"
@@ -334,7 +338,7 @@ per the losslessness table in §5):
 | `## AC-1` … `## AC-7` | full normative detail per AC: AC-1 carries L195-341 (the experiment directory tree, the derived-state table, the VL-016 residence posture, exploration rule, the 12-element registration capture list, protected paths, the semantic review packet and lock, the complete `experiment.yaml` v1 example with its field-stability rule); AC-2 carries L404-434 (the eight-step evaluation order, no-tiebreaker rules, noise posture); AC-3 carries L343-402 plus the metric-primitive and aggregation vocabulary L647-660 (describe handshake declaration list, observation record example, three trust classes, append-only keying; the primitive/aggregation vocabulary shared with `## DC-10`); AC-4 carries L436-480 + L589-621 (workspace derivation, schedule, environment fingerprint list, network default, failure taxonomy, resume, rerun identity, retention lists, capsule manifest, cleanup ordering); AC-5 carries L482-558 + L560-587 (one typed core, agent may/may-not lists, normal agent context rule, the two human moments, ratification record semantics, spike-closure integration, no promotion); AC-6 carries L667-670 + L681-711 (project/organization policy layering, policy constraint list, abuse-resistance mechanics, overfit disclosure, Verdi-bench boundary); AC-7 carries L104-106 + L837-838 (dogfood success test) |
 | `## Caching example` | L713-768 carried verbatim as the illustrative worked example (candidates, workload mix, decision contract, normalized-result table, witness preservation, measurement attribution) |
 | `## Delivery sequence` | Rollout steps 1-7 (L825-856) mapped onto the stubs in the design's own step order, with the step-5 surface split into its CLI/agent and workbench halves: experiment-schemas → decision-engine → evaluator-observer → isolated-execution → experiment-adapters → experiment-workbench (its UI unit runs serialized in orchestration Wave 6) → experiment-policy → dogfood-comparison; plus the standard/elevated assurance profiles and the explicit v1 boundary (generic command evaluator and built-in process observer only, L662-679) |
-| `## Relationship to Context Integrity` | the shared worktree/isolation/capability boundary dependency, stated per §7 of this plan — named, not ratified; plus the packet-consumed actor rule and experiment-surface scope pin (§5 row 69) and the CX-11 context-boundary restatement (§5 row 41), each carried only as owner-adjudicated |
+| `## Relationship to Context Integrity` | the landed `spec/execution-workspace` boundary required by OD-6, including the CI/CSE ownership split and distinct proof types; Context Integrity's single policy-authority custody required by OD-5; the owner-adjudicated actor rule and experiment-surface scope pin (§5 row 69); and the CX-11 context-boundary restatement (§5 row 41) |
 | `## Relationship to Verdi-bench and the chronicle` | L48-51, L74-78, L708-711: ownership boundaries |
 | `## DC-1` … `## DC-19` | rationale prose per decision, carrying the source's own reasoning including the six rejected alternatives (L896-922), each attached to the DC it motivates (dc-1 ← embed-in-spike and external-system rejections; dc-4/dc-7 ← auto-select rejection; dc-9 ← promote-prototype rejection; dc-18 ← benchmark-grade rejection; dc-11 ← per-tool-integration rejection) |
 | `## CO-1` … `## CO-7` | constraint elaborations, with CO-7 carrying the full verification strategy L770-823 |
@@ -399,7 +403,7 @@ reason). Preservation evidence cites the source inventory item numbers
 | 41 | Human/agent interaction, L542-546 | normal agent context contents; exploratory transcript excluded; excerpts non-authoritative and outside build context | `## AC-5` body; framing restated in `## Relationship to Context Integrity` | verbatim + restated as CI-compiler classification requirements per the audit's CX-11/R-7 clause 3 (the enumeration binds what the CI context compiler must include and exclude for experiment phases, never a freestanding competing context definition) | 94; AMB-5 |
 | 42 | Human/agent interaction, L548-553 | the two required human moments are consequential, not ceremonial (lock = fairness; ratification = path decision) | `dc-7`, `dc-16`; §8 rows C1-C2 | condensed | 95-96 |
 | 43 | Human/agent interaction, L555-558 | PR review + owner merge remain implementation governance; no competing approval ceremony; no recreated Codex/Claude Code/Verdi-go integrations | `## AC-5` body; §8 row C4 | condensed | 97 |
-| 44 | Ratification/closure, L562-572 | `ratification.yaml` five-option vocabulary; names result digest, actor identity, disposition, reason; adapter authenticates actor, payload cannot self-declare human authority | `dc-16`; `## AC-5` body | verbatim (option list); the actor clause is additionally strengthened by the packet-sourced principal rule (row 69) | 98-99 |
+| 44 | Ratification/closure, L562-572 | `ratification.yaml` five-option vocabulary; names result digest, actor identity, disposition, reason; adapter authenticates actor, payload cannot self-declare human authority | `dc-16`; `## AC-5` body | verbatim (option list); the actor clause is additionally strengthened by the owner-adjudicated principal rule (row 69) | 98-99 |
 | 45 | Ratification/closure, L574-583 | no direct feature edit, no new resolution edge; ratified decision becomes the spike answer through existing acceptance/closure; `resolves` edge sole connection; `resolved-by` backlink on frozen features; incorporated into normal closure review, no redundant approval; no auto-close without human ratification | `dc-16`, `ac-5`; `## AC-5` body; §8 row C3 | condensed | 100-101 |
 | 46 | Ratification/closure, L585-587 | selection authorizes fresh implementation, never patch promotion | `dc-9` | condensed | 102 |
 | 47 | Retention, L591-609 | retained-for-all list (6 items); not-retained-for-rejected list (6 items) | `dc-8`; `## AC-4` body | verbatim (both lists) | 103-104 |
@@ -423,14 +427,18 @@ reason). Preservation evidence cites the source inventory item numbers
 | 65 | Accepted decisions, L881-894 | 11 accepted decisions | `dc-1, dc-3, dc-4, dc-7, dc-8, dc-9, dc-10, dc-18` and `ac-1/ac-2` texts (each decision named in the DC that carries it) | condensed | 158-168 |
 | 66 | Rejected alternatives, L896-922 | 6 rejected alternatives with rationale | `## DC-1`, `## DC-4`, `## DC-7`, `## DC-9`, `## DC-11`, `## DC-18` bodies (rationale prose) | verbatim (rationale carried into the owning DC section) | 169-174 |
 | 67 | Contents, L6-28 | the source's own table of contents | none | plan-only (navigation, non-normative; the artifact's navigation is its frontmatter anchors and body headings) | — |
-| 68 | Orchestration index §Worktree/isolation/capability mechanics (non-CSE source, by declared exception) | the three CI/CSE boundary-ownership bullets | `## Relationship to Context Integrity` | verbatim (three bullets, per §7 — named, never ratified) | §7; independent Opus verification (word-by-word check against the index) |
-| 69 | Cross-feature authority audit packet §2 item 2 / OD-4 / R-7 (PR #264; non-CSE source, by declared exception; consumed only as owner-adjudicated) | the two-class actor rule: mutation-provenance actors are attribution records; `ratification.yaml` actors require authenticated kernel principals, unproven authentication blocks ratification; plus the experiment-surface scope pin (its CX-9). The packet's companion embed rule (kernel principal ID or explicit `unauthenticated` marker, never a bare string) is a disclosed deferral to the kernel's landing (§7) | `dc-16`, `ac-6`; `## Relationship to Context Integrity` | conditional consumption — final wording follows the owner-merged adjudication and authority PRs, never the packet alone; contingent on R-5/OD-4 sequencing per the merged R-7, with OD-2 as R-5's own vehicle/custody prerequisite (§7); §9 Task 1 Step 4 blocks authoring until the adjudication **and** the R-5/store-layout authority PRs have landed — only runtime implementation trails | §7 actor-rule and deferral paragraphs; packet CX-4/OD-4/§12 C1 |
+| 68 | Landed `spec/execution-workspace` authority plus orchestration index §Worktree/isolation/capability mechanics (non-CSE sources, by declared exception) | the shared component contract, its explicit release operation, OD-7 execution-grant terminology, and the three CI/CSE boundary-ownership bullets | `depends-on: spec/execution-workspace`; `## AC-4`; `## AC-6`; `## Relationship to Context Integrity` | cross-ref + verbatim (the component owns mechanics; CSE explicitly releases eligible units; the three feature-ownership bullets remain verbatim) | §7; OD-6; OD-7; `spec/execution-workspace` |
+| 69 | Owner adjudication OD-4 and the landed R-5 joint GLG/CI contract (non-CSE sources, by declared exception) | the two-class actor rule: mutation-provenance actors use the kernel attribution representation (canonical principal identifier or explicit unauthenticated marker, never a bare string); `ratification.yaml` actors require authenticated kernel principals and unproven authentication blocks ratification; plus the experiment-surface scope pin | `dc-16`, `ac-6`; `## Relationship to Context Integrity` | consumed as landed authority; the kernel delivery unit owns the concrete schema and resolver implementation, not these already-ratified semantics | §7; OD-4; GLG/CI kernel-contract successors |
+| 70 | Owner adjudication OD-5 and landed Context Integrity v2 DC-23 (non-CSE sources, by declared exception) | CSE policy is a typed feature-specific payload inside Context Integrity's single policy-authority system; Context Integrity exclusively owns storage, inheritance, effective-policy resolution, identity, and digest; no feature-local fallback, competing hierarchy, or second interpretation | `depends-on: spec/context-integrity-v2`; `## AC-6`; `## Relationship to Context Integrity` | cross-ref + condensed; CSE retains its feature-specific policy fields while consuming Context Integrity's custody and narrow-only resolution | §7; OD-5; `spec/context-integrity-v2` dc-23 |
+| 71 | Owner adjudication OD-11 (non-CSE source, by declared exception) | merge is the sole transport witness; solo-mode registration lock and ratification may ride their natural PRs; the judgments stay temporally distinct and digest-bound; stronger profiles may require dedicated PRs or distinct principals | `## AC-5`; §8 rows C1-C3 | condensed | §7; OD-11 |
 
 Coverage: rows 1-66 jointly cover inventory items 1-174 with no item
-unmapped and no item double-assigned; rows 67-69 account for the only three
-blocks outside that inventory (the source's navigation TOC; the
-orchestration-index boundary bullets; and the authority-audit actor rule and
-scope pin consumed as owner-adjudicated cross-feature authority). The
+unmapped and no item double-assigned. Row 67 accounts for the source's
+non-normative navigation TOC. Rows 68-71 account for the declared
+cross-feature authority additions: the orchestration boundary bullets, landed
+execution-workspace and execution-grant contract, landed
+principal/attribution contract, single policy-authority custody, and
+ratification transport. The
 promotion lane re-verifies this claim mechanically (§9 Task 3, step
 "losslessness audit").
 
@@ -464,11 +472,10 @@ never edits the parent feature or mints a new edge.
 ## Shared worktree, isolation, and capability boundary
 
 CSE candidate execution (ac-4) and Context Integrity sealed execution both
-need isolated workspaces and capability enforcement. The orchestration index
-requires their focused plans to "name a common low-level boundary before
-either adds feature-specific behavior," and Wave 0 carries a distinct item —
-"Ratify the reusable worktree/isolation boundary between CI and CSE" — that
-is **not this unit's to decide**.
+need isolated workspaces and capability enforcement. Owner ruling OD-6 and
+the owner-merged `spec/execution-workspace` component now provide that common
+low-level boundary. This promotion consumes the landed component contract; it
+does not redefine its mechanics or implement its runtime seam.
 
 This plan therefore records the dependency exactly as the index divides it,
 and no further:
@@ -480,18 +487,14 @@ and no further:
 - **Shared Git/worktree primitives may be reused**; context receipts and
   experiment recommendations remain separate proof types.
 
-The proposed canonical artifact names this boundary in its
-`## Relationship to Context Integrity` section using only the three bullets
-above and links `depends-on: spec/worktree-manager` for the existing
-worktree primitives — an edge both exemplars already declare, asserting
-reuse of an existing archived primitive spec
-(`.verdi/specs/archive/worktree-manager/spec.md`), not pre-committing the
-Wave 0 shared-seam ratification. It does **not** select shared isolation
-semantics,
-define the shared seam's schema, or assign implementation ownership — all of
-that is the separate Wave 0 ratification, which remains a blocking
-prerequisite for the Wave 3 unit `CSE evaluator and isolated execution`
-(§10, gap G-2).
+The canonical artifact names this boundary in its
+`## Relationship to Context Integrity` section, links both
+`spec/execution-workspace` and the archived `spec/worktree-manager` primitive,
+and preserves the three feature-ownership bullets above. It does **not**
+restate the component's state machine, select alternate isolation semantics,
+or assign its implementation elsewhere. Runtime delivery of the shared seam
+may trail this authority promotion, but CSE isolated execution cannot ship
+without it.
 
 The Wave 0 inventory is the cross-feature authority audit packet (PR #264,
 `docs/superpowers/plans/2026-08-03-cross-feature-authority-audit.md`,
@@ -500,7 +503,8 @@ is only the first: (1) the **packet merged** — a non-authoritative
 inventory that ratifies nothing; (2) the **owner adjudicates** the rulings
 it names, in repository-visible, owner-merged form; (3) the **resulting
 authoritative contracts land** as their own owner-merged authority PRs
-(the R-5 kernel ownership contract; the OD-6/OD-12 store-layout amendment).
+(the R-5 kernel ownership contract; the OD-12 store-layout amendment; the
+OD-6 `spec/execution-workspace` component specification).
 This promotion **consumes** the outcomes of (2) and (3) and decides none of
 them. Both are authoring prerequisites: the promotion unit's preflight (§9
 Task 1 Step 4) blocks until the owner adjudication **and** the resulting
@@ -508,9 +512,11 @@ authority PRs have landed for the rulings this artifact's text depends on —
 only the runtime/shared-seam *implementation* may trail. The consumed
 rulings:
 
-- **OD-6 — isolation-boundary vehicle** (extend the `spec/worktree-manager`
-  lineage via a ratified `verdi-store-layout` amendment plus a story, or a
-  new shared component spec);
+- **OD-6 — isolation-boundary vehicle**: the landed
+  `spec/execution-workspace` component owns exact workspace materialization,
+  isolation-control and execution-grant application, environment fingerprint
+  collection, and safe cleanup for CI and CSE while reusing the existing
+  worktree, Git, and file-lock primitives;
 - **OD-12 — store-layout amendment ownership**: the experiment directory
   tree the artifact carries from the design (dc-17) describes future store
   content whose admission into `verdi-store-layout`'s committed-zone
@@ -522,6 +528,11 @@ rulings:
 - **OD-7 — capability terminology**: CSE "capabilities" are execution
   grants drawn from the shared grant vocabulary (distinct from ASD's
   adapter-surface discovery), recorded in the promoted text once ratified;
+- **OD-5 — policy custody**: CSE's feature-specific policy is a typed payload
+  inside Context Integrity's single policy-authority system; Context Integrity
+  alone owns storage, inheritance, effective-policy resolution, identity, and
+  digest, with no feature-local fallback, competing hierarchy, or second
+  policy interpretation;
 - **OD-4 — ratification-principal treatment and mutation-provenance
   scope** (see the actor rule below);
 - **OD-11 — ratification transport** (merge-witnessed judgment, no separate
@@ -535,36 +546,20 @@ rulings:
   exploratory transcript; supporting excerpts as non-authoritative) — so the
   enumeration cannot drift once CI's compiler owns classification.
 
-**Actor rule consumed from the packet (§2 item 2, per its CX-4/OD-4/R-7):**
+**Actor rule consumed from landed owner authority (OD-4 and R-5):**
 CSE experiment **mutation-provenance actors are attribution records** —
 never authority decisions — while **`ratification.yaml` actors must resolve
 to authenticated principals through the shared governance-principal kernel,
 and unproven authentication blocks ratification**. The proposed `dc-16` and
-`ac-6` texts in §4 carry this rule; §5 row 69 records the packet as its
-source. The packet proposes this wording; only the owner's adjudication
-and the resulting authority PRs make it binding — if they land with
-different wording, the artifact text follows the owner-merged authority,
-not the packet, updated in the promotion PR before review, never after
-acceptance.
+`ac-6` texts in §4 carry this rule; §5 row 69 records the owner adjudication
+and landed joint GLG/CI kernel contract as its sources.
 
-Two disclosed deferrals ride with the actor rule, neither silently dropped:
-the packet's companion **embed rule** (every attribution record embeds a
-kernel canonical principal ID or an explicit `unauthenticated` marker —
-never a bare string presented as identity) is deferred to the
-governance-principal kernel's Wave 1 implementation, since it depends on
-the kernel's concrete canonical principal-ID representation; and the
-rule's final wording is
-**contingent on R-5/OD-4 sequencing, exactly as the merged packet's R-7
-states it** ("OD-3 governs only ASD's actor-upgrade timing"). OD-2 — the
-vehicle and custody decision for R-5's kernel ownership contract — may be
-an additional prerequisite for R-5's landing, but it does not replace
-CSE's OD-4. The preflight makes the landed R-5 authority PR a hard
-authoring prerequisite (§9 Task 1 Step 4(d)), so `dc-16`'s final wording
-follows the landed contract — never conditional plan wording authored
-against unlanded authority. The embed rule above is therefore the one
-implementation-tracked deferral: its requirement is fixed by the landed
-authority, and it binds concretely when the Wave 1 kernel implementation
-delivers the canonical principal-ID representation.
+From this promotion forward, every CSE attribution record embeds a kernel
+canonical principal ID or an explicit `unauthenticated` marker, never a bare
+string presented as identity. The landed joint GLG/CI contract owns that
+representation; the Wave 1 kernel implementation supplies its concrete schema
+and resolver. This promotion adopts the ratified representation without
+inventing its serialization ahead of that implementation.
 
 ## Human-ceremony inventory
 
@@ -598,7 +593,7 @@ The controller executes these tasks directly, only from a fresh branch off
 the then-current `main` with every Wave 0 prerequisite below satisfied. This
 is spec-only authority work: no Claude producer or fixer is launched.
 
-**Branch topology:** `main` (post-plan-merge) → `feature/cse-canonical-promotion`
+**Branch topology:** `main` (post-plan-merge) → `agent/cse-canonical-promotion`
 → draft PR to `main`. Rollback posture is phase-dependent, because the
 owner's merge **is acceptance** under the merge-signaled lifecycle:
 - **Before merge:** trivial — close the draft PR and delete the branch;
@@ -607,7 +602,7 @@ owner's merge **is acceptance** under the merge-signaled lifecycle:
   not casually removable: reversal is a governed lifecycle action —
   supersession or closure through the ratified amendment flow, decided and
   authorized by the owner — never a plain `git revert` of accepted
-  authority. What the single-file shape does guarantee is containment: no
+  authority. What the artifact-only shape does guarantee is containment: no
   runtime coupling, no data migration, and no other artifact depends on it
   until later delivery units land, so a governed reversal remains cheap.
 
@@ -637,7 +632,9 @@ specified by the promoted artifact's `co-7`.
 - [ ] **Step 3:** Re-verify link targets resolve in the committed store:
   `ls .verdi/specs/active/verdi-artifact-contract/spec.md
   .verdi/specs/active/verdi-evidence-model/spec.md
-  .verdi/specs/archive/worktree-manager/spec.md`. Expected: all three
+  .verdi/specs/archive/worktree-manager/spec.md
+  .verdi/specs/active/execution-workspace/spec.md
+  .verdi/specs/active/context-integrity-v2/spec.md`. Expected: all five
   present (verified during planning: `spec/worktree-manager` lives in the
   **archive** zone; VL-003 resolves refs against the whole committed zone,
   and both exemplars declare the identical edge).
@@ -652,15 +649,16 @@ specified by the promoted artifact's `co-7`.
   (c) **owner adjudication recorded** — repository-visible, owner-merged
   records of the owner's decisions on the rulings this artifact consumes:
   OD-4 (ratification-principal treatment and mutation-provenance scope),
-  OD-6 (isolation-boundary vehicle), OD-7 (capability terminology), OD-11
-  (ratification transport), OD-12 (store-layout amendment ownership);
+  OD-5 (single policy-authority custody), OD-6 (isolation-boundary vehicle),
+  OD-7 (capability terminology), OD-11 (ratification transport), OD-12
+  (store-layout amendment ownership);
   (d) **authoritative contracts landed** — both authority PRs the consumed
   wording depends on have merged before any authoring begins: the **R-5
   kernel ownership contract** (sequencing per the merged R-7: R-5/OD-4,
   with OD-2 as R-5's own vehicle/custody decision) and the **store-layout
   component-spec amendment** admitting the four features' new artifact
-  paths, including the CSE experiment tree (the OD-6/OD-12 vehicle,
-  through the ratified component-spec amendment flow) — each a
+  paths, including the CSE experiment tree (the OD-12 vehicle), and the
+  **OD-6 execution-workspace component specification** — each a
   repository-visible, owner-merged authority PR. A missing authority PR is
   a STOP; there is no authoring against unlanded authority. Only the
   **runtime/shared-seam implementation** may remain pending — the
@@ -677,9 +675,10 @@ specified by the promoted artifact's `co-7`.
   check context `merge-gate`, strict policy. Expected: unchanged; if the
   rule has been weakened or removed, STOP — the orchestration index
   requires the gate live before any canonical proposal lands.
-- [ ] **Step 6:** `git worktree add` a fresh worktree on
-  `feature/cse-canonical-promotion` from origin/main; `git status
-  --porcelain` empty. Expected: clean.
+- [ ] **Step 6:** Verify the dedicated worktree's
+  `agent/cse-canonical-promotion` branch is based on the freshly fetched
+  `origin/main` and that its only working-tree changes are the canonical
+  artifact and this plan correction. Expected: no unrelated paths.
 
 ### Task 2: Author the canonical artifact
 
@@ -706,17 +705,18 @@ and whose body follows §4's outline, with every §5 destination populated.
   frontmatter anchor.
 - [ ] **Step 3:** Confirm no new semantics beyond ratified authority: the
   artifact must contain no normative statement without a §5 source row —
-  the two declared exceptions being `## Relationship to Context Integrity`
-  (the orchestration index's boundary bullets, §5 row 68, carried verbatim)
-  and the packet-sourced actor rule and surface-scope pin (§5 row 69,
-  carried only as owner-adjudicated). The two OQs carry AMB-1 and AMB-7
+  the declared cross-authority additions being those mapped explicitly by
+  §5 rows 68-71 (execution workspace/grants, principal treatment, policy
+  custody, and ratification transport).
+  The two OQs carry AMB-1 and AMB-7
   verbatim as open questions; no other ambiguity is resolved in the
   artifact text.
 
 ### Task 3: Validate against the store gates
 
 **Files:**
-- Verify: the new `spec.md` only; no other file changes in the unit.
+- Verify: the new `spec.md` and this plan's authority-freshness correction;
+  no runtime or registry files change in the unit.
 
 - [ ] **Step 1:** `go build -o .build/verdi ./cmd/verdi && ./.build/verdi
   lint`. Expected: exit 0 — strict decode passes, anchors resolve
@@ -736,8 +736,8 @@ and whose body follows §4's outline, with every §5 destination populated.
   Record the result (174/174 or the exact shortfall) in the PR body's
   requirement-coverage table.
 - [ ] **Step 5:** `git diff --check`. Expected: no whitespace errors.
-- [ ] **Step 6:** `git add .verdi/specs/active/comparative-spike-experiments/spec.md
-  && git commit -m "Add comparative-spike-experiments canonical feature proposal"`.
+- [ ] **Step 6:** Commit the plan correction and canonical artifact with
+  focused imperative subjects.
 
 ### Task 4: Full gates, push, and draft PR
 
@@ -746,13 +746,13 @@ and whose body follows §4's outline, with every §5 destination populated.
   orchestration's per-unit protocol requires fresh full-gate evidence; e2e
   requires node/npm present — a missing toolchain HARD-FAILS and is an
   environment defect to fix, not skip).
-- [ ] **Step 2:** Push `feature/cse-canonical-promotion`; open a **draft**
+- [ ] **Step 2:** Push `agent/cse-canonical-promotion`; open a **draft**
   PR to `main` whose body carries the authority-review contract:
   Authority (design blob OID, landing commit, this plan's path and commit,
   base/head SHAs), Requirement coverage (one row per AC/DC/CO/OQ naming its
   §5 source rows), Verification (observed command output), Disclosures
-  (§10 carried forward, updated), Review scope (the single created file;
-  revert boundary).
+  (§10 carried forward, updated), Review scope (the canonical artifact plus
+  the prerequisite plan correction; revert boundary).
 - [ ] **Step 3:** Wait for the `merge-gate` check on the exact head
   (it runs unconditionally on every PR and is ruleset-required). Expected:
   green. Re-confirm Task 1 Step 5's active-ruleset reading still holds
@@ -800,25 +800,14 @@ and whose body follows §4's outline, with every §5 destination populated.
 **Disclosed as unproven, and authority gaps (G-*) that block later
 transitions:**
 
-- **G-1 (blocking for the promotion lane, not this plan):** the
-  successor invention-ledger location is a Wave 0 item not yet visibly
-  resolved in the repository. The orchestration stop conditions forbid
-  promotion while the ledger is unresolvable. AMB dispositions below
-  that require ledger entries inherit this gap.
-- **G-2 (blocking):** the reusable CI/CSE worktree/isolation/capability
-  boundary is unratified. The cross-feature authority audit packet
-  **has merged** (PR #264, landing commit `c99acbf3`) — but that landing
-  is only the non-authoritative inventory; the owner decisions it names —
-  OD-4 (ratification principals, mutation-provenance scope), OD-6
-  (isolation-boundary vehicle), OD-7 (capability terminology), OD-11
-  (ratification transport), OD-12 (store-layout amendment ownership) —
-  and the authority PRs that would result from them (the R-5 kernel
-  ownership contract; the store-layout component-spec amendment) **remain
-  pending**. The **owner rulings and both authority PRs block the
-  promotion unit's authoring** (§9 Task 1 Step 4); only the
-  runtime/shared-seam implementation may trail, and that implementation
-  blocks Wave 3, not authoring. This plan and the proposed artifact name
-  the boundary (§7) and select nothing.
+- **G-1 (resolved before promotion):** the successor invention ledger is
+  repository-visible at `docs/superpowers/invention-ledger.md` and named by
+  repository instructions.
+- **G-2 (authority resolved; runtime pending):** OD-4, OD-5, OD-6, OD-7,
+  OD-11, and OD-12 are owner-recorded; the R-5 kernel contract, store-layout
+  amendment, and `spec/execution-workspace` component specification are
+  owner-merged. Only the shared-seam runtime implementation remains pending;
+  it blocks CSE isolated-execution delivery, not this promotion.
 - **G-3 (resolved during verification — retained for the record):** the
   `spec/worktree-manager` link target is proven to resolve (see the Proven
   list above); the material fact the promotion lane carries is that
@@ -891,5 +880,6 @@ implementation, TDD, review, CI evidence, and the owner's merge.
 
 *Prepared by the FABLE-led planning lane for delivery unit
 `cse-canonical-promotion` (orchestration Phase A lane W3, converted per
-Phase C against landing commit `6d71fd7d`). Retained for Codex plan-review
-rounds; the owner alone merges.*
+Phase C against landing commit `6d71fd7d`). Its historical planning reviews
+remain provenance; the promotion itself receives the one independent Claude
+exact-head review required above. The owner alone merges.*
