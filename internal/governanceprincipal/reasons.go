@@ -21,6 +21,10 @@ const (
 	ReasonRoleNotAuthorized       = "role-not-authorized"
 	ReasonRequiredApproverMissing = "required-approver-missing"
 	ReasonDistinctnessViolated    = "distinctness-violated"
+	// ReasonDistinctnessUnproven marks an applicable distinctness rule
+	// with an unfilled role side: the relation cannot be evaluated, so it
+	// is unproven, never vacuously satisfied.
+	ReasonDistinctnessUnproven    = "distinctness-unproven"
 	ReasonSignatureViolated       = "signature-violated"
 	ReasonSignatureUnproven       = "signature-unproven"
 	ReasonOwnershipViolated       = "ownership-violated"

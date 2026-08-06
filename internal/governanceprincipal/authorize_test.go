@@ -193,8 +193,9 @@ func TestAuthorizeApproverCounting(t *testing.T) {
 	one := AuthorizationRequest{
 		Transition:  "accept",
 		Posture:     PostureAuthoritative,
-		Resolutions: []PrincipalResolution{authedRes(t, "user-456")},
+		Resolutions: []PrincipalResolution{authedRes(t, "user-123"), authedRes(t, "user-456")},
 		Approvals: []ApprovalRecord{
+			{Role: "author", PrincipalID: mustPID(t, "user-123")},
 			{Role: "reviewer", PrincipalID: mustPID(t, "user-456")},
 			{Role: "reviewer", PrincipalID: mustPID(t, "user-456")}, // duplicate never double-counts
 		},
@@ -206,8 +207,9 @@ func TestAuthorizeApproverCounting(t *testing.T) {
 	wantDecision(t, d, AuthorizationUnproven, ReasonRequiredApproverMissing)
 
 	two := one
-	two.Resolutions = []PrincipalResolution{authedRes(t, "user-456"), authedRes(t, "user-789")}
+	two.Resolutions = []PrincipalResolution{authedRes(t, "user-123"), authedRes(t, "user-456"), authedRes(t, "user-789")}
 	two.Approvals = []ApprovalRecord{
+		{Role: "author", PrincipalID: mustPID(t, "user-123")},
 		{Role: "reviewer", PrincipalID: mustPID(t, "user-456")},
 		{Role: "reviewer", PrincipalID: mustPID(t, "user-789")},
 	}
@@ -292,7 +294,7 @@ func TestAuthorizeDistinctness(t *testing.T) {
 		}
 		wantDecision(t, d, AuthorizationAuthorized)
 	})
-	t.Run("unfilled side is vacuous", func(t *testing.T) {
+	t.Run("unfilled side is unproven, never vacuously satisfied", func(t *testing.T) {
 		profile := authzProfile(t, nil)
 		d, err := Authorize(profile, AuthorizationRequest{
 			Transition:  "accept",
@@ -303,7 +305,7 @@ func TestAuthorizeDistinctness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Authorize: %v", err)
 		}
-		wantDecision(t, d, AuthorizationAuthorized)
+		wantDecision(t, d, AuthorizationUnproven, ReasonDistinctnessUnproven)
 	})
 }
 
@@ -411,15 +413,18 @@ func ownershipFact(state RuleFactState, principal PrincipalID) RuleFact {
 	return f
 }
 
-// closeRequest satisfies close's evidence restriction and escalation
-// metric so ownership behavior is isolated.
+// closeRequest satisfies close's evidence restriction, escalation metric,
+// and author/reviewer distinctness so ownership behavior is isolated.
 func closeRequest(t *testing.T, facts []RuleFact) AuthorizationRequest {
 	t.Helper()
 	return AuthorizationRequest{
-		Transition:        "close",
-		Posture:           PostureAuthoritative,
-		Resolutions:       []PrincipalResolution{authedRes(t, "user-456")},
-		Approvals:         []ApprovalRecord{{Role: "reviewer", PrincipalID: mustPID(t, "user-456")}},
+		Transition:  "close",
+		Posture:     PostureAuthoritative,
+		Resolutions: []PrincipalResolution{authedRes(t, "user-123"), authedRes(t, "user-456")},
+		Approvals: []ApprovalRecord{
+			{Role: "author", PrincipalID: mustPID(t, "user-123")},
+			{Role: "reviewer", PrincipalID: mustPID(t, "user-456")},
+		},
 		RuleFacts:         facts,
 		EvidenceSources:   []string{"merge-gate"},
 		EscalationMetrics: map[string]int{"unresolved-exceptions": 0},
@@ -475,10 +480,13 @@ func TestAuthorizeEvidenceRestrictions(t *testing.T) {
 	})
 	t.Run("unrestricted transition accepts any presented source", func(t *testing.T) {
 		d, err := Authorize(profile, AuthorizationRequest{
-			Transition:      "accept",
-			Posture:         PostureAuthoritative,
-			Resolutions:     []PrincipalResolution{authedRes(t, "user-456")},
-			Approvals:       []ApprovalRecord{{Role: "reviewer", PrincipalID: pRev}},
+			Transition:  "accept",
+			Posture:     PostureAuthoritative,
+			Resolutions: []PrincipalResolution{authedRes(t, "user-123"), authedRes(t, "user-456")},
+			Approvals: []ApprovalRecord{
+				{Role: "author", PrincipalID: mustPID(t, "user-123")},
+				{Role: "reviewer", PrincipalID: pRev},
+			},
 			EvidenceSources: []string{"ci-verify"},
 		})
 		if err != nil {
@@ -589,8 +597,14 @@ func TestAuthorizeDeterministicOrdering(t *testing.T) {
 	req.Resolutions = append(req.Resolutions, authedRes(t, "user-789"))
 
 	permuted := req
-	permuted.Approvals = []ApprovalRecord{req.Approvals[1], req.Approvals[0]}
-	permuted.Resolutions = []PrincipalResolution{req.Resolutions[1], req.Resolutions[0]}
+	permuted.Approvals = make([]ApprovalRecord, 0, len(req.Approvals))
+	for i := len(req.Approvals) - 1; i >= 0; i-- {
+		permuted.Approvals = append(permuted.Approvals, req.Approvals[i])
+	}
+	permuted.Resolutions = make([]PrincipalResolution, 0, len(req.Resolutions))
+	for i := len(req.Resolutions) - 1; i >= 0; i-- {
+		permuted.Resolutions = append(permuted.Resolutions, req.Resolutions[i])
+	}
 
 	d1, err := Authorize(profile, req)
 	if err != nil {
@@ -751,4 +765,82 @@ escalation_thresholds: []
 			t.Errorf("disclosures not sorted by principal: %+v", d.Disclosures)
 		}
 	}
+}
+
+// TestAuthorizeNonVacuousRules: an applicable actor rule never passes
+// merely because its target role has no authenticated filler.
+func TestAuthorizeNonVacuousRules(t *testing.T) {
+	t.Run("team reviewers without an author cannot authorize", func(t *testing.T) {
+		profile := authzProfile(t, nil)
+		d, err := Authorize(profile, AuthorizationRequest{
+			Transition:  "accept",
+			Posture:     PostureAuthoritative,
+			Resolutions: []PrincipalResolution{authedRes(t, "user-456"), authedRes(t, "user-789")},
+			Approvals: []ApprovalRecord{
+				{Role: "reviewer", PrincipalID: mustPID(t, "user-456")},
+				{Role: "reviewer", PrincipalID: mustPID(t, "user-789")},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Authorize: %v", err)
+		}
+		wantDecision(t, d, AuthorizationUnproven, ReasonDistinctnessUnproven)
+	})
+
+	t.Run("same-principal with one side unfilled is unproven", func(t *testing.T) {
+		sameRule := `distinctness_rules:
+  - transitions: [close, accept, merge-authorize]
+    left_role: author
+    right_role: reviewer
+    relation: different-principal
+  - transitions: [accept]
+    left_role: author
+    right_role: owner
+    relation: same-principal
+`
+		profile := authzProfile(t, map[string]string{"distinctness_rules": sameRule})
+		d, err := Authorize(profile, AuthorizationRequest{
+			Transition:  "accept",
+			Posture:     PostureAuthoritative,
+			Resolutions: []PrincipalResolution{authedRes(t, "user-123"), authedRes(t, "user-456")},
+			Approvals: []ApprovalRecord{
+				{Role: "author", PrincipalID: mustPID(t, "user-123")},
+				{Role: "reviewer", PrincipalID: mustPID(t, "user-456")},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Authorize: %v", err)
+		}
+		wantDecision(t, d, AuthorizationUnproven, ReasonDistinctnessUnproven)
+	})
+
+	t.Run("both sides unfilled is unproven", func(t *testing.T) {
+		profile := authzProfile(t, nil)
+		d, err := Authorize(profile, AuthorizationRequest{
+			Transition:        "close",
+			Posture:           PostureAuthoritative,
+			EvidenceSources:   []string{"merge-gate"},
+			EscalationMetrics: map[string]int{"unresolved-exceptions": 0},
+		})
+		if err != nil {
+			t.Fatalf("Authorize: %v", err)
+		}
+		wantDecision(t, d, AuthorizationUnproven, ReasonDistinctnessUnproven, ReasonRequiredApproverMissing)
+	})
+
+	t.Run("high-assurance signature and ownership never pass with empty roles", func(t *testing.T) {
+		profile := mustDecode(t, []byte(highAssuranceYAML))
+		d, err := Authorize(profile, AuthorizationRequest{
+			Transition:        "close",
+			Posture:           PostureAuthoritative,
+			EvidenceSources:   []string{"merge-gate"},
+			EscalationMetrics: map[string]int{"unresolved-exceptions": 0},
+		})
+		if err != nil {
+			t.Fatalf("Authorize: %v", err)
+		}
+		wantDecision(t, d, AuthorizationUnproven,
+			ReasonSignatureUnproven, ReasonOwnershipUnproven,
+			ReasonDistinctnessUnproven, ReasonRequiredApproverMissing)
+	})
 }

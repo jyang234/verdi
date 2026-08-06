@@ -501,7 +501,8 @@ func evaluateEscalation(profile Profile, transition string, metrics map[string]i
 }
 
 // evaluateDistinctness applies same-principal and different-principal
-// rules centrally over the role fillers. An unfilled side is vacuous.
+// rules centrally over the role fillers. An applicable rule with an
+// unfilled side is unproven, never vacuously satisfied.
 func evaluateDistinctness(profile Profile, transition string, fillers map[string][]PrincipalID) []Finding {
 	var findings []Finding
 	for _, rule := range profile.DistinctnessRules {
@@ -509,6 +510,19 @@ func evaluateDistinctness(profile Profile, transition string, fillers map[string
 			continue
 		}
 		left, right := fillers[rule.LeftRole], fillers[rule.RightRole]
+		if len(left) == 0 || len(right) == 0 {
+			for _, role := range []string{rule.LeftRole, rule.RightRole} {
+				if len(fillers[role]) == 0 {
+					findings = append(findings, Finding{
+						Code:   ReasonDistinctnessUnproven,
+						State:  AuthorizationUnproven,
+						Role:   role,
+						Detail: fmt.Sprintf("%s rule between %q and %q: role %q has no authenticated filler", rule.Relation, rule.LeftRole, rule.RightRole, role),
+					})
+				}
+			}
+			continue
+		}
 		switch rule.Relation {
 		case RelationDifferentPrincipal:
 			for _, p := range left {
@@ -522,9 +536,6 @@ func evaluateDistinctness(profile Profile, transition string, fillers map[string
 				}
 			}
 		case RelationSamePrincipal:
-			if len(left) == 0 || len(right) == 0 {
-				continue
-			}
 			distinct := make(map[PrincipalID]bool)
 			for _, p := range left {
 				distinct[p] = true
@@ -555,6 +566,15 @@ func evaluateSignatures(profile Profile, transition string, fillers map[string][
 			continue
 		}
 		for _, role := range rule.Roles {
+			if len(fillers[role]) == 0 {
+				findings = append(findings, Finding{
+					Code:   ReasonSignatureUnproven,
+					State:  AuthorizationUnproven,
+					Role:   role,
+					Detail: fmt.Sprintf("signature rule applies to role %q but no authenticated principal fills it", role),
+				})
+				continue
+			}
 			for _, p := range fillers[role] {
 				var violated, unproven *RuleFact
 				proven := false
@@ -624,6 +644,16 @@ func evaluateOwnership(profile Profile, transition string, fillers map[string][]
 			continue
 		}
 		for _, role := range src.Roles {
+			if len(fillers[role]) == 0 {
+				findings = append(findings, Finding{
+					Code:     ReasonOwnershipUnproven,
+					State:    AuthorizationUnproven,
+					Role:     role,
+					SourceID: src.ID,
+					Detail:   fmt.Sprintf("ownership source %q applies to role %q but no authenticated principal fills it", src.ID, role),
+				})
+				continue
+			}
 			for _, p := range fillers[role] {
 				f, ok := facts[factKey{Kind: RuleFactOwnership, SourceID: src.ID, PrincipalID: p}]
 				switch {
