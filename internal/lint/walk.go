@@ -26,6 +26,16 @@ import (
 // 1) is the obligation kind's own top-level directory, added alongside its
 // decoder — 01 §Directory layout's ".verdi/obligations/<story-ref-slug>/
 // <ac-id>--<for-kind>.md".
+//
+// "policy" is the constitution store's committed home (the ratified
+// verdi-store-layout amendment's policy/ entry; spec/context-integrity-v2
+// AC-1/DC-24). SI-6 assigned both the directory's internal grammar and
+// this exact lint-enumeration change to the CI policy-authority unit;
+// this entry admits the directory. Per-artifact validation lives at the
+// constitution store's own load seam (internal/policyauthority), not in
+// lint's 02-registry classification walk: the constitution kinds are
+// CI-owned artifacts outside 02 §Kind registry's frozen table, so
+// ClassifyPath deliberately does not learn them.
 var knownTopLevelEntries = map[string]bool{
 	"verdi.yaml":     true,
 	".gitignore":     true,
@@ -37,6 +47,7 @@ var knownTopLevelEntries = map[string]bool{
 	"conflicts":      true,
 	"reaffirmations": true,
 	"obligations":    true,
+	"policy":         true,
 	"bin":            true,
 	"data":           true,
 }
