@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/policyartifact"
@@ -151,11 +152,25 @@ func adapterManifestRelPath(adapterID string) string {
 // error deterministic.
 func managedPathOwners(adapters []policyartifact.Adapter) (map[string]string, error) {
 	owners := make(map[string]string)
+	// Collisions are detected CASE-FOLDED, the same uniform posture
+	// discovery matching uses: on a case-insensitive filesystem
+	// (APFS/NTFS) AGENTS.md and agents.md are ONE physical file, so a
+	// byte-exact check would let two adapters "own" it — Generate would
+	// exit 0 while writing a manifest the disk contradicts. Folding
+	// refuses the pair on every platform; on a case-sensitive system
+	// this refuses a layout that would genuinely be two files, which is
+	// the fail-closed direction — a human renames one, and no manifest
+	// ever lies (CO-1).
+	folded := make(map[string]policyartifact.Adapter)
+	spelling := make(map[string]string)
 	for _, a := range adapters {
 		for _, rel := range a.Managed {
-			if prev, ok := owners[rel]; ok {
-				return nil, fmt.Errorf("%w: %q is declared by adapters %q and %q; one file can carry only one adapter's projection", ErrOverlappingManagedPath, rel, prev, a.ID)
+			key := strings.ToLower(rel)
+			if prev, ok := folded[key]; ok {
+				return nil, fmt.Errorf("%w: %q (adapter %q) and %q (adapter %q) name the same projection file under case folding; one file can carry only one adapter's projection", ErrOverlappingManagedPath, spelling[key], prev.ID, rel, a.ID)
 			}
+			folded[key] = a
+			spelling[key] = rel
 			owners[rel] = a.ID
 		}
 	}

@@ -88,8 +88,15 @@ func excludedSubtrees() []string {
 // direction this package refuses.
 //
 // Satisfaction, unlike matching, stays EXACT-CASE: only a byte-exact
-// declared managed path counts, because that is the only path Generate
-// wrote and the managed-file check verified.
+// declared managed path counts, because that is the only path the
+// managed-file check verified. On a case-insensitive filesystem this has
+// a second disclosed direction: a PRE-EXISTING case-variant of a managed
+// path (say agents.md where the adapter declares AGENTS.md) is the file
+// Generate's write lands in — the OS preserves the incumbent spelling —
+// so Verify reports it unmanaged even though its bytes are the generated
+// projection. Fail-closed, a finding a human resolves by renaming to the
+// declared spelling; never a silent pass, and never a manifest that lies
+// (managedPathOwners refuses declared case-collisions outright).
 //
 // It never follows a symlinked directory (filepath.WalkDir/ReadDir
 // already does not: a symlink's own DirEntry never reports IsDir true)

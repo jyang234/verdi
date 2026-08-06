@@ -130,6 +130,52 @@ func TestGenerate_OverlappingManagedPaths_FailsClosed(t *testing.T) {
 	}
 }
 
+// TestGenerate_CaseVariantManagedPaths_FailClosed pins the FOLDED half
+// of the overlap rule: on a case-insensitive filesystem AGENTS.md and
+// agents.md are one physical file, so two adapters declaring the
+// case-variant pair — or one adapter declaring both spellings — is the
+// same unsatisfiable surface as a byte-identical collision, and a
+// byte-exact check would let Generate exit 0 with a manifest the disk
+// contradicts. Both shapes must be refused on every platform.
+func TestGenerate_CaseVariantManagedPaths_FailClosed(t *testing.T) {
+	t.Run("across adapters", func(t *testing.T) {
+		root := t.TempDir()
+		files := overlappingAdapterStoreFiles()
+		files[".verdi/policy/constitution.md"] = strings.Replace(
+			files[".verdi/policy/constitution.md"],
+			"  - id: claude-code\n    version: \"1\"\n    managed: [AGENTS.md]",
+			"  - id: claude-code\n    version: \"1\"\n    managed: [agents.md]", 1)
+		writeTree(t, root, files)
+
+		_, err := Generate(root)
+		if !errors.Is(err, ErrOverlappingManagedPath) {
+			t.Fatalf("Generate() error = %v, want errors.Is(err, ErrOverlappingManagedPath)", err)
+		}
+		for _, want := range []string{"codex", "claude-code", "AGENTS.md", "agents.md"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("Generate() error = %v, want it to name %q", err, want)
+			}
+		}
+		if _, statErr := os.Lstat(filepath.Join(root, "AGENTS.md")); !os.IsNotExist(statErr) {
+			t.Fatalf("Generate() wrote AGENTS.md despite failing closed (stat err = %v)", statErr)
+		}
+	})
+	t.Run("within one adapter", func(t *testing.T) {
+		root := t.TempDir()
+		files := overlappingAdapterStoreFiles()
+		files[".verdi/policy/constitution.md"] = strings.Replace(
+			files[".verdi/policy/constitution.md"],
+			"adapters:\n  - id: codex\n    version: \"1\"\n    managed: [AGENTS.md]\n    discovery_filenames: [AGENTS.md]\n  - id: claude-code\n    version: \"1\"\n    managed: [AGENTS.md]\n    discovery_filenames: [AGENTS.md]",
+			"adapters:\n  - id: codex\n    version: \"1\"\n    managed: [AGENTS.md, agents.md]\n    discovery_filenames: [AGENTS.md]", 1)
+		writeTree(t, root, files)
+
+		_, err := Generate(root)
+		if !errors.Is(err, ErrOverlappingManagedPath) {
+			t.Fatalf("Generate() error = %v, want errors.Is(err, ErrOverlappingManagedPath)", err)
+		}
+	})
+}
+
 // TestVerify_OverlappingManagedPaths_FailsClosed pins the same rule on
 // the read side: an unsatisfiable constitution is an operational error
 // naming the conflict, never a findings report whose "drift" would point

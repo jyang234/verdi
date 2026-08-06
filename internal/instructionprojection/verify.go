@@ -178,9 +178,13 @@ func verify(root string, c *policyartifact.Constitution, policies map[string]*po
 // nothing checks (CO-1). An absent directory is not a finding here (the
 // per-adapter pass already reports each missing manifest); a directory
 // that exists but cannot be read is incomplete-discovery, never assumed
-// empty. Any entry that is not an expected manifest file — including a
-// stray subdirectory — is an orphan: this directory holds generated
-// manifests and nothing else.
+// empty. Any entry that is not a currently declared adapter's manifest
+// is an orphan. Through the PUBLIC Verify the reachable orphan domain is
+// exactly <kebab>.json files for undeclared adapters: policyauthority's
+// stricter grammar already rejects a stray subdirectory, non-.json file,
+// or non-kebab name at Load, before this pass runs — this function's
+// broader classification is defense-in-depth behind that gate, not an
+// independently reachable surface.
 func orphanManifestFindings(root string, adapters []policyartifact.Adapter) []Finding {
 	dir := filepath.Join(root, filepath.FromSlash(projectionsDirRel))
 	entries, err := os.ReadDir(dir)
