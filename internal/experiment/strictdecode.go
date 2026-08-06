@@ -6,8 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	"gopkg.in/yaml.v3"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 )
@@ -128,23 +127,51 @@ func checkNoDuplicateJSONKeys(data []byte) error {
 // "---" introduces (yaml.v3 yields two documents for both) — the shared
 // seam validates only the first one, so any second document is content no
 // schema has ever seen.
+//
+// It reads the document markers textually rather than by re-parsing,
+// because CLAUDE.md's single import seam reserves gopkg.in/yaml.v3 for the
+// internal/artifact subtree (internal/artifact's own TestYAMLImportSeam
+// enforces that module-wide). The text is sufficient here: a directives-end
+// marker ("---") or document-end marker ("...") is only a marker at COLUMN
+// 0, and inside a block-context document every continuation line — block
+// scalar content, multi-line flow scalars, nested collections — is indented
+// past column 0. A column-0 marker in one of these artifacts is therefore
+// always a document boundary, never content. Counting documents belongs in
+// the shared seam; when it moves there, this helper goes away.
 func checkSingleYAMLDocument(data []byte) error {
-	dec := yaml.NewDecoder(bytes.NewReader(data))
+	started := false // the first document's own content or start marker seen
+	ended := false   // a "..." document-end marker seen
 
-	var first yaml.Node
-	if err := dec.Decode(&first); err != nil {
-		// Unreachable through decodeStrictYAML: the seam already decoded
-		// this document. Kept as a fail-closed guard for direct callers.
-		return fmt.Errorf("experiment: scanning yaml documents: %w", err)
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimRight(raw, "\r")
+		switch {
+		case isYAMLMarker(line, "---"):
+			if started {
+				return fmt.Errorf("experiment: trailing yaml document: a file must hold exactly one document")
+			}
+			started = true
+		case isYAMLMarker(line, "..."):
+			ended = true
+		case strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#"):
+			// Blank lines and comments belong to no document.
+		case !started && strings.HasPrefix(line, "%"):
+			// A directive in the prologue of the first document.
+		default:
+			if ended {
+				return fmt.Errorf("experiment: trailing yaml document: content follows the %q document-end marker", "...")
+			}
+			started = true
+		}
 	}
+	return nil
+}
 
-	var second yaml.Node
-	err := dec.Decode(&second)
-	if errors.Is(err, io.EOF) {
-		return nil
+// isYAMLMarker reports whether line is the document marker marker at column
+// 0 — the marker alone, or followed by whitespace and the rest of the line.
+func isYAMLMarker(line, marker string) bool {
+	rest, ok := strings.CutPrefix(line, marker)
+	if !ok {
+		return false
 	}
-	if err != nil {
-		return fmt.Errorf("experiment: trailing yaml document: %w", err)
-	}
-	return fmt.Errorf("experiment: trailing yaml document: a file must hold exactly one document")
+	return rest == "" || strings.HasPrefix(rest, " ") || strings.HasPrefix(rest, "\t")
 }

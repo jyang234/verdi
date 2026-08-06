@@ -108,9 +108,15 @@ func TestCheckSingleYAMLDocument(t *testing.T) {
 		{"single document", "a: 1\n", false},
 		{"single document with explicit start", "---\na: 1\n", false},
 		{"single document with explicit end", "a: 1\n...\n", false},
+		{"leading comment", "# a comment\na: 1\n", false},
+		{"dashes inside an indented block scalar", "a: |\n  ---\n  b\n", false},
+		{"value merely starting with dashes", "a: ---b\n", false},
 		{"second document", "a: 1\n---\nb: 2\n", true},
+		{"second document with a trailing space", "a: 1\n--- \nb: 2\n", true},
+		{"second document after an explicit start", "---\na: 1\n---\nb: 2\n", true},
 		{"second empty document", "a: 1\n---\n", true},
 		{"second unparseable document", "a: 1\n---\n: : :\n", true},
+		{"content after the document-end marker", "a: 1\n...\nb: 2\n", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
