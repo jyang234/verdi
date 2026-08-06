@@ -111,7 +111,7 @@ func excludedSubtrees() []string {
 //
 // Any walk error (most commonly an unreadable directory) is recorded as
 // its own incomplete-discovery Finding rather than aborting the walk:
-// CO-1's "silence is never a pass" applies to the walk's own
+// CLAUDE.md's "silence is never a pass" (CO-1's posture) applies to the walk's own
 // completeness, not only to the files it manages to see. A directory
 // that could not be read is skipped (its contents are simply unknown,
 // not assumed absent) so the rest of the tree is still checked.

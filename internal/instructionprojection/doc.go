@@ -52,7 +52,8 @@
 // file verifies clean. Every report additionally discloses the subtrees
 // the walk never entered (Report.ExcludedSubtrees). A walk that cannot
 // prove completeness, and a subtree that was never examined, are never
-// silently treated as clean (CO-1: "silence is never a pass").
+// silently treated as clean (CLAUDE.md's "silence is never a pass";
+// CO-1's never-a-pass posture).
 //
 // Every byte this package writes is canonical: no wall-clock timestamp,
 // username, local absolute path, or random identifier ever enters a

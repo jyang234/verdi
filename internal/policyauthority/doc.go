@@ -1,9 +1,9 @@
 // Package policyauthority is the constitution store's one loader and one
-// effective-policy resolver (spec/context-integrity-v2 DC-23/owner ruling
-// OD-5: "policy storage, inheritance, effective-policy resolution, and
-// policy identity and digest are owned exclusively here ... no
-// feature-local fallback, competing hierarchy, or second policy
-// interpretation is permitted"). Every feature-specific governance
+// effective-policy resolver (spec/context-integrity-v2 DC-23; owner
+// ruling OD-5: "Context Integrity exclusively owns policy storage,
+// inheritance, effective-policy resolution, and policy identity/digest.
+// No feature-local fallback, competing hierarchy, or second policy
+// interpretation is permitted."). Every feature-specific governance
 // configuration — including AI-assisted design-assistance policy and
 // comparative-experiment policy — reaches this system only as a typed
 // policyartifact.Payload; there is no untyped or feature-local path
