@@ -18,6 +18,10 @@ func TestClassifyPolicyPath(t *testing.T) {
 		{"exemptions/legacy-service.md", KindExemption, "legacy-service", ""},
 		{"profiles/solo-default.md", KindProfileStorage, "solo-default", ""},
 		{"profiles/solo.v2.md", KindProfileStorage, "solo.v2", ""},
+		{"projections/codex.json", KindProjectionManifest, "codex", ""},
+		{"projections/Codex.json", "", "", "kebab"},
+		{"projections/codex.md", "", "", "unrecognized"},
+		{"projections/nested/codex.json", "", "", "unrecognized"},
 		// Unknown entries fail closed: the directory is a versioned
 		// schema, not a convention (store-layout Principle 3).
 		{"notes.txt", "", "", "unrecognized"},

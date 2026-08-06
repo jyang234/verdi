@@ -16,10 +16,11 @@ import (
 // directory even when it carries no files at all — the classifier alone
 // only rejects unrecognized FILES).
 var knownPolicyDirs = map[string]bool{
-	policyartifact.DirPolicies:   true,
-	policyartifact.DirOverlays:   true,
-	policyartifact.DirExemptions: true,
-	policyartifact.DirProfiles:   true,
+	policyartifact.DirPolicies:    true,
+	policyartifact.DirOverlays:    true,
+	policyartifact.DirExemptions:  true,
+	policyartifact.DirProfiles:    true,
+	policyartifact.DirProjections: true,
 }
 
 // Store is a fully loaded, fully cross-validated constitution store: the
@@ -139,6 +140,14 @@ func Load(root string) (*Store, error) {
 			// is decoded; stash the relative path and revisit below.
 			profileRels = append(profileRels, rel)
 
+		case policyartifact.KindProjectionManifest:
+			// Generated OUTPUT, never authority input (DC-1: harness
+			// instruction files and their manifests are projections of
+			// the constitution). internal/instructionprojection generates
+			// and verifies them against the resolved authority; loading
+			// one here as authority would make a projection load-bearing,
+			// exactly what DC-1 forbids. Admitted, skipped.
+
 		default:
 			return nil, fmt.Errorf("policyauthority: %s: unreachable: unhandled artifact kind %q", rel, kind)
 		}
@@ -181,7 +190,7 @@ func Load(root string) (*Store, error) {
 
 // walkPolicyDir returns the sorted, root-relative slash paths of every
 // FILE under policyDir, failing closed on any directory directly or
-// transitively under policyDir whose own path is not one of the four
+// transitively under policyDir whose own path is not one of the five
 // known directory names (an empty unrecognized directory carries no file
 // for policyartifact.ClassifyPolicyPath to reject, so Load must check
 // directories itself).
@@ -210,8 +219,8 @@ func walkPolicyDir(policyDir string) ([]string, error) {
 		}
 		if d.IsDir() {
 			if !knownPolicyDirs[rel] {
-				return fmt.Errorf("policyauthority: unexpected directory %q under .verdi/policy/ (known: %s, %s, %s, %s)",
-					rel, policyartifact.DirPolicies, policyartifact.DirOverlays, policyartifact.DirExemptions, policyartifact.DirProfiles)
+				return fmt.Errorf("policyauthority: unexpected directory %q under .verdi/policy/ (known: %s, %s, %s, %s, %s)",
+					rel, policyartifact.DirPolicies, policyartifact.DirOverlays, policyartifact.DirExemptions, policyartifact.DirProfiles, policyartifact.DirProjections)
 			}
 			return nil
 		}

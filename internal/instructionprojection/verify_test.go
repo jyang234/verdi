@@ -1,6 +1,8 @@
 package instructionprojection
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -39,38 +41,72 @@ func TestVerify_ZeroAdapters_Clean(t *testing.T) {
 	}
 }
 
-// --- The confirmed policyauthority conflict --------------------------
-//
-// generate.go's projectionsDirRel doc explains why: writing
-// .verdi/policy/projections/<id>.json is this package's OWN contracted
-// path, but it also extends .verdi/policy/'s directory grammar beyond
-// what internal/policyauthority.Load currently recognizes. The
-// following test is the mechanical witness of that conflict — proven by
-// experiment, not asserted from a hunch — kept in the suite so CI itself
-// carries the disclosure rather than only this build's report.
-
-// TestGenerateThenPublicVerify_BlockedByPolicyAuthorityWalker documents,
-// as a passing (GREEN) test of ACTUAL current behavior, that the public
-// Verify(root) cannot complete after Generate(root) has run on the same
-// root: policyauthority.Load rejects the now-existing
-// .verdi/policy/projections/ directory as unrecognized. This is a real,
-// reachable production limitation of the contracted manifest path, not
-// a testing artifact — see this lane's final report for the disclosed
-// conflict and the fix it needs (extending internal/policyauthority's
-// directory grammar, which is out of this package's write set).
-func TestGenerateThenPublicVerify_BlockedByPolicyAuthorityWalker(t *testing.T) {
+// TestGenerateThenPublicVerify_RoundTripClean is the public-API
+// round-trip proof: Generate writes projections and manifests, the
+// grammar admits .verdi/policy/projections/ as a generated-output
+// directory (policyartifact's projection-manifest row; policyauthority
+// skips it as authority input per DC-1), and a fresh public Verify —
+// its own Load+Resolve included — reports clean. A second Generate on
+// the same root must also succeed and change nothing. This replaced the
+// lane's conflict-witness test once the controller's integration fix
+// extended the grammar.
+func TestGenerateThenPublicVerify_RoundTripClean(t *testing.T) {
 	root := newFixtureRoot(t)
 
-	if _, err := Generate(root); err != nil {
+	first, err := Generate(root)
+	if err != nil {
 		t.Fatalf("Generate() unexpected error: %v", err)
 	}
 
-	_, err := Verify(root)
-	if err == nil {
-		t.Fatal("Verify() after Generate() unexpectedly succeeded; the policyauthority walker conflict this test documents may have been fixed — replace this test with a real round-trip-clean assertion if so")
+	report, err := Verify(root)
+	if err != nil {
+		t.Fatalf("Verify() after Generate(): %v", err)
 	}
-	if errors.Is(err, policyauthority.ErrNotAdopted) {
-		t.Fatalf("Verify() error = %v, want the walker's unrecognized-directory error, not ErrNotAdopted", err)
+	if !report.Clean() {
+		t.Fatalf("Verify() after Generate() not clean: %+v", report)
+	}
+
+	second, err := Generate(root)
+	if err != nil {
+		t.Fatalf("second Generate() on the same root: %v", err)
+	}
+	a, err := json.Marshal(first)
+	if err != nil {
+		t.Fatalf("marshaling first result: %v", err)
+	}
+	b, err := json.Marshal(second)
+	if err != nil {
+		t.Fatalf("marshaling second result: %v", err)
+	}
+	if !bytes.Equal(a, b) {
+		t.Fatalf("second Generate() differed from the first:\n%s\nvs\n%s", a, b)
+	}
+
+	// The public path also witnesses drift end to end: edit a managed
+	// file and the next Verify names it.
+	adapters := first.Adapters
+	if len(adapters) == 0 || len(adapters[0].Files) == 0 {
+		t.Fatalf("fixture generated no files: %+v", first)
+	}
+	managed := filepath.Join(root, filepath.FromSlash(adapters[0].Files[0].Path))
+	if err := os.WriteFile(managed, []byte("edited projection\n"), 0o644); err != nil {
+		t.Fatalf("editing managed file: %v", err)
+	}
+	report, err = Verify(root)
+	if err != nil {
+		t.Fatalf("Verify() after edit: %v", err)
+	}
+	if report.Clean() {
+		t.Fatal("Verify() clean after a managed-file edit, want a drift finding")
+	}
+	found := false
+	for _, f := range report.Findings {
+		if f.Code == ReasonDrift && filepath.ToSlash(f.Path) == adapters[0].Files[0].Path {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no drift finding for %s in %+v", adapters[0].Files[0].Path, report.Findings)
 	}
 }
 
