@@ -204,6 +204,15 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// build/exact against real showcase content, never a synthetic fixture.
 	"cli:spec": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:journey (GLG v3 AC-1, journey-projection delivery unit): added
+	// alongside the new verb itself — TestCLIShowcaseJourney
+	// (cli_showcase_test.go) drives `verdi journey` against the real,
+	// already-landed spec/stale-decline feature from examples/showcase,
+	// proving the read-only projection emits a canonical verdi.journey/v1
+	// record that strict-decodes via journey.Decode, plus the unresolvable-
+	// ref negative case.
+	"cli:journey": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec

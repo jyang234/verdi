@@ -104,6 +104,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wtmanager"
@@ -884,4 +885,47 @@ func TestCLIShowcaseSpecState(t *testing.T) {
 	if dirtyAfter != dirtyBefore {
 		t.Fatalf("working-tree dirty state changed (before=%v after=%v) — spec state must never mutate the working tree", dirtyBefore, dirtyAfter)
 	}
+}
+
+// TestCLIShowcaseJourney (GLG v3 AC-1, journey-projection delivery unit)
+// drives `verdi journey` against the real, already-landed
+// spec/stale-decline feature from examples/showcase — the same target
+// TestCLIShowcaseSpecState above proves accepted-pending-build/exact for
+// — proving the read-only projection emits exactly one canonical
+// verdi.journey/v1 record that strict-decodes via journey.Decode (a
+// digest-bound round trip over real showcase content, never a synthetic
+// fixture), plus the unresolvable-ref negative case's exit 2 and
+// "journey: "-prefixed stderr.
+func TestCLIShowcaseJourney(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := provisionShowcaseStore(t)
+
+	stdout, stderr, code := runBinary(t, root, "journey", "spec/stale-decline")
+	if code != 0 {
+		t.Fatalf("verdi journey against the real showcase store: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"schema":"verdi.journey/v1"`) {
+		t.Fatalf("stdout = %q, want the verdi.journey/v1 schema tag", stdout)
+	}
+	line := strings.TrimRight(stdout, "\n")
+	if strings.Contains(line, "\n") {
+		t.Fatalf("stdout = %q, want exactly one canonical JSON line", stdout)
+	}
+	rec, err := journey.Decode([]byte(line))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout: %s", err, stdout)
+	}
+	if rec.Target.Ref != "spec/stale-decline" {
+		t.Fatalf("decoded record Target.Ref = %q, want spec/stale-decline", rec.Target.Ref)
+	}
+
+	t.Run("unresolvable_ref", func(t *testing.T) {
+		stdout, stderr, code := runBinary(t, root, "journey", "spec/does-not-exist")
+		if code != 2 {
+			t.Fatalf("verdi journey spec/does-not-exist: exit %d, want 2\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+		}
+		if !strings.HasPrefix(stderr, "journey: ") {
+			t.Fatalf("stderr = %q, want a \"journey: \"-prefixed line", stderr)
+		}
+	})
 }
