@@ -1,10 +1,12 @@
 package policyauthority
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
 func TestResolve_HappyPath(t *testing.T) {
@@ -377,5 +379,93 @@ func TestEffectivePolicy_DigestRejectsMutation(t *testing.T) {
 	ep.ProfileID = "tampered"
 	if _, err := ep.Digest(); err == nil {
 		t.Fatal("Digest() on a mutated EffectivePolicy succeeded, want error")
+	}
+	// The Store the output came from is untouched by that mutation.
+	if _, err := s.Policies["policy/go-toolchain"].Digest(); err != nil {
+		t.Fatalf("store policy digest after output mutation: %v", err)
+	}
+}
+
+// tamperScope rewrites every member of s in place, the way a caller
+// holding an aliased slice would.
+func tamperScope(s *policyartifact.Scope) {
+	for i := range s.Phases {
+		s.Phases[i] = "review"
+	}
+	for i := range s.Environments {
+		s.Environments[i] = "tampered-env"
+	}
+	for i := range s.Paths {
+		s.Paths[i] = "tampered/"
+	}
+	for i := range s.Refs {
+		s.Refs[i] = "spec/tampered"
+	}
+}
+
+// TestResolve_OutputDoesNotAliasStore proves the resolved value shares no
+// mutable memory with the Store: rewriting every scope slice and payload
+// map the output carries leaves every stored artifact's own digest intact
+// and leaves the store resolving to exactly the same effective policy.
+// Handing a caller a value that can corrupt the authority it was derived
+// from would defeat both seals at once.
+func TestResolve_OutputDoesNotAliasStore(t *testing.T) {
+	root := filepath.Join("testdata", "store")
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	ep, err := Resolve(s)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	want, err := ep.Digest()
+	if err != nil {
+		t.Fatalf("Digest() error: %v", err)
+	}
+	policyDigestBefore, err := s.Policies["policy/go-toolchain"].Digest()
+	if err != nil {
+		t.Fatalf("policy Digest() error: %v", err)
+	}
+
+	for i := range ep.Policies {
+		entry := &ep.Policies[i]
+		for kind := range entry.Payloads {
+			delete(entry.Payloads, kind)
+		}
+		entry.Payloads[testPayloadKind] = &testPayload{Note: "tampered"}
+		for j := range entry.Claims {
+			c := &entry.Claims[j]
+			tamperScope(&c.Scope)
+			for k := range c.Refinements {
+				tamperScope(&c.Refinements[k].Scope)
+			}
+		}
+	}
+	for i := range ep.Exemptions {
+		tamperScope(&ep.Exemptions[i].Scope)
+	}
+
+	policyDigestAfter, err := s.Policies["policy/go-toolchain"].Digest()
+	if err != nil {
+		t.Fatalf("policy Digest() after output mutation: %v", err)
+	}
+	if policyDigestAfter != policyDigestBefore {
+		t.Fatalf("stored policy digest changed through the resolved output: %s -> %s", policyDigestBefore, policyDigestAfter)
+	}
+	if _, err := s.Exemptions["policy-exemption/legacy-service-go"].Digest(); err != nil {
+		t.Fatalf("stored exemption Digest() after output mutation: %v", err)
+	}
+
+	again, err := Resolve(s)
+	if err != nil {
+		t.Fatalf("second Resolve() after output mutation: %v", err)
+	}
+	got, err := again.Digest()
+	if err != nil {
+		t.Fatalf("second Digest(): %v", err)
+	}
+	if got != want {
+		t.Fatalf("store resolves differently after output mutation: %s, want %s", got, want)
 	}
 }

@@ -184,7 +184,7 @@ func Resolve(s *Store) (*EffectivePolicy, error) {
 			PolicyDigest: pDigest,
 			Claims:       claims,
 			Instructions: append([]string{}, p.Instructions...),
-			Payloads:     p.Payloads,
+			Payloads:     copyPayloads(p.Payloads),
 		})
 	}
 
@@ -200,7 +200,7 @@ func Resolve(s *Store) (*EffectivePolicy, error) {
 			ExemptionID:     eid,
 			Digest:          eDigest,
 			Witnesses:       append([]policyartifact.Witness{}, e.Witnesses...),
-			Scope:           e.Scope,
+			Scope:           copyScope(e.Scope),
 			Expiry:          e.Expiry,
 			ReviewCondition: e.ReviewCondition,
 			Owners:          append([]string{}, e.Owners...),
@@ -402,6 +402,20 @@ func sortRefinementsByContent(rs []ScopedRefinement) error {
 	}
 	copy(rs, sorted)
 	return nil
+}
+
+// copyPayloads returns a fresh map holding the same payload values. The
+// VALUES are shared deliberately: a decoded payload is an immutable typed
+// struct this package never rewrites, and copying it would require every
+// feature's payload type to implement a clone the Payload interface does
+// not declare. The MAP is copied so a caller cannot add, delete, or
+// replace a stored policy's payload registration through the output.
+func copyPayloads(payloads map[string]policyartifact.Payload) map[string]policyartifact.Payload {
+	out := make(map[string]policyartifact.Payload, len(payloads))
+	for kind, p := range payloads {
+		out[kind] = p
+	}
+	return out
 }
 
 // copyScope returns a deep copy of s whose dimensions share no backing
