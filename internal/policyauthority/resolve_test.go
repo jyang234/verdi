@@ -165,6 +165,16 @@ func TestResolve_EmptySetsAreExplicitNeverNull(t *testing.T) {
 	}
 }
 
+func TestEffectivePolicy_DigestRejectsHandBuilt(t *testing.T) {
+	var nilEP *EffectivePolicy
+	if _, err := nilEP.Digest(); err == nil {
+		t.Fatal("(*EffectivePolicy)(nil).Digest() succeeded, want error")
+	}
+	if _, err := (&EffectivePolicy{Schema: EffectivePolicySchema}).Digest(); err == nil {
+		t.Fatal("hand-built EffectivePolicy.Digest() succeeded, want error")
+	}
+}
+
 func TestResolve_HandBuiltStoreRejected(t *testing.T) {
 	if _, err := Resolve(&Store{}); err == nil {
 		t.Fatal("Resolve(&Store{}) succeeded, want error")
