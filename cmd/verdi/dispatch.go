@@ -41,6 +41,7 @@ var verbPhase = map[string]int{
 	"obligation":      19, // extensibility phase 2, spec/obligation-seam ac-5 (spec/creation-surfaces#ac-4, ledger L-N8) — new verb, ratified into 05 §CLI in the same change; `verdi obligation author` is the design-branch, pre-freeze authoring/regeneration surface for an evidence obligation
 	"waive":           20, // extensibility phase 2, spec/verb-surfaces ac-1/ac-2 (spec/creation-surfaces#ac-5, ledger L-N9, guide 8.4) — new verb, ratified into 05 §CLI in the same change; `verdi waive` creates or (--reaffirm) extends a waiver record over the waivers/ kind
 	"spec":            21, // merge-signaled spec acceptance, Task 5 — new verb; `verdi spec state SPEC_REF` is the read-only surface over internal/specstate's Git-derived effective-state projection, never a lifecycle mutation
+	"journey":         22, // GLG v3 AC-1 (guided-lifecycle-governance-v3, journey-projection delivery unit) — first GLG runtime verb; `verdi journey <feature-or-story-ref>` is a read-only projection over internal/journey, never a lifecycle mutation
 }
 
 // vocab:identity — CLI verb names (identity)
@@ -48,7 +49,7 @@ const usage = `usage: verdi <verb> [args...]
 
 verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
        rollup, close, disposition, waivers, verify-artifact, dex, gc, gate,
-       board, audit, attest, model, init, obligation, waive, spec`
+       board, audit, attest, model, init, obligation, waive, spec, journey`
 
 // run parses args and returns the exit code per the CLAUDE.md contract:
 // 0 clean / 1 verdict failure / 2 operational error. Phase 1 has no verdicts
@@ -139,6 +140,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if verb == "spec" {
 		return runSpecVerb(args[1:], os.Stdout, stderr)
+	}
+	if verb == "journey" {
+		return cmdJourney(args[1:], os.Stdout, stderr)
 	}
 
 	if phase == 0 {
