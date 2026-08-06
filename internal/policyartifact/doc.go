@@ -25,4 +25,17 @@
 // canonical-content seal, and Digest() and every authority consumer
 // verify it before use. A hand-built or mutated value is an operational
 // error, never silently accepted authority.
+//
+// LIFECYCLE CONTRACT — the constitution kinds are STATUSLESS. There is
+// deliberately no status field in any of their frontmatter: an artifact
+// committed under .verdi/policy/ on the default branch IS active
+// authority, its lifecycle state derived from git presence exactly as
+// the store's ratified statusless direction derives spec state (VL-015's
+// merge-signaled supersession; the attestation kinds' existence-is-the-
+// record; DC-14: Git is the constitution's durable layer, never hidden
+// mutable state an authorable enum could flip). The effective-policy
+// resolver and the workbench inherit this operand: every loaded
+// artifact is live BY CONTRACT, and supersession or retirement is a
+// later-wave governance flow over git history (DC-15), never a
+// frontmatter edit.
 package policyartifact

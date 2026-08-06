@@ -171,13 +171,12 @@ func validateRelPath(p string) error {
 			return fmt.Errorf("path %q is not canonical (. segment)", p)
 		}
 		// An empty segment is a doubled slash — except the final one,
-		// which is the single permitted trailing directory marker.
+		// which is the single permitted trailing directory marker. (A
+		// lone "" cannot reach here: the empty path returned above, and
+		// "/" returned as absolute.)
 		if seg == "" && i != len(segs)-1 {
 			return fmt.Errorf("path %q is not canonical (empty segment)", p)
 		}
-	}
-	if len(segs) > 0 && segs[len(segs)-1] == "" && len(segs) == 1 {
-		return fmt.Errorf("empty path")
 	}
 	return nil
 }

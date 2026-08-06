@@ -64,7 +64,7 @@ func DecodePolicy(data []byte) (*Policy, error) {
 		return nil, fmt.Errorf("policyartifact: %w", err)
 	}
 
-	k, err := doc.kernelDoc.toKernel(SchemaPolicy, KindPolicy)
+	k, err := doc.toKernel(SchemaPolicy, KindPolicy)
 	if err != nil {
 		return nil, err
 	}

@@ -92,7 +92,7 @@ func DecodeExemption(data []byte) (*Exemption, error) {
 	if err := artifact.DecodeStrict(fm, &doc); err != nil {
 		return nil, err
 	}
-	k, err := doc.kernelDoc.toKernel(SchemaExemption, KindExemption)
+	k, err := doc.toKernel(SchemaExemption, KindExemption)
 	if err != nil {
 		return nil, err
 	}

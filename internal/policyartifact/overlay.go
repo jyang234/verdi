@@ -63,7 +63,7 @@ func DecodeOverlay(data []byte) (*Overlay, error) {
 	if err := artifact.DecodeStrict(fm, &doc); err != nil {
 		return nil, err
 	}
-	k, err := doc.kernelDoc.toKernel(SchemaOverlay, KindOverlay)
+	k, err := doc.toKernel(SchemaOverlay, KindOverlay)
 	if err != nil {
 		return nil, err
 	}

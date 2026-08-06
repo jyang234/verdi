@@ -69,6 +69,16 @@ func TestGovernanceCatalog_RefusesForgedConstitution(t *testing.T) {
 	if _, err := forged.GovernanceCatalog(); err == nil {
 		t.Fatal("hand-built constitution yielded a governance catalog")
 	}
+	// The post-decode mutation arm: a decoded constitution whose catalog
+	// is widened after the fact must refuse egress just like a forgery.
+	c, err := DecodeConstitution([]byte(validConstitutionDoc()))
+	if err != nil {
+		t.Fatalf("DecodeConstitution: %v", err)
+	}
+	c.Catalog.Roles = append(c.Catalog.Roles, "attacker-role")
+	if _, err := c.GovernanceCatalog(); err == nil || !strings.Contains(err.Error(), "modified") {
+		t.Fatalf("mutated constitution GovernanceCatalog err = %v, want modification error", err)
+	}
 }
 
 // TestSeal_RejectsForgeryAndMutation_AllKinds extends the policy seal

@@ -149,7 +149,7 @@ func DecodeConstitution(data []byte) (*Constitution, error) {
 	if err := artifact.DecodeStrict(fm, &doc); err != nil {
 		return nil, err
 	}
-	k, err := doc.kernelDoc.toKernel(SchemaConstitution, KindConstitution)
+	k, err := doc.toKernel(SchemaConstitution, KindConstitution)
 	if err != nil {
 		return nil, err
 	}
