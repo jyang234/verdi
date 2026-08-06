@@ -240,6 +240,47 @@ func TestDefinitionWithLockDecodes(t *testing.T) {
 	}
 }
 
+// evaluatorArgvYAML returns validDefinitionYAML with argv[0] replaced by
+// argv0, keeping the rest of the registration intact.
+func evaluatorArgvYAML(t *testing.T, argv0 string) string {
+	t.Helper()
+	return mutate(t, `  argv: ["./tools/cache-evaluator", "run"]`, `  argv: ["`+argv0+`", "run"]`)
+}
+
+// TestDefinitionEvaluatorArgvClasses pins the three classes of
+// evaluator.argv[0] and, for the repo-relative class, that only a
+// canonical spelling registers. A repo-path-like argv[0] the
+// protected-input matcher could not recognize is rejected at REGISTRATION,
+// so the patch-side check never has to guess.
+func TestDefinitionEvaluatorArgvClasses(t *testing.T) {
+	tests := []struct {
+		name    string
+		argv0   string
+		wantErr bool
+	}{
+		{"repo-relative with ./ prefix", "./tools/cache-evaluator", false},
+		{"repo-relative without ./ prefix", "tools/cache-evaluator", false},
+		{"absolute external executable", "/usr/bin/env", false},
+		{"bare PATH-resolved command", "env", false},
+		{"repo-relative with ./ prefix and traversal", "./tools/../tools/cache-evaluator", true},
+		{"repo-relative with traversal", "tools/../tools/cache-evaluator", true},
+		{"repo-relative with a dot segment", "./tools/./cache-evaluator", true},
+		{"repo-relative with an empty segment", "tools//cache-evaluator", true},
+		{"repo-relative with a trailing slash", "./tools/cache-evaluator/", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DecodeDefinition([]byte(evaluatorArgvYAML(t, tt.argv0)))
+			if tt.wantErr && err == nil {
+				t.Errorf("DecodeDefinition() with argv[0] %q = nil error, want error", tt.argv0)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("DecodeDefinition() with argv[0] %q = %v, want nil", tt.argv0, err)
+			}
+		})
+	}
+}
+
 func TestDefinitionEvaluatorArgvNoShellString(t *testing.T) {
 	doc := mutate(t, "  argv: [\"./tools/cache-evaluator\", \"run\"]\n", "  argv: []\n")
 	if _, err := DecodeDefinition([]byte(doc)); err == nil {

@@ -3,6 +3,7 @@ package experiment
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -44,14 +45,54 @@ type Evaluator struct {
 	CapabilitiesDigest string   `yaml:"capabilities_digest" json:"capabilities_digest"`
 }
 
-// Validate checks argv is a nonempty vector with a nonempty executable,
-// and that both digests are well-formed.
+// EvaluatorRepoPath classifies an evaluator's executable (argv[0]) and
+// returns the repo-relative path it names, or "" when it names no path in
+// this repository. There are exactly three classes:
+//
+//   - ABSOLUTE ("/usr/bin/env"): an external executable outside the
+//     repository. Returns "": no candidate patch can touch it, so it is
+//     not a protected input.
+//   - BARE COMMAND NAME, containing no "/" ("env"): resolved through PATH,
+//     also external. Returns "" — a repo file that happens to share the
+//     name is a different file.
+//   - REPO-RELATIVE (anything else, i.e. it contains "/" and is not
+//     absolute): the evaluator lives in this repository and IS a protected
+//     comparison input. A single leading "./" is optional and stripped;
+//     what remains must already be a canonical repo-relative path.
+//
+// A repo-relative executable spelled non-canonically ("./tools/../tools/x",
+// "tools//x", "./tools/x/") is an ERROR rather than a silently unprotected
+// input: the protection matcher compares canonical spellings, so a
+// registration it could not recognize must never be accepted in the first
+// place. Failing here — at registration — is what lets
+// ValidateCandidatePatch treat a validated definition's evaluator path as
+// directly comparable.
+func EvaluatorRepoPath(argv0 string) (string, error) {
+	if argv0 == "" {
+		return "", fmt.Errorf("experiment: evaluator.argv[0] must be nonempty")
+	}
+	if strings.HasPrefix(argv0, "/") || !strings.Contains(argv0, "/") {
+		return "", nil
+	}
+	path := strings.TrimPrefix(argv0, "./")
+	if err := ValidateRepoRelativePath(path); err != nil {
+		return "", fmt.Errorf("experiment: evaluator.argv[0] %q names a repository path: %w", argv0, err)
+	}
+	return path, nil
+}
+
+// Validate checks argv is a nonempty vector whose executable is a
+// well-formed absolute, bare-command, or canonical repo-relative path
+// (EvaluatorRepoPath), and that both digests are well-formed.
 func (e Evaluator) Validate() error {
 	if len(e.Argv) == 0 {
 		return fmt.Errorf("experiment: evaluator.argv must be nonempty")
 	}
 	if e.Argv[0] == "" {
 		return fmt.Errorf("experiment: evaluator.argv[0] must be nonempty")
+	}
+	if _, err := EvaluatorRepoPath(e.Argv[0]); err != nil {
+		return err
 	}
 	if err := ValidateDigest(e.Digest); err != nil {
 		return fmt.Errorf("experiment: evaluator.digest: %w", err)

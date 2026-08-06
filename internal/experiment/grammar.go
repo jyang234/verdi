@@ -82,12 +82,20 @@ func ValidateUnit(unit string) error {
 }
 
 // ValidateRepoRelativePath checks p is a repo-relative path in canonical
-// form: nonempty, no leading "/", and no empty, ".", or ".." segment. It
-// is shared by protected_paths validation, by the paths a candidate patch
-// names, and by the protected-input segment-boundary matching
-// ValidateCandidatePatch performs — one grammar for both sides of that
-// comparison, so no path can name a protected input in a spelling the
-// match does not recognize.
+// form: nonempty, no leading "/", and no empty, ".", or ".." segment.
+//
+// It is the ONE grammar both sides of the protected-input comparison pass
+// through, which is what makes that comparison's literal matching sound:
+// on the protected side, every protected_paths entry, the experiment
+// directory, and a repo-relative evaluator executable (EvaluatorRepoPath,
+// which rejects a non-canonical spelling at registration rather than
+// dropping the input); on the other side, every path a candidate patch
+// names. Since neither side can hold a non-canonical spelling, no path can
+// name a protected input in a form the match does not recognize.
+//
+// An evaluator executable that is absolute or a bare PATH-resolved command
+// names no path in this repository at all, and is deliberately outside
+// both sides of the comparison rather than an unrecognized spelling.
 //
 // A path needing normalization is rejected rather than normalized: "." and
 // ".." segments are refused outright, so the same file never has two

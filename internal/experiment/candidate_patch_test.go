@@ -1,6 +1,55 @@
 package experiment
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// TestEvaluatorExecutableProtectionByArgvClass is the closure review's
+// bypass scenario end to end: a non-canonical repo-relative argv[0] used
+// to register cleanly and then leave the evaluator executable unprotected.
+// Registration now rejects that spelling outright, and every spelling that
+// DOES register is matched.
+func TestEvaluatorExecutableProtectionByArgvClass(t *testing.T) {
+	patch := "diff --git a/tools/cache-evaluator b/tools/cache-evaluator\n"
+	digest := sha256Digest([]byte(patch))
+
+	tests := []struct {
+		name           string
+		argv0          string
+		wantDecodeErr  bool
+		wantProtection bool
+	}{
+		{"canonical with ./ prefix", "./tools/cache-evaluator", false, true},
+		{"canonical without ./ prefix", "tools/cache-evaluator", false, true},
+		{"absolute external executable", "/usr/bin/cache-evaluator", false, false},
+		{"bare PATH-resolved command", "cache-evaluator", false, false},
+		{"non-canonical traversal spelling", "./tools/../tools/cache-evaluator", true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := evaluatorArgvYAML(t, tt.argv0)
+			doc = strings.Replace(doc, "digest: "+baselinePatchDigest, "digest: "+digest, 1)
+			def, err := DecodeDefinition([]byte(doc))
+			if tt.wantDecodeErr {
+				if err == nil {
+					t.Fatalf("DecodeDefinition() with argv[0] %q = nil error, want error", tt.argv0)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DecodeDefinition() unexpected error: %v", err)
+			}
+			err = ValidateCandidatePatch(def, "baseline", []byte(patch), testExperimentDir)
+			if tt.wantProtection && err == nil {
+				t.Errorf("ValidateCandidatePatch() with argv[0] %q = nil error, want the evaluator executable protected", tt.argv0)
+			}
+			if !tt.wantProtection && err != nil {
+				t.Errorf("ValidateCandidatePatch() with argv[0] %q = %v, want nil (external executable is not a repo path)", tt.argv0, err)
+			}
+		})
+	}
+}
 
 // TestCandidatePatchFixtureDigestsMatchContent cross-checks the
 // definition_test.go fixture constants against this package's own

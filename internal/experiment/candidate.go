@@ -217,9 +217,10 @@ func pathTouchesPrefix(changed, prefix string) bool {
 // candidate's patch — its sha256 digest matches the definition's
 // registered digest for candidateID — and that none of its changed paths
 // touch a protected comparison input: any def.ProtectedPaths entry, the
-// evaluator's own repo-relative executable (def.Evaluator.Argv[0] with a
-// leading "./" stripped), or any path under the experiment's own
-// directory.
+// evaluator's own executable when it lives in this repository
+// (EvaluatorRepoPath — an absolute or PATH-resolved argv[0] names no repo
+// path and is therefore not a protected input), or any path under the
+// experiment's own directory.
 //
 // experimentDir is REQUIRED and is the experiment directory's canonical
 // repo-relative path — the same coordinate system protected_paths and the
@@ -255,9 +256,16 @@ func ValidateCandidatePatch(def Definition, candidateID string, patchBytes []byt
 	protected := make([]string, 0, len(def.ProtectedPaths)+2)
 	protected = append(protected, def.ProtectedPaths...)
 	if len(def.Evaluator.Argv) > 0 {
-		trimmed := strings.TrimPrefix(def.Evaluator.Argv[0], "./")
-		if ValidateRepoRelativePath(trimmed) == nil {
-			protected = append(protected, trimmed)
+		// A validated definition can only carry an absolute, bare-command,
+		// or canonical repo-relative executable, so this never rejects a
+		// registration Validate already accepted — but an unvalidated def
+		// must fail here rather than quietly lose one protected input.
+		evaluatorPath, err := EvaluatorRepoPath(def.Evaluator.Argv[0])
+		if err != nil {
+			return fmt.Errorf("experiment: candidate %q: %w", candidateID, err)
+		}
+		if evaluatorPath != "" {
+			protected = append(protected, evaluatorPath)
 		}
 	}
 	protected = append(protected, experimentDir)
