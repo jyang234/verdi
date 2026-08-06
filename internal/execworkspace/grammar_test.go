@@ -2,6 +2,8 @@ package execworkspace
 
 import (
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -282,5 +284,26 @@ func TestClassifyEntry_SuffixLookingUnitNameStillClassifiesAsUnit(t *testing.T) 
 	}
 	if ce.Form != FormUnit {
 		t.Fatalf("Form = %v, want FormUnit", ce.Form)
+	}
+}
+
+// TestEntryForm_String_SelfNamingFallback pins whole-wave finding F6: the
+// out-of-set fallback names its own type and value, matching PathKind.String
+// and GCOutcome.String, so a diagnostic can never print a bare "unknown"
+// that could be mistaken for a real form label.
+func TestEntryForm_String_SelfNamingFallback(t *testing.T) {
+	for _, f := range []EntryForm{FormUnit, FormRequest, FormRequestStaging, FormReleased, FormLock} {
+		if got := f.String(); strings.Contains(got, "EntryForm(") {
+			t.Fatalf("EntryForm(%d).String() = %q, want a real label, not the fallback", int(f), got)
+		}
+	}
+	for _, f := range []EntryForm{EntryForm(-1), EntryForm(99)} {
+		got := f.String()
+		if got == "unknown" {
+			t.Fatalf("EntryForm(%d).String() = %q, want a self-naming fallback", int(f), got)
+		}
+		if !strings.Contains(got, "EntryForm") || !strings.Contains(got, strconv.Itoa(int(f))) {
+			t.Fatalf("EntryForm(%d).String() = %q, want it to name both the type and the value", int(f), got)
+		}
 	}
 }

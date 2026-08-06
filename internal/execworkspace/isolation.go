@@ -48,7 +48,7 @@ import (
 )
 
 // profileOwnedEnvKeys are the four environment keys BuildProfile itself
-// sets from workspacePath. A declaredEnv pair naming one of these is
+// sets from envRoot. A declaredEnv pair naming one of these is
 // rejected outright — never a silent override — so a caller can never
 // smuggle a value into a key this package's own clean-environment contract
 // owns.
@@ -119,15 +119,35 @@ var couldNotApplyReasons = map[GrantKind]string{
 }
 
 // BuildProfile constructs the isolation Profile for workspacePath from
-// grants and declaredEnv (spec §Isolation-control application,
-// §Execution-grant enforcement; AD-5/AD-7/AD-9).
+// envRoot, grants and declaredEnv (spec §Isolation-control application,
+// §Execution-grant enforcement; AD-5/AD-7/AD-9/AD-13).
 //
-// Env(): NO inherited process environment. Exactly HOME=<workspacePath>/
-// .home, XDG_CONFIG_HOME=<home>/.config, XDG_CACHE_HOME=<home>/.cache,
-// TMPDIR=<workspacePath>/.tmp, plus every declaredEnv pair (PATH included
+// envRoot is the CALLER-CHOSEN parent of the four profile-owned directories.
+// It is REQUIRED: an empty envRoot is a fail-closed error, never silently
+// defaulted to workspacePath (controller decision AD-13, closing whole-wave
+// finding F2).
+//
+// COMPOSITION PROPERTY, disclosed — this is the reason envRoot is a separate
+// parameter rather than derived from workspacePath. The directories below are
+// created and then WRITTEN INTO by the launched process. If envRoot is inside
+// the unit path, that content is untracked content in the unit's worktree, so
+// `gitx.StatusDirty` reports the unit DIRTY and the execution gc slice keeps
+// it at rank 3 (spec §GC slice) on every invocation — permanently, since
+// nothing ever cleans it. That keep is CORRECT and FAIL-CLOSED, not a defect:
+// real process state inside the workspace is exactly what rank 3 exists to
+// protect. It does mean gc never converges for that unit. A consumer that
+// wants a RECLAIMABLE workspace therefore places envRoot OUTSIDE the unit
+// path, in its own lifecycle territory, and disposes of it itself; a consumer
+// that deliberately wants the environment to live and die with the workspace
+// passes the unit path and accepts the permanent keep-dirty. This component
+// makes the choice explicit and never makes it silently.
+//
+// Env(): NO inherited process environment. Exactly HOME=<envRoot>/.home,
+// XDG_CONFIG_HOME=<home>/.config, XDG_CACHE_HOME=<home>/.cache,
+// TMPDIR=<envRoot>/.tmp, plus every declaredEnv pair (PATH included
 // only if declaredEnv declares it — this package sets no default). The
-// four .home/.config/.cache/.tmp directories are created under the
-// workspace. A declaredEnv key that is empty, contains '=', contains NUL,
+// four .home/.config/.cache/.tmp directories are created under envRoot.
+// A declaredEnv key that is empty, contains '=', contains NUL,
 // or collides with one of the four profile-owned keys is a fail-closed
 // error — never a silent override. A declaredEnv VALUE containing a NUL is
 // likewise a fail-closed error, since the OS truncates an environment entry
@@ -149,10 +169,14 @@ var couldNotApplyReasons = map[GrantKind]string{
 // need to special-case the error path to see them.
 //
 // No wall clock, no randomness: BuildProfile's output depends only on its
-// three inputs.
-func BuildProfile(workspacePath string, grants GrantSet, declaredEnv map[string]string) (Profile, *EnforcementReport, error) {
+// four inputs.
+func BuildProfile(workspacePath, envRoot string, grants GrantSet, declaredEnv map[string]string) (Profile, *EnforcementReport, error) {
 	if workspacePath == "" {
 		return Profile{}, nil, fmt.Errorf("execworkspace: build profile: workspace path is empty")
+	}
+	if envRoot == "" {
+		return Profile{}, nil, fmt.Errorf(
+			"execworkspace: build profile: env root is empty: the parent of the profile-owned HOME/XDG/TMPDIR directories is a required caller choice, never silently defaulted to the workspace path (AD-13)")
 	}
 	if err := grants.Validate(); err != nil {
 		return Profile{}, nil, fmt.Errorf("execworkspace: build profile: %w", err)
@@ -172,12 +196,12 @@ func BuildProfile(workspacePath string, grants GrantSet, declaredEnv map[string]
 		}
 	}
 
-	home := filepath.Join(workspacePath, ".home")
+	home := filepath.Join(envRoot, ".home")
 	env := map[string]string{
 		"HOME":            home,
 		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
 		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
-		"TMPDIR":          filepath.Join(workspacePath, ".tmp"),
+		"TMPDIR":          filepath.Join(envRoot, ".tmp"),
 	}
 	for key, value := range declaredEnv {
 		env[key] = value

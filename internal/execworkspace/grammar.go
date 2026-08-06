@@ -1,6 +1,7 @@
 package execworkspace
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -86,7 +87,10 @@ const (
 	FormLock
 )
 
-// String renders EntryForm for diagnostics.
+// String renders EntryForm for diagnostics, with a SELF-NAMING fallback for
+// a value outside the closed set — the same shape PathKind.String and
+// GCOutcome.String already use in this package, so a diagnostic can never
+// print a bare, unattributable "unknown".
 func (f EntryForm) String() string {
 	switch f {
 	case FormUnit:
@@ -100,7 +104,7 @@ func (f EntryForm) String() string {
 	case FormLock:
 		return "lock"
 	default:
-		return "unknown"
+		return fmt.Sprintf("execworkspace.EntryForm(%d)", int(f))
 	}
 }
 

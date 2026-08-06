@@ -21,6 +21,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // --- fixture helpers local to this file ---
@@ -510,24 +511,27 @@ func TestDecideUnit_Rank5_ReleasedCleanUnlocked_Reclaimed_AllFivePathsGone(t *te
 }
 
 // A released, clean unit directory that was NEVER registered as a worktree
-// of repo.Dir (a standalone repo planted at the unit path) still reaches
-// rank 5 and reclaims — so no surviving registration exists for a later gc
-// to resolve. rank 5 performs no verification of that fact either way
-// (its five fixed deletions are the whole action), so the disclosed line
-// may only CONDITION the claim, never assert it.
+// of repo.Dir still reaches rank 5 and reclaims — so no surviving
+// registration exists for a later gc to resolve. rank 5 performs no
+// verification of that fact either way (its five fixed deletions are the
+// whole action), so the disclosed line may only CONDITION the claim, never
+// assert it.
+//
+// The unit is a REAL linked worktree of a SECOND repository, not a
+// standalone `git init` at the unit path: rank 3's evaluability guard
+// (whole-wave finding F1) requires a linked worktree's regular-file `.git`
+// before it will consult gitx.StatusDirty at all, and a standalone repo's
+// `.git` DIRECTORY leaves the predicate unevaluable-for-this-unit. Cutting
+// from another repository keeps the property this test is actually about —
+// clean, released, and absent from repo.Dir's registry — while the dirty
+// predicate stays genuinely evaluable.
 func TestDecideUnit_Rank5_UnregisteredUnit_LineMakesNoUnconditionalRegistrationClaim(t *testing.T) {
 	repo := newReconcileTestRepo(t)
+	otherRepo := newReconcileTestRepo(t)
 	storeRoot := newExecutionStoreRoot(t)
 	id := gcUnitID(0)
 	unitPath := UnitPath(storeRoot, id)
-	if err := os.MkdirAll(unitPath, 0o755); err != nil {
-		t.Fatalf("MkdirAll(%s): %v", unitPath, err)
-	}
-	// Standalone repo: rank 3's StatusDirty succeeds and reports clean, so
-	// rank 5 runs, yet `git worktree list` in repo.Dir never named this path.
-	if out, err := exec.CommandContext(context.Background(), "git", "init", "--quiet", unitPath).CombinedOutput(); err != nil {
-		t.Fatalf("git init %s: %v (%s)", unitPath, err, out)
-	}
+	cutWorktree(t, otherRepo.Dir, unitPath)
 	markReleased(t, storeRoot, id)
 
 	res := decideUnit(context.Background(), storeRoot, repo.Dir, id, NewGitReconciler(storeRoot))
@@ -665,7 +669,211 @@ func TestDecideUnit_Rank5_ReDerivation_MarkerRemovedUnderTheLock(t *testing.T) {
 	}
 }
 
+// --- rank 3: the dirty predicate's own evaluability guard ---
+
+// TestGC_ReleasedPlainDirectory_UnderGitignoredStore_KeptUnevaluable is the
+// probe for whole-wave finding F1, built in the EXACT production shape
+// `verdi gc` runs in (cmd/verdi's own execworkspace.GC(ctx, root, root)):
+// storeRoot IS repoRoot, a real git repository, with `.verdi/.gitignore`
+// naming `data/` so the whole data zone is invisible to `git status`.
+//
+// A released ABANDONED PARTIAL — a plain directory at the unit path that was
+// never linked as a worktree (spec §GC slice: "Release may be invoked for an
+// ABANDONED run regardless of how complete its materialization is") — has no
+// `.git` of its own, so `gitx.StatusDirty` run inside it answers from the
+// PARENT repository, which is clean because the data zone is gitignored.
+// The predicate's answer is therefore about a DIFFERENT tree than the unit,
+// and reading it as "this unit is clean" deletes a directory whose
+// cleanliness was never established. §Safe cleanup's "Keep dirty, locked,
+// ambiguous, or unverifiably eligible workspaces" and §GC slice's "a partial
+// worktree whose cleanliness cannot be proven KEEPS, disclosed" both require
+// the keep.
+func TestGC_ReleasedPlainDirectory_UnderGitignoredStore_KeptUnevaluable(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
+			".verdi/.gitignore": "data/\n",
+		},
+		Message: "store root",
+	}})
+	root := repo.Dir
+	if err := os.MkdirAll(ExecutionRoot(root), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", ExecutionRoot(root), err)
+	}
+	id := gcUnitID(0)
+	unitPath := UnitPath(root, id)
+	if err := os.MkdirAll(unitPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", unitPath, err)
+	}
+	// Content a human would lose if the unevaluable predicate were read as
+	// "clean": exactly the abandoned-partial residue the spec keeps.
+	if err := os.WriteFile(filepath.Join(unitPath, "abandoned-work.txt"), []byte("unproven\n"), 0o644); err != nil {
+		t.Fatalf("planting abandoned residue: %v", err)
+	}
+	markReleased(t, root, id)
+
+	// Setup sanity: the parent repository really is clean, so an unguarded
+	// StatusDirty against the unit path really would report "clean" here.
+	if dirty, derr := gitx.StatusDirty(context.Background(), unitPath); derr != nil {
+		t.Fatalf("setup sanity: StatusDirty inside the plain directory failed (%v) — this probe needs it to SUCCEED and answer from the parent repo", derr)
+	} else if dirty {
+		t.Fatal("setup sanity: parent repository is dirty — this probe needs a clean parent so the misread would be 'clean'")
+	}
+
+	results, _, err := GC(context.Background(), root, root)
+	if err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	res := mustFindResult(t, results, id)
+	if res.Outcome != KeepDirty {
+		t.Fatalf("Outcome = %v (detail=%q), want KeepDirty (the dirty predicate is UNEVALUABLE for a unit that is not a linked worktree; it keeps at its own rank, fail-closed)", res.Outcome, res.Detail)
+	}
+	if !strings.Contains(res.Detail, "dirty check unevaluable: unit path is not a linked worktree") {
+		t.Fatalf("Detail = %q, want the disclosure naming the check that could not be evaluated", res.Detail)
+	}
+	if mustPathKind(t, unitPath) != PathDir {
+		t.Fatal("released plain directory was deleted with its cleanliness never established")
+	}
+	if mustPathKind(t, filepath.Join(unitPath, "abandoned-work.txt")) != PathRegular {
+		t.Fatal("abandoned residue inside the kept directory was destroyed")
+	}
+	if mustPathKind(t, ReleasedPath(root, id)) != PathRegular {
+		t.Fatal(".released marker deleted for a kept unit")
+	}
+}
+
+// TestDecideUnit_Rank3_UnevaluableKinds_KeptWithDisclosure covers the guard's
+// remaining "anything else at .git" cases — absent, directory, and symlink —
+// each of which leaves the dirty predicate unevaluable AS A STATEMENT ABOUT
+// THIS UNIT and must keep at rank 3 with the disclosure naming the kind.
+func TestDecideUnit_Rank3_UnevaluableKinds_KeptWithDisclosure(t *testing.T) {
+	cases := []struct {
+		name     string
+		plant    func(t *testing.T, unitPath string)
+		wantKind string
+	}{
+		{"absent", func(t *testing.T, unitPath string) {}, "absent"},
+		{"directory", func(t *testing.T, unitPath string) {
+			if err := os.MkdirAll(filepath.Join(unitPath, ".git"), 0o755); err != nil {
+				t.Fatalf("planting .git directory: %v", err)
+			}
+		}, "dir"},
+		{"symlink", func(t *testing.T, unitPath string) {
+			if err := os.Symlink(t.TempDir(), filepath.Join(unitPath, ".git")); err != nil {
+				t.Fatalf("planting .git symlink: %v", err)
+			}
+		}, "symlink"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newReconcileTestRepo(t)
+			storeRoot := newExecutionStoreRoot(t)
+			id := gcUnitID(0)
+			unitPath := UnitPath(storeRoot, id)
+			if err := os.MkdirAll(unitPath, 0o755); err != nil {
+				t.Fatalf("MkdirAll(%s): %v", unitPath, err)
+			}
+			tc.plant(t, unitPath)
+			markReleased(t, storeRoot, id)
+
+			res := decideUnit(context.Background(), storeRoot, repo.Dir, id, NewGitReconciler(storeRoot))
+			if res.Outcome != KeepDirty {
+				t.Fatalf("Outcome = %v (detail=%q), want KeepDirty", res.Outcome, res.Detail)
+			}
+			want := "dirty check unevaluable: unit path is not a linked worktree (" + tc.wantKind + " at .git)"
+			if res.Detail != want {
+				t.Fatalf("Detail = %q, want %q", res.Detail, want)
+			}
+			if mustPathKind(t, unitPath) != PathDir {
+				t.Fatal("unit kept at rank 3 was nevertheless deleted")
+			}
+		})
+	}
+}
+
+// TestDecideUnit_Rank5_ReDerivation_LinkageBrokenUnderTheLock proves the
+// SECOND site the guard must run at: rank 5 re-derives the whole decision
+// under the acquired lock immediately before mutating, so a unit whose
+// linked-worktree `.git` file is replaced inside that window must be
+// re-decided into the rank-3 unevaluable keep, never reclaimed on the stale
+// classification.
+func TestDecideUnit_Rank5_ReDerivation_LinkageBrokenUnderTheLock(t *testing.T) {
+	repo := newReconcileTestRepo(t)
+	storeRoot := newExecutionStoreRoot(t)
+	id := gcUnitID(0)
+	unitPath := cutGCUnit(t, repo, storeRoot, id)
+	markReleased(t, storeRoot, id)
+
+	fired := false
+	gcHookAfterLockForTests = func(gotID string) {
+		if fired || gotID != id {
+			return
+		}
+		fired = true
+		// A real linked worktree's `.git` is a regular file. Replace it with
+		// a directory inside the post-acquire window: the classification
+		// that reached rank 5 no longer holds.
+		gitLink := filepath.Join(unitPath, ".git")
+		if err := os.Remove(gitLink); err != nil {
+			t.Fatalf("removing worktree .git link: %v", err)
+		}
+		if err := os.MkdirAll(gitLink, 0o755); err != nil {
+			t.Fatalf("planting .git directory under the lock: %v", err)
+		}
+	}
+	defer func() { gcHookAfterLockForTests = nil }()
+
+	res := decideUnit(context.Background(), storeRoot, repo.Dir, id, NewGitReconciler(storeRoot))
+	if !fired {
+		t.Fatal("test hook never fired — test did not exercise the re-derivation branch")
+	}
+	if res.Outcome != KeepDirty {
+		t.Fatalf("Outcome = %v (detail=%q), want KeepDirty (re-derived under the lock: the dirty predicate became unevaluable)", res.Outcome, res.Detail)
+	}
+	if !strings.Contains(res.Detail, "dirty check unevaluable: unit path is not a linked worktree") {
+		t.Fatalf("Detail = %q, want the unevaluable-predicate disclosure", res.Detail)
+	}
+	if mustPathKind(t, unitPath) != PathDir {
+		t.Fatal("rank 5 reclaimed a unit whose dirty predicate became unevaluable under the lock")
+	}
+}
+
 // --- scan set: grammar-external and administrative disclosures ---
+
+// TestGC_ScanSet_NonDirectoryAdministrativeEntry_DisclosedNeverDeleted is
+// whole-wave finding F5: a NON-DIRECTORY entry under
+// $GIT_COMMON_DIR/worktrees/ names no unit and cannot be resolved, so it is
+// the spec's disclosed-and-kept class ("one that CANNOT BE RESOLVED is
+// likewise kept, because an entry that cannot be proven in scope is never
+// ours to remove"), never a silent skip.
+func TestGC_ScanSet_NonDirectoryAdministrativeEntry_DisclosedNeverDeleted(t *testing.T) {
+	repo := newReconcileTestRepo(t)
+	storeRoot := newExecutionStoreRoot(t)
+	// A cut worktree guarantees $GIT_COMMON_DIR/worktrees/ exists.
+	cutWorktree(t, repo.Dir, filepath.Join(t.TempDir(), "seed"))
+	adminDir := adminWorktreesDir(t, repo.Dir)
+	strayPath := filepath.Join(adminDir, "stray-regular-file")
+	if err := os.WriteFile(strayPath, []byte("not a worktree entry\n"), 0o644); err != nil {
+		t.Fatalf("planting stray administrative entry: %v", err)
+	}
+
+	results, disclosures, err := GC(context.Background(), storeRoot, repo.Dir)
+	if err != nil {
+		t.Fatalf("GC: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results = %v, want none (a non-directory administrative entry names no unit)", results)
+	}
+	if len(disclosures) != 1 {
+		t.Fatalf("disclosures = %v, want exactly 1 naming the stray entry", disclosures)
+	}
+	if !strings.Contains(disclosures[0], strayPath) || !strings.Contains(disclosures[0], "kept for human attention") {
+		t.Fatalf("disclosure = %q, want the unclassified-administrative-entry disclosure naming %s", disclosures[0], strayPath)
+	}
+	if mustPathKind(t, strayPath) != PathRegular {
+		t.Fatal("stray administrative entry was deleted")
+	}
+}
 
 func TestGC_ScanSet_GrammarExternalEntries_DisclosedNeverDeleted(t *testing.T) {
 	repo := newReconcileTestRepo(t)

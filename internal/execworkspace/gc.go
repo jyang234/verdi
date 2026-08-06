@@ -215,10 +215,18 @@ func scanUnits(ctx context.Context, gr *GitReconciler, storeRoot, repoRoot strin
 	switch {
 	case err == nil:
 		for _, e := range adminEntries {
+			entryDir := filepath.Join(adminDir, e.Name())
 			if !e.IsDir() {
+				// A NON-DIRECTORY entry under $GIT_COMMON_DIR/worktrees/ has
+				// no `gitdir` record to resolve, so it names no unit and
+				// CANNOT BE RESOLVED — the spec's disclosed-and-kept class
+				// ("one that CANNOT BE RESOLVED is likewise kept, because an
+				// entry that cannot be proven in scope is never ours to
+				// remove"), never a silent skip.
+				disclosures = append(disclosures, fmt.Sprintf(
+					"execution: unclassified administrative entry %s, kept for human attention", entryDir))
 				continue
 			}
-			entryDir := filepath.Join(adminDir, e.Name())
 			resolved, _, ok := resolveAdminEntry(entryDir)
 			if !ok {
 				disclosures = append(disclosures, fmt.Sprintf(
@@ -283,6 +291,18 @@ func classifyResolvedAdminPath(resolved, canonicalRoot string) (workspaceID stri
 // ordinary not-yet-released case. Unexported and reconciler-parameterized
 // so tests can exercise every rank against a hermetic fake reconciler; GC
 // (above) always supplies a real *GitReconciler.
+//
+// RECURSION DEPTH, disclosed (whole-wave finding F4): both mutating ranks
+// re-enter this function when their under-the-lock re-derivation invalidates
+// the classification, so decideUnit -> decideRank0/decideRank5 -> decideUnit
+// is mutually recursive with NO code-imposed depth bound. The bound is
+// EXTERNAL CONTENTION, not code: each additional level requires an actor to
+// flip this unit's state again inside the narrow window between that rank's
+// filelock.Acquire succeeding and its re-derivation reading the paths back —
+// and every level re-reads real filesystem state, so a level can only repeat
+// if the world really changed again. Under the ordinary quiescent case the
+// depth is 1. This is disclosed rather than capped: a cap would have to
+// invent an outcome the spec's total ordered set does not name.
 func decideUnit(ctx context.Context, storeRoot, repoRoot, workspaceID string, reconciler Reconciler) GCResult {
 	unitPath := UnitPath(storeRoot, workspaceID)
 
@@ -317,6 +337,12 @@ func decideUnit(ctx context.Context, storeRoot, repoRoot, workspaceID string, re
 		return keepResult(workspaceID, KeepMalformed, fmt.Sprintf("marker path is %s, not a regular file", markerKind))
 	}
 
+	if detail := dirtyCheckUnevaluable(unitPath); detail != "" {
+		// The predicate cannot be evaluated AS A STATEMENT ABOUT THIS UNIT.
+		// Same unevaluable-predicate keep as a StatusDirty error below: rank
+		// 3's own kind, fail-closed, naming the check.
+		return keepResult(workspaceID, KeepDirty, detail)
+	}
 	dirty, derr := gitx.StatusDirty(ctx, unitPath)
 	if derr != nil {
 		// The unevaluable-predicate keep mints no new reason kind: a
@@ -330,6 +356,52 @@ func decideUnit(ctx context.Context, storeRoot, repoRoot, workspaceID string, re
 	}
 
 	return decideRank5(ctx, storeRoot, repoRoot, workspaceID, reconciler)
+}
+
+// gitLinkName is the entry a LINKED WORKTREE always carries at its root: a
+// REGULAR FILE holding a `gitdir:` pointer into
+// $GIT_COMMON_DIR/worktrees/<entry>. Every unit this component materializes
+// is cut by `git worktree add`, so every legitimate unit has exactly this
+// shape.
+const gitLinkName = ".git"
+
+// dirtyCheckUnevaluable decides whether rank 3's dirty predicate is
+// EVALUABLE for unitPath, returning "" when it is and the disclosure detail
+// when it is not.
+//
+// gitx.StatusDirty shells `git status --porcelain` with unitPath as the
+// working directory, and git DISCOVERS its repository by walking UPWARD when
+// the directory is not itself a worktree root. So for a unit path that is
+// not a linked worktree the command still succeeds — but it answers about
+// the ENCLOSING repository, not about this unit. In production `verdi gc`
+// runs with storeRoot == repoRoot and `.verdi/.gitignore` naming `data/`, so
+// that enclosing answer is reliably "clean" and a released ABANDONED PARTIAL
+// (spec §GC slice: "Release may be invoked for an ABANDONED run regardless
+// of how complete its materialization is") would be deleted with its own
+// cleanliness never established.
+//
+// The guard is therefore an lstat TYPE test, never a content test: a REGULAR
+// FILE at <unitPath>/.git is a linked worktree's gitdir pointer and the
+// predicate proceeds (a regular file holding GARBAGE still reaches
+// StatusDirty, which then errors — the same rank-3 unevaluable keep by the
+// other route, so no case escapes). ANYTHING ELSE — absent, a directory (a
+// standalone repository, whose `git status` would answer about a repository
+// this component never cut), a symlink, any other object, or an lstat
+// failure — leaves the predicate unevaluable for this unit and KEEPS,
+// fail-closed and disclosed: §Safe cleanup's "Keep dirty, locked, ambiguous,
+// or unverifiably eligible workspaces", and §GC slice's "a partial worktree
+// whose cleanliness cannot be proven KEEPS, disclosed — this store's
+// kept-until-a-human-resolves posture". The lstat is never a following stat,
+// exactly as every other path this list examines.
+func dirtyCheckUnevaluable(unitPath string) string {
+	kind, err := LstatType(filepath.Join(unitPath, gitLinkName))
+	if err != nil {
+		return fmt.Sprintf("dirty check unevaluable: unit path is not a linked worktree (lstat at %s failed: %v)", gitLinkName, err)
+	}
+	if kind == PathRegular {
+		return ""
+	}
+	return fmt.Sprintf("dirty check unevaluable: unit path is not a linked worktree (%s at %s)", kind, gitLinkName)
 }
 
 // tryAcquireLock attempts filelock.Acquire for the shared rank-0/rank-4 gate
@@ -452,6 +524,14 @@ func decideRank5(ctx context.Context, storeRoot, repoRoot, workspaceID string, r
 	markerPath := ReleasedPath(storeRoot, workspaceID)
 	markerKind, err := LstatType(markerPath)
 	if err != nil || markerKind != PathRegular {
+		_ = filelock.Release(lockFile, lockPath)
+		return decideUnit(ctx, storeRoot, repoRoot, workspaceID, reconciler)
+	}
+	// The SAME evaluability guard rank 3's classify pass applies, re-derived
+	// here: a unit whose linked-worktree `.git` file was replaced inside the
+	// post-acquire window is re-decided into rank 3's unevaluable keep, never
+	// reclaimed on the stale classification.
+	if detail := dirtyCheckUnevaluable(unitPath); detail != "" {
 		_ = filelock.Release(lockFile, lockPath)
 		return decideUnit(ctx, storeRoot, repoRoot, workspaceID, reconciler)
 	}

@@ -642,7 +642,16 @@ type mxRepresentativeRow struct {
 	rel             mxReleased
 	wantGC          GCOutcome
 	wantMaterialize string
-	note            string
+	// wantGCDetailContains, when non-empty, additionally pins a substring of
+	// the GCResult's disclosed Detail. It exists because rank 3 reaches its
+	// keep-dirty outcome by TWO DISTINCT ROUTES that the outcome label alone
+	// cannot tell apart (whole-wave finding F1): the evaluability guard
+	// refusing to consult a non-linked-worktree unit at all, and
+	// gitx.StatusDirty being consulted and failing. Which route a row takes
+	// is a real property of that row's fixture, so it is asserted, not
+	// assumed.
+	wantGCDetailContains string
+	note                 string
 	// vacuousForGC marks the ONE row (unit path absent, .released absent)
 	// where, under quiescent .request/.request.staging/.lock/registry,
 	// NOTHING at all names this id — exactly totality_test.go's own
@@ -653,39 +662,55 @@ type mxRepresentativeRow struct {
 	vacuousForGC bool
 }
 
+// mxDetailUnevaluable and mxDetailStatusDirtyFailed are rank 3's two
+// distinguishable keep-dirty routes (see mxRepresentativeRow.
+// wantGCDetailContains).
+const (
+	mxDetailUnevaluable       = "dirty check unevaluable: unit path is not a linked worktree"
+	mxDetailStatusDirtyFailed = "StatusDirty check failed:"
+)
+
 var mxRepresentativeRows = []mxRepresentativeRow{
 	// unit path ABSENT: gc's rank 0 (siblings-only-or-nothing) mirrors
 	// materialize's step 2 exactly — both examine the SAME three sibling
 	// forms with the SAME lstat-typed classification (spec §Workspace
 	// naming step 2 / §GC slice rank 0 share one prose description).
-	{mxUnitAbsent, mxRelAbsent, GCOutcomeUnknown, "fresh-materialize", "vacuous under quiescent request/staging/lock/registry: nothing on disk or in the registry names this id, so it never enters gc's scan set at all (no GCResult, no disclosure) — materialize's step 2 is a no-op then proceeds fresh at step 5, unaffected since it addresses the id's deterministic path directly rather than scanning", true},
-	{mxUnitAbsent, mxRelEmptyRegular, ReclaimOrphaned, "fresh-materialize", "a lone regular .released is orphaned metadata on both machines: gc unlinks it under rank 0, materialize unlinks it under step 2, both then proceed", false},
-	{mxUnitAbsent, mxRelNonEmptyRegular, ReclaimOrphaned, "fresh-materialize", "content is ignored — existence is the record — so nonempty behaves identically to empty", false},
-	{mxUnitAbsent, mxRelDirectory, Partial, "operational-error", "a non-regular object at an orphaned sibling path is 'unexpected object kind' on both machines: gc's rank-0 orphan-sibling loop discloses Partial, materialize's step-2 handleAbsentUnit returns an operational error — the same fail-closed mirror, neither silently deletes through it", false},
-	{mxUnitAbsent, mxRelSymlink, Partial, "operational-error", "same mirror as directory: a symlink is never followed, never treated as a plain regular orphan", false},
+	{mxUnitAbsent, mxRelAbsent, GCOutcomeUnknown, "fresh-materialize", "", "vacuous under quiescent request/staging/lock/registry: nothing on disk or in the registry names this id, so it never enters gc's scan set at all (no GCResult, no disclosure) — materialize's step 2 is a no-op then proceeds fresh at step 5, unaffected since it addresses the id's deterministic path directly rather than scanning", true},
+	{mxUnitAbsent, mxRelEmptyRegular, ReclaimOrphaned, "fresh-materialize", "", "a lone regular .released is orphaned metadata on both machines: gc unlinks it under rank 0, materialize unlinks it under step 2, both then proceed", false},
+	{mxUnitAbsent, mxRelNonEmptyRegular, ReclaimOrphaned, "fresh-materialize", "", "content is ignored — existence is the record — so nonempty behaves identically to empty", false},
+	{mxUnitAbsent, mxRelDirectory, Partial, "operational-error", "", "a non-regular object at an orphaned sibling path is 'unexpected object kind' on both machines: gc's rank-0 orphan-sibling loop discloses Partial, materialize's step-2 handleAbsentUnit returns an operational error — the same fail-closed mirror, neither silently deletes through it", false},
+	{mxUnitAbsent, mxRelSymlink, Partial, "operational-error", "", "same mirror as directory: a symlink is never followed, never treated as a plain regular orphan", false},
 
 	// unit path a genuine-shaped (but non-functional) worktree directory:
-	// StatusDirty always fails on this fixture (no real git linkage), so
-	// gc's rank 3 keeps fail-closed (KeepDirty, unevaluable predicate)
-	// whenever the marker is regular; materialize's step 3a is TERMINAL
-	// regardless of git state (dirtiness is never even consulted before
-	// 3a fires), so both machines refuse to touch/reuse it — the
-	// consistency property here is "never destroyed, never silently
-	// reused", not identical outcome labels.
-	{mxUnitDirWorktree, mxRelAbsent, KeepNotEligible, "fresh-materialize", "marker absent: gc rank 2 (not yet released, no mutation); materialize step 4c rebuilds the (non-functional) residue and re-cuts fresh, since .request's absence proves no consumer ever received it", false},
-	{mxUnitDirWorktree, mxRelEmptyRegular, KeepDirty, "released-terminal", "marker regular: materialize's 3a fires unconditionally (terminal, independent of git state); gc's rank 3 cannot evaluate StatusDirty against this non-functional fixture and keeps fail-closed rather than guessing clean — both refuse to mutate/reuse the workspace", false},
-	{mxUnitDirWorktree, mxRelNonEmptyRegular, KeepDirty, "released-terminal", "same as empty-regular: content is ignored", false},
-	{mxUnitDirWorktree, mxRelDirectory, KeepMalformed, "operational-error", "a non-regular object at the marker path is gc's own keep-malformed rank AND materialize's step 3b operational error — spec's explicit mirror: 'the materialization mirror of gc's keep-malformed rank, so a malformed marker is a decided state on both paths, not a gap'", false},
-	{mxUnitDirWorktree, mxRelSymlink, KeepMalformed, "operational-error", "same mirror as directory: symlink at the marker path, never followed", false},
+	// its `.git` is a REGULAR FILE, so rank 3's evaluability guard (whole-
+	// wave finding F1) PASSES and gitx.StatusDirty is really consulted —
+	// and really fails, because the gitdir pointer resolves nowhere. So
+	// gc's rank 3 keeps fail-closed (KeepDirty, unevaluable predicate) by
+	// the StatusDirty-error route whenever the marker is regular;
+	// materialize's step 3a is TERMINAL regardless of git state (dirtiness
+	// is never even consulted before 3a fires), so both machines refuse to
+	// touch/reuse it — the consistency property here is "never destroyed,
+	// never silently reused", not identical outcome labels.
+	{mxUnitDirWorktree, mxRelAbsent, KeepNotEligible, "fresh-materialize", "", "marker absent: gc rank 2 (not yet released, no mutation); materialize step 4c rebuilds the (non-functional) residue and re-cuts fresh, since .request's absence proves no consumer ever received it", false},
+	{mxUnitDirWorktree, mxRelEmptyRegular, KeepDirty, "released-terminal", mxDetailStatusDirtyFailed, "marker regular: materialize's 3a fires unconditionally (terminal, independent of git state); the guard admits this fixture (regular-file .git) and gc's rank 3 then cannot evaluate StatusDirty against its dead gitdir pointer, keeping fail-closed rather than guessing clean — both refuse to mutate/reuse the workspace", false},
+	{mxUnitDirWorktree, mxRelNonEmptyRegular, KeepDirty, "released-terminal", mxDetailStatusDirtyFailed, "same as empty-regular: content is ignored", false},
+	{mxUnitDirWorktree, mxRelDirectory, KeepMalformed, "operational-error", "", "a non-regular object at the marker path is gc's own keep-malformed rank AND materialize's step 3b operational error — spec's explicit mirror: 'the materialization mirror of gc's keep-malformed rank, so a malformed marker is a decided state on both paths, not a gap'", false},
+	{mxUnitDirWorktree, mxRelSymlink, KeepMalformed, "operational-error", "", "same mirror as directory: symlink at the marker path, never followed", false},
 
-	// unit path a plain (non-worktree) directory: StatusDirty fails just
-	// as above (no .git at all — `git status` finds no repository), so
-	// the same reasoning applies row-for-row.
-	{mxUnitDirPlain, mxRelAbsent, KeepNotEligible, "fresh-materialize", "marker absent: gc rank 2; materialize's 4c RemoveAll's the plain directory (no witness survives it) and re-cuts fresh", false},
-	{mxUnitDirPlain, mxRelEmptyRegular, KeepDirty, "released-terminal", "same fail-closed/terminal mirror as the worktree-shaped case: neither StatusDirty's own failure nor materialize's 3a depend on there being real git linkage", false},
-	{mxUnitDirPlain, mxRelNonEmptyRegular, KeepDirty, "released-terminal", "same as empty-regular", false},
-	{mxUnitDirPlain, mxRelDirectory, KeepMalformed, "operational-error", "keep-malformed / operational-error mirror, as above", false},
-	{mxUnitDirPlain, mxRelSymlink, KeepMalformed, "operational-error", "keep-malformed / operational-error mirror, as above", false},
+	// unit path a plain (non-worktree) directory: it has NO `.git` at all,
+	// so rank 3's evaluability guard REFUSES to consult StatusDirty in the
+	// first place — the outcome is the same fail-closed keep-dirty as the
+	// worktree-shaped rows above, reached by the OTHER route, and the
+	// Detail is what tells the two apart. That refusal is finding F1's
+	// whole point: without it, `git status` run inside a plain directory
+	// answers from the ENCLOSING repository, which in production (storeRoot
+	// == repoRoot, data/ gitignored) reports clean and would delete an
+	// abandoned partial whose cleanliness was never established.
+	{mxUnitDirPlain, mxRelAbsent, KeepNotEligible, "fresh-materialize", "", "marker absent: gc rank 2; materialize's 4c RemoveAll's the plain directory (no witness survives it) and re-cuts fresh", false},
+	{mxUnitDirPlain, mxRelEmptyRegular, KeepDirty, "released-terminal", mxDetailUnevaluable, "same fail-closed/terminal mirror as the worktree-shaped case, by the guard route rather than the StatusDirty-error route: neither the guard's refusal nor materialize's 3a depends on there being real git linkage", false},
+	{mxUnitDirPlain, mxRelNonEmptyRegular, KeepDirty, "released-terminal", mxDetailUnevaluable, "same as empty-regular", false},
+	{mxUnitDirPlain, mxRelDirectory, KeepMalformed, "operational-error", "", "keep-malformed / operational-error mirror, as above", false},
+	{mxUnitDirPlain, mxRelSymlink, KeepMalformed, "operational-error", "", "keep-malformed / operational-error mirror, as above", false},
 
 	// unit path a regular file: MALFORMATION IS TESTED BEFORE
 	// ELIGIBILITY on both machines, so every .released value here is
@@ -693,20 +718,20 @@ var mxRepresentativeRows = []mxRepresentativeRow{
 	// check both fire before either machine ever looks at the marker
 	// path, proving the "malformed unit path" mirror holds identically
 	// across all 5 .released values, not just one.
-	{mxUnitRegularFile, mxRelAbsent, KeepMalformed, "operational-error", "non-directory object at the unit path: gc rank 1, materialize's own unit-path check ('any object ... not a real directory is an OPERATIONAL ERROR ... the step-3b posture applied one level up')", false},
-	{mxUnitRegularFile, mxRelEmptyRegular, KeepMalformed, "operational-error", "malformation dominates before eligibility is ever examined", false},
-	{mxUnitRegularFile, mxRelNonEmptyRegular, KeepMalformed, "operational-error", "malformation dominates before eligibility is ever examined", false},
-	{mxUnitRegularFile, mxRelDirectory, KeepMalformed, "operational-error", "malformation dominates before eligibility is ever examined", false},
-	{mxUnitRegularFile, mxRelSymlink, KeepMalformed, "operational-error", "malformation dominates before eligibility is ever examined", false},
+	{mxUnitRegularFile, mxRelAbsent, KeepMalformed, "operational-error", "", "non-directory object at the unit path: gc rank 1, materialize's own unit-path check ('any object ... not a real directory is an OPERATIONAL ERROR ... the step-3b posture applied one level up')", false},
+	{mxUnitRegularFile, mxRelEmptyRegular, KeepMalformed, "operational-error", "", "malformation dominates before eligibility is ever examined", false},
+	{mxUnitRegularFile, mxRelNonEmptyRegular, KeepMalformed, "operational-error", "", "malformation dominates before eligibility is ever examined", false},
+	{mxUnitRegularFile, mxRelDirectory, KeepMalformed, "operational-error", "", "malformation dominates before eligibility is ever examined", false},
+	{mxUnitRegularFile, mxRelSymlink, KeepMalformed, "operational-error", "", "malformation dominates before eligibility is ever examined", false},
 
 	// unit path a symlink: LstatType never follows it, so it is a
 	// non-directory object exactly like the regular-file case above —
 	// same mirror, all 5 rows.
-	{mxUnitSymlink, mxRelAbsent, KeepMalformed, "operational-error", "symlink at the unit path is never followed and never a directory (BOTH PATHS ARE EXAMINED WITH LSTAT)", false},
-	{mxUnitSymlink, mxRelEmptyRegular, KeepMalformed, "operational-error", "malformation dominates before eligibility is ever examined", false},
-	{mxUnitSymlink, mxRelNonEmptyRegular, KeepMalformed, "operational-error", "malformation dominates before eligibility is ever examined", false},
-	{mxUnitSymlink, mxRelDirectory, KeepMalformed, "operational-error", "malformation dominates before eligibility is ever examined", false},
-	{mxUnitSymlink, mxRelSymlink, KeepMalformed, "operational-error", "malformation dominates before eligibility is ever examined", false},
+	{mxUnitSymlink, mxRelAbsent, KeepMalformed, "operational-error", "", "symlink at the unit path is never followed and never a directory (BOTH PATHS ARE EXAMINED WITH LSTAT)", false},
+	{mxUnitSymlink, mxRelEmptyRegular, KeepMalformed, "operational-error", "", "malformation dominates before eligibility is ever examined", false},
+	{mxUnitSymlink, mxRelNonEmptyRegular, KeepMalformed, "operational-error", "", "malformation dominates before eligibility is ever examined", false},
+	{mxUnitSymlink, mxRelDirectory, KeepMalformed, "operational-error", "", "malformation dominates before eligibility is ever examined", false},
+	{mxUnitSymlink, mxRelSymlink, KeepMalformed, "operational-error", "", "malformation dominates before eligibility is ever examined", false},
 }
 
 func TestGC_TotalityMatrix_RepresentativeSubset_MaterializeConsistency(t *testing.T) {
@@ -741,10 +766,12 @@ func TestGC_TotalityMatrix_RepresentativeSubset_MaterializeConsistency(t *testin
 				t.Fatalf("GC: %v", err)
 			}
 			var gotGC GCOutcome
+			gotDetail := ""
 			found := false
 			for _, r := range gcResults {
 				if r.WorkspaceID == id {
 					gotGC = r.Outcome
+					gotDetail = r.Detail
 					found = true
 				}
 			}
@@ -758,6 +785,10 @@ func TestGC_TotalityMatrix_RepresentativeSubset_MaterializeConsistency(t *testin
 				}
 				if gotGC != row.wantGC {
 					t.Fatalf("GC outcome = %v, want %v (%s)", gotGC, row.wantGC, row.note)
+				}
+				if row.wantGCDetailContains != "" && !strings.Contains(gotDetail, row.wantGCDetailContains) {
+					t.Fatalf("GC detail = %q, want it to contain %q (which of rank 3's two keep-dirty routes this fixture takes is a real property of the row, not an implementation detail): %s",
+						gotDetail, row.wantGCDetailContains, row.note)
 				}
 			}
 

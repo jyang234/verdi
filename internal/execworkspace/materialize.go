@@ -19,7 +19,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"syscall"
 
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -518,7 +517,19 @@ func (m *Materializer) materializeWorktree(ctx context.Context, req Request, uni
 // written through. The open itself adds O_NOFOLLOW (openStagingWitness,
 // below) so the lstat→open window cannot be raced into following a
 // freshly planted symlink: that ELOOP surfaces through this same
-// operational error path.
+// operational error path. (openStagingWitness lives in staging_unix.go /
+// staging_other.go — a build-tagged split, so a platform with no no-follow
+// primitive fails closed rather than opening a followable path.)
+//
+// DISCLOSED GAP (whole-wave finding F4): a HARD LINK at the staging path is
+// NOT covered. lstat reports PathRegular for it and O_NOFOLLOW does not
+// refuse it, so the O_TRUNC below truncates through it and this write lands
+// in whatever other name shares that inode. That is outside the threat model
+// the spec states, which is symlinks specifically ("BOTH PATHS ARE EXAMINED
+// WITH LSTAT, never a following stat"; "symlinks are never followed"), and no
+// primitive reachable here separates a hard link from an ordinary regular
+// file without a link-count heuristic that would also reject legitimate
+// crash-left residue. Disclosed as unproven, never silently claimed covered.
 func writeCompletionWitness(storeRoot, workspaceID string, id Identity) error {
 	data, err := EncodeSidecar(id)
 	if err != nil {
@@ -552,17 +563,4 @@ func writeCompletionWitness(storeRoot, workspaceID string, id Identity) error {
 		return fmt.Errorf("renaming staging witness into place: %w", err)
 	}
 	return nil
-}
-
-// openStagingWitness opens the staging path for step 6's write. O_NOFOLLOW
-// is the SECOND guard, independent of writeCompletionWitness's lstat
-// pre-check: between that lstat and this open lies a window in which a
-// fresh symlink can be planted at the staging path, and without O_NOFOLLOW
-// the O_TRUNC would follow it and empty whatever it names. With the flag,
-// the kernel refuses (ELOOP) and the caller reports it through the same
-// non-regular-object operational error path the lstat pre-check feeds —
-// "never followed, never written through" holds across the whole window,
-// not just at the instant of the check.
-func openStagingWitness(stagingPath string) (*os.File, error) {
-	return os.OpenFile(stagingPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0o644)
 }

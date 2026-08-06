@@ -318,7 +318,7 @@ func TestBuildProfile_RejectsSecondsOverflowingDuration(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			set := GrantSet{Grants: []Grant{{Kind: GrantTimeouts, Seconds: seconds}}}
-			profile, report, err := BuildProfile(dir, set, nil)
+			profile, report, err := BuildProfile(dir, dir, set, nil)
 			if err == nil {
 				t.Fatalf("BuildProfile(seconds=%d) = timeout %v, report %+v, want error",
 					seconds, profile.Timeout, report)

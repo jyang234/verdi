@@ -11,7 +11,7 @@ import (
 
 func TestCollectFingerprint_GoldenBytes(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, GrantSet{}, map[string]string{"FOO": "bar"})
+	profile, _, err := BuildProfile(dir, dir, GrantSet{}, map[string]string{"FOO": "bar"})
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestCollectFingerprint_GoldenBytes(t *testing.T) {
 
 func TestCollectFingerprint_DeterministicUnderHostileMapOrdering(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, GrantSet{}, map[string]string{"A": "1", "B": "2", "C": "3"})
+	profile, _, err := BuildProfile(dir, dir, GrantSet{}, map[string]string{"A": "1", "B": "2", "C": "3"})
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestCollectFingerprint_DeterministicUnderHostileMapOrdering(t *testing.T) {
 
 func TestCollectFingerprint_AbsentEnvNameRecordedExplicitly(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, GrantSet{}, nil)
+	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestCollectFingerprint_AbsentEnvNameRecordedExplicitly(t *testing.T) {
 
 func TestCollectFingerprint_RejectsInvalidToolVersion(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, GrantSet{}, nil)
+	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestCollectFingerprint_RejectsInvalidToolVersion(t *testing.T) {
 
 func TestCollectFingerprint_RejectsInvalidDigest(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, GrantSet{}, nil)
+	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestCollectFingerprint_RejectsInvalidDigest(t *testing.T) {
 // fingerprint stops being a stable identity for identical inputs.
 func TestCollectFingerprint_RejectsNonLowercaseHexDigest(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, GrantSet{}, nil)
+	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestCollectFingerprint_RejectsNonLowercaseHexDigest(t *testing.T) {
 // which reads as "asked for and absent" rather than "never askable".
 func TestCollectFingerprint_RejectsInvalidEnvVarName(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, GrantSet{}, nil)
+	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestCollectFingerprint_RejectsInvalidEnvVarName(t *testing.T) {
 
 func TestCollectFingerprint_RejectsEmptyEnvVarName(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, GrantSet{}, nil)
+	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestCollectFingerprint_RejectsEmptyEnvVarName(t *testing.T) {
 
 func TestCollectFingerprint_OSArchMatchRuntime(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, GrantSet{}, nil)
+	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestCollectFingerprint_OSArchMatchRuntime(t *testing.T) {
 
 func TestCollectFingerprint_EmptyInputsStillProduceObjects(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, GrantSet{}, nil)
+	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
