@@ -1,0 +1,8 @@
+diff --git a/app/handler.go b/app/handler.go
+index 1111111..2222222 100644
+--- a/app/handler.go
++++ b/app/handler.go
+@@ -1,2 +1,3 @@
+ package app
++// baseline: no caching
+ func Handle(req Request) Response {
