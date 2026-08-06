@@ -2,15 +2,14 @@ package policyartifact
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
-
-var dateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // Exemption is one policy-exemption artifact — the single exemption
 // artifact kind and home (DC-24; SI-4): a bounded, governed departure
@@ -147,12 +146,18 @@ func DecodeExemption(data []byte) (*Exemption, error) {
 		witnesses = append(witnesses, Witness{Policy: *wd.Policy, Claim: *wd.Claim, ClaimDigest: *wd.ClaimDigest})
 	}
 
+	// Compensating controls are authored ORDERED content, like a policy's
+	// instructions: their order is the author's and is digest-bound; they
+	// are never sorted or deduplicated. Each entry must carry real text.
 	if len(*doc.CompensatingControls) == 0 {
 		return nil, fmt.Errorf("policyartifact: exemption must name at least one compensating control")
 	}
 	for i, c := range *doc.CompensatingControls {
-		if c == "" {
+		if strings.TrimSpace(c) == "" {
 			return nil, fmt.Errorf("policyartifact: exemption compensating_controls[%d]: empty control", i)
+		}
+		if strings.ContainsAny(c, "\n\r") {
+			return nil, fmt.Errorf("policyartifact: exemption compensating_controls[%d]: a control must be a single line", i)
 		}
 	}
 
@@ -182,15 +187,18 @@ func DecodeExemption(data []byte) (*Exemption, error) {
 	expiry := ""
 	if doc.Expiry != nil {
 		expiry = *doc.Expiry
-		if !dateRe.MatchString(expiry) {
-			return nil, fmt.Errorf("policyartifact: exemption expiry %q is not a YYYY-MM-DD date", expiry)
+		// A real calendar date, not just the shape of one: a departure
+		// stamped 2026-02-31 or 9999-99-99 would be a permanently
+		// unbounded exemption wearing a bound (DC-8; CO-2 fails closed).
+		if _, err := time.Parse("2006-01-02", expiry); err != nil {
+			return nil, fmt.Errorf("policyartifact: exemption expiry %q is not a real YYYY-MM-DD calendar date", expiry)
 		}
 	}
 	review := ""
 	if doc.ReviewCondition != nil {
 		review = *doc.ReviewCondition
-		if review == "" {
-			return nil, fmt.Errorf("policyartifact: exemption review_condition must be non-empty when present")
+		if strings.TrimSpace(review) == "" {
+			return nil, fmt.Errorf("policyartifact: exemption review_condition must carry a named condition, not blank text")
 		}
 	}
 	if expiry == "" && review == "" {

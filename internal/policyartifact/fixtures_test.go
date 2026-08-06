@@ -73,8 +73,12 @@ func TestFixtureDigests_Ratchet(t *testing.T) {
 		}
 		return e.Digest()
 	})
+	govCat, err := con.GovernanceCatalog()
+	if err != nil {
+		t.Fatalf("GovernanceCatalog: %v", err)
+	}
 	walk(DirProfiles, func(data []byte) (string, error) {
-		sp, err := DecodeStoredProfile(data, con.GovernanceCatalog())
+		sp, err := DecodeStoredProfile(data, govCat)
 		if err != nil {
 			return "", err
 		}

@@ -131,6 +131,13 @@ func TestDecodeExemption_Negative(t *testing.T) {
 		{"bad approval role", strings.Replace(validExemptionDoc(), "role: policy-owner", "role: Policy Owner", 1), "role"},
 		{"unknown field", strings.Replace(validExemptionDoc(), "expiry: \"2026-12-31\"", "expiry: \"2026-12-31\"\nseverity: high", 1), "severity"},
 		{"empty body", strings.SplitN(validExemptionDoc(), "The legacy", 2)[0] + "\n", "rationale"},
+		{"impossible expiry day", strings.Replace(validExemptionDoc(), "expiry: \"2026-12-31\"", "expiry: \"2026-02-31\"", 1), "calendar"},
+		{"impossible expiry month", strings.Replace(validExemptionDoc(), "expiry: \"2026-12-31\"", "expiry: \"9999-99-99\"", 1), "calendar"},
+		{"blank review condition", strings.Replace(validExemptionDoc(), "expiry: \"2026-12-31\"", "review_condition: \"   \"", 1), "blank"},
+		{"blank compensating control", strings.Replace(validExemptionDoc(), "- \"Weekly CVE review of the pinned toolchain.\"", "- \"   \"", 1), "empty control"},
+		{"multiline compensating control", strings.Replace(validExemptionDoc(), "- \"Weekly CVE review of the pinned toolchain.\"", "- \"one\\ntwo\"", 1), "single line"},
+		{"blank title", strings.Replace(validExemptionDoc(), "title: \"Legacy service stays on Go 1.23\"", "title: \"   \"", 1), "blank"},
+		{"non-kebab owner", strings.Replace(validExemptionDoc(), "owners: [service-team]", "owners: [\"Alice Smith\"]", 1), "kebab"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

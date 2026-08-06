@@ -141,7 +141,12 @@ func normalizeScope(s *Scope) {
 // validateRelPath enforces the repo-relative path grammar shared by scope
 // paths, claim path operands, and adapter projection paths: relative,
 // forward-slash, no escape, no backslash (co-3's no-local-absolute-paths
-// posture and the store's own path-escape discipline).
+// posture and the store's own path-escape discipline), and CANONICAL —
+// one location has one spelling. "cmd/" and "cmd" are distinct intents
+// (directory marker vs exact entry) and both canonical; "./cmd/",
+// "cmd//x", and "a/./b" are incidental variance that would give
+// semantically identical policies different digests and stale exact
+// witnesses (CO-3; DC-7), so they fail closed.
 func validateRelPath(p string) error {
 	if p == "" {
 		return fmt.Errorf("empty path")
@@ -152,10 +157,27 @@ func validateRelPath(p string) error {
 	if strings.Contains(p, `\`) {
 		return fmt.Errorf("path %q contains a backslash; use forward slashes", p)
 	}
-	for _, seg := range strings.Split(p, "/") {
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("path %q contains a control character", p)
+		}
+	}
+	segs := strings.Split(p, "/")
+	for i, seg := range segs {
 		if seg == ".." {
 			return fmt.Errorf("path %q escapes the repository root (.. segment)", p)
 		}
+		if seg == "." {
+			return fmt.Errorf("path %q is not canonical (. segment)", p)
+		}
+		// An empty segment is a doubled slash — except the final one,
+		// which is the single permitted trailing directory marker.
+		if seg == "" && i != len(segs)-1 {
+			return fmt.Errorf("path %q is not canonical (empty segment)", p)
+		}
+	}
+	if len(segs) > 0 && segs[len(segs)-1] == "" && len(segs) == 1 {
+		return fmt.Errorf("empty path")
 	}
 	return nil
 }

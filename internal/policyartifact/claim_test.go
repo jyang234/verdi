@@ -158,6 +158,10 @@ func TestScopeValidate_Negative(t *testing.T) {
 		{"absolute path", func() Scope { s := universalScope(); s.Paths = []string{"/abs"}; return s }(), "absolute"},
 		{"escaping path", func() Scope { s := universalScope(); s.Paths = []string{"a/../b"}; return s }(), "escape"},
 		{"backslash path", func() Scope { s := universalScope(); s.Paths = []string{`a\b`}; return s }(), "backslash"},
+		{"dot-segment path", func() Scope { s := universalScope(); s.Paths = []string{"./cmd/"}; return s }(), "canonical"},
+		{"inner dot path", func() Scope { s := universalScope(); s.Paths = []string{"a/./b"}; return s }(), "canonical"},
+		{"doubled-slash path", func() Scope { s := universalScope(); s.Paths = []string{"cmd//x"}; return s }(), "canonical"},
+		{"control-char path", func() Scope { s := universalScope(); s.Paths = []string{"\x00bad"}; return s }(), "control"},
 		{"invalid ref", func() Scope { s := universalScope(); s.Refs = []string{"not a ref"}; return s }(), "ref"},
 	}
 	for _, tt := range tests {

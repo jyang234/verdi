@@ -50,8 +50,19 @@ func (t TemplateRecord) Validate() error {
 
 // kernelDoc is the strict decode target for the immutable kernel fields
 // every constitution artifact shares (AC-1/DC-4: identity, authority —
-// expressed by the kind and its governing relationships — ownership,
-// and template provenance; scope and lifecycle are per-kind).
+// expressed by the kind and its governing relationships — ownership, and
+// template provenance; scope is per-kind).
+//
+// LIFECYCLE is deliberately not a frontmatter field: the constitution
+// kinds are statusless, following the store's ratified statusless
+// direction (VL-015's merge-signaled supersession for specs; the
+// attestation kinds' "existence is the record"). An artifact committed
+// under .verdi/policy/ IS active authority — its lifecycle state is
+// presence on the default branch, derived from git, never an authorable
+// status enum a hand edit could flip. Supersession and retirement flows
+// are later-wave governance work over git history (DC-14/DC-15); the
+// effective-policy resolver therefore treats every loaded artifact as
+// live, by contract rather than omission.
 type kernelDoc struct {
 	Schema   *string         `yaml:"schema"`
 	ID       *string         `yaml:"id"`
@@ -107,15 +118,19 @@ func (d kernelDoc) toKernel(wantSchema, wantKind string) (kernel, error) {
 	if _, err := parseKindedID(k.ID, wantKind); err != nil {
 		return kernel{}, err
 	}
-	if k.Title == "" {
-		return kernel{}, fmt.Errorf("policyartifact: title is required")
+	if strings.TrimSpace(k.Title) == "" {
+		return kernel{}, fmt.Errorf("policyartifact: title is required and must not be blank")
 	}
 	if len(k.Owners) == 0 {
 		return kernel{}, fmt.Errorf("policyartifact: owners must list at least one owner")
 	}
+	// Owners carry the store's kebab-case owner-handle grammar (the
+	// convention every committed artifact already follows: platform-team,
+	// service-team). DC-17 resolves an owner handle to an authenticated
+	// principal downstream; an ungrammatical handle could never resolve.
 	if err := uniqueSet("owners", k.Owners, func(o string) error {
-		if o == "" {
-			return fmt.Errorf("empty owner")
+		if !kebabRe.MatchString(o) {
+			return fmt.Errorf("owner %q must be a kebab-case owner handle", o)
 		}
 		return nil
 	}); err != nil {

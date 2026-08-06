@@ -32,7 +32,8 @@ import (
 // AC-1/DC-24). SI-6 assigned both the directory's internal grammar and
 // this exact lint-enumeration change to the CI policy-authority unit;
 // this entry admits the directory. Per-artifact validation lives at the
-// constitution store's own load seam (internal/policyauthority), not in
+// constitution store's own load seam (internal/policyartifact's decoders,
+// composed by the policy-authority unit's resolver package), not in
 // lint's 02-registry classification walk: the constitution kinds are
 // CI-owned artifacts outside 02 §Kind registry's frozen table, so
 // ClassifyPath deliberately does not learn them.

@@ -33,10 +33,17 @@ var (
 )
 
 // RegisterPayloadKind registers a typed decoder for a feature-specific
-// payload kind. It is called at init time by the feature package that
-// owns the payload's fields (OD-5: features own fields, this system owns
-// everything else). Registering an empty kind, a nil decoder, or a kind
-// twice is a programming error and panics.
+// payload kind, at init time only (OD-5: features own their payload
+// fields, this system owns everything else). The design_assistance
+// payload below is registered by this package itself because the
+// accepted ASD specification already fixes its complete v1 field set —
+// a transcription, not an ownership claim; a feature whose fields live
+// in its own package (e.g. the CSE lane's experiment policy) registers
+// from that package's init instead. Because the registry is
+// process-global, WHICH kinds decode depends on which packages are
+// linked into the binary; digests of successfully decoded artifacts are
+// unaffected. Registering an empty kind, a nil decoder, or a kind twice
+// is a programming error and panics.
 func RegisterPayloadKind(kind string, decode func([]byte) (Payload, error)) {
 	if kind == "" || decode == nil {
 		panic("policyartifact: RegisterPayloadKind requires a kind and a decoder")

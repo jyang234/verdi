@@ -395,14 +395,21 @@ func normalizeConstitution(c *Constitution) {
 }
 
 // GovernanceCatalog converts the registered governance vocabulary into
-// the kernel's own catalog type for DecodeProfile injection.
-func (c *Constitution) GovernanceCatalog() governanceprincipal.Catalog {
+// the kernel's own catalog type for DecodeProfile injection. Like every
+// authority egress it verifies the seal first: a hand-built constitution
+// must never supply the vocabulary a profile validates against (the
+// SI-21 posture — otherwise a forged catalog could mint a real profile
+// digest no committed constitution authorized).
+func (c *Constitution) GovernanceCatalog() (governanceprincipal.Catalog, error) {
+	if err := c.checkSeal(); err != nil {
+		return governanceprincipal.Catalog{}, err
+	}
 	return governanceprincipal.Catalog{
 		Roles:             c.Catalog.Roles,
 		Transitions:       c.Catalog.Transitions,
 		EvidenceSources:   c.Catalog.EvidenceSources,
 		EscalationMetrics: c.Catalog.EscalationMetrics,
-	}
+	}, nil
 }
 
 // Digest returns the constitution's canonical content address after

@@ -2,8 +2,9 @@ package policyartifact
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
+
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
 // KindProfileStorage names the stored governance-profile artifact kind
@@ -21,10 +22,6 @@ const (
 	DirProfiles   = "profiles"
 )
 
-// profileNameRe is the filename grammar for stored profiles: the
-// kernel's own profile id alphabet (governanceprincipal.ValidateID),
-// since the file stem must equal the profile's id.
-var profileNameRe = regexp.MustCompile(`^[a-z][a-z0-9._-]*$`)
 
 // ClassifyPolicyPath maps a .verdi/policy/-relative slash path to the
 // constitution artifact kind it must decode as and its name half. The
@@ -54,8 +51,11 @@ func ClassifyPolicyPath(rel string) (kind, name string, err error) {
 			return KindExemption, stem, nil
 		}
 	case DirProfiles:
-		if !profileNameRe.MatchString(stem) {
-			return "", "", fmt.Errorf("policyartifact: entry %q under .verdi/policy/%s: name %q must match the kernel profile id grammar", rel, dir, stem)
+		// The file stem must equal the profile's kernel id, so it uses
+		// the kernel's own id grammar — called, never copied, so the two
+		// can never drift (DC-20: the kernel owns profile schema).
+		if err := governanceprincipal.ValidateID(stem); err != nil {
+			return "", "", fmt.Errorf("policyartifact: entry %q under .verdi/policy/%s: name must match the kernel profile id grammar: %w", rel, dir, err)
 		}
 		return KindProfileStorage, stem, nil
 	}

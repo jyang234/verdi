@@ -48,13 +48,75 @@ func TestDecodeConstitution_Happy(t *testing.T) {
 		t.Fatalf("Adapters = %+v", c.Adapters)
 	}
 	// The governance catalog converts to the kernel's own catalog type.
-	cat := c.GovernanceCatalog()
+	cat, err := c.GovernanceCatalog()
+	if err != nil {
+		t.Fatalf("GovernanceCatalog(): %v", err)
+	}
 	if err := cat.Validate(); err != nil {
 		t.Fatalf("GovernanceCatalog().Validate(): %v", err)
 	}
 	if _, err := c.Digest(); err != nil {
 		t.Fatalf("Digest: %v", err)
 	}
+}
+
+// TestGovernanceCatalog_RefusesForgedConstitution proves the catalog
+// egress verifies the seal: a hand-built constitution must never supply
+// the vocabulary a governance profile validates against.
+func TestGovernanceCatalog_RefusesForgedConstitution(t *testing.T) {
+	var forged Constitution
+	forged.Catalog = GovernanceCatalog{Roles: []string{"attacker-role"}}
+	if _, err := forged.GovernanceCatalog(); err == nil {
+		t.Fatal("hand-built constitution yielded a governance catalog")
+	}
+}
+
+// TestSeal_RejectsForgeryAndMutation_AllKinds extends the policy seal
+// negatives to every sealed kind (CO-6: every decoder gets negative
+// coverage; the SI-21 posture is package-wide, not policy-only).
+func TestSeal_RejectsForgeryAndMutation_AllKinds(t *testing.T) {
+	t.Run("overlay", func(t *testing.T) {
+		var forged Overlay
+		if _, err := forged.Digest(); err == nil {
+			t.Fatal("hand-built overlay yielded a digest")
+		}
+		o, err := DecodeOverlay([]byte(validOverlayDoc()))
+		if err != nil {
+			t.Fatalf("DecodeOverlay: %v", err)
+		}
+		o.Refines = "policy/other"
+		if _, err := o.Digest(); err == nil || !strings.Contains(err.Error(), "modified") {
+			t.Fatalf("mutated overlay Digest err = %v, want modification error", err)
+		}
+	})
+	t.Run("exemption", func(t *testing.T) {
+		var forged Exemption
+		if _, err := forged.Digest(); err == nil {
+			t.Fatal("hand-built exemption yielded a digest")
+		}
+		e, err := DecodeExemption([]byte(validExemptionDoc()))
+		if err != nil {
+			t.Fatalf("DecodeExemption: %v", err)
+		}
+		e.Expiry = "2099-01-01"
+		if _, err := e.Digest(); err == nil || !strings.Contains(err.Error(), "modified") {
+			t.Fatalf("mutated exemption Digest err = %v, want modification error", err)
+		}
+	})
+	t.Run("constitution", func(t *testing.T) {
+		var forged Constitution
+		if _, err := forged.Digest(); err == nil {
+			t.Fatal("hand-built constitution yielded a digest")
+		}
+		c, err := DecodeConstitution([]byte(validConstitutionDoc()))
+		if err != nil {
+			t.Fatalf("DecodeConstitution: %v", err)
+		}
+		c.SelectedProfile = "attacker-profile"
+		if _, err := c.Digest(); err == nil || !strings.Contains(err.Error(), "modified") {
+			t.Fatalf("mutated constitution Digest err = %v, want modification error", err)
+		}
+	})
 }
 
 func TestDecodeConstitution_Negative(t *testing.T) {
