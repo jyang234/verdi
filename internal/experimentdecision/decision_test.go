@@ -415,6 +415,172 @@ func TestEvaluateConflictingBoundsZeroBaselineGuard(t *testing.T) {
 	}
 }
 
+// TestEvaluateConflictingBoundsNonPositiveSeparationRunnerUp covers the
+// fourth degenerate case, and the reason it is degenerate: a RELATIVE
+// candidate_separation margin is a fraction OF the runner-up's aggregate,
+// so once that aggregate is zero or negative the margin collapses toward
+// zero or flips sign, and the comparison stops meaning "materially better".
+// Every case below would otherwise emit a proven-winner on a difference of
+// one ten-thousandth against a registered 5% bar.
+func TestEvaluateConflictingBoundsNonPositiveSeparationRunnerUp(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutate      func(*experiment.Definition)
+		baseline    []float64
+		aVals       []float64
+		bVals       []float64
+		wantVerdict experiment.Verdict
+		wantReason  experiment.ReasonCode
+	}{
+		{
+			name: "lower direction, negative runner-up",
+			mutate: func(d *experiment.Definition) {
+				d.Decision.PrimaryMetric.Aggregation = experiment.AggregationMean
+			},
+			baseline:    []float64{100, 100, 100},
+			aVals:       []float64{-10.0001, -10.0001, -10.0001},
+			bVals:       []float64{-10, -10, -10},
+			wantVerdict: experiment.VerdictDisclosedUnproven,
+			wantReason:  experiment.ReasonConflictingBounds,
+		},
+		{
+			name: "higher direction, negative runner-up",
+			mutate: func(d *experiment.Definition) {
+				d.Decision.PrimaryMetric.Aggregation = experiment.AggregationMean
+				d.Decision.PrimaryMetric.Direction = experiment.DirectionHigher
+				d.Decision.BaselineImprovement = experiment.Threshold{Absolute: ptr(1)}
+			},
+			baseline:    []float64{-100, -100, -100},
+			aVals:       []float64{-9.9999, -9.9999, -9.9999},
+			bVals:       []float64{-10, -10, -10},
+			wantVerdict: experiment.VerdictDisclosedUnproven,
+			wantReason:  experiment.ReasonConflictingBounds,
+		},
+		{
+			name: "lower direction, runner-up exactly zero",
+			mutate: func(d *experiment.Definition) {
+				d.Decision.PrimaryMetric.Aggregation = experiment.AggregationMean
+			},
+			baseline:    []float64{100, 100, 100},
+			aVals:       []float64{-5, -5, -5},
+			bVals:       []float64{0, 0, 0},
+			wantVerdict: experiment.VerdictDisclosedUnproven,
+			wantReason:  experiment.ReasonConflictingBounds,
+		},
+		{
+			// Control: with a positive runner-up the relative arm is
+			// unchanged — a genuinely separated winner still proves out.
+			name: "control: positive aggregates still prove a winner",
+			mutate: func(d *experiment.Definition) {
+				d.Decision.PrimaryMetric.Aggregation = experiment.AggregationMean
+			},
+			baseline:    []float64{100, 100, 100},
+			aVals:       []float64{10, 10, 10},
+			bVals:       []float64{20, 20, 20},
+			wantVerdict: experiment.VerdictProvenWinner,
+		},
+		{
+			// Control: with a positive runner-up inside the margin the
+			// relative arm still reports insufficient separation.
+			name: "control: positive aggregates inside the margin",
+			mutate: func(d *experiment.Definition) {
+				d.Decision.PrimaryMetric.Aggregation = experiment.AggregationMean
+			},
+			baseline:    []float64{100, 100, 100},
+			aVals:       []float64{20, 20, 20},
+			bVals:       []float64{20.5, 20.5, 20.5},
+			wantVerdict: experiment.VerdictDisclosedUnproven,
+			wantReason:  experiment.ReasonInsufficientSeparation,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			def := threeCandidateDef(t, tt.mutate)
+			obs := threeCandidateObs(t, def, tt.baseline, tt.aVals, tt.bVals)
+			res := mustEvaluate(t, def, obs)
+			if res.Verdict != tt.wantVerdict {
+				t.Fatalf("Verdict = %q (winner %q, reasons %+v), want %q", res.Verdict, res.Winner, res.Reasons, tt.wantVerdict)
+			}
+			if tt.wantVerdict == experiment.VerdictProvenWinner {
+				return
+			}
+			if len(res.Reasons) != 1 || res.Reasons[0].Code != tt.wantReason {
+				t.Fatalf("Reasons = %+v, want exactly one %q", res.Reasons, tt.wantReason)
+			}
+			if tt.wantReason == experiment.ReasonConflictingBounds {
+				r := res.Reasons[0]
+				if r.Candidate != "candidate-b" {
+					t.Errorf("Reasons[0].Candidate = %q, want the runner-up candidate-b", r.Candidate)
+				}
+				if !strings.Contains(r.Detail, "candidate-b") {
+					t.Errorf("Reasons[0].Detail = %q, want it to name the runner-up", r.Detail)
+				}
+			}
+		})
+	}
+}
+
+// TestEvaluateAbsoluteSeparationArm proves the ABSOLUTE separation arm is
+// unaffected by the relative arm's degenerate case: an absolute margin is
+// a fixed distance, which stays meaningful at and below zero.
+func TestEvaluateAbsoluteSeparationArm(t *testing.T) {
+	tests := []struct {
+		name        string
+		aVals       []float64
+		bVals       []float64
+		wantVerdict experiment.Verdict
+	}{
+		{
+			name:        "inside the absolute margin",
+			aVals:       []float64{18, 18, 18},
+			bVals:       []float64{19, 19, 19},
+			wantVerdict: experiment.VerdictDisclosedUnproven,
+		},
+		{
+			name:        "outside the absolute margin",
+			aVals:       []float64{10, 10, 10},
+			bVals:       []float64{19, 19, 19},
+			wantVerdict: experiment.VerdictProvenWinner,
+		},
+		{
+			// Negative aggregates: -20 beats -10 by 10, clearing the
+			// absolute margin of 5 — the arm must NOT be diverted into the
+			// relative arm's degenerate handling.
+			name:        "negative aggregates outside the absolute margin",
+			aVals:       []float64{-20, -20, -20},
+			bVals:       []float64{-10, -10, -10},
+			wantVerdict: experiment.VerdictProvenWinner,
+		},
+		{
+			name:        "negative aggregates inside the absolute margin",
+			aVals:       []float64{-11, -11, -11},
+			bVals:       []float64{-10, -10, -10},
+			wantVerdict: experiment.VerdictDisclosedUnproven,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			def := threeCandidateDef(t, func(d *experiment.Definition) {
+				d.Decision.PrimaryMetric.Aggregation = experiment.AggregationMean
+				d.Decision.CandidateSeparation = experiment.Threshold{Absolute: ptr(5)}
+			})
+			obs := threeCandidateObs(t, def, []float64{100, 100, 100}, tt.aVals, tt.bVals)
+			res := mustEvaluate(t, def, obs)
+			if res.Verdict != tt.wantVerdict {
+				t.Fatalf("Verdict = %q (reasons %+v), want %q", res.Verdict, res.Reasons, tt.wantVerdict)
+			}
+			if tt.wantVerdict == experiment.VerdictDisclosedUnproven {
+				if len(res.Reasons) != 1 || res.Reasons[0].Code != experiment.ReasonInsufficientSeparation {
+					t.Fatalf("Reasons = %+v, want one insufficient-separation", res.Reasons)
+				}
+			}
+			if tt.wantVerdict == experiment.VerdictProvenWinner && res.Winner != "candidate-a" {
+				t.Fatalf("Winner = %q, want candidate-a", res.Winner)
+			}
+		})
+	}
+}
+
 // TestEvaluateConflictingBoundsZeroMedianVariability covers the
 // degenerate variability case: a zero-or-negative primary p50 cannot
 // support a spread ratio.

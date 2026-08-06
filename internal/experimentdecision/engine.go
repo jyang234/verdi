@@ -379,6 +379,20 @@ func (e *evaluation) stepBaselinePremiseAndImprovement() (res experiment.Result,
 // comparison). The runner-up is simply the next entry in that same
 // ranking — which is the baseline itself whenever it is the only other
 // eligible candidate, exactly as AC-2 intends.
+//
+// A RELATIVE separation margin is a fraction OF the runner-up's aggregate,
+// so a non-positive runner-up aggregate is the fourth degenerate case in
+// this engine (alongside a non-positive baseline aggregate against a
+// relative baseline_improvement, a non-positive baseline aggregate against
+// a relative secondary bound, and a non-positive p50 against a registered
+// variability spread): at zero the margin collapses to nothing, and below
+// zero it inverts — runnerUp*(1-r) moves AWAY from the runner-up in the
+// wrong direction, so an arbitrarily small difference would satisfy an
+// arbitrarily large registered bar. The comparison completes as
+// disclosed-unproven/conflicting-bounds rather than emitting a winner the
+// registered threshold never actually cleared. The ABSOLUTE arm states a
+// fixed distance, which stays meaningful at and below zero, and is
+// deliberately left alone.
 func (e *evaluation) stepSeparation() (best string, res experiment.Result, done bool, err error) {
 	type ranked struct {
 		id    string
@@ -414,6 +428,18 @@ func (e *evaluation) stepSeparation() (best string, res experiment.Result, done 
 	}
 
 	sep := e.def.Decision.CandidateSeparation
+	if sep.Relative != nil && runnerUp.value <= 0 {
+		reason := experiment.Reason{
+			Code:      experiment.ReasonConflictingBounds,
+			Candidate: runnerUp.id,
+			Detail: "runner-up primary aggregate for candidate " + runnerUp.id + " is " +
+				string(formatFloat(runnerUp.value)) +
+				"; a relative candidate_separation threshold cannot be evaluated against a non-positive aggregate",
+		}
+		res, err = e.assemble(experiment.VerdictDisclosedUnproven, "", []experiment.Reason{reason})
+		return "", res, true, err
+	}
+
 	var separated bool
 	switch direction {
 	case experiment.DirectionLower:
