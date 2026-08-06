@@ -1,0 +1,64 @@
+schema: verdi.experiment/v1
+id: cache-placement-v1
+spike: spec/cache-placement-spike
+question: spec/request-path#oq-cache-placement
+base_commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+candidates:
+  - id: baseline
+    patch: candidates/baseline.patch
+    digest: sha256:3330fbd5740194cd2d9cb26cbeceb4d8ff41045466622bea3272ddf7944d1461
+    base: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - id: final-cache
+    patch: candidates/final-cache.patch
+    digest: sha256:00e880c3a25eeb32915566addc48f3f6da812e21580c5d263ad183d6b96b823f
+    base: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - id: facts-cache
+    patch: candidates/facts-cache.patch
+    digest: sha256:18c8aa5c31b7cec128f5484f90a5966a38ed91bbc5363f67664a92bf057a1d8a
+    base: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+evaluator:
+  argv: ["./tools/cache-evaluator", "run"]
+  digest: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  capabilities_digest: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+
+workload:
+  id: representative-request-mix
+  digest: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+
+contract:
+  id: behavior-contract
+  digest: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+decision:
+  primary_metric:
+    id: request-latency
+    type: duration
+    unit: ms
+    aggregation: p95
+    direction: lower
+  baseline: baseline
+  baseline_improvement:
+    relative: 0.25
+  candidate_separation:
+    relative: 0.05
+  guards:
+    - id: behavioral-equivalence
+    - id: tenant-isolation
+    - id: invalidation-deadline
+    - id: peak-rss
+      maximum_relative_to_baseline: 0.15
+
+execution:
+  warmups: 1
+  rounds: 3
+  order: deterministic-rotation
+  timeout_per_round: 30s
+  environment_policy: local-isolated-v1
+
+algorithm: verdi.experiment-recommendation/v1
+retention_policy: standard-retention
+
+lock:
+  definition_digest: sha256:b2aaf140bf90d8d15ccefb06c7b8fa2210eeeecb8237862bd285bbb396747f58

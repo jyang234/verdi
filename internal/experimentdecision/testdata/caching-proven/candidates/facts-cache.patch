@@ -1,0 +1,11 @@
+diff --git a/app/handler.go b/app/handler.go
+index 1111111..4444444 100644
+--- a/app/handler.go
++++ b/app/handler.go
+@@ -1,3 +1,6 @@
+ package app
+ 
++// facts-cache: cache account facts, reevaluate policy and render each request
++var factsCache = map[string]Facts{}
++
+ func Handle(req Request) Response {
