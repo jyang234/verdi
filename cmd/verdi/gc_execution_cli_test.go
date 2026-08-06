@@ -229,6 +229,9 @@ func TestGc_CLI_ExecutionSlice_ThreeRunLifecycle_ReclaimThenOrphanedThenSteadySt
 	if !strings.Contains(out2, "execution: reclaim-orphaned") || !strings.Contains(out2, workspaceID) {
 		t.Fatalf("run 2 stdout = %q, want the execution reclaim-orphaned line naming %s", out2, workspaceID)
 	}
+	if !strings.Contains(out2, "execution workspaces") {
+		t.Fatalf("run 2 stdout = %q, want the grown (closed-triple) scope disclosure naming execution workspaces on every run, not only the first and last", out2)
+	}
 
 	// Run 3: steady state — nothing left names this workspace at all, so
 	// nothing execution-specific should print except the scope line,

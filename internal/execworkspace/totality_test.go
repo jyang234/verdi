@@ -48,6 +48,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -292,11 +293,14 @@ var allMxRegistries = []mxRegistry{mxRegNone, mxRegValid, mxRegStaleDirGone, mxR
 
 // mxPlantRegistry hand-crafts an administrative entry directly (see the
 // file-level STRATEGY comment): for mxRegValid/mxRegStaleDirGone it writes
-// an intact `gitdir` record (the two labels name the SAME construction,
-// distinguished only by whether the unit path is present or absent —
-// mxJointSkipReason enforces that pairing); for mxRegCrashedAside it
-// writes only the `gitdir.reconciling` aside record, exactly the shape
-// step 3's atomic claim leaves behind after a simulated crash.
+// an intact `gitdir` record (the two labels name the SAME construction —
+// an intact registration naming this unit path — and are therefore
+// constructible against EVERY unit-path value, including the ones where
+// the registration turns out to name a plain directory, a regular file, a
+// symlink, or nothing at all; those are precisely the mismatches gc must
+// still decide); for mxRegCrashedAside it writes only the
+// `gitdir.reconciling` aside record, exactly the shape step 3's atomic
+// claim leaves behind after a simulated crash.
 func mxPlantRegistry(t *testing.T, adminDir, canonicalUnitPath, entryName string, d mxRegistry) (planted bool) {
 	t.Helper()
 	if d == mxRegNone {
@@ -317,43 +321,50 @@ func mxPlantRegistry(t *testing.T, adminDir, canonicalUnitPath, entryName string
 	return true
 }
 
-// mxJointSkipReason names the only UNCONSTRUCTIBLE pairings this matrix
-// documents: it is checked BEFORE every combination is built, and its
-// three branches are the ENTIRE skip set — a skip for any other reason is
-// a bug, caught by TestGC_TotalityMatrix's own hard-fail check against
+// mxJointSkipReason names the only UNCONSTRUCTIBLE pairing this matrix
+// documents — the single vacuous all-absent/none combination — and it is
+// checked BEFORE every combination is built. Its one branch is the ENTIRE
+// joint skip set: a joint skip for any other reason is a bug, caught by
+// TestGC_TotalityMatrix's own hard-fail check against
 // wantMxSkipped/mxKnownSkipReasonPrefixes below.
+//
+// It deliberately does NOT constrain registry=valid or
+// registry=stale-dir-gone to a single unit-path value. Both are built by
+// the same mxPlantRegistry intact-`gitdir` construction, which succeeds
+// against every unit-path value; treating the other pairings as
+// unconstructible would have excluded 960 genuinely constructible
+// combinations (in particular the 360 "intact registration x {dir-plain,
+// regular-file, symlink} unit path" mismatches, which are exactly the
+// registration/filesystem disagreements gc must still decide) from the
+// totality proof.
 func mxJointSkipReason(up mxUnitPath, req mxRequest, st mxStaging, rel mxReleased, lk mxLock, reg mxRegistry) string {
-	switch reg {
-	case mxRegValid:
-		if up != mxUnitDirWorktree {
-			return "registry=valid requires a genuine git-linked worktree directory at the unit path (unit-path=dir-worktree-shaped); pairing an intact, currently-resolving registration with any other unit-path type would not be a valid registration, only a mismatched one already covered by registry=crashed-aside/none"
-		}
-	case mxRegStaleDirGone:
-		if up != mxUnitAbsent {
-			return "registry=stale-dir-gone is definitionally paired with unit-path=absent (the directory the registration named is gone); a present object at the same path is a different, already-covered state (registry=crashed-aside/none)"
-		}
-	}
 	if up == mxUnitAbsent && req == mxReqAbsent && st == mxStagingAbsent && rel == mxRelAbsent && lk == mxLockAbsent && reg == mxRegNone {
 		return "vacuous: every dimension is absent/none simultaneously — nothing on disk or in the registry names this id, so it never enters gc's scan set at all; not a reachable per-unit decision state"
 	}
 	return ""
 }
 
-// mxKnownSkipReasonPrefixes is the closed set of skip-reason PREFIXES this
-// matrix will accept without hard-failing — one per branch of
-// mxJointSkipReason, plus the environment-dependent symlink-unsupported
-// reason a dimension constructor can also return. A skip reason matching
-// none of these means an UNDOCUMENTED skip appeared and the test must
-// fail loudly rather than silently absorb it.
+// mxKnownSkipReasonPrefixes is the closed set of JOINT skip-reason
+// PREFIXES this matrix will accept without hard-failing — one per branch
+// of mxJointSkipReason. A joint skip reason matching none of these means
+// an UNDOCUMENTED skip appeared and the test must fail loudly rather than
+// silently absorb it.
 var mxKnownSkipReasonPrefixes = []string{
-	"registry=valid requires a genuine git-linked worktree directory",
-	"registry=stale-dir-gone is definitionally paired with unit-path=absent",
 	"vacuous: every dimension is absent/none simultaneously",
+}
+
+// mxKnownEnvSkipPrefixes is the separate closed set of ENVIRONMENT skip
+// reasons a dimension constructor may return (as opposed to a documented
+// unconstructible pairing). These are counted apart from joint skips and,
+// on every platform where symlinks are expected to work, are themselves a
+// hard failure — an environment skip silently removes a combination from
+// the proof, which is exactly what this matrix must never tolerate.
+var mxKnownEnvSkipPrefixes = []string{
 	"symlink unsupported in this environment",
 }
 
-func mxIsKnownSkipReason(reason string) bool {
-	for _, prefix := range mxKnownSkipReasonPrefixes {
+func mxHasKnownPrefix(reason string, prefixes []string) bool {
+	for _, prefix := range prefixes {
 		if strings.HasPrefix(reason, prefix) {
 			return true
 		}
@@ -361,19 +372,37 @@ func mxIsKnownSkipReason(reason string) bool {
 	return false
 }
 
+func mxIsKnownSkipReason(reason string) bool {
+	return mxHasKnownPrefix(reason, mxKnownSkipReasonPrefixes)
+}
+
+func mxIsKnownEnvSkipReason(reason string) bool {
+	return mxHasKnownPrefix(reason, mxKnownEnvSkipPrefixes)
+}
+
 // wantMxTotal/wantMxSkipped are this matrix's hand-derived coverage
 // arithmetic, asserted (not merely logged) so a change to either the
 // dimension sizes or the joint-skip rule is caught rather than silently
 // drifting: total = 5(unit path) * 4(.request) * 2(.request.staging) *
-// 5(.released) * 3(.lock) * 4(registry) = 2400. skipped = 480
-// (registry=valid paired with each of the 4 non-dir-worktree unit-path
-// values, times the 120 = 4*2*5*3 combinations of the other four
-// dimensions) + 480 (registry=stale-dir-gone paired with each of the 4
-// non-absent unit-path values, times the same 120) + 1 (the single
-// vacuous all-absent/none combination) = 961.
+// 5(.released) * 3(.lock) * 4(registry) = 2400. skipped = 1 — the single
+// vacuous all-absent/none combination, the only combination nothing on
+// disk or in the registry names. Every other combination is
+// constructible, so asserted = 2400 - 1 = 2399.
 const (
 	wantMxTotal   = 2400
-	wantMxSkipped = 961
+	wantMxSkipped = 1
+)
+
+// mxComboStatus is runMxCombo's tri-state report. runMxCombo itself
+// returns only mxComboAsserted or mxComboEnvSkipped; mxComboFailed is
+// derived by the caller from t.Run's own result, because a t.Fatalf inside
+// the subtest Goexits before runMxCombo can return anything at all.
+type mxComboStatus int
+
+const (
+	mxComboAsserted mxComboStatus = iota
+	mxComboEnvSkipped
+	mxComboFailed
 )
 
 func TestGC_TotalityMatrix(t *testing.T) {
@@ -388,8 +417,9 @@ func TestGC_TotalityMatrix(t *testing.T) {
 		t.Fatalf("reading dead-pid lock template: %v", err)
 	}
 
-	total, skipped, asserted := 0, 0, 0
+	total, skipped, asserted, envSkipped, failed := 0, 0, 0, 0, 0
 	var skipLog []string
+	var envSkipLog []string
 
 	comboIndex := 0
 	for _, up := range allMxUnitPaths {
@@ -412,11 +442,25 @@ func TestGC_TotalityMatrix(t *testing.T) {
 							}
 
 							combo := mxCombo{up: up, req: req, st: st, rel: rel, lk: lk, reg: reg}
+							status, envReason := mxComboAsserted, ""
 							passed := t.Run(label, func(t *testing.T) {
-								runMxCombo(t, ctx, repo.Dir, adminDir, comboIndex, combo, deadPIDBytes)
+								status, envReason = runMxCombo(t, ctx, repo.Dir, adminDir, comboIndex, combo, deadPIDBytes)
 							})
-							asserted++
-							_ = passed
+							if !passed {
+								status = mxComboFailed
+							}
+							switch status {
+							case mxComboEnvSkipped:
+								if !mxIsKnownEnvSkipReason(envReason) {
+									t.Fatalf("%s: undocumented environment skip reason %q — a new, unaccounted-for skip appeared", label, envReason)
+								}
+								envSkipped++
+								envSkipLog = append(envSkipLog, label+": "+envReason)
+							case mxComboFailed:
+								failed++
+							default:
+								asserted++
+							}
 						}
 					}
 				}
@@ -424,18 +468,27 @@ func TestGC_TotalityMatrix(t *testing.T) {
 		}
 	}
 
-	t.Logf("totality matrix coverage: total=%d skipped=%d asserted=%d", total, skipped, asserted)
+	t.Logf("totality matrix coverage: total=%d skipped=%d asserted=%d environment-skipped=%d failed=%d", total, skipped, asserted, envSkipped, failed)
 	for _, s := range skipLog {
 		t.Logf("skipped (unconstructible): %s", s)
+	}
+	for _, s := range envSkipLog {
+		t.Logf("skipped (environment): %s", s)
 	}
 	if total != wantMxTotal {
 		t.Fatalf("total combinations = %d, want %d (dimension sizes changed — update the arithmetic comment)", total, wantMxTotal)
 	}
 	if skipped != wantMxSkipped {
-		t.Fatalf("skipped combinations = %d, want exactly %d (only the three documented unconstructible reasons)", skipped, wantMxSkipped)
+		t.Fatalf("skipped combinations = %d, want exactly %d (only the single documented vacuous combination)", skipped, wantMxSkipped)
 	}
-	if asserted != total-skipped {
-		t.Fatalf("coverage arithmetic mismatch: asserted=%d, want total-skipped=%d", asserted, total-skipped)
+	if envSkipped > 0 && runtime.GOOS != "windows" {
+		t.Fatalf("environment-skipped=%d on GOOS=%s, want 0: symlink construction is expected to work on every platform this suite runs on, and an environment skip silently removes a combination from the totality proof: %v", envSkipped, runtime.GOOS, envSkipLog)
+	}
+	if failed != 0 {
+		t.Fatalf("failed combinations = %d, want 0 (see the failing subtests above)", failed)
+	}
+	if asserted+envSkipped+failed != total-skipped {
+		t.Fatalf("coverage arithmetic mismatch: asserted=%d + environment-skipped=%d + failed=%d, want total-skipped=%d", asserted, envSkipped, failed, total-skipped)
 	}
 }
 
@@ -455,7 +508,16 @@ type mxCombo struct {
 // membership in the closed GCOutcome enum, no error from GC itself, and —
 // via the walk+hash guard reused from gc_test.go's hashAdminDir — that a
 // canary sibling unit present in every fixture is left byte-identical.
-func runMxCombo(t *testing.T, ctx context.Context, repoDir, adminDir string, comboIndex int, c mxCombo, deadPIDBytes []byte) {
+//
+// It reports (mxComboAsserted, "") when the combination was really built
+// and really asserted, or (mxComboEnvSkipped, reason) when a dimension
+// constructor could not build its fixture in THIS environment. It never
+// returns mxComboFailed: an assertion failure goes through t.Fatalf, which
+// Goexits, and the caller derives that state from t.Run's own result. The
+// environment-skip return exists so such a skip is counted separately
+// instead of being silently absorbed into the asserted count (which is
+// what an unchecked t.Skipf did).
+func runMxCombo(t *testing.T, ctx context.Context, repoDir, adminDir string, comboIndex int, c mxCombo, deadPIDBytes []byte) (mxComboStatus, string) {
 	t.Helper()
 	storeRoot := t.TempDir()
 	if err := os.MkdirAll(ExecutionRoot(storeRoot), 0o755); err != nil {
@@ -474,14 +536,17 @@ func runMxCombo(t *testing.T, ctx context.Context, repoDir, adminDir string, com
 	tmpBase := t.TempDir()
 	unitPath := UnitPath(storeRoot, targetID)
 	if ok, reason := mxConstructUnitPath(t, unitPath, tmpBase, c.up); !ok {
-		t.Skipf("unit-path construction unavailable: %s", reason)
+		t.Logf("unit-path construction unavailable: %s", reason)
+		return mxComboEnvSkipped, reason
 	}
 	if ok, reason := mxConstructRequest(t, RequestPath(storeRoot, targetID), tmpBase, c.req); !ok {
-		t.Skipf("request construction unavailable: %s", reason)
+		t.Logf("request construction unavailable: %s", reason)
+		return mxComboEnvSkipped, reason
 	}
 	mxConstructStaging(t, RequestStagingPath(storeRoot, targetID), c.st)
 	if ok, reason := mxConstructReleased(t, ReleasedPath(storeRoot, targetID), tmpBase, c.rel); !ok {
-		t.Skipf("released construction unavailable: %s", reason)
+		t.Logf("released construction unavailable: %s", reason)
+		return mxComboEnvSkipped, reason
 	}
 	mxConstructLock(t, LockPath(storeRoot, targetID), c.lk, deadPIDBytes)
 
@@ -529,6 +594,7 @@ func runMxCombo(t *testing.T, ctx context.Context, repoDir, adminDir string, com
 	if canaryHashBefore != canaryHashAfter {
 		t.Fatalf("canary sibling unit %s mutated by a gc call over this unrelated combination", canaryID)
 	}
+	return mxComboAsserted, ""
 }
 
 // --- representative subset: cross-check against Materialize ---
