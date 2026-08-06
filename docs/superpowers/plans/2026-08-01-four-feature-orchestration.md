@@ -84,11 +84,12 @@ review, hermetic Go tests, Playwright, `make verify`, and `go test -race ./...`.
 5. [Execution surfaces and security](#execution-surfaces-and-security)
 6. [Ten-hour acceleration window](#ten-hour-acceleration-window)
 7. [Delivery waves](#delivery-waves)
-8. [Per-unit pull request protocol](#per-unit-pull-request-protocol)
-9. [Producer-to-reviewer handoff contract](#producer-to-reviewer-handoff-contract)
-10. [Review and merge gates](#review-and-merge-gates)
-11. [Stop conditions](#stop-conditions)
-12. [Completion ledger](#completion-ledger)
+8. [Wave orchestration and review cadence](#wave-orchestration-and-review-cadence)
+9. [Per-unit pull request protocol](#per-unit-pull-request-protocol)
+10. [Producer-to-reviewer handoff contract](#producer-to-reviewer-handoff-contract)
+11. [Review and merge gates](#review-and-merge-gates)
+12. [Stop conditions](#stop-conditions)
+13. [Completion ledger](#completion-ledger)
 
 ## How to use this index
 
@@ -107,10 +108,13 @@ For each delivery unit:
 4. For implementation-heavy work, write a focused plan only when it materially
    improves correctness or reduces risk, then let the repository-defined
    Claude Code role execute it. Preserve FABLE ownership of frontend work.
-5. Open a draft pull request and attach the applicable handoff evidence below.
+5. Treat the delivery unit, not each internal task or commit, as the independent
+   review boundary. Open one draft pull request for that unit and attach the
+   applicable handoff evidence below.
 6. Substantial spec-only work receives exactly one independent cross-model
    exact-head review, at most one author correction pass, and one closure check.
-   Implementation-heavy work receives its applicable independent Codex review.
+   Implementation-heavy work receives one consolidated independent Codex
+   exact-head review after its implementation and gates are complete.
 7. The main agent adjudicates every finding, verifies the exact head, and
    produces the final handoff.
 8. Let the human owner merge only after required CI and governance checks pass.
@@ -304,8 +308,8 @@ The implementation concurrency ceiling remains two. During the shared-kernel pha
 
 ### Wave 1 — Shared authority foundation, solo
 
-- [ ] Plan and deliver `governance-principal-kernel`.
-- [ ] Plan and deliver CI `policy-authority`, including the human-artifact kernel, shared renderer, typed constraint catalogs, projection rules, and prospective adoption behavior.
+- [ ] Deliver `governance-principal-kernel`.
+- [ ] Deliver CI `policy-authority`, including the human-artifact kernel, shared renderer, typed constraint catalogs, projection rules, and prospective adoption behavior.
 - [ ] Prove legacy stores retain existing behavior when the constitution capability is not adopted.
 
 **Exit gate:** One strict schema and resolver for profiles and principals; one shared human-artifact/template seam; deterministic policy artifacts and projection checks; full gates green.
@@ -314,17 +318,17 @@ The implementation concurrency ceiling remains two. During the shared-kernel pha
 
 Track A:
 
-- [ ] Plan and deliver ASD's atomic draft-mutation core and structured CLI adapter.
+- [ ] Deliver ASD's atomic draft-mutation core and structured CLI adapter.
 - [ ] Establish the committed provenance-sidecar schema, transaction recovery contract, policy modes, semantic diff, and build-context exclusion identifier.
 
 Track B:
 
-- [ ] Plan and deliver GLG `journey-projection` as a read-only projection over existing lifecycle sources.
-- [ ] Plan and deliver GLG `obligation-quality`, keeping unresolved scaffolds visible and blocking at authoritative build.
+- [ ] Deliver GLG `journey-projection` as a read-only projection over existing lifecycle sources.
+- [ ] Deliver GLG `obligation-quality`, keeping unresolved scaffolds visible and blocking at authoritative build.
 
 After either track merges, the next eligible unit may start:
 
-- [ ] Plan and deliver the CSE versioned artifact schemas and closed deterministic recommendation engine without execution or UI adapters.
+- [ ] Deliver the CSE versioned artifact schemas and closed deterministic recommendation engine without execution or UI adapters.
 
 **Exit gate:** ASD mutations are atomic and provenance-bound; journey records and obligation blockers are deterministic; CSE can evaluate complete canned observations into byte-identical results; no adapter owns independent semantics.
 
@@ -332,12 +336,12 @@ After either track merges, the next eligible unit may start:
 
 Track A, sequential:
 
-- [ ] Plan and deliver CI `context-compiler`, including explicit ASD provenance exclusion and complete included/excluded/opaque ledgers.
-- [ ] Plan and deliver CI `policy-conflict-gate`, including mechanical proof, semantic candidates, dispositions, exemptions, staleness, and one shared verdict.
+- [ ] Deliver CI `context-compiler`, including explicit ASD provenance exclusion and complete included/excluded/opaque ledgers.
+- [ ] Deliver CI `policy-conflict-gate`, including mechanical proof, semantic candidates, dispositions, exemptions, staleness, and one shared verdict.
 
 Track B, eligible after the shared isolation boundary is approved:
 
-- [ ] Plan and deliver CSE evaluator capability discovery, generic command evaluator, process observer, candidate materialization, deterministic scheduling, interruption resume, and retention behavior.
+- [ ] Deliver CSE evaluator capability discovery, generic command evaluator, process observer, candidate materialization, deterministic scheduling, interruption resume, and retention behavior.
 
 **Exit gate:** Context compilation is byte-deterministic; conflict unknowns block; experiments distinguish candidate verdicts from operational failures; changed inputs refuse resume.
 
@@ -345,11 +349,11 @@ Track B, eligible after the shared isolation boundary is approved:
 
 Serialize changes that touch shared identity, authority, receipts, or human-record schemas:
 
-- [ ] Plan and deliver CI `sealed-codex-execution`.
-- [ ] Plan and deliver CI `context-receipts-review` with a fresh independent review capsule and authenticated managed-runner trust.
-- [ ] Plan and deliver GLG `lifecycle-governance` consumers over the shared kernel.
-- [ ] Plan and deliver GLG `accountable-human-records`.
-- [ ] Plan and deliver GLG `committed-authority`.
+- [ ] Deliver CI `sealed-codex-execution`.
+- [ ] Deliver CI `context-receipts-review` with a fresh independent review capsule and authenticated managed-runner trust.
+- [ ] Deliver GLG `lifecycle-governance` consumers over the shared kernel.
+- [ ] Deliver GLG `accountable-human-records`.
+- [ ] Deliver GLG `committed-authority`.
 
 **Exit gate:** No authoritative run launches without proven isolation; no authoritative transition consumes uncommitted human bytes; builder and reviewer receipts remain separate and fresh; experimental posture cannot mint authoritative proof.
 
@@ -357,17 +361,19 @@ Serialize changes that touch shared identity, authority, receipts, or human-reco
 
 Units may run in parallel only after a file/package ownership check:
 
-- [ ] Plan and deliver ASD capability/context reads, MCP adapter, proposal-only dogfood, draft-write, semantic review, and provenance read paths.
-- [ ] Plan and deliver CSE CLI and agent adapters, ratification record, spike-closure integration, cleanup, and selected-capsule retention.
-- [ ] Plan and deliver GLG `continuous-readiness` and feature-attestation scaffolding without agent-authored human claims.
-- [ ] Plan and deliver GLG `lifecycle-recovery` as diagnosis-first, read-only-by-default projection over observable state.
-- [ ] Plan and deliver GLG `journey-metrics` only after stable action, blocker, and outcome-event identifiers exist.
+- [ ] Deliver ASD capability/context reads, MCP adapter, proposal-only dogfood, draft-write, semantic review, and provenance read paths.
+- [ ] Deliver CSE CLI and agent adapters, ratification record, spike-closure integration, cleanup, and selected-capsule retention.
+- [ ] Deliver GLG `continuous-readiness` and feature-attestation scaffolding without agent-authored human claims.
+- [ ] Deliver GLG `lifecycle-recovery` as diagnosis-first, read-only-by-default projection over observable state.
+- [ ] Deliver GLG `journey-metrics` only after stable action, blocker, and outcome-event identifiers exist.
 
 **Exit gate:** Every adapter passes conformance against its application core; human-only actions are absent or refused through every agent surface; recovery never guesses; metric events never drive lifecycle truth.
 
 ### Wave 6 — Workbench presentation, fully serialized
 
-Each UI unit receives its own FABLE-owned plan and pull request:
+Each UI unit receives its own FABLE-owned delivery unit and pull request. Use a
+focused implementation plan only when the unit's complexity materially
+benefits from one:
 
 - [ ] ASD board synchronization, unsaved-edit protection, semantic review, and on-demand provenance.
 - [ ] CI Constitution rule ledger, derivation trail, impact review, and Git-backed proposal workflow.
@@ -388,6 +394,29 @@ Each UI unit receives its own FABLE-owned plan and pull request:
 
 **Exit gate:** Every feature AC has fresh evidence, every disclosure is explicit, no important Codex finding remains, and the human owner approves the integrated result.
 
+## Wave orchestration and review cadence
+
+A delivery wave is one orchestration campaign, not one branch or pull request.
+The main agent carries the wave from its entry conditions through its exit
+gate and keeps the dependency order, concurrency ceiling, shared ownership,
+and accumulated evidence visible across the campaign.
+
+Each named delivery unit remains a coherent branch and pull request. Internal
+tasks and commits receive author verification, TDD where applicable, and the
+unit's required gates, but they do not trigger automatic independent reviews.
+When the complete delivery unit is ready, one independent reviewer challenges
+its consolidated exact head. If the author accepts findings and changes that
+head, the same reviewer performs one closure check. Do not create a
+task-review-task-review loop, an automatic third review round, or a separate
+review event merely because an implementation plan had multiple steps.
+
+After every delivery unit in a wave has merged, the main agent performs one
+integration review against the resulting default-branch head. That review is
+limited to cross-unit contracts, regressions introduced by composition, and
+the wave's stated exit gate; it does not repeat each closed pull-request review
+line by line. A concrete integration defect becomes a focused correction unit.
+Wave 7 retains its fresh whole-program review and human authorization boundary.
+
 ## Per-unit pull request protocol
 
 Every delivery unit uses this Git topology:
@@ -404,8 +433,8 @@ The pull request remains draft until its author has completed the applicable
 producer-side review or direct-author verification and attached fresh gate
 evidence.
 Independent review is requested against an exact head commit. A pushed
-spec-only correction invalidates the initial review and permits the one closure
-check defined above; it does not begin a repeated review chain.
+correction invalidates the initial review and permits the one closure check
+defined above; it does not begin a repeated review chain.
 
 The branch must contain only its declared delivery unit. Generated data under `.verdi/data/`, exploratory prototypes, local profiles, `.DS_Store`, transcripts, and reviewer scratch files never enter the commit.
 
@@ -447,22 +476,26 @@ and the reported total.
 - A focused plan names exact files and interfaces after assessing the current base commit.
 - Every spec requirement maps to a task and test.
 - The plan contains no unresolved placeholders, speculative abstractions, or undeclared dependencies.
-- The independent cross-model reviewer selected by Gate C's authorship rule
-  issues `APPROVED`. If corrections are needed, the author may make at most one
-  correction pass and the same reviewer performs one closure check; no further
-  review round follows.
+- The main agent adjudicates the plan against binding authority before
+  implementation begins. Gate P does not create a separate automatic
+  cross-model review; the implemented delivery unit receives the consolidated
+  Gate C review.
 
 ### Gate I — Producer complete
 
 - This gate applies to implementation-heavy work, not spec-only authority.
-- Claude Code's implementer and internal reviewer have completed their loop.
+- The producer has completed the coherent delivery unit, its self-review, and
+  its required targeted and full gates. Internal task completion does not
+  require an independent reviewer loop.
 - The branch contains small, intentional commits and no unrelated changes.
 - The handoff packet contains fresh command evidence and three-valued disclosures.
 
 ### Gate C — Independent review approved
 
 - Implementation-heavy work receives a fresh read-only Codex review of the
-  exact head; its Claude Code producer repairs accepted findings.
+  consolidated exact head; its Claude Code producer repairs accepted findings.
+  If that repair changes the head, the same reviewer performs one closure
+  check. No task-level review chain or automatic third round follows.
 - Substantial spec-only work receives exactly one read-only cross-model review
   of the exact head: Claude reviews Codex-authored work, and Codex reviews
   Claude-authored work. The author adjudicates and repairs accepted findings,
