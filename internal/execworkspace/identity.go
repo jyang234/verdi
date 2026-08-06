@@ -52,15 +52,20 @@ type Identity struct {
 	PatchSHA256 string
 }
 
-// NewExactIdentity builds the exact-SHA shape's Identity. CommitSHA must be
-// the canonical lowercase full 40-hex commit SHA (spec §Workspace naming,
-// AD-3); anything else is a fail-closed error. No wall clock, no
-// randomness: the same (runID, commitSHA) always yields the same Identity.
+// NewExactIdentity builds the exact-SHA shape's Identity. runID must be
+// non-empty and CommitSHA must be the canonical lowercase full 40-hex commit
+// SHA (spec §Workspace naming, AD-3); anything else is a fail-closed error.
+// No wall clock, no randomness: the same (runID, commitSHA) always yields
+// the same Identity. Every returned Identity satisfies Validate.
 func NewExactIdentity(runID, commitSHA string) (Identity, error) {
 	if err := validateCommitSHA(commitSHA); err != nil {
 		return Identity{}, err
 	}
-	return Identity{Shape: ExactSHA, RunID: runID, CommitSHA: commitSHA}, nil
+	id := Identity{Shape: ExactSHA, RunID: runID, CommitSHA: commitSHA}
+	if err := id.Validate(); err != nil {
+		return Identity{}, err
+	}
+	return id, nil
 }
 
 // NewPatchIdentity builds the base-plus-patch shape's Identity. CommitSHA
@@ -78,12 +83,59 @@ func NewPatchIdentity(runID, commitSHA string, patchBytes []byte) (Identity, err
 		return Identity{}, fmt.Errorf("execworkspace: base-plus-patch request requires non-empty patch bytes")
 	}
 	sum := sha256.Sum256(patchBytes)
-	return Identity{
+	id := Identity{
 		Shape:       BasePlusPatch,
 		RunID:       runID,
 		CommitSHA:   commitSHA,
 		PatchSHA256: hex.EncodeToString(sum[:]),
-	}, nil
+	}
+	if err := id.Validate(); err != nil {
+		return Identity{}, err
+	}
+	return id, nil
+}
+
+// Validate reports whether id is a fully well-formed request identity, and
+// is the single gate every producer and consumer of an Identity passes
+// through: the constructors return only identities that satisfy it,
+// EncodeSidecar refuses to serialize one that does not, DecodeSidecar
+// refuses to hand back one that does not, and WorkspaceID refuses to name a
+// path for one that does not.
+//
+// The rules (spec §Workspace naming): Shape is one of the two ratified
+// shapes and nothing else — an unknown Shape value fails closed rather than
+// falling through to exact-SHA handling; RunID is non-empty AND still
+// non-empty after the store's normative RefSlug mapping, since an id whose
+// slug is empty could not produce a <workspace-id> with a non-empty slug
+// part; CommitSHA is the canonical lowercase 40-hex form; and PatchSHA256 is
+// the canonical lowercase 64-hex form for BasePlusPatch and EXACTLY empty
+// for ExactSHA — an exact-shape identity carrying a patch digest is a
+// contradiction, never silently ignored.
+func (id Identity) Validate() error {
+	switch id.Shape {
+	case ExactSHA, BasePlusPatch:
+	default:
+		return fmt.Errorf("execworkspace: identity: unknown shape %s", id.Shape)
+	}
+	if id.RunID == "" {
+		return fmt.Errorf("execworkspace: identity: run id is empty")
+	}
+	if store.RefSlug(id.RunID) == "" {
+		return fmt.Errorf("execworkspace: identity: run id %q slugs to the empty string", id.RunID)
+	}
+	if err := validateCommitSHA(id.CommitSHA); err != nil {
+		return fmt.Errorf("execworkspace: identity: %w", err)
+	}
+	if id.Shape == BasePlusPatch {
+		if err := validatePatchSHA256(id.PatchSHA256); err != nil {
+			return fmt.Errorf("execworkspace: identity: %w", err)
+		}
+		return nil
+	}
+	if id.PatchSHA256 != "" {
+		return fmt.Errorf("execworkspace: identity: exact-sha shape carries patch sha256 %q, want empty", id.PatchSHA256)
+	}
+	return nil
 }
 
 // WorkspaceID computes the deterministic <workspace-id> path segment (spec
@@ -94,12 +146,21 @@ func NewPatchIdentity(runID, commitSHA string, patchBytes []byte) (Identity, err
 // appear only in this path; full-identity comparison must use Equal, never
 // WorkspaceID, since truncation alone cannot distinguish two distinct
 // requests that happen to collide after truncation.
-func (id Identity) WorkspaceID() string {
+//
+// It returns an error rather than a path for any identity that fails
+// Validate — a hand-built Identity carrying a short digest yields a
+// fail-closed error, never a panic and never a truncated-looking path that
+// would name the wrong directory. The returned id always satisfies
+// ValidWorkspaceID.
+func (id Identity) WorkspaceID() (string, error) {
+	if err := id.Validate(); err != nil {
+		return "", err
+	}
 	base := store.RefSlug(id.RunID) + "--" + id.CommitSHA[:12]
 	if id.Shape == BasePlusPatch {
 		base += "-p" + id.PatchSHA256[:12]
 	}
-	return base
+	return base, nil
 }
 
 // Equal reports whether id and other are the SAME request identity by a

@@ -1,6 +1,7 @@
 package execworkspace
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -32,7 +33,22 @@ type sidecarDoc struct {
 // canonical JSON bytes (spec §Workspace naming). The exact-SHA shape omits
 // patch_sha256 entirely; the base-plus-patch shape carries its full 64-hex
 // digest.
+//
+// It fails closed on any identity that does not satisfy Identity.Validate:
+// a malformed identity is never serialized, so a sidecar on disk — the
+// materialization COMPLETION WITNESS — never records a request this package
+// would refuse to hand back.
 func EncodeSidecar(id Identity) ([]byte, error) {
+	if err := id.Validate(); err != nil {
+		return nil, fmt.Errorf("execworkspace: encoding request sidecar: %w", err)
+	}
+	return encodeSidecarDoc(sidecarDocFor(id))
+}
+
+// sidecarDocFor projects id onto its on-disk document shape. It is the ONE
+// place the projection lives, so encode and the decode-side canonical-bytes
+// gate can never drift apart.
+func sidecarDocFor(id Identity) sidecarDoc {
 	doc := sidecarDoc{
 		Schema:    sidecarSchema,
 		RunID:     id.RunID,
@@ -42,6 +58,10 @@ func EncodeSidecar(id Identity) ([]byte, error) {
 		patch := id.PatchSHA256
 		doc.PatchSHA256 = &patch
 	}
+	return doc
+}
+
+func encodeSidecarDoc(doc sidecarDoc) ([]byte, error) {
 	data, err := canonjson.Marshal(doc)
 	if err != nil {
 		return nil, fmt.Errorf("execworkspace: encoding request sidecar: %w", err)
@@ -50,17 +70,42 @@ func EncodeSidecar(id Identity) ([]byte, error) {
 }
 
 // DecodeSidecar strict-decodes a request-identity sidecar's bytes into an
-// Identity (spec §Workspace naming). It fails closed on: any unknown
-// field or trailing data (via internal/artifact.DecodeStrictJSON); a
-// schema value other than sidecarSchema; a missing or non-canonical
-// commit_sha; and a patch_sha256 that is present but not a canonical
-// 64-hex digest — this last case includes patch_sha256 present-but-empty,
-// which is never conflated with the key being absent (the exact-SHA
-// shape).
+// Identity (spec §Workspace naming). It fails closed on: any unknown field
+// or trailing data (via internal/artifact.DecodeStrictJSON); ANY departure
+// from the canonical bytes this package would itself write for the decoded
+// document (the canonical-bytes gate below); a schema value other than
+// sidecarSchema; a missing or non-canonical commit_sha; a patch_sha256 that
+// is present but not a canonical 64-hex digest — including
+// present-but-empty, never conflated with the key being absent (the
+// exact-SHA shape) — and any decoded identity that fails Identity.Validate.
+//
+// THE CANONICAL-BYTES GATE. The spec fixes the sidecar's serialization
+// exactly ("canonical JSON — sorted keys, trailing newline"), so anything
+// else is an UNDECODABLE sidecar, not a tolerated variant: the decoded
+// document is re-encoded through the same canonical encoder EncodeSidecar
+// uses and must byte-compare equal to the input. That single check closes
+// every silent-reinterpretation hole encoding/json otherwise leaves open —
+// an explicit `"patch_sha256": null` (which decodes to the absent/exact
+// shape while the bytes say otherwise), a duplicate key (last-wins), and
+// any non-canonical key order, interior whitespace, string escaping, or
+// missing/extra trailing newline. A sidecar is the materialization
+// completion witness and is written once and never edited, so a byte the
+// writer would not have produced means the file is not this package's
+// sidecar and must never be read as one.
 func DecodeSidecar(data []byte) (Identity, error) {
 	var doc sidecarDoc
 	if err := artifact.DecodeStrictJSON(data, &doc); err != nil {
 		return Identity{}, fmt.Errorf("execworkspace: decoding request sidecar: %w", err)
+	}
+	canonical, err := encodeSidecarDoc(doc)
+	if err != nil {
+		return Identity{}, fmt.Errorf("execworkspace: decoding request sidecar: %w", err)
+	}
+	if !bytes.Equal(canonical, data) {
+		return Identity{}, fmt.Errorf(
+			"execworkspace: request sidecar: bytes are not the canonical encoding of the document they decode to (want %q, got %q)",
+			canonical, data,
+		)
 	}
 	if doc.Schema != sidecarSchema {
 		return Identity{}, fmt.Errorf("execworkspace: request sidecar: schema %q, want %q", doc.Schema, sidecarSchema)
@@ -68,18 +113,18 @@ func DecodeSidecar(data []byte) (Identity, error) {
 	if err := validateCommitSHA(doc.CommitSHA); err != nil {
 		return Identity{}, fmt.Errorf("execworkspace: request sidecar: %w", err)
 	}
-	if doc.PatchSHA256 == nil {
-		return Identity{Shape: ExactSHA, RunID: doc.RunID, CommitSHA: doc.CommitSHA}, nil
+	id := Identity{Shape: ExactSHA, RunID: doc.RunID, CommitSHA: doc.CommitSHA}
+	if doc.PatchSHA256 != nil {
+		if err := validatePatchSHA256(*doc.PatchSHA256); err != nil {
+			return Identity{}, fmt.Errorf("execworkspace: request sidecar: %w", err)
+		}
+		id.Shape = BasePlusPatch
+		id.PatchSHA256 = *doc.PatchSHA256
 	}
-	if err := validatePatchSHA256(*doc.PatchSHA256); err != nil {
+	if err := id.Validate(); err != nil {
 		return Identity{}, fmt.Errorf("execworkspace: request sidecar: %w", err)
 	}
-	return Identity{
-		Shape:       BasePlusPatch,
-		RunID:       doc.RunID,
-		CommitSHA:   doc.CommitSHA,
-		PatchSHA256: *doc.PatchSHA256,
-	}, nil
+	return id, nil
 }
 
 // ErrIdentityMismatch is the typed hard error a caller returns when a

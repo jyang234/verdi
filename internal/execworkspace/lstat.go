@@ -73,7 +73,10 @@ func LstatType(path string) (PathKind, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return PathAbsent, nil
 		}
-		return PathUnknown, fmt.Errorf("execworkspace: lstat %s: %w", path, err)
+		// os.Lstat's error is an *os.PathError already naming both the
+		// operation ("lstat") and the path, so this wrap adds only the
+		// package context — repeating either would double-print it.
+		return PathUnknown, fmt.Errorf("execworkspace: typing path: %w", err)
 	}
 
 	mode := fi.Mode()

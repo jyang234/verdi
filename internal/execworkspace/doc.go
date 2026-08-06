@@ -11,5 +11,7 @@
 // top of the primitives this package exports (spec/execution-workspace
 // §Implementation seam names this unit "execution-workspace enforcement",
 // one shared internal package beside internal/wtmanager, internal/gitx,
-// internal/filelock; SI-15 assigns this package's name).
+// internal/filelock; the Go package NAME "execworkspace" is this unit's own
+// decision, controller decision AD-1, which SI-15 delegates to this unit
+// rather than fixing itself).
 package execworkspace

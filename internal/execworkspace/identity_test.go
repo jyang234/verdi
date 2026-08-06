@@ -7,6 +7,10 @@ import (
 
 const validSHA = "abcdef0123456789abcdef0123456789abcdef01"
 
+// validPatchSHA is a canonical lowercase 64-hex sha256 digest, the
+// patch-shape counterpart to validSHA.
+const validPatchSHA = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
 func TestNewExactIdentity_HappyPath(t *testing.T) {
 	id, err := NewExactIdentity("feature/my-run", validSHA)
 	if err != nil {
@@ -72,8 +76,16 @@ func TestNewPatchIdentity_Deterministic(t *testing.T) {
 	if id1.PatchSHA256 != id2.PatchSHA256 {
 		t.Fatalf("PatchSHA256 not deterministic: %q vs %q", id1.PatchSHA256, id2.PatchSHA256)
 	}
-	if id1.WorkspaceID() != id2.WorkspaceID() {
-		t.Fatalf("WorkspaceID not deterministic: %q vs %q", id1.WorkspaceID(), id2.WorkspaceID())
+	wid1, err := id1.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID: %v", err)
+	}
+	wid2, err := id2.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID: %v", err)
+	}
+	if wid1 != wid2 {
+		t.Fatalf("WorkspaceID not deterministic: %q vs %q", wid1, wid2)
 	}
 }
 
@@ -97,7 +109,10 @@ func TestWorkspaceID_ExactShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExactIdentity: %v", err)
 	}
-	got := id.WorkspaceID()
+	got, err := id.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID: %v", err)
+	}
 	want := "feature--my-run--" + validSHA[:12]
 	if got != want {
 		t.Fatalf("WorkspaceID() = %q, want %q", got, want)
@@ -109,7 +124,10 @@ func TestWorkspaceID_PatchShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPatchIdentity: %v", err)
 	}
-	got := id.WorkspaceID()
+	got, err := id.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID: %v", err)
+	}
 	want := "feature--my-run--" + validSHA[:12] + "-p" + id.PatchSHA256[:12]
 	if got != want {
 		t.Fatalf("WorkspaceID() = %q, want %q", got, want)
@@ -124,10 +142,106 @@ func TestWorkspaceID_UsesStoreRefSlug(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExactIdentity: %v", err)
 	}
-	got := id.WorkspaceID()
+	got, err := id.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID: %v", err)
+	}
 	want := "weird-run--name--" + validSHA[:12]
 	if got != want {
 		t.Fatalf("WorkspaceID() = %q, want %q", got, want)
+	}
+}
+
+// TestWorkspaceID_ShortDigestIsAnErrorNotAPanic proves a hand-built Identity
+// whose digests are too short to slice yields a fail-closed error, never a
+// panic and never a truncated path naming the wrong directory.
+func TestWorkspaceID_ShortDigestIsAnErrorNotAPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("WorkspaceID() panicked on a short commit sha: %v", r)
+		}
+	}()
+	cases := map[string]Identity{
+		"short commit sha":  {Shape: ExactSHA, RunID: "run", CommitSHA: "abc"},
+		"short patch sha":   {Shape: BasePlusPatch, RunID: "run", CommitSHA: validSHA, PatchSHA256: "abc"},
+		"empty commit sha":  {Shape: ExactSHA, RunID: "run"},
+		"unknown shape":     {Shape: Shape(42), RunID: "run", CommitSHA: validSHA},
+		"empty run id":      {Shape: ExactSHA, CommitSHA: validSHA},
+		"exact with patch":  {Shape: ExactSHA, RunID: "run", CommitSHA: validSHA, PatchSHA256: validPatchSHA},
+		"patch without sum": {Shape: BasePlusPatch, RunID: "run", CommitSHA: validSHA},
+	}
+	for name, id := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := id.WorkspaceID()
+			if err == nil {
+				t.Fatalf("WorkspaceID() = %q, want error for %+v", got, id)
+			}
+			if got != "" {
+				t.Fatalf("WorkspaceID() = %q alongside an error, want empty string", got)
+			}
+			if verr := id.Validate(); verr == nil {
+				t.Fatalf("Validate() = nil for %+v, want error", id)
+			}
+		})
+	}
+}
+
+func TestIdentity_Validate_AcceptsConstructedIdentities(t *testing.T) {
+	exact, err := NewExactIdentity("feature/my-run", validSHA)
+	if err != nil {
+		t.Fatalf("NewExactIdentity: %v", err)
+	}
+	if err := exact.Validate(); err != nil {
+		t.Fatalf("Validate(exact): unexpected error: %v", err)
+	}
+	patch, err := NewPatchIdentity("feature/my-run", validSHA, []byte("diff"))
+	if err != nil {
+		t.Fatalf("NewPatchIdentity: %v", err)
+	}
+	if err := patch.Validate(); err != nil {
+		t.Fatalf("Validate(patch): unexpected error: %v", err)
+	}
+}
+
+func TestNewIdentity_RejectsEmptyRunID(t *testing.T) {
+	if _, err := NewExactIdentity("", validSHA); err == nil {
+		t.Fatalf("NewExactIdentity(empty run id): want error, got nil")
+	}
+	if _, err := NewPatchIdentity("", validSHA, []byte("x")); err == nil {
+		t.Fatalf("NewPatchIdentity(empty run id): want error, got nil")
+	}
+}
+
+// TestWorkspaceID_SatisfiesValidWorkspaceID closes the loop between the two
+// halves of the naming scheme: every id the producer emits is one the
+// grammar classifier accepts.
+func TestWorkspaceID_SatisfiesValidWorkspaceID(t *testing.T) {
+	runIDs := []string{"run", "feature/My-Run", "weird_run/name", "a/b/c", "release/v1.2.3", "..", "--"}
+	for _, runID := range runIDs {
+		t.Run(runID, func(t *testing.T) {
+			exact, err := NewExactIdentity(runID, validSHA)
+			if err != nil {
+				t.Fatalf("NewExactIdentity(%q): %v", runID, err)
+			}
+			wid, err := exact.WorkspaceID()
+			if err != nil {
+				t.Fatalf("WorkspaceID: %v", err)
+			}
+			if !ValidWorkspaceID(wid) {
+				t.Fatalf("ValidWorkspaceID(%q) = false for an exact-shape id the package itself produced", wid)
+			}
+			patch, err := NewPatchIdentity(runID, validSHA, []byte("diff"))
+			if err != nil {
+				t.Fatalf("NewPatchIdentity(%q): %v", runID, err)
+			}
+			pwid, err := patch.WorkspaceID()
+			if err != nil {
+				t.Fatalf("WorkspaceID: %v", err)
+			}
+			if !ValidWorkspaceID(pwid) {
+				t.Fatalf("ValidWorkspaceID(%q) = false for a patch-shape id the package itself produced", pwid)
+			}
+		})
 	}
 }
 
@@ -163,7 +277,15 @@ func TestIdentity_NoWallClockNoRandomness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewPatchIdentity: %v", err)
 		}
-		if next.WorkspaceID() != first.WorkspaceID() || next.PatchSHA256 != first.PatchSHA256 {
+		nextID, err := next.WorkspaceID()
+		if err != nil {
+			t.Fatalf("WorkspaceID: %v", err)
+		}
+		firstID, err := first.WorkspaceID()
+		if err != nil {
+			t.Fatalf("WorkspaceID: %v", err)
+		}
+		if nextID != firstID || next.PatchSHA256 != first.PatchSHA256 {
 			t.Fatalf("identity not deterministic across repeated calls")
 		}
 	}
