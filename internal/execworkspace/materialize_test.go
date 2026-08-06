@@ -677,8 +677,24 @@ func TestMaterialize_OrphanedSiblings_NoDir(t *testing.T) {
 	if res.Outcome != OutcomeMaterialized {
 		t.Fatalf("Outcome = %v, want OutcomeMaterialized", res.Outcome)
 	}
-	if len(res.Disclosures) < 3 {
-		t.Fatalf("Disclosures = %v, want at least 3 lines (one per deleted orphan)", res.Disclosures)
+	// The FULL disclosure set, pinned exactly: one line per deleted sibling
+	// in orphanSiblings' spec order (.request, .request.staging, .released),
+	// then step 2's registry reconciliation. Nothing else is emitted on this
+	// path, and an "at least" assertion would hide both an extra line and a
+	// silently reordered sweep.
+	wantDisclosures := []string{
+		fmt.Sprintf("step 2: deleted orphaned sibling metadata %s", RequestPath(storeRoot, workspaceID)),
+		fmt.Sprintf("step 2: deleted orphaned sibling metadata %s", RequestStagingPath(storeRoot, workspaceID)),
+		fmt.Sprintf("step 2: deleted orphaned sibling metadata %s", ReleasedPath(storeRoot, workspaceID)),
+		fmt.Sprintf("step 2: reconciled worktree registry for %s", workspaceID),
+	}
+	if len(res.Disclosures) != len(wantDisclosures) {
+		t.Fatalf("Disclosures = %#v, want exactly %#v", res.Disclosures, wantDisclosures)
+	}
+	for i, want := range wantDisclosures {
+		if res.Disclosures[i] != want {
+			t.Fatalf("Disclosures[%d] = %q, want %q (full set: %#v)", i, res.Disclosures[i], want, res.Disclosures)
+		}
 	}
 	if calls := rec.callCount(); calls != 1 {
 		t.Fatalf("reconciler called %d times, want 1", calls)
@@ -708,11 +724,16 @@ func TestMaterialize_OrphanedSiblings_NoDir(t *testing.T) {
 	lockAbsent(t, storeRoot, workspaceID)
 }
 
-// --- lstat failure at the unit path: never read as absence ---
+// --- lock acquisition failure: fails at step 1, never reaches step 2 ---
 
-func TestMaterialize_LstatFailureAtUnitPath_NotAbsence(t *testing.T) {
+// An unreadable execution root fails at the FIRST filesystem operation the
+// state machine performs inside it, which is step 1's lock creation — not
+// the unit-path lstat, which never runs. The assertion pins the Op this
+// test actually exercises; the unit-path lstat-failure branch is covered
+// white-box below (TestMaterializeLocked_LstatFailureAtUnitPath_NotAbsence).
+func TestMaterialize_LockAcquireFailure_NeverReachesStep2(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("running as root: permission-based lstat failure cannot be induced")
+		t.Skip("running as root: permission-based failure cannot be induced")
 	}
 	m, storeRoot, repo, rec := newTestMaterializer(t)
 	ctx := context.Background()
@@ -726,7 +747,7 @@ func TestMaterialize_LstatFailureAtUnitPath_NotAbsence(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(execRoot, 0o755) })
 
-	id, err := NewExactIdentity("run-lstat-fail", repo.Head)
+	id, err := NewExactIdentity("run-lock-fail", repo.Head)
 	if err != nil {
 		t.Fatalf("NewExactIdentity: %v", err)
 	}
@@ -738,8 +759,203 @@ func TestMaterialize_LstatFailureAtUnitPath_NotAbsence(t *testing.T) {
 	if !errors.As(err, &opErr) {
 		t.Fatalf("error = %v, want *OperationalError", err)
 	}
+	if opErr.Op != "acquire lock" {
+		t.Fatalf("OperationalError.Op = %q, want %q (the step this test actually exercises)", opErr.Op, "acquire lock")
+	}
+	if calls := rec.callCount(); calls != 0 {
+		t.Fatalf("reconciler called %d times, want 0 (a step-1 failure must never route into step 2)", calls)
+	}
+}
+
+// --- lstat failure at the unit path: never read as absence ---
+
+// WHITE-BOX, for the same reason the writeCompletionWitness tests below are
+// white-box: the public Materialize() API cannot isolate this branch,
+// because the lock file and the unit path are siblings in ONE directory —
+// the only lever that makes the unit-path lstat fail (revoking access to
+// data/execution/) also makes step 1's lock creation fail first, so the
+// public path always errors at "acquire lock" and this branch would ship
+// untested. Holding the lock BEFORE revoking access, then entering the
+// locked phase directly, exercises the branch honestly.
+func TestMaterializeLocked_LstatFailureAtUnitPath_NotAbsence(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission-based lstat failure cannot be induced")
+	}
+	m, storeRoot, repo, rec := newTestMaterializer(t)
+	ctx := context.Background()
+
+	id, err := NewExactIdentity("run-lstat-fail", repo.Head)
+	if err != nil {
+		t.Fatalf("NewExactIdentity: %v", err)
+	}
+	workspaceID, err := id.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID: %v", err)
+	}
+	execRoot := ExecutionRoot(storeRoot)
+	if err := os.MkdirAll(execRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll execution root: %v", err)
+	}
+
+	// Take the unit lock exactly as step 1 would, THEN revoke access, so the
+	// locked phase's first act — the unit-path lstat — is the failing one.
+	lockPath := LockPath(storeRoot, workspaceID)
+	lockFile, err := filelock.Acquire(lockPath)
+	if err != nil {
+		t.Fatalf("pre-acquiring unit lock: %v", err)
+	}
+	if err := os.Chmod(execRoot, 0o000); err != nil {
+		t.Fatalf("chmod execution root: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(execRoot, 0o755)
+		_ = filelock.Release(lockFile, lockPath)
+	})
+
+	res := Result{}
+	err = m.materializeLocked(ctx, Request{Identity: id}, workspaceID, &res)
+	if err == nil {
+		t.Fatal("materializeLocked with an unreadable execution root: want error, got nil")
+	}
+	var opErr *OperationalError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("error = %v, want *OperationalError", err)
+	}
+	if opErr.Op != "lstat unit path" {
+		t.Fatalf("OperationalError.Op = %q, want %q", opErr.Op, "lstat unit path")
+	}
+	// Never read as absence: step 2 never ran, so no sibling deletion was
+	// attempted and the registry reconciliation never fired.
 	if calls := rec.callCount(); calls != 0 {
 		t.Fatalf("reconciler called %d times, want 0 (an lstat failure must never route into step 2)", calls)
+	}
+	if res.Outcome != OutcomeUnknown {
+		t.Fatalf("Outcome = %v, want OutcomeUnknown on a failed locked phase", res.Outcome)
+	}
+	if len(res.Disclosures) != 0 {
+		t.Fatalf("Disclosures = %#v, want none (nothing was deleted or reconciled)", res.Disclosures)
+	}
+
+	// The unit is untouched: restoring access shows nothing was created or
+	// removed under this workspace id.
+	if err := os.Chmod(execRoot, 0o755); err != nil {
+		t.Fatalf("restoring execution root mode: %v", err)
+	}
+	for _, p := range []string{
+		UnitPath(storeRoot, workspaceID),
+		RequestPath(storeRoot, workspaceID),
+		RequestStagingPath(storeRoot, workspaceID),
+		ReleasedPath(storeRoot, workspaceID),
+	} {
+		kind, lerr := LstatType(p)
+		if lerr != nil {
+			t.Fatalf("lstat %s: %v", p, lerr)
+		}
+		if kind != PathAbsent {
+			t.Fatalf("%s = %s after a unit-path lstat failure, want untouched/absent", p, kind)
+		}
+	}
+}
+
+// --- symlink planted AT the unit path: operational, never followed ---
+
+// Spec §Exact workspace materialization: "a symlink planted at
+// <workspace-id> would read as a present directory and a reclaim could
+// delete through it into its target." The unit-path branch types with
+// lstat, so a symlink lands in neither the absent nor the real-directory
+// branch: it is an operational error, and the symlink and everything behind
+// it survive byte-intact.
+func TestMaterialize_SymlinkAtUnitPath_OperationalError_NeverFollowed(t *testing.T) {
+	m, storeRoot, repo, rec := newTestMaterializer(t)
+	ctx := context.Background()
+
+	id, err := NewExactIdentity("run-unitpath-symlink", repo.Head)
+	if err != nil {
+		t.Fatalf("NewExactIdentity: %v", err)
+	}
+	workspaceID, err := id.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID: %v", err)
+	}
+	if err := os.MkdirAll(ExecutionRoot(storeRoot), 0o755); err != nil {
+		t.Fatalf("MkdirAll execution root: %v", err)
+	}
+
+	// The symlink's target: a directory holding a victim file that a
+	// delete-through would destroy.
+	targetDir := filepath.Join(t.TempDir(), "victim-dir")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll target dir: %v", err)
+	}
+	victim := filepath.Join(targetDir, "precious.txt")
+	const victimBody = "must survive byte-for-byte\n"
+	if err := os.WriteFile(victim, []byte(victimBody), 0o644); err != nil {
+		t.Fatalf("writing victim file: %v", err)
+	}
+
+	unitPath := UnitPath(storeRoot, workspaceID)
+	if err := os.Symlink(targetDir, unitPath); err != nil {
+		t.Fatalf("planting symlink at unit path: %v", err)
+	}
+
+	_, err = m.Materialize(ctx, Request{Identity: id})
+	if err == nil {
+		t.Fatal("Materialize with a symlink planted at the unit path: want error, got nil")
+	}
+	var opErr *OperationalError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("error = %v, want *OperationalError", err)
+	}
+	if opErr.Op != "lstat unit path" {
+		t.Fatalf("OperationalError.Op = %q, want %q", opErr.Op, "lstat unit path")
+	}
+
+	// Never followed: the symlink itself is still the object at the unit
+	// path, and its target's contents are byte-intact.
+	kind, lerr := LstatType(unitPath)
+	if lerr != nil {
+		t.Fatalf("lstat unit path: %v", lerr)
+	}
+	if kind != PathSymlink {
+		t.Fatalf("unit path kind = %s after refusal, want unchanged PathSymlink", kind)
+	}
+	body, rerr := os.ReadFile(victim)
+	if rerr != nil {
+		t.Fatalf("reading victim file after refusal: %v", rerr)
+	}
+	if string(body) != victimBody {
+		t.Fatalf("victim file body = %q, want unchanged %q", body, victimBody)
+	}
+	entries, derr := os.ReadDir(targetDir)
+	if derr != nil {
+		t.Fatalf("reading target dir after refusal: %v", derr)
+	}
+	if len(entries) != 1 || entries[0].Name() != "precious.txt" {
+		t.Fatalf("target dir entries = %v, want exactly [precious.txt] (nothing deleted through, nothing created through)", entries)
+	}
+
+	// Neither the absent-unit nor the residue-rebuild branch ran, and no
+	// witness was written beside the planted symlink.
+	if calls := rec.callCount(); calls != 0 {
+		t.Fatalf("reconciler called %d times, want 0", calls)
+	}
+	if k, _ := LstatType(RequestPath(storeRoot, workspaceID)); k != PathAbsent {
+		t.Fatalf("witness present despite unit-path refusal: kind=%s", k)
+	}
+	if k, _ := LstatType(RequestStagingPath(storeRoot, workspaceID)); k != PathAbsent {
+		t.Fatalf("staging present despite unit-path refusal: kind=%s", k)
+	}
+
+	// The lock was released on this error path: the file is gone and a
+	// fresh acquisition succeeds.
+	lockAbsent(t, storeRoot, workspaceID)
+	lockPath := LockPath(storeRoot, workspaceID)
+	f, aerr := filelock.Acquire(lockPath)
+	if aerr != nil {
+		t.Fatalf("re-acquiring the unit lock after refusal: %v", aerr)
+	}
+	if rerr := filelock.Release(f, lockPath); rerr != nil {
+		t.Fatalf("releasing re-acquired lock: %v", rerr)
 	}
 }
 
@@ -882,6 +1098,65 @@ func TestMaterialize_ReconcilerFailure_Step4c_SelfHeals(t *testing.T) {
 		t.Fatalf("reconciler called %d times total, want 2 (4c failure, then step-2 success)", calls)
 	}
 	lockAbsent(t, storeRoot, workspaceID)
+}
+
+// --- a panicking Reconciler must not leak a held lock ---
+
+type panicReconciler struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *panicReconciler) ReconcileUnit(_ context.Context, _, _ string) error {
+	p.mu.Lock()
+	p.calls++
+	p.mu.Unlock()
+	panic("panicReconciler: injected panic from inside the locked phase")
+}
+
+func TestMaterialize_ReconcilerPanic_DoesNotLeakHeldLock(t *testing.T) {
+	repo := buildTestRepo(t)
+	storeRoot := t.TempDir()
+	pr := &panicReconciler{}
+	m, err := NewMaterializer(storeRoot, repo.Dir, pr)
+	if err != nil {
+		t.Fatalf("NewMaterializer: %v", err)
+	}
+	ctx := context.Background()
+
+	id, err := NewExactIdentity("run-panic", repo.Head)
+	if err != nil {
+		t.Fatalf("NewExactIdentity: %v", err)
+	}
+	workspaceID, err := id.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID: %v", err)
+	}
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("Materialize with a panicking reconciler: want the panic to propagate, got none")
+			}
+		}()
+		_, _ = m.Materialize(ctx, Request{Identity: id})
+	}()
+
+	if pr.calls != 1 {
+		t.Fatalf("panicking reconciler called %d times, want 1", pr.calls)
+	}
+	// The lock must not survive the unwind: an abandoned lock file would
+	// wedge this unit against every later mutator (materialize, release, gc)
+	// until a liveness probe eventually reaped it.
+	lockAbsent(t, storeRoot, workspaceID)
+	lockPath := LockPath(storeRoot, workspaceID)
+	f, aerr := filelock.Acquire(lockPath)
+	if aerr != nil {
+		t.Fatalf("re-acquiring the unit lock after a panicking reconciler: %v", aerr)
+	}
+	if rerr := filelock.Release(f, lockPath); rerr != nil {
+		t.Fatalf("releasing re-acquired lock: %v", rerr)
+	}
 }
 
 // --- no deletion outside the exact unit ---
@@ -1179,6 +1454,55 @@ func TestWriteCompletionWitness_StagingSymlink_OperationalError(t *testing.T) {
 	}
 }
 
+// openStagingWitness's own refusal, independent of the lstat pre-check: the
+// lstat→open window is racy by construction (a symlink can be planted in
+// it), so the open itself must refuse to follow. Calling the opener
+// directly is the only way to exercise that second guard — through
+// writeCompletionWitness the lstat pre-check always fires first.
+func TestOpenStagingWitness_SymlinkRefusedAtOpen_NeverFollowed(t *testing.T) {
+	storeRoot := t.TempDir()
+	if err := os.MkdirAll(ExecutionRoot(storeRoot), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	id, err := NewExactIdentity("run-open-nofollow", "0123456789abcdef0123456789abcdef01234567")
+	if err != nil {
+		t.Fatalf("NewExactIdentity: %v", err)
+	}
+	workspaceID, _ := id.WorkspaceID()
+	stagingPath := RequestStagingPath(storeRoot, workspaceID)
+
+	victim := filepath.Join(t.TempDir(), "precious.txt")
+	const victimBody = "must survive byte-for-byte\n"
+	if err := os.WriteFile(victim, []byte(victimBody), 0o644); err != nil {
+		t.Fatalf("writing victim file: %v", err)
+	}
+	if err := os.Symlink(victim, stagingPath); err != nil {
+		t.Fatalf("symlinking staging path at the victim: %v", err)
+	}
+
+	f, oerr := openStagingWitness(stagingPath)
+	if oerr == nil {
+		_ = f.Close()
+		t.Fatal("openStagingWitness on a symlinked staging path: want a refusal (ELOOP), got nil error")
+	}
+	// The proof the open never followed: an O_TRUNC that had followed would
+	// have emptied the victim before any error could be reported.
+	body, rerr := os.ReadFile(victim)
+	if rerr != nil {
+		t.Fatalf("reading victim after refusal: %v", rerr)
+	}
+	if string(body) != victimBody {
+		t.Fatalf("victim body = %q, want unchanged %q (the open followed the symlink)", body, victimBody)
+	}
+	kind, lerr := LstatType(stagingPath)
+	if lerr != nil {
+		t.Fatalf("lstat staging path: %v", lerr)
+	}
+	if kind != PathSymlink {
+		t.Fatalf("staging path kind = %s after refusal, want unchanged PathSymlink", kind)
+	}
+}
+
 // --- Outcome/OperationalError diagnostics ---
 
 func TestOutcome_String(t *testing.T) {
@@ -1189,6 +1513,23 @@ func TestOutcome_String(t *testing.T) {
 	for outcome, want := range cases {
 		if got := outcome.String(); got != want {
 			t.Fatalf("Outcome(%d).String() = %q, want %q", outcome, got, want)
+		}
+	}
+}
+
+// The default branch is the fail-closed fallback: an Outcome carrying no
+// meaning (the zero value) or no definition at all renders as a
+// self-identifying diagnostic rather than silently borrowing a real
+// outcome's label.
+func TestOutcome_String_DefaultBranch(t *testing.T) {
+	cases := map[Outcome]string{
+		OutcomeUnknown: "execworkspace.Outcome(0)",
+		Outcome(-1):    "execworkspace.Outcome(-1)",
+		Outcome(42):    "execworkspace.Outcome(42)",
+	}
+	for outcome, want := range cases {
+		if got := outcome.String(); got != want {
+			t.Fatalf("Outcome(%d).String() = %q, want %q", int(outcome), got, want)
 		}
 	}
 }

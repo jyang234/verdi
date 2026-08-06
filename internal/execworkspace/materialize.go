@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"syscall"
 
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -177,51 +178,62 @@ func (e *ErrReleasedTerminal) Error() string {
 // error's Result.Outcome is meaningful). This is the one chosen surface
 // (documented here rather than also threading an io.Writer): a caller
 // that wants a log sink ranges over Result.Disclosures itself.
-func (m *Materializer) Materialize(ctx context.Context, req Request) (Result, error) {
-	res := Result{}
-
-	if err := req.Identity.Validate(); err != nil {
-		return res, operationalError("validate request identity", err)
+func (m *Materializer) Materialize(ctx context.Context, req Request) (res Result, err error) {
+	if verr := req.Identity.Validate(); verr != nil {
+		return res, operationalError("validate request identity", verr)
 	}
-	if err := validateRequestPatchBytes(req); err != nil {
-		return res, operationalError("validate request patch bytes", err)
+	if verr := validateRequestPatchBytes(req); verr != nil {
+		return res, operationalError("validate request patch bytes", verr)
 	}
-	workspaceID, err := req.Identity.WorkspaceID()
-	if err != nil {
-		return res, operationalError("compute workspace id", err)
+	workspaceID, widErr := req.Identity.WorkspaceID()
+	if widErr != nil {
+		return res, operationalError("compute workspace id", widErr)
 	}
 	res.WorkspaceID = workspaceID
 	res.Path = UnitPath(m.storeRoot, workspaceID)
 
 	// MkdirAll of the execution root is not a unit mutation (it names no
 	// <workspace-id>), so it runs before lock acquisition.
-	if err := os.MkdirAll(ExecutionRoot(m.storeRoot), 0o755); err != nil {
-		return res, operationalError("prepare execution root", err)
+	if mkErr := os.MkdirAll(ExecutionRoot(m.storeRoot), 0o755); mkErr != nil {
+		return res, operationalError("prepare execution root", mkErr)
 	}
 
 	// Step 1: non-blocking acquire. ANY acquisition failure is an
 	// operational error, disclosed and retryable — including ErrHeld,
 	// which is reachable from the returned error via errors.As.
 	lockPath := LockPath(m.storeRoot, workspaceID)
-	lockFile, err := filelock.Acquire(lockPath)
-	if err != nil {
-		return res, operationalError("acquire lock", err)
+	lockFile, acqErr := filelock.Acquire(lockPath)
+	if acqErr != nil {
+		return res, operationalError("acquire lock", acqErr)
 	}
 
-	// The lock is held CONTINUOUSLY across steps 1-6 and released here at
-	// the end on every path — success or any error past acquisition.
-	mErr := m.materializeLocked(ctx, req, workspaceID, &res)
-	if relErr := filelock.Release(lockFile, lockPath); relErr != nil {
-		relOpErr := operationalError("release lock", relErr)
-		if mErr == nil {
-			return res, relOpErr
+	// The lock is held CONTINUOUSLY across steps 1-6 and released on EVERY
+	// exit from this function past acquisition. The release is deferred
+	// rather than written after the call so that an unwinding PANIC — a
+	// Reconciler port implementation blowing up mid-flight, for instance —
+	// cannot leak a held lock and wedge this unit against every later
+	// mutator (materialize, release, gc).
+	//
+	// ERROR PRIORITY (unchanged from the pre-defer form): the flow's own
+	// error WINS. A release failure is promoted to the returned error only
+	// when the flow produced none; otherwise it is appended to
+	// Result.Disclosures beside the flow's error rather than masking it,
+	// because the flow's verdict (operational or hard) is what the caller
+	// must act on.
+	defer func() {
+		relErr := filelock.Release(lockFile, lockPath)
+		if relErr == nil {
+			return
 		}
-		// The step's own error (operational or hard-verdict) takes
-		// priority; the release failure is disclosed alongside it rather
-		// than masking it.
+		if err == nil {
+			err = operationalError("release lock", relErr)
+			return
+		}
 		res.Disclosures = append(res.Disclosures, fmt.Sprintf("lock release also failed: %v", relErr))
-	}
-	return res, mErr
+	}()
+
+	err = m.materializeLocked(ctx, req, workspaceID, &res)
+	return res, err
 }
 
 // validateRequestPatchBytes enforces AD-6: PatchBytes is required for
@@ -477,7 +489,10 @@ func (m *Materializer) materializeWorktree(ctx context.Context, req Request, uni
 // (O_CREATE|O_WRONLY|O_TRUNC, deliberately never O_EXCL — an exclusive
 // create would wedge forever against a crash-left staging residue); any
 // other object there is an operational error, never followed and never
-// written through.
+// written through. The open itself adds O_NOFOLLOW (openStagingWitness,
+// below) so the lstat→open window cannot be raced into following a
+// freshly planted symlink: that ELOOP surfaces through this same
+// operational error path.
 func writeCompletionWitness(storeRoot, workspaceID string, id Identity) error {
 	data, err := EncodeSidecar(id)
 	if err != nil {
@@ -491,7 +506,7 @@ func writeCompletionWitness(storeRoot, workspaceID string, id Identity) error {
 	}
 	switch stagingKind {
 	case PathAbsent, PathRegular:
-		f, oerr := os.OpenFile(stagingPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		f, oerr := openStagingWitness(stagingPath)
 		if oerr != nil {
 			return fmt.Errorf("opening staging witness: %w", oerr)
 		}
@@ -511,4 +526,17 @@ func writeCompletionWitness(storeRoot, workspaceID string, id Identity) error {
 		return fmt.Errorf("renaming staging witness into place: %w", err)
 	}
 	return nil
+}
+
+// openStagingWitness opens the staging path for step 6's write. O_NOFOLLOW
+// is the SECOND guard, independent of writeCompletionWitness's lstat
+// pre-check: between that lstat and this open lies a window in which a
+// fresh symlink can be planted at the staging path, and without O_NOFOLLOW
+// the O_TRUNC would follow it and empty whatever it names. With the flag,
+// the kernel refuses (ELOOP) and the caller reports it through the same
+// non-regular-object operational error path the lstat pre-check feeds —
+// "never followed, never written through" holds across the whole window,
+// not just at the instant of the check.
+func openStagingWitness(stagingPath string) (*os.File, error) {
+	return os.OpenFile(stagingPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0o644)
 }
