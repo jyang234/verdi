@@ -36,11 +36,26 @@ import (
 // failure — returns a non-nil error; it never reports success by exit
 // status alone.
 //
+// STRUCTURAL PRECONDITION ON EVERY IMPLEMENTATION: an implementation must
+// be confined, BY CONSTRUCTION, to one store root's data/execution/
+// namespace, and must REFUSE any unitPath that is not a direct child of
+// that execution root once both are canonicalized (symlinks resolved). The
+// spec's BY-CONSTRUCTION clause — "the only registration this component can
+// delete is one whose resolved path lies under data/execution/, names the
+// unit being reconciled, and is held under the claim from proof through
+// deletion" — is a property of this port, not a habit of its callers: an
+// implementation that reconciles whatever path it is handed would delete
+// Git worktree registrations belonging to repository slices this component
+// does not own, which the CROSS-SLICE INVARIANT forbids. The production
+// implementation, GitReconciler (reconcile.go), takes that store root at
+// construction (NewGitReconciler) and enforces the check before it opens a
+// single administrative directory.
+//
 // This is a consumer-side port (controller decision AD-4, the 04 §port
-// pattern: interfaces are defined at the consumer). The real
-// implementation is a later lane's concern; Materialize depends only on
-// this interface, and tests in this package exercise it through hermetic
-// fakes.
+// pattern: interfaces are defined at the consumer). Materialize depends
+// only on this interface, and tests in this package exercise it through
+// hermetic fakes — a fake is outside the confinement precondition only
+// because it deletes nothing.
 type Reconciler interface {
 	ReconcileUnit(ctx context.Context, repoRoot, unitPath string) error
 }

@@ -38,11 +38,38 @@ const (
 )
 
 // GitReconciler is the production Reconciler. Construct with
-// NewGitReconciler; the zero value *GitReconciler{} is also directly usable
-// (CLAUDE.md: "design zero values to be useful") — NewGitReconciler exists
-// for symmetry with NewMaterializer and as the one documented construction
-// site.
+// NewGitReconciler(storeRoot): the store root is REQUIRED, because it fixes
+// the one namespace this reconciler may ever delete a registration under.
+//
+// STRUCTURAL PRECONDITION (spec §Workspace naming's BY-CONSTRUCTION clause:
+// "the only registration this component can delete is one whose resolved
+// path lies under data/execution/, names the unit being reconciled, and is
+// held under the claim from proof through deletion"). Before this change
+// the "lies under data/execution/" half of that conjunction was carried
+// only by callers passing a well-formed unit path — nothing in this type
+// enforced it, so a GitReconciler pointed at any live worktree elsewhere on
+// the filesystem would claim and delete its administrative entry, breaking
+// a repository slice this component does not own. It is now enforced HERE,
+// once, before any enumeration or mutation: canonicalExecutionRoot is
+// captured at construction, and ReconcileUnit refuses any unitPath that is
+// not a DIRECT CHILD of it under the same canonicalization both sides of
+// every comparison already use. Canonicalization is what makes the check
+// structural rather than lexical: a symlink planted at an in-root unit path
+// whose target lives outside data/execution/ resolves outside the root and
+// is refused too.
+//
+// The zero value is therefore NO LONGER usable: it carries no execution
+// root, so every ReconcileUnit call on it refuses (fail-closed). That is
+// deliberate — a reconciler with no confinement root must delete nothing at
+// all rather than everything it can resolve.
 type GitReconciler struct {
+	// canonicalExecutionRoot is the canonicalized data/execution/ directory
+	// this reconciler is confined to (canonicalPath(ExecutionRoot(storeRoot))).
+	// Unexported so no caller outside this package can widen the confinement
+	// after construction, and so NewGitReconciler is the only way to obtain
+	// a reconciler that can delete anything.
+	canonicalExecutionRoot string
+
 	// Disclose, if non-nil, receives one diagnostic line per call where the
 	// read-only gitx.WorktreeList corroboration (spec §Reused primitives)
 	// disagrees with the direct administrative-directory enumeration this
@@ -81,11 +108,63 @@ type GitReconciler struct {
 	afterClaimForTests func(entryDir string) (simulateCrash bool)
 }
 
-// NewGitReconciler builds a GitReconciler with no disclosure sink. Set
-// Disclose on the returned value to receive corroboration-disagreement
-// lines.
-func NewGitReconciler() *GitReconciler {
-	return &GitReconciler{}
+// NewGitReconciler builds a GitReconciler confined to storeRoot's
+// data/execution/ directory (see ExecutionRoot) and with no disclosure
+// sink. Set Disclose on the returned value to receive
+// corroboration-disagreement lines.
+//
+// storeRoot is the directory containing .verdi/ — the SAME storeRoot
+// NewMaterializer takes, so a Materializer and the Reconciler it is given
+// are confined to one and the same unit namespace. The execution root is
+// canonicalized once, here, and never recomputed: it is compared against
+// canonicalized unit paths on every call.
+func NewGitReconciler(storeRoot string) *GitReconciler {
+	return &GitReconciler{canonicalExecutionRoot: canonicalPath(ExecutionRoot(storeRoot))}
+}
+
+// ErrOutsideExecutionRoot is the structural confinement refusal: a
+// ReconcileUnit call named a unit path that is not a direct child of this
+// reconciler's execution root once both are canonicalized. Nothing is
+// enumerated, claimed, or deleted — the refusal happens before any
+// administrative directory is opened, so a registration outside the root is
+// left byte-untouched and fully functional.
+type ErrOutsideExecutionRoot struct {
+	// UnitPath is the caller's spelling; CanonicalUnitPath is what it
+	// resolved to (they differ when a symlink, or a symlinked ancestor,
+	// redirects the path out of the root — the case a lexical prefix check
+	// would miss).
+	UnitPath               string
+	CanonicalUnitPath      string
+	CanonicalExecutionRoot string
+}
+
+func (e *ErrOutsideExecutionRoot) Error() string {
+	root := e.CanonicalExecutionRoot
+	if root == "" {
+		root = "(unset: this GitReconciler was not built by NewGitReconciler)"
+	}
+	return fmt.Sprintf(
+		"execworkspace: reconcile: refusing to reconcile %s (resolves to %s): a unit path must be a direct child of this reconciler's execution root %s; reconciliation deletes Git worktree registrations and is confined to that namespace by construction",
+		e.UnitPath, e.CanonicalUnitPath, root,
+	)
+}
+
+// confinedUnitPath canonicalizes unitPath and proves it is a DIRECT CHILD
+// of this reconciler's canonical execution root — the spec's
+// BY-CONSTRUCTION clause, enforced before any enumeration or mutation. A
+// unit path is always exactly one level under data/execution/ (see
+// UnitPath), so the parent-equality test is both necessary and sufficient;
+// a prefix test would additionally admit nested paths that are not units.
+func (r *GitReconciler) confinedUnitPath(unitPath string) (string, error) {
+	canonicalUnit := canonicalPath(unitPath)
+	if r.canonicalExecutionRoot == "" || filepath.Dir(canonicalUnit) != r.canonicalExecutionRoot {
+		return "", &ErrOutsideExecutionRoot{
+			UnitPath:               unitPath,
+			CanonicalUnitPath:      canonicalUnit,
+			CanonicalExecutionRoot: r.canonicalExecutionRoot,
+		}
+	}
+	return canonicalUnit, nil
 }
 
 // ErrWorktreeLocked is step 3/4's typed refusal: an administrative entry
@@ -117,7 +196,13 @@ func newLockedRefusalError(entryDir, worktreePath string) error {
 // ReconcileUnit implements the Reconciler port end to end for exactly one
 // execution-workspace unit.
 func (r *GitReconciler) ReconcileUnit(ctx context.Context, repoRoot, unitPath string) error {
-	canonicalUnit := canonicalPath(unitPath)
+	// STRUCTURAL CONFINEMENT first: refuse before opening a single
+	// administrative directory, so an out-of-root registration is never even
+	// examined, let alone claimed or deleted.
+	canonicalUnit, err := r.confinedUnitPath(unitPath)
+	if err != nil {
+		return err
+	}
 
 	adminDir, err := r.resolveAdminDir(ctx, repoRoot)
 	if err != nil {
@@ -156,10 +241,20 @@ func (r *GitReconciler) resolveAdminDir(ctx context.Context, repoRoot string) (s
 	if err != nil {
 		return "", err
 	}
+	return adminDirFor(repoRoot, commonDir), nil
+}
+
+// adminDirFor is resolveAdminDir's pure half: git reports the common dir
+// either absolutely or relatively (a linked worktree commonly yields
+// "../.git" or ".git"), and a relative answer is resolved against repoRoot,
+// which is the directory the command ran in. Split out so both branches are
+// directly table-testable without a git invocation that can only produce
+// one of them on a given host.
+func adminDirFor(repoRoot, commonDir string) string {
 	if !filepath.IsAbs(commonDir) {
 		commonDir = filepath.Join(repoRoot, commonDir)
 	}
-	return filepath.Join(commonDir, "worktrees"), nil
+	return filepath.Join(commonDir, "worktrees")
 }
 
 // reconcilePass implements steps 1 through 5: enumerate adminDir directly,
@@ -211,17 +306,27 @@ func (r *GitReconciler) reconcileEntry(entryDir, canonicalUnit string, alreadyCl
 	asidePath := filepath.Join(entryDir, adminGitdirReconcilingName)
 	lockedPath := filepath.Join(entryDir, adminLockedName)
 
+	// Step 3's lock check runs for BOTH shapes, and always BEFORE anything
+	// this invocation could mutate. For a fresh entry that is the spec's
+	// literal step 3 ("if git's LOCK MARKER is present, REFUSE without
+	// touching the entry"). For an entry re-claimed from a crashed prior
+	// invocation the same rule applies to the state THIS invocation found:
+	// checking the marker before the step-4 re-verify keeps the refusal
+	// byte-free of side effects, where deferring it to the re-verify's
+	// RESTORE branch would rename the aside record back and so MUTATE an
+	// entry the component just refused to touch. The crashed-claim state
+	// legitimately persists (it resolves through its own aside record) for a
+	// later attempt once a human has unlocked the worktree.
+	locked, err := lockedMarkerPresent(lockedPath)
+	if err != nil {
+		return fmt.Errorf("execworkspace: reconcile: check lock marker %s: %w", lockedPath, err)
+	}
+	if locked {
+		return newLockedRefusalError(entryDir, canonicalUnit)
+	}
+
 	if !alreadyClaimed {
-		// Step 3: if git's lock marker is present, REFUSE without touching
-		// the entry.
-		locked, err := lockedMarkerPresent(lockedPath)
-		if err != nil {
-			return fmt.Errorf("execworkspace: reconcile: check lock marker %s: %w", lockedPath, err)
-		}
-		if locked {
-			return newLockedRefusalError(entryDir, canonicalUnit)
-		}
-		// Otherwise CLAIM the entry: ONE ATOMIC RENAME of gitdir to
+		// CLAIM the entry: ONE ATOMIC RENAME of gitdir to
 		// gitdir.reconciling.
 		if err := os.Rename(gitdirPath, asidePath); err != nil {
 			return fmt.Errorf("execworkspace: reconcile: claim entry %s: %w", entryDir, err)
@@ -245,16 +350,22 @@ func (r *GitReconciler) reconcileEntry(entryDir, canonicalUnit string, alreadyCl
 	if !ok || canonicalPath(wt) != canonicalUnit {
 		return fmt.Errorf("execworkspace: reconcile: re-verify claim %s: aside record no longer resolves to %s", entryDir, canonicalUnit)
 	}
-	locked, err := lockedMarkerPresent(lockedPath)
+	lateLocked, err := lockedMarkerPresent(lockedPath)
 	if err != nil {
 		return fmt.Errorf("execworkspace: reconcile: re-verify lock marker %s: %w", lockedPath, err)
 	}
-	if locked {
+	if lateLocked {
 		// A marker landed in the window between step 3's check and its
 		// rename: RESTORE — rename the record back, byte-identical — and
-		// REFUSE, disclosed.
-		if rerr := os.Rename(asidePath, gitdirPath); rerr != nil {
-			return fmt.Errorf("execworkspace: reconcile: restore claimed entry %s after late lock marker: %w", entryDir, rerr)
+		// REFUSE, disclosed. RESTORE undoes THIS invocation's own claim, so
+		// it runs only when this invocation made one: for an entry inherited
+		// already-claimed from a crashed predecessor, the pre-invocation
+		// state IS the aside record, and renaming it back would mutate the
+		// entry rather than restore it.
+		if !alreadyClaimed {
+			if rerr := os.Rename(asidePath, gitdirPath); rerr != nil {
+				return fmt.Errorf("execworkspace: reconcile: restore claimed entry %s after late lock marker: %w", entryDir, rerr)
+			}
 		}
 		return newLockedRefusalError(entryDir, canonicalUnit)
 	}
