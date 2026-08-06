@@ -2,9 +2,8 @@ diff --git a/app/handler.go b/app/handler.go
 index 1111111..3333333 100644
 --- a/app/handler.go
 +++ b/app/handler.go
-@@ -1,3 +1,6 @@
+@@ -1,2 +1,5 @@
  package app
- 
 +// final-cache: cache the rendered quote
 +var quoteCache = map[string]Response{}
 +

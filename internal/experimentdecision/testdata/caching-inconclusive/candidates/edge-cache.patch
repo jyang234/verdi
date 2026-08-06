@@ -2,9 +2,8 @@ diff --git a/app/handler.go b/app/handler.go
 index 1111111..6666666 100644
 --- a/app/handler.go
 +++ b/app/handler.go
-@@ -1,3 +1,6 @@
+@@ -1,2 +1,5 @@
  package app
- 
 +// edge-cache: cache the rendered response at the edge, revalidate facts
 +var edgeCache = map[string]Response{}
 +

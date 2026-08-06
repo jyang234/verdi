@@ -7,15 +7,15 @@ base_commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 candidates:
   - id: baseline
     patch: candidates/baseline.patch
-    digest: sha256:3330fbd5740194cd2d9cb26cbeceb4d8ff41045466622bea3272ddf7944d1461
+    digest: sha256:12cbe0e7cdb02b7e2614b53d44c532c04c694a46bcccce07f693af7e90b84f10
     base: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   - id: final-cache
     patch: candidates/final-cache.patch
-    digest: sha256:00e880c3a25eeb32915566addc48f3f6da812e21580c5d263ad183d6b96b823f
+    digest: sha256:547419ebc33d31cea07833dfe02da3ec820651d0a8f06bce5f611091aef85b97
     base: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   - id: facts-cache
     patch: candidates/facts-cache.patch
-    digest: sha256:18c8aa5c31b7cec128f5484f90a5966a38ed91bbc5363f67664a92bf057a1d8a
+    digest: sha256:cca05cc43532b5e75831cfc7000d58343f43f90cdc7d5570ae2e7f99c08e0fa1
     base: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 evaluator:
@@ -61,4 +61,4 @@ algorithm: verdi.experiment-recommendation/v1
 retention_policy: standard-retention
 
 lock:
-  definition_digest: sha256:b2aaf140bf90d8d15ccefb06c7b8fa2210eeeecb8237862bd285bbb396747f58
+  definition_digest: sha256:5f40d68bb34a4384534721ae42ca7f44c109c87dd8c23aba4400fcac4687a7e8
