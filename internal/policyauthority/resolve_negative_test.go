@@ -3,6 +3,8 @@ package policyauthority
 import (
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
 // loadAndResolve writes files to a fresh temp dir and runs Load then
@@ -172,5 +174,145 @@ func TestResolve_NarrowOnlyRefinement_Matrix(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+// loadMinimal returns a freshly loaded Store over the minimal fixture,
+// for the composition probes below that hand-mutate its exported maps.
+func loadMinimal(t *testing.T) *Store {
+	t.Helper()
+	root := t.TempDir()
+	writeTree(t, root, minimalStoreFiles())
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	return s
+}
+
+// TestResolve_RejectsSmuggledOverlay proves Resolve re-proves the
+// store's composition rather than trusting Load's: an overlay decoded
+// independently and inserted straight into the exported Overlays map
+// cannot refine a claim the governing policy declares non-overridable
+// (DC-3), even though it never passed through Load's cross-validation.
+func TestResolve_RejectsSmuggledOverlay(t *testing.T) {
+	s := loadMinimal(t)
+	o, err := policyartifact.DecodeOverlay([]byte(`---
+schema: verdi.policy-overlay/v1
+id: policy-overlay/smuggled
+kind: policy-overlay
+title: "Smuggled overlay"
+owners: [frontend-team]
+refines: policy/go-toolchain
+scope: {phases: [build], environments: [], paths: [], refs: []}
+refinements:
+  - claim: verify-required
+    values: ["clean-exit", "extra-receipt"]
+---
+An overlay inserted directly into a loaded store's exported map.
+`))
+	if err != nil {
+		t.Fatalf("DecodeOverlay() error: %v", err)
+	}
+	s.Overlays[o.ID] = o
+
+	_, err = Resolve(s)
+	if err == nil {
+		t.Fatal("Resolve() succeeded on a store carrying a smuggled overlay, want error")
+	}
+	if !strings.Contains(err.Error(), "not overridable") {
+		t.Fatalf("error = %v, want not-overridable text", err)
+	}
+}
+
+// TestResolve_RejectsDeletedWitnessedPolicy proves deleting a policy an
+// exemption witnesses cannot leave Resolve emitting an effective policy
+// whose recorded exemption points at nothing (CO-1: a dangling witness is
+// never a silent pass).
+func TestResolve_RejectsDeletedWitnessedPolicy(t *testing.T) {
+	s := loadMinimal(t)
+	delete(s.Policies, "policy/go-toolchain")
+	delete(s.Overlays, "policy-overlay/frontend-go-version")
+
+	_, err := Resolve(s)
+	if err == nil {
+		t.Fatal("Resolve() succeeded with a witnessed policy deleted, want error")
+	}
+	if !strings.Contains(err.Error(), "policy-exemption/legacy-service-go") || !strings.Contains(err.Error(), "is not loaded") {
+		t.Fatalf("error = %v, want the dangling witness named", err)
+	}
+}
+
+// TestResolve_RejectsSwappedPolicy proves swapping a differently-decoded
+// policy into the exported map cannot silently stale every exemption
+// witness bound to the original claim digests (DC-8's exact witnesses).
+func TestResolve_RejectsSwappedPolicy(t *testing.T) {
+	s := loadMinimal(t)
+	p, err := policyartifact.DecodePolicy([]byte(`---
+schema: verdi.policy/v1
+id: policy/go-toolchain
+kind: policy
+title: "Go toolchain policy"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims:
+  - id: go-version
+    family: configuration
+    operator: allowed-values
+    subject: go-version
+    values: ["1.23", "1.24", "1.25"]
+    scope: {phases: [], environments: [], paths: [], refs: []}
+    overridable: true
+  - id: verify-required
+    family: action
+    operator: required-values
+    subject: make-verify
+    values: [clean-exit]
+    scope: {phases: [build], environments: [], paths: [], refs: []}
+    overridable: false
+instructions: []
+payloads: {}
+---
+A widened policy swapped into a loaded store's exported map.
+`))
+	if err != nil {
+		t.Fatalf("DecodePolicy() error: %v", err)
+	}
+	s.Policies[p.ID] = p
+
+	if _, err := Resolve(s); err == nil {
+		t.Fatal("Resolve() succeeded with a swapped policy, want a stale-witness error")
+	} else if !strings.Contains(err.Error(), "stale witness") {
+		t.Fatalf("error = %v, want stale-witness text", err)
+	}
+}
+
+// TestRefineClaim_RejectsNonOverridableClaim proves the narrowing
+// routine itself refuses a non-overridable claim, independent of the
+// Load-time and Resolve-time cross-validation that also reject it: DC-3's
+// authority rule holds at every layer that could reach a narrowing.
+func TestRefineClaim_RejectsNonOverridableClaim(t *testing.T) {
+	universal := policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}}
+	c := policyartifact.Claim{
+		ID:          "locked",
+		Family:      policyartifact.FamilyConfiguration,
+		Operator:    policyartifact.OpAllowedValues,
+		Subject:     "region",
+		Values:      []string{"us-east", "us-west"},
+		Scope:       universal,
+		Overridable: false,
+	}
+	o := &policyartifact.Overlay{
+		ID:          "policy-overlay/o",
+		Refines:     "policy/p",
+		Scope:       universal,
+		Refinements: []policyartifact.Refinement{{Claim: "locked", Values: []string{"us-east"}}},
+	}
+	_, err := refineClaim("policy/p", c, []*policyartifact.Overlay{o})
+	if err == nil {
+		t.Fatal("refineClaim() succeeded on a non-overridable claim, want error")
+	}
+	if !strings.Contains(err.Error(), "not overridable") {
+		t.Fatalf("error = %v, want not-overridable text", err)
 	}
 }

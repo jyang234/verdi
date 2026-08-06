@@ -27,6 +27,15 @@ var knownPolicyDirs = map[string]bool{
 // that satisfies Resolve's gate — the unexported sealed marker is never
 // settable from outside this package, so a hand-built or zero-value Store
 // fails closed rather than silently resolving.
+//
+// Every exported field is a READ-ONLY view of what Load decoded and
+// cross-validated. The maps are ordinary Go maps of pointers to
+// individually sealed artifacts: mutating one does not disturb any
+// artifact's own seal, so a mutated Store is not detectable from the
+// artifacts alone. Resolve consequently re-proves the store's whole
+// composition (crossValidate) before it resolves anything; a caller that
+// inserts, deletes, or swaps an entry gets a named failure there, never a
+// silently different effective policy.
 type Store struct {
 	Root         string
 	Constitution *policyartifact.Constitution

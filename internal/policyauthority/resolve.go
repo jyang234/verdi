@@ -122,9 +122,20 @@ type EffectiveExemption struct {
 // every policy, every overlay, every exemption, the selected profile)
 // before using it, applies DC-3's narrow-only overlay refinement to every
 // claim, and mints the result's own anti-forgery seal.
+//
+// The sealed marker proves the Store came from Load, but not that its
+// exported maps still hold what Load cross-validated: they are ordinary
+// maps of pointers to individually sealed artifacts, so an entry can be
+// inserted, deleted, or swapped afterwards without disturbing any
+// artifact's own seal. Resolve therefore re-proves the whole store's
+// composition before resolving anything (CO-1: composition that is merely
+// assumed is never a pass).
 func Resolve(s *Store) (*EffectivePolicy, error) {
 	if s == nil || !s.sealed {
 		return nil, fmt.Errorf("policyauthority: Resolve requires a Store produced by Load")
+	}
+	if err := crossValidate(s); err != nil {
+		return nil, err
 	}
 
 	conDigest, err := s.Constitution.Digest()
