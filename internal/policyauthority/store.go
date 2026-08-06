@@ -350,12 +350,15 @@ func checkOperandKind(overlayID, policyID string, claim policyartifact.Claim, r 
 // checkDuplicatePayloadKinds fails closed the first time two distinct
 // policies register the same payload kind: a payload kind's home must be
 // unambiguous (DC-23's single-interpretation posture applied to
-// feature-specific payload storage).
+// feature-specific payload storage). Policies and kinds are both visited
+// in sorted order so a store with several collisions always reports the
+// same pair — a canonical failure never depends on Go's randomized map
+// iteration order (CO-3).
 func checkDuplicatePayloadKinds(policies map[string]*policyartifact.Policy) error {
 	seenBy := map[string]string{}
 	for _, pid := range sortedKeys(policies) {
 		p := policies[pid]
-		for kind := range p.Payloads {
+		for _, kind := range sortedKeys(p.Payloads) {
 			if owner, dup := seenBy[kind]; dup {
 				return fmt.Errorf("policyauthority: payload kind %q is registered by both policy %s and policy %s", kind, owner, pid)
 			}
