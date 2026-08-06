@@ -22,7 +22,7 @@ the exact future pull request that lands it.
 Its canonical form is a statusless, merge-accepted feature-class spec at
 `.verdi/specs/active/ai-assisted-spec-design/spec.md`, following the exact
 conventions of the two existing canonical feature artifacts
-(`spec/context-integrity`, `spec/guided-lifecycle-governance`). Promotion
+(`spec/context-integrity-v2`, `spec/guided-lifecycle-governance-v3`). Promotion
 is one reviewed pull request whose merge is acceptance under the
 merge-signaled lifecycle; no `verdi accept`, status field, or frozen stamp
 is written.
@@ -90,8 +90,22 @@ Verified at plan time from the isolated worktree (branch
 | Orchestration index (sequencing authority) | `docs/superpowers/plans/2026-08-01-four-feature-orchestration.md` | at landing commit |
 | Merge-signaled acceptance design (acceptance mechanism) | `docs/superpowers/specs/2026-08-01-merge-signals-spec-acceptance-design.md` | at landing commit |
 
-Line references to the ASD design below use the blob above; the file is
-unchanged at the landing commit.
+Line references to the ASD design below use the blob above. At promotion
+execution, `origin/main` is
+`71aba84f20717232428e28a00c31c1fac30c050a`; the ASD source blob remains
+byte-identical. The promotion also consumes these later owner-merged
+authorities:
+
+| Authority | Path | Blob at promotion base |
+|---|---|---|
+| Context Integrity v2 policy/principal contract | `.verdi/specs/active/context-integrity-v2/spec.md` | `eddd72f7933497f7d14106588f8fd2967ee0e149` |
+| Guided Lifecycle v3 shared-kernel contract | `.verdi/specs/active/guided-lifecycle-governance-v3/spec.md` | `bdd37ac0c49b21a55cbb93c940a501706d1a3724` |
+| Store-layout ASD path/classification amendment | `.verdi/specs/active/verdi-store-layout/spec.md` | `3a23815c7bb8c95ed7963fa0b49638620c2f91a4` |
+| Successor invention ledger | `docs/superpowers/invention-ledger.md` | `e561f979cb27d8f481d71cba92c45c1a4f0b1414` |
+| Owner adjudications OD-2/3/5/8/12 | `docs/superpowers/specs/2026-08-03-four-feature-owner-adjudications-design.md` | `4051f4a777194d977507f36c16ab27069c27ec12` |
+
+These additions refresh authority; they do not change the 166-item inventory
+of the pinned ASD source.
 
 ## 2. Proposed canonical identity and path
 
@@ -128,8 +142,9 @@ review approves it and the owner merges the promotion PR.
 
 ## 3. Complete proposed artifact structure
 
-The artifact follows the exact skeleton shared by
-`spec/context-integrity` and `spec/guided-lifecycle-governance`:
+The artifact follows the exact skeleton established by the original
+`spec/context-integrity` and `spec/guided-lifecycle-governance` proposals and
+retained by their current v2/v3 successors:
 frontmatter objects with `ac-n`/`dc-n`/`co-n` IDs, each anchored to its
 body heading (`## AC-1`, `## DC-1`, `## CO-1` — slug-symmetric anchor
 resolution: `anchor: ac-1` resolves `## AC-1`), body sections `# Title`,
@@ -202,16 +217,16 @@ delivery-sequence prose, not a stub — it is a gate condition, not a story.
 
 ```yaml
 links:
-  - { type: depends-on, ref: spec/context-integrity }
-  - { type: depends-on, ref: spec/guided-lifecycle-governance }
+  - { type: depends-on, ref: spec/context-integrity-v2 }
+  - { type: depends-on, ref: spec/guided-lifecycle-governance-v3 }
   - { type: depends-on, ref: spec/verdi-artifact-contract }
   - { type: depends-on, ref: spec/verdi-surfaces }
 ```
 
 All four resolve in the active store (VL-003). Justification:
-`context-integrity` owns the human-artifact kernel/renderer seam ASD must
-consume and the context compiler that classifies ASD's sidecar;
-`guided-lifecycle-governance` owns the lifecycle-wide governance-profile
+`context-integrity-v2` owns the single policy-authority system and the
+context compiler that classifies ASD's sidecar;
+`guided-lifecycle-governance-v3` owns the lifecycle-wide governance-profile
 and authenticated-principal contract behind the shared kernel;
 `verdi-artifact-contract` owns the object model, strict dialect, and edge
 taxonomy the mutation vocabulary operates on; `verdi-surfaces` owns the
@@ -316,19 +331,19 @@ context; its normative home remains the binding 00–05 specs),
 | D-2, D-3 | Purpose 26–39 | `problem`/`outcome` attributes; dc-4, dc-15 | condensed | authorship-vs-authority sentence carried verbatim in Problem body |
 | D-4, D-5 | Purpose 41–56 | `outcome`; ac-7, ac-8; dc-12 | condensed | six supported paths enumerated verbatim in Outcome body |
 | B-1, B-2, B-3, C-1, C-2, C-3, D-6 | Current-state grounding 58–81 | `## Problem` body | grounding | facts restated as the gap statement; binding source unchanged (02/05 specs) |
-| D-7..D-16 (ten principles) | Design principles 83–115 | dc-1, dc-2, dc-3, dc-4, dc-5, dc-6, dc-7, dc-8, dc-9, dc-10 | condensed; body DC sections verbatim | one dc per principle, same order; each MUST/never clause quoted in its DC body |
+| D-7..D-16 (ten principles) | Design principles 83–115 | `## Design principles`; dc-1..dc-10 | verbatim source list plus condensed anchored DCs | the ten-item list is byte-faithful and each principle has one same-order DC anchor |
 | S-1, C-4..C-8 | Authority table 119–132 | `## Authority model` body table; ac-3; co-4 | verbatim | ten-row table carried unchanged; the five agent-"no" rows restated in ac-3 text |
 | C-9, C-10 | 134–137, 224–226 | co-4 | condensed | "cannot promote itself to a human actor merely by supplying an `author` string" quoted in CO-4 body |
 | D-17 | 139–144 | dc-11 | condensed | "no global auto-design mode" quoted |
 | D-18, S-2, INV-1, NG-1, B-4 | Shared architecture 146–190 | ac-1; dc-12; co-3; AC-1 body; Non-goals (v1 core exclusions) | verbatim in AC-1 body | the shared-architecture diagram, nine transaction steps, and the atomicity contract carried unchanged; v1 exclusion list carried into Non-goals |
-| S-3, S-4, S-5, S-6, C-11 | Mutation contract 192–255 | AC-1 body (schemas + closed vocabulary verbatim); co-2; co-3 | verbatim | `verdi.draftmutation/v1`, the request/result YAML examples, and all seven operation categories reproduced byte-for-byte |
+| S-3, S-4, S-5, S-6, C-11 | Mutation contract 192–255 | AC-1 body (schemas + closed vocabulary); co-2; co-3 | verbatim except S-4's bare `principal` is replaced by the OD-3 kernel attribution record | `verdi.draftmutation/v1`, the result example, and all seven operation categories are byte-faithful; the request's sole semantic change is mapped in the external-authority table |
 | D-19, C-49 | 257–260, 614–615 | dc-13 | condensed | "conspicuous in semantic review and ordinary Git review" quoted in DC-13 body |
 | C-12, P-2 | 262–266, 313–316 | ac-4; co-5 | condensed | "Verdi must not fabricate agent or human attribution" quoted; allow/disclose/block posture carried in AC-4 body |
-| S-7, S-8, P-1 | Provenance 268–291 | ac-4; co-5; §6 of this plan; AC-4 body | verbatim | sidecar path, schema id, all seven entry fields, and the exclusion sentence carried unchanged |
+| S-7, S-8, P-1 | Provenance 268–291 | ac-4; co-5; §6 of this plan; AC-4 body | verbatim except S-8's bare `principal` field is replaced by the same OD-3 kernel attribution record | sidecar path, schema id, all seven entry-field roles, and the exclusion sentence are preserved; actor identity is upgraded rather than dropped |
 | C-13, C-14, INV-2 | 293–311 | co-5; AC-4 body | verbatim | four classifications enumerated; attach-time digest rule quoted |
 | B-5..B-10, C-15 | External agent experience 318–339 | AC-8 body (six-tool list + structured CLI equivalence); dc-8 | verbatim | tool list and "no Codex-specific spec schema, Claude-specific lifecycle, or second MCP server" carried unchanged in AC-8 body |
 | S-9, D-20 | Prompt-driven behavior 342–355 | dc-14 + body table | verbatim | five-row request-mapping table carried unchanged |
-| B-11, B-12, INV-3 | Workbench-first flow 357–375 | B-11/B-12 → AC-2 body; INV-3 → ac-8 text with full prose in AC-8 body; co-9 covers the Playwright case | verbatim | seven-step flow and no-generic-AI-badges sentence in AC-2 body; "must never be silently overwritten" quoted in AC-8 body |
+| B-11, B-12, INV-3 | Workbench-first flow 357–375 | AC-2 body; INV-3 also condensed into ac-8; co-9 covers the Playwright case | verbatim | seven-step flow, no-generic-AI-badges sentence, and protected-unsaved-edit prose are byte-faithful in AC-2 |
 | B-13, P-3 | Markdown/Git-first flow 377–389 | AC-7 body; ac-7 | verbatim | six-step flow carried; `verdi design review <spec-ref>` named (see §10 G-6) |
 | INV-4 | Branch/worktree identity 391–398 | co-3; AC-8 body | verbatim | "never silently copies or merges content between worktrees" quoted |
 | D-21, D-22, S-10, C-16 | Human review and acceptance 400–428 | ac-6; dc-15; AC-6 body | verbatim | packet content list carried; "the owner's merge … is the single decision that accepts the specification" quoted unchanged |
@@ -339,17 +354,28 @@ context; its normative home remains the binding 00–05 specs),
 | C-27, C-28 | 518–523, 536–540 | co-6; co-2 | verbatim | narrowing-only rule quoted; the six internal extensibility ports (policy evaluation, mutation application, provenance recording, semantic diffing, change notification, transport adapters) and the declared-descriptor rule carried into CO-2 body |
 | S-14 | 524–534 | ac-3; AC-3 body | verbatim | eight-item capability list carried unchanged |
 | C-29..C-33, D-25 | Verdi-go boundaries 542–558 | co-7; dc-18 | verbatim | the four never-clauses reproduced in CO-7 body |
-| NG-3, NG-4, D-26, D-37 | Jira boundaries 560–581, 821–824 | dc-19 (separate-track rationale, likely-future-flow diagram, and the no-reverse-synchronization rule in DC-19 body); the Jira exclusion itself stays in Non-goals via NG-12 | verbatim | "no silent reverse synchronization" quoted in DC-19 body |
-| C-34..C-43 | Failure behavior 583–603 | co-1; co-3; co-5; AC-1 body failure table | verbatim | ten-row refusal list reproduced unchanged |
-| C-44..C-48, C-50, C-51 | Abuse resistance 605–618 | co-2 (C-46), co-3 (C-50), co-4 (C-44, C-45), co-5 (C-47, C-48), co-8 (C-51) | verbatim | resistance list reproduced in the named CO bodies (C-49 is carried by the dc-13 row above) |
+| NG-3, NG-4, D-26, D-37 | Jira boundaries 560–581, 821–824 | `## Verdi-go and Jira boundaries`; dc-19; Non-goals via NG-12 | verbatim source section plus condensed dc-19 | likely-future-flow diagram and no-reverse-synchronization rule are byte-faithful in the boundary section; D-37 is verbatim in dc-19 |
+| C-34..C-43 | Failure behavior 583–603 | co-1; co-3; co-5 | verbatim | ten-row refusal list reproduced unchanged in CO-1 |
+| C-44..C-48, C-50, C-51 | Abuse resistance 605–618 | co-1 source list; co-2 (C-46), co-3 (C-50), co-4 (C-44, C-45), co-5 (C-47, C-48), co-8 (C-51) | verbatim source list plus condensed owning constraints | resistance list reproduced unchanged in CO-1 and each clause restated in its owning CO (C-49 is carried by dc-13) |
 | C-52, T-1..T-4 (the four test inventories), C-53 | Testing 620–678 | co-9; ac-2 | verbatim | the four test inventories reproduced in CO-9 body; byte-identity conformance clause restated in ac-2 |
 | R-1..R-8, INV-5 | Rollout 680–693 | stubs order (§3.3); `## Delivery sequence` body | verbatim | eight steps reproduced in source order in the body; stubs 1–2 derive from R-1, stubs 3–8 from R-2..R-7, R-8 prose-only; INV-5 quoted beneath them |
 | D-27 | Dogfood observations 695–711 | dc-20 | condensed | ten observation classes enumerated in DC-20 body |
-| SM-1..SM-12 (twelve success measures) | 713–734 | ac-1..ac-8 texts; dc-19 (SM-12) | condensed (grouping = invention N-2) | §11 N-2 carries the measure→destination matrix; each measure's clause appears verbatim in exactly one AC or DC body |
+| SM-1..SM-12 (twelve success measures) | 713–734 | `## Dogfood observations and success measures`; ac-1..ac-8 texts; dc-19 (SM-12) | verbatim source list plus condensed grouping (invention N-2) | all twelve clauses remain byte-faithful in the body; §11 N-2 carries the measure→destination matrix |
 | Q-3 | 736–739 | dc-20 | verbatim | "do not prove universal usability" caveat quoted |
 | D-28 (in-scope list) | 741–753 | ac-1..ac-8; co-9; Outcome body | condensed | the nine in-scope items map 1→ac-1, 2→ac-2, 3→ac-3, 4→ac-4, 5→ac-6, 6→ac-5, 7→ac-8, 8→ac-7, 9→co-9 |
 | NG-5..NG-14 | Out of scope 755–767 | `## Non-goals` | verbatim | ten items reproduced unchanged, plus NG-1's v1 core exclusions |
 | D-29..D-36 (rejected alternatives) | 769–819 | DC bodies (dc-15, dc-6, dc-1, dc-3, dc-2, dc-8, dc-8, dc-7) | verbatim | each rejection and its rationale carried into the DC body of the decision it motivates |
+
+The pinned source table above remains the complete 166-item witness. The
+promotion additionally consumes the following owner-merged authority, mapped
+separately so it cannot masquerade as ASD-source content:
+
+| External authority | Promoted destination | Transformation |
+|---|---|---|
+| OD-3 plus GLG v3 DC-19/DC-20 | `## Authority model`, ac-3, co-4, `## Relationship to Context Integrity and Guided Lifecycle and Governance` | attribution adopts the kernel representation at promotion: canonical principal identifier or explicit unauthenticated marker, never a bare string and never authority |
+| OD-5 plus Context Integrity v2 DC-23 | `depends-on: spec/context-integrity-v2`, ac-3, co-6, relationship section | ASD policy remains a typed feature payload; Context Integrity exclusively owns storage, inheritance, effective resolution, identity, and digest, with no feature-local fallback |
+| OD-8 plus the store-layout amendment | ac-4 and relationship section | the committed sidecar path is admitted and the Context Integrity compiler exclusion code is fixed as `design-provenance-sidecar` |
+| OD-2 plus the joint GLG v3/CI v2 kernel contract | successor dependency links and relationship section | consumes the ratified custody split; does not invent a second profile, principal, trust-source, or authorization implementation |
 
 **Required source-coverage/losslessness witness:** the table above maps all
 166 inventoried source-authority elements (37 D, 12 SM, 4 T, 53 C, 14 S,
@@ -358,86 +384,64 @@ destinations, names every transformation, and records every intentional
 omission. Coverage is **166/166**; no element maps to "dropped". The only
 content in the proposed artifact that does not originate in the ASD design is:
 the depends-on link set (N-5), the relationship section carrying the
-orchestration index's imposed ownership rules (§5), the evidence-kind
-declarations (N-3), and the `attestation` outcome floor (mechanical VL-006
-requirement) — each is recorded as an invention or an imposed-authority
-carry-over, never silent.
+owner-merged cross-feature rules (§5), the evidence-kind declarations (N-3),
+and the `attestation` outcome floor (mechanical VL-006 requirement) — each is
+recorded as an invention or imposed-authority carry-over, never silent.
 
 ## 5. Cross-feature dependencies
 
-These bind ASD from the orchestration index (ratified design authority at
-the landing commit), not from the ASD document itself — the ASD design
-never names them. The canonical artifact carries them in its relationship
-section as imposed shared-ownership rules; carrying ratified external
-authority is preservation, not new semantics (see §10 G-3).
+These rules do not originate in the ASD document. They were first imposed by
+the orchestration index and are now fixed by the owner adjudications and
+owner-merged successor specifications named in §1. The canonical artifact
+carries them in its relationship section and the separate external-authority
+rows in §4 keep their provenance explicit.
 
 ### 5.1 Shared governance-principal kernel
 
-Orchestration lines 96–103, 238, 247: `governance-principal-kernel` is a
-prerequisite delivery unit (Wave 1, solo) before CI or GLG define
-consumers; "Neither feature may introduce a second profile enum, actor
-type, trust-source resolver, or authorization interpretation." ASD's actor
-identity (`actor: {kind, principal, harness, session}`, adapter-verified —
-ASD 134–137, 204–208) must resolve its human principal through that shared
-kernel once it exists. The canonical artifact
-states: ASD introduces no profile or actor schema of its own; the
-delegating principal resolves through the shared kernel; the agent-actor
-discriminator is ASD-owned.
-**Implementation of the ASD core (Wave 2) is blocked until the kernel
-(Wave 1) merges.** Promotion authoring is blocked until the owner
-adjudicates the W4 audit's actor-treatment decisions (OD-2/OD-3) and the
-resulting authority lands owner-merged (§7 precondition 2); the kernel
-implementation itself need not precede promotion.
+OD-2 and OD-3 are owner-merged and the joint GLG v3/CI v2 contract has
+landed. ASD adopts that contract during this promotion, not through a later
+migration. Its attribution record embeds either a kernel canonical principal
+identifier or an explicit unauthenticated marker, never a bare string; the
+record remains testimony about authorship, not authority. The shared kernel
+owns profile schema, principal resolution, trust-source evaluation, and
+authorization interpretation. ASD owns its agent discriminator, harness, and
+optional session metadata and introduces no competing principal or profile
+type. Runtime ASD delivery remains sequenced after the kernel implementation.
 
 ### 5.2 CI policy-authority scaffolds
 
-Orchestration line 106: CI `policy-authority` owns the immutable
-identity/authority/scope/lifecycle/ownership/provenance kernel plus the
-shared renderer for configurable human-authored artifacts; "ASD must
-consume this seam for agent-assisted creation and may add typed draft
-operations, but it may not create a competing template or policy model."
-The canonical artifact states this consumption obligation; ASD's
-`design_assistance` policy block is project policy expressed through the
-CI-owned policy model once that model lands. **ASD draft-creation
-implementation is blocked until `policy-authority` (Wave 1) merges.**
-Promotion authoring is blocked until the owner's W4 adjudications on
-policy-model ownership of `design_assistance` land as owner-merged
-authority (§7 precondition 2); the policy-authority implementation
-itself need not precede promotion.
+OD-5 and Context Integrity v2 DC-23 settle custody. ASD's
+`design_assistance` block is a typed feature-specific payload inside Context
+Integrity's single policy-authority system. Context Integrity exclusively owns
+storage, inheritance, effective-policy resolution, policy identity, and policy
+digest. ASD owns its feature fields and behaviors but no feature-local
+fallback, competing hierarchy, or second interpretation. Runtime draft
+creation remains sequenced after the `policy-authority` implementation.
 
 ### 5.3 ASD provenance-sidecar classification
 
-Orchestration lines 120–122 and 240, 258, 275: the context compiler must
-classify the ASD sidecar explicitly — never silently include it as
-authority, never silently omit it from the candidate universe — and "the
-ASD core plan must publish the sidecar identity and exclusion contract
-before the context compiler finalizes its input classifier." §6 below
-publishes that identity and contract from the ASD side. Ratifying the
-shared classification is Wave-0 owner work
-(orchestration line 240) and is **not performed here**.
+OD-8 is owner-merged, and the store-layout amendment admits both active and
+archive sidecar paths. Context Integrity's compiler must classify the sidecar
+explicitly—never include it as authority and never silently omit it from the
+candidate universe—using the fixed exclusion reason code
+`design-provenance-sidecar`. §6 states the ASD-owned identity and the landed
+shared classification; this promotion consumes that contract and does not
+reopen it.
 
 ### 5.4 Repository-visible successor invention ledger
 
-Orchestration line 235 requires Wave 0 to "establish a repository-visible
-successor invention ledger or explicitly retain `PLAN.md` section 7 with a
-portable access path"; line 404 makes an unresolvable ledger a named stop
-condition for implementation sessions. At the landing commit no successor
-ledger exists in the repository, `PLAN.md` lives at the workspace root
-outside the `verdi` repository, and its §7 contains no ASD, provenance, or
-promotion entries. **This is an unresolved authority gap that blocks
-implementation sessions** (§10 G-1). This plan's §11 is the interim
-repository-visible record for the promotion unit's own inventions; whether
-§11-style plan sections, a dedicated ledger file, or a retained `PLAN.md`
-§7 becomes the successor ledger is an owner decision this plan cannot
-make.
+OD-9 is complete: `docs/superpowers/invention-ledger.md` is the
+repository-visible successor ledger and repository instructions name it. The
+planning merge already adopted N-1..N-7 in §11 as the promotion's approved
+planning intent. This promotion introduces no additional invention; any new
+ambiguity discovered while authoring would stop the unit and be recorded in
+the successor ledger before proceeding.
 
 ## 6. Provenance-sidecar identity and exclusion contract
 
-Published here from the ASD side, as the orchestration index requires of
-the ASD core plan. **This section publishes; it does not ratify.** The
-shared classification consumed by the CI context compiler is ratified
-separately (Wave 0, orchestration line 240), and the context compiler's
-reason-code vocabulary belongs to the CI `context-compiler` plan.
+Published from the ASD side as the orchestration index requires and now
+paired with the owner-ratified OD-8 classification consumed by Context
+Integrity's compiler.
 
 **Identity:**
 
@@ -447,10 +451,10 @@ reason-code vocabulary belongs to the CI `context-compiler` plan.
   ("the sidecar follows the spec into the archive", ASD 287).
 - Schema: `verdi.design-provenance/v1`; append-only JSONL; each entry
   carries the spec ref, previous and resulting spec digests, actor kind /
-  principal / harness / optional session, the ordered typed operations,
-  object-level digests where applicable, optional bounded classified
-  excerpts, and the entry's own deterministic content digest (ASD
-  277–285).
+  kernel attribution record / harness / optional session, the ordered typed
+  operations, object-level digests where applicable, optional bounded
+  classified excerpts, and the entry's own deterministic content digest (ASD
+  277–285; OD-3).
 - Committed, content-addressed, non-authoritative.
 
 **Exclusion contract (what the context compiler must honor):**
@@ -469,49 +473,24 @@ reason-code vocabulary belongs to the CI `context-compiler` plan.
 4. The sidecar **cannot influence acceptance, evidence folding, alignment,
    or execution** (ASD 289–291); it is not an evidence source and carries
    no verdicts.
-5. The stable build-context **exclusion identifier** (the reason code the
-   Wave-2 ASD track must establish — orchestration 258) is proposed as the
-   sidecar's schema id `verdi.design-provenance/v1` plus its path shape;
-   the final reason-code string is deliberately left to the joint
-   ratification with the `context-compiler` plan (§11 N-7).
+5. The stable build-context **exclusion identifier** is
+   `design-provenance-sidecar` (OD-8). The schema id and path shape identify
+   the sidecar; they are not substitutes for the fixed classifier reason.
 
 ## 7. Future implementation steps
 
-The promotion delivery unit. Preconditions — every one must hold before
-Task 1 authoring begins:
-
-1. **Gate P:** a read-only Codex review of this plan reports technical
-   approval on its exact head, and the owner has merged this planning PR
-   (the merge adopts §11's inventions as planning intent; Codex approval
-   alone ratifies nothing).
-2. **Corrected cross-feature authority — three distinct facts, all
-   required:**
-   (a) the W4 audit packet (lane W4, PR #264) is merged — the packet is
-   a non-authoritative decision inventory, so its merge alone settles
-   and ratifies nothing;
-   (b) the owner has adjudicated the ASD-relevant owner decisions it
-   puts — at least OD-2 and OD-3 (kernel contract custody and ASD's
-   actor-upgrade timing), OD-5, OD-8 (the provenance-sidecar
-   classification), and OD-12 (store-layout amendment ownership for the
-   new sidecar path);
-   (c) those rulings and their resulting shared contracts and
-   store-layout authority have landed in repository-visible,
-   owner-merged authority PRs.
-   The canonical artifact's relationship section must restate that
-   landed authority — never proposals from the audit packet, and never
-   this plan's provisional §5 reading.
-3. **Ledger decision:** §10 G-1 resolved by the owner at least to the
-   extent of naming where the promotion unit's decision record durably
-   lives (PR #264's OD-9 puts that choice to the owner).
-4. **Fresh base:** base = current `main` at execution time; revalidate
-   this plan against the actual landing commit if `main` has moved past
-   `6d71fd7d` (orchestration Phase C).
+All authoring prerequisites are satisfied at execution: the plan and audit
+packet are owner-merged; OD-2, OD-3, OD-5, OD-8, OD-9, and OD-12 are
+owner-recorded; their joint GLG/CI, store-layout, and ledger authority has
+landed; and the pinned ASD source remains byte-identical. The unit runs from a
+fresh `agent/asd-canonical-promotion` branch based on current `origin/main` at
+`71aba84f20717232428e28a00c31c1fac30c050a`.
 
 ### Task 1: Author the canonical artifact
 
 **Files:**
-- Create: `.verdi/specs/active/ai-assisted-spec-design/spec.md` (the only
-  file in the unit)
+- Create: `.verdi/specs/active/ai-assisted-spec-design/spec.md`.
+- Update: this plan only for authority freshness and exact execution scope.
 
 **Interfaces:**
 - Consumes: §3's complete structure and §4's mapping table (this plan).
@@ -542,18 +521,20 @@ Task 1 authoring begins:
       baseline identity exists (`internal/specstate` returns a nil
       baseline for `RelationNew`). Capture output.
 - [ ] **Step 6: Mapping fidelity self-check.** Walk §4 row by row against
-      the authored file; every "verbatim" row's body content must match
-      the source bytes (frontmatter texts may differ only in YAML
-      quoting); every Appendix A inventory ID accounted for. Fix in
-      place.
-- [ ] **Step 7: Commit** (single commit, imperative subject):
+      the authored file; every Appendix A inventory ID must be accounted for,
+      every source block promised as verbatim must match, and every landed
+      authority addition must map through §4's separate table. Fix in place.
+- [ ] **Step 7: Commit** (focused imperative commits):
+      `git add docs/superpowers/plans/2026-08-03-asd-canonical-promotion.md`
+      `git commit -m "Refresh ASD promotion authority"`
       `git add .verdi/specs/active/ai-assisted-spec-design/spec.md`
       `git commit -m "Promote ASD design into canonical feature proposal"`
 
 ### Task 2: Full gates and draft PR
 
 - [ ] **Step 1:** `git diff --check` on the branch (no whitespace
-      damage); confirm the changed-file list is exactly the one new file.
+      damage); confirm the changed-file list is exactly the new artifact and
+      this plan's authority-freshness correction.
 - [ ] **Step 2:** `make verify` and `go test -race ./... -count=1` from
       the unit worktree — required by the orchestration handoff contract
       for every delivery-unit PR. Expected: clean (the change is
@@ -566,7 +547,7 @@ Task 1 authoring begins:
       SHAs), Requirement coverage (§4's table reference plus the
       per-invention ratification list §11), Verification (captured
       command outputs from Task 1), Disclosures (three-valued, §9 shape),
-      Review scope (one file; revert = revert one commit).
+      Review scope (two files; no runtime or frozen-authority changes).
 - [ ] **Step 4:** Wait for the required `merge-gate` check on the exact
       head. Expected: pass.
 
@@ -589,9 +570,8 @@ Task 1 authoring begins:
       state spec/ai-assisted-spec-design` reports `accepted-pending-build` — a
       read-only verification, not a ceremony.
 
-**Rollback posture:** two distinct regimes. **Before merge**, the unit is
-one commit adding one file: revert or abandon the branch and the store
-returns byte-identical to its prior state; no runtime code, schema
+**Rollback posture:** two distinct regimes. **Before merge**, abandon the
+branch and the store returns byte-identical to its prior state; no runtime code, schema
 registry, workflow, or index is touched. **After merge**, the artifact is
 accepted authority under the merge-signaled lifecycle, and an accepted
 path may only change through the existing amendment, supersession, or
@@ -602,9 +582,8 @@ not an available rollback mechanism.
 **Explicitly out of the unit:** any edit to the orchestration index, any
 runtime/test/workflow change, any obligation scaffolding (VL-020 exempts
 feature-class ACs), any `verdi accept` invocation, any edit to the ASD
-design document, and any CSE file (Phase C requires disjoint changed-file
-inventories; this unit's inventory is one file under
-`.verdi/specs/active/ai-assisted-spec-design/`).
+design document, invention-ledger row, and any CSE file. The inventory is the
+ASD artifact plus this plan's authority-freshness correction.
 
 ## 8. Human-ceremony inventory
 
@@ -637,12 +616,13 @@ plan introduces zero new ceremonies.
 
 **Proven (with witnesses):**
 
-- `origin/main` == `6d71fd7d33beaf8128fa675833ee12595205481d` — verified
-  by `git fetch && git rev-parse origin/main` at plan start.
-- The three authority blob identities match the pinned OIDs — verified by
-  `git rev-parse HEAD:<path>` for all three files (§1).
-- Branch `agent/asd-canonical-promotion-plan` did not previously exist
-  locally or on the remote — verified before creation.
+- The planning baseline facts remain historical provenance. At promotion
+  execution, fresh `origin/main` and worktree HEAD both equal
+  `71aba84f20717232428e28a00c31c1fac30c050a`; branch
+  `agent/asd-canonical-promotion` was created from that exact commit.
+- The pinned ASD source still hashes to
+  `8595721911c3c756458ace195a686a871b6410d3`, and the landed authority blobs
+  match §1 — verified with `git rev-parse`/`git hash-object` at execution.
 - Canonical-artifact conventions and statusless acceptance path — verified
   against both precedent artifacts and commits `f2185492`, `ae183b15`,
   `6d71fd7d`.
@@ -655,45 +635,27 @@ plan introduces zero new ceremonies.
 
 **Violated:** none observed.
 
-**Unproven / blocking:**
+**Unproven / pending:**
 
-- **Successor invention ledger (blocking for implementation sessions):**
-  no repository-visible successor ledger exists at the landing commit;
-  `PLAN.md §7` is workspace-root, outside this repository, with no ASD
-  entries. Until the owner resolves orchestration Wave-0 line 235, every
-  implementation session (including the promotion unit under a strict
-  reading of stop-condition line 404) lacks a named home for its invention
-  records. This plan's §11 is offered as the interim record; its
-  sufficiency is an owner call, not proven here.
-- **Governance-principal kernel and CI policy-authority do not exist yet**
-  (Wave 1 work): the canonical artifact can state the dependencies, but
-  their schemas are unproven; ASD runtime implementation is blocked on
-  them (§5.1, §5.2).
-- **"No new semantics" compliance of the §11 inventions** (AC grouping,
-  evidence kinds, stub granularity, link set, imposed-authority
-  relationship prose) is asserted with §4 as evidence but is only proven
-  by the historical independent Codex plan review, the future independent
-  Claude exact-head review, and owner ratification — until then it is a
-  disclosed-unproven claim.
-- **GitHub check results for this planning PR** are unproven until the
-  required checks complete on the pushed head (reported in the handoff).
-- **CSE disjointness at execution time** (Phase C precondition) can only
-  be proven against the CSE promotion unit's actual changed-file
-  inventory when both exist.
+- The runtime governance-principal kernel and Context Integrity
+  `policy-authority` implementations remain pending. Their authority contracts
+  are proven landed; ASD runtime delivery is still sequenced behind them.
+- Final 166/166 artifact fidelity is established by the promotion's mechanical
+  audit, one independent Claude exact-head review, and the owner's merge. Before
+  those steps complete, it remains disclosed-unproven rather than assumed.
+- GitHub check results are pending until the promotion head is pushed and CI
+  completes. CSE disjointness is proven by its already-merged artifact and this
+  unit's two-file inventory.
 
 ## 10. Semantic gaps and contradictions
 
-Complete list. G-1 blocks implementation; the rest are disclosed readings
-or deferred decisions that do not block this plan.
+Complete list, retaining resolved historical gaps rather than rewriting their
+provenance.
 
-- **G-1 (blocking): missing successor authority.** The repository-visible
-  successor invention ledger required by orchestration Wave 0 (line 235)
-  does not exist, and the stop condition at line 404 makes an unresolvable
-  ledger a session-stopper for implementation. **Missing successor
-  authority blocks implementation** of the promotion unit until the owner
-  names the ledger location (or ratifies plan-section records like §11 as
-  the mechanism).
-- **G-2: ASD is silent about its imposed dependencies.** The design
+- **G-1 (resolved before promotion): successor authority.** The
+  repository-visible successor ledger exists at
+  `docs/superpowers/invention-ledger.md` and repository instructions name it.
+- **G-2 (resolved authority; runtime pending): ASD is silent about its imposed dependencies.** The design
   document never mentions the governance-principal kernel, CI
   policy-authority, or the successor ledger; those bind ASD only through
   the orchestration index (lines 89, 92, 106, 120–122). The canonical
@@ -703,12 +665,8 @@ or deferred decisions that do not block this plan.
   (which ratified the four indexed documents — orchestration line 14),
   and both precedent canonical artifacts already carry imposed
   "Relationship to …" sections, so carrying them preserves reviewed
-  authority rather than adding semantics. Disclosed caveat: the index's
-  own ratification as successor orchestration authority (Wave-0 checkbox,
-  orchestration line 234) is itself still open; this reading is checked
-  by the Codex plan review, superseded wherever the owner's adjudication
-  of the W4 audit's decisions lands otherwise (§7 precondition 2), and
-  ratified only by the owner's merges (§11).
+  authority rather than adding semantics. OD-2, OD-3, OD-5, OD-8, and OD-12
+  plus their successor contracts now settle the exact relationship prose.
 - **G-3: evidence kinds and the outcome floor are additions.** The ASD
   design declares no evidence kinds for its success measures; VL-006
   mechanically requires every feature AC to declare kinds including
@@ -749,11 +707,10 @@ or deferred decisions that do not block this plan.
   append-only/no-rewrite discipline) is a Wave-2 design question for the
   core unit; recorded here so it is not silently resolved at
   implementation time.
-- **G-8: exclusion reason-code ownership.** The stable build-context
-  exclusion identifier for the sidecar is jointly owned: ASD publishes
-  identity (§6), the CI `context-compiler` plan owns the reason-code
-  vocabulary. Neither may finalize alone (orchestration 120–122, 258,
-  275). Deferred to that joint ratification (N-7).
+- **G-8 (resolved before promotion): exclusion reason-code ownership.** OD-8
+  fixes the Context Integrity compiler reason code as
+  `design-provenance-sidecar`; ASD publishes the sidecar identity and consumes
+  that classification without defining a second vocabulary.
 - **G-9: the binding 00–05 specs live outside this repository.**
   `docs/design/specs/` exists only at the workspace root, not in the
   verdi repository, and the orchestration index forbids web lanes from
@@ -773,7 +730,8 @@ own words).
 
 ## 11. Decision record — inventions requiring ratification
 
-Interim repository-visible record for this unit (see G-1). Each entry:
+Planning-time decision record for this unit, retained alongside the successor
+ledger for provenance. Each entry:
 smallest reversible choice with alternatives considered. Ratification is
 two owner merges, precisely allocated: independent agent reviews provide
 technical challenge only and ratify nothing; the owner's merge of THIS
@@ -812,8 +770,10 @@ the promotion merge.
   completion-ledger wave rows (coarser; would erase the reviewed rollout
   ordering R-1..R-7 that promotion must preserve). Chosen: eight, in
   rollout order.
-- **N-5 — depends-on link set** (§3.4): the two canonical feature
-  dependencies imposed by the orchestration index plus the two component
+- **N-5 — depends-on link set** (§3.4): the two current canonical successor
+  feature refs (`spec/context-integrity-v2` and
+  `spec/guided-lifecycle-governance-v3`) imposed by the orchestration index
+  plus the two component
   specs whose contracts the feature directly extends. Alternative (links
   to only the two features) rejected as under-declaring the reading-order
   dependencies. Disclosed new pattern: neither precedent links to a
@@ -821,15 +781,17 @@ the promotion merge.
   reading-order `depends-on` edges only, carrying no lifecycle coupling.
 - **N-6 — Q-1/Q-2 carried as Non-goals + DC-16 forward-compatibility
   clause,** not `open_questions:` objects (G-5).
-- **N-7 — Sidecar exclusion reason-code deferred** to joint ratification
-  with the CI `context-compiler` plan; ASD publishes identity and
-  contract only (§6, G-8).
+- **N-7 — Sidecar exclusion reason-code, resolved after planning.** The plan
+  originally deferred the string to joint ratification. OD-8 subsequently
+  fixed it as `design-provenance-sidecar`; this promotion consumes that landed
+  decision (§6, G-8) and invents no substitute.
 
 ---
 
-*Prepared on branch `agent/asd-canonical-promotion-plan` from base
-`6d71fd7d33beaf8128fa675833ee12595205481d`. Planning-only: this branch
-adds exactly this document.*
+*Historical planning provenance: prepared on branch
+`agent/asd-canonical-promotion-plan` from base
+`6d71fd7d33beaf8128fa675833ee12595205481d`. The promotion execution updates
+this document only for authority freshness alongside the canonical artifact.*
 
 ## Appendix A — exhaustive line-anchored element inventory
 
