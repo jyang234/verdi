@@ -395,6 +395,77 @@ func TestBuildProfile_RejectsEmptyEnvRoot(t *testing.T) {
 	}
 }
 
+// TestBuildProfile_RejectsRelativeRoots pins the absoluteness half of AD-13's
+// required-caller-choice contract. A relative root resolves against the
+// CALLING PROCESS's working directory, which this package neither chose nor
+// controls: a relative envRoot would create the four profile-owned
+// directories wherever that process happens to be standing and emit
+// cwd-relative HOME/XDG_CONFIG_HOME/XDG_CACHE_HOME/TMPDIR values whose
+// meaning silently changes if anything chdirs before the consumer launches.
+// workspacePath carries the same looseness and feeds the same profile-owned
+// decision (it is the unit territory envRoot is chosen relative to), so both
+// roots must be absolute or the call fails closed — the same posture as the
+// empty check beside it, never a silent resolution against an unowned cwd.
+//
+// The subtest chdirs into its own temp directory so that a build which
+// wrongly SUCCEEDS pollutes only that directory, and so the
+// nothing-was-created assertion below is exact.
+func TestBuildProfile_RejectsRelativeRoots(t *testing.T) {
+	cases := map[string]struct {
+		workspacePath string
+		envRoot       string
+	}{
+		"relative env root":        {envRoot: "relprobe-envroot"},
+		"dot-relative env root":    {envRoot: filepath.Join(".", "relprobe-dotted")},
+		"relative workspace path":  {workspacePath: "relprobe-workspace"},
+		"both roots relative":      {workspacePath: "relprobe-ws", envRoot: "relprobe-env"},
+		"parent-relative env root": {envRoot: filepath.Join("..", "relprobe-parent")},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cwd := t.TempDir()
+			t.Chdir(cwd)
+
+			workspacePath, envRoot := tc.workspacePath, tc.envRoot
+			if workspacePath == "" {
+				workspacePath = t.TempDir()
+			}
+			if envRoot == "" {
+				envRoot = t.TempDir()
+			}
+
+			_, _, err := BuildProfile(workspacePath, envRoot, GrantSet{}, nil)
+			if err == nil {
+				t.Fatalf("BuildProfile(%q, %q): want a fail-closed error for a non-absolute root, got nil", workspacePath, envRoot)
+			}
+			if !strings.Contains(err.Error(), "AD-13") {
+				t.Fatalf("error = %q, want the error to name AD-13", err.Error())
+			}
+
+			entries, readErr := os.ReadDir(cwd)
+			if readErr != nil {
+				t.Fatalf("ReadDir(cwd): %v", readErr)
+			}
+			if len(entries) != 0 {
+				names := make([]string, 0, len(entries))
+				for _, e := range entries {
+					names = append(names, e.Name())
+				}
+				t.Fatalf("cwd contains %v, want nothing: a rejected root must never create profile-owned directories under the calling process's cwd", names)
+			}
+		})
+	}
+}
+
+// TestBuildProfile_AcceptsAbsoluteRoots is the positive half of the pair
+// above: absolute roots remain accepted, so the new check rejects only the
+// non-absolute case and does not narrow BuildProfile's contract further.
+func TestBuildProfile_AcceptsAbsoluteRoots(t *testing.T) {
+	if _, _, err := BuildProfile(t.TempDir(), t.TempDir(), GrantSet{}, nil); err != nil {
+		t.Fatalf("BuildProfile(absolute, absolute) = %v, want nil", err)
+	}
+}
+
 // TestBuildProfile_EnvRootSeparateFromWorkspacePath proves the four
 // profile-owned directories are anchored on envRoot, NOT on workspacePath:
 // that separation is the whole content of AD-13.

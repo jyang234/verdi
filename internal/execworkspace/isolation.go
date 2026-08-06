@@ -125,7 +125,12 @@ var couldNotApplyReasons = map[GrantKind]string{
 // envRoot is the CALLER-CHOSEN parent of the four profile-owned directories.
 // It is REQUIRED: an empty envRoot is a fail-closed error, never silently
 // defaulted to workspacePath (controller decision AD-13, closing whole-wave
-// finding F2).
+// finding F2). Both envRoot and workspacePath must additionally be ABSOLUTE:
+// a relative root resolves against the calling process's working directory,
+// which this package neither chose nor controls, so it would place the
+// profile-owned directories wherever that process happens to be standing and
+// emit cwd-relative env values that change meaning on any chdir. A
+// non-absolute root is the same fail-closed error as an empty one (AD-13).
 //
 // COMPOSITION PROPERTY, disclosed — this is the reason envRoot is a separate
 // parameter rather than derived from workspacePath. The directories below are
@@ -135,7 +140,11 @@ var couldNotApplyReasons = map[GrantKind]string{
 // it at rank 3 (spec §GC slice) on every invocation — permanently, since
 // nothing ever cleans it. That keep is CORRECT and FAIL-CLOSED, not a defect:
 // real process state inside the workspace is exactly what rank 3 exists to
-// protect. It does mean gc never converges for that unit. A consumer that
+// protect. It does mean gc never converges for that unit ONCE ANYTHING HAS
+// BEEN WRITTEN under those directories: git ignores empty directories, so at
+// construction time alone the four freshly created dirs leave the unit clean
+// and still reclaimable — the non-convergence begins with the first write,
+// which for a launched process is a practical certainty. A consumer that
 // wants a RECLAIMABLE workspace therefore places envRoot OUTSIDE the unit
 // path, in its own lifecycle territory, and disposes of it itself; a consumer
 // that deliberately wants the environment to live and die with the workspace
@@ -174,9 +183,19 @@ func BuildProfile(workspacePath, envRoot string, grants GrantSet, declaredEnv ma
 	if workspacePath == "" {
 		return Profile{}, nil, fmt.Errorf("execworkspace: build profile: workspace path is empty")
 	}
+	if !filepath.IsAbs(workspacePath) {
+		return Profile{}, nil, fmt.Errorf(
+			"execworkspace: build profile: workspace path %q is not absolute: a relative root resolves against the calling process's working directory, which this package neither chose nor controls, so the profile-owned values it feeds would change meaning on any chdir; both roots are required absolute caller choices (AD-13)",
+			workspacePath)
+	}
 	if envRoot == "" {
 		return Profile{}, nil, fmt.Errorf(
 			"execworkspace: build profile: env root is empty: the parent of the profile-owned HOME/XDG/TMPDIR directories is a required caller choice, never silently defaulted to the workspace path (AD-13)")
+	}
+	if !filepath.IsAbs(envRoot) {
+		return Profile{}, nil, fmt.Errorf(
+			"execworkspace: build profile: env root %q is not absolute: a relative env root would create the profile-owned HOME/XDG/TMPDIR directories under the calling process's working directory and emit cwd-relative values for them, so it fails closed exactly as an empty env root does (AD-13)",
+			envRoot)
 	}
 	if err := grants.Validate(); err != nil {
 		return Profile{}, nil, fmt.Errorf("execworkspace: build profile: %w", err)
