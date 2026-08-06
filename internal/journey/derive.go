@@ -12,44 +12,73 @@ import (
 // whose From equals the joined effective status (DC-15: joined via
 // specstate.Result.ArtifactStatus() — never a literal-to-literal mapping
 // table of this package's own, and never a comparison against spec.Status
-// directly), sorted by Verb for determinism. Unproven state yields no
-// candidates at all (DC-3: no from-state can be established); a class the
-// model declares no lifecycle for likewise yields none — never a guess.
-func candidateTransitions(mdl *model.Model, class string, result specstate.Result) []model.Transition {
-	if result.State == specstate.Unproven {
-		return nil
-	}
+// directly), sorted by Verb for determinism, and classDeclared reporting
+// whether the model declares a lifecycle for class at all (a nil
+// Model.Lifecycle map reads as "declared for nothing", the same as any
+// other absent key — never a nil-map panic). classDeclared is checked
+// BEFORE state: whether a class has a lifecycle is a fact about the
+// operating model, independent of whether this evaluation's own lifecycle
+// state happened to resolve. Unproven state, once classDeclared is true,
+// still yields no candidates (DC-3: no from-state can be established).
+func candidateTransitions(mdl *model.Model, class string, result specstate.Result) (transitions []model.Transition, classDeclared bool) {
 	lifecycle, ok := mdl.Lifecycle[class]
 	if !ok {
-		return nil
+		return nil, false
+	}
+	if result.State == specstate.Unproven {
+		return nil, true
 	}
 	from := string(result.ArtifactStatus())
-	var out []model.Transition
 	for _, tr := range lifecycle.Transitions {
 		if tr.From == from {
-			out = append(out, tr)
+			transitions = append(transitions, tr)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Verb < out[j].Verb })
-	return out
+	sort.Slice(transitions, func(i, j int) bool { return transitions[i].Verb < transitions[j].Verb })
+	return transitions, true
+}
+
+// classUndeclaredMessage is F4's shared text: the record-level disclosure
+// and the Actions.NeededFacts entry a class absent from Model.Lifecycle
+// produces both carry this SAME message (one string, two sinks), so the
+// two can never drift apart.
+func classUndeclaredMessage(class string) string {
+	return fmt.Sprintf("the operating model declares no lifecycle for class %s; its transitions are unknown", class)
 }
 
 // obligationReason maps an obligation kind to its fixed ReasonCode and
-// blocker-ID builder (the closed kind -> reason mapping the work order
+// blocker-ID prefix (the closed kind -> reason mapping the work order
 // names: author-vouch/countersign/fold-green each get their own code; any
 // other kind is the first-class "unknown kind" failure to classify, never
-// silently folded into one of the three known reasons).
-func obligationReason(kind string) (reason ReasonCode, idFor func(verb string) string) {
+// silently folded into one of the three known reasons). The full blocker
+// ID additionally carries the transition verb AND the obligation's own
+// (scheme, kind) — obligationIDSegments below — so two DISTINCT
+// obligations on the same transition (e.g. attestation/fold-green and
+// behavioral/fold-green) never collide into one blocker id and silently
+// lose a witness to seen-map dedup.
+func obligationReason(kind string) (reason ReasonCode, idPrefix string) {
 	switch kind {
 	case "author-vouch":
-		return ReasonObligationAuthorVouchUnproven, func(verb string) string { return "obligation-author-vouch-unproven/" + verb }
+		return ReasonObligationAuthorVouchUnproven, "obligation-author-vouch-unproven"
 	case "countersign":
-		return ReasonObligationCountersignUnproven, func(verb string) string { return "obligation-countersign-unproven/" + verb }
+		return ReasonObligationCountersignUnproven, "obligation-countersign-unproven"
 	case "fold-green":
-		return ReasonObligationFoldGreenUnproven, func(verb string) string { return "obligation-fold-green-unproven/" + verb }
+		return ReasonObligationFoldGreenUnproven, "obligation-fold-green-unproven"
 	default:
-		return ReasonObligationUnknownKind, func(verb string) string { return "obligation-unknown-kind/" + verb }
+		return ReasonObligationUnknownKind, "obligation-unknown-kind"
 	}
+}
+
+// obligationBlockerID composes an obligation blocker's full id:
+// "<reason-prefix>/<verb>/<scheme>/<kind>" — blockerIDRe already admits
+// arbitrarily many slash segments, and the (scheme, kind) suffix is what
+// makes the id unique per DISTINCT obligation rather than per (reason,
+// verb) alone (F3). A byte-identical duplicate obligation (same scheme AND
+// kind, same transition) still produces the same id and correctly merges
+// via deriveBlockers' own seen-map — that is correct dedup, not a
+// collision.
+func obligationBlockerID(idPrefix, verb, scheme, kind string) string {
+	return fmt.Sprintf("%s/%s/%s/%s", idPrefix, verb, scheme, kind)
 }
 
 // transitionHasCountersign reports whether tr carries an attestation/
@@ -90,8 +119,12 @@ func deriveBlockers(defaultBranchKnown bool, result specstate.Result, candidates
 			ID:     "default-branch-unresolved/unknown",
 			Reason: ReasonDefaultBranchUnresolved,
 			Class:  ClassUnknown,
+			// F2: states only what was OBSERVED (DefaultBranch.Known ==
+			// false) — never an assertion about which of the three
+			// resolution steps individually failed, none of which this
+			// projection actually inspects one at a time.
 			Witnesses: []string{
-				"the default branch could not be resolved: CI_DEFAULT_BRANCH is unset, no origin/HEAD symbolic ref is configured, and no lone conventional remote-tracking ref (origin/main or origin/master) was found",
+				"no default branch could be resolved by the resolution chain (CI_DEFAULT_BRANCH, origin/HEAD symbolic ref, lone conventional remote-tracking ref)",
 			},
 			Owner:             owner,
 			ClearingCondition: "a default branch resolves via CI_DEFAULT_BRANCH, origin/HEAD, or a lone conventional remote-tracking ref",
@@ -117,7 +150,7 @@ func deriveBlockers(defaultBranchKnown bool, result specstate.Result, candidates
 
 	for _, tr := range candidates {
 		for _, ob := range tr.Obligations {
-			reason, idFor := obligationReason(ob.Kind)
+			reason, idPrefix := obligationReason(ob.Kind)
 			class, err := reason.Class()
 			if err != nil {
 				// obligationReason only ever returns a registered code; a
@@ -127,7 +160,7 @@ func deriveBlockers(defaultBranchKnown bool, result specstate.Result, candidates
 				panic(fmt.Sprintf("journey: obligationReason returned unregistered reason %q: %v", reason, err))
 			}
 			add(Blocker{
-				ID:     idFor(tr.Verb),
+				ID:     obligationBlockerID(idPrefix, tr.Verb, ob.Scheme, ob.Kind),
 				Reason: reason,
 				Class:  class,
 				Witnesses: []string{fmt.Sprintf(
@@ -198,53 +231,88 @@ func deriveEventual() EventualBlockers {
 }
 
 // derivePrincipals derives the record's principals section: one
-// RequiredRole per attestation-scheme author-vouch/countersign obligation
-// on a candidate transition (behavioral obligations are never principal
-// requirements — DC-19's kernel attribution stays confined to actual
-// attestation gates). ProfileAdopted is always false in this delivery unit
-// (no governance profile storage exists in-tree yet — Context Integrity's
-// constitution store is a later unit); Resolution is always "unproven" —
-// v1 wires no resolver (DC-18's three-valued honesty: never a silent
-// authenticated claim).
+// RequiredRole per DISTINCT (transition, obligation) pair drawn from every
+// attestation-scheme author-vouch/countersign obligation on a candidate
+// transition (behavioral obligations are never principal requirements —
+// DC-19's kernel attribution stays confined to actual attestation gates).
+// ProfileAdopted is always false in this delivery unit (no governance
+// profile storage exists in-tree yet — Context Integrity's constitution
+// store is a later unit); Resolution is always "unproven" — v1 wires no
+// resolver (DC-18's three-valued honesty: never a silent authenticated
+// claim).
+//
+// F6: two obligations that resolve to the SAME (transition, obligation)
+// key (a model declaring two countersign obligations on one transition,
+// legal per model.Validate — nothing in the kernel forbids it) are
+// deduplicated by that key, keeping the LARGER Count, rather than each
+// producing its own RequiredRole entry: PrincipalFacts.validate requires
+// principals.required to be STRICTLY ascending by (transition,
+// obligation), so two entries sharing a key would fail Record.Validate
+// and abort the whole projection over a Validate-clean model — the
+// correct behavior is one entry that asks for the more demanding count,
+// never a projection failure.
 func derivePrincipals(candidates []model.Transition) PrincipalFacts {
-	var required []RequiredRole
+	byKey := map[string]RequiredRole{}
+	var extra []string
 	for _, tr := range candidates {
 		for _, ob := range tr.Obligations {
 			if ob.Scheme != "attestation" {
 				continue
 			}
+			var rr RequiredRole
 			switch ob.Kind {
 			case "author-vouch":
-				required = append(required, RequiredRole{
+				rr = RequiredRole{
 					Transition: tr.Verb,
 					Obligation: "attestation/author-vouch",
 					Count:      1,
 					Resolution: "unproven",
-				})
+				}
 			case "countersign":
 				count := ob.Count
 				if count < 1 {
+					// F5: the operating model's Obligation.Count is
+					// documented "countersign only" (model.go) but carries
+					// no floor of its own; a zero or negative value is
+					// silently treated as 1, and that assumption is
+					// disclosed rather than presented as though the model
+					// stated it.
+					extra = append(extra, fmt.Sprintf(
+						"countersign count is unstated in the operating model for transition %s; a minimum of 1 is assumed",
+						tr.Verb,
+					))
 					count = 1
 				}
-				required = append(required, RequiredRole{
+				rr = RequiredRole{
 					Transition: tr.Verb,
 					Obligation: "attestation/countersign",
 					Count:      count,
 					Resolution: "unproven",
-				})
+				}
+			default:
+				continue
+			}
+			key := requiredRoleKey(rr)
+			if existing, ok := byKey[key]; !ok || rr.Count > existing.Count {
+				byKey[key] = rr
 			}
 		}
 	}
-	sort.Slice(required, func(i, j int) bool { return requiredRoleKey(required[i]) < requiredRoleKey(required[j]) })
-	if required == nil {
-		required = []RequiredRole{}
+
+	required := make([]RequiredRole, 0, len(byKey))
+	for _, rr := range byKey {
+		required = append(required, rr)
 	}
+	sort.Slice(required, func(i, j int) bool { return requiredRoleKey(required[i]) < requiredRoleKey(required[j]) })
+
+	disclosures := append([]string{
+		"no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown",
+	}, extra...)
+
 	return PrincipalFacts{
 		ProfileAdopted: false,
 		Required:       required,
-		Disclosures: []string{
-			"no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown",
-		},
+		Disclosures:    sortDedupStrings(disclosures),
 	}
 }
 
@@ -254,15 +322,20 @@ func derivePrincipals(candidates []model.Transition) PrincipalFacts {
 // — candidateTransitions only ever returns registered transitions whose
 // From already matches the proven effective status), AND it carries zero
 // obligations (any obligation is unprovable by this projection version, so
-// the action is excluded and NeededFacts names it instead). Unproven state
+// the action is excluded and NeededFacts names it instead). A class the
+// model declares no lifecycle for at all (F4) yields no candidates and
+// classUndeclaredMessage's own NeededFacts entry; otherwise unproven state
 // yields no candidates and one fixed NeededFacts entry.
-func deriveActions(class string, result specstate.Result, candidates []model.Transition, targetRef string) Actions {
+func deriveActions(class string, result specstate.Result, candidates []model.Transition, classDeclared bool, targetRef string) Actions {
 	var safe []Action
 	var needed []string
 
-	if result.State == specstate.Unproven {
+	switch {
+	case !classDeclared:
+		needed = append(needed, classUndeclaredMessage(class))
+	case result.State == specstate.Unproven:
 		needed = append(needed, "lifecycle state is unproven; no transition's from-state can be established")
-	} else {
+	default:
 		from := string(result.ArtifactStatus())
 		for _, tr := range candidates {
 			if len(tr.Obligations) == 0 {

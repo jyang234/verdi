@@ -214,15 +214,20 @@ func (p Projector) gatherRepositoryFacts(ctx context.Context, root, relPath stri
 		rf.RemoteOrigin = StringFact{Known: false}
 		disclosures = append(disclosures, "no origin remote is configured")
 	default:
+		// F1(a): the underlying gitx error (which may itself carry an
+		// absolute path or raw git stderr text) is never routed into the
+		// record — Known == false already carries the honesty; the
+		// disclosure names only the cause class, fixed and machine-
+		// independent.
 		rf.RemoteOrigin = StringFact{Known: false}
-		disclosures = append(disclosures, fmt.Sprintf("remote origin could not be read: %v", rerr))
+		disclosures = append(disclosures, "remote origin could not be read from this checkout")
 	}
 
 	branch, berr := p.git.CurrentBranch(ctx, root)
 	switch {
 	case berr != nil:
 		rf.Branch = StringFact{Known: false}
-		disclosures = append(disclosures, fmt.Sprintf("the current branch could not be determined: %v", berr))
+		disclosures = append(disclosures, "the current branch could not be determined from this checkout")
 	case branch == "":
 		rf.Branch = StringFact{Known: false}
 		disclosures = append(disclosures, "the repository is in a detached HEAD state; the current branch is unknown")
@@ -233,7 +238,7 @@ func (p Projector) gatherRepositoryFacts(ctx context.Context, root, relPath stri
 	head, herr := p.git.RevParse(ctx, root, "HEAD")
 	if herr != nil {
 		rf.Head = StringFact{Known: false}
-		disclosures = append(disclosures, fmt.Sprintf("HEAD could not be resolved: %v", herr))
+		disclosures = append(disclosures, "HEAD could not be resolved from this checkout")
 	} else {
 		rf.Head = StringFact{Known: true, Value: head}
 	}
@@ -244,6 +249,12 @@ func (p Projector) gatherRepositoryFacts(ctx context.Context, root, relPath stri
 		if dh, derr := p.git.RevParse(ctx, root, db.Ref); derr == nil {
 			rf.DefaultBranch = DefaultBranchFact{Known: true, Name: db.Name, Ref: db.Ref, Head: dh}
 			defaultHead, defaultKnown = dh, true
+		} else {
+			// F2: the default branch NAME resolved, but its ref could not
+			// be turned into a commit — a distinct, disclosed failure from
+			// "no default branch resolves at all" (below/in derive.go),
+			// never silently folded into the same unknown.
+			disclosures = append(disclosures, "the resolved default branch ref could not be resolved to a commit")
 		}
 	}
 	if !defaultKnown {
@@ -255,7 +266,7 @@ func (p Projector) gatherRepositoryFacts(ctx context.Context, root, relPath stri
 	dirty, derr := p.git.StatusDirty(ctx, root)
 	if derr != nil {
 		rf.Dirty = BoolFact{Known: false}
-		disclosures = append(disclosures, fmt.Sprintf("working-tree dirty state could not be determined: %v", derr))
+		disclosures = append(disclosures, "working-tree dirty state could not be determined from this checkout")
 	} else {
 		rf.Dirty = BoolFact{Known: true, Value: dirty}
 	}
@@ -263,7 +274,7 @@ func (p Projector) gatherRepositoryFacts(ctx context.Context, root, relPath stri
 	staged, serr := p.git.StagedPaths(ctx, root)
 	if serr != nil {
 		rf.Staged = BoolFact{Known: false}
-		disclosures = append(disclosures, fmt.Sprintf("staged paths could not be determined: %v", serr))
+		disclosures = append(disclosures, "staged paths could not be determined from this checkout")
 	} else {
 		rf.Staged = BoolFact{Known: true, Value: len(staged) > 0}
 	}
@@ -358,6 +369,18 @@ func (p Projector) gatherLifecycleFacts(ctx context.Context, root, relPath, name
 	if err != nil {
 		return LifecycleFacts{}, specstate.Result{}, fmt.Errorf("journey: resolving lifecycle state for %s: %w", relPath, err)
 	}
+	// F1(b): specstate's own disclosures may embed this checkout's
+	// absolute store-root path (e.g. specstate's own "no default branch
+	// could be resolved for <root>" — specstate/resolve.go's
+	// unresolvedDefaultBranchResult). Sanitized ONCE, here, before the
+	// result is used to build LifecycleFacts.Disclosures below AND before
+	// it is returned as the raw specstate.Result a later derivation stage
+	// (derive.go's deriveBlockers) reads its own blocker witnesses from —
+	// one sanitization point serves both consumers. This is a disclosed
+	// transformation for machine independence (CO-2/CO-4: canonical
+	// output must not depend on which checkout path evaluated it), never
+	// a reinterpretation of what specstate proved (DC-15).
+	result.Disclosures = sanitizeDisclosures(root, result.Disclosures)
 
 	lf := LifecycleFacts{
 		Class:    string(spec.Class),
@@ -455,6 +478,25 @@ func (p Projector) resolveActiveBranch(ctx context.Context, root, name string) (
 		sort.Strings(matched)
 		return StringFact{Known: false}, fmt.Sprintf("the active design or build branch is ambiguous for %s: %s", name, strings.Join(matched, ", ")), nil
 	}
+}
+
+// sanitizeDisclosures replaces every literal occurrence of root inside ds
+// with the fixed token "<store-root>" (F1(b)) — a disclosed transformation
+// for machine independence (CO-2/CO-4): two evaluations of the same
+// semantic inputs on different checkouts (different clone paths, worktree
+// locations, or CI runners) must never diverge byte-for-byte in their
+// canonical output merely because a disclosure happened to embed this
+// process's own absolute filesystem path. An empty root or empty input is
+// returned unchanged (a deliberate no-op guard, not a special case).
+func sanitizeDisclosures(root string, ds []string) []string {
+	if root == "" || len(ds) == 0 {
+		return ds
+	}
+	out := make([]string, len(ds))
+	for i, d := range ds {
+		out[i] = strings.ReplaceAll(d, root, "<store-root>")
+	}
+	return out
 }
 
 // sortDedupStrings returns ss sorted and deduplicated, always non-nil

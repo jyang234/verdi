@@ -30,7 +30,10 @@ func TestCandidateTransitions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := candidateTransitions(mdl, "feature", specstate.Result{State: tt.state})
+			got, classDeclared := candidateTransitions(mdl, "feature", specstate.Result{State: tt.state})
+			if !classDeclared {
+				t.Fatalf("classDeclared = false, want true (canonical model declares feature)")
+			}
 			var verbs []string
 			for _, tr := range got {
 				verbs = append(verbs, tr.Verb)
@@ -49,9 +52,34 @@ func TestCandidateTransitions(t *testing.T) {
 
 func TestCandidateTransitions_UnknownClass(t *testing.T) {
 	mdl := model.Canonical()
-	got := candidateTransitions(mdl, "component", specstate.Result{State: specstate.Proposed})
+	got, classDeclared := candidateTransitions(mdl, "component", specstate.Result{State: specstate.Proposed})
 	if got != nil {
 		t.Fatalf("candidateTransitions(component) = %v, want nil (no lifecycle declared)", got)
+	}
+	if classDeclared {
+		t.Fatal("classDeclared = true, want false (component has no declared lifecycle)")
+	}
+}
+
+// TestCandidateTransitions_NilLifecycleMap proves F4's nil-map safety: a
+// *model.Model whose Lifecycle map is nil (never even initialized) reads
+// as "declared for nothing" via a plain map read, never a panic.
+func TestCandidateTransitions_NilLifecycleMap(t *testing.T) {
+	mdl := &model.Model{}
+	got, classDeclared := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Proposed})
+	if got != nil || classDeclared {
+		t.Fatalf("candidateTransitions(nil Lifecycle) = (%v, %v), want (nil, false)", got, classDeclared)
+	}
+}
+
+// TestCandidateTransitions_ClassDeclaredIndependentOfState proves
+// classDeclared is checked BEFORE state: an undeclared class reports false
+// even when state is unproven, never masked by the unproven check.
+func TestCandidateTransitions_ClassDeclaredIndependentOfState(t *testing.T) {
+	mdl := model.Canonical()
+	got, classDeclared := candidateTransitions(mdl, "component", specstate.Result{State: specstate.Unproven})
+	if got != nil || classDeclared {
+		t.Fatalf("candidateTransitions(component, unproven) = (%v, %v), want (nil, false)", got, classDeclared)
 	}
 }
 
@@ -67,43 +95,52 @@ func TestCandidateTransitions_SortedByVerb(t *testing.T) {
 			},
 		},
 	}
-	got := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Proposed})
+	got, classDeclared := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Proposed})
+	if !classDeclared {
+		t.Fatal("classDeclared = false, want true")
+	}
 	if len(got) != 2 || got[0].Verb != "aaa" || got[1].Verb != "zzz" {
 		t.Fatalf("got = %+v, want sorted [aaa zzz]", got)
 	}
 }
 
-// --- obligationReason / transitionHasCountersign --------------------------
+// --- obligationReason / obligationBlockerID / transitionHasCountersign ---
 
 func TestObligationReason(t *testing.T) {
 	tests := []struct {
 		kind       string
 		wantReason ReasonCode
-		wantID     string
 	}{
-		{"author-vouch", ReasonObligationAuthorVouchUnproven, "obligation-author-vouch-unproven/accept"},
-		{"countersign", ReasonObligationCountersignUnproven, "obligation-countersign-unproven/close"},
-		{"fold-green", ReasonObligationFoldGreenUnproven, "obligation-fold-green-unproven/close"},
-		{"hook", ReasonObligationUnknownKind, "obligation-unknown-kind/close"},
-		{"", ReasonObligationUnknownKind, "obligation-unknown-kind/close"},
+		{"author-vouch", ReasonObligationAuthorVouchUnproven},
+		{"countersign", ReasonObligationCountersignUnproven},
+		{"fold-green", ReasonObligationFoldGreenUnproven},
+		{"hook", ReasonObligationUnknownKind},
+		{"", ReasonObligationUnknownKind},
 	}
 	for _, tt := range tests {
 		t.Run(tt.kind, func(t *testing.T) {
-			reason, idFor := obligationReason(tt.kind)
+			reason, idPrefix := obligationReason(tt.kind)
 			if reason != tt.wantReason {
 				t.Fatalf("reason = %q, want %q", reason, tt.wantReason)
 			}
-			verb := "accept"
-			if tt.kind != "author-vouch" {
-				verb = "close"
-			}
-			if got := idFor(verb); got != tt.wantID {
-				t.Fatalf("idFor(%q) = %q, want %q", verb, got, tt.wantID)
+			if idPrefix == "" {
+				t.Fatal("idPrefix must be non-empty")
 			}
 			if _, err := reason.Class(); err != nil {
 				t.Fatalf("reason.Class(): %v", err)
 			}
 		})
+	}
+}
+
+func TestObligationBlockerID(t *testing.T) {
+	got := obligationBlockerID("obligation-countersign-unproven", "close", "attestation", "countersign")
+	want := "obligation-countersign-unproven/close/attestation/countersign"
+	if got != want {
+		t.Fatalf("obligationBlockerID = %q, want %q", got, want)
+	}
+	if !blockerIDRe.MatchString(got) {
+		t.Fatalf("obligationBlockerID output %q does not match blockerIDRe", got)
 	}
 }
 
@@ -138,6 +175,12 @@ func TestDeriveBlockers_DefaultBranchUnresolved(t *testing.T) {
 	if found.Reason != ReasonDefaultBranchUnresolved || found.Class != ClassUnknown || found.Transition != "unknown" {
 		t.Fatalf("blocker = %+v", found)
 	}
+	// F2: the witness names only what was observed — no per-input claims
+	// about which of the three resolution steps individually failed.
+	wantWitness := "no default branch could be resolved by the resolution chain (CI_DEFAULT_BRANCH, origin/HEAD symbolic ref, lone conventional remote-tracking ref)"
+	if len(found.Witnesses) != 1 || found.Witnesses[0] != wantWitness {
+		t.Fatalf("Witnesses = %v, want [%q]", found.Witnesses, wantWitness)
+	}
 	if err := found.validate("blocker"); err != nil {
 		t.Fatalf("blocker fails Blocker.validate: %v", err)
 	}
@@ -169,12 +212,15 @@ func TestDeriveBlockers_ObligationsAndPrincipalResolution(t *testing.T) {
 	mdl := model.Canonical()
 	// accepted-pending-build joins to "close", which carries countersign
 	// AND fold-green obligations in the canonical model.
-	candidates := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.AcceptedPendingBuild})
+	candidates, classDeclared := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.AcceptedPendingBuild})
+	if !classDeclared {
+		t.Fatal("classDeclared = false, want true")
+	}
 	blockers := deriveBlockers(true, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
 
 	wantIDs := []string{
-		"obligation-countersign-unproven/close",
-		"obligation-fold-green-unproven/close",
+		"obligation-countersign-unproven/close/attestation/countersign",
+		"obligation-fold-green-unproven/close/behavioral/fold-green",
 		"principal-resolution-unproven/close",
 	}
 	for _, id := range wantIDs {
@@ -182,10 +228,10 @@ func TestDeriveBlockers_ObligationsAndPrincipalResolution(t *testing.T) {
 			t.Errorf("blockers missing %q; got %v", id, blockerIDs(blockers))
 		}
 	}
-	if b := findBlocker(blockers, "obligation-countersign-unproven/close"); b.Class != ClassGovernance {
+	if b := findBlocker(blockers, "obligation-countersign-unproven/close/attestation/countersign"); b.Class != ClassGovernance {
 		t.Errorf("countersign blocker class = %v, want governance", b.Class)
 	}
-	if b := findBlocker(blockers, "obligation-fold-green-unproven/close"); b.Class != ClassMechanical {
+	if b := findBlocker(blockers, "obligation-fold-green-unproven/close/behavioral/fold-green"); b.Class != ClassMechanical {
 		t.Errorf("fold-green blocker class = %v, want mechanical", b.Class)
 	}
 	if b := findBlocker(blockers, "principal-resolution-unproven/close"); b.Class != ClassGovernance {
@@ -193,14 +239,71 @@ func TestDeriveBlockers_ObligationsAndPrincipalResolution(t *testing.T) {
 	}
 	// draft-side obligations (author-vouch) must NOT appear: only "close"
 	// is a candidate here, not "accept".
-	if findBlocker(blockers, "obligation-author-vouch-unproven/accept") != nil {
+	if findBlocker(blockers, "obligation-author-vouch-unproven/accept/attestation/author-vouch") != nil {
 		t.Errorf("blockers unexpectedly include the accept-side obligation blocker")
+	}
+}
+
+// TestDeriveBlockers_ObligationIDCollisionRegression is F3's collision
+// regression test: two DISTINCT obligations sharing the same transition
+// verb AND the same kind, but different schemes, must produce TWO
+// blockers (both witnessed), never collide into one id and silently lose
+// a witness to deriveBlockers' own seen-map dedup.
+func TestDeriveBlockers_ObligationIDCollisionRegression(t *testing.T) {
+	candidates := []model.Transition{
+		{
+			Verb: "close", From: "accepted-pending-build", To: "closed",
+			Obligations: []model.Obligation{
+				{Scheme: "attestation", Kind: "fold-green"},
+				{Scheme: "behavioral", Kind: "fold-green"},
+			},
+		},
+	}
+	blockers := deriveBlockers(true, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
+
+	idA := "obligation-fold-green-unproven/close/attestation/fold-green"
+	idB := "obligation-fold-green-unproven/close/behavioral/fold-green"
+	bA, bB := findBlocker(blockers, idA), findBlocker(blockers, idB)
+	if bA == nil || bB == nil {
+		t.Fatalf("blockers = %v, want both %q and %q", blockerIDs(blockers), idA, idB)
+	}
+	if len(bA.Witnesses) == 0 || len(bB.Witnesses) == 0 {
+		t.Fatalf("both blockers must carry a witness: %+v / %+v", bA, bB)
+	}
+	if bA.Witnesses[0] == bB.Witnesses[0] {
+		t.Fatalf("witnesses should differ (they name different schemes): %q", bA.Witnesses[0])
+	}
+}
+
+// TestDeriveBlockers_ObligationIDByteIdenticalDuplicateMerges proves the
+// OTHER half of F3: a byte-identical duplicate obligation (same scheme AND
+// kind, same transition) still produces exactly ONE blocker — correct
+// dedup via the seen-map, not a collision.
+func TestDeriveBlockers_ObligationIDByteIdenticalDuplicateMerges(t *testing.T) {
+	candidates := []model.Transition{
+		{
+			Verb: "close", From: "accepted-pending-build", To: "closed",
+			Obligations: []model.Obligation{
+				{Scheme: "attestation", Kind: "countersign", Count: 1},
+				{Scheme: "attestation", Kind: "countersign", Count: 1},
+			},
+		},
+	}
+	blockers := deriveBlockers(true, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
+	count := 0
+	for _, b := range blockers {
+		if b.ID == "obligation-countersign-unproven/close/attestation/countersign" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("got %d blockers for the byte-identical duplicate obligation, want exactly 1", count)
 	}
 }
 
 func TestDeriveBlockers_ProposedForgeFacts(t *testing.T) {
 	mdl := model.Canonical()
-	candidates := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Proposed})
+	candidates, _ := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Proposed})
 	blockers := deriveBlockers(true, specstate.Result{State: specstate.Proposed}, candidates, testOwner())
 
 	found := findBlocker(blockers, "forge-facts-unavailable/accept")
@@ -225,7 +328,7 @@ func TestDeriveBlockers_ProposedForgeFacts_NoCandidatesFallsBackToUnknown(t *tes
 
 func TestDeriveBlockers_TerminalState_Empty(t *testing.T) {
 	mdl := model.Canonical()
-	candidates := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Closed})
+	candidates, _ := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Closed})
 	blockers := deriveBlockers(true, specstate.Result{State: specstate.Closed}, candidates, testOwner())
 	if len(blockers) != 0 {
 		t.Fatalf("terminal-state blockers = %v, want none", blockerIDs(blockers))
@@ -234,7 +337,7 @@ func TestDeriveBlockers_TerminalState_Empty(t *testing.T) {
 
 func TestDeriveBlockers_SortedAscendingByID(t *testing.T) {
 	mdl := model.Canonical()
-	candidates := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.AcceptedPendingBuild})
+	candidates, _ := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.AcceptedPendingBuild})
 	blockers := deriveBlockers(false, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
 	if len(blockers) < 2 {
 		t.Fatalf("want multiple blockers to prove ordering, got %v", blockerIDs(blockers))
@@ -286,7 +389,7 @@ func TestDerivePrincipals_CanonicalModel(t *testing.T) {
 	mdl := model.Canonical()
 
 	t.Run("accept candidate: author-vouch only", func(t *testing.T) {
-		candidates := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Proposed})
+		candidates, _ := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Proposed})
 		pf := derivePrincipals(candidates)
 		if len(pf.Required) != 1 {
 			t.Fatalf("Required = %+v, want exactly 1", pf.Required)
@@ -298,7 +401,7 @@ func TestDerivePrincipals_CanonicalModel(t *testing.T) {
 	})
 
 	t.Run("close candidate: countersign only (fold-green is behavioral, excluded)", func(t *testing.T) {
-		candidates := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.AcceptedPendingBuild})
+		candidates, _ := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.AcceptedPendingBuild})
 		pf := derivePrincipals(candidates)
 		if len(pf.Required) != 1 {
 			t.Fatalf("Required = %+v, want exactly 1 (fold-green must be excluded)", pf.Required)
@@ -306,6 +409,12 @@ func TestDerivePrincipals_CanonicalModel(t *testing.T) {
 		rr := pf.Required[0]
 		if rr.Transition != "close" || rr.Obligation != "attestation/countersign" || rr.Count != 1 {
 			t.Fatalf("RequiredRole = %+v", rr)
+		}
+		// The canonical model's own countersign obligation carries an
+		// explicit Count: 1 (canonical.go), so no F5 assumption-disclosure
+		// should fire here.
+		if containsString(pf.Disclosures, "countersign count is unstated in the operating model for transition close; a minimum of 1 is assumed") {
+			t.Fatalf("unexpected F5 disclosure for a model that DOES state its count: %v", pf.Disclosures)
 		}
 	})
 
@@ -340,10 +449,92 @@ func TestDerivePrincipals_SortedByTransitionThenObligation(t *testing.T) {
 	}
 }
 
+// --- F5: unstated countersign count -------------------------------------
+
+func TestDerivePrincipals_CountersignCountUnstated(t *testing.T) {
+	tests := []struct {
+		name  string
+		count int
+	}{
+		{"zero", 0},
+		{"negative", -3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			candidates := []model.Transition{
+				{Verb: "close", Obligations: []model.Obligation{{Scheme: "attestation", Kind: "countersign", Count: tt.count}}},
+			}
+			pf := derivePrincipals(candidates)
+			if len(pf.Required) != 1 || pf.Required[0].Count != 1 {
+				t.Fatalf("Required = %+v, want exactly one entry with Count 1", pf.Required)
+			}
+			want := "countersign count is unstated in the operating model for transition close; a minimum of 1 is assumed"
+			if !containsString(pf.Disclosures, want) {
+				t.Fatalf("Disclosures = %v, want to contain %q", pf.Disclosures, want)
+			}
+		})
+	}
+}
+
+func TestDerivePrincipals_CountersignCountStated_NoDisclosure(t *testing.T) {
+	candidates := []model.Transition{
+		{Verb: "close", Obligations: []model.Obligation{{Scheme: "attestation", Kind: "countersign", Count: 2}}},
+	}
+	pf := derivePrincipals(candidates)
+	if len(pf.Required) != 1 || pf.Required[0].Count != 2 {
+		t.Fatalf("Required = %+v, want exactly one entry with Count 2", pf.Required)
+	}
+	for _, d := range pf.Disclosures {
+		if d != "no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown" {
+			t.Fatalf("unexpected disclosure for a model that DOES state its count: %v", pf.Disclosures)
+		}
+	}
+}
+
+// --- F6: dedup by (transition, obligation), keeping the max count -------
+
+func TestDerivePrincipals_DedupesDuplicateObligationsKeepingMaxCount(t *testing.T) {
+	candidates := []model.Transition{
+		{
+			Verb: "close",
+			Obligations: []model.Obligation{
+				{Scheme: "attestation", Kind: "countersign", Count: 1},
+				{Scheme: "attestation", Kind: "countersign", Count: 3},
+			},
+		},
+	}
+	pf := derivePrincipals(candidates)
+	if len(pf.Required) != 1 {
+		t.Fatalf("Required = %+v, want exactly 1 (deduped by (transition, obligation))", pf.Required)
+	}
+	if pf.Required[0].Count != 3 {
+		t.Fatalf("Count = %d, want 3 (the max of the two duplicate obligations)", pf.Required[0].Count)
+	}
+	if err := pf.validate(); err != nil {
+		t.Fatalf("PrincipalFacts.validate: %v (a Validate-clean duplicate-obligation model must never abort the projection)", err)
+	}
+}
+
+func TestDerivePrincipals_DedupedAuthorVouchAlsoMerges(t *testing.T) {
+	candidates := []model.Transition{
+		{
+			Verb: "accept",
+			Obligations: []model.Obligation{
+				{Scheme: "attestation", Kind: "author-vouch"},
+				{Scheme: "attestation", Kind: "author-vouch"},
+			},
+		},
+	}
+	pf := derivePrincipals(candidates)
+	if len(pf.Required) != 1 {
+		t.Fatalf("Required = %+v, want exactly 1", pf.Required)
+	}
+}
+
 // --- deriveActions ------------------------------------------------------
 
 func TestDeriveActions_Unproven(t *testing.T) {
-	actions := deriveActions("feature", specstate.Result{State: specstate.Unproven}, nil, "spec/x")
+	actions := deriveActions("feature", specstate.Result{State: specstate.Unproven}, nil, true, "spec/x")
 	if len(actions.Safe) != 0 {
 		t.Fatalf("Safe = %v, want none", actions.Safe)
 	}
@@ -352,11 +543,28 @@ func TestDeriveActions_Unproven(t *testing.T) {
 	}
 }
 
+// TestDeriveActions_ClassNotDeclared is F4's test: a class absent from
+// Model.Lifecycle yields no Safe actions and a NeededFacts entry naming
+// the gap — never silently falling through to the unproven-state message.
+func TestDeriveActions_ClassNotDeclared(t *testing.T) {
+	actions := deriveActions("component", specstate.Result{State: specstate.Proposed}, nil, false, "spec/x")
+	if len(actions.Safe) != 0 {
+		t.Fatalf("Safe = %v, want none", actions.Safe)
+	}
+	want := "the operating model declares no lifecycle for class component; its transitions are unknown"
+	if !containsString(actions.NeededFacts, want) {
+		t.Fatalf("NeededFacts = %v, want to contain %q", actions.NeededFacts, want)
+	}
+	if containsString(actions.NeededFacts, "lifecycle state is unproven; no transition's from-state can be established") {
+		t.Fatalf("NeededFacts unexpectedly also carries the unproven-state message: %v", actions.NeededFacts)
+	}
+}
+
 func TestDeriveActions_CanonicalModel_AllHaveObligations_SafeEmpty(t *testing.T) {
 	mdl := model.Canonical()
 	for _, state := range []specstate.State{specstate.Proposed, specstate.AcceptedPendingBuild} {
-		candidates := candidateTransitions(mdl, "feature", specstate.Result{State: state})
-		actions := deriveActions("feature", specstate.Result{State: state}, candidates, "spec/x")
+		candidates, classDeclared := candidateTransitions(mdl, "feature", specstate.Result{State: state})
+		actions := deriveActions("feature", specstate.Result{State: state}, candidates, classDeclared, "spec/x")
 		if len(actions.Safe) != 0 {
 			t.Fatalf("state %v: Safe = %v, want empty (every canonical transition carries an obligation)", state, actions.Safe)
 		}
@@ -376,7 +584,7 @@ func TestDeriveActions_ZeroObligationTransition_EmitsSafeAction(t *testing.T) {
 	candidates := []model.Transition{
 		{Verb: "advance", From: "draft", To: "accepted-pending-build", Obligations: []model.Obligation{}},
 	}
-	actions := deriveActions("feature", specstate.Result{State: specstate.Proposed}, candidates, "spec/x")
+	actions := deriveActions("feature", specstate.Result{State: specstate.Proposed}, candidates, true, "spec/x")
 
 	if len(actions.Safe) != 1 {
 		t.Fatalf("Safe = %+v, want exactly one action", actions.Safe)
@@ -416,7 +624,7 @@ func TestDeriveActions_MixedObligationAndObligationFree(t *testing.T) {
 		{Verb: "free", From: "draft", To: "mid", Obligations: []model.Obligation{}},
 		{Verb: "gated", From: "draft", To: "other", Obligations: []model.Obligation{{Scheme: "attestation", Kind: "author-vouch"}}},
 	}
-	actions := deriveActions("feature", specstate.Result{State: specstate.Proposed}, candidates, "spec/x")
+	actions := deriveActions("feature", specstate.Result{State: specstate.Proposed}, candidates, true, "spec/x")
 	if len(actions.Safe) != 1 || actions.Safe[0].Verb != "free" {
 		t.Fatalf("Safe = %+v, want exactly [free]", actions.Safe)
 	}
@@ -455,7 +663,7 @@ func TestDeriveActions_EveryEmittedVerbInCatalog(t *testing.T) {
 			effective = "mid"
 		}
 		candidates := filterTransitionsByFrom(mdl.Lifecycle["feature"].Transitions, effective)
-		actions := deriveActions("feature", result, candidates, "spec/x")
+		actions := deriveActions("feature", result, candidates, true, "spec/x")
 		for _, a := range actions.Safe {
 			if !catalogVerbs[a.Verb] {
 				t.Fatalf("emitted action verb %q is not in the supplied catalog %v", a.Verb, catalogVerbs)

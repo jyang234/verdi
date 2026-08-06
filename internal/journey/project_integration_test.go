@@ -196,6 +196,51 @@ func TestProject_Integration_Deterministic(t *testing.T) {
 	}
 }
 
+// TestProject_Integration_TwoDistinctRootsByteIdentical is F7: the
+// no-default-branch fixture built twice, in two DIFFERENT temp dirs
+// (different absolute paths), must Project to byte-identical Canonical()
+// output — the same semantic content evaluated from two different
+// checkouts must never diverge merely because their absolute filesystem
+// paths differ (F1(b)/CO-2/CO-4's machine-independence guarantee). Before
+// F1/F2 this test is RED: specstate's own "no default branch could be
+// resolved for <root>" disclosure embeds each repo's own absolute temp
+// dir path verbatim, so the two records' Lifecycle.Disclosures (and the
+// lifecycle-state-unproven blocker's witness drawn from the same
+// specstate.Result) differ byte-for-byte between the two roots.
+func TestProject_Integration_TwoDistinctRootsByteIdentical(t *testing.T) {
+	files := map[string]string{".verdi/specs/active/payments/spec.md": testFeatureSpecMD}
+
+	repo1 := buildFactsRepoNoDefaultBranch(t, files)
+	cfg1 := openConfig(t, repo1.Dir)
+	rec1, err := NewProjector().Project(context.Background(), cfg1, "spec/payments")
+	if err != nil {
+		t.Fatalf("Project (repo1): %v", err)
+	}
+
+	repo2 := buildFactsRepoNoDefaultBranch(t, files)
+	cfg2 := openConfig(t, repo2.Dir)
+	rec2, err := NewProjector().Project(context.Background(), cfg2, "spec/payments")
+	if err != nil {
+		t.Fatalf("Project (repo2): %v", err)
+	}
+
+	if repo1.Dir == repo2.Dir {
+		t.Fatalf("test setup: want two distinct roots, got the same dir twice: %s", repo1.Dir)
+	}
+
+	out1, err := Canonical(rec1)
+	if err != nil {
+		t.Fatalf("Canonical (repo1): %v", err)
+	}
+	out2, err := Canonical(rec2)
+	if err != nil {
+		t.Fatalf("Canonical (repo2): %v", err)
+	}
+	if string(out1) != string(out2) {
+		t.Fatalf("Canonical output differs across two distinct-root repos with identical semantic content (a root path leaked into the record):\nrepo1 (%s): %s\nrepo2 (%s): %s", repo1.Dir, out1, repo2.Dir, out2)
+	}
+}
+
 // TestProject_Integration_ReadOnly proves Project changes neither HEAD nor
 // the working tree's status (cmd/verdi/specstate_test.go:56-70's idiom).
 func TestProject_Integration_ReadOnly(t *testing.T) {

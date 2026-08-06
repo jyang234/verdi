@@ -268,7 +268,9 @@ func TestGatherRepositoryFacts_RemoteOrigin(t *testing.T) {
 				return "", errors.New("boom")
 			},
 			wantKnown: false,
-			wantDiscl: "remote origin could not be read: boom",
+			// F1(a): the underlying error text ("boom") is never routed
+			// into the record — only a fixed, cause-classified disclosure.
+			wantDiscl: "remote origin could not be read from this checkout",
 		},
 	}
 	for _, tt := range tests {
@@ -434,6 +436,36 @@ func TestGatherRepositoryFacts_DefaultBranchAndRelationship(t *testing.T) {
 	}
 }
 
+// TestGatherRepositoryFacts_DefaultBranchRevParseFails is F2's test: the
+// default branch NAME resolves, but RevParse of its own ref fails — a
+// distinct, disclosed failure (never silently the same "unknown" as no
+// default branch resolving at all).
+func TestGatherRepositoryFacts_DefaultBranchRevParseFails(t *testing.T) {
+	git := baseGitReaderForRepoFacts()
+	git.revParseFn = func(_ context.Context, _, rev string) (string, error) {
+		if rev == "HEAD" {
+			return "headsha", nil
+		}
+		return "", errors.New("boom")
+	}
+	resolveDB := func(context.Context, string) (specstate.Branch, bool) {
+		return specstate.Branch{Name: "main", Ref: "origin/main"}, true
+	}
+	p := newProjector(git, &fakeStateResolver{}, resolveDB)
+
+	rf, discl, err := p.gatherRepositoryFacts(context.Background(), t.TempDir(), "rel/spec.md", []byte("x"), true)
+	if err != nil {
+		t.Fatalf("gatherRepositoryFacts: %v", err)
+	}
+	if rf.DefaultBranch.Known {
+		t.Fatalf("DefaultBranch = %+v, want unknown", rf.DefaultBranch)
+	}
+	want := "the resolved default branch ref could not be resolved to a commit"
+	if !containsString(discl, want) {
+		t.Fatalf("disclosures = %v, want to contain %q", discl, want)
+	}
+}
+
 func TestGatherRepositoryFacts_DirtyStaged(t *testing.T) {
 	git := baseGitReaderForRepoFacts()
 	git.statusDirtyFn = func(context.Context, string) (bool, error) { return true, nil }
@@ -460,8 +492,10 @@ func TestGatherRepositoryFacts_DirtyStaged(t *testing.T) {
 	if rf2.Dirty.Known || rf2.Staged.Known {
 		t.Fatalf("Dirty/Staged should be unknown on error: %+v %+v", rf2.Dirty, rf2.Staged)
 	}
-	if !containsString(discl2, "working-tree dirty state could not be determined: boom") ||
-		!containsString(discl2, "staged paths could not be determined: boom") {
+	// F1(a): fixed, cause-classified disclosures — the underlying "boom"
+	// error text never reaches the record.
+	if !containsString(discl2, "working-tree dirty state could not be determined from this checkout") ||
+		!containsString(discl2, "staged paths could not be determined from this checkout") {
 		t.Fatalf("disclosures = %v, want the dirty and staged failure messages", discl2)
 	}
 }
@@ -656,6 +690,97 @@ func TestResolveActiveBranch_Error(t *testing.T) {
 	_, _, err := p.resolveActiveBranch(context.Background(), t.TempDir(), "foo")
 	if err == nil {
 		t.Fatal("resolveActiveBranch: want error")
+	}
+}
+
+func TestSanitizeDisclosures(t *testing.T) {
+	tests := []struct {
+		name string
+		root string
+		in   []string
+		want []string
+	}{
+		{
+			name: "replaces every occurrence of root",
+			root: "/tmp/repo",
+			in:   []string{"specstate: no default branch could be resolved for /tmp/repo"},
+			want: []string{"specstate: no default branch could be resolved for <store-root>"},
+		},
+		{
+			name: "no occurrence: unchanged",
+			root: "/tmp/repo",
+			in:   []string{"specstate: unrelated disclosure"},
+			want: []string{"specstate: unrelated disclosure"},
+		},
+		{
+			name: "empty root: no-op",
+			root: "",
+			in:   []string{"contains /tmp/repo verbatim"},
+			want: []string{"contains /tmp/repo verbatim"},
+		},
+		{
+			name: "empty input: no-op",
+			root: "/tmp/repo",
+			in:   nil,
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeDisclosures(tt.root, tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("sanitizeDisclosures = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("sanitizeDisclosures = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestGatherLifecycleFacts_SanitizesRootFromDisclosures proves F1(b) at
+// the gatherLifecycleFacts seam: a specstate disclosure embedding root is
+// sanitized before it reaches LifecycleFacts.Disclosures AND before it is
+// returned as the raw specstate.Result a later derivation stage reads its
+// own blocker witnesses from.
+func TestGatherLifecycleFacts_SanitizesRootFromDisclosures(t *testing.T) {
+	spec, err := decodeTargetSpec("spec/payments", []byte(testFeatureSpecMD))
+	if err != nil {
+		t.Fatalf("decodeTargetSpec: %v", err)
+	}
+	root := t.TempDir()
+	git := noOpGitReader()
+	git.hasLocalBranchFn = func(context.Context, string, string) (bool, error) { return false, nil }
+	git.hasRemoteTrackingBranchFn = func(context.Context, string, string, string) (bool, error) { return false, nil }
+	state := &fakeStateResolver{
+		resolveFn: func(context.Context, string, specstate.Candidate) (specstate.Result, error) {
+			return specstate.Result{
+				State:       specstate.Unproven,
+				Relation:    specstate.RelationUnproven,
+				Disclosures: []string{"specstate: no default branch could be resolved for " + root},
+			}, nil
+		},
+	}
+	p := newProjector(git, state, alwaysUnresolvedDefaultBranch)
+
+	lf, result, err := p.gatherLifecycleFacts(context.Background(), root, "rel/spec.md", "payments", []byte(testFeatureSpecMD), spec)
+	if err != nil {
+		t.Fatalf("gatherLifecycleFacts: %v", err)
+	}
+	for _, d := range lf.Disclosures {
+		if strings.Contains(d, root) {
+			t.Fatalf("LifecycleFacts.Disclosures leaks the store root: %q", d)
+		}
+	}
+	if !containsString(lf.Disclosures, "specstate: no default branch could be resolved for <store-root>") {
+		t.Fatalf("Disclosures = %v, want the sanitized form", lf.Disclosures)
+	}
+	for _, d := range result.Disclosures {
+		if strings.Contains(d, root) {
+			t.Fatalf("returned specstate.Result.Disclosures leaks the store root: %q", d)
+		}
 	}
 }
 

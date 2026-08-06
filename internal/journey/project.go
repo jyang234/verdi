@@ -28,12 +28,21 @@ func (p Projector) Project(ctx context.Context, cfg *store.Config, arg string) (
 		Attribution: governanceprincipal.NewUnauthenticatedAttribution(),
 	}
 
-	candidates := candidateTransitions(cfg.Model, facts.Target.Class, facts.LifecycleResult)
+	candidates, classDeclared := candidateTransitions(cfg.Model, facts.Target.Class, facts.LifecycleResult)
 	current := deriveBlockers(facts.Repository.DefaultBranch.Known, facts.LifecycleResult, candidates, owner)
 	principals := derivePrincipals(candidates)
 
 	targetRef := "spec/" + specNameFromRelPath(facts.Target.Path)
-	actions := deriveActions(facts.Target.Class, facts.LifecycleResult, candidates, targetRef)
+	actions := deriveActions(facts.Target.Class, facts.LifecycleResult, candidates, classDeclared, targetRef)
+
+	recordLevelDisclosures := facts.RepositoryDisclosures
+	if !classDeclared {
+		// F4: the SAME message as Actions.NeededFacts's own entry
+		// (classUndeclaredMessage) — a structural fact about the operating
+		// model belongs at the record level too, not only buried inside
+		// Actions.
+		recordLevelDisclosures = append(append([]string(nil), recordLevelDisclosures...), classUndeclaredMessage(facts.Target.Class))
+	}
 
 	rec := Record{
 		Schema:     SchemaID,
@@ -46,7 +55,7 @@ func (p Projector) Project(ctx context.Context, cfg *store.Config, arg string) (
 		},
 		Principals:  principals,
 		Actions:     actions,
-		Disclosures: recordDisclosures(facts.RepositoryDisclosures),
+		Disclosures: recordDisclosures(recordLevelDisclosures),
 	}
 	if err := rec.Validate(); err != nil {
 		return Record{}, fmt.Errorf("journey: project: assembled record failed validation: %w", err)
