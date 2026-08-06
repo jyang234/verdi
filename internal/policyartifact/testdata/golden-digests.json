@@ -1,0 +1,7 @@
+{
+  "constitution.md": "sha256:7790fdd8424dd833c164169afb592aaefb4175e2a97f3373e5a75acc10f04d04",
+  "exemptions/legacy-service-go.md": "sha256:aeeef1dfb95122b2f7f366f0fa2a5f8ab23b29a092165b3a2543a001d4d8dafe",
+  "overlays/frontend-go-version.md": "sha256:9e7ebb83b039a7239a104e37c9a3f8769c86857a02fa524bd9bd0281d0dd5d31",
+  "policies/go-toolchain.md": "sha256:0e6a1094539a53d04a2eee7cdbbdbf4055fa80db5f09ac062e897a99e7677416",
+  "profiles/solo-default.md": "sha256:e57f7183f68956ba34e4208655e34656a26b7090f9bc8ba275a141e215af46a3"
+}
