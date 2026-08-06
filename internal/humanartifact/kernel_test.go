@@ -8,20 +8,25 @@ import (
 // TestKernelFields_KnownKinds pins the exact kernel field-name formula
 // for both artifact worlds this package bridges (AC-1/DC-4): the shared
 // spec-store Base fields (id, kind, title, owners, schema, links,
-// frozen, provenance) plus status for the kinds whose own decoder
-// carries one, and the constitution kinds' full L1 frontmatter key set.
+// frozen, provenance) plus status where the kind's own decoder carries
+// one, plus every other identity/governance frontmatter key that kind's
+// own decoder recognizes (class/custom for feature/story, decided for
+// adr, reason/expiry for waiver, object/hash for reaffirmation, for_kind
+// for obligation) — excluding each kind's own body-prose content fields
+// (problem, outcome, acceptance_criteria, constraints, decisions) — and
+// the constitution kinds' full L1 frontmatter key set.
 func TestKernelFields_KnownKinds(t *testing.T) {
 	tests := []struct {
 		kind string
 		want []string
 	}{
-		{"feature", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "status"}},
-		{"story", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "status"}},
-		{"adr", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "status"}},
+		{"feature", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "status", "class", "custom"}},
+		{"story", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "status", "class", "custom"}},
+		{"adr", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "status", "decided"}},
 		{"attestation", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance"}},
-		{"waiver", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "status"}},
-		{"reaffirmation", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance"}},
-		{"obligation", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance"}},
+		{"waiver", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "status", "reason", "expiry"}},
+		{"reaffirmation", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "object", "hash"}},
+		{"obligation", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "for_kind"}},
 		{"policy", []string{"schema", "id", "kind", "title", "owners", "template", "scope", "claims", "instructions", "payloads"}},
 		{"policy-overlay", []string{"schema", "id", "kind", "title", "owners", "template", "refines", "scope", "refinements"}},
 		{"policy-exemption", []string{"schema", "id", "kind", "title", "owners", "template", "scope", "witnesses", "compensating_controls", "approvals", "expiry", "review_condition"}},

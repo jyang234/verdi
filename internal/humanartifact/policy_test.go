@@ -249,6 +249,13 @@ func TestRenderPolicy_Sabotage(t *testing.T) {
 			},
 			"owners",
 		},
+		{
+			"template-authored extra instruction",
+			func(s string) string {
+				return strings.Replace(s, "instructions: []", `instructions: ["a template-authored instruction data never asked for"]`, 1)
+			},
+			"instructions",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -292,13 +299,10 @@ func TestRenderPolicy_StoreOverrideSabotage(t *testing.T) {
 	}
 }
 
-// TestRenderOverlay_Sabotage exercises the overlay twin's own kernel
-// mismatch: a template that hardcodes its refines target rather than
-// rendering data.RefinesPolicy still strict-decodes clean (any valid
-// policy/<name> id is legal), but never matches the KERNEL round-trip
-// this package additionally verifies — id must match data.Name.
-func TestRenderOverlay_Sabotage(t *testing.T) {
-	const testOverlayTemplate = `---
+// testOverlayTemplate is a minimal, valid, self-contained policy-
+// overlay.md-shaped template — the sabotage table's own base, mirroring
+// testPolicyTemplate's role for TestRenderPolicy_Sabotage.
+const testOverlayTemplate = `---
 schema: verdi.policy-overlay/v1
 id: policy-overlay/{{.Name}}
 kind: policy-overlay
@@ -313,14 +317,146 @@ template: {identity: {{printf "%q" .TemplateIdentity}}, digest: {{printf "%q" .T
 ---
 Placeholder rationale.
 `
-	sabotaged := strings.Replace(testOverlayTemplate, "id: policy-overlay/{{.Name}}", "id: policy-overlay/hardcoded-name", 1)
-	scaffold := scaffoldFromTemplate(sabotaged)
-	data := testOverlayData(scaffold)
-	_, err := RenderOverlay(scaffold, data)
-	if err == nil {
-		t.Fatal("RenderOverlay(hardcoded id) = nil error, want a kernel mismatch")
+
+// TestRenderOverlay_Sabotage exercises the overlay twin's own kernel
+// round trip end to end: a template that hardcodes its id, its refines
+// target, or its refinement's claim each still strict-decodes clean (any
+// valid policy/<name> id, refines target, and claim name are
+// individually legal) but never matches what data supplied — each fails
+// closed here, naming the specific mismatched field.
+func TestRenderOverlay_Sabotage(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(string) string
+		wantSub string
+	}{
+		{
+			"hardcode id ignoring data.Name",
+			func(s string) string {
+				return strings.Replace(s, "id: policy-overlay/{{.Name}}", "id: policy-overlay/hardcoded-name", 1)
+			},
+			"id",
+		},
+		{
+			"hardcode refines ignoring data.RefinesPolicy",
+			func(s string) string {
+				return strings.Replace(s, "refines: {{safe .RefinesPolicy}}", "refines: policy/hardcoded-refines-target", 1)
+			},
+			"refines",
+		},
+		{
+			"hardcode refinement claim ignoring data.ClaimName",
+			func(s string) string {
+				return strings.Replace(s, "claim: {{safe .ClaimName}}", "claim: hardcoded-claim", 1)
+			},
+			"claim",
+		},
+		{
+			"synthesize an extra refinement",
+			func(s string) string {
+				return strings.Replace(s, `refinements:
+  - claim: {{safe .ClaimName}}
+    values: ["placeholder-value"]`, `refinements:
+  - claim: {{safe .ClaimName}}
+    values: ["placeholder-value"]
+  - claim: synthesized-extra-claim
+    values: ["x"]`, 1)
+			},
+			"refinements",
+		},
 	}
-	if !strings.Contains(err.Error(), "id") {
-		t.Fatalf("error = %v, want it to name the id mismatch", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scaffold := scaffoldFromTemplate(tt.mutate(testOverlayTemplate))
+			data := testOverlayData(scaffold)
+			_, err := RenderOverlay(scaffold, data)
+			if err == nil {
+				t.Fatalf("RenderOverlay(sabotaged: %s) = nil error, want error containing %q", tt.name, tt.wantSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Fatalf("RenderOverlay(sabotaged: %s) error = %v, want containing %q", tt.name, err, tt.wantSub)
+			}
+		})
+	}
+}
+
+// testExemptionTemplate is a minimal, valid, self-contained policy-
+// exemption.md-shaped template — the sabotage table's own base.
+const testExemptionTemplate = `---
+schema: verdi.policy-exemption/v1
+id: policy-exemption/{{.Name}}
+kind: policy-exemption
+title: {{printf "%q" .Title}}
+owners: [{{range $i, $o := .Owners}}{{if $i}}, {{end}}{{safe $o}}{{end}}]
+scope: {phases: [], environments: [], paths: [], refs: []}
+witnesses:
+  - policy: {{safe .WitnessPolicy}}
+    claim: {{safe .WitnessClaim}}
+    claim_digest: {{printf "%q" .WitnessClaimDigest}}
+compensating_controls:
+  - "Placeholder compensating control."
+approvals:
+  - role: {{safe .ApprovalRole}}
+    principal: {{safe .ApprovalPrincipal}}
+expiry: {{printf "%q" .Expiry}}
+template: {identity: {{printf "%q" .TemplateIdentity}}, digest: {{printf "%q" .TemplateDigest}}}
+---
+Placeholder rationale.
+`
+
+// TestRenderExemption_Sabotage is F1's own required register: a store-
+// override-shaped template that hardcodes the expiry, the witness
+// policy, or the approval principal each still strict-decodes clean
+// (any real calendar date, any policy/<name> id, and any canonical
+// principal id are individually legal) but never matches what data
+// supplied — each fails closed here, naming the specific field.
+func TestRenderExemption_Sabotage(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(string) string
+		wantSub string
+	}{
+		{
+			"hardcode expiry ignoring data.Expiry",
+			func(s string) string {
+				return strings.Replace(s, `expiry: {{printf "%q" .Expiry}}`, `expiry: "2030-06-15"`, 1)
+			},
+			"expiry",
+		},
+		{
+			"hardcode witness policy ignoring data.WitnessPolicy",
+			func(s string) string {
+				return strings.Replace(s, "policy: {{safe .WitnessPolicy}}", "policy: policy/hardcoded-witness-target", 1)
+			},
+			"witnesses",
+		},
+		{
+			"hardcode approval principal ignoring data.ApprovalPrincipal",
+			func(s string) string {
+				return strings.Replace(s, "principal: {{safe .ApprovalPrincipal}}", "principal: principal/github-org/aGFyZGNvZGVk", 1)
+			},
+			"approvals",
+		},
+		{
+			"synthesize a review_condition alongside expiry",
+			func(s string) string {
+				return strings.Replace(s, `expiry: {{printf "%q" .Expiry}}`, `expiry: {{printf "%q" .Expiry}}
+review_condition: "synthesized review condition"`, 1)
+			},
+			"review_condition",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scaffold := scaffoldFromTemplate(tt.mutate(testExemptionTemplate))
+			data := testExemptionData(scaffold)
+			_, err := RenderExemption(scaffold, data)
+			if err == nil {
+				t.Fatalf("RenderExemption(sabotaged: %s) = nil error, want error containing %q", tt.name, tt.wantSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Fatalf("RenderExemption(sabotaged: %s) error = %v, want containing %q", tt.name, err, tt.wantSub)
+			}
+		})
 	}
 }

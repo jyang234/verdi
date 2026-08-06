@@ -11,7 +11,6 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,8 +66,12 @@ Placeholder rationale.
 	if !strings.Contains(stderr.String(), "policy.md") {
 		t.Fatalf("stderr = %q, want it to name the offending template file policy.md", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "policy") {
-		t.Fatalf("stderr = %q, want it to name the kind policy", stderr.String())
+	// "(kind policy)" is checkPolicyScaffold's own exact wrap token
+	// (model.go) — asserting on it, rather than the bare substring
+	// "policy" (already trivially true of "policy.md" itself), actually
+	// proves the kind is named.
+	if !strings.Contains(stderr.String(), "(kind policy)") {
+		t.Fatalf("stderr = %q, want it to name the kind via the \"(kind policy)\" token", stderr.String())
 	}
 }
 
@@ -123,21 +126,49 @@ func TestModelCheck_PolicyExemptionScaffold_StoreOverride_BrokenSyntax_Exit2(t *
 	}
 }
 
-// TestModelCheck_PolicyScaffold_UnsafeOverrideFilenameNeverReached is a
-// smoke check that a store with no .verdi/templates/ directory at all
-// (writeModelCheckStoreRoot's own baseline) never even attempts a
-// filesystem read outside .verdi/templates/ — verified indirectly by the
-// OK exit already proven in TestModelCheck_PolicyScaffolds_OK; this test
-// only pins that the directory need not exist at all (os.Stat would
-// error on a nonexistent directory if the check mishandled absence).
-func TestModelCheck_PolicyScaffold_UnsafeOverrideFilenameNeverReached(t *testing.T) {
+// TestModelCheck_PolicyExemptionScaffold_StoreOverride_HardcodedWitnessExpiryPrincipal_Exit2
+// is the F1 review round's own required end-to-end probe: a store
+// override under .verdi/templates/policy-exemption.md that hardcodes
+// its expiry, its witness policy, AND its approval principal all still
+// strict-decodes clean individually (a real calendar date, a real
+// policy/<name> id, and a real canonical principal id are each
+// independently legal) but none of the three matches the fixed
+// placeholder data checkExemptionScaffold supplies — model check must
+// fail closed at exit 2, naming policy-exemption.md.
+func TestModelCheck_PolicyExemptionScaffold_StoreOverride_HardcodedWitnessExpiryPrincipal_Exit2(t *testing.T) {
 	root := writeModelCheckStoreRoot(t, "")
-	if _, err := os.Stat(filepath.Join(root, ".verdi", "templates")); err == nil {
-		t.Fatal("test setup: .verdi/templates unexpectedly exists")
-	}
+	const sabotaged = `---
+schema: verdi.policy-exemption/v1
+id: policy-exemption/{{.Name}}
+kind: policy-exemption
+title: {{printf "%q" .Title}}
+owners: [{{range $i, $o := .Owners}}{{if $i}}, {{end}}{{safe $o}}{{end}}]
+scope: {phases: [], environments: [], paths: [], refs: []}
+witnesses:
+  - policy: policy/hardcoded-witness-target
+    claim: {{safe .WitnessClaim}}
+    claim_digest: {{printf "%q" .WitnessClaimDigest}}
+compensating_controls:
+  - "Placeholder compensating control."
+approvals:
+  - role: {{safe .ApprovalRole}}
+    principal: principal/github-org/aGFyZGNvZGVk
+expiry: "2030-06-15"
+template: {identity: {{printf "%q" .TemplateIdentity}}, digest: {{printf "%q" .TemplateDigest}}}
+---
+Placeholder rationale.
+`
+	writeTestFile(t, filepath.Join(root, ".verdi", "templates", "policy-exemption.md"), []byte(sabotaged))
+
 	var stdout, stderr bytes.Buffer
 	code := runModelCheck(root, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("runModelCheck (no templates dir at all) exit = %d, want 0\nstderr: %s", code, stderr.String())
+	if code != 2 {
+		t.Fatalf("runModelCheck (policy-exemption.md hardcoded witness/expiry/principal) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "policy-exemption.md") {
+		t.Fatalf("stderr = %q, want it to name the offending template file policy-exemption.md", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "(kind policy-exemption)") {
+		t.Fatalf("stderr = %q, want it to name the kind via the \"(kind policy-exemption)\" token", stderr.String())
 	}
 }

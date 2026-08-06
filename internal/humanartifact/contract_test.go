@@ -40,6 +40,11 @@ func TestContractValidate_Negative(t *testing.T) {
 		{"kernel collision exact", Contract{Kind: "policy", Extensions: []ExtensionField{{Name: "title", Type: ExtensionString}}}, "shadows kernel field"},
 		{"kernel collision case-fold", Contract{Kind: "policy", Extensions: []ExtensionField{{Name: "Title", Type: ExtensionString}}}, "shadows kernel field"},
 		{"kernel collision spec kind", Contract{Kind: "adr", Extensions: []ExtensionField{{Name: "status", Type: ExtensionString}}}, "shadows kernel field"},
+		{"kernel collision feature class", Contract{Kind: "feature", Extensions: []ExtensionField{{Name: "class", Type: ExtensionString}}}, "shadows kernel field"},
+		{"kernel collision story custom", Contract{Kind: "story", Extensions: []ExtensionField{{Name: "custom", Type: ExtensionString}}}, "shadows kernel field"},
+		{"kernel collision reaffirmation hash", Contract{Kind: "reaffirmation", Extensions: []ExtensionField{{Name: "hash", Type: ExtensionString}}}, "shadows kernel field"},
+		{"kernel collision obligation for_kind", Contract{Kind: "obligation", Extensions: []ExtensionField{{Name: "for_kind", Type: ExtensionString}}}, "shadows kernel field"},
+		{"kernel collision waiver reason", Contract{Kind: "waiver", Extensions: []ExtensionField{{Name: "reason", Type: ExtensionString}}}, "shadows kernel field"},
 		{"duplicate extension exact", Contract{Kind: "policy", Extensions: []ExtensionField{{Name: "foo", Type: ExtensionString}, {Name: "foo", Type: ExtensionInt}}}, "duplicate"},
 		{"duplicate extension case-fold", Contract{Kind: "policy", Extensions: []ExtensionField{{Name: "foo", Type: ExtensionString}, {Name: "FOO", Type: ExtensionInt}}}, "duplicate"},
 		{"unknown type", Contract{Kind: "policy", Extensions: []ExtensionField{{Name: "foo", Type: ExtensionType("float")}}}, "unknown type"},
@@ -91,6 +96,22 @@ func TestContractFor_PreRegisteredKinds(t *testing.T) {
 func TestContractFor_Unknown(t *testing.T) {
 	if _, ok := ContractFor("no-such-kind"); ok {
 		t.Fatal("ContractFor(unknown) ok = true, want false")
+	}
+}
+
+// TestContractFor_ComponentSpec_Unrecognized pins register.go's own
+// disclosed posture: AC-1 names "component specs" among the human-
+// authored kinds an operating model resolves a scaffold for, but this
+// package carries no kernel-field table or Contract for it yet (no
+// shipped scaffold consumer — internal/model's canonical default
+// registers only feature and story). Requesting "component" fails
+// closed rather than silently admitting an unproven kernel boundary.
+func TestContractFor_ComponentSpec_Unrecognized(t *testing.T) {
+	if _, ok := ContractFor("component"); ok {
+		t.Fatal(`ContractFor("component") ok = true, want false (no kernel table yet — see register.go's own doc comment)`)
+	}
+	if _, ok := KernelFields("component"); ok {
+		t.Fatal(`KernelFields("component") ok = true, want false`)
 	}
 }
 

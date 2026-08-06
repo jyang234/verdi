@@ -21,39 +21,62 @@ var specBaseFields = []string{"id", "kind", "title", "owners", "schema", "links"
 // posture, internal/artifact/spec.go). Attestation, reaffirmation, and
 // obligation carry no status field at all ("existence is the record");
 // their kernel is specBaseFields alone.
-//
-// Deliberately narrower than the constitution formula below: a spec's
-// own CONTENT fields (problem, outcome, acceptance_criteria, and so on)
-// are the scaffold's ordinary templated content, not identity/authority/
-// governance kernel — the same optimize-for-authors/never-ambiguous-
-// proof-formats line DC-4 draws generally, applied here to which fields
-// count as an artifact's own immutable identity versus its authored
-// body.
 func withStatus(base []string) []string {
-	out := make([]string, len(base), len(base)+1)
+	return withFields(base, "status")
+}
+
+// withFields returns base plus extra, without mutating base — the
+// shared append-a-copy helper withStatus and kernelFieldTable's own
+// per-kind rows below both use.
+func withFields(base []string, extra ...string) []string {
+	out := make([]string, len(base), len(base)+len(extra))
 	copy(out, base)
-	return append(out, "status")
+	return append(out, extra...)
 }
 
 // kernelFieldTable is the closed, per-kind kernel field-name table this
-// package's Kernel documentation type materializes. Constitution kinds
-// (policy, policy-overlay, policy-exemption) list their FULL L1
-// frontmatter key set (internal/policyartifact's kernelDoc/policyDoc/
-// overlayDoc/exemptionDoc) — AC-1/DC-4: nothing in a policy artifact's
-// own structured claims/refinements/witnesses grammar is generic
-// free-form template content the way a spec's problem/outcome prose is,
-// so the whole decoded shape is authority, not merely its identity
-// fields. Spec-store kinds list only their shared Base fields plus
-// status where their own decoder carries one (withStatus's own doc
-// comment).
+// package's Kernel documentation type materializes.
+//
+// Constitution kinds (policy, policy-overlay, policy-exemption) list
+// their FULL L1 frontmatter key set (internal/policyartifact's
+// kernelDoc/policyDoc/overlayDoc/exemptionDoc) — AC-1/DC-4: nothing in a
+// policy artifact's own structured claims/refinements/witnesses grammar
+// is generic free-form template content the way a spec's problem/
+// outcome prose is, so the whole decoded shape is authority, not merely
+// its identity fields.
+//
+// Spec-store kinds list their shared Base fields (internal/artifact's
+// common.go: id, kind, title, owners, schema, links, frozen, provenance)
+// plus status where the kind's own decoder carries one (withStatus),
+// plus every OTHER identity/governance frontmatter key that kind's own
+// decoder recognizes: class and custom for feature/story
+// (SpecFrontmatter's own class discriminator, mandatory, and its
+// reserved `custom:` extension namespace, internal/artifact/spec.go —
+// a model-declared extension named "custom" would collide with an
+// already-reserved key even though a given spec may omit the key
+// itself); decided for adr (ADRFrontmatter); reason and expiry for
+// waiver (WaiverFrontmatter); object and hash for reaffirmation
+// (ReaffirmationFrontmatter); for_kind for obligation
+// (ObligationFrontmatter). Deliberately excluded, per the accepted DC-4
+// reasoning: each kind's own BODY-PROSE / content fields — problem,
+// outcome, acceptance_criteria, constraints, decisions — since these are
+// the scaffold's ordinary templated content, not identity/authority/
+// governance kernel (the same optimize-for-authors/never-ambiguous-
+// proof-formats line DC-4 draws generally, applied here to which fields
+// count as an artifact's own immutable identity versus its authored
+// body). This is a deliberately bounded correction, not a claim of
+// completeness over every remaining SpecFrontmatter field (story, spike,
+// impacts, context, open_questions, stubs, supersession, dispositions
+// are not yet in this table); widening further is later, narrowly-
+// scoped work.
 var kernelFieldTable = map[string][]string{
-	string(artifact.ClassFeature):      withStatus(specBaseFields),
-	string(artifact.ClassStory):        withStatus(specBaseFields),
-	string(artifact.KindADR):           withStatus(specBaseFields),
+	string(artifact.ClassFeature):      withFields(withStatus(specBaseFields), "class", "custom"),
+	string(artifact.ClassStory):        withFields(withStatus(specBaseFields), "class", "custom"),
+	string(artifact.KindADR):           withFields(withStatus(specBaseFields), "decided"),
 	string(artifact.KindAttestation):   specBaseFields,
-	string(artifact.KindWaiver):        withStatus(specBaseFields),
-	string(artifact.KindReaffirmation): specBaseFields,
-	string(artifact.KindObligation):    specBaseFields,
+	string(artifact.KindWaiver):        withFields(withStatus(specBaseFields), "reason", "expiry"),
+	string(artifact.KindReaffirmation): withFields(specBaseFields, "object", "hash"),
+	string(artifact.KindObligation):    withFields(specBaseFields, "for_kind"),
 
 	policyartifact.KindPolicy:    {"schema", "id", "kind", "title", "owners", "template", "scope", "claims", "instructions", "payloads"},
 	policyartifact.KindOverlay:   {"schema", "id", "kind", "title", "owners", "template", "refines", "scope", "refinements"},
