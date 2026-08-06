@@ -73,6 +73,11 @@ func DecodeProfile(raw []byte, catalog Catalog) (Profile, error) {
 	if err := normalizeProfile(&p); err != nil {
 		return Profile{}, err
 	}
+	seal, err := contentDigest(p)
+	if err != nil {
+		return Profile{}, err
+	}
+	p.seal = seal
 	return p, nil
 }
 
@@ -155,10 +160,39 @@ func docToProfile(doc profileDoc) (Profile, error) {
 	}, nil
 }
 
-// Digest returns the profile's content address: sha256 over the canonical
-// JSON encoding of the normalized profile (internal/canonjson).
-func (p Profile) Digest() (string, error) {
+// contentDigest is the canonical content digest of a profile's exported
+// fields: sha256 over the canonical JSON encoding of the normalized
+// profile (internal/canonjson). The unexported seal is not part of the
+// encoding.
+func contentDigest(p Profile) (string, error) {
 	return canonjson.Digest(p)
+}
+
+// checkSeal proves the profile was produced by DecodeProfile and has not
+// been modified since. Both failures are operational errors: a profile
+// outside that provenance never yields a digest, resolution, or
+// authorization.
+func (p Profile) checkSeal() error {
+	if p.seal == "" {
+		return fmt.Errorf("governanceprincipal: profile %q was not produced by DecodeProfile", p.ID)
+	}
+	d, err := contentDigest(p)
+	if err != nil {
+		return err
+	}
+	if d != p.seal {
+		return fmt.Errorf("governanceprincipal: profile %q was modified after DecodeProfile", p.ID)
+	}
+	return nil
+}
+
+// Digest returns the profile's content address after proving the profile
+// is unmodified DecodeProfile output.
+func (p Profile) Digest() (string, error) {
+	if err := p.checkSeal(); err != nil {
+		return "", err
+	}
+	return p.seal, nil
 }
 
 // normalizeProfile sorts every set-like list deterministically: entries

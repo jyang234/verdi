@@ -1,6 +1,7 @@
 package governanceprincipal
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -40,24 +41,47 @@ func mustPID(t *testing.T, subject string) PrincipalID {
 	return id
 }
 
-// authedRes builds the kernel-consistent authenticated resolution for a
-// github subject.
-func authedRes(t *testing.T, subject string) PrincipalResolution {
+// mintResolution obtains a genuine resolution through Resolver.Resolve —
+// the only way a consumable resolution exists.
+func mintResolution(t *testing.T, fact TrustFact, subject string, want ResolutionState) PrincipalResolution {
 	t.Helper()
-	return PrincipalResolution{
-		Claim:       PrincipalClaim{TrustSource: "github", Subject: subject},
-		PrincipalID: mustPID(t, subject),
-		State:       ResolutionAuthenticated,
-		Witnesses:   []Witness{{Code: ReasonTrustSubjectVerified, SourceID: "github", EvidenceDigest: testDigest}},
+	profile := mustDecode(t, profileYAML())
+	r := NewResolver(staticFact(fact))
+	res, err := r.Resolve(context.Background(), profile, PrincipalClaim{TrustSource: "github", Subject: subject})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
 	}
+	if res.State != want {
+		t.Fatalf("minted resolution state = %q, want %q", res.State, want)
+	}
+	return res
 }
 
-func failedRes(subject string, state ResolutionState, code string) PrincipalResolution {
-	return PrincipalResolution{
-		Claim:     PrincipalClaim{TrustSource: "github", Subject: subject},
-		State:     state,
-		Witnesses: []Witness{{Code: code, SourceID: "github"}},
+// authedRes resolves a github subject to a genuine authenticated
+// resolution.
+func authedRes(t *testing.T, subject string) PrincipalResolution {
+	t.Helper()
+	return mintResolution(t, githubFact(subject), subject, ResolutionAuthenticated)
+}
+
+// failedRes resolves a github subject to a genuine violated or unproven
+// resolution.
+func failedRes(t *testing.T, subject string, state ResolutionState) PrincipalResolution {
+	t.Helper()
+	switch state {
+	case ResolutionViolated:
+		return mintResolution(t, githubFact("someone-else"), subject, state)
+	case ResolutionUnproven:
+		return mintResolution(t, TrustFact{
+			SourceID:   "github",
+			SourceKind: TrustSourceForge,
+			Available:  false,
+			Valid:      false,
+			Reason:     "forge api unreachable",
+		}, subject, state)
 	}
+	t.Fatalf("failedRes: unsupported state %q", state)
+	return PrincipalResolution{}
 }
 
 func findingCodes(d AuthorizationDecision) []string {
@@ -140,14 +164,14 @@ func TestAuthorizePrincipalAndRoleFindings(t *testing.T) {
 		},
 		{
 			"approval with violated resolution",
-			[]PrincipalResolution{failedRes("user-456", ResolutionViolated, ReasonTrustSubjectMismatch)},
+			[]PrincipalResolution{failedRes(t, "user-456", ResolutionViolated)},
 			[]ApprovalRecord{{Role: "reviewer", PrincipalID: pRev}},
 			AuthorizationViolated,
 			[]string{ReasonPrincipalViolated, ReasonRequiredApproverMissing},
 		},
 		{
 			"approval with unproven resolution",
-			[]PrincipalResolution{failedRes("user-456", ResolutionUnproven, ReasonTrustEvidenceUnavailable)},
+			[]PrincipalResolution{failedRes(t, "user-456", ResolutionUnproven)},
 			[]ApprovalRecord{{Role: "reviewer", PrincipalID: pRev}},
 			AuthorizationUnproven,
 			[]string{ReasonPrincipalUnproven, ReasonRequiredApproverMissing},
@@ -656,7 +680,7 @@ func TestAuthorizeMalformedRequests(t *testing.T) {
 		}, "principal"},
 		{"malformed resolution claim", func(r *AuthorizationRequest) { r.Resolutions[0].Claim.Subject = "" }, "subject"},
 		{"conflicting duplicate resolutions", func(r *AuthorizationRequest) {
-			r.Resolutions = append(r.Resolutions, failedRes("user-456", ResolutionUnproven, ReasonTrustEvidenceUnavailable))
+			r.Resolutions = append(r.Resolutions, failedRes(t, "user-456", ResolutionUnproven))
 		}, "conflicting"},
 		{"invalid approval role", func(r *AuthorizationRequest) { r.Approvals[0].Role = "Reviewer" }, "invalid id"},
 		{"invalid approval principal", func(r *AuthorizationRequest) { r.Approvals[0].PrincipalID = "bare-name" }, "principal"},

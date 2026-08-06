@@ -243,52 +243,57 @@ func TestDecodeProfileOrderIndependence(t *testing.T) {
 	}
 }
 
-// TestProfileDigestSensitivity: the digest moves when any semantic field
-// moves.
+// profileMutators mutates every authority-bearing profile family; shared
+// by the content-sensitivity and seal-detection tests.
+var profileMutators = []struct {
+	name   string
+	mutate func(*Profile)
+}{
+	{"id", func(p *Profile) { p.ID = "team-other" }},
+	{"class", func(p *Profile) { p.Class = ClassHighAssurance }},
+	{"applicable_transitions", func(p *Profile) { p.ApplicableTransitions = p.ApplicableTransitions[:2] }},
+	{"trust_source_id", func(p *Profile) { p.IdentityTrustSources[0].ID = "other-owners" }},
+	{"trust_source_kind", func(p *Profile) { p.IdentityTrustSources[0].Kind = TrustSourceForge }},
+	{"role_mapping_role", func(p *Profile) { p.RoleMappings[0].Role = "owner" }},
+	{"role_mapping_trust_source", func(p *Profile) { p.RoleMappings[0].TrustSource = "corporate-idp" }},
+	{"role_mapping_subjects", func(p *Profile) { p.RoleMappings[0].Subjects = []string{"user-999"} }},
+	{"ownership_id", func(p *Profile) { p.OwnershipSources[0].ID = "other" }},
+	{"ownership_trust_source", func(p *Profile) { p.OwnershipSources[0].TrustSource = "corporate-idp" }},
+	{"ownership_transitions", func(p *Profile) { p.OwnershipSources[0].Transitions = []string{"accept"} }},
+	{"ownership_roles", func(p *Profile) { p.OwnershipSources[0].Roles = []string{"owner"} }},
+	{"signature_transitions", func(p *Profile) { p.SignatureRequirements[0].Transitions = []string{"close"} }},
+	{"signature_roles", func(p *Profile) { p.SignatureRequirements[0].Roles = []string{"reviewer"} }},
+	{"signature_trust_sources", func(p *Profile) { p.SignatureRequirements[0].TrustSources = []string{"github"} }},
+	{"approver_transitions", func(p *Profile) { p.RequiredApprovers[0].Transitions = []string{"accept"} }},
+	{"approver_roles", func(p *Profile) { p.RequiredApprovers[0].Roles = []string{"owner"} }},
+	{"approver_minimum", func(p *Profile) { p.RequiredApprovers[0].Minimum = 2 }},
+	{"distinctness_transitions", func(p *Profile) { p.DistinctnessRules[0].Transitions = []string{"accept"} }},
+	{"distinctness_left", func(p *Profile) { p.DistinctnessRules[0].LeftRole = "owner" }},
+	{"distinctness_right", func(p *Profile) { p.DistinctnessRules[0].RightRole = "owner" }},
+	{"distinctness_relation", func(p *Profile) { p.DistinctnessRules[0].Relation = RelationSamePrincipal }},
+	{"evidence_transitions", func(p *Profile) { p.EvidenceSourceRestrictions[0].Transitions = []string{"accept"} }},
+	{"evidence_allowed_sources", func(p *Profile) { p.EvidenceSourceRestrictions[0].AllowedSources = []string{"ci-verify"} }},
+	{"escalation_transitions", func(p *Profile) { p.EscalationThresholds[0].Transitions = []string{"accept"} }},
+	{"escalation_metric", func(p *Profile) { p.EscalationThresholds[0].Metric = "other-metric" }},
+	{"escalation_at_least", func(p *Profile) { p.EscalationThresholds[0].AtLeast = 5 }},
+	{"escalation_required_roles", func(p *Profile) { p.EscalationThresholds[0].RequiredRoles = []string{"reviewer"} }},
+}
+
+// TestProfileDigestSensitivity: the canonical content digest moves when
+// any semantic field moves. Mutated values are compared through the
+// unexported content digest because the public Digest refuses mutated
+// profiles outright (see TestProfileSealDetectsMutation).
 func TestProfileDigestSensitivity(t *testing.T) {
-	tests := []struct {
-		name   string
-		mutate func(*Profile)
-	}{
-		{"id", func(p *Profile) { p.ID = "team-other" }},
-		{"class", func(p *Profile) { p.Class = ClassHighAssurance }},
-		{"applicable_transitions", func(p *Profile) { p.ApplicableTransitions = p.ApplicableTransitions[:2] }},
-		{"trust_source_id", func(p *Profile) { p.IdentityTrustSources[0].ID = "other-owners" }},
-		{"trust_source_kind", func(p *Profile) { p.IdentityTrustSources[0].Kind = TrustSourceForge }},
-		{"role_mapping_role", func(p *Profile) { p.RoleMappings[0].Role = "owner" }},
-		{"role_mapping_trust_source", func(p *Profile) { p.RoleMappings[0].TrustSource = "corporate-idp" }},
-		{"role_mapping_subjects", func(p *Profile) { p.RoleMappings[0].Subjects = []string{"user-999"} }},
-		{"ownership_id", func(p *Profile) { p.OwnershipSources[0].ID = "other" }},
-		{"ownership_trust_source", func(p *Profile) { p.OwnershipSources[0].TrustSource = "corporate-idp" }},
-		{"ownership_transitions", func(p *Profile) { p.OwnershipSources[0].Transitions = []string{"accept"} }},
-		{"ownership_roles", func(p *Profile) { p.OwnershipSources[0].Roles = []string{"owner"} }},
-		{"signature_transitions", func(p *Profile) { p.SignatureRequirements[0].Transitions = []string{"close"} }},
-		{"signature_roles", func(p *Profile) { p.SignatureRequirements[0].Roles = []string{"reviewer"} }},
-		{"signature_trust_sources", func(p *Profile) { p.SignatureRequirements[0].TrustSources = []string{"github"} }},
-		{"approver_transitions", func(p *Profile) { p.RequiredApprovers[0].Transitions = []string{"accept"} }},
-		{"approver_roles", func(p *Profile) { p.RequiredApprovers[0].Roles = []string{"owner"} }},
-		{"approver_minimum", func(p *Profile) { p.RequiredApprovers[0].Minimum = 2 }},
-		{"distinctness_transitions", func(p *Profile) { p.DistinctnessRules[0].Transitions = []string{"accept"} }},
-		{"distinctness_left", func(p *Profile) { p.DistinctnessRules[0].LeftRole = "owner" }},
-		{"distinctness_right", func(p *Profile) { p.DistinctnessRules[0].RightRole = "owner" }},
-		{"distinctness_relation", func(p *Profile) { p.DistinctnessRules[0].Relation = RelationSamePrincipal }},
-		{"evidence_transitions", func(p *Profile) { p.EvidenceSourceRestrictions[0].Transitions = []string{"accept"} }},
-		{"evidence_allowed_sources", func(p *Profile) { p.EvidenceSourceRestrictions[0].AllowedSources = []string{"ci-verify"} }},
-		{"escalation_transitions", func(p *Profile) { p.EscalationThresholds[0].Transitions = []string{"accept"} }},
-		{"escalation_metric", func(p *Profile) { p.EscalationThresholds[0].Metric = "other-metric" }},
-		{"escalation_at_least", func(p *Profile) { p.EscalationThresholds[0].AtLeast = 5 }},
-		{"escalation_required_roles", func(p *Profile) { p.EscalationThresholds[0].RequiredRoles = []string{"reviewer"} }},
-	}
-	for _, tt := range tests {
+	for _, tt := range profileMutators {
 		t.Run(tt.name, func(t *testing.T) {
 			base := mustDecode(t, profileYAML())
-			baseDigest, err := base.Digest()
+			baseDigest, err := contentDigest(base)
 			if err != nil {
 				t.Fatalf("base digest: %v", err)
 			}
 			mutated := mustDecode(t, profileYAML())
 			tt.mutate(&mutated)
-			mutatedDigest, err := mutated.Digest()
+			mutatedDigest, err := contentDigest(mutated)
 			if err != nil {
 				t.Fatalf("mutated digest: %v", err)
 			}

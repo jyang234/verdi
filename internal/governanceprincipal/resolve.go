@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"unicode/utf8"
+
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // ResolutionState is the closed three-valued principal-resolution state
@@ -178,6 +180,41 @@ type PrincipalResolution struct {
 	PrincipalID PrincipalID     `json:"principal_id,omitempty"`
 	State       ResolutionState `json:"state"`
 	Witnesses   []Witness       `json:"witnesses"`
+
+	// seal is the unexported integrity seal Resolver.Resolve mints: the
+	// canonical content digest of every exported field. External packages
+	// cannot set it, and any mutation of the exported fields — including
+	// witness replacement or removal — makes it stale, so Authorize and
+	// AttributionFromResolution can prove a resolution is unmodified
+	// resolver output (checkSeal). Only Resolver.Resolve mints a
+	// consumable resolution.
+	seal string
+}
+
+// checkSeal proves the resolution was produced by Resolver.Resolve and
+// has not been modified since. Both failures are operational errors.
+func (r PrincipalResolution) checkSeal() error {
+	if r.seal == "" {
+		return fmt.Errorf("governanceprincipal: resolution for claim %q/%q was not produced by Resolver.Resolve", r.Claim.TrustSource, r.Claim.Subject)
+	}
+	d, err := canonjson.Digest(r)
+	if err != nil {
+		return err
+	}
+	if d != r.seal {
+		return fmt.Errorf("governanceprincipal: resolution for claim %q/%q was modified after Resolver.Resolve", r.Claim.TrustSource, r.Claim.Subject)
+	}
+	return nil
+}
+
+// sealResolution mints the integrity seal on a freshly resolved record.
+func sealResolution(res *PrincipalResolution) error {
+	d, err := canonjson.Digest(*res)
+	if err != nil {
+		return err
+	}
+	res.seal = d
+	return nil
 }
 
 // Resolver turns principal claims into resolutions through an injected
@@ -204,6 +241,9 @@ func NewResolver(facts TrustFactReader) Resolver {
 //  6. valid evidence containing the subject is authenticated with the
 //     derived canonical principal ID.
 func (r Resolver) Resolve(ctx context.Context, profile Profile, claim PrincipalClaim) (PrincipalResolution, error) {
+	if err := profile.checkSeal(); err != nil {
+		return PrincipalResolution{}, err
+	}
 	if err := claim.Validate(); err != nil {
 		return PrincipalResolution{}, err
 	}
@@ -222,6 +262,9 @@ func (r Resolver) Resolve(ctx context.Context, profile Profile, claim PrincipalC
 			Detail:   fmt.Sprintf("trust source %q is not permitted by profile %q", claim.TrustSource, profile.ID),
 		}}
 		sortWitnesses(res.Witnesses)
+		if err := sealResolution(&res); err != nil {
+			return PrincipalResolution{}, err
+		}
 		return res, nil
 	}
 
@@ -273,5 +316,8 @@ func (r Resolver) Resolve(ctx context.Context, profile Profile, claim PrincipalC
 		}}
 	}
 	sortWitnesses(res.Witnesses)
+	if err := sealResolution(&res); err != nil {
+		return PrincipalResolution{}, err
+	}
 	return res, nil
 }

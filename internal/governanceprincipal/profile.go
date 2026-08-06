@@ -224,6 +224,13 @@ type Profile struct {
 	DistinctnessRules          []DistinctnessRule          `json:"distinctness_rules"`
 	EvidenceSourceRestrictions []EvidenceSourceRestriction `json:"evidence_source_restrictions"`
 	EscalationThresholds       []EscalationThreshold       `json:"escalation_thresholds"`
+
+	// seal is the unexported integrity seal DecodeProfile mints: the
+	// canonical content digest of every exported field at decode time.
+	// External packages cannot set it, and any post-decode mutation of the
+	// exported fields makes it stale, so every public kernel operation can
+	// prove a profile came from DecodeProfile unmodified (checkSeal).
+	seal string
 }
 
 // trustSource resolves a profile-local trust-source reference.

@@ -51,11 +51,17 @@ func AttributionFromResolution(res PrincipalResolution) (Attribution, error) {
 	if err := res.State.Validate(); err != nil {
 		return Attribution{}, err
 	}
+	if res.State != ResolutionAuthenticated && res.PrincipalID != "" {
+		return Attribution{}, fmt.Errorf("governanceprincipal: %s resolution must not carry a principal id", res.State)
+	}
+	if res.State == ResolutionAuthenticated && res.PrincipalID == "" {
+		return Attribution{}, fmt.Errorf("governanceprincipal: authenticated resolution must carry its derived principal id")
+	}
+	if err := res.checkSeal(); err != nil {
+		return Attribution{}, err
+	}
 	if res.State == ResolutionAuthenticated {
 		return NewPrincipalAttribution(res.PrincipalID)
-	}
-	if res.PrincipalID != "" {
-		return Attribution{}, fmt.Errorf("governanceprincipal: %s resolution must not carry a principal id", res.State)
 	}
 	return NewUnauthenticatedAttribution(), nil
 }

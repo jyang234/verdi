@@ -148,6 +148,9 @@ type AuthorizationDecision struct {
 // governed shortfall is a finding. Explicit contradiction outranks
 // unproven, and unproven is never reinterpreted as authorized.
 func Authorize(profile Profile, request AuthorizationRequest) (AuthorizationDecision, error) {
+	if err := profile.checkSeal(); err != nil {
+		return AuthorizationDecision{}, err
+	}
 	if err := ValidateID(request.Transition); err != nil {
 		return AuthorizationDecision{}, fmt.Errorf("governanceprincipal: request transition: %w", err)
 	}
@@ -242,6 +245,9 @@ func indexResolutions(resolutions []PrincipalResolution) (map[PrincipalID]Princi
 			}
 		} else if res.PrincipalID != "" {
 			return nil, fmt.Errorf("governanceprincipal: %s: %s resolution must not carry a principal id", field, res.State)
+		}
+		if err := res.checkSeal(); err != nil {
+			return nil, fmt.Errorf("governanceprincipal: %s: %w", field, err)
 		}
 		if prev, ok := byID[derived]; ok {
 			if !reflect.DeepEqual(prev, res) {

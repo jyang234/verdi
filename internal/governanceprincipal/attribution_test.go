@@ -68,9 +68,9 @@ func TestAttributionExclusiveUnion(t *testing.T) {
 	}
 }
 
-// TestAttributionFromResolution: authenticated resolutions may carry a
-// principal attribution; violated or unproven resolutions only the
-// explicit unauthenticated marker.
+// TestAttributionFromResolution: genuine authenticated resolutions may
+// carry a principal attribution; genuine violated or unproven resolutions
+// only the explicit unauthenticated marker.
 func TestAttributionFromResolution(t *testing.T) {
 	id, err := CanonicalPrincipalID("github", "user-123")
 	if err != nil {
@@ -78,8 +78,7 @@ func TestAttributionFromResolution(t *testing.T) {
 	}
 	claim := PrincipalClaim{TrustSource: "github", Subject: "user-123"}
 
-	authed := PrincipalResolution{Claim: claim, PrincipalID: id, State: ResolutionAuthenticated}
-	a, err := AttributionFromResolution(authed)
+	a, err := AttributionFromResolution(authedRes(t, "user-123"))
 	if err != nil {
 		t.Fatalf("AttributionFromResolution(authenticated): %v", err)
 	}
@@ -88,8 +87,7 @@ func TestAttributionFromResolution(t *testing.T) {
 	}
 
 	for _, state := range []ResolutionState{ResolutionViolated, ResolutionUnproven} {
-		res := PrincipalResolution{Claim: claim, State: state}
-		a, err := AttributionFromResolution(res)
+		a, err := AttributionFromResolution(failedRes(t, "user-123", state))
 		if err != nil {
 			t.Fatalf("AttributionFromResolution(%s): %v", state, err)
 		}
