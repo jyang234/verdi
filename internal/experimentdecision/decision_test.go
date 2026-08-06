@@ -937,10 +937,96 @@ func TestEvaluateOperationalErrorNeverCarriesResult(t *testing.T) {
 		t.Fatalf("Evaluate() happy path = (%+v, %v), want a validating Result and nil error", res, err)
 	}
 
-	broken := obs
+	// Copy before mutating: `broken := obs` would alias the SAME backing
+	// array, so the mutation below would corrupt obs for anything later in
+	// this test rather than isolating the broken input.
+	broken := append([]experiment.Observation(nil), obs...)
 	broken[0].Round = 999 // out of registered range
 	if res, err := Evaluate(def, broken); err == nil || !isZeroResult(res) {
 		t.Fatalf("Evaluate() on broken input = (%+v, %v), want (zero Result, error)", res, err)
+	}
+}
+
+// TestEvaluateOrderIndependent proves CO-3's other half: the SAME evidence
+// supplied in a different slice order is the same evidence. The
+// observations digest, the whole Result, and the rendered bytes must all
+// be identical — file order is a property of the transport, never of the
+// decision.
+func TestEvaluateOrderIndependent(t *testing.T) {
+	def := lockDefinition(t)
+	obs := happyObservations(t, def, "run-1",
+		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
+		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},
+	)
+
+	// Reverse the slice: same records, different order.
+	reordered := make([]experiment.Observation, 0, len(obs))
+	for i := len(obs) - 1; i >= 0; i-- {
+		reordered = append(reordered, obs[i])
+	}
+
+	d1, err := ObservationsDigest(def, obs)
+	if err != nil {
+		t.Fatalf("ObservationsDigest(obs) unexpected error: %v", err)
+	}
+	d2, err := ObservationsDigest(def, reordered)
+	if err != nil {
+		t.Fatalf("ObservationsDigest(reordered) unexpected error: %v", err)
+	}
+	if d1 != d2 {
+		t.Fatalf("ObservationsDigest differs across slice orders: %q vs %q", d1, d2)
+	}
+
+	res1 := mustEvaluate(t, def, obs)
+	res2 := mustEvaluate(t, def, reordered)
+	if !reflect.DeepEqual(res1, res2) {
+		t.Fatalf("Evaluate differs across slice orders:\n%+v\n---\n%+v", res1, res2)
+	}
+
+	rendered1, err := RenderResult(res1)
+	if err != nil {
+		t.Fatalf("RenderResult(res1) unexpected error: %v", err)
+	}
+	rendered2, err := RenderResult(res2)
+	if err != nil {
+		t.Fatalf("RenderResult(res2) unexpected error: %v", err)
+	}
+	if string(rendered1) != string(rendered2) {
+		t.Fatalf("RenderResult output differs across slice orders:\n%s\n---\n%s", rendered1, rendered2)
+	}
+}
+
+// TestEvaluateDoesNotMutateInputs proves Evaluate is a pure function of its
+// arguments: a caller's locked definition and observation set are exactly
+// as they were afterwards, so re-evaluating, re-digesting, or writing the
+// same inputs later cannot silently see engine-side edits.
+func TestEvaluateDoesNotMutateInputs(t *testing.T) {
+	def := lockDefinition(t)
+	obs := happyObservations(t, def, "run-1",
+		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
+		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},
+	)
+	// An independently built pair of the same shape is the reference: the
+	// fixture builders allocate fresh values on every call, so nothing is
+	// shared between the two.
+	wantDef := lockDefinition(t)
+	wantObs := happyObservations(t, wantDef, "run-1",
+		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
+		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},
+	)
+	if !reflect.DeepEqual(def, wantDef) || !reflect.DeepEqual(obs, wantObs) {
+		t.Fatalf("fixture builders are not deterministic; the immutability check below would be meaningless")
+	}
+
+	if _, err := Evaluate(def, obs); err != nil {
+		t.Fatalf("Evaluate() unexpected error: %v", err)
+	}
+
+	if !reflect.DeepEqual(def, wantDef) {
+		t.Errorf("Evaluate mutated its Definition argument:\ngot:  %+v\nwant: %+v", def, wantDef)
+	}
+	if !reflect.DeepEqual(obs, wantObs) {
+		t.Errorf("Evaluate mutated its observation slice:\ngot:  %+v\nwant: %+v", obs, wantObs)
 	}
 }
 
