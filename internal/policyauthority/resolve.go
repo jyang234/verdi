@@ -56,11 +56,16 @@ type EffectivePolicyEntry struct {
 	Payloads     map[string]policyartifact.Payload `json:"payloads"`
 }
 
-// EffectiveClaim is one base claim after narrow-only overlay refinement:
-// every base field the base claim carries, plus the effective operand
-// (Values/Bound after refinement), the base claim's own digest (the exact
-// witness identity exemptions bind to, DC-8), and the sorted ids of every
-// overlay that contributed a refinement.
+// EffectiveClaim is one base claim plus the narrow-only refinements that
+// apply inside a strictly bounded part of it: every field the base claim
+// carries (including its UNREFINED Values/Bound, which still govern
+// everywhere the claim's own scope reaches), the base claim's own digest
+// (the exact witness identity exemptions bind to, DC-8), and one
+// ScopedRefinement per distinct overlay scope. A refinement never
+// rewrites the base operand: DC-3 admits an overlay only "where the
+// governing policy declares the subject overridable AND its scope is
+// within the permitted refinement boundary", so a narrowing proven for
+// one boundary is authority for that boundary alone.
 type EffectiveClaim struct {
 	ID              string                  `json:"id"`
 	Family          policyartifact.Family   `json:"family"`
@@ -71,7 +76,31 @@ type EffectiveClaim struct {
 	Values          []string                `json:"values"`
 	Bound           *int                    `json:"bound,omitempty"`
 	BaseClaimDigest string                  `json:"base_claim_digest"`
-	AppliedOverlays []string                `json:"applied_overlays"`
+	Refinements     []ScopedRefinement      `json:"refinements"`
+}
+
+// ScopedRefinement is the narrowed operand that applies within ONE
+// overlay scope, together with the sorted ids of every overlay that
+// contributed to it. Entries group by canonically IDENTICAL scope (all
+// four dimensions equal as sorted sets); within a group the narrowing
+// rules combine the contributions (intersection for allowed-values,
+// union for required/forbidden-values, the strictest bound for
+// minimum/maximum), and each contribution is proven to narrow the BASE
+// claim.
+//
+// Refinements at DISTINCT scopes are RECORDED SEPARATELY, never merged:
+// deciding whether two different scopes overlap, nest, or are disjoint
+// requires the scope-comparison semantics that are Wave-3 work and that
+// this unit does not own. Silently combining them would either invent
+// that comparison or apply one boundary's narrowing outside it, so CO-1
+// requires the honest recorded form instead. Values is present only for
+// the value operators and Bound only for minimum/maximum: an operator
+// never carries an operand kind it cannot take.
+type ScopedRefinement struct {
+	Scope    policyartifact.Scope `json:"scope"`
+	Values   []string             `json:"values,omitempty"`
+	Bound    *int                 `json:"bound,omitempty"`
+	Overlays []string             `json:"overlays"`
 }
 
 // EffectiveExemption is one exemption carried into the effective policy
@@ -184,97 +213,196 @@ func Resolve(s *Store) (*EffectivePolicy, error) {
 	return ep, nil
 }
 
-// refineClaim applies every applicable overlay's narrow-only refinement
-// to c, in overlay-id order, and returns the effective claim.
+// scopeGroup accumulates every refinement contribution that shares one
+// canonically identical overlay scope. It starts from the BASE operand,
+// so a group's combined operand is the narrowing of the base by exactly
+// the overlays that reach that scope — never by an overlay bounded
+// somewhere else.
+type scopeGroup struct {
+	scope    policyartifact.Scope
+	values   []string
+	bound    *int
+	overlays []string
+}
+
+// refineClaim records every applicable overlay's narrow-only refinement
+// against c, grouped by the overlay scope that bounds it, and returns
+// the effective claim.
 func refineClaim(policyID string, c policyartifact.Claim, overlays []*policyartifact.Overlay) (EffectiveClaim, error) {
 	baseDigest, err := policyartifact.ClaimDigest(c)
 	if err != nil {
 		return EffectiveClaim{}, fmt.Errorf("policyauthority: policy %s claim %s: digesting base claim: %w", policyID, c.ID, err)
 	}
 
+	// Every slice below is copied, never aliased from the Store, and
+	// starts as an explicit empty slice, never nil: a claim with no
+	// contributing overlay (or a minimum/maximum claim, which never
+	// touches values at all) must still canonicalize its zero-value
+	// fields as [] like every other semantic set in this store, not as
+	// JSON null.
 	ec := EffectiveClaim{
 		ID:              c.ID,
 		Family:          c.Family,
 		Operator:        c.Operator,
 		Subject:         c.Subject,
-		Scope:           c.Scope,
+		Scope:           copyScope(c.Scope),
 		Overridable:     c.Overridable,
+		Values:          append([]string{}, c.Values...),
 		BaseClaimDigest: baseDigest,
-		AppliedOverlays: []string{},
+		Refinements:     []ScopedRefinement{},
 	}
-
-	// applied and values start as explicit empty slices, never nil: a
-	// claim with no contributing overlay (or a minimum/maximum claim,
-	// which never touches values at all) must still canonicalize its
-	// zero-value fields as [] like every other semantic set in this
-	// store, not as JSON null.
-	applied := []string{}
-	values := append([]string{}, c.Values...)
-	var bound *int
 	if c.Bound != nil {
 		b := *c.Bound
-		bound = &b
+		ec.Bound = &b
 	}
+
+	groups := map[string]*scopeGroup{}
+	var groupKeys []string
 
 	for _, o := range overlays {
 		for _, r := range o.Refinements {
 			if r.Claim != c.ID {
 				continue
 			}
+			// Defense in depth: Load's cross-validation already rejects a
+			// refinement of a non-overridable claim, and Resolve re-proves
+			// that composition, but the authority rule itself (DC-3: an
+			// overlay may refine ONLY a declared-overridable surface) is
+			// restated here so no future caller of refineClaim can reach a
+			// narrowing without it.
+			if !c.Overridable {
+				return EffectiveClaim{}, fmt.Errorf("policyauthority: overlay %s: claim %s on policy %s is not overridable", o.ID, c.ID, policyID)
+			}
+			if !refinableOperators[c.Operator] {
+				return EffectiveClaim{}, notRefinableError(o.ID, policyID, c)
+			}
 			if err := scopeSubset(c.Scope, o.Scope); err != nil {
 				return EffectiveClaim{}, fmt.Errorf("policyauthority: overlay %s refining policy %s claim %s: %w", o.ID, policyID, c.ID, err)
 			}
-			if !refinableOperators[c.Operator] {
-				return EffectiveClaim{}, fmt.Errorf("policyauthority: overlay %s: claim %s (policy %s, operator %s) is not refinable (specificity alone never changes authority)", o.ID, c.ID, policyID, c.Operator)
+
+			key, err := canonjson.Marshal(o.Scope)
+			if err != nil {
+				return EffectiveClaim{}, fmt.Errorf("policyauthority: overlay %s: canonicalizing scope: %w", o.ID, err)
 			}
-			applied = append(applied, o.ID)
+			g, ok := groups[string(key)]
+			if !ok {
+				g = &scopeGroup{
+					scope:    copyScope(o.Scope),
+					values:   append([]string{}, c.Values...),
+					overlays: []string{},
+				}
+				if c.Bound != nil {
+					b := *c.Bound
+					g.bound = &b
+				}
+				groups[string(key)] = g
+				groupKeys = append(groupKeys, string(key))
+			}
+			g.overlays = append(g.overlays, o.ID)
 
 			switch c.Operator {
 			case policyartifact.OpAllowedValues:
 				if !isSubset(r.Values, c.Values) {
 					return EffectiveClaim{}, fmt.Errorf("policyauthority: overlay %s: allowed-values refinement of policy %s claim %s is not a subset of the base values %v", o.ID, policyID, c.ID, c.Values)
 				}
-				values = intersect(values, r.Values)
+				g.values = intersect(g.values, r.Values)
 
 			case policyartifact.OpRequiredValues, policyartifact.OpForbiddenValues:
 				if !isSubset(c.Values, r.Values) {
 					return EffectiveClaim{}, fmt.Errorf("policyauthority: overlay %s: %s refinement of policy %s claim %s drops a base value (must be a superset of %v)", o.ID, c.Operator, policyID, c.ID, c.Values)
 				}
-				values = union(values, r.Values)
+				g.values = union(g.values, r.Values)
 
 			case policyartifact.OpMinimum:
 				if r.Bound == nil || *r.Bound < *c.Bound {
 					return EffectiveClaim{}, fmt.Errorf("policyauthority: overlay %s: minimum refinement of policy %s claim %s must be >= the base bound %d", o.ID, policyID, c.ID, *c.Bound)
 				}
-				if *r.Bound > *bound {
+				if *r.Bound > *g.bound {
 					b := *r.Bound
-					bound = &b
+					g.bound = &b
 				}
 
 			case policyartifact.OpMaximum:
 				if r.Bound == nil || *r.Bound > *c.Bound {
 					return EffectiveClaim{}, fmt.Errorf("policyauthority: overlay %s: maximum refinement of policy %s claim %s must be <= the base bound %d", o.ID, policyID, c.ID, *c.Bound)
 				}
-				if *r.Bound < *bound {
+				if *r.Bound < *g.bound {
 					b := *r.Bound
-					bound = &b
+					g.bound = &b
 				}
 			}
 		}
 	}
 
-	if c.Operator == policyartifact.OpAllowedValues && len(applied) > 0 && len(values) == 0 {
-		sorted := append([]string(nil), applied...)
-		sort.Strings(sorted)
-		return EffectiveClaim{}, fmt.Errorf("policyauthority: policy %s claim %s: overlays %v narrow allowed-values to an empty intersection", policyID, c.ID, sorted)
+	for _, key := range groupKeys {
+		g := groups[key]
+		sort.Strings(g.overlays)
+		sr := ScopedRefinement{Scope: g.scope, Overlays: g.overlays}
+		switch c.Operator {
+		case policyartifact.OpAllowedValues:
+			if len(g.values) == 0 {
+				return EffectiveClaim{}, fmt.Errorf("policyauthority: policy %s claim %s: overlays %v narrow allowed-values to an empty intersection", policyID, c.ID, g.overlays)
+			}
+			sr.Values = g.values
+		case policyartifact.OpRequiredValues, policyartifact.OpForbiddenValues:
+			sr.Values = g.values
+		case policyartifact.OpMinimum, policyartifact.OpMaximum:
+			sr.Bound = g.bound
+		}
+		ec.Refinements = append(ec.Refinements, sr)
 	}
-
-	sort.Strings(applied)
-	ec.AppliedOverlays = applied
-	sort.Strings(values)
-	ec.Values = values
-	ec.Bound = bound
+	if err := sortRefinementsByContent(ec.Refinements); err != nil {
+		return EffectiveClaim{}, fmt.Errorf("policyauthority: policy %s claim %s: %w", policyID, c.ID, err)
+	}
 	return ec, nil
+}
+
+// notRefinableError is the ONE named error both Load's structural
+// cross-validation and Resolve's narrowing raise for an overlay
+// targeting an operator DC-3's narrow-only refinement does not admit, so
+// a store can never Load clean and then fail to Resolve on the same
+// fact.
+func notRefinableError(overlayID, policyID string, c policyartifact.Claim) error {
+	return fmt.Errorf("policyauthority: overlay %s: claim %s (policy %s, operator %s) is not refinable (specificity alone never changes authority)", overlayID, c.ID, policyID, c.Operator)
+}
+
+// sortRefinementsByContent orders refinements by the canonical JSON
+// encoding of each entry — the "complete field content" tiebreak this
+// store uses for set entries that carry no single stable id (mirroring
+// internal/governanceprincipal's sortByContent), so the output carries
+// no incidental ordering (CO-3).
+func sortRefinementsByContent(rs []ScopedRefinement) error {
+	keys := make([]string, len(rs))
+	for i, r := range rs {
+		b, err := canonjson.Marshal(r)
+		if err != nil {
+			return fmt.Errorf("canonicalizing refinement for ordering: %w", err)
+		}
+		keys[i] = string(b)
+	}
+	idx := make([]int, len(rs))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.Slice(idx, func(i, j int) bool { return keys[idx[i]] < keys[idx[j]] })
+	sorted := make([]ScopedRefinement, len(rs))
+	for i, j := range idx {
+		sorted[i] = rs[j]
+	}
+	copy(rs, sorted)
+	return nil
+}
+
+// copyScope returns a deep copy of s whose dimensions share no backing
+// array with the caller's value, with every dimension an explicit empty
+// set rather than nil.
+func copyScope(s policyartifact.Scope) policyartifact.Scope {
+	return policyartifact.Scope{
+		Phases:       append([]string{}, s.Phases...),
+		Environments: append([]string{}, s.Environments...),
+		Paths:        append([]string{}, s.Paths...),
+		Refs:         append([]string{}, s.Refs...),
+	}
 }
 
 // scopeSubset proves overlay is a provable subset of claim on every

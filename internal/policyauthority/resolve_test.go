@@ -44,14 +44,26 @@ func TestResolve_HappyPath(t *testing.T) {
 	if goVersion == nil || verifyRequired == nil {
 		t.Fatalf("missing expected claims in %+v", entry.Claims)
 	}
-	if len(goVersion.Values) != 1 || goVersion.Values[0] != "1.25" {
-		t.Fatalf("go-version effective values = %v, want [1.25] (overlay-narrowed)", goVersion.Values)
+	// The BASE claim keeps its own (universal-scope) values: the overlay
+	// narrows only within the overlay's own scope, never claim-wide.
+	if len(goVersion.Values) != 2 || goVersion.Values[0] != "1.24" || goVersion.Values[1] != "1.25" {
+		t.Fatalf("go-version base values = %v, want [1.24 1.25]", goVersion.Values)
 	}
-	if len(goVersion.AppliedOverlays) != 1 || goVersion.AppliedOverlays[0] != "policy-overlay/frontend-go-version" {
-		t.Fatalf("go-version AppliedOverlays = %v", goVersion.AppliedOverlays)
+	if len(goVersion.Refinements) != 1 {
+		t.Fatalf("go-version Refinements = %+v, want exactly one", goVersion.Refinements)
 	}
-	if len(verifyRequired.AppliedOverlays) != 0 {
-		t.Fatalf("verify-required AppliedOverlays = %v, want empty", verifyRequired.AppliedOverlays)
+	ref := goVersion.Refinements[0]
+	if len(ref.Scope.Paths) != 1 || ref.Scope.Paths[0] != "web/" {
+		t.Fatalf("refinement scope paths = %v, want [web/]", ref.Scope.Paths)
+	}
+	if len(ref.Values) != 1 || ref.Values[0] != "1.25" {
+		t.Fatalf("refinement values = %v, want [1.25]", ref.Values)
+	}
+	if len(ref.Overlays) != 1 || ref.Overlays[0] != "policy-overlay/frontend-go-version" {
+		t.Fatalf("refinement overlays = %v", ref.Overlays)
+	}
+	if len(verifyRequired.Refinements) != 0 {
+		t.Fatalf("verify-required Refinements = %+v, want empty", verifyRequired.Refinements)
 	}
 	if len(ep.Exemptions) != 1 || ep.Exemptions[0].ExemptionID != "policy-exemption/legacy-service-go" {
 		t.Fatalf("Exemptions = %+v", ep.Exemptions)
@@ -162,6 +174,173 @@ func TestResolve_EmptySetsAreExplicitNeverNull(t *testing.T) {
 	}
 	if strings.Contains(string(data), "null") {
 		t.Fatalf("resolved effective policy contains JSON null (want explicit [] everywhere):\n%s", data)
+	}
+}
+
+// findClaim returns the named claim of the named policy in ep, failing
+// the test if either is absent.
+func findClaim(t *testing.T, ep *EffectivePolicy, policyID, claimID string) *EffectiveClaim {
+	t.Helper()
+	for i := range ep.Policies {
+		if ep.Policies[i].PolicyID != policyID {
+			continue
+		}
+		for j := range ep.Policies[i].Claims {
+			if ep.Policies[i].Claims[j].ID == claimID {
+				return &ep.Policies[i].Claims[j]
+			}
+		}
+	}
+	t.Fatalf("policy %s claim %s not present in resolved output", policyID, claimID)
+	return nil
+}
+
+// TestResolve_RefinementCarriesItsOwnScope proves an overlay's scope
+// survives into the canonical output attached to the refinement it
+// bounds (DC-3: an overlay is valid only "where ... its scope is within
+// the permitted refinement boundary" — a refinement whose boundary is
+// dropped would silently apply the narrowing claim-wide).
+func TestResolve_RefinementCarriesItsOwnScope(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, minimalStoreFiles())
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	ep, err := Resolve(s)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	data, err := canonjson.Marshal(ep)
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	if !strings.Contains(string(data), `"web/"`) {
+		t.Fatalf("canonical output does not carry the overlay's own scope path:\n%s", data)
+	}
+}
+
+// TestResolve_RefinementsGroupByIdenticalScope proves refinements group
+// by canonically identical overlay scope: two overlays sharing one scope
+// combine under the narrowing rules, while a third overlay at a
+// different scope stays a separate recorded entry (combining ACROSS
+// scopes needs scope-comparison semantics this unit does not own, so
+// CO-1 requires recording, never silent combination).
+func TestResolve_RefinementsGroupByIdenticalScope(t *testing.T) {
+	files := rulesStoreFiles()
+	files[".verdi/policy/overlays/o1.md"] = overlayFile("o1", `"web/"`, "allowed-region", `values: ["us-east", "us-west"]`)
+	files[".verdi/policy/overlays/o2.md"] = overlayFile("o2", `"web/"`, "allowed-region", `values: ["us-east", "eu-west"]`)
+	files[".verdi/policy/overlays/o3.md"] = overlayFile("o3", `"services/"`, "allowed-region", `values: ["us-west"]`)
+
+	root := t.TempDir()
+	writeTree(t, root, files)
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	ep, err := Resolve(s)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+
+	claim := findClaim(t, ep, "policy/rules", "allowed-region")
+	if len(claim.Values) != 3 {
+		t.Fatalf("base values = %v, want the unrefined base set", claim.Values)
+	}
+	if len(claim.Refinements) != 2 {
+		t.Fatalf("Refinements = %+v, want exactly two scope groups", claim.Refinements)
+	}
+
+	byPath := map[string]ScopedRefinement{}
+	for _, r := range claim.Refinements {
+		if len(r.Scope.Paths) != 1 {
+			t.Fatalf("refinement scope paths = %v, want exactly one", r.Scope.Paths)
+		}
+		byPath[r.Scope.Paths[0]] = r
+	}
+
+	web, ok := byPath["web/"]
+	if !ok {
+		t.Fatalf("no refinement recorded at scope web/: %+v", claim.Refinements)
+	}
+	if len(web.Values) != 1 || web.Values[0] != "us-east" {
+		t.Fatalf("web/ refinement values = %v, want the [us-east] intersection", web.Values)
+	}
+	if len(web.Overlays) != 2 || web.Overlays[0] != "policy-overlay/o1" || web.Overlays[1] != "policy-overlay/o2" {
+		t.Fatalf("web/ refinement overlays = %v, want both contributors sorted", web.Overlays)
+	}
+
+	svc, ok := byPath["services/"]
+	if !ok {
+		t.Fatalf("no refinement recorded at scope services/: %+v", claim.Refinements)
+	}
+	if len(svc.Values) != 1 || svc.Values[0] != "us-west" {
+		t.Fatalf("services/ refinement values = %v, want [us-west] (never combined across scopes)", svc.Values)
+	}
+	if len(svc.Overlays) != 1 || svc.Overlays[0] != "policy-overlay/o3" {
+		t.Fatalf("services/ refinement overlays = %v", svc.Overlays)
+	}
+}
+
+// TestResolve_RefinementAtTheClaimScopeIsStillScoped proves an overlay
+// whose scope EQUALS the claim's scope produces an ordinary
+// ScopedRefinement carrying that scope: the representation is uniform,
+// never flattened back into the base operand.
+func TestResolve_RefinementAtTheClaimScopeIsStillScoped(t *testing.T) {
+	files := rulesStoreFiles()
+	files[".verdi/policy/overlays/o.md"] = overlayFile("o", `"services/", "web/"`, "scoped-region", `values: ["us-east"]`)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	ep, err := Resolve(s)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	claim := findClaim(t, ep, "policy/rules", "scoped-region")
+	if len(claim.Values) != 2 {
+		t.Fatalf("base values = %v, want the unrefined base set", claim.Values)
+	}
+	if len(claim.Refinements) != 1 {
+		t.Fatalf("Refinements = %+v, want one entry", claim.Refinements)
+	}
+	got := claim.Refinements[0].Scope.Paths
+	if len(got) != 2 || got[0] != "services/" || got[1] != "web/" {
+		t.Fatalf("refinement scope paths = %v, want the claim's own scope restated", got)
+	}
+}
+
+// TestResolve_BoundRefinementsGroupByScope proves the bound operators
+// carry their narrowed bound (never a values operand) per scope group.
+func TestResolve_BoundRefinementsGroupByScope(t *testing.T) {
+	files := rulesStoreFiles()
+	files[".verdi/policy/overlays/o1.md"] = overlayFile("o1", `"web/"`, "coverage-min", `bound: 80`)
+	files[".verdi/policy/overlays/o2.md"] = overlayFile("o2", `"web/"`, "coverage-min", `bound: 85`)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	ep, err := Resolve(s)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	claim := findClaim(t, ep, "policy/rules", "coverage-min")
+	if claim.Bound == nil || *claim.Bound != 70 {
+		t.Fatalf("base bound = %v, want the unrefined 70", claim.Bound)
+	}
+	if len(claim.Refinements) != 1 {
+		t.Fatalf("Refinements = %+v, want one scope group", claim.Refinements)
+	}
+	r := claim.Refinements[0]
+	if r.Bound == nil || *r.Bound != 85 {
+		t.Fatalf("refinement bound = %v, want the strictest (85) of the group", r.Bound)
+	}
+	if len(r.Values) != 0 {
+		t.Fatalf("refinement values = %v, want none for a bound operator", r.Values)
 	}
 }
 

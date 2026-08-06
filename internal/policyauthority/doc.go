@@ -21,13 +21,18 @@
 // resolving.
 //
 // Resolve computes the one canonical *EffectivePolicy from a loaded
-// Store: base policy claims narrowed by their applicable overlays under
-// DC-3's narrow-only refinement discipline (specificity alone never
-// changes authority — an overlay may narrow a declared-overridable claim
-// only in the direction that removes optionality, never widens it), with
-// exemptions carried as recorded facts, never evaluated here. Its result
-// is itself sealed against post-Resolve mutation; Digest() verifies the
-// seal before returning the canonical content address.
+// Store: every base policy claim plus the scope-bounded refinements its
+// applicable overlays prove under DC-3's narrow-only discipline
+// (specificity alone never changes authority — an overlay may narrow a
+// declared-overridable claim only in the direction that removes
+// optionality, never widens it, and only inside the overlay's own scope),
+// with exemptions carried as recorded facts, never evaluated here. A
+// refinement is recorded against the scope that bounds it rather than
+// flattened into the base operand, and refinements at distinct scopes are
+// never combined: that would need scope-comparison semantics this unit
+// does not own. Its result is itself sealed against post-Resolve
+// mutation; Digest() verifies the seal before returning the canonical
+// content address.
 //
 // Nothing in this package exposes a way to compute an effective value
 // from raw policyartifact values without going through Load first: the
