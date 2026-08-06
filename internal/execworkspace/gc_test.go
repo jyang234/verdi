@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -503,6 +504,43 @@ func TestDecideUnit_Rank5_ReleasedCleanUnlocked_Reclaimed_AllFivePathsGone(t *te
 	}
 	// No double-unlink: the fused .lock deletion is the ONLY release call,
 	// and it produced no error (proven above by Reclaimed with no Partial).
+	if want := "execution: reclaimed: " + id + " (any surviving registration is resolved by a later gc)"; res.Line() != want {
+		t.Fatalf("Line() = %q, want %q", res.Line(), want)
+	}
+}
+
+// A released, clean unit directory that was NEVER registered as a worktree
+// of repo.Dir (a standalone repo planted at the unit path) still reaches
+// rank 5 and reclaims — so no surviving registration exists for a later gc
+// to resolve. rank 5 performs no verification of that fact either way
+// (its five fixed deletions are the whole action), so the disclosed line
+// may only CONDITION the claim, never assert it.
+func TestDecideUnit_Rank5_UnregisteredUnit_LineMakesNoUnconditionalRegistrationClaim(t *testing.T) {
+	repo := newReconcileTestRepo(t)
+	storeRoot := newExecutionStoreRoot(t)
+	id := gcUnitID(0)
+	unitPath := UnitPath(storeRoot, id)
+	if err := os.MkdirAll(unitPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", unitPath, err)
+	}
+	// Standalone repo: rank 3's StatusDirty succeeds and reports clean, so
+	// rank 5 runs, yet `git worktree list` in repo.Dir never named this path.
+	if out, err := exec.CommandContext(context.Background(), "git", "init", "--quiet", unitPath).CombinedOutput(); err != nil {
+		t.Fatalf("git init %s: %v (%s)", unitPath, err, out)
+	}
+	markReleased(t, storeRoot, id)
+
+	res := decideUnit(context.Background(), storeRoot, repo.Dir, id, NewGitReconciler(storeRoot))
+	if res.Outcome != Reclaimed {
+		t.Fatalf("Outcome = %v (detail=%q), want Reclaimed", res.Outcome, res.Detail)
+	}
+	line := res.Line()
+	if strings.Contains(line, "registration remains") {
+		t.Fatalf("Line() = %q asserts a surviving registration as fact, but this unit was never registered", line)
+	}
+	if !strings.Contains(line, "any surviving registration is resolved by a later gc") {
+		t.Fatalf("Line() = %q, want the conditional registration disclosure", line)
+	}
 }
 
 func TestDecideUnit_Rank5_PartialAtDirectoryStep_ThenReEntrantFinish(t *testing.T) {

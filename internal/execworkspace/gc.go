@@ -101,7 +101,11 @@ func (r GCResult) Line() string {
 	case ReclaimOrphaned:
 		return fmt.Sprintf("execution: reclaim-orphaned: %s (orphaned metadata cleared, registry reconciled)", r.WorkspaceID)
 	case Reclaimed:
-		return fmt.Sprintf("execution: reclaimed: %s (registration remains; a later gc resolves it)", r.WorkspaceID)
+		// Conditional, never asserted as fact: rank 5 verifies nothing about
+		// registrations (its five fixed deletions are the whole action), and
+		// a reclaimed unit need not have one at all — an unregistered
+		// released directory reaches rank 5 and reclaims just the same.
+		return fmt.Sprintf("execution: reclaimed: %s (any surviving registration is resolved by a later gc)", r.WorkspaceID)
 	case KeepMalformed:
 		return fmt.Sprintf("execution: kept: malformed (%s): %s", r.WorkspaceID, r.Detail)
 	case KeepNotEligible:
@@ -467,6 +471,15 @@ func decideRank5(ctx context.Context, storeRoot, repoRoot, workspaceID string, r
 		_ = filelock.Release(lockFile, lockPath)
 		return partialResult(workspaceID, fmt.Sprintf("rank 5: delete request step failed: %v", err))
 	}
+	// Direct filesystem removal, NOT gitx.WorktreeRemove — a deliberate
+	// primitive choice for spec §GC slice's "delete unit path" step. The
+	// unit's registration may be absent, stale, or claimed aside, and
+	// `git worktree remove` fails on all three, so it cannot implement a
+	// step the spec states unconditionally. The dirty guard this deletion
+	// relies on is rank 3's StatusDirty, RE-DERIVED above under the held
+	// lock (not git's own worktree-remove safety check), and any surviving
+	// registration is rank 0's job on a later invocation: §GC slice's fixed
+	// five-step order names no in-rank reconciliation.
 	if err := os.RemoveAll(unitPath); err != nil {
 		_ = filelock.Release(lockFile, lockPath)
 		return partialResult(workspaceID, fmt.Sprintf("rank 5: delete unit-path step failed: %v", err))
@@ -479,7 +492,6 @@ func decideRank5(ctx context.Context, storeRoot, repoRoot, workspaceID string, r
 	if relErr := filelock.Release(lockFile, lockPath); relErr != nil {
 		return partialResult(workspaceID, fmt.Sprintf("rank 5: delete lock step (release) failed: %v", relErr))
 	}
-	_ = detail // acquisition succeeded; detail is only meaningful on failure.
 	return keepResult(workspaceID, Reclaimed, "")
 }
 
