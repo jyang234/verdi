@@ -129,11 +129,72 @@ func TestCollectFingerprint_RejectsInvalidDigest(t *testing.T) {
 		"empty digest name":  {InputDigests: map[string]string{"": "deadbeef"}},
 		"empty digest value": {InputDigests: map[string]string{"fixture": ""}},
 		"non-hex digest":     {InputDigests: map[string]string{"fixture": "not-hex!!"}},
+		"odd-length digest":  {InputDigests: map[string]string{"fixture": "abc"}},
 	}
 	for name, inputs := range cases {
 		t.Run(name, func(t *testing.T) {
 			if data, err := CollectFingerprint(profile, inputs); err == nil {
 				t.Fatalf("CollectFingerprint(%s) = %q, want error", name, data)
+			}
+		})
+	}
+}
+
+// TestCollectFingerprint_RejectsNonLowercaseHexDigest pins identity.go's
+// canonical-lowercase-hex discipline on fingerprint input digests: two
+// spellings of the same digest bytes must never both be accepted, or the
+// fingerprint stops being a stable identity for identical inputs.
+func TestCollectFingerprint_RejectsNonLowercaseHexDigest(t *testing.T) {
+	dir := t.TempDir()
+	profile, _, err := BuildProfile(dir, GrantSet{}, nil)
+	if err != nil {
+		t.Fatalf("BuildProfile: %v", err)
+	}
+	cases := map[string]struct {
+		digest  string
+		wantErr bool
+	}{
+		"lowercase accepted":  {digest: "deadbeef", wantErr: false},
+		"uppercase rejected":  {digest: "DEADBEEF", wantErr: true},
+		"mixed case rejected": {digest: "DeAdBeEf", wantErr: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			data, err := CollectFingerprint(profile, FingerprintInputs{
+				InputDigests: map[string]string{"fixture": tc.digest},
+			})
+			if tc.wantErr && err == nil {
+				t.Fatalf("CollectFingerprint(digest %q) = %q, want error", tc.digest, data)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("CollectFingerprint(digest %q) = %v, want nil", tc.digest, err)
+			}
+		})
+	}
+}
+
+// TestCollectFingerprint_RejectsInvalidEnvVarName pins that a requested
+// env-var NAME is held to the same predicate BuildProfile applies to a
+// declared-env key. Without it a name BuildProfile could never have admitted
+// (containing '=' or a NUL) is silently recorded as an always-null entry,
+// which reads as "asked for and absent" rather than "never askable".
+func TestCollectFingerprint_RejectsInvalidEnvVarName(t *testing.T) {
+	dir := t.TempDir()
+	profile, _, err := BuildProfile(dir, GrantSet{}, nil)
+	if err != nil {
+		t.Fatalf("BuildProfile: %v", err)
+	}
+	cases := map[string]string{
+		"embedded equals": "A=B",
+		"embedded NUL":    "A\x00B",
+		"empty name":      "",
+	}
+	for name, envVar := range cases {
+		t.Run(name, func(t *testing.T) {
+			if data, err := CollectFingerprint(profile, FingerprintInputs{
+				EnvVarNames: []string{envVar},
+			}); err == nil {
+				t.Fatalf("CollectFingerprint(env var name %q) = %q, want error", envVar, data)
 			}
 		})
 	}

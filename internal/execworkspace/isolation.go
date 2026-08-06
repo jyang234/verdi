@@ -19,15 +19,13 @@ package execworkspace
 // cannot apply is not a silent partial success. BuildProfile always
 // returns its EnforcementReport (the facts survive), but when any row is
 // could-not-apply it ALSO returns a non-nil error — reusing this package's
-// existing *OperationalError type from materialize.go, which is why the
-// rendered message below carries that type's own fixed
-// "execworkspace: materialize: ..." prefix even though this failure has
-// nothing to do with materialization: OperationalError is this package's
-// one shared retryable-disclosed-failure type, and this commit's write set
-// does not touch materialize.go to give it a second, more general
-// constructor. The Op and Err fields still carry the correct, specific
-// content (which grant kinds could not be applied), and errors.As reaches
-// the typed value through any wrap.
+// existing *OperationalError type from materialize.go, which is its one
+// shared retryable-disclosed-failure type. That type's Error() prefixes
+// only "execworkspace: " and lets the Op name the subsystem, so this
+// failure renders as "execworkspace: isolation-profile: apply-grants: ..."
+// and is never mislabelled as a materialization failure. The Op and Err
+// fields carry the specific content (which grant kinds could not be
+// applied), and errors.As reaches the typed value through any wrap.
 //
 // Grounding for the fail-closed posture (spec §Isolation-control
 // application, quoted there): CI dc-10 — "authoritative launch fails when
@@ -131,7 +129,10 @@ var couldNotApplyReasons = map[GrantKind]string{
 // four .home/.config/.cache/.tmp directories are created under the
 // workspace. A declaredEnv key that is empty, contains '=', contains NUL,
 // or collides with one of the four profile-owned keys is a fail-closed
-// error — never a silent override.
+// error — never a silent override. A declaredEnv VALUE containing a NUL is
+// likewise a fail-closed error, since the OS truncates an environment entry
+// at its first NUL and the launched process would then see a different
+// environment than the Profile reports.
 //
 // Timeout is set from a GrantTimeouts grant, if present, else remains the
 // zero Duration. AllowedArgv0s is a sorted copy of a GrantProcessExecution
@@ -156,8 +157,11 @@ func BuildProfile(workspacePath string, grants GrantSet, declaredEnv map[string]
 	if err := grants.Validate(); err != nil {
 		return Profile{}, nil, fmt.Errorf("execworkspace: build profile: %w", err)
 	}
-	for key := range declaredEnv {
+	for key, value := range declaredEnv {
 		if err := validateEnvKey(key); err != nil {
+			return Profile{}, nil, fmt.Errorf("execworkspace: build profile: declared env: %w", err)
+		}
+		if err := validateEnvValue(key, value); err != nil {
 			return Profile{}, nil, fmt.Errorf("execworkspace: build profile: declared env: %w", err)
 		}
 		if profileOwnedEnvKeys[key] {
@@ -245,6 +249,21 @@ func validateEnvKey(key string) error {
 	}
 	if strings.ContainsRune(key, 0) {
 		return fmt.Errorf("declared env key %q contains a NUL byte", key)
+	}
+	return nil
+}
+
+// validateEnvValue enforces the value half of BuildProfile's declared-env
+// rules: no NUL byte. Env() renders "KEY=VALUE" entries destined for
+// exec.Cmd.Env, and the OS terminates each entry at its first NUL — so a
+// value carrying one would ship a SILENTLY DIFFERENT environment to the
+// launched process than the Profile reports and than CollectFingerprint
+// records. An empty value is legitimate ("declared, and empty") and is not
+// rejected; '=' is legitimate too, since only the first '=' in an entry
+// separates key from value.
+func validateEnvValue(key, value string) error {
+	if strings.ContainsRune(value, 0) {
+		return fmt.Errorf("declared env value for key %q contains a NUL byte", key)
 	}
 	return nil
 }

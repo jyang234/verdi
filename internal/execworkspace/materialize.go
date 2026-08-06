@@ -135,13 +135,24 @@ type Result struct {
 // to a hard verdict error (ErrReleasedTerminal, ErrIdentityMismatch) or
 // success. Op names which step/check produced it; Err is the underlying
 // cause and is reachable via errors.Unwrap/errors.As/errors.Is.
+//
+// OperationalError is this package's ONE shared retryable-failure type, and
+// isolation.go's AD-5 failure uses it too. So Op — not Error() — carries the
+// SUBSYSTEM as well as the step: every materialization Op in this file is
+// spelled "materialize: <step>", and isolation.go's is
+// "isolation-profile: apply-grants". Error() prefixes only "execworkspace: ".
+// A hard-coded "materialize: " in Error() would render an isolation-profile
+// failure as "execworkspace: materialize: isolation-profile: ...", naming a
+// subsystem that was never involved. Rendered materialization errors are
+// byte-for-byte identical to what the hard-coded form produced; only the Op
+// FIELD's value changed, gaining the "materialize: " prefix it now owns.
 type OperationalError struct {
 	Op  string
 	Err error
 }
 
 func (e *OperationalError) Error() string {
-	return fmt.Sprintf("execworkspace: materialize: %s: %v", e.Op, e.Err)
+	return fmt.Sprintf("execworkspace: %s: %v", e.Op, e.Err)
 }
 
 func (e *OperationalError) Unwrap() error { return e.Err }
@@ -180,14 +191,14 @@ func (e *ErrReleasedTerminal) Error() string {
 // that wants a log sink ranges over Result.Disclosures itself.
 func (m *Materializer) Materialize(ctx context.Context, req Request) (res Result, err error) {
 	if verr := req.Identity.Validate(); verr != nil {
-		return res, operationalError("validate request identity", verr)
+		return res, operationalError("materialize: validate request identity", verr)
 	}
 	if verr := validateRequestPatchBytes(req); verr != nil {
-		return res, operationalError("validate request patch bytes", verr)
+		return res, operationalError("materialize: validate request patch bytes", verr)
 	}
 	workspaceID, widErr := req.Identity.WorkspaceID()
 	if widErr != nil {
-		return res, operationalError("compute workspace id", widErr)
+		return res, operationalError("materialize: compute workspace id", widErr)
 	}
 	res.WorkspaceID = workspaceID
 	res.Path = UnitPath(m.storeRoot, workspaceID)
@@ -195,7 +206,7 @@ func (m *Materializer) Materialize(ctx context.Context, req Request) (res Result
 	// MkdirAll of the execution root is not a unit mutation (it names no
 	// <workspace-id>), so it runs before lock acquisition.
 	if mkErr := os.MkdirAll(ExecutionRoot(m.storeRoot), 0o755); mkErr != nil {
-		return res, operationalError("prepare execution root", mkErr)
+		return res, operationalError("materialize: prepare execution root", mkErr)
 	}
 
 	// Step 1: non-blocking acquire. ANY acquisition failure is an
@@ -204,7 +215,7 @@ func (m *Materializer) Materialize(ctx context.Context, req Request) (res Result
 	lockPath := LockPath(m.storeRoot, workspaceID)
 	lockFile, acqErr := filelock.Acquire(lockPath)
 	if acqErr != nil {
-		return res, operationalError("acquire lock", acqErr)
+		return res, operationalError("materialize: acquire lock", acqErr)
 	}
 
 	// The lock is held CONTINUOUSLY across steps 1-6 and released on EVERY
@@ -226,7 +237,7 @@ func (m *Materializer) Materialize(ctx context.Context, req Request) (res Result
 			return
 		}
 		if err == nil {
-			err = operationalError("release lock", relErr)
+			err = operationalError("materialize: release lock", relErr)
 			return
 		}
 		res.Disclosures = append(res.Disclosures, fmt.Sprintf("lock release also failed: %v", relErr))
@@ -270,7 +281,7 @@ func (m *Materializer) materializeLocked(ctx context.Context, req Request, works
 	if err != nil {
 		// Never read as absence: an lstat failure is always operational,
 		// regardless of what os.Lstat's underlying cause is.
-		return operationalError("lstat unit path", err)
+		return operationalError("materialize: lstat unit path", err)
 	}
 
 	switch unitKind {
@@ -294,18 +305,18 @@ func (m *Materializer) materializeLocked(ctx context.Context, req Request, works
 		// "Any object at the unit path that is not a real directory is an
 		// OPERATIONAL ERROR on this path ... the step-3b posture applied
 		// one level up."
-		return operationalError("lstat unit path", fmt.Errorf("unit path %q is %s, not absent or a real directory", unitPath, unitKind))
+		return operationalError("materialize: lstat unit path", fmt.Errorf("unit path %q is %s, not absent or a real directory", unitPath, unitKind))
 	}
 
 	// Step 5: materialize the worktree (either shape).
 	if err := m.materializeWorktree(ctx, req, unitPath); err != nil {
-		return operationalError("materialize worktree (step 5)", err)
+		return operationalError("materialize: materialize worktree (step 5)", err)
 	}
 
 	// Step 6: write the completion witness, then this function returns and
 	// Materialize releases the lock.
 	if err := writeCompletionWitness(m.storeRoot, workspaceID, req.Identity); err != nil {
-		return operationalError("write completion witness (step 6)", err)
+		return operationalError("materialize: write completion witness (step 6)", err)
 	}
 
 	res.Outcome = OutcomeMaterialized
@@ -336,24 +347,24 @@ func (m *Materializer) handleAbsentUnit(ctx context.Context, workspaceID string,
 	for _, sib := range orphanSiblings(m.storeRoot, workspaceID) {
 		kind, err := LstatType(sib.path)
 		if err != nil {
-			return operationalError("lstat orphaned sibling ("+sib.label+")", err)
+			return operationalError("materialize: lstat orphaned sibling ("+sib.label+")", err)
 		}
 		switch kind {
 		case PathAbsent:
 			continue
 		case PathRegular:
 			if err := os.Remove(sib.path); err != nil {
-				return operationalError("unlink orphaned sibling ("+sib.label+")", err)
+				return operationalError("materialize: unlink orphaned sibling ("+sib.label+")", err)
 			}
 			res.Disclosures = append(res.Disclosures, fmt.Sprintf("step 2: deleted orphaned sibling metadata %s", sib.path))
 		default:
-			return operationalError("unlink orphaned sibling ("+sib.label+")", fmt.Errorf("unexpected object kind %s at %s", kind, sib.path))
+			return operationalError("materialize: unlink orphaned sibling ("+sib.label+")", fmt.Errorf("unexpected object kind %s at %s", kind, sib.path))
 		}
 	}
 
 	unitPath := UnitPath(m.storeRoot, workspaceID)
 	if err := m.reconciler.ReconcileUnit(ctx, m.repoRoot, unitPath); err != nil {
-		return operationalError("reconcile registry (step 2)", err)
+		return operationalError("materialize: reconcile registry (step 2)", err)
 	}
 	res.Disclosures = append(res.Disclosures, fmt.Sprintf("step 2: reconciled worktree registry for %s", workspaceID))
 	return nil
@@ -370,7 +381,7 @@ func (m *Materializer) handlePresentUnit(ctx context.Context, req Request, works
 	releasedPath := ReleasedPath(m.storeRoot, workspaceID)
 	releasedKind, err := LstatType(releasedPath)
 	if err != nil {
-		return false, operationalError("lstat released marker", err)
+		return false, operationalError("materialize: lstat released marker", err)
 	}
 	switch releasedKind {
 	case PathRegular:
@@ -381,14 +392,14 @@ func (m *Materializer) handlePresentUnit(ctx context.Context, req Request, works
 	default:
 		// 3b: non-regular object — operational error, never falls through
 		// to step 4, never treated as released.
-		return false, operationalError("lstat released marker", fmt.Errorf("released marker %q is %s, not a regular file or absent", releasedPath, releasedKind))
+		return false, operationalError("materialize: lstat released marker", fmt.Errorf("released marker %q is %s, not a regular file or absent", releasedPath, releasedKind))
 	}
 
 	// Step 4: branch on .request.
 	requestPath := RequestPath(m.storeRoot, workspaceID)
 	requestKind, err := LstatType(requestPath)
 	if err != nil {
-		return false, operationalError("lstat request sidecar", err)
+		return false, operationalError("materialize: lstat request sidecar", err)
 	}
 	switch requestKind {
 	case PathRegular:
@@ -396,13 +407,13 @@ func (m *Materializer) handlePresentUnit(ctx context.Context, req Request, works
 		// undecodable (4b).
 		data, rerr := os.ReadFile(requestPath)
 		if rerr != nil {
-			return false, operationalError("read request sidecar", rerr)
+			return false, operationalError("materialize: read request sidecar", rerr)
 		}
 		recorded, derr := DecodeSidecar(data)
 		if derr != nil {
 			// A non-decodable-but-regular sidecar is treated as 4b's
 			// UNDECODABLE outcome, uniformly with a non-regular object.
-			return false, operationalError("decode request sidecar", derr)
+			return false, operationalError("materialize: decode request sidecar", derr)
 		}
 		if verr := VerifyIdentity(workspaceID, req.Identity, recorded); verr != nil {
 			// Hard error naming both, never a silent merge.
@@ -419,7 +430,7 @@ func (m *Materializer) handlePresentUnit(ctx context.Context, req Request, works
 		// 4b: present but undecodable (non-regular object). The lstat
 		// discipline is uniform across sibling paths, so a non-regular
 		// object here is UNDECODABLE, not a distinct third outcome.
-		return false, operationalError("lstat request sidecar", fmt.Errorf("request sidecar %q is %s, undecodable", requestPath, requestKind))
+		return false, operationalError("materialize: lstat request sidecar", fmt.Errorf("request sidecar %q is %s, undecodable", requestPath, requestKind))
 	}
 }
 
@@ -431,29 +442,29 @@ func (m *Materializer) handlePresentUnit(ctx context.Context, req Request, works
 // reconciliation for this unit.
 func (m *Materializer) rebuildIncompleteResidue(ctx context.Context, workspaceID, unitPath string, res *Result) error {
 	if err := os.RemoveAll(unitPath); err != nil {
-		return operationalError("remove incomplete residue (step 4c)", err)
+		return operationalError("materialize: remove incomplete residue (step 4c)", err)
 	}
 	res.Disclosures = append(res.Disclosures, fmt.Sprintf("step 4c: removed incomplete residue directory %s", unitPath))
 
 	stagingPath := RequestStagingPath(m.storeRoot, workspaceID)
 	stagingKind, err := LstatType(stagingPath)
 	if err != nil {
-		return operationalError("lstat staging residue (step 4c)", err)
+		return operationalError("materialize: lstat staging residue (step 4c)", err)
 	}
 	switch stagingKind {
 	case PathAbsent:
 		// Nothing to unlink.
 	case PathRegular:
 		if err := os.Remove(stagingPath); err != nil {
-			return operationalError("unlink staging residue (step 4c)", err)
+			return operationalError("materialize: unlink staging residue (step 4c)", err)
 		}
 		res.Disclosures = append(res.Disclosures, fmt.Sprintf("step 4c: deleted staging residue %s", stagingPath))
 	default:
-		return operationalError("unlink staging residue (step 4c)", fmt.Errorf("unexpected object kind %s at %s", stagingKind, stagingPath))
+		return operationalError("materialize: unlink staging residue (step 4c)", fmt.Errorf("unexpected object kind %s at %s", stagingKind, stagingPath))
 	}
 
 	if err := m.reconciler.ReconcileUnit(ctx, m.repoRoot, unitPath); err != nil {
-		return operationalError("reconcile registry (step 4c)", err)
+		return operationalError("materialize: reconcile registry (step 4c)", err)
 	}
 	res.Disclosures = append(res.Disclosures, fmt.Sprintf("step 4c: reconciled worktree registry for %s", workspaceID))
 	return nil

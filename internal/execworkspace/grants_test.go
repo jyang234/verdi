@@ -1,8 +1,10 @@
 package execworkspace
 
 import (
+	"math"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDecodeGrantSet_AllSixKindsHappy(t *testing.T) {
@@ -267,5 +269,131 @@ func TestGrantSet_Get(t *testing.T) {
 	}
 	if _, ok := set.Get(GrantNetwork); ok {
 		t.Fatalf("Get(GrantNetwork) = true, want false (not present)")
+	}
+}
+
+// probeSecondsOverflowingDuration and probeSecondsWrappingToZero are the two
+// GrantTimeouts values whose time.Duration conversion in BuildProfile
+// silently overflows: the first wraps to a NEGATIVE duration, the second
+// wraps to exactly 0s — either one turns a requested deadline into no
+// enforceable deadline at all while BuildProfile still reports the timeouts
+// grant as Applied. Both are declared as int64 VARIABLES (never untyped
+// constants) so the int() conversions below stay runtime conversions and the
+// test file still compiles where int is 32 bits wide.
+var (
+	probeSecondsOverflowingDuration int64 = math.MaxInt64/int64(time.Second) + 1
+	probeSecondsWrappingToZero      int64 = 4611686018427387904
+)
+
+func TestGrant_Validate_RejectsSecondsOverflowingDuration(t *testing.T) {
+	maxSeconds := int(int64(math.MaxInt64 / int64(time.Second)))
+	cases := map[string]struct {
+		seconds int
+		wantErr bool
+	}{
+		"largest non-overflowing value is still accepted": {seconds: maxSeconds, wantErr: false},
+		"one past the largest value wraps negative":       {seconds: int(probeSecondsOverflowingDuration), wantErr: true},
+		"large value wraps to exactly zero":               {seconds: int(probeSecondsWrappingToZero), wantErr: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := Grant{Kind: GrantTimeouts, Seconds: tc.seconds}
+			err := g.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatalf("Grant{Seconds:%d}.Validate() = nil, want error (time.Duration conversion is %v)",
+					tc.seconds, time.Duration(tc.seconds)*time.Second)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("Grant{Seconds:%d}.Validate() = %v, want nil", tc.seconds, err)
+			}
+		})
+	}
+}
+
+func TestBuildProfile_RejectsSecondsOverflowingDuration(t *testing.T) {
+	for name, seconds := range map[string]int{
+		"wraps negative": int(probeSecondsOverflowingDuration),
+		"wraps to zero":  int(probeSecondsWrappingToZero),
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			set := GrantSet{Grants: []Grant{{Kind: GrantTimeouts, Seconds: seconds}}}
+			profile, report, err := BuildProfile(dir, set, nil)
+			if err == nil {
+				t.Fatalf("BuildProfile(seconds=%d) = timeout %v, report %+v, want error",
+					seconds, profile.Timeout, report)
+			}
+		})
+	}
+}
+
+func TestDecodeGrantSet_RejectsSecondsOverflowingDuration(t *testing.T) {
+	cases := map[string]string{
+		"one past the largest value": `{"grants":[{"kind":"timeouts","seconds":9223372037}],"schema":"verdi.execution-grants/v1"}` + "\n",
+		"wraps to exactly zero":      `{"grants":[{"kind":"timeouts","seconds":4611686018427387904}],"schema":"verdi.execution-grants/v1"}` + "\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got, err := DecodeGrantSet([]byte(body)); err == nil {
+				t.Fatalf("DecodeGrantSet(%s) = %+v, want error", name, got)
+			}
+		})
+	}
+}
+
+// TestDecodeGrantSet_RejectsNullGrants pins that an explicit "grants":null is
+// refused. It is self-canonical (the canonical-bytes gate re-encodes the
+// decoded document, and a nil Grants slice marshals straight back to null),
+// so only an explicit nil check refuses it — leaving the spec's one empty
+// form as "grants":[].
+func TestDecodeGrantSet_RejectsNullGrants(t *testing.T) {
+	body := `{"grants":null,"schema":"verdi.execution-grants/v1"}` + "\n"
+	if got, err := DecodeGrantSet([]byte(body)); err == nil {
+		t.Fatalf("DecodeGrantSet(null grants) = %+v, want error", got)
+	}
+}
+
+func TestDecodeGrantSet_RejectsAbsentGrants(t *testing.T) {
+	body := `{"schema":"verdi.execution-grants/v1"}` + "\n"
+	if got, err := DecodeGrantSet([]byte(body)); err == nil {
+		t.Fatalf("DecodeGrantSet(absent grants) = %+v, want error", got)
+	}
+}
+
+func TestGrant_Validate_RejectsNonPositiveCeilingValues(t *testing.T) {
+	cases := map[string]struct {
+		ceilings map[string]int
+		wantErr  bool
+	}{
+		"positive ceiling accepted": {ceilings: map[string]int{"mem": 1024}, wantErr: false},
+		"negative ceiling rejected": {ceilings: map[string]int{"mem": -1}, wantErr: true},
+		"zero ceiling rejected":     {ceilings: map[string]int{"mem": 0}, wantErr: true},
+		"one bad among good":        {ceilings: map[string]int{"cpu": 2, "mem": 0}, wantErr: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := Grant{Kind: GrantResourceCeilings, Ceilings: tc.ceilings}
+			err := g.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatalf("Grant{Ceilings:%v}.Validate() = nil, want error", tc.ceilings)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("Grant{Ceilings:%v}.Validate() = %v, want nil", tc.ceilings, err)
+			}
+		})
+	}
+}
+
+func TestDecodeGrantSet_RejectsNonPositiveCeilingValues(t *testing.T) {
+	cases := map[string]string{
+		"negative ceiling": `{"grants":[{"ceilings":{"mem":-1},"kind":"resource-ceilings"}],"schema":"verdi.execution-grants/v1"}` + "\n",
+		"zero ceiling":     `{"grants":[{"ceilings":{"mem":0},"kind":"resource-ceilings"}],"schema":"verdi.execution-grants/v1"}` + "\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got, err := DecodeGrantSet([]byte(body)); err == nil {
+				t.Fatalf("DecodeGrantSet(%s) = %+v, want error", name, got)
+			}
+		})
 	}
 }

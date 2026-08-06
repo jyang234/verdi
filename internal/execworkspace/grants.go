@@ -11,7 +11,10 @@ package execworkspace
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"math"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -19,6 +22,17 @@ import (
 
 // grantSchema is GrantSet's canonical-JSON schema tag (AD-7).
 const grantSchema = "verdi.execution-grants/v1"
+
+// maxGrantSeconds is the largest GrantTimeouts value whose conversion to a
+// time.Duration (nanoseconds, int64) does not overflow: 9223372036. Anything
+// larger silently wraps — 9223372037 becomes a NEGATIVE duration and
+// 4611686018427387904 becomes exactly 0s — so isolation.go's
+// `time.Duration(g.Seconds) * time.Second` would record NO enforceable
+// deadline while the enforcement report still says the timeouts grant was
+// applied. AD-5 forbids exactly that silent partial success, so the bound is
+// enforced here in Grant.Validate — the single gate every producer of a
+// Grant already passes through — rather than at the one consumer.
+const maxGrantSeconds = math.MaxInt64 / int64(time.Second)
 
 // GrantKind is the closed six-member execution-grant vocabulary ratified by
 // ledger SI-12 (handle L-6): network, path-read scopes, path-write scopes,
@@ -148,15 +162,28 @@ func (g Grant) Validate() error {
 		if len(g.Ceilings) == 0 {
 			return fmt.Errorf("execworkspace: grant %s: ceilings must be non-empty", g.Kind)
 		}
-		for name := range g.Ceilings {
+		for name, limit := range g.Ceilings {
 			if name == "" {
 				return fmt.Errorf("execworkspace: grant %s: ceiling name is empty", g.Kind)
+			}
+			// A zero or negative ceiling is never a request: zero reads as
+			// "no allowance at all" and negative is meaningless, yet both
+			// would decode into a grant the enforcement report calls
+			// requested. Each named ceiling must be a positive allowance.
+			if limit <= 0 {
+				return fmt.Errorf("execworkspace: grant %s: ceiling %q must be > 0, got %d", g.Kind, name, limit)
 			}
 		}
 		return nil
 	case GrantTimeouts:
 		if g.Seconds <= 0 {
 			return fmt.Errorf("execworkspace: grant %s: seconds must be > 0, got %d", g.Kind, g.Seconds)
+		}
+		if int64(g.Seconds) > maxGrantSeconds {
+			return fmt.Errorf(
+				"execworkspace: grant %s: seconds must be <= %d (a larger value overflows time.Duration and silently records no deadline), got %d",
+				g.Kind, maxGrantSeconds, g.Seconds,
+			)
 		}
 		return nil
 	default:
@@ -311,19 +338,33 @@ func EncodeGrantSet(set GrantSet) ([]byte, error) {
 
 // DecodeGrantSet strict-decodes grant-set bytes into a GrantSet (spec
 // §Execution-grant enforcement; AD-7). It fails closed, in order, on: any
-// unknown field anywhere or trailing data (artifact.DecodeStrictJSON); any
-// departure from the canonical bytes this package would itself write for
-// the decoded document (sidecar.go's canonical-bytes gate, mirrored
-// exactly — see DecodeSidecar's doc comment for the full rationale); a
-// schema value other than grantSchema; an unknown grant kind string; a
-// duplicate kind; and an invalid per-kind payload (empty paths/argv0s
-// list, an empty path/argv0 entry, empty or empty-keyed ceilings, or
-// seconds <= 0) via Grant.Validate/GrantSet.Validate. An empty "grants": []
-// list decodes to a valid, empty GrantSet — never an error.
+// unknown field anywhere or trailing data (artifact.DecodeStrictJSON); an
+// absent or explicitly null "grants" member; any departure from the
+// canonical bytes this package would itself write for the decoded document
+// (sidecar.go's canonical-bytes gate, mirrored exactly — see DecodeSidecar's
+// doc comment for the full rationale); a schema value other than
+// grantSchema; an unknown grant kind string; a duplicate kind; and an
+// invalid per-kind payload (empty paths/argv0s list, an empty path/argv0
+// entry, empty or empty-keyed ceilings, a ceiling value <= 0, seconds <= 0,
+// or seconds larger than maxGrantSeconds) via
+// Grant.Validate/GrantSet.Validate. An empty "grants": [] list decodes to a
+// valid, empty GrantSet — never an error, and it is the ONLY accepted
+// spelling of the empty set.
 func DecodeGrantSet(data []byte) (GrantSet, error) {
 	var doc grantSetDoc
 	if err := artifact.DecodeStrictJSON(data, &doc); err != nil {
 		return GrantSet{}, fmt.Errorf("execworkspace: decoding grant set: %w", err)
+	}
+	// An explicit "grants":null decodes to a nil slice, which the
+	// canonical-bytes gate below CANNOT catch: that gate re-encodes the
+	// decoded document, and a nil slice marshals straight back to null, so
+	// the bytes are their own canonical form. Refusing nil here leaves
+	// exactly one spelling of the empty grant set — "grants":[] — and makes
+	// an absent "grants" key and an explicit null fail identically.
+	if doc.Grants == nil {
+		return GrantSet{}, errors.New(
+			`execworkspace: grant set: "grants" is absent or null; the empty grant set is written as "grants":[]`,
+		)
 	}
 	canonical, err := encodeGrantSetDoc(doc)
 	if err != nil {

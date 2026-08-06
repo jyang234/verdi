@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -759,8 +760,11 @@ func TestMaterialize_LockAcquireFailure_NeverReachesStep2(t *testing.T) {
 	if !errors.As(err, &opErr) {
 		t.Fatalf("error = %v, want *OperationalError", err)
 	}
-	if opErr.Op != "acquire lock" {
-		t.Fatalf("OperationalError.Op = %q, want %q (the step this test actually exercises)", opErr.Op, "acquire lock")
+	if opErr.Op != "materialize: acquire lock" {
+		t.Fatalf("OperationalError.Op = %q, want %q (the step this test actually exercises)", opErr.Op, "materialize: acquire lock")
+	}
+	if want := "execworkspace: materialize: acquire lock: "; !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("error = %q, want prefix %q (rendering is unchanged from before the Op carried its own prefix)", err.Error(), want)
 	}
 	if calls := rec.callCount(); calls != 0 {
 		t.Fatalf("reconciler called %d times, want 0 (a step-1 failure must never route into step 2)", calls)
@@ -821,8 +825,8 @@ func TestMaterializeLocked_LstatFailureAtUnitPath_NotAbsence(t *testing.T) {
 	if !errors.As(err, &opErr) {
 		t.Fatalf("error = %v, want *OperationalError", err)
 	}
-	if opErr.Op != "lstat unit path" {
-		t.Fatalf("OperationalError.Op = %q, want %q", opErr.Op, "lstat unit path")
+	if opErr.Op != "materialize: lstat unit path" {
+		t.Fatalf("OperationalError.Op = %q, want %q", opErr.Op, "materialize: lstat unit path")
 	}
 	// Never read as absence: step 2 never ran, so no sibling deletion was
 	// attempted and the registry reconciliation never fired.
@@ -906,8 +910,8 @@ func TestMaterialize_SymlinkAtUnitPath_OperationalError_NeverFollowed(t *testing
 	if !errors.As(err, &opErr) {
 		t.Fatalf("error = %v, want *OperationalError", err)
 	}
-	if opErr.Op != "lstat unit path" {
-		t.Fatalf("OperationalError.Op = %q, want %q", opErr.Op, "lstat unit path")
+	if opErr.Op != "materialize: lstat unit path" {
+		t.Fatalf("OperationalError.Op = %q, want %q", opErr.Op, "materialize: lstat unit path")
 	}
 
 	// Never followed: the symlink itself is still the object at the unit

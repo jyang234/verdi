@@ -86,8 +86,9 @@ type fingerprintDoc struct {
 // visible in the output.
 //
 // Fails closed on: an empty tool-version name or value; an empty
-// input-digest name; an input digest that is not non-empty valid hex; an
-// empty env-var name.
+// input-digest name; an input digest that is not non-empty canonical
+// lowercase hex; and an env-var name that BuildProfile's own declared-env
+// key predicate would reject (empty, containing '=', or containing NUL).
 func CollectFingerprint(profile Profile, declared FingerprintInputs) ([]byte, error) {
 	toolVersions := make(map[string]string, len(declared.ToolVersions))
 	for name, version := range declared.ToolVersions {
@@ -113,8 +114,15 @@ func CollectFingerprint(profile Profile, declared FingerprintInputs) ([]byte, er
 
 	env := make(map[string]*string, len(declared.EnvVarNames))
 	for _, name := range declared.EnvVarNames {
-		if name == "" {
-			return nil, fmt.Errorf("execworkspace: collect fingerprint: env var name is empty")
+		// The SAME predicate BuildProfile applies to a declared-env key
+		// (isolation.go's validateEnvKey: non-empty, no '=', no NUL). A
+		// name that predicate would reject can never be present in any
+		// profile's environment, so admitting it here would record an
+		// always-null entry that reads as "requested and absent" rather
+		// than "never requestable" — a fingerprint stating something the
+		// caller could not have been asking.
+		if err := validateEnvKey(name); err != nil {
+			return nil, fmt.Errorf("execworkspace: collect fingerprint: env var name: %w", err)
 		}
 		if value, ok := profile.env[name]; ok {
 			v := value
@@ -138,10 +146,25 @@ func CollectFingerprint(profile Profile, declared FingerprintInputs) ([]byte, er
 	return data, nil
 }
 
-// validateHexDigest reports whether digest is non-empty valid hex.
+// validateHexDigest reports whether digest is non-empty CANONICAL LOWERCASE
+// hex, mirroring identity.go's validateCommitSHA/validatePatchSHA256
+// discipline (which this package already applies to commit SHAs and patch
+// digests). Accepting both "deadbeef" and "DEADBEEF" would let two
+// spellings of the same digest bytes produce two different fingerprint
+// documents for one identical set of inputs, which is exactly the stable
+// identity CollectFingerprint exists to provide. No length is imposed here:
+// unlike a commit SHA or a sha256, an input digest's width is the caller's
+// own choice — only its canonical form is this package's business.
 func validateHexDigest(digest string) error {
 	if digest == "" {
 		return fmt.Errorf("digest is empty")
+	}
+	for i := 0; i < len(digest); i++ {
+		c := digest[i]
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
+			continue
+		}
+		return fmt.Errorf("digest %q is not canonical lowercase hex (byte %d = %q)", digest, i, c)
 	}
 	if _, err := hex.DecodeString(digest); err != nil {
 		return fmt.Errorf("digest %q is not valid hex: %w", digest, err)

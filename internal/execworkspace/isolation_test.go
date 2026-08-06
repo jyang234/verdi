@@ -300,3 +300,87 @@ func TestBuildProfile_RejectsEmptyWorkspacePath(t *testing.T) {
 		t.Fatalf("BuildProfile: want error for empty workspace path, got nil")
 	}
 }
+
+// TestBuildProfile_RejectsNULInDeclaredEnvValue pins the value side of the
+// declared-env contract. Env() renders "KEY=VALUE" entries destined for
+// exec.Cmd.Env, where the OS truncates each entry at the first NUL: a value
+// carrying one silently ships a DIFFERENT environment to the launched
+// process than the profile reports, so it must fail closed exactly as an
+// invalid key does.
+func TestBuildProfile_RejectsNULInDeclaredEnvValue(t *testing.T) {
+	cases := map[string]struct {
+		value   string
+		wantErr bool
+	}{
+		"clean value accepted":  {value: "ok", wantErr: false},
+		"empty value accepted":  {value: "", wantErr: false},
+		"embedded NUL rejected": {value: "has\x00nul", wantErr: true},
+		"trailing NUL rejected": {value: "trail\x00", wantErr: true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			profile, _, err := BuildProfile(dir, GrantSet{}, map[string]string{"DECLARED": tc.value})
+			if tc.wantErr && err == nil {
+				t.Fatalf("BuildProfile(value %q) = env %v, want error", tc.value, profile.Env())
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("BuildProfile(value %q) = %v, want nil", tc.value, err)
+			}
+		})
+	}
+}
+
+// TestBuildProfile_AD5_ErrorRenderingIsNotMislabelledAsMaterialization pins
+// the rendered text of AD-5's operational error. OperationalError is this
+// package's one shared retryable-failure type; its Error() must qualify the
+// failure with the Op the caller supplied, not hard-code a "materialize:"
+// prefix that mislabels an isolation-profile failure as a materialization
+// one.
+func TestBuildProfile_AD5_ErrorRenderingIsNotMislabelledAsMaterialization(t *testing.T) {
+	dir := t.TempDir()
+	set := GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}
+	_, _, err := BuildProfile(dir, set, nil)
+	if err == nil {
+		t.Fatalf("BuildProfile: want error, got nil")
+	}
+	const wantPrefix = "execworkspace: isolation-profile: apply-grants: "
+	if !strings.HasPrefix(err.Error(), wantPrefix) {
+		t.Fatalf("error = %q, want prefix %q", err.Error(), wantPrefix)
+	}
+	if strings.Contains(err.Error(), "materialize") {
+		t.Fatalf("error = %q, must not mention materialization: this failure is isolation-profile construction", err.Error())
+	}
+}
+
+// TestOperationalError_RenderingIsOpQualified pins Error()'s generalized
+// shape directly, for both the materialization Ops (which keep their exact
+// historical rendering via a "materialize: " Op prefix) and a non-
+// materialization Op.
+func TestOperationalError_RenderingIsOpQualified(t *testing.T) {
+	cases := map[string]struct {
+		op   string
+		want string
+	}{
+		"materialization op renders exactly as before": {
+			op:   "materialize: acquire lock",
+			want: "execworkspace: materialize: acquire lock: boom",
+		},
+		"isolation op is not mislabelled": {
+			op:   "isolation-profile: apply-grants",
+			want: "execworkspace: isolation-profile: apply-grants: boom",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := operationalError(tc.op, errors.New("boom"))
+			if got := err.Error(); got != tc.want {
+				t.Fatalf("Error() = %q, want %q", got, tc.want)
+			}
+			var target *OperationalError
+			if !errors.As(error(err), &target) || target.Op != tc.op {
+				t.Fatalf("errors.As did not reach the typed value with Op %q", tc.op)
+			}
+		})
+	}
+}
