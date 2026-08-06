@@ -121,6 +121,20 @@ func (d kernelDoc) toKernel(wantSchema, wantKind string) (kernel, error) {
 	if strings.TrimSpace(k.Title) == "" {
 		return kernel{}, fmt.Errorf("policyartifact: title is required and must not be blank")
 	}
+	// A title is single-line prose. It is rendered verbatim into
+	// generated instruction projections (internal/instructionprojection
+	// writes a per-policy "## <title> (<id>)" line), so a newline or
+	// carriage return inside one would emit extra, header-shaped lines
+	// into a generated file that reviewing the artifact's own title
+	// would not reveal. Every control character is rejected by one
+	// uniform rule (rune < 0x20, or 0x7f) rather than an enumerated
+	// blocklist: a tab is not meaningful in single-line prose either,
+	// and a uniform rule has no forgotten character to probe for.
+	for _, r := range k.Title {
+		if r < 0x20 || r == 0x7f {
+			return kernel{}, fmt.Errorf("policyartifact: title %q contains a control character (U+%04X); a title is single-line prose", k.Title, r)
+		}
+	}
 	if len(k.Owners) == 0 {
 		return kernel{}, fmt.Errorf("policyartifact: owners must list at least one owner")
 	}

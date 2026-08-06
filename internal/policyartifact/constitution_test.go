@@ -150,6 +150,13 @@ func TestDecodeConstitution_Negative(t *testing.T) {
 		{"adapter empty managed", strings.Replace(validConstitutionDoc(), "managed: [AGENTS.md]", "managed: []", 1), "managed"},
 		{"adapter absolute managed path", strings.Replace(validConstitutionDoc(), "managed: [AGENTS.md]", "managed: [/etc/agents]", 1), "absolute"},
 		{"adapter escaping managed path", strings.Replace(validConstitutionDoc(), "managed: [AGENTS.md]", "managed: [\"../AGENTS.md\"]", 1), "escape"},
+		// A managed projection is a FILE the store generates. The
+		// trailing "/" directory marker is meaningful for a scope path
+		// (which selects a subtree) and meaningless here; admitting it
+		// would let a constitution declare a managed path Generate can
+		// never write under that exact spelling.
+		{"adapter managed directory-marker path", strings.Replace(validConstitutionDoc(), "managed: [AGENTS.md]", "managed: [\"AGENTS.md/\"]", 1), "must name a file"},
+		{"adapter managed bare directory path", strings.Replace(validConstitutionDoc(), "managed: [AGENTS.md]", "managed: [\"docs/\"]", 1), "must name a file"},
 		{"adapter empty discovery", strings.Replace(validConstitutionDoc(), "discovery_filenames: [AGENTS.md]", "discovery_filenames: []", 1), "discovery"},
 		{"adapter discovery not bare filename", strings.Replace(validConstitutionDoc(), "discovery_filenames: [AGENTS.md]", "discovery_filenames: [\"docs/AGENTS.md\"]", 1), "bare filename"},
 		{"duplicate adapter id", strings.Replace(validConstitutionDoc(), "adapters:\n  - id: codex", "adapters:\n  - id: codex\n    version: \"0\"\n    managed: [CLAUDE.md]\n    discovery_filenames: [CLAUDE.md]\n  - id: codex", 1), "duplicate"},

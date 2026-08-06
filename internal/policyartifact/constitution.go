@@ -3,6 +3,7 @@ package policyartifact
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -357,7 +358,7 @@ func (d adapterDoc) toAdapter(i int) (Adapter, error) {
 	if len(a.Managed) == 0 {
 		return Adapter{}, fmt.Errorf("policyartifact: constitution adapters[%d] (%s): managed must name at least one projection file", i, a.ID)
 	}
-	if err := uniqueSet(fmt.Sprintf("constitution.adapters[%d].managed", i), a.Managed, validateRelPath); err != nil {
+	if err := uniqueSet(fmt.Sprintf("constitution.adapters[%d].managed", i), a.Managed, validateManagedProjectionPath); err != nil {
 		return Adapter{}, err
 	}
 	if len(a.DiscoveryFilenames) == 0 {
@@ -372,6 +373,25 @@ func (d adapterDoc) toAdapter(i int) (Adapter, error) {
 		return Adapter{}, err
 	}
 	return a, nil
+}
+
+// validateManagedProjectionPath enforces the adapter-managed file-shape
+// rule on top of the shared repo-relative path grammar: a managed
+// projection names a FILE the store generates, never a directory.
+// validateRelPath's single trailing "/" is scope's directory marker
+// ("cmd/" selects a subtree) and carries no meaning here — Generate can
+// only ever write a file, so admitting "AGENTS.md/" would let a
+// constitution declare a managed path whose generated file the store
+// records, verifies, and reports under a spelling that does not exist on
+// disk. One location, one spelling (CO-3).
+func validateManagedProjectionPath(p string) error {
+	if err := validateRelPath(p); err != nil {
+		return err
+	}
+	if strings.HasSuffix(p, "/") {
+		return fmt.Errorf("managed projection path %q must name a file, not a directory (a trailing %q is scope's directory marker and has no meaning for a generated projection)", p, "/")
+	}
+	return nil
 }
 
 // normalizeConstitution sorts every semantic set.
