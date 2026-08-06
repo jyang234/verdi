@@ -727,6 +727,37 @@ func TestGatherLifecycleFacts_HappyPath(t *testing.T) {
 	}
 }
 
+func TestGatherLifecycleFacts_PartialBaselineNeverMapped(t *testing.T) {
+	spec, err := decodeTargetSpec("spec/payments", []byte(testFeatureSpecMD))
+	if err != nil {
+		t.Fatalf("decodeTargetSpec: %v", err)
+	}
+	git := noOpGitReader()
+	git.hasLocalBranchFn = func(context.Context, string, string) (bool, error) { return false, nil }
+	git.hasRemoteTrackingBranchFn = func(context.Context, string, string, string) (bool, error) { return false, nil }
+	state := &fakeStateResolver{
+		resolveFn: func(context.Context, string, specstate.Candidate) (specstate.Result, error) {
+			// A diverged candidate's own partial baseline (Path/Blob set,
+			// LandingCommit empty) — specstate/resolve.go's own documented
+			// shape for RelationDiverged.
+			return specstate.Result{
+				State:    specstate.Proposed,
+				Relation: specstate.RelationDiverged,
+				Baseline: &specstate.Baseline{Path: "p", Blob: "b", LandingCommit: ""},
+			}, nil
+		},
+	}
+	p := newProjector(git, state, alwaysUnresolvedDefaultBranch)
+
+	lf, _, err := p.gatherLifecycleFacts(context.Background(), t.TempDir(), "rel/spec.md", "payments", []byte(testFeatureSpecMD), spec)
+	if err != nil {
+		t.Fatalf("gatherLifecycleFacts: %v", err)
+	}
+	if lf.AcceptedBaseline != nil {
+		t.Fatalf("AcceptedBaseline = %+v, want nil for a partial (never-landed) baseline", lf.AcceptedBaseline)
+	}
+}
+
 func TestGatherLifecycleFacts_ResolveError(t *testing.T) {
 	spec, err := decodeTargetSpec("spec/payments", []byte(testFeatureSpecMD))
 	if err != nil {

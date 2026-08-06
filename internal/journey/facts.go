@@ -365,7 +365,21 @@ func (p Projector) gatherLifecycleFacts(ctx context.Context, root, relPath, name
 		Relation: string(result.Relation),
 		Posture:  derivePosture(result.State, result.Relation),
 	}
-	if result.Baseline != nil {
+	// journey.Baseline is the ACCEPTED-baseline identity: record.go's own
+	// Validate requires Path/Blob/LandingCommit all non-empty together.
+	// specstate.Result.Baseline is not always that complete: a diverged
+	// candidate's own doc comment (specstate/resolve.go resolveOne) is
+	// explicit that a diverged candidate deliberately carries a PARTIAL
+	// baseline (Path/Blob populated, LandingCommit always "") — a
+	// candidate that has never landed has no first-parent landing commit
+	// to report, and specstate never computes one for that case. Mapping
+	// a partial baseline into AcceptedBaseline would violate this
+	// package's own schema (an accepted baseline the schema treats as
+	// always-complete), so only a COMPLETE baseline (LandingCommit != "",
+	// which specstate only ever sets alongside Path and Blob) becomes an
+	// AcceptedBaseline; anything else — nil, or partial — leaves it nil,
+	// the honest "no accepted baseline exists yet" reading.
+	if result.Baseline != nil && result.Baseline.LandingCommit != "" {
 		lf.AcceptedBaseline = &Baseline{
 			Path:          result.Baseline.Path,
 			Blob:          result.Baseline.Blob,
