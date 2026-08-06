@@ -244,3 +244,48 @@ A second policy that collides on payload kind.
 		t.Fatalf("error = %v, want both policy ids named", err)
 	}
 }
+
+// TestLoad_SymlinkedArtifactRejected proves a symlink inside the
+// constitution store fails closed rather than being followed: the store
+// is the Git-governed authority, and a link lets content that is not
+// committed under .verdi/policy/ — or that resolves differently on
+// another checkout — enter the loaded authority. The walker already fails
+// closed on unexpected directories; a linked FILE gets the same treatment,
+// named by its path.
+func TestLoad_SymlinkedArtifactRejected(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, minimalStoreFiles())
+
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("mkdir outside: %v", err)
+	}
+	target := filepath.Join(outside, "extra.md")
+	if err := os.WriteFile(target, []byte(`---
+schema: verdi.policy/v1
+id: policy/extra
+kind: policy
+title: "Extra policy"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims: []
+instructions: []
+payloads: {}
+---
+A perfectly valid policy that simply does not live in the store.
+`), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(root, ".verdi", "policy", "policies", "extra.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable on this platform: %v", err)
+	}
+
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() followed a symlinked artifact, want an error")
+	}
+	if !strings.Contains(err.Error(), "symlink") || !strings.Contains(err.Error(), "policies/extra.md") {
+		t.Fatalf("error = %v, want a symlink error naming the path", err)
+	}
+}

@@ -199,6 +199,15 @@ func walkPolicyDir(policyDir string) ([]string, error) {
 			return rerr
 		}
 		rel = filepath.ToSlash(rel)
+		// A symlink is never store content. filepath.WalkDir does not
+		// follow links, so a linked artifact would otherwise be read
+		// through its target: content outside the Git-governed store, or
+		// content that resolves differently on another checkout, would
+		// enter the loaded authority. Fail closed naming the entry (the
+		// unexpected-directory check below is the same posture for dirs).
+		if d.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("policyauthority: %q under .verdi/policy/ is a symlink; the constitution store carries only regular files", rel)
+		}
 		if d.IsDir() {
 			if !knownPolicyDirs[rel] {
 				return fmt.Errorf("policyauthority: unexpected directory %q under .verdi/policy/ (known: %s, %s, %s, %s)",
