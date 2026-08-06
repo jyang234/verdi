@@ -5,10 +5,10 @@ import "fmt"
 // Candidate is one registered candidate patch entry inside a Definition's
 // candidates list (AC-1).
 type Candidate struct {
-	ID     string `yaml:"id"`
-	Patch  string `yaml:"patch"`
-	Digest string `yaml:"digest"`
-	Base   string `yaml:"base"`
+	ID     string `yaml:"id" json:"id"`
+	Patch  string `yaml:"patch" json:"patch"`
+	Digest string `yaml:"digest" json:"digest"`
+	Base   string `yaml:"base" json:"base"`
 }
 
 // Validate checks c's own grammar and its relationship to the enclosing

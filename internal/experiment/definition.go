@@ -22,8 +22,8 @@ var (
 // ArtifactRef is the shared {id, digest} identity shape a Definition's
 // workload, contract, and fixtures fields use.
 type ArtifactRef struct {
-	ID     string `yaml:"id"`
-	Digest string `yaml:"digest"`
+	ID     string `yaml:"id" json:"id"`
+	Digest string `yaml:"digest" json:"digest"`
 }
 
 // Validate checks r's id and digest grammar, naming field in any error.
@@ -41,9 +41,9 @@ func (r ArtifactRef) Validate(field string) error {
 // argument-vector command (never a shell string), its content digest, and
 // the digest of the capabilities response it produced at registration.
 type Evaluator struct {
-	Argv               []string `yaml:"argv"`
-	Digest             string   `yaml:"digest"`
-	CapabilitiesDigest string   `yaml:"capabilities_digest"`
+	Argv               []string `yaml:"argv" json:"argv"`
+	Digest             string   `yaml:"digest" json:"digest"`
+	CapabilitiesDigest string   `yaml:"capabilities_digest" json:"capabilities_digest"`
 }
 
 // Validate checks argv is a nonempty vector with a nonempty executable,
@@ -67,11 +67,11 @@ func (e Evaluator) Validate() error {
 // PrimaryMetric is the Definition's single preregistered ranking metric
 // (DC-4).
 type PrimaryMetric struct {
-	ID          string      `yaml:"id"`
-	Type        MetricType  `yaml:"type"`
-	Unit        string      `yaml:"unit"`
-	Aggregation Aggregation `yaml:"aggregation"`
-	Direction   Direction   `yaml:"direction"`
+	ID          string      `yaml:"id" json:"id"`
+	Type        MetricType  `yaml:"type" json:"type"`
+	Unit        string      `yaml:"unit" json:"unit"`
+	Aggregation Aggregation `yaml:"aggregation" json:"aggregation"`
+	Direction   Direction   `yaml:"direction" json:"direction"`
 }
 
 // Validate checks pm's id, type, unit, aggregation, and direction.
@@ -97,8 +97,8 @@ func (pm PrimaryMetric) Validate() error {
 // Threshold is the exclusive relative-or-absolute significance union
 // baseline_improvement and candidate_separation each use.
 type Threshold struct {
-	Relative *float64 `yaml:"relative,omitempty"`
-	Absolute *float64 `yaml:"absolute,omitempty"`
+	Relative *float64 `yaml:"relative,omitempty" json:"relative,omitempty"`
+	Absolute *float64 `yaml:"absolute,omitempty" json:"absolute,omitempty"`
 }
 
 // Validate enforces the exclusive union — exactly one arm set — and that
@@ -124,8 +124,8 @@ func (t Threshold) Validate(field string) error {
 // evaluator observations; a guard with the bound is a secondary resource
 // bound evaluated over a measurement whose id equals the guard id.
 type Guard struct {
-	ID                        string   `yaml:"id"`
-	MaximumRelativeToBaseline *float64 `yaml:"maximum_relative_to_baseline,omitempty"`
+	ID                        string   `yaml:"id" json:"id"`
+	MaximumRelativeToBaseline *float64 `yaml:"maximum_relative_to_baseline,omitempty" json:"maximum_relative_to_baseline,omitempty"`
 }
 
 // Bounded reports whether g carries a secondary resource bound rather
@@ -146,7 +146,7 @@ func (g Guard) Validate() error {
 
 // Variability is the optional registered variability rule (AC-2 step 7).
 type Variability struct {
-	MaxRelativeSpread float64 `yaml:"max_relative_spread"`
+	MaxRelativeSpread float64 `yaml:"max_relative_spread" json:"max_relative_spread"`
 }
 
 // Validate checks the spread bound is strictly positive.
@@ -161,22 +161,22 @@ func (v Variability) Validate() error {
 // DC-5): the primary metric, baseline, significance thresholds, guards,
 // and optional variability rule.
 type DecisionSpec struct {
-	PrimaryMetric       PrimaryMetric `yaml:"primary_metric"`
-	Baseline            string        `yaml:"baseline"`
-	BaselineImprovement Threshold     `yaml:"baseline_improvement"`
-	CandidateSeparation Threshold     `yaml:"candidate_separation"`
-	Guards              []Guard       `yaml:"guards"`
-	Variability         *Variability  `yaml:"variability,omitempty"`
+	PrimaryMetric       PrimaryMetric `yaml:"primary_metric" json:"primary_metric"`
+	Baseline            string        `yaml:"baseline" json:"baseline"`
+	BaselineImprovement Threshold     `yaml:"baseline_improvement" json:"baseline_improvement"`
+	CandidateSeparation Threshold     `yaml:"candidate_separation" json:"candidate_separation"`
+	Guards              []Guard       `yaml:"guards" json:"guards"`
+	Variability         *Variability  `yaml:"variability,omitempty" json:"variability,omitempty"`
 }
 
 // Execution is a Definition's registered execution schedule (AC-4,
 // DC-13).
 type Execution struct {
-	Warmups           int    `yaml:"warmups"`
-	Rounds            int    `yaml:"rounds"`
-	Order             Order  `yaml:"order"`
-	TimeoutPerRound   string `yaml:"timeout_per_round"`
-	EnvironmentPolicy string `yaml:"environment_policy"`
+	Warmups           int    `yaml:"warmups" json:"warmups"`
+	Rounds            int    `yaml:"rounds" json:"rounds"`
+	Order             Order  `yaml:"order" json:"order"`
+	TimeoutPerRound   string `yaml:"timeout_per_round" json:"timeout_per_round"`
+	EnvironmentPolicy string `yaml:"environment_policy" json:"environment_policy"`
 }
 
 // Validate checks warmups/rounds bounds, the order enum, that
@@ -210,8 +210,8 @@ func (e Execution) Validate() error {
 // adjudication OD-5): this package never resolves or interprets ref or
 // digest, only checks their grammar.
 type PolicyRef struct {
-	Ref    string  `yaml:"ref"`
-	Digest *string `yaml:"digest,omitempty"`
+	Ref    string  `yaml:"ref" json:"ref"`
+	Digest *string `yaml:"digest,omitempty" json:"digest,omitempty"`
 }
 
 // Validate checks ref is nonempty and, when present, digest is
