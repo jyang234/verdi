@@ -3,8 +3,6 @@ package experiment
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // ResultSchema is the only accepted result.json schema identifier.
@@ -171,10 +169,13 @@ type Result struct {
 
 // DecodeResult strict-decodes raw as a result.json document and fully
 // validates its shape, enums, and grammar. It performs no recomputation
-// of the decision itself.
+// of the decision itself. decodeStrictJSON adds this package's
+// duplicate-key guard over the shared seam, so a document that says one
+// verdict textually and another to the decoder is rejected outright
+// rather than resolved last-key-wins.
 func DecodeResult(raw []byte) (Result, error) {
 	var res Result
-	if err := artifact.DecodeStrictJSON(raw, &res); err != nil {
+	if err := decodeStrictJSON(raw, &res); err != nil {
 		return Result{}, fmt.Errorf("experiment: decoding result: %w", err)
 	}
 	if err := res.Validate(); err != nil {

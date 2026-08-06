@@ -159,11 +159,11 @@ func TestDecodeDefinitionRejects(t *testing.T) {
 	}{
 		{"unknown schema", mutate(t, "schema: verdi.experiment/v1", "schema: verdi.experiment/v2")},
 		{"unknown field", validDefinitionYAML() + "unknown_field: true\n"},
-		// A second "---" YAML document is silently ignored by go-yaml's
-		// single-document Unmarshal/Decode (verified against
-		// internal/artifact.DecodeStrict directly), so trailing-data
-		// coverage instead uses a bare trailing scalar that breaks mapping
-		// syntax — genuine trailing content the parser cannot place.
+		// A bare trailing scalar breaks mapping syntax — genuine trailing
+		// content the parser cannot place. A second "---" YAML document,
+		// which go-yaml's single-document decode silently ignores, is
+		// covered separately by strictdecode_test.go's trailing-document
+		// probes.
 		{"trailing data", validDefinitionYAML() + "trailing-garbage-not-a-key\n"},
 		{"yaml anchor", mutate(t, "id: baseline", "id: &anchor baseline")},
 		{"yaml alias", validDefinitionYAML() + "alias_ref: *nonexistent\n"},

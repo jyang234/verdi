@@ -64,9 +64,9 @@ func TestDecodeRatificationRejects(t *testing.T) {
 	}{
 		{"unknown schema", mutateRatification(t, "schema: verdi.experiment-ratification/v1", "schema: verdi.experiment-ratification/v2")},
 		{"unknown field", validRatificationYAML() + "unknown_field: true\n"},
-		// See definition_test.go's "trailing data" case comment: a second
-		// "---" document is silently ignored by go-yaml's single-document
-		// decode, so this uses a bare trailing scalar instead.
+		// A bare trailing scalar the parser cannot place; a second "---"
+		// document is covered by strictdecode_test.go's trailing-document
+		// probes.
 		{"trailing data", validRatificationYAML() + "trailing-garbage-not-a-key\n"},
 		{"yaml anchor", mutateRatification(t, "actor: "+validActor, "actor: &a "+validActor)},
 		{"yaml alias", validRatificationYAML() + "alias_ref: *nonexistent\n"},

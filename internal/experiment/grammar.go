@@ -10,8 +10,11 @@
 // every JSON artifact through internal/artifact.DecodeStrictJSON — the
 // module's only strict-decode seams — so unknown fields, unknown schema
 // versions, and the restricted YAML dialect (no anchors, aliases, or
-// custom tags) fail closed everywhere in this package. Canonical JSON and
-// content digests go exclusively through internal/canonjson.
+// custom tags) fail closed everywhere in this package. Two package-local
+// guards are LAYERED over that seam without replacing it (strictdecode.go):
+// repeated JSON object keys and trailing YAML documents, both of which the
+// shared seam currently lets through. Canonical JSON and content digests go
+// exclusively through internal/canonjson.
 package experiment
 
 import (

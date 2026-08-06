@@ -1,10 +1,6 @@
 package experiment
 
-import (
-	"fmt"
-
-	"github.com/jyang234/verdi/internal/artifact"
-)
+import "fmt"
 
 // CapabilitiesSchema is the only accepted evaluator-capabilities schema
 // identifier.
@@ -63,10 +59,11 @@ type Capabilities struct {
 }
 
 // DecodeCapabilities strict-decodes raw as a capabilities response and
-// fully validates it.
+// fully validates it (decodeStrictJSON: the shared strict seam plus this
+// package's duplicate-key guard).
 func DecodeCapabilities(raw []byte) (Capabilities, error) {
 	var c Capabilities
-	if err := artifact.DecodeStrictJSON(raw, &c); err != nil {
+	if err := decodeStrictJSON(raw, &c); err != nil {
 		return Capabilities{}, fmt.Errorf("experiment: decoding capabilities: %w", err)
 	}
 	if err := c.Validate(); err != nil {

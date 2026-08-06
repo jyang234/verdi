@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-
-	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // ObservationSchema is the only accepted observation-record schema
@@ -101,10 +99,11 @@ type observationDoc struct {
 }
 
 // DecodeObservation strict-decodes data as one observation record and
-// fully validates it.
+// fully validates it (decodeStrictJSON: the shared strict seam plus this
+// package's duplicate-key guard, applied to every JSONL line).
 func DecodeObservation(data []byte) (Observation, error) {
 	var doc observationDoc
-	if err := artifact.DecodeStrictJSON(data, &doc); err != nil {
+	if err := decodeStrictJSON(data, &doc); err != nil {
 		return Observation{}, fmt.Errorf("experiment: decoding observation: %w", err)
 	}
 	if doc.Disclosures == nil {

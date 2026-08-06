@@ -1,10 +1,6 @@
 package experiment
 
-import (
-	"fmt"
-
-	"github.com/jyang234/verdi/internal/artifact"
-)
+import "fmt"
 
 // CapsuleManifestSchema is the only accepted capsule-manifest.json schema
 // identifier.
@@ -40,10 +36,11 @@ type CapsuleManifest struct {
 }
 
 // DecodeCapsuleManifest strict-decodes raw as a capsule-manifest.json
-// document and fully validates it.
+// document and fully validates it (decodeStrictJSON: the shared strict
+// seam plus this package's duplicate-key guard).
 func DecodeCapsuleManifest(raw []byte) (CapsuleManifest, error) {
 	var m CapsuleManifest
-	if err := artifact.DecodeStrictJSON(raw, &m); err != nil {
+	if err := decodeStrictJSON(raw, &m); err != nil {
 		return CapsuleManifest{}, fmt.Errorf("experiment: decoding capsule manifest: %w", err)
 	}
 	if err := m.Validate(); err != nil {

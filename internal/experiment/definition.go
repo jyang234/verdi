@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"time"
-
-	"github.com/jyang234/verdi/internal/artifact"
 )
 
 // DefinitionSchema is the only accepted experiment.yaml schema identifier.
@@ -262,10 +260,13 @@ type Definition struct {
 // DecodeDefinition strict-decodes raw as an experiment.yaml document and
 // fully validates it. Unknown fields, unknown enum values, and the
 // restricted YAML dialect fail closed through internal/artifact's single
-// decode seam.
+// decode seam; a second YAML document appended to the file fails closed
+// through this package's decodeStrictYAML guard (strictdecode.go), so a
+// registration can never validate on its first document while carrying
+// unseen content behind a trailing "---".
 func DecodeDefinition(raw []byte) (Definition, error) {
 	var def Definition
-	if err := artifact.DecodeStrict(raw, &def); err != nil {
+	if err := decodeStrictYAML(raw, &def); err != nil {
 		return Definition{}, fmt.Errorf("experiment: decoding definition: %w", err)
 	}
 	if err := def.Validate(); err != nil {

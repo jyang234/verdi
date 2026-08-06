@@ -3,7 +3,6 @@ package experiment
 import (
 	"fmt"
 
-	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
@@ -24,10 +23,11 @@ type Ratification struct {
 }
 
 // DecodeRatification strict-decodes raw as a ratification.yaml document
-// and fully validates it.
+// and fully validates it (decodeStrictYAML: the shared strict seam plus
+// this package's trailing-document guard).
 func DecodeRatification(raw []byte) (Ratification, error) {
 	var r Ratification
-	if err := artifact.DecodeStrict(raw, &r); err != nil {
+	if err := decodeStrictYAML(raw, &r); err != nil {
 		return Ratification{}, fmt.Errorf("experiment: decoding ratification: %w", err)
 	}
 	if err := r.Validate(); err != nil {
