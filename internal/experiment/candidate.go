@@ -50,69 +50,165 @@ func sha256Digest(data []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// diffGitHeaderRe, changedPathRe, and rename/copy path patterns are the
-// git unified-diff header lines ValidateCandidatePatch parses to find
-// every path a patch touches. Each captures at most one path per line, so
-// filenames containing " b/" cannot be split ambiguously the way
-// diffGitHeaderRe's two-path line can — that line is only ever used as a
-// fallback for sections whose content is otherwise unchanged (a pure
-// rename/copy with no diff hunks emits no "---"/"+++" lines at all).
-var (
-	diffGitHeaderRe = regexp.MustCompile(`^diff --git a/(.*) b/(.*)$`)
-	minusPathRe     = regexp.MustCompile(`^--- a/(.*)$`)
-	plusPathRe      = regexp.MustCompile(`^\+\+\+ b/(.*)$`)
-	renameFromRe    = regexp.MustCompile(`^rename from (.*)$`)
-	renameToRe      = regexp.MustCompile(`^rename to (.*)$`)
-	copyFromRe      = regexp.MustCompile(`^copy from (.*)$`)
-	copyToRe        = regexp.MustCompile(`^copy to (.*)$`)
+// diffGitPrefix opens a git unified-diff section; the rest of that line is
+// the section's two path arms ("a/<p1> b/<p2>"), which resolveDiffGitArms
+// splits. devNull is git's placeholder for the absent side of an added or
+// deleted file and never names a repo path.
+const (
+	diffGitPrefix = "diff --git "
+	devNull       = "/dev/null"
 )
 
+// minusPathRe, plusPathRe, and the rename/copy patterns are the
+// unambiguous, single-path header lines inside a section: each captures
+// exactly one path, so a filename containing " b/" cannot be mis-split the
+// way the two-armed "diff --git" line can. They are authoritative for
+// their section; the "diff --git" line's arms are resolved separately
+// (resolveDiffGitArms) and contribute in addition to them.
+var (
+	minusPathRe  = regexp.MustCompile(`^--- a/(.*)$`)
+	plusPathRe   = regexp.MustCompile(`^\+\+\+ b/(.*)$`)
+	renameFromRe = regexp.MustCompile(`^rename from (.*)$`)
+	renameToRe   = regexp.MustCompile(`^rename to (.*)$`)
+	copyFromRe   = regexp.MustCompile(`^copy from (.*)$`)
+	copyToRe     = regexp.MustCompile(`^copy to (.*)$`)
+)
+
+// patchSection is one "diff --git" section: the raw two-armed remainder of
+// its header line, and every path its unambiguous single-path lines name,
+// in file order.
+type patchSection struct {
+	arms     string
+	explicit []string
+}
+
+// resolveDiffGitArms resolves the "a/<p1> b/<p2>" remainder of a
+// "diff --git" line to the single path it names, or "" when the text alone
+// cannot say which split is meant.
+//
+// git writes both arms as the SAME path for everything except a
+// rename/copy, so the split whose two arms are equal is the intended one.
+// At most one split can ever satisfy that (the two arms are equal only
+// when they are also of equal length, which fixes the split point), so the
+// resolution is deterministic: exactly one equal split resolves; zero
+// equal splits — a rename/copy, or a genuinely ambiguous header — leaves
+// the section to its unambiguous single-path lines.
+func resolveDiffGitArms(arms string) string {
+	body, ok := strings.CutPrefix(arms, "a/")
+	if !ok {
+		return ""
+	}
+	const sep = " b/"
+	resolved := ""
+	found := 0
+	for i := 0; i+len(sep) <= len(body); i++ {
+		if body[i:i+len(sep)] != sep {
+			continue
+		}
+		if body[:i] == body[i+len(sep):] {
+			resolved = body[:i]
+			found++
+		}
+	}
+	if found != 1 {
+		return ""
+	}
+	return resolved
+}
+
+// splitPatchSections splits patchBytes into its "diff --git" sections,
+// collecting each section's unambiguous single-path header lines. It
+// requires at least one section; content with none is unparseable and
+// fails closed.
+func splitPatchSections(patchBytes []byte) ([]patchSection, error) {
+	var sections []patchSection
+	for _, line := range strings.Split(string(patchBytes), "\n") {
+		if arms, ok := strings.CutPrefix(line, diffGitPrefix); ok {
+			sections = append(sections, patchSection{arms: arms})
+			continue
+		}
+		if len(sections) == 0 {
+			continue
+		}
+		cur := &sections[len(sections)-1]
+		for _, re := range []*regexp.Regexp{minusPathRe, plusPathRe, renameFromRe, renameToRe, copyFromRe, copyToRe} {
+			if m := re.FindStringSubmatch(line); m != nil {
+				cur.explicit = append(cur.explicit, m[1])
+				break
+			}
+		}
+	}
+	if len(sections) == 0 {
+		return nil, fmt.Errorf("experiment: patch has no parseable %q section", "diff --git")
+	}
+	return sections, nil
+}
+
 // parsePatchPaths strictly parses patchBytes as a sequence of git unified
-// diffs and returns the set of repo-relative paths any section touches,
-// in first-seen order. It requires at least one "diff --git" header;
-// content with none is unparseable and fails closed.
+// diffs and returns the set of repo-relative paths any section touches, in
+// first-seen order.
+//
+// It fails closed on anything it cannot read as one exact set of paths:
+// content with no "diff --git" section; a section that names no path at
+// all (an unresolvable header with no unambiguous single-path lines); and
+// any path that is not already in canonical repo-relative form
+// (ValidateRepoRelativePath). A patch whose paths would have to be
+// normalized before they could be compared to a protected input is not
+// canonical, and is rejected outright rather than cleaned and accepted —
+// otherwise the same file would have several accepted spellings and only
+// one of them would be checked.
 func parsePatchPaths(patchBytes []byte) ([]string, error) {
+	sections, err := splitPatchSections(patchBytes)
+	if err != nil {
+		return nil, err
+	}
+
 	seen := make(map[string]bool)
 	var paths []string
-	add := func(p string) {
-		if p == "" || p == "/dev/null" || seen[p] {
-			return
+	add := func(p string) error {
+		if !namesRepoPath(p) || seen[p] {
+			return nil
+		}
+		if err := ValidateRepoRelativePath(p); err != nil {
+			return fmt.Errorf("experiment: patch names a non-canonical path: %w", err)
 		}
 		seen[p] = true
 		paths = append(paths, p)
+		return nil
 	}
 
-	sections := 0
-	for _, line := range strings.Split(string(patchBytes), "\n") {
-		switch {
-		case diffGitHeaderRe.MatchString(line):
-			m := diffGitHeaderRe.FindStringSubmatch(line)
-			sections++
-			add(m[1])
-			add(m[2])
-		case minusPathRe.MatchString(line):
-			add(minusPathRe.FindStringSubmatch(line)[1])
-		case plusPathRe.MatchString(line):
-			add(plusPathRe.FindStringSubmatch(line)[1])
-		case renameFromRe.MatchString(line):
-			add(renameFromRe.FindStringSubmatch(line)[1])
-		case renameToRe.MatchString(line):
-			add(renameToRe.FindStringSubmatch(line)[1])
-		case copyFromRe.MatchString(line):
-			add(copyFromRe.FindStringSubmatch(line)[1])
-		case copyToRe.MatchString(line):
-			add(copyToRe.FindStringSubmatch(line)[1])
+	for _, s := range sections {
+		resolved := resolveDiffGitArms(s.arms)
+		named := namesRepoPath(resolved)
+		for _, p := range s.explicit {
+			if namesRepoPath(p) {
+				named = true
+			}
 		}
-	}
-	if sections == 0 {
-		return nil, fmt.Errorf("experiment: patch has no parseable %q section", "diff --git")
+		if !named {
+			return nil, fmt.Errorf("experiment: patch section %q names no unambiguous path", diffGitPrefix+s.arms)
+		}
+		if err := add(resolved); err != nil {
+			return nil, err
+		}
+		for _, p := range s.explicit {
+			if err := add(p); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return paths, nil
 }
 
+// namesRepoPath reports whether p is a candidate repo path at all, as
+// opposed to an unresolved arm ("") or git's /dev/null placeholder.
+func namesRepoPath(p string) bool { return p != "" && p != devNull }
+
 // pathTouchesPrefix reports whether changed is prefix itself or lies
 // under prefix at a path-segment boundary — "internal/cache2" must NOT
-// match protected prefix "internal/cache".
+// match protected prefix "internal/cache". Both arguments are already in
+// canonical repo-relative form (ValidateRepoRelativePath), so the literal
+// comparison here cannot be evaded by an equivalent spelling.
 func pathTouchesPrefix(changed, prefix string) bool {
 	return changed == prefix || strings.HasPrefix(changed, prefix+"/")
 }

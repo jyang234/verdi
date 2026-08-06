@@ -80,10 +80,17 @@ func ValidateUnit(unit string) error {
 	return nil
 }
 
-// ValidateRepoRelativePath checks p is a repo-relative path: nonempty, no
-// leading "/", and no empty or ".." segment. It is shared by
-// protected_paths validation and by the protected-input segment-boundary
-// matching ValidateCandidatePatch performs.
+// ValidateRepoRelativePath checks p is a repo-relative path in canonical
+// form: nonempty, no leading "/", and no empty, ".", or ".." segment. It
+// is shared by protected_paths validation, by the paths a candidate patch
+// names, and by the protected-input segment-boundary matching
+// ValidateCandidatePatch performs — one grammar for both sides of that
+// comparison, so no path can name a protected input in a spelling the
+// match does not recognize.
+//
+// A path needing normalization is rejected rather than normalized: "." and
+// ".." segments are refused outright, so the same file never has two
+// accepted spellings.
 func ValidateRepoRelativePath(p string) error {
 	if p == "" {
 		return fmt.Errorf("experiment: repo-relative path must be nonempty")
@@ -95,8 +102,8 @@ func ValidateRepoRelativePath(p string) error {
 		if seg == "" {
 			return fmt.Errorf("experiment: repo-relative path %q has an empty segment", p)
 		}
-		if seg == ".." {
-			return fmt.Errorf("experiment: repo-relative path %q must not contain a %q segment", p, "..")
+		if seg == "." || seg == ".." {
+			return fmt.Errorf("experiment: repo-relative path %q must not contain a %q segment", p, seg)
 		}
 	}
 	return nil

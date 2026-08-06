@@ -133,6 +133,99 @@ func TestValidateCandidatePatchDevNullAddedFile(t *testing.T) {
 	}
 }
 
+// TestValidateCandidatePatchRejectsNonCanonicalPaths runs the review's
+// protected-input bypass probes: every one of them names a protected input
+// through a path form that literal prefix matching would miss. A patch
+// whose paths need normalization to be understood is not canonical, so it
+// is rejected outright rather than cleaned and accepted.
+func TestValidateCandidatePatchRejectsNonCanonicalPaths(t *testing.T) {
+	tests := []struct {
+		name  string
+		patch string
+	}{
+		{"parent traversal into a protected prefix", "diff --git a/foo/../internal/cache/x.go b/foo/../internal/cache/x.go\n"},
+		{"dot segment before a protected prefix", "diff --git a/./internal/cache/x.go b/./internal/cache/x.go\n"},
+		{"parent traversal onto the evaluator executable", "diff --git a/tools/../tools/cache-evaluator b/tools/../tools/cache-evaluator\n"},
+		{"absolute path", "diff --git a//abs/path b//abs/path\n"},
+		{"interior dot segment", "diff --git a/x/./y b/x/./y\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			digest := sha256Digest([]byte(tt.patch))
+			doc := mutate(t, "digest: "+baselinePatchDigest, "digest: "+digest)
+			def := mustDecodeDefinition(t, doc)
+			if err := ValidateCandidatePatch(def, "baseline", []byte(tt.patch), "experiments/cache-placement-v1"); err == nil {
+				t.Errorf("ValidateCandidatePatch(%s) = nil error, want error", tt.name)
+			}
+		})
+	}
+}
+
+// TestParsePatchPathsAmbiguousDiffGitHeader pins the resolution of a
+// "diff --git" line whose two path arms cannot be split unambiguously by
+// text alone: the greedy split the review flagged ("x b/y b/x") must never
+// appear, and the section's own "---"/"+++" lines remain authoritative.
+func TestParsePatchPathsAmbiguousDiffGitHeader(t *testing.T) {
+	patch := "diff --git a/x b/y b/x b/y\n" +
+		"--- a/x\n" +
+		"+++ b/x\n"
+	paths, err := parsePatchPaths([]byte(patch))
+	if err != nil {
+		t.Fatalf("parsePatchPaths() unexpected error: %v", err)
+	}
+	for _, p := range paths {
+		if p == "x b/y b/x" {
+			t.Errorf("parsePatchPaths() = %q, want no greedily misparsed %q entry", paths, "x b/y b/x")
+		}
+	}
+	found := false
+	for _, p := range paths {
+		if p == "x" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("parsePatchPaths() = %q, want the %q the section's ---/+++ lines confirm", paths, "x")
+	}
+}
+
+func TestParsePatchPathsHunklessSection(t *testing.T) {
+	tests := []struct {
+		name    string
+		patch   string
+		wantErr bool
+		want    string
+	}{
+		{
+			name:  "mode change only with an unambiguous header",
+			patch: "diff --git a/tools/runner b/tools/runner\nold mode 100644\nnew mode 100755\n",
+			want:  "tools/runner",
+		},
+		{
+			name:    "mode change only with an unresolvable header",
+			patch:   "diff --git a/old b/new\nold mode 100644\nnew mode 100755\n",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paths, err := parsePatchPaths([]byte(tt.patch))
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("parsePatchPaths() = %q, nil error, want error", paths)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parsePatchPaths() unexpected error: %v", err)
+			}
+			if len(paths) != 1 || paths[0] != tt.want {
+				t.Errorf("parsePatchPaths() = %q, want [%q]", paths, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateCandidatePatchDevNullAddedFileTouchesProtected(t *testing.T) {
 	patch := "diff --git a/internal/cache/new.go b/internal/cache/new.go\n" +
 		"new file mode 100644\n" +

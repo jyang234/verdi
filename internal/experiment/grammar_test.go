@@ -79,7 +79,7 @@ func TestValidateRepoRelativePath(t *testing.T) {
 			t.Errorf("ValidateRepoRelativePath(%q) = %v, want nil", v, err)
 		}
 	}
-	invalid := []string{"", "/a", "a/", "a//b", "../a", "a/../b", ".."}
+	invalid := []string{"", "/a", "a/", "a//b", "../a", "a/../b", "..", ".", "./a", "a/./b", "a/."}
 	for _, v := range invalid {
 		if err := ValidateRepoRelativePath(v); err == nil {
 			t.Errorf("ValidateRepoRelativePath(%q) = nil, want error", v)
