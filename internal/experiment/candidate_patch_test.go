@@ -18,21 +18,21 @@ func TestCandidatePatchFixtureDigestsMatchContent(t *testing.T) {
 
 func TestValidateCandidatePatchHappyPath(t *testing.T) {
 	def := mustDecodeDefinition(t, validDefinitionYAML())
-	if err := ValidateCandidatePatch(def, "baseline", []byte(baselinePatchContent), "experiments/cache-placement-v1"); err != nil {
+	if err := ValidateCandidatePatch(def, "baseline", []byte(baselinePatchContent), testExperimentDir); err != nil {
 		t.Fatalf("ValidateCandidatePatch() unexpected error: %v", err)
 	}
 }
 
 func TestValidateCandidatePatchUnregisteredCandidate(t *testing.T) {
 	def := mustDecodeDefinition(t, validDefinitionYAML())
-	if err := ValidateCandidatePatch(def, "nonexistent", []byte(baselinePatchContent), ""); err == nil {
+	if err := ValidateCandidatePatch(def, "nonexistent", []byte(baselinePatchContent), testExperimentDir); err == nil {
 		t.Errorf("ValidateCandidatePatch() with an unregistered candidate = nil error, want error")
 	}
 }
 
 func TestValidateCandidatePatchDigestMismatch(t *testing.T) {
 	def := mustDecodeDefinition(t, validDefinitionYAML())
-	if err := ValidateCandidatePatch(def, "baseline", []byte("diff --git a/other b/other\n"), ""); err == nil {
+	if err := ValidateCandidatePatch(def, "baseline", []byte("diff --git a/other b/other\n"), testExperimentDir); err == nil {
 		t.Errorf("ValidateCandidatePatch() with mismatched patch bytes = nil error, want error")
 	}
 }
@@ -44,7 +44,7 @@ func TestValidateCandidatePatchUnparseable(t *testing.T) {
 	// digest check passes and the parse failure is isolated.
 	doc := mutate(t, "digest: "+baselinePatchDigest, "digest: "+digest)
 	def := mustDecodeDefinition(t, doc)
-	if err := ValidateCandidatePatch(def, "baseline", unparseable, ""); err == nil {
+	if err := ValidateCandidatePatch(def, "baseline", unparseable, testExperimentDir); err == nil {
 		t.Errorf("ValidateCandidatePatch() with an unparseable patch = nil error, want error")
 	}
 }
@@ -56,21 +56,24 @@ func TestValidateCandidatePatchProtectedPaths(t *testing.T) {
 		experimentDir string
 	}{
 		{
-			name:  "touches explicit protected_paths entry",
-			patch: "diff --git a/internal/cache/store.go b/internal/cache/store.go\n",
+			name:          "touches explicit protected_paths entry",
+			patch:         "diff --git a/internal/cache/store.go b/internal/cache/store.go\n",
+			experimentDir: testExperimentDir,
 		},
 		{
-			name:  "touches explicit protected_paths entry exactly",
-			patch: "diff --git a/internal/cache b/internal/cache\n",
+			name:          "touches explicit protected_paths entry exactly",
+			patch:         "diff --git a/internal/cache b/internal/cache\n",
+			experimentDir: testExperimentDir,
 		},
 		{
-			name:  "touches evaluator executable",
-			patch: "diff --git a/tools/cache-evaluator b/tools/cache-evaluator\n",
+			name:          "touches evaluator executable",
+			patch:         "diff --git a/tools/cache-evaluator b/tools/cache-evaluator\n",
+			experimentDir: testExperimentDir,
 		},
 		{
 			name:          "touches experiment's own directory",
 			patch:         "diff --git a/experiments/cache-placement-v1/experiment.yaml b/experiments/cache-placement-v1/experiment.yaml\n",
-			experimentDir: "experiments/cache-placement-v1",
+			experimentDir: testExperimentDir,
 		},
 	}
 	for _, tt := range tests {
@@ -90,7 +93,7 @@ func TestValidateCandidatePatchAllowsUnrelatedPath(t *testing.T) {
 	digest := sha256Digest([]byte(patch))
 	doc := mutate(t, "digest: "+baselinePatchDigest, "digest: "+digest)
 	def := mustDecodeDefinition(t, doc)
-	if err := ValidateCandidatePatch(def, "baseline", []byte(patch), "experiments/cache-placement-v1"); err != nil {
+	if err := ValidateCandidatePatch(def, "baseline", []byte(patch), testExperimentDir); err != nil {
 		t.Errorf("ValidateCandidatePatch() for an unrelated path = %v, want nil", err)
 	}
 }
@@ -102,7 +105,7 @@ func TestValidateCandidatePatchNearMissDoesNotFalsePositive(t *testing.T) {
 	digest := sha256Digest([]byte(patch))
 	doc := mutate(t, "digest: "+baselinePatchDigest, "digest: "+digest)
 	def := mustDecodeDefinition(t, doc)
-	if err := ValidateCandidatePatch(def, "baseline", []byte(patch), ""); err != nil {
+	if err := ValidateCandidatePatch(def, "baseline", []byte(patch), testExperimentDir); err != nil {
 		t.Errorf("ValidateCandidatePatch() for a near-miss path = %v, want nil (segment-boundary matching only)", err)
 	}
 }
@@ -115,7 +118,7 @@ func TestValidateCandidatePatchRenameTouchesProtected(t *testing.T) {
 	digest := sha256Digest([]byte(patch))
 	doc := mutate(t, "digest: "+baselinePatchDigest, "digest: "+digest)
 	def := mustDecodeDefinition(t, doc)
-	if err := ValidateCandidatePatch(def, "baseline", []byte(patch), ""); err == nil {
+	if err := ValidateCandidatePatch(def, "baseline", []byte(patch), testExperimentDir); err == nil {
 		t.Errorf("ValidateCandidatePatch() with a rename into a protected path = nil error, want error")
 	}
 }
@@ -128,8 +131,27 @@ func TestValidateCandidatePatchDevNullAddedFile(t *testing.T) {
 	digest := sha256Digest([]byte(patch))
 	doc := mutate(t, "digest: "+baselinePatchDigest, "digest: "+digest)
 	def := mustDecodeDefinition(t, doc)
-	if err := ValidateCandidatePatch(def, "baseline", []byte(patch), ""); err != nil {
+	if err := ValidateCandidatePatch(def, "baseline", []byte(patch), testExperimentDir); err != nil {
 		t.Errorf("ValidateCandidatePatch() for a /dev/null-added unrelated file = %v, want nil", err)
+	}
+}
+
+// TestValidateCandidatePatchRequiresExperimentDir proves the
+// experiment-directory self-check can never be silently skipped: an empty
+// or non-repo-relative experimentDir is a hard error, not a patch that
+// quietly escapes one of its protected inputs.
+func TestValidateCandidatePatchRequiresExperimentDir(t *testing.T) {
+	patch := "diff --git a/experiments/cache-placement-v1/experiment.yaml b/experiments/cache-placement-v1/experiment.yaml\n"
+	digest := sha256Digest([]byte(patch))
+	doc := mutate(t, "digest: "+baselinePatchDigest, "digest: "+digest)
+	def := mustDecodeDefinition(t, doc)
+
+	for _, dir := range []string{"", "/experiments/cache-placement-v1", "experiments/../experiments/cache-placement-v1"} {
+		t.Run("experimentDir "+dir, func(t *testing.T) {
+			if err := ValidateCandidatePatch(def, "baseline", []byte(patch), dir); err == nil {
+				t.Errorf("ValidateCandidatePatch() with experimentDir %q = nil error, want error", dir)
+			}
+		})
 	}
 }
 
@@ -154,7 +176,7 @@ func TestValidateCandidatePatchRejectsNonCanonicalPaths(t *testing.T) {
 			digest := sha256Digest([]byte(tt.patch))
 			doc := mutate(t, "digest: "+baselinePatchDigest, "digest: "+digest)
 			def := mustDecodeDefinition(t, doc)
-			if err := ValidateCandidatePatch(def, "baseline", []byte(tt.patch), "experiments/cache-placement-v1"); err == nil {
+			if err := ValidateCandidatePatch(def, "baseline", []byte(tt.patch), testExperimentDir); err == nil {
 				t.Errorf("ValidateCandidatePatch(%s) = nil error, want error", tt.name)
 			}
 		})
@@ -234,7 +256,7 @@ func TestValidateCandidatePatchDevNullAddedFileTouchesProtected(t *testing.T) {
 	digest := sha256Digest([]byte(patch))
 	doc := mutate(t, "digest: "+baselinePatchDigest, "digest: "+digest)
 	def := mustDecodeDefinition(t, doc)
-	if err := ValidateCandidatePatch(def, "baseline", []byte(patch), ""); err == nil {
+	if err := ValidateCandidatePatch(def, "baseline", []byte(patch), testExperimentDir); err == nil {
 		t.Errorf("ValidateCandidatePatch() with a /dev/null-added file under a protected path = nil error, want error")
 	}
 }

@@ -9,6 +9,11 @@ import (
 // fixture in this file reuses.
 var base40 = repeat("a", 40)
 
+// testExperimentDir is the canonical repo-relative directory the fixture
+// experiment lives in — the coordinate every protected-input check and
+// every DeriveState call in this package's tests uses.
+const testExperimentDir = "experiments/cache-placement-v1"
+
 func digestOf(char string) string {
 	return "sha256:" + repeat(char, 64)
 }
@@ -191,10 +196,22 @@ func TestDecodeDefinitionRejects(t *testing.T) {
 		{"threshold both arms set", mutate(t, "  baseline_improvement:\n    relative: 0.25\n", "  baseline_improvement:\n    relative: 0.25\n    absolute: 5\n")},
 		{"threshold no arm set", mutate(t, "  baseline_improvement:\n    relative: 0.25\n", "  baseline_improvement: {}\n")},
 		{"threshold nonpositive relative", mutate(t, "    relative: 0.25\n  candidate_separation", "    relative: -0.25\n  candidate_separation")},
+		{"threshold NaN relative", mutate(t, "    relative: 0.25\n  candidate_separation", "    relative: .nan\n  candidate_separation")},
+		{"threshold +Inf relative", mutate(t, "    relative: 0.25\n  candidate_separation", "    relative: .inf\n  candidate_separation")},
+		{"threshold -Inf relative", mutate(t, "    relative: 0.25\n  candidate_separation", "    relative: -.inf\n  candidate_separation")},
+		{"threshold NaN absolute", mutate(t, "  baseline_improvement:\n    relative: 0.25\n", "  baseline_improvement:\n    absolute: .nan\n")},
+		{"threshold +Inf absolute", mutate(t, "  baseline_improvement:\n    relative: 0.25\n", "  baseline_improvement:\n    absolute: .inf\n")},
+		{"threshold -Inf absolute", mutate(t, "  baseline_improvement:\n    relative: 0.25\n", "  baseline_improvement:\n    absolute: -.inf\n")},
 		{"duplicate guard ids", mutate(t, "    - id: tenant-isolation\n", "    - id: behavioral-equivalence\n")},
 		{"guard id equals primary metric id", mutate(t, "    - id: behavioral-equivalence\n", "    - id: request-latency\n")},
 		{"guard bound nonpositive", mutate(t, "maximum_relative_to_baseline: 0.15", "maximum_relative_to_baseline: -0.15")},
+		{"guard bound NaN", mutate(t, "maximum_relative_to_baseline: 0.15", "maximum_relative_to_baseline: .nan")},
+		{"guard bound +Inf", mutate(t, "maximum_relative_to_baseline: 0.15", "maximum_relative_to_baseline: .inf")},
+		{"guard bound -Inf", mutate(t, "maximum_relative_to_baseline: 0.15", "maximum_relative_to_baseline: -.inf")},
 		{"variability nonpositive", mutate(t, "max_relative_spread: 0.1", "max_relative_spread: 0")},
+		{"variability NaN", mutate(t, "max_relative_spread: 0.1", "max_relative_spread: .nan")},
+		{"variability +Inf", mutate(t, "max_relative_spread: 0.1", "max_relative_spread: .inf")},
+		{"variability -Inf", mutate(t, "max_relative_spread: 0.1", "max_relative_spread: -.inf")},
 		{"duplicate fixture ids", duplicateFixtureIDsYAML(t)},
 		{"protected path leading slash", mutate(t, "  - internal/cache\n", "  - /internal/cache\n")},
 		{"protected path traversal", mutate(t, "  - internal/cache\n", "  - internal/../cache\n")},

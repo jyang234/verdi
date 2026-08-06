@@ -48,8 +48,8 @@ type Measurement struct {
 	Source Source      `json:"source"`
 }
 
-// Validate checks id, that value decoded as a genuine JSON number, unit,
-// and source.
+// Validate checks id, that value decoded as a genuine, finite JSON number,
+// unit, and source.
 func (m Measurement) Validate() error {
 	if err := ValidateID(m.ID); err != nil {
 		return fmt.Errorf("experiment: observation.measurements: %w", err)
@@ -57,8 +57,12 @@ func (m Measurement) Validate() error {
 	if m.Value == "" {
 		return fmt.Errorf("experiment: measurement %q: value is missing", m.ID)
 	}
-	if _, err := m.Value.Float64(); err != nil {
+	value, err := m.Value.Float64()
+	if err != nil {
 		return fmt.Errorf("experiment: measurement %q: value %q is not a JSON number: %w", m.ID, string(m.Value), err)
+	}
+	if err := validateFinite(fmt.Sprintf("measurement %q: value", m.ID), value); err != nil {
+		return err
 	}
 	if err := ValidateUnit(m.Unit); err != nil {
 		return fmt.Errorf("experiment: measurement %q: %w", m.ID, err)

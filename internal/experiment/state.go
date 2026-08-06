@@ -18,11 +18,24 @@ const (
 )
 
 // DeriveState computes an experiment's derived lifecycle state from the
-// presence and validity of its artifacts under dir (AC-1's state table,
-// DC-2): exploratory, registered, measured, recommended, inconclusive, or
+// presence and validity of its artifacts (AC-1's state table, DC-2):
+// exploratory, registered, measured, recommended, inconclusive, or
 // ratified. States form a ladder — reaching a state requires every lower
 // state's requirement to still hold — and DeriveState walks the ladder in
 // order, stopping at the first artifact that is genuinely ABSENT.
+//
+// The experiment is addressed by TWO arguments, because the artifacts are
+// read in filesystem coordinates while the protected-input self-check
+// (ValidateCandidatePatch) compares in repo coordinates:
+//
+//   - repoRoot is the filesystem directory to read under, absolute or
+//     relative to the process's working directory; it is never compared to
+//     anything a patch names.
+//   - experimentDir is the experiment directory's canonical REPO-RELATIVE
+//     path (ValidateRepoRelativePath). It is joined onto repoRoot to reach
+//     the artifacts AND used as the protected prefix naming the
+//     experiment's own directory. An absolute or otherwise non-canonical
+//     experimentDir is a hard error, never a silently skipped self-check.
 //
 // Absence and invalidity are NOT the same signal. Once an artifact is
 // PRESENT, DeriveState requires it to decode, validate, and digest-link
@@ -36,7 +49,20 @@ const (
 // "back to exploratory" — locking already required those patches to
 // exist, so their absence is a store inconsistency and DeriveState
 // reports it as an error.
-func DeriveState(dir string) (State, error) {
+//
+// A PARTIALLY WRITTEN observations.jsonl is a hard error here by design at
+// this rung: an incomplete observation set is not a lower rung, it is
+// evidence that does not yet support any verdict. DC-15's resume behavior
+// arrives in a later unit and keys on the ErrObservationIncomplete
+// sentinel (observations_validation.go), which is exactly why
+// incompleteness carries its own sentinel rather than being folded into
+// ErrObservationIntegrity.
+func DeriveState(repoRoot, experimentDir string) (State, error) {
+	if err := ValidateRepoRelativePath(experimentDir); err != nil {
+		return "", fmt.Errorf("experiment: experiment directory: %w", err)
+	}
+	dir := filepath.Join(repoRoot, experimentDir)
+
 	def, ok, err := readDefinition(dir)
 	if err != nil {
 		return "", err
@@ -57,7 +83,7 @@ func DeriveState(dir string) (State, error) {
 		return "", err
 	}
 
-	if err := checkCandidatePatchesValid(dir, def); err != nil {
+	if err := checkCandidatePatchesValid(dir, experimentDir, def); err != nil {
 		return "", err
 	}
 
@@ -112,13 +138,14 @@ func readDefinition(dir string) (def Definition, ok bool, err error) {
 
 // checkCandidatePatchesValid requires every candidate's registered patch
 // file to exist on disk, match its registered digest, and touch no
-// protected input (ValidateCandidatePatch). dir doubles as the
-// protected-path check's experiment-directory argument: callers are
-// expected to invoke DeriveState with dir already expressed as the
-// experiment directory's repo-relative path (AC-1's own directory
-// layout), the same coordinate system protected_paths and the evaluator
-// executable use.
-func checkCandidatePatchesValid(dir string, def Definition) error {
+// protected input (ValidateCandidatePatch). dir is where the files are
+// READ (repoRoot joined with the experiment directory); experimentDir is
+// the repo-relative path the protected-input self-check COMPARES against,
+// the same coordinate system protected_paths and the evaluator executable
+// use. Keeping the two apart is what lets DeriveState read an experiment
+// through an absolute repoRoot without ever comparing an absolute path to
+// a patch's repo-relative one.
+func checkCandidatePatchesValid(dir, experimentDir string, def Definition) error {
 	for _, c := range def.Candidates {
 		path := filepath.Join(dir, c.Patch)
 		raw, err := os.ReadFile(path)
@@ -128,7 +155,7 @@ func checkCandidatePatchesValid(dir string, def Definition) error {
 			}
 			return fmt.Errorf("experiment: reading %s: %w", path, err)
 		}
-		if err := ValidateCandidatePatch(def, c.ID, raw, dir); err != nil {
+		if err := ValidateCandidatePatch(def, c.ID, raw, experimentDir); err != nil {
 			return fmt.Errorf("experiment: %s: %w", path, err)
 		}
 	}

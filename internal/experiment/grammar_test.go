@@ -1,6 +1,9 @@
 package experiment
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestValidateDigest(t *testing.T) {
 	valid := []string{
@@ -83,6 +86,21 @@ func TestValidateRepoRelativePath(t *testing.T) {
 	for _, v := range invalid {
 		if err := ValidateRepoRelativePath(v); err == nil {
 			t.Errorf("ValidateRepoRelativePath(%q) = nil, want error", v)
+		}
+	}
+}
+
+func TestValidateFinite(t *testing.T) {
+	valid := []float64{0, 1, -1, 0.25, math.MaxFloat64, -math.MaxFloat64, math.SmallestNonzeroFloat64}
+	for _, v := range valid {
+		if err := validateFinite("field", v); err != nil {
+			t.Errorf("validateFinite(%v) = %v, want nil", v, err)
+		}
+	}
+	invalid := []float64{math.NaN(), math.Inf(1), math.Inf(-1)}
+	for _, v := range invalid {
+		if err := validateFinite("field", v); err == nil {
+			t.Errorf("validateFinite(%v) = nil, want error", v)
 		}
 	}
 }

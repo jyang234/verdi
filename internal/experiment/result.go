@@ -66,8 +66,8 @@ type PrimaryResult struct {
 	Rounds      int         `json:"rounds"`
 }
 
-// Validate checks the aggregation, unit, that value is a genuine JSON
-// number, and the rounds bound.
+// Validate checks the aggregation, unit, that value is a genuine, finite
+// JSON number, and the rounds bound.
 func (p PrimaryResult) Validate() error {
 	if err := p.Aggregation.Validate(); err != nil {
 		return fmt.Errorf("experiment: primary: %w", err)
@@ -78,8 +78,12 @@ func (p PrimaryResult) Validate() error {
 	if p.Value == "" {
 		return fmt.Errorf("experiment: primary: value is missing")
 	}
-	if _, err := p.Value.Float64(); err != nil {
+	value, err := p.Value.Float64()
+	if err != nil {
 		return fmt.Errorf("experiment: primary: value %q is not a JSON number: %w", string(p.Value), err)
+	}
+	if err := validateFinite("primary.value", value); err != nil {
+		return err
 	}
 	if p.Rounds < 1 {
 		return fmt.Errorf("experiment: primary: rounds must be >= 1, got %d", p.Rounds)
@@ -95,8 +99,8 @@ type Bound struct {
 	Pass  bool        `json:"pass"`
 }
 
-// Validate checks the guard id and that both value and limit are genuine
-// JSON numbers.
+// Validate checks the guard id and that both value and limit are genuine,
+// finite JSON numbers.
 func (b Bound) Validate() error {
 	if err := ValidateID(b.Guard); err != nil {
 		return fmt.Errorf("experiment: bound: guard: %w", err)
@@ -104,16 +108,21 @@ func (b Bound) Validate() error {
 	if b.Value == "" {
 		return fmt.Errorf("experiment: bound for guard %q: value is missing", b.Guard)
 	}
-	if _, err := b.Value.Float64(); err != nil {
+	value, err := b.Value.Float64()
+	if err != nil {
 		return fmt.Errorf("experiment: bound for guard %q: value %q is not a JSON number: %w", b.Guard, string(b.Value), err)
+	}
+	if err := validateFinite(fmt.Sprintf("bound for guard %q: value", b.Guard), value); err != nil {
+		return err
 	}
 	if b.Limit == "" {
 		return fmt.Errorf("experiment: bound for guard %q: limit is missing", b.Guard)
 	}
-	if _, err := b.Limit.Float64(); err != nil {
+	limit, err := b.Limit.Float64()
+	if err != nil {
 		return fmt.Errorf("experiment: bound for guard %q: limit %q is not a JSON number: %w", b.Guard, string(b.Limit), err)
 	}
-	return nil
+	return validateFinite(fmt.Sprintf("bound for guard %q: limit", b.Guard), limit)
 }
 
 // CandidateResult is one candidate's outcome inside a Result.

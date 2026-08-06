@@ -100,19 +100,29 @@ type Threshold struct {
 }
 
 // Validate enforces the exclusive union — exactly one arm set — and that
-// the set arm's value is strictly positive. field names the threshold in
-// any error.
+// the set arm's value is a finite, strictly positive number. field names
+// the threshold in any error.
 func (t Threshold) Validate(field string) error {
 	hasRelative := t.Relative != nil
 	hasAbsolute := t.Absolute != nil
 	if hasRelative == hasAbsolute {
 		return fmt.Errorf("experiment: %s must set exactly one of relative or absolute", field)
 	}
-	if hasRelative && *t.Relative <= 0 {
-		return fmt.Errorf("experiment: %s.relative must be > 0, got %v", field, *t.Relative)
+	if hasRelative {
+		if err := validateFinite(field+".relative", *t.Relative); err != nil {
+			return err
+		}
+		if *t.Relative <= 0 {
+			return fmt.Errorf("experiment: %s.relative must be > 0, got %v", field, *t.Relative)
+		}
 	}
-	if hasAbsolute && *t.Absolute <= 0 {
-		return fmt.Errorf("experiment: %s.absolute must be > 0, got %v", field, *t.Absolute)
+	if hasAbsolute {
+		if err := validateFinite(field+".absolute", *t.Absolute); err != nil {
+			return err
+		}
+		if *t.Absolute <= 0 {
+			return fmt.Errorf("experiment: %s.absolute must be > 0, got %v", field, *t.Absolute)
+		}
 	}
 	return nil
 }
@@ -130,14 +140,20 @@ type Guard struct {
 // than being a required correctness/safety guard.
 func (g Guard) Bounded() bool { return g.MaximumRelativeToBaseline != nil }
 
-// Validate checks g's id and, when bounded, that the bound is strictly
-// positive.
+// Validate checks g's id and, when bounded, that the bound is a finite,
+// strictly positive number.
 func (g Guard) Validate() error {
 	if err := ValidateID(g.ID); err != nil {
 		return fmt.Errorf("experiment: decision.guards: %w", err)
 	}
-	if g.MaximumRelativeToBaseline != nil && *g.MaximumRelativeToBaseline <= 0 {
-		return fmt.Errorf("experiment: guard %q: maximum_relative_to_baseline must be > 0, got %v", g.ID, *g.MaximumRelativeToBaseline)
+	if g.MaximumRelativeToBaseline != nil {
+		field := fmt.Sprintf("guard %q: maximum_relative_to_baseline", g.ID)
+		if err := validateFinite(field, *g.MaximumRelativeToBaseline); err != nil {
+			return err
+		}
+		if *g.MaximumRelativeToBaseline <= 0 {
+			return fmt.Errorf("experiment: guard %q: maximum_relative_to_baseline must be > 0, got %v", g.ID, *g.MaximumRelativeToBaseline)
+		}
 	}
 	return nil
 }
@@ -147,8 +163,11 @@ type Variability struct {
 	MaxRelativeSpread float64 `yaml:"max_relative_spread" json:"max_relative_spread"`
 }
 
-// Validate checks the spread bound is strictly positive.
+// Validate checks the spread bound is a finite, strictly positive number.
 func (v Variability) Validate() error {
+	if err := validateFinite("decision.variability.max_relative_spread", v.MaxRelativeSpread); err != nil {
+		return err
+	}
 	if v.MaxRelativeSpread <= 0 {
 		return fmt.Errorf("experiment: decision.variability.max_relative_spread must be > 0, got %v", v.MaxRelativeSpread)
 	}

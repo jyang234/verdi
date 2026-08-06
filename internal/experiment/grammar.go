@@ -19,6 +19,7 @@ package experiment
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"unicode"
@@ -105,6 +106,28 @@ func ValidateRepoRelativePath(p string) error {
 		if seg == "." || seg == ".." {
 			return fmt.Errorf("experiment: repo-relative path %q must not contain a %q segment", p, seg)
 		}
+	}
+	return nil
+}
+
+// validateFinite checks v is a real number: neither NaN nor an infinity of
+// either sign, naming field in any error. Every numeric bound in this
+// package goes through it before any ordering comparison, because NaN
+// silently answers false to every such comparison ("v <= 0" does not
+// reject NaN) and an infinity satisfies "strictly positive" while making
+// the threshold it states unreachable — a registered decision contract
+// that can never be met is not a contract.
+//
+// The live path is YAML, whose float grammar spells these values (".nan",
+// ".inf", "-.inf"). JSON has no literal for either, so the JSON-side calls
+// are defense in depth: a numeric literal large enough to overflow is
+// already rejected by json.Number.Float64's range error.
+func validateFinite(field string, v float64) error {
+	if math.IsNaN(v) {
+		return fmt.Errorf("experiment: %s must be a finite number, got NaN", field)
+	}
+	if math.IsInf(v, 0) {
+		return fmt.Errorf("experiment: %s must be a finite number, got %v", field, v)
 	}
 	return nil
 }

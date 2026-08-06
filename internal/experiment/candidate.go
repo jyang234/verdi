@@ -219,10 +219,19 @@ func pathTouchesPrefix(changed, prefix string) bool {
 // touch a protected comparison input: any def.ProtectedPaths entry, the
 // evaluator's own repo-relative executable (def.Evaluator.Argv[0] with a
 // leading "./" stripped), or any path under the experiment's own
-// directory (experimentDir, repo-relative; pass "" when the caller has no
-// meaningful directory context — the check is then skipped for that one
-// input only, every other protected input still applies).
+// directory.
+//
+// experimentDir is REQUIRED and is the experiment directory's canonical
+// repo-relative path — the same coordinate system protected_paths and the
+// changed paths use. An empty or non-repo-relative experimentDir is a hard
+// error: a caller with no directory context cannot be served by silently
+// dropping one protected input, because the resulting "clean" verdict
+// would be indistinguishable from one that actually checked it.
 func ValidateCandidatePatch(def Definition, candidateID string, patchBytes []byte, experimentDir string) error {
+	if err := ValidateRepoRelativePath(experimentDir); err != nil {
+		return fmt.Errorf("experiment: candidate %q: experiment directory: %w", candidateID, err)
+	}
+
 	var candidate *Candidate
 	for i := range def.Candidates {
 		if def.Candidates[i].ID == candidateID {
@@ -251,9 +260,7 @@ func ValidateCandidatePatch(def Definition, candidateID string, patchBytes []byt
 			protected = append(protected, trimmed)
 		}
 	}
-	if experimentDir != "" {
-		protected = append(protected, experimentDir)
-	}
+	protected = append(protected, experimentDir)
 
 	for _, path := range changed {
 		for _, prefix := range protected {
