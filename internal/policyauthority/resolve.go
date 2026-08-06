@@ -143,7 +143,7 @@ func Resolve(s *Store) (*EffectivePolicy, error) {
 			PolicyID:     pid,
 			PolicyDigest: pDigest,
 			Claims:       claims,
-			Instructions: append([]string(nil), p.Instructions...),
+			Instructions: append([]string{}, p.Instructions...),
 			Payloads:     p.Payloads,
 		})
 	}
@@ -159,12 +159,12 @@ func Resolve(s *Store) (*EffectivePolicy, error) {
 		exemptions = append(exemptions, EffectiveExemption{
 			ExemptionID:     eid,
 			Digest:          eDigest,
-			Witnesses:       append([]policyartifact.Witness(nil), e.Witnesses...),
+			Witnesses:       append([]policyartifact.Witness{}, e.Witnesses...),
 			Scope:           e.Scope,
 			Expiry:          e.Expiry,
 			ReviewCondition: e.ReviewCondition,
-			Owners:          append([]string(nil), e.Owners...),
-			Approvals:       append([]policyartifact.Approval(nil), e.Approvals...),
+			Owners:          append([]string{}, e.Owners...),
+			Approvals:       append([]policyartifact.Approval{}, e.Approvals...),
 		})
 	}
 
@@ -203,8 +203,13 @@ func refineClaim(policyID string, c policyartifact.Claim, overlays []*policyarti
 		AppliedOverlays: []string{},
 	}
 
-	var applied []string
-	values := append([]string(nil), c.Values...)
+	// applied and values start as explicit empty slices, never nil: a
+	// claim with no contributing overlay (or a minimum/maximum claim,
+	// which never touches values at all) must still canonicalize its
+	// zero-value fields as [] like every other semantic set in this
+	// store, not as JSON null.
+	applied := []string{}
+	values := append([]string{}, c.Values...)
 	var bound *int
 	if c.Bound != nil {
 		b := *c.Bound
@@ -316,7 +321,7 @@ func isSubset(a, b []string) bool {
 func intersect(a, b []string) []string {
 	bs := toSet(b)
 	seen := map[string]bool{}
-	var out []string
+	out := []string{}
 	for _, v := range a {
 		if bs[v] && !seen[v] {
 			out = append(out, v)
@@ -330,7 +335,7 @@ func intersect(a, b []string) []string {
 // union returns the sorted, deduplicated union of a and b.
 func union(a, b []string) []string {
 	seen := map[string]bool{}
-	var out []string
+	out := []string{}
 	for _, v := range append(append([]string(nil), a...), b...) {
 		if !seen[v] {
 			out = append(out, v)

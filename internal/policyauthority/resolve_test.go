@@ -1,6 +1,7 @@
 package policyauthority
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -134,6 +135,33 @@ Pin the toolchain and the verification gate.
 	}
 	if digestA != digestB {
 		t.Fatalf("Digest differs across source reordering: A=%s B=%s", digestA, digestB)
+	}
+}
+
+// TestResolve_EmptySetsAreExplicitNeverNull proves every zero-value
+// semantic set in the resolved output canonicalizes as JSON [], matching
+// this store's "explicit empty set is []" convention (internal/
+// policyartifact's own scope/claim decoders), never as JSON null: a
+// minimum-operator claim never touches values at all, and a claim with no
+// contributing overlay has no applied overlays.
+func TestResolve_EmptySetsAreExplicitNeverNull(t *testing.T) {
+	files := rulesStoreFiles()
+	root := t.TempDir()
+	writeTree(t, root, files)
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	ep, err := Resolve(s)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	data, err := canonjson.Marshal(ep)
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	if strings.Contains(string(data), "null") {
+		t.Fatalf("resolved effective policy contains JSON null (want explicit [] everywhere):\n%s", data)
 	}
 }
 
