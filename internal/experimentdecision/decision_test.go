@@ -800,6 +800,70 @@ func TestEvaluateCandidateReportedNeverShiftsAggregate(t *testing.T) {
 	}
 }
 
+// TestEvaluateBoundGuardCandidateReportedOnlyRejected is the bounded-guard
+// counterpart to TestEvaluateCandidateReportedNeverShiftsAggregate: it
+// pins "a candidate-reported value cannot affect eligibility" for a
+// SECONDARY BOUND (not just the primary aggregate), at the strongest
+// reachable layer.
+//
+// A record whose bound-guard measurement (here peak-rss) carries ONLY a
+// candidate-reported value, with no decision-eligible reading, is not a
+// shape the engine can quietly ignore-and-fall-back-to-honest on: it is a
+// shape experiment.ValidateObservations already refuses to let through at
+// all. Two Lane-1 rules combine to make this so: Observation.Validate
+// forbids two measurements sharing one id in the same record regardless
+// of source (so a decision-eligible peak-rss reading can never coexist
+// with a candidate-reported one under the same id in one record), and
+// ValidateObservations separately requires a decision-eligible
+// measurement under every registered bound guard's id in EVERY record. A
+// record that swaps the decision-eligible peak-rss reading for a
+// candidate-reported one therefore fails integrity validation outright —
+// Evaluate (which runs ValidateComplete, and therefore
+// ValidateObservations, as its precondition) rejects it as an
+// operational error before eligibility is ever computed, and never
+// silently treats the inflated candidate-reported value as if it were a
+// bound check.
+func TestEvaluateBoundGuardCandidateReportedOnlyRejected(t *testing.T) {
+	def := lockDefinition(t)
+	obs := happyObservations(t, def, "run-1",
+		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
+		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},
+	)
+	// Swap candidate-a's decision-eligible peak-rss reading, every round,
+	// for a candidate-reported one carrying a wildly-over-limit value. If
+	// the engine (incorrectly) honored a candidate-reported bound
+	// measurement, this would make candidate-a spuriously ineligible; the
+	// correct outcome is that this input is refused before Evaluate ever
+	// reaches eligibility at all.
+	for i := range obs {
+		if obs[i].Candidate != "candidate-a" {
+			continue
+		}
+		for j := range obs[i].Measurements {
+			if obs[i].Measurements[j].ID == "peak-rss" {
+				obs[i].Measurements[j] = measurement("peak-rss", 100000, "MiB", experiment.SourceCandidateReported)
+			}
+		}
+	}
+
+	res, err := Evaluate(def, obs)
+	if err == nil {
+		t.Fatalf("Evaluate() with a candidate-reported-only bound-guard measurement = nil error, want error")
+	}
+	if !errors.Is(err, experiment.ErrObservationIntegrity) {
+		t.Fatalf("Evaluate() error = %v, want it to wrap ErrObservationIntegrity (missing decision-eligible bound-guard measurement)", err)
+	}
+	if !isZeroResult(res) {
+		t.Fatalf("Evaluate() returned a nonzero Result alongside an error: %+v", res)
+	}
+
+	// Pin the invariant at its own strongest layer directly, not merely as
+	// observed through Evaluate's wrapped error.
+	if err := experiment.ValidateObservations(def, obs); !errors.Is(err, experiment.ErrObservationIntegrity) {
+		t.Fatalf("ValidateObservations() error = %v, want it to wrap ErrObservationIntegrity", err)
+	}
+}
+
 // TestEvaluateFasterIncorrectLoses is the unit-level version of the
 // spec's caching scenario (CO-7): a faster candidate that fails a
 // required guard must lose to a slower candidate that passes everything

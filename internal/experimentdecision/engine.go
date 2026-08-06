@@ -32,6 +32,17 @@ type candRound struct {
 // earlier one has already failed the run. There is no weighted score,
 // dynamic metric selection, threshold mutation, or tie-breaker anywhere in
 // this function, and it has no configuration beyond def itself (DC-4).
+//
+// DISCLOSED SCOPE (three-valued honesty, CO-1): step 1 in AC-2's own text
+// is "prove that the run is complete and matches the locked digests AND
+// ENVIRONMENT POLICY". This function proves completeness
+// (experiment.ValidateComplete) and digest agreement only. An observation
+// record carries no environment fingerprint, so the environment-policy
+// conjunct is structurally unproven at this layer — it is not silently
+// assumed to hold, it is simply not this unit's evidence to offer. That
+// conjunct belongs to spec/execution-workspace, which captures and checks
+// the environment fingerprint during execution, before any observation
+// this engine ever sees is produced.
 func Evaluate(def experiment.Definition, obs []experiment.Observation) (experiment.Result, error) {
 	locked, err := experiment.Locked(def)
 	if err != nil {
@@ -140,6 +151,16 @@ func (e *evaluation) primaryRoundValues(candID string) []float64 {
 
 // guardRoundValues returns candID's decision-eligible measurement values
 // for guard id guardID, one per registered round, in round order.
+//
+// The Source.DecisionEligible() filter here is defense in depth, not the
+// primary guarantee: experiment.Observation.Validate already forbids two
+// measurements sharing one id within the same record regardless of
+// source, and experiment.ValidateObservations already requires a
+// decision-eligible measurement under every registered bound guard's id
+// in every record. Together those two checks make a bound guard's value
+// ever being candidate-reported-only unreachable through validated
+// input — Evaluate's precondition check rejects that shape before this
+// function is ever called (see TestEvaluateBoundGuardCandidateReportedOnlyRejected).
 func (e *evaluation) guardRoundValues(candID, guardID string) []float64 {
 	values := make([]float64, 0, e.def.Execution.Rounds)
 	for round := 1; round <= e.def.Execution.Rounds; round++ {
