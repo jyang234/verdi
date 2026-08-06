@@ -106,6 +106,7 @@ func (r *Releaser) releaseMarkerLocked(workspaceID string) error {
 	f, err := os.OpenFile(markerPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err == nil {
 		if cerr := f.Close(); cerr != nil {
+			// vocab:identity — "close" names os.File.Close on the marker's file handle, not the close CLI verb.
 			return operationalError("release: close marker", cerr)
 		}
 		return nil
