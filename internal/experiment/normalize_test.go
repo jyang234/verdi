@@ -71,7 +71,7 @@ func TestDefinitionDigestChangesWithRegisteredInput(t *testing.T) {
 		name string
 		doc  string
 	}{
-		{"candidate digest changed", mutate(t, "digest: "+digestOf("1"), "digest: "+digestOf("f"))},
+		{"candidate digest changed", mutate(t, "digest: "+baselinePatchDigest, "digest: "+digestOf("f"))},
 		{"threshold changed", mutate(t, "    relative: 0.25\n  candidate_separation", "    relative: 0.30\n  candidate_separation")},
 		{"rounds changed", mutate(t, "rounds: 10", "rounds: 20")},
 		{"environment_policy changed", mutate(t, "environment_policy: local-isolated-v1", "environment_policy: local-isolated-v2")},

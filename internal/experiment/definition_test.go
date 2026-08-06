@@ -13,6 +13,24 @@ func digestOf(char string) string {
 	return "sha256:" + repeat(char, 64)
 }
 
+// baselinePatchContent and factsCachePatchContent are the exact patch
+// bytes validDefinitionYAML registers digests for. They are real (if
+// minimal) git-unified-diff bodies — one "diff --git" header naming a
+// single changed path — so commit 3's ValidateCandidatePatch tests can
+// write this same content to disk and have it verify against the
+// registered digest below, rather than an arbitrary placeholder.
+const (
+	baselinePatchContent   = "diff --git a/x b/x\n"
+	factsCachePatchContent = "diff --git a/y b/y\n"
+	// baselinePatchDigest and factsCachePatchDigest are
+	// sha256Digest([]byte(baselinePatchContent)) and
+	// sha256Digest([]byte(factsCachePatchContent)) respectively (verified
+	// independently against `shasum -a 256`; also cross-checked by
+	// TestCandidatePatchFixtureDigestsMatchContent).
+	baselinePatchDigest   = "sha256:1a059963bbf3198857755a48c741d351e21515186ce951464b89a0de0797c081"
+	factsCachePatchDigest = "sha256:0e02748d5d09549294f0c12f8356792fe75c43c7c5640a636039f9b1a9214b8d"
+)
+
 // validDefinitionYAML returns a complete, decode-and-validate-clean
 // experiment.yaml document extending the spec's own AC-1 example with
 // every field this package's contract requires.
@@ -26,11 +44,11 @@ func validDefinitionYAML() string {
 		"candidates:\n" +
 		"  - id: baseline\n" +
 		"    patch: candidates/baseline.patch\n" +
-		"    digest: " + digestOf("1") + "\n" +
+		"    digest: " + baselinePatchDigest + "\n" +
 		"    base: " + base40 + "\n" +
 		"  - id: facts-cache\n" +
 		"    patch: candidates/facts-cache.patch\n" +
-		"    digest: " + digestOf("2") + "\n" +
+		"    digest: " + factsCachePatchDigest + "\n" +
 		"    base: " + base40 + "\n" +
 		"\n" +
 		"evaluator:\n" +
@@ -118,7 +136,7 @@ func mutate(t *testing.T, old, replacement string) string {
 
 func oneCandidateYAML(t *testing.T) string {
 	t.Helper()
-	block := "  - id: facts-cache\n    patch: candidates/facts-cache.patch\n    digest: " + digestOf("2") + "\n    base: " + base40 + "\n"
+	block := "  - id: facts-cache\n    patch: candidates/facts-cache.patch\n    digest: " + factsCachePatchDigest + "\n    base: " + base40 + "\n"
 	return mutate(t, block, "")
 }
 

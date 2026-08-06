@@ -3,6 +3,7 @@ package experiment
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -19,31 +20,39 @@ func writeFile(t *testing.T, dir, relPath, content string) {
 	}
 }
 
-// lockedDefinitionDoc returns validDefinitionYAML with a correct lock
-// block appended, and the digest it locks against.
+// lockedDefinitionDoc returns validDefinitionYAML — with rounds reduced to
+// 2 so a COMPLETE observation set stays small (completeObservationsJSONLForDigest
+// below provides exactly the 2 candidates x 2 rounds this registers) — with
+// a correct lock block appended, and the digest it locks against.
 func lockedDefinitionDoc(t *testing.T) (doc, digest string) {
 	t.Helper()
-	def := mustDecodeDefinition(t, validDefinitionYAML())
+	unlocked := mutate(t, "rounds: 10", "rounds: 2")
+	def := mustDecodeDefinition(t, unlocked)
 	digest, err := DefinitionDigest(def)
 	if err != nil {
 		t.Fatalf("DefinitionDigest() unexpected error: %v", err)
 	}
-	return validDefinitionYAML() + "lock:\n  definition_digest: " + digest + "\n", digest
+	return unlocked + "lock:\n  definition_digest: " + digest + "\n", digest
 }
 
-// writeCandidatePatches writes placeholder patch files for every
-// candidate the shared fixture definition registers (commit 2's
-// "registered" rung checks existence only; commit 3 strengthens this to
-// digest verification, at which point these bodies will need to hash to
-// the registered digests).
+// writeCandidatePatches writes the real patch content the shared fixture
+// definition registers digests for (baselinePatchContent,
+// factsCachePatchContent — definition_test.go), so DeriveState's
+// commit-3-strengthened registered rung, which verifies each patch
+// against its registered digest, sees genuinely matching bytes.
 func writeCandidatePatches(t *testing.T, dir string) {
 	t.Helper()
-	writeFile(t, dir, "candidates/baseline.patch", "diff --git a/x b/x\n")
-	writeFile(t, dir, "candidates/facts-cache.patch", "diff --git a/y b/y\n")
+	writeFile(t, dir, "candidates/baseline.patch", baselinePatchContent)
+	writeFile(t, dir, "candidates/facts-cache.patch", factsCachePatchContent)
 }
 
-func validObservationsJSONLForDigest(defDigest string) string {
-	return `{"schema": "verdi.experiment-observation/v1", "experiment_digest": "` + defDigest + `", "run": "run-1", "candidate": "baseline", "round": 1, "guards": [], "measurements": [], "disclosures": []}` + "\n"
+// completeObservationsJSONLForDigest returns a full, valid observation set
+// for the rounds:2 fixture definition lockedDefinitionDoc registers:
+// both candidates, both rounds, every required guard passing, and every
+// registered measurement present with a decision-eligible source
+// (reusing observations_validation_test.go's shared record builders).
+func completeObservationsJSONLForDigest(defDigest string) string {
+	return strings.Join(validObservationLines(defDigest), "\n") + "\n"
 }
 
 func validResultJSONForDigest(defDigest string, verdict Verdict) string {
@@ -128,7 +137,7 @@ func TestDeriveStateRegisteredMissingPatchIsError(t *testing.T) {
 	dir := t.TempDir()
 	doc, _ := lockedDefinitionDoc(t)
 	writeFile(t, dir, "experiment.yaml", doc)
-	writeFile(t, dir, "candidates/baseline.patch", "diff --git a/x b/x\n")
+	writeFile(t, dir, "candidates/baseline.patch", baselinePatchContent)
 	// facts-cache.patch deliberately absent: a locked definition's
 	// registered candidate patches must exist; absence here is a store
 	// inconsistency, not a legitimate lower rung (see DeriveState's own
@@ -144,7 +153,7 @@ func TestDeriveStateMeasured(t *testing.T) {
 	doc, digest := lockedDefinitionDoc(t)
 	writeFile(t, dir, "experiment.yaml", doc)
 	writeCandidatePatches(t, dir)
-	writeFile(t, dir, "observations.jsonl", validObservationsJSONLForDigest(digest))
+	writeFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 
 	state, err := DeriveState(dir)
 	if err != nil {
@@ -160,7 +169,7 @@ func TestDeriveStateMeasuredBadEnvelopeDigestIsError(t *testing.T) {
 	doc, _ := lockedDefinitionDoc(t)
 	writeFile(t, dir, "experiment.yaml", doc)
 	writeCandidatePatches(t, dir)
-	writeFile(t, dir, "observations.jsonl", validObservationsJSONLForDigest(digestOf("0")))
+	writeFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digestOf("0")))
 
 	if _, err := DeriveState(dir); err == nil {
 		t.Errorf("DeriveState() with a mismatched observation experiment_digest = nil error, want error")
@@ -184,7 +193,7 @@ func TestDeriveStateRecommended(t *testing.T) {
 	doc, digest := lockedDefinitionDoc(t)
 	writeFile(t, dir, "experiment.yaml", doc)
 	writeCandidatePatches(t, dir)
-	writeFile(t, dir, "observations.jsonl", validObservationsJSONLForDigest(digest))
+	writeFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	writeFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictProvenWinner))
 
 	state, err := DeriveState(dir)
@@ -201,7 +210,7 @@ func TestDeriveStateInconclusive(t *testing.T) {
 	doc, digest := lockedDefinitionDoc(t)
 	writeFile(t, dir, "experiment.yaml", doc)
 	writeCandidatePatches(t, dir)
-	writeFile(t, dir, "observations.jsonl", validObservationsJSONLForDigest(digest))
+	writeFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	writeFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictDisclosedUnproven))
 
 	state, err := DeriveState(dir)
@@ -218,7 +227,7 @@ func TestDeriveStateResultDigestMismatchIsError(t *testing.T) {
 	doc, digest := lockedDefinitionDoc(t)
 	writeFile(t, dir, "experiment.yaml", doc)
 	writeCandidatePatches(t, dir)
-	writeFile(t, dir, "observations.jsonl", validObservationsJSONLForDigest(digest))
+	writeFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	writeFile(t, dir, "result.json", validResultJSONForDigest(digestOf("0"), VerdictProvenWinner))
 
 	if _, err := DeriveState(dir); err == nil {
@@ -231,7 +240,7 @@ func TestDeriveStateRatified(t *testing.T) {
 	doc, digest := lockedDefinitionDoc(t)
 	writeFile(t, dir, "experiment.yaml", doc)
 	writeCandidatePatches(t, dir)
-	writeFile(t, dir, "observations.jsonl", validObservationsJSONLForDigest(digest))
+	writeFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	resultDoc := validResultJSONForDigest(digest, VerdictProvenWinner)
 	writeFile(t, dir, "result.json", resultDoc)
 
@@ -263,7 +272,7 @@ func TestDeriveStateRatificationDigestMismatchIsError(t *testing.T) {
 	doc, digest := lockedDefinitionDoc(t)
 	writeFile(t, dir, "experiment.yaml", doc)
 	writeCandidatePatches(t, dir)
-	writeFile(t, dir, "observations.jsonl", validObservationsJSONLForDigest(digest))
+	writeFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	writeFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictProvenWinner))
 
 	ratificationDoc := "schema: verdi.experiment-ratification/v1\n" +
@@ -282,11 +291,70 @@ func TestDeriveStateUndecodableRatificationIsError(t *testing.T) {
 	doc, digest := lockedDefinitionDoc(t)
 	writeFile(t, dir, "experiment.yaml", doc)
 	writeCandidatePatches(t, dir)
-	writeFile(t, dir, "observations.jsonl", validObservationsJSONLForDigest(digest))
+	writeFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	writeFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictProvenWinner))
 	writeFile(t, dir, "ratification.yaml", "not: valid: yaml: at all:\n")
 
 	if _, err := DeriveState(dir); err == nil {
 		t.Errorf("DeriveState() with undecodable ratification.yaml = nil error, want error")
+	}
+}
+
+// TestDeriveStateTamperedCandidatePatchIsError proves the commit-3
+// demotion->error behavior: a locked definition whose candidate patch
+// bytes on disk no longer match the registered digest is a hard error,
+// never a silent report of "registered" (the file IS present) or
+// "exploratory" (the definition IS locked).
+func TestDeriveStateTamperedCandidatePatchIsError(t *testing.T) {
+	dir := t.TempDir()
+	doc, _ := lockedDefinitionDoc(t)
+	writeFile(t, dir, "experiment.yaml", doc)
+	writeFile(t, dir, "candidates/baseline.patch", "diff --git a/tampered b/tampered\n")
+	writeFile(t, dir, "candidates/facts-cache.patch", factsCachePatchContent)
+
+	if _, err := DeriveState(dir); err == nil {
+		t.Errorf("DeriveState() with a tampered candidate patch = nil error, want error")
+	}
+}
+
+// TestDeriveStateTamperedPatchProtectedPathIsError proves a registered
+// patch that touches a protected path is rejected even when its bytes
+// match the registered digest (i.e. the protected-path violation was
+// present at registration time already) — DeriveState surfaces it as an
+// error rather than reporting "registered".
+func TestDeriveStateTamperedPatchProtectedPathIsError(t *testing.T) {
+	dir := t.TempDir()
+	badPatch := "diff --git a/internal/cache/store.go b/internal/cache/store.go\n"
+	doc := validDefinitionYAML()
+	doc = strings.Replace(doc, "digest: "+baselinePatchDigest, "digest: "+sha256Digest([]byte(badPatch)), 1)
+	doc = strings.Replace(doc, "rounds: 10", "rounds: 2", 1)
+	def := mustDecodeDefinition(t, doc)
+	digest, err := DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest() unexpected error: %v", err)
+	}
+	writeFile(t, dir, "experiment.yaml", doc+"lock:\n  definition_digest: "+digest+"\n")
+	writeFile(t, dir, "candidates/baseline.patch", badPatch)
+	writeFile(t, dir, "candidates/facts-cache.patch", factsCachePatchContent)
+
+	if _, err := DeriveState(dir); err == nil {
+		t.Errorf("DeriveState() with a registered patch touching a protected path = nil error, want error")
+	}
+}
+
+// TestDeriveStateIncompleteObservationsIsError proves that an
+// observations.jsonl file which is present, decodes, and digest-links
+// correctly but does not cover every registered (candidate, round) pair
+// is an error, not a silent report of "registered".
+func TestDeriveStateIncompleteObservationsIsError(t *testing.T) {
+	dir := t.TempDir()
+	doc, digest := lockedDefinitionDoc(t)
+	writeFile(t, dir, "experiment.yaml", doc)
+	writeCandidatePatches(t, dir)
+	lines := validObservationLines(digest)
+	writeFile(t, dir, "observations.jsonl", strings.Join(lines[:3], "\n")+"\n") // drop facts-cache round 2
+
+	if _, err := DeriveState(dir); err == nil {
+		t.Errorf("DeriveState() with an incomplete observation set = nil error, want error")
 	}
 }

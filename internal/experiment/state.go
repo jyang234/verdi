@@ -57,14 +57,11 @@ func DeriveState(dir string) (State, error) {
 		return "", err
 	}
 
-	if err := checkCandidatePatchesExist(dir, def); err != nil {
+	if err := checkCandidatePatchesValid(dir, def); err != nil {
 		return "", err
 	}
 
-	// Commit 3 strengthens this rung with ValidateObservations/
-	// ValidateComplete; commit 2 checks presence, decode, and per-record
-	// envelope digest linkage only (readObservations).
-	_, ok, err = readObservations(dir, defDigest)
+	_, ok, err = readObservations(dir, def)
 	if err != nil {
 		return "", err
 	}
@@ -113,29 +110,36 @@ func readDefinition(dir string) (def Definition, ok bool, err error) {
 	return def, true, nil
 }
 
-// checkCandidatePatchesExist requires every candidate's registered patch
-// path to exist on disk (commit 2's "complete" test for the registered
-// rung: existence only). Commit 3 strengthens this to full digest and
-// protected-path verification via ValidateCandidatePatch.
-func checkCandidatePatchesExist(dir string, def Definition) error {
+// checkCandidatePatchesValid requires every candidate's registered patch
+// file to exist on disk, match its registered digest, and touch no
+// protected input (ValidateCandidatePatch). dir doubles as the
+// protected-path check's experiment-directory argument: callers are
+// expected to invoke DeriveState with dir already expressed as the
+// experiment directory's repo-relative path (AC-1's own directory
+// layout), the same coordinate system protected_paths and the evaluator
+// executable use.
+func checkCandidatePatchesValid(dir string, def Definition) error {
 	for _, c := range def.Candidates {
 		path := filepath.Join(dir, c.Patch)
-		if _, err := os.Stat(path); err != nil {
+		raw, err := os.ReadFile(path)
+		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("experiment: locked definition %q: candidate %q patch %s is missing", def.ID, c.ID, path)
 			}
-			return fmt.Errorf("experiment: statting %s: %w", path, err)
+			return fmt.Errorf("experiment: reading %s: %w", path, err)
+		}
+		if err := ValidateCandidatePatch(def, c.ID, raw, dir); err != nil {
+			return fmt.Errorf("experiment: %s: %w", path, err)
 		}
 	}
 	return nil
 }
 
-// readObservations reads and decodes observations.jsonl, and checks the
-// commit-2 "envelope digest match" rule: every record's experiment_digest
-// equals defDigest. ok is false only when the file itself is absent.
-// Commit 3 strengthens this rung with the full ValidateObservations and
-// ValidateComplete cross-record integrity checks.
-func readObservations(dir, defDigest string) (obs []Observation, ok bool, err error) {
+// readObservations reads observations.jsonl and runs the full
+// ValidateObservations and ValidateComplete integrity and completeness
+// checks against the locked def. ok is false only when the file itself is
+// absent.
+func readObservations(dir string, def Definition) (obs []Observation, ok bool, err error) {
 	path := filepath.Join(dir, observationsFile)
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -148,10 +152,8 @@ func readObservations(dir, defDigest string) (obs []Observation, ok bool, err er
 	if err != nil {
 		return nil, false, fmt.Errorf("experiment: %s: %w", path, err)
 	}
-	for i, o := range obs {
-		if o.ExperimentDigest != defDigest {
-			return nil, false, fmt.Errorf("experiment: %s: record %d: experiment_digest %q does not match the locked definition digest %q", path, i, o.ExperimentDigest, defDigest)
-		}
+	if err := ValidateComplete(def, obs); err != nil {
+		return nil, false, fmt.Errorf("experiment: %s: %w", path, err)
 	}
 	return obs, true, nil
 }
