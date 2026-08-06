@@ -307,6 +307,7 @@ func (def Definition) Validate() error {
 		return fmt.Errorf("experiment: definition id: %w", err)
 	}
 	if !spikeRe.MatchString(def.Spike) {
+		// vocab:identity — spike: FIELD validation (verdi.experiment/v1 ref grammar)
 		return fmt.Errorf("experiment: spike %q does not match ^spec/<id>$", def.Spike)
 	}
 	if !questionRe.MatchString(def.Question) {
