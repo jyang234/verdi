@@ -29,22 +29,27 @@ func writeTree(t *testing.T, root string, files map[string]string) {
 	}
 }
 
-// hashTree returns a deterministic content address for every regular
-// file under root: each entry's repo-relative slash path and exact
-// bytes, hashed in sorted-path order. Two calls against the same
-// directory tree return the same digest if and only if the tree's set
-// of files and their exact bytes are unchanged — the byte-identical-
-// before-and-after witness the legacy-store and incomplete-adoption
-// proofs need (nothing written on a failed Load/Generate/Verify).
+// hashTree returns a deterministic content address for every entry under
+// root: each FILE's repo-relative slash path plus its exact bytes, AND
+// each DIRECTORY's repo-relative slash path on its own (prefixed "dir:"
+// so a directory entry can never collide with a same-named file's own
+// "file:" entry) — hashed in sorted-key order. Directories are recorded
+// too, not merely files: a caller that stray-creates an empty directory
+// (e.g. a premature os.MkdirAll before an adoption check ever runs) must
+// still register as a change here, or the "nothing written" proofs this
+// helper backs would pass over a real write that just happens to carry
+// no file yet. root itself is never recorded (every legacy/incomplete
+// fixture's root pre-exists via t.TempDir(), so recording it would be
+// constant noise, never a witnessed change).
 func hashTree(t *testing.T, root string) string {
 	t.Helper()
 	entries := map[string][]byte{}
-	var paths []string
+	var keys []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if path == root {
 			return nil
 		}
 		rel, rerr := filepath.Rel(root, path)
@@ -52,26 +57,57 @@ func hashTree(t *testing.T, root string) string {
 			return rerr
 		}
 		rel = filepath.ToSlash(rel)
+		if info.IsDir() {
+			key := "dir:" + rel
+			entries[key] = nil
+			keys = append(keys, key)
+			return nil
+		}
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return rerr
 		}
-		entries[rel] = data
-		paths = append(paths, rel)
+		key := "file:" + rel
+		entries[key] = data
+		keys = append(keys, key)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("hashTree(%s): %v", root, err)
 	}
-	sort.Strings(paths)
+	sort.Strings(keys)
 	h := sha256.New()
-	for _, p := range paths {
-		h.Write([]byte(p))
+	for _, k := range keys {
+		h.Write([]byte(k))
 		h.Write([]byte{0})
-		h.Write(entries[p])
+		h.Write(entries[k])
 		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// TestHashTree_CatchesStrayDirectory is hashTree's own self-proof: a
+// stray directory created with no file inside it (the shape a premature
+// os.MkdirAll leaves behind — e.g. a hypothetical .verdi/cache/loader
+// dir a loader might create before an adoption check even runs) must
+// still change hashTree's output. Without this, a "nothing written"
+// proof built only from file contents would pass over that exact write.
+func TestHashTree_CatchesStrayDirectory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".verdi"), 0o755); err != nil {
+		t.Fatalf("mkdir .verdi: %v", err)
+	}
+	before := hashTree(t, root)
+
+	strayDir := filepath.Join(root, ".verdi", "cache", "loader")
+	if err := os.MkdirAll(strayDir, 0o755); err != nil {
+		t.Fatalf("mkdir stray dir: %v", err)
+	}
+	after := hashTree(t, root)
+
+	if after == before {
+		t.Fatalf("hashTree(%s) unchanged after creating a stray, file-less directory %s; the dir-only change was not caught", root, strayDir)
+	}
 }
 
 // goVersionClaim is the exact normalized (decode-time) shape of the

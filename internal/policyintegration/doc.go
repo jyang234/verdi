@@ -25,10 +25,15 @@
 // This unit's browser-facing surface is none: the four packages'
 // exported surface is Go-only (no workbench page, no board, no dex
 // output) — the CLAUDE.md frontend-dispatch exception does not apply
-// here for lack of any UI to dispatch. The CLI behavioral paths this
-// chain will eventually back (a lint-admission gate over an adopted
-// store, a harness model/instruction check) are covered inside
-// internal/policyauthority and internal/instructionprojection's own
-// test suites already; this package does not add a second CLI-shaped
-// proof for them.
+// here for lack of any UI to dispatch.
+//
+// DISCLOSED, UNPROVEN: no CLI verb backs this chain yet. Every proof in
+// this package — including this file's own — runs the four packages'
+// Go entry points in-process; none of it drives the built verdi binary.
+// CO-6's "CLI behavior is exercised through the built binary" rule does
+// not yet apply because there is no CLI-shaped behavior to exercise: a
+// lint-admission gate over an adopted store, or a harness model/
+// instruction check, would each need a real verb dispatching into this
+// chain, and this delivery unit adds none. That built-binary coverage
+// is owed once such a verb exists, not before.
 package policyintegration
