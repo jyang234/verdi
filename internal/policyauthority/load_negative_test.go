@@ -1,0 +1,246 @@
+package policyauthority
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLoad_IncompleteAdoption(t *testing.T) {
+	files := minimalStoreFiles()
+	delete(files, ".verdi/policy/constitution.md")
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want ErrIncompleteAdoption")
+	}
+	if !strings.Contains(err.Error(), "incomplete adoption") {
+		t.Fatalf("error = %v, want incomplete-adoption text", err)
+	}
+}
+
+func TestLoad_UnclassifiableEntryFailsClosed(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/policies/readme.txt"] = "not a policy artifact"
+	root := t.TempDir()
+	writeTree(t, root, files)
+	if _, err := Load(root); err == nil {
+		t.Fatal("Load() succeeded, want an unrecognized-entry error")
+	}
+}
+
+func TestLoad_UnexpectedTopLevelDirectory(t *testing.T) {
+	files := minimalStoreFiles()
+	root := t.TempDir()
+	writeTree(t, root, files)
+	if err := os.MkdirAll(filepath.Join(root, ".verdi", "policy", "junk"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want an unexpected-directory error")
+	}
+	if !strings.Contains(err.Error(), "unexpected directory") {
+		t.Fatalf("error = %v, want unexpected-directory text", err)
+	}
+}
+
+func TestLoad_FilenameStemMismatch(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/policies/go-toolchain.md"] = strings.Replace(
+		files[".verdi/policy/policies/go-toolchain.md"], "id: policy/go-toolchain", "id: policy/renamed", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want a filename-stem-mismatch error")
+	}
+	if !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("error = %v, want stem-mismatch text", err)
+	}
+}
+
+func TestLoad_UnregisteredClaimSubject(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/policies/go-toolchain.md"] = strings.Replace(
+		files[".verdi/policy/policies/go-toolchain.md"], "subject: go-version", "subject: unregistered-subject", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want an unregistered-subject error")
+	}
+	if !strings.Contains(err.Error(), "is not registered") {
+		t.Fatalf("error = %v, want subject-registration text", err)
+	}
+}
+
+func TestLoad_UnregisteredScopeEnvironment(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/policies/go-toolchain.md"] = strings.Replace(
+		files[".verdi/policy/policies/go-toolchain.md"],
+		`scope: {phases: [], environments: [], paths: [], refs: []}
+claims:`,
+		`scope: {phases: [], environments: [nonexistent-env], paths: [], refs: []}
+claims:`, 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want an unregistered-environment error")
+	}
+	if !strings.Contains(err.Error(), "registered environments") {
+		t.Fatalf("error = %v, want environment-registration text", err)
+	}
+}
+
+func TestLoad_OverlayRefinesMissingPolicy(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/overlays/frontend-go-version.md"] = strings.Replace(
+		files[".verdi/policy/overlays/frontend-go-version.md"], "refines: policy/go-toolchain", "refines: policy/does-not-exist", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want a missing-refines-target error")
+	}
+	if !strings.Contains(err.Error(), "not a loaded policy") {
+		t.Fatalf("error = %v, want missing-policy text", err)
+	}
+}
+
+func TestLoad_OverlayRefinementMissingClaim(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/overlays/frontend-go-version.md"] = strings.Replace(
+		files[".verdi/policy/overlays/frontend-go-version.md"], "claim: go-version", "claim: does-not-exist", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want a missing-claim error")
+	}
+	if !strings.Contains(err.Error(), "does not exist on policy") {
+		t.Fatalf("error = %v, want missing-claim text", err)
+	}
+}
+
+func TestLoad_OverlayOperandKindMismatch(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/overlays/frontend-go-version.md"] = strings.Replace(
+		files[".verdi/policy/overlays/frontend-go-version.md"], `values: ["1.25"]`, `bound: 5`, 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want an operand-kind-mismatch error")
+	}
+	if !strings.Contains(err.Error(), "must carry a values operand") {
+		t.Fatalf("error = %v, want operand-kind text", err)
+	}
+}
+
+func TestLoad_StaleExemptionWitness(t *testing.T) {
+	files := minimalStoreFiles()
+	staleDigest := "sha256:" + strings.Repeat("0", 64)
+	files[".verdi/policy/exemptions/legacy-service-go.md"] = strings.Replace(
+		files[".verdi/policy/exemptions/legacy-service-go.md"], goVersionClaimDigest, staleDigest, 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want a stale-witness error")
+	}
+	if !strings.Contains(err.Error(), "stale witness") {
+		t.Fatalf("error = %v, want stale-witness text", err)
+	}
+}
+
+func TestLoad_ExemptionWitnessUnloadedPolicy(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/exemptions/legacy-service-go.md"] = strings.Replace(
+		files[".verdi/policy/exemptions/legacy-service-go.md"], "policy: policy/go-toolchain", "policy: policy/does-not-exist", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want an unloaded-policy witness error")
+	}
+	if !strings.Contains(err.Error(), "is not loaded") {
+		t.Fatalf("error = %v, want unloaded-policy text", err)
+	}
+}
+
+func TestLoad_ExemptionWitnessMissingClaim(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/exemptions/legacy-service-go.md"] = strings.Replace(
+		files[".verdi/policy/exemptions/legacy-service-go.md"], "claim: go-version", "claim: does-not-exist", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want a missing-witness-claim error")
+	}
+	if !strings.Contains(err.Error(), "does not exist on policy") {
+		t.Fatalf("error = %v, want missing-claim text", err)
+	}
+}
+
+func TestLoad_UnregisteredApprovalRole(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/exemptions/legacy-service-go.md"] = strings.Replace(
+		files[".verdi/policy/exemptions/legacy-service-go.md"], "role: policy-owner", "role: not-a-role", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want an unregistered-role error")
+	}
+	if !strings.Contains(err.Error(), "is not a member of the constitution catalog's roles") {
+		t.Fatalf("error = %v, want role-registration text", err)
+	}
+}
+
+func TestLoad_SelectedProfileMissing(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/constitution.md"] = strings.Replace(
+		files[".verdi/policy/constitution.md"], "selected_profile: solo-default", "selected_profile: nonexistent-profile", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want a missing-selected-profile error")
+	}
+	if !strings.Contains(err.Error(), "does not resolve to a loaded stored profile") {
+		t.Fatalf("error = %v, want selected-profile text", err)
+	}
+}
+
+func TestLoad_DuplicatePayloadKindAcrossPolicies(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/policies/go-toolchain.md"] = strings.Replace(
+		files[".verdi/policy/policies/go-toolchain.md"], "payloads: {}", "payloads: {design_assistance: {mode: off, layout: false}}", 1)
+	files[".verdi/policy/policies/second.md"] = `---
+schema: verdi.policy/v1
+id: policy/second
+kind: policy
+title: "Second policy"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims: []
+instructions: []
+payloads: {design_assistance: {mode: proposal-only, layout: false}}
+---
+A second policy that collides on payload kind.
+`
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want a duplicate-payload-kind error")
+	}
+	if !strings.Contains(err.Error(), "policy/go-toolchain") || !strings.Contains(err.Error(), "policy/second") {
+		t.Fatalf("error = %v, want both policy ids named", err)
+	}
+}
