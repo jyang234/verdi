@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"sync"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/jyang234/verdi/internal/artifact"
 )
 
@@ -58,19 +56,20 @@ func RegisterPayloadKind(kind string, decode func([]byte) (Payload, error)) {
 
 // decodePayloads dispatches each payload node to its registered typed
 // decoder. Unknown kinds fail closed.
-func decodePayloads(nodes map[string]yaml.Node) (map[string]Payload, error) {
+func decodePayloads(nodes map[string]artifact.RawNode) (map[string]Payload, error) {
 	out := make(map[string]Payload, len(nodes))
 	for kind, node := range nodes {
 		payloadMu.RLock()
 		dec, ok := payloadRegistry[kind]
 		payloadMu.RUnlock()
 		if !ok {
+			// vocab:identity — "feature" names the DC-23/OD-5 term of art (feature-specific payload), not the display class a store renames.
 			return nil, fmt.Errorf("policyartifact: unknown payload kind %q (typed feature payloads must be registered; there is no untyped fallback)", kind)
 		}
 		n := node
-		raw, err := yaml.Marshal(&n)
+		raw, err := artifact.EncodeRawNode(&n)
 		if err != nil {
-			return nil, fmt.Errorf("policyartifact: payload %s: re-encoding node: %w", kind, err)
+			return nil, fmt.Errorf("policyartifact: payload %s: %w", kind, err)
 		}
 		p, err := dec(raw)
 		if err != nil {
@@ -111,6 +110,7 @@ func (p *DesignAssistancePayload) Validate() error {
 	switch p.Mode {
 	case "off", "proposal-only", "draft-write":
 	default:
+		// vocab:identity — "draft-write" is the accepted ASD spec's literal enum value, a machine identity display renames never touch.
 		return fmt.Errorf("mode %q must be exactly one of off, proposal-only, draft-write", p.Mode)
 	}
 	if p.Layout {

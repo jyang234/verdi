@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 )
@@ -36,10 +34,10 @@ type Policy struct {
 // frontmatter.
 type policyDoc struct {
 	kernelDoc    `yaml:",inline"`
-	Scope        *scopeDoc            `yaml:"scope"`
-	Claims       *[]claimDoc          `yaml:"claims"`
-	Instructions *[]*string           `yaml:"instructions"`
-	Payloads     map[string]yaml.Node `yaml:"payloads"`
+	Scope        *scopeDoc                    `yaml:"scope"`
+	Claims       *[]claimDoc                  `yaml:"claims"`
+	Instructions *[]*string                   `yaml:"instructions"`
+	Payloads     *map[string]artifact.RawNode `yaml:"payloads"`
 }
 
 // DecodePolicy strictly decodes data (a complete artifact file:
@@ -51,17 +49,9 @@ func DecodePolicy(data []byte) (*Policy, error) {
 		return nil, fmt.Errorf("policyartifact: %w", err)
 	}
 
-	// Presence of the payloads key must be distinguishable from an empty
-	// map; decode it via a presence probe alongside the typed doc.
-	var probe struct {
-		Payloads *map[string]yaml.Node `yaml:"payloads"`
-	}
 	var doc policyDoc
 	if err := artifact.DecodeStrict(fm, &doc); err != nil {
 		return nil, err
-	}
-	if err := yaml.Unmarshal(fm, &probe); err != nil {
-		return nil, fmt.Errorf("policyartifact: %w", err)
 	}
 
 	k, err := doc.toKernel(SchemaPolicy, KindPolicy)
@@ -80,7 +70,7 @@ func DecodePolicy(data []byte) (*Policy, error) {
 	if doc.Instructions == nil {
 		return nil, missing("instructions")
 	}
-	if probe.Payloads == nil {
+	if doc.Payloads == nil {
 		return nil, missing("payloads")
 	}
 
@@ -120,7 +110,7 @@ func DecodePolicy(data []byte) (*Policy, error) {
 		instructions = append(instructions, *ins)
 	}
 
-	payloads, err := decodePayloads(doc.Payloads)
+	payloads, err := decodePayloads(*doc.Payloads)
 	if err != nil {
 		return nil, err
 	}
