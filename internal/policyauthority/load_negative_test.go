@@ -289,3 +289,38 @@ A perfectly valid policy that simply does not live in the store.
 		t.Fatalf("error = %v, want a symlink error naming the path", err)
 	}
 }
+
+// TestLoad_RefinementOnNonRefinableOperatorRejected proves Load and
+// Resolve agree on WHICH operators admit a refinement at all. Load's
+// structural operand-kind check used to accept refinements of path-read
+// and path-write (they do take a values operand) that Resolve then
+// rejected as non-refinable, so a store could Load clean and never
+// resolve. A store that Loads must Resolve, absent a genuine narrowing
+// violation, so the same named error class now fires at Load.
+func TestLoad_RefinementOnNonRefinableOperatorRejected(t *testing.T) {
+	cases := []struct {
+		name    string
+		claim   string
+		operand string
+	}{
+		{"equals", "exact-version", `values: ["1.24"]`},
+		{"not-equals", "not-legacy", `values: ["ancient"]`},
+		{"path-read", "readable-paths", `values: ["docs/sub/"]`},
+		{"path-write", "writable-paths", `values: ["scripts/sub/"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			files := rulesStoreFiles()
+			files[".verdi/policy/overlays/o.md"] = overlayFile("o", `"web/"`, tc.claim, tc.operand)
+			root := t.TempDir()
+			writeTree(t, root, files)
+			_, err := Load(root)
+			if err == nil {
+				t.Fatal("Load() succeeded on a refinement of a non-refinable operator, want error")
+			}
+			if !strings.Contains(err.Error(), "is not refinable") {
+				t.Fatalf("error = %v, want the not-refinable error class", err)
+			}
+		})
+	}
+}

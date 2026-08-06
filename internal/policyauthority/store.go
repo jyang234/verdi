@@ -315,17 +315,18 @@ func crossValidate(s *Store) error {
 	return nil
 }
 
-// checkOperandKind proves a refinement's operand (values or bound) is the
-// kind its target claim's operator accepts at all: values for
+// checkOperandKind proves a refinement's target claim can be refined at
+// all, and that the refinement's operand is the kind that claim's
+// operator accepts: values for
 // equals/not-equals/allowed-values/required-values/forbidden-values/
 // path-read/path-write, bound for minimum/maximum. same-principal and
-// different-principal claims take neither operand, so any refinement
-// targeting them fails here — structurally, before Resolve's narrowing
-// rules ever run. Whether an operator that DOES accept the matching
-// operand kind is actually refinable (equals, not-equals, path-read, and
-// path-write are not) is Resolve's narrow-only rule, not this structural
-// check (contract: "see narrowing rules below for which are refinable at
-// all").
+// different-principal claims take neither operand, so a refinement
+// targeting them fails on the operand kind; equals, not-equals,
+// path-read, and path-write take an operand but admit no NARROWER value
+// under DC-3, so a refinement targeting them fails with the same named
+// error class Resolve raises (notRefinableError). Load and Resolve must
+// agree on this set: a store that loads clean and can never resolve is
+// its own silent failure (CO-1).
 func checkOperandKind(overlayID, policyID string, claim policyartifact.Claim, r policyartifact.Refinement) error {
 	wantsValues := claim.Operator == policyartifact.OpEquals || claim.Operator == policyartifact.OpNotEquals ||
 		claim.Operator == policyartifact.OpAllowedValues || claim.Operator == policyartifact.OpRequiredValues ||
@@ -343,6 +344,9 @@ func checkOperandKind(overlayID, policyID string, claim policyartifact.Claim, r 
 		return fmt.Errorf("policyauthority: overlay %s: refinement of claim %s (policy %s, operator %s) must carry a bound operand", overlayID, claim.ID, policyID, claim.Operator)
 	case !wantsValues && !wantsBound:
 		return fmt.Errorf("policyauthority: overlay %s: claim %s (policy %s, operator %s) accepts no refinement operand", overlayID, claim.ID, policyID, claim.Operator)
+	}
+	if !refinableOperators[claim.Operator] {
+		return notRefinableError(overlayID, policyID, claim)
 	}
 	return nil
 }
