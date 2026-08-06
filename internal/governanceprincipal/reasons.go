@@ -13,4 +13,27 @@ const (
 	// resolution carries: the claimed subject was observed in valid
 	// evidence, with the evidence digest recorded.
 	ReasonTrustSubjectVerified = "trust-subject-verified"
+
+	// Authorization findings.
+	ReasonTransitionNotApplicable = "transition-not-applicable"
+	ReasonPrincipalViolated       = "principal-violated"
+	ReasonPrincipalUnproven       = "principal-unproven"
+	ReasonRoleNotAuthorized       = "role-not-authorized"
+	ReasonRequiredApproverMissing = "required-approver-missing"
+	ReasonDistinctnessViolated    = "distinctness-violated"
+	ReasonSignatureViolated       = "signature-violated"
+	ReasonSignatureUnproven       = "signature-unproven"
+	ReasonOwnershipViolated       = "ownership-violated"
+	ReasonOwnershipUnproven       = "ownership-unproven"
+	ReasonEvidenceSourceForbidden = "evidence-source-forbidden"
+	ReasonEvidenceSourceUnproven  = "evidence-source-unproven"
+	ReasonEscalationRoleMissing   = "escalation-role-missing"
+	// ReasonEscalationMetricUnavailable marks an applicable escalation
+	// threshold whose metric value was not supplied: the threshold cannot
+	// be evaluated, so the decision is unproven, never a silent pass.
+	ReasonEscalationMetricUnavailable    = "escalation-metric-unavailable"
+	ReasonExperimentalAuthorityForbidden = "experimental-authority-forbidden"
+
+	// Disclosures.
+	ReasonSoloRoleCollapse = "solo-role-collapse"
 )
