@@ -359,3 +359,134 @@ func TestCompute_EmptyResult_EmptyPlan(t *testing.T) {
 		t.Fatalf("Compute(empty Result) = %d items, want 0", len(plan.Items))
 	}
 }
+
+// --- cluster: execution-workspace managed-root exclusion (spec/
+// execution-workspace §GC slice, "Cross-slice exclusion (data-loss
+// guard)") — mirrors this file's own TestLooksManagedAnywhere /
+// TestClassifyWorktreeRow_ForeignManagedSegment_KeptManaged shape
+// (crosscheckout_test.go) for the execution root.
+
+// TestLooksExecutionAnywhere is the direct unit witness for the segment
+// predicate: any "<root>/.verdi/data/execution/<id>" path is recognized
+// regardless of which checkout's root it is, while boundary-adjacent
+// look-alikes are not. The segment is derived from
+// execworkspace.ExecutionRoot (internal/execworkspace/grammar.go), so this
+// also pins that derivation.
+func TestLooksExecutionAnywhere(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "own checkout's execution leaf", path: "/store/primary/.verdi/data/execution/run--0123456789ab", want: true},
+		{name: "foreign checkout's execution leaf", path: "/store/checkout-b/.verdi/data/execution/run--0123456789ab", want: true},
+		{name: "nested below an execution leaf still matches (safe keep direction)", path: "/store/checkout-b/.verdi/data/execution/run--0123456789ab/sub", want: true},
+		{name: "unmanaged sibling outside any data zone", path: "/store/verdi-wt/other", want: false},
+		{name: "trailing-boundary collision: execution-scratch", path: "/store/primary/.verdi/data/execution-scratch/x", want: false},
+		{name: "leading-boundary collision: prefix.verdi", path: "/store/primary/prefix.verdi/data/execution/x", want: false},
+		{name: "bare data-zone root, name-less, never a real unit", path: "/store/primary/.verdi/data/execution", want: false},
+		{name: "empty path", path: "", want: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := looksExecutionAnywhere(c.path); got != c.want {
+				t.Errorf("looksExecutionAnywhere(%q) = %v, want %v", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+// TestClassifyWorktreeRow_ExecutionWorkspaceSegment_NeverEligible is the
+// table witness for the contract's own requirement: an execution-workspace
+// worktree row — dirty or clean, merged or not, detached or not — must
+// classify kept BEFORE it could ever reach eligible, whichever arm of the
+// fixed switch actually fires first for that combination. It does not
+// require every combination to report reason KeptManaged specifically:
+// the switch's own fixed order (dirty precedes managed; detached precedes
+// managed) means a dirty or detached execution row is legitimately kept
+// via KeptDirty/KeptDetached first — reordering the switch to force
+// KeptManaged in those cases is explicitly out of scope (it would change
+// the disclosed reason for every other already-shipped row). What must
+// hold, unconditionally, is that NONE of them is ever eligible.
+func TestClassifyWorktreeRow_ExecutionWorkspaceSegment_NeverEligible(t *testing.T) {
+	const invokingRoot = "/store/primary"
+	const defaultBranch = "main"
+	const execPath = "/store/checkout-b/.verdi/data/execution/run--0123456789ab"
+
+	cases := []struct {
+		name       string
+		wt         residue.Worktree
+		wantReason KeptReason
+	}{
+		{
+			// Merged, clean, and BRANCHED (non-detached) so every earlier arm
+			// (unresolved-state, default-branch, unmerged, dirty, detached) is
+			// false and the row reaches the managed arm — isolating the new
+			// looksExecutionAnywhere check.
+			name:       "merged clean non-detached execution path: reaches and is caught by the managed arm",
+			wt:         residue.Worktree{Path: execPath, Branch: "detached-emulated-as-branched-for-isolation", Merged: true, Dirty: false, Managed: false},
+			wantReason: KeptManaged,
+		},
+		{
+			// The REAL shape execution workspaces are always cut in (spec
+			// §Exact workspace materialization: WorktreeAddDetached) — Branch
+			// is "" and the detached arm fires first. Still never eligible.
+			name:       "merged clean DETACHED execution path (the real shape): kept via the detached arm, still never eligible",
+			wt:         residue.Worktree{Path: execPath, Branch: "", Merged: true, Dirty: false, Managed: false},
+			wantReason: KeptDetached,
+		},
+		{
+			// Dirty wins over managed in the fixed order too — still kept,
+			// never eligible, whichever reason is disclosed.
+			name:       "merged dirty non-detached execution path: kept via the dirty arm, still never eligible",
+			wt:         residue.Worktree{Path: execPath, Branch: "some-branch", Merged: true, Dirty: true, Managed: false},
+			wantReason: KeptDirty,
+		},
+		{
+			// Unmerged, detached: kept via unmerged (the earliest applicable
+			// arm), still never eligible.
+			name:       "unmerged detached execution path: kept via the unmerged arm, still never eligible",
+			wt:         residue.Worktree{Path: execPath, Branch: "", Merged: false, Dirty: false, Managed: false},
+			wantReason: KeptUnmerged,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			elig, reason, _ := classifyWorktreeRow(c.wt, invokingRoot, defaultBranch)
+			if elig {
+				t.Fatalf("eligible = true for an execution-workspace path %q; --apply would destroy a live CSE candidate workspace mid-run (spec/execution-workspace §GC slice cross-slice exclusion)", c.wt.Path)
+			}
+			if reason != c.wantReason {
+				t.Errorf("reason = %v (%s), want %v (%s)", reason, reason, c.wantReason, c.wantReason)
+			}
+		})
+	}
+}
+
+// TestClassifyWorktreeRow_ExecutionWorkspaceSegment_BoundaryNonMatchesUnaffected
+// proves the guard is not over-broad: a path merely LOOKING LIKE it might be
+// under the execution root, but actually a boundary near-miss, is judged on
+// its own merits (here: stays eligible, since every other exclusion is
+// false) rather than being swept in by a loose substring match.
+func TestClassifyWorktreeRow_ExecutionWorkspaceSegment_BoundaryNonMatchesUnaffected(t *testing.T) {
+	const invokingRoot = "/store/primary"
+	const defaultBranch = "main"
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"trailing-boundary collision", "/store/checkout-b/.verdi/data/execution-scratch/x"},
+		{"leading-boundary collision", "/store/checkout-b/prefix.verdi/data/execution/x"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wt := residue.Worktree{Path: c.path, Branch: "some-branch", Merged: true, Dirty: false, Managed: false}
+			elig, reason, _ := classifyWorktreeRow(wt, invokingRoot, defaultBranch)
+			if !elig {
+				t.Fatalf("eligible = false (reason=%s) for boundary non-match path %q, want eligible=true (guard must not be over-broad)", reason, c.path)
+			}
+		})
+	}
+}
