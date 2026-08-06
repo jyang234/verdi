@@ -85,6 +85,11 @@ type evaluation struct {
 	primaryVal map[string]float64
 	bounds     map[string][]experiment.Bound
 	eligible   map[string]bool
+
+	// boundReasons carries step 4's unevaluable-bound findings forward to
+	// step 5, which reports them only after confirming the baseline premise
+	// holds — see stepBaselinePremiseAndImprovement.
+	boundReasons []experiment.Reason
 }
 
 // run executes AC-2 steps 2 through 8 in order and returns the assembled,
@@ -92,10 +97,7 @@ type evaluation struct {
 func (e *evaluation) run() (experiment.Result, error) {
 	e.stepGuardEligibility()
 	e.stepAggregatePrimary()
-
-	if res, done, err := e.stepSecondaryBounds(); done {
-		return res, err
-	}
+	e.stepSecondaryBounds()
 
 	if res, done, err := e.stepBaselinePremiseAndImprovement(); done {
 		return res, err
@@ -208,15 +210,17 @@ func (e *evaluation) stepAggregatePrimary() {
 // measurement by MAXIMUM over rounds per candidate, computes
 // limit = baselineAggregate * (1+m), and records a Bound{pass} for every
 // candidate including the baseline. A candidate whose value exceeds the
-// limit becomes ineligible from this step. A non-positive baseline
-// aggregate against a relative bound cannot be evaluated at all: the run
-// completes as disclosed-unproven/conflicting-bounds instead (a valid run
-// whose registered bounds cannot be evaluated, never an error), and no
-// guard registered after the degenerate one is evaluated.
+// limit becomes ineligible from this step.
 //
-// done is true whenever this step already determined the final Result;
-// the caller must return immediately in that case.
-func (e *evaluation) stepSecondaryBounds() (res experiment.Result, done bool, err error) {
+// A non-positive baseline aggregate against a relative bound cannot be
+// evaluated at all. That bound records no check and disqualifies nobody;
+// it contributes one conflicting-bounds reason (boundReasons, in
+// registered guard order) which step 5 reports once it has confirmed the
+// baseline premise itself holds. EVERY OTHER registered bound is still
+// evaluated and recorded either way: an unevaluable bound is a fact about
+// that one bound, never a reason to stop measuring the others or to leave
+// a candidate's real bound failure unreported.
+func (e *evaluation) stepSecondaryBounds() {
 	e.bounds = make(map[string][]experiment.Bound, len(e.def.Candidates))
 	boundOK := make(map[string]bool, len(e.def.Candidates))
 	for _, c := range e.def.Candidates {
@@ -233,14 +237,12 @@ func (e *evaluation) stepSecondaryBounds() (res experiment.Result, done bool, er
 		}
 		baselineAgg := maxByCand[e.def.Decision.Baseline]
 		if baselineAgg <= 0 {
-			e.finalizeEligibility(boundOK)
-			reason := experiment.Reason{
+			e.boundReasons = append(e.boundReasons, experiment.Reason{
 				Code:   experiment.ReasonConflictingBounds,
 				Guard:  g.ID,
 				Detail: "baseline aggregate for guard " + g.ID + " is non-positive; a relative bound cannot be evaluated",
-			}
-			res, err = e.assemble(experiment.VerdictDisclosedUnproven, "", []experiment.Reason{reason})
-			return res, true, err
+			})
+			continue
 		}
 		limit := baselineAgg * (1 + *g.MaximumRelativeToBaseline)
 		for _, c := range e.def.Candidates {
@@ -259,17 +261,15 @@ func (e *evaluation) stepSecondaryBounds() (res experiment.Result, done bool, er
 	}
 
 	e.finalizeEligibility(boundOK)
-	return experiment.Result{}, false, nil
 }
 
 // finalizeEligibility combines step 2's guard violations with step 4's
-// bound-pass state into the final per-candidate eligibility map. It is
-// called both when step 4 completes normally and, with whatever bound
-// checks were computed before a degenerate baseline aggregate stopped
-// further processing, on the conflicting-bounds early-return path — a
-// candidate's eligibility as far as the engine got is always reported
-// accurately, never defaulted to false merely because evaluation stopped
-// early.
+// bound-pass state into the final per-candidate eligibility map. Step 4
+// always runs every registered bound before calling it, so eligibility
+// reflects every check that could be made — a candidate is never marked
+// ineligible for a bound that could not be evaluated, and never left
+// eligible despite a real bound failure just because some OTHER bound was
+// degenerate.
 func (e *evaluation) finalizeEligibility(boundOK map[string]bool) {
 	e.eligible = make(map[string]bool, len(e.def.Candidates))
 	for _, c := range e.def.Candidates {
@@ -282,12 +282,24 @@ func (e *evaluation) finalizeEligibility(boundOK map[string]bool) {
 // violated-with-witness — one reason per distinct violated guard, using
 // that guard's FIRST round witness, in registered guard order — and steps
 // 6-8 never run (a candidate cannot out-improve a baseline whose own
-// premise is broken). A relative baseline_improvement threshold against a
-// non-positive baseline aggregate is a second degenerate case
-// (conflicting-bounds). Otherwise every eligible non-baseline candidate is
-// checked for material improvement; no eligible candidate at all, or no
-// improving eligible candidate, both complete the run as
-// disclosed-unproven with the matching reason.
+// premise is broken).
+//
+// That verdict is decided FIRST, ahead of step 4's unevaluable-bound
+// findings, because AC-2's verdict biconditional makes it unconditional:
+// violated-with-witness is emitted exactly when the baseline failed a
+// required guard. The finding is already complete from step 2's evidence —
+// nothing step 4 measures can confirm or refute it — so letting an
+// unevaluable bound preempt it would both break the biconditional and drop
+// the baseline's witnesses from the result entirely. Only once the
+// baseline premise holds does step 4's deferred conflicting-bounds outcome
+// (boundReasons) end the run.
+//
+// A relative baseline_improvement threshold against a non-positive
+// baseline aggregate is a further degenerate case (conflicting-bounds).
+// Otherwise every eligible non-baseline candidate is checked for material
+// improvement; no eligible candidate at all, or no improving eligible
+// candidate, both complete the run as disclosed-unproven with the matching
+// reason.
 func (e *evaluation) stepBaselinePremiseAndImprovement() (res experiment.Result, done bool, err error) {
 	baselineID := e.def.Decision.Baseline
 
@@ -313,6 +325,11 @@ func (e *evaluation) stepBaselinePremiseAndImprovement() (res experiment.Result,
 			}
 		}
 		res, err = e.assemble(experiment.VerdictViolatedWithWitness, "", reasons)
+		return res, true, err
+	}
+
+	if len(e.boundReasons) > 0 {
+		res, err = e.assemble(experiment.VerdictDisclosedUnproven, "", e.boundReasons)
 		return res, true, err
 	}
 

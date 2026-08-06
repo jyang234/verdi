@@ -581,6 +581,168 @@ func TestEvaluateAbsoluteSeparationArm(t *testing.T) {
 	}
 }
 
+// TestEvaluateBaselineGuardViolationOutranksDegenerateBound holds AC-2's
+// verdict biconditional: violated-with-witness is emitted exactly when the
+// baseline failed a required guard. A run whose baseline ALSO carries a
+// degenerate secondary bound must still report the violation and its
+// witness — a broken baseline premise is a fact about the run, and an
+// unevaluable bound must never swallow it.
+func TestEvaluateBaselineGuardViolationOutranksDegenerateBound(t *testing.T) {
+	def := lockDefinition(t)
+	obs := happyObservations(t, def, "run-1",
+		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
+		// The baseline's peak-rss aggregate is zero: the registered relative
+		// bound cannot be evaluated against it.
+		map[string][]float64{"baseline": {0, 0, 0}, "candidate-a": {108, 109, 107}},
+	)
+	witness := "tenant boundary crossed in round 1"
+	obs[0].Guards = []experiment.GuardResult{guardResult("behavioral-equivalence", false, witness)}
+
+	res := mustEvaluate(t, def, obs)
+	if res.Verdict != experiment.VerdictViolatedWithWitness {
+		t.Fatalf("Verdict = %q (reasons %+v), want %q", res.Verdict, res.Reasons, experiment.VerdictViolatedWithWitness)
+	}
+	if len(res.Reasons) != 1 || res.Reasons[0].Code != experiment.ReasonBaselineGuardViolation {
+		t.Fatalf("Reasons = %+v, want one baseline-guard-violation", res.Reasons)
+	}
+	if res.Reasons[0].Witness == nil || *res.Reasons[0].Witness != witness {
+		t.Fatalf("Reasons[0].Witness = %v, want the baseline's witness %q", res.Reasons[0].Witness, witness)
+	}
+	base := candidateResult(t, res, "baseline")
+	if len(base.Violations) != 1 || base.Violations[0].Witness != witness {
+		t.Fatalf("baseline Violations = %+v, want the preserved witness", base.Violations)
+	}
+}
+
+// TestEvaluateDegenerateBoundStillRecordsEvaluableBounds proves the
+// conflicting-bounds path stays maximally honest: every bound that CAN be
+// evaluated is still evaluated and recorded (pass and fail alike, for every
+// candidate), a real bound failure still makes its candidate ineligible,
+// and only the degenerate bound contributes a reason.
+func TestEvaluateDegenerateBoundStillRecordsEvaluableBounds(t *testing.T) {
+	def := lockDefinition(t, func(d *experiment.Definition) {
+		// Bounded guards in registered order: peak-fds is degenerate,
+		// peak-rss is evaluable and genuinely failed, peak-cpu is a second
+		// degenerate bound registered after both. Registered order also
+		// fixes the order of the reasons.
+		d.Decision.Guards = []experiment.Guard{
+			{ID: "behavioral-equivalence"},
+			{ID: "peak-fds", MaximumRelativeToBaseline: ptr(0.10)},
+			{ID: "peak-rss", MaximumRelativeToBaseline: ptr(0.15)},
+			{ID: "peak-cpu", MaximumRelativeToBaseline: ptr(0.20)},
+		}
+	})
+	obs := happyObservations(t, def, "run-1",
+		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
+		// peak-rss: candidate-a blows the 15% bound over the baseline's 100.
+		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {200, 201, 199}},
+	)
+	// peak-fds and peak-cpu: the baseline aggregate is zero for both, so
+	// their relative bounds are unevaluable, while candidate-a reports real
+	// values.
+	for i := range obs {
+		v := 0.0
+		if obs[i].Candidate != "baseline" {
+			v = 5
+		}
+		obs[i].Measurements = append(obs[i].Measurements,
+			measurement("peak-fds", v, "count", experiment.SourceHarnessMeasured),
+			measurement("peak-cpu", v, "percent", experiment.SourceHarnessMeasured),
+		)
+	}
+
+	res := mustEvaluate(t, def, obs)
+	if res.Verdict != experiment.VerdictDisclosedUnproven {
+		t.Fatalf("Verdict = %q, want %q", res.Verdict, experiment.VerdictDisclosedUnproven)
+	}
+	if len(res.Reasons) != 2 {
+		t.Fatalf("Reasons = %+v, want exactly two (one per degenerate bound, none for the evaluable one)", res.Reasons)
+	}
+	for i, wantGuard := range []string{"peak-fds", "peak-cpu"} {
+		if res.Reasons[i].Code != experiment.ReasonConflictingBounds || res.Reasons[i].Guard != wantGuard {
+			t.Fatalf("Reasons[%d] = %+v, want conflicting-bounds on %q (registered order)", i, res.Reasons[i], wantGuard)
+		}
+	}
+
+	cand := candidateResult(t, res, "candidate-a")
+	if cand.Eligible {
+		t.Fatalf("candidate-a Eligible = true, want false (its peak-rss bound genuinely failed)")
+	}
+	var rssRecorded bool
+	for _, b := range cand.Bounds {
+		if b.Guard == "peak-rss" {
+			rssRecorded = true
+			if b.Pass {
+				t.Errorf("candidate-a peak-rss bound = %+v, want a recorded FAILURE", b)
+			}
+		}
+		if b.Guard == "peak-fds" || b.Guard == "peak-cpu" {
+			t.Errorf("candidate-a has a %s bound record %+v, want none (the bound is unevaluable)", b.Guard, b)
+		}
+	}
+	if !rssRecorded {
+		t.Fatalf("candidate-a Bounds = %+v, want the evaluable peak-rss check recorded", cand.Bounds)
+	}
+	base := candidateResult(t, res, "baseline")
+	var baseRSS bool
+	for _, b := range base.Bounds {
+		if b.Guard == "peak-rss" {
+			baseRSS = true
+			if !b.Pass {
+				t.Errorf("baseline peak-rss bound = %+v, want a recorded PASS", b)
+			}
+		}
+	}
+	if !baseRSS {
+		t.Fatalf("baseline Bounds = %+v, want the evaluable peak-rss check recorded", base.Bounds)
+	}
+}
+
+// TestEvaluateNonBaselineGuardFailureNeverViolatedWithWitness holds the
+// other half of AC-2's biconditional: a required-guard failure on a
+// NON-baseline candidate makes that candidate ineligible but never turns
+// the run's verdict into violated-with-witness, whatever the rest of the
+// field does.
+func TestEvaluateNonBaselineGuardFailureNeverViolatedWithWitness(t *testing.T) {
+	t.Run("no other eligible candidate", func(t *testing.T) {
+		def := lockDefinition(t)
+		obs := happyObservations(t, def, "run-1",
+			map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
+			map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},
+		)
+		obs[5].Guards = []experiment.GuardResult{guardResult("behavioral-equivalence", false, "stale in round 3")}
+
+		res := mustEvaluate(t, def, obs)
+		if res.Verdict == experiment.VerdictViolatedWithWitness {
+			t.Fatalf("Verdict = %q, want anything but violated-with-witness (the BASELINE passed every guard)", res.Verdict)
+		}
+		if res.Verdict != experiment.VerdictDisclosedUnproven {
+			t.Fatalf("Verdict = %q, want %q", res.Verdict, experiment.VerdictDisclosedUnproven)
+		}
+	})
+
+	t.Run("another candidate still wins", func(t *testing.T) {
+		def := threeCandidateDef(t)
+		obs := threeCandidateObs(t, def,
+			[]float64{40, 42, 41},
+			[]float64{10, 11, 12},
+			[]float64{18, 19, 17},
+		)
+		for i := range obs {
+			if obs[i].Candidate == "candidate-a" && obs[i].Round == 3 {
+				obs[i].Guards = []experiment.GuardResult{guardResult("behavioral-equivalence", false, "stale after policy update")}
+			}
+		}
+		res := mustEvaluate(t, def, obs)
+		if res.Verdict == experiment.VerdictViolatedWithWitness {
+			t.Fatalf("Verdict = %q, want anything but violated-with-witness", res.Verdict)
+		}
+		if res.Verdict != experiment.VerdictProvenWinner || res.Winner != "candidate-b" {
+			t.Fatalf("Verdict/Winner = %q/%q, want proven-winner/candidate-b", res.Verdict, res.Winner)
+		}
+	})
+}
+
 // TestEvaluateConflictingBoundsZeroMedianVariability covers the
 // degenerate variability case: a zero-or-negative primary p50 cannot
 // support a spread ratio.
