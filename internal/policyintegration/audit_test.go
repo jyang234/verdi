@@ -15,12 +15,13 @@ import (
 // matching baseStoreFiles' own solo-default profile's role and transition
 // references — built directly here, never derived from any decoded
 // Constitution. This is deliberate: DecodeStoredProfile takes the catalog
-// as an injected dependency (governanceprincipal's own DC-25 posture,
-// "the kernel never defines these names itself; callers construct the
-// catalog"), so a hand-built catalog is not a forgery vector the way a
-// hand-built *policyartifact.Constitution or *Store is elsewhere in this
-// table. See the audit row below for exactly where provenance IS
-// enforced for a stored profile.
+// as an injected dependency — the kernel owns implementation only and the
+// governance vocabulary is project-registered, resolved "through an
+// injected duplicate-free catalog" (GLG v3 dc-25; SI-18) — so a
+// hand-built catalog is not a forgery vector the way a hand-built
+// *policyartifact.Constitution or *Store is elsewhere in this table. See
+// the audit row below for exactly where provenance IS enforced for a
+// stored profile.
 var storedProfileFixtureCatalog = governanceprincipal.Catalog{
 	Roles:       []string{"author", "policy-owner"},
 	Transitions: []string{"accept"},
@@ -157,9 +158,10 @@ func TestExportedAPIAudit_FailClosed(t *testing.T) {
 		{
 			// THE ONE DELIBERATE EXCEPTION: policyartifact.DecodeStoredProfile
 			// takes its governanceprincipal.Catalog as an injected
-			// dependency (DC-25 — "the kernel never defines these names
-			// itself; callers construct the catalog"), so a hand-built
-			// catalog is accepted BY DESIGN here. Provenance enforcement
+			// dependency — the kernel "owns implementation only" (GLG v3
+			// dc-25) and profiles resolve "through an injected
+			// duplicate-free catalog" (SI-18) — so a hand-built catalog
+			// is accepted BY DESIGN here. Provenance enforcement
 			// for a stored profile does not live at this decoder at all:
 			// it lives at policyauthority.Load's own call site, which
 			// obtains the catalog exclusively from
