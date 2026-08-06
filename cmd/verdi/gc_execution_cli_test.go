@@ -164,3 +164,85 @@ func TestGc_CLI_ReclaimUnmanaged_DisclosesExecutionSliceNotRun(t *testing.T) {
 		t.Fatalf("execution workspace %s touched by --reclaim-unmanaged (must be out of scope for this mode): %v", unitPath, statErr)
 	}
 }
+
+// TestGc_CLI_ExecutionSlice_ThreeRunLifecycle_ReclaimThenOrphanedThenSteadyState
+// is contract item 5: bare `verdi gc`, run three times over the SAME
+// released, clean workspace built through the real production seam
+// (materializeExecutionWorkspace + Release, exactly as (a)/(c) above).
+// Run 1 reclaims it (rank 5) and prints the grown (closed-triple) scope
+// disclosure; run 2 resolves the `git worktree add` registration that
+// materialize produced and rank 5 never reconciles (rank 0,
+// reclaim-orphaned); run 3 is steady state — nothing execution-specific
+// in its output except the scope line, which prints unconditionally on
+// every run. Exit 0 on all three (AD-10: per-unit outcomes, including
+// every keep and partial, are folded into their own disclosed line and
+// never fail the run).
+func TestGc_CLI_ExecutionSlice_ThreeRunLifecycle_ReclaimThenOrphanedThenSteadyState(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root, headSHA := gcExecutionCLIFixture(t)
+
+	workspaceID := materializeExecutionWorkspace(t, root, "run-three-cycle", headSHA)
+	releaser := execworkspace.NewReleaser(root)
+	if err := releaser.Release(workspaceID); err != nil {
+		t.Fatalf("Release(%s): %v", workspaceID, err)
+	}
+
+	runGC := func(t *testing.T, label string) (stdout string, exitCode int) {
+		t.Helper()
+		cmd := exec.Command(bin, "gc")
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "CI_DEFAULT_BRANCH=main")
+		var stdoutBuf, stderrBuf bytes.Buffer
+		cmd.Stdout = &stdoutBuf
+		cmd.Stderr = &stderrBuf
+		err := cmd.Run()
+		if err == nil {
+			return stdoutBuf.String(), 0
+		}
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return stdoutBuf.String(), exitErr.ExitCode()
+		}
+		t.Fatalf("%s: verdi gc failed to run at all: %v\nstdout: %s\nstderr: %s", label, err, stdoutBuf.String(), stderrBuf.String())
+		return "", -1
+	}
+
+	// Run 1: reclaim (rank 5).
+	out1, code1 := runGC(t, "run 1")
+	if code1 != 0 {
+		t.Fatalf("run 1 exit code = %d, want 0 (AD-10: per-unit outcomes never fail the run)\nstdout: %s", code1, out1)
+	}
+	if !strings.Contains(out1, "execution: reclaimed") || !strings.Contains(out1, workspaceID) {
+		t.Fatalf("run 1 stdout = %q, want the execution reclaimed line naming %s", out1, workspaceID)
+	}
+	if !strings.Contains(out1, "execution workspaces") {
+		t.Fatalf("run 1 stdout = %q, want the grown (closed-triple) scope disclosure naming execution workspaces", out1)
+	}
+
+	// Run 2: the real `git worktree add` registration materialize
+	// produced survives rank 5 (which never reconciles the registry, per
+	// spec's own fixed five-step deletion order) — this run resolves it
+	// at rank 0, disclosed as reclaim-orphaned.
+	out2, code2 := runGC(t, "run 2")
+	if code2 != 0 {
+		t.Fatalf("run 2 exit code = %d, want 0\nstdout: %s", code2, out2)
+	}
+	if !strings.Contains(out2, "execution: reclaim-orphaned") || !strings.Contains(out2, workspaceID) {
+		t.Fatalf("run 2 stdout = %q, want the execution reclaim-orphaned line naming %s", out2, workspaceID)
+	}
+
+	// Run 3: steady state — nothing left names this workspace at all, so
+	// nothing execution-specific should print except the scope line,
+	// which prints on every run regardless of whether anything happened.
+	out3, code3 := runGC(t, "run 3")
+	if code3 != 0 {
+		t.Fatalf("run 3 exit code = %d, want 0\nstdout: %s", code3, out3)
+	}
+	for _, marker := range []string{"execution: reclaimed", "execution: reclaim-orphaned", "execution: kept", "execution: partial", workspaceID} {
+		if strings.Contains(out3, marker) {
+			t.Fatalf("run 3 stdout = %q, steady state must not mention %q", out3, marker)
+		}
+	}
+	if !strings.Contains(out3, "execution workspaces") {
+		t.Fatalf("run 3 stdout = %q, want the scope line still naming execution workspaces (it prints unconditionally, not only when something happened)", out3)
+	}
+}
