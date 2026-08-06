@@ -702,3 +702,53 @@ func TestAuthorizeIgnoresAttribution(t *testing.T) {
 		}
 	}
 }
+
+// TestAuthorizeSoloCollapseOrdering: multiple collapse disclosures come
+// back sorted by principal.
+func TestAuthorizeSoloCollapseOrdering(t *testing.T) {
+	yaml := `schema: verdi.governance-profile/v1
+id: solo-pair
+class: solo
+applicable_transitions: [accept]
+identity_trust_sources:
+  - { id: github, kind: forge }
+role_mappings:
+  - role: author
+    trust_source: github
+    subjects: ["user-123", "user-456"]
+  - role: reviewer
+    trust_source: github
+    subjects: ["user-123", "user-456"]
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+`
+	solo := mustDecode(t, []byte(yaml))
+	req := AuthorizationRequest{
+		Transition:  "accept",
+		Posture:     PostureAuthoritative,
+		Resolutions: []PrincipalResolution{authedRes(t, "user-456"), authedRes(t, "user-123")},
+		Approvals: []ApprovalRecord{
+			{Role: "reviewer", PrincipalID: mustPID(t, "user-456")},
+			{Role: "author", PrincipalID: mustPID(t, "user-456")},
+			{Role: "reviewer", PrincipalID: mustPID(t, "user-123")},
+			{Role: "author", PrincipalID: mustPID(t, "user-123")},
+		},
+	}
+	d, err := Authorize(solo, req)
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	wantDecision(t, d, AuthorizationAuthorized)
+	if len(d.Disclosures) != 2 {
+		t.Fatalf("Disclosures = %+v, want two", d.Disclosures)
+	}
+	for i := 1; i < len(d.Disclosures); i++ {
+		if d.Disclosures[i].PrincipalID < d.Disclosures[i-1].PrincipalID {
+			t.Errorf("disclosures not sorted by principal: %+v", d.Disclosures)
+		}
+	}
+}

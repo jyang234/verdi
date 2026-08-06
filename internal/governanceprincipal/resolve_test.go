@@ -3,6 +3,7 @@ package governanceprincipal
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -219,5 +220,27 @@ func TestResolveCancellationPropagates(t *testing.T) {
 	_, err := r.Resolve(ctx, profile, PrincipalClaim{TrustSource: "github", Subject: "user-123"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Resolve error = %v, want wrapped context.Canceled", err)
+	}
+}
+
+// TestSortWitnesses: witness ordering is total over field content.
+func TestSortWitnesses(t *testing.T) {
+	shuffled := []Witness{
+		{Code: "b", SourceID: "s2"},
+		{Code: "a", SourceID: "s2", Detail: "y"},
+		{Code: "a", SourceID: "s2", Detail: "x"},
+		{Code: "a", SourceID: "s1"},
+		{Code: "a", SourceID: "s2", EvidenceDigest: testDigest, Detail: "x"},
+	}
+	sortWitnesses(shuffled)
+	want := []Witness{
+		{Code: "a", SourceID: "s1"},
+		{Code: "a", SourceID: "s2", Detail: "x"},
+		{Code: "a", SourceID: "s2", Detail: "y"},
+		{Code: "a", SourceID: "s2", EvidenceDigest: testDigest, Detail: "x"},
+		{Code: "b", SourceID: "s2"},
+	}
+	if !reflect.DeepEqual(shuffled, want) {
+		t.Errorf("sortWitnesses = %+v, want %+v", shuffled, want)
 	}
 }
