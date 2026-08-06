@@ -16,10 +16,9 @@ var updateGolden = flag.Bool("update", false, "regenerate testdata/golden-projec
 // content and manifest digests (mirroring internal/policyauthority's own
 // TestFixtureEffectivePolicy_Ratchet discipline): any change to fixture
 // content, rendering, normalization, or canonical encoding shows up as
-// an explicit golden diff, never silent drift. This reads testdata/
-// store/ directly (never writes into it) and never calls Generate, so it
-// never touches .verdi/policy/projections/ and is unaffected by the
-// confirmed policyauthority walker conflict.
+// an explicit golden diff, never silent drift. It reads testdata/store/
+// directly and never calls Generate, so the committed fixture tree is
+// never written into by this test.
 func TestFixtureProjection_Ratchet(t *testing.T) {
 	root := filepath.Join("testdata", "store")
 

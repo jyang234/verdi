@@ -25,17 +25,34 @@
 //
 // Generate renders every adapter's managed files and one canonical
 // manifest per adapter from a policyauthority.Load + Resolve pair,
-// atomically writing both (internal/atomicfile). An unadopted store
-// (policyauthority.ErrNotAdopted) generates nothing and claims nothing —
-// adoption stays opt-in and reversible (DC-15).
+// atomically writing both (internal/atomicfile). Manifests live at
+// .verdi/policy/projections/<adapter-id>.json, a directory the store
+// grammar admits as a GENERATED OUTPUT — policyauthority.Load recognizes
+// it and deliberately never reads its entries as authority, because a
+// projection derives from the constitution and can never be an input to
+// it (DC-1). An unadopted store (policyauthority.ErrNotAdopted)
+// generates nothing and claims nothing — adoption stays opt-in and
+// reversible (DC-15). A constitution whose adapters declare the same
+// managed path twice is unsatisfiable and is refused by name
+// (ErrOverlappingManagedPath) before anything is written, rather than
+// resolved last-writer-wins into a manifest the disk contradicts.
 //
 // Verify recomputes the same rendering from the CURRENT store state and
 // classifies every managed file and manifest as clean, drifted (with a
-// truncated subclass), missing, or manifest-drifted, and classifies the
-// discovery walk's own findings as unmanaged, shadowing, or (when the
-// walk itself could not fully enumerate the tree) incomplete-discovery.
-// A walk that cannot prove completeness is never silently treated as
-// clean (CO-1: "silence is never a pass").
+// truncated subclass), missing, or manifest-drifted; enumerates the
+// manifest directory so a manifest left behind by a removed or renamed
+// adapter is an orphan-manifest finding rather than a record nothing
+// ever checks again; and classifies the discovery walk's own findings as
+// unmanaged, shadowing, or (when the walk itself could not fully
+// enumerate the tree) incomplete-discovery. A discovered instruction
+// file is satisfied when SOME adapter generates and digest-matches it —
+// AC-1 requires each discovered instruction to be "generated and
+// digest-matched", not managed by whichever adapter discovered it — so
+// the ordinary layout where one harness also reads another adapter's
+// file verifies clean. Every report additionally discloses the subtrees
+// the walk never entered (Report.ExcludedSubtrees). A walk that cannot
+// prove completeness, and a subtree that was never examined, are never
+// silently treated as clean (CO-1: "silence is never a pass").
 //
 // Every byte this package writes is canonical: no wall-clock timestamp,
 // username, local absolute path, or random identifier ever enters a

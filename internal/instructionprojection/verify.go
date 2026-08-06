@@ -36,6 +36,11 @@ const (
 	// ReasonShadowing: the same as ReasonUnmanaged, but nested in a
 	// subdirectory.
 	ReasonShadowing Reason = "shadowing"
+	// ReasonOrphanManifest: an entry under .verdi/policy/projections/
+	// that is not the manifest of any currently declared adapter — a
+	// record of a projection nothing regenerates and nothing verifies
+	// (typically left behind by a removed or renamed adapter).
+	ReasonOrphanManifest Reason = "orphan-manifest"
 	// ReasonIncompleteDiscovery: the walk (or a targeted read) could not
 	// fully enumerate or read some part of the tree — the chain is
 	// unproven, never a pass.
@@ -43,8 +48,9 @@ const (
 )
 
 // Finding is one witnessed departure from a clean projection state.
-// Adapter is "" for a walk-level incomplete-discovery finding that is
-// not attributable to any single adapter's own chain. Expected/Actual
+// Adapter is "" for a finding attributable to no single adapter's own
+// chain: a walk-level incomplete-discovery error, or an orphan manifest
+// whose adapter no longer exists to attribute it to. Expected/Actual
 // are content digests, populated only where a byte comparison produced
 // the finding (drift, truncated, manifest-drift); Detail carries free-
 // text context (a walk or read error, or why a symlink was refused).
@@ -60,11 +66,20 @@ type Finding struct {
 // Report is Verify's fail-closed result.
 type Report struct {
 	Findings []Finding
+	// ExcludedSubtrees names every subtree the discovery walk never
+	// entered, sorted, and is ALWAYS populated — on a clean report as
+	// much as a failing one. It is a disclosure, not a verdict: what
+	// this proof did not examine is stated rather than left silent
+	// (CO-1). See discovery.go's excludedSubtrees for each rule and its
+	// grounding.
+	ExcludedSubtrees []string
 }
 
 // Clean reports whether r witnessed zero findings of any kind — the
 // only state authoritative launch may treat as a proven, drift-free
-// projection chain.
+// projection chain. It is deliberately findings-based: ExcludedSubtrees
+// is always non-empty and never makes a report unclean, because those
+// subtrees are excluded by contract, not by a failure to examine them.
 func (r *Report) Clean() bool {
 	return r != nil && len(r.Findings) == 0
 }
@@ -87,17 +102,11 @@ func Verify(root string) (*Report, error) {
 	return verify(root, store.Constitution, store.Policies, ep)
 }
 
-// verify is Verify's store-agnostic core. Splitting it out lets a caller
-// supply a Store/EffectivePolicy obtained from a Load that happened
-// BEFORE .verdi/policy/projections/ existed on disk — the only way this
-// package's own tests can exercise a true generate-then-verify round
-// trip given the confirmed conflict documented at generate.go's
-// projectionsDirRel: the public Verify's own Load call fails on any real
-// root a prior Generate has already touched, because
-// policyauthority.Load rejects "projections" as an unrecognized
-// directory under .verdi/policy/. verify itself never calls Load, so it
-// is unaffected and is exactly what Verify's public entry point
-// delegates to once its own Load+Resolve succeeds.
+// verify is Verify's store-agnostic core: it never performs a Load of
+// its own, so a caller that already holds a resolved Store and
+// EffectivePolicy gets the same verdict from that same authority without
+// re-reading the store. Verify's public entry point delegates here once
+// its own Load+Resolve succeeds.
 func verify(root string, c *policyartifact.Constitution, policies map[string]*policyartifact.Policy, ep *policyauthority.EffectivePolicy) (*Report, error) {
 	in, err := buildProjectionInput(policies, ep)
 	if err != nil {
@@ -106,13 +115,17 @@ func verify(root string, c *policyartifact.Constitution, policies map[string]*po
 
 	adapters := sortedAdapters(c.Adapters)
 
-	managed := make(map[string]map[string]bool, len(adapters))
-	for _, a := range adapters {
-		set := make(map[string]bool, len(a.Managed))
-		for _, rel := range a.Managed {
-			set[rel] = true
-		}
-		managed[a.ID] = set
+	// An overlapping managed path is an unsatisfiable constitution, not
+	// a drift: reporting findings against the FILES would point a reader
+	// at a file no regeneration can fix. Fail closed naming the
+	// constitution's own conflict instead (see managedPathOwners).
+	owners, err := managedPathOwners(adapters)
+	if err != nil {
+		return nil, err
+	}
+	managed := make(map[string]bool, len(owners))
+	for rel := range owners {
+		managed[rel] = true
 	}
 
 	var findings []Finding
@@ -144,6 +157,8 @@ func verify(root string, c *policyartifact.Constitution, policies map[string]*po
 		}
 	}
 
+	findings = append(findings, orphanManifestFindings(root, adapters)...)
+
 	discoveryFindings, err := discover(root, adapters, managed)
 	if err != nil {
 		return nil, err
@@ -151,7 +166,46 @@ func verify(root string, c *policyartifact.Constitution, policies map[string]*po
 	findings = append(findings, discoveryFindings...)
 
 	sortFindings(findings)
-	return &Report{Findings: findings}, nil
+	return &Report{Findings: findings, ExcludedSubtrees: excludedSubtrees()}, nil
+}
+
+// orphanManifestFindings enumerates .verdi/policy/projections/ and
+// reports every entry that is not a currently declared adapter's own
+// manifest. Without this pass the per-adapter checks above only ever ask
+// whether the manifests that SHOULD exist do; a manifest belonging to a
+// removed or renamed adapter would then verify clean forever, leaving an
+// authority-shaped record of a projection nothing regenerates and
+// nothing checks (CO-1). An absent directory is not a finding here (the
+// per-adapter pass already reports each missing manifest); a directory
+// that exists but cannot be read is incomplete-discovery, never assumed
+// empty. Any entry that is not an expected manifest file — including a
+// stray subdirectory — is an orphan: this directory holds generated
+// manifests and nothing else.
+func orphanManifestFindings(root string, adapters []policyartifact.Adapter) []Finding {
+	dir := filepath.Join(root, filepath.FromSlash(projectionsDirRel))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return []Finding{{Code: ReasonIncompleteDiscovery, Path: projectionsDirRel, Detail: err.Error()}}
+	}
+	expected := make(map[string]bool, len(adapters))
+	for _, a := range adapters {
+		expected[a.ID+manifestExt] = true
+	}
+	var findings []Finding
+	for _, e := range entries {
+		if expected[e.Name()] {
+			continue
+		}
+		findings = append(findings, Finding{
+			Code:   ReasonOrphanManifest,
+			Path:   projectionsDirRel + "/" + e.Name(),
+			Detail: "no adapter currently declared by the constitution owns this manifest",
+		})
+	}
+	return findings
 }
 
 // verifyManagedFile compares full's on-disk state against wantContent,

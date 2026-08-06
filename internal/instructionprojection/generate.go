@@ -1,6 +1,7 @@
 package instructionprojection
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -13,21 +14,30 @@ import (
 // projectionsDirRel is the store-relative directory holding one
 // generated manifest per adapter: a sibling of policies/, overlays/,
 // exemptions/, and profiles/ under .verdi/policy/ (contract-fixed path).
+// manifestExt is the extension every manifest in it carries.
 //
-// This extends .verdi/policy/'s own directory grammar
-// (internal/policyartifact.ClassifyPolicyPath, restated as
-// internal/policyauthority's knownPolicyDirs), and internal/
-// policyauthority.Load currently fails closed on ANY unrecognized
-// directory under .verdi/policy/ — including this one. Writing here is
-// nonetheless the contracted path for this package (an out-of-write-set
-// change to internal/policyauthority is the only fix; this package must
-// not make it — see the package-level conflict disclosure in doc.go and
-// this build's final report). Confirmed by experiment: once this
-// directory exists, ANY subsequent policyauthority.Load(root) call
-// (including this package's own Verify, or a second Generate) fails
-// with "unexpected directory \"projections\"" rather than succeeding or
-// returning ErrNotAdopted.
-const projectionsDirRel = ".verdi/policy/projections"
+// The directory is part of .verdi/policy/'s own grammar
+// (internal/policyartifact.ClassifyPolicyPath's projection-manifest row,
+// restated as internal/policyauthority's knownPolicyDirs), admitted
+// there as a GENERATED OUTPUT: policyauthority.Load recognizes the
+// directory and deliberately skips its entries rather than reading them
+// as authority, because a projection derives from the constitution and
+// can never be an input to it (DC-1).
+const (
+	projectionsDirRel = ".verdi/policy/projections"
+	manifestExt       = ".json"
+)
+
+// ErrOverlappingManagedPath is returned when two adapters declare the
+// same managed projection path. Such a constitution is unsatisfiable:
+// each adapter renders its own content (its identity is in the file), so
+// one file cannot simultaneously be both adapters' generated projection.
+// Writing it for whichever adapter came last would leave the other
+// adapter's manifest asserting a digest the disk contradicts — a
+// manifest that lies, which is worse than no manifest at all (CO-1). The
+// wrapped error names both adapter ids and the path so the constitution,
+// not the file, is what a reader is sent to fix.
+var ErrOverlappingManagedPath = errors.New("instructionprojection: two adapters declare the same managed projection path")
 
 // Result reports exactly what Generate wrote: per adapter, every managed
 // file's repo-relative path and content digest, plus the manifest's own
@@ -71,9 +81,9 @@ func Generate(root string) (*Result, error) {
 }
 
 // generate is Generate's store-agnostic core: it never calls Load
-// itself, so tests (and Verify's own reuse of buildProjectionInput) can
-// drive it directly from an already-resolved store without repeating the
-// Load that .verdi/policy/projections/ would break on a second call.
+// itself, so a caller that already holds a resolved store (or a test
+// that needs authority captured at a specific moment) can drive it
+// directly without a second Load.
 func generate(root string, c *policyartifact.Constitution, policies map[string]*policyartifact.Policy, ep *policyauthority.EffectivePolicy) (*Result, error) {
 	in, err := buildProjectionInput(policies, ep)
 	if err != nil {
@@ -81,6 +91,13 @@ func generate(root string, c *policyartifact.Constitution, policies map[string]*
 	}
 
 	adapters := sortedAdapters(c.Adapters)
+
+	// Prove the whole projection surface is satisfiable BEFORE writing
+	// anything: a partial write followed by a failure would leave files
+	// on disk that no manifest describes.
+	if _, err := managedPathOwners(adapters); err != nil {
+		return nil, err
+	}
 
 	res := &Result{}
 	for _, adapter := range adapters {
@@ -121,7 +138,28 @@ func generate(root string, c *policyartifact.Constitution, policies map[string]*
 // adapterManifestRelPath returns the repo-relative slash path of
 // adapterID's own manifest.
 func adapterManifestRelPath(adapterID string) string {
-	return projectionsDirRel + "/" + adapterID + ".json"
+	return projectionsDirRel + "/" + adapterID + manifestExt
+}
+
+// managedPathOwners maps every managed projection path to the ONE
+// adapter that declares it, failing closed with ErrOverlappingManagedPath
+// when two adapters claim the same path. Generate calls it before
+// writing anything and Verify before judging anything, so an
+// unsatisfiable constitution is refused by name at both entry points
+// rather than silently resolving last-writer-wins. adapters must already
+// be sorted by id (sortedAdapters), which makes the named pair in the
+// error deterministic.
+func managedPathOwners(adapters []policyartifact.Adapter) (map[string]string, error) {
+	owners := make(map[string]string)
+	for _, a := range adapters {
+		for _, rel := range a.Managed {
+			if prev, ok := owners[rel]; ok {
+				return nil, fmt.Errorf("%w: %q is declared by adapters %q and %q; one file can carry only one adapter's projection", ErrOverlappingManagedPath, rel, prev, a.ID)
+			}
+			owners[rel] = a.ID
+		}
+	}
+	return owners, nil
 }
 
 // sortedAdapters returns a copy of adapters sorted by id.

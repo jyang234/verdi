@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/policyauthority"
@@ -47,9 +48,7 @@ func TestVerify_ZeroAdapters_Clean(t *testing.T) {
 // directory (policyartifact's projection-manifest row; policyauthority
 // skips it as authority input per DC-1), and a fresh public Verify —
 // its own Load+Resolve included — reports clean. A second Generate on
-// the same root must also succeed and change nothing. This replaced the
-// lane's conflict-witness test once the controller's integration fix
-// extended the grammar.
+// the same root must also succeed and change nothing.
 func TestGenerateThenPublicVerify_RoundTripClean(t *testing.T) {
 	root := newFixtureRoot(t)
 
@@ -110,15 +109,14 @@ func TestGenerateThenPublicVerify_RoundTripClean(t *testing.T) {
 	}
 }
 
-// TestGenerateThenVerifyCore_RoundTripClean is the REAL round-trip-clean
-// proof the contract requires, exercised at the layer this package
-// actually controls: verify's store-agnostic core, fed the SAME
-// EffectivePolicy Generate itself resolved (captured before Generate
-// wrote anything, so it is byte-identical to what Generate used — nothing
-// about the authority changed by writing its own projection). This is
-// the only way to prove "Generate then Verify is clean" without a second
-// policyauthority.Load call on a root Generate has already touched (see
-// the conflict test above).
+// TestGenerateThenVerifyCore_RoundTripClean exercises verify's store-
+// agnostic core directly, fed a Store and EffectivePolicy the CALLER
+// resolved (captured before Generate wrote anything). The public
+// round-trip above already proves the end-to-end verdict; what this adds
+// is the core's own contract — it never performs a Load of its own, so a
+// caller that already holds a resolved store gets the same verdict from
+// the same authority without re-reading the store. Writing a projection
+// must not change that authority, and this is where that stays pinned.
 func TestGenerateThenVerifyCore_RoundTripClean(t *testing.T) {
 	root := newFixtureRoot(t)
 	store, ep := loadResolve(t, root)
@@ -142,7 +140,6 @@ func TestGenerateThenVerifyCore_RoundTripClean(t *testing.T) {
 // clean.
 func TestVerify_Drift(t *testing.T) {
 	root := newFixtureRoot(t)
-	store, ep := loadResolve(t, root)
 	if _, err := Generate(root); err != nil {
 		t.Fatalf("Generate(): %v", err)
 	}
@@ -152,9 +149,9 @@ func TestVerify_Drift(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	f := findOne(t, report, "codex", ReasonDrift, "AGENTS.md")
 	if f.Expected == "" || f.Actual == "" || f.Expected == f.Actual {
@@ -169,7 +166,6 @@ func TestVerify_Drift(t *testing.T) {
 // and expects the truncated subclass, not plain drift.
 func TestVerify_Truncated(t *testing.T) {
 	root := newFixtureRoot(t)
-	store, ep := loadResolve(t, root)
 	if _, err := Generate(root); err != nil {
 		t.Fatalf("Generate(): %v", err)
 	}
@@ -186,9 +182,9 @@ func TestVerify_Truncated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	findOne(t, report, "codex", ReasonTruncated, "AGENTS.md")
 	if hasFinding(report, "codex", ReasonDrift, "AGENTS.md") {
@@ -199,7 +195,6 @@ func TestVerify_Truncated(t *testing.T) {
 // TestVerify_MissingManagedFile deletes a managed file after Generate.
 func TestVerify_MissingManagedFile(t *testing.T) {
 	root := newFixtureRoot(t)
-	store, ep := loadResolve(t, root)
 	if _, err := Generate(root); err != nil {
 		t.Fatalf("Generate(): %v", err)
 	}
@@ -207,21 +202,18 @@ func TestVerify_MissingManagedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	findOne(t, report, "codex", ReasonMissing, "docs/AGENTS.md")
 }
 
-// TestVerify_MissingManifest deletes the manifest entirely (no
-// .verdi/policy/projections/ directory left at all — so the missing-
-// manifest scenario is exercised WITHOUT recreating the policyauthority
-// conflict for THIS test's own purposes; the conflict-witness test above
-// covers the case where the directory does exist).
+// TestVerify_MissingManifest deletes the generated manifest directory
+// after Generate: a managed file set that still matches authority is not
+// clean while its manifest is absent.
 func TestVerify_MissingManifest(t *testing.T) {
 	root := newFixtureRoot(t)
-	store, ep := loadResolve(t, root)
 	if _, err := Generate(root); err != nil {
 		t.Fatalf("Generate(): %v", err)
 	}
@@ -229,19 +221,19 @@ func TestVerify_MissingManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	findOne(t, report, "codex", ReasonMissing, ".verdi/policy/projections/codex.json")
 }
 
-// TestVerify_ManifestDrift proves the manifest-drift classification
-// directly at verifyManifestFile (never through Verify's public Load
-// path, which the conflict makes structurally unreachable once a
-// manifest exists — see the conflict-witness test above): a manifest
-// whose bytes do not match the freshly recomputed canonical manifest is
-// manifest-drift, independent of the managed files' own state.
+// TestVerify_ManifestDrift unit-tests verifyManifestFile directly. The
+// end-to-end manifest-drift verdict is proven through the public Verify
+// by TestVerify_ManifestDrift_StaleAfterAuthorityChange below; what this
+// adds is the classifier's own contract in isolation — arbitrary
+// non-matching bytes are manifest-drift, and the finding carries both
+// digests — with no store, adapter, or walk involved.
 func TestVerify_ManifestDrift(t *testing.T) {
 	root := newFixtureRoot(t)
 	manifestPath := filepath.Join(root, ".verdi", "policy", "projections", "codex.json")
@@ -291,9 +283,9 @@ func TestVerify_ManifestDrift_StaleAfterAuthorityChange(t *testing.T) {
 	}
 	writeTree(t, root, map[string]string{".verdi/policy/projections/codex.json": string(staleBytes)})
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	findOne(t, report, "codex", ReasonManifestDrift, ".verdi/policy/projections/codex.json")
 	if hasFinding(report, "codex", ReasonDrift, "AGENTS.md") || hasFinding(report, "codex", ReasonMissing, "AGENTS.md") {
@@ -306,12 +298,11 @@ func TestVerify_ManifestDrift_StaleAfterAuthorityChange(t *testing.T) {
 func TestVerify_RootUnmanagedInstructionFile(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, unmanagedAdapterStoreFiles())
-	store, ep := loadResolve(t, root)
 	writeTree(t, root, map[string]string{"AGENTS.md": "hand-authored, never generated\n"})
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	findOne(t, report, "codex", ReasonUnmanaged, "AGENTS.md")
 }
@@ -321,12 +312,11 @@ func TestVerify_RootUnmanagedInstructionFile(t *testing.T) {
 func TestVerify_NestedShadowingInstructionFile(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, unmanagedAdapterStoreFiles())
-	store, ep := loadResolve(t, root)
 	writeTree(t, root, map[string]string{"services/legacy/AGENTS.md": "a nested instruction file the harness would also discover\n"})
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	findOne(t, report, "codex", ReasonShadowing, "services/legacy/AGENTS.md")
 }
@@ -342,7 +332,6 @@ func TestVerify_SymlinkedDiscoveryFile_FailsClosed(t *testing.T) {
 	}
 	root := t.TempDir()
 	writeTree(t, root, unmanagedAdapterStoreFiles())
-	store, ep := loadResolve(t, root)
 	writeTree(t, root, map[string]string{"target.txt": "irrelevant\n"})
 	if err := os.MkdirAll(filepath.Join(root, "extra"), 0o755); err != nil {
 		t.Fatal(err)
@@ -351,9 +340,9 @@ func TestVerify_SymlinkedDiscoveryFile_FailsClosed(t *testing.T) {
 		t.Fatalf("creating symlink: %v", err)
 	}
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	findOne(t, report, "codex", ReasonShadowing, "extra/AGENTS.md")
 }
@@ -367,7 +356,6 @@ func TestVerify_SymlinkedManagedFile_FailsClosed(t *testing.T) {
 		t.Skip("symlink semantics differ on windows")
 	}
 	root := newFixtureRoot(t)
-	store, ep := loadResolve(t, root)
 	if _, err := Generate(root); err != nil {
 		t.Fatalf("Generate(): %v", err)
 	}
@@ -381,9 +369,9 @@ func TestVerify_SymlinkedManagedFile_FailsClosed(t *testing.T) {
 		t.Fatalf("creating symlink: %v", err)
 	}
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	// AGENTS.md's basename ("AGENTS.md") IS a declared discovery
 	// filename here, so the discovery walk itself classifies the
@@ -391,6 +379,113 @@ func TestVerify_SymlinkedManagedFile_FailsClosed(t *testing.T) {
 	// the managed-file integrity pass.
 	if !hasFinding(report, "codex", ReasonUnmanaged, "AGENTS.md") && !hasFinding(report, "codex", ReasonMissing, "AGENTS.md") {
 		t.Fatalf("a symlinked managed file must fail closed (unmanaged or missing), got: %+v", report.Findings)
+	}
+}
+
+// TestVerify_SymlinkedManagedFile_NotADiscoveryName_FailsClosed isolates
+// the MANAGED-FILE integrity check's own symlink branch. The test above
+// leaves that branch unpinned: its managed path is also a declared
+// discovery filename, so the walk would have caught the symlink anyway.
+// Here the adapter manages PROJECTION.md, a name it never discovers, so
+// the walk never looks at it — and the symlink's target holds
+// BYTE-CORRECT generated content, so the only thing that can produce a
+// finding is the refusal to treat a symlink as the managed file.
+func TestVerify_SymlinkedManagedFile_NotADiscoveryName_FailsClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on windows")
+	}
+	root := t.TempDir()
+	writeTree(t, root, unmanagedAdapterStoreFiles())
+	if _, err := Generate(root); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	managed := filepath.Join(root, "PROJECTION.md")
+	generated, err := os.ReadFile(managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "generated-elsewhere.md")
+	if err := os.WriteFile(target, generated, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(managed); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, managed); err != nil {
+		t.Fatalf("creating symlink: %v", err)
+	}
+
+	report, err := Verify(root)
+	if err != nil {
+		t.Fatalf("Verify(): %v", err)
+	}
+	f := findOne(t, report, "codex", ReasonMissing, "PROJECTION.md")
+	if !strings.Contains(f.Detail, "symlink") {
+		t.Fatalf("missing finding must disclose WHY the managed file is absent: %+v", f)
+	}
+	if hasFinding(report, "codex", ReasonUnmanaged, "PROJECTION.md") || hasFinding(report, "codex", ReasonShadowing, "PROJECTION.md") {
+		t.Fatalf("PROJECTION.md is not a discovery filename; only the managed-file check may report it: %+v", report.Findings)
+	}
+}
+
+// TestVerify_OrphanManifest proves a manifest left behind by an adapter
+// the constitution no longer declares is a named finding. Verify's
+// per-adapter passes only ever look for the manifests CURRENT adapters
+// should have, so without this enumeration a stale manifest — an
+// authority-shaped record of a projection nothing regenerates — would
+// verify clean forever (CO-1).
+func TestVerify_OrphanManifest(t *testing.T) {
+	root := newFixtureRoot(t)
+	if _, err := Generate(root); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	// Rename the adapter in the constitution: codex.json is now nobody's
+	// manifest.
+	consPath := filepath.Join(root, ".verdi", "policy", "constitution.md")
+	data, err := os.ReadFile(consPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := strings.Replace(string(data), "- id: codex", "- id: codex-next", 1)
+	if renamed == string(data) {
+		t.Fatal("fixture constitution did not carry the expected adapter id line")
+	}
+	if err := os.WriteFile(consPath, []byte(renamed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Verify(root)
+	if err != nil {
+		t.Fatalf("Verify(): %v", err)
+	}
+	f := findOne(t, report, "", ReasonOrphanManifest, ".verdi/policy/projections/codex.json")
+	if f.Adapter != "" {
+		t.Fatalf("an orphan manifest belongs to no current adapter; Adapter = %q, want empty", f.Adapter)
+	}
+	// The renamed adapter's own manifest is separately missing — the
+	// orphan finding never substitutes for the current adapter's state.
+	findOne(t, report, "codex-next", ReasonMissing, ".verdi/policy/projections/codex-next.json")
+}
+
+// TestVerify_NoOrphanManifest_WhenEveryManifestIsCurrent is the
+// enumeration's negative arm: the generated manifests of currently
+// declared adapters must never be reported as orphans.
+func TestVerify_NoOrphanManifest_WhenEveryManifestIsCurrent(t *testing.T) {
+	root := newMultiFixtureRoot(t)
+	if _, err := Generate(root); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+
+	report, err := Verify(root)
+	if err != nil {
+		t.Fatalf("Verify(): %v", err)
+	}
+	for _, f := range report.Findings {
+		if f.Code == ReasonOrphanManifest {
+			t.Fatalf("a current adapter's own manifest was reported as an orphan: %+v", f)
+		}
 	}
 }
 
@@ -406,7 +501,6 @@ func TestVerify_UnreadableDirectory_IncompleteDiscovery(t *testing.T) {
 	}
 	root := t.TempDir()
 	writeTree(t, root, unmanagedAdapterStoreFiles())
-	store, ep := loadResolve(t, root)
 
 	blocked := filepath.Join(root, "blocked")
 	if err := os.MkdirAll(blocked, 0o755); err != nil {
@@ -420,9 +514,9 @@ func TestVerify_UnreadableDirectory_IncompleteDiscovery(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	found := false
 	for _, f := range report.Findings {
@@ -447,14 +541,13 @@ func TestVerify_DanglingSymlink_FailsClosedNotError(t *testing.T) {
 	}
 	root := t.TempDir()
 	writeTree(t, root, unmanagedAdapterStoreFiles())
-	store, ep := loadResolve(t, root)
 	if err := os.Symlink(filepath.Join(root, "does-not-exist"), filepath.Join(root, "AGENTS.md")); err != nil {
 		t.Fatalf("creating dangling symlink: %v", err)
 	}
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	findOne(t, report, "codex", ReasonUnmanaged, "AGENTS.md")
 }
@@ -463,7 +556,6 @@ func TestVerify_DanglingSymlink_FailsClosedNotError(t *testing.T) {
 // ordering contract.
 func TestVerify_FindingsSortedByAdapterCodePath(t *testing.T) {
 	root := newFixtureRoot(t)
-	store, ep := loadResolve(t, root)
 	if _, err := Generate(root); err != nil {
 		t.Fatalf("Generate(): %v", err)
 	}
@@ -474,9 +566,9 @@ func TestVerify_FindingsSortedByAdapterCodePath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := Verify(root)
 	if err != nil {
-		t.Fatalf("verify(): %v", err)
+		t.Fatalf("Verify(): %v", err)
 	}
 	for i := 1; i < len(report.Findings); i++ {
 		a, b := report.Findings[i-1], report.Findings[i]
@@ -544,25 +636,7 @@ payloads: {}
 ---
 Pin the toolchain.
 `,
-		".verdi/policy/profiles/solo-default.md": `---
-schema: verdi.governance-profile/v1
-id: solo-default
-class: solo
-applicable_transitions: [accept]
-identity_trust_sources:
-  - {id: github-org, kind: forge}
-role_mappings:
-  - {role: author, trust_source: github-org, subjects: [alice]}
-  - {role: policy-owner, trust_source: github-org, subjects: [alice]}
-ownership_sources: []
-signature_requirements: []
-required_approvers: []
-distinctness_rules: []
-evidence_source_restrictions: []
-escalation_thresholds: []
----
-The solo operator profile.
-`,
+		".verdi/policy/profiles/solo-default.md": soloDefaultProfileDoc,
 	}
 }
 
