@@ -110,10 +110,10 @@ func TestRenderRecommendationProvenWinner(t *testing.T) {
 	titleIdx := strings.Index(body, def.ID)
 	verdictIdx := strings.Index(body, string(res.Verdict))
 	tableIdx := strings.Index(body, "candidate-a")
-	if !(titleIdx < verdictIdx) {
+	if titleIdx >= verdictIdx {
 		t.Fatalf("title must precede the verdict in the rendered output")
 	}
-	if !(verdictIdx < tableIdx) {
+	if verdictIdx >= tableIdx {
 		t.Fatalf("verdict must precede the candidates table in the rendered output")
 	}
 }
