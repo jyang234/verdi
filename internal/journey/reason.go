@@ -11,8 +11,8 @@ import (
 // work requires identity or approval; external-wait requires a forge, CI,
 // provider, or clock-bound condition; unknown is the first-class failure
 // to classify. Class controls ergonomics, never truth — a blocker's Class
-// is always the fixed class of its ReasonCode (see Blocker.Validate) and
-// may never be reassigned to a different class.
+// is always the fixed class of its ReasonCode (enforced by Record.Validate)
+// and may never be reassigned to a different class.
 type BlockerClass string
 
 // The closed BlockerClass vocabulary (DC-4's four classes plus explicit

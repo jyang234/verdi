@@ -337,6 +337,201 @@ func TestRecordValidateNegative(t *testing.T) {
 			mutate:  func(r *Record) { r.Digest = strings.Repeat("a", 64) },
 			wantSub: "digest",
 		},
+
+		// --- grammar symmetry ---
+		{
+			name:    "action id malformed",
+			mutate:  func(r *Record) { r.Actions.Safe[0].ID = "Close Issue" },
+			wantSub: "id",
+		},
+		{
+			name:    "blocker id malformed (double slash)",
+			mutate:  func(r *Record) { r.Blockers.Current[0].ID = "forge-facts-unavailable//close" },
+			wantSub: "id",
+		},
+		{
+			name:    "blocker id malformed (trailing slash)",
+			mutate:  func(r *Record) { r.Blockers.Current[0].ID = "forge-facts-unavailable/" },
+			wantSub: "id",
+		},
+		{
+			name:    "required role transition malformed",
+			mutate:  func(r *Record) { r.Principals.Required[0].Transition = "Close Now" },
+			wantSub: "transition",
+		},
+		{
+			name:    "action from_state malformed",
+			mutate:  func(r *Record) { r.Actions.Safe[0].FromState = "Accepted Pending" },
+			wantSub: "from_state",
+		},
+		{
+			name: "precondition duplicate id within action",
+			mutate: func(r *Record) {
+				r.Actions.Safe[0].Preconditions = []Precondition{
+					{ID: "fold-green", Witness: "a"},
+					{ID: "fold-green", Witness: "b"},
+				}
+			},
+			wantSub: "preconditions",
+		},
+		{
+			name: "precondition swapped order",
+			mutate: func(r *Record) {
+				r.Actions.Safe[0].Preconditions = []Precondition{
+					{ID: "z-check", Witness: "a"},
+					{ID: "a-check", Witness: "b"},
+				}
+			},
+			wantSub: "preconditions",
+		},
+
+		// --- deterministic ordering (CO-4) ---
+		{
+			name: "blockers.current swapped order",
+			mutate: func(r *Record) {
+				owner := r.Blockers.Current[0].Owner
+				r.Blockers.Current = []Blocker{
+					{ID: "zzz-blocker", Reason: ReasonForgeFactsUnavailable, Class: ClassExternalWait, Witnesses: []string{}, Owner: owner, ClearingCondition: "x", Transition: "unknown"},
+					{ID: "aaa-blocker", Reason: ReasonForgeFactsUnavailable, Class: ClassExternalWait, Witnesses: []string{}, Owner: owner, ClearingCondition: "x", Transition: "unknown"},
+				}
+			},
+			wantSub: "blockers.current",
+		},
+		{
+			name: "blockers.eventual.items swapped order",
+			mutate: func(r *Record) {
+				owner := r.Blockers.Current[0].Owner
+				r.Blockers.Eventual.Derived = true
+				r.Blockers.Eventual.Items = []Blocker{
+					{ID: "zzz-eventual", Reason: ReasonForgeFactsUnavailable, Class: ClassExternalWait, Witnesses: []string{}, Owner: owner, ClearingCondition: "x", Transition: "unknown"},
+					{ID: "aaa-eventual", Reason: ReasonForgeFactsUnavailable, Class: ClassExternalWait, Witnesses: []string{}, Owner: owner, ClearingCondition: "x", Transition: "unknown"},
+				}
+			},
+			wantSub: "blockers.eventual.items",
+		},
+		{
+			name: "actions.safe swapped order",
+			mutate: func(r *Record) {
+				a1, a2 := r.Actions.Safe[0], r.Actions.Safe[0]
+				a1.ID, a2.ID = "zzz-action", "aaa-action"
+				r.Actions.Safe = []Action{a1, a2}
+			},
+			wantSub: "actions.safe",
+		},
+		{
+			name: "principals.required swapped order",
+			mutate: func(r *Record) {
+				r.Principals.Required = []RequiredRole{
+					{Transition: "merge", Obligation: "attestation/countersign", Count: 1, Resolution: "unproven"},
+					{Transition: "close", Obligation: "attestation/countersign", Count: 1, Resolution: "unproven"},
+				}
+			},
+			wantSub: "principals.required",
+		},
+		{
+			name: "action.authority swapped order",
+			mutate: func(r *Record) {
+				r.Actions.Safe[0].Authority = []RequiredRole{
+					{Transition: "close", Obligation: "attestation/zzz-check", Count: 1, Resolution: "unproven"},
+					{Transition: "close", Obligation: "attestation/aaa-check", Count: 1, Resolution: "unproven"},
+				}
+			},
+			wantSub: "authority",
+		},
+		{
+			name: "action.authority transition mismatches verb",
+			mutate: func(r *Record) {
+				r.Actions.Safe[0].Authority = []RequiredRole{
+					{Transition: "merge", Obligation: "attestation/countersign", Count: 1, Resolution: "unproven"},
+				}
+			},
+			wantSub: "authority",
+		},
+		{
+			name:    "action.authority nil",
+			mutate:  func(r *Record) { r.Actions.Safe[0].Authority = nil },
+			wantSub: "authority",
+		},
+
+		// --- known/value converse arms ---
+		{
+			name:    "string fact known true with empty value",
+			mutate:  func(r *Record) { r.Repository.Branch = StringFact{Known: true, Value: ""} },
+			wantSub: "known",
+		},
+		{
+			name: "default branch fact known true with missing field",
+			mutate: func(r *Record) {
+				r.Repository.DefaultBranch = DefaultBranchFact{Known: true, Name: "main", Ref: "", Head: "abc123"}
+			},
+			wantSub: "known",
+		},
+		{
+			name:    "worktree fact managed true with empty name",
+			mutate:  func(r *Record) { r.Repository.Worktree = WorktreeFact{Managed: true, Name: ""} },
+			wantSub: "managed",
+		},
+
+		// --- schema completion (lifecycle posture / active branch) ---
+		{
+			name:    "unknown lifecycle posture",
+			mutate:  func(r *Record) { r.Lifecycle.Posture = "mystery" },
+			wantSub: "posture",
+		},
+		{
+			name:    "lifecycle active branch known false with nonempty value",
+			mutate:  func(r *Record) { r.Lifecycle.ActiveBranch = StringFact{Known: false, Value: "x"} },
+			wantSub: "known",
+		},
+
+		// --- PrincipalFacts CO-1 mirror ---
+		{
+			name: "principals profile not adopted without disclosure",
+			mutate: func(r *Record) {
+				r.Principals.ProfileAdopted = false
+				r.Principals.Disclosures = []string{}
+			},
+			wantSub: "disclos",
+		},
+
+		// --- reason/blocker-class cleanup and coverage gaps ---
+		{
+			name:    "unknown blocker class value entirely",
+			mutate:  func(r *Record) { r.Blockers.Current[0].Class = "urgent" },
+			wantSub: "unknown class",
+		},
+		{
+			name: "nil blockers.eventual.items",
+			mutate: func(r *Record) {
+				r.Blockers.Eventual.Items = nil
+			},
+			wantSub: "items",
+		},
+		{
+			name:    "nil blockers.eventual.disclosures",
+			mutate:  func(r *Record) { r.Blockers.Eventual.Disclosures = nil },
+			wantSub: "disclosures",
+		},
+		{
+			name:    "unsorted blockers.eventual.disclosures",
+			mutate:  func(r *Record) { r.Blockers.Eventual.Disclosures = []string{"b", "a"} },
+			wantSub: "sorted",
+		},
+		{
+			name:    "nil principals.disclosures",
+			mutate:  func(r *Record) { r.Principals.Disclosures = nil },
+			wantSub: "disclosures",
+		},
+		{
+			name:    "unsorted principals.disclosures",
+			mutate:  func(r *Record) { r.Principals.Disclosures = []string{"b", "a"} },
+			wantSub: "sorted",
+		},
+		{
+			name:    "unsorted lifecycle.disclosures",
+			mutate:  func(r *Record) { r.Lifecycle.Disclosures = []string{"b", "a"} },
+			wantSub: "sorted",
+		},
 	}
 
 	for _, tt := range tests {

@@ -38,18 +38,20 @@ func validRecord(t *testing.T) Record {
 			Class:    "feature",
 			State:    "accepted-pending-build",
 			Relation: "exact",
+			Posture:  "authoritative",
 			AcceptedBaseline: &Baseline{
 				Path:          "specs/active/example/spec.md",
 				Blob:          "deadbeef",
 				LandingCommit: "cafebabe",
 			},
-			Frozen:      nil,
-			Disclosures: []string{},
+			Frozen:       nil,
+			ActiveBranch: StringFact{Known: true, Value: "spec/example"},
+			Disclosures:  []string{},
 		},
 		Blockers: Blockers{
 			Current: []Blocker{
 				{
-					ID:                "forge-unreachable",
+					ID:                "forge-facts-unavailable/close",
 					Reason:            ReasonForgeFactsUnavailable,
 					Class:             ClassExternalWait,
 					Witnesses:         []string{"forge/pr/42"},
@@ -69,7 +71,7 @@ func validRecord(t *testing.T) Record {
 			Required: []RequiredRole{
 				{Transition: "close", Obligation: "attestation/countersign", Count: 1, Resolution: "unproven"},
 			},
-			Disclosures: []string{},
+			Disclosures: []string{"profile not adopted"},
 		},
 		Actions: Actions{
 			Safe: []Action{
@@ -81,6 +83,7 @@ func validRecord(t *testing.T) Record {
 					ToState:       "closed",
 					Confirmation:  "none",
 					Preconditions: []Precondition{{ID: "fold-green", Witness: "ci-run/456"}},
+					Authority:     []RequiredRole{},
 				},
 			},
 			NeededFacts: []string{"default-branch"},

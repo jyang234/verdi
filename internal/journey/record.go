@@ -27,7 +27,7 @@ const SchemaID = "verdi.journey/v1"
 
 var (
 	idRe         = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	transitionRe = regexp.MustCompile(`^([a-z][a-z0-9-]*|unknown)$`)
+	blockerIDRe  = regexp.MustCompile(`^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)*$`)
 	obligationRe = regexp.MustCompile(`^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$`)
 	argumentRe   = regexp.MustCompile(`^[A-Za-z0-9._/@-]+$`)
 	digestRe     = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -121,13 +121,17 @@ type FrozenRevision struct {
 }
 
 // LifecycleFacts is the record's lifecycle section: class and state,
-// accepted and frozen revisions, and disclosed gaps in deriving them.
+// accepted and frozen revisions, the active build/design branch,
+// authoritative-versus-advisory posture, and disclosed gaps in deriving
+// any of them.
 type LifecycleFacts struct {
 	Class            string          `json:"class"`
 	State            string          `json:"state"`
 	Relation         string          `json:"relation"`
+	Posture          string          `json:"posture"`
 	AcceptedBaseline *Baseline       `json:"accepted_baseline"`
 	Frozen           *FrozenRevision `json:"frozen"`
+	ActiveBranch     StringFact      `json:"active_branch"`
 	Disclosures      []string        `json:"disclosures"`
 }
 
@@ -144,7 +148,10 @@ type Owner struct {
 
 // Blocker is one current or eventual blocker: its stable reason code,
 // fixed class, witnesses, owner, clearing condition, and the transition
-// it affects (or the literal "unknown").
+// it affects (or the literal "unknown"). ID is slash-segmented
+// (^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)*$) so a blocker can compose its
+// reason with the transition it blocks, e.g.
+// "obligation-countersign-unproven/close".
 type Blocker struct {
 	ID                string       `json:"id"`
 	Reason            ReasonCode   `json:"reason"`
@@ -200,10 +207,22 @@ type Precondition struct {
 }
 
 // Action is one safe action: the existing Verdi verb or forge transition
-// that performs it, its bound arguments, its state transition, its
-// confirmation posture, and its proven preconditions. An action is never
-// free text or generated shell (DC-3): Arguments are bare tokens, never
-// shell text.
+// that performs it, its bound arguments, its declared state transition,
+// its confirmation posture, its proven preconditions, and any
+// principal-bearing authority it itself requires (Authority — e.g. a
+// countersign obligation on the same verb; empty when none is known-
+// required). An action is never free text or generated shell (DC-3):
+// Arguments are bare tokens, never shell text.
+//
+// FromState and ToState are the declared effect of a registered
+// operating-model catalog transition, in the operating model's own
+// state vocabulary (e.g. "draft") — never internal/specstate's
+// spec-lifecycle vocabulary ("proposed", ...), and this schema does not
+// import specstate. Proving that Verb/FromState/ToState actually name a
+// catalog transition is the deriving layer's obligation; this schema
+// enforces only their lexical grammar, deliberately not their catalog
+// membership — the record is a projection's output, not the operating
+// model itself (DC-1).
 type Action struct {
 	ID            string         `json:"id"`
 	Verb          string         `json:"verb"`
@@ -212,6 +231,7 @@ type Action struct {
 	ToState       string         `json:"to_state"`
 	Confirmation  string         `json:"confirmation"`
 	Preconditions []Precondition `json:"preconditions"`
+	Authority     []RequiredRole `json:"authority"`
 }
 
 // Actions is the record's actions section: the safe actions whose
@@ -230,6 +250,7 @@ var (
 		"closed": true, "unproven": true,
 	}
 	validLifecycleRelation = map[string]bool{"new": true, "exact": true, "diverged": true, "unproven": true}
+	validPosture           = map[string]bool{"authoritative": true, "advisory": true, "unknown": true}
 	validRelationship      = map[string]bool{"equal": true, "ahead": true, "behind": true, "diverged": true, "unknown": true}
 	validSource            = map[string]bool{"head": true, "working-tree": true, "remote-ref": true, "receipt-bound": true}
 	validConfirmation      = map[string]bool{"none": true, "explicit-confirmation": true}
@@ -290,6 +311,9 @@ func (t Target) validate() error {
 }
 
 func (f StringFact) validate(field string) error {
+	if f.Known && f.Value == "" {
+		return fmt.Errorf("journey: %s: known is true but value is empty", field)
+	}
 	if !f.Known && f.Value != "" {
 		return fmt.Errorf("journey: %s: known is false but value %q is non-empty", field, f.Value)
 	}
@@ -304,6 +328,9 @@ func (f BoolFact) validate(field string) error {
 }
 
 func (f DefaultBranchFact) validate(field string) error {
+	if f.Known && (f.Name == "" || f.Ref == "" || f.Head == "") {
+		return fmt.Errorf("journey: %s: known is true but name/ref/head are not all non-empty", field)
+	}
 	if !f.Known && (f.Name != "" || f.Ref != "" || f.Head != "") {
 		return fmt.Errorf("journey: %s: known is false but name/ref/head are non-empty", field)
 	}
@@ -311,6 +338,9 @@ func (f DefaultBranchFact) validate(field string) error {
 }
 
 func (f WorktreeFact) validate(field string) error {
+	if f.Managed && f.Name == "" {
+		return fmt.Errorf("journey: %s: managed is true but name is empty", field)
+	}
 	if !f.Managed && f.Name != "" {
 		return fmt.Errorf("journey: %s: managed is false but name %q is non-empty", field, f.Name)
 	}
@@ -361,6 +391,9 @@ func (lf LifecycleFacts) validate(targetClass string) error {
 	if !validLifecycleRelation[lf.Relation] {
 		return fmt.Errorf("journey: lifecycle: unknown relation %q", lf.Relation)
 	}
+	if !validPosture[lf.Posture] {
+		return fmt.Errorf("journey: lifecycle: unknown posture %q", lf.Posture)
+	}
 	if lf.AcceptedBaseline != nil {
 		b := lf.AcceptedBaseline
 		if b.Path == "" || b.Blob == "" || b.LandingCommit == "" {
@@ -372,6 +405,9 @@ func (lf LifecycleFacts) validate(targetClass string) error {
 		if fz.At == "" || fz.Commit == "" {
 			return fmt.Errorf("journey: lifecycle.frozen: at and commit must both be non-empty")
 		}
+	}
+	if err := lf.ActiveBranch.validate("lifecycle.active_branch"); err != nil {
+		return err
 	}
 	if lf.Disclosures == nil {
 		return fmt.Errorf("journey: lifecycle: disclosures must be non-nil (an explicitly empty set is [])")
@@ -390,8 +426,8 @@ func (o Owner) validate(field string) error {
 }
 
 func (b Blocker) validate(field string) error {
-	if b.ID == "" {
-		return fmt.Errorf("journey: %s: id must be non-empty", field)
+	if !blockerIDRe.MatchString(b.ID) {
+		return fmt.Errorf("journey: %s: id %q must match ^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)*$", field, b.ID)
 	}
 	fixedClass, err := b.Reason.Class()
 	if err != nil {
@@ -415,8 +451,8 @@ func (b Blocker) validate(field string) error {
 	if b.ClearingCondition == "" {
 		return fmt.Errorf("journey: %s: clearing_condition must be non-empty", field)
 	}
-	if b.Transition == "" || !transitionRe.MatchString(b.Transition) {
-		return fmt.Errorf("journey: %s: transition %q must be a catalog verb or the literal \"unknown\"", field, b.Transition)
+	if !idRe.MatchString(b.Transition) {
+		return fmt.Errorf("journey: %s: transition %q must be a lowercase-kebab token (a catalog verb or the literal \"unknown\")", field, b.Transition)
 	}
 	return nil
 }
@@ -429,6 +465,9 @@ func (eb EventualBlockers) validate() error {
 		if err := blk.validate(fmt.Sprintf("blockers.eventual.items[%d]", i)); err != nil {
 			return err
 		}
+	}
+	if !isSortedDeduped(mapStrings(eb.Items, func(b Blocker) string { return b.ID })) {
+		return fmt.Errorf("journey: blockers.eventual.items: must be strictly ascending by id (unique and ordered)")
 	}
 	if eb.Disclosures == nil {
 		return fmt.Errorf("journey: blockers.eventual.disclosures: must be non-nil (an explicitly empty set is [])")
@@ -462,6 +501,9 @@ func (bs Blockers) validate() error {
 		}
 		seen[blk.ID] = true
 	}
+	if !isSortedDeduped(mapStrings(bs.Current, func(b Blocker) string { return b.ID })) {
+		return fmt.Errorf("journey: blockers.current: must be strictly ascending by id (unique and ordered)")
+	}
 	if err := bs.Eventual.validate(); err != nil {
 		return err
 	}
@@ -475,8 +517,8 @@ func (bs Blockers) validate() error {
 }
 
 func (rr RequiredRole) validate(field string) error {
-	if rr.Transition == "" {
-		return fmt.Errorf("journey: %s: transition must be non-empty", field)
+	if !idRe.MatchString(rr.Transition) {
+		return fmt.Errorf("journey: %s: transition %q must match ^[a-z][a-z0-9-]*$", field, rr.Transition)
 	}
 	if !obligationRe.MatchString(rr.Obligation) {
 		return fmt.Errorf("journey: %s: obligation %q must match <kind>/<obligation>", field, rr.Obligation)
@@ -490,6 +532,15 @@ func (rr RequiredRole) validate(field string) error {
 	return nil
 }
 
+// requiredRoleKey is the (transition, obligation) ordering key shared by
+// PrincipalFacts.Required and Action.Authority: both must be strictly
+// ascending by this tuple (CO-4). \x00 cannot appear in either field
+// (both are restricted to idRe/obligationRe's grammar), so lexicographic
+// order over the joined key matches tuple order exactly.
+func requiredRoleKey(rr RequiredRole) string {
+	return rr.Transition + "\x00" + rr.Obligation
+}
+
 func (pf PrincipalFacts) validate() error {
 	if pf.Required == nil {
 		return fmt.Errorf("journey: principals.required: must be non-nil (an explicitly empty set is [])")
@@ -499,11 +550,17 @@ func (pf PrincipalFacts) validate() error {
 			return err
 		}
 	}
+	if !isSortedDeduped(mapStrings(pf.Required, requiredRoleKey)) {
+		return fmt.Errorf("journey: principals.required: must be strictly ascending by (transition, obligation)")
+	}
 	if pf.Disclosures == nil {
 		return fmt.Errorf("journey: principals.disclosures: must be non-nil (an explicitly empty set is [])")
 	}
 	if !isSortedDeduped(pf.Disclosures) {
 		return fmt.Errorf("journey: principals.disclosures: must be sorted and deduplicated")
+	}
+	if !pf.ProfileAdopted && len(pf.Disclosures) == 0 {
+		return fmt.Errorf("journey: principals: profile_adopted is false but disclosures is empty: absence must be disclosed (CO-1)")
 	}
 	return nil
 }
@@ -519,8 +576,8 @@ func (p Precondition) validate(field string) error {
 }
 
 func (a Action) validate(field string) error {
-	if a.ID == "" {
-		return fmt.Errorf("journey: %s: id must be non-empty", field)
+	if !idRe.MatchString(a.ID) {
+		return fmt.Errorf("journey: %s: id %q must match ^[a-z][a-z0-9-]*$", field, a.ID)
 	}
 	if !idRe.MatchString(a.Verb) {
 		return fmt.Errorf("journey: %s: verb %q must match ^[a-z][a-z0-9-]*$", field, a.Verb)
@@ -533,8 +590,8 @@ func (a Action) validate(field string) error {
 			return fmt.Errorf("journey: %s: argument[%d] %q is not a bare token (never free shell text)", field, i, arg)
 		}
 	}
-	if a.FromState == "" {
-		return fmt.Errorf("journey: %s: from_state must be non-empty", field)
+	if !idRe.MatchString(a.FromState) {
+		return fmt.Errorf("journey: %s: from_state %q must match ^[a-z][a-z0-9-]*$", field, a.FromState)
 	}
 	if !idRe.MatchString(a.ToState) {
 		return fmt.Errorf("journey: %s: to_state %q must match ^[a-z][a-z0-9-]*$", field, a.ToState)
@@ -549,6 +606,23 @@ func (a Action) validate(field string) error {
 		if err := p.validate(fmt.Sprintf("%s.preconditions[%d]", field, i)); err != nil {
 			return err
 		}
+	}
+	if !isSortedDeduped(mapStrings(a.Preconditions, func(p Precondition) string { return p.ID })) {
+		return fmt.Errorf("journey: %s.preconditions: must be strictly ascending by id (unique and ordered)", field)
+	}
+	if a.Authority == nil {
+		return fmt.Errorf("journey: %s.authority: must be non-nil (an explicitly empty set is [])", field)
+	}
+	for i, ar := range a.Authority {
+		if err := ar.validate(fmt.Sprintf("%s.authority[%d]", field, i)); err != nil {
+			return err
+		}
+		if ar.Transition != a.Verb {
+			return fmt.Errorf("journey: %s.authority[%d]: transition %q must equal the action's verb %q", field, i, ar.Transition, a.Verb)
+		}
+	}
+	if !isSortedDeduped(mapStrings(a.Authority, requiredRoleKey)) {
+		return fmt.Errorf("journey: %s.authority: must be strictly ascending by (transition, obligation)", field)
 	}
 	return nil
 }
@@ -568,6 +642,9 @@ func (as Actions) validate() error {
 		}
 		seen[a.ID] = true
 	}
+	if !isSortedDeduped(mapStrings(as.Safe, func(a Action) string { return a.ID })) {
+		return fmt.Errorf("journey: actions.safe: must be strictly ascending by id (unique and ordered)")
+	}
 	if as.NeededFacts == nil {
 		return fmt.Errorf("journey: actions.needed_facts: must be non-nil (an explicitly empty set is [])")
 	}
@@ -586,4 +663,15 @@ func isSortedDeduped(ss []string) bool {
 		}
 	}
 	return true
+}
+
+// mapStrings projects each element of items to a string ordering/identity
+// key, preserving order — the shared building block for this package's
+// ascending-order and dedup checks over non-string element types.
+func mapStrings[T any](items []T, key func(T) string) []string {
+	out := make([]string, len(items))
+	for i, it := range items {
+		out[i] = key(it)
+	}
+	return out
 }
