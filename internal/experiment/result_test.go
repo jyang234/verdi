@@ -80,6 +80,27 @@ func TestDecodeResultInconclusiveHappyPath(t *testing.T) {
 	}
 }
 
+func TestDecodeResultReasonWitness(t *testing.T) {
+	doc := mutateResult(t, validInconclusiveResultJSON(),
+		`{"code": "practical-tie", "detail": "candidates within noise floor"}`,
+		`{"code": "practical-tie", "detail": "candidates within noise floor", "witness": "p95 40ms vs 39ms"}`)
+	res, err := DecodeResult([]byte(doc))
+	if err != nil {
+		t.Fatalf("DecodeResult() unexpected error: %v", err)
+	}
+	if res.Reasons[0].Witness == nil || *res.Reasons[0].Witness != "p95 40ms vs 39ms" {
+		t.Errorf("Reasons[0].Witness = %v, want the recorded witness", res.Reasons[0].Witness)
+	}
+
+	res, err = DecodeResult([]byte(validInconclusiveResultJSON()))
+	if err != nil {
+		t.Fatalf("DecodeResult() unexpected error: %v", err)
+	}
+	if res.Reasons[0].Witness != nil {
+		t.Errorf("Reasons[0].Witness = %v, want nil for an absent witness", res.Reasons[0].Witness)
+	}
+}
+
 func TestDecodeResultRejects(t *testing.T) {
 	tests := []struct {
 		name string
@@ -94,6 +115,9 @@ func TestDecodeResultRejects(t *testing.T) {
 		{"winner present on non-proven-winner", mutateResult(t, validInconclusiveResultJSON(), `"verdict": "disclosed-unproven",`, `"verdict": "disclosed-unproven",
   "winner": "facts-cache",`)},
 		{"winner not among candidates", mutateResult(t, validResultJSON(), `"winner": "facts-cache",`, `"winner": "nonexistent",`)},
+		{"winner is an ineligible candidate", mutateResult(t, validResultJSON(), `"winner": "facts-cache",`, `"winner": "final-cache",`)},
+		{"winner is the baseline", mutateResult(t, validResultJSON(), `"winner": "facts-cache",`, `"winner": "baseline",`)},
+		{"reason witness present but empty", mutateResult(t, validInconclusiveResultJSON(), `{"code": "practical-tie", "detail": "candidates within noise floor"}`, `{"code": "practical-tie", "detail": "candidates within noise floor", "witness": ""}`)},
 		{"reasons nonempty on proven-winner", mutateResult(t, validResultJSON(), `"winner": "facts-cache",`, `"winner": "facts-cache",
   "reasons": [{"code": "practical-tie"}],`)},
 		{"reasons empty on disclosed-unproven", mutateResult(t, validInconclusiveResultJSON(), `"reasons": [{"code": "practical-tie", "detail": "candidates within noise floor"}],`, "")},

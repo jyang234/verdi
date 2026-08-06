@@ -44,6 +44,23 @@ func TestDecodeCapabilitiesHappyPath(t *testing.T) {
 	}
 }
 
+// TestDecodeCapabilitiesEmptyMetricsList proves the distinction the
+// presence check draws: an explicitly EMPTY metrics list is a valid answer
+// ("no metrics"), while an absent key is not an answer at all.
+func TestDecodeCapabilitiesEmptyMetricsList(t *testing.T) {
+	doc := mutateCapabilities(t, `"metrics": [
+    {"id": "request-latency", "type": "duration", "unit": "ms", "direction": "lower"},
+    {"id": "peak-rss", "type": "bytes", "unit": "bytes", "direction": "lower"}
+  ]`, `"metrics": []`)
+	c, err := DecodeCapabilities([]byte(doc))
+	if err != nil {
+		t.Fatalf("DecodeCapabilities() unexpected error: %v", err)
+	}
+	if len(c.Metrics) != 0 {
+		t.Errorf("len(c.Metrics) = %d, want 0", len(c.Metrics))
+	}
+}
+
 func TestDecodeCapabilitiesRejects(t *testing.T) {
 	tests := []struct {
 		name string
@@ -64,6 +81,17 @@ func TestDecodeCapabilitiesRejects(t *testing.T) {
 		{"duplicate workload input ids", mutateCapabilities(t, `"workload_inputs": ["representative-request-mix"]`, `"workload_inputs": ["representative-request-mix", "representative-request-mix"]`)},
 		{"empty environment entry", mutateCapabilities(t, `"environment": ["CACHE_TTL"]`, `"environment": [""]`)},
 		{"missing schema", strings.Replace(validCapabilitiesJSON(), `"schema": "verdi.experiment-evaluator-capabilities/v1",`, "", 1)},
+		// AC-3 declares metrics as required response content: an evaluator
+		// that never mentions the key has not answered the question, which
+		// is not the same as answering "I support no metrics" ([]).
+		{"metrics key missing", mutateCapabilities(t, `"metrics": [
+    {"id": "request-latency", "type": "duration", "unit": "ms", "direction": "lower"},
+    {"id": "peak-rss", "type": "bytes", "unit": "bytes", "direction": "lower"}
+  ],`, "")},
+		{"metrics explicit null", mutateCapabilities(t, `"metrics": [
+    {"id": "request-latency", "type": "duration", "unit": "ms", "direction": "lower"},
+    {"id": "peak-rss", "type": "bytes", "unit": "bytes", "direction": "lower"}
+  ]`, `"metrics": null`)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

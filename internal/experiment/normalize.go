@@ -65,6 +65,26 @@ func NormalizeDefinition(def Definition) (NormalizedDefinition, error) {
 // internal/canonjson.Digest of its NormalizeDefinition projection. This IS
 // the identity a lock block pins (Locked) — any change to a registered
 // input yields a different digest, never a mutation of the same identity.
+//
+// NUMERIC NORMALIZATION differs between this digest and ResultDigest, and
+// the difference is load-bearing for CO-3 (byte-identity across writers):
+//
+//   - DefinitionDigest hashes the PROJECTION, whose numeric fields are
+//     typed float64. The decoder has already parsed "0.25", "0.250" and
+//     "2.5e-1" to the same float64, and Go re-encodes it in one fixed
+//     shortest-round-trip form, so a definition's digest is independent of
+//     how the YAML spelled its numbers.
+//   - ResultDigest hashes the decoded Result, whose numeric fields are
+//     json.Number — the document's EXACT literal, preserved verbatim
+//     through canonjson. "18", "18.0" and "1.8e1" are three different
+//     digests.
+//
+// Result WRITERS therefore have an obligation definition authors do not:
+// every writer must emit result numerics in ONE fixed formatting, or two
+// writers that agree on every value still produce different bytes and CO-3
+// fails. The decision-engine lane emits via strconv.FormatFloat(v, 'f', -1,
+// 64) consistently; any other writer of verdi.experiment-result/v1 must
+// match that formatting exactly.
 func DefinitionDigest(def Definition) (string, error) {
 	n, err := NormalizeDefinition(def)
 	if err != nil {
@@ -100,6 +120,11 @@ func Locked(def Definition) (bool, error) {
 // internal/canonjson.Digest of the validated Result value itself.
 // ratification.yaml's result_digest field must equal this value to bind a
 // ratification to the exact result it responds to.
+//
+// Unlike DefinitionDigest, this digest BINDS the decoded Result's exact
+// json.Number literals rather than normalizing them through typed floats —
+// see DefinitionDigest's numeric-normalization note for the writer
+// obligation that follows from it.
 func ResultDigest(res Result) (string, error) {
 	if err := res.Validate(); err != nil {
 		return "", err

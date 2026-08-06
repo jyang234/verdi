@@ -19,6 +19,17 @@ var ErrObservationIntegrity = errors.New("experiment: observation integrity viol
 // ErrObservationIncomplete is the sentinel ValidateComplete wraps when an
 // otherwise integrity-valid observation set is missing one or more
 // required (candidate, round) entries.
+//
+// It is the SEAM the future resume lane keys on. At this rung an
+// incomplete observations.jsonl is a hard error (DeriveState reports it
+// rather than selecting a lower state), because incomplete evidence
+// supports no verdict. DC-15's resume behavior arrives in a later unit and is the one
+// caller allowed to treat this condition as a continuation point rather
+// than a failure: it matches on this sentinel with errors.Is, reads the
+// enumerated missing (candidate, round) pairs out of the error text's
+// source — the same set ValidateComplete computes — and resumes execution
+// there. Nothing else may special-case incompleteness, and integrity
+// failures (ErrObservationIntegrity) are never resumable.
 var ErrObservationIncomplete = errors.New("experiment: observation set incomplete")
 
 // candidateRound is the (candidate, round) key ValidateObservations and

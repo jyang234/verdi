@@ -79,6 +79,11 @@ func TestDecodeRatificationRejects(t *testing.T) {
 		{"malformed principal actor", mutateRatification(t, "actor: "+validActor, "actor: principal/GitHub/dXNlci0xMjM")},
 		{"select-other missing candidate", selectOtherDoc + "reason: because\n"},
 		{"select-other missing reason", selectOtherDoc + "candidate: baseline\n"},
+		// A PRESENT reason must carry content. select-other is the one
+		// disposition where the rule has observable force: an explicitly
+		// empty reason and an absent one both decode to "", and for every
+		// other disposition an absent reason is legitimate.
+		{"select-other empty reason", selectOtherDoc + "candidate: baseline\nreason: \"\"\n"},
 		{"candidate present on non-select-other", validRatificationYAML() + "candidate: baseline\n"},
 	}
 	for _, tt := range tests {

@@ -58,13 +58,45 @@ type Capabilities struct {
 	RequiresElevated bool               `json:"requires_elevated"`
 }
 
+// capabilitiesDoc is the strict decode target: metrics is a pointer so an
+// omitted (or explicit null) field is distinguishable from an explicitly
+// present empty list, matching AC-3's "required response content; may be
+// empty" grammar — the same presence trick observationDoc uses for
+// disclosures. An evaluator that never mentions metrics has not answered
+// the question; one that answers [] has.
+type capabilitiesDoc struct {
+	Schema           string              `json:"schema"`
+	ProtocolVersions []string            `json:"protocol_versions"`
+	Metrics          *[]CapabilityMetric `json:"metrics"`
+	Guards           []string            `json:"guards,omitempty"`
+	Observers        []string            `json:"observers,omitempty"`
+	WorkloadInputs   []string            `json:"workload_inputs,omitempty"`
+	Environment      []string            `json:"environment,omitempty"`
+	RequiresNetwork  bool                `json:"requires_network"`
+	RequiresElevated bool                `json:"requires_elevated"`
+}
+
 // DecodeCapabilities strict-decodes raw as a capabilities response and
 // fully validates it (decodeStrictJSON: the shared strict seam plus this
 // package's duplicate-key guard).
 func DecodeCapabilities(raw []byte) (Capabilities, error) {
-	var c Capabilities
-	if err := decodeStrictJSON(raw, &c); err != nil {
+	var doc capabilitiesDoc
+	if err := decodeStrictJSON(raw, &doc); err != nil {
 		return Capabilities{}, fmt.Errorf("experiment: decoding capabilities: %w", err)
+	}
+	if doc.Metrics == nil {
+		return Capabilities{}, fmt.Errorf("experiment: capabilities.metrics is missing (an explicitly empty list is [])")
+	}
+	c := Capabilities{
+		Schema:           doc.Schema,
+		ProtocolVersions: doc.ProtocolVersions,
+		Metrics:          *doc.Metrics,
+		Guards:           doc.Guards,
+		Observers:        doc.Observers,
+		WorkloadInputs:   doc.WorkloadInputs,
+		Environment:      doc.Environment,
+		RequiresNetwork:  doc.RequiresNetwork,
+		RequiresElevated: doc.RequiresElevated,
 	}
 	if err := c.Validate(); err != nil {
 		return Capabilities{}, err

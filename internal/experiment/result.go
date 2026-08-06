@@ -10,16 +10,22 @@ const ResultSchema = "verdi.experiment-result/v1"
 
 // Reason is one entry explaining why a result did not reach
 // proven-winner.
+//
+// Witness is a pointer for the same reason GuardResult.Witness is
+// (observation.go): a witness that is PRESENT must exhibit something, so
+// its presence has to be distinguishable from its absence. Absent stays
+// absent (nil, omitted from the canonical form); an explicitly empty
+// witness is a claim to have exhibited nothing and is rejected.
 type Reason struct {
 	Code      ReasonCode `json:"code"`
 	Detail    string     `json:"detail,omitempty"`
 	Guard     string     `json:"guard,omitempty"`
 	Candidate string     `json:"candidate,omitempty"`
-	Witness   string     `json:"witness,omitempty"`
+	Witness   *string    `json:"witness,omitempty"`
 }
 
 // Validate checks the code and, for any present optional field, that its
-// grammar holds.
+// grammar holds — including that a present witness is nonempty.
 func (r Reason) Validate() error {
 	if err := r.Code.Validate(); err != nil {
 		return fmt.Errorf("experiment: reasons: %w", err)
@@ -33,6 +39,9 @@ func (r Reason) Validate() error {
 		if err := ValidateID(r.Candidate); err != nil {
 			return fmt.Errorf("experiment: reason %q: candidate: %w", r.Code, err)
 		}
+	}
+	if r.Witness != nil && *r.Witness == "" {
+		return fmt.Errorf("experiment: reason %q: witness must be nonempty when present", r.Code)
 	}
 	return nil
 }
@@ -194,7 +203,9 @@ func DecodeResult(raw []byte) (Result, error) {
 }
 
 // Validate checks every field's grammar and the verdict-conditional rules
-// binding winner, reasons, candidates, and observations_digest together.
+// binding winner, reasons, candidates, and observations_digest together,
+// including that a named winner is an eligible, non-baseline entry of
+// candidates.
 func (res Result) Validate() error {
 	if res.Schema != ResultSchema {
 		return fmt.Errorf("experiment: unknown result schema %q, want %q", res.Schema, ResultSchema)
@@ -247,7 +258,7 @@ func (res Result) Validate() error {
 	}
 	candidateIDs := make(map[string]bool, len(res.Candidates))
 	baselines := 0
-	winnerFound := false
+	var winner *CandidateResult
 	for i, c := range res.Candidates {
 		if err := c.Validate(); err != nil {
 			return fmt.Errorf("experiment: candidates[%d]: %w", i, err)
@@ -260,14 +271,26 @@ func (res Result) Validate() error {
 			baselines++
 		}
 		if c.ID == res.Winner {
-			winnerFound = true
+			winner = &res.Candidates[i]
 		}
 	}
 	if baselines != 1 {
 		return fmt.Errorf("experiment: result.candidates must have exactly one baseline=true entry, got %d", baselines)
 	}
-	if res.Winner != "" && !winnerFound {
+	if res.Winner != "" && winner == nil {
 		return fmt.Errorf("experiment: result.winner %q does not name an entry in result.candidates", res.Winner)
+	}
+	// A proven winner is a claim about ONE named candidate, so the entry it
+	// names has to be able to carry the claim: a candidate ruled out by a
+	// guard cannot win, and the baseline cannot win against itself —
+	// winning means having materially improved OVER the baseline.
+	if winner != nil {
+		if !winner.Eligible {
+			return fmt.Errorf("experiment: result.winner %q names an ineligible candidate", res.Winner)
+		}
+		if winner.Baseline {
+			return fmt.Errorf("experiment: result.winner %q names the baseline candidate", res.Winner)
+		}
 	}
 
 	if err := ValidateDigest(res.ObservationsDigest); err != nil {
