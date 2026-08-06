@@ -14,18 +14,27 @@ import (
 // explicitly empty list: omission is invalid; `[]` is a present, empty
 // set where the class permits it.
 type profileDoc struct {
-	Schema                     *string                      `yaml:"schema"`
-	ID                         *string                      `yaml:"id"`
-	Class                      *string                      `yaml:"class"`
-	ApplicableTransitions      *[]string                    `yaml:"applicable_transitions"`
-	IdentityTrustSources       *[]TrustSource               `yaml:"identity_trust_sources"`
-	RoleMappings               *[]RoleMapping               `yaml:"role_mappings"`
-	OwnershipSources           *[]OwnershipSource           `yaml:"ownership_sources"`
-	SignatureRequirements      *[]SignatureRequirement      `yaml:"signature_requirements"`
-	RequiredApprovers          *[]ApproverRequirement       `yaml:"required_approvers"`
-	DistinctnessRules          *[]DistinctnessRule          `yaml:"distinctness_rules"`
-	EvidenceSourceRestrictions *[]EvidenceSourceRestriction `yaml:"evidence_source_restrictions"`
-	EscalationThresholds       *[]escalationDoc             `yaml:"escalation_thresholds"`
+	Schema                     *string                   `yaml:"schema"`
+	ID                         *string                   `yaml:"id"`
+	Class                      *string                   `yaml:"class"`
+	ApplicableTransitions      *[]string                 `yaml:"applicable_transitions"`
+	IdentityTrustSources       *[]TrustSource            `yaml:"identity_trust_sources"`
+	RoleMappings               *[]RoleMapping            `yaml:"role_mappings"`
+	OwnershipSources           *[]OwnershipSource        `yaml:"ownership_sources"`
+	SignatureRequirements      *[]SignatureRequirement   `yaml:"signature_requirements"`
+	RequiredApprovers          *[]ApproverRequirement    `yaml:"required_approvers"`
+	DistinctnessRules          *[]DistinctnessRule       `yaml:"distinctness_rules"`
+	EvidenceSourceRestrictions *[]evidenceRestrictionDoc `yaml:"evidence_source_restrictions"`
+	EscalationThresholds       *[]escalationDoc          `yaml:"escalation_thresholds"`
+}
+
+// evidenceRestrictionDoc mirrors EvidenceSourceRestriction with a pointer
+// allowed_sources so an omitted or null field is distinguishable from the
+// explicit empty set [] — otherwise two behaviorally equivalent profiles
+// could canonicalize (and digest) differently.
+type evidenceRestrictionDoc struct {
+	Transitions    []string  `yaml:"transitions"`
+	AllowedSources *[]string `yaml:"allowed_sources"`
 }
 
 // escalationDoc mirrors EscalationThreshold with a pointer at_least so a
@@ -100,6 +109,23 @@ func docToProfile(doc profileDoc) (Profile, error) {
 		return Profile{}, missing("escalation_thresholds")
 	}
 
+	restrictions := make([]EvidenceSourceRestriction, 0, len(*doc.EvidenceSourceRestrictions))
+	for i, e := range *doc.EvidenceSourceRestrictions {
+		if e.AllowedSources == nil {
+			return Profile{}, fmt.Errorf("governanceprincipal: evidence_source_restrictions[%d]: allowed_sources is missing (an explicitly empty set is [])", i)
+		}
+		allowed := *e.AllowedSources
+		if allowed == nil {
+			// A present-but-nil slice normalizes to the explicit empty set
+			// so equivalent profiles share one canonical encoding.
+			allowed = []string{}
+		}
+		restrictions = append(restrictions, EvidenceSourceRestriction{
+			Transitions:    e.Transitions,
+			AllowedSources: allowed,
+		})
+	}
+
 	thresholds := make([]EscalationThreshold, 0, len(*doc.EscalationThresholds))
 	for i, e := range *doc.EscalationThresholds {
 		if e.AtLeast == nil {
@@ -124,7 +150,7 @@ func docToProfile(doc profileDoc) (Profile, error) {
 		SignatureRequirements:      *doc.SignatureRequirements,
 		RequiredApprovers:          *doc.RequiredApprovers,
 		DistinctnessRules:          *doc.DistinctnessRules,
-		EvidenceSourceRestrictions: *doc.EvidenceSourceRestrictions,
+		EvidenceSourceRestrictions: restrictions,
 		EscalationThresholds:       thresholds,
 	}, nil
 }

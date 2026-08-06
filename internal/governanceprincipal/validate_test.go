@@ -314,3 +314,34 @@ func TestCatalogValidate(t *testing.T) {
 		t.Fatalf("valid catalog rejected: %v", err)
 	}
 }
+
+// TestDecodeProfileAllowedSourcesPresence: allowed_sources must be
+// present and non-null; a literal [] is the explicit empty set, and
+// behaviorally equivalent profiles digest identically.
+func TestDecodeProfileAllowedSourcesPresence(t *testing.T) {
+	mustErr(t, profileYAMLWith(map[string]string{
+		"evidence_source_restrictions": "evidence_source_restrictions:\n  - transitions: [close]\n",
+	}), "allowed_sources")
+	mustErr(t, profileYAMLWith(map[string]string{
+		"evidence_source_restrictions": "evidence_source_restrictions:\n  - transitions: [close]\n    allowed_sources:\n",
+	}), "allowed_sources")
+
+	explicit := "evidence_source_restrictions:\n  - transitions: [close]\n    allowed_sources: []\n"
+	p := mustDecode(t, profileYAMLWith(map[string]string{"evidence_source_restrictions": explicit}))
+	if len(p.EvidenceSourceRestrictions) != 1 || p.EvidenceSourceRestrictions[0].AllowedSources == nil ||
+		len(p.EvidenceSourceRestrictions[0].AllowedSources) != 0 {
+		t.Fatalf("explicit [] allowed_sources = %+v, want present empty set", p.EvidenceSourceRestrictions)
+	}
+	d1, err := p.Digest()
+	if err != nil {
+		t.Fatalf("Digest: %v", err)
+	}
+	q := mustDecode(t, profileYAMLWith(map[string]string{"evidence_source_restrictions": explicit}))
+	d2, err := q.Digest()
+	if err != nil {
+		t.Fatalf("Digest: %v", err)
+	}
+	if d1 != d2 {
+		t.Errorf("equivalent profiles digest differently: %s vs %s", d1, d2)
+	}
+}

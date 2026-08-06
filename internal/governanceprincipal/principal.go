@@ -50,9 +50,15 @@ func (id PrincipalID) Validate() error {
 	if err := ValidateID(parts[1]); err != nil {
 		return fmt.Errorf("governanceprincipal: principal id %q: %w", string(id), err)
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(parts[2])
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(parts[2])
 	if err != nil {
 		return fmt.Errorf("governanceprincipal: principal id %q: subject segment is not unpadded base64url: %w", string(id), err)
+	}
+	// Only the exact CanonicalPrincipalID output validates: strict decoding
+	// rejects nonzero trailing padding bits, and the re-encode equality
+	// closes every remaining noncanonical spelling of the same bytes.
+	if base64.RawURLEncoding.EncodeToString(raw) != parts[2] {
+		return fmt.Errorf("governanceprincipal: principal id %q: subject segment is not the canonical base64url encoding of its bytes", string(id))
 	}
 	if len(raw) == 0 {
 		return fmt.Errorf("governanceprincipal: principal id %q: subject must be nonempty", string(id))

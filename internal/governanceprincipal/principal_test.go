@@ -110,6 +110,10 @@ func TestPrincipalIDValidate(t *testing.T) {
 		{"standard base64 alphabet", "principal/github/dXNl+g"},
 		{"non-base64 bytes", "principal/github/not base64!"},
 		{"encoded invalid utf-8", "principal/github/_w"},
+		// "YR" decodes to the same byte as canonical "YQ" under permissive
+		// decoding; only the exact CanonicalPrincipalID output may validate.
+		{"non-canonical trailing bits", "principal/github/YR"},
+		{"non-canonical trailing bits long", "principal/github/dXNlci0xMjN"},
 	}
 	for _, tt := range invalid {
 		t.Run(tt.name, func(t *testing.T) {
