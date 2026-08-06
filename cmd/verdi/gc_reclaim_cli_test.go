@@ -84,8 +84,8 @@ func TestGcReclaimUnmanaged_CLI_BothInvocationShapes_DiscloseTheOtherAsNotRun(t 
 		if !strings.Contains(out, "reclaimed") {
 			t.Fatalf("plain gc stdout missing its pre-existing reclaim line:\n%s", out)
 		}
-		if !strings.Contains(out, "reclaims managed worktrees only") {
-			t.Fatalf("plain gc stdout missing its pre-existing managed-only scope line:\n%s", out)
+		if !strings.Contains(out, "reclaims managed worktrees") || !strings.Contains(out, "execution workspaces") {
+			t.Fatalf("plain gc stdout missing its scope line naming the closed triple (managed worktrees, execution workspaces, unmanaged-not-run):\n%s", out)
 		}
 		if !strings.Contains(out, "--reclaim-unmanaged") || !strings.Contains(out, "NOT run this invocation") {
 			t.Fatalf("plain gc stdout missing the new available-but-not-run disclosure naming --reclaim-unmanaged:\n%s", out)
@@ -121,14 +121,14 @@ func TestGcReclaimUnmanaged_CLI_BothInvocationShapes_DiscloseTheOtherAsNotRun(t 
 		if !strings.Contains(out, unmanagedBranch) {
 			t.Fatalf("--reclaim-unmanaged stdout missing the unmanaged pair's own branch:\n%s", out)
 		}
-		if !strings.Contains(out, "managed-worktree reclamation") || !strings.Contains(out, "NOT run this invocation") {
-			t.Fatalf("--reclaim-unmanaged stdout missing the mirrored managed-not-run disclosure:\n%s", out)
+		if !strings.Contains(out, "managed-worktree reclamation") || !strings.Contains(out, "execution-workspace reclamation") || !strings.Contains(out, "NOT run this invocation") {
+			t.Fatalf("--reclaim-unmanaged stdout missing the mirrored managed-and-execution-not-run disclosure:\n%s", out)
 		}
 		if !strings.Contains(out, "derived-cache") || !strings.Contains(strings.ToLower(out), "layout") {
 			t.Fatalf("--reclaim-unmanaged stdout missing the pre-existing derived-cache/layout-cache disclosure:\n%s", out)
 		}
-		if strings.Contains(out, "reclaims managed worktrees only") {
-			t.Fatalf("--reclaim-unmanaged stdout must never print the plain run's own managed-only scope line:\n%s", out)
+		if strings.Contains(out, "reclaims managed worktrees (spec/worktree-manager) and execution workspaces") {
+			t.Fatalf("--reclaim-unmanaged stdout must never print the plain run's own scope line:\n%s", out)
 		}
 		if strings.Contains(out, "reclaimed:") {
 			t.Fatalf("--reclaim-unmanaged (no --apply) must never print a reclaimed: line:\n%s", out)
