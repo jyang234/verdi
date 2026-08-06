@@ -212,6 +212,74 @@ func TestNewIdentity_RejectsEmptyRunID(t *testing.T) {
 	}
 }
 
+// TestNewIdentity_RejectsInvalidUTF8RunID proves a RunID that is not valid
+// UTF-8 fails closed at construction and at Validate. Canonical JSON is
+// LOSSY for invalid UTF-8 — encoding substitutes U+FFFD — so an identity
+// carrying such a RunID could be written to a sidecar and read back as a
+// DIFFERENT identity; the guard belongs upstream of the encoder.
+func TestNewIdentity_RejectsInvalidUTF8RunID(t *testing.T) {
+	cases := map[string]string{
+		"lone continuation bytes": "run-\xff\xfe-x",
+		"truncated 2-byte start":  "run-\xc3",
+		"surrogate half":          "run-\xed\xa0\x80",
+		"overlong encoding":       "run-\xc0\xaf",
+	}
+	for name, runID := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := NewExactIdentity(runID, validSHA); err == nil {
+				t.Fatalf("NewExactIdentity(%q): want error, got nil", runID)
+			}
+			if _, err := NewPatchIdentity(runID, validSHA, []byte("x")); err == nil {
+				t.Fatalf("NewPatchIdentity(%q): want error, got nil", runID)
+			}
+			id := Identity{Shape: ExactSHA, RunID: runID, CommitSHA: validSHA}
+			if err := id.Validate(); err == nil {
+				t.Fatalf("Validate(): want error for run id %q, got nil", runID)
+			}
+			if got, err := id.WorkspaceID(); err == nil {
+				t.Fatalf("WorkspaceID() = %q, want error for run id %q", got, runID)
+			}
+		})
+	}
+}
+
+// TestEncodeDecodeSidecar_RoundTripsToAnEqualIdentity is the completion
+// witness invariant: EVERY identity the constructors emit must survive
+// EncodeSidecar/DecodeSidecar byte-for-byte and compare Equal to itself.
+// Without it, a legitimate repeat of an identical request compares unequal
+// to its own recorded sidecar and takes the ErrIdentityMismatch branch — a
+// hard error naming both requests — forever, permanently wedging that
+// workspace id.
+func TestEncodeDecodeSidecar_RoundTripsToAnEqualIdentity(t *testing.T) {
+	cases := map[string]string{
+		"plain":         "run",
+		"slashed":       "feature/My-Run",
+		"underscored":   "weird_run/name",
+		"invalid utf-8": "run-\xff\xfe-x",
+	}
+	for name, runID := range cases {
+		t.Run(name, func(t *testing.T) {
+			id, err := NewExactIdentity(runID, validSHA)
+			if err != nil {
+				// Rejected at construction: it can never reach a sidecar,
+				// so the round-trip invariant is vacuously preserved.
+				t.Skipf("NewExactIdentity(%q) rejected the run id: %v", runID, err)
+			}
+			data, err := EncodeSidecar(id)
+			if err != nil {
+				t.Fatalf("EncodeSidecar: %v", err)
+			}
+			back, err := DecodeSidecar(data)
+			if err != nil {
+				t.Fatalf("DecodeSidecar: %v", err)
+			}
+			if !back.Equal(id) {
+				t.Fatalf("sidecar round trip is not identity-preserving: encoded %s, decoded %s (bytes %q)", id, back, data)
+			}
+		})
+	}
+}
+
 // TestWorkspaceID_SatisfiesValidWorkspaceID closes the loop between the two
 // halves of the naming scheme: every id the producer emits is one the
 // grammar classifier accepts.

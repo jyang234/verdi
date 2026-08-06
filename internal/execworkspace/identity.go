@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -104,13 +105,23 @@ func NewPatchIdentity(runID, commitSHA string, patchBytes []byte) (Identity, err
 //
 // The rules (spec §Workspace naming): Shape is one of the two ratified
 // shapes and nothing else — an unknown Shape value fails closed rather than
-// falling through to exact-SHA handling; RunID is non-empty AND still
-// non-empty after the store's normative RefSlug mapping, since an id whose
-// slug is empty could not produce a <workspace-id> with a non-empty slug
-// part; CommitSHA is the canonical lowercase 40-hex form; and PatchSHA256 is
+// falling through to exact-SHA handling; RunID is non-empty, is valid UTF-8,
+// AND is still non-empty after the store's normative RefSlug mapping, since
+// an id whose slug is empty could not produce a <workspace-id> with a
+// non-empty slug part; CommitSHA is the canonical lowercase 40-hex form; and
+// PatchSHA256 is
 // the canonical lowercase 64-hex form for BasePlusPatch and EXACTLY empty
 // for ExactSHA — an exact-shape identity carrying a patch digest is a
 // contradiction, never silently ignored.
+//
+// The UTF-8 rule protects the sidecar's role as the materialization
+// COMPLETION WITNESS. Canonical JSON is lossy for invalid UTF-8 — the
+// encoder substitutes U+FFFD — so an identity with an invalid-UTF-8 RunID
+// would encode, decode cleanly, and compare UNEQUAL to the request that
+// produced it. A later identical request would then hit VerifyIdentity's
+// hard-error branch forever, permanently wedging that workspace id.
+// Rejecting here keeps every identity that can reach a sidecar
+// round-trip-stable.
 func (id Identity) Validate() error {
 	switch id.Shape {
 	case ExactSHA, BasePlusPatch:
@@ -119,6 +130,9 @@ func (id Identity) Validate() error {
 	}
 	if id.RunID == "" {
 		return fmt.Errorf("execworkspace: identity: run id is empty")
+	}
+	if !utf8.ValidString(id.RunID) {
+		return fmt.Errorf("execworkspace: identity: run id %q is not valid UTF-8", id.RunID)
 	}
 	if store.RefSlug(id.RunID) == "" {
 		return fmt.Errorf("execworkspace: identity: run id %q slugs to the empty string", id.RunID)
