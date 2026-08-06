@@ -22,7 +22,6 @@ const (
 	DirProfiles   = "profiles"
 )
 
-
 // ClassifyPolicyPath maps a .verdi/policy/-relative slash path to the
 // constitution artifact kind it must decode as and its name half. The
 // grammar is closed (D1's posture applied inside the directory): an
