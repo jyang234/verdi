@@ -86,8 +86,7 @@
 // `verdi journey` (no argument) fails on usage parsing alone
 // (cmd/verdi/journey.go's cmdJourney) before resolving a store root or
 // reading any file, falling straight into the plain default case below —
-// the same safety property model/spec/board/waivers already rely on
-// there.
+// the same safety property model/spec/board already rely on there.
 package specalign
 
 import "testing"
