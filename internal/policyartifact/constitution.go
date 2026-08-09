@@ -1,0 +1,527 @@
+package policyartifact
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/governanceprincipal"
+)
+
+// ConstitutionName is the fixed name (and filename stem) of the one
+// constitution manifest a store carries at .verdi/policy/constitution.md.
+const ConstitutionName = "constitution"
+
+// Constitution is the store-level constitution manifest: it selects the
+// canonical governance profile (AC-1: "The constitution also selects a
+// canonical governance profile"), registers the project's governance
+// catalog (the duplicate-free catalog the kernel's DecodeProfile
+// requires, SI-18), registers the constraint-subject catalogs projects
+// contribute under DC-5 (subjects per Verdi-owned family, plus the
+// environment scope values), and declares the harness adapters whose
+// instruction projections this store generates (DC-1's adapter-driven
+// projection rules; the adapter boundary stays generic data — paths and
+// filenames — never executable configuration).
+type Constitution struct {
+	Schema          string            `json:"schema"`
+	ID              string            `json:"id"`
+	Kind            string            `json:"kind"`
+	Title           string            `json:"title"`
+	Owners          []string          `json:"owners"`
+	SelectedProfile string            `json:"selected_profile"`
+	Environments    []string          `json:"environments"`
+	Catalog         GovernanceCatalog `json:"catalog"`
+	Subjects        SubjectCatalog    `json:"subjects"`
+	Adapters        []Adapter         `json:"adapters"`
+	Template        *TemplateRecord   `json:"template,omitempty"`
+	Rationale       string            `json:"rationale"`
+
+	seal string
+}
+
+// GovernanceCatalog registers the project's governance vocabulary — the
+// injected duplicate-free catalog governance-profile validation resolves
+// against (SI-18). The kernel owns the catalog TYPE's semantics
+// (governanceprincipal.Catalog); this manifest owns its committed
+// registration.
+type GovernanceCatalog struct {
+	Roles             []string `yaml:"roles" json:"roles"`
+	Transitions       []string `yaml:"transitions" json:"transitions"`
+	EvidenceSources   []string `yaml:"evidence_sources" json:"evidence_sources"`
+	EscalationMetrics []string `yaml:"escalation_metrics" json:"escalation_metrics"`
+}
+
+// SubjectCatalog registers the concrete constraint subjects a project's
+// policy claims may name, per Verdi-owned family (DC-5: projects
+// register subjects; they cannot register executable semantics).
+type SubjectCatalog struct {
+	Action        []string `yaml:"action" json:"action"`
+	Configuration []string `yaml:"configuration" json:"configuration"`
+	Capability    []string `yaml:"capability" json:"capability"`
+	Resource      []string `yaml:"resource" json:"resource"`
+	Identity      []string `yaml:"identity" json:"identity"`
+	Evidence      []string `yaml:"evidence" json:"evidence"`
+}
+
+// Family returns the registered subjects for family f.
+func (s SubjectCatalog) Family(f Family) []string {
+	switch f {
+	case FamilyAction:
+		return s.Action
+	case FamilyConfiguration:
+		return s.Configuration
+	case FamilyCapability:
+		return s.Capability
+	case FamilyResource:
+		return s.Resource
+	case FamilyIdentity:
+		return s.Identity
+	case FamilyEvidence:
+		return s.Evidence
+	}
+	return nil
+}
+
+// Has reports whether subject is registered for family f.
+func (s SubjectCatalog) Has(f Family, subject string) bool {
+	for _, m := range s.Family(f) {
+		if m == subject {
+			return true
+		}
+	}
+	return false
+}
+
+// Adapter declares one harness adapter's projection surface: the managed
+// projection files this store generates for it and the instruction
+// filenames its harness discovers project-wide (AC-1: "The adapter
+// enumerates the harness's effective project-level instruction discovery
+// chain, including nested instruction files").
+type Adapter struct {
+	ID                 string   `yaml:"id" json:"id"`
+	Version            string   `yaml:"version" json:"version"`
+	Managed            []string `yaml:"managed" json:"managed"`
+	DiscoveryFilenames []string `yaml:"discovery_filenames" json:"discovery_filenames"`
+}
+
+type governanceCatalogDoc struct {
+	Roles             *[]string `yaml:"roles"`
+	Transitions       *[]string `yaml:"transitions"`
+	EvidenceSources   *[]string `yaml:"evidence_sources"`
+	EscalationMetrics *[]string `yaml:"escalation_metrics"`
+}
+
+type subjectCatalogDoc struct {
+	Action        *[]string `yaml:"action"`
+	Configuration *[]string `yaml:"configuration"`
+	Capability    *[]string `yaml:"capability"`
+	Resource      *[]string `yaml:"resource"`
+	Identity      *[]string `yaml:"identity"`
+	Evidence      *[]string `yaml:"evidence"`
+}
+
+type adapterDoc struct {
+	ID                 *string   `yaml:"id"`
+	Version            *string   `yaml:"version"`
+	Managed            *[]string `yaml:"managed"`
+	DiscoveryFilenames *[]string `yaml:"discovery_filenames"`
+}
+
+type constitutionDoc struct {
+	kernelDoc       `yaml:",inline"`
+	SelectedProfile *string               `yaml:"selected_profile"`
+	Environments    *[]string             `yaml:"environments"`
+	Catalog         *governanceCatalogDoc `yaml:"catalog"`
+	Subjects        *subjectCatalogDoc    `yaml:"subjects"`
+	Adapters        *[]adapterDoc         `yaml:"adapters"`
+}
+
+// DecodeConstitution strictly decodes data as the store's
+// verdi.policy-constitution/v1 manifest, validates it, normalizes its
+// semantic sets, and seals the result.
+func DecodeConstitution(data []byte) (*Constitution, error) {
+	fm, body, err := artifact.SplitFrontmatter(data)
+	if err != nil {
+		return nil, fmt.Errorf("policyartifact: %w", err)
+	}
+	var doc constitutionDoc
+	if err := artifact.DecodeStrict(fm, &doc); err != nil {
+		return nil, err
+	}
+	k, err := doc.toKernel(SchemaConstitution, KindConstitution)
+	if err != nil {
+		return nil, err
+	}
+	if nameOf(k.ID) != ConstitutionName {
+		return nil, fmt.Errorf("policyartifact: constitution id must be %s/%s, got %q", KindConstitution, ConstitutionName, k.ID)
+	}
+	missing := func(field string) error {
+		return fmt.Errorf("policyartifact: constitution field %s is missing: every constitution field is mandatory (an explicitly empty set is [])", field)
+	}
+	if doc.SelectedProfile == nil {
+		return nil, missing("selected_profile")
+	}
+	if doc.Environments == nil {
+		return nil, missing("environments")
+	}
+	if doc.Catalog == nil {
+		return nil, missing("catalog")
+	}
+	if doc.Subjects == nil {
+		return nil, missing("subjects")
+	}
+	if doc.Adapters == nil {
+		return nil, missing("adapters")
+	}
+
+	// The selected profile id follows the kernel's own id grammar; the
+	// kernel decides everything else about profiles.
+	if err := governanceprincipal.ValidateID(*doc.SelectedProfile); err != nil {
+		return nil, fmt.Errorf("policyartifact: constitution selected_profile: %w", err)
+	}
+
+	if err := uniqueSet("constitution.environments", emptyIfNil(*doc.Environments), func(e string) error {
+		if !kebabRe.MatchString(e) {
+			return fmt.Errorf("environment %q must be kebab-case", e)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	catalog, err := doc.Catalog.toCatalog()
+	if err != nil {
+		return nil, err
+	}
+	subjects, err := doc.Subjects.toCatalog()
+	if err != nil {
+		return nil, err
+	}
+
+	adapters := make([]Adapter, 0, len(*doc.Adapters))
+	seenAdapter := make(map[string]bool, len(*doc.Adapters))
+	for i, ad := range *doc.Adapters {
+		a, err := ad.toAdapter(i)
+		if err != nil {
+			return nil, err
+		}
+		if seenAdapter[a.ID] {
+			return nil, fmt.Errorf("policyartifact: constitution adapters: duplicate adapter id %q", a.ID)
+		}
+		seenAdapter[a.ID] = true
+		adapters = append(adapters, a)
+	}
+
+	rationale, err := requireRationale(KindConstitution, body)
+	if err != nil {
+		return nil, err
+	}
+
+	c := &Constitution{
+		Schema:          k.Schema,
+		ID:              k.ID,
+		Kind:            k.Kind,
+		Title:           k.Title,
+		Owners:          k.Owners,
+		SelectedProfile: *doc.SelectedProfile,
+		Environments:    emptyIfNil(*doc.Environments),
+		Catalog:         catalog,
+		Subjects:        subjects,
+		Adapters:        adapters,
+		Template:        k.Template,
+		Rationale:       rationale,
+	}
+	normalizeConstitution(c)
+	// Managed-target restriction is CROSS-ADAPTER, so it runs once here,
+	// after every adapter is decoded and normalized (deterministic order).
+	if err := validateManagedProjectionTargets(c.Adapters); err != nil {
+		return nil, err
+	}
+	seal, err := canonjson.Digest(c)
+	if err != nil {
+		return nil, err
+	}
+	c.seal = seal
+	return c, nil
+}
+
+func (d governanceCatalogDoc) toCatalog() (GovernanceCatalog, error) {
+	missing := func(field string) error {
+		return fmt.Errorf("policyartifact: constitution catalog.%s is missing (an explicitly empty set is [])", field)
+	}
+	switch {
+	case d.Roles == nil:
+		return GovernanceCatalog{}, missing("roles")
+	case d.Transitions == nil:
+		return GovernanceCatalog{}, missing("transitions")
+	case d.EvidenceSources == nil:
+		return GovernanceCatalog{}, missing("evidence_sources")
+	case d.EscalationMetrics == nil:
+		return GovernanceCatalog{}, missing("escalation_metrics")
+	}
+	c := GovernanceCatalog{
+		Roles:             emptyIfNil(*d.Roles),
+		Transitions:       emptyIfNil(*d.Transitions),
+		EvidenceSources:   emptyIfNil(*d.EvidenceSources),
+		EscalationMetrics: emptyIfNil(*d.EscalationMetrics),
+	}
+	fields := []struct {
+		name string
+		set  []string
+	}{
+		{"catalog.roles", c.Roles},
+		{"catalog.transitions", c.Transitions},
+		{"catalog.evidence_sources", c.EvidenceSources},
+		{"catalog.escalation_metrics", c.EscalationMetrics},
+	}
+	for _, f := range fields {
+		if err := uniqueSet("constitution."+f.name, f.set, governanceprincipal.ValidateID); err != nil {
+			return GovernanceCatalog{}, err
+		}
+	}
+	return c, nil
+}
+
+func (d subjectCatalogDoc) toCatalog() (SubjectCatalog, error) {
+	missing := func(field string) error {
+		return fmt.Errorf("policyartifact: constitution subjects.%s is missing (an explicitly empty set is [])", field)
+	}
+	switch {
+	case d.Action == nil:
+		return SubjectCatalog{}, missing("action")
+	case d.Configuration == nil:
+		return SubjectCatalog{}, missing("configuration")
+	case d.Capability == nil:
+		return SubjectCatalog{}, missing("capability")
+	case d.Resource == nil:
+		return SubjectCatalog{}, missing("resource")
+	case d.Identity == nil:
+		return SubjectCatalog{}, missing("identity")
+	case d.Evidence == nil:
+		return SubjectCatalog{}, missing("evidence")
+	}
+	s := SubjectCatalog{
+		Action:        emptyIfNil(*d.Action),
+		Configuration: emptyIfNil(*d.Configuration),
+		Capability:    emptyIfNil(*d.Capability),
+		Resource:      emptyIfNil(*d.Resource),
+		Identity:      emptyIfNil(*d.Identity),
+		Evidence:      emptyIfNil(*d.Evidence),
+	}
+	fields := []struct {
+		name string
+		set  []string
+	}{
+		{"subjects.action", s.Action},
+		{"subjects.configuration", s.Configuration},
+		{"subjects.capability", s.Capability},
+		{"subjects.resource", s.Resource},
+		{"subjects.identity", s.Identity},
+		{"subjects.evidence", s.Evidence},
+	}
+	for _, f := range fields {
+		if err := uniqueSet("constitution."+f.name, f.set, func(m string) error {
+			if !kebabRe.MatchString(m) {
+				return fmt.Errorf("subject %q must be kebab-case", m)
+			}
+			return nil
+		}); err != nil {
+			return SubjectCatalog{}, err
+		}
+	}
+	return s, nil
+}
+
+func (d adapterDoc) toAdapter(i int) (Adapter, error) {
+	missing := func(field string) error {
+		return fmt.Errorf("policyartifact: constitution adapters[%d].%s is missing", i, field)
+	}
+	switch {
+	case d.ID == nil:
+		return Adapter{}, missing("id")
+	case d.Version == nil:
+		return Adapter{}, missing("version")
+	case d.Managed == nil:
+		return Adapter{}, missing("managed")
+	case d.DiscoveryFilenames == nil:
+		return Adapter{}, missing("discovery_filenames")
+	}
+	a := Adapter{
+		ID:                 *d.ID,
+		Version:            *d.Version,
+		Managed:            emptyIfNil(*d.Managed),
+		DiscoveryFilenames: emptyIfNil(*d.DiscoveryFilenames),
+	}
+	if !kebabRe.MatchString(a.ID) {
+		return Adapter{}, fmt.Errorf("policyartifact: constitution adapters[%d]: id %q must be kebab-case", i, a.ID)
+	}
+	if a.Version == "" {
+		return Adapter{}, fmt.Errorf("policyartifact: constitution adapters[%d] (%s): version must be non-empty", i, a.ID)
+	}
+	if len(a.Managed) == 0 {
+		return Adapter{}, fmt.Errorf("policyartifact: constitution adapters[%d] (%s): managed must name at least one projection file", i, a.ID)
+	}
+	if err := uniqueSet(fmt.Sprintf("constitution.adapters[%d].managed", i), a.Managed, validateManagedProjectionPath); err != nil {
+		return Adapter{}, err
+	}
+	if len(a.DiscoveryFilenames) == 0 {
+		return Adapter{}, fmt.Errorf("policyartifact: constitution adapters[%d] (%s): discovery_filenames must name at least one instruction filename", i, a.ID)
+	}
+	if err := uniqueSet(fmt.Sprintf("constitution.adapters[%d].discovery_filenames", i), a.DiscoveryFilenames, func(f string) error {
+		if !artifact.IsBareFilename(f) {
+			return fmt.Errorf("discovery filename %q must be a bare filename (the harness discovers it by name at any depth)", f)
+		}
+		return nil
+	}); err != nil {
+		return Adapter{}, err
+	}
+	return a, nil
+}
+
+// validateManagedProjectionPath enforces the adapter-managed file-shape
+// rule on top of the shared repo-relative path grammar: a managed
+// projection names a FILE the store generates, never a directory.
+// validateRelPath's single trailing "/" is scope's directory marker
+// ("cmd/" selects a subtree) and carries no meaning here — Generate can
+// only ever write a file, so admitting "AGENTS.md/" would let a
+// constitution declare a managed path whose generated file the store
+// records, verifies, and reports under a spelling that does not exist on
+// disk. One location, one spelling (CO-3).
+func validateManagedProjectionPath(p string) error {
+	if err := validateRelPath(p); err != nil {
+		return err
+	}
+	if strings.HasSuffix(p, "/") {
+		return fmt.Errorf("managed projection path %q must name a file, not a directory (a trailing %q is scope's directory marker and has no meaning for a generated projection)", p, "/")
+	}
+	return nil
+}
+
+// reservedManagedSegments are the path segments a managed projection
+// path may never contain at ANY depth. .verdi is Verdi's own store —
+// including .verdi/policy/, the constitution store itself: a projection
+// is a one-way OUTPUT of the constitution (AC-1/DC-1), so a projection
+// that could overwrite the authority it derives from would let editing a
+// generated file change authority, exactly what DC-1 forbids. .git is
+// the repository's own metadata; a managed .git/config or .git/hooks/*
+// would turn projection generation into arbitrary repository
+// reconfiguration. Neither is a harness instruction file, so refusing
+// both costs no legitimate projection (CO-1).
+var reservedManagedSegments = []string{".git", ".verdi"}
+
+// validateManagedProjectionTargets restricts WHAT a managed projection
+// may target, on top of the per-path grammar validateManagedProjectionPath
+// already enforces. Two rules, both fail-closed:
+//
+//  1. No path segment is a reserved segment (case-folded, any depth).
+//  2. The path's basename matches — case-folded — some declared
+//     discovery filename in the UNION of every adapter's
+//     discovery_filenames. A managed projection IS a harness instruction
+//     file; a path whose basename no adapter's harness ever discovers is
+//     not a projection target at all, it is some other file the store
+//     would silently overwrite.
+//
+// Rule 2 is deliberately cross-adapter, matching
+// internal/instructionprojection/discovery.go's own cross-adapter
+// satisfaction rule: in the realistic layout codex manages AGENTS.md
+// while claude-code's harness also reads it, so the declaring adapter's
+// own discovery set is the wrong denominator.
+//
+// Matching is CASE-FOLDED throughout, the same uniform posture discovery
+// matching and managed-path overlap detection already use: on a
+// case-insensitive filesystem ".GIT/config" IS ".git/config", so a
+// byte-exact rule would admit a path that reaches the forbidden target
+// anyway. Uniform rather than filesystem-detected so one constitution
+// yields one verdict everywhere (CO-3).
+//
+// adapters must already be normalized (sorted by id, each set sorted) so
+// a constitution with several offending paths always names the same one.
+func validateManagedProjectionTargets(adapters []Adapter) error {
+	var discovery []string
+	for _, a := range adapters {
+		discovery = append(discovery, a.DiscoveryFilenames...)
+	}
+	for _, a := range adapters {
+		for _, rel := range a.Managed {
+			for _, seg := range strings.Split(rel, "/") {
+				for _, reserved := range reservedManagedSegments {
+					if strings.EqualFold(seg, reserved) {
+						return fmt.Errorf("policyartifact: constitution adapter %s: managed projection path %q contains reserved path segment %q; %s and its contents are never a generated projection target", a.ID, rel, seg, reserved)
+					}
+				}
+			}
+			base := rel
+			if i := strings.LastIndex(rel, "/"); i >= 0 {
+				base = rel[i+1:]
+			}
+			if !discoveredFilename(discovery, base) {
+				return fmt.Errorf("policyartifact: constitution adapter %s: managed projection path %q: no adapter declares its filename %q as a discovery filename; a managed projection must be a harness instruction file", a.ID, rel, base)
+			}
+		}
+	}
+	return nil
+}
+
+// discoveredFilename reports whether basename case-folds equal to some
+// member of filenames.
+func discoveredFilename(filenames []string, basename string) bool {
+	for _, f := range filenames {
+		if strings.EqualFold(basename, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeConstitution sorts every semantic set.
+func normalizeConstitution(c *Constitution) {
+	sort.Strings(c.Environments)
+	sort.Strings(c.Catalog.Roles)
+	sort.Strings(c.Catalog.Transitions)
+	sort.Strings(c.Catalog.EvidenceSources)
+	sort.Strings(c.Catalog.EscalationMetrics)
+	sort.Strings(c.Subjects.Action)
+	sort.Strings(c.Subjects.Configuration)
+	sort.Strings(c.Subjects.Capability)
+	sort.Strings(c.Subjects.Resource)
+	sort.Strings(c.Subjects.Identity)
+	sort.Strings(c.Subjects.Evidence)
+	for i := range c.Adapters {
+		sort.Strings(c.Adapters[i].Managed)
+		sort.Strings(c.Adapters[i].DiscoveryFilenames)
+	}
+	sort.Slice(c.Adapters, func(i, j int) bool { return c.Adapters[i].ID < c.Adapters[j].ID })
+}
+
+// GovernanceCatalog converts the registered governance vocabulary into
+// the kernel's own catalog type for DecodeProfile injection. Like every
+// authority egress it verifies the seal first: a hand-built constitution
+// must never supply the vocabulary a profile validates against (the
+// SI-21 posture — otherwise a forged catalog could mint a real profile
+// digest no committed constitution authorized).
+func (c *Constitution) GovernanceCatalog() (governanceprincipal.Catalog, error) {
+	if err := c.checkSeal(); err != nil {
+		return governanceprincipal.Catalog{}, err
+	}
+	return governanceprincipal.Catalog{
+		Roles:             c.Catalog.Roles,
+		Transitions:       c.Catalog.Transitions,
+		EvidenceSources:   c.Catalog.EvidenceSources,
+		EscalationMetrics: c.Catalog.EscalationMetrics,
+	}, nil
+}
+
+// Digest returns the constitution's canonical content address after
+// proving the value is unmodified DecodeConstitution output.
+func (c *Constitution) Digest() (string, error) {
+	if err := c.checkSeal(); err != nil {
+		return "", err
+	}
+	return c.seal, nil
+}
+
+func (c *Constitution) checkSeal() error {
+	return checkSealed("constitution", c.ID, c.seal, c)
+}

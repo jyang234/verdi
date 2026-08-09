@@ -68,7 +68,31 @@ type ScaffoldData struct {
 // AND any store override alike — see safeScalar's own doc comment for what
 // it guards and why it is a conditional guard rather than an unconditional
 // %q.
+//
+// Render is RenderValue's typed delegate over ScaffoldData — every real
+// spec-scaffold caller's own shape — added by the same additive refactor
+// that introduced RenderValue (AC-1/CX-16/R-10: internal/humanartifact's
+// policy scaffolds are RenderValue's first non-ScaffoldData caller). No
+// behavior change: this is the identical parse/execute body RenderValue
+// now also runs for any data shape.
 func Render(tmpl []byte, data ScaffoldData) (string, error) {
+	return RenderValue(tmpl, data)
+}
+
+// RenderValue is the generalized render seam every human-artifact
+// creation surface shares (AC-1: "one resolver and renderer" for every
+// committed human-authored artifact kind, not just the spec-store's
+// feature/story classes ScaffoldData was scoped to). It instantiates
+// tmpl against ANY data value with the identical parse options and error
+// wrapping Render already established: the "safe" func registered, and
+// missingkey=error so an undefined field access fails closed rather than
+// rendering a silent blank. internal/humanartifact's policy/overlay/
+// exemption scaffolds render through this entry directly, since their
+// data shapes (PolicyScaffoldData and friends) are not — and must not
+// become — ScaffoldData fields; Render itself is now this function's
+// typed ScaffoldData delegate, so there is exactly one execution body
+// either path runs.
+func RenderValue(tmpl []byte, data any) (string, error) {
 	t, err := template.New("scaffold").Funcs(template.FuncMap{"safe": safeScalar}).Option("missingkey=error").Parse(string(tmpl))
 	if err != nil {
 		return "", fmt.Errorf("designscaffold: parsing template: %w", err)
