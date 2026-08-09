@@ -50,10 +50,10 @@ func TestRunInterview_AllDefaults_EmptyVocabulary(t *testing.T) {
 // result exactly, and the template-copy choice is threaded through.
 func TestRunInterview_RenamesAndTemplateCopy(t *testing.T) {
 	// Order: classes [feature, spike, story], states [accepted-pending-build,
-	// closed, draft, superseded], verbs [accept, close].
+	// closed, draft, superseded], verbs [close, merge].
 	script := "Epic\n\nTask\n" + // feature->Epic, spike default, story->Task
 		"\n\n\n\n" + // all four states default
-		"Sign off\n\n" + // accept->"Sign off", close default
+		"\nSign off\n" + // close default, merge->"Sign off"
 		"y\n" + // copy templates: yes
 		"n\n" + // structural probe: no
 		"y\n" // confirm write
@@ -74,8 +74,8 @@ func TestRunInterview_RenamesAndTemplateCopy(t *testing.T) {
 	if len(result.Vocabulary.States) != 0 {
 		t.Fatalf("Vocabulary.States = %+v, want empty (every state prompt defaulted)", result.Vocabulary.States)
 	}
-	if got := result.Vocabulary.Verbs["accept"]; got != "Sign off" {
-		t.Fatalf("Vocabulary.Verbs[accept] = %q, want %q", got, "Sign off")
+	if got := result.Vocabulary.Verbs["merge"]; got != "Sign off" {
+		t.Fatalf("Vocabulary.Verbs[merge] = %q, want %q", got, "Sign off")
 	}
 	if _, ok := result.Vocabulary.Verbs["close"]; ok {
 		t.Fatalf("Vocabulary.Verbs[close] should be absent (defaulted), got %+v", result.Vocabulary.Verbs)

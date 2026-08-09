@@ -397,7 +397,7 @@ func TestVocabProseWitness(t *testing.T) {
 // TestVocabProseWords proves the derived word list carries the canonical
 // classes, the spike pseudo-class, display plurals, every canonical
 // lifecycle state, and — spec/verb-surfaces ac-4 — every canonical
-// lifecycle verb (accept, close) — and is longest-first (the matcher's
+// lifecycle verb (merge, close) — and is longest-first (the matcher's
 // precondition).
 func TestVocabProseWords(t *testing.T) {
 	words := vocabProseWords()
@@ -408,7 +408,7 @@ func TestVocabProseWords(t *testing.T) {
 	for _, want := range []string{
 		"feature", "features", "story", "stories", "spike", "spikes",
 		"draft", "accepted-pending-build", "closed", "superseded",
-		"accept", "close",
+		"merge", "close",
 	} {
 		if !got[want] {
 			t.Errorf("vocabProseWords() is missing %q (have %v)", want, words)
@@ -594,19 +594,20 @@ func f() string {
 // own mutation-witness proof, mirroring TestScanVocabProse_Classifier's
 // established convention (and the class/state word lists' own precedent):
 // it proves the scanner, extended with verb words, is RED on a
-// deliberately bare, unrouted verb word ("accept") — a synthetic mutation
-// of what a routed production site would look like with its routing
-// stripped out — and GREEN once that same word is routed through
-// DisplayVerb, or once it carries the vocab:identity marker instead. This
-// is the evidence that the new verb-word category actually BITES, not
-// merely that vocabProseWords() happens to contain "accept"/"close".
+// deliberately bare, unrouted verb word ("merge", the canonical catalog's
+// draft-exit transition) — a synthetic mutation of what a routed
+// production site would look like with its routing stripped out — and
+// GREEN once that same word is routed through DisplayVerb, or once it
+// carries the vocab:identity marker instead. This is the evidence that
+// the verb-word category actually BITES, not merely that
+// vocabProseWords() happens to contain "merge"/"close".
 func TestScanVocabProse_VerbWordMutationWitness(t *testing.T) {
 	words := vocabProseWords()
 
 	t.Run("RED: a bare, unrouted verb word in production prose", func(t *testing.T) {
 		src := `package p
 func f() string {
-	return "run this before you accept the story"
+	return "run this before you merge the story"
 }
 `
 		got, err := scanVocabProse("synth.go", []byte(src), words)
@@ -616,21 +617,21 @@ func f() string {
 		if len(got) != 1 {
 			t.Fatalf("scanVocabProse violations = %d (%v), want exactly 1 (RED) — the verb-word category must bite a bare hit", len(got), got)
 		}
-		hasAccept := false
+		hasMerge := false
 		for _, w := range got[0].Words {
-			if w == "accept" {
-				hasAccept = true
+			if w == "merge" {
+				hasMerge = true
 			}
 		}
-		if !hasAccept {
-			t.Fatalf("violation Words = %v, want it to name \"accept\"", got[0].Words)
+		if !hasMerge {
+			t.Fatalf("violation Words = %v, want it to name \"merge\"", got[0].Words)
 		}
 	})
 
 	t.Run("GREEN: the identical verb word routed through DisplayVerb", func(t *testing.T) {
 		src := `package p
 func f(mdl M) string {
-	return sprintf("run this before you "+mdl.DisplayVerb("accept")+" the story")
+	return sprintf("run this before you "+mdl.DisplayVerb("merge")+" the story")
 }
 `
 		got, err := scanVocabProse("synth.go", []byte(src), words)
@@ -645,7 +646,7 @@ func f(mdl M) string {
 	t.Run("GREEN: the identical verb word marked vocab:identity", func(t *testing.T) {
 		src := `package p
 func f() string {
-	return "run this before you accept the story" // vocab:identity — CLI verb name
+	return "run this before you merge the story" // vocab:identity — forge transition name
 }
 `
 		got, err := scanVocabProse("synth.go", []byte(src), words)
@@ -664,7 +665,7 @@ func f() string {
 		// "words"-named receiver would coincidentally satisfy instead.
 		src := `package p
 func f(p ClassWords) string {
-	return "run this before you " + p.verb("accept") + " the story"
+	return "run this before you " + p.verb("merge") + " the story"
 }
 `
 		got, err := scanVocabProse("synth.go", []byte(src), words)

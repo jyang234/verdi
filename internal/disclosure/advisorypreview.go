@@ -32,6 +32,7 @@ const SourceAdvisoryPreview = "matrix:advisory-preview"
 // hand-authored "PREVIEW:"/"PREVIEW — ADVISORY" markers instead — extra
 // vocabularies for a disclosed-unproven state, invisible to IsRendered
 // and to every disclosure consumer.
+// vocab:identity — non-vocabulary homograph: the forge's merge request/merge gate, never the `merge` lifecycle transition word
 const advisoryPreviewText = "this fold included advisory (source: local) evidence alongside authoritative (source: ci) evidence, so the statuses below are not the merge gate's answer — local evidence is never authoritative (04/03)"
 
 // AdvisoryPreview is the structured value every advisory-fold surface

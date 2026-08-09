@@ -2,8 +2,11 @@
 # store.Open resolves an absent .verdi/model.yaml to (internal/model/
 # embed.go's Canonical()). Expresses today's hardcoded lifecycle exactly:
 # internal/artifact/status.go's specFeatureStatuses state set, and the two
-# ritual verbs (accept, close) that actually flip a spec's status field in
-# cmd/verdi today. TestCanonicalMatchesCode (embed_test.go) proves both
+# rituals that advance a spec: `merge` (a FORGE transition — specification
+# acceptance is merge-signaled, docs/superpowers/specs/2026-08-01-merge-
+# signals-spec-acceptance-design.md; `verdi accept` is retired and mutates
+# nothing) and `close` (a live Verdi verb that flips the status field in
+# cmd/verdi today). TestCanonicalMatchesCode (embed_test.go) proves both
 # halves against the code they describe; TestCanonicalYAMLMatchesGoLiteral
 # proves this file agrees with canonical.go's canonicalModel Go literal.
 #
@@ -31,7 +34,7 @@ lifecycle:
     states: [draft, accepted-pending-build, closed, superseded]
     terminal: [closed, superseded]
     transitions:
-      - verb: accept
+      - verb: merge
         from: draft
         to: accepted-pending-build
         obligations:
@@ -46,7 +49,7 @@ lifecycle:
     states: [draft, accepted-pending-build, closed, superseded]
     terminal: [closed, superseded]
     transitions:
-      - verb: accept
+      - verb: merge
         from: draft
         to: accepted-pending-build
         obligations:

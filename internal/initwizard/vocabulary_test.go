@@ -26,7 +26,7 @@ func TestRenameableIDs_MatchesCanonical(t *testing.T) {
 		t.Fatalf("RenameableIDs().States = %v, want %v", ids.States, wantStates)
 	}
 
-	wantVerbs := []string{"accept", "close"}
+	wantVerbs := []string{"close", "merge"}
 	if !reflect.DeepEqual(ids.Verbs, wantVerbs) {
 		t.Fatalf("RenameableIDs().Verbs = %v, want %v", ids.Verbs, wantVerbs)
 	}

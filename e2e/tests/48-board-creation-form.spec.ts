@@ -9,7 +9,7 @@ import { CONTROL_URL } from "./fixtures";
 // proof covers the L-M12 override property end to end.
 //
 // The store is the hermetic vocab-rename fixture (cmd/e2eharness/
-// provision_vocab.go): story -> "Workstream", accept -> "Sign off",
+// provision_vocab.go): story -> "Workstream", merge -> "Sign off",
 // feature -> "Initiative". The form's labels must speak those display
 // words — the affordance, the dialog, and the receipt (whose verb word
 // routes through DisplayVerb, spec/creation-surfaces ac-5's discipline)

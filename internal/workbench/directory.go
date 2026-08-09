@@ -171,6 +171,7 @@ func writeDirectorySection(buf *bytes.Buffer, root string, entries []refindex.En
 	if mrConfigured {
 		// dc-4: the in-review chip's input is a second, non-ref source —
 		// disclosed as such on the page.
+		// vocab:identity — non-vocabulary homograph: the forge's merge request/merge gate, never the `merge` lifecycle transition word
 		buf.WriteString(` &ldquo;In review&rdquo; chips are consulted per render from the forge's open merge requests &mdash; a second source beside the refs.`)
 	}
 	buf.WriteString(`</p>`)
