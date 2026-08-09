@@ -99,6 +99,13 @@ func generate(root string, c *policyartifact.Constitution, policies map[string]*
 	if _, err := managedPathOwners(adapters); err != nil {
 		return nil, err
 	}
+	// ... and prove every path this run will touch is free of symlinked
+	// components, for the same reason and in the same pre-flight: a link
+	// discovered halfway through would already have carried a write
+	// outside the repository (see symlink.go).
+	if err := checkProjectionPathsSafe(root, adapters, true); err != nil {
+		return nil, err
+	}
 
 	res := &Result{}
 	for _, adapter := range adapters {

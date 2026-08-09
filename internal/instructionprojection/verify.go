@@ -123,6 +123,15 @@ func verify(root string, c *policyartifact.Constitution, policies map[string]*po
 	if err != nil {
 		return nil, err
 	}
+	// A symlinked ANCESTOR is not a drift either: the bytes behind it may
+	// match exactly, and reporting a clean chain for a file that does not
+	// live in this repository is the one outcome this package must never
+	// produce. Refuse before reading anything (symlink.go). A symlinked
+	// FINAL path stays a named finding — the per-file passes below own
+	// that disposition, and it is equally fail-closed.
+	if err := checkProjectionPathsSafe(root, adapters, false); err != nil {
+		return nil, err
+	}
 	managed := make(map[string]bool, len(owners))
 	for rel := range owners {
 		managed[rel] = true
