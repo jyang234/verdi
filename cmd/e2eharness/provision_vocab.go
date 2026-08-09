@@ -19,7 +19,7 @@ package main
 // model-resolution pipe, never a canned label.
 //
 // The store's .verdi/model.yaml is internal/model/testdata's
-// vocab-rename.yaml — model-schema's own frontier fixture (accept ->
+// vocab-rename.yaml — model-schema's own frontier fixture (merge ->
 // "Sign off", accepted-pending-build -> "Ready to build", feature ->
 // "Initiative", story -> "Workstream", spike -> "Timebox"), read from
 // the module tree at provision time and reused verbatim, never
