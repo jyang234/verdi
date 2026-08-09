@@ -48,10 +48,10 @@ func checkNoSymlinkedComponent(root, rel string, includeFinal bool) error {
 			if os.IsNotExist(err) {
 				return nil
 			}
-			return fmt.Errorf("instructionprojection: %s: statting path component %q: %w", rel, seg, err)
+			return fmt.Errorf("%s: statting path component %q: %w", rel, seg, err)
 		}
 		if fi.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("instructionprojection: %s: path component %q is a symlink; a projection is this repository's own generated file and is never written or read through a link", rel, seg)
+			return fmt.Errorf("%s: path component %q is a symlink; a projection is this repository's own generated file and is never written or read through a link", rel, seg)
 		}
 	}
 	return nil
@@ -69,11 +69,11 @@ func checkProjectionPathsSafe(root string, adapters []policyartifact.Adapter, in
 	for _, a := range adapters {
 		for _, rel := range a.Managed {
 			if err := checkNoSymlinkedComponent(root, rel, includeFinal); err != nil {
-				return fmt.Errorf("adapter %s: %w", a.ID, err)
+				return fmt.Errorf("instructionprojection: adapter %s: %w", a.ID, err)
 			}
 		}
 		if err := checkNoSymlinkedComponent(root, adapterManifestRelPath(a.ID), includeFinal); err != nil {
-			return fmt.Errorf("adapter %s: %w", a.ID, err)
+			return fmt.Errorf("instructionprojection: adapter %s: %w", a.ID, err)
 		}
 	}
 	return nil
