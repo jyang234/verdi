@@ -249,10 +249,42 @@ func TestGatherRepositoryFacts_RemoteOrigin(t *testing.T) {
 		wantDiscl string
 	}{
 		{
-			name:      "known",
+			// The record stores the CANONICAL repository identity, never
+			// the raw origin URL: scheme, userinfo, and the ".git" suffix
+			// are gone (gitx.CanonicalRemoteIdentity).
+			name:      "known, scp-like spelling",
 			remoteURL: func(context.Context, string, string) (string, error) { return "git@example.com:x/y.git", nil },
 			wantKnown: true,
-			wantValue: "git@example.com:x/y.git",
+			wantValue: "example.com/x/y",
+		},
+		{
+			// Same repository, https spelling: the SAME identity, so two
+			// checkouts of one repository never disagree (nor do their
+			// record digests).
+			name:      "known, https spelling of the same repository",
+			remoteURL: func(context.Context, string, string) (string, error) { return "https://Example.com/x/y.git", nil },
+			wantKnown: true,
+			wantValue: "example.com/x/y",
+		},
+		{
+			// GLG v3's security decision: a journey projection carries no
+			// credentials. A credential-bearing origin URL reaches the
+			// record only as its credential-free identity.
+			name: "credential-bearing url is reduced to an identity",
+			remoteURL: func(context.Context, string, string) (string, error) {
+				return "https://user:s3cr3t-TOKEN@example.com/x/y.git", nil
+			},
+			wantKnown: true,
+			wantValue: "example.com/x/y",
+		},
+		{
+			// A URL that cannot be canonicalized is unproven and disclosed
+			// — and the raw URL itself is never routed into the record or
+			// into the disclosure (the same F1(a) posture as a read error).
+			name:      "uncanonicalizable url is unknown and disclosed",
+			remoteURL: func(context.Context, string, string) (string, error) { return "file:///srv/git/y.git", nil },
+			wantKnown: false,
+			wantDiscl: "the origin remote URL could not be canonicalized to a repository identity",
 		},
 		{
 			name: "no such remote",
@@ -288,6 +320,40 @@ func TestGatherRepositoryFacts_RemoteOrigin(t *testing.T) {
 			}
 			if tt.wantDiscl != "" && !containsString(discl, tt.wantDiscl) {
 				t.Fatalf("disclosures = %v, want to contain %q", discl, tt.wantDiscl)
+			}
+		})
+	}
+}
+
+// TestGatherRepositoryFacts_RemoteOriginNeverCarriesCredentials is the
+// negative twin of the table above, stated as the security property
+// itself (GLG v3: journey projections contain no credentials): for a
+// credential-bearing origin URL — canonicalizable or not — neither the
+// fact value nor any disclosure may contain the secret, the userinfo, or
+// the raw URL.
+func TestGatherRepositoryFacts_RemoteOriginNeverCarriesCredentials(t *testing.T) {
+	const secret = "s3cr3t-TOKEN"
+	urls := []string{
+		"https://user:" + secret + "@example.com/x/y.git",
+		"ssh://user:" + secret + "@example.com:2222/x/y.git",
+		// Not canonicalizable (unsupported scheme) AND credential-bearing:
+		// the unknown path must not leak it into the disclosure either.
+		"file://user:" + secret + "@example.com/x/y.git",
+	}
+	for _, raw := range urls {
+		t.Run(raw, func(t *testing.T) {
+			git := baseGitReaderForRepoFacts()
+			git.remoteURLFn = func(context.Context, string, string) (string, error) { return raw, nil }
+			p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+
+			rf, discl, err := p.gatherRepositoryFacts(context.Background(), t.TempDir(), "rel/spec.md", []byte("x"), true)
+			if err != nil {
+				t.Fatalf("gatherRepositoryFacts: %v", err)
+			}
+			for _, s := range append([]string{rf.RemoteOrigin.Value}, discl...) {
+				if strings.Contains(s, secret) || strings.Contains(s, "user@") || strings.Contains(s, raw) {
+					t.Fatalf("credential material leaked into the record: %q (origin %q)", s, raw)
+				}
 			}
 		})
 	}

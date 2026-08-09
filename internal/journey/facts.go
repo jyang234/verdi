@@ -209,7 +209,24 @@ func (p Projector) gatherRepositoryFacts(ctx context.Context, root, relPath stri
 
 	switch url, rerr := p.git.RemoteURL(ctx, root, "origin"); {
 	case rerr == nil:
-		rf.RemoteOrigin = StringFact{Known: true, Value: url}
+		// AC-1's repository section reports a CANONICAL repository
+		// identity, never the raw origin URL: the raw URL may carry
+		// credentials (GLG v3's security decision — a journey projection
+		// contains no credentials or secrets), and its ssh and https
+		// spellings of one repository differ, which would make identity
+		// and every digest over it checkout-dependent. Canonicalization
+		// is gitx's (CanonicalRemoteIdentity); gitx.RemoteURL itself still
+		// returns the raw URL for the callers that need it.
+		if identity, ok := gitx.CanonicalRemoteIdentity(url); ok {
+			rf.RemoteOrigin = StringFact{Known: true, Value: identity}
+		} else {
+			// Same F1(a) posture as a read failure: the raw URL is never
+			// routed into the record OR into the disclosure (it is exactly
+			// the string that may carry the credential), so the disclosure
+			// names only the cause class, fixed and machine-independent.
+			rf.RemoteOrigin = StringFact{Known: false}
+			disclosures = append(disclosures, "the origin remote URL could not be canonicalized to a repository identity")
+		}
 	case errors.Is(rerr, gitx.ErrNoSuchRemote):
 		rf.RemoteOrigin = StringFact{Known: false}
 		disclosures = append(disclosures, "no origin remote is configured")

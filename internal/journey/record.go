@@ -92,6 +92,12 @@ type WorktreeFact struct {
 // canonical repository identity, branch, HEAD, default-branch HEAD, and
 // their relationship stay visible because hiding them recreates the
 // wrong-checkout ambiguity the feature exists to eliminate (DC-2).
+//
+// RemoteOrigin is the CANONICAL repository identity — "host[:port]/path",
+// no scheme and no userinfo (gitx.CanonicalRemoteIdentity) — never the raw
+// origin URL: a raw URL may carry credentials, which this record must
+// never contain, and its ssh and https spellings of one repository differ,
+// which would make identity and every digest over it checkout-dependent.
 type RepositoryFacts struct {
 	RemoteOrigin  StringFact        `json:"remote_origin"`
 	Branch        StringFact        `json:"branch"`

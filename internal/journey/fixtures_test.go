@@ -19,7 +19,10 @@ func validRecord(t *testing.T) Record {
 			Path:  "specs/active/example/spec.md",
 		},
 		Repository: RepositoryFacts{
-			RemoteOrigin: StringFact{Known: true, Value: "https://example.invalid/repo.git"},
+			// A CANONICAL repository identity (host[:port]/path), the only
+			// shape gatherRepositoryFacts ever produces — never a raw
+			// origin URL with a scheme or userinfo.
+			RemoteOrigin: StringFact{Known: true, Value: "example.invalid/repo"},
 			Branch:       StringFact{Known: true, Value: "main"},
 			Head:         StringFact{Known: true, Value: "abc123"},
 			DefaultBranch: DefaultBranchFact{
