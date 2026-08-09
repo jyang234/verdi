@@ -122,6 +122,22 @@ func TestCmdJourney_HappyPath(t *testing.T) {
 	if rec.Lifecycle.State != "accepted-pending-build" {
 		t.Fatalf("Lifecycle.State = %q, want accepted-pending-build", rec.Lifecycle.State)
 	}
+	// DC-2's always-visible evidence operands reach the CLI surface as
+	// TYPED fields, not prose: unknown in this delivery unit, and
+	// disclosed as such rather than left silent (CO-1). The fixture spec
+	// declares evidence: [static], so exactly one contributor is derived.
+	if rec.Evidence.Authority != "unknown" || rec.Evidence.Freshness != "unknown" {
+		t.Fatalf("Evidence authority/freshness = %q/%q, want unknown/unknown", rec.Evidence.Authority, rec.Evidence.Freshness)
+	}
+	if len(rec.Evidence.Disclosures) == 0 {
+		t.Fatal("Evidence.Disclosures is empty while authority and freshness are unknown (CO-1)")
+	}
+	if len(rec.Evidence.Contributors) != 1 {
+		t.Fatalf("Evidence.Contributors = %+v, want exactly one (the spec declares evidence: [static])", rec.Evidence.Contributors)
+	}
+	if c := rec.Evidence.Contributors[0]; c.ID != "static" || c.Kind != "static" || c.Resolution != "unproven" || c.Witness == "" {
+		t.Fatalf("Evidence.Contributors[0] = %+v, want the static kind, unproven, with a witness", c)
+	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty on success", stderr.String())
 	}
@@ -150,7 +166,7 @@ func TestCmdJourney_CanonicalEncoding_SortedKeys(t *testing.T) {
 	// flatter schema: canonjson.Marshal's sorted-keys seam is actually
 	// used, not Go's default map/struct marshal order.
 	got2 := topLevelObjectKeys(t, line)
-	want := []string{"actions", "blockers", "digest", "disclosures", "lifecycle", "principals", "repository", "schema", "target"}
+	want := []string{"actions", "blockers", "digest", "disclosures", "evidence", "lifecycle", "principals", "repository", "schema", "target"}
 	if len(got2) != len(want) {
 		t.Fatalf("topLevelObjectKeys = %v, want %v", got2, want)
 	}

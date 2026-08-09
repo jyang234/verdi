@@ -5,9 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
@@ -1039,5 +1041,118 @@ func TestNotFoundError_Error(t *testing.T) {
 	err := &NotFoundError{Ref: "spec/x"}
 	if !strings.Contains(err.Error(), "spec/x") {
 		t.Fatalf("Error() = %q, want it to name the ref", err.Error())
+	}
+}
+
+// --- evidence facts ------------------------------------------------------
+
+func TestGatherEvidenceFacts(t *testing.T) {
+	const unknownOperandsDisclosure = "Context Integrity's canonical evidence-authority and freshness operands are not consumed by this delivery unit; evidence posture and freshness are unknown"
+
+	tests := []struct {
+		name             string
+		criteria         []artifact.AcceptanceCriterion
+		wantContributors []EvidenceContributor
+		wantDisclosures  []string
+	}{
+		{
+			name: "one declared kind yields one contributor",
+			criteria: []artifact.AcceptanceCriterion{
+				{ID: "ac-1", Evidence: []artifact.EvidenceKind{artifact.EvidenceStatic}},
+			},
+			wantContributors: []EvidenceContributor{
+				{ID: "static", Kind: "static", Resolution: "unproven", Witness: evidenceContributorWitness("static")},
+			},
+			wantDisclosures: []string{unknownOperandsDisclosure},
+		},
+		{
+			name: "distinct kinds across criteria are deduped and sorted by id",
+			criteria: []artifact.AcceptanceCriterion{
+				{ID: "ac-1", Evidence: []artifact.EvidenceKind{artifact.EvidenceStatic, artifact.EvidenceBehavioral}},
+				{ID: "ac-2", Evidence: []artifact.EvidenceKind{artifact.EvidenceStatic, artifact.EvidenceAttestation}},
+				{ID: "ac-3", Evidence: []artifact.EvidenceKind{artifact.EvidenceRuntime}},
+			},
+			wantContributors: []EvidenceContributor{
+				{ID: "attestation", Kind: "attestation", Resolution: "unproven", Witness: evidenceContributorWitness("attestation")},
+				{ID: "behavioral", Kind: "behavioral", Resolution: "unproven", Witness: evidenceContributorWitness("behavioral")},
+				{ID: "runtime", Kind: "runtime", Resolution: "unproven", Witness: evidenceContributorWitness("runtime")},
+				{ID: "static", Kind: "static", Resolution: "unproven", Witness: evidenceContributorWitness("static")},
+			},
+			wantDisclosures: []string{unknownOperandsDisclosure},
+		},
+		{
+			// A spec that declares no evidence kinds at all (artifact's own
+			// Validate forbids it for feature/story specs, so this is the
+			// defensive branch): an empty contributor set must say so
+			// rather than read as "no evidence is required".
+			name:             "no declared kinds discloses the empty contributor set",
+			criteria:         nil,
+			wantContributors: []EvidenceContributor{},
+			// Sorted, like every disclosure list in this schema.
+			wantDisclosures: []string{
+				unknownOperandsDisclosure,
+				"the target declares no acceptance-criteria evidence kinds; this projection derives no evidence contributors for it",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := gatherEvidenceFacts(&artifact.SpecFrontmatter{AcceptanceCriteria: tt.criteria})
+
+			// This delivery unit consumes no Context Integrity operands,
+			// so both always-visible operands are honestly unknown.
+			if got.Authority != "unknown" {
+				t.Errorf("Authority = %q, want unknown", got.Authority)
+			}
+			if got.Freshness != "unknown" {
+				t.Errorf("Freshness = %q, want unknown", got.Freshness)
+			}
+			if !reflect.DeepEqual(got.Contributors, tt.wantContributors) {
+				t.Errorf("Contributors = %+v, want %+v", got.Contributors, tt.wantContributors)
+			}
+			if !reflect.DeepEqual(got.Disclosures, tt.wantDisclosures) {
+				t.Errorf("Disclosures = %q, want %q", got.Disclosures, tt.wantDisclosures)
+			}
+			if err := got.validate(); err != nil {
+				t.Errorf("derived EvidenceFacts.validate() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestGatherEvidenceFacts_UnknownKindIsRefused is the negative twin: a
+// kind outside artifact's closed catalog must never reach the record as
+// though it were a legal contributor. artifact.DecodeSpec rejects such a
+// spec long before this point, so the derived section simply must fail
+// its own Validate rather than emitting a contributor nobody can read.
+func TestGatherEvidenceFacts_UnknownKindIsRefused(t *testing.T) {
+	got := gatherEvidenceFacts(&artifact.SpecFrontmatter{
+		AcceptanceCriteria: []artifact.AcceptanceCriterion{
+			{ID: "ac-1", Evidence: []artifact.EvidenceKind{"vibes"}},
+		},
+	})
+	if err := got.validate(); err == nil {
+		t.Fatalf("EvidenceFacts.validate() = nil for contributor kind %q, want a fail-closed error", "vibes")
+	}
+}
+
+// TestGatherEvidenceFacts_Deterministic proves two derivations over the
+// same spec agree exactly, whatever order the criteria declared their
+// kinds in — the record digest depends on it.
+func TestGatherEvidenceFacts_Deterministic(t *testing.T) {
+	a := gatherEvidenceFacts(&artifact.SpecFrontmatter{
+		AcceptanceCriteria: []artifact.AcceptanceCriterion{
+			{ID: "ac-1", Evidence: []artifact.EvidenceKind{artifact.EvidenceRuntime, artifact.EvidenceStatic}},
+			{ID: "ac-2", Evidence: []artifact.EvidenceKind{artifact.EvidenceBehavioral}},
+		},
+	})
+	b := gatherEvidenceFacts(&artifact.SpecFrontmatter{
+		AcceptanceCriteria: []artifact.AcceptanceCriterion{
+			{ID: "ac-2", Evidence: []artifact.EvidenceKind{artifact.EvidenceBehavioral}},
+			{ID: "ac-1", Evidence: []artifact.EvidenceKind{artifact.EvidenceStatic, artifact.EvidenceRuntime}},
+		},
+	})
+	if !reflect.DeepEqual(a, b) {
+		t.Fatalf("gatherEvidenceFacts is order-dependent:\n a = %+v\n b = %+v", a, b)
 	}
 }

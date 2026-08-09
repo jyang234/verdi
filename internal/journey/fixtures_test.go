@@ -51,6 +51,14 @@ func validRecord(t *testing.T) Record {
 			ActiveBranch: StringFact{Known: true, Value: "spec/example"},
 			Disclosures:  []string{},
 		},
+		Evidence: EvidenceFacts{
+			Authority: "authoritative",
+			Freshness: "fresh",
+			Contributors: []EvidenceContributor{
+				{ID: "static", Kind: "static", Resolution: "proven", Witness: "gate/static-obligations"},
+			},
+			Disclosures: []string{},
+		},
 		Blockers: Blockers{
 			Current: []Blocker{
 				{

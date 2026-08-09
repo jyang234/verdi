@@ -50,6 +50,7 @@ type Facts struct {
 	RepositoryDisclosures []string
 	Lifecycle             LifecycleFacts
 	LifecycleResult       specstate.Result
+	Evidence              EvidenceFacts
 	Owners                []string
 }
 
@@ -86,6 +87,7 @@ func (p Projector) GatherFacts(ctx context.Context, cfg *store.Config, arg strin
 		RepositoryDisclosures: repoDisclosures,
 		Lifecycle:             lifeFacts,
 		LifecycleResult:       result,
+		Evidence:              gatherEvidenceFacts(spec),
 		Owners:                spec.Owners,
 	}, nil
 }
@@ -366,6 +368,81 @@ func worktreeFact(root string) WorktreeFact {
 		return WorktreeFact{Managed: false}
 	}
 	return WorktreeFact{Managed: true, Name: name}
+}
+
+// --- evidence facts --------------------------------------------------------
+
+// evidenceOperandsUnknownDisclosure is the fixed disclosure this delivery
+// unit always carries for the two always-visible evidence operands DC-2
+// names. Context Integrity owns the canonical evidence-authority and
+// freshness operands; DC-15 is explicit that the journey CONSUMES them
+// when available and DISCLOSES their absence otherwise, never recomputing
+// or guessing a posture of its own.
+const evidenceOperandsUnknownDisclosure = "Context Integrity's canonical evidence-authority and freshness operands are not consumed by this delivery unit; evidence posture and freshness are unknown"
+
+// noEvidenceContributorsDisclosure is the defensive branch's disclosure: a
+// target declaring no acceptance-criteria evidence kinds yields no
+// contributors, and an empty list must never be read as "this target needs
+// no evidence" (CO-1). artifact.DecodeSpec already refuses a feature or
+// story spec with no acceptance criteria (and every criterion with no
+// evidence kinds), so this is unreachable through GatherFacts today — it
+// exists so the section stays honest if that ever changes.
+const noEvidenceContributorsDisclosure = "the target declares no acceptance-criteria evidence kinds; this projection derives no evidence contributors for it"
+
+// evidenceContributorWitness is a contributor's fixed, machine-independent
+// witness: this delivery unit wires no evidence source, so every derived
+// contributor is unproven and says exactly why (CO-1: silence is never a
+// pass, and an unproven resolution with no witness IS silence).
+func evidenceContributorWitness(kind string) string {
+	return fmt.Sprintf("evidence kind %s is declared by the target's acceptance criteria, but no evidence source is wired to this projection, so its resolution is unproven", kind)
+}
+
+// gatherEvidenceFacts derives the record's evidence section (DC-2's
+// always-visible evidence authority and freshness operands) from the
+// target's own frontmatter.
+//
+// Authority and Freshness are both "unknown" in this delivery unit, with
+// the reason disclosed (DC-15): Context Integrity owns those canonical
+// operands and this projection consumes none of them yet. Contributors
+// are one per DISTINCT evidence kind the target's acceptance criteria
+// declare — the kind is the contributor's id, so the set is inherently
+// deduplicated — each resolved "unproven" with its own witness, sorted
+// ascending by id for determinism.
+func gatherEvidenceFacts(spec *artifact.SpecFrontmatter) EvidenceFacts {
+	kinds := map[string]bool{}
+	for _, ac := range spec.AcceptanceCriteria {
+		for _, k := range ac.Evidence {
+			kinds[string(k)] = true
+		}
+	}
+
+	ids := make([]string, 0, len(kinds))
+	for k := range kinds {
+		ids = append(ids, k)
+	}
+	sort.Strings(ids)
+
+	contributors := make([]EvidenceContributor, 0, len(ids))
+	for _, id := range ids {
+		contributors = append(contributors, EvidenceContributor{
+			ID:         id,
+			Kind:       id,
+			Resolution: "unproven",
+			Witness:    evidenceContributorWitness(id),
+		})
+	}
+
+	disclosures := []string{evidenceOperandsUnknownDisclosure}
+	if len(contributors) == 0 {
+		disclosures = append(disclosures, noEvidenceContributorsDisclosure)
+	}
+
+	return EvidenceFacts{
+		Authority:    "unknown",
+		Freshness:    "unknown",
+		Contributors: contributors,
+		Disclosures:  sortDedupStrings(disclosures),
+	}
 }
 
 // --- lifecycle facts -------------------------------------------------------

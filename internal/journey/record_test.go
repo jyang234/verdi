@@ -1,9 +1,12 @@
 package journey
 
 import (
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
@@ -546,5 +549,198 @@ func TestRecordValidateNegative(t *testing.T) {
 				t.Errorf("Validate() error = %q, want substring %q", err.Error(), tt.wantSub)
 			}
 		})
+	}
+}
+
+// --- evidence section (DC-2's always-visible operands) -------------------
+
+func TestEvidenceFactsValidateHappy(t *testing.T) {
+	tests := []struct {
+		name string
+		ef   EvidenceFacts
+	}{
+		{
+			"this delivery unit's shape: unknown/unknown, disclosed, no contributors",
+			EvidenceFacts{
+				Authority:    "unknown",
+				Freshness:    "unknown",
+				Contributors: []EvidenceContributor{},
+				Disclosures:  []string{"evidence operands are not consumed by this delivery unit"},
+			},
+		},
+		{
+			"contributors ascending by id, every kind and resolution legal",
+			EvidenceFacts{
+				Authority: "authoritative",
+				Freshness: "fresh",
+				Contributors: []EvidenceContributor{
+					{ID: "attestation", Kind: "attestation", Resolution: "proven", Witness: "w1"},
+					{ID: "behavioral", Kind: "behavioral", Resolution: "violated-with-witness", Witness: "w2"},
+					{ID: "runtime", Kind: "runtime", Resolution: "unproven", Witness: "w3"},
+					{ID: "static", Kind: "static", Resolution: "unproven", Witness: "w4"},
+				},
+				Disclosures: []string{},
+			},
+		},
+		{
+			"advisory/stale needs no disclosure: both are PROVEN postures",
+			EvidenceFacts{
+				Authority:    "advisory",
+				Freshness:    "stale",
+				Contributors: []EvidenceContributor{},
+				Disclosures:  []string{},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.ef.validate(); err != nil {
+				t.Fatalf("EvidenceFacts.validate() = %v, want nil", err)
+			}
+			r := validRecord(t)
+			r.Evidence = tt.ef
+			if err := r.Validate(); err != nil {
+				t.Fatalf("Record.Validate() with this evidence section = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestEvidenceFactsValidateNegative(t *testing.T) {
+	base := func() EvidenceFacts {
+		return EvidenceFacts{
+			Authority:    "authoritative",
+			Freshness:    "fresh",
+			Contributors: []EvidenceContributor{},
+			Disclosures:  []string{},
+		}
+	}
+	tests := []struct {
+		name    string
+		mutate  func(*EvidenceFacts)
+		wantSub string
+	}{
+		{"unknown authority", func(e *EvidenceFacts) { e.Authority = "trusted" }, "authority"},
+		{"empty authority", func(e *EvidenceFacts) { e.Authority = "" }, "authority"},
+		{"unknown freshness", func(e *EvidenceFacts) { e.Freshness = "recent" }, "freshness"},
+		{"empty freshness", func(e *EvidenceFacts) { e.Freshness = "" }, "freshness"},
+		{"nil contributors", func(e *EvidenceFacts) { e.Contributors = nil }, "contributors"},
+		{"nil disclosures", func(e *EvidenceFacts) { e.Disclosures = nil }, "disclosures"},
+		{
+			"unsorted disclosures",
+			func(e *EvidenceFacts) { e.Disclosures = []string{"b", "a"} },
+			"sorted",
+		},
+		{
+			"duplicate disclosures",
+			func(e *EvidenceFacts) { e.Disclosures = []string{"a", "a"} },
+			"sorted",
+		},
+		{
+			"malformed contributor id",
+			func(e *EvidenceFacts) {
+				e.Contributors = []EvidenceContributor{{ID: "Static", Kind: "static", Resolution: "unproven", Witness: "w"}}
+			},
+			"id",
+		},
+		{
+			"unknown contributor kind",
+			func(e *EvidenceFacts) {
+				e.Contributors = []EvidenceContributor{{ID: "static", Kind: "vibes", Resolution: "unproven", Witness: "w"}}
+			},
+			"kind",
+		},
+		{
+			"unknown contributor resolution",
+			func(e *EvidenceFacts) {
+				e.Contributors = []EvidenceContributor{{ID: "static", Kind: "static", Resolution: "authenticated", Witness: "w"}}
+			},
+			"resolution",
+		},
+		{
+			"contributor with no witness",
+			func(e *EvidenceFacts) {
+				e.Contributors = []EvidenceContributor{{ID: "static", Kind: "static", Resolution: "unproven"}}
+			},
+			"witness",
+		},
+		{
+			"contributors out of order",
+			func(e *EvidenceFacts) {
+				e.Contributors = []EvidenceContributor{
+					{ID: "static", Kind: "static", Resolution: "unproven", Witness: "w"},
+					{ID: "behavioral", Kind: "behavioral", Resolution: "unproven", Witness: "w"},
+				}
+			},
+			"ascending",
+		},
+		{
+			"duplicate contributor ids",
+			func(e *EvidenceFacts) {
+				e.Contributors = []EvidenceContributor{
+					{ID: "static", Kind: "static", Resolution: "unproven", Witness: "w"},
+					{ID: "static", Kind: "static", Resolution: "unproven", Witness: "w"},
+				}
+			},
+			"ascending",
+		},
+		{
+			// CO-1: an unknown operand must disclose itself.
+			"unknown authority with no disclosure",
+			func(e *EvidenceFacts) { e.Authority = "unknown" },
+			"disclos",
+		},
+		{
+			"unknown freshness with no disclosure",
+			func(e *EvidenceFacts) { e.Freshness = "unknown" },
+			"disclos",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ef := base()
+			tt.mutate(&ef)
+			err := ef.validate()
+			if err == nil {
+				t.Fatalf("EvidenceFacts.validate() = nil, want an error mentioning %q", tt.wantSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Fatalf("EvidenceFacts.validate() = %q, want it to mention %q", err.Error(), tt.wantSub)
+			}
+
+			// The same rule must be reachable through the whole record —
+			// a section validated only in isolation is not fail-closed.
+			r := validRecord(t)
+			r.Evidence = ef
+			if rerr := r.Validate(); rerr == nil {
+				t.Fatalf("Record.Validate() = nil for an invalid evidence section (%q)", tt.name)
+			}
+		})
+	}
+}
+
+// TestEvidenceKindParityWithArtifact proves journey's closed evidence-kind
+// vocabulary is exactly internal/artifact.EvidenceKind's constant set: a
+// spec's acceptance criteria may declare ANY of those kinds, and a
+// contributor derived from one must never fail this schema's own
+// fail-closed enum and abort the projection over a legal spec. record.go
+// never imports internal/artifact in production; only this test does.
+func TestEvidenceKindParityWithArtifact(t *testing.T) {
+	want := []string{
+		string(artifact.EvidenceStatic),
+		string(artifact.EvidenceBehavioral),
+		string(artifact.EvidenceRuntime),
+		string(artifact.EvidenceAttestation),
+	}
+	sort.Strings(want)
+
+	got := make([]string, 0, len(validEvidenceKind))
+	for k := range validEvidenceKind {
+		got = append(got, k)
+	}
+	sort.Strings(got)
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("journey evidence kinds = %v, internal/artifact evidence kinds = %v", got, want)
 	}
 }

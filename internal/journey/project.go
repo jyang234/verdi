@@ -49,6 +49,7 @@ func (p Projector) Project(ctx context.Context, cfg *store.Config, arg string) (
 		Target:     facts.Target,
 		Repository: facts.Repository,
 		Lifecycle:  facts.Lifecycle,
+		Evidence:   facts.Evidence,
 		Blockers: Blockers{
 			Current:  current,
 			Eventual: deriveEventual(),

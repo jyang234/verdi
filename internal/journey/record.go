@@ -43,6 +43,7 @@ type Record struct {
 	Target      Target          `json:"target"`
 	Repository  RepositoryFacts `json:"repository"`
 	Lifecycle   LifecycleFacts  `json:"lifecycle"`
+	Evidence    EvidenceFacts   `json:"evidence"`
 	Blockers    Blockers        `json:"blockers"`
 	Principals  PrincipalFacts  `json:"principals"`
 	Actions     Actions         `json:"actions"`
@@ -139,6 +140,37 @@ type LifecycleFacts struct {
 	Frozen           *FrozenRevision `json:"frozen"`
 	ActiveBranch     StringFact      `json:"active_branch"`
 	Disclosures      []string        `json:"disclosures"`
+}
+
+// EvidenceContributor is one evidence source the target's acceptance
+// criteria declare, and this projection's three-valued reading of it.
+// Kind is drawn from the closed evidence-kind catalog (parity-tested
+// against internal/artifact.EvidenceKind); Resolution is proven,
+// violated-with-witness, or unproven — silence is never a pass (CO-1), so
+// there is no fourth "not looked at" value: a source nobody evaluated is
+// unproven WITH a witness saying why.
+type EvidenceContributor struct {
+	ID         string `json:"id"`
+	Kind       string `json:"kind"`
+	Resolution string `json:"resolution"`
+	Witness    string `json:"witness"`
+}
+
+// EvidenceFacts is the record's evidence section. DC-2 makes evidence
+// AUTHORITY and FRESHNESS always-visible operands of every journey
+// response, alongside repository, HEAD, and default-branch relationship —
+// they are typed fields here rather than free-text disclosures precisely
+// because a consumer must be able to read them without parsing prose.
+//
+// Authority is authoritative, advisory, or unknown; Freshness is fresh,
+// stale, or unknown. "unknown" is a real, legal posture — but never a
+// silent one: CO-1's rule is enforced structurally, so an unknown
+// operand with an empty Disclosures list fails Validate.
+type EvidenceFacts struct {
+	Authority    string                `json:"authority"`
+	Freshness    string                `json:"freshness"`
+	Contributors []EvidenceContributor `json:"contributors"`
+	Disclosures  []string              `json:"disclosures"`
 }
 
 // Owner is a blocker's advisory owner: a display projection of the spec's
@@ -261,6 +293,23 @@ var (
 	validSource            = map[string]bool{"head": true, "working-tree": true, "remote-ref": true, "receipt-bound": true}
 	validConfirmation      = map[string]bool{"none": true, "explicit-confirmation": true}
 	validResolution        = map[string]bool{"authenticated": true, "violated-with-witness": true, "unproven": true}
+
+	validEvidenceAuthority = map[string]bool{"authoritative": true, "advisory": true, "unknown": true}
+	validEvidenceFreshness = map[string]bool{"fresh": true, "stale": true, "unknown": true}
+	// validEvidenceKind is internal/artifact.EvidenceKind's constant set,
+	// all four of it (parity-tested, TestEvidenceKindParityWithArtifact).
+	// Omitting "runtime" — the one kind this delivery unit's own fixtures
+	// never exercise — would make a spec that legally declares
+	// `evidence: [runtime]` abort the whole projection on a fail-closed
+	// enum, so the closed set here is the ARTIFACT's closed set, not this
+	// unit's convenience subset.
+	validEvidenceKind = map[string]bool{
+		"static": true, "behavioral": true, "runtime": true, "attestation": true,
+	}
+	// validEvidenceResolution is deliberately NOT validResolution: a
+	// principal is authenticated or not, while an evidence source is
+	// PROVEN or not — different questions, different closed vocabularies.
+	validEvidenceResolution = map[string]bool{"proven": true, "violated-with-witness": true, "unproven": true}
 )
 
 // Validate reports the first rule the record violates, fail-closed: an
@@ -280,6 +329,9 @@ func (r Record) Validate() error {
 		return err
 	}
 	if err := r.Lifecycle.validate(r.Target.Class); err != nil {
+		return err
+	}
+	if err := r.Evidence.validate(); err != nil {
 		return err
 	}
 	if err := r.Blockers.validate(); err != nil {
@@ -420,6 +472,56 @@ func (lf LifecycleFacts) validate(targetClass string) error {
 	}
 	if !isSortedDeduped(lf.Disclosures) {
 		return fmt.Errorf("journey: lifecycle: disclosures must be sorted and deduplicated")
+	}
+	return nil
+}
+
+func (c EvidenceContributor) validate(field string) error {
+	if !idRe.MatchString(c.ID) {
+		return fmt.Errorf("journey: %s: id %q must match ^[a-z][a-z0-9-]*$", field, c.ID)
+	}
+	if !validEvidenceKind[c.Kind] {
+		return fmt.Errorf("journey: %s: unknown evidence kind %q", field, c.Kind)
+	}
+	if !validEvidenceResolution[c.Resolution] {
+		return fmt.Errorf("journey: %s: unknown resolution %q", field, c.Resolution)
+	}
+	if c.Witness == "" {
+		return fmt.Errorf("journey: %s: witness must be non-empty (a resolution with no witness is silence)", field)
+	}
+	return nil
+}
+
+func (ef EvidenceFacts) validate() error {
+	if !validEvidenceAuthority[ef.Authority] {
+		return fmt.Errorf("journey: evidence: unknown authority %q", ef.Authority)
+	}
+	if !validEvidenceFreshness[ef.Freshness] {
+		return fmt.Errorf("journey: evidence: unknown freshness %q", ef.Freshness)
+	}
+	if ef.Contributors == nil {
+		return fmt.Errorf("journey: evidence.contributors: must be non-nil (an explicitly empty set is [])")
+	}
+	for i, c := range ef.Contributors {
+		if err := c.validate(fmt.Sprintf("evidence.contributors[%d]", i)); err != nil {
+			return err
+		}
+	}
+	if !isSortedDeduped(mapStrings(ef.Contributors, func(c EvidenceContributor) string { return c.ID })) {
+		return fmt.Errorf("journey: evidence.contributors: must be strictly ascending by id (unique and ordered)")
+	}
+	if ef.Disclosures == nil {
+		return fmt.Errorf("journey: evidence.disclosures: must be non-nil (an explicitly empty set is [])")
+	}
+	if !isSortedDeduped(ef.Disclosures) {
+		return fmt.Errorf("journey: evidence.disclosures: must be sorted and deduplicated")
+	}
+	// CO-1, structurally: an unknown operand must disclose itself. Both
+	// operands are checked against the SAME list, so a record whose
+	// authority is unknown for one reason and freshness for another must
+	// still carry at least one disclosure explaining the gap.
+	if (ef.Authority == "unknown" || ef.Freshness == "unknown") && len(ef.Disclosures) == 0 {
+		return fmt.Errorf("journey: evidence: authority or freshness is unknown but disclosures is empty: an unproven operand must disclose itself (CO-1)")
 	}
 	return nil
 }
