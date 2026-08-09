@@ -77,27 +77,41 @@ var canonicalModel = Model{
 // story classes today: states/terminal mirror internal/artifact/
 // status.go's specFeatureStatuses set (draft, accepted-pending-build,
 // closed, superseded; terminal: closed, superseded) exactly (parity-
-// tested, Task 6). Its two transitions are the only ritual verbs that
-// actually flip a spec's status field in cmd/verdi today (grep-verified:
-// accept.go's draftStatusLineRe flip, close.go's
-// closeAcceptedStatusLineRe flip) — `build start` (buildstart.go) cuts a
-// branch without touching status, so it is NOT modeled as a transition,
-// and the accepted-pending-build -> superseded flip a predecessor spec
-// undergoes when its successor is ACCEPTED (supersede.go,
-// supersedePredecessors, called from within the accept ritual on a
-// DIFFERENT spec object) stays kernel per the guide's own §8.3
-// ("accepting v2 flips v1's status to superseded" — a side effect of
-// accept, never its own verb-transition) — so `superseded` is reachable
-// here only via its Terminal membership, exactly like the guide's own
-// worked epic/task example never models a transition into `superseded`
-// either.
+// tested, Task 6).
+//
+// Its two transitions are the two rituals that actually advance a spec:
+//
+//   - `merge` (draft -> accepted-pending-build) is a FORGE transition, not
+//     a Verdi verb. Specification acceptance is merge-signaled: merging
+//     the reviewed specification pull request into the configured default
+//     branch accepts that exact landed revision (docs/superpowers/specs/
+//     2026-08-01-merge-signals-spec-acceptance-design.md — "the successful
+//     merge is the state transition"; internal/specstate derives the state
+//     from Git). `verdi accept` is RETIRED: cmd/verdi/accept.go prints a
+//     compatibility notice and mutates nothing, so an earlier version of
+//     this comment claiming a grep-verified "accept.go's draftStatusLineRe
+//     flip" no longer describes the code and this transition no longer
+//     names that verb. Its author-vouch obligation is unchanged —
+//     retiring a command never drops a governance requirement.
+//   - `close` (accepted-pending-build -> closed) is a live Verdi verb
+//     (grep-verified: close.go's closeAcceptedStatusLineRe flip).
+//
+// `build start` (buildstart.go) cuts a branch without touching status, so
+// it is NOT modeled as a transition, and the accepted-pending-build ->
+// superseded flip a predecessor spec undergoes when its successor is
+// accepted (supersede.go, supersedePredecessors, on a DIFFERENT spec
+// object) stays kernel per the guide's own §8.3 ("accepting v2 flips v1's
+// status to superseded" — a side effect of acceptance, never its own
+// verb-transition) — so `superseded` is reachable here only via its
+// Terminal membership, exactly like the guide's own worked epic/task
+// example never models a transition into `superseded` either.
 func canonicalSpecLifecycle() Lifecycle {
 	return Lifecycle{
 		States:   []string{"draft", "accepted-pending-build", "closed", "superseded"},
 		Terminal: []string{"closed", "superseded"},
 		Transitions: []Transition{
 			{
-				Verb: "accept",
+				Verb: "merge",
 				From: "draft",
 				To:   "accepted-pending-build",
 				Obligations: []Obligation{

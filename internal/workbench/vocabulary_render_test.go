@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifactview"
+	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/model"
 )
@@ -33,7 +34,7 @@ func vocabTestModel() *model.Model {
 			"story":   {Parent: "feature", Template: "story.md"},
 		},
 		Vocabulary: model.Vocabulary{
-			Verbs:  map[string]string{"accept": "Sign off"},
+			Verbs:  map[string]string{"merge": "Sign off"},
 			States: map[string]string{"accepted-pending-build": "Ready to build", "superseded": "Shelved"},
 			Classes: map[string]string{
 				"feature": "Initiative",
@@ -227,6 +228,53 @@ func TestBoardRender_ClassWordProseModelVocabulary(t *testing.T) {
 		if !strings.Contains(html, keep) {
 			t.Errorf("board region lost identity-layer string %q — a rename must never move addressing", keep)
 		}
+	}
+}
+
+// TestBoardRender_CreateReceiptVerbModelVocabulary proves the creation
+// receipt's tracker sentence names the lifecycle moment it gates — the
+// draft -> accepted-pending-build catalog transition, whose verb is
+// `merge` (acceptance is merge-signaled; the `accept` verb is retired) —
+// through DisplayVerb: a store renaming merge sees its own word, and a
+// no-rename store sees the bare catalog verb id, never the retired
+// hand-written "accept" (spec/creation-surfaces ac-5's verb-word
+// discipline).
+func TestBoardRender_CreateReceiptVerbModelVocabulary(t *testing.T) {
+	receiptProj := func() *BoardProjection {
+		return &BoardProjection{
+			Spec:   "vocab-probe",
+			Title:  "Vocab probe",
+			Mode:   modeReadOnly,
+			Status: "accepted-pending-build",
+			Class:  "feature",
+			CreateFields: []designscaffold.Field{
+				{Name: "Title", Kind: designscaffold.FieldInput},
+			},
+		}
+	}
+
+	renamed := receiptProj()
+	renamed.applyModelVocabulary(vocabTestModel())
+	page, err := renderBoardSpecPage(renamed, &boardGitState{})
+	if err != nil {
+		t.Fatalf("renderBoardSpecPage: %v", err)
+	}
+	if !strings.Contains(string(page), "fill it in on the branch before Sign off.") {
+		t.Fatal("receipt tracker sentence does not speak the renamed merge verb word")
+	}
+	if strings.Contains(string(page), "before accept.") {
+		t.Fatal("receipt tracker sentence still speaks the retired bare verb accept")
+	}
+
+	plainPage, err := renderBoardSpecPage(receiptProj(), &boardGitState{})
+	if err != nil {
+		t.Fatalf("renderBoardSpecPage plain: %v", err)
+	}
+	if !strings.Contains(string(plainPage), "fill it in on the branch before merge.") {
+		t.Fatal("no-rename receipt tracker sentence does not fall back to the bare catalog verb id merge")
+	}
+	if strings.Contains(string(plainPage), "before accept.") {
+		t.Fatal("no-rename receipt tracker sentence still speaks the retired verb accept")
 	}
 }
 

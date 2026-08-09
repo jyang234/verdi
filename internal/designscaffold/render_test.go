@@ -226,3 +226,81 @@ func TestLoadTemplate_Negative_PathEscape(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderValue_Happy proves RenderValue — the generalized render seam
+// AC-1's "one resolver and renderer" contract extends to any data shape,
+// not just ScaffoldData (internal/humanartifact's policy scaffolds are
+// the first non-ScaffoldData caller) — renders an arbitrary struct with
+// the identical parse options Render itself uses.
+func TestRenderValue_Happy(t *testing.T) {
+	const tmpl = `name: {{.Name}}
+`
+	type localData struct{ Name string }
+	got, err := RenderValue([]byte(tmpl), localData{Name: "x"})
+	if err != nil {
+		t.Fatalf("RenderValue: %v", err)
+	}
+	want := "name: x\n"
+	if got != want {
+		t.Fatalf("RenderValue = %q, want %q", got, want)
+	}
+}
+
+// TestRenderValue_Negative_MalformedSyntax mirrors TestRender_Negative_
+// MalformedSyntax over the generalized entry: a syntax error fails closed
+// at parse time regardless of the data type.
+func TestRenderValue_Negative_MalformedSyntax(t *testing.T) {
+	const tmpl = `title: {{.Title`
+	if _, err := RenderValue([]byte(tmpl), struct{ Title string }{"x"}); err == nil {
+		t.Fatal("RenderValue(malformed template) = nil error, want a parse failure")
+	}
+}
+
+// TestRenderValue_Negative_UndefinedField mirrors TestRender_Negative_
+// UndefinedField: missingkey=error applies to any data value, not just
+// ScaffoldData.
+func TestRenderValue_Negative_UndefinedField(t *testing.T) {
+	const tmpl = `bogus: {{.NoSuchField}}`
+	if _, err := RenderValue([]byte(tmpl), struct{}{}); err == nil {
+		t.Fatal("RenderValue(undefined field) = nil error, want an execution failure")
+	}
+}
+
+// TestRenderValue_SafeFuncAvailable proves the "safe" func (K4) is
+// registered for RenderValue's execution exactly as it is for Render's —
+// a non-ScaffoldData caller gets the identical newline-smuggle guard.
+func TestRenderValue_SafeFuncAvailable(t *testing.T) {
+	const tmpl = `id: {{safe .ID}}
+`
+	type localData struct{ ID string }
+	got, err := RenderValue([]byte(tmpl), localData{ID: "a: b"})
+	if err != nil {
+		t.Fatalf("RenderValue: %v", err)
+	}
+	want := "id: \"a: b\"\n"
+	if got != want {
+		t.Fatalf("RenderValue = %q, want %q", got, want)
+	}
+}
+
+// TestRender_DelegatesToRenderValue proves Render(tmpl, data) produces
+// byte-identical output to RenderValue(tmpl, data) over the same
+// ScaffoldData — Render is RenderValue's typed delegate, never a second,
+// independently-maintained render path (the additive-refactor contract:
+// "no behavior change for existing callers").
+func TestRender_DelegatesToRenderValue(t *testing.T) {
+	const tmpl = `ref: {{.Ref}}
+`
+	data := ScaffoldData{Ref: "spec/x"}
+	viaRender, err := Render([]byte(tmpl), data)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	viaValue, err := RenderValue([]byte(tmpl), data)
+	if err != nil {
+		t.Fatalf("RenderValue: %v", err)
+	}
+	if viaRender != viaValue {
+		t.Fatalf("Render = %q, RenderValue = %q, want identical", viaRender, viaValue)
+	}
+}

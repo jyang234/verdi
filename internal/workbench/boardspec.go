@@ -293,6 +293,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// inexplicably sealed board.
 	if st.State == specstate.Proposed && st.Relation == specstate.RelationDiverged {
 		proj.Notices = append(proj.Notices, fmt.Sprintf(
+			// vocab:identity — non-vocabulary homograph: the forge's merge request/merge gate, never the `merge` lifecycle transition word
 			"spec/%s's working-tree bytes diverge from the accepted revision on the default branch — a modified accepted revision (VL-010 refuses it at merge); the board renders read-only. Start a new proposal (a successor spec) instead of editing the accepted revision in place", name))
 	}
 	// Display vocabulary (spec/vocabulary-surfaces ac-2): resolved-model

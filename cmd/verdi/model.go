@@ -38,13 +38,18 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/designscaffold"
+	"github.com/jyang234/verdi/internal/humanartifact"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -91,6 +96,11 @@ func runModelCheck(root string, stdout, stderr io.Writer) int {
 	}
 
 	if err := checkTemplates(cfg); err != nil {
+		fmt.Fprintln(stderr, "model check:", err)
+		return 2
+	}
+
+	if err := checkPolicyScaffolds(cfg.Root); err != nil {
 		fmt.Fprintln(stderr, "model check:", err)
 		return 2
 	}
@@ -272,6 +282,164 @@ func checkTemplates(cfg *store.Config) error {
 				return fmt.Errorf("template %s (class %s, %s variant): %w", class.Template, name, v.name, err)
 			}
 		}
+	}
+	return nil
+}
+
+// checkPolicyScaffolds round-trips every constitution scaffold —
+// spec/context-integrity-v2 AC-1's three named human-authored
+// constitution kinds (policies, overlays, exemptions), independent of
+// the resolved model's own Classes (constitution kinds are not model-
+// registered classes; SI-6 assigns their own directory grammar to
+// internal/policyartifact) — a store override under .verdi/templates/
+// when one exists, the embedded
+// canonical default otherwise (humanartifact.ResolveScaffold, the SAME
+// resolver checkTemplates' own designscaffold.LoadTemplate mirrors for
+// the spec-store classes) — through humanartifact.RenderPolicy/
+// RenderOverlay/RenderExemption's render/strict-decode/kernel-round-trip
+// path, exactly like a real scaffold consumer's decode would (AC-1:
+// "verdi model check renders and strict-decodes every configured
+// template and proves parity across creation surfaces"). A failure
+// (render error, strict-decode failure, or kernel round-trip mismatch)
+// fails model check closed here, naming the offending template file —
+// grouped with checkTemplates' own undecodable-manifest conditions
+// above, never the frontier's exit 1 (a broken constitution scaffold is
+// not a structural MODEL deviation any more than a broken class
+// template is).
+func checkPolicyScaffolds(root string) error {
+	adopted, err := storeHasBegunPolicyAdoption(root)
+	if err != nil {
+		return err
+	}
+	if !adopted {
+		return nil
+	}
+	if err := checkPolicyScaffold(root); err != nil {
+		return err
+	}
+	if err := checkOverlayScaffold(root); err != nil {
+		return err
+	}
+	return checkExemptionScaffold(root)
+}
+
+// storeHasBegunPolicyAdoption reports whether root has opted in to the
+// constitution capability, which is exactly the existence of the
+// .verdi/policy/ directory (internal/policyauthority.Load's own adoption
+// signal: an absent .verdi/policy/ is ErrNotAdopted).
+//
+// The gate exists because adoption is PROSPECTIVE (DC-15): an unchanged
+// legacy store's behavior is preserved, and adoption is opt-in. The
+// constitution scaffolds resolve through humanartifact.ResolveScaffold,
+// which prefers a store override at .verdi/templates/policy.md — a
+// filename a pre-adoption store may legitimately carry for its own
+// unrelated purposes. Checking it unconditionally would make an
+// untouched legacy store start exiting 2 for a file whose meaning it
+// never changed.
+//
+// A directory that exists but carries no constitution.md is INCOMPLETE
+// adoption, not absent adoption: the store has opted in, so the checks
+// run and still fail closed. An unreadable .verdi/policy is operational
+// trouble, never an assumed absence (CO-1).
+//
+// A .verdi/policy that EXISTS but is not a directory is operational
+// trouble too, never an assumed absence: internal/policyauthority.Load
+// classifies that exact filesystem state as a hard error
+// ("policyauthority: .verdi/policy exists but is not a directory"), and
+// one state classified two ways across two store entry points is what
+// CO-1's uniform fail-closed posture forbids. The wording is matched
+// deliberately; the classification, not the code, is what is shared
+// (cmd/verdi does not depend on internal/policyauthority).
+func storeHasBegunPolicyAdoption(root string) (bool, error) {
+	info, err := os.Stat(filepath.Join(root, ".verdi", "policy"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("statting .verdi/policy: %w", err)
+	}
+	if !info.IsDir() {
+		return false, errors.New(".verdi/policy exists but is not a directory")
+	}
+	return true, nil
+}
+
+// modelCheckPolicyPlaceholderDigest is a fixed, computed (never hand-
+// typed) sha256:<64 hex> placeholder — the exemption scaffold's witness
+// claim_digest needs a well-formed digest, and computing it here means
+// its length can never silently drift from policyartifact's own grammar.
+func modelCheckPolicyPlaceholderDigest() string {
+	sum := sha256.Sum256([]byte("model-check-placeholder-claim"))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// checkPolicyScaffold round-trips policy.md: humanartifact.ResolveScaffold
+// then humanartifact.RenderPolicy against fixed placeholder data
+// (mirrors modelCheckDefaultData's own "representative enough, never
+// mistaken for a real artifact" posture).
+func checkPolicyScaffold(root string) error {
+	const filename = "policy.md"
+	scaffold, err := humanartifact.ResolveScaffold(root, filename)
+	if err != nil {
+		return fmt.Errorf("policy scaffold %s (kind policy): %w", filename, err)
+	}
+	data := humanartifact.PolicyScaffoldData{
+		Name:             "model-check-placeholder",
+		Title:            "Model Check Placeholder Policy",
+		Owners:           []string{"model-check-placeholder-team"},
+		TemplateIdentity: scaffold.Identity,
+		TemplateDigest:   scaffold.Digest,
+	}
+	if _, err := humanartifact.RenderPolicy(scaffold, data); err != nil {
+		return fmt.Errorf("policy scaffold %s (kind policy): %w", filename, err)
+	}
+	return nil
+}
+
+// checkOverlayScaffold round-trips policy-overlay.md.
+func checkOverlayScaffold(root string) error {
+	const filename = "policy-overlay.md"
+	scaffold, err := humanartifact.ResolveScaffold(root, filename)
+	if err != nil {
+		return fmt.Errorf("policy scaffold %s (kind policy-overlay): %w", filename, err)
+	}
+	data := humanartifact.OverlayScaffoldData{
+		Name:             "model-check-placeholder",
+		Title:            "Model Check Placeholder Overlay",
+		Owners:           []string{"model-check-placeholder-team"},
+		RefinesPolicy:    "policy/model-check-placeholder",
+		ClaimName:        "model-check-placeholder-claim",
+		TemplateIdentity: scaffold.Identity,
+		TemplateDigest:   scaffold.Digest,
+	}
+	if _, err := humanartifact.RenderOverlay(scaffold, data); err != nil {
+		return fmt.Errorf("policy scaffold %s (kind policy-overlay): %w", filename, err)
+	}
+	return nil
+}
+
+// checkExemptionScaffold round-trips policy-exemption.md.
+func checkExemptionScaffold(root string) error {
+	const filename = "policy-exemption.md"
+	scaffold, err := humanartifact.ResolveScaffold(root, filename)
+	if err != nil {
+		return fmt.Errorf("policy scaffold %s (kind policy-exemption): %w", filename, err)
+	}
+	data := humanartifact.ExemptionScaffoldData{
+		Name:               "model-check-placeholder",
+		Title:              "Model Check Placeholder Exemption",
+		Owners:             []string{"model-check-placeholder-team"},
+		WitnessPolicy:      "policy/model-check-placeholder",
+		WitnessClaim:       "model-check-placeholder-claim",
+		WitnessClaimDigest: modelCheckPolicyPlaceholderDigest(),
+		ApprovalRole:       "policy-owner",
+		ApprovalPrincipal:  "principal/github-org/YWxpY2U",
+		Expiry:             "2099-12-31",
+		TemplateIdentity:   scaffold.Identity,
+		TemplateDigest:     scaffold.Digest,
+	}
+	if _, err := humanartifact.RenderExemption(scaffold, data); err != nil {
+		return fmt.Errorf("policy scaffold %s (kind policy-exemption): %w", filename, err)
 	}
 	return nil
 }

@@ -67,7 +67,7 @@ lifecycle:
     states: [draft, accepted-pending-build, closed, superseded]
     terminal: [closed, superseded]
     transitions:
-      - verb: accept
+      - verb: merge
         from: draft
         to: accepted-pending-build
         obligations:
@@ -82,7 +82,7 @@ lifecycle:
     states: [draft, accepted-pending-build, closed, superseded]
     terminal: [closed, superseded]
     transitions:
-      - verb: accept
+      - verb: merge
         from: draft
         to: accepted-pending-build
         obligations:
@@ -96,7 +96,7 @@ lifecycle:
 
 vocabulary:
   verbs:
-    accept: "Sign off"
+    merge: "Sign off"
   states:
     accepted-pending-build: "Ready to build"
   classes:

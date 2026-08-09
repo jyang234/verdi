@@ -370,6 +370,7 @@ func renderWorktreeLine(wt residue.Worktree) string {
 	merged := "unmerged"
 	switch {
 	case wt.MergedUnresolved:
+		// vocab:identity — non-vocabulary homograph: git's own merge-base/merge state, never the `merge` lifecycle transition word
 		merged = "merge state unresolvable"
 	case wt.Merged:
 		merged = "merged"
