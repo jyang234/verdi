@@ -278,3 +278,91 @@ func TestResolveDesignSpec_Negative(t *testing.T) {
 		})
 	}
 }
+
+// --- MatchStoryClassRef --------------------------------------------------
+
+func TestMatchStoryClassRef_Happy(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "matrix-helper-test", testFeatureSpec) // story: jira:LOAN-1482
+	writeActiveSpec(t, root, "matrix-helper-story", testStorySpec)  // story: jira:LOAN-1490
+	writeActiveSpec(t, root, "matrix-helper-component", testComponentSpec)
+
+	tests := []struct {
+		name     string
+		storyRef string
+		wantIDs  []string
+	}{
+		{
+			// The class: story spec matches by its own story: field.
+			"story-class match",
+			"jira:LOAN-1490",
+			[]string{"spec/matrix-helper-story"},
+		},
+		{
+			// The FEATURE carrying this ref is deliberately not returned:
+			// this helper answers the story-class question only, so a
+			// caller can join the two answers itself.
+			"feature-class carrier of the ref is not a story-class match",
+			"jira:LOAN-1482",
+			nil,
+		},
+		{"no match at all", "jira:NOPE-1", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := MatchStoryClassRef(root, tt.storyRef)
+			if err != nil {
+				t.Fatalf("MatchStoryClassRef: %v", err)
+			}
+			if len(got) != len(tt.wantIDs) {
+				t.Fatalf("MatchStoryClassRef = %d matches, want %d", len(got), len(tt.wantIDs))
+			}
+			for i, want := range tt.wantIDs {
+				if got[i].ID != want {
+					t.Fatalf("match[%d].ID = %q, want %q", i, got[i].ID, want)
+				}
+			}
+		})
+	}
+}
+
+// TestMatchStoryClassRef_MultipleMatchesSortedByID proves the returned
+// order is deterministic: a caller composing a refusal that names every
+// match must not depend on directory-walk order.
+func TestMatchStoryClassRef_MultipleMatchesSortedByID(t *testing.T) {
+	root := t.TempDir()
+	writeActiveSpec(t, root, "zeta-story", strings.ReplaceAll(testStorySpec, "spec/matrix-helper-story", "spec/zeta-story"))
+	writeActiveSpec(t, root, "alpha-story", strings.ReplaceAll(testStorySpec, "spec/matrix-helper-story", "spec/alpha-story"))
+
+	got, err := MatchStoryClassRef(root, "jira:LOAN-1490")
+	if err != nil {
+		t.Fatalf("MatchStoryClassRef: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("MatchStoryClassRef = %d matches, want 2", len(got))
+	}
+	if got[0].ID != "spec/alpha-story" || got[1].ID != "spec/zeta-story" {
+		t.Fatalf("matches = [%s %s], want ascending by id", got[0].ID, got[1].ID)
+	}
+}
+
+func TestMatchStoryClassRef_Negative(t *testing.T) {
+	t.Run("missing active directory is operational", func(t *testing.T) {
+		_, err := MatchStoryClassRef(t.TempDir(), "jira:LOAN-1490")
+		var opErr *OperationalError
+		if !errors.As(err, &opErr) {
+			t.Fatalf("MatchStoryClassRef error = %v, want *OperationalError (a store that cannot be listed is machinery trouble, never a no-match verdict)", err)
+		}
+	})
+
+	t.Run("undecodable spec mid-scan is operational", func(t *testing.T) {
+		root := t.TempDir()
+		writeActiveSpec(t, root, "broken", "---\nid: spec/broken\nkind: spec\nclass: story\nunknown_field: true\n---\n")
+
+		_, err := MatchStoryClassRef(root, "jira:LOAN-1490")
+		var opErr *OperationalError
+		if !errors.As(err, &opErr) {
+			t.Fatalf("MatchStoryClassRef error = %v, want *OperationalError (ADJ-51 finding 1: corruption walked into mid-scan must never read as a missing ref)", err)
+		}
+	})
+}

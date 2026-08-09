@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -220,6 +221,50 @@ func matchStoryRef(root, storyRef string) (*artifact.SpecFrontmatter, error) {
 		// — display, resolved (L-M13a(6) work order).
 		return nil, fmt.Errorf("story ref %q matches more than one active %s spec: %s", storyRef, displayModel(root).DisplayClass("feature"), strings.Join(names, ", "))
 	}
+}
+
+// MatchStoryClassRef returns every active `class: story` spec whose own
+// story: field equals storyRef, sorted ascending by spec id and never nil-
+// versus-empty-sensitive (zero matches is an empty slice and a nil error,
+// the ordinary "no story-class spec carries this ref" outcome, never an
+// error).
+//
+// It is matchStoryRef's story-class twin, deliberately kept SEPARATE from
+// it rather than folded into it: matchStoryRef is Resolve's shared seam
+// and several already-shipped consumers depend on its feature-only
+// semantics (see its own doc comment for why widening it silently changes
+// which spec they find). This function answers the other half of the
+// question, so a caller that needs BOTH — `verdi build start`'s
+// resolveBuildTarget, `verdi journey`'s target resolution — joins the two
+// answers itself and decides its own policy over them, including whether
+// a ref matching one of each is ambiguous.
+//
+// Failure posture is matchStoryRef's exactly (ADJ-51 finding 1): a
+// directory under active/ that cannot be listed, read, or strict-decoded
+// mid-scan is store corruption and yields an *OperationalError — never a
+// "does not resolve" verdict that could mask a reachable match.
+func MatchStoryClassRef(root, storyRef string) ([]*artifact.SpecFrontmatter, error) {
+	dir := filepath.Join(root, ".verdi", "specs", "active")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, &OperationalError{Err: fmt.Errorf("listing %s: %w", dir, err)}
+	}
+
+	matches := []*artifact.SpecFrontmatter{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		spec, lerr := LoadActiveSpec(root, e.Name())
+		if lerr != nil {
+			return nil, &OperationalError{Err: lerr}
+		}
+		if spec.Class == artifact.ClassStory && spec.Story == storyRef {
+			matches = append(matches, spec)
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].ID < matches[j].ID })
+	return matches, nil
 }
 
 // buildBranchPrefix is `verdi feature start`'s branch-naming convention

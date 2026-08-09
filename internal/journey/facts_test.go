@@ -1156,3 +1156,184 @@ func TestGatherEvidenceFacts_Deterministic(t *testing.T) {
 		t.Fatalf("gatherEvidenceFacts is order-dependent:\n a = %+v\n b = %+v", a, b)
 	}
 }
+
+// --- story-ref resolution across BOTH spec classes -----------------------
+
+// testStorySpecMD is a class: story spec carrying its own REQUIRED story:
+// field — the form storyresolve.Resolve deliberately never matches (its
+// scan is feature-class only), and therefore the form this projection has
+// to reach for itself.
+const testStorySpecMD = `---
+id: spec/loan-api
+kind: spec
+class: story
+title: "Loan API"
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+story: jira:LOAN-1482
+links:
+  - { type: implements, ref: "spec/loans#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+---
+# body
+`
+
+// testSecondStorySpecMD is a SECOND class: story spec carrying the same
+// story: ref — the story-versus-story collision.
+const testSecondStorySpecMD = `---
+id: spec/loan-ui
+kind: spec
+class: story
+title: "Loan UI"
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+story: jira:LOAN-1482
+links:
+  - { type: implements, ref: "spec/loans#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+---
+# body
+`
+
+// TestResolveTargetBytes_StoryRef_StoryClassReachable proves a class:
+// story target is reachable by its own story ref. storyresolve.Resolve
+// matches active FEATURE specs only, so before this the story-class form
+// was simply unreachable through `verdi journey`.
+func TestResolveTargetBytes_StoryRef_StoryClassReachable(t *testing.T) {
+	root := t.TempDir()
+	writeSpec(t, root, store.ZoneActive, "loan-api", testStorySpecMD)
+
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	name, relPath, content, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "jira:LOAN-1482")
+	if err != nil {
+		t.Fatalf("resolveTargetBytes: %v", err)
+	}
+	if name != "loan-api" || relPath != store.ActiveSpecRelPath("loan-api") || !foundOnDisk {
+		t.Fatalf("got name=%q relPath=%q foundOnDisk=%v", name, relPath, foundOnDisk)
+	}
+	if string(content) != testStorySpecMD {
+		t.Fatalf("content mismatch")
+	}
+}
+
+// TestResolveTargetBytes_StoryRef_AmbiguousFailsClosed is the collision
+// the real showcase corpus already contains (stale-decline, class:
+// feature, and borrower-update-api, class: story, both carry
+// story: jira:LOAN-1482): with two specs answering to one ref, silently
+// picking either is a wrong answer, so the projection refuses and names
+// both.
+func TestResolveTargetBytes_StoryRef_AmbiguousFailsClosed(t *testing.T) {
+	tests := []struct {
+		name    string
+		specs   map[string]string
+		wantIDs []string
+	}{
+		{
+			"feature and story carry the same ref",
+			map[string]string{"loans": testFeatureSpecWithStoryMD, "loan-api": testStorySpecMD},
+			[]string{"spec/loan-api", "spec/loans"},
+		},
+		{
+			"two stories carry the same ref",
+			map[string]string{"loan-api": testStorySpecMD, "loan-ui": testSecondStorySpecMD},
+			[]string{"spec/loan-api", "spec/loan-ui"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			for name, content := range tt.specs {
+				writeSpec(t, root, store.ZoneActive, name, content)
+			}
+
+			p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+			_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "jira:LOAN-1482")
+			if err == nil {
+				t.Fatal("resolveTargetBytes: want an ambiguity refusal, got nil")
+			}
+			// Ambiguity is operational, never a NotFound verdict: the ref
+			// resolves to too much, not to nothing.
+			var nf *NotFoundError
+			if errors.As(err, &nf) {
+				t.Fatalf("ambiguity surfaced as *NotFoundError: %v", err)
+			}
+			for _, id := range tt.wantIDs {
+				if !strings.Contains(err.Error(), id) {
+					t.Fatalf("error = %q, want it to name every match (%v)", err.Error(), tt.wantIDs)
+				}
+			}
+			// Sorted, so the refusal is byte-identical across runs.
+			first, second := strings.Index(err.Error(), tt.wantIDs[0]), strings.Index(err.Error(), tt.wantIDs[1])
+			if first > second {
+				t.Fatalf("error = %q, want the matches named in ascending id order", err.Error())
+			}
+			if !strings.Contains(err.Error(), "spec/<name>") {
+				t.Fatalf("error = %q, want it to instruct qualification via spec/<name>", err.Error())
+			}
+		})
+	}
+}
+
+// TestNotFoundError_SearchedIsHonestPerForm pins F-4's honesty fix: the
+// refusal must state what was ACTUALLY searched. The story-ref form scans
+// only the working tree's active zone; the direct spec-ref form scans
+// active and archive locally AND both zones at the configured default
+// branch. Claiming the latter for the former was simply false.
+func TestNotFoundError_SearchedIsHonestPerForm(t *testing.T) {
+	t.Run("story-ref form does not claim the default branch", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, ".verdi", "specs", "active"), 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		// A default branch DOES resolve here — so a message claiming it was
+		// searched would be false rather than merely imprecise.
+		resolveDB := func(context.Context, string) (specstate.Branch, bool) {
+			return specstate.Branch{Name: "main", Ref: "origin/main"}, true
+		}
+		p := newProjector(noOpGitReader(), &fakeStateResolver{}, resolveDB)
+
+		_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "jira:NOPE-1")
+		var nf *NotFoundError
+		if !errors.As(err, &nf) {
+			t.Fatalf("error = %v, want *NotFoundError", err)
+		}
+		msg := nf.Error()
+		if !strings.Contains(msg, "jira:NOPE-1") {
+			t.Fatalf("Error() = %q, want it to name the ref", msg)
+		}
+		if strings.Contains(msg, "default branch") {
+			t.Fatalf("Error() = %q, but the story-ref form never searches the default branch", msg)
+		}
+		if !strings.Contains(msg, "active") {
+			t.Fatalf("Error() = %q, want it to name the active zone it actually scanned", msg)
+		}
+	})
+
+	t.Run("spec-ref form names both zones and the default branch", func(t *testing.T) {
+		root := t.TempDir()
+		git := noOpGitReader()
+		git.showFn = func(context.Context, string, string, string) ([]byte, error) {
+			return nil, errors.New("no such path")
+		}
+		resolveDB := func(context.Context, string) (specstate.Branch, bool) {
+			return specstate.Branch{Name: "main", Ref: "origin/main"}, true
+		}
+		p := newProjector(git, &fakeStateResolver{}, resolveDB)
+
+		_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "spec/nope")
+		var nf *NotFoundError
+		if !errors.As(err, &nf) {
+			t.Fatalf("error = %v, want *NotFoundError", err)
+		}
+		msg := nf.Error()
+		for _, want := range []string{"spec/nope", "active", "archive", "default branch"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("Error() = %q, want it to mention %q", msg, want)
+			}
+		}
+	})
+}

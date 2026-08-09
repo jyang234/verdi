@@ -847,3 +847,110 @@ func journeyBlockerIDs(blockers []journey.Blocker) []string {
 	}
 	return ids
 }
+
+// journeyFeatureWithStoryMD and journeyStoryClassMD are the two-classes-
+// one-tracker-ref shape the real showcase corpus already has
+// (stale-decline, class: feature, and borrower-update-api, class: story,
+// both carrying story: jira:LOAN-1482): a feature's OPTIONAL epic/
+// objective story: field and a story's REQUIRED own story: field are
+// different refs that may legitimately coincide.
+const journeyFeatureWithStoryMD = `---
+id: spec/loans
+kind: spec
+class: feature
+title: "Loans"
+owners: [platform-team]
+story: jira:LOAN-1482
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+---
+# body
+`
+
+const journeyStoryClassMD = `---
+id: spec/loan-api
+kind: spec
+class: story
+title: "Loan API"
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+story: jira:LOAN-1482
+links:
+  - { type: implements, ref: "spec/loans#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+---
+# body
+`
+
+// TestCmdJourney_StoryRef_StoryClassTarget proves AC-1's "any feature OR
+// story" reach at the CLI surface: a class: story spec is reachable by its
+// own story ref. storyresolve.Resolve matches active FEATURE specs only,
+// so this form was previously unreachable through `verdi journey`.
+func TestCmdJourney_StoryRef_StoryClassTarget(t *testing.T) {
+	buildJourneyRepo(t, map[string]string{".verdi/specs/active/loan-api/spec.md": journeyStoryClassMD})
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"jira:LOAN-1482"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdJourney(jira:LOAN-1482) = %d, want 0; stderr=%s", got, stderr.String())
+	}
+	rec, err := journey.Decode([]byte(strings.TrimRight(stdout.String(), "\n")))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout.String())
+	}
+	if rec.Target.Class != "story" {
+		t.Fatalf("Target.Class = %q, want story", rec.Target.Class)
+	}
+	if !strings.Contains(rec.Target.Path, "loan-api") {
+		t.Fatalf("Target.Path = %q, want the story-class spec's own path", rec.Target.Path)
+	}
+}
+
+// TestCmdJourney_StoryRef_AmbiguousExitsTwo proves the fail-closed half at
+// the CLI surface: a ref two active specs answer to is operational exit 2
+// naming both, never a silently-picked one of them.
+func TestCmdJourney_StoryRef_AmbiguousExitsTwo(t *testing.T) {
+	buildJourneyRepo(t, map[string]string{
+		".verdi/specs/active/loans/spec.md":    journeyFeatureWithStoryMD,
+		".verdi/specs/active/loan-api/spec.md": journeyStoryClassMD,
+	})
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"jira:LOAN-1482"}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdJourney(ambiguous jira:LOAN-1482) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on an operational error", stdout.String())
+	}
+	for _, want := range []string{"spec/loan-api", "spec/loans", "spec/<name>"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want it to mention %q", stderr.String(), want)
+		}
+	}
+	if strings.Count(stderr.String(), "journey: ") != 1 {
+		t.Fatalf("stderr = %q, want the \"journey: \" prefix exactly once", stderr.String())
+	}
+}
+
+// TestCmdJourney_StoryRef_UnmatchedExitsTwo is the third outcome: a ref no
+// active spec of either class carries stays a NotFound refusal at exit 2,
+// and its message does not claim a default-branch search the story-ref
+// form never performs.
+func TestCmdJourney_StoryRef_UnmatchedExitsTwo(t *testing.T) {
+	buildJourneyRepo(t, map[string]string{".verdi/specs/active/payments/spec.md": journeyFeatureSpecMD})
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"jira:NOPE-1"}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdJourney(jira:NOPE-1) = %d, want 2; stdout=%s", got, stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "jira:NOPE-1") {
+		t.Fatalf("stderr = %q, want it to name the ref", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "default branch") {
+		t.Fatalf("stderr = %q, but the story-ref form never searches the default branch", stderr.String())
+	}
+}

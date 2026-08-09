@@ -18,19 +18,44 @@ import (
 	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
+// Searched phrases name, per ref form, EXACTLY what resolution looked in
+// — the two forms search genuinely different things, and a refusal that
+// claims otherwise is a false statement about the evidence (CO-1's
+// honesty applies to a refusal's own account of itself, not only to a
+// record's fields). Both are fixed and machine-independent: no path, no
+// branch name, nothing that varies by checkout.
+const (
+	// searchedSpecRef is the direct spec/<name> form's reach:
+	// resolveDirectSpecRef.
+	searchedSpecRef = "checked the working tree's active and archive zones and both zones at the configured default branch"
+	// searchedStoryRef is the scheme-prefixed story-ref form's reach:
+	// only the working tree's active zone is scanned, for BOTH classes'
+	// story: fields (resolveStoryRef). The default branch is never
+	// consulted for this form. The two classes are deliberately not
+	// enumerated in the text: "every active spec's story: field" says the
+	// same thing without spelling class words a store may have renamed
+	// (L-M13a(6)'s enumeration rule; no *model.Model is in scope at a
+	// package-level const).
+	searchedStoryRef = "checked every active spec's story: field in the working tree's active zone"
+)
+
 // NotFoundError is GatherFacts's typed refusal when arg resolves to no
-// spec anywhere this projection can see: neither the working tree's
-// active or archive zone, nor the configured default branch's active or
-// archive zone (the direct spec/<name> form), nor any active feature
-// spec's story: field (the scheme-prefixed story-ref form). A caller (the
-// CLI lane) maps this to exit 2 — an argument that resolves to nothing is
-// operational, not a lifecycle verdict of its own.
+// spec this projection can see. Searched names what was actually scanned
+// for arg's own form (searchedSpecRef / searchedStoryRef); the zero value
+// falls back to a form-agnostic phrase that claims nothing specific. A
+// caller (the CLI lane) maps this to exit 2 — an argument that resolves to
+// nothing is operational, not a lifecycle verdict of its own.
 type NotFoundError struct {
-	Ref string
+	Ref      string
+	Searched string
 }
 
 func (e *NotFoundError) Error() string {
-	return fmt.Sprintf("journey: %s resolves to no spec (checked the working tree and the configured default branch)", e.Ref)
+	searched := e.Searched
+	if searched == "" {
+		searched = "no spec with this ref was found"
+	}
+	return fmt.Sprintf("journey: %s resolves to no spec (%s)", e.Ref, searched)
 }
 
 // Facts is the complete repository- and lifecycle-fact basis for a journey
@@ -98,11 +123,11 @@ func (p Projector) GatherFacts(ctx context.Context, cfg *store.Config, arg strin
 // spec/<name> ref is read directly, active-then-archive-then-default-
 // branch (mirroring cmd/verdi/specstate.go's readSpecBytesEitherZone, with
 // the default-branch fallback this projection additionally needs); a
-// scheme-prefixed story ref is resolved via internal/storyresolve.Resolve
-// and then re-read from the active zone. foundOnDisk is false only when
-// the direct-ref form fell back to the default branch (Source ==
-// "remote-ref"); it is always true for the story-ref form, since
-// storyresolve.Resolve only ever matches specs already present in the
+// scheme-prefixed story ref is resolved by resolveStoryRef against BOTH
+// spec classes' story: fields and then re-read from the active zone.
+// foundOnDisk is false only when the direct-ref form fell back to the
+// default branch (Source == "remote-ref"); it is always true for the
+// story-ref form, which only ever matches specs already present in the
 // working tree's active zone.
 func (p Projector) resolveTargetBytes(ctx context.Context, root, arg string) (name, relPath string, content []byte, foundOnDisk bool, err error) {
 	if ref, perr := artifact.ParseRef(arg); perr == nil && ref.Kind == artifact.KindSpec {
@@ -111,12 +136,8 @@ func (p Projector) resolveTargetBytes(ctx context.Context, root, arg string) (na
 	}
 
 	if scheme, key, ok := strings.Cut(arg, ":"); ok && scheme != "" && key != "" {
-		spec, rerr := storyresolve.Resolve(root, arg)
+		spec, rerr := p.resolveStoryRef(root, arg)
 		if rerr != nil {
-			var unmatched *storyresolve.UnmatchedStoryRefError
-			if errors.As(rerr, &unmatched) {
-				return "", "", nil, false, &NotFoundError{Ref: arg}
-			}
 			return "", "", nil, false, rerr
 		}
 		specRef, perr := artifact.ParseRef(spec.ID)
@@ -133,6 +154,67 @@ func (p Projector) resolveTargetBytes(ctx context.Context, root, arg string) (na
 
 	// vocab:identity — the "story ref" FIELD-form grammar (I-30; mirrors storyresolve.Resolve's own refusal text)
 	return "", "", nil, false, fmt.Errorf("journey: %q is neither a scheme-prefixed story ref (e.g. jira:LOAN-1482) nor a spec ref (e.g. spec/stale-decline); this verb accepts exactly those two forms", arg)
+}
+
+// resolveStoryRef resolves a scheme-prefixed story ref against BOTH spec
+// classes' story: fields, over the working tree's active zone.
+//
+// AC-1's contract is "any feature OR story", so both classes must be
+// reachable by the ref they carry. The two halves come from two different
+// storyresolve entry points, deliberately: Resolve's shared story-ref
+// scan is feature-class only (its own doc comment explains why widening
+// it would silently change which spec several already-shipped consumers
+// find), and MatchStoryClassRef answers the story-class half. Joining
+// them here — rather than in either of them — keeps every other consumer
+// byte-for-byte unchanged.
+//
+// Both classes legitimately carry the SAME tracker ref: a feature's
+// OPTIONAL epic/objective story: field and a story's REQUIRED own story:
+// field are different refs that may coincide, with no uniqueness rule
+// between them (this module's own examples/showcase does exactly that:
+// stale-decline, class: feature, and borrower-update-api, class: story,
+// both carry story: jira:LOAN-1482). When that happens the ref names two
+// different targets, and silently projecting either one is a wrong
+// answer, so resolution fails closed naming every match and how to
+// disambiguate. That refusal is a plain operational error, never a
+// *NotFoundError: the ref resolves to too much, not to nothing.
+func (p Projector) resolveStoryRef(root, arg string) (*artifact.SpecFrontmatter, error) {
+	var matches []*artifact.SpecFrontmatter
+
+	featureMatch, rerr := storyresolve.Resolve(root, arg)
+	switch {
+	case rerr == nil:
+		matches = append(matches, featureMatch)
+	case errors.As(rerr, new(*storyresolve.UnmatchedStoryRefError)):
+		// Zero feature-class matches — an ordinary outcome here, not a
+		// failure: the story-class half may still answer.
+	default:
+		// Anything else (a corrupt store walked into mid-scan, a
+		// feature-versus-feature collision storyresolve refuses on its own)
+		// is surfaced as-is.
+		return nil, rerr
+	}
+
+	storyMatches, serr := storyresolve.MatchStoryClassRef(root, arg)
+	if serr != nil {
+		return nil, serr
+	}
+	matches = append(matches, storyMatches...)
+
+	switch len(matches) {
+	case 0:
+		return nil, &NotFoundError{Ref: arg, Searched: searchedStoryRef}
+	case 1:
+		return matches[0], nil
+	default:
+		ids := make([]string, len(matches))
+		for i, m := range matches {
+			ids[i] = m.ID
+		}
+		sort.Strings(ids)
+		// vocab:identity — "story ref" names the scheme-prefixed story: FIELD's ref form, and spec/<name> is the ref grammar the operator must retype (I-30); both identity, like storyresolve's own twin refusal
+		return nil, fmt.Errorf("journey: story ref %q matches more than one active spec: %s; name the one you mean as spec/<name>", arg, strings.Join(ids, ", "))
+	}
 }
 
 // resolveDirectSpecRef reads name's spec.md active-then-archive from the
@@ -162,7 +244,7 @@ func (p Projector) resolveDirectSpecRef(ctx context.Context, root, name string) 
 
 	branch, ok := p.resolveDefaultBranch(ctx, root)
 	if !ok {
-		return "", nil, false, &NotFoundError{Ref: "spec/" + name}
+		return "", nil, false, &NotFoundError{Ref: "spec/" + name, Searched: searchedSpecRef}
 	}
 	for _, zone := range []string{store.ZoneActive, store.ZoneArchive} {
 		zoneRelPath := store.SpecRelPath(zone, name)
@@ -171,7 +253,7 @@ func (p Projector) resolveDirectSpecRef(ctx context.Context, root, name string) 
 			return zoneRelPath, shown, false, nil
 		}
 	}
-	return "", nil, false, &NotFoundError{Ref: "spec/" + name}
+	return "", nil, false, &NotFoundError{Ref: "spec/" + name, Searched: searchedSpecRef}
 }
 
 // decodeTargetSpec strict-decodes content's frontmatter and refuses any
