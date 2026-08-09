@@ -557,6 +557,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		writeGuide(&b, p)
 	case modeReview:
 		b.WriteString(`<section class="mirror-note"><h2>Review mirror</h2>` +
+			// vocab:identity — non-vocabulary homograph: the forge's merge request/merge gate, never the `merge` lifecycle transition word
 			`<p class="ritual-note">This board mirrors the merge request. Comments that name a card ride on it; everything else lands in the tray below &#8212; nothing is dropped.</p></section>`)
 		writeInboxTray(&b, p.Tray)
 		writeYarnKey(&b, p)

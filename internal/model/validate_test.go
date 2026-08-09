@@ -83,7 +83,7 @@ func TestModelValidate_VocabularyKeys(t *testing.T) {
 		{
 			"declared keys in every section validate",
 			Vocabulary{
-				Verbs:   map[string]string{"accept": "Sign off"},
+				Verbs:   map[string]string{"merge": "Sign off"},
 				States:  map[string]string{"accepted-pending-build": "Ready to build"},
 				Classes: map[string]string{"feature": "Initiative", "story": "Workstream"},
 			},
@@ -107,7 +107,7 @@ func TestModelValidate_VocabularyKeys(t *testing.T) {
 		{
 			"unknown verbs key fails closed naming key and legal set",
 			Vocabulary{Verbs: map[string]string{"approve": "Approve"}},
-			`model: vocabulary: verbs key "approve" is not a declared transition verb in any lifecycle (declared verbs: accept, close)`,
+			`model: vocabulary: verbs key "approve" is not a declared transition verb in any lifecycle (declared verbs: close, merge)`,
 		},
 	}
 	for _, tc := range cases {
@@ -160,8 +160,8 @@ func TestModelValidate_VocabularyEmptyValueRejected(t *testing.T) {
 		},
 		{
 			"empty verbs value fails closed naming the key",
-			Vocabulary{Verbs: map[string]string{"accept": ""}},
-			`model: vocabulary: verbs key "accept" has an empty rename value`,
+			Vocabulary{Verbs: map[string]string{"merge": ""}},
+			`model: vocabulary: verbs key "merge" has an empty rename value`,
 		},
 	}
 	for _, tc := range cases {
@@ -225,27 +225,27 @@ func TestDecodeModel_Frontier(t *testing.T) {
 // compare DIRECTLY: the kernel's own duplicate-verb rule now rejects such a
 // manifest at Validate time, so DecodeModel never hands lifecycleEqual a
 // duplicate — this exercises the compare on a hand-built value to prove it
-// is robust even if one ever slipped that gate. A lifecycle listing `accept`
-// twice and omitting `close` must NOT compare equal to canonical's
-// [accept, close]: staying length-2 while each accept matched canonical's one
-// accept, the pre-fix one-directional verb-map compare returned true and let
-// a whole missing transition slip the frontier. The verb-keyed multiset
-// (transitionsAxis, reached through lifecycleEqual) drives the extra accept's
-// count negative and fails closed — in either orientation, while canonical
-// still equals itself.
+// is robust even if one ever slipped that gate. A lifecycle listing the
+// advancement transition (`merge`) twice and omitting `close` must NOT
+// compare equal to canonical's [merge, close]: staying length-2 while each
+// merge matched canonical's one merge, the pre-fix one-directional verb-map
+// compare returned true and let a whole missing transition slip the
+// frontier. The verb-keyed multiset (transitionsAxis, reached through
+// lifecycleEqual) drives the extra merge's count negative and fails closed
+// — in either orientation, while canonical still equals itself.
 func TestLifecycleEqual_DuplicateVerbCannotMaskMissing(t *testing.T) {
 	canon := canonicalSpecLifecycle()
-	accept := canon.Transitions[0] // the `accept` transition, verbatim
+	advancement := canon.Transitions[0] // the `merge` transition, verbatim
 	dup := Lifecycle{
 		States:      canon.States,
 		Terminal:    canon.Terminal,
-		Transitions: []Transition{accept, accept}, // accept x2, no close
+		Transitions: []Transition{advancement, advancement}, // merge x2, no close
 	}
 	if lifecycleEqual(dup, canon) {
-		t.Fatal("lifecycleEqual(accept×2-no-close, canonical) = true, want false: a duplicate verb must not mask canonical's missing `close` (judged-frontier-duplicate-verb-bypass)")
+		t.Fatal("lifecycleEqual(merge×2-no-close, canonical) = true, want false: a duplicate verb must not mask canonical's missing `close` (judged-frontier-duplicate-verb-bypass)")
 	}
 	if lifecycleEqual(canon, dup) {
-		t.Fatal("lifecycleEqual(canonical, accept×2-no-close) = true, want false (the compare must fail closed in either orientation)")
+		t.Fatal("lifecycleEqual(canonical, merge×2-no-close) = true, want false (the compare must fail closed in either orientation)")
 	}
 	if !lifecycleEqual(canon, canonicalSpecLifecycle()) {
 		t.Fatal("lifecycleEqual(canonical, canonical) = false, want true (positive control: an unchanged lifecycle still compares equal)")
@@ -263,8 +263,8 @@ func TestDecodeModel_VocabRenamePassesFrontier(t *testing.T) {
 	if got := m.Classes["feature"].Template; got != "custom-feature.md" {
 		t.Fatalf("Classes[feature].Template = %q, want custom-feature.md", got)
 	}
-	if got := m.DisplayVerb("accept"); got != "Sign off" {
-		t.Fatalf("DisplayVerb(accept) = %q, want %q", got, "Sign off")
+	if got := m.DisplayVerb("merge"); got != "Sign off" {
+		t.Fatalf("DisplayVerb(merge) = %q, want %q", got, "Sign off")
 	}
 }
 

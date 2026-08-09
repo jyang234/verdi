@@ -22,7 +22,7 @@ func TestCandidateTransitions(t *testing.T) {
 		state     specstate.State
 		wantVerbs []string
 	}{
-		{"proposed joins draft, candidate is accept", specstate.Proposed, []string{"accept"}},
+		{"proposed joins draft, candidate is the merge-signaled transition", specstate.Proposed, []string{"merge"}},
 		{"accepted-pending-build joins, candidate is close", specstate.AcceptedPendingBuild, []string{"close"}},
 		{"closed is terminal: no candidates", specstate.Closed, nil},
 		{"superseded is terminal: no candidates", specstate.Superseded, nil},
@@ -238,9 +238,9 @@ func TestDeriveBlockers_ObligationsAndPrincipalResolution(t *testing.T) {
 		t.Errorf("principal-resolution blocker class = %v, want governance", b.Class)
 	}
 	// draft-side obligations (author-vouch) must NOT appear: only "close"
-	// is a candidate here, not "accept".
-	if findBlocker(blockers, "obligation-author-vouch-unproven/accept/attestation/author-vouch") != nil {
-		t.Errorf("blockers unexpectedly include the accept-side obligation blocker")
+	// is a candidate here, not the draft-exit "merge" transition.
+	if findBlocker(blockers, "obligation-author-vouch-unproven/merge/attestation/author-vouch") != nil {
+		t.Errorf("blockers unexpectedly include the draft-exit obligation blocker")
 	}
 }
 
@@ -306,9 +306,13 @@ func TestDeriveBlockers_ProposedForgeFacts(t *testing.T) {
 	candidates, _ := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Proposed})
 	blockers := deriveBlockers(true, specstate.Result{State: specstate.Proposed}, candidates, testOwner())
 
-	found := findBlocker(blockers, "forge-facts-unavailable/accept")
+	// The draft-exit transition is merge-signaled (docs/superpowers/specs/
+	// 2026-08-01-merge-signals-spec-acceptance-design.md), so the
+	// forge-facts gap is attributed to "merge" — the forge transition
+	// that actually advances the spec — never to the retired `accept`.
+	found := findBlocker(blockers, "forge-facts-unavailable/merge")
 	if found == nil {
-		t.Fatalf("blockers = %v, want forge-facts-unavailable/accept", blockerIDs(blockers))
+		t.Fatalf("blockers = %v, want forge-facts-unavailable/merge", blockerIDs(blockers))
 	}
 	if found.Reason != ReasonForgeFactsUnavailable || found.Class != ClassExternalWait {
 		t.Fatalf("blocker = %+v", found)
@@ -316,7 +320,7 @@ func TestDeriveBlockers_ProposedForgeFacts(t *testing.T) {
 }
 
 func TestDeriveBlockers_ProposedForgeFacts_NoCandidatesFallsBackToUnknown(t *testing.T) {
-	// A model with no "accept"-shaped transition from draft at all: the
+	// A model with no draft-exit transition at all: the
 	// draft-exit verb cannot be named, so the blocker's transition is the
 	// literal "unknown" rather than a guess.
 	blockers := deriveBlockers(true, specstate.Result{State: specstate.Proposed}, nil, testOwner())
@@ -388,14 +392,14 @@ func TestDeriveEventual(t *testing.T) {
 func TestDerivePrincipals_CanonicalModel(t *testing.T) {
 	mdl := model.Canonical()
 
-	t.Run("accept candidate: author-vouch only", func(t *testing.T) {
+	t.Run("merge candidate: author-vouch only", func(t *testing.T) {
 		candidates, _ := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Proposed})
 		pf := derivePrincipals(candidates)
 		if len(pf.Required) != 1 {
 			t.Fatalf("Required = %+v, want exactly 1", pf.Required)
 		}
 		rr := pf.Required[0]
-		if rr.Transition != "accept" || rr.Obligation != "attestation/author-vouch" || rr.Count != 1 || rr.Resolution != "unproven" {
+		if rr.Transition != "merge" || rr.Obligation != "attestation/author-vouch" || rr.Count != 1 || rr.Resolution != "unproven" {
 			t.Fatalf("RequiredRole = %+v", rr)
 		}
 	})
@@ -518,7 +522,7 @@ func TestDerivePrincipals_DedupesDuplicateObligationsKeepingMaxCount(t *testing.
 func TestDerivePrincipals_DedupedAuthorVouchAlsoMerges(t *testing.T) {
 	candidates := []model.Transition{
 		{
-			Verb: "accept",
+			Verb: "merge",
 			Obligations: []model.Obligation{
 				{Scheme: "attestation", Kind: "author-vouch"},
 				{Scheme: "attestation", Kind: "author-vouch"},

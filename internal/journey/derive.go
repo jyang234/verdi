@@ -184,6 +184,7 @@ func deriveBlockers(defaultBranchKnown bool, result specstate.Result, candidates
 			Reason: ReasonForgeFactsUnavailable,
 			Class:  ClassExternalWait,
 			Witnesses: []string{
+				// vocab:identity — the merge-signals design document's own name and its protocol term ("merge-signaled"), plus the forge's merge state; none is the renameable `merge` transition word
 				"acceptance is merge-signaled (docs/superpowers/specs/2026-08-01-merge-signals-spec-acceptance-design.md); this projection consults no forge facts, so review and merge state is unknown",
 			},
 			Owner:             owner,
