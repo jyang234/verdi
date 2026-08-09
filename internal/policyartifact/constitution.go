@@ -234,6 +234,11 @@ func DecodeConstitution(data []byte) (*Constitution, error) {
 		Rationale:       rationale,
 	}
 	normalizeConstitution(c)
+	// Managed-target restriction is CROSS-ADAPTER, so it runs once here,
+	// after every adapter is decoded and normalized (deterministic order).
+	if err := validateManagedProjectionTargets(c.Adapters); err != nil {
+		return nil, err
+	}
 	seal, err := canonjson.Digest(c)
 	if err != nil {
 		return nil, err
@@ -392,6 +397,82 @@ func validateManagedProjectionPath(p string) error {
 		return fmt.Errorf("managed projection path %q must name a file, not a directory (a trailing %q is scope's directory marker and has no meaning for a generated projection)", p, "/")
 	}
 	return nil
+}
+
+// reservedManagedSegments are the path segments a managed projection
+// path may never contain at ANY depth. .verdi is Verdi's own store —
+// including .verdi/policy/, the constitution store itself: a projection
+// is a one-way OUTPUT of the constitution (AC-1/DC-1), so a projection
+// that could overwrite the authority it derives from would let editing a
+// generated file change authority, exactly what DC-1 forbids. .git is
+// the repository's own metadata; a managed .git/config or .git/hooks/*
+// would turn projection generation into arbitrary repository
+// reconfiguration. Neither is a harness instruction file, so refusing
+// both costs no legitimate projection (CO-1).
+var reservedManagedSegments = []string{".git", ".verdi"}
+
+// validateManagedProjectionTargets restricts WHAT a managed projection
+// may target, on top of the per-path grammar validateManagedProjectionPath
+// already enforces. Two rules, both fail-closed:
+//
+//  1. No path segment is a reserved segment (case-folded, any depth).
+//  2. The path's basename matches — case-folded — some declared
+//     discovery filename in the UNION of every adapter's
+//     discovery_filenames. A managed projection IS a harness instruction
+//     file; a path whose basename no adapter's harness ever discovers is
+//     not a projection target at all, it is some other file the store
+//     would silently overwrite.
+//
+// Rule 2 is deliberately cross-adapter, matching
+// internal/instructionprojection/discovery.go's own cross-adapter
+// satisfaction rule: in the realistic layout codex manages AGENTS.md
+// while claude-code's harness also reads it, so the declaring adapter's
+// own discovery set is the wrong denominator.
+//
+// Matching is CASE-FOLDED throughout, the same uniform posture discovery
+// matching and managed-path overlap detection already use: on a
+// case-insensitive filesystem ".GIT/config" IS ".git/config", so a
+// byte-exact rule would admit a path that reaches the forbidden target
+// anyway. Uniform rather than filesystem-detected so one constitution
+// yields one verdict everywhere (CO-3).
+//
+// adapters must already be normalized (sorted by id, each set sorted) so
+// a constitution with several offending paths always names the same one.
+func validateManagedProjectionTargets(adapters []Adapter) error {
+	var discovery []string
+	for _, a := range adapters {
+		discovery = append(discovery, a.DiscoveryFilenames...)
+	}
+	for _, a := range adapters {
+		for _, rel := range a.Managed {
+			for _, seg := range strings.Split(rel, "/") {
+				for _, reserved := range reservedManagedSegments {
+					if strings.EqualFold(seg, reserved) {
+						return fmt.Errorf("policyartifact: constitution adapter %s: managed projection path %q contains reserved path segment %q; %s and its contents are never a generated projection target", a.ID, rel, seg, reserved)
+					}
+				}
+			}
+			base := rel
+			if i := strings.LastIndex(rel, "/"); i >= 0 {
+				base = rel[i+1:]
+			}
+			if !discoveredFilename(discovery, base) {
+				return fmt.Errorf("policyartifact: constitution adapter %s: managed projection path %q: no adapter declares its filename %q as a discovery filename; a managed projection must be a harness instruction file", a.ID, rel, base)
+			}
+		}
+	}
+	return nil
+}
+
+// discoveredFilename reports whether basename case-folds equal to some
+// member of filenames.
+func discoveredFilename(filenames []string, basename string) bool {
+	for _, f := range filenames {
+		if strings.EqualFold(basename, f) {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeConstitution sorts every semantic set.

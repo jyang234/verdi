@@ -382,25 +382,27 @@ func TestVerify_SymlinkedManagedFile_FailsClosed(t *testing.T) {
 	}
 }
 
-// TestVerify_SymlinkedManagedFile_NotADiscoveryName_FailsClosed isolates
+// TestVerify_SymlinkedManagedFile_OutsideTheWalk_FailsClosed isolates
 // the MANAGED-FILE integrity check's own symlink branch. The test above
-// leaves that branch unpinned: its managed path is also a declared
-// discovery filename, so the walk would have caught the symlink anyway.
-// Here the adapter manages PROJECTION.md, a name it never discovers, so
-// the walk never looks at it — and the symlink's target holds
-// BYTE-CORRECT generated content, so the only thing that can produce a
-// finding is the refusal to treat a symlink as the managed file.
-func TestVerify_SymlinkedManagedFile_NotADiscoveryName_FailsClosed(t *testing.T) {
+// leaves that branch unpinned: its managed path sits where the discovery
+// walk would have caught the symlink anyway. Here the adapter's managed
+// path lives inside node_modules — a subtree the walk NEVER descends
+// into (discovery.go's skipDirBasenames, disclosed by every report) —
+// and the symlink's target holds BYTE-CORRECT generated content, so the
+// only thing that can produce a finding is the refusal to treat a
+// symlink as the managed file.
+func TestVerify_SymlinkedManagedFile_OutsideTheWalk_FailsClosed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on windows")
 	}
 	root := t.TempDir()
-	writeTree(t, root, unmanagedAdapterStoreFiles())
+	writeTree(t, root, excludedSubtreeManagedStoreFiles())
 	if _, err := Generate(root); err != nil {
 		t.Fatalf("Generate(): %v", err)
 	}
 
-	managed := filepath.Join(root, "PROJECTION.md")
+	const rel = "node_modules/AGENTS.md"
+	managed := filepath.Join(root, filepath.FromSlash(rel))
 	generated, err := os.ReadFile(managed)
 	if err != nil {
 		t.Fatal(err)
@@ -420,13 +422,26 @@ func TestVerify_SymlinkedManagedFile_NotADiscoveryName_FailsClosed(t *testing.T)
 	if err != nil {
 		t.Fatalf("Verify(): %v", err)
 	}
-	f := findOne(t, report, "codex", ReasonMissing, "PROJECTION.md")
+	f := findOne(t, report, "codex", ReasonMissing, rel)
 	if !strings.Contains(f.Detail, "symlink") {
 		t.Fatalf("missing finding must disclose WHY the managed file is absent: %+v", f)
 	}
-	if hasFinding(report, "codex", ReasonUnmanaged, "PROJECTION.md") || hasFinding(report, "codex", ReasonShadowing, "PROJECTION.md") {
-		t.Fatalf("PROJECTION.md is not a discovery filename; only the managed-file check may report it: %+v", report.Findings)
+	if hasFinding(report, "codex", ReasonUnmanaged, rel) || hasFinding(report, "codex", ReasonShadowing, rel) {
+		t.Fatalf("%s lives in a subtree the walk never enters; only the managed-file check may report it: %+v", rel, report.Findings)
 	}
+}
+
+// excludedSubtreeManagedStoreFiles is a store whose one adapter's only
+// managed projection lives inside node_modules — a subtree the discovery
+// walk never descends into — so the managed-file integrity check is the
+// ONLY pass that can ever report on it.
+func excludedSubtreeManagedStoreFiles() map[string]string {
+	files := unmanagedAdapterStoreFiles()
+	files[".verdi/policy/constitution.md"] = strings.Replace(
+		files[".verdi/policy/constitution.md"],
+		"    managed: [PROJECTION.md]\n    discovery_filenames: [AGENTS.md, PROJECTION.md]\n",
+		"    managed: [\"node_modules/AGENTS.md\"]\n    discovery_filenames: [AGENTS.md]\n", 1)
+	return files
 }
 
 // TestVerify_OrphanManifest proves a manifest left behind by an adapter
@@ -585,11 +600,16 @@ func TestVerify_FindingsSortedByAdapterCodePath(t *testing.T) {
 }
 
 // unmanagedAdapterStoreFiles is a minimal store whose adapter manages a
-// DIFFERENT path (PROJECTION.md) than the filename it discovers
-// (AGENTS.md), so a test can plant a real AGENTS.md anywhere in the
-// tree and know it can never coincide with the adapter's own managed
-// path — every AGENTS.md this fixture's tests see is necessarily
-// unmanaged or shadowing, never the generated file.
+// DIFFERENT path (PROJECTION.md) than the AGENTS.md its tests plant, so
+// a test can plant a real AGENTS.md anywhere in the tree and know it can
+// never coincide with the adapter's own managed path — every AGENTS.md
+// this fixture's tests see is necessarily unmanaged or shadowing, never
+// the generated file. PROJECTION.md is itself a declared discovery
+// filename because policyartifact's managed-target grammar requires
+// every managed projection to be a filename some adapter discovers (a
+// managed path no harness ever reads is not a projection target); the
+// separation the fixture needs is between MANAGED PATHS, not between the
+// declared filename sets.
 func unmanagedAdapterStoreFiles() map[string]string {
 	return map[string]string{
 		".verdi/policy/constitution.md": `---
@@ -616,11 +636,11 @@ adapters:
   - id: codex
     version: "1"
     managed: [PROJECTION.md]
-    discovery_filenames: [AGENTS.md]
+    discovery_filenames: [AGENTS.md, PROJECTION.md]
 ---
 Discovery fixture: one adapter managing PROJECTION.md while the harness
-discovers AGENTS.md — deliberately disjoint so a planted AGENTS.md is
-always unmanaged/shadowing, never the generated file.
+also discovers AGENTS.md — no AGENTS.md is ever managed, so a planted
+AGENTS.md is always unmanaged/shadowing, never the generated file.
 `,
 		".verdi/policy/policies/go-toolchain.md": `---
 schema: verdi.policy/v1

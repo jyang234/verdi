@@ -176,3 +176,70 @@ func TestDecodeConstitution_Negative(t *testing.T) {
 		})
 	}
 }
+
+// TestDecodeConstitution_ManagedProjectionTarget_Negative pins the
+// managed-projection TARGET restriction (AC-1/DC-1: a projection is a
+// one-way OUTPUT of the constitution, never authority; CO-1: an unsafe
+// target fails closed). Without it a valid constitution could declare
+// the constitution store itself, the repository's own git metadata, or
+// an arbitrary source file as "managed" and Generate would overwrite it.
+func TestDecodeConstitution_ManagedProjectionTarget_Negative(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     string
+		wantSub string
+	}{
+		{
+			"managed path inside the constitution store",
+			strings.Replace(validConstitutionDoc(), "managed: [AGENTS.md]", "managed: [\".verdi/policy/constitution.md\"]", 1),
+			".verdi",
+		},
+		{
+			"managed path inside git metadata",
+			strings.Replace(validConstitutionDoc(), "managed: [AGENTS.md]", "managed: [\".git/config\"]", 1),
+			".git",
+		},
+		{
+			"managed path inside git metadata, case variant",
+			strings.Replace(validConstitutionDoc(), "managed: [AGENTS.md]", "managed: [\".GIT/config\"]", 1),
+			".git",
+		},
+		{
+			"managed path nested under a reserved segment",
+			strings.Replace(validConstitutionDoc(), "managed: [AGENTS.md]", "managed: [\"docs/.Verdi/AGENTS.md\"]", 1),
+			".verdi",
+		},
+		{
+			"managed basename no adapter discovers",
+			strings.Replace(validConstitutionDoc(), "managed: [AGENTS.md]", "managed: [\"go.mod\"]", 1),
+			"no adapter declares",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DecodeConstitution([]byte(tt.doc))
+			if err == nil {
+				t.Fatalf("DecodeConstitution = nil error, want error containing %q", tt.wantSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Fatalf("DecodeConstitution error = %v, want containing %q", err, tt.wantSub)
+			}
+		})
+	}
+}
+
+// TestDecodeConstitution_ManagedBasenameSatisfiedCrossAdapter proves the
+// discovery-filename requirement is judged against the UNION of every
+// adapter's declared discovery filenames, not the declaring adapter's
+// own set: in the realistic layout one harness generates a file another
+// harness reads (discovery.go's own cross-adapter satisfaction rule),
+// so adapter codex managing CLAUDE.md — a filename only claude-code
+// declares — is a legitimate constitution and must decode clean.
+func TestDecodeConstitution_ManagedBasenameSatisfiedCrossAdapter(t *testing.T) {
+	doc := strings.Replace(validConstitutionDoc(),
+		"adapters:\n  - id: codex\n    version: \"1\"\n    managed: [AGENTS.md]\n    discovery_filenames: [AGENTS.md]\n",
+		"adapters:\n  - id: codex\n    version: \"1\"\n    managed: [CLAUDE.md]\n    discovery_filenames: [AGENTS.md]\n  - id: claude-code\n    version: \"1\"\n    managed: [AGENTS.md]\n    discovery_filenames: [CLAUDE.md]\n", 1)
+	if _, err := DecodeConstitution([]byte(doc)); err != nil {
+		t.Fatalf("DecodeConstitution (cross-adapter discovery union): %v", err)
+	}
+}
