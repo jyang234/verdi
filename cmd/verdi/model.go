@@ -43,6 +43,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -305,6 +307,13 @@ func checkTemplates(cfg *store.Config) error {
 // not a structural MODEL deviation any more than a broken class
 // template is).
 func checkPolicyScaffolds(root string) error {
+	adopted, err := storeHasBegunPolicyAdoption(root)
+	if err != nil {
+		return err
+	}
+	if !adopted {
+		return nil
+	}
 	if err := checkPolicyScaffold(root); err != nil {
 		return err
 	}
@@ -312,6 +321,35 @@ func checkPolicyScaffolds(root string) error {
 		return err
 	}
 	return checkExemptionScaffold(root)
+}
+
+// storeHasBegunPolicyAdoption reports whether root has opted in to the
+// constitution capability, which is exactly the existence of the
+// .verdi/policy/ directory (internal/policyauthority.Load's own adoption
+// signal: an absent .verdi/policy/ is ErrNotAdopted).
+//
+// The gate exists because adoption is PROSPECTIVE (DC-15): an unchanged
+// legacy store's behavior is preserved, and adoption is opt-in. The
+// constitution scaffolds resolve through humanartifact.ResolveScaffold,
+// which prefers a store override at .verdi/templates/policy.md — a
+// filename a pre-adoption store may legitimately carry for its own
+// unrelated purposes. Checking it unconditionally would make an
+// untouched legacy store start exiting 2 for a file whose meaning it
+// never changed.
+//
+// A directory that exists but carries no constitution.md is INCOMPLETE
+// adoption, not absent adoption: the store has opted in, so the checks
+// run and still fail closed. An unreadable .verdi/policy is operational
+// trouble, never an assumed absence (CO-1).
+func storeHasBegunPolicyAdoption(root string) (bool, error) {
+	info, err := os.Stat(filepath.Join(root, ".verdi", "policy"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("statting .verdi/policy: %w", err)
+	}
+	return info.IsDir(), nil
 }
 
 // modelCheckPolicyPlaceholderDigest is a fixed, computed (never hand-
