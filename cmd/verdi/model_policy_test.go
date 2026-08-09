@@ -219,6 +219,30 @@ func TestModelCheck_LegacyStore_PolicyTemplateName_NotAdopted_OK(t *testing.T) {
 	}
 }
 
+// TestModelCheck_PolicyPathIsRegularFile_Exit2 pins the THIRD state of
+// .verdi/policy, alongside absent (not adopted, exit 0) and directory
+// (adopted, checks run): a .verdi/policy that exists but is not a
+// directory. internal/policyauthority.Load classifies exactly that
+// filesystem state as a hard operational error ("policyauthority:
+// .verdi/policy exists but is not a directory"), so model check must
+// classify it the same way — one state, one classification, uniformly
+// fail-closed across every store entry point (CO-1). Reading it as
+// "not adopted" would let the model check exit 0 over a store whose
+// constitution path is structurally broken.
+func TestModelCheck_PolicyPathIsRegularFile_Exit2(t *testing.T) {
+	root := writeModelCheckStoreRoot(t, "")
+	writeTestFile(t, filepath.Join(root, ".verdi", "policy"), []byte("not a directory\n"))
+
+	var stdout, stderr bytes.Buffer
+	code := runModelCheck(root, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("runModelCheck (.verdi/policy is a regular file) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), ".verdi/policy exists but is not a directory") {
+		t.Fatalf("stderr = %q, want it to name the non-directory .verdi/policy state", stderr.String())
+	}
+}
+
 // TestModelCheck_AdoptedStore_BrokenPolicyTemplate_Exit2 is the other
 // half: the SAME store, once it has begun adoption (a .verdi/policy/
 // directory exists — even before constitution.md does), is checked, and

@@ -341,6 +341,15 @@ func checkPolicyScaffolds(root string) error {
 // adoption, not absent adoption: the store has opted in, so the checks
 // run and still fail closed. An unreadable .verdi/policy is operational
 // trouble, never an assumed absence (CO-1).
+//
+// A .verdi/policy that EXISTS but is not a directory is operational
+// trouble too, never an assumed absence: internal/policyauthority.Load
+// classifies that exact filesystem state as a hard error
+// ("policyauthority: .verdi/policy exists but is not a directory"), and
+// one state classified two ways across two store entry points is what
+// CO-1's uniform fail-closed posture forbids. The wording is matched
+// deliberately; the classification, not the code, is what is shared
+// (cmd/verdi does not depend on internal/policyauthority).
 func storeHasBegunPolicyAdoption(root string) (bool, error) {
 	info, err := os.Stat(filepath.Join(root, ".verdi", "policy"))
 	if err != nil {
@@ -349,7 +358,10 @@ func storeHasBegunPolicyAdoption(root string) (bool, error) {
 		}
 		return false, fmt.Errorf("statting .verdi/policy: %w", err)
 	}
-	return info.IsDir(), nil
+	if !info.IsDir() {
+		return false, errors.New(".verdi/policy exists but is not a directory")
+	}
+	return true, nil
 }
 
 // modelCheckPolicyPlaceholderDigest is a fixed, computed (never hand-
