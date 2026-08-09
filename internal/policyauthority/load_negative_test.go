@@ -231,6 +231,7 @@ scope: {phases: [], environments: [], paths: [], refs: []}
 claims: []
 instructions: []
 payloads: {design_assistance: {mode: proposal-only, layout: false}}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
 ---
 A second policy that collides on payload kind.
 `
@@ -271,6 +272,7 @@ scope: {phases: [], environments: [], paths: [], refs: []}
 claims: []
 instructions: []
 payloads: {}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
 ---
 A perfectly valid policy that simply does not live in the store.
 `), 0o644); err != nil {

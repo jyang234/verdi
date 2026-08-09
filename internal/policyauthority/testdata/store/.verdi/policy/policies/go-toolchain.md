@@ -25,6 +25,7 @@ instructions:
   - "Never claim a gate passed without command output."
 payloads:
   design_assistance: {mode: proposal-only, layout: false}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
 ---
 Pin the Go toolchain and the verification gate so builds are
 reproducible and completion claims stay proven.

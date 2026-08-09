@@ -15,6 +15,7 @@ approvals:
   - role: policy-owner
     principal: principal/github-org/YWxpY2U
 expiry: "2026-12-31"
+template: {identity: "embedded:policy-exemption.md", digest: "sha256:cf3977e08d4259c963e3b7ca9b974e2334d35548ac155b0e972bc7441733dad9"}
 ---
 The legacy service cannot move until its cgo dependency updates; the
 departure is bounded by an expiry and a weekly review control.

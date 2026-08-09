@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+// overlayTemplateLine and exemptionTemplateLine are the two docs'
+// scaffold-provenance lines, named so negative cases can remove exactly
+// them.
+const (
+	overlayTemplateLine   = `template: {identity: "embedded:policy-overlay.md", digest: "sha256:c42fbc9f6c30311c940c91199d018ce99930466aad1e56108389f5d9a4be04e6"}`
+	exemptionTemplateLine = `template: {identity: "embedded:policy-exemption.md", digest: "sha256:cf3977e08d4259c963e3b7ca9b974e2334d35548ac155b0e972bc7441733dad9"}`
+)
+
 func validOverlayDoc() string {
 	return `---
 schema: verdi.policy-overlay/v1
@@ -17,6 +25,7 @@ scope: {phases: [], environments: [], paths: ["web/"], refs: []}
 refinements:
   - claim: go-version
     values: ["1.25"]
+template: {identity: "embedded:policy-overlay.md", digest: "sha256:c42fbc9f6c30311c940c91199d018ce99930466aad1e56108389f5d9a4be04e6"}
 ---
 The frontend build pins the newer toolchain.
 `
@@ -53,6 +62,7 @@ func TestDecodeOverlay_Negative(t *testing.T) {
 		{"refinement with both operands", strings.Replace(validOverlayDoc(), "    values: [\"1.25\"]", "    values: [\"1.25\"]\n    bound: 3", 1), "exactly one"},
 		{"unknown field", strings.Replace(validOverlayDoc(), "refines: policy/go-toolchain", "refines: policy/go-toolchain\nweight: 3", 1), "weight"},
 		{"empty body", strings.SplitN(validOverlayDoc(), "The frontend", 2)[0] + "\n", "rationale"},
+		{"template absent", strings.Replace(validOverlayDoc(), overlayTemplateLine+"\n", "", 1), "template"},
 		{"missing overlay scope", strings.Replace(validOverlayDoc(), "scope: {phases: [], environments: [], paths: [\"web/\"], refs: []}\n", "", 1), "scope"},
 	}
 	for _, tt := range tests {
@@ -86,6 +96,7 @@ approvals:
   - role: policy-owner
     principal: principal/github-org/YWxpY2U
 expiry: "2026-12-31"
+template: {identity: "embedded:policy-exemption.md", digest: "sha256:cf3977e08d4259c963e3b7ca9b974e2334d35548ac155b0e972bc7441733dad9"}
 ---
 The legacy service cannot move until its cgo dependency updates.
 `
@@ -131,6 +142,7 @@ func TestDecodeExemption_Negative(t *testing.T) {
 		{"bad approval role", strings.Replace(validExemptionDoc(), "role: policy-owner", "role: Policy Owner", 1), "role"},
 		{"unknown field", strings.Replace(validExemptionDoc(), "expiry: \"2026-12-31\"", "expiry: \"2026-12-31\"\nseverity: high", 1), "severity"},
 		{"empty body", strings.SplitN(validExemptionDoc(), "The legacy", 2)[0] + "\n", "rationale"},
+		{"template absent", strings.Replace(validExemptionDoc(), exemptionTemplateLine+"\n", "", 1), "template"},
 		{"impossible expiry day", strings.Replace(validExemptionDoc(), "expiry: \"2026-12-31\"", "expiry: \"2026-02-31\"", 1), "calendar"},
 		{"impossible expiry month", strings.Replace(validExemptionDoc(), "expiry: \"2026-12-31\"", "expiry: \"9999-99-99\"", 1), "calendar"},
 		{"blank review condition", strings.Replace(validExemptionDoc(), "expiry: \"2026-12-31\"", "review_condition: \"   \"", 1), "blank"},

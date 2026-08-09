@@ -5,6 +5,10 @@ import (
 	"testing"
 )
 
+// policyTemplateLine is validPolicyDoc's scaffold-provenance line, named
+// so negative cases can replace or remove exactly it.
+const policyTemplateLine = `template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}`
+
 // validPolicyDoc returns a complete, valid policy artifact document.
 func validPolicyDoc() string {
 	return `---
@@ -32,6 +36,7 @@ claims:
 instructions:
   - "Run make verify before claiming completion."
 payloads: {}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
 ---
 Pin the Go toolchain so builds are reproducible.
 `
@@ -95,6 +100,7 @@ claims:
 instructions:
   - "Run make verify before claiming completion."
 payloads: {}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
 ---
 Pin the Go toolchain so builds are reproducible.
 `
@@ -141,8 +147,13 @@ func TestDecodePolicy_Negative(t *testing.T) {
 		{"empty instruction", strings.Replace(validPolicyDoc(), "- \"Run make verify before claiming completion.\"", "- \"\"", 1), "instruction"},
 		{"multiline instruction", strings.Replace(validPolicyDoc(), "- \"Run make verify before claiming completion.\"", "- \"line one\\nline two\"", 1), "single line"},
 		{"instructions null entry", strings.Replace(validPolicyDoc(), "- \"Run make verify before claiming completion.\"", "- null", 1), "instruction"},
-		{"template with bad digest", strings.Replace(validPolicyDoc(), "payloads: {}", "payloads: {}\ntemplate: {identity: \"embedded:policy.md\", digest: \"nothex\"}", 1), "digest"},
-		{"template missing identity", strings.Replace(validPolicyDoc(), "payloads: {}", "payloads: {}\ntemplate: {digest: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\"}", 1), "identity"},
+		{"template with bad digest", strings.Replace(validPolicyDoc(), policyTemplateLine, "template: {identity: \"embedded:policy.md\", digest: \"nothex\"}", 1), "digest"},
+		{"template missing identity", strings.Replace(validPolicyDoc(), policyTemplateLine, "template: {digest: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\"}", 1), "identity"},
+		// AC-1: "A created artifact records the resolved template identity
+		// and digest" — unconditional for the scaffold-backed kinds, and
+		// the policy store is greenfield (adoption is opt-in), so no
+		// legacy artifact exists to grandfather.
+		{"template absent", strings.Replace(validPolicyDoc(), policyTemplateLine+"\n", "", 1), "template"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

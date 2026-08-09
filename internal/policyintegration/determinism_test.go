@@ -105,6 +105,7 @@ scope: {phases: [], environments: [], paths: [], refs: []}
 instructions:
   - "Run make verify before claiming completion."
 payloads: {}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
 ---
 Pin the toolchain and the verification gate.
 `,
@@ -119,6 +120,7 @@ scope: {phases: [], environments: [], paths: ["web/"], refs: []}
 refinements:
   - claim: go-version
     values: ["1.25"]
+template: {identity: "embedded:policy-overlay.md", digest: "sha256:c42fbc9f6c30311c940c91199d018ce99930466aad1e56108389f5d9a4be04e6"}
 ---
 The frontend narrows the toolchain choice.
 `,
@@ -139,6 +141,7 @@ approvals:
   - role: policy-owner
     principal: principal/github-org/YWxpY2U
 expiry: "2099-12-31"
+template: {identity: "embedded:policy-exemption.md", digest: "sha256:cf3977e08d4259c963e3b7ca9b974e2334d35548ac155b0e972bc7441733dad9"}
 ---
 The legacy service departs from the toolchain policy under review.
 `,

@@ -104,6 +104,7 @@ scope: {phases: [], environments: [], paths: [], refs: []}
 claims: []
 instructions: []
 ` + both + `
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
 ---
 A second policy colliding on both payload kinds at once.
 `

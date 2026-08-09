@@ -208,6 +208,7 @@ scope: {phases: [build], environments: [], paths: [], refs: []}
 refinements:
   - claim: verify-required
     values: ["clean-exit", "extra-receipt"]
+template: {identity: "embedded:policy-overlay.md", digest: "sha256:c42fbc9f6c30311c940c91199d018ce99930466aad1e56108389f5d9a4be04e6"}
 ---
 An overlay inserted directly into a loaded store's exported map.
 `))
@@ -272,6 +273,7 @@ claims:
     overridable: false
 instructions: []
 payloads: {}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
 ---
 A widened policy swapped into a loaded store's exported map.
 `))

@@ -151,12 +151,35 @@ func (d kernelDoc) toKernel(wantSchema, wantKind string) (kernel, error) {
 		return kernel{}, err
 	}
 	sort.Strings(k.Owners)
-	if k.Template != nil {
-		if err := k.Template.Validate(); err != nil {
-			return kernel{}, err
+	if k.Template == nil {
+		if scaffoldBackedKinds[wantKind] {
+			return kernel{}, fmt.Errorf("policyartifact: %s field template is missing: a scaffold-backed artifact records the resolved template identity and digest it was created from", wantKind)
 		}
+	} else if err := k.Template.Validate(); err != nil {
+		return kernel{}, err
 	}
 	return k, nil
+}
+
+// scaffoldBackedKinds are the constitution kinds a store SCAFFOLD
+// creates, and for which AC-1's "A created artifact records the resolved
+// template identity and digest" is therefore unconditional: every one of
+// them has a canonical template (internal/designscaffold's policy.md,
+// policy-overlay.md, policy-exemption.md, resolved through
+// internal/humanartifact) whose identity and digest the created artifact
+// must carry as provenance. Making the record optional would let an
+// artifact of one of these kinds exist with no statement of what it was
+// created from — silence where a provenance record is required (CO-1).
+// The policy store is greenfield (adoption is opt-in and prospective,
+// DC-15), so there is no legacy artifact to grandfather.
+//
+// policy-constitution and the stored governance-profile kind are
+// deliberately absent: no scaffold creates them, so requiring a record of
+// a template that does not exist would be a rule with no referent.
+var scaffoldBackedKinds = map[string]bool{
+	KindPolicy:    true,
+	KindOverlay:   true,
+	KindExemption: true,
 }
 
 // parseKindedID validates an "<kind>/<name>" constitution artifact id
