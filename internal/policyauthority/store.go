@@ -243,6 +243,10 @@ func walkPolicyDir(policyDir string) ([]string, error) {
 // offending artifact and field (co-1's three-valued honesty: a cross-
 // validation gap is never a silent pass).
 func crossValidate(s *Store) error {
+	if err := checkMapKeyIdentity(s); err != nil {
+		return err
+	}
+
 	if _, ok := s.Profiles[s.Constitution.SelectedProfile]; !ok {
 		return fmt.Errorf("policyauthority: constitution selected_profile %q does not resolve to a loaded stored profile", s.Constitution.SelectedProfile)
 	}
@@ -321,6 +325,57 @@ func crossValidate(s *Store) error {
 		}
 	}
 
+	return nil
+}
+
+// checkMapKeyIdentity proves every map KEY equals the identity of the
+// artifact stored under it. It runs first in crossValidate, before any
+// check that selects an artifact by key.
+//
+// Every artifact in a Store is individually sealed, but the MAPS are
+// not: rekeying an entry, or pointing a second key at an existing value,
+// leaves every seal valid, so nothing a per-artifact check can see is
+// wrong. Resolve selects artifacts by key throughout — the constitution's
+// selected_profile, an overlay's refines target, an exemption's witness
+// policy — so an unbound key makes Resolve emit one artifact's content
+// under another's name: a wrong effective policy with an intact digest,
+// which is worse than a refusal (CO-1). Load itself always keys by the
+// decoded identity, so a store that fails here has been mutated after
+// Load or hand-built; that is an OPERATIONAL error, matching the seal
+// checks' own SI-21 posture, and Resolve re-runs crossValidate precisely
+// so post-load mutation is caught rather than resolved.
+//
+// Maps and keys are both visited in fixed, sorted order so a store with
+// several mismatches always names the same one (CO-3).
+func checkMapKeyIdentity(s *Store) error {
+	if err := checkKeyedIdentities("Policies", s.Policies, func(p *policyartifact.Policy) string { return p.ID }); err != nil {
+		return err
+	}
+	if err := checkKeyedIdentities("Overlays", s.Overlays, func(o *policyartifact.Overlay) string { return o.ID }); err != nil {
+		return err
+	}
+	if err := checkKeyedIdentities("Exemptions", s.Exemptions, func(e *policyartifact.Exemption) string { return e.ID }); err != nil {
+		return err
+	}
+	return checkKeyedIdentities("Profiles", s.Profiles, func(p *policyartifact.StoredProfile) string { return p.ID })
+}
+
+// checkKeyedIdentities is checkMapKeyIdentity's one generic body: identity
+// extracts the canonical id a value must be filed under (the full kinded
+// id for policies, overlays, and exemptions; the bare kernel profile id
+// for stored profiles, matching Constitution.SelectedProfile). A nil
+// value is its own mismatch: an entry that carries no artifact can never
+// be the artifact its key names.
+func checkKeyedIdentities[T any](mapName string, m map[string]*T, identity func(*T) string) error {
+	for _, key := range sortedKeys(m) {
+		v := m[key]
+		if v == nil {
+			return fmt.Errorf("policyauthority: store %s map key %q holds no artifact; a store key must name the artifact filed under it", mapName, key)
+		}
+		if got := identity(v); got != key {
+			return fmt.Errorf("policyauthority: store %s map key %q holds the artifact whose id is %q; a store key must equal the identity of the artifact filed under it (the store was modified after Load)", mapName, key, got)
+		}
+	}
 	return nil
 }
 
