@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -30,6 +31,47 @@ func TestLoad_ErrNotAdopted(t *testing.T) {
 	_, err := Load(root)
 	if !errors.Is(err, ErrNotAdopted) {
 		t.Fatalf("Load() error = %v, want errors.Is(err, ErrNotAdopted)", err)
+	}
+}
+
+// TestLoad_PolicyRootSymlinkRejected proves a present authority-root entry
+// never becomes genuine absence and is never followed, whether its target is
+// missing or live.
+func TestLoad_PolicyRootSymlinkRejected(t *testing.T) {
+	tests := []struct {
+		name       string
+		liveTarget bool
+	}{
+		{name: "dangling"},
+		{name: "live", liveTarget: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, ".verdi"), 0o755); err != nil {
+				t.Fatalf("mkdir .verdi: %v", err)
+			}
+			target := filepath.Join(root, "policy-target")
+			if tt.liveTarget {
+				if err := os.Mkdir(target, 0o755); err != nil {
+					t.Fatalf("mkdir policy target: %v", err)
+				}
+			}
+			if err := os.Symlink(target, filepath.Join(root, ".verdi", "policy")); err != nil {
+				t.Skipf("symlinks unavailable on this platform: %v", err)
+			}
+
+			_, err := Load(root)
+			if err == nil {
+				t.Fatal("Load() followed or accepted a symlinked policy root, want an operational error")
+			}
+			if errors.Is(err, ErrNotAdopted) {
+				t.Fatalf("Load() error = %v, present symlink root must not satisfy ErrNotAdopted", err)
+			}
+			if !strings.Contains(err.Error(), ".verdi/policy") || !strings.Contains(err.Error(), "symlink") {
+				t.Fatalf("Load() error = %v, want a symlink error naming .verdi/policy", err)
+			}
+		})
 	}
 }
 
