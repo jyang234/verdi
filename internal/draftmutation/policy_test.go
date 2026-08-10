@@ -2,6 +2,7 @@ package draftmutation
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,6 +136,84 @@ type trustFacts struct{}
 
 func (trustFacts) ReadTrustFact(_ context.Context, source governanceprincipal.TrustSource, claim governanceprincipal.PrincipalClaim) (governanceprincipal.TrustFact, error) {
 	return governanceprincipal.TrustFact{SourceID: source.ID, SourceKind: source.Kind, Subjects: []string{claim.Subject}, EvidenceDigest: DigestBytes([]byte("fact")), Available: true, Valid: true}, nil
+}
+
+type resolutionTrustFacts struct {
+	state governanceprincipal.ResolutionState
+}
+
+func (f resolutionTrustFacts) ReadTrustFact(_ context.Context, source governanceprincipal.TrustSource, claim governanceprincipal.PrincipalClaim) (governanceprincipal.TrustFact, error) {
+	switch f.state {
+	case governanceprincipal.ResolutionAuthenticated:
+		return governanceprincipal.TrustFact{SourceID: source.ID, SourceKind: source.Kind, Subjects: []string{claim.Subject}, EvidenceDigest: DigestBytes([]byte("authenticated fact")), Available: true, Valid: true}, nil
+	case governanceprincipal.ResolutionViolated:
+		return governanceprincipal.TrustFact{SourceID: source.ID, SourceKind: source.Kind, Subjects: []string{"other-subject"}, EvidenceDigest: DigestBytes([]byte("violated fact")), Available: true, Valid: true}, nil
+	case governanceprincipal.ResolutionUnproven:
+		return governanceprincipal.TrustFact{SourceID: source.ID, SourceKind: source.Kind, Reason: "trust evidence unavailable"}, nil
+	default:
+		return governanceprincipal.TrustFact{}, errors.New("unsupported test resolution state")
+	}
+}
+
+func resolutionForActor(t *testing.T, state governanceprincipal.ResolutionState) governanceprincipal.PrincipalResolution {
+	t.Helper()
+	store, err := policyauthority.Load(copyPolicyFixture(t, "draft-write", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := store.Profiles[store.Constitution.SelectedProfile].Profile
+	resolution, err := governanceprincipal.NewResolver(resolutionTrustFacts{state: state}).Resolve(context.Background(), profile, governanceprincipal.PrincipalClaim{TrustSource: "github-org", Subject: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.State != state {
+		t.Fatalf("resolution state = %q, want %q", resolution.State, state)
+	}
+	return resolution
+}
+
+func TestResolvedHumanAttributionStateMatrix(t *testing.T) {
+	for _, state := range []governanceprincipal.ResolutionState{
+		governanceprincipal.ResolutionAuthenticated,
+		governanceprincipal.ResolutionViolated,
+		governanceprincipal.ResolutionUnproven,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			actor, err := NewTrustedHuman(resolutionForActor(t, state))
+			if err != nil {
+				t.Fatalf("NewTrustedHuman: %v", err)
+			}
+			if actor.Kind() != ActorHuman || actor.Harness() != "" || actor.Session() != "" {
+				t.Fatalf("resolved actor = %+v", actor)
+			}
+			if state == governanceprincipal.ResolutionAuthenticated {
+				if actor.Attribution().PrincipalID == "" || actor.Attribution().Unauthenticated {
+					t.Fatalf("authenticated attribution = %+v", actor.Attribution())
+				}
+				if grant, typed := AuthorizePolicy(context.Background(), "/repo", testIdentity(), actor, staticPolicySource{policy: resolvedPolicy(t, "off", true)}); typed != nil || grant.Digest == "" {
+					t.Fatalf("authenticated human policy = %+v, %v", grant, typed)
+				}
+				return
+			}
+			if !actor.Attribution().Unauthenticated || actor.Attribution().PrincipalID != "" {
+				t.Fatalf("%s attribution = %+v, want explicit unauthenticated marker", state, actor.Attribution())
+			}
+			for _, mode := range []string{"off", "proposal-only"} {
+				if _, typed := AuthorizePolicy(context.Background(), "/repo", testIdentity(), actor, staticPolicySource{policy: resolvedPolicy(t, mode, true)}); typed == nil || typed.Code != CodePolicyForbidden {
+					t.Fatalf("%s actor bypassed %s policy: %v", state, mode, typed)
+				}
+			}
+			if grant, typed := AuthorizePolicy(context.Background(), "/repo", testIdentity(), actor, staticPolicySource{policy: resolvedPolicy(t, "draft-write", true)}); typed != nil || grant.Digest == "" {
+				t.Fatalf("%s draft-write policy = %+v, %v", state, grant, typed)
+			}
+		})
+	}
+
+	forged := resolutionForActor(t, governanceprincipal.ResolutionAuthenticated)
+	forged.Witnesses = nil
+	if _, err := NewTrustedHuman(forged); err == nil || !strings.Contains(err.Error(), "modified after Resolver.Resolve") {
+		t.Fatalf("NewTrustedHuman(forged) error = %v", err)
+	}
 }
 
 func TestPolicyActorsRequireAdapterControlledSealedAttribution(t *testing.T) {

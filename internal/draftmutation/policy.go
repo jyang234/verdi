@@ -63,8 +63,8 @@ func (a Actor) validate() error {
 			return fmt.Errorf("draftmutation: delegated agent requires unauthenticated attribution and nonblank harness")
 		}
 	case ActorHuman:
-		if a.attribution.PrincipalID == "" || a.attribution.Unauthenticated || a.harness != "" || a.session != "" {
-			return fmt.Errorf("draftmutation: trusted human requires principal attribution and no harness/session")
+		if a.harness != "" || a.session != "" {
+			return fmt.Errorf("draftmutation: resolved human attribution requires no harness/session")
 		}
 	default:
 		return fmt.Errorf("draftmutation: unknown actor kind %q", a.kind)
@@ -90,9 +90,6 @@ func NewTrustedHuman(resolution governanceprincipal.PrincipalResolution) (Actor,
 	attribution, err := governanceprincipal.AttributionFromResolution(resolution)
 	if err != nil {
 		return Actor{}, err
-	}
-	if attribution.PrincipalID == "" {
-		return Actor{}, fmt.Errorf("draftmutation: trusted human requires an authenticated principal resolution")
 	}
 	actor := Actor{kind: ActorHuman, attribution: attribution}
 	if err := sealActor(&actor); err != nil {
@@ -172,7 +169,7 @@ func AuthorizePolicy(ctx context.Context, root string, identity Identity, actor 
 		return PolicyGrant{}, WrapError(CodeAuthorityInvalid, identity, "invalid design_assistance payload", err)
 	}
 	grant := PolicyGrant{Mode: payload.Mode, Digest: digest, PolicyID: policyID}
-	if actor.kind == ActorHuman {
+	if actor.kind == ActorHuman && actor.attribution.PrincipalID != "" {
 		return grant, nil
 	}
 	if payload.Mode != "draft-write" {

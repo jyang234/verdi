@@ -14,6 +14,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact/splice"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/designprovenance"
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
@@ -120,6 +121,31 @@ func TestServiceAppliesAtomicMutationAndBindsPolicyProvenance(t *testing.T) {
 	}
 	if len(response.Result.Disclosures) != 1 || response.Result.Disclosures[0].Code != DisclosureContextUnavailable {
 		t.Fatalf("disclosures = %+v", response.Result.Disclosures)
+	}
+}
+
+func TestServicePersistsUnprovenAttributionWithoutHumanBypass(t *testing.T) {
+	root := serviceRoot(t, []byte(baseSpec))
+	actor, err := NewTrustedHuman(resolutionForActor(t, governanceprincipal.ResolutionUnproven))
+	if err != nil {
+		t.Fatalf("NewTrustedHuman: %v", err)
+	}
+	request := requestFor(t, root, []byte(baseSpec), []Operation{{Op: OpSetProblem, Text: "new problem", Anchor: "#problem"}})
+	response, typed := testService(root, resolvedPolicy(t, "draft-write", true), specstate.Proposed).Mutate(context.Background(), root, request, actor)
+	if typed != nil || response.Result == nil {
+		t.Fatalf("Mutate = %+v, %v", response, typed)
+	}
+	logBytes, err := os.ReadFile(store.DesignProvenancePath(root, store.ZoneActive, "sample"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := designprovenance.DecodeLog(logBytes)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("DecodeLog = %+v, %v", entries, err)
+	}
+	entry := entries[0]
+	if !entry.Attribution.Unauthenticated || entry.Attribution.PrincipalID != "" || entry.Harness != "" || entry.Session != "" {
+		t.Fatalf("unproven provenance attribution = %+v harness=%q session=%q", entry.Attribution, entry.Harness, entry.Session)
 	}
 }
 

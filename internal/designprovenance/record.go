@@ -454,8 +454,11 @@ func (e Entry) validate(checkDigest bool) error {
 		return err
 	}
 	if e.Attribution.Unauthenticated {
-		if strings.TrimSpace(e.Harness) == "" || !utf8.ValidString(e.Harness) {
-			return fmt.Errorf("designprovenance: unauthenticated CLI attribution requires a nonblank valid UTF-8 harness")
+		if e.Harness != "" && (strings.TrimSpace(e.Harness) == "" || !utf8.ValidString(e.Harness)) {
+			return fmt.Errorf("designprovenance: unauthenticated harness must be nonblank valid UTF-8 when present")
+		}
+		if e.Session != "" && e.Harness == "" {
+			return fmt.Errorf("designprovenance: unauthenticated session requires harness attribution")
 		}
 		if e.Session != "" && (strings.TrimSpace(e.Session) == "" || !utf8.ValidString(e.Session)) {
 			return fmt.Errorf("designprovenance: session must be nonblank valid UTF-8 when present")

@@ -83,7 +83,7 @@ func TestEntryAttributionAndOwnDigest(t *testing.T) {
 		want   string
 	}{
 		{"both attribution arms", func(e *Entry) { e.Attribution.PrincipalID = "principal/github/YWxpY2U" }, "exactly one"},
-		{"CLI arm missing harness", func(e *Entry) { e.Harness = "" }, "harness"},
+		{"unauthenticated session missing harness", func(e *Entry) { e.Harness, e.Session = "", "session-1" }, "harness"},
 		{"principal arm carries harness", func(e *Entry) {
 			e.Attribution = governanceprincipal.Attribution{PrincipalID: "principal/github/YWxpY2U"}
 		}, "harness"},
@@ -97,6 +97,16 @@ func TestEntryAttributionAndOwnDigest(t *testing.T) {
 				t.Fatalf("Validate error = %v, want it to contain %q", err, tt.want)
 			}
 		})
+	}
+
+	unauthenticatedResolved := validEntry(t)
+	unauthenticatedResolved.Harness = ""
+	unauthenticatedResolved.Session = ""
+	if err := unauthenticatedResolved.Seal(); err != nil {
+		t.Fatalf("Seal resolved unauthenticated attribution: %v", err)
+	}
+	if err := unauthenticatedResolved.Validate(); err != nil {
+		t.Fatalf("Validate resolved unauthenticated attribution: %v", err)
 	}
 
 	e := validEntry(t)
