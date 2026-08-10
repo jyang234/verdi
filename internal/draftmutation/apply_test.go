@@ -169,6 +169,27 @@ func TestApplyAggregatesInitialToFinalPerTarget(t *testing.T) {
 	}
 }
 
+func TestApplyOrdersFinalChangesByFirstNamedTouch(t *testing.T) {
+	req := decodedRequest(t)
+	req.Operations = []Operation{
+		{Op: OpSetProblem, Text: "old problem", Anchor: "#problem"},
+		{Op: OpSetOutcome, Text: "changed outcome", Anchor: "#outcome"},
+		{Op: OpSetProblem, Text: "changed problem", Anchor: "#problem"},
+	}
+	applied, err := Apply([]byte(baseSpec), req, testIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, len(applied.Result.Changes))
+	for i, change := range applied.Result.Changes {
+		got[i] = change.Target
+	}
+	want := []string{"problem", "outcome"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("change order = %v, want first named touch order %v", got, want)
+	}
+}
+
 func TestSemanticDiffChangedTargetsSorted(t *testing.T) {
 	req := decodedRequest(t)
 	req.Operations = []Operation{

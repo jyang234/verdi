@@ -42,6 +42,13 @@ func Apply(current []byte, request Request, identity Identity) (Applied, error) 
 		if err != nil {
 			return Applied{}, err
 		}
+		primaryTarget := operationTarget(operation)
+		if primaryTarget == "" {
+			return Applied{}, fmt.Errorf("draftmutation: operation[%d] has no semantic target", index)
+		}
+		if _, seen := firstTouches[primaryTarget]; !seen {
+			firstTouches[primaryTarget] = index
+		}
 		for _, target := range changedSnapshotTargets(before, after) {
 			if _, seen := firstTouches[target]; !seen {
 				firstTouches[target] = index

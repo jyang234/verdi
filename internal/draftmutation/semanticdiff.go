@@ -140,6 +140,28 @@ func linkTarget(source string, linkType artifact.LinkType, ref string) string {
 	return "link/" + PercentComponent(source) + "/" + PercentComponent(string(linkType)) + "/" + PercentComponent(ref)
 }
 
+func operationTarget(operation Operation) string {
+	switch operation.Op {
+	case OpSetProblem:
+		return "problem"
+	case OpSetOutcome:
+		return "outcome"
+	case OpAddAC, OpEditAC, OpRemoveAC, OpReorderAC, OpSetACEvidence,
+		OpAddConstraint, OpEditConstraint, OpRemoveConstraint,
+		OpAddDecision, OpEditDecision, OpRemoveDecision,
+		OpAddQuestion, OpEditQuestion, OpRemoveQuestion:
+		return operation.ID
+	case OpAddLink, OpRemoveLink:
+		return linkTarget(operation.Source, operation.Type, operation.Ref)
+	case OpAddStub, OpEditStub, OpRemoveStub, OpReorderStub:
+		return "stub/" + PercentComponent(operation.Slug)
+	case OpAddContextRef, OpRemoveContextRef:
+		return "context/" + PercentComponent(operation.Ref)
+	default:
+		return ""
+	}
+}
+
 func changedSnapshotTargets(left, right semanticSnapshot) []string {
 	seen := map[string]bool{}
 	for target, value := range left {
