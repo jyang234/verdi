@@ -80,6 +80,9 @@ func WithWriterLock(ctx context.Context, root string, coordinator Coordinator, w
 		return err
 	}
 	lockPath := store.WriterLockPath(root)
+	if err := validateRegularDestination(lockPath, false); err != nil {
+		return fmt.Errorf("draftmutation: validating global writer lock: %w", err)
+	}
 	lockFile, err := filelock.Acquire(lockPath)
 	if err != nil {
 		return fmt.Errorf("draftmutation: acquiring global writer lock: %w", err)
@@ -321,17 +324,26 @@ func ensureDirectory(root, target string) error {
 }
 
 func validateDirectoryChain(root, target string) error {
+	_, err := validateDirectoryChainPresence(root, target, false)
+	return err
+}
+
+func validateOptionalDirectoryChain(root, target string) (bool, error) {
+	return validateDirectoryChainPresence(root, target, true)
+}
+
+func validateDirectoryChainPresence(root, target string, allowMissing bool) (bool, error) {
 	absoluteRoot, err := filepath.Abs(root)
 	if err != nil {
-		return err
+		return false, err
 	}
 	absoluteTarget, err := filepath.Abs(target)
 	if err != nil {
-		return err
+		return false, err
 	}
 	relative, err := filepath.Rel(absoluteRoot, absoluteTarget)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("draftmutation: directory %q escapes checkout root", target)
+		return false, fmt.Errorf("draftmutation: directory %q escapes checkout root", target)
 	}
 	current := absoluteRoot
 	components := []string{}
@@ -343,11 +355,14 @@ func validateDirectoryChain(root, target string) error {
 			current = filepath.Join(current, component)
 		}
 		info, statErr := os.Lstat(current)
+		if errors.Is(statErr, os.ErrNotExist) && allowMissing && component != "" {
+			return false, nil
+		}
 		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return fmt.Errorf("draftmutation: directory %s is missing, a symlink, or not a directory", current)
+			return false, fmt.Errorf("draftmutation: directory %s is missing, a symlink, or not a directory", current)
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func validateRegularDestination(path string, required bool) error {

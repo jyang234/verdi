@@ -17,6 +17,13 @@ func (w *LockedWriter) Recover(name string) error {
 		return fmt.Errorf("draftmutation: recovery spec name %q is invalid", name)
 	}
 	txDir := store.DraftMutationDir(w.root, name)
+	parentExists, err := validateOptionalDirectoryChain(w.root, filepath.Dir(txDir))
+	if err != nil {
+		return err
+	}
+	if !parentExists {
+		return nil
+	}
 	info, err := os.Lstat(txDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

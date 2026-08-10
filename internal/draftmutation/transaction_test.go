@@ -159,7 +159,7 @@ func TestRecoveryMalformedTamperedAndSymlinkStateIsRetained(t *testing.T) {
 		}
 	})
 
-	for _, target := range []string{"transaction root", "spec", "spec parent"} {
+	for _, target := range []string{"transaction root", "transaction parent", "spec", "sidecar", "spec parent", "writer lock"} {
 		t.Run("symlink "+target, func(t *testing.T) {
 			root := transactionRoot(t)
 			outside := t.TempDir()
@@ -170,12 +170,39 @@ func TestRecoveryMalformedTamperedAndSymlinkStateIsRetained(t *testing.T) {
 				if err := os.Symlink(outside, store.DraftMutationDir(root, transactionSpecName)); err != nil {
 					t.Fatal(err)
 				}
+			} else if target == "transaction parent" {
+				if err := os.Mkdir(filepath.Join(outside, transactionSpecName), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, filepath.Dir(store.DraftMutationDir(root, transactionSpecName))); err != nil {
+					t.Fatal(err)
+				}
 			} else if target == "spec" {
 				path := store.SpecPath(root, store.ZoneActive, transactionSpecName)
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(filepath.Join(outside, "spec.md"), path); err != nil {
+					t.Fatal(err)
+				}
+			} else if target == "sidecar" {
+				path := store.DesignProvenancePath(root, store.ZoneActive, transactionSpecName)
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(outside, "design-provenance.jsonl"), path); err != nil {
+					t.Fatal(err)
+				}
+			} else if target == "writer lock" {
+				outsideLock := filepath.Join(outside, "writer.lock")
+				lockBytes, err := json.Marshal(filelock.Info{PID: 999999999, Start: 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(outsideLock, lockBytes, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outsideLock, store.WriterLockPath(root)); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -195,6 +222,17 @@ func TestRecoveryMalformedTamperedAndSymlinkStateIsRetained(t *testing.T) {
 			}
 			if err := runTransaction(t, root, Coordinator{}); err == nil || !strings.Contains(err.Error(), "symlink") {
 				t.Fatalf("transaction error = %v", err)
+			}
+			if target == "transaction parent" {
+				if _, err := os.Stat(filepath.Join(outside, transactionSpecName)); err != nil {
+					t.Fatalf("recovery traversed and removed outside transaction root: %v", err)
+				}
+			}
+			if target == "writer lock" {
+				info, err := os.Lstat(store.WriterLockPath(root))
+				if err != nil || info.Mode()&os.ModeSymlink == 0 {
+					t.Fatalf("writer lock symlink was not retained: info=%v err=%v", info, err)
+				}
 			}
 		})
 	}
