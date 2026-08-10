@@ -277,6 +277,28 @@ func TestCmdJourney_ComponentSpec(t *testing.T) {
 	}
 }
 
+// TestCmdJourney_InvalidPolicyAuthority proves an adopted-but-malformed
+// constitution store is an operational failure: the command emits no partial
+// or absence record and maps Project's error to exit 2.
+func TestCmdJourney_InvalidPolicyAuthority(t *testing.T) {
+	buildJourneyRepo(t, map[string]string{
+		".verdi/specs/active/payments/spec.md": journeyFeatureSpecMD,
+		".verdi/policy/constitution.md":        "---\nschema: [not valid here]\n",
+	})
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"spec/payments"}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdJourney = %d, want 2; stderr=%s", got, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on invalid policy authority", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "decoding constitution.md") {
+		t.Fatalf("stderr = %q, want malformed policy-authority witness", stderr.String())
+	}
+}
+
 // TestCmdJourney_Rootless proves an unresolvable store root is operational
 // exit 2 (store.FindRoot's own error, which carries no "journey: " prefix
 // of its own — journeyErr must add exactly one).
