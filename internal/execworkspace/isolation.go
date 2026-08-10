@@ -3,17 +3,28 @@ package execworkspace
 // Isolation-profile construction for spec/execution-workspace
 // §Isolation-control application and §Execution-grant enforcement
 // (controller decisions AD-5/AD-9). This is MECHANISM ONLY, and
-// construction-only: this package builds a Profile a consumer applies to
-// its own process launch — it never runs the consumer's process itself
-// (spec §Isolation-control application: "The component constructs the
-// isolated profile ... as MECHANISM only").
+// CONSTRUCTION-ONLY: this package builds a Profile, and builds the launch a
+// consumer then runs — it never runs the consumer's process itself (spec
+// §Isolation-control application: "The component constructs the isolated
+// profile ... as MECHANISM only").
+//
+// Profile.Command is this package's ONE launch-construction seam (ledger
+// SI-40). It exists because "applied" must mean enforced: a profile that
+// merely CARRIES an argv0 allowlist and a deadline enforces neither, so a
+// consumer could launch any program with no deadline while the enforcement
+// report read Applied — an enforcement claim with no mechanism, which the
+// three-valued honesty rule forbids. Command gates argv0 against the
+// granted allowlist, derives the granted deadline into the context the
+// returned *exec.Cmd is bound to, and sets exactly the profile environment.
+// It STILL never runs anything: it returns an unstarted *exec.Cmd, and the
+// consumer decides whether, when and where to start it.
 //
 // AD-9 fixes v0's mechanically appliable kinds: process execution (an
-// argv0 allowlist recorded on the profile) and timeouts (a deadline
-// recorded on the profile, applied by the consumer to its own context),
-// plus the base profile every grant set gets regardless of which grants it
-// names — a clean environment with controlled HOME/XDG discovery. network,
-// path-read, path-write, and resource-ceilings have no v0 mechanism.
+// argv0 allowlist, enforced when the launch is constructed) and timeouts (a
+// deadline, applied to the constructed launch's context), plus the base
+// profile every grant set gets regardless of which grants it names — a
+// clean environment with controlled HOME/XDG discovery. network, path-read,
+// path-write, and resource-ceilings have no v0 mechanism.
 //
 // AD-5 makes every granted control REQUIRED: a control the component
 // cannot apply is not a silent partial success. BuildProfile always
@@ -39,8 +50,10 @@ package execworkspace
 // execution.
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -60,9 +73,10 @@ var profileOwnedEnvKeys = map[string]bool{
 }
 
 // Profile is a constructed, ready-to-use isolation profile. A consumer
-// applies Env() and Timeout to its own process launch and its own context;
-// this package never launches anything itself. The zero Profile has an
-// empty (but non-panicking) Env() and a zero Timeout/AllowedArgv0s — only
+// constructs its launch through Command, which is the seam that ENFORCES
+// AllowedArgv0s and Timeout; this package never starts a process itself.
+// The zero Profile has an empty (but non-panicking) Env(), a zero Timeout
+// and a nil AllowedArgv0s, so Command refuses it outright — only
 // BuildProfile constructs a Profile actually backed by a workspace.
 type Profile struct {
 	env           map[string]string
@@ -81,6 +95,89 @@ func (p Profile) Env() []string {
 	}
 	sort.Strings(entries)
 	return entries
+}
+
+// Command constructs the one launch this profile authorizes for argv0 and
+// args: the package's SINGLE launch-construction seam (ledger SI-40), and
+// the mechanism the enforcement report's two Applied rows now name. It
+// returns an UNSTARTED *exec.Cmd, the context that Cmd is bound to, that
+// context's cancel func, and an error — this package still never runs the
+// consumer's process (spec §Isolation-control application: MECHANISM only).
+//
+// FAIL-CLOSED, in this order:
+//
+//   - A nil ctx is an operational error, never a silently substituted
+//     Background: the caller's cancellation scope is the caller's own
+//     choice, and context.WithTimeout would panic on it.
+//   - Constructing a launch REQUIRES a recorded process-execution
+//     allowance. A nil AllowedArgv0s means no GrantProcessExecution grant
+//     was requested at all, and that is an operational error — never an
+//     unconstrained Cmd. (BuildProfile leaves the field nil in exactly that
+//     case, and a grant always carries a non-empty allowlist, so nil and
+//     "allowed nothing" never get confused.)
+//   - argv0 must be an EXACT member of AllowedArgv0s — byte equality, no
+//     prefix, base-name, symlink or path-normalization matching, since any
+//     looser rule would silently widen a ratified allowlist. A miss is an
+//     operational error naming argv0 and the whole allowlist.
+//
+// On success: when Timeout > 0 (a GrantTimeouts grant), the returned
+// context is context.WithTimeout(ctx, Timeout) and the Cmd is built with
+// exec.CommandContext against it, so the granted deadline actually kills an
+// overrunning child rather than merely being recorded. When Timeout is
+// zero, NO deadline is added — the returned context IS the caller's ctx
+// (the Cmd is still bound to it, so the caller's own cancellation works)
+// and the cancel func is a no-op. The cancel func is NEVER nil on success,
+// so `defer cancel()` is always correct.
+//
+// cmd.Env is set to exactly Env(): the profile environment and nothing
+// inherited. cmd.Dir is deliberately NOT set — the working directory is the
+// consumer's choice (it may want the unit path, a subdirectory of it, or
+// somewhere else entirely), and this seam never guesses it.
+//
+// DISCLOSED LIMIT: os/exec resolves an argv0 containing no path separator
+// through LookPath against the CALLING PROCESS's PATH, not cmd.Env, so for
+// such an entry the allowlist constrains the NAME while the ambient PATH
+// picks the file. An allowlist entry that is an absolute path is
+// resolution-free and has no such gap; this seam neither rewrites the
+// caller's entries nor imposes absoluteness, since the allowlist's contents
+// are the grant author's ratified choice.
+func (p Profile) Command(ctx context.Context, argv0 string, args ...string) (*exec.Cmd, context.Context, context.CancelFunc, error) {
+	if ctx == nil {
+		return nil, nil, nil, operationalError("isolation-profile: launch", fmt.Errorf(
+			"nil context: the launch's cancellation scope is the caller's own choice and is never silently substituted (SI-40)"))
+	}
+	if p.AllowedArgv0s == nil {
+		return nil, nil, nil, operationalError("isolation-profile: launch", fmt.Errorf(
+			"no process-execution grant is recorded on this profile, so no launch may be constructed for %q: an execution allowance is required, never assumed (AD-5, AD-9, SI-40; CI dc-10)",
+			argv0))
+	}
+	if !containsExact(p.AllowedArgv0s, argv0) {
+		return nil, nil, nil, operationalError("isolation-profile: launch", fmt.Errorf(
+			"argv0 %q is not in the granted argv0 allowlist [%s]: membership is exact, never a prefix, base name, or resolved path (AD-9, SI-40)",
+			argv0, strings.Join(p.AllowedArgv0s, ", ")))
+	}
+
+	runCtx := ctx
+	cancel := context.CancelFunc(func() {})
+	if p.Timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, p.Timeout)
+	}
+
+	cmd := exec.CommandContext(runCtx, argv0, args...)
+	cmd.Env = p.Env()
+	return cmd, runCtx, cancel, nil
+}
+
+// containsExact reports whether s is a byte-exact member of list. It is the
+// allowlist membership rule Command enforces, kept as its own named
+// predicate so the "exact, never fuzzy" property is stated in one place.
+func containsExact(list []string, s string) bool {
+	for _, item := range list {
+		if item == s {
+			return true
+		}
+	}
+	return false
 }
 
 // EnforcementReportRow is one requested grant's applied/could-not-apply
@@ -105,8 +202,8 @@ type EnforcementReport struct {
 // appliedReasons names the v0 mechanism actually used for each
 // mechanically appliable kind (AD-9).
 var appliedReasons = map[GrantKind]string{
-	GrantProcessExecution: "applied: argv0 allowlist recorded on the profile (AD-9)",
-	GrantTimeouts:         "applied: deadline recorded on the profile; the consumer applies it to its own context (AD-9)",
+	GrantProcessExecution: "applied: argv0 allowlist enforced by Profile.Command, the package's one launch-construction seam, which refuses any argv0 outside the allowlist and refuses to construct a launch at all without this grant (AD-9, SI-40)",
+	GrantTimeouts:         "applied: deadline derived by Profile.Command into the context the constructed *exec.Cmd is bound to, so an overrunning child is killed (AD-9, SI-40)",
 }
 
 // couldNotApplyReasons names the missing v0 mechanism for each kind AD-9
