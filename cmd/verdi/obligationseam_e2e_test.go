@@ -85,9 +85,11 @@ func TestObligationSeamE2E_ScaffoldsMissingObligations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("split %s: %v", p, err)
 		}
-		if _, err := artifact.DecodeObligation(fm); err != nil {
+		ob, err := artifact.DecodeObligation(fm)
+		if err != nil {
 			t.Fatalf("decode %s: %v\n%s", p, err, raw)
 		}
+		assertUnresolvedObligationQuality(t, ob)
 	}
 }
 
@@ -112,9 +114,11 @@ func TestObligationSeamE2E_ObligationAuthorCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("split %s: %v", path, err)
 	}
-	if _, err := artifact.DecodeObligation(fm); err != nil {
+	ob, err := artifact.DecodeObligation(fm)
+	if err != nil {
 		t.Fatalf("decode %s: %v\n%s", path, err, raw)
 	}
+	assertUnresolvedObligationQuality(t, ob)
 	if !contains(string(body), "verdi:obligation-unauthored") {
 		t.Fatalf("body missing the unauthored marker:\n%s", body)
 	}
