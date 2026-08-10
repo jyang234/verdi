@@ -61,12 +61,15 @@ type Store struct {
 // and field.
 func Load(root string) (*Store, error) {
 	policyDir := filepath.Join(root, ".verdi", "policy")
-	info, err := os.Stat(policyDir)
+	info, err := os.Lstat(policyDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("policyauthority: %w", ErrNotAdopted)
 		}
 		return nil, fmt.Errorf("policyauthority: statting .verdi/policy: %w", err)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return nil, fmt.Errorf("policyauthority: .verdi/policy is a symlink; the constitution store root must be a directory")
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("policyauthority: .verdi/policy exists but is not a directory")

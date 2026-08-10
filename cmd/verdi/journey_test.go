@@ -299,6 +299,30 @@ func TestCmdJourney_InvalidPolicyAuthority(t *testing.T) {
 	}
 }
 
+// TestCmdJourney_DanglingPolicyRootSymlinkIsOperational proves a present but
+// unavailable policy-authority root cannot be projected as genuine absence.
+func TestCmdJourney_DanglingPolicyRootSymlinkIsOperational(t *testing.T) {
+	repo := buildJourneyRepo(t, map[string]string{
+		".verdi/specs/active/payments/spec.md": journeyFeatureSpecMD,
+	})
+	policyDir := filepath.Join(repo.Dir, ".verdi", "policy")
+	if err := os.Symlink("missing-policy-authority", policyDir); err != nil {
+		t.Skipf("symlinks unavailable on this platform: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"spec/payments"}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdJourney = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on unavailable policy authority", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), ".verdi/policy") || !strings.Contains(stderr.String(), "symlink") {
+		t.Fatalf("stderr = %q, want a symlink error naming .verdi/policy", stderr.String())
+	}
+}
+
 // TestCmdJourney_Rootless proves an unresolvable store root is operational
 // exit 2 (store.FindRoot's own error, which carries no "journey: " prefix
 // of its own — journeyErr must add exactly one).
