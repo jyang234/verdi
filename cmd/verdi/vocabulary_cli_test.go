@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
@@ -63,11 +64,12 @@ func buildVocabRenameRepo(t *testing.T, predName, predMD, succName, succMD strin
 	return fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
-				".verdi/verdi.yaml":                            phase7ManifestYAML,
-				".verdi/model.yaml":                            vocabModelYAML(t),
-				".verdi/specs/active/some-feature/spec.md":     someFeatureMD,
-				".verdi/specs/active/" + predName + "/spec.md": predMD,
-				".verdi/specs/active/" + succName + "/spec.md": succMD,
+				".verdi/verdi.yaml":                                   phase7ManifestYAML,
+				".verdi/model.yaml":                                   vocabModelYAML(t),
+				".verdi/specs/active/some-feature/spec.md":            someFeatureMD,
+				".verdi/specs/active/" + predName + "/spec.md":        predMD,
+				".verdi/specs/active/" + succName + "/spec.md":        succMD,
+				".verdi/obligations/" + succName + "/ac-1--static.md": fixtureElaboratedObligationMD(succName, "ac-1", artifact.EvidenceStatic, "fixture-static", "1", gateFakeFrozenCommit),
 			},
 			Message: "init store with predecessor + draft successor + vocab-rename model",
 		},

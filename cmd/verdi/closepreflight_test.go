@@ -72,15 +72,32 @@ y
 // seeds (or withholds) evidence/attestations/reports/forge state on top of
 // this same base to produce exactly one defect class at a time.
 func buildPreflightFixtureRepo(t *testing.T) *fixturegit.Repo {
+	return buildPreflightFixtureRepoWithSpec(t, preflightFixtureSpecMD)
+}
+
+// buildPreflightMechanicalFixtureRepo removes the independently tested
+// attestation kind from cases that need every non-target condition satisfied.
+// Post-adoption authenticated-human evidence remains unproven until its later
+// identity-bearing record unit, so using it as generic green backdrop would
+// fabricate a success this feature intentionally cannot prove.
+func buildPreflightMechanicalFixtureRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	spec := strings.Replace(preflightFixtureSpecMD, "evidence: [static, behavioral, attestation]", "evidence: [static, behavioral]", 1)
+	return buildPreflightFixtureRepoWithSpec(t, spec)
+}
+
+func buildPreflightFixtureRepoWithSpec(t *testing.T, spec string) *fixturegit.Repo {
 	t.Helper()
 	// Pin the projector's default-branch resolution for the C1 pre-closure
 	// precondition (no origin remote in a fixturegit repo).
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
-			".verdi/verdi.yaml":                             "schema: verdi.layout/v1\nforge: github\n",
-			".verdi/specs/active/loan-mgmt/spec.md":         featureV1SpecMD,
-			".verdi/specs/active/preflight-fixture/spec.md": preflightFixtureSpecMD,
+			".verdi/verdi.yaml":                                        "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/loan-mgmt/spec.md":                    featureV1SpecMD,
+			".verdi/specs/active/preflight-fixture/spec.md":            spec,
+			".verdi/obligations/preflight-fixture/ac-1--static.md":     fixtureElaboratedObligationMD("preflight-fixture", "ac-1", artifact.EvidenceStatic, "fixture-static", "1", gateFakeFrozenCommit),
+			".verdi/obligations/preflight-fixture/ac-1--behavioral.md": fixtureElaboratedObligationMD("preflight-fixture", "ac-1", artifact.EvidenceBehavioral, "fixture-behavioral", "1", gateFakeFrozenCommit),
 		},
 		Message: "preflight fixture: feature + story declaring static+behavioral+attestation",
 	}})
@@ -368,12 +385,11 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 	})
 
 	t.Run("violated: a failing current record", func(t *testing.T) {
-		repo := buildPreflightFixtureRepo(t)
+		repo := buildPreflightMechanicalFixtureRepo(t)
 		writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, repo.Head,
 			featureFixtureEvidenceJSON("ac-1", "static", "fail", repo.Head),
 			featureFixtureEvidenceJSON("ac-1", "behavioral", "pass", repo.Head),
 		)
-		writePreflightAttestation(t, repo.Dir, preflightAuthoredAttestationMD)
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer
@@ -414,12 +430,11 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 	})
 
 	t.Run("spec-stale: own-text accepted-deviation finding", func(t *testing.T) {
-		repo := buildPreflightFixtureRepo(t)
+		repo := buildPreflightMechanicalFixtureRepo(t)
 		writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, repo.Head,
 			featureFixtureEvidenceJSON("ac-1", "static", "pass", repo.Head),
 			featureFixtureEvidenceJSON("ac-1", "behavioral", "pass", repo.Head),
 		)
-		writePreflightAttestation(t, repo.Dir, preflightAuthoredAttestationMD)
 		writePreflightGateReport(t, repo.Dir, repo.Head, `  - { id: ac-1, kind: computed, text: "targets the AC's own declared text", disposition: accepted-deviation, note: "known drift" }
 `)
 		before := snapshotRepo(t, repo.Dir)
@@ -466,13 +481,11 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 		// real CI job's own env would.
 		t.Setenv("CI_DEFAULT_BRANCH", "main")
 
-		repo := buildPreflightFixtureRepo(t)
+		repo := buildPreflightMechanicalFixtureRepo(t)
 		writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, repo.Head,
 			featureFixtureEvidenceJSON("ac-1", "static", "pass", repo.Head),
 			featureFixtureEvidenceJSON("ac-1", "behavioral", "pass", repo.Head),
 		)
-		writePreflightAttestation(t, repo.Dir, preflightAuthoredAttestationMD)
-
 		fg := forgefake.New()
 		fg.SeedOpenMR("main", forge.OpenMR{ID: "77", SourceBranch: "supersede-loan-mgmt", Title: "supersede loan-mgmt"})
 		fg.SeedFile("supersede-loan-mgmt", ".verdi/specs/active/loan-mgmt-v2/spec.md",
@@ -638,13 +651,12 @@ func TestRunPreflight_StoryScope_DefectClasses(t *testing.T) {
 	// named as a violation — the pre-fix renderer sees the passing record and
 	// goes SILENT, leaving a violated AC with no detail at all.
 	t.Run("violated kind with a coexisting passing record is never silent (finding 3)", func(t *testing.T) {
-		repo := buildPreflightFixtureRepo(t)
+		repo := buildPreflightMechanicalFixtureRepo(t)
 		writeFixtureVerdicts(t, repo.Dir, preflightStoryRef, repo.Head,
 			preflightEvidenceJSON("ac-1", "static", "fail", "ci", "linter-a", repo.Head),
 			preflightEvidenceJSON("ac-1", "static", "pass", "ci", "linter-b", repo.Head),
 			featureFixtureEvidenceJSON("ac-1", "behavioral", "pass", repo.Head),
 		)
-		writePreflightAttestation(t, repo.Dir, preflightAuthoredAttestationMD)
 		before := snapshotRepo(t, repo.Dir)
 
 		var pstdout, pstderr bytes.Buffer

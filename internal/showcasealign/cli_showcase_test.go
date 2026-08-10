@@ -27,11 +27,11 @@
 //     store, not a workaround; `verdi gate`'s condition 3 (below) fails as
 //     a direct, honest downstream consequence — no deviation-report.md was
 //     ever written.
-//   - `verdi gate` (on a build branch cut from the real, accepted
-//     spec/borrower-update-api): conditions 1/2/4 hold for real against
-//     the committed corpus (accepted-pending-build on the default branch;
-//     no violated AC; no unresolved cascade); condition 3 fails per the
-//     align finding above. Overall: gate: FAIL, exit 1.
+//   - `verdi build start` and `verdi gate` use a test-added, landed story
+//     whose obligation is explicitly elaborated. The frozen showcase's 282
+//     legacy obligations stay byte-identical and correctly refuse new builds;
+//     conditions 1/2/4 then hold against the conforming story while condition
+//     3 fails per the align finding above. Overall: gate: FAIL, exit 1.
 //   - `verdi close` (on spec/borrower-update-api): the closure gate's
 //     eligibility condition fails for real — this harness's
 //     provisionShowcaseStore deliberately does not copy
@@ -109,6 +109,66 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wtmanager"
 )
+
+const showcaseBuildReadySpecMD = `---
+id: spec/showcase-build-ready
+kind: spec
+class: story
+title: "Showcase build-ready story"
+owners: [platform-team]
+story: jira:SHOWCASE-1
+problem: { text: "the CLI success path needs a post-adoption fixture", anchor: problem }
+outcome: { text: "the fixture declares executable obligation quality", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "the build-ready fixture is statically checked", evidence: [static] }
+links:
+  - { type: implements, ref: "spec/stale-decline#ac-1" }
+---
+# Showcase build-ready story
+
+## Problem
+The CLI success path needs a post-adoption fixture.
+
+## Outcome
+The fixture declares executable obligation quality.
+`
+
+const showcaseBuildReadyObligationMD = `---
+id: obligation/showcase-build-ready--ac-1--static
+kind: obligation
+title: "Showcase build-ready quality"
+owners: [platform-team]
+for_kind: static
+quality:
+  state: elaborated
+  claim: "the build-ready fixture is statically checked"
+  falsifier: "the static checker reports that the fixture contract is absent"
+  scope: "spec/showcase-build-ready at the evaluated commit"
+  producer: { kind: checker, ref: "showcase-static" }
+  authoritative_source: { kind: ci-job, ref: "showcase" }
+  freshness:
+    invalidated_by: [code]
+    rule: "rerun for the evaluated commit"
+links:
+  - { type: verifies, ref: "spec/showcase-build-ready" }
+frozen: { at: 2026-08-10, commit: 000000000000000000000000000000000000000a }
+---
+# Showcase build-ready quality
+
+The fixture's static producer and CI source must match exactly.
+`
+
+func commitShowcaseBuildReadyFixture(t *testing.T, root string) {
+	t.Helper()
+	writeTestFile(t, filepath.Join(root, ".verdi", "specs", "active", "showcase-build-ready", "spec.md"), showcaseBuildReadySpecMD)
+	writeTestFile(t, filepath.Join(root, ".verdi", "obligations", "showcase-build-ready", "ac-1--static.md"), showcaseBuildReadyObligationMD)
+	if err := gitx.AddAll(context.Background(), root); err != nil {
+		t.Fatalf("staging post-adoption showcase build fixture: %v", err)
+	}
+	if _, err := gitx.CreateCommit(context.Background(), root, "test setup: add post-adoption build-ready story"); err != nil {
+		t.Fatalf("committing post-adoption showcase build fixture: %v", err)
+	}
+}
 
 func TestCLIShowcaseCoverage(t *testing.T) {
 	t.Run("audit", func(t *testing.T) {
@@ -340,13 +400,14 @@ func TestCLIShowcaseCoverage(t *testing.T) {
 	t.Run("build_start_then_align_then_gate", func(t *testing.T) {
 		root := provisionShowcaseStore(t)
 		t.Setenv("CI_DEFAULT_BRANCH", "main")
+		commitShowcaseBuildReadyFixture(t, root)
 
-		stdout, stderr, code := runBinary(t, root, "build", "start", "spec/borrower-update-api")
+		stdout, stderr, code := runBinary(t, root, "build", "start", "spec/showcase-build-ready")
 		if code != 0 {
 			t.Fatalf("verdi build start: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 		}
-		if !strings.Contains(stdout, "feature/borrower-update-api") {
-			t.Fatalf("verdi build start stdout missing the real story's build branch:\n%s", stdout)
+		if !strings.Contains(stdout, "feature/showcase-build-ready") {
+			t.Fatalf("verdi build start stdout missing the conforming story's build branch:\n%s", stdout)
 		}
 
 		alignOut, alignErr, alignCode := runBinary(t, root, "align")
@@ -362,7 +423,7 @@ func TestCLIShowcaseCoverage(t *testing.T) {
 			t.Fatalf("verdi gate: exit %d, want 1\nstdout:\n%s\nstderr:\n%s", gateCode, gateOut, gateErr)
 		}
 		if !strings.Contains(gateOut, "[PASS] 1.") {
-			t.Fatalf("gate condition 1 (accepted-pending-build on the default branch) should PASS for the real committed borrower-update-api:\n%s", gateOut)
+			t.Fatalf("gate condition 1 (accepted-pending-build on the default branch) should PASS for the landed showcase-build-ready story:\n%s", gateOut)
 		}
 		if !strings.Contains(gateOut, "[PASS] 2.") {
 			t.Fatalf("gate condition 2 (no AC violated) should PASS (no derived evidence to violate):\n%s", gateOut)

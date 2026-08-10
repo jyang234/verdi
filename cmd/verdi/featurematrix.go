@@ -357,6 +357,7 @@ func foldImplementingStory(ctx context.Context, root, commit string, storySpec *
 	}
 	in, err := storyFoldInput(ctx, root, storySpec, commit, records, false)
 	if err != nil {
+		// vocab:identity — machinery diagnostic names the fixed implementing-story role and spec id
 		return evidence.StoryResult{}, fmt.Errorf("matrix: preparing obligation quality for implementing story %s: %w", storySpec.ID, err)
 	}
 	result, err := evidence.Fold(in)

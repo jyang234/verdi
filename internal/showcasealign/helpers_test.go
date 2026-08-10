@@ -45,6 +45,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
@@ -438,7 +439,33 @@ func buildShowcaseRepo(t *testing.T) *fixturegit.Repo {
 
 	layers := append(append([]fixturegit.Layer{}, base...), layerA, layerB, layerC)
 	repo := fixturegit.Build(t, layers)
+	attachHistoricalObligationQualityAncestry(t, repo)
 	writeLoansvcFixture(t, repo.Dir)
 	provisionMutableZone(t, repo.Dir)
 	return repo
+}
+
+// attachHistoricalObligationQualityAncestry supplies the one relationship the
+// deterministic showcase reconstruction cannot encode in its stable fixture
+// SHAs: this legacy corpus predates the owner merge that adopted obligation
+// quality. Importing the exact local adoption object and grafting it after the
+// reconstructed head lets production Git ancestry prove that historical fact;
+// no runtime cutoff, fallback, or assumption is weakened.
+func attachHistoricalObligationQualityAncestry(t *testing.T, repo *fixturegit.Repo) {
+	t.Helper()
+	fetch := exec.Command("git", "fetch", "--quiet", "--no-tags", verdiRepoRoot, evidence.ObligationQualityAdoptionCommit)
+	fetch.Dir = repo.Dir
+	if out, err := fetch.CombinedOutput(); err != nil {
+		t.Fatalf("importing obligation-quality adoption %s into showcase fixture: %v\n%s", evidence.ObligationQualityAdoptionCommit, err, out)
+	}
+	graft := exec.Command("git", "replace", "--graft", evidence.ObligationQualityAdoptionCommit, repo.Head)
+	graft.Dir = repo.Dir
+	if out, err := graft.CombinedOutput(); err != nil {
+		t.Fatalf("attaching historical showcase head %s before adoption %s: %v\n%s", repo.Head, evidence.ObligationQualityAdoptionCommit, err, out)
+	}
+	prove := exec.Command("git", "merge-base", "--is-ancestor", repo.Head, evidence.ObligationQualityAdoptionCommit)
+	prove.Dir = repo.Dir
+	if out, err := prove.CombinedOutput(); err != nil {
+		t.Fatalf("proving historical showcase ancestry %s <= %s: %v\n%s", repo.Head, evidence.ObligationQualityAdoptionCommit, err, out)
+	}
 }
