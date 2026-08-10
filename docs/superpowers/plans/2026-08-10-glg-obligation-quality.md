@@ -27,8 +27,10 @@ new SI-71..SI-74; inherited obligation artifact/gate/seam/wall authority.
   ACs remain exempt. Evidence records gain no `obligation_id`.
 - No new CLI verb, MCP tool, lifecycle state, store root or operating-model
   transition.
-- No frontend markup/CSS/JS/Playwright change. Backend workbench writer tests
-  may change; a later FABLE unit owns presentation.
+- No frontend markup/CSS/JS or new presentation behavior. Backend workbench
+  writer tests may change, and existing Playwright assertions may be ratcheted
+  only when this backend truth changes an incumbent surface's output; a later
+  FABLE unit owns presentation implementation.
 - Do not edit 282 frozen legacy obligation files. Do not call missing fields
   elaborated. Do not make unresolved scaffolds fail acceptance-time VL-020.
 
