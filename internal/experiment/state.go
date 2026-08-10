@@ -79,53 +79,74 @@ type ResultVerifier func(Definition, []Observation, Result) error
 // set. A nil verify is an operational error at entry rather than a
 // "checks skipped" mode, and a verify that fails is likewise an
 // operational error — never a silent downgrade to measured.
-func DeriveState(repoRoot, experimentDir string, verify ResultVerifier) (State, error) {
+//
+// The second return is the derived state's DISCLOSED-UNPROVEN AUTHORITY
+// CONJUNCTS (SI-43, state_disclosure.go): the facts AC-1's state table
+// depends on that no reader of these artifacts can establish from their
+// bytes. Every rung from registered upward discloses the registration
+// lock's human witness, and the ratified rung additionally discloses the
+// actor's authenticated principal resolution — always in that order, so
+// two derivations over the same bytes agree exactly. They are returned
+// rather than logged because CO-1 makes them part of the answer: a
+// consumer that surfaces the state must surface these with it, and the
+// Wave-5/6 adapter and lock surfaces own turning each one into proof or
+// refusal. An operational error carries no state and therefore no
+// disclosures.
+func DeriveState(repoRoot, experimentDir string, verify ResultVerifier) (State, []StateDisclosure, error) {
 	if verify == nil {
-		return "", fmt.Errorf("experiment: DeriveState requires a result verifier (a present result.json is state-bearing only when it recomputes)")
+		return "", nil, fmt.Errorf("experiment: DeriveState requires a result verifier (a present result.json is state-bearing only when it recomputes)")
 	}
 	if err := ValidateRepoRelativePath(experimentDir); err != nil {
-		return "", fmt.Errorf("experiment: experiment directory: %w", err)
+		return "", nil, fmt.Errorf("experiment: experiment directory: %w", err)
 	}
 	dir := filepath.Join(repoRoot, experimentDir)
 
+	// No disclosure belongs to the exploratory rung: it asserts no locked
+	// registration, no evaluation, and no human decision at all.
+	unlocked := []StateDisclosure{}
+
 	def, ok, err := readDefinition(dir)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if !ok {
-		return StateExploratory, nil
+		return StateExploratory, unlocked, nil
 	}
 
 	locked, err := Locked(def)
 	if err != nil {
-		return "", fmt.Errorf("experiment: %s: %w", filepath.Join(dir, definitionFile), err)
+		return "", nil, fmt.Errorf("experiment: %s: %w", filepath.Join(dir, definitionFile), err)
 	}
 	if !locked {
-		return StateExploratory, nil
+		return StateExploratory, unlocked, nil
 	}
 	defDigest, err := DefinitionDigest(def)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
+	// From here up the ladder the registration IS locked, so every rung
+	// carries the lock's unprovable human witness.
+	disclosures := []StateDisclosure{lockWitnessDisclosure()}
+
 	if err := checkCandidatePatchesValid(dir, experimentDir, def); err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	obs, ok, err := readObservations(dir, def)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if !ok {
-		return StateRegistered, nil
+		return StateRegistered, disclosures, nil
 	}
 
 	res, ok, err := readResult(dir, defDigest, def, obs, verify)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if !ok {
-		return StateMeasured, nil
+		return StateMeasured, disclosures, nil
 	}
 
 	rung := StateInconclusive
@@ -135,12 +156,12 @@ func DeriveState(repoRoot, experimentDir string, verify ResultVerifier) (State, 
 
 	_, ok, err = readRatification(dir, res)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if !ok {
-		return rung, nil
+		return rung, disclosures, nil
 	}
-	return StateRatified, nil
+	return StateRatified, append(disclosures, actorResolutionDisclosure()), nil
 }
 
 // readDefinition reads and decodes experiment.yaml. ok is false only when

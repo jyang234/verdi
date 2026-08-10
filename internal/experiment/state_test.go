@@ -113,7 +113,7 @@ func TestDeriveStateRejectsInvalidExperimentDir(t *testing.T) {
 			doc, _ := lockedDefinitionDoc(t)
 			writeFile(t, root, filepath.Join("experiments/cache-placement-v1", "experiment.yaml"), doc)
 			writeCandidatePatches(t, root)
-			if _, err := DeriveState(root, experimentDir, acceptResult); err == nil {
+			if _, _, err := DeriveState(root, experimentDir, acceptResult); err == nil {
 				t.Errorf("DeriveState(root, %q) = nil error, want error", experimentDir)
 			}
 		})
@@ -133,7 +133,7 @@ func TestDeriveStateAbsoluteRepoRootReadsThroughExperimentDir(t *testing.T) {
 	writeExperimentFile(t, root, "experiment.yaml", doc)
 	writeCandidatePatches(t, root)
 
-	state, err := DeriveState(root, testExperimentDir, acceptResult)
+	state, _, err := DeriveState(root, testExperimentDir, acceptResult)
 	if err != nil {
 		t.Fatalf("DeriveState() unexpected error: %v", err)
 	}
@@ -161,14 +161,14 @@ func TestDeriveStateSelfTouchingPatchIsError(t *testing.T) {
 	writeExperimentFile(t, root, "candidates/baseline.patch", selfPatch)
 	writeExperimentFile(t, root, "candidates/facts-cache.patch", factsCachePatchContent)
 
-	if _, err := DeriveState(root, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(root, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with a patch touching the experiment's own directory = nil error, want error")
 	}
 }
 
 func TestDeriveStateExploratoryNoDefinition(t *testing.T) {
 	dir := t.TempDir()
-	state, err := DeriveState(dir, testExperimentDir, acceptResult)
+	state, _, err := DeriveState(dir, testExperimentDir, acceptResult)
 	if err != nil {
 		t.Fatalf("DeriveState() unexpected error: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestDeriveStateExploratoryNoDefinition(t *testing.T) {
 func TestDeriveStateExploratoryUnlockedDefinition(t *testing.T) {
 	dir := t.TempDir()
 	writeExperimentFile(t, dir, "experiment.yaml", validDefinitionYAML())
-	state, err := DeriveState(dir, testExperimentDir, acceptResult)
+	state, _, err := DeriveState(dir, testExperimentDir, acceptResult)
 	if err != nil {
 		t.Fatalf("DeriveState() unexpected error: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestDeriveStateExploratoryUnlockedDefinition(t *testing.T) {
 func TestDeriveStateUndecodableDefinitionIsError(t *testing.T) {
 	dir := t.TempDir()
 	writeExperimentFile(t, dir, "experiment.yaml", "not: valid: yaml: at all:\n")
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with corrupt experiment.yaml = nil error, want error")
 	}
 }
@@ -201,7 +201,7 @@ func TestDeriveStateTamperedLockIsError(t *testing.T) {
 	dir := t.TempDir()
 	doc := validDefinitionYAML() + "lock:\n  definition_digest: " + digestOf("9") + "\n"
 	writeExperimentFile(t, dir, "experiment.yaml", doc)
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with a tampered lock = nil error, want error")
 	}
 }
@@ -212,7 +212,7 @@ func TestDeriveStateRegistered(t *testing.T) {
 	writeExperimentFile(t, dir, "experiment.yaml", doc)
 	writeCandidatePatches(t, dir)
 
-	state, err := DeriveState(dir, testExperimentDir, acceptResult)
+	state, _, err := DeriveState(dir, testExperimentDir, acceptResult)
 	if err != nil {
 		t.Fatalf("DeriveState() unexpected error: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestDeriveStateRegisteredMissingPatchIsError(t *testing.T) {
 	// inconsistency, not a legitimate lower rung (see DeriveState's own
 	// doc comment).
 
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with a missing registered candidate patch = nil error, want error")
 	}
 }
@@ -243,7 +243,7 @@ func TestDeriveStateMeasured(t *testing.T) {
 	writeCandidatePatches(t, dir)
 	writeExperimentFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 
-	state, err := DeriveState(dir, testExperimentDir, acceptResult)
+	state, _, err := DeriveState(dir, testExperimentDir, acceptResult)
 	if err != nil {
 		t.Fatalf("DeriveState() unexpected error: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestDeriveStateMeasuredBadEnvelopeDigestIsError(t *testing.T) {
 	writeCandidatePatches(t, dir)
 	writeExperimentFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digestOf("0")))
 
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with a mismatched observation experiment_digest = nil error, want error")
 	}
 }
@@ -271,7 +271,7 @@ func TestDeriveStateMeasuredUndecodableObservationsIsError(t *testing.T) {
 	writeCandidatePatches(t, dir)
 	writeExperimentFile(t, dir, "observations.jsonl", "not json\n")
 
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with undecodable observations.jsonl = nil error, want error")
 	}
 }
@@ -284,7 +284,7 @@ func TestDeriveStateRecommended(t *testing.T) {
 	writeExperimentFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	writeExperimentFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictProvenWinner))
 
-	state, err := DeriveState(dir, testExperimentDir, acceptResult)
+	state, _, err := DeriveState(dir, testExperimentDir, acceptResult)
 	if err != nil {
 		t.Fatalf("DeriveState() unexpected error: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestDeriveStateInconclusive(t *testing.T) {
 	writeExperimentFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	writeExperimentFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictDisclosedUnproven))
 
-	state, err := DeriveState(dir, testExperimentDir, acceptResult)
+	state, _, err := DeriveState(dir, testExperimentDir, acceptResult)
 	if err != nil {
 		t.Fatalf("DeriveState() unexpected error: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestDeriveStateResultDigestMismatchIsError(t *testing.T) {
 	writeExperimentFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	writeExperimentFile(t, dir, "result.json", validResultJSONForDigest(digestOf("0"), VerdictProvenWinner))
 
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with result.definition_digest mismatched = nil error, want error")
 	}
 }
@@ -346,7 +346,7 @@ func TestDeriveStateRatified(t *testing.T) {
 		"disposition: select-recommended\n"
 	writeExperimentFile(t, dir, "ratification.yaml", ratificationDoc)
 
-	state, err := DeriveState(dir, testExperimentDir, acceptResult)
+	state, _, err := DeriveState(dir, testExperimentDir, acceptResult)
 	if err != nil {
 		t.Fatalf("DeriveState() unexpected error: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestDeriveStateRatificationDigestMismatchIsError(t *testing.T) {
 		"disposition: select-recommended\n"
 	writeExperimentFile(t, dir, "ratification.yaml", ratificationDoc)
 
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with ratification.result_digest mismatched = nil error, want error")
 	}
 }
@@ -383,7 +383,7 @@ func TestDeriveStateUndecodableRatificationIsError(t *testing.T) {
 	writeExperimentFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictProvenWinner))
 	writeExperimentFile(t, dir, "ratification.yaml", "not: valid: yaml: at all:\n")
 
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with undecodable ratification.yaml = nil error, want error")
 	}
 }
@@ -401,12 +401,12 @@ func TestDeriveStateNilVerifierIsError(t *testing.T) {
 	writeExperimentFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	writeExperimentFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictProvenWinner))
 
-	if _, err := DeriveState(dir, testExperimentDir, nil); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, nil); err == nil {
 		t.Errorf("DeriveState() with a nil verifier = nil error, want error")
 	}
 	// Not even the rungs below result.json may be reported without it.
 	empty := t.TempDir()
-	if _, err := DeriveState(empty, testExperimentDir, nil); err == nil {
+	if _, _, err := DeriveState(empty, testExperimentDir, nil); err == nil {
 		t.Errorf("DeriveState() with a nil verifier and no artifacts = nil error, want error")
 	}
 }
@@ -424,7 +424,7 @@ func TestDeriveStateFailedResultVerificationIsError(t *testing.T) {
 	writeExperimentFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 	writeExperimentFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictProvenWinner))
 
-	state, err := DeriveState(dir, testExperimentDir, rejectResult)
+	state, _, err := DeriveState(dir, testExperimentDir, rejectResult)
 	if err == nil {
 		t.Fatalf("DeriveState() with a rejected result = (%q, nil error), want error", state)
 	}
@@ -443,7 +443,7 @@ func TestDeriveStateVerifierUnusedWithoutResult(t *testing.T) {
 	writeCandidatePatches(t, dir)
 	writeExperimentFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
 
-	state, err := DeriveState(dir, testExperimentDir, rejectResult)
+	state, _, err := DeriveState(dir, testExperimentDir, rejectResult)
 	if err != nil {
 		t.Fatalf("DeriveState() unexpected error: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestDeriveStateVerifierReceivesDecodedArtifacts(t *testing.T) {
 		return nil
 	}
 
-	if _, err := DeriveState(dir, testExperimentDir, verify); err != nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, verify); err != nil {
 		t.Fatalf("DeriveState() unexpected error: %v", err)
 	}
 	if calls != 1 {
@@ -503,7 +503,7 @@ func TestDeriveStateTamperedCandidatePatchIsError(t *testing.T) {
 	writeExperimentFile(t, dir, "candidates/baseline.patch", "diff --git a/tampered b/tampered\n")
 	writeExperimentFile(t, dir, "candidates/facts-cache.patch", factsCachePatchContent)
 
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with a tampered candidate patch = nil error, want error")
 	}
 }
@@ -528,7 +528,7 @@ func TestDeriveStateTamperedPatchProtectedPathIsError(t *testing.T) {
 	writeExperimentFile(t, dir, "candidates/baseline.patch", badPatch)
 	writeExperimentFile(t, dir, "candidates/facts-cache.patch", factsCachePatchContent)
 
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with a registered patch touching a protected path = nil error, want error")
 	}
 }
@@ -545,7 +545,7 @@ func TestDeriveStateIncompleteObservationsIsError(t *testing.T) {
 	lines := validObservationLines(digest)
 	writeExperimentFile(t, dir, "observations.jsonl", strings.Join(lines[:3], "\n")+"\n") // drop facts-cache round 2
 
-	if _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
 		t.Errorf("DeriveState() with an incomplete observation set = nil error, want error")
 	}
 }

@@ -247,7 +247,7 @@ func TestDeriveStateWithRealVerifierOverFixtures(t *testing.T) {
 				}
 			}
 
-			state, err := experiment.DeriveState(root, tt.fixture, VerifyResult)
+			state, _, err := experiment.DeriveState(root, tt.fixture, VerifyResult)
 			if forged {
 				if err == nil {
 					t.Fatalf("DeriveState() over a forged result.json = (%q, nil error), want an operational error", state)
