@@ -17,6 +17,21 @@ const (
 	ratificationFile = "ratification.yaml"
 )
 
+// ResultVerifier is the port DeriveState requires to treat a PRESENT
+// result.json as state-bearing (invention ledger SI-42): given the locked
+// definition, the complete observation set, and the decoded result, it
+// answers whether that result IS the closed decision engine's own output
+// for that evidence, or an operational error explaining why not.
+//
+// It is a func port defined HERE, at the consumer, and injected by
+// callers, because the only implementation — internal/experimentdecision's
+// recompute-equality check — imports this package. A shape-, digest-, and
+// algorithm-checked result.json is still hand-writable to name any winner
+// (the Git-edit mutation surface AC-5/AC-6 leave open), so shape checking
+// alone cannot decide the recommended/inconclusive rungs; recomputation
+// can, and it is the caller's job to supply it.
+type ResultVerifier func(Definition, []Observation, Result) error
+
 // DeriveState computes an experiment's derived lifecycle state from the
 // presence and validity of its artifacts (AC-1's state table, DC-2):
 // exploratory, registered, measured, recommended, inconclusive, or
@@ -57,7 +72,17 @@ const (
 // sentinel (observations_validation.go), which is exactly why
 // incompleteness carries its own sentinel rather than being folded into
 // ErrObservationIntegrity.
-func DeriveState(repoRoot, experimentDir string) (State, error) {
+//
+// verify is REQUIRED (SI-42): a present result.json only bears the
+// recommended or inconclusive rung when verify accepts it as the closed
+// engine's own output for the locked definition and complete observation
+// set. A nil verify is an operational error at entry rather than a
+// "checks skipped" mode, and a verify that fails is likewise an
+// operational error — never a silent downgrade to measured.
+func DeriveState(repoRoot, experimentDir string, verify ResultVerifier) (State, error) {
+	if verify == nil {
+		return "", fmt.Errorf("experiment: DeriveState requires a result verifier (a present result.json is state-bearing only when it recomputes)")
+	}
 	if err := ValidateRepoRelativePath(experimentDir); err != nil {
 		return "", fmt.Errorf("experiment: experiment directory: %w", err)
 	}
@@ -87,7 +112,7 @@ func DeriveState(repoRoot, experimentDir string) (State, error) {
 		return "", err
 	}
 
-	_, ok, err = readObservations(dir, def)
+	obs, ok, err := readObservations(dir, def)
 	if err != nil {
 		return "", err
 	}
@@ -95,7 +120,7 @@ func DeriveState(repoRoot, experimentDir string) (State, error) {
 		return StateRegistered, nil
 	}
 
-	res, ok, err := readResult(dir, defDigest)
+	res, ok, err := readResult(dir, defDigest, def, obs, verify)
 	if err != nil {
 		return "", err
 	}
@@ -185,10 +210,17 @@ func readObservations(dir string, def Definition) (obs []Observation, ok bool, e
 	return obs, true, nil
 }
 
-// readResult reads and decodes result.json, and checks that its
-// definition_digest and algorithm match the locked definition. ok is
-// false only when the file itself is absent.
-func readResult(dir, defDigest string) (res Result, ok bool, err error) {
+// readResult reads and decodes result.json, checks that its
+// definition_digest and algorithm match the locked definition, and then
+// requires verify to accept it as the closed engine's own output for
+// (def, obs) — SI-42's recompute-equality authority. ok is false only when
+// the file itself is absent; every other failure, verification included,
+// is an error.
+//
+// The cheap identity checks run FIRST so a result belonging to a different
+// definition or algorithm is reported as exactly that, rather than as a
+// recomputation mismatch that names the wrong cause.
+func readResult(dir, defDigest string, def Definition, obs []Observation, verify ResultVerifier) (res Result, ok bool, err error) {
 	path := filepath.Join(dir, resultFile)
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -206,6 +238,9 @@ func readResult(dir, defDigest string) (res Result, ok bool, err error) {
 	}
 	if res.Algorithm != AlgorithmV1 {
 		return Result{}, false, fmt.Errorf("experiment: %s: algorithm %q does not match the registered algorithm %q", path, res.Algorithm, AlgorithmV1)
+	}
+	if err := verify(def, obs, res); err != nil {
+		return Result{}, false, fmt.Errorf("experiment: %s: result does not verify against the locked definition and observations: %w", path, err)
 	}
 	return res, true, nil
 }

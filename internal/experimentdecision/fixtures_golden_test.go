@@ -62,7 +62,7 @@ func goldenBytes(t *testing.T, name, file string) []byte {
 // experiment directory through DeriveState, Evaluate, RenderResult, and
 // RenderRecommendation.
 func TestCachingProvenFixture(t *testing.T) {
-	state, err := experiment.DeriveState("testdata", "caching-proven")
+	state, err := experiment.DeriveState("testdata", "caching-proven", VerifyResult)
 	if err != nil {
 		t.Fatalf("DeriveState(caching-proven): %v", err)
 	}
@@ -134,7 +134,7 @@ func TestCachingProvenFixture(t *testing.T) {
 // disclosed-unproven/insufficient-separation result rather than a forced
 // winner.
 func TestCachingInconclusiveFixture(t *testing.T) {
-	state, err := experiment.DeriveState("testdata", "caching-inconclusive")
+	state, err := experiment.DeriveState("testdata", "caching-inconclusive", VerifyResult)
 	if err != nil {
 		t.Fatalf("DeriveState(caching-inconclusive): %v", err)
 	}

@@ -71,7 +71,20 @@ func Evaluate(def experiment.Definition, obs []experiment.Observation, att Envir
 	if err := experiment.ValidateComplete(def, obs); err != nil {
 		return experiment.Result{}, errfWrap("validating observations", err)
 	}
+	return compute(def, obs)
+}
 
+// compute is the CLOSED DECISION COMPUTATION itself: everything AC-2
+// numbers after step 1's preconditions, over a (def, obs) pair a caller
+// has already proven locked and complete. It is a pure function of its two
+// arguments — no clock, no environment, no configuration (DC-4) — which is
+// what lets VerifyResult recompute an at-rest result and compare bytes.
+//
+// It deliberately takes no environment attestation: an attestation is
+// about the RUN that produced obs, a fact only the emission path can
+// assert (SI-41), and re-checking a stored result must not be able to
+// manufacture one.
+func compute(def experiment.Definition, obs []experiment.Observation) (experiment.Result, error) {
 	defDigest, err := experiment.DefinitionDigest(def)
 	if err != nil {
 		return experiment.Result{}, errfWrap("computing definition digest", err)
