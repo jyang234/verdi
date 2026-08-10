@@ -15,9 +15,11 @@ type candRound struct {
 }
 
 // Evaluate runs the closed deterministic recommendation engine
-// (spec/comparative-spike-experiments AC-2) over one locked def and its
-// complete observation set. A returned error is ALWAYS an operational
-// failure (CO-1) — def is unlocked or tampered, or obs fails
+// (spec/comparative-spike-experiments AC-2) over one locked def, its
+// complete observation set, and the execution layer's environment-policy
+// attestation for the run. A returned error is ALWAYS an operational
+// failure (CO-1) — def is unlocked or tampered, att does not attest def's
+// registered environment policy, or obs fails
 // experiment.ValidateObservations/ValidateComplete — and never carries a
 // Result. A returned Result is always a completed comparison expressing
 // exactly one Verdict; Evaluate never returns both a non-nil error and a
@@ -36,20 +38,35 @@ type candRound struct {
 // DISCLOSED SCOPE (three-valued honesty, CO-1): step 1 in AC-2's own text
 // is "prove that the run is complete and matches the locked digests AND
 // ENVIRONMENT POLICY". This function proves completeness
-// (experiment.ValidateComplete) and digest agreement only. An observation
-// record carries no environment fingerprint, so the environment-policy
-// conjunct is structurally unproven at this layer — it is not silently
-// assumed to hold, it is simply not this unit's evidence to offer. That
-// conjunct belongs to spec/execution-workspace, which captures and checks
-// the environment fingerprint during execution, before any observation
-// this engine ever sees is produced.
-func Evaluate(def experiment.Definition, obs []experiment.Observation) (experiment.Result, error) {
+// (experiment.ValidateComplete) and digest agreement from the artifacts
+// themselves; an observation record carries no environment fingerprint, so
+// the environment-policy conjunct cannot be proven from the evidence set
+// at all. It is not silently assumed either (SI-41): the execution layer
+// must ATTEST it at emission time through att, and an attestation that is
+// zero or names any other policy stops the run as an operational error
+// rather than producing a verdict.
+//
+// Two parts of that conjunct remain outside this unit and are disclosed,
+// not claimed:
+//
+//   - The DURABLE receipt — the environment fingerprint artifact captured
+//     during execution and re-checkable afterwards — is
+//     spec/execution-workspace's scope (Wave 3). Until it lands, att is an
+//     in-memory contract with the caller, and this engine never records it
+//     in the Result (the verdi.experiment-result/v1 schema is unchanged).
+//   - AT REST, a result.json read back from the store therefore carries no
+//     proof of the conjunct at all; experiment.DeriveState surfaces that as
+//     a typed disclosed-unproven authority disclosure (SI-43).
+func Evaluate(def experiment.Definition, obs []experiment.Observation, att EnvironmentAttestation) (experiment.Result, error) {
 	locked, err := experiment.Locked(def)
 	if err != nil {
 		return experiment.Result{}, errfWrap("checking definition lock", err)
 	}
 	if !locked {
 		return experiment.Result{}, errf("definition %q is not locked", def.ID)
+	}
+	if err := att.verify(def); err != nil {
+		return experiment.Result{}, err
 	}
 	if err := experiment.ValidateComplete(def, obs); err != nil {
 		return experiment.Result{}, errfWrap("validating observations", err)

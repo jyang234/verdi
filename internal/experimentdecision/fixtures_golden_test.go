@@ -71,7 +71,7 @@ func TestCachingProvenFixture(t *testing.T) {
 	}
 
 	def, obs := goldenExperiment(t, "caching-proven")
-	res, err := Evaluate(def, obs)
+	res, err := Evaluate(def, obs, attestation(def))
 	if err != nil {
 		t.Fatalf("Evaluate(caching-proven): %v", err)
 	}
@@ -143,7 +143,7 @@ func TestCachingInconclusiveFixture(t *testing.T) {
 	}
 
 	def, obs := goldenExperiment(t, "caching-inconclusive")
-	res, err := Evaluate(def, obs)
+	res, err := Evaluate(def, obs, attestation(def))
 	if err != nil {
 		t.Fatalf("Evaluate(caching-inconclusive): %v", err)
 	}
@@ -183,11 +183,11 @@ func TestGoldenFixturesDeterministicAcrossFreshDecodes(t *testing.T) {
 			def1, obs1 := goldenExperiment(t, name)
 			def2, obs2 := goldenExperiment(t, name)
 
-			res1, err := Evaluate(def1, obs1)
+			res1, err := Evaluate(def1, obs1, attestation(def1))
 			if err != nil {
 				t.Fatalf("Evaluate() first decode: %v", err)
 			}
-			res2, err := Evaluate(def2, obs2)
+			res2, err := Evaluate(def2, obs2, attestation(def2))
 			if err != nil {
 				t.Fatalf("Evaluate() second decode: %v", err)
 			}

@@ -21,7 +21,7 @@ func isZeroResult(res experiment.Result) bool {
 // mustEvaluate calls Evaluate and fails the test on an unexpected error.
 func mustEvaluate(t *testing.T, def experiment.Definition, obs []experiment.Observation) experiment.Result {
 	t.Helper()
-	res, err := Evaluate(def, obs)
+	res, err := Evaluate(def, obs, attestation(def))
 	if err != nil {
 		t.Fatalf("Evaluate() unexpected error: %v", err)
 	}
@@ -846,7 +846,7 @@ func TestEvaluateBoundGuardCandidateReportedOnlyRejected(t *testing.T) {
 		}
 	}
 
-	res, err := Evaluate(def, obs)
+	res, err := Evaluate(def, obs, attestation(def))
 	if err == nil {
 		t.Fatalf("Evaluate() with a candidate-reported-only bound-guard measurement = nil error, want error")
 	}
@@ -908,7 +908,7 @@ func TestEvaluateIncompleteRun(t *testing.T) {
 	)
 	obs = obs[:len(obs)-1] // drop the last (candidate-a, round 3) record
 
-	res, err := Evaluate(def, obs)
+	res, err := Evaluate(def, obs, attestation(def))
 	if err == nil {
 		t.Fatalf("Evaluate() on an incomplete run = nil error, want error")
 	}
@@ -933,7 +933,7 @@ func TestEvaluateDigestMismatch(t *testing.T) {
 	)
 	obs[0].ExperimentDigest = fixtureDigest("9")
 
-	_, err := Evaluate(def, obs)
+	_, err := Evaluate(def, obs, attestation(def))
 	if err == nil {
 		t.Fatalf("Evaluate() with a mismatched digest = nil error, want error")
 	}
@@ -952,7 +952,7 @@ func TestEvaluateMixedRunIDs(t *testing.T) {
 	)
 	obs[0].Run = "run-2"
 
-	_, err := Evaluate(def, obs)
+	_, err := Evaluate(def, obs, attestation(def))
 	if err == nil {
 		t.Fatalf("Evaluate() with mixed run identities = nil error, want error")
 	}
@@ -965,7 +965,7 @@ func TestEvaluateMixedRunIDs(t *testing.T) {
 // operational error and never produces a Result.
 func TestEvaluateUnlockedDefinition(t *testing.T) {
 	def := baseDefinition() // never locked
-	res, err := Evaluate(def, nil)
+	res, err := Evaluate(def, nil, attestation(def))
 	if err == nil {
 		t.Fatalf("Evaluate() on an unlocked definition = nil error, want error")
 	}
@@ -981,7 +981,7 @@ func TestEvaluateTamperedLock(t *testing.T) {
 	def := lockDefinition(t)
 	def.Lock.DefinitionDigest = fixtureDigest("9")
 
-	_, err := Evaluate(def, nil)
+	_, err := Evaluate(def, nil, attestation(def))
 	if err == nil {
 		t.Fatalf("Evaluate() on a tampered lock = nil error, want error")
 	}
@@ -997,7 +997,7 @@ func TestEvaluateOperationalErrorNeverCarriesResult(t *testing.T) {
 		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},
 	)
 
-	if res, err := Evaluate(def, obs); err != nil || res.Validate() != nil {
+	if res, err := Evaluate(def, obs, attestation(def)); err != nil || res.Validate() != nil {
 		t.Fatalf("Evaluate() happy path = (%+v, %v), want a validating Result and nil error", res, err)
 	}
 
@@ -1006,7 +1006,7 @@ func TestEvaluateOperationalErrorNeverCarriesResult(t *testing.T) {
 	// this test rather than isolating the broken input.
 	broken := append([]experiment.Observation(nil), obs...)
 	broken[0].Round = 999 // out of registered range
-	if res, err := Evaluate(def, broken); err == nil || !isZeroResult(res) {
+	if res, err := Evaluate(def, broken, attestation(def)); err == nil || !isZeroResult(res) {
 		t.Fatalf("Evaluate() on broken input = (%+v, %v), want (zero Result, error)", res, err)
 	}
 }
@@ -1082,7 +1082,7 @@ func TestEvaluateDoesNotMutateInputs(t *testing.T) {
 		t.Fatalf("fixture builders are not deterministic; the immutability check below would be meaningless")
 	}
 
-	if _, err := Evaluate(def, obs); err != nil {
+	if _, err := Evaluate(def, obs, attestation(def)); err != nil {
 		t.Fatalf("Evaluate() unexpected error: %v", err)
 	}
 

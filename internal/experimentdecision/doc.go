@@ -2,9 +2,11 @@
 // (CSE) closed deterministic recommendation engine
 // (spec/comparative-spike-experiments AC-2, DC-4, DC-5, DC-6, DC-12,
 // DC-14, CO-1, CO-3, CO-5, CO-7): given one locked
-// github.com/jyang234/verdi/internal/experiment.Definition and a complete,
-// integrity-valid observation set, Evaluate deterministically produces
-// exactly one experiment.Result expressing proven-winner,
+// github.com/jyang234/verdi/internal/experiment.Definition, a complete,
+// integrity-valid observation set, and the execution layer's
+// environment-policy attestation for the run (SI-41), Evaluate
+// deterministically produces exactly one experiment.Result expressing
+// proven-winner,
 // violated-with-witness, or disclosed-unproven, in the registered
 // evaluation order. RenderResult and RenderRecommendation turn a Result
 // into its canonical result.json bytes and a deterministic

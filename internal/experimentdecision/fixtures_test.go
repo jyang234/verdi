@@ -96,6 +96,15 @@ func lockDefinition(t *testing.T, mutators ...func(*experiment.Definition)) expe
 	return def
 }
 
+// attestation returns the canned execution-layer environment-policy
+// attestation for def: the policy def itself registers (SI-41). Wave 2
+// has no execution unit to produce a real one, so every test and fixture
+// in this package supplies this contract value; the mismatch and
+// zero-value arms are exercised explicitly in attestation_test.go.
+func attestation(def experiment.Definition) EnvironmentAttestation {
+	return EnvironmentAttestation{PolicyID: def.Execution.EnvironmentPolicy}
+}
+
 // guard builds one passing (nil witness) or failing (nonempty witness)
 // GuardResult.
 func guardResult(id string, pass bool, witness string) experiment.GuardResult {
