@@ -37,7 +37,7 @@ Read completely before editing:
   .verdi/specs/active/ai-assisted-spec-design/spec.md
   orchestration Wave 2/shared-ownership/gate sections
   owner adjudications OD-3/5/8/10/12
-  invention-ledger SI-9, SI-30/31/33/34/37 and SI-65..SI-70
+  invention-ledger SI-9, SI-30/31/33/34/37, SI-65..SI-70 and SI-77
   linked artifact, store-layout, policy-authority, governance-principal and
   human-artifact contracts named by the plan
 
@@ -45,15 +45,17 @@ Implement exactly the eight TDD tasks in the approved plan. The core belongs in
 internal/draftmutation; the shared sidecar contract belongs in
 internal/designprovenance; cmd/verdi is a thin adapter. Use the exact request,
 operation, digest, provenance, policy, recovery, warning, path and exit
-contracts recorded in SI-65..SI-70. In particular: the request carries a
-digest-verified base snapshot for stale changed-target computation; the CLI is
-always an unauthenticated delegated-agent and requires --harness (optional
---session), never environment-selected human/principal attribution; a direct
-edit is the exact unclassified-gap arm; the request and every response carry
+contracts recorded in SI-65..SI-70 and SI-77. In particular: the request
+carries a digest-verified base snapshot for stale changed-target computation;
+the CLI is always an unauthenticated delegated-agent and requires --harness
+(optional --session), never environment-selected human/principal attribution;
+a direct edit is the exact unclassified-gap arm; the request and every response carry
 the plan's canonical exact checkout/branch/HEAD/spec identity; and recovery/
 mutation uses only the checkout-wide data/writer.lock plus the ratified
 data/draft-mutation root. Do not substitute a simpler two-file write or create
-a per-spec lock.
+a per-spec lock. Per SI-77, this adapter accepts positive bounded excerpts only:
+omit sensitive full text, do not invent a tombstone wire, and disclose
+removal/redaction as deferred.
 
 Do not implement workbench or MCP adapters, capabilities/context compiler,
 semantic review UI, Playwright changes, Git publication/governance verbs, a new
@@ -76,7 +78,8 @@ Push the branch and open one draft PR. Its body must include exact base/head,
 the ASD spec path/blob/first-parent promotion, plan path and commit, SI IDs,
 AC/DC/CO-to-test mapping, commit list, changed files, full command output,
 three-valued disclosures and revert posture. Do not claim the deferred
-workbench/MCP, capability/context or semantic-review portions complete.
+workbench/MCP, capability/context, semantic-review or excerpt-tombstone
+portions complete.
 ```
 
 ## Packet B — GLG obligation quality
