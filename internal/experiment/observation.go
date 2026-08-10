@@ -2,7 +2,6 @@ package experiment
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 )
 
@@ -40,29 +39,38 @@ func (g GuardResult) Validate() error {
 }
 
 // Measurement is one measured value inside an observation record, carrying
-// exactly one trust classification (DC-12).
+// exactly one trust classification (DC-12). Value is the strict
+// number-or-boolean union SI-45 registers (measurementvalue.go).
 type Measurement struct {
-	ID     string      `json:"id"`
-	Value  json.Number `json:"value"`
-	Unit   string      `json:"unit"`
-	Source Source      `json:"source"`
+	ID     string           `json:"id"`
+	Value  MeasurementValue `json:"value"`
+	Unit   string           `json:"unit"`
+	Source Source           `json:"source"`
 }
 
-// Validate checks id, that value decoded as a genuine, finite JSON number,
-// unit, and source.
+// Validate checks id, that a value is present and — when it is the
+// numeric arm — a genuine finite JSON number, plus unit and source.
+//
+// It is deliberately GRAMMAR-SCOPED about which arm of the union appeared:
+// whether this measurement's id may carry a boolean at all depends on the
+// metric the definition registered for it, which is knowledge only the
+// def-aware path has (ValidateObservations enforces it, SI-45). Checking
+// it here would either duplicate that rule or, worse, guess at it.
 func (m Measurement) Validate() error {
 	if err := ValidateID(m.ID); err != nil {
 		return fmt.Errorf("experiment: observation.measurements: %w", err)
 	}
-	if m.Value == "" {
+	if !m.Value.Present() {
 		return fmt.Errorf("experiment: measurement %q: value is missing", m.ID)
 	}
-	value, err := m.Value.Float64()
-	if err != nil {
-		return fmt.Errorf("experiment: measurement %q: value %q is not a JSON number: %w", m.ID, string(m.Value), err)
-	}
-	if err := validateFinite(fmt.Sprintf("measurement %q: value", m.ID), value); err != nil {
-		return err
+	if !m.Value.IsBool() {
+		value, err := m.Value.Float64()
+		if err != nil {
+			return fmt.Errorf("experiment: measurement %q: %w", m.ID, err)
+		}
+		if err := validateFinite(fmt.Sprintf("measurement %q: value", m.ID), value); err != nil {
+			return err
+		}
 	}
 	if err := ValidateUnit(m.Unit); err != nil {
 		return fmt.Errorf("experiment: measurement %q: %w", m.ID, err)

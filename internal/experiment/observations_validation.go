@@ -125,6 +125,12 @@ func ValidateObservations(def Definition, obs []Observation) error {
 			}
 		}
 
+		for _, m := range o.Measurements {
+			if err := validateMeasurementValueKind(def, m); err != nil {
+				return fmt.Errorf("%w: observation %d (candidate %q round %d): %v", ErrObservationIntegrity, i, o.Candidate, o.Round, err)
+			}
+		}
+
 		primaryPresent := false
 		for _, m := range o.Measurements {
 			if m.ID != primaryID || !m.Source.DecisionEligible() {
@@ -160,6 +166,49 @@ func ValidateObservations(def Definition, obs []Observation) error {
 		}
 	}
 
+	return nil
+}
+
+// registeredMetricType resolves the metric type def registers for
+// measurement id, and whether it registers one at all.
+//
+// v1 registers a metric TYPE in exactly one place: decision.primary_metric
+// (AC-1's registration shape). A bound guard registers an id and a bound
+// but no type, and a diagnostic measurement is not registered at all —
+// neither has a declared primitive, so neither can be the boolean arm of
+// the union. Should a later revision give guards a declared type, this is
+// the one function that changes.
+func registeredMetricType(def Definition, id string) (MetricType, bool) {
+	if id == def.Decision.PrimaryMetric.ID {
+		return def.Decision.PrimaryMetric.Type, true
+	}
+	return "", false
+}
+
+// validateMeasurementValueKind enforces SI-45's typed union against the
+// registered metric: a measurement whose id resolves to a boolean-typed
+// registered metric MUST carry the JSON literal true/false, and every
+// other measurement MUST carry a number. Both directions fail closed (CO-2)
+// — a 0/1 number standing in for a boolean is exactly the undetectable
+// coercion the union exists to prevent, and a boolean standing in for a
+// duration is a misdeclared metric that would otherwise aggregate as 1 or
+// 0 without complaint.
+func validateMeasurementValueKind(def Definition, m Measurement) error {
+	metricType, registered := registeredMetricType(def, m.ID)
+	wantBool := registered && metricType == MetricBoolean
+
+	switch {
+	case wantBool && !m.Value.IsBool():
+		return fmt.Errorf("measurement %q is registered as metric type %q and must carry the JSON literal true or false, got %s",
+			m.ID, MetricBoolean, m.Value.String())
+	case !wantBool && m.Value.IsBool():
+		if registered {
+			return fmt.Errorf("measurement %q is registered as metric type %q and must carry a JSON number, got the boolean literal %s",
+				m.ID, metricType, m.Value.String())
+		}
+		return fmt.Errorf("measurement %q registers no boolean metric type and must carry a JSON number, got the boolean literal %s",
+			m.ID, m.Value.String())
+	}
 	return nil
 }
 

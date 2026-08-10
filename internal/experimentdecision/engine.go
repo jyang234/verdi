@@ -163,6 +163,12 @@ func (e *evaluation) run() (experiment.Result, error) {
 // record carries exactly one decision-eligible primary-metric
 // measurement, so this never returns fewer than def.Execution.Rounds
 // values for a validated (def, obs) pair.
+//
+// A BOOLEAN-typed primary metric projects onto the same float64 scale
+// through MeasurementValue.Float64 — true to 1, false to 0 (SI-45) — which
+// is what keeps every registered aggregation, direction comparison, and
+// threshold defined without a second code path (a rate over a boolean is
+// then exactly the fraction of true rounds).
 func (e *evaluation) primaryRoundValues(candID string) []float64 {
 	primaryID := e.def.Decision.PrimaryMetric.ID
 	values := make([]float64, 0, e.def.Execution.Rounds)
@@ -172,7 +178,10 @@ func (e *evaluation) primaryRoundValues(candID string) []float64 {
 			if m.ID != primaryID || !m.Source.DecisionEligible() {
 				continue
 			}
-			v, _ := m.Value.Float64() // already validated finite at decode time
+			// A number was already validated finite at decode time, and a
+			// boolean maps to 1/0 without parsing (SI-45), so neither arm of
+			// the union can fail here.
+			v, _ := m.Value.Float64()
 			values = append(values, v)
 		}
 	}

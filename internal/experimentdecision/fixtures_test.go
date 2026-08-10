@@ -115,9 +115,16 @@ func guardResult(id string, pass bool, witness string) experiment.GuardResult {
 	return experiment.GuardResult{ID: id, Verdict: experiment.GuardVerdictFail, Witness: &w}
 }
 
-// measurement builds one decision-eligible or diagnostic Measurement.
+// measurement builds one decision-eligible or diagnostic Measurement
+// carrying the NUMERIC arm of SI-45's value union.
 func measurement(id string, value float64, unit string, source experiment.Source) experiment.Measurement {
-	return experiment.Measurement{ID: id, Value: formatFloat(value), Unit: unit, Source: source}
+	return experiment.Measurement{ID: id, Value: experiment.NumberValue(formatFloat(value)), Unit: unit, Source: source}
+}
+
+// boolMeasurement builds one Measurement carrying the BOOLEAN arm — legal
+// only for a measurement whose registered metric type is boolean (SI-45).
+func boolMeasurement(id string, value bool, unit string, source experiment.Source) experiment.Measurement {
+	return experiment.Measurement{ID: id, Value: experiment.BoolValue(value), Unit: unit, Source: source}
 }
 
 // observation builds one complete Observation record for def's locked

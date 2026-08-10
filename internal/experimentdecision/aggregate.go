@@ -71,7 +71,10 @@ func mean(values []float64) float64 {
 // aggregate reduces values by the registered closed aggregation vocabulary
 // (spec/comparative-spike-experiments AC-2 step 3): p50/p95 use the
 // nearest-rank percentile, maximum uses maximum, and mean/rate both use
-// the arithmetic mean. values must be nonempty; agg must already have
+// the arithmetic mean. Boolean measurements reach this function already
+// projected onto the same scale (true 1, false 0 — SI-45), so all five
+// aggregations are defined over them unchanged. values must be nonempty;
+// agg must already have
 // passed Aggregation.Validate() (Evaluate's callers only ever reach this
 // through an already-validated locked Definition).
 func aggregate(agg experiment.Aggregation, values []float64) float64 {
