@@ -3,14 +3,174 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/specstate"
 )
+
+func TestRunBuildStart_ObligationQualityStates(t *testing.T) {
+	tests := []struct {
+		name      string
+		quality   string
+		write     bool
+		wantCode  int
+		wantState string
+	}{
+		{"missing", "", false, 1, "missing"},
+		{"legacy", "", true, 1, "legacy-unelaborated"},
+		{"unresolved", "quality:\n  state: unresolved-design-debt\n", true, 1, "unresolved-design-debt"},
+		{"elaborated", buildQualityBlock(), true, 0, ""},
+		{"malformed", "quality:\n  state: unresolved-design-debt\n  unknown: true\n", true, 2, "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
+				".verdi/verdi.yaml":                        phase7ManifestYAML,
+				".verdi/specs/active/widget-story/spec.md": statuslessBuildStorySpecMD,
+			}, Message: "accepted story"}})
+			if tt.write {
+				writeBuildQualityObligation(t, repo.Dir, "widget-story", "ac-1", artifact.EvidenceStatic, tt.quality)
+			}
+			beforeHead, err := gitx.RevParse(context.Background(), repo.Dir, "HEAD")
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeBranch, err := gitx.CurrentBranch(context.Background(), repo.Dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeStatus := gitTestOutput(t, repo.Dir, "status", "--porcelain=v1", "--untracked-files=all")
+
+			var stdout, stderr bytes.Buffer
+			resolver := fakeScaffoldResolver{result: specstate.Result{State: specstate.AcceptedPendingBuild}}
+			got := runBuildStart(context.Background(), repo.Dir, "spec/widget-story", resolver,
+				syncDeps{Runner: nil, GoTest: fakeGoTest{}, Model: phase7Model(t)}, &stdout, &stderr)
+			if got != tt.wantCode {
+				t.Fatalf("runBuildStart = %d, want %d; stdout=%s stderr=%s", got, tt.wantCode, stdout.String(), stderr.String())
+			}
+			if tt.wantState != "" && !strings.Contains(stderr.String(), tt.wantState) {
+				t.Fatalf("stderr = %q, want state/error witness %q", stderr.String(), tt.wantState)
+			}
+			if tt.wantCode != 0 {
+				afterHead, _ := gitx.RevParse(context.Background(), repo.Dir, "HEAD")
+				afterBranch, _ := gitx.CurrentBranch(context.Background(), repo.Dir)
+				afterStatus := gitTestOutput(t, repo.Dir, "status", "--porcelain=v1", "--untracked-files=all")
+				if afterHead != beforeHead || afterBranch != beforeBranch || afterStatus != beforeStatus {
+					t.Fatalf("refused build mutated git state: head %s→%s branch %s→%s status %q→%q", beforeHead, afterHead, beforeBranch, afterBranch, beforeStatus, afterStatus)
+				}
+			}
+		})
+	}
+}
+
+func TestRunBuildStart_ObligationQualityDebtsSorted(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
+		".verdi/verdi.yaml":                        phase7ManifestYAML,
+		".verdi/specs/active/widget-story/spec.md": obligationSeamStoryCleanMD,
+	}, Message: "accepted story"}})
+	writeBuildQualityObligation(t, repo.Dir, "widget-story", "ac-2", artifact.EvidenceBehavioral, "quality:\n  state: unresolved-design-debt\n")
+
+	var stdout, stderr bytes.Buffer
+	resolver := fakeScaffoldResolver{result: specstate.Result{State: specstate.AcceptedPendingBuild}}
+	got := runBuildStart(context.Background(), repo.Dir, "spec/widget-story", resolver,
+		syncDeps{Runner: nil, GoTest: fakeGoTest{}, Model: phase7Model(t)}, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("runBuildStart = %d, want 1; stderr=%s", got, stderr.String())
+	}
+	out := stderr.String()
+	first := strings.Index(out, "ac-1/static")
+	second := strings.Index(out, "ac-2/behavioral")
+	if first < 0 || second < 0 || first >= second {
+		t.Fatalf("debts not sorted by AC/kind: %q", out)
+	}
+}
+
+func TestRunBuildStart_ObligationQualityMissingDimensionsOperational(t *testing.T) {
+	full := buildQualityBlock()
+	tests := []struct {
+		name    string
+		quality string
+	}{
+		{"claim", strings.Replace(full, "  claim: claim\n", "", 1)},
+		{"falsifier", strings.Replace(full, "  falsifier: falsifier\n", "", 1)},
+		{"scope", strings.Replace(full, "  scope: scope\n", "", 1)},
+		{"producer", strings.Replace(full, "  producer: { kind: checker, ref: \"verify:static\" }\n", "", 1)},
+		{"authoritative source", strings.Replace(full, "  authoritative_source: { kind: ci-job, ref: \"verify\" }\n", "", 1)},
+		{"freshness", strings.Replace(full, "  freshness:\n    invalidated_by: [code]\n    rule: rerun\n", "", 1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
+				".verdi/verdi.yaml":                               phase7ManifestYAML,
+				".verdi/specs/active/widget-story/spec.md":        statuslessBuildStorySpecMD,
+				".verdi/obligations/widget-story/ac-1--static.md": buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic, tt.quality),
+			}, Message: "accepted story"}})
+			var stdout, stderr bytes.Buffer
+			got := runBuildStart(context.Background(), repo.Dir, "spec/widget-story",
+				fakeScaffoldResolver{result: specstate.Result{State: specstate.AcceptedPendingBuild}},
+				syncDeps{Runner: nil, GoTest: fakeGoTest{}, Model: phase7Model(t)}, &stdout, &stderr)
+			if got != 2 {
+				t.Fatalf("runBuildStart = %d, want operational 2; stderr=%s", got, stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunBuildStart_ObligationQualityIOErrorOperational(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
+		".verdi/verdi.yaml":                        phase7ManifestYAML,
+		".verdi/specs/active/widget-story/spec.md": statuslessBuildStorySpecMD,
+	}, Message: "accepted story"}})
+	path := filepath.Join(repo.Dir, ".verdi", "obligations", "widget-story", "ac-1--static.md")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	got := runBuildStart(context.Background(), repo.Dir, "spec/widget-story",
+		fakeScaffoldResolver{result: specstate.Result{State: specstate.AcceptedPendingBuild}},
+		syncDeps{Runner: nil, GoTest: fakeGoTest{}, Model: phase7Model(t)}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runBuildStart = %d, want operational 2; stderr=%s", got, stderr.String())
+	}
+}
+
+func writeBuildQualityObligation(t *testing.T, root, specName, acID string, kind artifact.EvidenceKind, quality string) {
+	t.Helper()
+	path := filepath.Join(root, ".verdi", "obligations", specName, acID+"--"+string(kind)+".md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc := buildQualityObligationDocument(specName, acID, kind, quality)
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func buildQualityObligationDocument(specName, acID string, kind artifact.EvidenceKind, quality string) string {
+	return "---\nid: obligation/" + specName + "--" + acID + "--" + string(kind) + "\nkind: obligation\ntitle: Quality\nowners: [platform-team]\nfor_kind: " + string(kind) + "\n" + quality + "links:\n  - { type: verifies, ref: \"spec/" + specName + "\" }\nfrozen: { at: 2026-01-01, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }\n---\n# Quality\n\nAuthored obligation.\n"
+}
+
+func buildQualityBlock() string {
+	return "quality:\n  state: elaborated\n  claim: claim\n  falsifier: falsifier\n  scope: scope\n  producer: { kind: checker, ref: \"verify:static\" }\n  authoritative_source: { kind: ci-job, ref: \"verify\" }\n  freshness:\n    invalidated_by: [code]\n    rule: rerun\n"
+}
+
+func gitTestOutput(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return string(out)
+}
 
 const birdsEyeFeatureSpecMD = `---
 id: spec/loan-mgmt
@@ -132,8 +292,9 @@ func TestRunBuildStart_StatuslessExactDefaultBranch_Starts(t *testing.T) {
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
-				".verdi/verdi.yaml":                        phase7ManifestYAML,
-				".verdi/specs/active/widget-story/spec.md": statuslessBuildStorySpecMD,
+				".verdi/verdi.yaml":                               phase7ManifestYAML,
+				".verdi/specs/active/widget-story/spec.md":        statuslessBuildStorySpecMD,
+				".verdi/obligations/widget-story/ac-1--static.md": buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic, buildQualityBlock()),
 			},
 			Message: "init store with a statusless, landed story",
 		},

@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/specstate"
@@ -233,6 +235,28 @@ func runBuildStart(ctx context.Context, root, storyArg string, resolver specStat
 		return 1
 	}
 
+	// Obligation-quality is the final pre-effect build precondition. It runs
+	// after acceptance and cascade proof, but before RevParse, branch creation,
+	// or baseline work. Feature ACs remain exempt: obligations are story-only.
+	if spec.Class == artifact.ClassStory {
+		debts, qerr := buildObligationQualityDebts(ctx, root, specRef.Name, spec)
+		if qerr != nil {
+			fmt.Fprintln(stderr, "build start: obligation quality:", qerr)
+			return 2
+		}
+		if len(debts) > 0 {
+			parts := make([]string, len(debts))
+			for i, debt := range debts {
+				parts[i] = fmt.Sprintf("%s/%s: %s (witness %s)", debt.acID, debt.kind, debt.assessment.StructuralState, debt.assessment.WitnessPath)
+				if debt.assessment.Reason != "" {
+					parts[i] += " reason=" + string(debt.assessment.Reason)
+				}
+			}
+			fmt.Fprintf(stderr, "build start: refused: obligation quality unresolved: %s\n", strings.Join(parts, "; "))
+			return 1
+		}
+	}
+
 	branch := "feature/" + specRef.Name
 
 	commit, err := gitx.RevParse(ctx, root, "HEAD")
@@ -250,6 +274,39 @@ func runBuildStart(ctx context.Context, root, storyArg string, resolver specStat
 	fmt.Fprintf(stdout, "build start: created branch %s from %s (status: %s)\n", branch, spec.ID,
 		deps.Model.DisplayState(string(spec.Class), "accepted-pending-build"))
 	return 0
+}
+
+type buildObligationDebt struct {
+	acID       string
+	kind       artifact.EvidenceKind
+	assessment evidence.ObligationAssessment
+}
+
+func buildObligationQualityDebts(ctx context.Context, root, specName string, spec *artifact.SpecFrontmatter) ([]buildObligationDebt, error) {
+	var debts []buildObligationDebt
+	for _, ac := range spec.AcceptanceCriteria {
+		for _, kind := range ac.Evidence {
+			assessment, err := evidence.AssessObligation(ctx, evidence.ObligationAssessmentInput{
+				StoreRoot: root,
+				SpecName:  specName,
+				ACID:      ac.ID,
+				Kind:      kind,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("%s/%s: %w", ac.ID, kind, err)
+			}
+			if assessment.StructuralState != evidence.ObligationElaborated {
+				debts = append(debts, buildObligationDebt{acID: ac.ID, kind: kind, assessment: assessment})
+			}
+		}
+	}
+	sort.SliceStable(debts, func(i, j int) bool {
+		if debts[i].acID != debts[j].acID {
+			return debts[i].acID < debts[j].acID
+		}
+		return debts[i].kind < debts[j].kind
+	})
+	return debts, nil
 }
 
 // resolveBuildTarget resolves storyArg (05 §CLI: "<story-spec | story-ref>")
