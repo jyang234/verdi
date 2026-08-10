@@ -336,6 +336,23 @@ frozen: { at: 2026-08-10, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
 Authored obligation.
 `
 
+const projectUnresolvedObligationMD = `---
+id: obligation/quality-story--ac-1--behavioral
+kind: obligation
+title: "Quality"
+owners: [platform-team]
+for_kind: behavioral
+quality:
+  state: unresolved-design-debt
+links:
+  - { type: verifies, ref: "spec/quality-story" }
+frozen: { at: 2026-08-10, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
+---
+# Quality
+
+<!-- verdi:obligation-unauthored -->
+`
+
 func TestProject_Integration_ObligationQualityMatching(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -387,13 +404,53 @@ func TestProject_Integration_ObligationQualityMatching(t *testing.T) {
 	}
 }
 
+func TestProject_Integration_ObligationQualityFailuresRemainBlockers(t *testing.T) {
+	tests := []struct {
+		name       string
+		obligation string
+		state      string
+	}{
+		{name: "elaborated", obligation: projectElaboratedObligationMD, state: "elaborated"},
+		{name: "missing", state: "missing"},
+		{name: "unresolved", obligation: projectUnresolvedObligationMD, state: "unresolved-design-debt"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := map[string]string{".verdi/specs/active/quality-story/spec.md": projectQualityStorySpecMD}
+			if tt.obligation != "" {
+				files[".verdi/obligations/quality-story/ac-1--behavioral.md"] = tt.obligation
+			}
+			repo := buildFactsRepo(t, files)
+			writeJourneyEvidenceRecordWithVerdict(t, repo.Dir, repo.Head, "failing:behavioral", "fail", "ci failure witness")
+
+			rec, err := NewProjector().Project(context.Background(), openConfig(t, repo.Dir), "spec/quality-story")
+			if err != nil {
+				t.Fatalf("Project: %v", err)
+			}
+			blocker := findBlocker(rec.Blockers.Current, "obligation-quality/ac-1/behavioral")
+			if blocker == nil {
+				t.Fatalf("blockers = %v, want obligation-quality/ac-1/behavioral", blockerIDs(rec.Blockers.Current))
+			}
+			structural := ".verdi/obligations/quality-story/ac-1--behavioral.md: " + tt.state
+			if len(blocker.Witnesses) != 2 || blocker.Witnesses[0] != structural || blocker.Witnesses[1] != "ci failure witness" {
+				t.Fatalf("quality blocker witnesses = %v, want [%q %q]", blocker.Witnesses, structural, "ci failure witness")
+			}
+		})
+	}
+}
+
 func writeJourneyEvidenceRecord(t *testing.T, root, commit, producer string) {
+	writeJourneyEvidenceRecordWithVerdict(t, root, commit, producer, "pass", "ci proof")
+}
+
+func writeJourneyEvidenceRecordWithVerdict(t *testing.T, root, commit, producer, verdict, witness string) {
 	t.Helper()
 	dir := filepath.Join(root, ".verdi", "data", "derived", "spec--quality-story", commit)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	record := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"behavioral","verdict":"pass","witness":"ci proof","producer":"` + producer + `","provenance":{"source":"ci","pipeline":"pipeline-1","job":"verify","commit":"` + commit + `"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}]`
+	record := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"behavioral","verdict":"` + verdict + `","witness":"` + witness + `","producer":"` + producer + `","provenance":{"source":"ci","pipeline":"pipeline-1","job":"verify","commit":"` + commit + `"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}]`
 	if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte(record), 0o644); err != nil {
 		t.Fatal(err)
 	}

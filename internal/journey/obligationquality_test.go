@@ -123,6 +123,28 @@ func TestDeriveObligationQualityBlockers(t *testing.T) {
 	}
 }
 
+func TestDeriveObligationQualityBlockersRetainsStructuralAndFailureWitnesses(t *testing.T) {
+	owner := testOwner()
+	violating := artifact.Evidence{Kind: artifact.EvidenceBehavioral, Verdict: artifact.VerdictFail, Witness: "ci failure witness"}
+	got := deriveObligationQualityBlockers([]ObligationQualityFact{{
+		ACID: "ac-1",
+		Kind: artifact.EvidenceBehavioral,
+		Assessment: evidence.ObligationAssessment{
+			StructuralState: evidence.ObligationElaborated,
+			MatchState:      evidence.ObligationViolatedWithWitness,
+			WitnessPath:     ".verdi/obligations/story/ac-1--behavioral.md",
+			Violating:       &violating,
+		},
+	}}, owner)
+	if len(got) != 1 {
+		t.Fatalf("blockers = %+v, want one quality blocker", got)
+	}
+	want := []string{".verdi/obligations/story/ac-1--behavioral.md: elaborated", "ci failure witness"}
+	if !reflect.DeepEqual(got[0].Witnesses, want) {
+		t.Fatalf("witnesses = %v, want structural and failing evidence witnesses %v", got[0].Witnesses, want)
+	}
+}
+
 func TestMergeObligationQualityBlockersPreservesQualityGroupOrder(t *testing.T) {
 	owner := testOwner()
 	base := []Blocker{
@@ -168,6 +190,63 @@ func TestEvidenceObligationQualityReader(t *testing.T) {
 	for i := range facts {
 		if facts[i].Assessment.StructuralState != wantStates[i] {
 			t.Fatalf("facts[%d] state = %q, want %q", i, facts[i].Assessment.StructuralState, wantStates[i])
+		}
+	}
+}
+
+func TestSelectObligationQualityAssessmentViolationPrecedesPassRegardlessOfOrder(t *testing.T) {
+	const commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	quality := &artifact.ObligationQuality{
+		State: artifact.ObligationQualityElaborated,
+		Producer: artifact.ObligationProducer{
+			Kind: artifact.ObligationProducerChecker,
+			Ref:  "verify:behavioral",
+		},
+		AuthoritativeSource: artifact.ObligationAuthoritativeSource{
+			Kind: artifact.ObligationSourceCIJob,
+			Ref:  "verify",
+		},
+		Freshness: artifact.ObligationFreshness{
+			InvalidatedBy: []artifact.ObligationInvalidator{artifact.ObligationInvalidatorCode},
+			Rule:          "rerun",
+		},
+	}
+	base := evidence.ObligationAssessment{
+		StructuralState: evidence.ObligationElaborated,
+		MatchState:      evidence.ObligationUnproven,
+		Reason:          evidence.ObligationReasonProducerMissing,
+		WitnessPath:     ".verdi/obligations/quality-story/ac-1--behavioral.md",
+		Quality:         quality,
+	}
+	pass := artifact.Evidence{
+		Kind:     artifact.EvidenceBehavioral,
+		Verdict:  artifact.VerdictPass,
+		Witness:  "passing witness",
+		Producer: "verify:behavioral",
+		Provenance: artifact.EvidenceProvenance{
+			Source: artifact.SourceCI,
+			Job:    "verify",
+			Commit: commit,
+		},
+	}
+	fail := pass
+	fail.Verdict = artifact.VerdictFail
+	fail.Witness = "failing witness"
+	fail.Producer = "failing:behavioral"
+
+	for _, records := range [][]artifact.Evidence{{pass, fail}, {fail, pass}} {
+		got, err := selectObligationQualityAssessment(context.Background(), base, evidence.ObligationAssessmentInput{
+			StoreRoot:        t.TempDir(),
+			SpecName:         "quality-story",
+			ACID:             "ac-1",
+			Kind:             artifact.EvidenceBehavioral,
+			EvaluationCommit: commit,
+		}, records)
+		if err != nil {
+			t.Fatalf("selectObligationQualityAssessment: %v", err)
+		}
+		if got.MatchState != evidence.ObligationViolatedWithWitness || got.Violating == nil || got.Violating.Witness != "failing witness" {
+			t.Fatalf("assessment = %+v, want failing witness to outrank pass for records %+v", got, records)
 		}
 	}
 }

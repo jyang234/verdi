@@ -987,6 +987,39 @@ func TestCmdJourney_ObligationQualityBlockerExitsZero(t *testing.T) {
 	}
 }
 
+func TestCmdJourney_ObligationQualityFailureWitnessExitsZero(t *testing.T) {
+	repo := buildJourneyRepo(t, map[string]string{".verdi/specs/active/loan-api/spec.md": journeyStoryClassMD})
+	dir := filepath.Join(repo.Dir, ".verdi", "data", "derived", "spec--loan-api", repo.Head)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"fail","witness":"cli failure witness","producer":"verify:static","provenance":{"source":"ci","pipeline":"pipeline-1","job":"verify","commit":"` + repo.Head + `"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"jira:LOAN-1482"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdJourney = %d, want successful blocked projection exit 0; stderr=%s", got, stderr.String())
+	}
+	rec, err := journey.Decode([]byte(strings.TrimRight(stdout.String(), "\n")))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout.String())
+	}
+	blocker := journeyFindBlocker(rec.Blockers.Current, "obligation-quality/ac-1/static")
+	if blocker == nil {
+		t.Fatalf("blockers = %v, want obligation-quality/ac-1/static", journeyBlockerIDs(rec.Blockers.Current))
+	}
+	wantStructural := ".verdi/obligations/loan-api/ac-1--static.md: missing"
+	if len(blocker.Witnesses) != 2 || blocker.Witnesses[0] != wantStructural || blocker.Witnesses[1] != "cli failure witness" {
+		t.Fatalf("quality blocker witnesses = %v, want structural and failing evidence witnesses", blocker.Witnesses)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty for an exit-0 blocked projection", stderr.String())
+	}
+}
+
 const journeyMalformedQualityObligationMD = `---
 id: obligation/loan-api--ac-1--static
 kind: obligation

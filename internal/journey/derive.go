@@ -72,11 +72,15 @@ func deriveObligationQualityBlockers(facts []ObligationQualityFact, owner Owner)
 		if assessment.Reason != "" {
 			detail += "/" + string(assessment.Reason)
 		}
+		witnesses := []string{assessment.WitnessPath + ": " + detail}
+		if assessment.Violating != nil && assessment.Violating.Witness != "" {
+			witnesses = append(witnesses, assessment.Violating.Witness)
+		}
 		out = append(out, Blocker{
 			ID:                id,
 			Reason:            ReasonObligationDesignUnresolved,
 			Class:             ClassMechanical,
-			Witnesses:         []string{assessment.WitnessPath + ": " + detail},
+			Witnesses:         witnesses,
 			Owner:             owner,
 			ClearingCondition: fmt.Sprintf("the obligation quality for %s/%s is elaborated and any positive evidence matches its producer, source, and freshness declaration", fact.ACID, fact.Kind),
 			Transition:        buildStartActionIdentity,

@@ -262,35 +262,52 @@ func (r evidenceObligationQualityReader) Assess(ctx context.Context, root, targe
 			}
 
 			fact := ObligationQualityFact{ACID: ac.ID, Kind: kind, Assessment: assessment}
-			for i := range current {
-				if current[i].Kind != kind || current[i].Verdict != artifact.VerdictPass {
-					continue
-				}
-				candidate, matchErr := evidence.MatchObligation(ctx, assessment, evidence.ObligationAssessmentInput{
-					StoreRoot:         root,
-					SpecName:          specNameFromRelPath(targetPath),
-					ACID:              ac.ID,
-					Kind:              kind,
-					Record:            &current[i],
-					EvaluationCommit:  evaluationCommit,
-					SpecLandingCommit: specLandingCommit,
-					Git:               r.git,
-				})
-				if matchErr != nil {
-					return nil, matchErr
-				}
-				if candidate.MatchState == evidence.ObligationMatched {
-					fact.Assessment = candidate
-					break
-				}
-				if fact.Assessment.Reason == evidence.ObligationReasonProducerMissing {
-					fact.Assessment = candidate
-				}
+			fact.Assessment, err = selectObligationQualityAssessment(ctx, assessment, evidence.ObligationAssessmentInput{
+				StoreRoot:         root,
+				SpecName:          specNameFromRelPath(targetPath),
+				ACID:              ac.ID,
+				Kind:              kind,
+				EvaluationCommit:  evaluationCommit,
+				SpecLandingCommit: specLandingCommit,
+				Git:               r.git,
+			}, current)
+			if err != nil {
+				return nil, err
 			}
 			facts = append(facts, fact)
 		}
 	}
 	return facts, nil
+}
+
+// selectObligationQualityAssessment applies the fold's total evidence
+// precedence to every current record for one declared pair. A witnessed
+// failure outranks both a matched pass and any unproven candidate regardless
+// of record order; a matched pass outranks unproven candidates.
+func selectObligationQualityAssessment(ctx context.Context, base evidence.ObligationAssessment, in evidence.ObligationAssessmentInput, current []artifact.Evidence) (evidence.ObligationAssessment, error) {
+	selected := base
+	for i := range current {
+		if current[i].Kind != in.Kind {
+			continue
+		}
+		candidateInput := in
+		candidateInput.Record = &current[i]
+		candidate, err := evidence.MatchObligation(ctx, base, candidateInput)
+		if err != nil {
+			return evidence.ObligationAssessment{}, err
+		}
+		if candidate.MatchState == evidence.ObligationViolatedWithWitness {
+			return candidate, nil
+		}
+		if candidate.MatchState == evidence.ObligationMatched {
+			selected = candidate
+			continue
+		}
+		if selected.MatchState != evidence.ObligationMatched && selected.Reason == evidence.ObligationReasonProducerMissing {
+			selected = candidate
+		}
+	}
+	return selected, nil
 }
 
 // Projector gathers repository and lifecycle facts and (a later stage,
