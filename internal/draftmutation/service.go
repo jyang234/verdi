@@ -197,11 +197,8 @@ func validateEffectiveResult(current []byte, applied Applied) error {
 		return fmt.Errorf("result contains no changes")
 	}
 	for i, change := range applied.Result.Changes {
-		switch change.Change {
-		case designprovenance.ChangeReplaced, designprovenance.ChangeReordered:
-			if change.BeforeDigest == change.AfterDigest {
-				return fmt.Errorf("change[%d] leaves target %q unchanged", i, change.Target)
-			}
+		if change.Change == designprovenance.ChangeReplaced && change.BeforeDigest == change.AfterDigest {
+			return fmt.Errorf("change[%d] leaves target %q unchanged", i, change.Target)
 		}
 	}
 	return nil

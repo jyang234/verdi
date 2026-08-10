@@ -10,9 +10,10 @@ import (
 )
 
 type semanticValue struct {
-	Digest       string
 	ObjectDigest string
 	Text         string
+	Ordered      bool
+	Position     int
 }
 
 type semanticSnapshot map[string]semanticValue
@@ -58,7 +59,7 @@ func snapshot(specBytes []byte) (semanticSnapshot, error) {
 		if err != nil {
 			return err
 		}
-		result[target] = semanticValue{Digest: digest, ObjectDigest: digest, Text: text}
+		result[target] = semanticValue{ObjectDigest: digest, Text: text}
 		return nil
 	}
 	putOrdered := func(target string, position int, value any, text string) error {
@@ -66,14 +67,7 @@ func snapshot(specBytes []byte) (semanticSnapshot, error) {
 		if err != nil {
 			return err
 		}
-		digest, err := digestSemantic(struct {
-			Position int `json:"position"`
-			Value    any `json:"value"`
-		}{position, value})
-		if err != nil {
-			return err
-		}
-		result[target] = semanticValue{Digest: digest, ObjectDigest: objectDigest, Text: text}
+		result[target] = semanticValue{ObjectDigest: objectDigest, Text: text, Ordered: true, Position: position}
 		return nil
 	}
 	if spec.Problem != nil {
@@ -146,37 +140,15 @@ func linkTarget(source string, linkType artifact.LinkType, ref string) string {
 	return "link/" + PercentComponent(source) + "/" + PercentComponent(string(linkType)) + "/" + PercentComponent(ref)
 }
 
-func operationTarget(operation Operation) string {
-	switch operation.Op {
-	case OpSetProblem:
-		return "problem"
-	case OpSetOutcome:
-		return "outcome"
-	case OpAddAC, OpEditAC, OpRemoveAC, OpReorderAC, OpSetACEvidence,
-		OpAddConstraint, OpEditConstraint, OpRemoveConstraint,
-		OpAddDecision, OpEditDecision, OpRemoveDecision,
-		OpAddQuestion, OpEditQuestion, OpRemoveQuestion:
-		return operation.ID
-	case OpAddLink, OpRemoveLink:
-		return linkTarget(operation.Source, operation.Type, operation.Ref)
-	case OpAddStub, OpEditStub, OpRemoveStub, OpReorderStub:
-		return "stub/" + PercentComponent(operation.Slug)
-	case OpAddContextRef, OpRemoveContextRef:
-		return "context/" + PercentComponent(operation.Ref)
-	default:
-		return ""
-	}
-}
-
 func changedSnapshotTargets(left, right semanticSnapshot) []string {
 	seen := map[string]bool{}
 	for target, value := range left {
-		if current, ok := right[target]; !ok || current.Digest != value.Digest {
+		if current, ok := right[target]; !ok || !sameSemanticValue(current, value) {
 			seen[target] = true
 		}
 	}
 	for target, value := range right {
-		if previous, ok := left[target]; !ok || previous.Digest != value.Digest {
+		if previous, ok := left[target]; !ok || !sameSemanticValue(previous, value) {
 			seen[target] = true
 		}
 	}
@@ -186,6 +158,10 @@ func changedSnapshotTargets(left, right semanticSnapshot) []string {
 	}
 	sort.Strings(targets)
 	return targets
+}
+
+func sameSemanticValue(left, right semanticValue) bool {
+	return left.ObjectDigest == right.ObjectDigest && left.Ordered == right.Ordered && (!left.Ordered || left.Position == right.Position)
 }
 
 // ChangedTargets returns every semantic target whose canonical value or

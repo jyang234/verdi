@@ -2,6 +2,7 @@ package draftmutation
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -22,9 +23,12 @@ func Apply(current []byte, request Request, identity Identity) (Applied, error) 
 	if err := identity.Validate(); err != nil {
 		return Applied{}, err
 	}
+	initial, err := snapshot(current)
+	if err != nil {
+		return Applied{}, err
+	}
 	resultBytes := append([]byte(nil), current...)
-	changes := make([]Change, 0, len(request.Operations))
-	warnings := make([]Warning, 0, len(request.Operations))
+	firstTouches := make(map[string]int)
 	for index, operation := range request.Operations {
 		before, err := snapshot(resultBytes)
 		if err != nil {
@@ -38,25 +42,41 @@ func Apply(current []byte, request Request, identity Identity) (Applied, error) 
 		if err != nil {
 			return Applied{}, err
 		}
-		primaryTarget := operationTarget(operation)
 		for _, target := range changedSnapshotTargets(before, after) {
-			var change Change
-			if target == primaryTarget {
-				change, err = changeForOperation(operation, target, before[target], after[target])
-			} else {
-				change, err = changeForSecondaryTarget(target, before[target], after[target])
+			if _, seen := firstTouches[target]; !seen {
+				firstTouches[target] = index
 			}
-			if err != nil {
-				return Applied{}, fmt.Errorf("draftmutation: operation[%d]: %w", index, err)
-			}
-			changes = append(changes, change)
-			warnings = append(warnings, warningsForChange(operation, primaryTarget, change)...)
 		}
 		resultBytes = next
 	}
 	final, err := snapshot(resultBytes)
 	if err != nil {
 		return Applied{}, err
+	}
+	targets := changedSnapshotTargets(initial, final)
+	sort.Slice(targets, func(i, j int) bool {
+		left, leftOK := firstTouches[targets[i]]
+		right, rightOK := firstTouches[targets[j]]
+		if leftOK != rightOK {
+			return leftOK
+		}
+		if left != right {
+			return left < right
+		}
+		return targets[i] < targets[j]
+	})
+	changes := make([]Change, 0, len(targets))
+	warnings := make([]Warning, 0, len(targets))
+	for _, target := range targets {
+		if _, ok := firstTouches[target]; !ok {
+			return Applied{}, fmt.Errorf("draftmutation: final target %q has no originating operation", target)
+		}
+		change, err := changeForFinalState(target, initial[target], final[target])
+		if err != nil {
+			return Applied{}, err
+		}
+		changes = append(changes, change)
+		warnings = append(warnings, warningsForFinalChange(change, final[target])...)
 	}
 	excerpts := make([]designprovenance.Excerpt, len(request.Excerpts))
 	for i, excerpt := range request.Excerpts {
@@ -81,49 +101,24 @@ func Apply(current []byte, request Request, identity Identity) (Applied, error) 
 	return Applied{Spec: resultBytes, Result: result, ProvenanceExcerpts: excerpts}, nil
 }
 
-func changeForOperation(operation Operation, target string, before, after semanticValue) (Change, error) {
+func changeForFinalState(target string, before, after semanticValue) (Change, error) {
 	change := Change{Target: target}
-	switch operation.Op {
-	case OpAddLink, OpAddContextRef:
-		change.Change, change.AfterDigest = ChangeRelationshipAdded, after.Digest
-	case OpRemoveLink, OpRemoveContextRef:
-		change.Change, change.BeforeDigest = ChangeRelationshipRemoved, before.Digest
-	case OpRemoveAC, OpRemoveConstraint, OpRemoveDecision, OpRemoveQuestion, OpRemoveStub:
-		change.Change, change.BeforeDigest = ChangeRemoved, before.Digest
-	case OpReorderAC, OpReorderStub:
-		change.Change, change.BeforeDigest, change.AfterDigest = ChangeReordered, before.Digest, after.Digest
-	default:
-		if before.Digest == "" {
-			change.Change, change.AfterDigest = ChangeAdded, after.Digest
-		} else {
-			change.Change, change.BeforeDigest, change.AfterDigest = ChangeReplaced, before.Digest, after.Digest
-		}
-	}
-	if err := change.Validate(); err != nil {
-		return Change{}, err
-	}
-	return change, nil
-}
-
-func changeForSecondaryTarget(target string, before, after semanticValue) (Change, error) {
-	change := Change{Target: target}
+	beforePresent := before.ObjectDigest != ""
+	afterPresent := after.ObjectDigest != ""
+	relationship := strings.HasPrefix(target, "link/") || strings.HasPrefix(target, "context/")
 	switch {
-	case strings.HasPrefix(target, "link/") || strings.HasPrefix(target, "context/"):
-		if before.Digest == "" {
-			change.Change, change.AfterDigest = ChangeRelationshipAdded, after.Digest
-		} else if after.Digest == "" {
-			change.Change, change.BeforeDigest = ChangeRelationshipRemoved, before.Digest
-		} else {
-			return Change{}, fmt.Errorf("relationship target %q changed without being the operation target", target)
-		}
-	case before.Digest != "" && after.Digest != "" && before.ObjectDigest == after.ObjectDigest:
-		change.Change, change.BeforeDigest, change.AfterDigest = ChangeReordered, before.Digest, after.Digest
-	case before.Digest == "":
-		change.Change, change.AfterDigest = ChangeAdded, after.Digest
-	case after.Digest == "":
-		change.Change, change.BeforeDigest = ChangeRemoved, before.Digest
+	case relationship && !beforePresent:
+		change.Change, change.AfterDigest = ChangeRelationshipAdded, after.ObjectDigest
+	case relationship && !afterPresent:
+		change.Change, change.BeforeDigest = ChangeRelationshipRemoved, before.ObjectDigest
+	case !beforePresent:
+		change.Change, change.AfterDigest = ChangeAdded, after.ObjectDigest
+	case !afterPresent:
+		change.Change, change.BeforeDigest = ChangeRemoved, before.ObjectDigest
+	case before.ObjectDigest == after.ObjectDigest && before.Ordered && after.Ordered && before.Position != after.Position:
+		change.Change, change.BeforeDigest, change.AfterDigest = ChangeReordered, before.ObjectDigest, after.ObjectDigest
 	default:
-		change.Change, change.BeforeDigest, change.AfterDigest = ChangeReplaced, before.Digest, after.Digest
+		change.Change, change.BeforeDigest, change.AfterDigest = ChangeReplaced, before.ObjectDigest, after.ObjectDigest
 	}
 	if err := change.Validate(); err != nil {
 		return Change{}, err
@@ -131,17 +126,18 @@ func changeForSecondaryTarget(target string, before, after semanticValue) (Chang
 	return change, nil
 }
 
-func warningsForChange(operation Operation, primaryTarget string, change Change) []Warning {
+func warningsForFinalChange(change Change, after semanticValue) []Warning {
 	warnings := []Warning{}
 	switch change.Change {
 	case ChangeRemoved:
 		warnings = append(warnings, Warning{Code: WarningDestructiveRemoval, Target: change.Target})
 	case ChangeReordered:
 		warnings = append(warnings, Warning{Code: WarningSemanticReorder, Target: change.Target})
-	case ChangeRelationshipAdded, ChangeRelationshipRemoved:
+	}
+	if strings.HasPrefix(change.Target, "link/") || strings.HasPrefix(change.Target, "context/") {
 		warnings = append(warnings, Warning{Code: WarningRelationshipChange, Target: change.Target})
 	}
-	if change.Target == primaryTarget && (operation.Op == OpSetProblem || operation.Op == OpSetOutcome || operation.Op == OpEditAC || operation.Op == OpEditConstraint || operation.Op == OpEditDecision || operation.Op == OpEditQuestion) && utf8.RuneCountInString(operation.Text) > 1000 {
+	if change.Change == ChangeReplaced && utf8.RuneCountInString(after.Text) > 1000 {
 		warnings = append(warnings, Warning{Code: WarningLargeReplacement, Target: change.Target})
 	}
 	return warnings

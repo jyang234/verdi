@@ -42,7 +42,7 @@ func TestApplyOrderedChangesWarningsAndExcerpts(t *testing.T) {
 	if !bytes.Equal(before, []byte(baseSpec)) {
 		t.Fatal("Apply mutated caller-owned base bytes")
 	}
-	wantTargets := []string{"ac-1", "ac-1", "ac-2", "co-1", "context/spec%2Fother%40abcdef2"}
+	wantTargets := []string{"ac-1", "ac-2", "co-1", "context/spec%2Fother%40abcdef2"}
 	gotTargets := make([]string, len(applied.Result.Changes))
 	for i, change := range applied.Result.Changes {
 		gotTargets[i] = change.Target
@@ -50,7 +50,7 @@ func TestApplyOrderedChangesWarningsAndExcerpts(t *testing.T) {
 	if !reflect.DeepEqual(gotTargets, wantTargets) {
 		t.Fatalf("change targets = %v, want %v", gotTargets, wantTargets)
 	}
-	wantWarnings := []string{"large-replacement/ac-1", "semantic-reorder/ac-1", "semantic-reorder/ac-2", "destructive-removal/co-1", "relationship-change/context/spec%2Fother%40abcdef2"}
+	wantWarnings := []string{"large-replacement/ac-1", "semantic-reorder/ac-2", "destructive-removal/co-1", "relationship-change/context/spec%2Fother%40abcdef2"}
 	gotWarnings := make([]string, len(applied.Result.Warnings))
 	for i, warning := range applied.Result.Warnings {
 		gotWarnings[i] = string(warning.Code) + "/" + warning.Target
@@ -70,6 +70,102 @@ func TestApplyOrderedChangesWarningsAndExcerpts(t *testing.T) {
 	}
 	if applied.Result.Identity != testIdentity() || applied.Result.PreviousDigest != DigestBytes(before) || applied.Result.ResultDigest != DigestBytes(applied.Spec) {
 		t.Fatalf("result identity/digests = %+v", applied.Result)
+	}
+}
+
+func TestApplyChangeDigestsExcludePosition(t *testing.T) {
+	req := decodedRequest(t)
+	req.Operations = []Operation{{Op: OpReorderAC, ID: "ac-2"}}
+	applied, err := Apply([]byte(baseSpec), req, testIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := snapshot([]byte(baseSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(applied.Result.Changes) != 2 {
+		t.Fatalf("changes = %+v, want two reordered objects", applied.Result.Changes)
+	}
+	for _, change := range applied.Result.Changes {
+		if change.Change != ChangeReordered || change.BeforeDigest != before[change.Target].ObjectDigest || change.AfterDigest != before[change.Target].ObjectDigest {
+			t.Fatalf("reorder change = %+v, want equal canonical object digests %q", change, before[change.Target].ObjectDigest)
+		}
+	}
+	if err := validateEffectiveResult([]byte(baseSpec), applied); err != nil {
+		t.Fatalf("equal-digest reorder rejected as ineffective: %v", err)
+	}
+}
+
+func TestApplyAggregatesInitialToFinalPerTarget(t *testing.T) {
+	tests := []struct {
+		name       string
+		operations []Operation
+		want       []string
+	}{
+		{
+			name: "edit then reorder",
+			operations: []Operation{
+				{Op: OpEditAC, ID: "ac-2", Text: "edited second", Evidence: []artifact.EvidenceKind{artifact.EvidenceBehavioral}, Anchor: "#ac-2"},
+				{Op: OpReorderAC, ID: "ac-2"},
+			},
+			want: []string{"replaced/ac-2", "reordered/ac-1"},
+		},
+		{
+			name: "edit then remove",
+			operations: []Operation{
+				{Op: OpEditAC, ID: "ac-1", Text: "temporary", Evidence: []artifact.EvidenceKind{artifact.EvidenceStatic}, Anchor: "#ac-1"},
+				{Op: OpRemoveAC, ID: "ac-1"},
+			},
+			want: []string{"removed/ac-1", "reordered/ac-2"},
+		},
+		{
+			name: "add then edit",
+			operations: []Operation{
+				{Op: OpAddConstraint, ID: "co-new", Text: "first", Anchor: "#co-new"},
+				{Op: OpEditConstraint, ID: "co-new", Text: "final", Anchor: "#co-new"},
+			},
+			want: []string{"added/co-new"},
+		},
+		{
+			name: "add then remove",
+			operations: []Operation{
+				{Op: OpAddConstraint, ID: "co-new", Text: "temporary", Anchor: "#co-new"},
+				{Op: OpRemoveConstraint, ID: "co-new"},
+			},
+			want: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := decodedRequest(t)
+			req.Operations = tt.operations
+			initial, err := snapshot([]byte(baseSpec))
+			if err != nil {
+				t.Fatal(err)
+			}
+			applied, err := Apply([]byte(baseSpec), req, testIdentity())
+			if err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+			final, err := snapshot(applied.Spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]string, len(applied.Result.Changes))
+			for i, change := range applied.Result.Changes {
+				got[i] = string(change.Change) + "/" + change.Target
+				if change.BeforeDigest != "" && change.BeforeDigest != initial[change.Target].ObjectDigest {
+					t.Fatalf("change[%d] before_digest = %q, want initial object digest %q", i, change.BeforeDigest, initial[change.Target].ObjectDigest)
+				}
+				if change.AfterDigest != "" && change.AfterDigest != final[change.Target].ObjectDigest {
+					t.Fatalf("change[%d] after_digest = %q, want final object digest %q", i, change.AfterDigest, final[change.Target].ObjectDigest)
+				}
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("changes = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
