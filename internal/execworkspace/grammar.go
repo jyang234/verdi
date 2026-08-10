@@ -35,6 +35,17 @@ func ExecutionRoot(root string) string {
 	return filepath.Join(root, ".verdi", "data", "execution")
 }
 
+// The five assemblers below (UnitPath, RequestPath, RequestStagingPath,
+// ReleasedPath, LockPath) are PURE GRAMMAR HELPERS: they join whatever
+// workspaceID they are handed and validate NOTHING, so an id carrying a
+// path segment ("../writer") resolves out of data/execution/ entirely.
+// Every caller that turns one of these paths into a FILESYSTEM EFFECT must
+// therefore gate its raw id on ValidWorkspaceID first — Releaser.Release
+// does so on entry, and GC and Materializer only ever pass ids that are
+// already ValidWorkspaceID-proven (ClassifyEntry /
+// classifyResolvedAdminPath for the former, Identity.WorkspaceID for the
+// latter).
+
 // UnitPath returns workspaceID's unit directory path under root — the
 // worktree materialization target itself.
 func UnitPath(root, workspaceID string) string {

@@ -295,3 +295,114 @@ func TestRelease_CannotLandInsideMaterialization(t *testing.T) {
 		t.Fatalf("Release after materialization's lock freed: %v", err)
 	}
 }
+
+// --- workspace-id validation (path-escape refusal) ---
+
+// TestRelease_InvalidWorkspaceID_RejectedBeforeAnyFilesystemEffect proves
+// Release validates its raw workspaceID argument BEFORE assembling any path
+// and before creating the execution root: an id like "../writer" would
+// otherwise resolve LockPath/ReleasedPath out of data/execution/ and touch
+// data/writer.lock — the store-layout writer lock — and drop a
+// data/writer.released marker beside it. Every rejection must leave the
+// store root byte-for-byte untouched (not even .verdi/ created).
+func TestRelease_InvalidWorkspaceID_RejectedBeforeAnyFilesystemEffect(t *testing.T) {
+	cases := []struct {
+		name        string
+		workspaceID string
+	}{
+		{"parent-escape", "../writer"},
+		{"nested-slash", "a/b"},
+		{"backslash", `a\b`},
+		{"empty", ""},
+		{"dot", "."},
+		{"dotdot", ".."},
+		{"uppercase-slug", "Run--0123456789ab"},
+		{"uppercase-hex", "run--0123456789AB"},
+		{"bare-slug-no-sha-group", "run"},
+		{"short-hex-group", "run--0123456789a"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			storeRoot := t.TempDir()
+
+			rel := NewReleaser(storeRoot)
+			err := rel.Release(tc.workspaceID)
+			if err == nil {
+				t.Fatalf("Release(%q): want operational error, got nil", tc.workspaceID)
+			}
+			var opErr *OperationalError
+			if !errors.As(err, &opErr) {
+				t.Fatalf("Release(%q): want *OperationalError, got %T: %v", tc.workspaceID, err, err)
+			}
+
+			// The escape targets specifically: neither the store-layout
+			// writer lock nor a sibling release marker may appear.
+			for _, escaped := range []string{
+				filepath.Join(storeRoot, ".verdi", "data", "writer.lock"),
+				filepath.Join(storeRoot, ".verdi", "data", "writer.released"),
+			} {
+				if _, serr := os.Lstat(escaped); !errors.Is(serr, os.ErrNotExist) {
+					t.Fatalf("Release(%q) touched escaped path %s: lstat err=%v", tc.workspaceID, escaped, serr)
+				}
+			}
+
+			// And nothing at all was created anywhere under the store root.
+			if got := treeUnder(t, storeRoot); len(got) != 0 {
+				t.Fatalf("Release(%q) created %d path(s) under the store root: %v", tc.workspaceID, len(got), got)
+			}
+		})
+	}
+}
+
+// TestRelease_ValidWorkspaceIDsStillAccepted is the positive half of the
+// validation table: every id the grammar accepts must still release.
+func TestRelease_ValidWorkspaceIDsStillAccepted(t *testing.T) {
+	cases := []struct {
+		name        string
+		workspaceID string
+	}{
+		{"exact-sha", "run--0123456789ab"},
+		{"base-plus-patch", "run--0123456789ab-pfedcba987654"},
+		{"slug-with-double-dash", "a--b--0123456789ab"},
+		{"slug-with-dot", "a.b--0123456789ab"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			storeRoot := t.TempDir()
+			rel := NewReleaser(storeRoot)
+			if err := rel.Release(tc.workspaceID); err != nil {
+				t.Fatalf("Release(%q): %v", tc.workspaceID, err)
+			}
+			if _, err := os.Lstat(ReleasedPath(storeRoot, tc.workspaceID)); err != nil {
+				t.Fatalf("marker not created for %q: %v", tc.workspaceID, err)
+			}
+		})
+	}
+}
+
+// treeUnder returns every path under root, relative to root, so a test can
+// assert that a refused call created nothing at all.
+func treeUnder(t *testing.T, root string) []string {
+	t.Helper()
+	var found []string
+	err := filepath.Walk(root, func(path string, _ os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			return rerr
+		}
+		found = append(found, rel)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	return found
+}

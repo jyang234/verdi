@@ -71,7 +71,23 @@ func NewReleaser(storeRoot string) *Releaser {
 // including for an id with NOTHING AT ALL on disk yet (an abandoned run):
 // the consuming feature owns WHEN release happens, never this component,
 // and this call still creates the marker under the lock.
+//
+// ID VALIDATION FIRST. Release takes a RAW workspaceID from its caller, so
+// it gates that id on ValidWorkspaceID (grammar.go — the package's ONE
+// <workspace-id> shape test) BEFORE assembling any path and before creating
+// the execution root. The path assemblers are pure grammar helpers that
+// join whatever they are handed, so without this gate an id carrying a path
+// segment — "../writer" — would resolve LockPath and ReleasedPath OUT of
+// data/execution/ and operate on data/writer.lock, the store-layout writer
+// lock, leaving a data/writer.released marker beside it. A refused id is an
+// operational error with NO filesystem effect whatsoever.
 func (r *Releaser) Release(workspaceID string) error {
+	if !ValidWorkspaceID(workspaceID) {
+		return operationalError("release: workspace id", fmt.Errorf(
+			"%q is not a valid <workspace-id>: the grammar is `<run-slug>--<sha12>` or `<run-slug>--<sha12>-p<patch12>` over the store's normative slug alphabet, with a non-empty slug and 12 lowercase hex digits per group (spec §Workspace naming; ValidWorkspaceID) — no path is assembled from an unvalidated id",
+			workspaceID))
+	}
+
 	if err := os.MkdirAll(ExecutionRoot(r.storeRoot), 0o755); err != nil {
 		return operationalError("release: prepare execution root", err)
 	}
