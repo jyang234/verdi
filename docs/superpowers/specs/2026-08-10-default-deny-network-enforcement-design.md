@@ -1,8 +1,11 @@
 # Default-Deny Network Enforcement Design
 
-**Status:** proposed authority; effective only after owner merge  
-**Planning base:** `cb7cd6fb4e6123b21469a8ced886aae1f95f4398`  
-**Owners:** platform-team  
+**Status:** proposed authority; effective only after owner merge
+
+**Planning base:** `cb7cd6fb4e6123b21469a8ced886aae1f95f4398`
+
+**Owners:** platform-team
+
 **Consumers:** CSE isolated execution first; CI sealed execution later
 
 ## 1. Decision
@@ -150,4 +153,3 @@ Intentional omissions:
 - no CI sealed-execution integration;
 - no external helper, container runtime, cgo, firewall mutation or privileged
   daemon.
-

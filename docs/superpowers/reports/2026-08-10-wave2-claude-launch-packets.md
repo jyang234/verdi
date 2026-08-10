@@ -1,6 +1,7 @@
 # Wave 2 Claude Launch Packets
 
-**Planning base:** `cb7cd6fb4e6123b21469a8ced886aae1f95f4398`  
+**Planning base:** `cb7cd6fb4e6123b21469a8ced886aae1f95f4398`
+
 **Concurrency rule:** launch exactly two implementation units after this
 planning/authority change is owner-merged. Do not launch the network or CSE
 execution unit concurrently with them.
@@ -148,4 +149,3 @@ For each implementation PR, Codex prepares an immutable exact-head diff
 package, performs one independent review against the pinned authority, posts
 actionable PR comments, adjudicates every finding, and requests one closure
 check after at most one correction pass. The user remains the merge owner.
-

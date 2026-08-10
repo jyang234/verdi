@@ -215,4 +215,3 @@ actor moves from caller payload to trusted adapter injection; context digest is
 an explicit unavailable status until Wave 3. Intentional omissions are the
 later adapters, compiler, review packet, UI and Git/governance verbs named
 above. No source authority is silently dropped.
-

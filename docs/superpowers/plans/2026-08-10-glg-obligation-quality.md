@@ -218,4 +218,3 @@ uses an action identity without entering the operating-model catalog.
 Intentional omissions are experimental advisory execution, frontend display,
 feature obligations and frozen in-place migration. No source is silently
 grandfathered or called complete.
-
