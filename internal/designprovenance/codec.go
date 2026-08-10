@@ -2,10 +2,7 @@ package designprovenance
 
 import (
 	"bytes"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -73,62 +70,5 @@ func DecodeLog(data []byte) ([]Entry, error) {
 }
 
 func decodeStrictJSON(data []byte, out any) error {
-	if err := checkNoDuplicateJSONKeys(data); err != nil {
-		return err
-	}
-	return artifact.DecodeStrictJSON(data, out)
-}
-
-type jsonFrame struct {
-	object    bool
-	seen      map[string]bool
-	expectKey bool
-}
-
-func checkNoDuplicateJSONKeys(data []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	var stack []*jsonFrame
-	valueDone := func() {
-		if len(stack) > 0 && stack[len(stack)-1].object {
-			stack[len(stack)-1].expectKey = true
-		}
-	}
-	for {
-		tok, err := dec.Token()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("designprovenance: scanning JSON: %w", err)
-		}
-		if delim, ok := tok.(json.Delim); ok {
-			switch delim {
-			case '{':
-				stack = append(stack, &jsonFrame{object: true, seen: map[string]bool{}, expectKey: true})
-			case '[':
-				stack = append(stack, &jsonFrame{})
-			case '}', ']':
-				if len(stack) == 0 {
-					return fmt.Errorf("designprovenance: unbalanced JSON")
-				}
-				stack = stack[:len(stack)-1]
-				valueDone()
-			}
-			continue
-		}
-		if len(stack) > 0 && stack[len(stack)-1].object && stack[len(stack)-1].expectKey {
-			key, ok := tok.(string)
-			if !ok {
-				return fmt.Errorf("designprovenance: JSON object key is not a string")
-			}
-			if stack[len(stack)-1].seen[key] {
-				return fmt.Errorf("designprovenance: duplicate JSON key %q", key)
-			}
-			stack[len(stack)-1].seen[key] = true
-			stack[len(stack)-1].expectKey = false
-			continue
-		}
-		valueDone()
-	}
+	return artifact.DecodeExactJSON(data, out)
 }
