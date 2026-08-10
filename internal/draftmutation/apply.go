@@ -2,6 +2,7 @@ package draftmutation
 
 import (
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/artifact/splice"
@@ -37,13 +38,20 @@ func Apply(current []byte, request Request, identity Identity) (Applied, error) 
 		if err != nil {
 			return Applied{}, err
 		}
-		target := operationTarget(operation)
-		change, err := changeForOperation(operation, target, before[target], after[target])
-		if err != nil {
-			return Applied{}, fmt.Errorf("draftmutation: operation[%d]: %w", index, err)
+		primaryTarget := operationTarget(operation)
+		for _, target := range changedSnapshotTargets(before, after) {
+			var change Change
+			if target == primaryTarget {
+				change, err = changeForOperation(operation, target, before[target], after[target])
+			} else {
+				change, err = changeForSecondaryTarget(target, before[target], after[target])
+			}
+			if err != nil {
+				return Applied{}, fmt.Errorf("draftmutation: operation[%d]: %w", index, err)
+			}
+			changes = append(changes, change)
+			warnings = append(warnings, warningsForChange(operation, primaryTarget, change)...)
 		}
-		changes = append(changes, change)
-		warnings = append(warnings, warningsForOperation(operation, target)...)
 		resultBytes = next
 	}
 	final, err := snapshot(resultBytes)
@@ -97,18 +105,44 @@ func changeForOperation(operation Operation, target string, before, after semant
 	return change, nil
 }
 
-func warningsForOperation(operation Operation, target string) []Warning {
-	warnings := []Warning{}
-	switch operation.Op {
-	case OpRemoveAC, OpRemoveConstraint, OpRemoveDecision, OpRemoveQuestion, OpRemoveStub:
-		warnings = append(warnings, Warning{Code: WarningDestructiveRemoval, Target: target})
-	case OpReorderAC, OpReorderStub:
-		warnings = append(warnings, Warning{Code: WarningSemanticReorder, Target: target})
-	case OpAddLink, OpRemoveLink, OpAddContextRef, OpRemoveContextRef:
-		warnings = append(warnings, Warning{Code: WarningRelationshipChange, Target: target})
+func changeForSecondaryTarget(target string, before, after semanticValue) (Change, error) {
+	change := Change{Target: target}
+	switch {
+	case strings.HasPrefix(target, "link/") || strings.HasPrefix(target, "context/"):
+		if before.Digest == "" {
+			change.Change, change.AfterDigest = ChangeRelationshipAdded, after.Digest
+		} else if after.Digest == "" {
+			change.Change, change.BeforeDigest = ChangeRelationshipRemoved, before.Digest
+		} else {
+			return Change{}, fmt.Errorf("relationship target %q changed without being the operation target", target)
+		}
+	case before.Digest != "" && after.Digest != "" && before.ObjectDigest == after.ObjectDigest:
+		change.Change, change.BeforeDigest, change.AfterDigest = ChangeReordered, before.Digest, after.Digest
+	case before.Digest == "":
+		change.Change, change.AfterDigest = ChangeAdded, after.Digest
+	case after.Digest == "":
+		change.Change, change.BeforeDigest = ChangeRemoved, before.Digest
+	default:
+		change.Change, change.BeforeDigest, change.AfterDigest = ChangeReplaced, before.Digest, after.Digest
 	}
-	if (operation.Op == OpSetProblem || operation.Op == OpSetOutcome || operation.Op == OpEditAC || operation.Op == OpEditConstraint || operation.Op == OpEditDecision || operation.Op == OpEditQuestion) && utf8.RuneCountInString(operation.Text) > 1000 {
-		warnings = append(warnings, Warning{Code: WarningLargeReplacement, Target: target})
+	if err := change.Validate(); err != nil {
+		return Change{}, err
+	}
+	return change, nil
+}
+
+func warningsForChange(operation Operation, primaryTarget string, change Change) []Warning {
+	warnings := []Warning{}
+	switch change.Change {
+	case ChangeRemoved:
+		warnings = append(warnings, Warning{Code: WarningDestructiveRemoval, Target: change.Target})
+	case ChangeReordered:
+		warnings = append(warnings, Warning{Code: WarningSemanticReorder, Target: change.Target})
+	case ChangeRelationshipAdded, ChangeRelationshipRemoved:
+		warnings = append(warnings, Warning{Code: WarningRelationshipChange, Target: change.Target})
+	}
+	if change.Target == primaryTarget && (operation.Op == OpSetProblem || operation.Op == OpSetOutcome || operation.Op == OpEditAC || operation.Op == OpEditConstraint || operation.Op == OpEditDecision || operation.Op == OpEditQuestion) && utf8.RuneCountInString(operation.Text) > 1000 {
+		warnings = append(warnings, Warning{Code: WarningLargeReplacement, Target: change.Target})
 	}
 	return warnings
 }

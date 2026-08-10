@@ -168,17 +168,7 @@ func operationTarget(operation Operation) string {
 	}
 }
 
-// ChangedTargets returns every semantic target whose canonical value or
-// presence differs, sorted by canonical target identity for stale refusals.
-func ChangedTargets(before, after []byte) ([]string, error) {
-	left, err := snapshot(before)
-	if err != nil {
-		return nil, fmt.Errorf("draftmutation: decoding base snapshot: %w", err)
-	}
-	right, err := snapshot(after)
-	if err != nil {
-		return nil, fmt.Errorf("draftmutation: decoding current snapshot: %w", err)
-	}
+func changedSnapshotTargets(left, right semanticSnapshot) []string {
 	seen := map[string]bool{}
 	for target, value := range left {
 		if current, ok := right[target]; !ok || current.Digest != value.Digest {
@@ -195,5 +185,19 @@ func ChangedTargets(before, after []byte) ([]string, error) {
 		targets = append(targets, target)
 	}
 	sort.Strings(targets)
-	return targets, nil
+	return targets
+}
+
+// ChangedTargets returns every semantic target whose canonical value or
+// presence differs, sorted by canonical target identity for stale refusals.
+func ChangedTargets(before, after []byte) ([]string, error) {
+	left, err := snapshot(before)
+	if err != nil {
+		return nil, fmt.Errorf("draftmutation: decoding base snapshot: %w", err)
+	}
+	right, err := snapshot(after)
+	if err != nil {
+		return nil, fmt.Errorf("draftmutation: decoding current snapshot: %w", err)
+	}
+	return changedSnapshotTargets(left, right), nil
 }

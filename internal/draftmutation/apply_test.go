@@ -42,7 +42,7 @@ func TestApplyOrderedChangesWarningsAndExcerpts(t *testing.T) {
 	if !bytes.Equal(before, []byte(baseSpec)) {
 		t.Fatal("Apply mutated caller-owned base bytes")
 	}
-	wantTargets := []string{"ac-1", "ac-2", "co-1", "context/spec%2Fother%40abcdef2"}
+	wantTargets := []string{"ac-1", "ac-1", "ac-2", "co-1", "context/spec%2Fother%40abcdef2"}
 	gotTargets := make([]string, len(applied.Result.Changes))
 	for i, change := range applied.Result.Changes {
 		gotTargets[i] = change.Target
@@ -50,7 +50,7 @@ func TestApplyOrderedChangesWarningsAndExcerpts(t *testing.T) {
 	if !reflect.DeepEqual(gotTargets, wantTargets) {
 		t.Fatalf("change targets = %v, want %v", gotTargets, wantTargets)
 	}
-	wantWarnings := []string{"large-replacement/ac-1", "semantic-reorder/ac-2", "destructive-removal/co-1", "relationship-change/context/spec%2Fother%40abcdef2"}
+	wantWarnings := []string{"large-replacement/ac-1", "semantic-reorder/ac-1", "semantic-reorder/ac-2", "destructive-removal/co-1", "relationship-change/context/spec%2Fother%40abcdef2"}
 	gotWarnings := make([]string, len(applied.Result.Warnings))
 	for i, warning := range applied.Result.Warnings {
 		gotWarnings[i] = string(warning.Code) + "/" + warning.Target
@@ -102,6 +102,40 @@ func TestApplyRejectsUnknownExcerptTarget(t *testing.T) {
 	req.Excerpts = []ExcerptRequest{{Target: "co-missing", Classification: designprovenance.ClassificationUnresolved, Representation: designprovenance.RepresentationVerbatim, Text: "unknown"}}
 	if _, err := Apply([]byte(baseSpec), req, testIdentity()); err == nil || !strings.Contains(err.Error(), "excerpt target") {
 		t.Fatalf("Apply error = %v", err)
+	}
+}
+
+func TestApplyReportsSecondarySemanticTargetsInOperationThenTargetOrder(t *testing.T) {
+	req := decodedRequest(t)
+	req.Operations = []Operation{
+		{Op: OpReorderAC, ID: "ac-2"},
+		{Op: OpRemoveDecision, ID: "dc-1"},
+	}
+	applied, err := Apply([]byte(baseSpec), req, testIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotChanges := make([]string, len(applied.Result.Changes))
+	for i, change := range applied.Result.Changes {
+		gotChanges[i] = string(change.Change) + "/" + change.Target
+	}
+	wantChanges := []string{
+		"reordered/ac-1", "reordered/ac-2",
+		"removed/dc-1", "relationship-removed/link/dc-1/depends-on/spec%2Fbase",
+	}
+	if !reflect.DeepEqual(gotChanges, wantChanges) {
+		t.Fatalf("changes = %v, want %v", gotChanges, wantChanges)
+	}
+	gotWarnings := make([]string, len(applied.Result.Warnings))
+	for i, warning := range applied.Result.Warnings {
+		gotWarnings[i] = string(warning.Code) + "/" + warning.Target
+	}
+	wantWarnings := []string{
+		"semantic-reorder/ac-1", "semantic-reorder/ac-2",
+		"destructive-removal/dc-1", "relationship-change/link/dc-1/depends-on/spec%2Fbase",
+	}
+	if !reflect.DeepEqual(gotWarnings, wantWarnings) {
+		t.Fatalf("warnings = %v, want %v", gotWarnings, wantWarnings)
 	}
 }
 
