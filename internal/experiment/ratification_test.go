@@ -75,7 +75,7 @@ func bindingResult(verdict Verdict, winner string) Result {
 	return Result{Verdict: verdict, Winner: winner}
 }
 
-// TestValidateRatificationBinding is SI-44's table: AC-5's disposition
+// TestValidateRatificationBinding is SI-45's table: AC-5's disposition
 // list carries semantic preconditions its grammar cannot express, and the
 // binding check is where they hold. Grammar validity is assumed by none of
 // these cases — every record here is grammar-valid, and only the
@@ -167,7 +167,7 @@ func TestValidateRatificationBinding(t *testing.T) {
 	}
 }
 
-// TestRatificationValidateStaysGrammarScoped pins the split SI-44 chose:
+// TestRatificationValidateStaysGrammarScoped pins the split SI-45 chose:
 // the record's own Validate never consults a definition or result, so a
 // disposition that is semantically impossible against its bound result
 // still DECODES — it is the binding check, wherever a ratification meets

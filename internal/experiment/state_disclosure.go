@@ -4,7 +4,7 @@ import "fmt"
 
 // StateDisclosureCode is the CLOSED vocabulary of authority conjuncts
 // DeriveState reports as disclosed-unproven beside the state it derived
-// (invention ledger SI-43). Each code names a fact AC-1's state table
+// (invention ledger SI-44). Each code names a fact AC-1's state table
 // depends on that a filesystem reader structurally cannot establish from
 // artifact bytes — CO-1 forbids assuming any of them silently, and equally
 // forbids pretending the rung below is what the artifacts say.

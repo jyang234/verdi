@@ -75,7 +75,7 @@ func (r Ratification) Validate() error {
 }
 
 // ValidateRatificationBinding checks the preconditions AC-5's disposition
-// list IMPLIES but its grammar cannot express (invention ledger SI-44),
+// list IMPLIES but its grammar cannot express (invention ledger SI-45),
 // for one ratification bound to the definition and result it responds to:
 //
 //   - select-recommended ("select the recommended candidate") requires the

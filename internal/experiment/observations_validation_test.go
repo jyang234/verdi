@@ -166,7 +166,7 @@ func TestValidateObservationsRejects(t *testing.T) {
 
 // booleanPrimaryDefinition returns a locked definition identical to
 // smallRoundsDefinition's except that the primary metric is the BOOLEAN
-// primitive AC-3 registers, aggregated by rate — the shape SI-45's union
+// primitive AC-3 registers, aggregated by rate — the shape SI-46's union
 // exists for — plus its computed digest.
 func booleanPrimaryDefinition(t *testing.T) (def Definition, digest string) {
 	t.Helper()
@@ -210,7 +210,7 @@ func boolObservationLines(defDigest string, primary map[string][]bool) []string 
 	return lines
 }
 
-// TestValidateObservationsBooleanMetricHappyPath is SI-45's positive arm:
+// TestValidateObservationsBooleanMetricHappyPath is SI-46's positive arm:
 // with a boolean-typed primary metric registered, true/false literals
 // validate, and they survive decode as booleans rather than as numbers.
 func TestValidateObservationsBooleanMetricHappyPath(t *testing.T) {
@@ -236,7 +236,7 @@ func TestValidateObservationsBooleanMetricHappyPath(t *testing.T) {
 }
 
 // TestValidateObservationsRejectsMismatchedValueKinds is the negative
-// arm, both directions (SI-45): a number where the registered metric type
+// arm, both directions (SI-46): a number where the registered metric type
 // is boolean, and a boolean where it is not.
 func TestValidateObservationsRejectsMismatchedValueKinds(t *testing.T) {
 	numericDef, numericDigest := smallRoundsDefinition(t)

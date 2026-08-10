@@ -41,7 +41,7 @@ type candRound struct {
 // (experiment.ValidateComplete) and digest agreement from the artifacts
 // themselves; an observation record carries no environment fingerprint, so
 // the environment-policy conjunct cannot be proven from the evidence set
-// at all. It is not silently assumed either (SI-41): the execution layer
+// at all. It is not silently assumed either (SI-42): the execution layer
 // must ATTEST it at emission time through att, and an attestation that is
 // zero or names any other policy stops the run as an operational error
 // rather than producing a verdict.
@@ -56,7 +56,7 @@ type candRound struct {
 //     in the Result (the verdi.experiment-result/v1 schema is unchanged).
 //   - AT REST, a result.json read back from the store therefore carries no
 //     proof of the conjunct at all; experiment.DeriveState surfaces that as
-//     a typed disclosed-unproven authority disclosure (SI-43).
+//     a typed disclosed-unproven authority disclosure (SI-44).
 func Evaluate(def experiment.Definition, obs []experiment.Observation, att EnvironmentAttestation) (experiment.Result, error) {
 	locked, err := experiment.Locked(def)
 	if err != nil {
@@ -82,7 +82,7 @@ func Evaluate(def experiment.Definition, obs []experiment.Observation, att Envir
 //
 // It deliberately takes no environment attestation: an attestation is
 // about the RUN that produced obs, a fact only the emission path can
-// assert (SI-41), and re-checking a stored result must not be able to
+// assert (SI-42), and re-checking a stored result must not be able to
 // manufacture one.
 func compute(def experiment.Definition, obs []experiment.Observation) (experiment.Result, error) {
 	defDigest, err := experiment.DefinitionDigest(def)
@@ -165,7 +165,7 @@ func (e *evaluation) run() (experiment.Result, error) {
 // values for a validated (def, obs) pair.
 //
 // A BOOLEAN-typed primary metric projects onto the same float64 scale
-// through MeasurementValue.Float64 — true to 1, false to 0 (SI-45) — which
+// through MeasurementValue.Float64 — true to 1, false to 0 (SI-46) — which
 // is what keeps every registered aggregation, direction comparison, and
 // threshold defined without a second code path (a rate over a boolean is
 // then exactly the fraction of true rounds).
@@ -179,7 +179,7 @@ func (e *evaluation) primaryRoundValues(candID string) []float64 {
 				continue
 			}
 			// A number was already validated finite at decode time, and a
-			// boolean maps to 1/0 without parsing (SI-45), so neither arm of
+			// boolean maps to 1/0 without parsing (SI-46), so neither arm of
 			// the union can fail here.
 			v, _ := m.Value.Float64()
 			values = append(values, v)

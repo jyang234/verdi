@@ -24,7 +24,7 @@ func verifiableRun(t *testing.T) (experiment.Definition, []experiment.Observatio
 	return def, obs, mustEvaluate(t, def, obs)
 }
 
-// TestVerifyResultAcceptsEngineOutput is SI-42's positive arm: the engine's
+// TestVerifyResultAcceptsEngineOutput is SI-43's positive arm: the engine's
 // own output for a locked definition and complete observation set verifies,
 // and does so without any environment attestation — recompute-equality is
 // an AT-REST check over artifacts, not an emission.
@@ -56,7 +56,7 @@ func TestVerifyResultAcceptsCommittedFixtures(t *testing.T) {
 // TestVerifyResultRejects is the negative table. Every case here is
 // shape-, enum-, and digest-valid — each one DECODES cleanly through
 // experiment.DecodeResult's checks — and is rejected only because it is
-// not what the closed engine computes from the evidence (SI-42's whole
+// not what the closed engine computes from the evidence (SI-43's whole
 // point: a forgeable document is not authority).
 func TestVerifyResultRejects(t *testing.T) {
 	tests := []struct {
@@ -189,13 +189,13 @@ func forgeResult(t *testing.T, root, name, old, replacement string) {
 	}
 }
 
-// TestDeriveStateWithRealVerifierOverFixtures is SI-42's integration arm:
+// TestDeriveStateWithRealVerifierOverFixtures is SI-43's integration arm:
 // experiment.DeriveState wired to THIS package's real recompute-equality
 // verifier, over the committed fixture directories. The unforged copies
 // must still reach their registered rungs, and a forged-but-shape-valid
 // result.json — one that decodes cleanly, carries the right
 // definition_digest and algorithm, and would pass every check that existed
-// before SI-42 — must be a hard error, never a downgrade to measured.
+// before SI-43 — must be a hard error, never a downgrade to measured.
 func TestDeriveStateWithRealVerifierOverFixtures(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -237,7 +237,7 @@ func TestDeriveStateWithRealVerifierOverFixtures(t *testing.T) {
 			if forged {
 				forgeResult(t, root, tt.fixture, tt.forgeOld, tt.forgeNew)
 				// The forgery must be a shape-valid document, or this test
-				// would be proving DecodeResult's checks rather than SI-42's.
+				// would be proving DecodeResult's checks rather than SI-43's.
 				raw, err := os.ReadFile(filepath.Join(root, tt.fixture, "result.json"))
 				if err != nil {
 					t.Fatalf("reading forged result: %v", err)
@@ -269,7 +269,7 @@ func TestDeriveStateWithRealVerifierOverFixtures(t *testing.T) {
 
 // TestVerifyResultIsTheDeriveStateVerifier proves the exported function
 // satisfies internal/experiment's injected port type exactly — the wiring
-// the import direction forbids doing from the other side (SI-42).
+// the import direction forbids doing from the other side (SI-43).
 func TestVerifyResultIsTheDeriveStateVerifier(t *testing.T) {
 	var verify experiment.ResultVerifier = VerifyResult
 	def, obs, res := verifiableRun(t)

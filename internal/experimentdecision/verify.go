@@ -8,7 +8,7 @@ import (
 
 // VerifyResult decides whether res, as found AT REST, really is the closed
 // engine's output for the locked def and the complete observation set obs
-// (invention ledger SI-42). It is the implementation
+// (invention ledger SI-43). It is the implementation
 // experiment.DeriveState's ResultVerifier port expects, wired here because
 // the import direction only runs this way.
 //
@@ -32,9 +32,9 @@ import (
 // does not recompute makes no statement about candidates at all.
 //
 // It takes NO environment attestation, unlike Evaluate: an attestation is
-// the execution layer's assertion about the run that produced obs (SI-41),
+// the execution layer's assertion about the run that produced obs (SI-42),
 // which no at-rest reader can make. That conjunct stays disclosed-unproven
-// at rest until spec/execution-workspace's durable receipt lands (SI-43).
+// at rest until spec/execution-workspace's durable receipt lands (SI-44).
 func VerifyResult(def experiment.Definition, obs []experiment.Observation, res experiment.Result) error {
 	locked, err := experiment.Locked(def)
 	if err != nil {

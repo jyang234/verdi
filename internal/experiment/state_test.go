@@ -9,7 +9,7 @@ import (
 )
 
 // acceptResult and rejectResult are the stub ResultVerifier ports this
-// package's own tests inject (SI-42). The real recompute-equality
+// package's own tests inject (SI-43). The real recompute-equality
 // verifier lives in internal/experimentdecision — which imports this
 // package, so it can never be wired from here; the injected-port shape is
 // exactly what keeps that import direction one-way. The integration test
@@ -389,7 +389,7 @@ func TestDeriveStateUndecodableRatificationIsError(t *testing.T) {
 }
 
 // TestDeriveStateNilVerifierIsError proves the result verifier is a
-// REQUIRED input, not an optional hardening step (SI-42): without it a
+// REQUIRED input, not an optional hardening step (SI-43): without it a
 // present result.json could only be trusted on its shape, which is exactly
 // the forgeable state the port exists to close. The check fires before any
 // artifact is read, so a nil verifier never yields a lower rung either.
@@ -413,7 +413,7 @@ func TestDeriveStateNilVerifierIsError(t *testing.T) {
 
 // TestDeriveStateFailedResultVerificationIsError proves a present
 // result.json that the verifier rejects is a hard operational error and
-// never a silent downgrade to the measured rung (SI-42): the artifact IS
+// never a silent downgrade to the measured rung (SI-43): the artifact IS
 // present, and its disagreement with the closed engine's recomputation is
 // itself the fact worth reporting.
 func TestDeriveStateFailedResultVerificationIsError(t *testing.T) {
@@ -491,7 +491,7 @@ func TestDeriveStateVerifierReceivesDecodedArtifacts(t *testing.T) {
 	}
 }
 
-// TestDeriveStateRatificationBindingIsEnforced proves SI-44's
+// TestDeriveStateRatificationBindingIsEnforced proves SI-45's
 // preconditions are wired into the ratified rung and not merely available
 // as a helper: a ratification whose disposition cannot be true of the
 // definition and result it is bound to is a hard error, exactly like every

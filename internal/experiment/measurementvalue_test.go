@@ -59,7 +59,7 @@ func TestMeasurementValueUnmarshalJSON(t *testing.T) {
 	}
 }
 
-// TestMeasurementValueMarshalRoundTripsLiterals is SI-45's byte-identity
+// TestMeasurementValueMarshalRoundTripsLiterals is SI-46's byte-identity
 // arm: the union preserves the ORIGINAL literal, so a value that decoded
 // from "18.0" re-encodes as 18.0 (never 18), and true re-encodes as the
 // boolean literal (never 1). Both properties matter for CO-3, since the
@@ -95,7 +95,7 @@ func TestMeasurementValueMarshalRejectsMissing(t *testing.T) {
 	}
 }
 
-// TestMeasurementValueFloat64 covers SI-45's aggregation mapping: a
+// TestMeasurementValueFloat64 covers SI-46's aggregation mapping: a
 // boolean projects to 1 (true) or 0 (false) so every registered
 // aggregation stays defined over the mapped values, while a number
 // projects to itself.

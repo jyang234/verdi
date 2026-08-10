@@ -19,7 +19,7 @@ const (
 )
 
 // MeasurementValue is the strict typed union a measurement's value field
-// carries (invention ledger SI-45): a JSON number, or the JSON literal
+// carries (invention ledger SI-46): a JSON number, or the JSON literal
 // true/false for a measurement whose registered metric type is boolean.
 //
 // AC-3 names boolean a core metric primitive, but the artifact grammar
@@ -102,7 +102,7 @@ func (v MeasurementValue) String() string {
 
 // Float64 projects v onto the single numeric scale every comparison and
 // aggregation in the decision engine operates on: a number parses to
-// itself, true maps to 1, and false maps to 0 (SI-45). An absent or
+// itself, true maps to 1, and false maps to 0 (SI-46). An absent or
 // malformed value is an error rather than a silent zero, because zero is
 // itself a meaningful measurement.
 func (v MeasurementValue) Float64() (float64, error) {

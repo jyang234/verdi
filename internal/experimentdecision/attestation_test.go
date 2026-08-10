@@ -9,7 +9,7 @@ import (
 
 // TestEnvironmentAttestationVerify is the direct table over the
 // attestation check itself: only an attestation naming the locked
-// definition's registered execution.environment_policy verifies (SI-41).
+// definition's registered execution.environment_policy verifies (SI-42).
 func TestEnvironmentAttestationVerify(t *testing.T) {
 	def := lockDefinition(t)
 
@@ -42,7 +42,7 @@ func TestEnvironmentAttestationVerify(t *testing.T) {
 
 // TestEvaluateRequiresEnvironmentAttestation proves AC-2 step 1's
 // environment-policy conjunct is an INPUT requirement and not a verdict
-// (SI-41, CO-6): a zero or mismatched attestation is an operational error
+// (SI-42, CO-6): a zero or mismatched attestation is an operational error
 // carrying no Result, never a disclosed-unproven comparison.
 func TestEvaluateRequiresEnvironmentAttestation(t *testing.T) {
 	def := lockDefinition(t)
@@ -93,7 +93,7 @@ func TestEvaluateMatchingAttestationEvaluates(t *testing.T) {
 	}
 }
 
-// TestEvaluateAttestationNeverEntersResult pins SI-41's scope boundary:
+// TestEvaluateAttestationNeverEntersResult pins SI-42's scope boundary:
 // the attestation gates emission, it is not recorded content. The Result
 // schema is unchanged, so its canonical bytes must not mention the
 // attested policy identifier anywhere.

@@ -7,7 +7,7 @@ import "github.com/jyang234/verdi/internal/experiment"
 // executed under the locked definition's registered
 // execution.environment_policy — AC-2 step 1's environment-policy
 // conjunct, which no observation record carries a fingerprint for
-// (invention ledger SI-41).
+// (invention ledger SI-42).
 //
 // It is an in-memory contract between the execution unit and this engine,
 // not durable evidence. What it buys today is that the conjunct is never
@@ -16,7 +16,7 @@ import "github.com/jyang234/verdi/internal/experiment"
 // operational error (CO-1, CO-6) rather than a verdict of any kind. The
 // durable execution receipt that turns the assertion into checkable
 // evidence belongs to spec/execution-workspace (Wave 3); at rest, the
-// conjunct stays disclosed-unproven until that unit lands (SI-43).
+// conjunct stays disclosed-unproven until that unit lands (SI-44).
 //
 // The zero value is deliberately useless: an empty PolicyID attests
 // nothing.

@@ -97,7 +97,7 @@ func lockDefinition(t *testing.T, mutators ...func(*experiment.Definition)) expe
 }
 
 // attestation returns the canned execution-layer environment-policy
-// attestation for def: the policy def itself registers (SI-41). Wave 2
+// attestation for def: the policy def itself registers (SI-42). Wave 2
 // has no execution unit to produce a real one, so every test and fixture
 // in this package supplies this contract value; the mismatch and
 // zero-value arms are exercised explicitly in attestation_test.go.
@@ -116,13 +116,13 @@ func guardResult(id string, pass bool, witness string) experiment.GuardResult {
 }
 
 // measurement builds one decision-eligible or diagnostic Measurement
-// carrying the NUMERIC arm of SI-45's value union.
+// carrying the NUMERIC arm of SI-46's value union.
 func measurement(id string, value float64, unit string, source experiment.Source) experiment.Measurement {
 	return experiment.Measurement{ID: id, Value: experiment.NumberValue(formatFloat(value)), Unit: unit, Source: source}
 }
 
 // boolMeasurement builds one Measurement carrying the BOOLEAN arm — legal
-// only for a measurement whose registered metric type is boolean (SI-45).
+// only for a measurement whose registered metric type is boolean (SI-46).
 func boolMeasurement(id string, value bool, unit string, source experiment.Source) experiment.Measurement {
 	return experiment.Measurement{ID: id, Value: experiment.BoolValue(value), Unit: unit, Source: source}
 }

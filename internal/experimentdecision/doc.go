@@ -4,7 +4,7 @@
 // DC-14, CO-1, CO-3, CO-5, CO-7): given one locked
 // github.com/jyang234/verdi/internal/experiment.Definition, a complete,
 // integrity-valid observation set, and the execution layer's
-// environment-policy attestation for the run (SI-41), Evaluate
+// environment-policy attestation for the run (SI-42), Evaluate
 // deterministically produces exactly one experiment.Result expressing
 // proven-winner,
 // violated-with-witness, or disclosed-unproven, in the registered

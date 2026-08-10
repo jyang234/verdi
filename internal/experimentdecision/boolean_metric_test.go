@@ -49,10 +49,10 @@ func primaryValue(t *testing.T, res experiment.Result, id string) string {
 	return string(c.Primary.Value)
 }
 
-// TestEvaluateBooleanRateIsFractionOfTrue is SI-45's headline aggregation
+// TestEvaluateBooleanRateIsFractionOfTrue is SI-46's headline aggregation
 // case: rate over a boolean metric is the fraction of rounds that measured
 // true, because true maps to 1 and false to 0 and rate reduces by
-// arithmetic mean (SI-40).
+// arithmetic mean (SI-41).
 func TestEvaluateBooleanRateIsFractionOfTrue(t *testing.T) {
 	def := booleanPrimaryDefinition(t, experiment.AggregationRate)
 	obs := booleanObservations(t, def, map[string][]bool{
@@ -73,8 +73,8 @@ func TestEvaluateBooleanRateIsFractionOfTrue(t *testing.T) {
 }
 
 // TestEvaluateBooleanAggregations proves all five registered aggregations
-// stay defined over the mapped values (SI-45), with the same nearest-rank
-// percentile and maximum/mean rules SI-40 fixed for numbers.
+// stay defined over the mapped values (SI-46), with the same nearest-rank
+// percentile and maximum/mean rules SI-41 fixed for numbers.
 func TestEvaluateBooleanAggregations(t *testing.T) {
 	// baseline maps to [1,0,0]; candidate-a maps to [1,1,0].
 	primary := map[string][]bool{
@@ -112,7 +112,7 @@ func TestEvaluateBooleanAggregations(t *testing.T) {
 // TestEvaluateRejectsMismatchedMeasurementKinds proves the union is
 // enforced at Evaluate's precondition, in both directions, and carries no
 // Result: a number for a boolean-typed metric and a boolean for a numeric
-// one are integrity violations, never quietly coerced inputs (SI-45,
+// one are integrity violations, never quietly coerced inputs (SI-46,
 // CO-1).
 func TestEvaluateRejectsMismatchedMeasurementKinds(t *testing.T) {
 	tests := []struct {

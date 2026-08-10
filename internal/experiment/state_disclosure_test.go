@@ -56,7 +56,7 @@ func TestStateDisclosureValidate(t *testing.T) {
 }
 
 // disclosureCodes projects ds onto its codes, in the order returned — the
-// order itself is part of what DeriveState promises (SI-43).
+// order itself is part of what DeriveState promises (SI-44).
 func disclosureCodes(ds []StateDisclosure) []StateDisclosureCode {
 	codes := make([]StateDisclosureCode, 0, len(ds))
 	for _, d := range ds {
@@ -65,7 +65,7 @@ func disclosureCodes(ds []StateDisclosure) []StateDisclosureCode {
 	return codes
 }
 
-// TestDeriveStateDisclosures is SI-43's table: which authority conjuncts
+// TestDeriveStateDisclosures is SI-44's table: which authority conjuncts
 // DeriveState reports as disclosed-unproven at each rung of the ladder,
 // and in which order. Artifact bytes cannot prove AC-5's human/merge
 // witness for a lock, nor OD-4's authenticated principal resolution for a

@@ -40,7 +40,7 @@ func (g GuardResult) Validate() error {
 
 // Measurement is one measured value inside an observation record, carrying
 // exactly one trust classification (DC-12). Value is the strict
-// number-or-boolean union SI-45 registers (measurementvalue.go).
+// number-or-boolean union SI-46 registers (measurementvalue.go).
 type Measurement struct {
 	ID     string           `json:"id"`
 	Value  MeasurementValue `json:"value"`
@@ -54,7 +54,7 @@ type Measurement struct {
 // It is deliberately GRAMMAR-SCOPED about which arm of the union appeared:
 // whether this measurement's id may carry a boolean at all depends on the
 // metric the definition registered for it, which is knowledge only the
-// def-aware path has (ValidateObservations enforces it, SI-45). Checking
+// def-aware path has (ValidateObservations enforces it, SI-46). Checking
 // it here would either duplicate that rule or, worse, guess at it.
 func (m Measurement) Validate() error {
 	if err := ValidateID(m.ID); err != nil {

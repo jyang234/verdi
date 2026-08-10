@@ -18,7 +18,7 @@ const (
 )
 
 // ResultVerifier is the port DeriveState requires to treat a PRESENT
-// result.json as state-bearing (invention ledger SI-42): given the locked
+// result.json as state-bearing (invention ledger SI-43): given the locked
 // definition, the complete observation set, and the decoded result, it
 // answers whether that result IS the closed decision engine's own output
 // for that evidence, or an operational error explaining why not.
@@ -73,7 +73,7 @@ type ResultVerifier func(Definition, []Observation, Result) error
 // incompleteness carries its own sentinel rather than being folded into
 // ErrObservationIntegrity.
 //
-// verify is REQUIRED (SI-42): a present result.json only bears the
+// verify is REQUIRED (SI-43): a present result.json only bears the
 // recommended or inconclusive rung when verify accepts it as the closed
 // engine's own output for the locked definition and complete observation
 // set. A nil verify is an operational error at entry rather than a
@@ -81,7 +81,7 @@ type ResultVerifier func(Definition, []Observation, Result) error
 // operational error — never a silent downgrade to measured.
 //
 // The second return is the derived state's DISCLOSED-UNPROVEN AUTHORITY
-// CONJUNCTS (SI-43, state_disclosure.go): the facts AC-1's state table
+// CONJUNCTS (SI-44, state_disclosure.go): the facts AC-1's state table
 // depends on that no reader of these artifacts can establish from their
 // bytes. Every rung from registered upward discloses the registration
 // lock's human witness, and the ratified rung additionally discloses the
@@ -234,7 +234,7 @@ func readObservations(dir string, def Definition) (obs []Observation, ok bool, e
 // readResult reads and decodes result.json, checks that its
 // definition_digest and algorithm match the locked definition, and then
 // requires verify to accept it as the closed engine's own output for
-// (def, obs) — SI-42's recompute-equality authority. ok is false only when
+// (def, obs) — SI-43's recompute-equality authority. ok is false only when
 // the file itself is absent; every other failure, verification included,
 // is an error.
 //
@@ -269,7 +269,7 @@ func readResult(dir, defDigest string, def Definition, obs []Observation, verify
 // readRatification reads and decodes ratification.yaml, checks that its
 // result_digest equals ResultDigest(res), and requires its disposition's
 // def/result-bound preconditions to hold (ValidateRatificationBinding,
-// SI-44). ok is false only when the file itself is absent; a present
+// SI-45). ok is false only when the file itself is absent; a present
 // ratification whose disposition cannot be true of this definition and
 // result is an error under the same absence-vs-invalidity doctrine
 // DeriveState applies to every other artifact.

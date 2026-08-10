@@ -185,7 +185,7 @@ func registeredMetricType(def Definition, id string) (MetricType, bool) {
 	return "", false
 }
 
-// validateMeasurementValueKind enforces SI-45's typed union against the
+// validateMeasurementValueKind enforces SI-46's typed union against the
 // registered metric: a measurement whose id resolves to a boolean-typed
 // registered metric MUST carry the JSON literal true/false, and every
 // other measurement MUST carry a number. Both directions fail closed (CO-2)
