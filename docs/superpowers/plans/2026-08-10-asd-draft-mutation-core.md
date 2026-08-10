@@ -137,7 +137,7 @@ Request = {
   "spec":"spec/<name>",
   "base_digest":"sha256:<64-lower-hex>",
   "base_spec_b64":"<standard padded base64 of exact prior spec.md bytes>",
-  "expected":{"branch":"<exact branch>","head":"<40-lower-hex>"},
+  "expected":{"checkout":"<canonical checkout root>","branch":"<exact branch>","head":"<40-lower-hex>"},
   "operations":[Operation, ...],
   "excerpts":[Excerpt, ...]                 // optional, omitted when empty
 }
@@ -154,6 +154,28 @@ Excerpt = {
 stored in provenance. There are at most three excerpts per target. The core
 computes each excerpt's target digest from the resulting object; callers never
 supply it.
+
+`checkout` is the exact worktree root returned by
+`git rev-parse --show-toplevel`, made absolute and clean, resolved through
+`filepath.EvalSymlinks`, then rendered with `/` separators. Empty, relative,
+unresolvable, non-root-equivalent or non-POSIX forms are operationally invalid;
+v1 supports the repository's Darwin/Linux platform set. The request's expected
+checkout, branch and HEAD must byte-equal the three resolved operands before
+any mutation. The shared response identity is:
+
+```text
+Identity = {
+  "checkout":"<canonical checkout root>",
+  "branch":"<exact short local branch>|DETACHED",
+  "head":"<40-lower-hex>",
+  "spec":"spec/<name>"
+}
+```
+
+Detached HEAD is not a design branch and yields a state refusal whose exact
+branch value is the literal `DETACHED`; the field is never empty. The service
+constructs `Identity` once after request decode and threads that same value
+through success and every typed refusal; adapters never reconstruct it.
 
 Every `Operation` has `op` first and exactly the fields in its row:
 
@@ -202,7 +224,7 @@ Disclosure =
 | {"code":"context-unavailable","reason":"unavailable-before-context-compiler"}
 Result = {
   "schema":"verdi.draftmutation-result/v1",
-  "spec":"spec/<name>",
+  "identity":Identity,
   "previous_digest":"sha256:<64-lower-hex>",
   "result_digest":"sha256:<64-lower-hex>",
   "changes":[Change, ...],
@@ -219,15 +241,19 @@ literal, and is then joined with `/`, so target identity is reversible. Stale
 refusal is the only verdict record written to stdout:
 
 ```text
-{"schema":"verdi.draftmutation-refusal/v1","spec":"spec/<name>","code":"stale-base","current_digest":"sha256:<64-lower-hex>","changed_targets":["<Change target>","..."]}
+{"schema":"verdi.draftmutation-refusal/v1","identity":Identity,"code":"stale-base","current_digest":"sha256:<64-lower-hex>","changed_targets":["<Change target>","..."]}
 ```
 
 Changed targets are sorted canonical semantic IDs and include `problem` and
 `outcome`; deletion is represented by the absent current target still named in
-the list. Other verdicts use fixed stderr codes `state-forbidden`,
-`policy-forbidden`, `actor-forbidden`, `operation-invalid`, and
-`result-invalid`. Operational failures use `input-invalid`, `identity-invalid`,
-`authority-invalid`, `recovery-invalid`, or `io-failure`.
+the list. Every internal typed refusal contains `identity:Identity`. Other
+verdicts use fixed stderr codes `state-forbidden`, `policy-forbidden`,
+`actor-forbidden`, `operation-invalid`, and `result-invalid`; the CLI renders
+the code and canonical identity before human detail. Operational failures use
+`input-invalid`, `identity-invalid`, `authority-invalid`, `recovery-invalid`,
+or `io-failure`; after strict request decode they carry/render the same exact
+identity. A failure before the request yields a valid spec is an input-decoder
+diagnostic rather than a mutation response and cannot truthfully name a spec.
 
 The sidecar entry is also exact. `Operation` is the same strict union decoded
 from the request; `Change` is the result union above. The CLI arm always writes
@@ -300,7 +326,8 @@ and tests/testdata.
 Start with strict codec and golden RED tests, then pure apply/diff tests. Pin
 every enum, per-operation field set, result/refusal byte shape, warning,
 ordering, base-snapshot digest check, stale changed-target computation and 1
-MiB refusal. Reject request-supplied attribution and unknown optional fields.
+MiB refusal. Pin `Identity` on success and every typed refusal. Reject
+request-supplied attribution and unknown optional fields.
 
 Run: `go test -race ./internal/draftmutation -run 'Test(Decode|Apply|SemanticDiff)' -count=1`
 
@@ -310,7 +337,8 @@ Commit: `Define draft mutation transactions`
 
 **Files:** create `internal/draftmutation/policy.go`, `identity.go` and tests.
 
-Test exact checkout/branch/HEAD/spec, Git-derived draft state, sealed effective
+Test canonical symlink-resolved checkout representation and exact expected
+checkout/branch/HEAD/spec, Git-derived draft state, sealed effective
 policy, delegated-agent/harness inputs, sealed-resolution-only in-process
 attribution, all mode combinations, absent authority, layout=false and forged
 policy failures. Define consumer-local ports for fakes. The CLI never exercises
@@ -355,8 +383,9 @@ Commit: `Apply atomic draft mutations`
 
 Drive the built binary for stdin/file input, required `--harness`, optional
 `--session`, rejection of actor/principal environment spoofing, canonical
-result/refusal, exit 0/1/2, stale/concurrent calls and malformed input. The
-adapter contains no operation switch and no semantic validation.
+result/refusal identity, identity-bearing post-decode stderr, exit 0/1/2,
+stale/concurrent calls and malformed input. The adapter contains no operation
+switch and no semantic validation.
 
 Run: `go test -race ./cmd/verdi -run 'Test.*DesignMutate' -count=1`
 
@@ -400,7 +429,7 @@ canonical promotion independently preserves **166/166** source elements.
 | 10 | ASD DC-6 durability | T5 | every write/fsync/rename fault |
 | 11 | ASD DC-7 mode enforcement | T4 | closed mode matrix |
 | 12 | ASD DC-8 request boundary | exact wire; T3/T7 | strict codec/built binary |
-| 13 | ASD DC-9 identity | request identity; T4 | checkout/branch/HEAD/spec mismatch |
+| 13 | ASD DC-9 identity | request/response Identity; T3/T4/T7 | canonical checkout/branch/HEAD/spec mismatch and echo |
 | 14 | ASD DC-10 stable IDs | operations; T2/T3 | duplicate/missing target tests |
 | 15 | ASD DC-11 ordered batch | operations; T2/T6 | order and rollback tests |
 | 16 | ASD DC-12 semantic diff | result grammar; T3 | deterministic change golden |

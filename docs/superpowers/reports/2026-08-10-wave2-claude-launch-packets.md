@@ -49,9 +49,11 @@ contracts recorded in SI-65..SI-70. In particular: the request carries a
 digest-verified base snapshot for stale changed-target computation; the CLI is
 always an unauthenticated delegated-agent and requires --harness (optional
 --session), never environment-selected human/principal attribution; a direct
-edit is the exact unclassified-gap arm; and recovery/mutation uses only the
-checkout-wide data/writer.lock plus the ratified data/draft-mutation root. Do
-not substitute a simpler two-file write or create a per-spec lock.
+edit is the exact unclassified-gap arm; the request and every response carry
+the plan's canonical exact checkout/branch/HEAD/spec identity; and recovery/
+mutation uses only the checkout-wide data/writer.lock plus the ratified
+data/draft-mutation root. Do not substitute a simpler two-file write or create
+a per-spec lock.
 
 Do not implement workbench or MCP adapters, capabilities/context compiler,
 semantic review UI, Playwright changes, Git publication/governance verbs, a new
