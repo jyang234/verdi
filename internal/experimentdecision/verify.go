@@ -60,7 +60,7 @@ func VerifyResult(def experiment.Definition, obs []experiment.Observation, res e
 		return errfWrap("verifying result: rendering the stored result", err)
 	}
 	if !bytes.Equal(want, got) {
-		return errf("verifying result: the stored result is not the closed engine's output for this definition and observation set\nstored:\n%s\nrecomputed:\n%s", got, want)
+		return errf("verifying result: the stored result is not this engine's own output for this definition and observation set\nstored:\n%s\nrecomputed:\n%s", got, want)
 	}
 	return nil
 }
