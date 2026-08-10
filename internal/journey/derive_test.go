@@ -167,7 +167,7 @@ func TestTransitionHasCountersign(t *testing.T) {
 // --- deriveBlockers ---------------------------------------------------
 
 func TestDeriveBlockers_DefaultBranchUnresolved(t *testing.T) {
-	blockers := deriveBlockers(false, specstate.Result{State: specstate.AcceptedPendingBuild}, nil, testOwner())
+	blockers := deriveBlockers(false, false, specstate.Result{State: specstate.AcceptedPendingBuild}, nil, testOwner())
 	found := findBlocker(blockers, "default-branch-unresolved/unknown")
 	if found == nil {
 		t.Fatalf("blockers = %+v, want default-branch-unresolved/unknown", blockers)
@@ -189,7 +189,7 @@ func TestDeriveBlockers_DefaultBranchUnresolved(t *testing.T) {
 func TestDeriveBlockers_LifecycleStateUnproven(t *testing.T) {
 	t.Run("with disclosures", func(t *testing.T) {
 		result := specstate.Result{State: specstate.Unproven, Disclosures: []string{"b", "a", "a"}}
-		blockers := deriveBlockers(true, result, nil, testOwner())
+		blockers := deriveBlockers(true, false, result, nil, testOwner())
 		found := findBlocker(blockers, "lifecycle-state-unproven/unknown")
 		if found == nil {
 			t.Fatal("want lifecycle-state-unproven/unknown blocker")
@@ -200,7 +200,7 @@ func TestDeriveBlockers_LifecycleStateUnproven(t *testing.T) {
 	})
 	t.Run("without disclosures uses a fixed witness", func(t *testing.T) {
 		result := specstate.Result{State: specstate.Unproven}
-		blockers := deriveBlockers(true, result, nil, testOwner())
+		blockers := deriveBlockers(true, false, result, nil, testOwner())
 		found := findBlocker(blockers, "lifecycle-state-unproven/unknown")
 		if found == nil || len(found.Witnesses) != 1 || found.Witnesses[0] == "" {
 			t.Fatalf("blocker = %+v, want exactly one non-empty fixed witness", found)
@@ -216,7 +216,7 @@ func TestDeriveBlockers_ObligationsAndPrincipalResolution(t *testing.T) {
 	if !classDeclared {
 		t.Fatal("classDeclared = false, want true")
 	}
-	blockers := deriveBlockers(true, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
+	blockers := deriveBlockers(true, false, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
 
 	wantIDs := []string{
 		"obligation-countersign-unproven/close/attestation/countersign",
@@ -259,7 +259,7 @@ func TestDeriveBlockers_ObligationIDCollisionRegression(t *testing.T) {
 			},
 		},
 	}
-	blockers := deriveBlockers(true, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
+	blockers := deriveBlockers(true, false, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
 
 	idA := "obligation-fold-green-unproven/close/attestation/fold-green"
 	idB := "obligation-fold-green-unproven/close/behavioral/fold-green"
@@ -289,7 +289,7 @@ func TestDeriveBlockers_ObligationIDByteIdenticalDuplicateMerges(t *testing.T) {
 			},
 		},
 	}
-	blockers := deriveBlockers(true, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
+	blockers := deriveBlockers(true, false, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
 	count := 0
 	for _, b := range blockers {
 		if b.ID == "obligation-countersign-unproven/close/attestation/countersign" {
@@ -304,7 +304,7 @@ func TestDeriveBlockers_ObligationIDByteIdenticalDuplicateMerges(t *testing.T) {
 func TestDeriveBlockers_ProposedForgeFacts(t *testing.T) {
 	mdl := model.Canonical()
 	candidates, _ := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Proposed})
-	blockers := deriveBlockers(true, specstate.Result{State: specstate.Proposed}, candidates, testOwner())
+	blockers := deriveBlockers(true, false, specstate.Result{State: specstate.Proposed}, candidates, testOwner())
 
 	// The draft-exit transition is merge-signaled (docs/superpowers/specs/
 	// 2026-08-01-merge-signals-spec-acceptance-design.md), so the
@@ -323,7 +323,7 @@ func TestDeriveBlockers_ProposedForgeFacts_NoCandidatesFallsBackToUnknown(t *tes
 	// A model with no draft-exit transition at all: the
 	// draft-exit verb cannot be named, so the blocker's transition is the
 	// literal "unknown" rather than a guess.
-	blockers := deriveBlockers(true, specstate.Result{State: specstate.Proposed}, nil, testOwner())
+	blockers := deriveBlockers(true, false, specstate.Result{State: specstate.Proposed}, nil, testOwner())
 	found := findBlocker(blockers, "forge-facts-unavailable/unknown")
 	if found == nil {
 		t.Fatalf("blockers = %v, want forge-facts-unavailable/unknown", blockerIDs(blockers))
@@ -333,7 +333,7 @@ func TestDeriveBlockers_ProposedForgeFacts_NoCandidatesFallsBackToUnknown(t *tes
 func TestDeriveBlockers_TerminalState_Empty(t *testing.T) {
 	mdl := model.Canonical()
 	candidates, _ := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.Closed})
-	blockers := deriveBlockers(true, specstate.Result{State: specstate.Closed}, candidates, testOwner())
+	blockers := deriveBlockers(true, false, specstate.Result{State: specstate.Closed}, candidates, testOwner())
 	if len(blockers) != 0 {
 		t.Fatalf("terminal-state blockers = %v, want none", blockerIDs(blockers))
 	}
@@ -342,7 +342,7 @@ func TestDeriveBlockers_TerminalState_Empty(t *testing.T) {
 func TestDeriveBlockers_SortedAscendingByID(t *testing.T) {
 	mdl := model.Canonical()
 	candidates, _ := candidateTransitions(mdl, "feature", specstate.Result{State: specstate.AcceptedPendingBuild})
-	blockers := deriveBlockers(false, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
+	blockers := deriveBlockers(false, false, specstate.Result{State: specstate.AcceptedPendingBuild}, candidates, testOwner())
 	if len(blockers) < 2 {
 		t.Fatalf("want multiple blockers to prove ordering, got %v", blockerIDs(blockers))
 	}

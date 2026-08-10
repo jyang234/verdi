@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -35,6 +37,140 @@ func openConfig(t *testing.T, root string) *store.Config {
 		t.Fatalf("store.Open: %v", err)
 	}
 	return cfg
+}
+
+func installedPolicyFixtureFiles(t *testing.T) map[string]string {
+	t.Helper()
+	rels := []string{
+		".verdi/policy/constitution.md",
+		".verdi/policy/exemptions/legacy-service-go.md",
+		".verdi/policy/overlays/frontend-go-version.md",
+		".verdi/policy/policies/go-toolchain.md",
+		".verdi/policy/profiles/solo-default.md",
+	}
+	files := make(map[string]string, len(rels))
+	root := filepath.Join("..", "policyauthority", "testdata", "store")
+	for _, rel := range rels {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("reading policy authority fixture %s: %v", rel, err)
+		}
+		files[rel] = string(data)
+	}
+	return files
+}
+
+func TestProject_Integration_InstalledProfile(t *testing.T) {
+	files := installedPolicyFixtureFiles(t)
+	files[".verdi/specs/active/payments/spec.md"] = testFeatureSpecMD
+	repo := buildFactsRepo(t, files)
+	cfg := openConfig(t, repo.Dir)
+
+	rec, err := NewProjector().Project(context.Background(), cfg, "spec/payments")
+	if err != nil {
+		t.Fatalf("Project: %v", err)
+	}
+	if !rec.Principals.ProfileAdopted {
+		t.Fatal("Principals.ProfileAdopted = false, want true for installed authority")
+	}
+	if rec.Principals.SelectedProfileID != "solo-default" {
+		t.Fatalf("Principals.SelectedProfileID = %q, want solo-default", rec.Principals.SelectedProfileID)
+	}
+	if rec.Principals.SelectedProfileDigest != fixtureSelectedProfileDigest {
+		t.Fatalf("Principals.SelectedProfileDigest = %q, want %q", rec.Principals.SelectedProfileDigest, fixtureSelectedProfileDigest)
+	}
+	const absent = "no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown"
+	for _, disclosure := range rec.Principals.Disclosures {
+		if disclosure == absent {
+			t.Fatalf("Principals.Disclosures = %v, must not disclose profile absence after adoption", rec.Principals.Disclosures)
+		}
+	}
+	const unproven = "authenticated principal resolution and profile-contributed requirements remain unproven"
+	if !containsString(rec.Principals.Disclosures, unproven) {
+		t.Fatalf("Principals.Disclosures = %v, want %q", rec.Principals.Disclosures, unproven)
+	}
+	data, err := Canonical(rec)
+	if err != nil {
+		t.Fatalf("Canonical: %v", err)
+	}
+	if strings.Contains(string(data), "no governance profile is adopted") {
+		t.Fatalf("canonical adopted record emits a false profile-absence disclosure: %s", data)
+	}
+	if len(rec.Principals.Required) == 0 {
+		t.Fatal("Principals.Required is empty, want operating-model-derived close obligation")
+	}
+	for _, required := range rec.Principals.Required {
+		if required.Resolution != "unproven" {
+			t.Fatalf("Principals.Required = %+v, adopted profile must not authenticate operating-model roles", rec.Principals.Required)
+		}
+	}
+}
+
+func TestProject_Integration_ProfileNotAdopted(t *testing.T) {
+	repo := buildFactsRepo(t, map[string]string{".verdi/specs/active/payments/spec.md": testFeatureSpecMD})
+	cfg := openConfig(t, repo.Dir)
+
+	rec, err := NewProjector().Project(context.Background(), cfg, "spec/payments")
+	if err != nil {
+		t.Fatalf("Project: %v", err)
+	}
+	if rec.Principals.ProfileAdopted {
+		t.Fatal("Principals.ProfileAdopted = true, want false before adoption")
+	}
+	if rec.Principals.SelectedProfileID != "" || rec.Principals.SelectedProfileDigest != "" {
+		t.Fatalf("selected profile = %q/%q, want empty before adoption", rec.Principals.SelectedProfileID, rec.Principals.SelectedProfileDigest)
+	}
+	const absent = "no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown"
+	if !containsString(rec.Principals.Disclosures, absent) {
+		t.Fatalf("Principals.Disclosures = %v, want %q", rec.Principals.Disclosures, absent)
+	}
+}
+
+func TestProject_Integration_InvalidPolicyAuthority(t *testing.T) {
+	policyFiles := installedPolicyFixtureFiles(t)
+	tests := []struct {
+		name    string
+		files   map[string]string
+		wantErr string
+	}{
+		{
+			name: "incomplete adoption",
+			files: map[string]string{
+				".verdi/policy/policies/go-toolchain.md": policyFiles[".verdi/policy/policies/go-toolchain.md"],
+			},
+			wantErr: "incomplete adoption",
+		},
+		{
+			name: "malformed authority",
+			files: map[string]string{
+				".verdi/policy/constitution.md": "---\nschema: [not valid here]\n",
+			},
+			wantErr: "decoding constitution.md",
+		},
+		{
+			name: "unavailable authority path",
+			files: map[string]string{
+				".verdi/policy": "not a directory",
+			},
+			wantErr: "not a directory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.files[".verdi/specs/active/payments/spec.md"] = testFeatureSpecMD
+			repo := buildFactsRepo(t, tt.files)
+			cfg := openConfig(t, repo.Dir)
+
+			rec, err := NewProjector().Project(context.Background(), cfg, "spec/payments")
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Project error = %v, want containing %q", err, tt.wantErr)
+			}
+			if rec.Schema != "" {
+				t.Fatalf("Project record schema = %q, want zero record on invalid policy authority", rec.Schema)
+			}
+		})
+	}
 }
 
 // TestProject_Integration_UnknownDefaultBranch proves that an unresolvable

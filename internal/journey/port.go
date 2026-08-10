@@ -185,16 +185,19 @@ type DefaultBranchResolver func(ctx context.Context, root string) (specstate.Bra
 type Projector struct {
 	git                  GitReader
 	state                StateResolver
+	profiles             ProfileLoader
 	resolveDefaultBranch DefaultBranchResolver
 }
 
 // NewProjector returns a Projector backed by real git plumbing, the real
-// internal/specstate resolver, and specstate.ResolveDefaultBranch — the
-// only constructor production callers may use.
+// internal/specstate resolver, the policyauthority-backed profile loader,
+// and specstate.ResolveDefaultBranch — the only constructor production
+// callers may use.
 func NewProjector() Projector {
 	return Projector{
 		git:                  NewGitReader(),
 		state:                NewStateResolver(),
+		profiles:             NewProfileLoader(),
 		resolveDefaultBranch: specstate.ResolveDefaultBranch,
 	}
 }
@@ -202,5 +205,5 @@ func NewProjector() Projector {
 // newProjector is the test-only seam: package tests construct a Projector
 // over in-process fakes.
 func newProjector(git GitReader, state StateResolver, resolveDefaultBranch DefaultBranchResolver) Projector {
-	return Projector{git: git, state: state, resolveDefaultBranch: resolveDefaultBranch}
+	return Projector{git: git, state: state, profiles: NewProfileLoader(), resolveDefaultBranch: resolveDefaultBranch}
 }
