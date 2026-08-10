@@ -90,6 +90,10 @@ Principles inherited from verdi-go and binding here:
     execution/<workspace-id>/      # execution-workspace runs (OD-6); naming owned by spec/execution-workspace
     execution/<workspace-id>.lock
     journey/event-receipts/<ref-slug>.jsonl   # GLG journey event receipts (GLG v3 dc-27; SI-5): append-only, D3 writer only
+    draft-mutation/<spec-name>/    # ASD recovery journal/staging; D3 global writer only (SI-69)
+      journal.json
+      spec.new
+      provenance.new
 ```
 
 Notes:
@@ -235,6 +239,19 @@ Notes:
   cover it; it joins `worktrees/` among the individually-ratified `data/`
   paths. Its lock sibling `data/execution/<workspace-id>.lock` is held only
   for the duration of a single mutating operation.
+- ASD draft-mutation recovery: `data/draft-mutation/<spec-name>/` is an
+  individually-ratified per-checkout transaction root, not a new zone and not
+  a committed artifact. It contains only the digest-validated journal and
+  staging files needed to recover one coordinated `spec.md` plus
+  `design-provenance.jsonl` mutation. Before inspecting recovery state or
+  writing, a standalone mutation process acquires the existing checkout-wide
+  `data/writer.lock`; if `verdi serve` or another writer holds it, mutation
+  fails operationally without touching the store. No per-spec lock or second
+  writer authority exists. Recovery and cleanup run under that same lock.
+  Malformed recovery state is retained for human attention and blocks further
+  mutation. The root has no `verdi gc` scope; successful recovery/mutation
+  removes its staging files, and whole-checkout disposal is its only external
+  reclamation.
 
 ## Store manifest: `verdi.yaml`
 
@@ -377,7 +394,10 @@ a byte-deterministic pure function of the tree.
   running. Per-checkout sockets (and pointer files) mean worktrees never
   collide; if even the short bound form overflows the ceiling, binding
   fails loudly naming the path and the limit, rather than a cryptic `bind:
-  invalid argument`. CI writes only commit-scoped derived paths.
+  invalid argument`. A standalone ASD draft mutation is also a D3 writer: it
+  uses this exact global lock for recovery and mutation and refuses while the
+  service owns it; it never introduces a narrower lock. CI writes only
+  commit-scoped derived paths.
 - **D4 — Disposable caches.** Cache filenames embed layout version and tree
   hash; staleness is detected, never guessed. The tree hash algorithm is
   sha256 over the sorted `(path, git-blob-sha)` pairs of the committed zone
@@ -421,6 +441,8 @@ throughout: keep on dirty, keep on locked, keep on ambiguous; never forced.
 The two existing modes' per-invocation mutual exclusivity (gc-reclaim dc-1)
 is restated untouched; no new invocation surface is ratified here.
 `data/journey/` carries no ratified gc scope (GLG v3 dc-27; SI-5).
+`data/draft-mutation/` carries no ratified gc scope; its staging lifecycle is
+owned by ASD recovery under D3's global writer lock (SI-69).
 
 ## Scale envelope and non-goals
 
