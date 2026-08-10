@@ -11,11 +11,11 @@ import "fmt"
 //
 // It is closed for the same reason every other vocabulary in this package
 // is: an unknown code fails closed, so a consumer can never encounter a
-// disclosure it has no handling for and treat it as noise. Exactly two
-// codes are registered today; a third requires an explicit revision.
+// disclosure it has no handling for and treat it as noise. Exactly three
+// codes are registered today; a fourth requires an explicit revision.
 type StateDisclosureCode string
 
-// The two registered disclosure codes.
+// The three registered disclosure codes.
 const (
 	// DisclosureRegistrationLockWitness is emitted at every rung from
 	// registered upward. Locked (normalize.go) proves the lock block's
@@ -26,6 +26,19 @@ const (
 	// surfaces and profile governance own converting this into proof or
 	// refusal.
 	DisclosureRegistrationLockWitness StateDisclosureCode = "registration-lock-human-witness"
+
+	// DisclosureResultEnvironmentReceipt is emitted at every RESULT-BEARING
+	// rung — recommended, inconclusive, and ratified alike — because each
+	// one rests on a verdict, and AC-2 step 1 makes every verdict rest on
+	// the run matching the registered environment policy as well as the
+	// locked digests. SI-42 resolved that conjunct at the Wave-2 layer as a
+	// caller-supplied in-memory attestation; no artifact inside the
+	// experiment directory records the environment the run actually
+	// executed in, so a reader of these bytes cannot re-establish it. The
+	// Wave-3 execution unit's durable receipt/fingerprint artifact owns
+	// converting this into proof or refusal; until it lands the conjunct is
+	// disclosed-unproven here rather than silently assumed (SI-44, CO-1).
+	DisclosureResultEnvironmentReceipt StateDisclosureCode = "result-environment-policy-receipt"
 
 	// DisclosureRatificationActorResolution is emitted only at the ratified
 	// rung. Ratification.Validate proves the actor field is a canonical
@@ -39,7 +52,7 @@ const (
 // Validate fails closed on any disclosure code outside the vocabulary.
 func (c StateDisclosureCode) Validate() error {
 	switch c {
-	case DisclosureRegistrationLockWitness, DisclosureRatificationActorResolution:
+	case DisclosureRegistrationLockWitness, DisclosureResultEnvironmentReceipt, DisclosureRatificationActorResolution:
 		return nil
 	}
 	return fmt.Errorf("experiment: unknown state disclosure code %q", string(c))
@@ -69,16 +82,30 @@ func (d StateDisclosure) Validate() error {
 	return nil
 }
 
-// lockWitnessDisclosure and actorResolutionDisclosure are the two fixed
-// disclosure values DeriveState emits. They are functions rather than
-// package-level variables so no caller can mutate the shared value a later
-// derivation would return.
+// lockWitnessDisclosure, environmentReceiptDisclosure, and
+// actorResolutionDisclosure are the three fixed disclosure values
+// DeriveState emits. They are functions rather than package-level
+// variables so no caller can mutate the shared value a later derivation
+// would return.
 func lockWitnessDisclosure() StateDisclosure {
 	return StateDisclosure{
 		Code: DisclosureRegistrationLockWitness,
 		Detail: "the lock block's digest matches the registered definition, but the human moment AC-5 requires behind it " +
 			// vocab:identity — "merge" names the git pull-request merge event AC-5 fixes as the solo-mode transport witness, a mechanism identity, not renameable display vocabulary.
 			"is witnessed by the pull-request merge, a git-layer fact these artifact bytes cannot exhibit",
+	}
+}
+
+// environmentReceiptDisclosure makes SI-42's at-rest deferral visible:
+// the engine was handed an environment-policy attestation in memory, but
+// the artifacts left behind hold no fingerprint of the environment the
+// run executed in, so at rest AC-2 step 1's second conjunct is unproven
+// until the Wave-3 execution unit's durable receipt exists (SI-44).
+func environmentReceiptDisclosure() StateDisclosure {
+	return StateDisclosure{
+		Code: DisclosureResultEnvironmentReceipt,
+		Detail: "the verdict rests on AC-2 step 1's environment-policy conjunct as well as the locked digests, but no " +
+			"artifact at rest records the environment this run executed in; the execution unit's durable receipt owns proving it",
 	}
 }
 

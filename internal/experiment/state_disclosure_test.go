@@ -12,9 +12,11 @@ func TestStateDisclosureCodeValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{"registration lock witness", DisclosureRegistrationLockWitness, false},
+		{"result environment receipt", DisclosureResultEnvironmentReceipt, false},
 		{"ratification actor resolution", DisclosureRatificationActorResolution, false},
 		{"empty", StateDisclosureCode(""), true},
-		{"unknown", StateDisclosureCode("environment-policy-receipt"), true},
+		{"unknown", StateDisclosureCode("evaluator-executable-provenance"), true},
+		{"near miss on the environment receipt code", StateDisclosureCode("environment-policy-receipt"), true},
 		{"case-shifted", StateDisclosureCode("Registration-Lock-Human-Witness"), true},
 	}
 	for _, tt := range tests {
@@ -37,6 +39,7 @@ func TestStateDisclosureValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{"lock witness", StateDisclosure{Code: DisclosureRegistrationLockWitness, Detail: "why it is unproven"}, false},
+		{"environment receipt", StateDisclosure{Code: DisclosureResultEnvironmentReceipt, Detail: "why it is unproven"}, false},
 		{"actor resolution", StateDisclosure{Code: DisclosureRatificationActorResolution, Detail: "why it is unproven"}, false},
 		{"zero value", StateDisclosure{}, true},
 		{"unknown code", StateDisclosure{Code: StateDisclosureCode("made-up"), Detail: "d"}, true},
@@ -55,6 +58,38 @@ func TestStateDisclosureValidate(t *testing.T) {
 	}
 }
 
+// TestFixedDisclosureValues pins the three constructors DeriveState emits:
+// each carries its own registered code and a nonempty reason, and no two
+// share a code — a duplicated code would make a disclosure set ambiguous
+// about WHICH conjunct is unproven.
+func TestFixedDisclosureValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		build    func() StateDisclosure
+		wantCode StateDisclosureCode
+	}{
+		{"lock witness", lockWitnessDisclosure, DisclosureRegistrationLockWitness},
+		{"environment receipt", environmentReceiptDisclosure, DisclosureResultEnvironmentReceipt},
+		{"actor resolution", actorResolutionDisclosure, DisclosureRatificationActorResolution},
+	}
+	seen := map[StateDisclosureCode]string{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := tt.build()
+			if d.Code != tt.wantCode {
+				t.Fatalf("%s code = %q, want %q", tt.name, d.Code, tt.wantCode)
+			}
+			if err := d.Validate(); err != nil {
+				t.Fatalf("%s Validate() unexpected error: %v", tt.name, err)
+			}
+		})
+		if prev, dup := seen[tt.wantCode]; dup {
+			t.Fatalf("%s reuses the code %q already emitted by %s", tt.name, tt.wantCode, prev)
+		}
+		seen[tt.wantCode] = tt.name
+	}
+}
+
 // disclosureCodes projects ds onto its codes, in the order returned — the
 // order itself is part of what DeriveState promises (SI-44).
 func disclosureCodes(ds []StateDisclosure) []StateDisclosureCode {
@@ -67,9 +102,11 @@ func disclosureCodes(ds []StateDisclosure) []StateDisclosureCode {
 
 // TestDeriveStateDisclosures is SI-44's table: which authority conjuncts
 // DeriveState reports as disclosed-unproven at each rung of the ladder,
-// and in which order. Artifact bytes cannot prove AC-5's human/merge
-// witness for a lock, nor OD-4's authenticated principal resolution for a
-// ratification actor, and CO-1 forbids silently assuming either.
+// and in which order. Artifact bytes cannot prove AC-5's human witness
+// for a lock, nor AC-2 step 1's environment-policy conjunct behind any
+// verdict (SI-42's at-rest deferral), nor OD-4's authenticated principal
+// resolution for a ratification actor, and CO-1 forbids silently assuming
+// any of them.
 func TestDeriveStateDisclosures(t *testing.T) {
 	// ratified builds the full artifact set including a ratification bound
 	// to the result's own digest.
@@ -137,7 +174,7 @@ func TestDeriveStateDisclosures(t *testing.T) {
 			wantCodes: []StateDisclosureCode{DisclosureRegistrationLockWitness},
 		},
 		{
-			name: "recommended discloses the lock witness",
+			name: "recommended discloses the lock witness and the environment receipt, in that order",
 			setup: func(t *testing.T, dir string) {
 				doc, digest := lockedDefinitionDoc(t)
 				writeExperimentFile(t, dir, "experiment.yaml", doc)
@@ -146,10 +183,10 @@ func TestDeriveStateDisclosures(t *testing.T) {
 				writeExperimentFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictProvenWinner))
 			},
 			wantState: StateRecommended,
-			wantCodes: []StateDisclosureCode{DisclosureRegistrationLockWitness},
+			wantCodes: []StateDisclosureCode{DisclosureRegistrationLockWitness, DisclosureResultEnvironmentReceipt},
 		},
 		{
-			name: "inconclusive discloses the lock witness",
+			name: "inconclusive discloses the lock witness and the environment receipt, in that order",
 			setup: func(t *testing.T, dir string) {
 				doc, digest := lockedDefinitionDoc(t)
 				writeExperimentFile(t, dir, "experiment.yaml", doc)
@@ -158,13 +195,17 @@ func TestDeriveStateDisclosures(t *testing.T) {
 				writeExperimentFile(t, dir, "result.json", validResultJSONForDigest(digest, VerdictDisclosedUnproven))
 			},
 			wantState: StateInconclusive,
-			wantCodes: []StateDisclosureCode{DisclosureRegistrationLockWitness},
+			wantCodes: []StateDisclosureCode{DisclosureRegistrationLockWitness, DisclosureResultEnvironmentReceipt},
 		},
 		{
-			name:      "ratified discloses the lock witness and the actor resolution, in that order",
+			name:      "ratified discloses all three conjuncts, in lifecycle order",
 			setup:     ratified,
 			wantState: StateRatified,
-			wantCodes: []StateDisclosureCode{DisclosureRegistrationLockWitness, DisclosureRatificationActorResolution},
+			wantCodes: []StateDisclosureCode{
+				DisclosureRegistrationLockWitness,
+				DisclosureResultEnvironmentReceipt,
+				DisclosureRatificationActorResolution,
+			},
 		},
 	}
 

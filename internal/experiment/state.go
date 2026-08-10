@@ -83,10 +83,21 @@ type ResultVerifier func(Definition, []Observation, Result) error
 // The second return is the derived state's DISCLOSED-UNPROVEN AUTHORITY
 // CONJUNCTS (SI-44, state_disclosure.go): the facts AC-1's state table
 // depends on that no reader of these artifacts can establish from their
-// bytes. Every rung from registered upward discloses the registration
-// lock's human witness, and the ratified rung additionally discloses the
-// actor's authenticated principal resolution — always in that order, so
-// two derivations over the same bytes agree exactly. They are returned
+// bytes. There are three, emitted in lifecycle order so two derivations
+// over the same bytes agree exactly:
+//
+//   - the registration lock's human witness, at every rung from registered
+//     upward (AC-5's human moment behind the lock);
+//   - the result's environment-policy receipt, at every RESULT-BEARING
+//     rung — recommended, inconclusive, and ratified alike — because
+//     AC-2 step 1 rests every verdict on the run matching the registered
+//     environment policy, a conjunct SI-42 satisfies at evaluation time
+//     with an in-memory attestation that no artifact at rest records
+//     until the Wave-3 execution unit's durable receipt lands;
+//   - the ratification actor's authenticated principal resolution, at the
+//     ratified rung (OD-4, via the SI-21-deferred kernel seam).
+//
+// They are returned
 // rather than logged because CO-1 makes them part of the answer: a
 // consumer that surfaces the state must surface these with it, and the
 // Wave-5/6 adapter and lock surfaces own turning each one into proof or
@@ -148,6 +159,11 @@ func DeriveState(repoRoot, experimentDir string, verify ResultVerifier) (State, 
 	if !ok {
 		return StateMeasured, disclosures, nil
 	}
+
+	// A result is present, so every rung from here up rests on a verdict —
+	// and every verdict rests on AC-2 step 1's environment-policy conjunct,
+	// which no artifact at rest proves (SI-42, SI-44).
+	disclosures = append(disclosures, environmentReceiptDisclosure())
 
 	rung := StateInconclusive
 	if res.Verdict == VerdictProvenWinner {
