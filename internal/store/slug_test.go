@@ -15,7 +15,8 @@ func TestRefSlug_TableDriven(t *testing.T) {
 		{"already-lower simple name", "main", "main"},
 		{"uppercase lowered", "Feature/Stale-Decline", "feature--stale-decline"},
 		{"multiple slashes both mapped", "release/2026/q3", "release--2026--q3"},
-		{"underscore mapped to dash", "feature/foo_bar", "feature--foo-bar"},
+		{"underscore preserved: it is inside [a-z0-9._-]", "feature/foo_bar", "feature--foo_bar"},
+		{"bare underscore ref preserved", "ci_run", "ci_run"},
 		{"space mapped to dash", "feature/foo bar", "feature--foo-bar"},
 		{"dots and dashes preserved", "v1.2.3-rc.1", "v1.2.3-rc.1"},
 		{"digits preserved", "story-1482", "story-1482"},
@@ -61,5 +62,31 @@ func TestCheckSlugCollisions_NoCollision(t *testing.T) {
 	refs := []string{"feature/stale-decline", "main", "release/2026-q3", "feature/stale-decline"}
 	if err := CheckSlugCollisions(refs); err != nil {
 		t.Fatalf("CheckSlugCollisions: want nil, got %v", err)
+	}
+}
+
+// TestRefSlug_UnderscoreIsNotDash proves the alphabet is read correctly.
+// 01 §notes defines the slug alphabet as [a-z0-9._-], which CONTAINS the
+// underscore, so an underscore survives slugging and "ci_run" and "ci-run"
+// are two different slugs. Collapsing them would be exactly the silent
+// merge the same paragraph forbids ("Two refs that collide after mapping
+// are a hard error naming both — never a silent merge").
+func TestRefSlug_UnderscoreIsNotDash(t *testing.T) {
+	underscored := RefSlug("ci_run")
+	dashed := RefSlug("ci-run")
+	if underscored == dashed {
+		t.Fatalf("RefSlug(%q) and RefSlug(%q) both = %q: distinct refs silently merged into one slug", "ci_run", "ci-run", underscored)
+	}
+	if !strings.Contains(underscored, "_") {
+		t.Fatalf("RefSlug(%q) = %q, want the underscore preserved", "ci_run", underscored)
+	}
+}
+
+// TestCheckSlugCollisions_UnderscoreAndDashDoNotCollide is the collision
+// checker's half of the same rule: two refs differing only in '_' vs '-'
+// are not a collision, because the mapping keeps them distinct.
+func TestCheckSlugCollisions_UnderscoreAndDashDoNotCollide(t *testing.T) {
+	if err := CheckSlugCollisions([]string{"ci_run", "ci-run"}); err != nil {
+		t.Fatalf("CheckSlugCollisions([ci_run ci-run]): want nil (distinct slugs), got %v", err)
 	}
 }

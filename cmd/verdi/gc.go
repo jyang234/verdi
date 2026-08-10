@@ -27,6 +27,7 @@ import (
 	"io"
 
 	"github.com/jyang234/verdi/internal/disclosure"
+	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/reclaim"
@@ -36,19 +37,28 @@ import (
 )
 
 // gcScopeDisclosureManaged is dc-5's original mandatory scope line, GROWN
-// (ac-3's own static obligation: "grown, not replaced"), never merely
-// implied by omission — printed on every PLAIN `verdi gc` run: the
-// existing managed-worktrees-only disclosure, now additionally naming
-// --reclaim-unmanaged as available but NOT run this invocation (spec/
-// gc-reclaim ac-3, dc-1's mutual-exclusivity made observable).
-const gcScopeDisclosureManaged = "gc: scope — this run reclaims managed worktrees only (spec/worktree-manager); derived-cache pruning and layout/tree-hash-cache pruning (verdi-store-layout's other ratified gc bullets) are OUT OF SCOPE and were NOT run; unmanaged branch/worktree reclamation is available via --reclaim-unmanaged but was NOT run this invocation"
+// twice now (ac-3's own static obligation: "grown, not replaced"; spec/
+// execution-workspace §GC slice: "the bare mode's slice set gains the
+// execution slice and the disclosure grows from a closed pair to a closed
+// triple — grown, never replaced and never narrowed"), never merely
+// implied by omission — printed on every PLAIN `verdi gc` run: names all
+// three members of the closed triple — (1) managed worktrees reclaimed
+// this run, (2) execution workspaces reclaimed this run (invention SI-11,
+// the execution slice's own bare-gc invocation surface), and (3) unmanaged
+// branch/worktree reclamation, available via --reclaim-unmanaged but NOT
+// run this invocation — plus the still-out-of-scope derived-cache/
+// layout-cache bullets.
+const gcScopeDisclosureManaged = "gc: scope — this run reclaims managed worktrees (spec/worktree-manager) and execution workspaces (spec/execution-workspace); derived-cache pruning and layout/tree-hash-cache pruning (verdi-store-layout's other ratified gc bullets) are OUT OF SCOPE and were NOT run; unmanaged branch/worktree reclamation is available via --reclaim-unmanaged but was NOT run this invocation"
 
 // gcScopeDisclosureUnmanaged is ac-3's MIRRORED scope line, printed on
-// every `--reclaim-unmanaged` run (dry-run or --apply alike): names
-// managed-worktree reclamation as available but not run this invocation,
-// alongside the same still-out-of-scope derived-cache/layout-cache bullets
-// spec/residue-reclamation co-1 leaves untouched either way.
-const gcScopeDisclosureUnmanaged = "gc: scope — this run reclaims unmanaged branches/worktrees only (spec/gc-reclaim); managed-worktree reclamation (spec/worktree-manager) is available via a plain `verdi gc` but was NOT run this invocation; derived-cache pruning and layout/tree-hash-cache pruning (verdi-store-layout's other ratified gc bullets) remain OUT OF SCOPE and were NOT run"
+// every `--reclaim-unmanaged` run (dry-run or --apply alike): names BOTH
+// bare-gc slices — managed-worktree reclamation and execution-workspace
+// reclamation (spec/execution-workspace §GC slice's own mirrored
+// disclosure requirement) — as available via a plain `verdi gc` but NOT
+// run this invocation, alongside the same still-out-of-scope derived-cache/
+// layout-cache bullets spec/residue-reclamation co-1 leaves untouched
+// either way.
+const gcScopeDisclosureUnmanaged = "gc: scope — this run reclaims unmanaged branches/worktrees only (spec/gc-reclaim); managed-worktree reclamation (spec/worktree-manager) and execution-workspace reclamation (spec/execution-workspace) are available via a plain `verdi gc` but were NOT run this invocation; derived-cache pruning and layout/tree-hash-cache pruning (verdi-store-layout's other ratified gc bullets) remain OUT OF SCOPE and were NOT run"
 
 // cmdGc is `verdi gc`'s real entry point, invoked by dispatch.go.
 func cmdGc(args []string, stdout, stderr io.Writer) int {
@@ -75,10 +85,31 @@ func cmdGc(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gc:", err)
 		return 2
 	}
-
 	for _, r := range results {
 		fmt.Fprintln(stdout, r.Line())
 	}
+
+	// Execution slice (invention SI-11, disclosed): joins bare `verdi gc`
+	// alongside the managed-worktree slice above. storeRoot and repoRoot
+	// are the SAME root here, exactly as the managed slice already treats
+	// them (wtmanager.GC(ctx, root, ...) addresses root's own
+	// .verdi/data/worktrees/ against root's own git repository).
+	// AD-10: per-unit keeps and partials are folded into each GCResult and
+	// never fail this run — GC's own error return is reserved for a
+	// pre-sweep operational failure, which stays exit 2 like every other
+	// operational failure above.
+	execResults, execDisclosures, err := execworkspace.GC(ctx, root, root)
+	if err != nil {
+		fmt.Fprintln(stderr, "gc:", err)
+		return 2
+	}
+	for _, d := range execDisclosures {
+		fmt.Fprintln(stdout, d)
+	}
+	for _, r := range execResults {
+		fmt.Fprintln(stdout, r.Line())
+	}
+
 	fmt.Fprintln(stdout, gcScopeDisclosureManaged)
 	return 0
 }
