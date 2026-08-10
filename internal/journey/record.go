@@ -227,8 +227,9 @@ type RequiredRole struct {
 }
 
 // PrincipalFacts is the record's principals section: whether a governance
-// profile was adopted, the roles required for the next action, and any
-// disclosed absence or unavailable separation of duties.
+// profile was adopted, its selected identity and kernel-sealed digest, the
+// roles required for the next action, and any disclosed absence or unavailable
+// separation of duties.
 type PrincipalFacts struct {
 	ProfileAdopted        bool           `json:"profile_adopted"`
 	SelectedProfileID     string         `json:"selected_profile_id"`
