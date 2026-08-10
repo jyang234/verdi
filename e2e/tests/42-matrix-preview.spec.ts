@@ -43,15 +43,22 @@ test("advisory preview matrix folds real records behind the mandatory banner", a
   await expect(table.locator("thead")).toContainText("Status");
   await expect(table.locator("thead")).toContainText("Evidence");
 
-  // One declared AC, one row — carrying the REAL per-kind fold state: the
-  // provisioned CI static record passes, the attestation file is present,
-  // and behavioral has no record yet, so the AC folds to pending.
+  // One declared AC, one row — carrying the REAL per-kind quality state. The
+  // provisioned static record predates later checkout mutations and is stale;
+  // behavioral has no producer record; and the current evidence schema cannot
+  // authenticate the attestation. None may borrow its pre-quality meaning.
   const rows = table.locator("tbody tr");
   await expect(rows).toHaveCount(1);
   const row = rows.filter({ hasText: SHOWCASE.SLOT_WALL_AC });
-  await expect(row).toContainText(`${SHOWCASE.SLOT_HELD_KIND}:pass`);
-  await expect(row).toContainText(`${SHOWCASE.SLOT_ATTESTED_KIND}:present`);
-  await expect(row).toContainText(`${SHOWCASE.SLOT_EMPTY_KIND}:none`);
+  await expect(row).toContainText(
+    `${SHOWCASE.SLOT_HELD_KIND}:pending(obligation-quality:elaborated/freshness-stale)`,
+  );
+  await expect(row).toContainText(
+    `${SHOWCASE.SLOT_ATTESTED_KIND}:pending(obligation-quality:elaborated/source-ref-missing)`,
+  );
+  await expect(row).toContainText(
+    `${SHOWCASE.SLOT_EMPTY_KIND}:pending(obligation-quality:elaborated/producer-missing)`,
+  );
   await expect(row.locator(".status-badge")).toHaveText("pending");
 
   // The story-level verdict line: no fail record → not violated; the
@@ -69,15 +76,18 @@ test("advisory preview matrix renders a committed showcase story's fold", async 
   await expect(banner).toContainText("disclosed-unproven");
   await expect(banner).toContainText("matrix:advisory-preview");
 
-  // The committed story declares one AC with no derived records in this
-  // store — the fold reads that honestly as no-signal, never a blank.
+  // The committed story declares one AC with legacy obligations and no
+  // derived records. This scratch checkout is explicitly post-adoption, so
+  // the fold discloses legacy-unelaborated debt rather than borrowing the old
+  // no-signal meaning.
   const table = page.locator("table.matrix-table");
   await expect(table).toBeVisible();
   const rows = table.locator("tbody tr");
   await expect(rows).toHaveCount(1);
   const row = rows.filter({ hasText: "ac-1" });
   await expect(row).toContainText("PUT /applications/:id/update");
-  await expect(row.locator(".status-badge")).toHaveText("no-signal");
+  await expect(row).toContainText("obligation-quality:legacy-unelaborated");
+  await expect(row.locator(".status-badge")).toHaveText("pending");
 
   await expect(page.locator(".matrix-summary")).toContainText("story.violated:");
 });

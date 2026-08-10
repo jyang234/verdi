@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/evidence"
 )
 
 // TestCopyTreePresent proves a present source tree copies through.
@@ -83,5 +85,64 @@ func TestCopyTreeUnreadable(t *testing.T) {
 	}
 	if errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("expected a non-NotExist error, got %v", err)
+	}
+}
+
+func TestAttachObligationQualityAdoptionAncestry(t *testing.T) {
+	moduleRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeRoot := filepath.Join(t.TempDir(), "store")
+	if err := os.MkdirAll(storeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(storeRoot, "fixture.txt"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitInitAndCommit(t.Context(), storeRoot); err != nil {
+		t.Fatal(err)
+	}
+	beforeHead, err := gitOutput(t.Context(), storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeTree, err := gitOutput(t.Context(), storeRoot, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := attachObligationQualityAdoptionAncestry(t.Context(), moduleRoot, storeRoot); err != nil {
+		t.Fatalf("attachObligationQualityAdoptionAncestry: %v", err)
+	}
+	if err := runGit(t.Context(), storeRoot, nil, "merge-base", "--is-ancestor", evidence.ObligationQualityAdoptionCommit, "HEAD"); err != nil {
+		t.Fatalf("adoption is not an ancestor of scratch HEAD: %v", err)
+	}
+	afterHead, err := gitOutput(t.Context(), storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterTree, err := gitOutput(t.Context(), storeRoot, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterHead != beforeHead || afterTree != beforeTree {
+		t.Fatalf("ancestry attachment changed scratch identity/tree: head %s -> %s, tree %s -> %s", beforeHead, afterHead, beforeTree, afterTree)
+	}
+}
+
+func TestAttachObligationQualityAdoptionAncestryRejectsMissingSource(t *testing.T) {
+	storeRoot := filepath.Join(t.TempDir(), "store")
+	if err := os.MkdirAll(storeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(storeRoot, "fixture.txt"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitInitAndCommit(t.Context(), storeRoot); err != nil {
+		t.Fatal(err)
+	}
+	if err := attachObligationQualityAdoptionAncestry(t.Context(), filepath.Join(t.TempDir(), "missing"), storeRoot); err == nil {
+		t.Fatal("attachObligationQualityAdoptionAncestry with missing source returned nil")
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/jyang234/verdi/internal/evidence"
 )
 
 // provisionStore builds a scratch store at storeRoot: examples/showcase's
@@ -142,6 +144,9 @@ func provisionStore(ctx context.Context, moduleRoot, storeRoot string) error {
 	if err := gitInitAndCommit(ctx, storeRoot); err != nil {
 		return fmt.Errorf("git init/commit: %w", err)
 	}
+	if err := attachObligationQualityAdoptionAncestry(ctx, moduleRoot, storeRoot); err != nil {
+		return fmt.Errorf("attaching obligation-quality ancestry: %w", err)
+	}
 
 	if err := copyTree(filepath.Join(corpusDir, "mutable"), filepath.Join(storeRoot, ".verdi", "data", "mutable")); err != nil {
 		return fmt.Errorf("copying mutable zone: %w", err)
@@ -150,6 +155,29 @@ func provisionStore(ctx context.Context, moduleRoot, storeRoot string) error {
 		return fmt.Errorf("copying derived zone: %w", err)
 	}
 
+	return nil
+}
+
+// attachObligationQualityAdoptionAncestry makes the scratch store's root
+// commit a real descendant of the exact owner-merge that adopted obligation
+// quality. The e2e store is assembled after adoption from copied showcase
+// bytes, but its synthetic root otherwise has no repository ancestry at all.
+// A local replacement graft records that true relationship without changing
+// the scratch ref, tree, or production ancestry classifier.
+func attachObligationQualityAdoptionAncestry(ctx context.Context, moduleRoot, storeRoot string) error {
+	head, err := gitOutput(ctx, storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		return fmt.Errorf("resolving scratch HEAD: %w", err)
+	}
+	if err := runGit(ctx, storeRoot, nil, "fetch", "--quiet", "--no-tags", moduleRoot, evidence.ObligationQualityAdoptionCommit); err != nil {
+		return fmt.Errorf("importing adoption commit %s: %w", evidence.ObligationQualityAdoptionCommit, err)
+	}
+	if err := runGit(ctx, storeRoot, nil, "replace", "--graft", head, evidence.ObligationQualityAdoptionCommit); err != nil {
+		return fmt.Errorf("grafting scratch root %s after adoption %s: %w", head, evidence.ObligationQualityAdoptionCommit, err)
+	}
+	if err := runGit(ctx, storeRoot, nil, "merge-base", "--is-ancestor", evidence.ObligationQualityAdoptionCommit, head); err != nil {
+		return fmt.Errorf("proving adoption %s precedes scratch root %s: %w", evidence.ObligationQualityAdoptionCommit, head, err)
+	}
 	return nil
 }
 
