@@ -8,6 +8,11 @@ import (
 	"github.com/jyang234/verdi/internal/specstate"
 )
 
+const (
+	profileNotAdoptedDisclosure         = "no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown"
+	profileResolutionUnprovenDisclosure = "authenticated principal resolution and profile-contributed requirements remain unproven"
+)
+
 // candidateTransitions returns cfg.Model.Lifecycle[class]'s transitions
 // whose From equals the joined effective status (DC-15: joined via
 // specstate.Result.ArtifactStatus() — never a literal-to-literal mapping
@@ -103,7 +108,7 @@ func transitionHasCountersign(tr model.Transition) bool {
 // (closed/superseded) and a fully-proven, obligation-free candidate set
 // naturally yield none of the per-transition blockers; an empty result is
 // legal (Blockers.Current may be empty).
-func deriveBlockers(defaultBranchKnown bool, result specstate.Result, candidates []model.Transition, owner Owner) []Blocker {
+func deriveBlockers(defaultBranchKnown, profileAdopted bool, result specstate.Result, candidates []model.Transition, owner Owner) []Blocker {
 	var out []Blocker
 	seen := map[string]bool{}
 	add := func(b Blocker) {
@@ -197,15 +202,19 @@ func deriveBlockers(defaultBranchKnown bool, result specstate.Result, candidates
 		if !transitionHasCountersign(tr) {
 			continue
 		}
+		witness := "no governance profile is adopted at the evaluated revision; authenticated principal resolution is unproven (governance-principal kernel present, no adopted profile artifact)"
+		clearingCondition := "a governance profile is adopted and the required principals resolve as authenticated"
+		if profileAdopted {
+			witness = "a governance profile is adopted, but authenticated principal resolution remains unproven because principal resolution is not yet a journey contributor"
+			clearingCondition = "the required principals resolve as authenticated"
+		}
 		add(Blocker{
-			ID:     "principal-resolution-unproven/" + tr.Verb,
-			Reason: ReasonPrincipalResolutionUnproven,
-			Class:  ClassGovernance,
-			Witnesses: []string{
-				"no governance profile is adopted at the evaluated revision; authenticated principal resolution is unproven (governance-principal kernel present, no adopted profile artifact)",
-			},
+			ID:                "principal-resolution-unproven/" + tr.Verb,
+			Reason:            ReasonPrincipalResolutionUnproven,
+			Class:             ClassGovernance,
+			Witnesses:         []string{witness},
 			Owner:             owner,
-			ClearingCondition: "a governance profile is adopted and the required principals resolve as authenticated",
+			ClearingCondition: clearingCondition,
 			Transition:        tr.Verb,
 		})
 	}
@@ -236,10 +245,10 @@ func deriveEventual() EventualBlockers {
 // attestation-scheme author-vouch/countersign obligation on a candidate
 // transition (behavioral obligations are never principal requirements —
 // DC-19's kernel attribution stays confined to actual attestation gates).
-// ProfileAdopted is always false in this delivery unit (no governance
-// profile storage exists in-tree yet — Context Integrity's constitution
-// store is a later unit); Resolution is always "unproven" — v1 wires no
-// resolver (DC-18's three-valued honesty: never a silent authenticated
+// Profile adoption is overlaid by Project after this operating-model-only
+// derivation. Resolution remains "unproven": this delivery unit records the
+// installed profile but wires no authenticated-principal or profile-rule
+// contributor (DC-18's three-valued honesty: never a silent authenticated
 // claim).
 //
 // F6: two obligations that resolve to the SAME (transition, obligation)
@@ -306,9 +315,7 @@ func derivePrincipals(candidates []model.Transition) PrincipalFacts {
 	}
 	sort.Slice(required, func(i, j int) bool { return requiredRoleKey(required[i]) < requiredRoleKey(required[j]) })
 
-	disclosures := append([]string{
-		"no governance profile is adopted at the evaluated revision; role and approver requirements beyond the operating-model obligations are unknown",
-	}, extra...)
+	disclosures := append([]string{profileNotAdoptedDisclosure}, extra...)
 
 	return PrincipalFacts{
 		ProfileAdopted: false,

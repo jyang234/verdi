@@ -2,11 +2,13 @@ package journey
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/governanceprincipal"
+	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -22,6 +24,11 @@ func (p Projector) Project(ctx context.Context, cfg *store.Config, arg string) (
 	if err != nil {
 		return Record{}, err
 	}
+	profile, profileErr := p.profiles.Load(ctx, cfg.Root)
+	profileAdopted := profileErr == nil
+	if profileErr != nil && !errors.Is(profileErr, policyauthority.ErrNotAdopted) {
+		return Record{}, profileErr
+	}
 
 	owner := Owner{
 		Declared:    strings.Join(facts.Owners, ","),
@@ -29,8 +36,20 @@ func (p Projector) Project(ctx context.Context, cfg *store.Config, arg string) (
 	}
 
 	candidates, classDeclared := candidateTransitions(cfg.Model, facts.Target.Class, facts.LifecycleResult)
-	current := deriveBlockers(facts.Repository.DefaultBranch.Known, facts.LifecycleResult, candidates, owner)
+	current := deriveBlockers(facts.Repository.DefaultBranch.Known, profileAdopted, facts.LifecycleResult, candidates, owner)
 	principals := derivePrincipals(candidates)
+	if profileAdopted {
+		principals.ProfileAdopted = true
+		principals.SelectedProfileID = profile.ID
+		principals.SelectedProfileDigest = profile.Digest
+		disclosures := make([]string, 0, len(principals.Disclosures))
+		for _, disclosure := range principals.Disclosures {
+			if disclosure != profileNotAdoptedDisclosure {
+				disclosures = append(disclosures, disclosure)
+			}
+		}
+		principals.Disclosures = sortDedupStrings(append(disclosures, profileResolutionUnprovenDisclosure))
+	}
 
 	targetRef := "spec/" + specNameFromRelPath(facts.Target.Path)
 	actions := deriveActions(facts.Target.Class, facts.LifecycleResult, candidates, classDeclared, targetRef)

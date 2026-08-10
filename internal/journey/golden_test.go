@@ -31,9 +31,14 @@ func goldenRecord(t *testing.T) Record {
 	r := validRecord(t)
 	r.Repository.Worktree = WorktreeFact{Managed: true, Name: "glg-journey-projection"}
 	r.Blockers.Current[0].Owner = Owner{Declared: "Jane Doe", Attribution: attr}
+	r.Principals.ProfileAdopted = true
+	r.Principals.SelectedProfileID = "solo-default"
+	r.Principals.SelectedProfileDigest = testSelectedProfileDigest
+	r.Principals.Disclosures = []string{profileResolutionUnprovenDisclosure}
 	r.Actions.Safe[0].Authority = []RequiredRole{
 		{Transition: "close", Obligation: "attestation/countersign", Count: 1, Resolution: "authenticated"},
 	}
+	r.Disclosures = []string{}
 	return r
 }
 

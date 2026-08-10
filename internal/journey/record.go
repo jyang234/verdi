@@ -227,12 +227,15 @@ type RequiredRole struct {
 }
 
 // PrincipalFacts is the record's principals section: whether a governance
-// profile was adopted, the roles required for the next action, and any
-// disclosed absence or unavailable separation of duties.
+// profile was adopted, its selected identity and kernel-sealed digest, the
+// roles required for the next action, and any disclosed absence or unavailable
+// separation of duties.
 type PrincipalFacts struct {
-	ProfileAdopted bool           `json:"profile_adopted"`
-	Required       []RequiredRole `json:"required"`
-	Disclosures    []string       `json:"disclosures"`
+	ProfileAdopted        bool           `json:"profile_adopted"`
+	SelectedProfileID     string         `json:"selected_profile_id"`
+	SelectedProfileDigest string         `json:"selected_profile_digest"`
+	Required              []RequiredRole `json:"required"`
+	Disclosures           []string       `json:"disclosures"`
 }
 
 // Precondition is one proven precondition of a safe action. There is
@@ -650,6 +653,21 @@ func requiredRoleKey(rr RequiredRole) string {
 }
 
 func (pf PrincipalFacts) validate() error {
+	if pf.ProfileAdopted {
+		if err := governanceprincipal.ValidateID(pf.SelectedProfileID); err != nil {
+			return fmt.Errorf("journey: principals.selected_profile_id: %w", err)
+		}
+		if !digestRe.MatchString(pf.SelectedProfileDigest) {
+			return fmt.Errorf("journey: principals.selected_profile_digest: %q must match sha256:<64 lowercase hex>", pf.SelectedProfileDigest)
+		}
+	} else {
+		if pf.SelectedProfileID != "" {
+			return fmt.Errorf("journey: principals.selected_profile_id: must be empty when profile_adopted is false")
+		}
+		if pf.SelectedProfileDigest != "" {
+			return fmt.Errorf("journey: principals.selected_profile_digest: must be empty when profile_adopted is false")
+		}
+	}
 	if pf.Required == nil {
 		return fmt.Errorf("journey: principals.required: must be non-nil (an explicitly empty set is [])")
 	}

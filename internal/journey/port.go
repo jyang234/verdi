@@ -2,8 +2,10 @@ package journey
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/specstate"
 )
 
@@ -133,6 +135,40 @@ func (r specstateResolver) Resolve(ctx context.Context, root string, candidate s
 	return r.p.Resolve(ctx, root, candidate)
 }
 
+// ProfileSelection identifies the constitution-selected governance profile
+// and its kernel-sealed digest. It contains no profile rules: journey records
+// the installed authority without interpreting it.
+type ProfileSelection struct {
+	ID     string
+	Digest string
+}
+
+// ProfileLoader is journey's consumer-owned port for reading the installed
+// policy authority's selected governance profile.
+type ProfileLoader interface {
+	Load(ctx context.Context, root string) (ProfileSelection, error)
+}
+
+type policyAuthorityProfileLoader struct{}
+
+// NewProfileLoader returns the production adapter backed exclusively by
+// policyauthority.Load.
+func NewProfileLoader() ProfileLoader { return policyAuthorityProfileLoader{} }
+
+func (policyAuthorityProfileLoader) Load(_ context.Context, root string) (ProfileSelection, error) {
+	policyStore, err := policyauthority.Load(root)
+	if err != nil {
+		return ProfileSelection{}, fmt.Errorf("journey: loading policy authority: %w", err)
+	}
+
+	selectedID := policyStore.Constitution.SelectedProfile
+	selected, ok := policyStore.Profiles[selectedID]
+	if !ok || selected == nil {
+		return ProfileSelection{}, fmt.Errorf("journey: loading policy authority: selected profile %q is unavailable after validation", selectedID)
+	}
+	return ProfileSelection{ID: selectedID, Digest: selected.ProfileDigest}, nil
+}
+
 // DefaultBranchResolver is the func-value shape of
 // specstate.ResolveDefaultBranch: a production Projector wires this field
 // directly to that function; tests substitute a fake func, exactly like
@@ -149,16 +185,19 @@ type DefaultBranchResolver func(ctx context.Context, root string) (specstate.Bra
 type Projector struct {
 	git                  GitReader
 	state                StateResolver
+	profiles             ProfileLoader
 	resolveDefaultBranch DefaultBranchResolver
 }
 
 // NewProjector returns a Projector backed by real git plumbing, the real
-// internal/specstate resolver, and specstate.ResolveDefaultBranch — the
-// only constructor production callers may use.
+// internal/specstate resolver, the policyauthority-backed profile loader,
+// and specstate.ResolveDefaultBranch — the only constructor production
+// callers may use.
 func NewProjector() Projector {
 	return Projector{
 		git:                  NewGitReader(),
 		state:                NewStateResolver(),
+		profiles:             NewProfileLoader(),
 		resolveDefaultBranch: specstate.ResolveDefaultBranch,
 	}
 }
@@ -166,5 +205,5 @@ func NewProjector() Projector {
 // newProjector is the test-only seam: package tests construct a Projector
 // over in-process fakes.
 func newProjector(git GitReader, state StateResolver, resolveDefaultBranch DefaultBranchResolver) Projector {
-	return Projector{git: git, state: state, resolveDefaultBranch: resolveDefaultBranch}
+	return Projector{git: git, state: state, profiles: NewProfileLoader(), resolveDefaultBranch: resolveDefaultBranch}
 }
